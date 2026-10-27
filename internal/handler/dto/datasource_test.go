@@ -48,6 +48,33 @@ func TestDataSourceResponse_OmitsCredentials(t *testing.T) {
 	assert.Contains(t, s, "main")
 }
 
+func TestDataSourceResponses_OmitsLastSyncCursor(t *testing.T) {
+	ds := &types.DataSource{
+		ID:             "ds-1",
+		Name:           "github-prod",
+		Type:           "github",
+		LastSyncCursor: types.JSON(`{"page":42}`),
+		LastSyncResult: types.JSON(`{"total":10}`),
+	}
+
+	list := NewDataSourceResponses([]*types.DataSource{ds})
+	assert.Len(t, list, 1)
+	got := list[0]
+	assert.Empty(t, got.LastSyncCursor)
+
+	body, err := json.Marshal(got)
+	assert.NoError(t, err)
+	var raw map[string]json.RawMessage
+	assert.NoError(t, json.Unmarshal(body, &raw))
+	assert.NotContains(t, raw, "last_sync_cursor")
+
+	// Every other field must match the single-entity conversion.
+	want := NewDataSourceResponse(ds)
+	assert.Equal(t, json.RawMessage(`{"page":42}`), want.LastSyncCursor)
+	want.LastSyncCursor = nil
+	assert.Equal(t, want, got)
+}
+
 func TestDataSourceResponse_NilSafe(t *testing.T) {
 	assert.Nil(t, NewDataSourceResponse(nil))
 	assert.Equal(t, []*DataSourceResponse{}, NewDataSourceResponses(nil))

@@ -14,6 +14,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -26,17 +29,17 @@ import (
 )
 
 const (
-	vlmOCRPrompt = "<system_prompt>\n" +
-		"You are an OCR assistant. Your task is to extract all body text content from this document image and output in pure Markdown format.\n" +
-		"</system_prompt>\n\n" +
-		"<instructions>\n" +
-		"1. Ignore headers and footers.\n" +
-		"2. Use Markdown table syntax for tables.\n" +
-		"3. Use LaTeX format for formulas (wrapped with $ or $$).\n" +
-		"4. Organize content in the original reading order.\n" +
-		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
-		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
-		"</instructions>"
+	vlmOCRPrompt = "You are an OCR assistant. Transcribe only text that is visibly present in the image, " +
+		"preserving its original language.\n" +
+		"The image may be a screenshot, photograph, diagram, or document. For scattered labels, " +
+		"buttons, scores, and other UI text, output plain text in reading order, one item per line. " +
+		"Do not force this content into a table.\n" +
+		"Use Markdown tables only when the image contains a real table with readable cells. Never " +
+		"output empty table cells, invented layout, repeated filler, or descriptions of the image.\n" +
+		"Preserve readable numbers and symbols. Do not guess unreadable text. Stop after all visible " +
+		"text has been transcribed; repeat text only when it visibly appears more than once.\n" +
+		"Output only the extracted text, without explanations, HTML tags, or code fences. If no text " +
+		"is recognizable, reply only: No text content."
 	vlmOCRScannedPDFPrompt = "<system_prompt>\n" +
 		"You are an OCR and document layout extraction assistant. The input image is a page from a scanned PDF document.\n" +
 		"Your task is to carefully extract all text and layout structure from the image, and output the result in pure Markdown format.\n" +
@@ -103,6 +106,12 @@ type ImageMultimodalService struct {
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
 	spanTracker SpanTracker
+
+	// docReader is the document service the pipeline asks to straighten a
+	// photographed page before OCR. Nil when this build has none (tests,
+	// minimal wiring): the preprocess action then reports "unavailable" and
+	// OCR simply reads the original bytes.
+	docReader interfaces.DocumentReader
 }
 
 func NewImageMultimodalService(
@@ -120,6 +129,7 @@ func NewImageMultimodalService(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
+	docReader interfaces.DocumentReader,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
@@ -136,6 +146,7 @@ func NewImageMultimodalService(
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
 		spanTracker:     spanTracker,
+		docReader:       docReader,
 	}
 }
 
@@ -156,8 +167,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	}
 
 	logger.Infof(ctx,
-		"[ImageMultimodal] Processing image: chunk=%s, url=%s, ocr=%v, caption=%v, attrs=%v",
-		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption, payload.ImageAttrsEnabled)
+		"[ImageMultimodal] Processing image: chunk=%s, url=%s, attrs=%v",
+		payload.ChunkID, payload.ImageURL, payload.ImageAttrsEnabled)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -210,7 +221,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	// double-count and prematurely trigger post-process.
 	var handleErr error
 	defer func() {
-		if handleErr == nil || isFinalAsynqAttempt(ctx) {
+		// Finalize on success, on the final asynq retry, or when the error is
+		// a permanent failure wrapped with asynq.SkipRetry. The SkipRetry
+		// branch is essential: a SkipRetry error makes the executor break
+		// before the retry counter reaches maxRetry, so isFinalAsynqAttempt
+		// would otherwise return false and the parent knowledge would be
+		// stranded in "processing" forever.
+		if handleErr == nil || isFinalAsynqAttempt(ctx) || errors.Is(handleErr, asynq.SkipRetry) {
 			if err := s.checkAndFinalizeAllImages(ctx, payload); err != nil && retErr == nil {
 				retErr = err
 			}
@@ -220,7 +237,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 				payload.ImageURL)
 		}
 	}()
-
 	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
@@ -236,17 +252,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
-	handleErr = s.processImage(ctx, &payload, vlmModel, vlmCfg, tracker, imgOut)
+	handleErr = wrapSkipRetry(s.processImage(ctx, &payload, vlmModel, vlmCfg, tracker, imgOut))
 	return handleErr
 }
 
-// processImage runs the unified image action loop for one image. The selector
-// plans rounds from the payload switches; the dispatcher runs each round
-// (observation and caption share one VLM call); the result processor reads the
-// observation and, when the OCR policy wants it, appends an OCR round. The
-// observation must be known before any OCR call is spent — that ordering is
-// what makes "observe first, then act" possible: an image whose text is
-// reliably absent does not pay for OCR.
+// processImage runs one image pipeline for one image. The pipeline is chosen
+// from the payload switches and owns the whole control flow; this function only
+// hands it the run context and closes the span afterwards. The observation must
+// be known before any OCR call is spent — that ordering is what makes "observe
+// first, then act" possible: an image whose text is reliably absent does not pay
+// for OCR.
 //
 // An observation (describe) failure is not fatal. The attributes then stay at
 // their conservative defaults, which keeps OCR running, so a model that cannot
@@ -263,6 +278,10 @@ func (s *ImageMultimodalService) processImage(
 	tracker SpanTracker,
 	out types.JSONMap,
 ) error {
+	// Selected from the payload because a task in flight was enqueued for one
+	// pipeline and must not be re-routed by an edit made since; the id also
+	// lands on the trace, which reading image_info alone cannot do.
+	pipeline := selectImagePipeline(payload)
 	// Open a per-image subspan under the parent attempt's multimodal stage.
 	// If the parent stage row is missing (legacy in-flight task, or the
 	// upstream code shipped without span tracking), the tracker is a no-op so
@@ -274,18 +293,15 @@ func (s *ImageMultimodalService) processImage(
 			name := fmt.Sprintf("multimodal.image[%d]", payload.ImageIndex)
 			// The observation, and the policy it resolves to, are only known
 			// after the describe round, so they land on the span's output (see
-			// out["image_attrs"] and out["attr_policy"]) instead of here.
+			// out[keyImageAttrs]) instead of here.
 			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, types.JSONMap{
 				"image_url":         payload.ImageURL,
 				"image_source_type": payload.ImageSourceType,
 				"parent_chunk_id":   payload.ChunkID,
-				// Which pipeline the trace is looking at: observation_driven
-				// (a describe round that also observes the attributes, then OCR
-				// only if the policy says so) or caption_ocr (caption then OCR,
-				// no observation). Reading image_info alone cannot tell a
-				// caption_ocr run from an observation_driven run that skipped
-				// OCR.
-				"pipeline": string(types.PipelineModeFor(payload.ImageAttrsEnabled)),
+				// Which pipeline ran. Reading image_info alone cannot tell a
+				// default run from a smartocr run that observed and then
+				// skipped OCR.
+				"pipeline": string(pipeline.ID()),
 			})
 		}
 	}
@@ -301,9 +317,24 @@ func (s *ImageMultimodalService) processImage(
 		}
 		if handleErr == nil {
 			tracker.EndSpan(ctx, imgSpan, out)
-		} else if isFinalAsynqAttempt(ctx) {
+		} else {
+			// Any genuinely failed attempt must close its span red, not
+			// leave it dangling as "in progress". The span is a Generation
+			// subspan, so FailSpan here cannot poison the parent stage or
+			// the attempt status (cascade only fires for Stage-kind spans);
+			// it merely records this attempt's outcome and lets a later
+			// retry open its own span under the new attempt. A caller
+			// cancellation gets its own code: the run did not fail, it was
+			// walked away from.
+			code := "MULTIMODAL_VLM_FAILED"
+			if out["input_error"] != nil {
+				code = "MULTIMODAL_INVALID_IMAGE"
+			}
+			if errors.Is(handleErr, context.Canceled) {
+				code = "MULTIMODAL_CANCELLED"
+			}
 			tracker.FailSpan(ctx, imgSpan,
-				"MULTIMODAL_VLM_FAILED",
+				code,
 				handleErr.Error(),
 				handleErr)
 		}
@@ -316,12 +347,20 @@ func (s *ImageMultimodalService) processImage(
 	imgBytes, readErr := s.readImageBytes(ctx, *payload)
 	if readErr != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
-		out["skipped"] = "unreadable_image"
-		out["read_error"] = readErr.Error()
+		out[keyOutcome] = outcomeUnreadable
+		out[keyReadError] = readErr.Error()
 		handleErr = fmt.Errorf("read source image: %w", readErr)
 		return handleErr
 	}
-	out["image_bytes"] = len(imgBytes)
+	out[keyImageBytes] = len(imgBytes)
+	// A successful storage read can still return an empty object or an HTML/
+	// JSON error body. Do not let the VLM turn that into a successful caption
+	// such as "please provide an image" and persist it in the gallery.
+	if _, err := imageprep.Prepare(imgBytes, imageprep.Limits{}); err != nil {
+		out["input_error"] = err.Error()
+		handleErr = fmt.Errorf("%w: invalid source image: %v", asynq.SkipRetry, err)
+		return handleErr
+	}
 
 	imageInfo := types.ImageInfo{
 		SHA256:      fmt.Sprintf("%x", sha256.Sum256(imgBytes)),
@@ -329,37 +368,43 @@ func (s *ImageMultimodalService) processImage(
 		OriginalURL: payload.ImageURL,
 	}
 
-	// --- Unified action loop: the decision + dispatch half of the image
-	// pipeline framework. Every image step is a normal action (caption,
-	// observation, ocr). The selector plans rounds from the payload switches;
-	// the dispatcher runs each round (observation + caption share one VLM call);
-	// the result processor reads the observation and, when OCR is wanted,
-	// appends an ocr round - the "observe, decide, then act" closure. The VLM
-	// transport here is a direct-call shim; PR-E routes it through a request
-	// manager without touching this dispatch logic.
-	if !payload.ImageAttrsEnabled && !payload.EnableOCR {
-		// Caption+OCR mode with OCR off: recorded so the trace explains the
-		// missing OCR chunk rather than leaving it to be inferred from an
-		// absence.
-		out["ocr_skipped"] = "disabled"
+	// The pipeline runs to completion, including the decision it makes about
+	// OCR. Nothing below re-reads its result except the chunk building that
+	// follows. The tracker and the image span travel with the run context so
+	// the OCR action can raise and resolve its own subspan exactly like the
+	// action-loop layout did (a failed OCR fails the .ocr subspan and the
+	// outcome summary, without failing or retrying the whole image).
+	rc := &runContext{
+		payload:    payload,
+		pipelineID: string(pipeline.ID()),
+		params:     payload.ImagePipelineParams,
+		declared:   pipeline.Fields(),
+		model:      vlmModel,
+		imageBytes: imgBytes,
+		vlmCfg:     vlmCfg,
+		imageInfo:  &imageInfo,
+		out:        out,
+		tracker:    tracker,
+		imgSpan:    imgSpan,
+		// The preprocess action asks this to straighten the page. Nil is fine:
+		// the action reports "unavailable" and OCR reads the original bytes.
+		preprocessor: s.docReader,
 	}
-	plan := selectImageActionRounds(payload)
-	for i := 0; i < len(plan); i++ {
-		round := plan[i]
-		s.executeActionRound(ctx, payload, vlmModel, imgBytes, vlmCfg, &imageInfo, out, round)
-		// Result processor: only an observation round feeds the OCR decision.
-		if round.Contains(types.ActionObservation) {
-			ocrWanted := payload.EnableOCR && DecideOCR(imageInfo.Attrs, payload.ImageActions)
-			out["attr_policy"] = types.JSONMap{"ocr": ocrWanted}
-			out["image_attrs"] = imageInfo.Attrs.Attrs
-			if ocrWanted {
-				plan = append(plan, ActionRound{Actions: []types.ActionKind{types.ActionOCR}})
-			} else {
-				logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (attrs=%v)",
-					payload.ImageURL, imageInfo.Attrs.Attrs)
-				out["ocr_skipped"] = "attr_policy"
-			}
+	// Recorded here rather than inside a pipeline's Run: a run that returns early
+	// with an error still did the actions it did, and "what ran before it failed"
+	// is exactly what a trace is for.
+	defer func() {
+		if ids := rc.actionIDs(); len(ids) > 0 {
+			out[keyActions] = ids
 		}
+	}()
+	if err := pipeline.Run(ctx, rc); err != nil {
+		// Surface the pipeline failure on this image's span instead of
+		// letting the deferred finalize misread it as success. Without
+		// this assignment the span below keeps handleErr == nil and the
+		// UI shows a green (done) result for a genuinely failed image.
+		handleErr = err
+		return err
 	}
 
 	// Build child chunks for OCR and caption results
@@ -384,7 +429,9 @@ func (s *ImageMultimodalService) processImage(
 		})
 	}
 
-	if payload.EnableCaption && imageInfo.Caption != "" {
+	// A caption that reached the slot came from an action this run executed, so
+	// an empty slot needs no second question asked of it.
+	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
 			ID:              uuid.New().String(),
 			TenantID:        payload.TenantID,
@@ -401,11 +448,52 @@ func (s *ImageMultimodalService) processImage(
 			UpdatedAt:       time.Now(),
 		})
 	}
-	out["chunks_created"] = len(newChunks)
+	out[keyChunksCreated] = len(newChunks)
+
+	// Nothing was produced and a requested extraction failed: the image
+	// has no image_info, so it will not appear in the gallery, and a silent
+	// "skipped" success would hide a dead endpoint behind a green trace.
+	// Report the failure to the task layer — the caller wraps permanent
+	// failures (dead endpoint, bad key) with SkipRetry, transient ones burn
+	// at most the asynq retry budget, and the deferred finalize marks this
+	// image's span red (MULTIMODAL_CANCELLED when the run was walked away
+	// from). The #4132 refinement: failures stay recorded-not-propagated only
+	// while there is content to protect — a valid caption must not be
+	// duplicated by an OCR retry; with nothing produced there is nothing to
+	// protect, so the image fails honestly.
+	extractionFailed := out[keyCaptionError] != nil || out[keyObservationError] != nil ||
+		out[keyOCRResult] == "failed" ||
+		out[keyOCRResult] == "skipped_observation_failed"
+	if len(newChunks) == 0 && extractionFailed {
+		out[keyOutcome] = outcomeFailed
+		if ctx.Err() != nil {
+			handleErr = fmt.Errorf("image processing cancelled with no content produced: %w", ctx.Err())
+			return handleErr
+		}
+		if rc.vlmErr != nil {
+			// The typed VLM error travels with the verdict so the task
+			// layer can tell a permanent failure (SkipRetry) from a
+			// transient one.
+			handleErr = fmt.Errorf("image produced no content: %w", rc.vlmErr)
+		} else {
+			handleErr = fmt.Errorf("image produced no content (ocr_status=%v, caption_error=%v)",
+				out[keyOCRResult], out[keyCaptionError])
+		}
+		return handleErr
+	}
+
+	if out[keyOCRResult] == "failed" {
+		// Some content exists (a valid caption was persisted) — the failure
+		// is recorded on the .ocr subspan and the outcome, and the image
+		// stays a success at the task level (#4132).
+		out[keyOutcome] = outcomePartialFailure
+	}
 
 	if len(newChunks) == 0 {
-		// Deferred finalize will count this image on success.
-		out["skipped"] = "no_extracted_content"
+		// Deferred finalize will count this image on success. A genuine
+		// blank (OCR answered no_text) or a policy-declined image keeps its
+		// trace-level skip.
+		out[keyOutcome] = outcomeNoContent
 		return nil
 	}
 
@@ -420,8 +508,15 @@ func (s *ImageMultimodalService) processImage(
 	}
 
 	// Index chunks so they can be retrieved
-	s.indexChunks(ctx, *payload, newChunks)
-	out["indexed"] = true
+	s.indexChunks(ctx, *payload, newChunks, imgBytes, out)
+	out[keyIndexed] = true
+	// Only an image that reached this point with no verdict of its own is a
+	// plain success: a partial failure was already recorded by the OCR clause
+	// above, and overwriting it would hide the failure behind the content that
+	// did survive.
+	if _, decided := out[keyOutcome]; !decided {
+		out[keyOutcome] = outcomeDone
+	}
 
 	return nil
 }
@@ -431,7 +526,13 @@ func (s *ImageMultimodalService) processImage(
 // known before the image's OCR call is spent. The attribute list and questions
 // come from the registry, so the prompt cannot drift from the attributes the
 // parser folds answers back onto.
-func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig) string {
+//
+// onDemand tells the builder whether the steps that consume on-demand
+// attributes are switched on for this run. When they are off the prompt is
+// byte-identical to what it was before those attributes existed, so a
+// knowledge base that does not use them pays neither prompt length nor a
+// chance of answer drift.
+func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig, onDemand bool) string {
 	language := strings.TrimSpace(cfg.DescriptionLanguage)
 	if language == "" {
 		language = types.LanguageNameFromContext(ctx)
@@ -442,6 +543,9 @@ func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig) string {
 			"Output one line per observation using exactly this format, then a DESCRIPTION line:\n\n",
 		language)
 	for _, spec := range types.ImageAttrRegistry {
+		if !spec.WantsInjection(onDemand) {
+			continue
+		}
 		allowed := make([]string, 0, len(spec.Values))
 		for _, value := range spec.Values {
 			allowed = append(allowed, value.Value)
@@ -450,6 +554,9 @@ func buildImageAttrsPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	}
 	b.WriteString("DESCRIPTION: <one or two sentences>\n\nRules:\n")
 	for _, spec := range types.ImageAttrRegistry {
+		if !spec.WantsInjection(onDemand) {
+			continue
+		}
 		fmt.Fprintf(&b, "- %s: %s\n", spec.Name, spec.Question)
 	}
 	b.WriteString("- Output only those lines. No preamble, no summary, no extra commentary.\n")
@@ -472,59 +579,18 @@ func applyImageObservation(
 	if attrs.Attrs != nil {
 		imageInfo.Attrs = attrs
 	}
-	if description == "" {
+	if !wantCaption {
+		out[keyObservationCaptionResult] = resultSkippedDisabled
 		return
 	}
-	if !wantCaption {
-		out["caption_skipped"] = "disabled"
+	if description == "" {
+		out[keyObservationCaptionResult] = "empty"
 		return
 	}
 	imageInfo.Caption = description
-	out["caption_chars"] = len([]rune(description))
-	out["caption_preview"] = previewText(description, 200)
-}
-
-// runImageOCR runs the second pipeline round: text extraction at full
-// resolution. Both pipelines share it — the observation-driven one reaches it
-// only when the attribute policy allows it, caption+OCR mode runs it for every
-// image.
-func (s *ImageMultimodalService) runImageOCR(
-	ctx context.Context,
-	payload *types.ImageMultimodalPayload,
-	vlmModel vlm.VLM,
-	imgBytes []byte,
-	imageInfo *types.ImageInfo,
-	out types.JSONMap,
-	vlmCfg types.VLMConfig,
-) {
-	// The OCR prompt is system-owned: knowledge base custom instructions must
-	// never reach it, or free-form business rules compete with the "No text
-	// content" contract and poison image_ocr chunks. buildVLMOCRPrompt picks
-	// the scanned-PDF or default prompt and ignores vlmCfg on purpose.
-	prompt := buildVLMOCRPrompt(payload.ImageSourceType, vlmCfg)
-	if payload.ImageSourceType == "scanned_pdf" {
-		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
-		out["ocr_prompt"] = "scanned_pdf"
-	} else {
-		out["ocr_prompt"] = "default"
-	}
-
-	ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-	if ocrErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-		out["ocr_error"] = ocrErr.Error()
-		return
-	}
-	ocrText = sanitizeOCRText(ocrText)
-	if ocrText != "" {
-		imageInfo.OCRText = ocrText
-		out["ocr_chars"] = len([]rune(ocrText))
-		out["ocr_preview"] = previewText(ocrText, 200)
-	} else {
-		logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
-		out["ocr_chars"] = 0
-		out["ocr_skipped"] = "empty_or_invalid"
-	}
+	out[keyObservationCaptionChars] = len([]rune(description))
+	out[keyObservationCaptionPreview] = previewText(description, 200)
+	out[keyObservationCaptionResult] = "done"
 }
 
 // shouldDropOrphanedMultimodal reports whether the task should exit without
@@ -572,6 +638,63 @@ func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
 // Returns false when the values are unavailable (e.g. when the handler is
 // invoked outside an asynq worker, as in unit tests). Treating that case as
 // "not final" keeps test ergonomics — tests should drive finalize explicitly.
+// isPermanentVLMFailure reports whether an error returned by the image run is
+// a permanent failure that must NOT be retried by the task layer. Retrying
+// such an error only burns queue capacity and re-hits the same dead end, so
+// the caller wraps it with asynq.SkipRetry to archive the task immediately.
+//
+// Permanent (SkipRetry):
+//   - a 4xx client error (bad key, oversized image, unsupported request): the
+//     request cannot succeed on retry;
+//   - a connection-level failure (connection refused / DNS / TLS / first-byte
+//     timeout) surfaced as an api.TransportError in the "send request" phase:
+//     the endpoint is unreachable, so every retry fails identically.
+//
+// Retryable (leave to the task-layer backoff):
+//   - 5xx, 408, 429;
+//   - a mid-stream transport error ("read response"): the stream broke after
+//     the server answered, which is transient;
+//   - anything else (unknown / context errors): safest to let the task retry.
+//
+// This is deliberately decoupled from the vlm package: it inspects only the
+// stable api.* error types the manager always propagates. The manager wraps
+// the original api error with %w, so errors.As still reaches it here.
+func isPermanentVLMFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		switch {
+		case httpErr.StatusCode == 429, // Too Many Requests
+			httpErr.StatusCode == 408: // Request Timeout
+			return false
+		case httpErr.StatusCode >= 500:
+			return false
+		case httpErr.StatusCode >= 400:
+			return true // permanent client error
+		}
+	}
+	var transportErr *api.TransportError
+	if errors.As(err, &transportErr) {
+		// "send request" = failure before any response (connect / TLS /
+		// first-byte timeout): endpoint is down. "read response" = the stream
+		// broke mid-flight, which is transient.
+		return transportErr.Op == "send request"
+	}
+	return false
+}
+
+// wrapSkipRetry marks a permanent VLM failure so the task layer archives the
+// task immediately instead of retrying it. Retryable errors are returned
+// unchanged.
+func wrapSkipRetry(err error) error {
+	if err == nil || !isPermanentVLMFailure(err) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
+}
+
 func isFinalAsynqAttempt(ctx context.Context) bool {
 	retried, ok := asynq.GetRetryCount(ctx)
 	if ok {
@@ -585,8 +708,12 @@ func isFinalAsynqAttempt(ctx context.Context) bool {
 }
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
-// so they can participate in semantic search.
-func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk) {
+// so they can participate in semantic search, then embeds the image itself
+// when the knowledge base opted in and its embedding model takes images.
+func (s *ImageMultimodalService) indexChunks(
+	ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk,
+	img []byte, out types.JSONMap,
+) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 	if err != nil || kb == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: %v", err)
@@ -676,6 +803,121 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for knowledge %s",
 		len(chunks), payload.KnowledgeID)
+
+	if status := s.indexImageVector(ctx, kb, payload, img, chunks, embeddingModel, engine); status != "" {
+		out["image_vector"] = status
+	}
+}
+
+// indexImageVector embeds the image itself with a multimodal embedding model
+// and stores the vector under an image_vector chunk, so a query can find the
+// image by what it shows even where the caption left that out. It returns a
+// short status for the trace, "" when image indexing is disabled for this
+// document (falling back to the KB setting) or the model takes no images.
+//
+// The caption and OCR chunks are already indexed, so a failure here only
+// loses the extra recall and never fails the task.
+func (s *ImageMultimodalService) indexImageVector(
+	ctx context.Context, kb *types.KnowledgeBase, payload types.ImageMultimodalPayload, img []byte,
+	chunks []*types.Chunk, model embedding.Embedder, engine *retriever.CompositeRetrieveEngine,
+) string {
+	// The task's explicit choice wins over the KB default, including false.
+	// A vector index is still required; old tasks inherit the KB setting.
+	enabled := kb.IsImageVectorEnabled()
+	if payload.ImageVectorEnabled != nil {
+		enabled = kb.IsVectorEnabled() && *payload.ImageVectorEnabled
+	}
+	if !enabled {
+		return ""
+	}
+	imageModel, ok := embedding.AsImageEmbedder(model)
+	if !ok {
+		return ""
+	}
+	// A scanned page is text, which its OCR chunk already carries better
+	// than an image vector can: multimodal embeddings are weakest on dense
+	// text, and a document of such pages would cost a call each.
+	if payload.ImageSourceType == "scanned_pdf" {
+		return "skipped: scanned page"
+	}
+	// The chunk needs text for reranking and the answer context; the caption
+	// describes the image, the OCR text is the fallback.
+	var source *types.Chunk
+	for _, c := range chunks {
+		if c.ChunkType == types.ChunkTypeImageCaption {
+			source = c
+			break
+		}
+		if c.ChunkType == types.ChunkTypeImageOCR {
+			source = c
+		}
+	}
+	if source == nil {
+		return "skipped: no caption or OCR text"
+	}
+
+	prepared, err := imageprep.Prepare(img, imageModel.ImageLimits())
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Image %s not embeddable: %v", payload.ImageURL, err)
+		return "failed: " + err.Error()
+	}
+	vectors, err := imageModel.BatchEmbedImages(ctx, []embedding.Image{prepared})
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Image embedding failed for %s: %v", payload.ImageURL, err)
+		return "failed: " + err.Error()
+	}
+	if dims := model.GetDimensions(); dims > 0 && len(vectors[0]) != dims {
+		// The index is laid out for the text vectors' width; a vector of
+		// another would land in a different collection or be refused.
+		logger.Warnf(ctx, "[ImageMultimodal] Image vector for %s has %d dimensions, the index %d",
+			payload.ImageURL, len(vectors[0]), dims)
+		return fmt.Sprintf("failed: %d dimensions, index has %d", len(vectors[0]), dims)
+	}
+
+	now := time.Now()
+	chunk := &types.Chunk{
+		ID:              uuid.New().String(),
+		TenantID:        payload.TenantID,
+		KnowledgeID:     payload.KnowledgeID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		Content:         source.Content,
+		ChunkType:       types.ChunkTypeImageVector,
+		ParentChunkID:   payload.ChunkID,
+		IsEnabled:       true,
+		Flags:           types.ChunkFlagRecommended,
+		ImageInfo:       source.ImageInfo,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.chunkService.GetRepository().CreateChunks(ctx, []*types.Chunk{chunk}); err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to create image vector chunk for %s: %v", payload.ImageURL, err)
+		return "failed: " + err.Error()
+	}
+	err = engine.BatchIndexVectors(ctx, model, []*types.IndexInfo{{
+		Content:         chunk.Content,
+		SourceID:        chunk.ID,
+		SourceType:      types.ImageSourceType,
+		ChunkID:         chunk.ID,
+		KnowledgeID:     chunk.KnowledgeID,
+		KnowledgeBaseID: chunk.KnowledgeBaseID,
+		IsEnabled:       true,
+	}}, vectors)
+	if err != nil {
+		// The chunk stays unindexed: nothing retrieves it, and a re-parse
+		// replaces it with the rest of the knowledge's chunks.
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to index image vector for %s: %v", payload.ImageURL, err)
+		return "failed: " + err.Error()
+	}
+	// Re-fetch for the same reason as indexChunks: GORM Save would zero
+	// the generated fields the in-memory chunk lacks.
+	if dbChunk, err := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID); err == nil {
+		dbChunk.Status = int(types.ChunkStatusIndexed)
+		if err := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Failed to mark image vector chunk %s indexed: %v", chunk.ID, err)
+		}
+	}
+	logger.Infof(ctx, "[ImageMultimodal] Indexed image vector chunk %s for image %s", chunk.ID, payload.ImageURL)
+	return "indexed"
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
@@ -704,7 +946,33 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	// New-style: resolve model through ModelService
 	if vlmCfg.ModelID != "" {
 		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
-		return model, vlmCfg, err
+		if err == nil {
+			return model, vlmCfg, nil
+		}
+
+		// A shared KB is processed in its owner's tenant context, while a
+		// document uploaded by an editor may carry a model ID from the
+		// editor's tenant. If that document-level model cannot be resolved,
+		// retry with the KB owner's configured model instead.
+		kbVLMConfig := kb.VLMConfig
+		if vlmCfg.ModelID != kbVLMConfig.ModelID && kbVLMConfig.ModelID != "" && kbVLMConfig.IsEnabled() {
+			logger.Warnf(ctx,
+				"[ImageMultimodal] Failed to resolve document VLM model %s: %v;"+
+					" falling back to knowledge base VLM model %s",
+				vlmCfg.ModelID, err, kbVLMConfig.ModelID)
+			fallbackModel, fallbackErr := s.modelService.GetVLMModel(ctx, kbVLMConfig.ModelID)
+			if fallbackErr != nil {
+				logger.Warnf(ctx,
+					"[ImageMultimodal] Failed to resolve knowledge base fallback VLM model %s: %v",
+					kbVLMConfig.ModelID, fallbackErr)
+				return nil, vlmCfg, errors.Join(
+					fmt.Errorf("resolve document VLM model %s: %w", vlmCfg.ModelID, err),
+					fmt.Errorf("resolve knowledge base fallback VLM model %s: %w", kbVLMConfig.ModelID, fallbackErr),
+				)
+			}
+			return fallbackModel, kbVLMConfig, nil
+		}
+		return nil, vlmCfg, err
 	}
 
 	// Legacy: create VLM from inline config
@@ -718,53 +986,28 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 // This mirrors the write-side fallback in knowledgeService.resolveFileService
 // and is required because images can be saved using global STORAGE_TYPE/MINIO_*
 // env vars while tenant.StorageEngineConfig.MinIO is left empty (issue #1282).
-func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Context, payload types.ImageMultimodalPayload) interfaces.FileService {
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
-	if err != nil || tenant == nil {
-		logger.Warnf(ctx, "[ImageMultimodal] GetTenantByID failed: tenant=%d err=%v", payload.TenantID, err)
-		return s.fileSvc
-	}
-
-	backendID, _, _ := types.ParseStorageBackendPath(payload.ImageURL)
-	provider := types.ParseProviderScheme(payload.ImageURL)
-	// A resource:// reference carries no provider/backend in the URL itself; the
-	// authoritative backend lives on the stored resource record. Using the KB's
-	// currently configured backend here would break reads when the resource was
-	// stored on a different backend (multi-backend / post-migration).
-	if _, isResourceRef := types.ParseResourcePath(payload.ImageURL); isResourceRef && s.resourceCatalog != nil {
-		if resource, resErr := s.resourceCatalog.Resolve(ctx, payload.ImageURL); resErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] resolve resource reference failed: url=%s err=%v", payload.ImageURL, resErr)
-		} else if resource != nil {
-			backendID = resource.StorageBackendID
-			provider = strings.ToLower(strings.TrimSpace(resource.Provider))
+func (s *ImageMultimodalService) resolveFileServiceForPayload(
+	ctx context.Context, payload types.ImageMultimodalPayload,
+) interfaces.FileService {
+	kb := func() *types.KnowledgeBase {
+		kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+		if err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v",
+				payload.KnowledgeBaseID, err)
+			return nil
 		}
+		return kb
 	}
-	if provider == "" {
-		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-		if kbErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
-		} else if kb != nil {
-			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
-			if backendID == "" && kb.StorageBackendID != nil {
-				backendID = *kb.StorageBackendID
-			}
-		}
-	}
+	return s.imageReader().fileService(ctx, payload.TenantID, kb, payload.ImageURL)
+}
 
-	if s.storageResolver == nil {
-		return s.fileSvc
+func (s *ImageMultimodalService) imageReader() knowledgeImageReader {
+	return knowledgeImageReader{
+		tenantRepo:      s.tenantRepo,
+		fileSvc:         s.fileSvc,
+		storageResolver: s.storageResolver,
+		resourceCatalog: s.resourceCatalog,
 	}
-
-	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
-		payload.TenantID, provider, baseDir, payload.ImageURL)
-	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
-	if svcErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
-			payload.TenantID, provider, svcErr)
-		return s.fileSvc
-	}
-	return fileSvc
 }
 
 // readImageBytes loads the image bytes for one image of a multimodal payload.
@@ -779,8 +1022,7 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 // a batched payload carries several images and only the first one is mirrored
 // onto the legacy single-image fields.
 func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload types.ImageMultimodalPayload) ([]byte, error) {
-	_, isResourceRef := types.ParseResourcePath(payload.ImageURL)
-	if isResourceRef || types.ParseProviderScheme(payload.ImageURL) != "" {
+	if isStoredImageURL(payload.ImageURL) {
 		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
 		if fileSvc == nil {
 			return nil, fmt.Errorf("no file service available for %s", payload.ImageURL)

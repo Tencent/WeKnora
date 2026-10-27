@@ -14,12 +14,17 @@ import (
 )
 
 type fakeAPI struct {
-	workspaces  []workspace
-	nodes       map[string][]node
-	blocks      map[string][]json.RawMessage
-	nodeErrors  map[string]error
-	blockErrors map[string]error
-	blockCalls  map[string]int
+	workspaces   []workspace
+	nodes        map[string][]node
+	blocks       map[string][]json.RawMessage
+	downloads    map[string][]byte
+	nodeErrors   map[string]error
+	blockErrors  map[string]error
+	verifyErrors map[string]error
+	dlErrors     map[string]error
+	blockCalls   map[string]int
+	verifyCalls  map[string]int
+	dlCalls      map[string]int
 }
 
 func (f *fakeAPI) listWorkspaces(context.Context) ([]workspace, error) {
@@ -33,6 +38,12 @@ func (f *fakeAPI) listNodes(_ context.Context, parentID string) ([]node, error) 
 	return f.nodes[parentID], nil
 }
 
+// listNodesPage serves every child of parentID as a single page.
+func (f *fakeAPI) listNodesPage(ctx context.Context, parentID, _ string) ([]node, string, error) {
+	nodes, err := f.listNodes(ctx, parentID)
+	return nodes, "", err
+}
+
 func (f *fakeAPI) documentBlocks(_ context.Context, documentID string) ([]json.RawMessage, error) {
 	if f.blockCalls == nil {
 		f.blockCalls = make(map[string]int)
@@ -42,6 +53,25 @@ func (f *fakeAPI) documentBlocks(_ context.Context, documentID string) ([]json.R
 		return nil, err
 	}
 	return f.blocks[documentID], nil
+}
+
+func (f *fakeAPI) verifyDocumentDownload(_ context.Context, documentID string) error {
+	if f.verifyCalls == nil {
+		f.verifyCalls = make(map[string]int)
+	}
+	f.verifyCalls[documentID]++
+	return f.verifyErrors[documentID]
+}
+
+func (f *fakeAPI) downloadDocument(_ context.Context, documentID string) ([]byte, error) {
+	if f.dlCalls == nil {
+		f.dlCalls = make(map[string]int)
+	}
+	f.dlCalls[documentID]++
+	if err := f.dlErrors[documentID]; err != nil {
+		return nil, err
+	}
+	return f.downloads[documentID], nil
 }
 
 func testConnector(api dingTalkAPI) *Connector {
@@ -58,6 +88,15 @@ func testConfig(resources ...string) *types.DataSourceConfig {
 		},
 		ResourceIDs: resources,
 	}
+}
+
+// testConfigWithUploadedFiles turns include_uploaded_files on. Cases that
+// exercise the upload ingest path have to opt in, because the switch defaults
+// to off and testConfig deliberately leaves the settings bag empty.
+func testConfigWithUploadedFiles(resources ...string) *types.DataSourceConfig {
+	cfg := testConfig(resources...)
+	cfg.Settings = map[string]interface{}{"include_uploaded_files": true}
+	return cfg
 }
 
 func rawJSON(value string) json.RawMessage {
@@ -681,7 +720,7 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 		ResourceID:  "resource",
 		Reference:   resourceReference{WorkspaceID: "space"},
 		StartNodeID: "root",
-	})
+	}, documentSettings{})
 	if err != nil {
 		t.Fatalf("scanScope() error = %v", err)
 	}
@@ -707,33 +746,39 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 		ResourceID: "resource",
 		Reference:  resourceReference{WorkspaceID: "space"},
 		Document:   &document,
-	})
+	}, documentSettings{})
 	if err != nil || len(documents) != 1 || documents[0].ID != "doc" || len(skipped) != 0 {
 		t.Fatalf("single-document scanScope() = %#v, %#v, %v", documents, skipped, err)
 	}
 }
 
 // The reason has to say which kind of unsupported a node is: a video is skipped
-// on purpose, a native type has simply not been implemented.
+// on purpose, a native type has simply not been implemented, and an uploaded
+// file the connector could read is skipped only because its switch is off.
 func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
+	enabled := documentSettings{IncludeUploadedFiles: true}
 	for _, testCase := range []struct {
-		label string
-		node  node
-		want  string
+		label    string
+		node     node
+		settings documentSettings
+		want     string
 	}{
 		{
 			"video category",
 			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
 			"video extension without a category",
 			node{Type: "FILE", Category: "OTHER", Extension: "MOV"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
 			"audio extension",
 			node{Type: "FILE", Category: "OTHER", Extension: "mp3"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
@@ -742,27 +787,601 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			// regression guard on the map.
 			"type without a dedicated label",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
 		},
 		{
 			"multidimensional table",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "able"},
+			documentSettings{},
 			"DingTalk multi-dimensional table has no ingest path in this connector yet",
 		},
 		{
 			"mind map",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			documentSettings{},
 			"DingTalk mind map has no ingest path in this connector yet",
 		},
 		{
 			"unknown type",
 			node{Type: "FILE", Category: "OTHER", Extension: "bin"},
+			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// The skip is not a missing feature: the file is readable, the data
+			// source simply never opted in, and the log has to say so.
+			"uploaded file with the switch off",
+			node{Type: "FILE", Category: "DOCUMENT", Extension: "docx"},
+			documentSettings{},
+			"uploaded files are not ingested because include_uploaded_files is not enabled for this data source",
+		},
+		{
+			"uploaded file with the switch explicitly off",
+			node{Type: "FILE", Category: "DOCUMENT", Extension: "pdf"},
+			documentSettings{IncludeUploadedFiles: false},
+			"uploaded files are not ingested because include_uploaded_files is not enabled for this data source",
+		},
+		{
+			// A node that is not an uploaded file keeps its own reason even
+			// while the switch is on, so the switch never relabels a node it
+			// does not govern.
+			"unsupported type with the switch on",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			enabled,
+			"DingTalk mind map has no ingest path in this connector yet",
+		},
+		{
+			"media with the switch on",
+			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
+			enabled,
+			"video/media files are deliberately not downloaded by this connector",
 		},
 	} {
 		t.Run(testCase.label, func(t *testing.T) {
-			if got := skipReason(testCase.node); got != testCase.want {
+			if got := skipReason(testCase.node, testCase.settings); got != testCase.want {
 				t.Fatalf("skipReason() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// The switch is read from the settings bag the way Yuque reads its own, and a
+// missing or malformed value keeps uploaded files out.
+func TestParseDocumentSettingsReadsTheUploadedFilesSwitch(t *testing.T) {
+	for _, testCase := range []struct {
+		label    string
+		settings map[string]interface{}
+		want     bool
+	}{
+		{"unset", nil, false},
+		{"empty bag", map[string]interface{}{}, false},
+		{"explicit true", map[string]interface{}{"include_uploaded_files": true}, true},
+		{"explicit false", map[string]interface{}{"include_uploaded_files": false}, false},
+		{"string true", map[string]interface{}{"include_uploaded_files": "true"}, true},
+		{"string ON", map[string]interface{}{"include_uploaded_files": " ON "}, true},
+		{"string 1", map[string]interface{}{"include_uploaded_files": "1"}, true},
+		{"string yes", map[string]interface{}{"include_uploaded_files": "yes"}, true},
+		{"string off", map[string]interface{}{"include_uploaded_files": "off"}, false},
+		{"string False", map[string]interface{}{"include_uploaded_files": "False"}, false},
+		{"string 0", map[string]interface{}{"include_uploaded_files": "0"}, false},
+		{"string no", map[string]interface{}{"include_uploaded_files": "no"}, false},
+		{"garbage string", map[string]interface{}{"include_uploaded_files": "maybe"}, false},
+		{"wrong type", map[string]interface{}{"include_uploaded_files": 1}, false},
+		// A switch for another type must never turn this one on.
+		{"unrelated key", map[string]interface{}{"include_sheets": true}, false},
+	} {
+		t.Run(testCase.label, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.Settings = testCase.settings
+			if got := parseDocumentSettings(cfg).IncludeUploadedFiles; got != testCase.want {
+				t.Fatalf("IncludeUploadedFiles = %v, want %v", got, testCase.want)
+			}
+		})
+	}
+	// A nil config cannot be parsed by the connector, but reading its settings
+	// must not panic either.
+	if got := parseDocumentSettings(nil).IncludeUploadedFiles; got {
+		t.Fatalf("parseDocumentSettings(nil).IncludeUploadedFiles = true, want false")
+	}
+}
+
+// binaryNode is an uploaded file as the wiki API lists it: a FILE in the
+// DOCUMENT category carrying the original extension.
+func binaryNode(id, name, extension string) node {
+	return node{
+		ID: id, WorkspaceID: "space", Name: name, Type: "FILE",
+		Category: "DOCUMENT", Extension: extension, ModifiedTime: "2026-07-25T08:00:00Z",
+	}
+}
+
+func uploadedDocumentsFixture() *fakeAPI {
+	return &fakeAPI{
+		workspaces: []workspace{{ID: "space", RootNodeID: "root"}},
+		nodes: map[string][]node{
+			"root": {
+				{
+					ID: "adoc", WorkspaceID: "space", Name: "Runbook.adoc", Type: "FILE",
+					Category: "ALIDOC", Extension: "adoc", ModifiedTime: "r1",
+				},
+				binaryNode("docx", "Employee-Handbook.docx", "docx"),
+				binaryNode("pptx", "Deck.pptx", "pptx"),
+				binaryNode("xlsx", "Sheet.xlsx", "xlsx"),
+				binaryNode("pdf", "Policy.pdf", "pdf"),
+				{
+					ID: "video", WorkspaceID: "space", Name: "Lesson.mp4", Type: "FILE",
+					Category: "VIDEO", Extension: "mp4",
+				},
+				{
+					ID: "aitable", WorkspaceID: "space", Name: "Table.able", Type: "FILE",
+					Category: "ALIDOC", Extension: "able",
+				},
+			},
+		},
+		blocks: map[string][]json.RawMessage{
+			"adoc": {rawJSON(`{"blockType":"paragraph","paragraph":{"text":"run"}}`)},
+		},
+		downloads: map[string][]byte{
+			"docx": []byte("PK\x03\x04word-bytes"),
+			"pptx": []byte("PK\x03\x04slides-bytes"),
+			"xlsx": []byte("PK\x03\x04sheet-bytes"),
+			"pdf":  []byte("%PDF-1.7-policy-bytes"),
+		},
+	}
+}
+
+// Uploaded Office and PDF files must be downloaded byte-for-byte with a
+// concrete content type and a file name that keeps exactly one extension, while
+// adoc keeps going through the blocks API and unsupported nodes are left out.
+func TestFetchAllDownloadsUploadedDocuments(t *testing.T) {
+	api := uploadedDocumentsFixture()
+	items, err := testConnector(api).FetchAll(
+		context.Background(), testConfigWithUploadedFiles("space"), []string{"space"},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 5 {
+		t.Fatalf("FetchAll() returned %d items, want 5: %#v", len(items), items)
+	}
+
+	byID := make(map[string]types.FetchedItem, len(items))
+	for _, item := range items {
+		byID[item.ExternalID] = item
+	}
+	for _, skipped := range []string{"video", "aitable"} {
+		if _, exists := byID[skipped]; exists {
+			t.Fatalf("unsupported node %q was synced: %#v", skipped, byID[skipped])
+		}
+	}
+	if api.blockCalls["adoc"] != 1 || len(api.blockCalls) != 1 {
+		t.Fatalf("block calls = %#v, want only the adoc document", api.blockCalls)
+	}
+	if len(api.dlCalls) != 4 {
+		t.Fatalf("download calls = %#v, want one per uploaded document", api.dlCalls)
+	}
+
+	want := []struct {
+		id          string
+		contentType string
+		fileName    string
+		content     string
+	}{
+		{
+			"docx",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			"Employee-Handbook.docx",
+			"PK\x03\x04word-bytes",
+		},
+		{
+			"pptx",
+			"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+			"Deck.pptx",
+			"PK\x03\x04slides-bytes",
+		},
+		{
+			"xlsx",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			"Sheet.xlsx",
+			"PK\x03\x04sheet-bytes",
+		},
+		{"pdf", "application/pdf", "Policy.pdf", "%PDF-1.7-policy-bytes"},
+	}
+	for _, expected := range want {
+		item, exists := byID[expected.id]
+		if !exists {
+			t.Fatalf("uploaded document %q was not synced: %#v", expected.id, byID)
+		}
+		if string(item.Content) != expected.content || item.ContentType != expected.contentType ||
+			item.FileName != expected.fileName {
+			t.Fatalf("%s item = %#v (content_type %q, file_name %q)",
+				expected.id, item, item.ContentType, item.FileName)
+		}
+		if item.SourceResourceID != "space" || item.Metadata["extension"] == "" ||
+			item.Metadata["channel"] != types.ChannelDingtalk {
+			t.Fatalf("%s metadata = %#v", expected.id, item.Metadata)
+		}
+		if item.URL == "" || item.UpdatedAt.IsZero() {
+			t.Fatalf("%s lost its URL or timestamp: %#v", expected.id, item)
+		}
+	}
+	if byID["adoc"].ContentType != "text/markdown" ||
+		string(byID["adoc"].Content) != "# Runbook.adoc\n\nrun\n" {
+		t.Fatalf("adoc item = %#v", byID["adoc"])
+	}
+}
+
+// Selecting an uploaded file directly must resolve to a single-document scope.
+func TestFetchAllHandlesUploadedDocumentSelection(t *testing.T) {
+	api := uploadedDocumentsFixture()
+	resourceID, err := encodeResourceReference(resourceReference{
+		WorkspaceID: "space", NodeID: "docx",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := testConnector(api).FetchAll(
+		context.Background(), testConfigWithUploadedFiles(resourceID), []string{resourceID},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ExternalID != "docx" ||
+		string(items[0].Content) != "PK\x03\x04word-bytes" ||
+		items[0].SourceResourceID != resourceID {
+		t.Fatalf("FetchAll() = %#v", items)
+	}
+	if len(api.dlCalls) != 1 || api.dlCalls["docx"] != 1 {
+		t.Fatalf("download calls = %#v", api.dlCalls)
+	}
+}
+
+// A failed download must surface as a retryable failure item and must not
+// advance the cursor, exactly like a failed block read.
+func TestIncrementalSyncRetriesUploadedDownloadFailures(t *testing.T) {
+	api := uploadedDocumentsFixture()
+	document := binaryNode("docx", "Employee-Handbook.docx", "docx")
+	document.ModifiedTimestamp = 1_768_000_000_000
+	api.nodes["root"] = []node{document}
+	api.dlErrors = map[string]error{"docx": errors.New("unsupported file type")}
+
+	cursorMap, err := encodeCursor(&cursorState{
+		Version:   cursorVersion,
+		Resources: map[string]map[string]string{"space": {"docx": "r1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, next, syncErr := testConnector(api).FetchIncremental(
+		context.Background(), testConfigWithUploadedFiles("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
+	)
+	var partial *datasource.PartialFetchError
+	if !errors.As(syncErr, &partial) {
+		t.Fatalf("FetchIncremental() error = %v, want PartialFetchError", syncErr)
+	}
+	if len(items) != 1 || items[0].Metadata["error_reason_code"] != "dingtalk_document_failed" ||
+		!strings.Contains(items[0].Metadata["error"], "unsupported file type") ||
+		len(items[0].Content) != 0 {
+		t.Fatalf("failure item = %#v", items)
+	}
+	state, err := decodeCursor(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Resources["space"]["docx"] != "r1" {
+		t.Fatalf("failed download advanced the cursor: %#v", state.Resources)
+	}
+
+	// The same document succeeds once the provider recovers.
+	delete(api.dlErrors, "docx")
+	items, _, err = testConnector(api).FetchIncremental(
+		context.Background(), testConfigWithUploadedFiles("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
+	)
+	if err != nil || len(items) != 1 || string(items[0].Content) != "PK\x03\x04word-bytes" {
+		t.Fatalf("retry result = %#v, %v", items, err)
+	}
+}
+
+// Validate must prove an uploaded document is reachable without paying for the
+// transfer, and must still report a provider refusal.
+func TestValidateProbesUploadedDocumentsWithoutDownloading(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "space", RootNodeID: "root", Name: "Space"}},
+		nodes: map[string][]node{
+			"root": {binaryNode("docx", "Employee-Handbook.docx", "docx")},
+		},
+	}
+
+	if err := testConnector(api).Validate(context.Background(), testConfigWithUploadedFiles()); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if api.verifyCalls["docx"] != 1 || len(api.dlCalls) != 0 {
+		t.Fatalf("verify calls = %#v, download calls = %#v", api.verifyCalls, api.dlCalls)
+	}
+
+	api.verifyErrors = map[string]error{"docx": errors.New("missing Storage.File.Read")}
+	err := testConnector(api).Validate(context.Background(), testConfigWithUploadedFiles())
+	if err == nil || !strings.Contains(err.Error(), "missing Storage.File.Read") {
+		t.Fatalf("Validate() error = %v, want provider refusal", err)
+	}
+}
+
+// switchStates are the three states every switch test has to cover: the key is
+// absent from a data source created before the switch existed, explicitly
+// false, and explicitly true.
+func switchStates(t *testing.T, key string) []struct {
+	label    string
+	settings map[string]interface{}
+	on       bool
+} {
+	t.Helper()
+	return []struct {
+		label    string
+		settings map[string]interface{}
+		on       bool
+	}{
+		{key + " unset", nil, false},
+		{key + " explicitly off", map[string]interface{}{key: false}, false},
+		{key + " explicitly on", map[string]interface{}{key: true}, true},
+	}
+}
+
+// Validate must honour the switch: with it off an uploaded file is not a
+// document, so it is neither probed nor treated as the one readable document a
+// data source has to prove. With it on the same file is probed through the
+// download-location lookup, never through the body transfer.
+func TestValidateHonoursTheUploadedFilesSwitch(t *testing.T) {
+	for _, testCase := range switchStates(t, "include_uploaded_files") {
+		t.Run(testCase.label, func(t *testing.T) {
+			api := &fakeAPI{
+				workspaces: []workspace{{ID: "space", RootNodeID: "root", Name: "Space"}},
+				nodes: map[string][]node{
+					"root": {binaryNode("docx", "Employee-Handbook.docx", "docx")},
+				},
+				verifyErrors: map[string]error{"docx": errors.New("missing Storage.File.Read")},
+			}
+			cfg := testConfig()
+			cfg.Settings = testCase.settings
+
+			err := testConnector(api).Validate(context.Background(), cfg)
+			if testCase.on {
+				if err == nil || !strings.Contains(err.Error(), "missing Storage.File.Read") {
+					t.Fatalf("Validate() error = %v, want the probe to fail loudly", err)
+				}
+				if api.verifyCalls["docx"] != 1 {
+					t.Fatalf("verify calls = %#v, want exactly one upload probe", api.verifyCalls)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Validate() error = %v, want acceptance with nothing to probe", err)
+				}
+				if len(api.verifyCalls) != 0 {
+					t.Fatalf("verify calls = %#v, want no upload probe while the switch is off", api.verifyCalls)
+				}
+			}
+			if len(api.dlCalls) != 0 {
+				t.Fatalf("download calls = %#v, want no body transfer during validation", api.dlCalls)
+			}
+		})
+	}
+}
+
+// The picker follows the same switch, so a node the sync would skip is never
+// offered for selection.
+func TestListResourcesHonoursTheUploadedFilesSwitch(t *testing.T) {
+	for _, testCase := range switchStates(t, "include_uploaded_files") {
+		t.Run(testCase.label, func(t *testing.T) {
+			api := uploadedDocumentsFixture()
+			rootID, err := encodeResourceReference(resourceReference{WorkspaceID: "space"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := testConfig()
+			cfg.Settings = testCase.settings
+
+			resources, err := testConnector(api).ListResources(context.Background(), cfg, rootID)
+			if err != nil {
+				t.Fatalf("ListResources() error = %v", err)
+			}
+			names := make(map[string]bool, len(resources))
+			for _, resource := range resources {
+				names[resource.Name] = true
+			}
+			if !names["Runbook.adoc"] {
+				t.Fatalf("the adoc document is missing from %#v", names)
+			}
+			for _, uploaded := range []string{"Employee-Handbook.docx", "Deck.pptx", "Sheet.xlsx", "Policy.pdf"} {
+				if names[uploaded] != testCase.on {
+					t.Fatalf("resource %q listed = %v, want %v (%#v)",
+						uploaded, names[uploaded], testCase.on, names)
+				}
+			}
+			// A node with no ingest path is hidden either way.
+			if names["Table.able"] || names["Lesson.mp4"] {
+				t.Fatalf("unsupported nodes were listed: %#v", names)
+			}
+		})
+	}
+}
+
+// Full sync and incremental sync share one scan, so the switch has to hold in
+// both. With it off, the pre-#3786 behaviour stands: the uploaded files are
+// reported as skipped with an actionable reason and never downloaded.
+func TestSyncHonoursTheUploadedFilesSwitch(t *testing.T) {
+	for _, testCase := range switchStates(t, "include_uploaded_files") {
+		t.Run(testCase.label, func(t *testing.T) {
+			api := uploadedDocumentsFixture()
+			cfg := testConfig("space")
+			cfg.Settings = testCase.settings
+			logs := captureLogs(t)
+
+			items, err := testConnector(api).FetchAll(context.Background(), cfg, []string{"space"})
+			if err != nil {
+				t.Fatalf("FetchAll() error = %v", err)
+			}
+			wantUploads := testCase.on
+			for _, id := range []string{"docx", "pptx", "xlsx", "pdf"} {
+				got := false
+				for _, item := range items {
+					if item.ExternalID == id {
+						got = true
+					}
+				}
+				if got != wantUploads {
+					t.Fatalf("FetchAll() synced %q = %v, want %v: %#v", id, got, wantUploads, items)
+				}
+			}
+			if hasAdoc := func() bool {
+				for _, item := range items {
+					if item.ExternalID == "adoc" {
+						return true
+					}
+				}
+				return false
+			}(); !hasAdoc {
+				t.Fatalf("adoc document disappeared from %#v", items)
+			}
+
+			downloads := len(api.dlCalls)
+			if wantUploads && downloads != 4 {
+				t.Fatalf("download calls = %#v, want one per uploaded document", api.dlCalls)
+			}
+			if !wantUploads {
+				if downloads != 0 {
+					t.Fatalf("download calls = %#v, want none while the switch is off", api.dlCalls)
+				}
+				wantLog := "uploaded files are not ingested because include_uploaded_files " +
+					"is not enabled for this data source"
+				if !strings.Contains(logs.String(), wantLog) {
+					t.Fatalf("skip log is missing %q:\n%s", wantLog, logs.String())
+				}
+			}
+
+			// The incremental path walks the same scan, so it must agree.
+			api.dlCalls = nil
+			cursorMap, err := encodeCursor(&cursorState{
+				Version:   cursorVersion,
+				Resources: map[string]map[string]string{"space": {}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			items, _, err = testConnector(api).FetchIncremental(
+				context.Background(), cfg, &types.SyncCursor{ConnectorCursor: cursorMap},
+			)
+			if err != nil {
+				t.Fatalf("FetchIncremental() error = %v", err)
+			}
+			wantItems := 1
+			if wantUploads {
+				wantItems = 5
+			}
+			if len(items) != wantItems {
+				t.Fatalf("FetchIncremental() returned %d items, want %d: %#v", len(items), wantItems, items)
+			}
+			if wantUploads && len(api.dlCalls) != 4 {
+				t.Fatalf("incremental download calls = %#v, want one per uploaded document", api.dlCalls)
+			}
+			if !wantUploads && len(api.dlCalls) != 0 {
+				t.Fatalf("incremental download calls = %#v, want none while the switch is off", api.dlCalls)
+			}
+		})
+	}
+}
+
+// Selecting an uploaded file directly is a scope the sync cannot resolve while
+// the switch is off, exactly as it could not before the upload path existed.
+func TestSelectingAnUploadedFileNeedsTheSwitch(t *testing.T) {
+	api := uploadedDocumentsFixture()
+	resourceID, err := encodeResourceReference(resourceReference{WorkspaceID: "space", NodeID: "docx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig(resourceID)
+	cfg.Settings = map[string]interface{}{"include_uploaded_files": false}
+
+	items, err := testConnector(api).FetchAll(context.Background(), cfg, []string{resourceID})
+	var partial *datasource.PartialFetchError
+	if !errors.As(err, &partial) {
+		t.Fatalf("FetchAll() error = %v, want PartialFetchError", err)
+	}
+	if len(api.dlCalls) != 0 {
+		t.Fatalf("download calls = %#v, want none while the switch is off", api.dlCalls)
+	}
+	if len(items) != 1 || items[0].Metadata["error_reason_code"] != "dingtalk_resource_failed" {
+		t.Fatalf("FetchAll() = %#v, want one failed resource", items)
+	}
+}
+
+func TestBinaryDocumentFileNameKeepsASingleExtension(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		extension string
+		want      string
+	}{
+		{"Employee-Handbook.docx", "docx", "Employee-Handbook.docx"},
+		{"Deck", "pptx", "Deck.pptx"},
+		{"Report.PDF", "pdf", "Report.pdf"},
+		{"quarterly/2026:sheet.xlsx", "xlsx", "quarterly_2026_sheet.xlsx"},
+		{"", "xlsx", "untitled.xlsx"},
+		{".pdf", "pdf", "untitled.pdf"},
+	} {
+		t.Run(testCase.name+"."+testCase.extension, func(t *testing.T) {
+			got := binaryDocumentFileName(node{Name: testCase.name, Extension: testCase.extension})
+			if got != testCase.want {
+				t.Fatalf("binaryDocumentFileName() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// isDocument answers whether a read path exists at all, and isIngestible
+// answers whether this data source takes the node: the blocks API for adoc
+// always, the 钉盘 download API for an uploaded file only once
+// include_uploaded_files is on. Native DingTalk types stay out either way, so
+// nothing is ever enumerated that the sync cannot read.
+func TestNodeDocumentClassification(t *testing.T) {
+	for _, testCase := range []struct {
+		label    string
+		node     node
+		document bool
+		online   bool
+		binary   bool
+	}{
+		{"adoc", node{Type: "FILE", Category: "ALIDOC", Extension: "adoc"}, true, true, false},
+		{"axls", node{Type: "FILE", Category: "ALIDOC", Extension: "axls"}, false, false, false},
+		{"docx", node{Type: "FILE", Category: "DOCUMENT", Extension: "docx"}, true, false, true},
+		{"pptx", node{Type: "FILE", Category: "DOCUMENT", Extension: "pptx"}, true, false, true},
+		{"xlsx", node{Type: "FILE", Category: "DOCUMENT", Extension: "xlsx"}, true, false, true},
+		{"pdf", node{Type: "FILE", Category: "DOCUMENT", Extension: "pdf"}, true, false, true},
+		{"uppercase", node{Type: "file", Category: "document", Extension: "PDF"}, true, false, true},
+		{"mp4", node{Type: "FILE", Category: "VIDEO", Extension: "mp4"}, false, false, false},
+		{"aitable", node{Type: "FILE", Category: "ALIDOC", Extension: "able"}, false, false, false},
+		{"mindmap", node{Type: "FILE", Category: "ALIDOC", Extension: "amind"}, false, false, false},
+		{"upload category", node{Type: "FILE", Category: "FILE", Extension: "pdf"}, false, false, false},
+		{"other category", node{Type: "FILE", Category: "OTHER", Extension: "docx"}, false, false, false},
+		{"folder", node{Type: "FOLDER", Extension: "docx"}, false, false, false},
+		{"no extension", node{Type: "FILE", Category: "DOCUMENT"}, false, false, false},
+	} {
+		t.Run(testCase.label, func(t *testing.T) {
+			if got := testCase.node.isDocument(); got != testCase.document {
+				t.Fatalf("isDocument() = %v, want %v", got, testCase.document)
+			}
+			if got := testCase.node.isOnlineDocument(); got != testCase.online {
+				t.Fatalf("isOnlineDocument() = %v, want %v", got, testCase.online)
+			}
+			if got := testCase.node.isBinaryDocument(); got != testCase.binary {
+				t.Fatalf("isBinaryDocument() = %v, want %v", got, testCase.binary)
+			}
+			// Off by default: with every switch unset only the native adoc
+			// path is admitted, and the switch must never admit a node that
+			// has no read path at all.
+			if got := testCase.node.isIngestible(documentSettings{}); got != testCase.online {
+				t.Fatalf("isIngestible(off) = %v, want %v", got, testCase.online)
+			}
+			enabled := documentSettings{IncludeUploadedFiles: true}
+			if got := testCase.node.isIngestible(enabled); got != testCase.document {
+				t.Fatalf("isIngestible(on) = %v, want %v", got, testCase.document)
 			}
 		})
 	}

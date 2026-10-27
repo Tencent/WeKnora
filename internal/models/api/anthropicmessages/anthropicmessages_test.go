@@ -103,7 +103,7 @@ func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	})
 	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
 		&api.Options{ReasoningEffort: api.ReasoningXHigh}, false)
-	assert.Equal(t, map[string]any{"type": "adaptive"}, out["thinking"])
+	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, out["thinking"])
 	assert.Equal(t, map[string]any{"effort": "max"}, out["output_config"])
 	assert.Equal(t, float64(4096), out["max_tokens"])
 
@@ -112,6 +112,23 @@ func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	assert.Equal(t, map[string]any{"type": "disabled"}, off["thinking"])
 	_, hasEffort := off["output_config"]
 	assert.False(t, hasEffort)
+}
+
+func TestBuildRequestBody_ThinkingOffType(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingAdaptive
+		cfg.Settings.SupportsEffort = true
+		cfg.Settings.ThinkingOffType = "between_tools"
+	})
+	off := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningOff}, false)
+	assert.Equal(t, map[string]any{"type": "between_tools"}, off["thinking"])
+	_, hasEffort := off["output_config"]
+	assert.False(t, hasEffort)
+
+	on := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningHigh}, false)
+	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, on["thinking"])
 }
 
 func TestBuildRequestBody_NoThinkingKeepsSampling(t *testing.T) {
@@ -132,6 +149,7 @@ func TestURLResolution(t *testing.T) {
 		"https://api.anthropic.com":              "https://api.anthropic.com/v1/messages",
 		"https://api.anthropic.com/v1":           "https://api.anthropic.com/v1/messages",
 		"https://api.minimaxi.com/anthropic":     "https://api.minimaxi.com/anthropic/v1/messages",
+		"https://api.minimax.cn/anthropic":       "https://api.minimax.cn/anthropic/v1/messages",
 		"https://open.bigmodel.cn/api/anthropic": "https://open.bigmodel.cn/api/anthropic/v1/messages",
 		"https://proxy.example.com/v1/messages":  "https://proxy.example.com/v1/messages",
 	}
@@ -642,4 +660,29 @@ func TestRedactedThinkingSurvivesAnUnsignedNeighbour(t *testing.T) {
 	blocks := assistantContent(t, bodyJSON(t, c, []api.Message{msg}, &api.Options{}, false))
 	require.Equal(t, []string{"redacted_thinking", "tool_use"}, blockTypes(blocks))
 	assert.Equal(t, "opaque-1", blocks[0].(map[string]any)["data"])
+}
+
+func TestMapStopReason(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     string
+		toolCalls  int
+		incomplete bool
+		want       string
+	}{
+		{"max tokens is length", "max_tokens", 0, false, "length"},
+		{"context window exceeded is length", "model_context_window_exceeded", 0, false, "length"},
+		{"context window exceeded with tool calls is length", "model_context_window_exceeded", 2, false, "length"},
+		{"tool use", "tool_use", 1, false, "tool_calls"},
+		{"end turn with tool calls", "end_turn", 1, false, "tool_calls"},
+		{"end turn", "end_turn", 0, false, "end_turn"},
+		{"refusal", "refusal", 0, false, "content_filter"},
+		{"incomplete stream", "max_tokens", 0, true, types.FinishReasonIncomplete},
+		{"empty reason", "", 0, false, types.FinishReasonIncomplete},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, mapStopReason(tt.reason, tt.toolCalls, tt.incomplete))
+		})
+	}
 }

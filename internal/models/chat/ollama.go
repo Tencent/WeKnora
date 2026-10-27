@@ -123,6 +123,11 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		Options:  make(map[string]interface{}),
 	}
 
+	// Keep request-scoped notices out of the system prefix and stored history.
+	if opts != nil && opts.RuntimeNotice != "" {
+		chatReq.Messages = append(chatReq.Messages, ollamaapi.Message{Role: "user", Content: opts.RuntimeNotice})
+	}
+
 	// 添加可选参数
 	if opts != nil {
 		chatReq.Options["temperature"] = opts.Temperature
@@ -164,6 +169,7 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 	var responseContent string
 	var toolCalls []types.LLMToolCall
 	var promptTokens, completionTokens int
+	var finishReason string
 
 	// 使用 Ollama 客户端发送请求
 	err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
@@ -173,6 +179,11 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 			responseContent = resp.Message.Thinking
 		}
 		toolCalls = c.toolCallTo(resp.Message.ToolCalls)
+		// done_reason 是 "stop" / "length" 等；不透传的话调用方分不清拒答和
+		// num_predict 打满导致的截断（图谱抽取据此决定跳过还是重试）。
+		if resp.DoneReason != "" {
+			finishReason = resp.DoneReason
+		}
 
 		// 获取token计数。eval_count 本身就是回答的 token 数，不含 prompt
 		// (https://github.com/ollama/ollama/blob/main/docs/api.md)，所以不能再
@@ -197,9 +208,10 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 	api.LogUsage(ctx, c.modelName, &usage)
 
 	return &types.ChatResponse{
-		Content:   responseContent,
-		ToolCalls: toolCalls,
-		Usage:     usage,
+		Content:      responseContent,
+		ToolCalls:    toolCalls,
+		FinishReason: finishReason,
+		Usage:        usage,
 	}, nil
 }
 

@@ -3,6 +3,7 @@ import markedKatex from 'marked-katex-extension'
 import type { Tokens } from 'marked'
 
 import type { CachedMermaidSvgHtml } from './mermaidStreaming.ts'
+import { ensureLiteralSingleTildeOnGlobalMarked } from './markedLiteralTilde.ts'
 import { normalizeSandboxArtifactRefs } from './sandboxArtifactRefs.ts'
 import {
   collapseStandaloneCitationParagraphs,
@@ -14,6 +15,7 @@ import {
   stripIncompleteCitationTag,
   type CitationKnowledgeRef,
 } from './citationMarkdown.ts'
+import { renderWeKnoraEntityLinks, type WeKnoraEntityLinkLabels } from './weknoraEntityLinks.ts'
 
 const STREAMING_IMAGE_PLACEHOLDER =
   '<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>'
@@ -44,11 +46,14 @@ export type RenderChatMarkdownOptions = {
   cachedMermaidSvgHtml?: CachedMermaidSvgHtml
   injectCachedMermaidSvg?: (html: string, cachedSvgHtml?: CachedMermaidSvgHtml) => string
   prepareMarkdown?: (markdown: string, cachedSvgHtml?: CachedMermaidSvgHtml) => string
+  /** Render `weknora://` URIs as clickable entity links with these labels. */
+  entityLinkLabels?: WeKnoraEntityLinkLabels
 }
 
 export function configureMarkedForChatMarkdown(): void {
   if (markedConfigured) return
   marked.use({ breaks: true, gfm: true })
+  ensureLiteralSingleTildeOnGlobalMarked()
   marked.use(markedKatex({ throwOnError: false, nonStandard: true }))
   markedConfigured = true
 }
@@ -501,7 +506,10 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   const citationHtml = options.collapseStandaloneCitations === false
     ? restoredHtml
     : collapseStandaloneCitationParagraphs(restoredHtml)
-  const tableWrappedHtml = wrapChatMarkdownTables(citationHtml)
+  const entityHtml = options.entityLinkLabels
+    ? renderWeKnoraEntityLinks(citationHtml, options.entityLinkLabels)
+    : citationHtml
+  const tableWrappedHtml = wrapChatMarkdownTables(entityHtml)
   const strongTitleHtml = markStandaloneStrongParagraphs(tableWrappedHtml)
   const sanitized = options.sanitizeHtml(strongTitleHtml)
   const withMermaid = options.injectCachedMermaidSvg

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -98,7 +101,9 @@ func (s *knowledgeService) cloneKnowledge(
 		}
 		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
 		dstSvc := s.resolveFileService(ctx, targetKB)
-		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		newPath, copyErr := copyOwnedObject(
+			ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID,
+			s.resourceCatalog, types.ResourceRelationSourceFile)
 		if copyErr != nil {
 			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
 		}
@@ -112,7 +117,10 @@ func (s *knowledgeService) cloneKnowledge(
 		}
 		stored, loadErr := s.repo.GetKnowledgeByID(ctx, dst.TenantID, dst.ID)
 		if errors.Is(loadErr, repository.ErrKnowledgeNotFound) {
-			cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			cleanupCopiedObjects(
+				ctx, s.resolveFileService(ctx, targetKB),
+				knowledgeResourceOwners(s.resourceCatalog, dst.ID), copiedFilePaths,
+			)
 			return
 		}
 		// An uncertain save/read must not delete objects that may be referenced.
@@ -207,6 +215,39 @@ type ProcessChunksOptions struct {
 	// child's ParentIndex references an entry in this slice.
 	ParentChunks []types.ParsedParentChunk
 	Metadata     map[string]string
+}
+
+func imagesForMultimodal(images []docparser.StoredImage) []docparser.StoredImage {
+	selected := make([]docparser.StoredImage, 0, len(images))
+	for _, image := range images {
+		if !image.SkipMultimodal {
+			selected = append(selected, image)
+		}
+	}
+	return selected
+}
+
+func cleanupUnboundInlineImages(
+	ctx context.Context, fileSvc interfaces.FileService, images []docparser.StoredImage,
+) {
+	if fileSvc == nil {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	deleted := make(map[string]struct{})
+	for _, image := range images {
+		if (!image.Inline && !image.NewlyStored) || image.ServingURL == "" {
+			continue
+		}
+		if _, exists := deleted[image.ServingURL]; exists {
+			continue
+		}
+		deleted[image.ServingURL] = struct{}{}
+		if err := fileSvc.DeleteFile(cleanupCtx, image.ServingURL); err != nil {
+			logger.Warnf(ctx, "Failed to clean up unbound inline image %s: %v", image.ServingURL, err)
+		}
+	}
 }
 
 // finalizeIndexedKnowledgeState makes a document retrievable as soon as chunks
@@ -337,6 +378,23 @@ func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterCo
 // ContextHeader breadcrumbs regardless of the configured strategy.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
 	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize)
+}
+
+// deleteUnindexedChunks drops the chunks processChunks wrote for a knowledge
+// that failed before BatchIndex ran. Nothing reached the vector store yet, so
+// only the chunk rows need removing; left alone they would stay active under a
+// failed knowledge, the same leftovers the BatchIndex failure path cleans up.
+func (s *knowledgeService) deleteUnindexedChunks(ctx context.Context, knowledge *types.Knowledge) {
+	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
+		logger.Errorf(ctx, "Delete chunks failed: %v", err)
+	}
+}
+
+// supersededChunkPurger is intentionally narrower than ChunkRepository: only
+// persistent repositories that can prove a newer active replacement should
+// physically reclaim soft-deleted chunk history.
+type supersededChunkPurger interface {
+	PurgeSupersededChunksByKnowledgeID(context.Context, uint64, string) (int64, error)
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
@@ -693,6 +751,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
 			// Check if there's enough storage quota available
@@ -701,6 +760,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
 		}
@@ -755,11 +815,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			if isLikelyRateLimitError(err) {
 				code = werrors.ErrCodeEmbeddingRateLimit
 			}
-			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
-				code, "batch index failed", err)
 			if willRetry {
+				s.failStageRetryable(ctx, knowledge.ID, types.StageEmbedding,
+					code, "batch index failed", err)
 				return fmt.Errorf("batch index: %w", err)
 			}
+			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+				code, "batch index failed", err)
 			return nil
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
@@ -802,6 +864,20 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if s.currentAttemptSuperseded(ctx, knowledge.ID) {
 		logger.Infof(ctx, "Parse attempt superseded, skipping completion: %s", knowledge.ID)
 		return nil
+	}
+
+	// Reparse has now written the replacement chunks and, when enabled, their
+	// replacement indexes. Only at this successful point is it safe to reclaim
+	// old soft-deleted rows. Keep this optional at the interface boundary so
+	// existing non-SQL repositories and narrow test doubles retain their
+	// lifecycle behavior; the concrete SQL chunk repository implements it.
+	if purger, ok := s.chunkRepo.(supersededChunkPurger); ok {
+		purged, purgeErr := purger.PurgeSupersededChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID)
+		if purgeErr != nil {
+			logger.Warnf(ctx, "Failed to purge superseded chunks for knowledge %s: %v", knowledge.ID, purgeErr)
+		} else if purged > 0 {
+			logger.Infof(ctx, "Purged %d superseded chunks for knowledge %s", purged, knowledge.ID)
+		}
 	}
 
 	now := time.Now()
@@ -1829,6 +1905,18 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			indexBatchAttempted,
 			indexBatchSucceeded,
 		)
+		if llmCallEmpty > 0 {
+			// Empty completions are counted, not logged, at the call site; a
+			// run where every chunk came back empty is indistinguishable from
+			// a healthy run in the application log. Reasoning-style models
+			// burning the whole budget on thinking are the known cause —
+			// point operators at the knob instead of leaving them to guess.
+			logger.Warnf(ctx,
+				"Question generation: %d of %d model calls returned empty completions "+
+					"(reasoning-style models can spend the completion budget on thinking even when disabled; "+
+					"raise %s to give the reply room)",
+				llmCallEmpty, llmCallAttempts, generateQuestionsMaxTokensEnv)
+		}
 		if qSpan != nil {
 			out := types.JSONMap{
 				"status":                 exitStatus,
@@ -2150,6 +2238,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	chunksInBatch := len(batchIDs)
 	chunksProcessed := 0
 	emptyChunks := 0
+	llmCallEmpty := 0
 	llmCallFailed := 0
 	generatedQuestionsTotal := 0
 	indexEntriesPrepared := 0
@@ -2178,11 +2267,23 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}()
 	defer func() {
 		logger.Infof(ctx,
-			"Question generation (batch) stats: knowledge=%s batch=%d chunks(in_batch=%d,processed=%d,empty=%d) llm_failed=%d retry=%d/%d status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
-			payload.KnowledgeID, payload.BatchIndex, chunksInBatch, chunksProcessed, emptyChunks, llmCallFailed,
-			retryCount, maxRetry, exitStatus, time.Since(taskStartedAt).Round(time.Millisecond),
+			"Question generation (batch) stats: knowledge=%s batch=%d "+
+				"chunks(in_batch=%d,processed=%d,empty=%d,llm_empty=%d) llm_failed=%d retry=%d/%d "+
+				"status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
+			payload.KnowledgeID, payload.BatchIndex, chunksInBatch, chunksProcessed, emptyChunks,
+			llmCallEmpty, llmCallFailed, retryCount, maxRetry, exitStatus,
+			time.Since(taskStartedAt).Round(time.Millisecond),
 			generatedQuestionsTotal, indexEntriesPrepared, indexBatchSucceeded,
 		)
+		if llmCallEmpty > 0 {
+			// See the matching warning in processQuestionGenerationForKnowledge:
+			// empty completions point at a completion budget spent on thinking.
+			logger.Warnf(ctx,
+				"Question generation (batch): %d model calls returned empty completions "+
+					"(reasoning-style models can spend the completion budget on thinking even when disabled; "+
+					"raise %s to give the reply room)",
+				llmCallEmpty, generateQuestionsMaxTokensEnv)
+		}
 		if qSpan != nil {
 			out := types.JSONMap{
 				"status":                 exitStatus,
@@ -2392,6 +2493,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			continue
 		}
 		if len(questions) == 0 {
+			llmCallEmpty++
 			continue
 		}
 		latestChunk, latestErr := s.chunkRepo.GetChunkByID(ctx, payload.TenantID, chunk.ID)
@@ -2454,6 +2556,29 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	return nil
 }
 
+const (
+	// generateQuestionsDefaultMaxTokens is the per-chunk completion budget for
+	// question generation. The reply itself is a handful of short lines, but
+	// reasoning-style models can spend a small budget on thinking even when
+	// thinking is disabled and come back with an empty completion (the same
+	// failure mode the description path grew KNOWLEDGE_BASE_PROFILE_MAX_TOKENS
+	// for, issue #4221) — so the default keeps headroom.
+	generateQuestionsDefaultMaxTokens = 2048
+	// generateQuestionsMaxTokensEnv lets operators raise (or lower) the budget
+	// without a rebuild; invalid or non-positive values fall back to the
+	// default so one bad variable cannot break question generation.
+	generateQuestionsMaxTokensEnv = "GENERATE_QUESTIONS_MAX_TOKENS"
+)
+
+func generateQuestionsMaxTokens() int {
+	if v := strings.TrimSpace(os.Getenv(generateQuestionsMaxTokensEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return generateQuestionsDefaultMaxTokens
+}
+
 // generateQuestionsWithContext generates questions for a chunk with surrounding context
 func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,
@@ -2500,7 +2625,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		},
 	}, &chat.ChatOptions{
 		Temperature: 0.7,
-		MaxTokens:   512,
+		MaxTokens:   generateQuestionsMaxTokens(),
 		Thinking:    &thinking,
 	})
 	if err != nil {
@@ -3246,6 +3371,11 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			logger.Warnf(ctx, "Knowledge base ID mismatch: %s != %s", chunk.KnowledgeBaseID, kbID)
 			continue
 		}
+		// Its index row holds the image's own vector, which re-embedding
+		// Content here would replace with a text vector of the caption.
+		if chunk.ChunkType == types.ChunkTypeImageVector {
+			continue
+		}
 		ids = append(ids, chunk.ID)
 		if !chunk.IsEnabled || chunk.ChunkType == types.ChunkTypeParentText {
 			continue
@@ -3396,6 +3526,15 @@ func (s *knowledgeService) UpdateImageInfo(
 			// Update OCR if it has changed
 			if image.OCRText != cImageInfo[0].OCRText {
 				child.Content = image.OCRText
+				child.ImageInfo = imageInfo
+				updateChunk = append(updateChunk, chunkChildren[i])
+			}
+		case types.ChunkTypeImageVector:
+			// The image's vector does not change with its caption, only the
+			// text shown and reranked for it; updateChunkVector leaves the
+			// vector alone.
+			if image.Caption != "" && image.Caption != child.Content {
+				child.Content = image.Caption
 				child.ImageInfo = imageInfo
 				updateChunk = append(updateChunk, chunkChildren[i])
 			}
@@ -3996,31 +4135,66 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	}
 	sanitizeReadResult(convertResult)
+	normalizeStarted := time.Now()
 	if convertResult != nil {
 		convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
 		if convertResult.MarkdownContent != "" {
 			convertResult.MarkdownContent = docparser.NormalizeHTMLTables(convertResult.MarkdownContent)
 		}
 	}
+	normalizedBytes := 0
+	if convertResult != nil {
+		normalizedBytes = len(convertResult.MarkdownContent)
+	}
+	logger.Infof(ctx, "Document text normalization completed in %s (knowledge=%s input_bytes=%d output_bytes=%d)",
+		time.Since(normalizeStarted), knowledge.ID, len(parsedMarkdown), normalizedBytes)
 
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
+	var imageFileSvc interfaces.FileService
+	var inlineParseErr error
 
 	if s.imageResolver != nil && convertResult != nil {
-		fileSvc := s.resolveFileService(ctx, kb)
+		imageFileSvc = s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
-		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(ctx, convertResult, fileSvc, tenantID)
-		if resolveErr != nil {
-			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
+		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(
+			ctx, convertResult, imageFileSvc, tenantID)
+		if errors.Is(resolveErr, docparser.ErrAmbiguousInlineImage) {
+			inlineParseErr = resolveErr
+			images = nil // ResolveAndStore already rolled back this attempt's uploads.
+		} else if resolveErr != nil {
+			_, err := s.failKnowledge(ctx, knowledge, isLastRetry, "store inline image: %v", resolveErr)
+			return err
 		}
-		if updatedMarkdown != "" {
-			convertResult.MarkdownContent = updatedMarkdown
-		}
+		convertResult.MarkdownContent = updatedMarkdown
 		storedImages = images
 
+	}
+	if inlineParseErr != nil ||
+		(convertResult != nil && docparser.HasUnresolvedInlineImagePayload(convertResult.MarkdownContent)) {
+		message := "unresolved inline image base64 payload remains before chunking"
+		if inlineParseErr != nil {
+			message = inlineParseErr.Error()
+		}
+		logger.Errorf(ctx, "Knowledge %s: %s", knowledge.ID, message)
+		cleanupUnboundInlineImages(ctx, imageFileSvc, storedImages)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = message
+		knowledge.UpdatedAt = time.Now()
+		s.beginStage(ctx, knowledge.ID, types.StageChunking, nil)
+		s.failStage(ctx, knowledge.ID, types.StageChunking, werrors.ErrCodeChunkingFailed, message, nil)
+		if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+			return fmt.Errorf("%w: persist inline image processing failure: %v", asynq.SkipRetry, err)
+		}
+		return fmt.Errorf("%s: %w", message, asynq.SkipRetry)
+	}
+
+	if s.imageResolver != nil && convertResult != nil {
+		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
 		// Resolve remote http(s) images (e.g. markdown external URLs) → download + upload to storage.
 		// ResolveAndStore handles inline bytes and base64; ResolveRemoteImages handles http/https URLs.
-		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(ctx, convertResult.MarkdownContent, fileSvc, tenantID)
+		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(
+			ctx, convertResult.MarkdownContent, imageFileSvc, tenantID)
 		if remoteErr != nil {
 			logger.Warnf(ctx, "Remote image resolution partially failed: %v", remoteErr)
 		}
@@ -4046,12 +4220,14 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	chunkStarted := time.Now()
 
+	multimodalImages := imagesForMultimodal(storedImages)
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
 		QuestionCount:            payload.QuestionCount,
 		EnableMultimodel:         payload.EnableMultimodel,
-		StoredImages:             storedImages,
+		StoredImages:             multimodalImages,
 	}
 
 	if convertResult != nil {
@@ -4098,6 +4274,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
+	logger.Infof(ctx, "Document chunking completed in %s (knowledge=%s input_bytes=%d chunks=%d)",
+		time.Since(chunkStarted), knowledge.ID, len(convertResult.MarkdownContent), len(chunks))
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
@@ -4213,16 +4391,18 @@ func (s *knowledgeService) convert(
 	if !isURL {
 		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
 		if err != nil {
-			s.failStage(ctx, knowledge.ID, types.StageDocReader,
-				werrors.ErrCodeDocReaderParseFailed, "failed to get file", err)
-			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
+			result, taskErr := s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
+			s.failStageWithRetry(ctx, knowledge.ID, types.StageDocReader,
+				werrors.ErrCodeDocReaderParseFailed, "failed to get file", err, taskErr != nil)
+			return result, taskErr
 		}
 		defer fileReader.Close()
 		contentBytes, err := io.ReadAll(fileReader)
 		if err != nil {
-			s.failStage(ctx, knowledge.ID, types.StageDocReader,
-				werrors.ErrCodeDocReaderParseFailed, "failed to read file", err)
-			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
+			result, taskErr := s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
+			s.failStageWithRetry(ctx, knowledge.ID, types.StageDocReader,
+				werrors.ErrCodeDocReaderParseFailed, "failed to read file", err, taskErr != nil)
+			return result, taskErr
 		}
 		req.FileContent = contentBytes
 		req.FileName = payload.FileName
@@ -4230,12 +4410,17 @@ func (s *knowledgeService) convert(
 	}
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	// Parser resource limits are permanent document rejections, not transient reader failures.
+	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
+		result, err = &types.ReadResult{Error: err.Error()}, nil
+	}
 	if err != nil {
 		code, message := docReaderFailure(err)
 		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
-		s.failStage(ctx, knowledge.ID, types.StageDocReader,
-			code, message, err)
-		return s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
+		result, taskErr := s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
+		s.failStageWithRetry(ctx, knowledge.ID, types.StageDocReader,
+			code, message, err, taskErr != nil)
+		return result, taskErr
 	}
 	sanitizeReadResult(result)
 	if result.Error != "" {
@@ -4415,20 +4600,21 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 
 		payload := types.ImageMultimodalPayload{
-			TenantID:          knowledge.TenantID,
-			KnowledgeID:       knowledge.ID,
-			KnowledgeBaseID:   kb.ID,
-			ChunkID:           chunkID,
-			ImageURL:          img.ServingURL,
-			EnableOCR:         true,
-			EnableCaption:     true,
-			ImageAttrsEnabled: eff.ImageAttrsEnabled,
-			ImageActions:      eff.ImageActions,
-			Language:          lang,
-			ImageSourceType:   metadata["image_source_type"],
-			Attempt:           attempt,
-			ImageIndex:        idx,
-			SourceLocators:    img.SourceLocators,
+			TenantID:            knowledge.TenantID,
+			KnowledgeID:         knowledge.ID,
+			KnowledgeBaseID:     kb.ID,
+			ChunkID:             chunkID,
+			ImageURL:            img.ServingURL,
+			ImagePipelineID:     eff.ImagePipelineID,
+			ImagePipelineParams: eff.ImagePipelineParams,
+			ImageAttrsEnabled:   eff.ImageAttrsEnabled,
+			ImageActions:        eff.ImageActions,
+			Language:            lang,
+			ImageSourceType:     metadata["image_source_type"],
+			Attempt:             attempt,
+			ImageIndex:          idx,
+			SourceLocators:      img.SourceLocators,
+			ImageVectorEnabled:  &eff.ImageVectorEnabled,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

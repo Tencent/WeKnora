@@ -1,7 +1,7 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
-import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
@@ -9,7 +9,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
@@ -79,6 +79,14 @@ const emit = defineEmits<{
 
 const loading = ref(false);
 const error = ref('');
+// Async renderer setup/mount failures do not emit the renderer's `error` event.
+// Surface them in the preview instead of leaving an empty document area.
+onErrorCaptured((err) => {
+  error.value = t('preview.loadFailed');
+  loading.value = false;
+  console.error('Document renderer failed:', err);
+  return false;
+});
 const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');
@@ -336,7 +344,10 @@ async function renderMarkdown(blob: Blob) {
     return;
   }
 
-  markdownHtml.value = renderDocumentPreviewMarkdown(text);
+  markdownHtml.value = renderDocumentPreviewMarkdown(text, undefined, {
+    // 预览工具栏已经显示文件名；正文第一行的同名 H1 属于重复标题。
+    titles: [props.fileName],
+  });
 }
 
 function onImageLoad(e: Event) {
@@ -486,6 +497,10 @@ async function loadPreview() {
       }
       case 'markdown': {
         await renderMarkdown(blob);
+        // Markdown 里的 resource:// 等受保护图片需要带鉴权换 blob（无 override
+        // 时走应用默认鉴权面：登录态 /files 代理）。已换过的元素幂等跳过。
+        await nextTick();
+        await hydrateProtectedFileImages(previewContent.value);
         break;
       }
       case 'pptx': {
@@ -1321,8 +1336,8 @@ onUnmounted(() => {
   position: absolute;
   pointer-events: none;
   border-radius: var(--app-radius-xs);
-  background: color-mix(in srgb, var(--td-success-color) 22%, transparent);
-  outline: 1px solid color-mix(in srgb, var(--td-success-color) 50%, transparent);
+  background: var(--app-source-highlight-soft-bg);
+  outline: 1px solid var(--app-source-highlight-border);
 }
 
 .preview-image {
@@ -1414,7 +1429,7 @@ onUnmounted(() => {
     max-width: 480px;
     padding: 10px 12px;
     border-radius: @border-radius;
-    background: color-mix(in srgb, var(--td-success-color) 10%, transparent);
+    background: var(--app-source-highlight-soft-bg);
     color: @text-primary;
     &__time {
       font-size: var(--app-text-sm);
@@ -1469,9 +1484,12 @@ onUnmounted(() => {
 
 :deep(.markdown-body) {
   font-size: var(--app-text-base);
-  line-height: 1.7;
+  line-height: 1.75;
   color: @text-primary;
   word-break: break-word;
+  // 正文窄栏：全屏 / 宽抽屉下限制行宽，避免中文长行难以阅读。
+  max-width: 680px;
+  margin-inline: auto;
 
   h1, h2, h3, h4, h5, h6 {
     margin-top: 20px;
@@ -1479,20 +1497,62 @@ onUnmounted(() => {
     font-weight: 600;
     line-height: 1.4;
   }
+  h1:first-child,
+  h2:first-child,
+  h3:first-child,
+  h4:first-child,
+  h5:first-child,
+  h6:first-child { margin-top: 0; }
+  // 标题层级：旧规则里 h4~h6 没有字号，会退回正文字号（14px），和 h3 的
+  // 17px 几乎看不出差别；这里补齐 24 / 20 / 18 / 16 / 15 / 14 的完整层级。
   h1 { font-size: var(--app-text-4xl); border-bottom: 1px solid @border-color; padding-bottom: 8px; }
   h2 { font-size: var(--app-text-3xl); border-bottom: 1px solid @border-color; padding-bottom: 6px; }
-  h3 { font-size: 17px; }
+  h3 { font-size: var(--app-text-2xl); }
+  h4 { font-size: var(--app-text-xl); margin-top: 16px; margin-bottom: 8px; }
+  h5 { font-size: var(--app-text-lg); margin-top: 14px; margin-bottom: 6px; }
+  h6 { font-size: var(--app-text-base); margin-top: 12px; margin-bottom: 6px; }
 
-  p { margin: 8px 0; }
+  p { margin: 10px 0; }
+  p:last-child { margin-bottom: 0; }
   blockquote {
-    margin: 12px 0;
-    padding: 8px 16px;
+    margin: 14px 0;
+    padding: 10px 16px;
     border-left: 4px solid @border-color;
     background: @bg-subtle;
     color: var(--td-text-color-secondary);
   }
-  ul, ol { padding-left: 24px; margin: 8px 0; }
-  li { margin: 4px 0; }
+  blockquote > :first-child { margin-top: 0; }
+  blockquote > :last-child { margin-bottom: 0; }
+  ul, ol { padding-left: 28px; margin: 10px 0; }
+  li { margin: 4px 0; line-height: 1.75; }
+  li > ul, li > ol { margin: 4px 0; padding-left: 24px; }
+  li > p { margin: 4px 0; }
+  ul li:has(> .task-checkbox) { list-style: none; }
+  .task-checkbox {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    border: 1px solid @border-color;
+    border-radius: var(--app-radius-xs);
+    vertical-align: -2px;
+    position: relative;
+    &.checked {
+      background: @accent;
+      border-color: @accent;
+      &::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1px;
+        width: 4px;
+        height: 8px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+  }
 
   table {
     .preview-table(@bg-muted; var(--td-bg-color-container-hover));
@@ -1511,9 +1571,9 @@ onUnmounted(() => {
   }
   code {
     background: var(--td-bg-color-secondarycontainer);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 0.9em;
+    padding: 1px 5px;
+    border-radius: var(--app-radius-xs);
+    font-size: 0.92em;
   }
   img { max-width: 100%; border-radius: var(--app-radius-xs); }
   hr { border: none; border-top: 1px solid @border-color; margin: 20px 0; }
@@ -1679,22 +1739,39 @@ html[theme-mode="dark"] {
 /* Citation highlights live outside the scoped block: they apply to DOM that
    third-party renderers (docx-preview, pptx-preview, SheetJS) create. */
 ::highlight(source-locate) {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+  background-color: var(--app-source-highlight-bg);
 }
 
 mark.source-locate-mark {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+  background-color: var(--app-source-highlight-bg);
   color: inherit;
+  border-radius: var(--app-radius-xs);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .source-locate-block {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 22%, transparent) !important;
-  outline: 1px solid var(--app-source-highlight);
-  outline-offset: 2px;
-  border-radius: var(--app-radius-xs);
+  background-color: var(--app-source-highlight-soft-bg) !important;
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+/* Cell backgrounds can obscure a row's marker. Paint each cell once and
+   keep the accent on the leading edge, without boxing every table row. */
+tr.source-locate-block {
+  background-color: transparent !important;
+  box-shadow: none;
 }
 
 tr.source-locate-block > td {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 45%, transparent) !important;
+  background-color: var(--app-source-highlight-soft-bg) !important;
+}
+
+tr.source-locate-block > td:first-child {
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+img.source-locate-block {
+  outline: 1px solid var(--app-source-highlight-border);
+  outline-offset: 2px;
 }
 </style>

@@ -26,9 +26,11 @@ func (f *stagingFileService) CheckConnectivity(context.Context) error { return n
 func (f *stagingFileService) SaveFile(context.Context, *multipart.FileHeader, uint64, string) (string, error) {
 	panic("unexpected SaveFile")
 }
+
 func (f *stagingFileService) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
 	panic("unexpected SaveBytes")
 }
+
 func (f *stagingFileService) GetFile(_ context.Context, filePath string) (io.ReadCloser, error) {
 	if f.getCalls == nil {
 		f.getCalls = make(map[string]int)
@@ -36,6 +38,7 @@ func (f *stagingFileService) GetFile(_ context.Context, filePath string) (io.Rea
 	f.getCalls[filePath]++
 	return io.NopCloser(bytes.NewReader(f.files[filePath])), nil
 }
+
 func (f *stagingFileService) GetFileURL(context.Context, string) (string, error) {
 	panic("unexpected GetFileURL")
 }
@@ -77,12 +80,15 @@ func (m *stagingSandboxManager) SessionFileStore() sandbox.SessionFileStore {
 func (m *stagingSandboxManager) EnsureSessionDir(context.Context, string, string) error {
 	return nil
 }
+
 func (m *stagingSandboxManager) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
 	panic("unexpected StatSessionFile")
 }
+
 func (m *stagingSandboxManager) ReadSessionFile(context.Context, string, string) ([]byte, error) {
 	panic("unexpected ReadSessionFile")
 }
+
 func (m *stagingSandboxManager) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
 	entries := make([]sandbox.RemoteDirEntry, 0, len(m.files))
 	for filePath, content := range m.files {
@@ -90,6 +96,7 @@ func (m *stagingSandboxManager) ListSessionFiles(context.Context, string, string
 	}
 	return entries, nil
 }
+
 func (m *stagingSandboxManager) WriteSessionInputFile(_ context.Context, _ string, filePath string, content []byte) error {
 	if m.files == nil {
 		m.files = make(map[string][]byte)
@@ -98,9 +105,11 @@ func (m *stagingSandboxManager) WriteSessionInputFile(_ context.Context, _ strin
 	m.writes = append(m.writes, filePath)
 	return nil
 }
+
 func (m *stagingSandboxManager) WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error {
 	return m.WriteSessionInputFile(ctx, sessionID, filePath, content)
 }
+
 func (m *stagingSandboxManager) WriteSessionWorkspaceFiles(ctx context.Context, sessionID string, files []sandbox.SessionWorkspaceFile) error {
 	for _, file := range files {
 		if err := m.WriteSessionWorkspaceFile(ctx, sessionID, file.Path, file.Content); err != nil {
@@ -109,6 +118,7 @@ func (m *stagingSandboxManager) WriteSessionWorkspaceFiles(ctx context.Context, 
 	}
 	return nil
 }
+
 func (m *stagingSandboxManager) RemoveSessionInputPath(_ context.Context, _ string, targetPath string) error {
 	for filePath := range m.files {
 		if filePath == targetPath || strings.HasPrefix(filePath, targetPath+"/") {
@@ -387,7 +397,7 @@ func TestStageSessionAttachmentsIgnoresWrongTenant(t *testing.T) {
 	assert.Empty(t, fileService.getCalls)
 }
 
-func TestStageSessionAttachmentsKeepsExistingURLWithoutLookup(t *testing.T) {
+func TestStageSessionAttachmentsKeepsExistingURL(t *testing.T) {
 	db := stagingTempDocDB(t)
 	attachment := types.MessageAttachment{
 		ID:       "doc-1",
@@ -814,4 +824,57 @@ func TestStageSessionAttachmentsRestoresReusedInputsAfterRebind(t *testing.T) {
 	require.Equal(t, []byte("content-second"), store.files[remoteSecond])
 	require.Equal(t, 1, fileService.getCalls[first.URL],
 		"the reused attachment's content must be re-read from durable storage during the recovery")
+}
+
+func TestStageSessionAttachmentsRebindRestoresSidecarsAndLaterInputs(t *testing.T) {
+	for _, sidecarPresent := range []bool{false, true} {
+		name := "new-sidecar"
+		if sidecarPresent {
+			name = "reused-sidecar"
+		}
+		t.Run(name, func(t *testing.T) {
+			db := stagingTempDocDB(t)
+			attachments := types.MessageAttachments{
+				{ID: "parsed-doc", URL: "local://first", FileName: "report.pdf", FileType: ".pdf", FileSize: 3},
+				{URL: "local://second", FileName: "notes.txt", FileType: ".txt", FileSize: 3},
+				{URL: "local://third", FileName: "later.txt", FileType: ".txt", FileSize: 3},
+			}
+			require.NoError(t, db.Create(&types.TemporaryDocument{
+				ID: "parsed-doc", TenantID: 7, SessionID: "session-1", ResourceRef: attachments[0].URL,
+				FileName: "report.pdf", FileType: ".pdf", FileSize: 3,
+				Status: types.TemporaryDocumentStatusReady, Content: "extracted report",
+				ExpiresAt: time.Now().Add(time.Hour),
+			}).Error)
+			layout := sandbox.RemoteWorkspaceLayout()
+			paths := make([]string, len(attachments))
+			for i, attachment := range attachments {
+				var err error
+				paths[i], err = sandboxAttachmentPath(attachment, layout.InputDir)
+				require.NoError(t, err)
+			}
+			store := &rebindingInputStore{
+				slowPath: paths[1],
+				stagingSandboxManager: stagingSandboxManager{
+					files: map[string][]byte{paths[0]: []byte("one"), paths[2]: []byte("tri")},
+				},
+			}
+			if sidecarPresent {
+				store.files[paths[0]+parsedSidecarSuffix] = []byte("extracted report")
+			}
+			fileService := &stagingFileService{files: map[string][]byte{
+				attachments[0].URL: []byte("one"), attachments[1].URL: []byte("two"), attachments[2].URL: []byte("tri"),
+			}}
+			svc := &agentService{
+				db: db, sandboxMgr: store, fileService: fileService, sandboxResolver: stubSandboxResolver{mgr: store},
+			}
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+			staged, err := svc.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, attachments, layout)
+			require.NoError(t, err)
+			require.Len(t, staged, 3)
+			assert.Equal(t, []byte("extracted report"), store.files[paths[0]+parsedSidecarSuffix])
+			for i, attachment := range attachments {
+				assert.Equal(t, fileService.files[attachment.URL], store.files[paths[i]], attachment.FileName)
+			}
+		})
+	}
 }

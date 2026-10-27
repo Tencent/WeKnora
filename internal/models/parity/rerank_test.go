@@ -36,9 +36,9 @@ func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, resolved.RerankAPI.Known(),
 				"unknown rerank protocol %q", resolved.RerankAPI)
-			// The catch-all vendor has no endpoint of its own: the operator
-			// supplies one, and Validate requires it.
-			if v.ID != providers.GenericID {
+			// Generic and self-hosted TEI have no endpoint of their own:
+			// the operator supplies one, and Validate requires it.
+			if v.ID != providers.GenericID && v.ID != providers.HuggingFaceTEIID {
 				assert.NotEmpty(t, resolved.BaseURL, "rerank vendors need a default endpoint")
 			}
 
@@ -59,20 +59,22 @@ func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
 // every rerank call for that vendor.
 func TestRerankProtocolAssignment(t *testing.T) {
 	for id, want := range map[string]api.RerankAPI{
-		"aliyun":       api.RerankDashScope,
-		"nvidia":       api.RerankNIM,
-		"lkeap":        api.RerankTencentLKEAP,
-		"volcengine":   api.RerankVolcengineKnowledge,
-		"zhipu":        api.RerankCohere,
-		"jina":         api.RerankCohere,
-		"siliconflow":  api.RerankCohere,
-		"qianfan":      api.RerankCohere,
-		"gpustack":     api.RerankCohere,
-		"generic":      api.RerankCohere,
-		"weknoracloud": api.RerankCohere,
-		"novita":       api.RerankCohere,
-		"openrouter":   api.RerankCohere,
-		"litellm":      api.RerankCohere,
+		"aliyun":          api.RerankDashScope,
+		"nvidia":          api.RerankNIM,
+		"pinecone":        api.RerankPinecone,
+		"huggingface_tei": api.RerankTEI,
+		"lkeap":           api.RerankTencentLKEAP,
+		"volcengine":      api.RerankVolcengineKnowledge,
+		"zhipu":           api.RerankCohere,
+		"jina":            api.RerankCohere,
+		"siliconflow":     api.RerankCohere,
+		"qianfan":         api.RerankCohere,
+		"gpustack":        api.RerankCohere,
+		"generic":         api.RerankCohere,
+		"weknoracloud":    api.RerankCohere,
+		"novita":          api.RerankCohere,
+		"openrouter":      api.RerankCohere,
+		"litellm":         api.RerankCohere,
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := modelruntime.Resolve(modelruntime.Ref{
@@ -285,6 +287,8 @@ func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
 		// help.aliyun.com text-rerank: 500 documents per request. Its length
 		// limits are stated in tokens, which runes cannot express.
 		"aliyun": {MaxDocuments: 500},
+		// TEI router: --max-client-batch-size defaults to 32.
+		"huggingface_tei": {MaxDocuments: 32},
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := modelruntime.Resolve(modelruntime.Ref{
@@ -437,13 +441,13 @@ func TestGatewayRerankEndpoints(t *testing.T) {
 
 // TestScoreScaleIsOverridablePerRow covers the gateways, where the vendor
 // cannot know the answer: GPUStack and a generic endpoint serve whatever
-// reranker was deployed behind them, and the two families disagree — BGE
-// answers a 0..1 probability, Qwen3-Reranker an unbounded score. Converting a
+// reranker was deployed behind them. Its serving configuration determines
+// whether the endpoint returns raw logits or probabilities. Converting a
 // probability as if it were a logit squeezes every score into [0.5, 0.73],
 // which makes a relevance threshold meaningless, so the operator needs a way
 // to say which one is actually there.
 func TestScoreScaleIsOverridablePerRow(t *testing.T) {
-	for _, id := range []string{"gpustack", "generic"} {
+	for _, id := range []string{"gpustack", "generic", "litellm"} {
 		t.Run(id, func(t *testing.T) {
 			base := "http://127.0.0.1:9/v1"
 			overridden, err := modelruntime.Resolve(modelruntime.Ref{

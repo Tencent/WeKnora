@@ -2,7 +2,7 @@
 services:
   # 只启动依赖的基础设施服务
   postgres:
-    image: paradedb/paradedb:v0.22.6-pg17
+    image: paradedb/paradedb:v0.25.11-pg17
     container_name: WeKnora-postgres-dev
     ports:
       - "${DB_PORT:-5432}:5432"
@@ -269,6 +269,14 @@ services:
       - DOCREADER_GRPC_MAX_WORKERS=${DOCREADER_GRPC_MAX_WORKERS:-4}
       - DOCREADER_GRPC_MAX_FILE_SIZE_MB=${DOCREADER_GRPC_MAX_FILE_SIZE_MB:-${MAX_FILE_SIZE_MB:-50}}
       - DOCREADER_GRPC_PORT=${DOCREADER_GRPC_PORT:-50051}
+      # Optional RapidOCR subprocesses, independent of ordinary parser RPCs.
+      - DOCREADER_PREPROCESS_MAX_WORKERS=${DOCREADER_PREPROCESS_MAX_WORKERS:-1}
+      - DOCREADER_PREPROCESS_TIMEOUT_SECONDS=${DOCREADER_PREPROCESS_TIMEOUT_SECONDS:-30}
+      - DOCREADER_PREPROCESS_THREADS=${DOCREADER_PREPROCESS_THREADS:-2}
+      - DOCREADER_PREPROCESS_MEMORY_MB=${DOCREADER_PREPROCESS_MEMORY_MB:-2048}
+      - DOCREADER_PREPROCESS_MAX_PIXELS=${DOCREADER_PREPROCESS_MAX_PIXELS:-16000000}
+      - DOCREADER_PREPROCESS_MAX_EDGE=${DOCREADER_PREPROCESS_MAX_EDGE:-2000}
+      - DOCREADER_PREPROCESS_PROBE_EDGE=${DOCREADER_PREPROCESS_PROBE_EDGE:-2000}
       # ========== 解析通用 ==========
       - DOCREADER_DOCX_MAX_PAGES=${DOCREADER_DOCX_MAX_PAGES:-0}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
@@ -382,7 +390,7 @@ services:
   # ---------------------------------------------------------------------------
   # 复用 dev 已有的 ParadeDB 镜像，不额外拉 postgres 镜像
   langfuse-db-init:
-    image: paradedb/paradedb:v0.22.6-pg17
+    image: paradedb/paradedb:v0.25.11-pg17
     container_name: WeKnora-langfuse-db-init-dev
     depends_on:
       postgres:

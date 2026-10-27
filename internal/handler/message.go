@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -18,6 +20,32 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+const (
+	// defaultMessagesPageSize is the page size used when a client omits the
+	// limit or sends a non-positive one.
+	defaultMessagesPageSize = 20
+	// maxMessagesPageSize bounds the client-supplied page size of the message
+	// read endpoints. Without an upper bound a single request can ask for an
+	// arbitrarily large page; the search path additionally multiplies the
+	// forwarded value for a bounded over-fetch.
+	maxMessagesPageSize = 200
+)
+
+// clampMessagesPageSize bounds a client-supplied page size to
+// [1, maxMessagesPageSize], substituting defaultMessagesPageSize for
+// non-positive input. Callers must clamp at the edge: the repository only
+// guards `limit <= 0` upstream and GORM omits the LIMIT clause entirely for
+// negative values, so an unclamped -1 reads the whole table.
+func clampMessagesPageSize(limit int) int {
+	if limit < 1 {
+		return defaultMessagesPageSize
+	}
+	if limit > maxMessagesPageSize {
+		return maxMessagesPageSize
+	}
+	return limit
+}
+
 // MessageHandler handles HTTP requests related to messages within chat sessions
 // It provides endpoints for loading and managing message history
 type MessageHandler struct {
@@ -28,6 +56,11 @@ type MessageHandler struct {
 	// handle mode is available.
 	FileService     interfaces.FileService
 	StorageResolver interfaces.StorageBackendResolver
+	// Prompts supplies the pending prompt of messages awaiting input. May be
+	// nil, in which case such messages carry none.
+	Prompts               interfaces.AgentPromptRepository
+	DelegatedPrompts      func(context.Context, string) (map[string][]*types.PendingPromptView, error)
+	CollaborationStatuses func(context.Context, string, []string) (map[string]json.RawMessage, error)
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -41,11 +74,75 @@ func NewMessageHandler(
 	messageService interfaces.MessageService,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	prompts interfaces.AgentPromptRepository,
 ) *MessageHandler {
 	return &MessageHandler{
 		MessageService:  messageService,
 		FileService:     fileService,
 		StorageResolver: storageResolver,
+		Prompts:         prompts,
+	}
+}
+
+// attachPendingPrompts restores timeline history and the current open prompt. Only
+// prompts raised for the caller are shown; the messages themselves were
+// already scoped to the caller's session.
+func (h *MessageHandler) attachPendingPrompts(ctx context.Context, sessionID string, messages []*types.Message) {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		ids = append(ids, m.ID)
+	}
+	if h.CollaborationStatuses != nil {
+		if rows, err := h.CollaborationStatuses(ctx, sessionID, ids); err == nil {
+			for _, m := range messages {
+				m.CollaborationStatus = rows[m.ID]
+			}
+		}
+	}
+	if h.DelegatedPrompts != nil {
+		if rows, err := h.DelegatedPrompts(ctx, sessionID); err == nil {
+			for _, m := range messages {
+				m.DelegatedPrompts = rows[m.ID]
+			}
+		}
+	}
+	if h.Prompts == nil {
+		return
+	}
+	var rows []*types.AgentPrompt
+	var err error
+	// Load only the prompts of this page; history covers every prompt status.
+	if byPage, ok := h.Prompts.(interface {
+		ListByMessages(context.Context, string, []string, []string) ([]*types.AgentPrompt, error)
+	}); ok {
+		rows, err = byPage.ListByMessages(ctx, sessionID, ids, types.AgentPromptHistoryStatuses)
+	} else {
+		rows, err = h.Prompts.ListBySession(ctx, sessionID, types.AgentPromptHistoryStatuses)
+	}
+	if err != nil {
+		logger.Warnf(ctx, "list prompts of session %s: %v", sessionID, err)
+		return
+	}
+	principal, _ := types.PrincipalFromContext(ctx)
+	caller := principal.StorageID()
+	tenantID := types.CallerFromContext(ctx).TenantID
+	byMessage := make(map[string]*types.Message, len(messages))
+	for _, m := range messages {
+		m.PromptHistory, m.PendingPrompt = nil, nil
+		byMessage[m.ID] = m
+	}
+	for _, p := range rows {
+		m := byMessage[p.AssistantMessageID]
+		if m == nil || p.TenantID != tenantID || (p.UserID != "" && p.UserID != caller) {
+			continue
+		}
+		if p.Kind != types.AgentPromptKindToolApproval && p.Kind != types.AgentPromptKindAskUser {
+			continue
+		}
+		m.PromptHistory = append(m.PromptHistory, p.TimelineView())
+		if p.IsOpen() && m.RunState == types.MessageRunStateAwaitingInput {
+			m.PendingPrompt = p.TimelineView()
+		}
 	}
 }
 
@@ -71,14 +168,16 @@ func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Re
 // @Tags         消息
 // @Accept       json
 // @Produce      json
-// @Param        session_id     path      string  true   "会话ID"
-// @Param        limit          query     int     false  "返回数量"  default(20)
-// @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
+// @Param        session_id     path      string  true   "会话ID"  extensions(x-agent)
+// @Param        limit          query     int     false  "返回数量"  default(20)  minimum(1)  extensions(x-agent,x-agent-maximum=20)
+// @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"  extensions(x-agent)
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200            {object}  map[string]interface{}  "消息列表"
+// @Success      200            {object}  handler.DataResponse{data=[]types.Message}  "消息列表"
 // @Failure      400          {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"message.list","risk":"read"}
+// @x-agent-hint "The latest messages of one of the user's conversations, oldest first. For earlier ones, pass the created_at of the first message as before_time."
 // @Router       /messages/{session_id}/load [get]
 func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -87,7 +186,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 
 	// Get path parameters and query parameters
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
-	limit := secutils.SanitizeForLog(c.DefaultQuery("limit", "20"))
+	limit := secutils.SanitizeForLog(c.DefaultQuery("limit", strconv.Itoa(defaultMessagesPageSize)))
 	beforeTimeStr := secutils.SanitizeForLog(c.DefaultQuery("before_time", ""))
 
 	logger.Infof(ctx, "Loading messages params, session ID: %s, limit: %s, before time: %s",
@@ -100,12 +199,18 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		return
 	}
 
-	// Parse limit parameter with fallback to default
+	// Parse limit parameter with fallback to default, then clamp it. A
+	// non-positive value must not reach the repository: GORM only emits a
+	// LIMIT clause for `limit >= 0`, so `limit=-1` would load the entire
+	// session history (and attach artifacts for every row) in one request.
 	limitInt, convErr := strconv.Atoi(limit)
 	if convErr != nil {
-		logger.Warnf(ctx, "Invalid limit value, using default value 20, input: %s", limit)
-		limitInt = 20
+		// Note: on out-of-range input Atoi returns the boundary value rather
+		// than zero, so the default has to be assigned explicitly here.
+		logger.Warnf(ctx, "Invalid limit value, using default value %d, input: %s", defaultMessagesPageSize, limit)
+		limitInt = defaultMessagesPageSize
 	}
+	limitInt = clampMessagesPageSize(limitInt)
 
 	// If no beforeTime is provided, retrieve the most recent messages
 	if beforeTimeStr == "" {
@@ -131,6 +236,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		h.attachPendingPrompts(ctx, sessionID, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -171,6 +277,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	h.attachPendingPrompts(ctx, sessionID, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -185,7 +292,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 // @Produce      json
 // @Param        session_id  path      string  true  "会话ID"
 // @Param        id          path      string  true  "消息ID"
-// @Success      200         {object}  map[string]interface{}  "删除成功"
+// @Success      200         {object}  handler.MessageResponse  "删除成功"
 // @Failure      500         {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -239,10 +346,12 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      SearchMessagesRequest  true  "搜索请求"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
+// @Success      200      {object}  handler.DataResponse{data=types.MessageSearchResult}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"message.search","risk":"probe","root":"data.items","max_items":20}
+// @x-agent-hint "Finds exchanges in the user's own past conversations by what was said, each with its session_id. Matching is by meaning only when message indexing is on (see message.chat_history_stats); otherwise words must appear verbatim, so retry with the user's exact wording before concluding nothing matches."
 // @Router       /messages/search [post]
 func (h *MessageHandler) SearchMessages(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -262,15 +371,24 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 		return
 	}
 
+	// Clamp the requested page size before it reaches the service. The
+	// service later applies a bounded over-fetch (limit*3) to the keyword
+	// search so it has enough candidates to rank; that multiplier is
+	// intentional and is left untouched, so the SQL LIMIT is at most
+	// 3*maxMessagesPageSize. Without this clamp an unbounded request would
+	// inflate the query by the same factor.
+	request.Limit = clampMessagesPageSize(request.Limit)
+
 	params := &types.MessageSearchParams{
-		Query:      secutils.SanitizeForLog(request.Query),
+		Query:      request.Query,
 		Mode:       types.MessageSearchMode(request.Mode),
 		Limit:      request.Limit,
 		SessionIDs: request.SessionIDs,
 	}
 
 	logger.Infof(ctx, "Searching messages with params: query=%s, mode=%s, limit=%d, session_ids=%v",
-		params.Query, params.Mode, params.Limit, params.SessionIDs)
+		secutils.SanitizeForLog(params.Query), secutils.SanitizeForLog(string(params.Mode)), params.Limit,
+		secutils.SanitizeForLogArray(params.SessionIDs))
 
 	result, err := h.MessageService.SearchMessages(ctx, params)
 	if err != nil {
@@ -289,11 +407,11 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 // SearchMessagesRequest defines the request structure for searching messages
 type SearchMessagesRequest struct {
 	// Query text for search
-	Query string `json:"query" binding:"required"`
+	Query string `json:"query" binding:"required" extensions:"x-agent"`
 	// Search mode: "keyword", "vector", "hybrid" (default: "hybrid")
 	Mode string `json:"mode"`
 	// Maximum number of results to return (default: 20)
-	Limit int `json:"limit"`
+	Limit int `json:"limit" minimum:"1" extensions:"x-agent,x-agent-maximum=20"`
 	// Filter by specific session IDs (optional)
 	SessionIDs []string `json:"session_ids"`
 }
@@ -304,9 +422,11 @@ type SearchMessagesRequest struct {
 // @Tags         消息
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "统计信息"
+// @Success      200  {object}  handler.DataResponse{data=types.ChatHistoryKBStats}  "统计信息"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"message.chat_history_stats","risk":"read"}
+// @x-agent-hint "Whether the workspace indexes conversations for search by meaning, and how many messages are indexed. When it is off, message.search only matches exact words; the setting is under settings section chathistory."
 // @Router       /messages/chat-history-stats [get]
 func (h *MessageHandler) GetChatHistoryKBStats(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -4,7 +4,8 @@
 //
 // Its boundaries are deliberate:
 //   - UUIDs, wiki slugs, URLs, and resource:// handles are durable identities.
-//   - cN/dN/bN/wN/iN/res://NNNN/ref-N values are temporary model handles.
+//   - kb://N, doc://N, chunk://N, url://N, iN, res://NNNN and ref-N values are
+//     temporary model handles; weknora:// URIs are their durable text form.
 //   - temporary handles are never persisted or accepted outside their registry.
 //   - every model response is decoded before tools, storage, or UI consume it.
 package modelcontext
@@ -42,7 +43,7 @@ Some durable resources and high-entropy Wiki slugs are represented by request-lo
 // Durable resource references are encoded before source identifiers. This
 // ordering is intentionally private: summary/<knowledge-id> wiki slugs must be
 // protected as one resource-like handle before the embedded document ID can be
-// compacted to dN. Callers therefore cannot accidentally reverse the codecs.
+// compacted to doc://N. Callers therefore cannot accidentally reverse the codecs.
 type Registry struct {
 	sources    *sourceRegistry
 	resources  *resourceRegistry
@@ -116,7 +117,7 @@ func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 	normalizeWebFetchItems(toolCalls)
 	normalizeMCPCallArguments(toolCalls)
 	r.resources.DecodeToolCalls(toolCalls)
-	r.sources.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed)
+	r.sources.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed, sourceBareTextAllowed)
 	for i := range toolCalls {
 		r.decodeToolPolicies(&toolCalls[i])
 		decodedMCP, unresolvedMCP := r.decodeMCPArguments(toolCalls[i].Function.Name, toolCalls[i].Function.Arguments)
@@ -198,6 +199,7 @@ func (r *Registry) StreamDecoder() *StreamDecoder {
 	return &StreamDecoder{
 		resources:  newResourceStreamDecoder(r.resources),
 		sources:    newCitationStreamExpander(r.sources),
+		handles:    newSourceHandleStreamDecoder(r.sources),
 		issues:     NewHandleStreamDecoder(r.issues),
 		mcpServers: NewHandleStreamDecoder(r.mcpServers),
 		mcpTools:   NewHandleStreamDecoder(r.mcpTools),
@@ -242,6 +244,24 @@ func (r *Registry) RegisterKnowledgeBase(id string) string {
 		return ""
 	}
 	return r.sources.RegisterKnowledgeBase(id)
+}
+
+// RegisterIssue allocates the iN handle the Wiki issue tools accept for id.
+func (r *Registry) RegisterIssue(id string) string {
+	if r == nil || r.issues == nil || strings.TrimSpace(id) == "" {
+		return ""
+	}
+	return r.issues.Register(id)
+}
+
+// EncodeKnownIssues replaces registered Wiki issue IDs with their handles.
+// CompactKnownText leaves them alone because tools opt into issue encoding
+// per policy; runtime context the engine renders opts in explicitly.
+func (r *Registry) EncodeKnownIssues(text string) string {
+	if r == nil || r.issues == nil {
+		return text
+	}
+	return r.issues.EncodeKnownText(text)
 }
 
 func (r *Registry) RegisterWeb(rawURL, title string) string {
@@ -339,5 +359,6 @@ func (r *Registry) DecodeOutputText(text string) string {
 	text = r.resources.DecodeText(text)
 	text = r.resources.StripOrphanHandles(text)
 	text = r.sources.ExpandText(text)
+	text = r.sources.ExpandHandleText(text)
 	return r.mcpTools.DecodeKnownText(r.mcpServers.DecodeKnownText(r.issues.DecodeKnownText(text)))
 }

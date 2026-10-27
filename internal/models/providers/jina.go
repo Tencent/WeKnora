@@ -72,12 +72,23 @@ func newJinaProvider() *Definition {
 				DimensionsField: api.Ptr("dimensions"),
 				TruncateField:   api.Ptr("truncate"),
 				TruncateValue:   api.Ptr("true"),
+				// The multimodal models take {"image": URL or data URI} in
+				// input; "Maximum file sizes are 5 MB for images". The page
+				// gives no image count per request, so each image goes alone.
+				ImageField:    api.Ptr("image"),
+				MaxImageBytes: api.Ptr(5_000_000),
 			},
 			Rerank: api.RerankCompat{
 				// return_documents echoes the text back. Results are matched
 				// by index, so this is not needed to map them; it is kept
 				// because it is what this vendor has always been sent.
 				SendReturnDocs: api.Ptr(true),
+				// jina-reranker-m0 takes {"image": URL or base64} documents
+				// (https://jina.ai/news/jina-reranker-m0-multilingual-multimodal-document-reranker/).
+				// Unverified: no rerank example shows the base64 form, so the
+				// data URI the embeddings reference documents is sent. The
+				// page states no image count per request; each goes alone.
+				ImageField: api.Ptr("image"),
 			},
 		},
 	}

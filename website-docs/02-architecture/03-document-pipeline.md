@@ -271,7 +271,7 @@ Worker 消费 `TypeDocumentProcess` 后按五个规范化阶段推进，每个�
 4. `resolveDocReader` 返回 `interfaces.DocReader`：
    - **builtin**：通过 gRPC（`docparser/grpc_parser.go`）或 HTTP（`http_parser.go`）调用 Python **docreader** 服务；
    - **simple**：Go 原生解析 md/txt/csv/json/图片/音频（`builtin_converter.go`，CSV→Markdown 表格、JSON→递归分割的代码块，图片/音频转占位引用）；
-   - **anydoc**：Go 进程内解析 docx/doc/pptx/ppt/xlsx/xls/odf/rtf/epub/csv/pdf（`anydoc_reader.go`），底层是通过 cgo 链接的 anydoc Rust 库。office 文档的嵌入图按文档模型插回 Markdown 原位；无文字层的扫描件 PDF 在 DocReader 可用时回退到 builtin 整页渲染。链接了 anydoc 时，未配置规则的复杂格式默认走 anydoc，但 PDF 默认仍走 builtin。仅在带 `anydoc` 构建标签的二进制中可用，其余构建里该引擎在引擎列表中显示为不可用；
+   - **anydoc**：Go 进程内解析 docx/doc/pptx/ppt/xlsx/xls/odf/rtf/epub/csv/pdf（`anydoc_reader.go`），底层是通过 cgo 链接的 anydoc Rust 库。office 文档的嵌入图按文档模型插回 Markdown 原位；无文字层的扫描件 PDF 在 DocReader 可用时回退到 builtin 整页渲染。启用图片提取时，包含 `ppt/media/*.emf` 或 `*.wmf` 的 PPTX 会交给 DocReader 的 MarkItDown 路径，复用其 ImageMagick 光栅化能力；未连接 DocReader 时明确报错。普通位图 PPTX 和设置 `anydoc_extract_images=false` 的文件仍走 anydoc；此检测不覆盖旧版二进制 PPT。链接了 anydoc 时，未配置规则的复杂格式默认走 anydoc，但 PDF 默认仍走 builtin。仅在带 `anydoc` 构建标签的二进制中可用，其余构建里该引擎在引擎列表中显示为不可用；
    - **weknoracloud / mineru / mineru_cloud / paddleocr_vl / paddleocr_vl_cloud**：HTTP 转换器（`engines.go` 注册，按 `mineru_endpoint`、`mineru_api_key`、`paddleocr_vl_endpoint` 等配置判定可用性；自建 `mineru` 会自动识别 MinerU 4.0 的 V1 API 与旧版 `/file_parse`，见[文档解析服务](../03-features/03-document-parsing.md#mineru-self-hosted)）。
 
 引擎目录集中在 `internal/infrastructure/docparser/engines.go`：每个引擎同时声明元数据（名称、描述、文件类型、可用性探针）与 `NewReader` 工厂，`docparser.NewReader` 按名字分发，未注册的名字（如只存在于 docreader 的 `markitdown`）落到 docreader 客户端。
@@ -394,6 +394,8 @@ promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expecte
 1. `readImageBytes` 从存储/URL 取图；`resolveVLM` 取 KB 的 VLM 配置；
 2. 生成 Caption（VLM，prompt 由 `buildVLMCaptionPrompt` 按 `DescriptionLanguage/CustomInstructions` 组装）与 OCR 文本；
 3. 结果写回所属文本 Chunk 的 `ImageInfo`（JSON），并创建/更新两个**子 Chunk**：`ChunkTypeImageCaption` 与 `ChunkTypeImageOCR`，`ParentChunkID` 指向文本块，随后单独 `indexChunks` 入向量索引 —— 使"搜图片描述也能召回原文块"；
+   - **图片向量**：知识库开启了图片向量（`ImageProcessingConfig.ImageVectorEnabled`，默认关闭，见 `KnowledgeBase.IsImageVectorEnabled`）且向量模型能处理图片时（模型能力 `input` 含 `image`，且厂商协议能传图片，见 `embedding.AsImageEmbedder`），`indexImageVector` 再用该模型直接对图片编码，存为第三个子 Chunk `ChunkTypeImageVector`：索引行的 `SourceType` 为 `ImageSourceType`，向量是图片本身的（经 `CompositeRetrieveEngine.BatchIndexVectors` 写入预先算好的向量），`Content` 复用图片描述（没有描述时用 OCR 文本），供重排与回答上下文使用。图片先经 `imageprep.Prepare` 按厂商限制转格式、压缩；扫描件 PDF 页不做（OCR 更准）。这一步失败只记日志，不影响任务；
+   - `ChunkTypeImageVector` 的向量不能由文本重建：`syncChunkIndex` 对它只同步启用状态，`updateChunkVector` 跳过它；图片描述被修改时只更新它的 `Content`；
 4. `shouldDropOrphanedMultimodal` 检查父块是否已被删除/取代，孤儿任务直接丢弃；
 5. `checkAndFinalizeAllImages`：全部图片处理完毕后，`enqueueKnowledgePostProcessTask` 触发 [后处理编排（knowledge_post_process.go，Stage: postprocess）](#_6-6-后处理编排-knowledge-post-process-go-stage-postprocess) 的后处理编排。后处理任务入队会就地重试 3 次，仍失败时本次任务返回错误交给重试，不会确认任务后让文档停在 `processing`。最后一次尝试时即使读取知识行失败，这张图片也会计入完成数。Lite 模式没有 Redis，计数器保存在进程内存中，所有图片都完成后才进入后处理。
 

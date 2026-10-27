@@ -119,7 +119,7 @@ flowchart LR
 
 | 段 | 结构体 | 关键字段与默认值 |
 | --- | --- | --- |
-| `auth` | `AuthConfig` | `registration_mode`：`self_serve`（默认）/ `invite_only`（`DISABLE_REGISTRATION=true` 时强制）；`default_tenant_mode`：`create_personal`（默认）/ `tenantless` |
+| `auth` | `AuthConfig` | `registration_mode`：`self_serve`（默认，开放注册）/ `invite_register`（仅限邀请注册）/ `invite_only`（禁止注册，`DISABLE_REGISTRATION=true` 时使用）；`default_tenant_mode`：`create_personal`（默认）/ `tenantless` |
 | `audit` | `AuditConfig` | `retention_days`：审计日志保留天数，段落省略时默认 90；0 禁用清理；<0 校验报错（env `WEKNORA_AUDIT_RETENTION_DAYS`） |
 | `oidc_auth` | `OIDCAuthConfig` | `enable`、`issuer_url`、`jwks_uri`、`discovery_url`（缺省由 issuer 拼 `/.well-known/openid-configuration`）、`client_id`、`client_secret`、`authorization_endpoint`、`token_endpoint`、`user_info_endpoint`、`scopes`（默认 `openid profile email`）、`user_info_mapping.username`（默认 `name`）/`email`（默认 `email`）；全部可用 `OIDC_AUTH_*` 环境变量覆盖 |
 | `agent` | `AgentConfig` | `llm_call_timeout`：单次 LLM 调用超时秒数（默认 120，env `WEKNORA_AGENT_LLM_TIMEOUT`）；`tool_approval_timeout_seconds`：MCP 工具人工审批等待（默认 600，env `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT`） |
@@ -140,7 +140,7 @@ flowchart LR
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | `GIN_MODE` | release | `debug` 开发模式（启用 Swagger）/ `release` 生产 |
-| `LOG_LEVEL` / `LOG_PATH` / `LOG_FORMAT` | debug / 空 / 空 | 日志级别、文件路径（空则仅 stdout）、自定义格式 |
+| `LOG_LEVEL` / `LOG_PATH` / `WEKNORA_LOG_FORMAT` | debug / 空 / 空 | 日志级别、文件路径（空则仅 stdout）、自定义格式（非空须含 `%msg`；未设置时兼容旧 `LOG_FORMAT`，显式空值禁用回退；不支持 `json` 关键字） |
 | `LLM_DEBUG_LOG` | false | true 时在 LOG_PATH 同目录写 `llm_debug.log` |
 | `TZ` | Asia/Shanghai | 时区 |
 | `DEFAULT_LOCALE` | 空 | 前端界面默认语言（frontend 容器读取）：`zh-CN` / `en-US` / `ru-RU` / `ko-KR` / `ja-JP`，非法值忽略。仅影响未手动切换过语言的用户，优先级：用户已选语言 > 本变量 > `zh-CN`；改完重启 frontend 容器即可，无需重建镜像 |
@@ -174,6 +174,7 @@ flowchart LR
 | `REDIS_ADDR` / `REDIS_USERNAME` / `REDIS_PASSWORD` / `REDIS_DB` / `REDIS_PREFIX` | redis:6379 / … | Redis 连接 |
 | `REDIS_USE_TLS` | false | **启用 TLS 的总开关**，托管 Redis（如 AWS ElastiCache）需要打开；`REDIS_TLS_SERVER_NAME` 指定校验与 SNI 用的服务器名（地址是 IP 时有用），`REDIS_TLS_INSECURE_SKIP_VERIFY` 跳过证书校验（不安全，仅自签证书的开发环境用） |
 | `WEKNORA_REDIS_NAMESPACE` | 空 | 多部署共用 Redis 时的频道命名空间后缀 |
+| `WEKNORA_SANDBOX_USER_ALLOCATION` | 空 | 设为 `enabled` 后，沙箱配置可选择「同一用户的会话共用一台沙箱」。必须在所有实例升级完成后再在所有实例上设置，且需要 Redis；未满足时该选项不可保存，已保存的配置在分配时回退为每会话一台。 |
 | `WEKNORA_ASYNQ_CORE_CONCURRENCY` 等 | 8 / 2 / 12 / 4 / 6 | Asynq 各队列并发（core/postprocess/enrichment/maintenance/shared），另有 `WEKNORA_WIKI_ASYNQ_CONCURRENCY=8`、`WEKNORA_MODEL_MAX_CONCURRENCY=32` |
 
 ### 检索引擎与向量库
@@ -212,6 +213,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `OLLAMA_OPTIONAL` | true | Ollama 不可用时仅告警不阻断启动 |
 | `BATCH_EMBED_SIZE` | 空 | 批量 embedding 大小 |
 | `VLM_HTTP_TIMEOUT_SECONDS` | 180 | VLM 单次请求超时 |
+| `VLM_MAX_TOKENS` | 5000 | 远程 VLM 单次请求的补全 token 预算（含模型隐藏的思考 token，整页扫描件被截断时报 `finish_reason=length` 可调大） |
 | `BUILTIN_MODELS_CONFIG` | config/builtin_models.yaml | 内置模型声明文件路径（见下文） |
 | `MODELS_CONFIG` | config/models.json | 模型厂商目录的部署叠加文件路径（补充厂商、覆盖地址或模型参数），格式见[模型管理](../03-features/06-models.md) |
 | `WEKNORA_LLM_STREAM_RAW_DUMP` / `_DIR` | 空 | LLM 流原始转储（排障用） |
@@ -225,7 +227,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `JWT_SECRET` | 空 | JWT 签名密钥（必填，可用 `openssl rand -hex 32` 生成）。留空或使用示例值时每次启动随机生成，重启后已登录用户需重新登录；多副本必须配置相同的值 |
 | `SYSTEM_AES_KEY` | 空 | 敏感字段落盘加密的 AES-256 主密钥，**必须 32 字节**（可用 `openssl rand -hex 16` 生成）；丢失则已加密数据（租户 API Key、模型 key、向量库凭证等）不可恢复，升级时沿用原值。v0.4.0 起取代 `TENANT_AES_KEY`/`CRYPTO_MASTER_KEY`/`CRYPTO_SALT` |
 | `SYSTEM_SIGNING_KEY` | 空（回退到 `SYSTEM_AES_KEY`） | 嵌入会话与预签名文件链接的签名密钥（可用 `openssl rand -hex 32` 生成）。未设置时使用 `SYSTEM_AES_KEY`；两者都缺失、长度不足 16 或为示例值时无法签发签名链接与嵌入会话。更换后已签发的链接失效；多副本须使用同一个值 |
-| `DISABLE_REGISTRATION` | false | true 时强制 `registration_mode=invite_only` |
+| `DISABLE_REGISTRATION` | false | true 时启动配置使用 `invite_only`（禁止密码注册，包括邀请注册）；数据库运行时设置仍优先 |
 | `WEKNORA_AUTH_DEFAULT_TENANT_MODE` | create_personal | 注册后建空间策略（`create_personal` / `tenantless`） |
 | `WEKNORA_TENANT_ENABLE_RBAC` | （默认 true） | 空间角色强制鉴权开关 |
 | `WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS` | false | 跨空间访问 |
@@ -261,11 +263,13 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 ### 镜像构建参数（从源码构建时）
 
-以下变量只在 `docker compose build` / `make docker-build-frontend` 构建 frontend 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
+以下变量只在 `docker compose build` / `make docker-build-frontend` 从源码构建 frontend / app 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | `VITE_FRONTEND_COMMIT` | unknown | 写入「系统信息」页的前端短 commit。`make docker-build-frontend` 与 `start_all.sh --no-pull` 会从 git 自动填充；直接 `docker compose build` 时需自行导出 |
+| `VERSION_ARG` | 空（构建时回退读 `VERSION` 文件） | 写入「系统信息」页的应用版本号。`start_all.sh --no-pull` 会自动填充；直接 `docker compose build` 时可自行导出 |
+| `COMMIT_ID_ARG` / `BUILD_TIME_ARG` / `GO_VERSION_ARG` | 空（unknown） | 写入「系统信息」页的应用 commit / 构建时间 / Go 版本。`start_all.sh --no-pull` 会从 git 自动填充 |
 | `NPM_REGISTRY` | 空（默认源） | 构建阶段使用的 npm registry，国内可设 `https://registry.npmmirror.com` |
 | `NODE_MAX_OLD_SPACE_SIZE` | 4096 | Vite 构建的 Node 堆上限（MB），Docker Desktop 内存较小时可降到 2048 |
 
@@ -279,8 +283,16 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `DOCREADER_PDF_RENDER_DPI` / `DOCREADER_PDF_JPEG_QUALITY` / `DOCREADER_PDF_RENDER_MAX_EDGE` | 200 / 85 / 2000 | PDF 渲染 |
 | `DOCREADER_PDF_FORCE_SCANNED` / `DOCREADER_PDF_SCAN_IMAGE_RATIO` / `DOCREADER_PDF_SCAN_MIN_CHARS` | false / 代码默认 | 扫描件判定 |
 | `DOCREADER_ODL_HYBRID` / `DOCREADER_ODL_HYBRID_URL` / `DOCREADER_ODL_HYBRID_MODE` / `DOCREADER_ODL_HYBRID_FALLBACK` | off / http://odl-hybrid:5002 / auto / false | OpenDataLoader 混合解析 |
+| `DOCREADER_HTML_MAIN_CONTENT` | false | 上传的 HTML 文件只索引正文（与 URL 导入同一抽取策略；抽取不足时回退整页转换） |
 | 其余 `DOCREADER_PDF_*`（词距/边栏/隐藏文本/嵌入图/图表区等 20+ 项） | 见 `docker-compose.yml` docreader 段注释 | PDF 版式与抽取精调 |
 | `DOCREADER_EXTERNAL_HTTP_PROXY` / `_HTTPS_PROXY` | 空 | docreader 出站抓取代理 |
+
+### 描述生成与出站连接
+
+| 环境变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `KNOWLEDGE_BASE_PROFILE_MAX_TOKENS` | 2048 | 知识库描述生成的补全 token 预算；无效或非正值回退默认，推理模型出现 `no gist` 时可调大 |
+| `WEKNORA_OUTBOUND_DIAL_TIMEOUT` | 5s | SSRF 安全出站连接的拨号超时，使用 Go duration（如 `10s`）；不是整个请求或模型生成的总超时 |
 
 ### Agent、Skills 与附件
 
@@ -289,13 +301,16 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | Sandbox 配置 | 设置页按空间维护 | 后端、凭据、模板、超时和私网访问策略按空间保存 |
 | `WEKNORA_SANDBOX_DOCKER_ENABLED` | false | Docker 沙箱后端回退开关。系统管理员也可在「设置 → 系统设置 → 网络安全」打开（DB 优先，立即生效）。默认关闭，因为本机 `docker.sock` 等同宿主机 root |
 | `WEKNORA_AGENT_LLM_TIMEOUT` | 120s | Agent 单次 LLM 调用超时（Go duration 或纯数字秒） |
+| `WEKNORA_WEB_FETCH_TIMEOUT` | 3m | Agent `web_fetch` 单页抓取预算（Go duration 或纯数字秒）。HTTP 与 chromedp 共用这一预算，不叠加。空值、无效值或非正数使用默认值。工具包装层再多等 5 秒。快速回答管道仍为 15s，不使用此项 |
 | `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT` / `_FAIL_OPEN` | 600s / fail-close | MCP 工具人工审批等待与失败策略 |
-| `WEKNORA_CHAT_ATTACHMENT_TTL_HOURS` / `_WAIT_TIMEOUT_SEC` / `_OCR_CONCURRENCY` / `_OCR_MAX_PAGES` | 24 / 60 / 8 / 8 | 聊天附件解析保留时长、等待超时与 OCR 并发/页数上限 |
+| `WEKNORA_CHAT_ATTACHMENT_TTL_HOURS` / `_WAIT_TIMEOUT_SEC` / `_OCR_CONCURRENCY` / `_OCR_MAX_PAGES` | 24 / 60 / 8 / 8 | 未被有效会话消息引用的附件保留时长、读取解析等待超时与 OCR 并发/页数上限；已发送附件在原会话或分叉会话仍引用时不因 TTL 清理 |
 | `WEKNORA_HOUSEKEEPING_ENABLED` | 启用 | 回收卡在 processing 的脏数据 |
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` / `WEKNORA_DOCREADER_CALL_TIMEOUT` | 2h / 30m | 文档处理任务与单次 RPC 超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | 1000s | 自建 PaddleOCR-VL HTTP 请求超时，支持正数 Go duration（如 `5400s`、`90m`）；空值、无效值或非正数使用默认值。外层超时需留余量，例如本项 `90m`、DocReader `100m`、文档任务 `2h` |
 | `WEKNORA_MINERU_TIMEOUT` | 1000s | 自建 MinerU 单次解析超时（V1 API 为整个解析任务，旧版为 `/file_parse` 请求），格式与默认值规则同上；超大 PDF 同样需要外层超时留余量 |
-| `WEKNORA_MINERU_CLOUD_TIMEOUT` | 600s | MinerU 云端（mineru.net）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_MINERU_CLOUD_TIMEOUT` | 30m | MinerU 云端（mineru.net）每个批次/分片轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_WEKNORACLOUD_TIMEOUT` | 20m | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，格式与默认值规则同上；应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT` |
 
 沙箱后端、网络策略、脚本开关与个人环境变量使用空间配置/API 管理，见[技能与沙箱](../03-features/22-skills-sandbox.md)。长期记忆与自动标签均默认关闭，分别使用租户 memory_config 和知识库 auto_tag_config，不用全局环境变量替代各空间配置。
 

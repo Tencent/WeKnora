@@ -221,6 +221,9 @@ func (s *mcpServiceService) RefreshMCPMetadata(
 	if err != nil {
 		return nil, fmt.Errorf("could not refresh complete MCP directory: %w", err)
 	}
+	if s.mcpManager != nil {
+		s.mcpManager.InvalidateToolSchemas(service.ID, client)
+	}
 	const maxLoggedTools = 30
 	logged := 0
 	for i, tool := range listed {

@@ -281,16 +281,16 @@ type RegisterResponse struct {
 
 // UserInfo represents user information for API responses
 type UserInfo struct {
-	ID                  string          `json:"id"`
-	Username            string          `json:"username"`
-	Email               string          `json:"email"`
+	ID                  string          `json:"id" extensions:"x-agent"`
+	Username            string          `json:"username" extensions:"x-agent"`
+	Email               string          `json:"email" extensions:"x-agent"`
 	Avatar              string          `json:"avatar"`
-	TenantID            uint64          `json:"tenant_id"`
-	IsActive            bool            `json:"is_active"`
+	TenantID            uint64          `json:"tenant_id" extensions:"x-agent"`
+	IsActive            bool            `json:"is_active" extensions:"x-agent"`
 	CanAccessAllTenants bool            `json:"can_access_all_tenants"`
-	IsSystemAdmin       bool            `json:"is_system_admin"`
+	IsSystemAdmin       bool            `json:"is_system_admin" extensions:"x-agent"`
 	Preferences         UserPreferences `json:"preferences"`
-	CreatedAt           time.Time       `json:"created_at"`
+	CreatedAt           time.Time       `json:"created_at" extensions:"x-agent"`
 	UpdatedAt           time.Time       `json:"updated_at"`
 }
 

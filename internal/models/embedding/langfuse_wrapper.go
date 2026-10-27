@@ -78,6 +78,49 @@ func (l *langfuseEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedde
 	return l.inner.BatchEmbedWithPool(ctx, l, texts)
 }
 
+func (l *langfuseEmbedder) AcceptsImages() bool {
+	_, ok := AsImageEmbedder(l.inner)
+	return ok
+}
+
+func (l *langfuseEmbedder) ImageLimits() ImageLimits { return imageLimitsOf(l.inner) }
+
+func (l *langfuseEmbedder) BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error) {
+	inner, err := imageSide(l.inner)
+	if err != nil {
+		return nil, err
+	}
+	mgr := langfuse.GetManager()
+	if !mgr.Enabled() {
+		return inner.BatchEmbedImages(ctx, images)
+	}
+	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
+		Name:  "embedding.batch_embed_images",
+		Model: l.inner.GetModelName(),
+		Input: map[string]interface{}{
+			"count":   len(images),
+			"preview": previewTexts(describeImages(images), 5),
+		},
+		Metadata: map[string]interface{}{
+			"model_id":   l.inner.GetModelID(),
+			"dimensions": l.inner.GetDimensions(),
+			"batch_size": len(images),
+		},
+	})
+	result, err := inner.BatchEmbedImages(genCtx, images)
+	var out interface{}
+	if len(result) > 0 {
+		out = map[string]interface{}{
+			"count":      len(result),
+			"dimensions": len(result[0]),
+		}
+	}
+	// No usage: the text approximation has nothing to count, and a made-up
+	// token figure for an image would mislead the cost report.
+	gen.Finish(out, nil, err)
+	return result, err
+}
+
 func (l *langfuseEmbedder) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseEmbedder) GetDimensions() int   { return l.inner.GetDimensions() }
 func (l *langfuseEmbedder) GetModelID() string   { return l.inner.GetModelID() }

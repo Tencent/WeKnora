@@ -41,6 +41,14 @@ services:
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
         - WITH_ANYDOC=${WITH_ANYDOC:-1}
+        # Build metadata shown on the system-info page. start_all.sh injects
+        # these from git and the VERSION file; with a plain `docker compose
+        # build` leave them unset (version falls back to the VERSION file,
+        # the rest to "unknown").
+        - VERSION_ARG=${VERSION_ARG:-}
+        - COMMIT_ID_ARG=${COMMIT_ID_ARG:-}
+        - BUILD_TIME_ARG=${BUILD_TIME_ARG:-}
+        - GO_VERSION_ARG=${GO_VERSION_ARG:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -83,8 +91,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-debug}
       # 日志文件路径（留空则只输出 stdout）；LLM_DEBUG_LOG 开启时同目录写 llm_debug.log
       - LOG_PATH=${LOG_PATH:-}
-      # 自定义日志格式模板（留空用内置默认格式）
-      - LOG_FORMAT=${LOG_FORMAT:-}
+      # 自定义日志格式模板，必须包含 %msg；显式留空用默认格式，未设置时兼容旧变量
+      - WEKNORA_LOG_FORMAT=${WEKNORA_LOG_FORMAT-${LOG_FORMAT:-}}
       # LLM 调试日志：true 写 LOG_PATH 同目录 llm_debug.log，或指定路径；留空关闭
       - LLM_DEBUG_LOG=${LLM_DEBUG_LOG:-false}
       # ========== 运行时基础 ==========
@@ -99,6 +107,8 @@ services:
       # Docker 沙箱默认关闭：本机 docker.sock 等同宿主机 root。
       # 系统管理员也可在「设置 → 系统设置」打开（立即生效）。未落库时读本变量。
       - WEKNORA_SANDBOX_DOCKER_ENABLED=${WEKNORA_SANDBOX_DOCKER_ENABLED:-false}
+      # 出站拨号超时（Go duration，默认 5s）：模型、连接器等外部端点在此时间内连不上即失败。留空使用默认值。
+      - WEKNORA_OUTBOUND_DIAL_TIMEOUT=${WEKNORA_OUTBOUND_DIAL_TIMEOUT:-}
       # gin 信任的代理 CIDR（逗号分隔）；显式设为空字符串则禁用代理信任。
       # 默认信任 loopback + 私网段（容器网络内 nginx 已覆盖）
       # - WEKNORA_TRUSTED_PROXIES=${WEKNORA_TRUSTED_PROXIES:-}
@@ -273,6 +283,8 @@ services:
       - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-}
       # VLM 单次 HTTP 请求超时（秒，默认 180）
       - VLM_HTTP_TIMEOUT_SECONDS=${VLM_HTTP_TIMEOUT_SECONDS:-}
+      # VLM 单次请求的补全 token 预算（默认 5000）
+      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-}
       # LLM 流原始转储（排查上下文问题；1 启用，默认目录 ~/.weknora/investigate/llm-stream）
       - WEKNORA_LLM_STREAM_RAW_DUMP=${WEKNORA_LLM_STREAM_RAW_DUMP:-}
       - WEKNORA_LLM_STREAM_RAW_DUMP_DIR=${WEKNORA_LLM_STREAM_RAW_DUMP_DIR:-}
@@ -334,8 +346,12 @@ services:
       - WEKNORA_PADDLEOCR_VL_TIMEOUT=${WEKNORA_PADDLEOCR_VL_TIMEOUT:-}
       # 自建 MinerU 单次解析超时（Go duration，默认 1000s）
       - WEKNORA_MINERU_TIMEOUT=${WEKNORA_MINERU_TIMEOUT:-}
-      # MinerU 云端轮询解析结果的最长时间（Go duration，默认 600s）
+      # MinerU 云端每个批次/分片轮询解析结果的最长时间（Go duration，默认 30m）
       - WEKNORA_MINERU_CLOUD_TIMEOUT=${WEKNORA_MINERU_CLOUD_TIMEOUT:-}
+      # PaddleOCR-VL 云端轮询解析结果的最长时间（Go duration，默认 600s）
+      - WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT=${WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT:-}
+      # WeKnoraCloud 托管 docreader 轮询任务结果的最长时间（Go duration，默认 20m，应小于 DocReader RPC 超时）
+      - WEKNORA_WEKNORACLOUD_TIMEOUT=${WEKNORA_WEKNORACLOUD_TIMEOUT:-}
       # 知识库巡检回收（回收卡在 processing 的脏数据；false 禁用，不建议）
       - WEKNORA_HOUSEKEEPING_ENABLED=${WEKNORA_HOUSEKEEPING_ENABLED:-}
       - WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=${WEKNORA_CHAT_ATTACHMENT_TTL_HOURS:-24}
@@ -344,6 +360,8 @@ services:
       - WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES=${WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES:-8}
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
+      # web_fetch 单页抓取预算（Go duration 或纯数字秒，默认 3m；HTTP 与 chromedp 共用，不叠加）
+      - WEKNORA_WEB_FETCH_TIMEOUT=${WEKNORA_WEB_FETCH_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
       # MCP 工具人工审批失败时是否放行（true 放行 / 默认 fail-close 拒绝）
       - WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=${WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN:-}
@@ -379,8 +397,9 @@ services:
       - OIDC_AUTH_SCOPES=${OIDC_AUTH_SCOPES:-}
       - OIDC_USER_INFO_MAPPING_USER_NAME=${OIDC_USER_INFO_MAPPING_USER_NAME:-}
       - OIDC_USER_INFO_MAPPING_EMAIL=${OIDC_USER_INFO_MAPPING_EMAIL:-}
-      # 飞书云文档解析模式 export：导出为docx，blocks：根据飞书云文档块解析为markdown。默认为:export
-      - FEISHU_DOCX_PARSE_MODE=${FEISHU_DOCX_PARSE_MODE:-export}
+      # 已废弃：解析模式改在数据源编辑页按数据源配置（默认 blocks）。此变量仅在
+      # 数据源未配置 parse_mode 时回退读取并打印弃用警告，后续版本将移除。
+      - FEISHU_DOCX_PARSE_MODE=${FEISHU_DOCX_PARSE_MODE:-}
     depends_on:
       redis:
         condition: service_started
@@ -415,6 +434,8 @@ services:
       dockerfile: docker/Dockerfile.docreader
       args:
         - APT_MIRROR=${APT_MIRROR:-}
+        - PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST:-}
+        - PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=${PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST:-}
     container_name: WeKnora-docreader
     # docreader gRPC ships without auth/TLS and is only consumed by the app
     # container over the WeKnora-network (DOCREADER_ADDR defaults to
@@ -449,9 +470,37 @@ services:
       - DOCREADER_GRPC_MAX_WORKERS=${DOCREADER_GRPC_MAX_WORKERS:-4}
       - DOCREADER_GRPC_MAX_FILE_SIZE_MB=${DOCREADER_GRPC_MAX_FILE_SIZE_MB:-${MAX_FILE_SIZE_MB:-50}}
       - DOCREADER_GRPC_PORT=${DOCREADER_GRPC_PORT:-50051}
+      # Optional RapidOCR subprocesses, independent of ordinary parser RPCs.
+      - DOCREADER_PREPROCESS_MAX_WORKERS=${DOCREADER_PREPROCESS_MAX_WORKERS:-1}
+      - DOCREADER_PREPROCESS_TIMEOUT_SECONDS=${DOCREADER_PREPROCESS_TIMEOUT_SECONDS:-30}
+      - DOCREADER_PREPROCESS_THREADS=${DOCREADER_PREPROCESS_THREADS:-2}
+      - DOCREADER_PREPROCESS_MEMORY_MB=${DOCREADER_PREPROCESS_MEMORY_MB:-2048}
+      - DOCREADER_PREPROCESS_MAX_PIXELS=${DOCREADER_PREPROCESS_MAX_PIXELS:-16000000}
+      - DOCREADER_PREPROCESS_MAX_EDGE=${DOCREADER_PREPROCESS_MAX_EDGE:-2000}
+      - DOCREADER_PREPROCESS_PROBE_EDGE=${DOCREADER_PREPROCESS_PROBE_EDGE:-2000}
       # ========== 解析通用 ==========
       - DOCREADER_DOCX_MAX_PAGES=${DOCREADER_DOCX_MAX_PAGES:-0}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
+      # 上传的 HTML 文件是否只索引正文（trafilatura 抽取，抽取不足时回退整页转换）。
+      # 默认 false = 整页转换（导航/侧栏/页脚也会进索引），升级后行为不变。
+      - DOCREADER_HTML_MAIN_CONTENT=${DOCREADER_HTML_MAIN_CONTENT:-false}
+      # ========== XLSX / Excel ==========
+      # 按显示格式物化百分比单元格：Excel 的百分比是显示格式而非存储值，单元格实存
+      # 0.6112 靠 "0.00%" 渲染成 61.12%，而 pandas/openpyxl 只读到分数，报表里的
+      # 61.12% 会变成 0.6112（100 倍偏差）。开启后该单元格变成字面量文本 "61.12%"。
+      # 默认 false：开启会使单元格由数值变为字符串，改变下游排序/计算看到的内容，
+      # 存量部署行为保持不变。单次上传可用 parser_engine_overrides.xlsx_percent_as_text 覆盖。
+      - DOCREADER_XLSX_PERCENT_AS_TEXT=${DOCREADER_XLSX_PERCENT_AS_TEXT:-false}
+      # 同一行有 >= N 个显式百分比格式单元格时，把该行漏标格式的 0<|v|<1 数字也按百分比
+      # 处理（源文件偶有漏刷格式的格子）。仅在上一开关开启时生效；0=关闭（默认）。
+      - DOCREADER_XLSX_PCT_ROW_HINT_MIN=${DOCREADER_XLSX_PCT_ROW_HINT_MIN:-0}
+      # 页面摆正（OCR 前的几何预处理）的阈值：留空即用 17 张图上调好的默认值，
+      # 只有为了复现某次调试才需要覆盖；生效的一组会打在预处理子进程的启动日志里。
+      - WEKNORA_PREPROCESS_PAD=${WEKNORA_PREPROCESS_PAD:-}
+      - WEKNORA_PREPROCESS_MIN_SCORE=${WEKNORA_PREPROCESS_MIN_SCORE:-}
+      - WEKNORA_PREPROCESS_ANG_TOL=${WEKNORA_PREPROCESS_ANG_TOL:-}
+      - WEKNORA_PREPROCESS_SIZE_MIN=${WEKNORA_PREPROCESS_SIZE_MIN:-}
+      - WEKNORA_PREPROCESS_QUAD_TOL=${WEKNORA_PREPROCESS_QUAD_TOL:-}
       # 出站 HTTP/HTTPS 代理（抓取网页 / 远程图片时）
       - DOCREADER_EXTERNAL_HTTP_PROXY=${DOCREADER_EXTERNAL_HTTP_PROXY:-}
       - DOCREADER_EXTERNAL_HTTPS_PROXY=${DOCREADER_EXTERNAL_HTTPS_PROXY:-}
@@ -533,7 +582,7 @@ services:
 
   # 修改的PostgreSQL配置
   postgres:
-    image: paradedb/paradedb:v0.22.6-pg17
+    image: paradedb/paradedb:v0.25.11-pg17
     container_name: WeKnora-postgres
     environment:
       - POSTGRES_USER=${DB_USER}
@@ -811,7 +860,7 @@ services:
   # 一次性初始化脚本：在已有的 WeKnora-postgres 里创建 langfuse 数据库（幂等，数据库已存在则跳过）
   # 复用 WeKnora-postgres 的 ParadeDB 镜像，避免多拉一个 postgres 镜像
   langfuse-db-init:
-    image: paradedb/paradedb:v0.22.6-pg17
+    image: paradedb/paradedb:v0.25.11-pg17
     container_name: WeKnora-langfuse-db-init
     depends_on:
       postgres:

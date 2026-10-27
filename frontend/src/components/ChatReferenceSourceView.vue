@@ -36,8 +36,8 @@
       v-else-if="mode === 'file'"
       class="reference-source__preview"
       :knowledge-id="target.knowledgeId"
-      :file-type="meta.fileType"
-      :file-name="meta.fileName"
+      :file-type="isManual ? 'md' : meta.fileType"
+      :file-name="meta.fileName || displayName"
       :active="active"
       source-mode
       fill-height
@@ -117,6 +117,10 @@ let shownKnowledgeId = ''
 
 const displayName = computed(() => meta.fileName || props.target.fileName || props.target.title || '')
 const displayTitle = computed(() => props.target.title || meta.title || displayName.value)
+// The preview endpoint streams manual metadata.content as Markdown, even
+// though these entries have file_type="manual" and no physical file path.
+const isManual = computed(() => meta.knowledgeSource === 'manual' ||
+  (meta.knowledgeType || meta.fileType).toLowerCase() === 'manual')
 
 const documentHref = computed(() => {
   if (!props.target.knowledgeBaseId) return ''
@@ -187,6 +191,8 @@ async function loadChunk(version: number) {
   imageContext.value = undefined
   imageDigest.value = undefined
   chunkType.value = props.target.chunkType || ''
+  // Document-only cards have no passage to look up or highlight.
+  if (!props.target.chunkId) return
 
   let loadedCurrent = false
   // Old conversations and agent tool results carry no locators; the chunk
@@ -264,7 +270,8 @@ async function loadChunk(version: number) {
 
 function resolveMode(): Mode {
   const type = (meta.knowledgeType || meta.fileType || '').toLowerCase()
-  if (meta.knowledgeSource === 'manual' || type === 'manual' || type === 'faq' || props.target.chunkType === 'faq') return 'none'
+  if (type === 'faq' || props.target.chunkType === 'faq') return 'none'
+  if (isManual.value) return 'file'
   if (meta.fileName && isKnownPreviewableFile(meta.fileName, meta.fileType)) return 'file'
   if (isWebUrl(meta.knowledgeSource)) return 'web'
   return 'none'
@@ -298,7 +305,7 @@ async function load() {
     return
   }
   // A summary speaks for the whole document: open it without hunting for a passage.
-  if (next === 'file' && chunkType.value !== 'summary') {
+  if (next === 'file' && props.target.chunkId && chunkType.value !== 'summary') {
     locate.value = buildLocate()
     status.value = locate.value.unavailable ? 'stale' : 'locating'
   }
@@ -420,8 +427,8 @@ watch(
 .reference-source__quote {
   margin: 0;
   padding: 10px 12px;
-  border-left: 3px solid var(--app-source-highlight);
-  background: color-mix(in srgb, var(--app-source-highlight) 18%, transparent);
+  border-left: 2px solid var(--app-source-highlight-border);
+  background: var(--app-source-highlight-soft-bg);
   font-size: var(--app-text-md);
   line-height: 1.6;
   color: var(--td-text-color-primary);

@@ -1,276 +1,256 @@
 <template>
-  <div v-if="visible" class="mention-menu" :style="style" ref="menuRef" @click.stop>
+  <div v-if="visible" class="mention-menu" :style="[style, stableHeightStyle]" ref="menuRef" @click.stop>
+    <div class="mention-search">
+      <div class="mention-search__box" :class="{ 'is-readonly': !searchable }">
+        <span class="mention-search__icon">
+          <t-loading v-if="loading" size="12px" />
+          <t-icon v-else name="search" />
+        </span>
+        <button
+          v-if="currentGroup"
+          type="button"
+          class="mention-search__crumb"
+          :title="$t('mentionDetail.back')"
+          @mousedown.prevent
+          @click.stop="leaveGroup"
+        >
+          <t-icon name="chevron-left" />
+          <span>{{ currentGroup.label }}</span>
+        </button>
+        <input
+          ref="searchInputRef"
+          class="mention-search__input"
+          type="text"
+          :value="query ?? ''"
+          :readonly="!searchable"
+          :tabindex="searchable ? 0 : -1"
+          :placeholder="searchPlaceholder"
+          autocomplete="off"
+          spellcheck="false"
+          @mousedown="!searchable && $event.preventDefault()"
+          @input="onSearchInput"
+          @compositionstart="isComposing = true"
+          @compositionend="onCompositionEnd"
+          @keydown="onSearchKeydown"
+        />
+      </div>
+    </div>
+
     <div class="mention-list" ref="listRef" @scroll="onScroll">
-      <template v-if="!currentGroupType && !isFlatMode">
+      <!-- 根层级：分组入口 -->
+      <template v-if="isRootView">
         <button
           v-for="(group, index) in groupRows"
           :key="group.type"
           type="button"
-          class="mention-group-entry"
+          class="mention-row mention-group-entry"
           :class="{ active: index === groupActiveIndex }"
           @click.stop="enterGroup(group.type)"
           @mouseenter="groupActiveIndex = index"
         >
-          <span class="mention-group-entry__icon">
+          <span class="mention-row__icon">
             <t-icon :name="group.icon" />
           </span>
-          <span class="mention-group-entry__label">{{ group.label }}</span>
-          <span class="mention-group-entry__count">{{ formatGroupCount(group) }}</span>
-          <t-icon class="mention-group-entry__arrow" name="chevron-right" />
+          <span class="mention-row__name">{{ group.label }}</span>
+          <span class="mention-row__meta">{{ formatGroupCount(group) }}</span>
+          <t-icon class="mention-row__arrow" name="chevron-right" />
         </button>
         <div v-if="groupRows.length === 0 && !loading" class="empty">
           {{ emptyHint || $t('common.noResult') }}
         </div>
       </template>
 
+      <!-- 全局搜索结果 / 分组内列表 -->
       <template v-else>
-        <button v-if="!isFlatMode" type="button" class="mention-back-row" @click.stop="leaveGroup">
-          <t-icon name="chevron-left" />
-          <span>{{ currentGroup?.label }}</span>
-        </button>
-
-      <div
-        v-if="isFlatMode && groupTabs.length > 1 && kbItems.length > 0"
-        class="mention-group-header"
-      >
-        {{ $t('common.knowledgeBase') }}
-      </div>
-      <!-- Knowledge Bases Group -->
-      <div v-if="(isFlatMode || currentGroupType === 'kb') && kbItems.length > 0" class="mention-group" data-group-type="kb">
-        <t-popup
-          v-for="(item, index) in kbItems"
-          :key="item.id"
-          placement="right-start"
-          trigger="hover"
-          :show-arrow="false"
-          :delay="[320, 80]"
-          :disabled="isScrolling"
-          :overlay-class-name="'mention-detail-popup'"
-          :overlay-inner-class-name="'mention-detail-popup-wrap'"
-          @visible-change="(v: boolean) => v && fetchKbDetail(item)"
-        >
-          <div
-            class="mention-item"
-            :class="{ active: index === activeIndex }"
-            @click="$emit('select', item)"
-            @mouseenter="$emit('update:activeIndex', index)"
-          >
-            <div class="icon-wrap">
-              <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
-                <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
-              </div>
-            </div>
-            <div class="item-main">
-              <span class="name">{{ item.name }}</span>
-              <span class="count">{{ item.count || 0 }}</span>
-            </div>
+        <template v-for="group in visibleGroups" :key="group.type">
+          <div v-if="isFlatMode" class="mention-section-header">
+            <span class="mention-section-header__label">{{ group.label }}</span>
+            <span class="mention-section-header__count">{{ formatGroupCount(group) }}</span>
+            <button
+              v-if="group.hasHidden"
+              type="button"
+              class="mention-section-header__more"
+              @mousedown.prevent
+              @click.stop="enterGroup(group.type)"
+            >
+              {{ $t('mentionDetail.viewAll') }}
+              <t-icon name="chevron-right" />
+            </button>
           </div>
-          <template #content>
-            <div class="mention-detail-content">
-              <template v-if="detailCache[item.id]?.loading">
-                <div class="detail-loading"><t-loading size="small" /></div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.error">
-                <div class="detail-error">{{ detailCache[item.id].error }}</div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.data">
-                <div class="detail-header">
-                  <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
-                  <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
-                    {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
-                  </span>
-                </div>
-                <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
-                <div class="detail-meta">
-                  <span v-if="detailCache[item.id].data.type === 'faq'">
-                    {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                  </span>
-                  <span v-else>
-                    {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                  </span>
-                  <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
-                    <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
-                    <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
-                    <span
-                      class="detail-value clickable"
-                      @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
-                    >
-                      {{ detailCache[item.id].data.org_name || item.orgName }}
-                    </span>
-                  </span>
-                  <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
-                    {{ $t('mentionDetail.readOnlyFromAgent') }}
-                  </span>
-                </div>
-              </template>
-            </div>
-          </template>
-        </t-popup>
-      </div>
+          <div class="mention-group" :data-group-type="group.type">
+            <t-popup
+              v-for="(item, index) in group.visibleItems"
+              :key="`${item.type}:${item.id}`"
+              placement="right-start"
+              trigger="hover"
+              :show-arrow="false"
+              :delay="[320, 80]"
+              :disabled="isScrolling"
+              :overlay-class-name="'mention-detail-popup'"
+              :overlay-inner-class-name="'mention-detail-popup-wrap'"
+              @visible-change="(v: boolean) => v && fetchDetail(item)"
+            >
+              <div
+                class="mention-row mention-item"
+                :class="{ active: group.offset + index === activeIndex }"
+                @click="$emit('select', item)"
+                @mouseenter="$emit('update:activeIndex', group.offset + index)"
+              >
+                <span class="mention-row__icon" :class="item.type === 'kb' && item.kbType === 'faq' ? 'faq-icon' : `${item.type}-icon`">
+                  <t-icon :name="itemIcon(item)" />
+                </span>
+                <span class="mention-row__name">
+                  <template v-for="(part, pi) in highlightParts(item.name)" :key="pi">
+                    <mark v-if="part.hit" class="mention-hit">{{ part.text }}</mark>
+                    <template v-else>{{ part.text }}</template>
+                  </template>
+                </span>
+                <span
+                  v-if="item.type === 'kb'"
+                  class="mention-row__meta"
+                >{{ item.count || 0 }}</span>
+                <span
+                  v-else-if="item.type === 'mcp' && item.catalogSynced"
+                  class="mention-row__meta"
+                  :class="{ 'is-stale': item.catalogStale }"
+                >{{ item.toolCount ?? 0 }}</span>
+                <span
+                  v-else-if="(item.type === 'file' || item.type === 'tag') && item.kbName"
+                  class="mention-row__meta mention-row__meta--text"
+                >{{ item.kbName }}</span>
+              </div>
+              <template #content>
+                <div class="mention-detail-content">
+                  <!-- 知识库详情 -->
+                  <template v-if="item.type === 'kb'">
+                    <template v-if="detailCache[item.id]?.loading">
+                      <div class="detail-loading"><t-loading size="small" /></div>
+                    </template>
+                    <template v-else-if="detailCache[item.id]?.error">
+                      <div class="detail-error">{{ detailCache[item.id].error }}</div>
+                    </template>
+                    <template v-else-if="detailCache[item.id]?.data">
+                      <div class="detail-header">
+                        <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
+                        <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
+                          {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
+                        </span>
+                      </div>
+                      <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
+                      <div class="detail-meta">
+                        <span v-if="detailCache[item.id].data.type === 'faq'">
+                          {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                        </span>
+                        <span v-else>
+                          {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                        </span>
+                        <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
+                          <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
+                          <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
+                          <span
+                            class="detail-value clickable"
+                            @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
+                          >
+                            {{ detailCache[item.id].data.org_name || item.orgName }}
+                          </span>
+                        </span>
+                        <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
+                          {{ $t('mentionDetail.readOnlyFromAgent') }}
+                        </span>
+                      </div>
+                    </template>
+                  </template>
 
-      <template v-for="group in activeExtraGroups" :key="group.type">
-        <div
-          v-if="isFlatMode && groupTabs.length > 1"
-          class="mention-group-header"
-        >
-          {{ group.label }}
-        </div>
-        <div class="mention-group" :data-group-type="group.type">
-        <t-popup
-          v-for="(item, index) in group.items"
-          :key="`${item.type}:${item.id}`"
-          placement="right-start"
-          trigger="hover"
-          :show-arrow="false"
-          :delay="[320, 80]"
-          :disabled="isScrolling"
-          :overlay-class-name="'mention-detail-popup'"
-          :overlay-inner-class-name="'mention-detail-popup-wrap'"
-        >
-          <div
-            class="mention-item"
-            :class="{ active: group.offset + index === activeIndex }"
-            @click="$emit('select', item)"
-            @mouseenter="$emit('update:activeIndex', group.offset + index)"
-          >
-            <div class="icon-wrap">
-              <div class="icon" :class="`${item.type}-icon`">
-                <t-icon :name="group.icon" />
-              </div>
-            </div>
-            <div class="item-main">
-              <span class="name">{{ item.name }}</span>
-              <span
-                v-if="item.type === 'mcp' && item.catalogSynced"
-                class="count"
-                :class="{ 'is-stale': item.catalogStale }"
-              >{{ item.toolCount ?? 0 }}</span>
-            </div>
-          </div>
-          <template #content>
-            <div class="mention-detail-content">
-              <div class="detail-header">
-                <span class="detail-name">{{ item.name }}</span>
-              </div>
-              <p v-if="item.description" class="detail-desc">{{ item.description }}</p>
-              <div v-if="item.type === 'mcp'" class="detail-meta">
-                <span class="detail-kb">
-                  <t-icon name="tools" class="detail-icon" />
-                  <span v-if="item.catalogSynced" class="detail-value">
-                    {{ $t('mentionDetail.mcpToolCount', { count: item.toolCount ?? 0 }) }}
-                  </span>
-                  <span v-else class="detail-value">{{ $t('mentionDetail.mcpNotSynced') }}</span>
-                </span>
-                <span v-if="item.catalogSynced && item.catalogStale" class="detail-stale">
-                  {{ $t('mentionDetail.mcpStale') }}
-                </span>
-              </div>
-              <div v-else-if="item.kbName || item.serviceName" class="detail-meta">
-                <span v-if="item.kbName" class="detail-kb">
-                  <t-icon name="folder" class="detail-icon" />
-                  <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
-                  <span
-                    class="detail-value clickable"
-                    @click.stop="handleKbClick(item.kbId)"
-                  >
-                    {{ item.kbName }}
-                  </span>
-                </span>
-                <span v-if="item.serviceName" class="detail-kb">
-                  <t-icon name="tools" class="detail-icon" />
-                  <span class="detail-label">MCP：</span>
-                  <span class="detail-value">{{ item.serviceName }}</span>
-                </span>
-              </div>
-            </div>
-          </template>
-        </t-popup>
-        </div>
-      </template>
+                  <!-- 文件详情 -->
+                  <template v-else-if="item.type === 'file'">
+                    <template v-if="detailCache[item.id]?.loading">
+                      <div class="detail-loading"><t-loading size="small" /></div>
+                    </template>
+                    <template v-else-if="detailCache[item.id]?.error">
+                      <div class="detail-error">{{ detailCache[item.id].error }}</div>
+                    </template>
+                    <template v-else-if="detailCache[item.id]?.data">
+                      <div class="detail-header">
+                        <span class="detail-name">{{ detailCache[item.id].data.title || detailCache[item.id].data.file_name || item.name }}</span>
+                      </div>
+                      <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
+                      <div class="detail-meta">
+                        <span v-if="detailCache[item.id].data.knowledge_base_name || item.kbName" class="detail-kb">
+                          <t-icon name="folder" class="detail-icon" />
+                          <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
+                          <span
+                            class="detail-value clickable"
+                            @click.stop="handleKbClick(detailCache[item.id].data.knowledge_base_id || item.kbId)"
+                          >
+                            {{ detailCache[item.id].data.knowledge_base_name || item.kbName }}
+                          </span>
+                        </span>
+                        <span v-if="item.orgName" class="detail-org">
+                          <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
+                          <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
+                          <span
+                            class="detail-value clickable"
+                            @click.stop="handleOrgClick(item.orgName)"
+                          >
+                            {{ item.orgName }}
+                          </span>
+                        </span>
+                      </div>
+                    </template>
+                  </template>
 
-      <div
-        v-if="isFlatMode && groupTabs.length > 1 && fileItems.length > 0"
-        class="mention-group-header"
-      >
-        {{ $t('common.file') }}
-      </div>
-      <!-- Files Group -->
-      <div v-if="(isFlatMode || currentGroupType === 'file') && fileItems.length > 0" class="mention-group" data-group-type="file">
-        <t-popup
-          v-for="(item, index) in fileItems"
-          :key="item.id"
-          placement="right-start"
-          trigger="hover"
-          :show-arrow="false"
-          :delay="[320, 80]"
-          :disabled="isScrolling"
-          :overlay-class-name="'mention-detail-popup'"
-          :overlay-inner-class-name="'mention-detail-popup-wrap'"
-          @visible-change="(v: boolean) => v && fetchFileDetail(item)"
-        >
-          <div
-            class="mention-item"
-            :class="{ active: (fileGroupOffset + index) === activeIndex }"
-            @click="$emit('select', item)"
-            @mouseenter="$emit('update:activeIndex', fileGroupOffset + index)"
-          >
-            <div class="icon-wrap">
-              <div class="icon file-icon">
-                <t-icon name="file" />
-              </div>
-            </div>
-            <span class="name">{{ item.name }}</span>
+                  <!-- 标签 / MCP / 技能 -->
+                  <template v-else>
+                    <div class="detail-header">
+                      <span class="detail-name">{{ item.name }}</span>
+                    </div>
+                    <p v-if="item.description" class="detail-desc">{{ item.description }}</p>
+                    <div v-if="item.type === 'mcp'" class="detail-meta">
+                      <span class="detail-kb">
+                        <t-icon name="tools" class="detail-icon" />
+                        <span v-if="item.catalogSynced" class="detail-value">
+                          {{ $t('mentionDetail.mcpToolCount', { count: item.toolCount ?? 0 }) }}
+                        </span>
+                        <span v-else class="detail-value">{{ $t('mentionDetail.mcpNotSynced') }}</span>
+                      </span>
+                      <span v-if="item.catalogSynced && item.catalogStale" class="detail-stale">
+                        {{ $t('mentionDetail.mcpStale') }}
+                      </span>
+                    </div>
+                    <div v-else-if="item.kbName || item.serviceName" class="detail-meta">
+                      <span v-if="item.kbName" class="detail-kb">
+                        <t-icon name="folder" class="detail-icon" />
+                        <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
+                        <span
+                          class="detail-value clickable"
+                          @click.stop="handleKbClick(item.kbId)"
+                        >
+                          {{ item.kbName }}
+                        </span>
+                      </span>
+                      <span v-if="item.serviceName" class="detail-kb">
+                        <t-icon name="tools" class="detail-icon" />
+                        <span class="detail-label">MCP：</span>
+                        <span class="detail-value">{{ item.serviceName }}</span>
+                      </span>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </t-popup>
           </div>
-          <template #content>
-            <div class="mention-detail-content">
-              <template v-if="detailCache[item.id]?.loading">
-                <div class="detail-loading"><t-loading size="small" /></div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.error">
-                <div class="detail-error">{{ detailCache[item.id].error }}</div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.data">
-                <div class="detail-header">
-                  <span class="detail-name">{{ detailCache[item.id].data.title || detailCache[item.id].data.file_name || item.name }}</span>
-                </div>
-                <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
-                <div class="detail-meta">
-                  <span v-if="detailCache[item.id].data.knowledge_base_name || item.kbName" class="detail-kb">
-                    <t-icon name="folder" class="detail-icon" />
-                    <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
-                    <span
-                      class="detail-value clickable"
-                      @click.stop="handleKbClick(detailCache[item.id].data.knowledge_base_id || (item as any).kbId)"
-                    >
-                      {{ detailCache[item.id].data.knowledge_base_name || item.kbName }}
-                    </span>
-                  </span>
-                  <span v-if="item.orgName" class="detail-org">
-                    <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
-                    <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
-                    <span
-                      class="detail-value clickable"
-                      @click.stop="handleOrgClick(item.orgName)"
-                    >
-                      {{ item.orgName }}
-                    </span>
-                  </span>
-                </div>
-              </template>
-            </div>
-          </template>
-        </t-popup>
-        <!-- Loading indicator -->
-        <div v-if="loading" class="loading-more">
+        </template>
+
+        <div v-if="loading && currentGroupType === 'file' && visibleItems.length > 0" class="loading-more">
           <t-loading size="small" />
         </div>
-      </div>
 
-      <div v-if="items.length === 0 && !loading" class="empty">
-        {{ emptyHint || $t('common.noResult') }}
-      </div>
+        <div v-if="visibleItems.length === 0" class="empty">
+          <template v-if="!loading">{{ emptyHint || $t('common.noResult') }}</template>
+        </div>
       </template>
     </div>
+
   </div>
 </template>
 
@@ -280,7 +260,6 @@ import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
-import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import { SKILL_ICON, type MentionItem, type MentionItemType } from '@/types/mention';
 
@@ -290,27 +269,33 @@ const props = defineProps<{
   visible: boolean;
   style: any;
   items: MentionItem[];
+  /** 当前可见列表（全局搜索结果或分组内列表）中的高亮下标 */
   activeIndex: number;
   hasMore?: boolean;
   loading?: boolean;
   // 空态下替换默认 "无结果" 文案，用于给上游（如"被智能体工具兼容性过滤掉了"）透传具体原因
   emptyHint?: string;
-  // 输入 @ 后的筛选关键词；非空时平铺展示匹配项，不再要求进入二级目录
+  // 搜索关键词；在根层级非空时做跨分组的全局搜索，在分组内则只过滤该分组
   query?: string;
+  // 为 true 时顶部搜索框可编辑并自动聚焦（按钮触发）；否则关键词来自输入框中 @ 之后的文本
+  searchable?: boolean;
   // 分组入口展示用的总数（如文件搜索的 total），避免仅用首屏已加载条数
   groupCounts?: Partial<Record<MentionItemType, number>>;
 }>();
 
-const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
+const emit = defineEmits(['select', 'update:activeIndex', 'update:query', 'loadMore', 'close']);
+
+const FLAT_GROUP_LIMIT = 5;
 
 const router = useRouter();
 const { t } = useI18n();
-const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
 const menuRef = ref<HTMLElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
+const searchInputRef = ref<HTMLInputElement | null>(null);
 const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
+const isComposing = ref(false);
 const currentGroupType = ref<MentionItemType | null>(null);
 const groupActiveIndex = ref(0);
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -327,27 +312,69 @@ const agentIdForDetail = computed(() => {
 });
 const agentSourceTenantIdForDetail = computed(() => settingsStore.selectedAgentSourceTenantId ?? undefined);
 
-const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
-const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
-
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
-  { type: 'tag', label: '标签', icon: 'tag' },
+  { type: 'tag', label: t('mentionDetail.tag'), icon: 'tag' },
   { type: 'mcp', label: 'MCP', icon: 'tools' },
   { type: 'skill', label: t('common.skill'), icon: SKILL_ICON },
   { type: 'file', label: t('common.file'), icon: 'file' },
 ]);
 
-const mentionGroups = computed(() => {
+const mentionGroups = computed(() => mentionGroupDefs.value.map(def => {
+  const items = props.items.filter(item => item.type === def.type);
+  const loadedCount = items.length;
+  const count = props.groupCounts?.[def.type] ?? loadedCount;
+  return { ...def, items, count, loadedCount };
+}));
+
+type MentionGroup = (typeof mentionGroups.value)[number];
+
+const trimmedQuery = computed(() => (props.query ?? '').trim());
+const currentGroup = computed(() => mentionGroups.value.find(group => group.type === currentGroupType.value) || null);
+const isFlatMode = computed(() => !currentGroupType.value && trimmedQuery.value.length > 0);
+const isRootView = computed(() => !currentGroupType.value && !isFlatMode.value);
+const groupRows = computed(() => mentionGroups.value.filter(group => group.count > 0));
+
+const visibleGroups = computed(() => {
+  const source: MentionGroup[] = currentGroup.value
+    ? [currentGroup.value]
+    : isFlatMode.value
+      ? mentionGroups.value.filter(group => group.loadedCount > 0)
+      : [];
   let offset = 0;
-  return mentionGroupDefs.value.map(def => {
-    const items = props.items.filter(item => item.type === def.type);
-    const loadedCount = items.length;
-    const count = props.groupCounts?.[def.type] ?? loadedCount;
-    const group = { ...def, items, offset, count, loadedCount };
-    offset += items.length;
-    return group;
+  return source.map(group => {
+    const visibleItems = isFlatMode.value ? group.items.slice(0, FLAT_GROUP_LIMIT) : group.items;
+    const hasHidden = isFlatMode.value && (group.loadedCount > visibleItems.length || group.count > visibleItems.length);
+    const row = { ...group, visibleItems, hasHidden, offset };
+    offset += visibleItems.length;
+    return row;
   });
+});
+
+const visibleItems = computed(() => visibleGroups.value.flatMap(group => group.visibleItems));
+
+// 菜单贴着输入框向上展开，结果条数变化会让顶边上下跳；搜索期间高度只增不减
+const stableMinHeight = ref(0);
+const stableHeightStyle = computed(() => (
+  !isRootView.value && stableMinHeight.value ? { minHeight: `${stableMinHeight.value}px` } : undefined
+));
+
+watch(
+  [() => visibleItems.value.length, () => props.loading, isRootView],
+  () => {
+    if (isRootView.value) {
+      stableMinHeight.value = 0;
+      return;
+    }
+    const height = menuRef.value?.offsetHeight ?? 0;
+    if (height > stableMinHeight.value) stableMinHeight.value = height;
+  },
+  { flush: 'post' },
+);
+
+const searchPlaceholder = computed(() => {
+  if (currentGroup.value) return t('mentionDetail.searchInGroup', { group: currentGroup.value.label });
+  return props.searchable ? t('mentionDetail.searchPlaceholder') : t('mentionDetail.typeToSearch');
 });
 
 const formatGroupCount = (group: { type: MentionItemType; count: number; loadedCount: number }) => {
@@ -360,104 +387,156 @@ const formatGroupCount = (group: { type: MentionItemType; count: number; loadedC
   return group.count;
 };
 
-const groupTabs = computed(() => mentionGroups.value.filter(group => group.count > 0));
-const groupRows = computed(() => groupTabs.value);
-const isFlatMode = computed(() => (props.query ?? '').trim().length > 0);
-const currentGroup = computed(() => mentionGroups.value.find(group => group.type === currentGroupType.value));
-const extraGroups = computed(() => mentionGroups.value.filter(group =>
-  group.type !== 'kb' && group.type !== 'file' && group.count > 0
-));
-const activeExtraGroups = computed(() => {
-  if (isFlatMode.value) return extraGroups.value;
-  return extraGroups.value.filter(group => group.type === currentGroupType.value);
-});
-const fileGroupOffset = computed(() => mentionGroups.value.find(group => group.type === 'file')?.offset || 0);
+const itemIcon = (item: MentionItem) => {
+  if (item.type === 'kb') return item.kbType === 'faq' ? 'chat-bubble-help' : 'folder';
+  return mentionGroupDefs.value.find(def => def.type === item.type)?.icon || 'file';
+};
 
-const enterGroup = (type: MentionItemType) => {
-  const group = mentionGroups.value.find(item => item.type === type && item.count > 0);
-  if (!group || !listRef.value) return;
+const highlightParts = (name: string) => {
+  const q = trimmedQuery.value;
+  if (!q || !name) return [{ text: name, hit: false }];
+  const idx = name.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return [{ text: name, hit: false }];
+  return [
+    { text: name.slice(0, idx), hit: false },
+    { text: name.slice(idx, idx + q.length), hit: true },
+    { text: name.slice(idx + q.length), hit: false },
+  ].filter(part => part.text);
+};
 
-  currentGroupType.value = type;
-  emit('update:activeIndex', group.offset);
-
+const resetListScroll = () => {
   nextTick(() => {
-    if (!listRef.value) return;
-    listRef.value.scrollTo({
-      top: 0,
-    });
+    if (listRef.value) listRef.value.scrollTop = 0;
   });
 };
 
+const enterGroup = (type: MentionItemType) => {
+  const group = mentionGroups.value.find(item => item.type === type && item.count > 0);
+  if (!group) return;
+  currentGroupType.value = type;
+  emit('update:activeIndex', 0);
+  resetListScroll();
+  focusSearch();
+};
+
 const leaveGroup = () => {
-  if (isFlatMode.value) return false;
   if (!currentGroupType.value) return false;
   const rowIndex = groupRows.value.findIndex(group => group.type === currentGroupType.value);
   groupActiveIndex.value = Math.max(0, rowIndex);
   currentGroupType.value = null;
-  nextTick(() => {
-    if (listRef.value) listRef.value.scrollTop = 0;
-  });
+  emit('update:activeIndex', 0);
+  resetListScroll();
+  focusSearch();
   return true;
 };
 
-const updateActiveGroupFromIndex = (index: number) => {
-  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.count);
-  if (group) currentGroupType.value = group.type;
+/** 全局搜索结果中，从当前高亮项进入其所在分组查看全部 */
+const enterActiveGroup = () => {
+  if (isRootView.value) {
+    confirmActive();
+    return true;
+  }
+  if (!isFlatMode.value) return false;
+  const group = visibleGroups.value.find(g => props.activeIndex >= g.offset && props.activeIndex < g.offset + g.visibleItems.length);
+  if (!group) return false;
+  enterGroup(group.type);
+  return true;
 };
 
-watch(groupTabs, (groups) => {
+watch(groupRows, (groups) => {
   if (groupActiveIndex.value >= groups.length) {
     groupActiveIndex.value = Math.max(0, groups.length - 1);
   }
 });
 
-const moveActive = (delta: number) => {
-  if (isFlatMode.value) {
-    const next = Math.min(props.items.length - 1, Math.max(0, props.activeIndex + delta));
-    emit('update:activeIndex', next);
-    scrollToItem(next);
-    return;
+watch(() => visibleItems.value.length, (len) => {
+  if (!isRootView.value && props.activeIndex >= len) {
+    emit('update:activeIndex', Math.max(0, len - 1));
   }
+});
 
-  if (!currentGroupType.value) {
+const moveActive = (delta: number) => {
+  if (isRootView.value) {
     const maxIndex = Math.max(0, groupRows.value.length - 1);
     groupActiveIndex.value = Math.min(maxIndex, Math.max(0, groupActiveIndex.value + delta));
+    scrollToRow(groupActiveIndex.value);
     return;
   }
-
-  const group = currentGroup.value;
-  if (!group) return;
-  const currentLocalIndex = props.activeIndex - group.offset;
-  const nextLocalIndex = Math.min(group.count - 1, Math.max(0, currentLocalIndex + delta));
-  emit('update:activeIndex', group.offset + nextLocalIndex);
-  scrollToItem(nextLocalIndex);
+  const len = visibleItems.value.length;
+  if (!len) return;
+  const next = Math.min(len - 1, Math.max(0, props.activeIndex + delta));
+  emit('update:activeIndex', next);
+  scrollToRow(next);
+  if (currentGroupType.value === 'file' && next >= len - 3 && props.hasMore && !props.loading) {
+    emit('loadMore');
+  }
 };
 
 const confirmActive = () => {
-  if (isFlatMode.value) {
-    const item = props.items[props.activeIndex];
-    if (item) emit('select', item);
-    return;
-  }
-
-  if (!currentGroupType.value) {
+  if (isRootView.value) {
     const group = groupRows.value[groupActiveIndex.value];
     if (group) enterGroup(group.type);
     return;
   }
-
-  const group = currentGroup.value;
-  if (!group) return;
-  const localIndex = props.activeIndex - group.offset;
-  const item = group.items[localIndex];
+  const item = visibleItems.value[props.activeIndex];
   if (item) emit('select', item);
+};
+
+const focusSearch = () => {
+  if (!props.searchable) return;
+  nextTick(() => searchInputRef.value?.focus({ preventScroll: true }));
+};
+
+const onSearchInput = (e: Event) => {
+  if (isComposing.value) return;
+  emit('update:query', (e.target as HTMLInputElement).value);
+};
+
+const onCompositionEnd = (e: CompositionEvent) => {
+  isComposing.value = false;
+  emit('update:query', (e.target as HTMLInputElement).value);
+};
+
+const onSearchKeydown = (e: KeyboardEvent) => {
+  if (!props.searchable) return;
+  if (isComposing.value || e.isComposing || e.keyCode === 229) return;
+  switch (e.key) {
+    case 'ArrowUp':
+      e.preventDefault();
+      moveActive(-1);
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      moveActive(1);
+      break;
+    case 'Enter':
+      e.preventDefault();
+      confirmActive();
+      break;
+    case 'Tab':
+      if (enterActiveGroup()) e.preventDefault();
+      break;
+    case 'Escape':
+      e.preventDefault();
+      if (!leaveGroup()) emit('close');
+      break;
+    case 'Backspace':
+      if (!(props.query ?? '') && leaveGroup()) e.preventDefault();
+      break;
+  }
 };
 
 defineExpose({
   moveActive,
   confirmActive,
   leaveGroup,
+  enterActiveGroup,
 });
+
+const fetchDetail = (item: MentionItem) => {
+  if (item.type === 'kb') return fetchKbDetail(item);
+  if (item.type === 'file') return fetchFileDetail(item);
+};
 
 async function fetchKbDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
@@ -494,19 +573,10 @@ function handleKbClick(kbId: string | undefined) {
   router.push(`/platform/knowledge-bases/${kbId}`);
 }
 
-function handleOrgClick(orgName: string) {
+function handleOrgClick(orgName: string | undefined) {
   if (!orgName) return;
-  // 从共享知识库列表中找到对应的组织 ID
-  const sharedKb = orgStore.sharedKnowledgeBases.find(
-    (s: any) => s.org_name === orgName
-  );
-  if (sharedKb?.organization_id) {
-    // 跳转到组织列表页（目前组织详情页可能不存在，先跳转到列表页）
-    router.push('/platform/organizations');
-  } else {
-    // 如果找不到组织 ID，也跳转到组织列表页
-    router.push('/platform/organizations');
-  }
+  // 目前组织详情页可能不存在，统一跳转到组织列表页
+  router.push('/platform/organizations');
 }
 
 const onScroll = (e: Event) => {
@@ -518,336 +588,312 @@ const onScroll = (e: Event) => {
 
   const target = e.target as HTMLElement;
   const { scrollTop, scrollHeight, clientHeight } = target;
-  if ((currentGroupType.value === 'file' || isFlatMode.value) && scrollHeight - scrollTop - clientHeight < 50 && props.hasMore && !props.loading) {
+  if (currentGroupType.value === 'file' && scrollHeight - scrollTop - clientHeight < 50 && props.hasMore && !props.loading) {
     emit('loadMore');
   }
 };
 
 watch(() => props.activeIndex, (newIndex) => {
-  if (isFlatMode.value) {
-    scrollToItem(newIndex);
-    return;
-  }
-  if (currentGroupType.value) {
-    updateActiveGroupFromIndex(newIndex);
-    const group = currentGroup.value;
-    if (group) scrollToItem(newIndex - group.offset);
-  }
-});
-
-watch(isFlatMode, (flat) => {
-  if (flat) {
-    currentGroupType.value = null;
-    nextTick(() => {
-      if (listRef.value) listRef.value.scrollTop = 0;
-    });
-  }
+  if (!isRootView.value) scrollToRow(newIndex);
 });
 
 watch(() => props.visible, (newVisible) => {
   if (newVisible) {
-    nextTick(() => {
-      if (listRef.value) listRef.value.scrollTop = 0;
-      currentGroupType.value = null;
-      groupActiveIndex.value = 0;
-    });
+    stableMinHeight.value = 0;
+    currentGroupType.value = null;
+    groupActiveIndex.value = 0;
+    resetListScroll();
+    focusSearch();
   }
 });
 
-const scrollToItem = (index: number) => {
+const scrollToRow = (index: number) => {
   nextTick(() => {
-    if (!listRef.value) return;
-    
-    const items = listRef.value.querySelectorAll('.mention-item');
-    if (!items || items.length <= index) return;
-    
-    const activeItem = items[index] as HTMLElement;
-    const menu = listRef.value;
-    
-    if (activeItem) {
-      const menuRect = menu.getBoundingClientRect();
-      const itemRect = activeItem.getBoundingClientRect();
-      
-      // 检查是否在上方被遮挡
-      if (itemRect.top < menuRect.top) {
-        menu.scrollTop -= (menuRect.top - itemRect.top);
-      }
-      // 检查是否在下方被遮挡
-      else if (itemRect.bottom > menuRect.bottom) {
-        menu.scrollTop += (itemRect.bottom - menuRect.bottom);
-      }
+    const list = listRef.value;
+    if (!list) return;
+    const rows = list.querySelectorAll<HTMLElement>(isRootView.value ? '.mention-group-entry' : '.mention-item');
+    const row = rows[index];
+    if (!row) return;
+    const listRect = list.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    if (rowRect.top < listRect.top) {
+      list.scrollTop -= (listRect.top - rowRect.top);
+    } else if (rowRect.bottom > listRect.bottom) {
+      list.scrollTop += (rowRect.bottom - listRect.bottom);
     }
   });
 };
 </script>
 
 <style scoped>
+/* 与输入框内其他下拉（推理强度、模型选择）保持同一套尺寸 */
 .mention-menu {
   position: fixed;
   z-index: 10000;
+  width: 260px;
+  max-height: 360px;
+  padding: 4px;
+  box-sizing: border-box;
   background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-extraLarge);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
-  width: 220px;
-  max-height: 388px;
+  border: .5px solid var(--td-component-border);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--td-shadow-2);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  font-family: var(--app-font-family);
+  animation: mentionMenuFadeIn 0.15s ease-out;
+}
+
+@keyframes mentionMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.mention-search {
+  flex-shrink: 0;
+  margin-bottom: 2px;
+  border-bottom: .5px solid var(--td-component-stroke);
+}
+
+.mention-search__box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.mention-search__icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-placeholder);
+}
+
+.mention-search__crumb {
+  flex-shrink: 0;
+  max-width: 88px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 2px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--app-motion-instant), color var(--app-motion-instant);
+}
+
+.mention-search__crumb:hover {
+  background: var(--td-bg-color-secondarycontainer-hover);
+  color: var(--td-text-color-primary);
+}
+
+.mention-search__crumb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-search__input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  text-overflow: ellipsis;
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  line-height: 20px;
+}
+
+.mention-search__input::placeholder {
+  color: var(--td-text-color-placeholder);
+}
+
+.mention-search__box.is-readonly .mention-search__input {
+  cursor: default;
 }
 
 .mention-list {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 0;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.mention-group-entry,
-.mention-back-row {
-  width: calc(100% - 12px);
-  min-height: 32px;
-  margin: 1px 6px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--td-radius-medium);
-  background: transparent;
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: var(--td-font-size-body-medium);
-  font-weight: 400;
-  line-height: 20px;
-  cursor: pointer;
-  box-sizing: border-box;
+.mention-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mention-row {
+  width: 100%;
+  min-height: 30px;
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: background var(--app-motion-fast) ease;
+  padding: 4px 8px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  box-sizing: border-box;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--app-motion-instant), color var(--app-motion-instant);
 }
 
-.mention-group-entry:hover,
-.mention-group-entry.active,
-.mention-back-row:hover {
+.mention-row:hover {
+  background: var(--td-bg-color-secondarycontainer-hover);
+}
+
+.mention-row.active {
   background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
 }
 
-.mention-group-entry__icon {
-  width: 18px;
-  height: 18px;
+.mention-row__icon {
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--td-text-color-secondary);
-  font-size: var(--app-text-xl);
-}
-
-.mention-group-entry__label,
-.mention-back-row span {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: inherit;
-  font-weight: inherit;
-}
-
-.mention-group-entry__count {
-  flex-shrink: 0;
-  min-width: 18px;
-  padding: 0 6px;
-  border-radius: var(--app-radius-pill);
-  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
-  font-size: var(--td-font-size-mark-small);
-  line-height: 18px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
+  transition: color var(--app-motion-instant);
 }
 
-.mention-group-entry__arrow {
-  flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
-  font-size: var(--app-text-xl);
-}
-
-.mention-back-row {
-  min-height: 30px;
-  margin-bottom: 4px;
-  color: var(--td-text-color-secondary);
-  border-bottom: 1px solid var(--td-component-stroke);
-  border-radius: 0;
-}
-
-.mention-back-row span {
-  font-size: var(--td-font-size-body-medium);
-}
-
-.mention-group {
-  padding: 2px 0 5px;
-}
-
-.mention-group:not(:last-child) {
-  border-bottom: 1px solid var(--td-component-stroke);
-}
-
-.mention-group-header {
-  padding: 7px 14px 5px;
-  font-size: var(--td-font-size-mark-small);
-  font-weight: 600;
-  line-height: 18px;
-  color: var(--td-text-color-placeholder);
-}
-
-.mention-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 4px 8px;
-  margin: 1px 6px;
-  box-sizing: border-box;
-  cursor: pointer;
-  border-radius: var(--td-radius-medium);
-  color: var(--td-text-color-primary);
-  font-size: var(--td-font-size-body-medium);
-  font-family: var(--app-font-family);
-  transition: background var(--app-motion-fast) ease;
-}
-
-.mention-item:hover {
-  background: var(--td-bg-color-secondarycontainer);
-}
-
-.mention-item.active {
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-primary);
-}
-
-.icon-wrap {
-  position: relative;
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-
-.icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  font-size: var(--app-text-xl);
-}
-
-/* 右下角组织角标：柔和小圆 + 绿色/灰色 icon，不刺眼 */
-.org-badge-wrap {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--td-bg-color-secondarycontainer);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.org-badge-wrap .org-badge {
-  width: 6px;
-  height: 6px;
-  object-fit: contain;
-}
-
-/* 知识库 / 文件 - 无背景，与整体一致 */
-.kb-icon,
-.faq-icon,
-.file-icon,
-.mcp-icon,
-.skill-icon,
-.tag-icon {
-  background: transparent;
-  color: var(--td-text-color-secondary);
-}
-
-.mention-item.active .icon {
+.mention-row.active .mention-row__icon {
   color: var(--td-brand-color);
 }
 
-.mention-item.active .faq-icon {
+.mention-row.active .mention-row__icon.faq-icon {
   color: var(--weknora-faq-color, #0052d9);
 }
 
-.item-main {
+.mention-row__name {
   flex: 1;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.name {
-  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 文件项中的 name 需要占据剩余空间，将 kb-name 推到右边 */
-.mention-item > .name {
-  flex: 1;
-  min-width: 0;
+.mention-hit {
+  padding: 0;
+  background: transparent;
+  color: var(--td-brand-color);
+  font-weight: 500;
 }
 
-.count {
-  margin-left: auto;
+.mention-row__meta {
   flex-shrink: 0;
-  font-size: var(--td-font-size-mark-small);
-  font-variant-numeric: tabular-nums;
   color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+  font-variant-numeric: tabular-nums;
 }
 
-.count.is-stale {
+.mention-row__meta--text {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-row__meta.is-stale {
   color: var(--td-warning-color);
 }
 
-.org-name {
+.mention-row__arrow {
   flex-shrink: 0;
-  max-width: 72px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--td-font-size-mark-small);
+  margin-right: -4px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
-.kb-name {
-  flex-shrink: 0;
-  max-width: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--td-font-size-mark-small);
+/* 全局搜索结果中的分组标题 */
+.mention-section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+  line-height: 18px;
+}
+
+.mention-group + .mention-section-header {
+  margin-top: 2px;
+  padding-top: 4px;
+  height: 28px;
+  border-top: .5px solid var(--td-component-stroke);
+}
+
+.mention-section-header__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.mention-section-header__more {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0 0 4px;
+  border: 0;
+  background: transparent;
   color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  cursor: pointer;
+  transition: color var(--app-motion-instant);
+}
+
+.mention-section-header__more:hover {
+  color: var(--td-brand-color);
 }
 
 .empty {
-  padding: 28px 16px;
+  min-height: 52px;
+  padding: 16px 8px;
+  box-sizing: border-box;
   text-align: center;
   color: var(--td-text-color-placeholder);
-  font-size: var(--td-font-size-body-medium);
+  font-size: var(--app-text-md);
+  line-height: 20px;
 }
 
 .loading-more {
   display: flex;
   justify-content: center;
-  padding: 8px 12px;
+  padding: 4px 8px;
 }
 </style>
 
@@ -856,11 +902,11 @@ const scrollToItem = (index: number) => {
 .mention-detail-popup-wrap.t-popup__content {
   min-width: 220px;
   max-width: 280px;
-  padding: 13px 14px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-large);
+  padding: 10px 12px;
+  border: .5px solid var(--td-component-border);
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--td-shadow-2);
 }
 .mention-detail-content {
   font-size: var(--td-font-size-body-small);
@@ -892,8 +938,8 @@ const scrollToItem = (index: number) => {
 .mention-detail-content .detail-type-badge {
   flex-shrink: 0;
   padding: 1px 6px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-medium);
+  border: .5px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-xs);
   font-size: var(--td-font-size-mark-small);
   line-height: 18px;
 }

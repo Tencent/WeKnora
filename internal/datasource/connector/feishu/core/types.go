@@ -34,7 +34,24 @@ type Config struct {
 	// rendering in UTC shifts the date. Empty defaults to GMT+8, which matches
 	// Feishu (mainland) tenants; set it for Lark tenants in other zones.
 	Timezone string `json:"timezone,omitempty"`
+
+	// ParseMode selects the docx parsing path: "blocks" (default) renders the
+	// blocks API into Markdown with attachment sub-items; "export" exports
+	// a .docx binary that docreader parses inline, keeping image↔document
+	// association via parent_chunk_id. Parsed from Settings["parse_mode"] by
+	// ParseFeishuConfig and threaded via DocxFetchInput.ParseMode; see
+	// FetchDocxWithBlocks.
+	ParseMode string `json:"parse_mode,omitempty"`
 }
+
+// Docx parse modes (Config.ParseMode, from Settings["parse_mode"]).
+const (
+	// ParseModeBlocks renders docx via the blocks API into Markdown (default).
+	ParseModeBlocks = "blocks"
+	// ParseModeExport exports docx as a binary and lets docreader parse it
+	// inline — the escape hatch when image↔document association matters.
+	ParseModeExport = "export"
+)
 
 // defaultTimezoneOffsetSeconds is GMT+8 (the Feishu mainland default), used when
 // no timezone is configured. A fixed zone avoids any dependency on system tzdata,
@@ -160,7 +177,7 @@ type WikiNode struct {
 	ObjType        string `json:"obj_type"`  // "doc", "sheet", "mindnote", "bitable", "file", "docx", "slides"
 	ParentNodeID   string `json:"parent_node_token"`
 	NodeType       string `json:"node_type"` // "origin" or "shortcut"
-	OriginNodeID   string `json:"origin_node_id"`
+	OriginNodeID   string `json:"origin_node_token"`
 	OriginSpaceID  string `json:"origin_space_id"`
 	HasChild       bool   `json:"has_child"`
 	Title          string `json:"title"`

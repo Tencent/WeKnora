@@ -3,6 +3,8 @@ import { Marked, Renderer } from 'marked'
 import markedKatex from 'marked-katex-extension'
 
 import { domPurifyAllowedUriRegexp } from './markdownDomPurify.ts'
+import { literalSingleTildeExtension } from './markedLiteralTilde.ts'
+import { stripDuplicateLeadingH1 } from './markdownTitleDedupe.ts'
 import { escapeHTML, safeMarkdownToHTML, sanitizeDocumentPreviewHTML } from './security.ts'
 
 const PREVIEW_IMAGE_ATTRIBUTES = 'loading="lazy" decoding="async" fetchpriority="low"'
@@ -31,6 +33,10 @@ function highlightPreviewCode(source: string, lang?: string): string {
 
 function createPreviewMarkdownRenderer(): Renderer {
   const renderer = new Renderer()
+  // GFM task lists: marked emits <input type="checkbox">, which the DOMPurify
+  // tag allowlist strips (leaving a plain bullet) — render a styled span.
+  renderer.checkbox = ({ checked }) =>
+    `<span class="task-checkbox${checked ? ' checked' : ''}"></span>`
   renderer.image = ({ href, title, text }) => {
     if (!isSafePreviewImageHref(href)) return ''
     const safeHref = href.trim().replace(/"/g, '&quot;')
@@ -50,6 +56,7 @@ const previewMarked = new Marked({
   renderer: createPreviewMarkdownRenderer(),
 })
 previewMarked.use(markedKatex({ throwOnError: false, nonStandard: true }))
+previewMarked.use(literalSingleTildeExtension)
 
 function preprocessMathDelimiters(rawText: string): string {
   if (!rawText || typeof rawText !== 'string') return ''
@@ -58,10 +65,25 @@ function preprocessMathDelimiters(rawText: string): string {
     .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$')
 }
 
+export interface DocumentPreviewMarkdownOptions {
+  /**
+   * Names already shown by the surrounding UI (drawer header, preview
+   * toolbar). A leading level-1 heading that normalizes to one of them is
+   * dropped so the document title is not rendered twice.
+   */
+  titles?: Array<string | null | undefined>
+}
+
 export function renderDocumentPreviewMarkdown(
   markdown: string,
   sanitize: (html: string) => string = sanitizeDocumentPreviewHTML,
+  options: DocumentPreviewMarkdownOptions = {},
 ): string {
-  const mathSafe = preprocessMathDelimiters(markdown)
+  // Strip the duplicated heading before delimiter preprocessing so the
+  // comparison sees the original text (math delimiters stay untouched).
+  const deduped = options.titles?.length
+    ? stripDuplicateLeadingH1(markdown, options.titles)
+    : markdown
+  const mathSafe = preprocessMathDelimiters(deduped)
   return sanitize(previewMarked.parse(safeMarkdownToHTML(mathSafe)) as string)
 }

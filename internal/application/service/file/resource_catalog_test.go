@@ -39,6 +39,12 @@ func (c *catalogStub) Resolve(_ context.Context, _ string) (*types.StoredResourc
 	return c.resource, nil
 }
 
+// ReuseByContentHash never hits in this stub: these tests exercise reference
+// shape and resolution, not payload deduplication.
+func (c *catalogStub) ReuseByContentHash(context.Context, uint64, string) (string, bool, error) {
+	return "", false, nil
+}
+
 func (c *catalogStub) ResolvePath(_ context.Context, value string) (string, *types.StoredResource, error) {
 	if value == c.ref {
 		return c.resource.PhysicalPath, c.resource, nil
@@ -51,6 +57,11 @@ func (c *catalogStub) MarkDeleted(context.Context, string) error                
 func (c *catalogStub) Release(context.Context, string, string, string) (int64, error) {
 	return 0, nil
 }
+
+func (c *catalogStub) ListReferencesByOwner(context.Context, string, ...string) ([]string, error) {
+	return nil, nil
+}
+
 func (c *catalogStub) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "GrantTokenAbCdEfGhIjKl", nil
 }

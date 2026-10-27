@@ -80,6 +80,12 @@ func (s *stubResourceCatalog) Register(
 	panic("unexpected Register")
 }
 
+// ReuseByContentHash stays a miss: these handlers serve existing references and
+// never reach the payload-sharing path.
+func (s *stubResourceCatalog) ReuseByContentHash(context.Context, uint64, string) (string, bool, error) {
+	return "", false, nil
+}
+
 func (s *stubResourceCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
 	return s.resource, nil
 }
@@ -97,6 +103,10 @@ func (s *stubResourceCatalog) Bind(context.Context, string, string, string, stri
 
 func (s *stubResourceCatalog) Release(context.Context, string, string, string) (int64, error) {
 	panic("unexpected Release")
+}
+
+func (s *stubResourceCatalog) ListReferencesByOwner(context.Context, string, ...string) ([]string, error) {
+	return nil, nil
 }
 
 func (s *stubResourceCatalog) MarkDeleted(context.Context, string) error {
