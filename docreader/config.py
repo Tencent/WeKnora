@@ -37,6 +37,14 @@ def _get_bool(keys: Iterable[str], default: bool) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _positive_int(key: str, default: int) -> int:
+    value = _get_int([key], default)
+    if value <= 0:
+        logger.warning("%s must be positive; using %d", key, default)
+        return default
+    return value
+
+
 def _mask_secret(v: str) -> str:
     if not v:
         return ""
@@ -67,6 +75,15 @@ class DocReaderConfig:
     pdf_render_dpi: int
     pdf_jpeg_quality: int
     pdf_render_max_edge: int
+
+    # Optional image preprocessing, isolated from the parser workers.
+    preprocess_max_workers: int
+    preprocess_timeout_seconds: int
+    preprocess_threads: int
+    preprocess_memory_mb: int
+    preprocess_max_pixels: int
+    preprocess_max_edge: int
+    preprocess_probe_edge: int
 
     # Proxy
     external_http_proxy: str
@@ -153,6 +170,13 @@ def load_config() -> DocReaderConfig:
         pdf_render_dpi=pdf_render_dpi,
         pdf_jpeg_quality=pdf_jpeg_quality,
         pdf_render_max_edge=pdf_render_max_edge,
+        preprocess_max_workers=_positive_int("DOCREADER_PREPROCESS_MAX_WORKERS", 1),
+        preprocess_timeout_seconds=_positive_int("DOCREADER_PREPROCESS_TIMEOUT_SECONDS", 30),
+        preprocess_threads=_positive_int("DOCREADER_PREPROCESS_THREADS", 2),
+        preprocess_memory_mb=_positive_int("DOCREADER_PREPROCESS_MEMORY_MB", 2048),
+        preprocess_max_pixels=_positive_int("DOCREADER_PREPROCESS_MAX_PIXELS", 16_000_000),
+        preprocess_max_edge=_positive_int("DOCREADER_PREPROCESS_MAX_EDGE", 2000),
+        preprocess_probe_edge=_positive_int("DOCREADER_PREPROCESS_PROBE_EDGE", 2000),
         external_http_proxy=external_http_proxy,
         external_https_proxy=external_https_proxy,
         image_output_dir=image_output_dir,
@@ -166,7 +190,7 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
     cfg = CONFIG
     d: Dict[str, Any] = {
         "DOCREADER_GRPC_MAX_WORKERS": cfg.grpc_max_workers,
-        "DOCREADER_GRPC_MAX_FILE_SIZE_MB": cfg.grpc_max_file_size_mb,
+        "DOCREADER_GRPC_MAX_FILE_SIZE_MB": cfg.grpc_max_file_size_mb // (1024 * 1024),
         "DOCREADER_GRPC_PORT": cfg.grpc_port,
         "DOCREADER_DOCX_MAX_PAGES": cfg.docx_max_pages,
         "DOCREADER_MARKITDOWN_MAX_WORKERS": cfg.markitdown_max_workers,
@@ -182,6 +206,13 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_PDF_RENDER_DPI": cfg.pdf_render_dpi,
         "DOCREADER_PDF_JPEG_QUALITY": cfg.pdf_jpeg_quality,
         "DOCREADER_PDF_RENDER_MAX_EDGE": cfg.pdf_render_max_edge,
+        "DOCREADER_PREPROCESS_MAX_WORKERS": cfg.preprocess_max_workers,
+        "DOCREADER_PREPROCESS_TIMEOUT_SECONDS": cfg.preprocess_timeout_seconds,
+        "DOCREADER_PREPROCESS_THREADS": cfg.preprocess_threads,
+        "DOCREADER_PREPROCESS_MEMORY_MB": cfg.preprocess_memory_mb,
+        "DOCREADER_PREPROCESS_MAX_PIXELS": cfg.preprocess_max_pixels,
+        "DOCREADER_PREPROCESS_MAX_EDGE": cfg.preprocess_max_edge,
+        "DOCREADER_PREPROCESS_PROBE_EDGE": cfg.preprocess_probe_edge,
         "DOCREADER_EXTERNAL_HTTP_PROXY": cfg.external_http_proxy,
         "DOCREADER_EXTERNAL_HTTPS_PROXY": cfg.external_https_proxy,
         "DOCREADER_IMAGE_OUTPUT_DIR": cfg.image_output_dir,

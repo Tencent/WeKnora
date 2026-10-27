@@ -470,6 +470,15 @@ func IsPipelineToolCallID(id string) bool {
 	return strings.HasPrefix(id, PipelineToolCallIDPrefix)
 }
 
+// BackgroundInjection is one background-work message the engine put in front
+// of the model before a step's LLM call. History replays it in place; AckIDs
+// are the completion notices it delivered, acknowledged once the assistant
+// message carrying the step is persisted.
+type BackgroundInjection struct {
+	Content string   `json:"content"`
+	AckIDs  []string `json:"ack_ids,omitempty"`
+}
+
 // AgentStep represents one iteration of the ReAct loop
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
@@ -480,6 +489,12 @@ type AgentStep struct {
 	// UserMessagesBefore records consumed steer rows in delivery order, before
 	// this model response. Unlike timestamps, this remains unambiguous on replay.
 	UserMessagesBefore []string `json:"user_messages_before,omitempty"`
+	// BackgroundInjections are background-work messages delivered before this
+	// model response, after the step's steered messages, in delivery order.
+	BackgroundInjections []BackgroundInjection `json:"background_injections,omitempty"`
+	// BackgroundSeenIDs are finished background items whose results this
+	// step's tool calls (work_wait, work_cancel) returned to the model.
+	BackgroundSeenIDs []string `json:"background_seen_ids,omitempty"`
 	// IntermediateAnswer preserves a plain answer followed by a loop-end steer.
 	// The canonical final answer is still stored in Message.Content.
 	IntermediateAnswer bool `json:"intermediate_answer,omitempty"`
@@ -520,13 +535,14 @@ func (s *AgentStep) GetObservations() []string {
 
 // AgentState tracks the execution state of an agent across iterations
 type AgentState struct {
-	PendingSteerMessages []string        `json:"-"`
-	CurrentRound         int             `json:"current_round"`  // Current round number
-	RoundSteps           []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
-	IsComplete           bool            `json:"is_complete"`    // Whether agent has finished
-	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
-	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
-	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
+	PendingSteerMessages []string              `json:"-"`
+	PendingBackground    []BackgroundInjection `json:"-"`
+	CurrentRound         int                   `json:"current_round"`  // Current round number
+	RoundSteps           []AgentStep           `json:"round_steps"`    // All steps taken so far in the current round
+	IsComplete           bool                  `json:"is_complete"`    // Whether agent has finished
+	FinalAnswer          string                `json:"final_answer"`   // The final answer to the query
+	KnowledgeRefs        []*SearchResult       `json:"knowledge_refs"` // Collected knowledge references
+	TurnUsage            TokenUsage            `json:"turn_usage"`     // LLM usage accumulated across this turn
 	// Suspended is set when the run ended waiting on a user prompt.
 	// SuspendedStep is the interrupted round: its thought and the calls
 	// that finished before the blocked one, kept for display.

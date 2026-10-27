@@ -56,6 +56,10 @@ func TestQuickAnswerFailurePersistsErrorAndCompletesTurn(t *testing.T) {
 	require.True(t, messages.saved.IsCompleted)
 	require.Equal(t, uint64(1), messages.tenant)
 	require.True(t, *released)
+	require.NotEmpty(t, stream.events)
+	require.Equal(t, types.ResponseTypeError, stream.events[0].Type)
+	require.Equal(t, testStreamError, stream.events[0].Content)
+	require.True(t, stream.events[0].Done)
 	last := stream.events[len(stream.events)-1]
 	require.Equal(t, types.ResponseTypeComplete, last.Type)
 }

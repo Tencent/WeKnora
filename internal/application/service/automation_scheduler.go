@@ -174,6 +174,9 @@ func (s *AutomationService) startQueued(ctx context.Context, now time.Time) erro
 	}
 	var queued []*types.AutomationRun
 	if err := s.db.WithContext(ctx).Where("status = ?", types.AutomationRunQueued).
+		Where(`NOT EXISTS (SELECT 1 FROM automation_runs AS holding
+			WHERE holding.automation_id = automation_runs.automation_id AND holding.status IN ? )`,
+			[]string{types.AutomationRunRunning, types.AutomationRunAwaitingApproval}).
 		Order("resume DESC, scheduled_at").Limit(free * 4).Find(&queued).Error; err != nil {
 		return err
 	}
@@ -197,16 +200,6 @@ func (s *AutomationService) startQueued(ctx context.Context, now time.Time) erro
 }
 
 func (s *AutomationService) startRun(ctx context.Context, run *types.AutomationRun, now time.Time) (bool, error) {
-	var holding int64
-	if err := s.db.WithContext(ctx).Model(&types.AutomationRun{}).
-		Where("automation_id = ? AND id <> ? AND status IN ?", run.AutomationID, run.ID, []string{
-			types.AutomationRunRunning, types.AutomationRunAwaitingApproval,
-		}).Count(&holding).Error; err != nil {
-		return false, err
-	}
-	if holding > 0 {
-		return false, nil
-	}
 	lease := now.Add(s.cfg.Lease)
 	updates := map[string]any{
 		"status": types.AutomationRunRunning, "owner": s.instance, "lease_until": lease, "updated_at": now,
@@ -214,10 +207,33 @@ func (s *AutomationService) startRun(ctx context.Context, run *types.AutomationR
 	if run.StartedAt == nil {
 		updates["started_at"] = now
 	}
-	res := s.db.WithContext(ctx).Model(&types.AutomationRun{}).
-		Where("id = ? AND status = ?", run.ID, types.AutomationRunQueued).Updates(updates)
-	if res.Error != nil || res.RowsAffected == 0 {
-		return false, res.Error
+	started := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Take the automation's write lock before reading its runs. A run-row
+		// CAS alone cannot serialize two different queued runs. Writing first
+		// also avoids a deferred read-to-write transaction upgrade on SQLite.
+		locked := tx.Model(&types.Automation{}).Where("id = ?", run.AutomationID).
+			UpdateColumn("version", gorm.Expr("version + 1"))
+		if locked.Error != nil || locked.RowsAffected == 0 {
+			return locked.Error
+		}
+		var holding int64
+		if err := tx.Model(&types.AutomationRun{}).
+			Where("automation_id = ? AND id <> ? AND status IN ?", run.AutomationID, run.ID, []string{
+				types.AutomationRunRunning, types.AutomationRunAwaitingApproval,
+			}).Count(&holding).Error; err != nil {
+			return err
+		}
+		if holding > 0 {
+			return nil
+		}
+		res := tx.Model(&types.AutomationRun{}).
+			Where("id = ? AND status = ?", run.ID, types.AutomationRunQueued).Updates(updates)
+		started = res.Error == nil && res.RowsAffected > 0
+		return res.Error
+	})
+	if err != nil || !started {
+		return false, err
 	}
 	run.Status, run.Owner, run.LeaseUntil = types.AutomationRunRunning, s.instance, &lease
 	if run.StartedAt == nil {
@@ -277,20 +293,31 @@ func (s *AutomationService) reconcileAwaiting(ctx context.Context, now time.Time
 	if s.broker == nil {
 		return nil
 	}
-	var waiting []*types.AutomationRun
-	if err := s.db.WithContext(ctx).Where("status = ?", types.AutomationRunAwaitingApproval).
-		Order("updated_at").Limit(automationClaimBatch * 2).Find(&waiting).Error; err != nil {
-		return err
-	}
-	for _, run := range waiting {
-		if err := s.reconcileRun(ctx, run, now); err != nil {
-			logger.Warnf(ctx, "Reconcile automation run %s: %v", run.ID, err)
+	// Keyset pagination visits later approvals even when earlier ones stay
+	// open. Offsets would skip rows as reconciled runs leave the waiting set.
+	for cursor := ""; ; {
+		var waiting []*types.AutomationRun
+		if err := s.db.WithContext(ctx).
+			Where("status = ? AND id > ?", types.AutomationRunAwaitingApproval, cursor).
+			Order("id").Limit(automationClaimBatch * 2).Find(&waiting).Error; err != nil {
+			return err
 		}
+		for _, run := range waiting {
+			if err := s.reconcileRun(ctx, run, now); err != nil {
+				logger.Warnf(ctx, "Reconcile automation run %s: %v", run.ID, err)
+			}
+		}
+		if len(waiting) < automationClaimBatch*2 {
+			return nil
+		}
+		cursor = waiting[len(waiting)-1].ID
 	}
-	return nil
 }
 
 func (s *AutomationService) reconcileRun(ctx context.Context, run *types.AutomationRun, now time.Time) error {
+	if run.CancelRequested {
+		return s.cancelRun(ctx, run, "cancelled by the owner")
+	}
 	waiting := []string{types.AutomationRunAwaitingApproval}
 	prompt, err := s.broker.Store().Get(ctx, run.PendingPromptID)
 	if err != nil {
@@ -335,7 +362,8 @@ func (s *AutomationService) reconcileRun(ctx context.Context, run *types.Automat
 // queue, to continue from the answer.
 func (s *AutomationService) queueResume(ctx context.Context, runID, promptID string) error {
 	res := s.db.WithContext(ctx).Model(&types.AutomationRun{}).
-		Where("id = ? AND status = ? AND pending_prompt_id = ?", runID, types.AutomationRunAwaitingApproval, promptID).
+		Where("id = ? AND status = ? AND pending_prompt_id = ? AND cancel_requested = ?",
+			runID, types.AutomationRunAwaitingApproval, promptID, false).
 		Updates(map[string]any{"status": types.AutomationRunQueued, "resume": true, "updated_at": s.now()})
 	if res.Error == nil && res.RowsAffected > 0 {
 		s.Wake()
@@ -418,8 +446,15 @@ func (s *AutomationService) finishRun(
 		return false, res.Error
 	}
 	run.Status, run.Error, run.FinishedAt = status, reason, &now
+	// Only the winning finalizer may stop work. A stale approval reaper must
+	// not cancel a run that another scheduler has already resumed.
+	var stopErr error
+	if status == types.AutomationRunFailed || status == types.AutomationRunCancelled ||
+		status == types.AutomationRunNeedsAttention {
+		stopErr = s.stopRunDelegation(context.WithoutCancel(ctx), run)
+	}
 	s.settle(ctx, run)
-	return true, nil
+	return true, stopErr
 }
 
 // settle records a finished run on its automation, pauses it after too many

@@ -277,10 +277,42 @@ export function prettyPrintJson(text: string): string {
   const trimmed = text.trim()
   if (!trimmed) return text
   try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2)
+    // Validate the document, but format its original tokens: serializing the
+    // parsed value rounds large IDs/decimals and turns overflowing numbers into null.
+    JSON.parse(trimmed)
   } catch {
     return text
   }
+  const tokens = trimmed.match(/"(?:\\.|[^"\\])*"|[{}\[\],:]|[^\s{}\[\],:]+/g)!
+  const output: string[] = []
+  let depth = 0
+  const newline = () => output.push('\n', '  '.repeat(depth))
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token === '{' || token === '[') {
+      output.push(token)
+      const closing = token === '{' ? '}' : ']'
+      if (tokens[i + 1] === closing) {
+        output.push(closing)
+        i++
+      } else {
+        depth++
+        newline()
+      }
+    } else if (token === '}' || token === ']') {
+      depth--
+      newline()
+      output.push(token)
+    } else if (token === ',') {
+      output.push(token)
+      newline()
+    } else if (token === ':') {
+      output.push(': ')
+    } else {
+      output.push(token)
+    }
+  }
+  return output.join('')
 }
 
 /**
@@ -289,29 +321,14 @@ export function prettyPrintJson(text: string): string {
  * reject valid text files.
  */
 export function isValidUTF8(bytes: Uint8Array, allowTruncatedEnd = false): boolean {
-  for (let i = 0; i < bytes.length;) {
-    const b = bytes[i]
-    let remaining = 0
-    if (b <= 0x7F) {
-      remaining = 0
-    } else if ((b & 0xE0) === 0xC0) {
-      remaining = 1
-    } else if ((b & 0xF0) === 0xE0) {
-      remaining = 2
-    } else if ((b & 0xF8) === 0xF0) {
-      remaining = 3
-    } else {
-      return false
-    }
-    if (i + remaining >= bytes.length) {
-      return allowTruncatedEnd
-    }
-    for (let j = 1; j <= remaining; j++) {
-      if ((bytes[i + j] & 0xC0) !== 0x80) return false
-    }
-    i += 1 + remaining
+  try {
+    // Streaming tolerates an incomplete final code point, but still rejects
+    // invalid bytes already present (including overlong and surrogate encodings).
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes, { stream: allowTruncatedEnd })
+    return true
+  } catch {
+    return false
   }
-  return true
 }
 
 function asciiTag(bytes: Uint8Array, offset: number, length: number): string {
@@ -349,6 +366,21 @@ function sniffFromMagic(bytes: Uint8Array): FilePreviewSniff | null {
     if (tag === 'AVI ') return { kind: 'video', ext: 'avi' }
   }
   if (bytes.length >= 8 && asciiTag(bytes, 4, 4) === 'ftyp') {
+    // ISO base media containers also carry images and audio. Compatible
+    // brands matter when the major brand is generic (for example, mif1).
+    const brands = new Set([asciiTag(bytes, 8, 4)])
+    if (bytes.length >= 16) {
+      const boxSize = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0)
+      const end = Math.min(boxSize, bytes.length, SNIFF_BYTES)
+      for (let offset = 16; offset + 4 <= end; offset += 4) {
+        brands.add(asciiTag(bytes, offset, 4))
+      }
+    }
+    if (brands.has('avif') || brands.has('avis')) return { kind: 'image', ext: 'avif' }
+    if (['heic', 'heix', 'hevc', 'hevx'].some(brand => brands.has(brand))) {
+      return { kind: 'image', ext: 'heic' }
+    }
+    if (brands.has('M4A ') || brands.has('M4B ')) return { kind: 'audio', ext: 'm4a' }
     return { kind: 'video', ext: 'mp4' }
   }
   if (bytes.length >= 4 && bytes[0] === 0x1A && bytes[1] === 0x45 && bytes[2] === 0xDF && bytes[3] === 0xA3) {

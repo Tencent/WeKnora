@@ -313,5 +313,59 @@ class TestPptxMediaRealFallback(unittest.TestCase):
         self.assertEqual(image_colors(document.content, document.images), [RED, BLUE])
 
 
+class TestPptxRasterTransparency(unittest.TestCase):
+    def assert_png_pixels_preserved(self, image, image_format="PNG"):
+        source = io.BytesIO()
+        image.save(source, format=image_format)
+        raw = source.getvalue()
+        with Image.open(io.BytesIO(raw)) as original:
+            expected = original.convert("RGBA").tobytes()
+            size = original.size
+        suffix = ".jpg" if image_format == "JPEG" else ".png"
+        with patch.object(
+            pptx_media, "_rasterize_with_imagemagick", side_effect=AssertionError
+        ):
+            result = pptx_media.rasterize_media_bytes("picture" + suffix, raw)
+        self.assertIsNotNone(result)
+        with Image.open(io.BytesIO(result)) as converted:
+            self.assertEqual(converted.format, "PNG")
+            self.assertEqual(converted.size, size)
+            self.assertEqual(converted.convert("RGBA").tobytes(), expected)
+
+    def test_rgba_alpha_is_preserved(self):
+        image = Image.new("RGBA", (3, 1))
+        image.putdata([(255, 0, 0, 0), (0, 255, 0, 96), (0, 0, 255, 255)])
+        self.assert_png_pixels_preserved(image)
+
+    def test_grayscale_alpha_is_preserved(self):
+        image = Image.new("LA", (3, 1))
+        image.putdata([(10, 0), (90, 96), (230, 255)])
+        self.assert_png_pixels_preserved(image)
+
+    def palette_image(self):
+        image = Image.new("P", (3, 1))
+        image.putpalette([30, 50, 70, 90, 110, 130, 150, 170, 190] + [0] * 759)
+        image.putdata([0, 1, 2])
+        return image
+
+    def test_palette_alpha_table_is_preserved(self):
+        image = self.palette_image()
+        image.info["transparency"] = bytes([0, 96, 255])
+        self.assert_png_pixels_preserved(image)
+
+    def test_palette_transparent_index_is_preserved(self):
+        image = self.palette_image()
+        image.info["transparency"] = 1
+        self.assert_png_pixels_preserved(image)
+
+    def test_rgb_control_is_unchanged(self):
+        self.assert_png_pixels_preserved(Image.new("RGB", (3, 1), (20, 40, 60)))
+
+    def test_cmyk_jpeg_still_converts_to_rgb(self):
+        self.assert_png_pixels_preserved(
+            Image.new("CMYK", (3, 1), (0, 255, 255, 0)), image_format="JPEG"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

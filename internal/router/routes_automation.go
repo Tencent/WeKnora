@@ -41,5 +41,6 @@ func RegisterAutomationRoutes(r *gin.RouterGroup, h *handler.AutomationHandler, 
 	{
 		notifications.GET("", h.ListNotifications)
 		notifications.POST("/read", h.MarkNotificationsRead)
+		notifications.DELETE("/read", h.ClearReadNotifications)
 	}
 }

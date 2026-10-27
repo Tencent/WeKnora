@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -35,6 +36,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
 // Compile-time checks for the optional IM capabilities implemented by Adapter.
@@ -66,6 +68,12 @@ type Adapter struct {
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
+
+	// botOpenID is this app's own bot open_id. Feishu reports every bot
+	// mention with mentioned_type == "bot"; the open_id is what distinguishes
+	// this bot from other bots in the same group.
+	botOpenIDMu sync.Mutex
+	botOpenID   string
 }
 
 // NewAdapter creates a new adapter for the given region (RegionFeishu or RegionLark).
@@ -88,6 +96,55 @@ func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey, 
 		encryptKey:        encryptKey,
 		apiBaseURL:        apiBaseURL,
 	}, nil
+}
+
+// BotOpenID returns the app's own bot open_id, fetching and caching it on the
+// first use. Both the WebSocket and webhook event paths use this value to
+// distinguish a mention of this bot from mentions of other bots in a group.
+func (a *Adapter) BotOpenID(ctx context.Context) (string, error) {
+	a.botOpenIDMu.Lock()
+	defer a.botOpenIDMu.Unlock()
+
+	if a.botOpenID != "" {
+		return a.botOpenID, nil
+	}
+
+	accessToken, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get access token: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.api("/open-apis/bot/v3/info"), nil)
+	if err != nil {
+		return "", fmt.Errorf("create bot info request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request bot info: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Bot  struct {
+			OpenID string `json:"open_id"`
+		} `json:"bot"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode bot info: %w", err)
+	}
+	if result.Code != 0 {
+		return "", fmt.Errorf("bot info error: code=%d msg=%s", result.Code, result.Msg)
+	}
+	if result.Bot.OpenID == "" {
+		return "", fmt.Errorf("bot info response missing open_id")
+	}
+
+	a.botOpenID = result.Bot.OpenID
+	return a.botOpenID, nil
 }
 
 // validateAPIBaseURL checks that a custom Feishu/Lark API base URL uses an
@@ -294,13 +351,14 @@ type feishuEvent struct {
 }
 
 type feishuMessage struct {
-	MessageID   string `json:"message_id"`
-	RootID      string `json:"root_id"`
-	ParentID    string `json:"parent_id"`
-	MessageType string `json:"message_type"`
-	ChatType    string `json:"chat_type"`
-	ChatID      string `json:"chat_id"`
-	Content     string `json:"content"`
+	MessageID   string                 `json:"message_id"`
+	RootID      string                 `json:"root_id"`
+	ParentID    string                 `json:"parent_id"`
+	MessageType string                 `json:"message_type"`
+	ChatType    string                 `json:"chat_type"`
+	ChatID      string                 `json:"chat_id"`
+	Content     string                 `json:"content"`
+	Mentions    []*larkim.MentionEvent `json:"mentions,omitempty"`
 }
 
 type feishuSender struct {
@@ -355,6 +413,23 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		return nil, nil
 	}
 	msg := eventBody.Event.Message
+
+	// Keep webhook delivery in sync with the WebSocket path. In group chats
+	// Feishu may deliver every message when the app has the "receive all group
+	// messages" permission; only continue when this app's own bot is mentioned.
+	if msg.ChatType == "group" {
+		botOpenID, err := a.BotOpenID(c.Request.Context())
+		if err != nil {
+			logger.Warnf(c.Request.Context(),
+				"[%s] failed to resolve bot open_id; ignoring group message: %v", a.region.Label, err)
+			return nil, nil
+		}
+		if !mentionsBot(botOpenID, msg.Mentions) {
+			logger.Infof(c.Request.Context(),
+				"[%s] ignoring group message without this bot mention: msg_id=%q", a.region.Label, msg.MessageID)
+			return nil, nil
+		}
+	}
 
 	// Compute thread ID: use root_id for threaded replies, or message_id for top-level messages.
 	threadID := msg.RootID
@@ -758,17 +833,44 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	// Use the original file name from the message, or extract from Content-Disposition
 	fileName := msg.FileName
 	if fileName == "" {
-		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-			if idx := strings.Index(cd, "filename="); idx >= 0 {
-				fileName = strings.Trim(cd[idx+len("filename="):], "\" ")
-			}
-		}
+		fileName = contentDispositionFilename(resp.Header.Get("Content-Disposition"))
 	}
 	if fileName == "" {
 		fileName = msg.FileKey
 	}
 
 	return resp.Body, fileName, nil
+}
+
+// contentDispositionFilename extracts a filename using the standard parser so
+// quoted parameters and RFC 5987 filename* are decoded correctly. A fallback
+// keeps accepting malformed headers emitted by some proxies.
+func contentDispositionFilename(cd string) string {
+	if cd == "" {
+		return ""
+	}
+	if _, params, err := mime.ParseMediaType(cd); err == nil {
+		if name := params["filename"]; name != "" {
+			return name
+		}
+	}
+	idx := strings.Index(cd, "filename=")
+	if idx < 0 {
+		return ""
+	}
+	value := strings.TrimSpace(cd[idx+len("filename="):])
+	if value == "" {
+		return ""
+	}
+	if value[0] == '"' {
+		if end := strings.IndexByte(value[1:], '"'); end >= 0 {
+			return value[1 : end+1]
+		}
+	}
+	if semi := strings.IndexByte(value, ';'); semi >= 0 {
+		value = value[:semi]
+	}
+	return strings.Trim(strings.TrimSpace(value), "\"")
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -38,6 +38,7 @@
               <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2"
                 stroke-linecap="round" />
             </svg>
+            <ResourceIcon v-else-if="item.key === 'assistant'" type="assistant" :size="17" class="nav-icon" />
             <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
             <t-icon v-else :name="item.icon" class="nav-icon" />
             <span class="nav-label">{{ item.label }}</span>
@@ -207,7 +208,9 @@ import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useModalShell } from '@/composables/useModalShell'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
@@ -377,7 +380,7 @@ const navItems = computed(() => {
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
-    { key: 'assistant', icon: 'compass', label: t('assistantSettings.title') },
+    { key: 'assistant', icon: 'assistant', label: t('assistantSettings.title') },
     { key: 'envvars', icon: 'key', label: envNavLabel() },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
@@ -484,6 +487,15 @@ const visible = computed(() => {
   return route.path === '/platform/settings' || uiStore.showSettingsModal
 })
 
+useAssistantPageContext(() => {
+  if (!visible.value) return null
+  const panel = typeof route.query.panel === 'string' ? route.query.panel : ''
+  const section = currentSection.value === 'system-global' && panel
+    ? `system-global-${panel}`
+    : currentSection.value
+  return { page: 'settings', section }
+})
+
 // 关闭弹窗
 const handleClose = () => {
   // Blur before unmount so TDesign textarea autosize won't run on a detached node.
@@ -491,13 +503,18 @@ const handleClose = () => {
     document.activeElement.blur()
   }
   uiStore.closeSettings()
-  // 如果当前路由是设置页，返回上一页
+  // Only go back when Vue Router knows the previous route is inside the app.
   if (route.path === '/platform/settings') {
     const sec = route.query.section
     if (sec === 'model-catalog' || sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
       router.push('/platform/knowledge-bases')
     } else {
-      router.back()
+      const back = router.options.history.state.back
+      if (typeof back === 'string' && back.startsWith('/platform/')) {
+        router.back()
+      } else {
+        router.push('/platform/knowledge-bases')
+      }
     }
   }
 }

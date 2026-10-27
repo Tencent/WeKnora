@@ -111,5 +111,6 @@ func TestAutomationDueTaskStillClaimsUnderUTCClock(t *testing.T) {
 	reloaded := f.reload(t, a.ID)
 	require.False(t, reloaded.Enabled)
 	require.Nil(t, reloaded.NextRunAt)
-	require.Equal(t, int64(1), reloaded.Version)
+	// Claiming advances the schedule; starting the queued run acquires a second version.
+	require.Equal(t, int64(2), reloaded.Version)
 }

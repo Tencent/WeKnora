@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -326,8 +327,8 @@ type docDownloadOutput struct {
 	DocID    string `json:"doc_id"`
 	FileName string `json:"file_name"`
 	Bytes    int    `json:"bytes"`
-	// Content is the file contents (UTF-8 if text, base64 if the SDK
-	// reports a binary-looking blob). For binary, agents should decode
+	// Content is the file contents (UTF-8 if text, base64 for invalid
+	// UTF-8 or a binary-looking blob). For base64, agents should decode
 	// before consuming.
 	Content  string `json:"content"`
 	IsBase64 bool   `json:"is_base64"`
@@ -341,8 +342,10 @@ const maxDocDownloadBytes = 1 << 20
 
 func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "doc_download",
-		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, use search_chunks to find the relevant excerpts. is_base64 reports whether content was base64-encoded (heuristic: presence of NUL byte in the first 512 bytes).",
+		Name: "doc_download",
+		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, " +
+			"use search_chunks to find the relevant excerpts. is_base64 reports whether content was " +
+			"base64-encoded (invalid UTF-8 or presence of NUL byte in the first 512 bytes).",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "Download Document",
 			DestructiveHint: bptr(false),
@@ -689,11 +692,13 @@ func addChunkList(server *mcpsdk.Server, svc chunkListService) {
 	})
 }
 
-// encodeDownload returns (content, isBase64). Heuristic: if the first 512
-// bytes contain a NUL, treat as binary. Otherwise it's UTF-8-ish text.
-// Matches what /usr/bin/file's "binary" heuristic does at a coarse level -
-// good enough to spare an agent from base64-decoding obvious text.
+// encodeDownload returns (content, isBase64). Invalid UTF-8 must be encoded
+// to preserve bytes through JSON serialization. Valid UTF-8 containing a
+// NUL in the first 512 bytes also uses base64 for binary-looking content.
 func encodeDownload(buf []byte) (string, bool) {
+	if !utf8.Valid(buf) {
+		return base64.StdEncoding.EncodeToString(buf), true
+	}
 	probe := buf
 	if len(probe) > 512 {
 		probe = probe[:512]

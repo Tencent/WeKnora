@@ -69,6 +69,14 @@ const (
 	// keys it on SkillsEnabled (or install mode), so the shell follows the
 	// skills switch and not a per-agent tool checkbox.
 	ToolShellExec = "shell_exec"
+	// ToolShellExecAsync submits a shell command as background work (plan 4).
+	// Like shell_exec it is registered per run, not in AvailableToolDefinitions.
+	ToolShellExecAsync = "shell_exec_async"
+	// ToolWorkWait / ToolWorkCancel wait on and stop background work. They are
+	// registered per run, only when the run can submit background work, so
+	// they are absent from AvailableToolDefinitions like shell_exec.
+	ToolWorkWait   = "work_wait"
+	ToolWorkCancel = "work_cancel"
 	// Wiki-related tools (only available when wiki KBs are in scope)
 	ToolWikiReadPage    = "wiki_read_page"
 	ToolWikiWritePage   = "wiki_write_page"
@@ -177,6 +185,7 @@ func SwitchManagedTools() []string {
 		ToolWebFetch,
 		ToolSearchMemory,
 		ToolShellExec,
+		ToolShellExecAsync,
 		ToolReadFile,
 		ToolListSandboxFiles,
 		ToolWriteSandboxFile,
@@ -294,14 +303,17 @@ func RetiredToolReplacement(name string) string {
 		return "knowledge_search is no longer available; use search_knowledge(query=..., mode=\"semantic\"|\"hybrid\")"
 	case LegacyToolGrepChunks:
 		return "grep_chunks is no longer available; use search_knowledge(query=..., mode=\"keyword\") for exact " +
-			"terms, or read_document(id=dN, query=...) to search inside one document"
+			"terms, or read_document(id=doc://N, query=...) to search inside one document"
 	case LegacyToolListKnowledgeChunks:
-		return "list_knowledge_chunks is no longer available; use read_document(id=dN or cN, offset=..., limit=...)"
+		return "list_knowledge_chunks is no longer available; use " +
+			"read_document(id=doc://N or chunk://N, offset=..., limit=...)"
 	case LegacyToolGetDocumentInfo:
-		return "get_document_info is no longer available; read_document(id=dN) returns the document metadata " +
+		return "get_document_info is no longer available; read_document(id=doc://N) " +
+			"returns the document metadata " +
 			"with its first page"
 	case LegacyToolWikiReadSourceDoc:
-		return "wiki_read_source_doc is no longer available; use read_document(id=dN, query=... or offset=...)"
+		return "wiki_read_source_doc is no longer available; use " +
+			"read_document(id=doc://N, query=... or offset=...)"
 	default:
 		return ""
 	}

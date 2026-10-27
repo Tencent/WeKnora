@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -239,7 +240,13 @@ func truncateForErr(b []byte) string {
 	const max = 512
 	s := string(b)
 	if len(s) > max {
-		return s[:max] + "..."
+		// Back off to a rune boundary: a partial multi-byte rune is invalid
+		// UTF-8 in an error string that callers log and surface.
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut] + "..."
 	}
 	return s
 }

@@ -184,10 +184,35 @@ func (s *AgentCollaboration) prune(ctx context.Context) error {
 type delegatedConfig struct {
 	Agent  types.CustomAgent          `json:"agent"`
 	Access types.AssistantAccessLevel `json:"access"`
+	// Durable execution identity follows children across scheduler instances
+	// and approval resumes; it must not turn an automation into a human turn.
+	ActingVia string        `json:"acting_via,omitempty"`
+	Mode      types.RunMode `json:"mode,omitempty"`
 	// AssistantParent records that the delegating run was the WeKnora
 	// assistant, whose level stays under the workspace's assistant ceiling.
 	AssistantParent bool                  `json:"assistant_parent,omitempty"`
 	Inherited       *inheritedAgentConfig `json:"inherited,omitempty"`
+}
+
+func (d *delegatedConfig) captureExecution(ctx context.Context) {
+	d.ActingVia = types.ActingViaFromContext(ctx)
+	d.Mode = types.RunModeAttended
+	if mode, ok := ctx.Value(types.RunModeContextKey).(types.RunMode); ok {
+		d.Mode = mode.Normalize()
+	}
+	if d.ActingVia != "" {
+		d.Mode = types.RunModeDeferred
+	}
+}
+
+func (d *delegatedConfig) runMode() types.RunMode {
+	if d.ActingVia != "" {
+		return types.RunModeDeferred
+	}
+	if d.Mode == "" {
+		return types.RunModeAttended // snapshots created before mode was stored
+	}
+	return d.Mode.Normalize()
 }
 
 // level is the child's access level: the delegating run's, capped by the
@@ -222,7 +247,9 @@ func (s *AgentCollaboration) resolveDelegated(
 		id == types.BuiltinSkillInstallerID {
 		return "", errors.New("only same-workspace reasoning agents without management privileges may be delegated")
 	}
-	data, err := json.Marshal(delegatedConfig{Agent: *a, Access: level, AssistantParent: assistantParent})
+	saved := delegatedConfig{Agent: *a, Access: level, AssistantParent: assistantParent}
+	saved.captureExecution(ctx)
+	data, err := json.Marshal(saved)
 	return string(data), err
 }
 
@@ -377,7 +404,11 @@ func (s *AgentCollaboration) workerContext(ctx context.Context, scope collaborat
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, membership.Role)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 	ctx = types.WithCaller(ctx, types.Caller{TenantID: scope.TenantID, UserID: scope.UserID, Role: membership.Role})
-	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: scope.UserID})
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: scope.UserID}
+	if previous, ok := types.PrincipalFromContext(ctx); ok && previous.ID == scope.UserID {
+		principal.ActingVia = previous.ActingVia
+	}
+	ctx = types.WithPrincipal(ctx, principal)
 	return ctx, nil
 }
 
@@ -397,6 +428,10 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 	if err = json.Unmarshal([]byte(w.Member.ConfigJSON), &saved); err != nil {
 		return result, err
 	}
+	ctx = types.WithPrincipal(ctx, types.Principal{
+		Type: types.PrincipalWebUser, ID: w.Scope.UserID, ActingVia: saved.ActingVia,
+	})
+	ctx = types.WithRunMode(ctx, saved.runMode())
 	// Both modes pin configuration, but reauthorize the source before each turn.
 	if saved.Inherited == nil {
 		if _, err = s.resolve(ctx, w.Member.AgentID, types.AssistantAccessReadOnly); err != nil {
@@ -610,7 +645,7 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 			ctx,
 			&types.QARequest{
 				Resume:             resume,
-				Mode:               types.RunModeAttended,
+				Mode:               saved.runMode(),
 				GrantSessionID:     w.Scope.SessionID,
 				Suspendable:        true,
 				Session:            session,

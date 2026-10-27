@@ -9,14 +9,14 @@
         <details v-if="message.role === 'user'" class="child-assignment">
           <summary>
             <span class="child-assignment-label">
-              <TaskIcon class="child-assignment-icon" size="18px" aria-hidden="true" />
+              <ChatTimelineIcon class="child-assignment-icon" name="task" />
               {{ t('agentStream.collaboration.assignment') }}
             </span>
             <span v-if="message === latestAssignment" class="child-assignment-status" :class="task.status" role="status">
               <span class="child-assignment-dot" aria-hidden="true" />
               {{ t(`agentStream.collaboration.status.${task.status}`) }}
             </span>
-            <ChevronRightIcon class="child-assignment-chevron" size="16px" aria-hidden="true" />
+            <ChatTimelineIcon class="child-assignment-chevron" name="chevron-right" width="14" height="14" />
           </summary>
           <div class="child-assignment-body">{{ message.content }}</div>
         </details>
@@ -28,7 +28,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRightIcon, TaskIcon } from 'tdesign-icons-vue-next'
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { useChatScrollFollow } from '@/composables/useChatScrollFollow'
 import { getMessageList } from '@/api/chat'
 import { useStream } from '@/api/chat/streame'
@@ -117,7 +117,8 @@ onUnmounted(() => { closed = true; clearTimeout(timer); stream.stopStream() })
 </script>
 <style scoped lang="less">
 @import '../../../components/css/chat-scrollbar.less';
-.child-stream { height: 100%; box-sizing: border-box; overflow-y: auto; overscroll-behavior-y: contain; padding: 18px 16px 24px; font-size: var(--app-text-base); .chat-scrollbar(); }
+@import (reference) '@/components/css/chat-timeline-theme.less';
+.child-stream { .chat-timeline-theme(); height: 100%; box-sizing: border-box; overflow-y: auto; overscroll-behavior-y: contain; padding: 18px 16px 24px; font-size: var(--app-text-base); .chat-scrollbar(); }
 .child-assignment {
   margin: 0 0 16px;
   border-radius: var(--app-radius-md);
@@ -131,7 +132,7 @@ onUnmounted(() => { closed = true; clearTimeout(timer); stream.stopStream() })
   padding: 6px 10px;
   box-sizing: border-box;
   border-radius: var(--app-radius-md);
-  color: var(--td-text-color-secondary);
+  color: var(--agent-step-color);
   font-size: var(--agent-step-text-size, 14px);
   line-height: 1.55;
   list-style: none;
@@ -142,7 +143,7 @@ onUnmounted(() => { closed = true; clearTimeout(timer); stream.stopStream() })
 .child-assignment summary:hover, .child-assignment[open] summary { color: var(--td-text-color-primary); }
 .child-assignment summary:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
 .child-assignment-label { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
-.child-assignment-icon { flex-shrink: 0; color: var(--agent-step-icon-color, var(--td-text-color-secondary)); }
+.child-assignment-icon { flex-shrink: 0; color: inherit; }
 .child-assignment-chevron { margin-left: auto; flex-shrink: 0; color: var(--td-text-color-placeholder); transition: transform var(--app-motion-fast) ease; }
 .child-assignment[open] .child-assignment-chevron { transform: rotate(90deg); }
 .child-assignment-status { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--td-text-color-placeholder); font-size: var(--agent-step-summary-size, 13px); }

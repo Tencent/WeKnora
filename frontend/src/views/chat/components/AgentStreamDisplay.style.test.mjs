@@ -39,16 +39,17 @@ test('steer seals animation while keeping the preceding timeline open without co
 })
 
 test('agent steps use compact muted timeline styling', () => {
-  assert.match(source, /--agent-step-text-size:\s*14px/)
-  assert.match(source, /--agent-step-summary-size:\s*13px/)
-  assert.match(source, /--agent-step-icon-color:\s*var\(--td-text-color-placeholder\)/)
+  const theme = readFileSync(join(here, '../../../components/css/chat-timeline-theme.less'), 'utf8')
+  assert.match(source, /\.chat-timeline-theme\(\)/)
+  assert.match(theme, /--agent-step-text-size:\s*14px/)
+  assert.match(theme, /--agent-step-summary-size:\s*13px/)
+  assert.match(theme, /--agent-step-icon-color:\s*var\(--agent-step-color\)/)
   assert.match(source, /max-height:\s*none/)
   assert.match(source, /overflow-y:\s*visible/)
   assert.match(source, /\.tree-root \.action-name\s*\{[\s\S]*font-size:\s*(?:14px|var\(--app-text-base\))/)
   assert.match(source, /\.tree-child \.action-title-icon\s*\{[\s\S]*position:\s*absolute/)
-  assert.match(source, /function maskIconStyle\(src: string, size = 18\)/)
-  assert.match(source, /\.icon-mask\s*\{[\s\S]*background-color:\s*var\(--agent-step-icon-color\)/)
-  assert.doesNotMatch(source, /\.action-title \.action-title-icon,\s*\n\s*\.icon-mask\s*\{/)
+  assert.doesNotMatch(source, /maskIconStyle|icon-mask|<BrowserIcon/)
+  assert.match(source, /<ChatTimelineIcon v-if="event.tool_name"/)
 })
 
 test('expanded agent step log keeps model thinking in the tool timeline', () => {

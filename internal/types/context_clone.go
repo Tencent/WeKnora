@@ -34,7 +34,10 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	UserContextKey:             true,
 	UserIDContextKey:           true,
 	PrincipalContextKey:        true,
-	SystemAdminContextKey:      true,
+	// How the principal was authenticated. Background work that creates a
+	// session (SSE clone) must stamp the same source the request had.
+	PrincipalAuthSourceContextKey: true,
+	SystemAdminContextKey:         true,
 	// TenantRoleContextKey: the caller's resolved role in the active tenant
 	// (PR 2 #1303). Must survive for the same reason as TenantIDContextKey —
 	// any handler that does `ctx := logger.CloneContext(c.Request.Context())`
@@ -57,6 +60,10 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	SessionIDContextKey:       true,
 	SessionTenantIDContextKey: true,
 	SandboxTenantIDContextKey: true,
+	// The request's own admission members. Not a grant: it only exempts
+	// members this turn holds itself, by unique token, from a rebuild check.
+	// Dropping it would make detached QA work wait on its own turn.
+	SandboxAdmissionExemptContextKey: true,
 
 	// Embed callers: the anonymous visitor id isolates embed OAuth, so losing
 	// it would merge visitors together.

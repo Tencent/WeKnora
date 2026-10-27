@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // webSearchProviderRepository implements the WebSearchProviderRepository interface
@@ -21,6 +22,11 @@ func NewWebSearchProviderRepository(db *gorm.DB) interfaces.WebSearchProviderRep
 
 // Create creates a new web search provider
 func (r *webSearchProviderRepository) Create(ctx context.Context, provider *types.WebSearchProviderEntity) error {
+	if provider.IsDefault {
+		return r.withDefaultTransition(ctx, provider.TenantID, "", func(tx *gorm.DB) error {
+			return tx.Create(provider).Error
+		})
+	}
 	return r.db.WithContext(ctx).Create(provider).Error
 }
 
@@ -65,9 +71,22 @@ func (r *webSearchProviderRepository) List(ctx context.Context, tenantID uint64)
 
 // Update updates a web search provider
 func (r *webSearchProviderRepository) Update(ctx context.Context, provider *types.WebSearchProviderEntity) error {
-	return r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
-		"id = ? AND tenant_id = ?", provider.ID, provider.TenantID,
-	).Select("*").Updates(provider).Error
+	update := func(db *gorm.DB) error {
+		result := db.Model(&types.WebSearchProviderEntity{}).Where(
+			"id = ? AND tenant_id = ?", provider.ID, provider.TenantID,
+		).Select("*").Updates(provider)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	}
+	if provider.IsDefault {
+		return r.withDefaultTransition(ctx, provider.TenantID, provider.ID, update)
+	}
+	return update(r.db.WithContext(ctx))
 }
 
 // Delete soft-deletes a web search provider
@@ -77,15 +96,53 @@ func (r *webSearchProviderRepository) Delete(ctx context.Context, tenantID uint6
 	).Delete(&types.WebSearchProviderEntity{}).Error
 }
 
-// ClearDefault clears the default flag for all providers of a tenant, optionally excluding one
-func (r *webSearchProviderRepository) ClearDefault(ctx context.Context, tenantID uint64, excludeID string) error {
-	query := r.db.WithContext(ctx).Model(&types.WebSearchProviderEntity{}).Where(
+func clearDefault(tx *gorm.DB, tenantID uint64, excludeID string) error {
+	query := tx.Model(&types.WebSearchProviderEntity{}).Where(
 		"tenant_id = ? AND is_default = ?", tenantID, true,
 	)
 	if excludeID != "" {
 		query = query.Where("id != ?", excludeID)
 	}
 	return query.Update("is_default", false).Error
+}
+
+// withDefaultTransition serializes changes to a tenant's default provider and
+// keeps clearing the previous default in the same transaction as the new write.
+func (r *webSearchProviderRepository) withDefaultTransition(
+	ctx context.Context,
+	tenantID uint64,
+	excludeID string,
+	write func(*gorm.DB) error,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockDefaultProviderScope(tx, tenantID); err != nil {
+			return err
+		}
+		if err := clearDefault(tx, tenantID, excludeID); err != nil {
+			return err
+		}
+		return write(tx)
+	})
+}
+
+// lockDefaultProviderScope uses the tenant row as a stable per-tenant lock,
+// including when the tenant does not have any providers yet. SQLite has no row
+// locks, so a no-op write acquires its database writer lock before the read/write
+// transition starts.
+func lockDefaultProviderScope(tx *gorm.DB, tenantID uint64) error {
+	if tx.Name() == "sqlite" {
+		result := tx.Model(&types.Tenant{}).Where("id = ?", tenantID).UpdateColumn("id", tenantID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	}
+
+	var tenant types.Tenant
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", tenantID).First(&tenant).Error
 }
 
 // PatchSettings persists display/default changes without writing connection parameters.
@@ -108,14 +165,7 @@ func (r *webSearchProviderRepository) PatchSettings(
 			return errors.New("unsupported provider setting")
 		}
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if values["is_default"] == true {
-			if err := tx.Model(&types.WebSearchProviderEntity{}).
-				Where("tenant_id = ? AND id != ? AND is_default = ?", provider.TenantID, provider.ID, true).
-				Update("is_default", false).Error; err != nil {
-				return err
-			}
-		}
+	update := func(tx *gorm.DB) error {
 		result := tx.Model(&types.WebSearchProviderEntity{}).
 			Where("id = ? AND tenant_id = ?", provider.ID, provider.TenantID).Updates(values)
 		if result.Error != nil {
@@ -125,5 +175,9 @@ func (r *webSearchProviderRepository) PatchSettings(
 			return gorm.ErrRecordNotFound
 		}
 		return nil
-	})
+	}
+	if values["is_default"] == true {
+		return r.withDefaultTransition(ctx, provider.TenantID, provider.ID, update)
+	}
+	return r.db.WithContext(ctx).Transaction(update)
 }

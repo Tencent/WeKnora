@@ -114,6 +114,22 @@
                 @load-more="loadTags()" @manage="openTagManageDrawer" />
             </div>
             <div class="faq-filter-bar__trailing">
+              <div class="faq-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
+                <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
+                  <button type="button" :class="{ active: viewMode === 'grid' }"
+                    :aria-label="$t('knowledgeBase.viewModeGrid')" :aria-pressed="viewMode === 'grid'"
+                    @click="viewMode = 'grid'">
+                    <t-icon name="view-module" size="16px" />
+                  </button>
+                </t-tooltip>
+                <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
+                  <button type="button" :class="{ active: viewMode === 'list' }"
+                    :aria-label="$t('knowledgeBase.viewModeList')" :aria-pressed="viewMode === 'list'"
+                    @click="viewMode = 'list'">
+                    <t-icon name="view-list" size="16px" />
+                  </button>
+                </t-tooltip>
+              </div>
               <!-- 新建：新建条目 / 导入 -->
               <template v-if="faqCreateOptions.length">
                 <t-tooltip :content="$t('knowledgeEditor.faq.createGroup')" placement="top">
@@ -148,7 +164,8 @@
           <div ref="scrollContainer" class="faq-scroll-container"
             :class="{ 'has-batch-bar': selectedRowKeys.length > 0 && canSelectEntries }" @scroll="handleScroll">
             <!-- FAQ 骨架屏 -->
-            <div v-if="loading && entries.length === 0" class="faq-skeleton-grid">
+            <div v-if="loading && entries.length === 0" class="faq-skeleton-grid"
+              :class="{ 'faq-skeleton-list': viewMode === 'list' }">
               <div v-for="n in 6" :key="'faq-skel-' + n" class="faq-card faq-card-skeleton">
                 <div class="faq-card-header">
                   <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '16px' }]" />
@@ -165,7 +182,7 @@
             </div>
             <!-- Card List -->
             <template v-else-if="entries.length > 0">
-              <div ref="cardListRef" class="faq-card-list">
+              <div v-if="viewMode === 'grid'" ref="cardListRef" class="faq-card-list">
                 <div v-for="entry in entries" :key="entry.id" class="faq-card"
                   :class="{ 'selected': selectedRowKeys.includes(entry.id), 'is-selectable': canSelectEntries }"
                   @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))">
@@ -303,6 +320,87 @@
                   </div>
                 </div>
               </div>
+              <!-- 列表与卡片共享数据、选择状态和操作 -->
+              <div v-else class="faq-entry-list">
+                <div v-for="entry in entries" :key="entry.id" class="faq-list-row"
+                  :class="{ selected: selectedRowKeys.includes(entry.id), 'is-selectable': canSelectEntries }"
+                  @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))">
+                  <div v-if="canSelectEntries" class="faq-list-check" @click.stop>
+                    <t-checkbox :checked="selectedRowKeys.includes(entry.id)" :disabled="batchActionLoading"
+                      :aria-label="entry.standard_question"
+                      @change="(checked: boolean) => handleCardSelect(entry.id, checked)" />
+                  </div>
+                  <div class="faq-list-main">
+                    <button type="button" class="faq-list-question" :aria-expanded="!!entry.expanded"
+                      :aria-controls="`faq-list-details-${entry.id}`" @click.stop="entry.expanded = !entry.expanded">
+                      <span>{{ entry.standard_question }}</span>
+                      <t-icon :name="entry.expanded ? 'chevron-up' : 'chevron-down'" size="14px" />
+                    </button>
+                    <div class="faq-list-tag" @click.stop>
+                      <t-dropdown v-if="canEdit && tagList.length" :options="tagDropdownOptions" trigger="click"
+                        @click="(data: any) => handleEntryTagChange(entry.id, data.value as string)">
+                        <t-tag size="small" variant="light" :title="getTagName(entry.tag_id) || $t('knowledgeBase.untagged')">
+                          <span class="faq-list-tag-text">{{ getTagName(entry.tag_id) || $t('knowledgeBase.untagged') }}</span>
+                        </t-tag>
+                      </t-dropdown>
+                      <t-tag v-else size="small" variant="light"
+                        :title="getTagName(entry.tag_id) || $t('knowledgeBase.untagged')">
+                        <span class="faq-list-tag-text">{{ getTagName(entry.tag_id) || $t('knowledgeBase.untagged') }}</span>
+                      </t-tag>
+                    </div>
+                  </div>
+                  <div class="faq-list-meta">
+                    <div class="faq-list-counts">
+                      <span>{{ entry.similar_questions?.length || 0 }} {{ $t('knowledgeEditor.faq.similarQuestions') }}</span>
+                      <span>{{ entry.negative_questions?.length || 0 }} {{ $t('knowledgeEditor.faq.negativeQuestions') }}</span>
+                      <span>{{ entry.answers?.length || 0 }} {{ $t('knowledgeEditor.faq.answers') }}</span>
+                    </div>
+                    <div class="faq-list-updated">
+                      {{ $t('knowledgeBase.columnUpdatedAt') }} <time :datetime="entry.updated_at">{{ formatEntryDate(entry.updated_at) }}</time>
+                    </div>
+                  </div>
+                  <div class="faq-list-actions" @click.stop>
+                    <t-tooltip
+                      :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
+                      placement="top">
+                      <t-switch size="small" :value="entry.is_enabled" :loading="!!entryStatusLoading[entry.id]"
+                        :disabled="!!entryStatusLoading[entry.id] || !canEdit"
+                        :aria-label="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
+                        @change="(value: boolean) => handleEntryStatusChange(entry, value)" />
+                    </t-tooltip>
+                    <t-popup v-if="canManage" v-model="entry.showMore" overlayClassName="card-more-popup"
+                      trigger="click" destroy-on-close placement="bottom-right">
+                      <button type="button" class="card-more-btn faq-list-more" :aria-label="$t('knowledgeBase.columnActions')">
+                        <t-icon name="more" size="16px" />
+                      </button>
+                      <template #content>
+                        <div class="popup-menu" @click.stop>
+                          <div class="popup-menu-item" @click.stop="handleMenuEdit(entry)">
+                            <t-icon class="menu-icon" name="edit" />
+                            <span>{{ $t('common.edit') }}</span>
+                          </div>
+                          <div class="popup-menu-item delete" @click.stop="handleMenuDelete(entry)">
+                            <t-icon class="menu-icon" name="delete" />
+                            <span>{{ $t('common.delete') }}</span>
+                          </div>
+                        </div>
+                      </template>
+                    </t-popup>
+                  </div>
+                  <div v-if="entry.expanded" :id="`faq-list-details-${entry.id}`" class="faq-list-details" @click.stop>
+                    <div v-for="section in [
+                      { key: 'similarQuestions', values: entry.similar_questions },
+                      { key: 'negativeQuestions', values: entry.negative_questions },
+                      { key: 'answers', values: entry.answers },
+                    ].filter(section => section.values?.length)" :key="section.key" class="faq-list-detail-section">
+                      <div class="faq-list-detail-label">{{ $t(`knowledgeEditor.faq.${section.key}`) }}</div>
+                      <ul>
+                        <li v-for="(value, index) in section.values" :key="index">{{ value }}</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </template>
             <template v-else-if="!loading">
               <div class="faq-empty-state">
@@ -356,7 +454,14 @@
             <!-- 相似问 -->
             <div class="setting-row vertical setting-row-optional setting-row-similar">
               <div class="setting-info">
-                <label class="optional-label">{{ $t('knowledgeEditor.faq.similarQuestions') }}</label>
+                <div class="setting-label-row">
+                  <label class="optional-label">{{ $t('knowledgeEditor.faq.similarQuestions') }}</label>
+                  <AssistantActionButton v-if="editorForm.standard_question.trim()"
+                    :label="$t('assistant.actions.suggestFaqQuestions')"
+                    :query="$t('assistant.prompts.suggestFaqQuestions', { count: Math.max(0, 10 - editorForm.similar_questions.length) })"
+                    :selection="faqAssistantSelection"
+                    :disabled="savingEntry || editorForm.similar_questions.length >= 10" />
+                </div>
                 <p class="desc optional-desc">{{ $t('knowledgeEditor.faq.similarQuestionsDesc') }}</p>
               </div>
               <div class="setting-control">
@@ -422,9 +527,15 @@
               <div class="setting-control">
                 <div class="textarea-container">
                   <div class="full-width-input-wrapper textarea-wrapper">
-                    <t-textarea v-model="answerInput" :placeholder="$t('knowledgeEditor.faq.answerPlaceholder')"
-                      :autosize="{ minRows: 3, maxRows: 6 }" class="full-width-textarea" @keydown.ctrl.enter="addAnswer"
-                      @keydown.meta.enter="addAnswer" />
+                    <div class="faq-answer-draft">
+                      <t-textarea v-model="answerInput" :placeholder="$t('knowledgeEditor.faq.answerPlaceholder')"
+                        :autosize="{ minRows: 3, maxRows: 6 }" class="full-width-textarea" @keydown.ctrl.enter="addAnswer"
+                        @keydown.meta.enter="addAnswer" />
+                      <AssistantActionButton v-if="editorForm.standard_question.trim()" class="faq-answer-action"
+                        :label="$t(answerInput.trim() ? 'assistant.actions.refineAnswer' : 'assistant.actions.writeAnswer')"
+                        :query="$t(answerInput.trim() ? 'assistant.prompts.refineFaqAnswer' : 'assistant.prompts.writeFaqAnswer')"
+                        :selection="faqAnswerSelection" :disabled="savingEntry || editorForm.answers.length >= 5" />
+                    </div>
                     <t-button theme="primary" variant="outline"
                       :disabled="!answerInput.trim() || editorForm.answers.length >= 5" @click="addAnswer"
                       class="add-item-btn" size="small">
@@ -758,6 +869,7 @@
 
 <script setup lang="ts">
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -934,6 +1046,25 @@ const handleFaqAction = (data: { value: string }) => {
 const loading = ref(true)
 const loadingMore = ref(false)
 const entries = ref<FAQEntry[]>([])
+
+// 问答视图偏好独立保存，首次访问沿用卡片视图。
+type FAQViewMode = 'grid' | 'list'
+const FAQ_VIEW_MODE_KEY = 'weknora.kb.faq.viewMode'
+const initViewMode = (): FAQViewMode => {
+  try {
+    return localStorage.getItem(FAQ_VIEW_MODE_KEY) === 'list' ? 'list' : 'grid'
+  } catch {
+    return 'grid'
+  }
+}
+const viewMode = ref<FAQViewMode>(initViewMode())
+const formatEntryDate = (value?: string) => {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 const entryStatusLoading = reactive<Record<number, boolean>>({})
 const selectedRowKeys = ref<number[]>([])
 const batchDeleteLoading = ref(false)
@@ -1055,6 +1186,25 @@ const savingEntry = ref(false)
 const answerInput = ref('')
 const similarInput = ref('')
 const negativeInput = ref('')
+
+const faqAnswerSelection = computed(() => ({
+  field: t('knowledgeEditor.faq.answers'),
+  text: JSON.stringify({
+    standard_question: editorForm.standard_question,
+    draft_answer: answerInput.value,
+    existing_answers: editorForm.answers,
+  }, null, 2),
+}))
+
+const faqAssistantSelection = computed(() => ({
+  field: t('knowledgeEditor.faq.similarQuestions'),
+  text: JSON.stringify({
+    standard_question: editorForm.standard_question,
+    existing_similar_questions: [...editorForm.similar_questions, similarInput.value].filter(Boolean),
+    negative_questions: [...editorForm.negative_questions, negativeInput.value].filter(Boolean),
+    answers: [...editorForm.answers, answerInput.value].filter(Boolean),
+  }, null, 2),
+}))
 
 const importVisible = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -2480,7 +2630,9 @@ const debounceArrangeCards = (delay = 100) => {
 
 // 瀑布流布局函数 - 优化版本，避免闪烁
 const arrangeCards = () => {
-  if (!cardListRef.value) return
+  if (viewMode.value !== 'grid' || !cardListRef.value) return
+
+  const container = cardListRef.value
 
   const cards = cardListRef.value.querySelectorAll('.faq-card') as NodeListOf<HTMLElement>
   if (cards.length === 0) return
@@ -2506,6 +2658,7 @@ const arrangeCards = () => {
 
   // 使用 requestAnimationFrame 优化性能
   requestAnimationFrame(() => {
+    if (viewMode.value !== 'grid' || cardListRef.value !== container) return
     // 先设置宽度，保持当前位置不变
     cards.forEach((card) => {
       // 确保卡片是绝对定位
@@ -2518,6 +2671,7 @@ const arrangeCards = () => {
 
     // 等待浏览器重新计算布局
     requestAnimationFrame(() => {
+      if (viewMode.value !== 'grid' || cardListRef.value !== container) return
       // 计算所有卡片的高度（不改变位置）
       const cardHeights: number[] = []
       cards.forEach((card) => {
@@ -2557,10 +2711,8 @@ const arrangeCards = () => {
 
       // 设置容器高度
       const maxHeight = Math.max(...columnHeights)
-      if (cardListRef.value) {
-        cardListRef.value.style.height = `${maxHeight}px`
-        cardListRef.value.style.position = 'relative'
-      }
+      container.style.height = `${maxHeight}px`
+      container.style.position = 'relative'
 
       // 动画完成后移除过渡和 will-change，避免影响后续交互
       setTimeout(() => {
@@ -2617,7 +2769,22 @@ onUnmounted(() => {
   }
 })
 
-// 监听 entries 变化，重新布局
+// 切换视图时保留选择，重建布局并补齐可视区域。
+watch(viewMode, async (mode) => {
+  try {
+    localStorage.setItem(FAQ_VIEW_MODE_KEY, mode)
+  } catch {
+    // 浏览器禁止存储时，仍可正常切换视图。
+  }
+  entries.value.forEach(entry => { entry.showMore = false })
+  await nextTick()
+  scrollContainer.value?.scrollTo({ top: 0 })
+  arrangeCards()
+  // 等待瀑布流布局完成后检查是否需要补齐当前视区。
+  setTimeout(checkAndLoadMore, 350)
+})
+
+// 监听条目数量变化，重新布局。
 watch(() => entries.value.length, () => {
   nextTick(() => {
     arrangeCards()
@@ -2647,6 +2814,15 @@ watch(() => entries.value.map(e => ({
 </script>
 
 <style scoped lang="less">
+.faq-answer-draft {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+
+  .faq-answer-action { position: absolute; left: 8px; bottom: 8px; }
+  :deep(.t-textarea__inner) { padding-bottom: 44px; }
+}
+
 .faq-manager {
   display: flex;
   flex-direction: column;
@@ -2772,6 +2948,273 @@ watch(() => entries.value.map(e => ({
 
   :deep(.t-input__prefix-icon) {
     margin-right: 0;
+  }
+}
+
+.faq-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  margin-right: 4px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--app-radius-xs);
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+
+    &.active {
+      background: var(--td-bg-color-container);
+      color: var(--td-brand-color);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+  }
+}
+
+.faq-entry-list {
+  overflow: hidden;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-lg);
+  background: var(--td-bg-color-container);
+}
+
+.faq-list-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  transition: background-color var(--app-motion-fast) ease;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  &.is-selectable {
+    cursor: pointer;
+  }
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &.selected {
+    background: var(--app-selection-bg);
+
+    &::before {
+      content: '';
+      position: absolute;
+      inset: 12px auto 12px 0;
+      width: 3px;
+      border-radius: var(--app-radius-xs);
+      background: var(--td-brand-color);
+    }
+  }
+}
+
+.faq-list-check {
+  display: flex;
+  flex: 0 0 20px;
+  align-items: center;
+
+  :deep(.t-checkbox__label) {
+    padding: 0;
+  }
+}
+
+.faq-list-main {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.faq-list-question {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font: inherit;
+  font-size: var(--app-text-lg);
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+
+  span {
+    overflow-wrap: anywhere;
+  }
+
+  :deep(.t-icon) {
+    flex-shrink: 0;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 3px;
+  }
+}
+
+.faq-list-tag {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+
+  :deep(.t-popup__reference) {
+    display: block;
+    max-width: 100%;
+  }
+
+  :deep(.t-tag) {
+    max-width: min(240px, 100%);
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  :deep(.t-tag > span) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .faq-list-tag-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.faq-list-meta {
+  flex: 0 1 auto;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-md);
+  line-height: 1.6;
+  text-align: right;
+}
+
+.faq-list-counts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 12px;
+}
+
+.faq-list-updated {
+  margin-top: 4px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+}
+
+.faq-list-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 16px;
+  margin-left: 8px;
+}
+
+.faq-list-more {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+}
+
+.faq-list-details {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-component-stroke);
+  cursor: default;
+
+  .is-selectable & {
+    margin-left: 36px;
+  }
+}
+
+.faq-list-detail-section {
+  & + & {
+    margin-top: 16px;
+  }
+
+  ul {
+    margin: 6px 0 0;
+    padding-left: 20px;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-md);
+    line-height: 1.7;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+
+.faq-list-detail-label {
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
+  .faq-list-row {
+    gap: 12px;
+    padding: 16px 12px;
+  }
+
+  .faq-list-main {
+    flex-basis: 0;
+  }
+
+  .faq-list-actions {
+    gap: 8px;
+    margin-left: 0;
+  }
+
+  .faq-list-meta {
+    flex-basis: 100%;
+    order: 1;
+    text-align: left;
+  }
+
+  .faq-list-counts {
+    justify-content: flex-start;
+  }
+
+  .faq-list-details {
+    order: 2;
+  }
+
+  .faq-list-row.is-selectable {
+    .faq-list-meta,
+    .faq-list-details {
+      margin-left: 32px;
+    }
   }
 }
 
@@ -3175,6 +3618,29 @@ watch(() => entries.value.map(e => ({
   gap: 12px;
   width: 100%;
   animation: contentFadeIn 0.32s ease-out;
+
+  &.faq-skeleton-list {
+    grid-template-columns: 1fr;
+
+    .faq-card-skeleton {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 120px;
+      align-items: center;
+      gap: 12px 24px;
+      padding: 20px;
+
+      .faq-card-header {
+        grid-column: 1 / -1;
+        padding: 0;
+        border: 0;
+      }
+
+      .faq-skel-footer {
+        padding: 0;
+        border: 0;
+      }
+    }
+  }
 }
 
 .faq-card-skeleton {
@@ -4423,6 +4889,18 @@ watch(() => entries.value.map(e => ({
   flex: 1;
   max-width: 65%;
   padding-right: 24px;
+
+  .setting-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+
+    label {
+      margin-bottom: 0;
+    }
+  }
 
   label {
     font-size: var(--app-text-lg);

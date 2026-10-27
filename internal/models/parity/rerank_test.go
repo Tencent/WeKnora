@@ -441,13 +441,13 @@ func TestGatewayRerankEndpoints(t *testing.T) {
 
 // TestScoreScaleIsOverridablePerRow covers the gateways, where the vendor
 // cannot know the answer: GPUStack and a generic endpoint serve whatever
-// reranker was deployed behind them, and the two families disagree — BGE
-// answers a 0..1 probability, Qwen3-Reranker an unbounded score. Converting a
+// reranker was deployed behind them. Its serving configuration determines
+// whether the endpoint returns raw logits or probabilities. Converting a
 // probability as if it were a logit squeezes every score into [0.5, 0.73],
 // which makes a relevance threshold meaningless, so the operator needs a way
 // to say which one is actually there.
 func TestScoreScaleIsOverridablePerRow(t *testing.T) {
-	for _, id := range []string{"gpustack", "generic"} {
+	for _, id := range []string{"gpustack", "generic", "litellm"} {
 		t.Run(id, func(t *testing.T) {
 			base := "http://127.0.0.1:9/v1"
 			overridden, err := modelruntime.Resolve(modelruntime.Ref{

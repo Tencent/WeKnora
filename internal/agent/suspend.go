@@ -28,7 +28,7 @@ type CollaborationDelivery struct {
 
 // RunSnapshot is everything needed to resume a run that ended waiting on a
 // user prompt. It holds durable values only: request-local model handles
-// (cN, dN, res://, msN, mtN) do not survive the run, so the user turn is kept
+// (chunk://N, doc://N, res://, msN, mtN) do not survive the run, so the user turn is kept
 // as the raw query and re-rendered on resume, and tool arguments are kept in
 // their decoded form.
 type RunSnapshot struct {

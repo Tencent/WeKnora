@@ -56,8 +56,29 @@ class AppStorageTests(unittest.TestCase):
         return yaml.safe_load(next(block for block in blocks
                                    if block.startswith(f"# {filename}\n")))
 
-    def test_default_strategy_is_unchanged(self):
+    def test_persistent_single_writer_storage_defaults_to_recreate(self):
         app = self.app(self.documents())
+        self.assertEqual(app["spec"]["strategy"], {
+            "type": "Recreate",
+        })
+
+    def test_nonpersistent_storage_defaults_to_rolling_update(self):
+        app = self.app(self.documents({"dataFiles": {"persistence": {"enabled": False}}}))
+        self.assertEqual(app["spec"]["strategy"], {
+            "type": "RollingUpdate",
+            "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
+        })
+
+    def test_shared_storage_defaults_to_rolling_update(self):
+        app = self.app(self.documents({"dataFiles": {"persistence": {
+            "accessModes": ["ReadWriteMany"],
+        }}}))
+        self.assertEqual(app["spec"]["strategy"]["type"], "RollingUpdate")
+
+    def test_explicit_rolling_update_overrides_safe_default(self):
+        app = self.app(self.documents({"app": {"strategy": {
+            "type": "RollingUpdate",
+        }}}))
         self.assertEqual(app["spec"]["strategy"], {
             "type": "RollingUpdate",
             "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
@@ -78,10 +99,7 @@ class AppStorageTests(unittest.TestCase):
 
     def test_null_strategy_falls_back_to_defaults(self):
         app = self.app(self.documents({"app": {"strategy": None}}))
-        self.assertEqual(app["spec"]["strategy"], {
-            "type": "RollingUpdate",
-            "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
-        })
+        self.assertEqual(app["spec"]["strategy"], {"type": "Recreate"})
 
     def test_invalid_strategy_is_rejected(self):
         result = render({"app": {"strategy": {"type": "Invalid"}}})

@@ -7,6 +7,7 @@ import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, h, nextTick, reactive } from 'vue'
+import * as imageProcessingConfig from '../../utils/imageProcessingConfig'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./ImagePipelineSettings.vue', import.meta.url))
@@ -18,7 +19,7 @@ const compiled = ts.transpileModule(script, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 
-const violation = { message_key: 'imagePipeline.errors.noActionEnabled', field: 'enable_caption' }
+const violation = { message_key: 'imagePipeline.errors.noActionEnabled', field: 'caption_enabled' }
 const flushUpdates = async () => {
   await new Promise<void>((resolve) => setImmediate(resolve))
   await nextTick()
@@ -43,6 +44,7 @@ async function fixture() {
     require(name: string) {
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key, te: () => false }) }
+      if (name === '@/utils/imageProcessingConfig') return imageProcessingConfig
       if (name === '@/api/knowledge-base') return {
         fetchImagePipelines: async () => [{ id: 'default', fields: [] }, { id: 'smartocr', fields: [] }],
         validateImagePipelines: (pipelineId: string, params: Record<string, unknown>) =>
@@ -57,7 +59,12 @@ async function fixture() {
     insert() {}, remove() {}, setElementText() {}, setText() {}, patchProp() {},
     parentNode: () => null, nextSibling: () => null,
   })
-  const props = reactive({ pipelineId: 'default', params: { enable_caption: false, enable_ocr: false } as Record<string, unknown> })
+  // The defaults a pipeline declared, each already stored under its own
+  // pipeline's slot — the shape the panel reads and writes.
+  const props = reactive({
+    pipelineId: 'default',
+    params: { 'default.caption_enabled': false, 'default.ocr_enabled': false } as Record<string, unknown>,
+  })
   const emitted: boolean[] = []
   let vm: any
   const app = renderer.createApp({ setup: () => () => h(exports.default, {
@@ -73,7 +80,8 @@ async function fixture() {
     requests, timers, emitted,
     get invalid() { return emitted.at(-1) },
     get validationFailed() { return vm.validationFailed },
-    async setCaption(enabled: boolean) { vm.onParamChange('enable_caption', enabled); await flushUpdates() },
+    get params() { return props.params as Record<string, unknown> },
+    async setCaption(enabled: boolean) { vm.onParamChange('caption_enabled', enabled); await flushUpdates() },
     async setPipeline(id: string) { vm.onPipelineChange(id); await flushUpdates() },
     async validate() {
       for (const [id, callback] of [...timers]) { timers.delete(id); callback() }
@@ -90,8 +98,8 @@ test('a late invalid response cannot block saving newer valid parameters', async
     await f.setCaption(true)
     await f.validate()
     assert.equal(f.requests.length, 2)
-    assert.equal(f.requests[0].params.enable_caption, false)
-    assert.equal(f.requests[1].params.enable_caption, true)
+    assert.equal(f.requests[0].params['default.caption_enabled'], false)
+    assert.equal(f.requests[1].params['default.caption_enabled'], true)
     f.requests[1].resolve({ violations: [] })
     await flushUpdates()
     f.requests[0].resolve({ violations: [violation] })
@@ -132,7 +140,7 @@ test('parameter changes invalidate responses even before the next debounce fires
   } finally { f.dispose() }
 })
 
-test('switching pipelines clears the previous verdict and ignores its pending request', async () => {
+test('switching pipelines clears the previous verdict and keeps the earlier pick\'s parameters', async () => {
   const f = await fixture()
   try {
     await f.validate()
@@ -145,11 +153,33 @@ test('switching pipelines clears the previous verdict and ignores its pending re
     assert.equal(f.invalid, false)
     await f.validate()
     assert.equal(f.requests[2].pipelineId, 'smartocr')
-    assert.deepEqual({ ...f.requests[2].params }, {})
+    // The previous pipeline's answers stay: each pipeline reads its own slot,
+    // so there is nothing to clear and switching back finds what was set.
+    assert.deepEqual({ ...f.requests[2].params }, {
+      'default.caption_enabled': true,
+      'default.ocr_enabled': false,
+    })
     f.requests[2].resolve({ violations: [] })
     f.requests[1].resolve({ violations: [violation] })
     await flushUpdates()
     assert.equal(f.invalid, false)
+  } finally { f.dispose() }
+})
+
+test('a control writes under the slot of the pipeline that declared it', async () => {
+  // Regression: the panel used to write bare keys, so two pipelines that
+  // declare the same field key read each other's value.
+  const f = await fixture()
+  try {
+    await f.setPipeline('smartocr')
+    await f.setCaption(false)
+    // Spread into a plain object: the panel builds its params inside the
+    // sandbox realm, whose prototypes strict deepEqual will not accept.
+    assert.deepEqual({ ...f.params }, {
+      'default.caption_enabled': false,
+      'default.ocr_enabled': false,
+      'smartocr.caption_enabled': false,
+    })
   } finally { f.dispose() }
 })
 
