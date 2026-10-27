@@ -180,7 +180,6 @@ func (s *agentService) stageSessionAttachments(
 				remotePath: remotePath,
 				name:       attachment.FileName,
 				url:        attachment.URL,
-				content:    content,
 				size:       attachment.FileSize,
 			})
 			if rebound {
@@ -274,9 +273,9 @@ const sandboxStagingRetryDelay = 2 * time.Second
 const sandboxStagingRebindPasses = 3
 
 // stagedInput tracks one attachment staged during this pass so the rebinding
-// recovery can re-establish what an earlier container already held. content
-// is nil for inputs reused from the previous pass; those re-read from
-// durable storage when the recovery needs to rewrite them.
+// recovery can re-establish what an earlier container already held. Original
+// files are re-read from durable storage on recovery rather than retaining
+// every attachment in memory. Only derived text sidecars carry content.
 type stagedInput struct {
 	remotePath string
 	name       string

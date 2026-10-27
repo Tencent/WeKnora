@@ -764,9 +764,9 @@ func TestStageSessionAttachmentsRestoresEarlierInputsAfterRebind(t *testing.T) {
 	require.Equal(t, []byte("content-second"), store.files[remoteSecond])
 	require.Equal(t, []string{remoteFirst, remoteSecond, remoteFirst}, store.writes,
 		"write order: first attachment, killed attachment's retry, then the re-established first attachment")
-	// The re-established write reuses the content kept from this pass, so
-	// durable storage is only read once per attachment.
-	require.Equal(t, 1, fileService.getCalls[first.URL])
+	// Recovery re-reads the earlier original instead of retaining every
+	// attachment in memory for the entire staging pass.
+	require.Equal(t, 2, fileService.getCalls[first.URL])
 	require.Equal(t, 1, fileService.getCalls[second.URL])
 }
 
