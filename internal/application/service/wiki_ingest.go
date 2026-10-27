@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -531,7 +532,6 @@ func EnqueueWikiIngest(
 	kbID, knowledgeID string,
 ) (bool, error) {
 	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
-
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
 	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
@@ -1110,6 +1110,34 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 		cancel()
 		<-renewDone
 	}, true
+}
+
+// wikiInflightCountScript purges expired slots exactly like the reserve
+// script does, then returns the live count. Read-mostly companion to
+// wikiInflightReserveScript so a fan-out decision sees the same view of the
+// cap a reserver would.
+const wikiInflightCountScript = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, tonumber(ARGV[1]))
+return redis.call('ZCARD', KEYS[1])
+`
+
+// activeInflightSlots reports how many batches currently hold one of KB's
+// in-flight slots (standard/Redis mode). Returns -1 when the count is
+// unavailable (no Redis client, or a Redis error); callers must treat that as
+// "unknown" and stay conservative instead of scaling on a stale number.
+func (s *wikiIngestService) activeInflightSlots(ctx context.Context, kbID string) int {
+	if s.redisClient == nil {
+		return -1
+	}
+	res, err := s.redisClient.Eval(ctx, wikiInflightCountScript,
+		[]string{wikiInflightPrefix + kbID},
+		time.Now().UnixMilli(),
+	).Int()
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: inflight count failed for KB %s: %v", kbID, err)
+		return -1
+	}
+	return res
 }
 
 // scheduleCappedRetry enqueues a single coalesced follow-up trigger after a
@@ -3024,45 +3052,58 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 // to the DB. A nil result from GetKnowledgeByIDOnly also counts as gone: the
 // repo layer uses GORM First() which filters soft-deleted rows, so a
 // soft-deleted knowledge surfaces as "not found" here — exactly what we want.
-func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledgeID string) bool {
+// Other lookup errors leave liveness unknown and must reach the caller so it
+// can retry instead of discarding the document's pending work.
+func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledgeID string) (bool, error) {
 	if knowledgeID == "" {
-		return true
+		return true, nil
 	}
 	if s.redisClient != nil {
 		if exists, err := s.redisClient.Exists(ctx, WikiDeletedTombstoneKey(kbID, knowledgeID)).Result(); err == nil && exists > 0 {
-			return true
+			return true, nil
 		}
 	}
 	kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil || kn == nil {
-		return true
+	if errors.Is(err, apprepo.ErrKnowledgeNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("wiki ingest: check knowledge %s: %w", knowledgeID, err)
+	}
+	if kn == nil {
+		return true, nil
 	}
 	switch kn.ParseStatus {
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 // filterLiveUpdates drops additions/summaries whose source knowledge has been
 // deleted since the Map phase finished. Retract updates are preserved so
 // pages still get cleaned up. Caches per-knowledge results to avoid DB
 // hammering when a single reduce slug carries many updates for the same doc.
-func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, updates []SlugUpdate) []SlugUpdate {
+func (s *wikiIngestService) filterLiveUpdates(
+	ctx context.Context, kbID string, updates []SlugUpdate,
+) ([]SlugUpdate, error) {
 	if len(updates) == 0 {
-		return updates
+		return updates, nil
 	}
 	goneCache := make(map[string]bool)
-	isGone := func(kid string) bool {
+	isGone := func(kid string) (bool, error) {
 		if kid == "" {
-			return false
+			return false, nil
 		}
 		if v, ok := goneCache[kid]; ok {
-			return v
+			return v, nil
 		}
-		v := s.isKnowledgeGone(ctx, kbID, kid)
+		v, err := s.isKnowledgeGone(ctx, kbID, kid)
+		if err != nil {
+			return false, err
+		}
 		goneCache[kid] = v
-		return v
+		return v, nil
 	}
 	filtered := make([]SlugUpdate, 0, len(updates))
 	dropped := 0
@@ -3071,7 +3112,11 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 		case "retract", "retractStale":
 			filtered = append(filtered, u)
 		default:
-			if isGone(u.KnowledgeID) {
+			gone, err := isGone(u.KnowledgeID)
+			if err != nil {
+				return nil, err
+			}
+			if gone {
 				dropped++
 				continue
 			}
@@ -3081,7 +3126,7 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 	if dropped > 0 {
 		logger.Infof(ctx, "wiki ingest: reduce dropped %d updates for deleted knowledge(s)", dropped)
 	}
-	return filtered
+	return filtered, nil
 }
 
 // reconstructContent rebuilds document text from chunks.
@@ -3138,6 +3183,134 @@ func reconstructEnrichedContent(
 	return searchutil.EnrichContentWithImageInfo(content, mergedImageInfo)
 }
 
+// appendScannedPageText adds OCR from pages whose parent text is only an
+// image link. reconstructEnrichedContent inlines image_info when that JSON
+// exists; scanned pages often keep the recognized text only on the image_ocr
+// chunk. A document that already has some prose still receives those pages.
+// Disabled chunks, OCR beside real prose, and text already present are left out.
+func appendScannedPageText(content string, chunks []*types.Chunk) string {
+	var b strings.Builder
+	b.WriteString(content)
+	written := content
+	for _, c := range scannedOCRForWiki(chunks) {
+		text := strings.TrimSpace(c.Content)
+		if text == "" || strings.Contains(written, text) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+		written = b.String()
+	}
+	return b.String()
+}
+
+// wikiCitationChunks gives the citation pass the scanned-page OCR on the
+// parent text chunk. splitChunksIntoCitationBatches only reads text chunks,
+// so an image-link parent would otherwise be cited without the page text.
+// The returned chunks are copies; stored rows are not changed.
+func wikiCitationChunks(chunks []*types.Chunk) []*types.Chunk {
+	ocrByParent := map[string][]*types.Chunk{}
+	var orphans []*types.Chunk
+	for _, c := range scannedOCRForWiki(chunks) {
+		if c.ParentChunkID == "" {
+			orphans = append(orphans, c)
+			continue
+		}
+		ocrByParent[c.ParentChunkID] = append(ocrByParent[c.ParentChunkID], c)
+	}
+	out := make([]*types.Chunk, 0, len(chunks)+len(orphans))
+	for _, c := range chunks {
+		if c == nil || !c.IsEnabled {
+			continue
+		}
+		if c.ChunkType != types.ChunkTypeText && c.ChunkType != "" {
+			continue
+		}
+		ocrs := ocrByParent[c.ID]
+		if len(ocrs) == 0 || chunkHasExtractableText(c.Content) {
+			out = append(out, c)
+			continue
+		}
+		clone := *c
+		var b strings.Builder
+		b.WriteString(c.Content)
+		for _, o := range ocrs {
+			text := strings.TrimSpace(o.Content)
+			if text == "" || strings.Contains(b.String(), text) {
+				continue
+			}
+			b.WriteByte('\n')
+			b.WriteString(text)
+		}
+		clone.Content = b.String()
+		out = append(out, &clone)
+	}
+	for _, o := range orphans {
+		clone := *o
+		clone.ChunkType = types.ChunkTypeText
+		out = append(out, &clone)
+	}
+	return out
+}
+
+// scannedOCRForWiki returns enabled OCR chunks whose parent is only an image
+// link, ordered by the parent text chunk and then the PDF page.
+func scannedOCRForWiki(chunks []*types.Chunk) []*types.Chunk {
+	parentIndex := make(map[string]int, len(chunks))
+	disabledParent := make(map[string]bool)
+	for _, c := range chunks {
+		if c == nil || (c.ChunkType != types.ChunkTypeText && c.ChunkType != "") {
+			continue
+		}
+		parentIndex[c.ID] = c.ChunkIndex
+		if !c.IsEnabled {
+			disabledParent[c.ID] = true
+		}
+	}
+	enabled := make([]*types.Chunk, 0, len(chunks))
+	for _, c := range chunks {
+		if c == nil || !c.IsEnabled || disabledParent[c.ParentChunkID] {
+			continue
+		}
+		enabled = append(enabled, c)
+	}
+	var ocr []*types.Chunk
+	for _, c := range selectGraphChunks(enabled) {
+		if c != nil && c.ChunkType == types.ChunkTypeImageOCR {
+			ocr = append(ocr, c)
+		}
+	}
+	sort.SliceStable(ocr, func(i, j int) bool {
+		pi, pj := parentIndex[ocr[i].ParentChunkID], parentIndex[ocr[j].ParentChunkID]
+		if pi != pj {
+			return pi < pj
+		}
+		pageI, pageJ := pdfPageOf(ocr[i]), pdfPageOf(ocr[j])
+		if pageI != pageJ {
+			return pageI < pageJ
+		}
+		if ocr[i].ChunkIndex != ocr[j].ChunkIndex {
+			return ocr[i].ChunkIndex < ocr[j].ChunkIndex
+		}
+		return ocr[i].StartAt < ocr[j].StartAt
+	})
+	return ocr
+}
+
+func pdfPageOf(c *types.Chunk) int {
+	if c == nil {
+		return 0
+	}
+	for _, loc := range c.SourceLocators {
+		if loc.Type == types.SourceLocatorPDF && loc.Page > 0 {
+			return loc.Page
+		}
+	}
+	return 0
+}
+
 // slugify creates a URL-friendly slug from a string
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
@@ -3163,15 +3336,6 @@ func slugify(s string) string {
 		s = s[:200]
 	}
 	return s
-}
-
-// truncateString truncates a string to maxLen runes
-func truncateString(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
 }
 
 // appendUnique appends a string to a StringArray if not already present
@@ -3230,7 +3394,14 @@ var (
 	// e.g. <image url="...">. Capture both double- and single-quoted forms.
 	imageURLAttrRE = regexp.MustCompile(`(?i)<image\b[^>]*\surl\s*=\s*(?:"([^"]*)"|'([^']*)')`)
 
-	imagePlaceholderTokenRE = regexp.MustCompile(`wkimg:[A-Za-z0-9_-]+`)
+	imagePlaceholderTokenRE = regexp.MustCompile(`(?i)wkimg\s*[:：/_\-]?\s*[0-9]{1,6}`)
+
+	// looseImagePlaceholderTokenRE matches a whole token that the synthesis
+	// model may have rewritten with a different separator (wkimg/0010,
+	// wkimg_0010, wkimg-0010, "wkimg 0010", full-width colon). The numeric
+	// suffix still identifies the image, so these are normalised back to the
+	// canonical wkimg:0010 form before lookup.
+	looseImagePlaceholderTokenRE = regexp.MustCompile(`(?i)^wkimg\s*[:：/_\-]?\s*([0-9]{1,6})$`)
 )
 
 func maskTemplateDataImageURLs(data map[string]string) (map[string]string, map[string]string) {
@@ -3336,13 +3507,36 @@ func unmaskImageURLs(out string, urlMap map[string]string) string {
 			}
 			return match[:idx+1] + realURL + ")"
 		}
-		if strings.HasPrefix(url, "wkimg:") {
+		if canonical, ok := canonicalImagePlaceholder(url); ok {
+			realURL, known := urlMap[canonical]
+			if !known {
+				return ""
+			}
+			idx := strings.LastIndex(match, "(")
+			if idx < 0 {
+				return match
+			}
+			return match[:idx+1] + realURL + ")"
+		}
+		if strings.HasPrefix(strings.ToLower(url), "wkimg") {
 			return ""
 		}
 		return match
 	})
 
 	return replaceImagePlaceholderTokensOutsideMarkdown(out, urlMap)
+}
+
+// canonicalImagePlaceholder normalises the separator variants a model may
+// introduce and reports whether token is a whole image placeholder. Only the
+// separator is normalised: the digits are preserved verbatim so an invented
+// index such as wkimg:9999 does not accidentally resolve to a real image.
+func canonicalImagePlaceholder(token string) (string, bool) {
+	m := looseImagePlaceholderTokenRE.FindStringSubmatch(strings.TrimSpace(token))
+	if m == nil {
+		return "", false
+	}
+	return "wkimg:" + m[1], true
 }
 
 func replaceImagePlaceholderTokensOutsideMarkdown(s string, urlMap map[string]string) string {
@@ -3368,7 +3562,11 @@ func replaceImagePlaceholderTokensOutsideMarkdown(s string, urlMap map[string]st
 
 func replaceImagePlaceholderTokens(s string, urlMap map[string]string) string {
 	return imagePlaceholderTokenRE.ReplaceAllStringFunc(s, func(token string) string {
-		if realURL, ok := urlMap[token]; ok {
+		canonical, ok := canonicalImagePlaceholder(token)
+		if !ok {
+			return ""
+		}
+		if realURL, ok := urlMap[canonical]; ok {
 			return realURL
 		}
 		return ""

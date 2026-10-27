@@ -427,13 +427,15 @@ import {
   validateAllowedOrigins,
   type AllowedOriginsValidationError,
 } from '@/utils/embedAllowedOrigins'
-import { listAgents, type CustomAgent } from '@/api/agent'
+import type { CustomAgent } from '@/api/agent'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue'
 
 const filterAgentId = defineModel<string>('filterAgentId', { default: '' })
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const chatResources = useChatResourcesStore()
 const isAdmin = computed(() => authStore.hasRole('admin'))
 
 const loading = ref(false)
@@ -536,6 +538,7 @@ const headerTitleModeOptions = computed(() => ([
 const defaultLocaleOptions = computed(() => ([
   { label: t('embedPublish.defaultLocaleBrowser'), value: '' },
   { label: '简体中文', value: 'zh-CN' },
+  { label: '繁體中文', value: 'zh-TW' },
   { label: 'English', value: 'en-US' },
   { label: '한국어', value: 'ko-KR' },
   { label: '日本語', value: 'ja-JP' },
@@ -680,12 +683,12 @@ function mergeChannelDetail(detail: EmbedChannel) {
 const load = async () => {
   loading.value = true
   try {
-    const [res, agentRes] = await Promise.all([
+    const [res] = await Promise.all([
       listAllEmbedChannels(),
-      listAgents(),
+      chatResources.ensureAgents(),
     ])
     allChannels.value = res?.data || []
-    agents.value = agentRes?.data || []
+    agents.value = chatResources.agents as CustomAgent[]
     await Promise.all(allChannels.value.map(async (ch) => {
       try {
         const statsRes = await getEmbedChannelStats(ch.id)

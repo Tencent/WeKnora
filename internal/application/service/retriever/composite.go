@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -28,11 +29,20 @@ type CompositeRetrieveEngine struct {
 }
 
 // Retrieve performs retrieval operations by delegating to the appropriate engine
-// based on the retriever type specified in the parameters
+// based on the retriever type specified in the parameters.
+//
+// Error contract: a failure in one retriever leg does not discard results
+// collected from other successful legs. Any such error is returned alongside
+// the available results (or nil results when every leg fails), so callers can
+// degrade gracefully without treating an incomplete answer as complete. A
+// result set that reports a partial failure in RetrieveResult.Error follows
+// the same contract: its returned hits are kept alongside the failure.
 func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 	retrieveParams []types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
-	return concurrentRetrieve(ctx, retrieveParams,
+	var partialMu sync.Mutex
+	var partialErrs []error
+	results, err := concurrentRetrieve(ctx, retrieveParams,
 		func(ctx context.Context, param types.RetrieveParams, results *[]*types.RetrieveResult, mu *sync.Mutex) error {
 			found := false
 			for _, engineInfo := range c.engineInfos {
@@ -43,6 +53,14 @@ func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 					result, err := engineInfo.retrieveEngine.Retrieve(ctx, param)
 					if err != nil {
 						return err
+					}
+					for _, one := range result {
+						if one == nil || one.Error == nil {
+							continue
+						}
+						partialMu.Lock()
+						partialErrs = append(partialErrs, one.Error)
+						partialMu.Unlock()
 					}
 					mu.Lock()
 					*results = append(*results, result...)
@@ -57,6 +75,14 @@ func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 			return nil
 		},
 	)
+	if err != nil {
+		// Keep results from successful retriever legs alongside the failure.
+		return results, err
+	}
+	if len(partialErrs) > 0 {
+		return results, fmt.Errorf("retrieve returned partial results: %w", errors.Join(partialErrs...))
+	}
+	return results, nil
 }
 
 // NewCompositeRetrieveEngine creates a new composite retrieve engine with the given parameters
@@ -155,7 +181,7 @@ func concurrentRetrieve(
 	// Check for errors
 	for err := range errCh {
 		if err != nil {
-			return nil, err
+			return results, err
 		}
 	}
 

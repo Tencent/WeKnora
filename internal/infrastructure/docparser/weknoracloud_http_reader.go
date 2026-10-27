@@ -21,6 +21,11 @@ import (
 
 const (
 	weKnoraCloudReaderBaseURL = "https://weknora.weixin.qq.com/api/v1/doc"
+	// defaultWeKnoraCloudPollTimeout bounds how long one async task is polled;
+	// WEKNORA_WEKNORACLOUD_TIMEOUT overrides it. It must stay below
+	// WEKNORA_DOCREADER_CALL_TIMEOUT (default 30m) or the hardcoded value, not
+	// the configured one, is what fails a slow parse.
+	defaultWeKnoraCloudPollTimeout = 20 * time.Minute
 )
 
 // WeKnoraCloudSignedDocumentReader implements the docreader HTTP protocol with WeKnoraCloud signing.
@@ -47,7 +52,7 @@ func NewWeKnoraCloudSignedDocumentReader(appID, apiKey string) (*WeKnoraCloudSig
 		apiKey:              apiKey,
 		initialPollInterval: 500 * time.Millisecond,
 		maxPollInterval:     10 * time.Second,
-		pollTimeout:         20 * time.Minute,
+		pollTimeout:         requestTimeoutFromEnv("WEKNORA_WEKNORACLOUD_TIMEOUT", defaultWeKnoraCloudPollTimeout),
 		client:              secutils.NewSSRFSafeHTTPClient(clientCfg),
 	}, nil
 }
@@ -138,7 +143,7 @@ type weKnoraCloudAsyncTaskResponse struct {
 
 func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, taskID string) (*types.ReadResult, error) {
 	pollCtx := ctx
-	if _, ok := ctx.Deadline(); !ok && p.pollTimeout > 0 {
+	if p.pollTimeout > 0 {
 		var cancel context.CancelFunc
 		pollCtx, cancel = context.WithTimeout(ctx, p.pollTimeout)
 		defer cancel()
@@ -238,4 +243,13 @@ func (p *WeKnoraCloudSignedDocumentReader) newSignedRequest(ctx context.Context,
 		httpReq.Header.Set(k, v)
 	}
 	return httpReq, nil
+}
+
+// PreprocessImage is not offered by the cloud-signed reader: page straightening
+// runs in the local docreader service, while this reader talks to WeKnoraCloud.
+// It reports that as a verdict — fallback=true, no error — so the caller's only
+// fallback (OCR the original bytes) needs no special case and nothing looks like
+// a failure in the logs.
+func (p *WeKnoraCloudSignedDocumentReader) PreprocessImage(_ context.Context, _ []byte) ([]byte, bool, error) {
+	return nil, true, nil
 }

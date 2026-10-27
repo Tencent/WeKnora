@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 import { useUIStore } from './ui.ts'
+import { SIDEBAR_COLLAPSED_WIDTH } from '../utils/sidebarWidth.ts'
 
 test('sidebar drag bounds, collapse, button restore, and saved width stay consistent', () => {
   const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
@@ -24,7 +25,7 @@ test('sidebar drag bounds, collapse, button restore, and saved width stay consis
     ui.resizeSidebar(270)
     ui.resizeSidebar(179)
     assert.equal(ui.sidebarCollapsed, true)
-    assert.equal(ui.sidebarDisplayWidth, 60)
+    assert.equal(ui.sidebarDisplayWidth, SIDEBAR_COLLAPSED_WIDTH)
     ui.toggleSidebar()
     assert.equal(ui.sidebarDisplayWidth, 270, 'collapse keeps the last expanded width')
     ui.collapseSidebar()

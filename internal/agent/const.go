@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/browserskill"
+	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -36,12 +38,19 @@ const (
 	defaultLLMStallTimeout = 120 * time.Second
 
 	// defaultToolExecTimeout is the default maximum time for a single tool execution.
-	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
+	// Prevents long-running tools (for example database_query) from hanging indefinitely.
 	defaultToolExecTimeout = 60 * time.Second
 	// shellExecToolTimeout is slightly longer than shell_exec's own hard
 	// 600-second command timeout so the tool can return a structured timeout
 	// result instead of being cancelled first by the generic agent wrapper.
 	shellExecToolTimeout = 10*time.Minute + 5*time.Second
+	// webFetchToolSlack is how much longer the agent wrapper waits than the
+	// shared page-fetch budget. Same 5s headroom as shell_exec, so web_fetch can
+	// return its own timeout result instead of being cancelled first.
+	webFetchToolSlack = 5 * time.Second
+	// workWaitToolSlack is added to work_wait's own wait so the final detailed
+	// read still fits after the wait elapses (D3).
+	workWaitToolSlack = 30 * time.Second
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
@@ -60,6 +69,10 @@ const (
 	// "Identical" includes an identical lack of content: consecutive empty
 	// rounds are the clearest stuck loop there is.
 	maxRepeatedResponseRounds = 2
+
+	// maxConsecutiveFailedToolCalls is the number of identical failed tool
+	// calls allowed before the model is asked to switch tools or strategies.
+	maxConsecutiveFailedToolCalls = 3
 
 	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
 	// the completion-token cap before the loop gives up. A truncated answer
@@ -82,6 +95,13 @@ const truncatedAnswerFallback = "Sorry, this answer kept hitting the model's per
 // and the round that tripped it produced no text.
 const stalledAnswerFallback = "I'm sorry, I was unable to generate a response. Please try again."
 
+// Empty model output is a runtime recovery condition, not new user steering.
+const emptyResponseRetryNotice = "<runtime_event>\n" +
+	"{\"source\":\"runtime\",\"type\":\"empty_response_retry\",\"message\":\"The" +
+	" previous model response contained no usable answer or tool calls. Continue the " +
+	"existing task from the current state. Tools and waiting remain available; " +
+	"provide a final response when the task is ready to conclude.\"}\n</runtime_event>"
+
 func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	if toolName == "local_browser" && len(arguments) > 0 {
 		var input struct {
@@ -91,8 +111,18 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 			return browserskill.HumanStepTimeout
 		}
 	}
-	if toolName == "shell_exec" {
+	if toolName == agenttools.ToolWorkWait {
+		raw := ""
+		if len(arguments) > 0 {
+			raw = arguments[0]
+		}
+		return time.Duration(agenttools.WorkWaitSeconds(raw))*time.Second + workWaitToolSlack
+	}
+	switch toolName {
+	case "shell_exec":
 		return shellExecToolTimeout
+	case "web_fetch":
+		return webfetch.PageFetchTimeout() + webFetchToolSlack
 	}
 	return defaultToolExecTimeout
 }
@@ -145,6 +175,27 @@ func isTransientError(err error) bool {
 	return false
 }
 
+// maxLLMRetryAfter caps how long a vendor's Retry-After may hold a turn
+// between two attempts. A longer wait is not worth keeping the user on a
+// silent turn for; the retry then goes out at the cap and, if the vendor is
+// still limiting, the turn fails the usual way.
+const maxLLMRetryAfter = 30 * time.Second
+
+// llmRetryDelay is the wait before retry number attempt (1-based). It is the
+// linear backoff, raised to the vendor's Retry-After when a 429/503 reply
+// carried one, so a rate-limited request is not re-sent before the provider
+// said it would accept it.
+func llmRetryDelay(err error, attempt int) time.Duration {
+	delay := time.Duration(attempt) * time.Second
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		if wait := min(httpErr.RetryAfter(), maxLLMRetryAfter); wait > delay {
+			delay = wait
+		}
+	}
+	return delay
+}
+
 // getLLMStallTimeout returns how long an LLM stream may go silent before it is
 // cancelled, from AgentConfig.LLMCallTimeout or the default.
 func (e *AgentEngine) getLLMStallTimeout() time.Duration {
@@ -171,11 +222,18 @@ func (e *AgentEngine) getCompletionTokenBudget() int {
 func completionTokenBudgetFor(cfg *types.AgentConfig) int {
 	configured := 0
 	sandboxID := ""
+	modelLimit := 0
 	if cfg != nil {
 		configured = cfg.MaxCompletionTokens
 		sandboxID = cfg.SandboxConfigID
+		modelLimit = cfg.ModelMaxOutputTokens
 	}
-	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
+	budget := types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
+	// Providers reject a request for more output than the model can emit.
+	if modelLimit > 0 {
+		budget = min(budget, modelLimit)
+	}
+	return budget
 }
 
 // contextReserveTokens is the part of the window that history may not occupy,

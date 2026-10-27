@@ -33,6 +33,19 @@ Create a default fully qualified app name.
 {{- end }}
 
 {{/*
+Resolve a component Service name while preserving names used by existing releases.
+Usage: include "weknora.serviceName" (dict "component" "postgresql" "context" .)
+*/}}
+{{- define "weknora.serviceName" -}}
+{{- $service := (index .context.Values .component).service | default dict -}}
+{{- $legacyName := .component -}}
+{{- if eq .component "postgresql" -}}
+{{- $legacyName = "postgres" -}}
+{{- end -}}
+{{- default $legacyName $service.name -}}
+{{- end -}}
+
+{{/*
 Create chart name and version as used by the chart label.
 Ref: https://helm.sh/docs/chart_best_practices/labels/
 */}}

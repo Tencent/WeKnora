@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -37,12 +36,14 @@ type SummaryConfig struct {
 // Sessions are now knowledge-base-independent and serve as conversation containers.
 // All configuration comes from custom agent at query time.
 type CreateSessionRequest struct {
+	Kind        string `json:"kind,omitempty"`
 	Title       string `json:"title"`       // Session title (optional)
 	Description string `json:"description"` // Session description (optional)
 }
 
 // Session session information
 type Session struct {
+	Kind        string `json:"kind"`
 	ID          string `json:"id"`
 	TenantID    uint64 `json:"tenant_id"`
 	Title       string `json:"title"`
@@ -97,11 +98,21 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*Session, er
 	return &response.Data, nil
 }
 
-// GetSessionsByTenant gets all sessions for a tenant
-func (c *Client) GetSessionsByTenant(ctx context.Context, page int, pageSize int) ([]Session, int, error) {
+// SessionListOptions keeps assistant history opt-in for existing callers.
+type SessionListOptions struct {
+	Kind string
+}
+
+// GetSessionsByTenant gets normal sessions unless an explicit kind is requested.
+func (c *Client) GetSessionsByTenant(
+	ctx context.Context, page int, pageSize int, opts ...SessionListOptions,
+) ([]Session, int, error) {
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
+	if len(opts) > 0 {
+		queryParams.Set("kind", opts[0].Kind)
+	}
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/sessions", nil, queryParams)
 	if err != nil {
 		return nil, 0, err
@@ -218,6 +229,16 @@ type QuestionOrigin struct {
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
 }
 
+// PageContext identifies the open page. Knowledge-base resources must be in
+// the retrieval scope; agents must be visible in the current tenant.
+type PageContext struct {
+	AgentID         string   `json:"agent_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
+	KnowledgeID     string   `json:"knowledge_id,omitempty"`
+	WikiSlug        string   `json:"wiki_slug,omitempty"`
+	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"` // At most 20 are kept
+}
+
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
 	Query            string            `json:"query"`                     // Query text for knowledge base search
@@ -299,8 +320,7 @@ func (c *Client) KnowledgeQAStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return err
 	}
@@ -324,10 +344,12 @@ func (c *Client) KnowledgeQAStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" {
-				debugLogger.Debug("sse_data_processing", "data", dataBuffer, "event_type", eventType)
+			// A bare `data:` frame carries no payload; skip it rather than
+			// failing the stream on an empty JSON document.
+			if data := completeSSEData(dataBuffer); data != "" {
+				debugLogger.Debug("sse_data_processing", "data", data, "event_type", eventType)
 				var streamResponse StreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					debugLogger.Debug("sse_parse_failed", "error", err)
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
@@ -342,9 +364,9 @@ func (c *Client) KnowledgeQAStream(
 				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
-				eventType = ""
 			}
+			dataBuffer = ""
+			eventType = ""
 			continue
 		}
 
@@ -356,7 +378,7 @@ func (c *Client) KnowledgeQAStream(
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 
@@ -393,8 +415,7 @@ func (c *Client) ContinueStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newAPIError(resp.StatusCode, body)
+		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 	}
 
 	// Use bufio to read SSE data line by line
@@ -410,9 +431,9 @@ func (c *Client) ContinueStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" && eventType == "message" {
+			if data := completeSSEData(dataBuffer); data != "" && eventType == "message" {
 				var streamResponse StreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
 
@@ -422,20 +443,20 @@ func (c *Client) ContinueStream(
 				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
-				eventType = ""
 			}
+			dataBuffer = ""
+			eventType = ""
 			continue
 		}
 
 		// Process lines with event: prefix
 		if strings.HasPrefix(line, "event:") {
-			eventType = line[6:] // Remove "event:" prefix
+			eventType = strings.TrimPrefix(line[6:], " ") // Remove "event:" prefix
 		}
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 
@@ -537,8 +558,7 @@ func (c *Client) SearchKnowledgeDetailed(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return nil, err
 	}

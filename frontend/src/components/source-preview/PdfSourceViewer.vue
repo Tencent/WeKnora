@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { SourceLocateRequest, SourceLocator } from '@/utils/sourceLocator'
-import { findInText } from '@/utils/sourceLocator'
-import { findTextRange } from '@/utils/sourceLocatorDom'
+import type { SourceLocateRequest } from '@/utils/sourceLocator'
+import { resolvePdfSource, mergeSourceRects, type PdfTarget } from '@/utils/pdfSourceLocate'
+import { findTextRanges } from '@/utils/sourceLocatorDom'
 import { loadPdfJs, type PdfJs } from './pdfjsLoader'
 
 type PdfDocument = Awaited<ReturnType<PdfJs['getDocument']>['promise']>
 type PdfPage = Awaited<ReturnType<PdfDocument['getPage']>>
 
 /** A highlight drawn on a page, in fractions of the page box. */
-type Mark = { left: number; top: number; width: number; height: number; kind: 'box' | 'text' | 'page' }
+type Mark = { left: number; top: number; width: number; height: number; kind: 'box' | 'text' | 'page'; target: number }
 
-export type PdfLocateResult = { found: boolean; precise: boolean; page?: number }
+export type PdfLocateResult = { found: boolean; precise: boolean; page?: number; granularity?: string; reason?: string }
 
 const props = defineProps<{
   data: ArrayBuffer | null
@@ -89,7 +89,10 @@ async function openDocument(data: ArrayBuffer) {
   pdfjs = lib
   if (disposed) return
   // pdf.js takes ownership of the buffer; keep the caller's copy intact.
-  const task = lib.getDocument({ data: new Uint8Array(data.slice(0)) })
+  const task = lib.getDocument({
+    data: new Uint8Array(data.slice(0)),
+    wasmUrl: `${import.meta.env.BASE_URL}pdfjs/wasm/`,
+  })
   loadingTask = task
   const doc = await task.promise
   if (disposed) {
@@ -113,7 +116,9 @@ async function renderPage(pageNumber: number): Promise<void> {
   const doc = pdf.value
   const el = pageElements.get(pageNumber)
   if (!doc || !el || !pdfjs) return
-  const page = await doc.getPage(pageNumber)
+  let page: PdfPage
+  try { page = await doc.getPage(pageNumber) } catch { return }
+  if (disposed || pdf.value !== doc) return
   const scale = renderScale(page)
   const existing = rendered.get(pageNumber)
   if (existing && Math.abs(existing.scale - scale) < 0.01) {
@@ -159,7 +164,12 @@ async function paintPage(
   entry.task = task
   try {
     await task.promise
-  } catch {
+  } catch (err) {
+    if (rendered.get(pageNumber) === entry) {
+      console.error('PDF page render failed:', err)
+      error.value = t('preview.loadFailed')
+      emit('error', error.value)
+    }
     return // cancelled by a newer render or unrender
   }
   if (rendered.get(pageNumber) !== entry) return
@@ -274,130 +284,95 @@ async function pageText(pageNumber: number): Promise<string> {
   return text
 }
 
-/** Draw the match for one of `quotes` on `pageNumber`; returns the top fraction or null. */
-async function markQuoteOnPage(pageNumber: number, quotes: string[], version: number): Promise<number | null> {
-  const text = await pageText(pageNumber)
-  const quote = quotes.find((q) => findInText(text, q))
-  if (!quote || version !== locateVersion) return null
+/** Refine only within the recorded region, or at a verified text occurrence. */
+async function markTarget(target: PdfTarget, version: number, targetIndex: number): Promise<number | null> {
+  const pageNumber = target.page
   await renderPage(pageNumber)
-  // A concurrent render may have replaced the one awaited; wait for the live one.
   await rendered.get(pageNumber)?.done
+  await nextTick()
   if (version !== locateVersion) return null
   const el = pageElements.get(pageNumber)
   const layer = el?.querySelector('.textLayer')
-  if (!el || !layer) return null
-  const range = findTextRange(layer, quote)
-  if (!range) return null
+  if (!el || !layer || !target.quote) return null
   const pageBox = el.getBoundingClientRect()
-  const lines = mergeLineRects([...range.getClientRects()])
-  let top: number | null = null
+  const ranges = findTextRanges(layer, target.quote)
+  const candidates = ranges.map((range) => mergeSourceRects([...range.getClientRects()]))
+  const inside = (rects: ReturnType<typeof mergeSourceRects>) => {
+    if (!rects.length) return false
+    if (!target.bbox) return true
+    const [x0, y0, x1, y1] = target.bbox
+    return rects.every((r) => {
+      const x = (r.left + r.width / 2 - pageBox.left) / pageBox.width
+      const y = (r.top + r.height / 2 - pageBox.top) / pageBox.height
+      return x >= x0 && x <= x1 && y >= y0 && y <= y1
+    })
+  }
+  const eligible = target.bbox ? candidates.filter(inside) : candidates
+  const lines = target.bbox ? (eligible.length === 1 ? eligible[0] : undefined)
+    : (target.occurrence !== undefined && target.occurrence >= 0 ? eligible[target.occurrence] : eligible.length === 1 ? eligible[0] : undefined)
+  if (!lines?.length) return null
+  let top = 1
   for (const r of lines) {
-    const mark: Mark = {
-      kind: 'text',
-      left: (r.left - pageBox.left) / pageBox.width,
-      top: (r.top - pageBox.top) / pageBox.height,
-      width: r.width / pageBox.width,
-      height: r.height / pageBox.height,
-    }
-    if (mark.width <= 0 || mark.height <= 0) continue
+    const mark: Mark = { kind: 'text', target: targetIndex, left: (r.left - pageBox.left) / pageBox.width,
+      top: (r.top - pageBox.top) / pageBox.height, width: r.width / pageBox.width, height: r.height / pageBox.height }
     addMark(pageNumber, mark)
-    top = top === null ? mark.top : Math.min(top, mark.top)
+    top = Math.min(top, mark.top)
   }
   return top
-}
-
-/** Merge the per-glyph-run rects of a range into one rect per visual line. */
-function mergeLineRects(rects: DOMRect[]): Array<{ left: number; top: number; width: number; height: number }> {
-  const lines: Array<{ left: number; top: number; right: number; bottom: number }> = []
-  for (const r of rects) {
-    if (r.width < 0.5 || r.height < 0.5) continue
-    const line = lines.find((l) => Math.min(l.bottom, r.bottom) - Math.max(l.top, r.top) > Math.min(r.height, l.bottom - l.top) * 0.5)
-    if (line) {
-      line.left = Math.min(line.left, r.left)
-      line.right = Math.max(line.right, r.right)
-      line.top = Math.min(line.top, r.top)
-      line.bottom = Math.max(line.bottom, r.bottom)
-    } else {
-      lines.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom })
-    }
-  }
-  return lines.map((l) => ({ left: l.left - 2, top: l.top - 1, width: l.right - l.left + 4, height: l.bottom - l.top + 2 }))
 }
 
 async function applyLocate(request: SourceLocateRequest | null | undefined) {
   const version = ++locateVersion
   clearMarks()
+  locatedTargets.value = []
+  selectedTarget.value = 0
   if (!request || !pdf.value) return
-  const total = pageCount.value
-  const pdfLocators = request.locators.filter((l): l is SourceLocator & { page: number } =>
-    l.type === 'pdf' && !!l.page && l.page >= 1 && l.page <= total)
-
-  let firstPage = 0
-  let firstTop = 0
-  let precise = false
-  const note = (page: number, top: number) => {
-    if (!firstPage) {
-      firstPage = page
-      firstTop = top
-    }
-  }
-
-  // Regions reported by the parser are drawn as they are.
-  for (const loc of pdfLocators) {
-    if (loc.bbox && loc.bbox.length === 4) {
-      const [x0, y0, x1, y1] = loc.bbox
-      addMark(loc.page, { kind: 'box', left: x0, top: y0, width: x1 - x0, height: y1 - y0 })
-      note(loc.page, y0)
-      precise = true
-    }
-  }
-
-  // Pages without a region: find the quoted text on the page.
-  if (!precise) {
-    const pages = [...new Set(pdfLocators.map((l) => l.page))]
-    for (const page of pages) {
-      const quotes = [
-        ...pdfLocators.filter((l) => l.page === page && l.quote).map((l) => l.quote as string),
-        ...request.quotes,
-      ]
-      const top = quotes.length ? await markQuoteOnPage(page, quotes, version) : null
+  try {
+    const result = await resolvePdfSource(request, pageCount.value, pageText, () => version !== locateVersion)
+    if (version !== locateVersion) return
+    const destinations: Array<{ page: number; top: number }> = []
+    const levels: string[] = []
+    for (const target of result.targets) {
+      // Use the navigation index: unresolved targets do not get a stop.
+      const targetIndex = destinations.length
+      let top = await markTarget(target, version, targetIndex)
       if (version !== locateVersion) return
-      if (top !== null) {
-        note(page, top)
-        precise = true
-      } else {
-        // Scanned pages have no text: outline the page itself.
-        addMark(page, { kind: 'page', left: 0, top: 0, width: 1, height: 1 })
-        note(page, 0)
+      if (top !== null) levels.push('text')
+      else if (target.bbox) {
+        const [x0, y0, x1, y1] = target.bbox
+        addMark(target.page, { kind: 'box', target: targetIndex, left: x0, top: y0, width: x1 - x0, height: y1 - y0 })
+        top = y0
+        levels.push('block')
+      } else if (target.granularity === 'page') {
+        top = 0
+        levels.push('page')
+        addMark(target.page, { kind: 'page', target: targetIndex, left: 0, top: 0, width: 1, height: 1 })
       }
+      if (top !== null) destinations.push({ page: target.page, top })
     }
+    await nextTick()
+    if (version !== locateVersion) return
+    locatedTargets.value = destinations
+    selectedTarget.value = 0
+    if (destinations.length) jumpToTarget(0)
+    const granularity = levels.includes('page') ? 'page' : levels.includes('block') ? 'block' : 'text'
+    emit('located', { found: destinations.length > 0, precise: destinations.length === result.targets.length && levels.every((l) => l === 'text') && !result.reason,
+      page: destinations[0]?.page, granularity, reason: result.reason || (destinations.length < result.targets.length ? 'missing' : undefined) })
+  } catch {
+    if (version !== locateVersion) return
+    clearMarks()
+    emit('located', { found: false, precise: false, reason: 'unavailable' })
   }
+}
 
-  // No page at all: search the document for the quote.
-  if (!firstPage && request.quotes.length) {
-    const limit = Math.min(total, 500)
-    for (let page = 1; page <= limit; page++) {
-      const text = await pageText(page)
-      if (version !== locateVersion) return
-      if (request.quotes.some((q) => findInText(text, q))) {
-        const top = await markQuoteOnPage(page, request.quotes, version)
-        if (version !== locateVersion) return
-        if (top !== null) {
-          note(page, top)
-          precise = true
-        }
-        break
-      }
-    }
-  }
-
-  await nextTick()
-  if (version !== locateVersion) return
-  if (firstPage) {
-    scrollToPageFraction(firstPage, firstTop)
-    currentPage.value = firstPage
-  }
-  emit('located', { found: !!firstPage, precise, page: firstPage || undefined })
+const locatedTargets = ref<Array<{ page: number; top: number }>>([])
+const selectedTarget = ref(0)
+function jumpToTarget(index: number) {
+  const target = locatedTargets.value[index]
+  if (!target) return
+  selectedTarget.value = index
+  scrollToPageFraction(target.page, target.top)
+  currentPage.value = target.page
 }
 
 watch(
@@ -420,6 +395,7 @@ async function load() {
     console.error('PDF preview failed:', err)
     error.value = t('preview.loadFailed')
     emit('error', error.value)
+    emit('located', { found: false, precise: false, reason: 'unavailable' })
   } finally {
     loading.value = false
   }
@@ -446,7 +422,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   for (const p of [...rendered.keys()]) unrenderPage(p)
   // Destroying the loading task also destroys the document and its worker.
-  void loadingTask?.destroy()
+  void loadingTask?.destroy().catch(() => {})
 })
 
 const pageLabel = computed(() => (pageCount.value ? `${currentPage.value} / ${pageCount.value}` : ''))
@@ -480,7 +456,7 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
             v-for="(mark, i) in marks[page] || []"
             :key="i"
             class="pdf-source-mark"
-            :class="`pdf-source-mark--${mark.kind}`"
+            :class="[`pdf-source-mark--${mark.kind}`, { 'is-active': mark.target === selectedTarget }]"
             :style="{
               left: `${mark.left * 100}%`,
               top: `${mark.top * 100}%`,
@@ -492,6 +468,11 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
       </div>
     </div>
     <div v-if="pageCount" class="pdf-source-viewer__bar">
+      <template v-if="locatedTargets.length > 1">
+        <t-button variant="text" size="small" :disabled="selectedTarget === 0" :aria-label="t('chat.referenceSourcePrevious')" @click="jumpToTarget(selectedTarget - 1)">‹</t-button>
+        <span>{{ selectedTarget + 1 }} / {{ locatedTargets.length }}</span>
+        <t-button variant="text" size="small" :disabled="selectedTarget === locatedTargets.length - 1" :aria-label="t('chat.referenceSourceNext')" @click="jumpToTarget(selectedTarget + 1)">›</t-button>
+      </template>
       <span class="pdf-source-viewer__page">{{ pageLabel }}</span>
       <t-button
         theme="default" variant="text" size="small" shape="square"
@@ -541,6 +522,11 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
 
 .pdf-source-page {
   position: relative;
+  isolation: isolate;
+  // The PDF canvas stays white even when the surrounding app is dark.
+  --app-source-highlight-bg: rgba(250, 204, 75, 0.34);
+  --app-source-highlight-soft-bg: rgba(250, 204, 75, 0.09);
+  --app-source-highlight-border: rgba(183, 130, 22, 0.5);
   // Block flow with auto margins keeps zoomed pages scrollable to the left.
   margin: 0 auto 12px;
   max-width: none;
@@ -563,22 +549,35 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
   inset: 0;
   z-index: 2;
   pointer-events: none;
+  // Blend the whole layer once, so overlapping glyph rectangles do not
+  // darken the printed text independently.
+  mix-blend-mode: multiply;
 }
 
 .pdf-source-mark {
   position: absolute;
   border-radius: var(--app-radius-xs);
-  background: color-mix(in srgb, var(--app-source-highlight) 55%, transparent);
-  mix-blend-mode: multiply;
+  background: var(--app-source-highlight-soft-bg);
+
+  &--text.is-active {
+    background: var(--app-source-highlight-bg);
+  }
 
   &--box {
-    outline: 1px solid var(--app-source-highlight);
+    outline: 1px solid var(--app-source-highlight-border);
+
+    &.is-active {
+      box-shadow: inset 3px 0 var(--app-source-highlight-border);
+    }
   }
 
   &--page {
     background: transparent;
-    outline: 2px solid var(--app-source-highlight);
-    mix-blend-mode: normal;
+    box-shadow: inset 0 0 0 1px var(--app-source-highlight-border);
+
+    &.is-active {
+      box-shadow: inset 3px 0 var(--app-source-highlight-border), inset 0 0 0 1px var(--app-source-highlight-border);
+    }
   }
 }
 

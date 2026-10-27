@@ -13,11 +13,17 @@
 
 切换引擎需要重建索引。知识库绑定的向量存储在创建后不可修改，应在建库前确定实例。
 
+## 多模态 Embedding 与图片召回
+
+支持图片输入的向量模型可将文本和图片编码到同一空间。知识库默认不开启图片向量，需要同时配置多模态与「图片向量检索」；已有文档需重新解析，扫描 PDF 页不生成图片向量。画廊只展示已有图片，不依赖此开关。详情见[知识库图片配置](02-knowledge-base.md#multimodal-embedding)。
+
+命中图片可交给支持图片输入的重排模型评估，视觉对话模型能直接看到保留的命中原图；纯文本模型使用描述等文本信息。原图向量与描述/OCR 文本索引分别管理，关闭开关停止图片向量召回，不自动删除已有向量。
+
 ## 能力矩阵与选型对比 {#_3-能力矩阵与选型对比}
 
 | 引擎 | RETRIEVE_DRIVER 值 | 向量检索 | 关键词/全文 | 关键词打分 | 中文分词 | 维度管理 | 阈值下推 | 部署复杂度 | 适用场景 |
 |------|-------------------|----------|------------|-----------|---------|----------|---------|-----------|----------|
-| PostgreSQL | `postgres` | pgvector halfvec + HNSW 表达式索引 | ParadeDB BM25（`\|\|\|`） | BM25（paradedb.score） | ParadeDB tokenizer | 单表混维，表达式索引按维 cast | 距离阈值 SQL 内 | 低（默认镜像内置） | 默认选择；与业务同库，事务一致 |
+| PostgreSQL | `postgres` | pgvector halfvec + HNSW 表达式索引 | pg_search BM25（`\|\|\|`） | BM25（优先 `paradedb.score`，兼容 `pgsearch.score`） | pg_search tokenizer | 单表混维，表达式索引按维 cast | 距离阈值 SQL 内 | 低（默认镜像内置） | 默认选择；与业务同库，事务一致 |
 | SQLite | `sqlite` | sqlite-vec vec0（cosine） | FTS5 contentless | FTS5 | 应用侧 bigram | 每维一张 vec0 虚表 | 应用侧 | 极低（内嵌） | 桌面版 / 开发 / 微型部署 |
 | Elasticsearch v8 | `elasticsearch_v8` | script_score cosineSimilarity | match（BM25） | BM25 | ES analyzer | dense_vector 单索引 | 应用侧 | 中 | 已有 ES 8 集群 |
 | Elasticsearch v7 | `elasticsearch_v7` | 不支持（Support 仅 keywords） | match（BM25） | BM25 | ES analyzer | — | — | 中 | 存量 ES 7，仅作关键词引擎，需与其他向量引擎组合 |
@@ -128,7 +134,8 @@ flowchart TD
   >   USING hnsw ((embedding::halfvec(<dim>)) halfvec_cosine_ops)
   >   WITH (m = 16, ef_construction = 64) WHERE (dimension = <dim>);
   > ```
-- **关键词检索**：ParadeDB `pg_search` BM25——`content ||| query`（任意 token 匹配）+ `paradedb.score(id) as score`。
+- **关键词检索**：`pg_search` BM25——`content ||| query`（任意 token 匹配）。首次关键词查询探测评分函数，优先使用 `paradedb.score(anyelement) -> real`，兼容部分 PolarDB 实例的 `pgsearch.score(anyelement) -> real`；仅缓存成功结果，探测失败可重试。缓存按检索仓库实例隔离，纯向量查询不触发探测。
+- **兼容边界**：评分函数适配不会安装扩展、创建包装函数或修改数据库结构；仍须预先具备兼容的 `pg_search`、`|||` 操作符及有效 BM25 索引。不代表所有 PolarDB 版本均受支持；没有匹配评分函数时，关键词检索返回明确错误。
 - **过滤**：`knowledge_base_id` / `knowledge_id` / `tag_id` IN 过滤（AND 语义），`is_enabled` 为 NULL 或 true。
 - **建索引**：`BatchSave` + `ON CONFLICT DO NOTHING`；删除按 chunk/source/knowledge ID 物理删除。
 

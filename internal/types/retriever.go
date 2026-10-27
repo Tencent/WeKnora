@@ -48,6 +48,12 @@ type RetrieveParams struct {
 	KnowledgeIDs []string
 	// Tag IDs for filtering (used for FAQ priority filtering)
 	TagIDs []string
+	// ExcludeGeneratedQuestionKBIDs drops generated-question index rows for
+	// these knowledge bases before TopK is applied. Document knowledge bases
+	// with question generation turned off are listed here so historical
+	// question vectors stop occupying recall. FAQ similar-question rows share
+	// the source-id shape and must not be listed.
+	ExcludeGeneratedQuestionKBIDs []string
 	// Excluded knowledge IDs
 	ExcludeKnowledgeIDs []string
 	// Excluded chunk IDs
@@ -92,6 +98,11 @@ type IndexWithScore struct {
 	TagID string
 	// Score
 	Score float64
+	// VectorScore is a vector hit's similarity as its engine reported it.
+	// Fusion replaces Score with a rank-based one; this keeps the evidence of
+	// how close the vector actually was, which reranking weighs for images.
+	// Zero for keyword hits.
+	VectorScore float64
 	// Match type
 	MatchType MatchType
 	// IsEnabled
@@ -108,5 +119,12 @@ type RetrieveResult struct {
 	Results             []*IndexWithScore   // Retrieval results
 	RetrieverEngineType RetrieverEngineType // Retrieval source type
 	RetrieverType       RetrieverType       // Retrieval type
-	Error               error               // Retrieval error
+	// Error reports a partial failure of this result set: Results holds what
+	// answered, Error says what did not. It is nil for a complete retrieval,
+	// including a genuine zero-hit search. A store-level failure is still
+	// returned as the call's error with no result set at all.
+	// CompositeRetrieveEngine surfaces a non-nil Error as an error alongside the
+	// results, so a caller that reads the results must not ignore the error
+	// without at least logging that the answer is incomplete.
+	Error error // Retrieval error
 }

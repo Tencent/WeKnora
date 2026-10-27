@@ -139,7 +139,10 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 		// / `search sessions` filters. Plain LIKE is case-sensitive in
 		// Postgres, which surprised callers searching with lowercase.
 		escaped := strings.ToLower(escapeLikeKeyword(filter.Keyword))
-		query = query.Where("(LOWER(file_name) LIKE ? OR LOWER(title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		query = query.Where(
+			"(LOWER(file_name) LIKE ? ESCAPE ? OR LOWER(title) LIKE ? ESCAPE ?)",
+			"%"+escaped+"%", likeEscapeChar, "%"+escaped+"%", likeEscapeChar,
+		)
 	}
 	// FileType and Source share the same special-case routing onto `type` for
 	// the "manual" / "url" values, so callers can pick either control.
@@ -430,6 +433,10 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status NOT IN ?",
 			tenantID, kbID, []string{"failed", "deleting"})
+
+	if params.ExcludeKnowledgeID != "" {
+		query = query.Where("id <> ?", params.ExcludeKnowledgeID)
+	}
 
 	switch params.Type {
 	case "file":
@@ -958,7 +965,10 @@ func (r *knowledgeRepository) SearchKnowledge(
 	// If keyword is provided, filter by file_name or title (case-insensitive).
 	if keyword != "" {
 		escaped := strings.ToLower(escapeLikeKeyword(keyword))
-		query = query.Where("(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		query = query.Where(
+			"(LOWER(knowledges.file_name) LIKE ? ESCAPE ? OR LOWER(knowledges.title) LIKE ? ESCAPE ?)",
+			"%"+escaped+"%", likeEscapeChar, "%"+escaped+"%", likeEscapeChar,
+		)
 	}
 
 	// If fileTypes is provided, filter by file extension or type
@@ -1077,7 +1087,10 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 
 	if keyword != "" {
 		escaped := strings.ToLower(escapeLikeKeyword(keyword))
-		query = query.Where("(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		query = query.Where(
+			"(LOWER(knowledges.file_name) LIKE ? ESCAPE ? OR LOWER(knowledges.title) LIKE ? ESCAPE ?)",
+			"%"+escaped+"%", likeEscapeChar, "%"+escaped+"%", likeEscapeChar,
+		)
 	}
 
 	if len(fileTypes) > 0 {

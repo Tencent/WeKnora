@@ -166,7 +166,7 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 	var children []ChildChunk
 	childSeq := 0
 	for _, parent := range parents {
-		subs := Split(parent.Content, childCfg)
+		subs := mapChildrenToSource(parent, Split(parent.Content, childCfg))
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {
@@ -175,8 +175,6 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 		}
 		for _, sub := range subs {
 			sub.Seq = childSeq
-			sub.Start += parent.Start
-			sub.End += parent.Start
 			sub.ContextHeader = mergeBreadcrumbs(parent.ContextHeader, sub.ContextHeader)
 			children = append(children, ChildChunk{Chunk: sub, ParentIndex: parentIndex})
 			childSeq++
@@ -185,15 +183,27 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 	return ParentChildResult{Parents: newParents, Children: children}, diag
 }
 
+// defaultChunkSizeAndOverlap fills unset size/overlap fields.
+//
+// An empty config (both fields still at Go zero values) still receives the
+// package defaults. When ChunkSize is already set, ChunkOverlap == 0 is kept
+// as an explicit "no overlap" request — matching the wiki-only KB preset and
+// the DefaultChunkOverlap docs ("Use 0 for strictly atomic data").
+func defaultChunkSizeAndOverlap(cfg SplitterConfig) SplitterConfig {
+	sizeUnset := cfg.ChunkSize <= 0
+	if sizeUnset {
+		cfg.ChunkSize = DefaultChunkSize
+	}
+	if cfg.ChunkOverlap < 0 || (cfg.ChunkOverlap == 0 && sizeUnset) {
+		cfg.ChunkOverlap = DefaultChunkOverlap
+	}
+	return cfg
+}
+
 // NormalizeSplitterConfig applies the same base splitter defaults used by
 // knowledge ingestion before parent-child derivation or single-pass splitting.
 func NormalizeSplitterConfig(cfg SplitterConfig) SplitterConfig {
-	if cfg.ChunkSize <= 0 {
-		cfg.ChunkSize = DefaultChunkSize
-	}
-	if cfg.ChunkOverlap <= 0 {
-		cfg.ChunkOverlap = DefaultChunkOverlap
-	}
+	cfg = defaultChunkSizeAndOverlap(cfg)
 	if len(cfg.Separators) == 0 {
 		cfg.Separators = []string{"\n\n", "\n", "。"}
 	}
@@ -314,19 +324,14 @@ func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocPro
 }
 
 // ensureDefaults fills in zero-value config fields with sane defaults.
-// NormalizeSplitterConfig also uses these defaults so service callers and
-// direct callers of this package get the same numbers.
+// Size/overlap defaulting is shared with NormalizeSplitterConfig via
+// defaultChunkSizeAndOverlap so service callers and direct callers stay aligned.
 //
 // When cfg.TokenLimit is set, ChunkSize is clamped to the character budget
 // that fits within that token limit (with a 10% safety factor). This makes
 // chunks safe for embedding APIs that have hard token caps.
 func ensureDefaults(cfg SplitterConfig) SplitterConfig {
-	if cfg.ChunkSize <= 0 {
-		cfg.ChunkSize = DefaultChunkSize
-	}
-	if cfg.ChunkOverlap <= 0 {
-		cfg.ChunkOverlap = DefaultChunkOverlap
-	}
+	cfg = defaultChunkSizeAndOverlap(cfg)
 	if len(cfg.Separators) == 0 {
 		cfg.Separators = []string{"\n\n", "\n", "。"}
 	}

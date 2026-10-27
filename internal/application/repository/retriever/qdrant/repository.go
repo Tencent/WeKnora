@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -53,6 +54,16 @@ func NewQdrantRetrieveEngineRepository(client *qdrant.Client, indexCfg *types.In
 // getCollectionName returns the collection name for a specific dimension
 func (q *qdrantRepository) getCollectionName(dimension int) string {
 	return fmt.Sprintf("%s_%d", q.collectionBaseName, dimension)
+}
+
+// matchesCollectionName accepts only names generated for a positive dimension.
+func (q *qdrantRepository) matchesCollectionName(collectionName string) bool {
+	suffix, ok := strings.CutPrefix(collectionName, q.collectionBaseName+"_")
+	if !ok {
+		return false
+	}
+	dimension, err := strconv.Atoi(suffix)
+	return err == nil && dimension > 0 && suffix == strconv.Itoa(dimension)
 }
 
 // collectionExists reports whether the dimension-specific collection is
@@ -122,8 +133,10 @@ func isMissingCollectionErr(err error) bool {
 // following write (ensureCollection) will recreate the collection instead of
 // skipping create and failing the upsert.
 func (q *qdrantRepository) deletePoints(ctx context.Context, dimension int, collectionName string, points *qdrant.PointsSelector) error {
+	wait := true
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: collectionName,
+		Wait:           &wait,
 		Points:         points,
 	})
 	if err == nil {
@@ -163,7 +176,15 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			ShardNumber:       types.OptionalUint32(q.shardNumber),
 			ReplicationFactor: types.OptionalUint32(q.replicationFactor),
 		})
-		if err != nil {
+		// The first batches written at a new dimension are saved by several
+		// workers at once, so another one (or another replica) may have
+		// created the collection since our check. Qdrant refuses the losing
+		// create with AlreadyExists; carry on, since the collection is there.
+		// Creating a payload index that already exists is a no-op, so the
+		// indexes below are still ensured in case the winner did not finish.
+		if status.Code(err) == codes.AlreadyExists {
+			log.Infof("[Qdrant] Collection %s was created concurrently", collectionName)
+		} else if err != nil {
 			log.Errorf("[Qdrant] Failed to create collection: %v", err)
 			return fmt.Errorf("failed to create collection: %w", err)
 		}
@@ -211,7 +232,7 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			log.Warnf("[Qdrant] Failed to create text index for content: %v", err)
 		}
 
-		log.Infof("[Qdrant] Successfully created collection %s", collectionName)
+		log.Infof("[Qdrant] Collection %s is ready", collectionName)
 	}
 
 	// Mark as initialized
@@ -270,8 +291,10 @@ func (q *qdrantRepository) Save(ctx context.Context,
 		Payload: createPayload(embeddingDB),
 	}
 
+	wait := true
 	_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 		CollectionName: collectionName,
+		Wait:           &wait,
 		Points:         []*qdrant.PointStruct{point},
 	})
 	if err != nil {
@@ -301,8 +324,8 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 	for _, embedding := range embeddingList {
 		embeddingDB := toQdrantVectorEmbedding(embedding, additionalParams)
 		if len(embeddingDB.Embedding) == 0 {
-			log.Warnf("[Qdrant] Skipping empty embedding for chunk ID: %s", embedding.ChunkID)
-			continue
+			return fmt.Errorf("empty embedding vector for chunk ID: %s (source ID: %s)",
+				embedding.ChunkID, embedding.SourceID)
 		}
 
 		dimension := len(embeddingDB.Embedding)
@@ -313,11 +336,6 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 		}
 		pointsByDimension[dimension] = append(pointsByDimension[dimension], point)
 		log.Debugf("[Qdrant] Added chunk ID %s to batch request (dimension: %d)", embedding.ChunkID, dimension)
-	}
-
-	if len(pointsByDimension) == 0 {
-		log.Warn("[Qdrant] No valid points to save after filtering")
-		return nil
 	}
 
 	// Save points to each dimension-specific collection
@@ -337,8 +355,10 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 			}
 			batch := points[i:end]
 
+			wait := true
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Points:         batch,
 			})
 			if err != nil {
@@ -493,9 +513,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			continue
 		}
 
@@ -504,8 +522,10 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: true}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -524,8 +544,10 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: false}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -578,9 +600,7 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			continue
 		}
 
@@ -589,8 +609,10 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldTagID: tagID}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -759,6 +781,13 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 
 	var allResults []*types.IndexWithScore
 	limit := uint32(params.TopK)
+	// A batch where every matching collection failed must not be reported as
+	// "no matches": the caller cannot tell a genuine zero-hit search apart from
+	// a search that never ran. Count both sides and fail loudly when the search
+	// produced nothing but errors.
+	matchedCollections := 0
+	failedCollections := 0
+	var lastFailedErr error
 
 	log.Debugf("[Qdrant] Found %d collections, base name: %s", len(collections), q.collectionBaseName)
 
@@ -769,12 +798,11 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 	// Search in all matching collections
 	for _, collectionName := range collections {
 		log.Debugf("[Qdrant] Checking collection: %s", collectionName)
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			log.Debugf("[Qdrant] Skipping collection %s (doesn't match base name %s)", collectionName, q.collectionBaseName)
 			continue
 		}
+		matchedCollections++
 
 		filter := q.getBaseFilter(params)
 
@@ -800,6 +828,8 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 			WithPayload:    qdrant.NewWithPayload(true),
 		})
 		if err != nil {
+			failedCollections++
+			lastFailedErr = err
 			log.Warnf("[Qdrant] Keywords search failed in %s: %v", collectionName, err)
 			continue
 		}
@@ -826,18 +856,68 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 		}
 	}
 
+	// Every collection that matched the base name failed, so this call produced
+	// no evidence at all about the knowledge base. Surface the failure instead
+	// of letting callers treat it as "no relevant content".
+	if matchedCollections > 0 && failedCollections == matchedCollections {
+		return nil, fmt.Errorf(
+			"qdrant keyword search failed in all %d matched collections: %w",
+			matchedCollections,
+			lastFailedErr,
+		)
+	}
+
 	// Limit results to topK
 	if len(allResults) > params.TopK {
 		allResults = allResults[:params.TopK]
 	}
 
-	if len(allResults) == 0 {
-		log.Warnf("[Qdrant] No keyword matches found for query: %s", params.Query)
-	} else {
-		log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
+	// Some matched collections answered and others did not: these results are
+	// real but incomplete. Carry the failure on the result set
+	// (RetrieveResult.Error) instead of returning it as the call's error, which
+	// would discard the partial evidence. CompositeRetrieveEngine turns it into
+	// an error alongside the results so the gap stays visible upstream.
+	var partialErr error
+	if failedCollections > 0 && failedCollections < matchedCollections {
+		partialErr = fmt.Errorf(
+			"qdrant keyword search failed in %d of %d matched collections: %w",
+			failedCollections, matchedCollections, lastFailedErr,
+		)
 	}
 
-	return buildRetrieveResult(allResults, types.KeywordsRetrieverType), nil
+	switch {
+	case matchedCollections == 0:
+		// No collection carries this base name, so nothing was searched. This
+		// must not read as a search that ran and legitimately hit nothing.
+		log.Warnf(
+			"[Qdrant] No collection matched base name %s among %d listed; keyword search did not run",
+			q.collectionBaseName, len(collections),
+		)
+	case partialErr != nil:
+		log.Warnf(
+			"[Qdrant] Keywords search failed in %d of %d matched collections; results are incomplete: %v",
+			failedCollections, matchedCollections, lastFailedErr,
+		)
+		if len(allResults) > 0 {
+			log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
+			break
+		}
+		// Partial failure with zero hits: the remaining collections did answer,
+		// so this is a real zero-hit outcome, but it must not read as if the
+		// search had succeeded everywhere.
+		log.Warnf(
+			"[Qdrant] Keywords search returned no matches in the %d collections that answered",
+			matchedCollections-failedCollections,
+		)
+	case len(allResults) > 0:
+		log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
+	default:
+		log.Warnf("[Qdrant] No keyword matches found for query: %s", params.Query)
+	}
+
+	retrieved := buildRetrieveResult(allResults, types.KeywordsRetrieverType)
+	retrieved[0].Error = partialErr
+	return retrieved, nil
 }
 
 // CopyIndices copies index data from source knowledge base to target knowledge base
@@ -870,9 +950,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 	batchSize := uint32(64)
 	var offset *qdrant.PointId = nil
 	totalCopied := 0
+	seenCursors := make(map[string]struct{})
 
 	for {
-		scrollResult, err := q.client.Scroll(ctx, &qdrant.ScrollPoints{
+		scrollResult, nextOffset, err := q.client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
 			CollectionName: collectionName,
 			Filter: &qdrant.Filter{
 				Must: []*qdrant.Condition{
@@ -892,6 +973,19 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 		pointsCount := len(scrollResult)
 		if pointsCount == 0 {
 			break
+		}
+
+		// The cursor for the next request is the one the server hands back.
+		// Qdrant's offset is inclusive, so deriving it from the last point of
+		// the page makes the next page start at that point again and copy it
+		// into the target a second time. A cursor that comes back a second time
+		// means the walk can never finish, which is a failure, not an end.
+		if nextOffset != nil {
+			cursor := nextOffset.String()
+			if _, repeated := seenCursors[cursor]; repeated {
+				return fmt.Errorf("qdrant: copy indices made no progress at cursor %s", nextOffset)
+			}
+			seenCursors[cursor] = struct{}{}
 		}
 
 		log.Infof("[Qdrant] Found %d source points in batch", pointsCount)
@@ -969,8 +1063,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 		}
 
 		if len(targetPoints) > 0 {
+			wait := true
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Points:         targetPoints,
 			})
 			if err != nil {
@@ -983,13 +1079,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				len(targetPoints), totalCopied)
 		}
 
-		if pointsCount > 0 {
-			offset = scrollResult[pointsCount-1].Id
-		}
-
-		if pointsCount < int(batchSize) {
+		if nextOffset == nil {
 			break
 		}
+		offset = nextOffset
 	}
 
 	log.Infof("[Qdrant] Index copy completed, total copied: %d", totalCopied)

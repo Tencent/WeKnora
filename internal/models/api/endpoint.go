@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -123,9 +127,16 @@ func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentT
 	if e.Auth != nil {
 		e.Auth(req, data)
 	}
-	// User headers are applied last but the helper skips reserved names so
-	// they cannot clobber auth or content negotiation.
+	// The helper skips reserved names so custom headers cannot clobber auth
+	// or content negotiation.
 	secutils.ApplyCustomHeaders(req, e.Headers)
+	// Identity belongs to this call, not the shared model configuration or
+	// a per-request UUID. Derived contexts retain it across turns and retries.
+	req.Header.Set("User-Agent", "WeKnora")
+	req.Header.Del("X-Conversation-ID")
+	if sessionID, ok := types.SessionIDFromContext(ctx); ok {
+		req.Header.Set("X-Conversation-ID", sessionID)
+	}
 	return req, nil
 }
 
@@ -139,7 +150,7 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		_ = resp.Body.Close()
-		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body)}
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
 	}
 	return resp, nil
 }
@@ -170,8 +181,15 @@ func (e Endpoint) roundTrip(req *http.Request, out any) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := ReadResponseCapped(resp.Body, 0)
 	if err != nil {
+		// A body over the cap is the vendor answering with something we cannot
+		// use, not the network failing. withRetry retries only TransportError,
+		// and repeating an oversized reply would bill the request again for the
+		// same bytes, so it is returned as-is.
+		if errors.Is(err, ErrResponseTooLarge) {
+			return err
+		}
 		// The connection broke before the reply arrived whole: nothing was
 		// received, so this is the network failing, not the vendor answering.
 		return &TransportError{Op: "read response", Err: err}
@@ -201,10 +219,43 @@ func (e *TransportError) Unwrap() error { return e.Err }
 type HTTPError struct {
 	StatusCode int
 	Body       string
+	// Header is the reply's headers, kept so a retry can honour the vendor's
+	// Retry-After on a 429 or 503 instead of guessing its own backoff.
+	Header http.Header
 }
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Body)
+}
+
+// RetryAfter is how long the vendor asked the caller to wait before trying
+// again, from the Retry-After header in either of its two forms (delay in
+// seconds or an HTTP date). It is zero when the header is absent, malformed
+// or already in the past.
+func (e *HTTPError) RetryAfter() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return parseRetryAfter(e.Header.Get("Retry-After"), time.Now())
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(value); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		if d := at.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // LogRequest emits the standard request log line with image payloads

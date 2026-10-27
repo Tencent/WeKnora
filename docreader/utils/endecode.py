@@ -9,9 +9,10 @@ with a focus on image and text data conversion:
 """
 
 import base64
+import codecs
 import io
 import logging
-from typing import List, Union
+from typing import List, Optional, Union
 
 import numpy as np
 from PIL import Image
@@ -136,17 +137,12 @@ def encode_bytes(content: str) -> bytes:
 
 def decode_bytes(
     content: bytes,
-    encodings: List[str] = [
-        "utf-8",
-        "gb18030",
-        "gb2312",
-        "gbk",
-        "big5",
-        "ascii",
-        "latin-1",
-    ],
+    encodings: Optional[List[str]] = None,
 ) -> str:
     """Decode bytes to string with automatic encoding detection.
+
+    With default encodings, a Unicode byte order mark is decoded first.
+    Explicit encoding lists retain their supplied priority.
 
     This function attempts to decode bytes using multiple encoding formats
     in order of priority. It's particularly useful for handling text files
@@ -181,6 +177,27 @@ def decode_bytes(
         >>> # Decode with custom encodings
         >>> text = decode_bytes(content, encodings=["utf-8", "gbk"])
     """
+    if encodings is None:
+        # UTF-32 LE starts with the UTF-16 LE signature: check it first.
+        for signatures, encoding in [
+            ((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE), "utf-32"),
+            ((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE), "utf-16"),
+            ((codecs.BOM_UTF8,), "utf-8-sig"),
+        ]:
+            if content.startswith(signatures):
+                try:
+                    return content.decode(encoding)
+                except UnicodeDecodeError:
+                    break
+        encodings = [
+            "utf-8",
+            "gb18030",
+            "gb2312",
+            "gbk",
+            "big5",
+            "ascii",
+            "latin-1",
+        ]
     # Try decoding with each encoding format in order
     for encoding in encodings:
         try:

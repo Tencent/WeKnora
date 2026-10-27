@@ -594,7 +594,7 @@ import { copyWithToast } from '@/utils/clipboard';
 import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
-  getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
+  getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels,
   type IMChannelOverview, type CustomAgent,
 } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
@@ -684,6 +684,7 @@ const platformOptions = computed(() => ([
 const localeOptions = computed(() => ([
   { value: '' as IMLocale, label: t('agentEditor.im.replyLanguageDefault') },
   { value: 'zh-CN' as IMLocale, label: '简体中文' },
+  { value: 'zh-TW' as IMLocale, label: '繁體中文' },
   { value: 'en-US' as IMLocale, label: 'English' },
   { value: 'ja-JP' as IMLocale, label: '日本語' },
   { value: 'ko-KR' as IMLocale, label: '한국어' },
@@ -940,13 +941,13 @@ async function loadChannels() {
   loading.value = true;
   try {
     const chatResources = useChatResourcesStore();
-    const [channelRes, agentRes] = await Promise.all([
+    const [channelRes] = await Promise.all([
       listAllIMChannels(),
-      listAgents(),
+      chatResources.ensureAgents(),
       chatResources.ensureKnowledgeBases(),
     ]);
     allChannels.value = channelRes.data || [];
-    agents.value = agentRes?.data || [];
+    agents.value = chatResources.agents as CustomAgent[];
     knowledgeBases.value = chatResources.rawKnowledgeBases.map((kb: any) => ({ id: kb.id, name: kb.name }));
   } catch {
     allChannels.value = [];

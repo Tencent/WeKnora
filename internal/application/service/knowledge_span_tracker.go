@@ -36,7 +36,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
+
+	"github.com/Tencent/WeKnora/internal/common"
 )
 
 // maxSpanNameLen matches knowledge_processing_spans.name (varchar(255)).
@@ -110,8 +113,13 @@ type SpanTracker interface {
 
 	// FailSpan marks span as failed and cascade-cancels its
 	// descendants. errorDetail (a Go error) is recorded verbatim in
-	// error_detail (truncated to 8 KB) for admin views.
+	// error_detail (truncated to 8 KB) for admin views. Main pipeline stage
+	// failures close the root even when unused retry budget remains.
 	FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error)
+
+	// FailSpanRetryable records a failure that the caller will return to the
+	// task runner for retry. It leaves the root open only while retries remain.
+	FailSpanRetryable(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error)
 
 	// SkipSpan marks an intentionally not-run span (e.g. multimodal
 	// on a text-only document). Distinct from cancelled — skipped is
@@ -250,6 +258,23 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 	attempt, err := t.repo.NextAttempt(ctx, knowledgeID)
 	if err != nil {
 		return nil, 0, err
+	}
+	// A new attempt supersedes every earlier one: close whatever the previous
+	// attempt left open before opening the new root. A failure path that marks
+	// the row terminal without finalizing its attempt leaves a "running" root
+	// behind; housekeeping's stall sweep never revisits a terminal row, so
+	// without this the old run would appear to progress alongside the new one
+	// and would never be closed.
+	if attempt > 1 {
+		if n, err := t.repo.CancelOpenSpansBeforeAttempt(ctx, knowledgeID, attempt,
+			"ATTEMPT_SUPERSEDED", "superseded by a newer parse attempt"); err != nil {
+			logger.Warnf(ctx, "[SpanTracker] cancel superseded spans failed kid=%s attempt=%d: %v",
+				knowledgeID, attempt, err)
+		} else if n > 0 {
+			logger.Infof(ctx,
+				"[SpanTracker] cancelled %d superseded open span(s) for kid=%s before attempt %d",
+				n, knowledgeID, attempt)
+		}
 	}
 	now := time.Now()
 	rootID := newSpanID()
@@ -476,6 +501,18 @@ func (t *spanTracker) EndSpan(ctx context.Context, span *Span, output types.JSON
 }
 
 func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error) {
+	t.failSpan(ctx, span, errorCode, errorMessage, errorDetail, false)
+}
+
+func (t *spanTracker) FailSpanRetryable(
+	ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error,
+) {
+	t.failSpan(ctx, span, errorCode, errorMessage, errorDetail, attemptStillHasRetry(ctx))
+}
+
+func (t *spanTracker) failSpan(
+	ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error, willRetry bool,
+) {
 	if span == nil {
 		return
 	}
@@ -485,11 +522,11 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	if errorDetail != nil {
 		detail = errorDetail.Error()
 		if len(detail) > 8192 {
-			detail = detail[:8192]
+			detail = common.TruncateUTF8Bytes(detail, 8192)
 		}
 	}
 	if len(errorMessage) > 1024 {
-		errorMessage = errorMessage[:1024]
+		errorMessage = common.TruncateUTF8Bytes(errorMessage, 1024)
 	}
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  span.KnowledgeID,
@@ -523,13 +560,16 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	// in StageDependencies (those are siblings, not descendants).
 	if span.Kind == types.SpanKindStage {
 		t.cascadeDependentStages(ctx, span, reason)
-		// Any failure in a MAIN pipeline stage means the attempt is
-		// done — the parse cannot succeed past this point. Close the
-		// root span as failed so the UI doesn't show "进行中" forever.
-		// Optional downstream stages (summary/question/wiki/graph) do
-		// not poison the attempt: they can fail without invalidating
-		// the parsed document.
-		if isMainPipelineStage(span.Name) {
+		// Only an explicitly retryable failure with remaining budget leaves
+		// the root open. Retries share the same attempt, so closing it early
+		// prevents a successful retry from finalizing it as done (#4326).
+		// Terminal failures must close it even when retry budget is unused:
+		// callers can record a permanent failure and acknowledge the task.
+		//
+		// Optional downstream stages (summary/question/wiki/graph) do not
+		// poison the attempt: they can fail without invalidating the parsed
+		// document.
+		if isMainPipelineStage(span.Name) && !willRetry {
 			t.FinalizeAttempt(ctx, span.KnowledgeID, span.Attempt,
 				types.SpanStatusFailed, nil, errorCode, errorMessage)
 		}
@@ -708,12 +748,28 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
+// attemptStillHasRetry reports whether retry budget remains, not whether the
+// caller will actually request a retry. It reads ProcessDocument's isLastRetry
+// counters: the Lite executor's injected metadata wins, otherwise
+// the asynq counters. Outside a task runner (a synchronous reparse, a test
+// harness) neither is present and the failure is final.
+func attemptStillHasRetry(ctx context.Context) bool {
+	if retried, limit, ok := types.TaskRetryMetadataFromContext(ctx); ok {
+		return retried < limit
+	}
+	retryCount, ok := asynq.GetRetryCount(ctx)
+	if !ok {
+		return false
+	}
+	maxRetry, ok := asynq.GetMaxRetry(ctx)
+	return ok && retryCount < maxRetry
+}
+
 // isMainPipelineStage reports whether stage is one of the 5 mandatory
 // pipeline stages (docreader / chunking / embedding / multimodal /
-// postprocess). A failure in any of these terminally invalidates the
-// attempt and must close the root as failed. Optional downstream stages
-// added later (summary, question, wiki, graph) do NOT match — those
-// can fail individually without poisoning the parse result.
+// postprocess). A terminal failure in any of these closes the root. Optional
+// downstream stages added later (summary, question, wiki, graph) do NOT match
+// — those can fail individually without poisoning the parse result.
 func isMainPipelineStage(name string) bool {
 	for _, s := range types.AllStages {
 		if s == name {
@@ -790,7 +846,7 @@ func (t *spanTracker) FinalizeAttempt(ctx context.Context, knowledgeID string, a
 		dur = now.Sub(started).Milliseconds()
 	}
 	if len(errorMessage) > 1024 {
-		errorMessage = errorMessage[:1024]
+		errorMessage = common.TruncateUTF8Bytes(errorMessage, 1024)
 	}
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  root.KnowledgeID,
@@ -864,16 +920,20 @@ func (noopSpanTracker) LatestAttempt(_ context.Context, _ string) int { return 0
 func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, _ types.JSONMap) *Span {
 	return nil
 }
+
 func (noopSpanTracker) BeginSubSpan(_ context.Context, _ *Span, _, _ string, _ types.JSONMap) *Span {
 	return nil
 }
-func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)            {}
-func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)      {}
-func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                  {}
-func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
+func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)                {}
+func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)          {}
+func (noopSpanTracker) FailSpanRetryable(_ context.Context, _ *Span, _, _ string, _ error) {}
+func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                      {}
+func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span     { return nil }
+
 func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
 	return nil
 }
+
 func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
 }
 func (noopSpanTracker) AbortAttempt(_ context.Context, _ string, _ int, _, _, _ string) {}

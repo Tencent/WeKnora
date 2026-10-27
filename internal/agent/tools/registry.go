@@ -16,6 +16,8 @@ import (
 
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
+	executionGuard    func(context.Context, types.Tool) error
+	mcpCallGuard      MCPCallGuard
 	tools             map[string]types.Tool
 	deferred          map[string]bool
 	mcpDirect         bool // Full exposure is an explicit compatibility path.
@@ -77,6 +79,22 @@ func (r *ToolRegistry) registerTool(tool types.Tool, deferred bool) {
 		r.deferred = make(map[string]bool)
 	}
 	r.deferred[name] = deferred
+}
+
+// RestrictTools intersects an already constructed registry with an authorized
+// snapshot. Used by inherited children so newly available integrations cannot
+// silently expand their parent's effective native tool set.
+func (r *ToolRegistry) RestrictTools(names []string) {
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		allowed[name] = true
+	}
+	for name := range r.tools {
+		if !allowed[name] {
+			delete(r.tools, name)
+			delete(r.deferred, name)
+		}
+	}
 }
 
 // GetTool retrieves a tool by name
@@ -204,6 +222,11 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	if err := ctx.Err(); err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
+	if r.executionGuard != nil {
+		if err := r.executionGuard(ctx, tool); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
+	}
 	name := tool.Name()
 	// Cast parameters to match expected schema types before execution.
 	// This handles common LLM quirks like returning "true" instead of true.
@@ -248,6 +271,7 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 			maxOutput = toolLimit
 		}
 	}
+	ctx = withMCPCallGuard(ctx, r.mcpCallGuard)
 	result, execErr := executeRecovered(WithOutputBudget(ctx, maxOutput), tool, args)
 	if result == nil {
 		result = &types.ToolResult{Success: false, Error: "tool returned no result"}
@@ -295,6 +319,10 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 // run on errgroup goroutines when a round executes in parallel, and errgroup
 // does not carry a panic back to Wait: an unrecovered one from any tool (MCP
 // clients, sandboxes, third-party SDKs) would take down the whole server.
+//
+// recover only covers the goroutine that calls it, so this guards the
+// tool.Execute call alone: a goroutine a tool starts for itself must install
+// its own barrier (GoRecovered / RecoverGoroutine in goroutine.go).
 func executeRecovered(
 	ctx context.Context, tool types.Tool, args json.RawMessage,
 ) (result *types.ToolResult, err error) {
@@ -310,13 +338,32 @@ func executeRecovered(
 	return tool.Execute(ctx, args)
 }
 
-// Cleanup cleans up all registered tools that implement the types.Cleanable interface.
-// This is called at the end of agent sessions to release tool-specific resources.
+// errorCleanable is Cleanup that reports a failure. types.Cleanable takes no
+// error, and one method cannot satisfy both signatures. shell_exec_async uses
+// the error form so a failed cursor update is visible.
+type errorCleanable interface {
+	Cleanup(ctx context.Context) error
+}
+
+// Cleanup cleans up all registered tools that implement types.Cleanable or
+// errorCleanable. This is called at the end of agent sessions to release
+// tool-specific resources, including shell-job output cursors.
 func (r *ToolRegistry) Cleanup(ctx context.Context) {
 	for name, tool := range r.tools {
-		if cleanable, ok := tool.(types.Cleanable); ok {
+		switch cleanable := tool.(type) {
+		case types.Cleanable:
 			logger.Infof(ctx, "[ToolRegistry] Cleaning up tool: %s", name)
 			cleanable.Cleanup(ctx)
+		case errorCleanable:
+			logger.Infof(ctx, "[ToolRegistry] Cleaning up tool: %s", name)
+			if err := cleanable.Cleanup(ctx); err != nil {
+				logger.Warnf(ctx, "[ToolRegistry] cleanup %s: %v", name, err)
+			}
 		}
 	}
+}
+
+// SetExecutionGuard installs a runtime authority fence before any direct or deferred tool.
+func (r *ToolRegistry) SetExecutionGuard(guard func(context.Context, types.Tool) error) {
+	r.executionGuard = guard
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,6 +62,10 @@ type fakeHostSkillTree struct {
 	discarded []string
 	pruned    map[string][]string
 	removed   []string
+	// held counts runs between Lock and its unlock. A host install marks the
+	// row ready while it still holds the lock and only then prunes, unbinds
+	// its session and unlocks, so the row alone does not say the run is over.
+	held sync.WaitGroup
 }
 
 func newFakeHostSkillTree(root string) *fakeHostSkillTree {
@@ -99,9 +104,12 @@ func (f *fakeHostSkillTree) Remove(name string) error {
 	delete(f.active, name)
 	return nil
 }
-func (f *fakeHostSkillTree) Installed(name string) bool  { return f.active[name] != "" }
-func (f *fakeHostSkillTree) Sweep() error                { return nil }
-func (f *fakeHostSkillTree) Lock(string) (func(), error) { return func() {}, nil }
+func (f *fakeHostSkillTree) Installed(name string) bool { return f.active[name] != "" }
+func (f *fakeHostSkillTree) Sweep() error               { return nil }
+func (f *fakeHostSkillTree) Lock(string) (func(), error) {
+	f.held.Add(1)
+	return f.held.Done, nil
+}
 
 type fakeHostSkillInstaller struct {
 	capableManager
@@ -208,10 +216,16 @@ func (fx *installFixture) snapshotLog() []string {
 	return out
 }
 
-// waitHostInstallDone waits until the background host install leaves installing.
-// Adapted from waitBackgroundInstallReady, which also requires a non-empty
-// InstalledSnapshotID (remote-only).
-func waitHostInstallDone(t *testing.T, fx *installFixture, skillID string) *types.TenantSkillEntity {
+// waitHostInstallDone waits until the background host install leaves installing
+// and has released the skill lock. Adapted from waitBackgroundInstallReady,
+// which also requires a non-empty InstalledSnapshotID (remote-only).
+//
+// The status alone is not enough: ready is recorded while the run still holds
+// the lock, before it prunes old versions and unbinds its session, so reading
+// the tree or the installer on the status would race with that tail.
+func waitHostInstallDone(
+	t *testing.T, fx *installFixture, tree *fakeHostSkillTree, skillID string,
+) *types.TenantSkillEntity {
 	t.Helper()
 	var skill *types.TenantSkillEntity
 	require.Eventually(t, func() bool {
@@ -222,14 +236,32 @@ func waitHostInstallDone(t *testing.T, fx *installFixture, skillID string) *type
 		skill = got
 		return got.Status == types.SkillStatusReady || got.Status == types.SkillStatusFailed
 	}, 2*time.Second, 5*time.Millisecond)
+	waitHostSkillUnlocked(t, tree)
 	return skill
+}
+
+// waitHostSkillUnlocked waits until no run holds a lock on the fake tree. Every
+// host install and remove unlocks last, so once this returns their writes to
+// the tree, the installer and the fixture are all visible to the test.
+func waitHostSkillUnlocked(t *testing.T, tree *fakeHostSkillTree) {
+	t.Helper()
+	released := make(chan struct{})
+	go func() {
+		tree.held.Wait()
+		close(released)
+	}()
+	select {
+	case <-released:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the host skill run never released its lock")
+	}
 }
 
 func TestHostInstallActivatesVersionAndMarksReady(t *testing.T) {
 	fx, tree, installer := hostInstallFixture(t)
 	id, err := fx.svc.InstallSkill(context.Background(), 7, sandbox.HostSkillTargetID, fx.installArchive())
 	require.NoError(t, err)
-	waitHostInstallDone(t, fx, id)
+	waitHostInstallDone(t, fx, tree, id)
 
 	row := fx.skillRow(t, sandbox.HostSkillTargetID, id)
 	require.Equal(t, types.SkillStatusReady, row.Status)
@@ -253,7 +285,7 @@ func TestHostInstallFailureKeepsPreviousVersion(t *testing.T) {
 
 	id, err := fx.svc.InstallSkill(context.Background(), 7, sandbox.HostSkillTargetID, fx.installArchive())
 	require.NoError(t, err)
-	waitHostInstallDone(t, fx, id)
+	waitHostInstallDone(t, fx, tree, id)
 
 	row := fx.skillRow(t, sandbox.HostSkillTargetID, id)
 	require.Equal(t, types.SkillStatusFailed, row.Status)
@@ -316,23 +348,26 @@ func (fx *installFixture) skillRowOrNil(configID, skillID string) *types.TenantS
 	return row
 }
 
-// waitRemoveDone waits until the background RemoveSkill goroutine deletes the row.
-func (fx *installFixture) waitRemoveDone(t *testing.T, skillID string) {
+// waitRemoveDone waits until the background RemoveSkill goroutine deletes the
+// row and releases the skill lock. The row goes before the run is over: the
+// stale marks and the progress event follow it, still under the lock.
+func (fx *installFixture) waitRemoveDone(t *testing.T, tree *fakeHostSkillTree, skillID string) {
 	t.Helper()
 	require.Eventually(t, func() bool {
 		got, err := fx.skillRepo.GetSkill(context.Background(), 7, sandbox.HostSkillTargetID, skillID)
 		return err == nil && got == nil
 	}, 2*time.Second, 5*time.Millisecond)
+	waitHostSkillUnlocked(t, tree)
 }
 
 func TestHostRemoveDeletesFilesAndRow(t *testing.T) {
 	fx, tree, _ := hostInstallFixture(t)
 	id, err := fx.svc.InstallSkill(context.Background(), 7, sandbox.HostSkillTargetID, fx.installArchive())
 	require.NoError(t, err)
-	waitHostInstallDone(t, fx, id)
+	waitHostInstallDone(t, fx, tree, id)
 
 	require.NoError(t, fx.svc.RemoveSkill(context.Background(), 7, sandbox.HostSkillTargetID, id))
-	fx.waitRemoveDone(t, id)
+	fx.waitRemoveDone(t, tree, id)
 	require.Equal(t, []string{fx.bundle.Name}, tree.removed)
 	require.Nil(t, fx.skillRowOrNil(sandbox.HostSkillTargetID, id))
 	require.Empty(t, fx.snapshotLog())

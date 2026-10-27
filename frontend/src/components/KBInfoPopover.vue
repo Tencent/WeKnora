@@ -198,7 +198,8 @@ const isOwner = computed<boolean>(() => {
   const creatorId = kb.creator_id || ''
   const userId = authStore.user?.id || ''
   if (!creatorId) return false
-  return creatorId === userId
+  // A creator demoted to Viewer no longer manages it (access.CreatorRoleFloor).
+  return creatorId === userId && authStore.hasRole('contributor')
 })
 
 const currentSharedKb = computed(() => {

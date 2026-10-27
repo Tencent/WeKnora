@@ -285,6 +285,11 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options) (map[strin
 		// messages legitimately produces no turns.
 		contents = []map[string]any{}
 	}
+	// Gemini has no in-sequence instruction role; the envelope identifies
+	// this trailing input as runtime context, rather than new user intent.
+	if opts != nil && opts.RuntimeNotice != "" {
+		contents = append(contents, map[string]any{"role": roleUser, "parts": []part{{"text": opts.RuntimeNotice}}})
+	}
 	body := map[string]any{"contents": contents}
 	if len(system) > 0 {
 		body["systemInstruction"] = map[string]any{

@@ -99,6 +99,24 @@ export interface ModelConfig {
   deleted_at?: string | null;
 }
 
+// 复制模型。只提交展示名；name 与凭证由服务端从源模型复制。
+export function copyModelConfig(id: string, displayName: string): Promise<ModelConfig> {
+  return new Promise((resolve, reject) => {
+    post(`/api/v1/models/${id}/copy`, { display_name: displayName })
+      .then((response: any) => {
+        if (response.success && response.data) {
+          resolve(response.data);
+        } else {
+          reject(new Error(response.message || ''));
+        }
+      })
+      .catch((error: any) => {
+        console.error('Failed to copy model:', error);
+        reject(error);
+      });
+  });
+}
+
 // 创建模型
 export function createModel(data: ModelConfig): Promise<ModelConfig> {
   return new Promise((resolve, reject) => {
@@ -217,6 +235,8 @@ export interface ModelDebugOptions {
   thinking?: boolean
   // Graded thinking level; takes precedence over the boolean when set.
   reasoning_effort?: ReasoningEffortLevel | string
+  // Embedding only: score `documents` (and the file) against `input` as a query.
+  similarity?: boolean
 }
 
 export interface ModelDebugResult {

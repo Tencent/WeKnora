@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { protectProviderImageSrcInHTML } from './security.ts'
+import { documentPreviewDomPurifyConfig, protectProviderImageSrcInHTML } from './security.ts'
 
 test('protectProviderImageSrcInHTML uses a placeholder src for provider images', () => {
   const html = '<p><img alt="preview" src="local://10000/exports/a.jpg"></p>'
@@ -35,4 +35,12 @@ test('protectProviderImageSrcInHTML uses a placeholder src for resource referenc
     sanitized,
     /data-protected-src="resource:\/\/AbCdEfGhIjKlMnOpQrStUv"/,
   )
+})
+
+test('document preview sanitizer keeps target on links alongside image attributes', () => {
+  // USE_PROFILES replaces ALLOWED_ATTR, so target must come from ADD_ATTR or
+  // the hook-added target="_blank" is stripped again.
+  for (const attr of ['target', 'loading', 'decoding', 'fetchpriority']) {
+    assert.ok(documentPreviewDomPurifyConfig.ADD_ATTR.includes(attr), attr)
+  }
 })

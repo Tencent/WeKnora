@@ -45,10 +45,7 @@ import {
 } from '@/api/organization'
 import { getCurrentLanguage } from '@/utils/request'
 import { createVersionedRequestCoordinator } from './versionedRequest'
-import {
-  isLocalizedCacheFresh,
-  shouldForceLocalizedRefetch,
-} from './localizedResourceCache'
+import { shouldForceLocalizedRefetch } from './localizedResourceCache'
 import {
   applyOrganizationResourceDelta,
   upsertById,
@@ -69,14 +66,11 @@ export const useOrganizationStore = defineStore('organization', () => {
   const error = ref<string | null>(null)
   /** 各空间内知识库/智能体数量（由 GET /organizations 的 resource_counts 填充，供列表侧栏使用） */
   const resourceCounts = ref<ResourceCountsByOrg | null>(null)
-  /** 用于去重：同一时刻只允许一次 GET /organizations 请求 */
-  let organizationsLoadedAt = 0
-  /** 共享资源缓存 TTL，与 chatResources 对齐 */
-  const SHARED_RESOURCE_TTL_MS = 60_000
+  // 组织 / 共享资源列表不设 TTL：每次 fetch 都发请求（并发共用同一个），
+  // 写操作后 `fetch({ force: true })` 排在飞行中的请求之后再拉一次。
+  // 输入联想的搜索结果例外，按查询串短期记忆，写操作时整体清空。
   const SEARCHABLE_ORGANIZATION_TTL_MS = 5 * 60_000
-  let sharedKbLoadedAt = 0
-  let sharedAgentsLoadedAt = 0
-  /** 共享智能体含按请求语言本地化的内置名称；切换 UI 语言后缓存随之失效 */
+  /** 共享智能体含按请求语言本地化的内置名称；切换 UI 语言后快照随之失效 */
   let sharedAgentsLoadedLocale = ''
   let sharedAgentsInflightLocale = ''
   let searchableOrganizationsQuery = ''
@@ -105,7 +99,7 @@ export const useOrganizationStore = defineStore('organization', () => {
 
   /**
    * Fetch all organizations the user belongs to.
-   * 去重 + 短期缓存，列表页与侧栏等多处共用。
+   * 并发去重，列表页与侧栏等多处共用。
    */
   const organizationsRequest = createVersionedRequestCoordinator(
     async () => {
@@ -121,7 +115,6 @@ export const useOrganizationStore = defineStore('organization', () => {
       if (response.success && response.data) {
         organizations.value = response.data.organizations
         resourceCounts.value = response.data.resource_counts ?? null
-        organizationsLoadedAt = Date.now()
       } else {
         resourceCounts.value = null
         error.value = response.message || 'Failed to fetch organizations'
@@ -130,20 +123,11 @@ export const useOrganizationStore = defineStore('organization', () => {
   )
 
   async function fetchOrganizations(options?: { force?: boolean }) {
-    const force = options?.force ?? false
-    if (
-      !force &&
-      organizationsLoadedAt > 0 &&
-      Date.now() - organizationsLoadedAt < SHARED_RESOURCE_TTL_MS
-    ) {
-      return
-    }
-    return organizationsRequest.fetch(force)
+    return organizationsRequest.fetch(options?.force ?? false)
   }
 
   function patchOrganization(id: string, patch: Partial<Organization>) {
     organizationsRequest.invalidate()
-    organizationsLoadedAt = 0
     organizations.value = organizations.value.map(org =>
       org.id === id ? { ...org, ...patch } : org
     )
@@ -154,7 +138,6 @@ export const useOrganizationStore = defineStore('organization', () => {
 
   function upsertOrganization(organization: Organization) {
     organizationsRequest.invalidate()
-    organizationsLoadedAt = 0
     organizations.value = upsertById(organizations.value, organization)
     if (currentOrganization.value?.id === organization.id) {
       currentOrganization.value = organization
@@ -167,7 +150,6 @@ export const useOrganizationStore = defineStore('organization', () => {
    */
   function mergeOrganizationDetail(organization: Organization) {
     organizationsRequest.invalidate()
-    organizationsLoadedAt = 0
     const next = mergeById(organizations.value, organization)
     organizations.value = next
     currentOrganization.value =
@@ -180,7 +162,6 @@ export const useOrganizationStore = defineStore('organization', () => {
     delta: number
   ) {
     organizationsRequest.invalidate()
-    organizationsLoadedAt = 0
     const result = applyOrganizationResourceDelta(
       organizations.value,
       resourceCounts.value,
@@ -206,9 +187,7 @@ export const useOrganizationStore = defineStore('organization', () => {
       const response = await createOrganization({ name, description, avatar })
       if (response.success && response.data) {
         upsertOrganization(response.data)
-        // 创建成功后重置缓存时间戳，确保后续 fetchOrganizations() 不会被 TTL 缓存跳过，
-        // 从而刷新 resource_counts 等创建接口不返回的聚合字段。
-        organizationsLoadedAt = 0
+        // 创建接口不返回 resource_counts 等聚合字段，强刷一次列表补齐。
         void fetchOrganizations({ force: true })
         return response.data
       } else {
@@ -261,7 +240,6 @@ export const useOrganizationStore = defineStore('organization', () => {
       const response = await deleteOrganization(id)
       if (response.success) {
         organizationsRequest.invalidate()
-        organizationsLoadedAt = 0
         organizations.value = organizations.value.filter(o => o.id !== id)
         if (currentOrganization.value?.id === id) {
           currentOrganization.value = null
@@ -338,7 +316,6 @@ export const useOrganizationStore = defineStore('organization', () => {
       const response = await leaveOrganization(id)
       if (response.success) {
         organizationsRequest.invalidate()
-        organizationsLoadedAt = 0
         organizations.value = organizations.value.filter(o => o.id !== id)
         if (currentOrganization.value?.id === id) {
           currentOrganization.value = null
@@ -459,7 +436,7 @@ export const useOrganizationStore = defineStore('organization', () => {
 
   /**
    * Fetch shared knowledge bases.
-   * 去重 + 短期缓存，避免对话页等多处并发重复请求。
+   * 并发去重，避免对话页等多处同时重复请求。
    */
   const sharedKnowledgeBasesRequest = createVersionedRequestCoordinator(
     async () => {
@@ -474,7 +451,6 @@ export const useOrganizationStore = defineStore('organization', () => {
     (response) => {
       if (response.success && response.data) {
         sharedKnowledgeBases.value = response.data.filter(s => s.knowledge_base != null)
-        sharedKbLoadedAt = Date.now()
       } else {
         error.value = response.message || 'Failed to fetch shared knowledge bases'
       }
@@ -482,21 +458,13 @@ export const useOrganizationStore = defineStore('organization', () => {
   )
 
   async function fetchSharedKnowledgeBases(options?: { force?: boolean }) {
-    const force = options?.force ?? false
-    if (
-      !force &&
-      sharedKbLoadedAt > 0 &&
-      Date.now() - sharedKbLoadedAt < SHARED_RESOURCE_TTL_MS
-    ) {
-      return sharedKnowledgeBases.value
-    }
-    await sharedKnowledgeBasesRequest.fetch(force)
+    await sharedKnowledgeBasesRequest.fetch(options?.force ?? false)
     return sharedKnowledgeBases.value
   }
 
   /**
    * Fetch shared agents (shared to me through organizations).
-   * 去重 + 短期缓存。
+   * 并发去重；快照只对拉取时的 UI 语言有效。
    */
   const sharedAgentsRequest = createVersionedRequestCoordinator(
     async () => {
@@ -508,7 +476,6 @@ export const useOrganizationStore = defineStore('organization', () => {
     ({ response, locale }) => {
       if (response.success && response.data) {
         sharedAgents.value = response.data.filter(s => s.agent != null)
-        sharedAgentsLoadedAt = Date.now()
         sharedAgentsLoadedLocale = locale
       }
     }
@@ -519,7 +486,6 @@ export const useOrganizationStore = defineStore('organization', () => {
     (locale) => {
       if (sharedAgentsLoadedLocale && sharedAgentsLoadedLocale !== locale) {
         sharedAgentsRequest.invalidate()
-        sharedAgentsLoadedAt = 0
         sharedAgentsLoadedLocale = ''
         sharedAgentsInflightLocale = ''
       }
@@ -529,17 +495,7 @@ export const useOrganizationStore = defineStore('organization', () => {
   async function fetchSharedAgents(options?: { force?: boolean }) {
     const locale = getCurrentLanguage()
     const force = options?.force ?? false
-    if (
-      !force &&
-      isLocalizedCacheFresh(
-        sharedAgentsLoadedAt,
-        sharedAgentsLoadedLocale,
-        locale,
-        SHARED_RESOURCE_TTL_MS,
-      )
-    ) {
-      return sharedAgents.value
-    }
+    // 飞行中的请求是用另一种语言发起的：不能复用它，排在它后面再发一次。
     const mustForce =
       force ||
       shouldForceLocalizedRefetch(
@@ -571,15 +527,12 @@ export const useOrganizationStore = defineStore('organization', () => {
   function invalidateOrganizationData(options: InvalidateOrganizationDataOptions) {
     if (options.organizations) {
       organizationsRequest.invalidate()
-      organizationsLoadedAt = 0
     }
     if (options.sharedKnowledgeBases) {
       sharedKnowledgeBasesRequest.invalidate()
-      sharedKbLoadedAt = 0
     }
     if (options.sharedAgents) {
       sharedAgentsRequest.invalidate()
-      sharedAgentsLoadedAt = 0
       sharedAgentsLoadedLocale = ''
       sharedAgentsInflightLocale = ''
     }
@@ -834,11 +787,8 @@ export const useOrganizationStore = defineStore('organization', () => {
     resourceCounts.value = null
     previewData.value = null
     error.value = null
-    sharedKbLoadedAt = 0
-    sharedAgentsLoadedAt = 0
     sharedAgentsLoadedLocale = ''
     sharedAgentsInflightLocale = ''
-    organizationsLoadedAt = 0
     searchableOrganizationsQuery = ''
     searchableOrganizationCache.clear()
     organizationsRequest.invalidate()

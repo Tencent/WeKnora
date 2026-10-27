@@ -39,13 +39,18 @@ func (s *schemaTestServer) repository(t *testing.T) *weaviateRepository {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/schema/"):
-			if s.probe != nil {
-				s.probe()
-			}
+			// Answer from the state the worker found on arrival, before the
+			// barrier releases the race. Sampling after it instead lets the
+			// winner's create turn into an "already exists" answer for whoever
+			// the scheduler runs last, so that worker skips the create
+			// entirely and fewer than `workers` creates ever reach the server.
 			s.mu.Lock()
 			s.probes++
 			exists := s.exists
 			s.mu.Unlock()
+			if s.probe != nil {
+				s.probe()
+			}
 			if !exists {
 				w.WriteHeader(http.StatusNotFound)
 				return

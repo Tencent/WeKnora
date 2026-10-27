@@ -139,10 +139,10 @@ var registry = map[string]settingSpec{
 		Type:     "string",
 		EnvName:  "", // No env fallback — handler passes cfg.Auth.RegistrationMode as default
 		Default:  "self_serve",
-		Enum:     []string{"self_serve", "invite_only"},
+		Enum:     []string{"self_serve", "invite_register", "invite_only"},
 		Category: "auth",
-		Description: "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
-			"仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
+		Description: "注册模式。self_serve = 开放注册；invite_register = 仅持有效邀请链接的新用户可注册；" +
+			"invite_only = 禁止注册，邀请仅供已有账号加入空间。保存后立即生效。",
 	},
 	"auth.default_tenant_mode": {
 		Type:     "string",
@@ -217,6 +217,14 @@ var registry = map[string]settingSpec{
 		Description: "新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
 			"仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。" +
 			"0 或负数表示使用内置默认值 10GB。",
+	},
+	"tenant.default_storage_quota_mb": {
+		Type:     "int",
+		EnvName:  "WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_MB",
+		Default:  int64(0),
+		Category: "tenant",
+		Description: "新空间默认存储配额（MB），包括注册自动创建的个人空间。" +
+			"正数优先于 GB 配额；0 或负数沿用 GB 设置。仅新建空间时读取，不自动修改现有空间。",
 	},
 	// tenant.auto_create_api_key restores the legacy behaviour where creating
 	// a tenant also minted a full-access API key and returned its plaintext
@@ -756,6 +764,48 @@ func (s *systemSettingService) GetStringList(ctx context.Context, key string, en
 // override are returned as virtual rows using the effective fallback
 // value (ENV/config/default), so merely migrating the schema never
 // changes runtime behaviour.
+// SummarizeSystemSettings excludes unknown rows and secrets. Registry metadata
+// is authoritative, so a stray database row cannot introduce arbitrary config
+// fields into the assistant's catalog. Values remain JSON to preserve type.
+func SummarizeSystemSettings(rows []*types.SystemSetting, key string) []types.SystemSettingSummary {
+	out := []types.SystemSettingSummary{}
+	for _, row := range rows {
+		if row == nil || (key != "" && row.Key != key) {
+			continue
+		}
+		spec, known := registry[row.Key]
+		if !known {
+			continue
+		}
+		item := types.SystemSettingSummary{
+			Key: row.Key, ValueType: spec.Type, Category: spec.Category,
+			Description: spec.Description, RequiresRestart: spec.RequiresRestart, Enum: spec.Enum, ValueHidden: true,
+		}
+		if !row.IsSecret && json.Valid(row.Value) && len(row.Value) <= 4096 {
+			// Check the value against the declared type before returning it.
+			var value any
+			decoder := json.NewDecoder(bytes.NewReader(row.Value))
+			decoder.UseNumber()
+			if decoder.Decode(&value) == nil {
+				if number, ok := value.(json.Number); ok {
+					parsed, err := number.Int64()
+					if err != nil {
+						out = append(out, item)
+						continue
+					}
+					value = parsed
+				}
+				if encoded, err := encodeForType(spec.Type, value); err == nil {
+					item.ValueJSON = string(encoded)
+					item.ValueHidden = false
+				}
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
 func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting, error) {
 	rows, err := s.repo.List(ctx)
 	if err != nil {

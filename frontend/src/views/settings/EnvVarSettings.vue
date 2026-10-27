@@ -437,7 +437,7 @@ const loading = ref(true)
 const loadError = ref('')
 const groups = ref<ConfigEnvGroup[]>([])
 
-const skillCards = computed(() => skillSecretCards(groups.value))
+const skillCards = computed(() => skillSecretCards(groups.value, t('settings.skills.hostTarget')))
 const sandboxCards = computed(() => sandboxGroupsWithVars(groups.value))
 const multipleSandboxes = computed(() => groups.value.length > 1)
 const sandboxOptions = computed(() =>

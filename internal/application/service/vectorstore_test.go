@@ -393,6 +393,28 @@ func TestCreateStore_DuplicateCheck_EnvStore(t *testing.T) {
 	assert.Contains(t, appErr.Error(), "environment variables")
 }
 
+func TestCreateStore_DuplicateCheck_QdrantEnvStore(t *testing.T) {
+	withSSRFWhitelist(t, "qdrant")
+	t.Setenv("RETRIEVE_DRIVER", "qdrant")
+	t.Setenv("QDRANT_HOST", "qdrant")
+	t.Setenv("QDRANT_PORT", "7443")
+	t.Setenv("QDRANT_USE_TLS", "true")
+	t.Setenv("QDRANT_COLLECTION", "custom_vectors")
+
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	err := svc.CreateStore(context.Background(), &types.VectorStore{
+		TenantID: 1, Name: "duplicate", EngineType: types.QdrantRetrieverEngineType,
+		ConnectionConfig: types.ConnectionConfig{Host: "qdrant", Port: 7443, UseTLS: true},
+		IndexConfig:      types.IndexConfig{CollectionPrefix: "custom_vectors"},
+	})
+	var appErr *errors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, errors.ErrConflict, appErr.Code)
+	assert.Contains(t, appErr.Error(), "environment variables")
+	assert.Empty(t, repo.stores)
+}
+
 func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T) {
 	// Same endpoint as env store but different index — should be allowed.
 	// Use an httptest server so CreateStore's connection probe sees a real

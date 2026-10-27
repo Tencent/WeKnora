@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, ref, watch, type ComputedRef } from 'vue';
+import { KB_WEB_TAG_RE, stripIncompleteCitationTag } from '../utils/citationMarkdown';
 
 export interface TypewriterOptions {
   /** Comfortable reveal floor in characters per second. */
@@ -11,7 +12,7 @@ export interface TypewriterOptions {
   maxFrameSeconds?: number;
 }
 
-const NATURAL_BREAK_RE = /[\s，。！？；：、,.!?;:)\]】》」』]/u;
+const NATURAL_BREAK_RE = /[\s，。！？；：、,.!?;:)\]】》」』\uFFFC]/u;
 const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/u;
 const WORD_CHARACTER_RE = /[\p{L}\p{N}_]/u;
 
@@ -91,6 +92,21 @@ export function useTypewriter(
   const maxCps = options.maxCps ?? 240;
   const maxFrameSeconds = options.maxFrameSeconds ?? 0.05;
 
+  // Pace visible units, not the long IDs/URLs hidden inside citation badges.
+  // Keep source offsets so the renderer still receives the original tags intact.
+  const pacedTarget = computed(() => {
+    const source = stripIncompleteCitationTag(getTarget());
+    const citations: { index: number; hiddenLength: number }[] = [];
+    let hiddenLength = 0;
+    const text = source.replace(KB_WEB_TAG_RE, (tag: string, offset: number) => {
+      const index = offset - hiddenLength;
+      hiddenLength += tag.length - 1;
+      citations.push({ index, hiddenLength });
+      return '\uFFFC';
+    });
+    return { source, text, citations };
+  });
+
   const typedLength = ref(0);
   let revealCredit = 0;
   let raf: number | null = null;
@@ -105,14 +121,22 @@ export function useTypewriter(
   }
 
   const displayed = computed(() => {
-    const full = getTarget();
+    const { source, text: full, citations } = pacedTarget.value;
     let n = Math.min(typedLength.value, full.length);
+    // Preserve the raw completed value, even if generation ended mid-tag. The
+    // renderer hides that tail; callers use raw length to detect reveal completion.
+    if (getComplete() && n === full.length) return getTarget();
     // Never cut on a high surrogate, which would render a broken glyph.
     if (n > 0 && n < full.length) {
       const code = full.charCodeAt(n - 1);
       if (code >= 0xd800 && code <= 0xdbff) n -= 1;
     }
-    return full.slice(0, n);
+    let hiddenLength = 0;
+    for (const citation of citations) {
+      if (citation.index >= n) break;
+      hiddenLength = citation.hiddenLength;
+    }
+    return source.slice(0, n + hiddenLength);
   });
 
   const stop = () => {
@@ -124,7 +148,7 @@ export function useTypewriter(
   };
 
   const tick = (ts: number) => {
-    const full = getTarget();
+    const full = pacedTarget.value.text;
     const target = full.length;
     if (typedLength.value > target) {
       typedLength.value = 0;
@@ -160,7 +184,7 @@ export function useTypewriter(
   const handleMotionChange = (event: MediaQueryListEvent) => {
     reduceMotion = event.matches;
     if (reduceMotion) {
-      typedLength.value = getTarget().length;
+      typedLength.value = pacedTarget.value.text.length;
       revealCredit = 0;
       stop();
     }
@@ -170,7 +194,7 @@ export function useTypewriter(
   watch(
     [getTarget, getComplete],
     ([full, complete], [previous, wasComplete]) => {
-      const target = full.length;
+      const target = pacedTarget.value.text.length;
       if (!initialized) {
         initialized = true;
         if (complete || reduceMotion) {

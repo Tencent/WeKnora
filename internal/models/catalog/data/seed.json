@@ -584,37 +584,115 @@
         "id": "tongyi-embedding-vision-plus",
         "name": "Tongyi Embedding Vision Plus",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 1152,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
+        "id": "tongyi-embedding-vision-flash",
+        "name": "tongyi-embedding-vision-flash",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 768,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "tongyi-embedding-vision-flash (fixed 768 dimensions)",
         "match": "tongyi-embedding-vision-flash",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "tongyi-embedding-vision snapshots",
         "match": "tongyi-embedding-vision*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
+        "id": "qwen3-vl-embedding",
+        "name": "qwen3-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 2560,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "qwen3-vl-embedding (independent vectors by default)",
         "match": "qwen3-vl-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
+        "id": "qwen2.5-vl-embedding",
+        "name": "qwen2.5-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "qwen2.5-vl-embedding (fused vectors only)",
         "match": "qwen2.5-vl-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
+        "id": "multimodal-embedding-v1",
+        "name": "multimodal-embedding-v1",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "multimodal-embedding-v1",
         "match": "multimodal-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
@@ -660,6 +738,60 @@
           "cache_write": 12.5
         },
         "source": "https://docs.anthropic.com/en/docs/about-claude/models"
+      },
+      {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 4,
+          "output": 20,
+          "cache_read": 0.2,
+          "cache_write": 5
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview"
+      },
+      {
+        "id": "claude-sonnet-5-5",
+        "name": "Claude Sonnet 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 2,
+          "output": 10,
+          "cache_read": 0.1,
+          "cache_write": 2.5
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview"
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "name": "Claude Haiku 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 0.1,
+          "output": 0.5,
+          "cache_read": 0.01,
+          "cache_write": 0.125
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview"
       },
       {
         "id": "claude-opus-5",
@@ -1312,9 +1444,65 @@
         "match": "o4*",
         "reasoning": true,
         "source": "https://platform.openai.com/docs/guides/reasoning"
+      },
+      {
+        "name": "Qwen3-VL-Embedding (self-hosted)",
+        "match": "*qwen3-vl-embedding*",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
+        "source": "https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-2B",
+        "match": "*/WeMM-Embedding-2B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-2B",
+        "aliases": [
+          "WeMM-Embedding-2B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2048,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-2B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-4B",
+        "match": "*/WeMM-Embedding-4B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-4B",
+        "aliases": [
+          "WeMM-Embedding-4B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 2560,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-4B"
+      },
+      {
+        "id": "tencent/WeMM-Embedding-9B",
+        "match": "*/WeMM-Embedding-9B",
+        "type": "Embedding",
+        "name": "WeMM-Embedding-9B",
+        "aliases": [
+          "WeMM-Embedding-9B"
+        ],
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 4096,
+        "source": "https://huggingface.co/tencent/WeMM-Embedding-9B"
       }
     ],
     "gpustack": [],
+    "huggingface_tei": [],
     "hunyuan": [
       {
         "name": "Hunyuan T1 family (always-on reasoning)",
@@ -1496,6 +1684,10 @@
         "id": "jina-embeddings-v4",
         "name": "Jina Embeddings v4",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
         "dimension": 2048,
         "context_window": 32768,
         "source": "https://jina.ai/models/jina-embeddings-v4/"
@@ -1542,6 +1734,10 @@
         "id": "jina-reranker-m0",
         "name": "Jina Reranker m0 (multimodal)",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "context_window": 10000,
         "source": "https://jina.ai/reranker/"
       },
@@ -2627,6 +2823,10 @@
         "id": "nvidia/llama-nemotron-rerank-vl-1b-v2",
         "name": "Llama Nemotron Rerank VL 1B v2",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "source": "https://build.nvidia.com"
       },
       {
@@ -3349,6 +3549,22 @@
         "name": "Whisper Large v3",
         "type": "ASR",
         "source": "https://openrouter.ai/docs/api/api-reference/stt/create-transcription"
+      }
+    ],
+    "pinecone": [
+      {
+        "id": "bge-reranker-v2-m3",
+        "name": "BGE Reranker v2 M3 (Pinecone)",
+        "type": "Rerank",
+        "context_window": 1024,
+        "source": "https://docs.pinecone.io/reference/api/2025-10/inference/list_models"
+      },
+      {
+        "id": "pinecone-rerank-v0",
+        "name": "Pinecone Rerank v0",
+        "type": "Rerank",
+        "context_window": 512,
+        "source": "https://docs.pinecone.io/reference/api/2025-10/inference/list_models"
       }
     ],
     "qianfan": [
@@ -4305,6 +4521,11 @@
         "id": "doubao-embedding-vision-251215",
         "name": "Doubao Embedding Vision (251215)",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 2048,
         "source": "https://docs.volcengine.com/docs/ark/multimodal-vectorization-api?lang=zh"
       },
@@ -4312,6 +4533,11 @@
         "id": "doubao-embedding-vision-250615",
         "name": "Doubao Embedding Vision",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 2048,
         "source": "https://docs.volcengine.com/docs/ark/multimodal-vectorization-api?lang=zh"
       },
@@ -4535,6 +4761,38 @@
         "name": "GLM-ASR-2512 (at most 30 s per file)",
         "type": "ASR",
         "source": "https://docs.bigmodel.cn/api-reference/模型-api/语音转文本"
+      }
+    ],
+    "cohere": [
+      {
+        "id": "rerank-v4.0-pro",
+        "name": "rerank-v4.0-pro",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v4.0-fast",
+        "name": "rerank-v4.0-fast",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v3.5",
+        "name": "rerank-v3.5",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 4096,
+        "source": "https://docs.cohere.com/docs/models#rerank"
       }
     ]
   }

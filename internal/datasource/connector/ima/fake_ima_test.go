@@ -78,8 +78,30 @@ type fakeIMA struct {
 
 	// calls counts requests per action, plus "download:<media_id>".
 	calls map[string]int
+	// paging overrides an action's paging envelope; see fakePaging.
+	paging map[string]fakePaging
 	// downloadHeaders records the headers seen by the last download of a media.
 	downloadHeaders map[string]http.Header
+}
+
+// fakePaging forces the paging envelope of one action so a test can reproduce
+// a vendor that never stops paging. maxRequests bounds the fake: once the
+// action has been called more times than that it answers 400, so a run without
+// the connector's guard fails instead of spinning forever.
+type fakePaging struct {
+	// nextCursor is answered as next_cursor; with advanceCursor the request
+	// number is appended so every page hands back a cursor never seen before.
+	nextCursor    string
+	advanceCursor bool
+	isEnd         bool
+	// stopAfter ends the listing (is_end=true, empty cursor) once the action
+	// has been called this many times, so a test can model a finite listing.
+	stopAfter int
+	// filesByCall replaces get_knowledge_list's payload for one request
+	// number (1-based), so a test can prove several pages are merged.
+	filesByCall map[int][]fakeFile
+	// maxRequests answers 400 once the action has been called more than this.
+	maxRequests int
 }
 
 func newFakeIMA(t *testing.T) *fakeIMA {
@@ -88,6 +110,7 @@ func newFakeIMA(t *testing.T) *fakeIMA {
 		files:           map[string]map[string][]fakeFile{},
 		folders:         map[string]map[string][]fakeFolder{},
 		calls:           map[string]int{},
+		paging:          map[string]fakePaging{},
 		downloadHeaders: map[string]http.Header{},
 	}
 	mux := http.NewServeMux()
@@ -136,6 +159,47 @@ func (f *fakeIMA) record(key string) {
 	f.calls[key]++
 }
 
+// pagingFields answers the is_end/next_cursor pair for an action, applying the
+// test's paging override when one is installed.
+func (f *fakeIMA) pagingFields(action string) (isEnd bool, nextCursor string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	override, ok := f.paging[action]
+	if !ok {
+		return true, ""
+	}
+	if override.stopAfter > 0 && f.calls[action] >= override.stopAfter {
+		return true, ""
+	}
+	if override.advanceCursor {
+		return override.isEnd, fmt.Sprintf("%s-%d", override.nextCursor, f.calls[action])
+	}
+	return override.isEnd, override.nextCursor
+}
+
+// pagingFiles answers the file payload for one get_knowledge_list request,
+// falling back to the knowledge base's own listing.
+func (f *fakeIMA) pagingFiles(kbID, folderID string, call int) []fakeFile {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if override, ok := f.paging["get_knowledge_list"]; ok {
+		if files, ok := override.filesByCall[call]; ok {
+			return files
+		}
+	}
+	return f.files[kbID][folderID]
+}
+
+// requestBudgetExceeded reports whether the action has used up the request
+// budget a test installed, so the fake can answer 400 instead of letting an
+// unguarded connector spin.
+func (f *fakeIMA) requestBudgetExceeded(action string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	limit := f.paging[action].maxRequests
+	return limit > 0 && f.calls[action] > limit
+}
+
 // findFile locates a file by media_id across every knowledge base.
 func (f *fakeIMA) findFile(mediaID string) (fakeFile, bool) {
 	f.mu.Lock()
@@ -155,6 +219,10 @@ func (f *fakeIMA) findFile(mediaID string) (fakeFile, bool) {
 func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 	action := strings.TrimPrefix(r.URL.Path, apiBasePath+"/")
 	f.record(action)
+	if f.requestBudgetExceeded(action) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
 	var req map[string]interface{}
 	_ = json.NewDecoder(r.Body).Decode(&req)
@@ -167,14 +235,20 @@ func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "get_addable_knowledge_base_list":
+		isEnd, nextCursor := f.pagingFields(action)
 		f.mu.Lock()
-		resp := getAddableKnowledgeBaseListResp{AddableKnowledgeBaseList: f.bases, IsEnd: true}
+		resp := getAddableKnowledgeBaseListResp{
+			AddableKnowledgeBaseList: f.bases,
+			IsEnd:                    isEnd,
+			NextCursor:               nextCursor,
+		}
 		f.mu.Unlock()
 		writeEnvelope(w, 0, "", resp)
 
 	case "search_knowledge_base":
+		isEnd, nextCursor := f.pagingFields(action)
 		f.mu.Lock()
-		resp := searchKnowledgeBaseResp{InfoList: f.searchBases, IsEnd: true}
+		resp := searchKnowledgeBaseResp{InfoList: f.searchBases, IsEnd: isEnd, NextCursor: nextCursor}
 		f.mu.Unlock()
 		writeEnvelope(w, 0, "", resp)
 
@@ -191,8 +265,9 @@ func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 	case "get_knowledge_list":
 		kbID, folderID := str("knowledge_base_id"), str("folder_id")
 		f.record("get_knowledge_list:" + folderID)
+		isEnd, nextCursor := f.pagingFields("get_knowledge_list")
+		files := f.pagingFiles(kbID, folderID, f.callCount("get_knowledge_list"))
 		f.mu.Lock()
-		files := f.files[kbID][folderID]
 		folders := f.folders[kbID][folderID]
 		f.mu.Unlock()
 
@@ -216,7 +291,7 @@ func (f *fakeIMA) handleAPI(w http.ResponseWriter, r *http.Request) {
 			})
 			list = append(list, b)
 		}
-		writeEnvelope(w, 0, "", getKnowledgeListResp{KnowledgeList: list, IsEnd: true})
+		writeEnvelope(w, 0, "", getKnowledgeListResp{KnowledgeList: list, IsEnd: isEnd, NextCursor: nextCursor})
 
 	case "get_media_info":
 		mediaID := str("media_id")

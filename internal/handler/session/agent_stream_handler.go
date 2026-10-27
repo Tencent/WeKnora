@@ -43,6 +43,9 @@ type AgentStreamHandler struct {
 	assistantMessage   *types.Message
 	streamManager      interfaces.StreamManager
 	completionEvent    *interfaces.StreamEvent // Published only after the final message is persisted.
+	// suspension is set when the run ended waiting on a user prompt. The
+	// message then stays incomplete and the run is resumed later.
+	suspension *types.PromptSuspension
 
 	eventBus *event.EventBus
 
@@ -62,6 +65,7 @@ type AgentStreamHandler struct {
 	sandboxIDLookup SandboxIDLookup
 
 	// State tracking
+	toolApprovals   []types.ToolApprovalRecord
 	knowledgeRefs   []*types.SearchResult
 	finalAnswer     string
 	answerSegments  []*answerSegment     // Per-answer-event-ID accumulation, so superseded preambles can be dropped
@@ -103,6 +107,21 @@ func (h *AgentStreamHandler) composeFinalAnswer() string {
 	return b.String()
 }
 
+// supersedeAnswerSegments marks the matching streamed segments as superseded
+// and recomposes the answer. Callers must hold h.mu.
+func (h *AgentStreamHandler) supersedeAnswerSegments(match func(*answerSegment) bool) {
+	supersededAny := false
+	for _, seg := range h.answerSegments {
+		if !seg.superseded && seg.content != "" && match(seg) {
+			seg.superseded = true
+			supersededAny = true
+		}
+	}
+	if supersededAny {
+		h.finalAnswer = h.composeFinalAnswer()
+	}
+}
+
 // NewAgentStreamHandler creates a new handler for agent SSE streaming
 func NewAgentStreamHandler(
 	ctx context.Context,
@@ -139,6 +158,7 @@ func NewAgentStreamHandler(
 func (h *AgentStreamHandler) Subscribe() {
 	// Subscribe to all agent streaming events on the dedicated EventBus
 	h.eventBus.On(event.EventAgentThought, h.handleThought)
+	h.eventBus.On(event.EventAgentProgress, h.handleProgress)
 	h.eventBus.On(event.EventAgentToolCall, h.handleToolCall)
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
 	h.eventBus.On(event.EventAgentCommandOutput, h.handleCommandOutput)
@@ -155,6 +175,47 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventToolApprovalResolved, h.handleToolApprovalResolved)
 	h.eventBus.On(event.EventMCPOAuthRequired, h.handleMCPOAuthRequired)
 	h.eventBus.On(event.EventMCPOAuthResolved, h.handleMCPOAuthResolved)
+	h.eventBus.On(event.EventAgentPromptRequired, h.handleAgentPromptEvent)
+	h.eventBus.On(event.EventAgentPromptResolved, h.handleAgentPromptEvent)
+}
+
+// handleAgentPromptEvent forwards generic prompt events to the SSE stream.
+func (h *AgentStreamHandler) handleAgentPromptEvent(_ context.Context, evt event.Event) error {
+	var responseType types.ResponseType
+	switch evt.Data.(type) {
+	case event.AgentPromptRequiredData:
+		responseType = types.ResponseTypeAgentPromptRequired
+	case event.AgentPromptResolvedData:
+		responseType = types.ResponseTypeAgentPromptResolved
+	default:
+		return nil
+	}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      responseType,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      toolApprovalDataToMap(evt.Data),
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append agent prompt event failed", "error", err)
+	}
+	return nil
+}
+
+// handleProgress never contributes to the persisted final answer or reasoning.
+func (h *AgentStreamHandler) handleProgress(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.AgentProgressData)
+	if !ok {
+		return nil
+	}
+	// Progress reusing an answer's ID retracts text already streamed as answer.
+	h.mu.Lock()
+	h.supersedeAnswerSegments(func(seg *answerSegment) bool { return seg.id == evt.ID })
+	h.mu.Unlock()
+	return h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeProgress, Content: data.Content, Done: true, Timestamp: time.Now(),
+		Data: map[string]interface{}{"event_id": evt.ID, "iteration": data.Iteration},
+	})
 }
 
 // handleThought handles agent thought events
@@ -213,23 +274,16 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 	}
 
 	h.mu.Lock()
-	_, first := h.eventStartTimes[data.ToolCallID]
-	if !first {
+	if _, seen := h.eventStartTimes[data.ToolCallID]; !seen {
 		h.eventStartTimes[data.ToolCallID] = time.Now()
-		// Any answer text streamed before this tool call was a non-terminal round's
-		// preamble, not the final answer (the agent only ends by stopping naturally
-		// with plain text and no tool calls). Drop those segments from the persisted
-		// answer so the preamble never leaks into Message.Content.
-		supersededAny := false
-		for _, seg := range h.answerSegments {
-			if !seg.superseded && seg.content != "" {
-				seg.superseded = true
-				supersededAny = true
-			}
-		}
-		if supersededAny {
-			h.finalAnswer = h.composeFinalAnswer()
-		}
+	}
+	// Answer text streamed before a tool call was a non-terminal round's
+	// preamble, not the final answer. Drop those segments from the persisted
+	// answer so the preamble never leaks into Message.Content. A page button
+	// follows the answer instead; the engine retracts that text with a progress
+	// event if the turn goes on.
+	if !agenttools.IsPageButtonTool(data.ToolName) {
+		h.supersedeAnswerSegments(func(*answerSegment) bool { return true })
 	}
 	h.mu.Unlock()
 
@@ -329,12 +383,96 @@ func toolApprovalDataToMap(v interface{}) map[string]interface{} {
 	return m
 }
 
+func (h *AgentStreamHandler) rememberToolApproval(data event.ToolApprovalRequiredData) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.toolApprovals = append(h.toolApprovals, types.ToolApprovalRecord{
+		PendingID:      data.PendingID,
+		ToolCallID:     data.ToolCallID,
+		Kind:           data.Kind,
+		ServiceName:    data.ServiceName,
+		MCPToolName:    data.MCPToolName,
+		Description:    data.Description,
+		ArgsJSON:       data.ArgsJSON,
+		TimeoutSeconds: data.TimeoutSeconds,
+		RequestedAt:    data.RequestedAtUnix,
+		Host:           hostApprovalSnapshot(data.Host),
+	})
+}
+
+func (h *AgentStreamHandler) resolveRememberedToolApproval(data event.ToolApprovalResolvedData) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.toolApprovals {
+		if h.toolApprovals[i].PendingID != data.PendingID {
+			continue
+		}
+		h.toolApprovals[i].Resolved = true
+		h.toolApprovals[i].Approved = data.Approved
+		h.toolApprovals[i].Reason = data.Reason
+		h.toolApprovals[i].TimedOut = data.TimedOut
+		h.toolApprovals[i].Canceled = data.Canceled
+		h.toolApprovals[i].Scope = data.Scope
+		return
+	}
+}
+
+func hostApprovalSnapshot(host *event.HostApprovalPayload) *types.HostApprovalSnapshot {
+	if host == nil {
+		return nil
+	}
+	return &types.HostApprovalSnapshot{
+		Reason:          host.Reason,
+		Command:         host.Command,
+		Cwd:             host.Cwd,
+		GrantPath:       host.GrantPath,
+		GrantAccess:     host.GrantAccess,
+		DenialSnippet:   host.DenialSnippet,
+		FirstAttemptRan: host.FirstAttemptRan,
+		AllowSession:    host.AllowSession,
+		SessionRules:    append([]string(nil), host.SessionRules...),
+	}
+}
+
+// attachToolApprovals copies each decision onto the step that ran that tool.
+// A decision with no matching call stays on the last step.
+func attachToolApprovals(steps []types.AgentStep, records []types.ToolApprovalRecord) []types.AgentStep {
+	if len(steps) == 0 || len(records) == 0 {
+		return steps
+	}
+	used := make([]bool, len(records))
+	for i := range steps {
+		for j, rec := range records {
+			if used[j] || rec.ToolCallID == "" {
+				continue
+			}
+			for _, call := range steps[i].ToolCalls {
+				if call.ID != rec.ToolCallID {
+					continue
+				}
+				steps[i].Approvals = append(steps[i].Approvals, rec)
+				used[j] = true
+				break
+			}
+		}
+	}
+	last := len(steps) - 1
+	for j, rec := range records {
+		if used[j] {
+			continue
+		}
+		steps[last].Approvals = append(steps[last].Approvals, rec)
+	}
+	return steps
+}
+
 // handleToolApprovalRequired persists MCP tool human-approval prompts for SSE / replay (issue #1173).
 func (h *AgentStreamHandler) handleToolApprovalRequired(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.ToolApprovalRequiredData)
 	if !ok {
 		return nil
 	}
+	h.rememberToolApproval(data)
 	meta := toolApprovalDataToMap(data)
 	meta["pending_id"] = data.PendingID
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
@@ -356,6 +494,7 @@ func (h *AgentStreamHandler) handleToolApprovalResolved(ctx context.Context, evt
 	if !ok {
 		return nil
 	}
+	h.resolveRememberedToolApproval(data)
 	meta := toolApprovalDataToMap(data)
 	meta["pending_id"] = data.PendingID
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
@@ -549,13 +688,18 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 	// Accumulate final answer locally for assistant message (database). Track
 	// per event ID so a later supersede can subtract this segment's content.
-	if data.Content != "" {
+	if data.Content != "" || data.Replace {
 		seg := h.findAnswerSegment(evt.ID)
 		if seg == nil {
 			seg = &answerSegment{id: evt.ID}
 			h.answerSegments = append(h.answerSegments, seg)
 		}
-		seg.content += data.Content
+		if data.Replace {
+			seg.content = data.Content
+			seg.superseded = false
+		} else {
+			seg.content += data.Content
+		}
 		h.finalAnswer = h.composeFinalAnswer()
 	}
 	if data.IsFallback {
@@ -577,6 +721,9 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 		metadata = map[string]interface{}{
 			"event_id": evt.ID,
 		}
+	}
+	if data.Replace {
+		metadata["replace"] = true
 	}
 	if data.IsFallback {
 		metadata["is_fallback"] = true
@@ -719,10 +866,21 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	suspended, _ := data.Suspended.(*types.PromptSuspension)
+	h.suspension = suspended
+	if suspended != nil && suspended.Detached {
+		return nil
+	}
+
 	// Update assistant message with final data
 	if data.MessageID == h.assistantMessageID {
 		// h.assistantMessage.Content = data.FinalAnswer
-		h.assistantMessage.IsCompleted = true
+		if suspended != nil {
+			h.assistantMessage.RunState = types.MessageRunStateAwaitingInput
+		} else {
+			h.assistantMessage.RunState = ""
+			h.assistantMessage.IsCompleted = true
+		}
 		h.assistantMessage.AgentDurationMs = data.TotalDurationMs
 
 		// Update knowledge references if provided
@@ -741,6 +899,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// Update agent steps if provided
 		if data.AgentSteps != nil {
 			if steps, ok := data.AgentSteps.([]types.AgentStep); ok {
+				steps = attachToolApprovals(steps, h.toolApprovals)
 				h.assistantMessage.AgentSteps = agenttools.SanitizeAgentStepsForStorage(steps)
 			}
 		}
@@ -771,17 +930,25 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			}
 		}
 
+		// Child files already exist in storage. Attach them through the same
+		// message-owned artifact path as local files, even without a sandbox.
+		delegated, _ := data.Artifacts.(types.MessageArtifacts)
+		delegated = delegated.Live()
+		h.assistantMessage.Artifacts = mergeArtifactLists(h.assistantMessage.Artifacts, delegated)
+		h.artifactCollector.BindArtifactsToMessage(context.WithoutCancel(h.ctx), h.assistantMessageID, delegated)
+
 		// Drain skill-generated files from the sandbox into persistent
 		// storage. Best-effort: any failure is logged and the turn is
 		// persisted without artifacts. Collect is a no-op when either the
 		// collector wasn't wired in, no sandbox is bound, or no files were
 		// produced — those cases must not disturb the completion path.
+		// A suspended run collects when its resumed run completes.
 		//
 		// Layouts without a separate output tree must not be collected
 		// (scanning Root would upload the whole project). Remote backends keep
 		// skills.ArtifactOutputDir(), or layout.OutputDir when advertised.
 		var previous types.MessageArtifacts
-		if h.artifactCollector != nil {
+		if h.artifactCollector != nil && suspended == nil {
 			collectCtx := context.WithoutCancel(h.ctx)
 			var artifacts types.MessageArtifacts
 			if collectDir, skip := h.artifactCollector.CollectTarget(collectCtx, h.sessionID); !skip {
@@ -844,6 +1011,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			// message that first produced the file cannot invalidate it.
 			h.artifactCollector.BindArtifactsToMessage(collectCtx, h.assistantMessageID, previous)
 		}
+		h.assistantMessage.Content = rewriteArtifactReferences(h.assistantMessage.Content, h.assistantMessage.Artifacts)
 		h.assistantMessage.Content = types.ClarifyArtifactVersions(h.assistantMessage.Content,
 			h.assistantMessage.Artifacts, previous, types.LanguageFromContextOrDefault(h.ctx))
 	}
@@ -851,7 +1019,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	// Fallback: if no answer events were streamed but we have a final answer,
 	// emit it as answer events so the frontend can render it properly.
 	// This guards against edge cases where the LLM stops without calling final_answer.
-	if h.finalAnswer == "" && data.FinalAnswer != "" {
+	if suspended == nil && h.finalAnswer == "" && data.FinalAnswer != "" {
 		logger.GetLogger(h.ctx).Warnf(
 			"No answer events were streamed, emitting fallback answer (len=%d). "+
 				"This typically happens when: (1) model stopped naturally and content was sent as thought events, "+
@@ -911,6 +1079,13 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if turnUsage != nil {
 		completeData["usage"] = turnUsage
 	}
+	// The chat model that produced the usage, so a consumer can price it.
+	if data.ModelID != "" {
+		completeData["model_id"] = data.ModelID
+	}
+	if suspended != nil {
+		completeData["suspended"] = suspended
+	}
 	h.completionEvent = &interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,
@@ -933,11 +1108,33 @@ func (h *AgentStreamHandler) publishCompletion(ctx context.Context) error {
 	if h.completionEvent == nil {
 		return nil
 	}
+	if s := h.suspension; s != nil {
+		if err := h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+			ID:        "suspended-" + s.PromptID,
+			Type:      types.ResponseTypeRunSuspended,
+			Timestamp: time.Now(),
+			Data: map[string]interface{}{
+				"pending_id": s.PromptID,
+				"kind":       s.Kind,
+				"expires_at": s.ExpiresAt,
+			},
+		}); err != nil {
+			return err
+		}
+	}
 	if err := h.streamManager.AppendEvent(ctx, h.sessionID, h.assistantMessageID, *h.completionEvent); err != nil {
 		return err
 	}
 	h.completionEvent = nil
 	return nil
+}
+
+// Suspension reports the prompt the run ended waiting on, or nil when the
+// run finished.
+func (h *AgentStreamHandler) Suspension() *types.PromptSuspension {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.suspension
 }
 
 // emitArtifactsPending tells the live UI that sandbox files exist and are

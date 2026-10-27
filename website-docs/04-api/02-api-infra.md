@@ -342,9 +342,11 @@ curl -X POST $BASE/api/v1/datasource/validate-credentials -H "Authorization: Bea
 | `sync_mode` | string | 否 | `incremental`（默认）/`full` |
 | `conflict_strategy` | string | 否 | `overwrite`（默认）/`skip` |
 | `sync_deletions` | bool | 否 | 默认 true |
-| `sync_log_retention_days` | int | 否 | 默认 30 |
+| `sync_log_retention_days` | int | 否 | 本数据源同步日志保留天数，默认 30；非正值按 30 天处理 |
 
 响应：201 `DataSourceResponse`（凭证剥离，见 `internal/handler/dto/datasource.go`）。
+
+后台每日凌晨（服务所在时区）清理过期的 `success`、`partial`、`canceled` 同步日志，包括暂停和仅手动同步的数据源。保留期从完成时间计算，旧日志缺少完成时间时使用开始时间。运行中或等待执行的日志不清理；现有数据源的 `failed` 日志也会保留，因为该状态可能仍在等待任务重试。数据源软删除后继续沿用原保留期，并可清理 `failed` 日志；无来源日志按默认 30 天保留。
 
 ```bash
 curl -X POST $BASE/api/v1/datasource -H "Authorization: Bearer $TOKEN" \
@@ -374,11 +376,17 @@ curl $BASE/api/v1/datasource/ds-1 -H "Authorization: Bearer $TOKEN"
 
 用途：更新（`id/tenant_id/knowledge_base_id` 锁定为原值）。权限：Admin+。请求体同创建。
 
+PUT 整体替换数据源配置，不支持部分更新：请先 GET 详情，修改后回传完整对象（`name`、`type`、`config`、`sync_schedule`、`sync_mode`、`conflict_strategy`、`sync_deletions`、`sync_log_retention_days`、`status` 等）。`sync_schedule` 和 `sync_deletions` 总是按请求体写入：省略 `sync_schedule` 会清空为空字符串（仅手动同步，已有定时任务随之移除），省略 `sync_deletions` 即为 false；其他字段省略时是否保留原值不作保证。凭证不经本接口修改，请求体中的 `config.credentials` 会被忽略，保留已存凭证。
+
 响应：200 `DataSourceResponse`
 
 ```bash
 curl -X PUT $BASE/api/v1/datasource/ds-1 -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"name":"notion 同步 v2","type":"notion","knowledge_base_id":"kb-1","config":{}}'
+  -H 'Content-Type: application/json' \
+  -d '{"name":"notion 同步 v2","type":"notion","knowledge_base_id":"kb-1",
+       "config":{"type":"notion","resource_ids":["page-1"]},
+       "sync_schedule":"0 0 */6 * * *","sync_mode":"incremental","conflict_strategy":"overwrite",
+       "sync_deletions":true,"sync_log_retention_days":30,"status":"active"}'
 ```
 
 ### DELETE /api/v1/datasource/:id

@@ -1,6 +1,7 @@
 // @ts-nocheck
 <script setup lang="ts">
-import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
+import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
@@ -8,8 +9,9 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
+import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
@@ -27,12 +29,9 @@ import {
   type FilePreviewKind,
 } from '@/utils/filePreview';
 import {
-  narrowTextLines,
-  ngramOverlap,
-  normalizeForMatch,
-  pickBestTexts,
+  findInText,
+  sourceQuoteText,
   type SourceLocateRequest,
-  type SourceLocator,
 } from '@/utils/sourceLocator';
 import {
   buildTextIndex,
@@ -72,7 +71,7 @@ const props = defineProps<{
   locate?: SourceLocateRequest | null;
 }>();
 
-export type SourceLocateResult = { found: boolean; precise: boolean };
+export type SourceLocateResult = { found: boolean; precise: boolean; granularity?: string; reason?: string };
 
 const emit = defineEmits<{
   located: [result: SourceLocateResult];
@@ -80,6 +79,14 @@ const emit = defineEmits<{
 
 const loading = ref(false);
 const error = ref('');
+// Async renderer setup/mount failures do not emit the renderer's `error` event.
+// Surface them in the preview instead of leaving an empty document area.
+onErrorCaptured((err) => {
+  error.value = t('preview.loadFailed');
+  loading.value = false;
+  console.error('Document renderer failed:', err);
+  return false;
+});
 const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');
@@ -264,6 +271,7 @@ async function renderDocx(blob: Blob) {
       trimXmlDeclaration: true,
       useBase64URL: true,
     });
+    if (docxContainer.value) await indexEmbeddedSourceImages(docxContainer.value);
   }
 }
 
@@ -336,7 +344,10 @@ async function renderMarkdown(blob: Blob) {
     return;
   }
 
-  markdownHtml.value = renderDocumentPreviewMarkdown(text);
+  markdownHtml.value = renderDocumentPreviewMarkdown(text, undefined, {
+    // 预览工具栏已经显示文件名；正文第一行的同名 H1 属于重复标题。
+    titles: [props.fileName],
+  });
 }
 
 function onImageLoad(e: Event) {
@@ -486,6 +497,10 @@ async function loadPreview() {
       }
       case 'markdown': {
         await renderMarkdown(blob);
+        // Markdown 里的 resource:// 等受保护图片需要带鉴权换 blob（无 override
+        // 时走应用默认鉴权面：登录态 /files 代理）。已换过的元素幂等跳过。
+        await nextTick();
+        await hydrateProtectedFileImages(previewContent.value);
         break;
       }
       case 'pptx': {
@@ -575,11 +590,7 @@ watch(
 
 const NOT_FOUND: SourceLocateResult = { found: false, precise: false };
 
-function locatorQuotes(request: SourceLocateRequest, locators: SourceLocator[] = request.locators): string[] {
-  return [...locators.map((l) => l.quote || '').filter(Boolean), ...request.quotes];
-}
-
-function findQuoteRange(root: Element | null | undefined, quotes: string[]): Range | null {
+function findQuoteRange(root: Node | null | undefined, quotes: string[]): Range | null {
   if (!root) return null;
   const index = buildTextIndex(root);
   for (const quote of quotes) {
@@ -608,91 +619,95 @@ function locateQuote(root: Element | null | undefined, container: Element | null
   return { found: true, precise: true };
 }
 
-/** The element among `blocks` near index `at` whose text best matches `quote`. */
-function pickNearby(blocks: Element[], at: number, quote?: string): Element | null {
-  if (!blocks.length) return null;
-  const center = Math.max(0, Math.min(blocks.length - 1, at));
-  const needle = normalizeForMatch(quote || '').slice(0, 120);
-  if (needle.length < 4) return blocks[center];
-  let best = { el: blocks[center], score: -1 };
-  for (let i = Math.max(0, center - 4); i <= Math.min(blocks.length - 1, center + 4); i++) {
-    const score = ngramOverlap(needle, normalizeForMatch(blocks[i].textContent || ''));
-    if (score > best.score) best = { el: blocks[i], score };
-  }
-  return best.score >= 0.4 ? best.el : blocks[center];
-}
-
-/** The candidates that best match the cited sentence, or all of them when none aligns. */
-function narrowToSentence(candidates: Element[], request: SourceLocateRequest): Element[] {
-  const picked = pickBestTexts(candidates.map((el) => el.textContent || ''), request.sentence || '');
-  return picked.length ? picked.map((i) => candidates[i]) : candidates;
-}
-
-function contentsRange(el: Element): Range {
-  const range = el.ownerDocument.createRange();
-  range.selectNodeContents(el);
-  return range;
+/** Only exact evidence may narrow a structural source region. */
+function evidenceQuotes(request: SourceLocateRequest): string[] {
+  return request.scope ? [request.scope] : request.quotes;
 }
 
 function locateDocx(request: SourceLocateRequest): SourceLocateResult {
   const root = docxContainer.value;
   if (!root) return NOT_FOUND;
-  const locators = request.locators.filter((l) => l.type === 'docx' && l.block);
-  if (locators.length) {
-    // Body paragraphs and tables in order, the unit the backend counts.
-    const blocks = Array.from(root.querySelectorAll('section > article')).flatMap((article) =>
-      Array.from(article.children).filter((c) => c.tagName === 'P' || c.tagName === 'TABLE'),
-    );
-    const targets: Element[] = [];
-    for (const loc of locators) {
-      const el = pickNearby(blocks, (loc.block as number) - 1, loc.quote);
-      if (el && !targets.includes(el)) targets.push(el);
-    }
-    if (targets.length) {
-      const range = findQuoteRange(targets[0], locatorQuotes(request, locators));
-      commitMarks(range ? [range] : [], targets);
-      reveal(root, range || targets[0]);
-      return { found: true, precise: true };
-    }
+  const blocks = Array.from(root.querySelectorAll('section > article')).flatMap((article) =>
+    Array.from(article.children).filter((c) => c.tagName === 'P' || c.tagName === 'TABLE'),
+  );
+  if (request.imageDigest) {
+    const images = [...root.querySelectorAll('img')].filter(image => image.dataset.sourceImageDigest === request.imageDigest);
+    if (images.length !== 1) return { ...NOT_FOUND, ...(images.length > 1 ? { reason: 'ambiguous' } : {}) };
+    commitMarks([], images); reveal(root, images[0]);
+    return { found: true, precise: false, granularity: 'block' };
   }
-  return locateQuote(root, root, request.quotes);
+  if (request.imageContext) {
+    const { before: beforeQuote, after: afterQuote } = request.imageContext;
+    const before = beforeQuote ? findQuoteRange(root, [beforeQuote]) : null;
+    const after = afterQuote ? findQuoteRange(root, [afterQuote]) : null;
+    if ((beforeQuote && !before) || (afterQuote && !after) || (!before && !after)) return NOT_FOUND;
+    const from = before?.cloneRange() || document.createRange();
+    const to = after?.cloneRange() || document.createRange();
+    if (before) from.collapse(false);
+    else { from.selectNodeContents(root); from.collapse(true); }
+    if (after) to.collapse(true);
+    else { to.selectNodeContents(root); to.collapse(false); }
+    // A chunk can end immediately after its image. In that case bound the
+    // search by the next nonempty original paragraph, not the document end.
+    for (const block of blocks) {
+      if (!block.textContent?.trim()) continue;
+      const range = document.createRange(); range.selectNodeContents(block);
+      if (!after && range.compareBoundaryPoints(Range.START_TO_START, from) >= 0) { to.setStartBefore(block); to.collapse(true); break; }
+      if (!before && range.compareBoundaryPoints(Range.END_TO_END, to) <= 0) { from.setStartAfter(block); from.collapse(true); }
+    }
+    const images = [...root.querySelectorAll('img')].filter(image => {
+      const range = document.createRange(); range.selectNode(image);
+      return range.compareBoundaryPoints(Range.START_TO_START, from) >= 0 &&
+        range.compareBoundaryPoints(Range.END_TO_END, to) <= 0;
+    });
+    if (images.length !== 1) return NOT_FOUND;
+    commitMarks([], images); reveal(root, images[0]);
+    return { found: true, precise: false, granularity: 'block' };
+  }
+  const excerpt = request.quotes.length === 1 ? request.quotes[0] : '';
+  if (excerpt && request.scope && excerpt !== request.scope && findInText(request.scope, excerpt)) {
+    const range = findQuoteRange(root, [excerpt]);
+    if (range) { commitMarks([range], []); reveal(root, range); return { found: true, precise: true }; }
+  }
+  const ranges: Range[] = [];
+  let missed = false, partial = false, narrowed = false;
+  for (const loc of request.locators.filter((l) => l.type === 'docx' && l.mapping === 'exact' && l.block)) {
+    const el = blocks[(loc.block as number) - 1];
+    const quote = sourceQuoteText(loc.quote || '');
+    const sentence = request.sentence && findInText(quote, request.sentence) ? request.sentence : '';
+    // Pagination may split Word paragraphs. Revalidate the complete quote
+    // globally before accepting a shifted block, and reject duplicate matches.
+    const region = quote ? findQuoteRange(el, [quote]) || findQuoteRange(root, [quote]) : null;
+    if (!region) { missed = true; continue; }
+    const range = sentence ? findQuoteRange(region.commonAncestorContainer.nodeType === Node.TEXT_NODE ? region.commonAncestorContainer.parentElement : region.commonAncestorContainer, [sentence]) : region;
+    ranges.push(range || region);
+    narrowed ||= !!sentence && !!range;
+    partial ||= !!loc.partial;
+  }
+  if (!ranges.length) return locateQuote(root, root, evidenceQuotes(request));
+  const complete = !missed && (!partial || narrowed || !!findQuoteRange(root, evidenceQuotes(request)));
+  commitMarks(ranges, []);
+  reveal(root, ranges[0]);
+  return { found: true, precise: complete, ...(!complete ? { reason: 'partial' } : {}) };
 }
 
 function locatePptx(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
   const slides = Array.from(box.querySelectorAll('.pptx-preview-slide-wrapper'));
-  const locators = request.locators.filter((l) => l.type === 'slide' && l.slide);
-  if (locators.length) {
-    const slide = slides[(locators[0].slide as number) - 1];
-    if (slide) {
-      // Master and layout text repeats on every slide; match the slide's own.
-      const own = slide.querySelector('.slide-wrapper') || slide;
-      // A slide locator covers the whole slide; the cited bullet is narrower.
-      const paragraphs = Array.from(own.querySelectorAll('p')).filter((p) => (p.textContent || '').trim());
-      const cited = narrowToSentence(paragraphs, request);
-      if (paragraphs.length && cited.length < paragraphs.length) {
-        const ranges = cited.map(contentsRange);
-        commitMarks(ranges, []);
-        reveal(box, ranges[0]);
-        return { found: true, precise: true };
-      }
-      const range = findQuoteRange(own, locatorQuotes(request, locators));
-      commitMarks(range ? [range] : [], range ? [] : [slide]);
-      reveal(box, range || slide);
-      return { found: true, precise: !!range };
-    }
-  }
-  for (const slide of slides) {
+  const locators = request.locators.filter((l) => l.type === 'slide' && l.mapping === 'exact' && !l.partial && l.slide);
+  if (!locators.length) return locateQuote(box, box, evidenceQuotes(request));
+  const ranges: Range[] = [], regions: Element[] = [];
+  for (const loc of locators) {
+    const slide = slides[(loc.slide as number) - 1];
+    if (!slide) return NOT_FOUND;
     const own = slide.querySelector('.slide-wrapper') || slide;
-    const range = findQuoteRange(own, request.quotes);
-    if (range) {
-      commitMarks([range], []);
-      reveal(box, range);
-      return { found: true, precise: true };
-    }
+    const range = loc.quote ? findQuoteRange(own, [loc.quote]) : null;
+    if (range) ranges.push(range); else regions.push(slide);
   }
-  return NOT_FOUND;
+  commitMarks(ranges, regions);
+  reveal(box, ranges[0] || regions[0]);
+  return { found: true, precise: !regions.length, granularity: regions.length ? 'block' : 'text' };
 }
 
 /** Map sheet row numbers to table rows using the cell ids SheetJS emits. */
@@ -709,11 +724,12 @@ function sheetRows(table: Element): Map<number, Element> {
 function locateExcel(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
-  const locators = request.locators.filter((l) => l.type === 'sheet' && l.row_start);
+  const locators = request.locators.filter((l) => l.type === 'sheet' && l.mapping === 'exact' && !l.partial && l.row_start);
   const targets: Element[] = [];
   for (const loc of locators) {
     const byName = loc.sheet ? excelSheetNames.indexOf(loc.sheet) : -1;
-    const sheetIdx = byName >= 0 ? byName : 0;
+    if (byName < 0) continue;
+    const sheetIdx = byName;
     const table = box.querySelector(`#user-content-sheet-${sheetIdx}`) || box.querySelector(`#sheet-${sheetIdx}`);
     if (!table) continue;
     const rows = sheetRows(table);
@@ -724,104 +740,69 @@ function locateExcel(request: SourceLocateRequest): SourceLocateResult {
     }
   }
   if (targets.length) {
-    // A chunk often spans many rows; keep the ones the sentence is about.
-    // Header rows repeat the column names every answer mentions.
-    const body = targets.filter((tr) => tr.parentElement?.firstElementChild !== tr);
-    const cited = body.length > 1 ? narrowToSentence(body, request) : targets;
-    const rows = cited.length < body.length ? cited : targets;
-    commitMarks([], rows);
-    reveal(box, rows[0]);
-    return { found: true, precise: true };
+    commitMarks([], targets);
+    reveal(box, targets[0]);
+    return { found: true, precise: false, granularity: 'block' };
   }
-  return locateQuote(box, box, request.quotes);
+  return locateQuote(box, box, evidenceQuotes(request));
 }
 
 function locateEpub(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
-  const locators = request.locators.filter((l) => l.type === 'section' && l.section);
-  const section = locators.length
-    ? box.querySelector(`[data-epub-section="${locators[0].section}"]`)
-    : null;
-  if (section) {
-    // A section locator covers the whole chapter; the cited paragraph is narrower.
-    const paragraphs = Array.from(section.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6')).filter(
-      (el) => (el.textContent || '').trim(),
-    );
-    const cited = narrowToSentence(paragraphs, request);
-    if (paragraphs.length && cited.length < paragraphs.length) {
-      const ranges = cited.map(contentsRange);
-      commitMarks(ranges, []);
-      reveal(box, ranges[0]);
-      return { found: true, precise: true };
-    }
-    const range = findQuoteRange(section, locatorQuotes(request, locators));
-    if (range) commitMarks([range], []);
-    reveal(box, range || section);
-    return { found: true, precise: !!range };
+  const locators = request.locators.filter((l) => l.type === 'section' && l.mapping === 'exact' && !l.partial && l.section);
+  if (!locators.length) return locateQuote(box, box, evidenceQuotes(request));
+  const ranges: Range[] = [], regions: Element[] = [];
+  for (const loc of locators) {
+    const section = box.querySelector(`[data-epub-section="${loc.section}"]`);
+    if (!section) return NOT_FOUND;
+    const range = loc.quote ? findQuoteRange(section, [loc.quote]) : null;
+    if (range) ranges.push(range); else regions.push(section);
   }
-  return locateQuote(box, box, request.quotes);
+  commitMarks(ranges, regions);
+  reveal(box, ranges[0] || regions[0]);
+  return { found: true, precise: !regions.length, granularity: regions.length ? 'block' : 'text' };
 }
 
 function locateText(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   const code = box?.querySelector('code') || box;
   if (!box || !code) return NOT_FOUND;
-  // Offsets index the original file; pretty-printed JSON no longer matches it.
-  const locators = request.locators.filter((l) => l.type === 'text' && (l.end || 0) > (l.start || 0));
+  // Validate stored offsets against their full quote. A manual edit or a
+  // pretty-printed JSON document must not reuse offsets from another version.
+  const locators = request.locators.filter((l) => l.type === 'text' && !l.partial && (l.end || 0) > (l.start || 0));
   if (locators.length && previewType.value === 'text' && !shouldPrettyPrintJson(previewExt)) {
-    const spans = locators.map((l): [number, number] => [l.start || 0, l.end || 0]);
-    // A chunk spans several paragraphs; keep the lines the sentence is about.
-    const cited = narrowTextLines(code.textContent || '', spans, request.sentence || '');
-    const ranges = (cited.length ? cited : spans)
-      .map(([start, end]) => rangeForOffsets(code, start, end))
-      .filter((r): r is Range => !!r && !r.collapsed);
-    if (ranges.length) {
-      commitMarks(ranges, []);
+    const ranges = locators.map((l) => rangeForOffsets(code, l.start || 0, l.end || 0));
+    if (ranges.every((r, i) => r && locators[i].quote && findInText(r.toString(), locators[i].quote!))) {
+      commitMarks(ranges as Range[], []);
       reveal(box, ranges[0]);
       return { found: true, precise: true };
     }
   }
-  return locateQuote(code, box, locatorQuotes(request));
+  return locateQuote(code, box, evidenceQuotes(request));
 }
 
-const MARKDOWN_BLOCKS = 'p, li, tr, h1, h2, h3, h4, h5, h6, pre, blockquote, dt, dd';
-
-/**
- * Rendered Markdown has no offsets back into the file, so the cited chunk's
- * text bounds the candidate blocks and the sentence picks among them.
- */
 function locateMarkdown(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
-  const scope = normalizeForMatch(request.scope || '');
-  if (scope && request.sentence) {
-    const blocks = Array.from(box.querySelectorAll(MARKDOWN_BLOCKS)).filter((el) => {
-      if (el.querySelector(MARKDOWN_BLOCKS)) return false;
-      const text = normalizeForMatch(el.textContent || '');
-      return text.length >= 4 && scope.includes(text);
-    });
-    const cited = pickBestTexts(blocks.map((el) => el.textContent || ''), request.sentence);
-    if (cited.length) {
-      const ranges = cited.map((i) => contentsRange(blocks[i]));
-      commitMarks(ranges, []);
-      reveal(box, ranges[0]);
-      return { found: true, precise: true };
-    }
-  }
-  return locateQuote(box, box, locatorQuotes(request));
+  const markdown = request.sourceMarkdown ?? request.scope ?? request.quotes[0] ?? '';
+  const match = findMarkdownSourceRange(box, markdown, request.sentence);
+  if (!match) return NOT_FOUND;
+  commitMarks(match.ranges || [match.range], []);
+  reveal(box, match.range);
+  return { found: true, precise: match.exact, ...(!match.exact ? { granularity: 'block' } : {}) };
 }
 
 function locateImage(request: SourceLocateRequest): SourceLocateResult {
   const boxes = request.locators
-    .filter((l) => l.type === 'pdf' && (l.page || 1) === 1 && l.bbox?.length === 4)
+    .filter((l) => l.type === 'pdf' && l.mapping === 'exact' && !l.partial && (l.page || 1) === 1 && l.bbox?.length === 4)
     .map((l) => {
       const [x0, y0, x1, y1] = l.bbox as number[];
       return { left: x0, top: y0, width: x1 - x0, height: y1 - y0 };
     });
   imageMarks.value = boxes;
   // Without regions the whole image is the cited source.
-  return { found: true, precise: boxes.length > 0 };
+  return { found: true, precise: false, granularity: 'block' };
 }
 
 function formatClock(ms: number): string {
@@ -856,6 +837,7 @@ function applyLocate() {
   clearLocateMarks();
   // The pdf.js viewer locates on its own and reports through @located.
   if (!request || previewType.value === 'pdf') return;
+  if (request.unavailable) { emit('located', { ...NOT_FOUND, reason: 'unavailable' }); return; }
   let result = NOT_FOUND;
   try {
     switch (previewType.value) {
@@ -1354,8 +1336,8 @@ onUnmounted(() => {
   position: absolute;
   pointer-events: none;
   border-radius: var(--app-radius-xs);
-  background: color-mix(in srgb, var(--td-success-color) 22%, transparent);
-  outline: 1px solid color-mix(in srgb, var(--td-success-color) 50%, transparent);
+  background: var(--app-source-highlight-soft-bg);
+  outline: 1px solid var(--app-source-highlight-border);
 }
 
 .preview-image {
@@ -1447,7 +1429,7 @@ onUnmounted(() => {
     max-width: 480px;
     padding: 10px 12px;
     border-radius: @border-radius;
-    background: color-mix(in srgb, var(--td-success-color) 10%, transparent);
+    background: var(--app-source-highlight-soft-bg);
     color: @text-primary;
     &__time {
       font-size: var(--app-text-sm);
@@ -1502,9 +1484,12 @@ onUnmounted(() => {
 
 :deep(.markdown-body) {
   font-size: var(--app-text-base);
-  line-height: 1.7;
+  line-height: 1.75;
   color: @text-primary;
   word-break: break-word;
+  // 正文窄栏：全屏 / 宽抽屉下限制行宽，避免中文长行难以阅读。
+  max-width: 680px;
+  margin-inline: auto;
 
   h1, h2, h3, h4, h5, h6 {
     margin-top: 20px;
@@ -1512,20 +1497,62 @@ onUnmounted(() => {
     font-weight: 600;
     line-height: 1.4;
   }
+  h1:first-child,
+  h2:first-child,
+  h3:first-child,
+  h4:first-child,
+  h5:first-child,
+  h6:first-child { margin-top: 0; }
+  // 标题层级：旧规则里 h4~h6 没有字号，会退回正文字号（14px），和 h3 的
+  // 17px 几乎看不出差别；这里补齐 24 / 20 / 18 / 16 / 15 / 14 的完整层级。
   h1 { font-size: var(--app-text-4xl); border-bottom: 1px solid @border-color; padding-bottom: 8px; }
   h2 { font-size: var(--app-text-3xl); border-bottom: 1px solid @border-color; padding-bottom: 6px; }
-  h3 { font-size: 17px; }
+  h3 { font-size: var(--app-text-2xl); }
+  h4 { font-size: var(--app-text-xl); margin-top: 16px; margin-bottom: 8px; }
+  h5 { font-size: var(--app-text-lg); margin-top: 14px; margin-bottom: 6px; }
+  h6 { font-size: var(--app-text-base); margin-top: 12px; margin-bottom: 6px; }
 
-  p { margin: 8px 0; }
+  p { margin: 10px 0; }
+  p:last-child { margin-bottom: 0; }
   blockquote {
-    margin: 12px 0;
-    padding: 8px 16px;
+    margin: 14px 0;
+    padding: 10px 16px;
     border-left: 4px solid @border-color;
     background: @bg-subtle;
     color: var(--td-text-color-secondary);
   }
-  ul, ol { padding-left: 24px; margin: 8px 0; }
-  li { margin: 4px 0; }
+  blockquote > :first-child { margin-top: 0; }
+  blockquote > :last-child { margin-bottom: 0; }
+  ul, ol { padding-left: 28px; margin: 10px 0; }
+  li { margin: 4px 0; line-height: 1.75; }
+  li > ul, li > ol { margin: 4px 0; padding-left: 24px; }
+  li > p { margin: 4px 0; }
+  ul li:has(> .task-checkbox) { list-style: none; }
+  .task-checkbox {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    border: 1px solid @border-color;
+    border-radius: var(--app-radius-xs);
+    vertical-align: -2px;
+    position: relative;
+    &.checked {
+      background: @accent;
+      border-color: @accent;
+      &::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1px;
+        width: 4px;
+        height: 8px;
+        border: solid #fff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+    }
+  }
 
   table {
     .preview-table(@bg-muted; var(--td-bg-color-container-hover));
@@ -1544,9 +1571,9 @@ onUnmounted(() => {
   }
   code {
     background: var(--td-bg-color-secondarycontainer);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 0.9em;
+    padding: 1px 5px;
+    border-radius: var(--app-radius-xs);
+    font-size: 0.92em;
   }
   img { max-width: 100%; border-radius: var(--app-radius-xs); }
   hr { border: none; border-top: 1px solid @border-color; margin: 20px 0; }
@@ -1712,22 +1739,39 @@ html[theme-mode="dark"] {
 /* Citation highlights live outside the scoped block: they apply to DOM that
    third-party renderers (docx-preview, pptx-preview, SheetJS) create. */
 ::highlight(source-locate) {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+  background-color: var(--app-source-highlight-bg);
 }
 
 mark.source-locate-mark {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+  background-color: var(--app-source-highlight-bg);
   color: inherit;
+  border-radius: var(--app-radius-xs);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .source-locate-block {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 22%, transparent) !important;
-  outline: 1px solid var(--app-source-highlight);
-  outline-offset: 2px;
-  border-radius: var(--app-radius-xs);
+  background-color: var(--app-source-highlight-soft-bg) !important;
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+/* Cell backgrounds can obscure a row's marker. Paint each cell once and
+   keep the accent on the leading edge, without boxing every table row. */
+tr.source-locate-block {
+  background-color: transparent !important;
+  box-shadow: none;
 }
 
 tr.source-locate-block > td {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 45%, transparent) !important;
+  background-color: var(--app-source-highlight-soft-bg) !important;
+}
+
+tr.source-locate-block > td:first-child {
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+img.source-locate-block {
+  outline: 1px solid var(--app-source-highlight-border);
+  outline-offset: 2px;
 }
 </style>

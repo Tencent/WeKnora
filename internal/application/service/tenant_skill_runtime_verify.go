@@ -22,12 +22,17 @@ Runtime prerequisites and completion report (required for every skill):
 - Verify required commands with documented, non-destructive checks. Assess whether required capabilities
   are available in this execution environment and whether dependencies outside it are reachable. Report
   unresolved setup or compatibility requirements precisely; do not silently substitute a different tool.
-- With write_skill_file, create .weknora/install-report.json as a JSON object with two required fields:
+- With write_skill_file, create .weknora/install-report.json as a JSON object with two required fields
+  and one optional field:
   - commands: an array of strings listing every runtime CLI required by this skill, including those
     already installed. Each entry must be a bare executable name without paths or arguments.
   - blockers: an array of strings describing unresolved setup or compatibility requirements found
-    during verification.
-  Populate both arrays from this skill's actual requirements and verification results, without
+    during verification. A blocker means the skill cannot do its job in this environment: a required
+    dependency, capability, or external service is missing or unreachable.
+  - notes (optional): an array of strings for observations that do not stop the skill from working,
+    such as documentation that disagrees with the code while a verified working usage exists, upstream
+    quirks, or usage hints for later sessions. Notes never fail the install; do not put them in blockers.
+  Populate the arrays from this skill's actual requirements and verification results, without
   placeholder entries. Use an empty array when there are no entries for that field. Never include
   credentials; declare ordinary per-user API keys in .weknora/requirements.json instead of blockers.
 - The server refuses missing/invalid reports, missing commands, and unresolved blockers. Do not remove a
@@ -41,15 +46,18 @@ var skillRuntimeCommandName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.+-]*$
 type skillRuntimeReport struct {
 	Commands []string `json:"commands"`
 	Blockers []string `json:"blockers"`
+	Notes    []string `json:"notes"`
 }
 
 // The agent discovers prerequisites; this gate independently checks executable
 // availability and refuses explicitly unresolved setup before snapshotting.
+// The report's notes are returned even when the gate refuses, so whoever reads
+// the failure also sees what the installer observed.
 func (s *TenantSkillService) verifyRuntimePrerequisites(
 	ctx context.Context,
 	mgr sandbox.Manager,
 	sessionID, skillDir string,
-) error {
+) ([]string, error) {
 	fail := func(problem string, repairable bool) error {
 		return &skillVerificationError{
 			Language:   "runtime prerequisites",
@@ -59,40 +67,49 @@ func (s *TenantSkillService) verifyRuntimePrerequisites(
 	}
 	reader, ok := mgr.(sandbox.SessionFileReader)
 	if !ok {
-		return fmt.Errorf("sandbox backend cannot read the install report")
+		return nil, fmt.Errorf("sandbox backend cannot read the install report")
 	}
 	raw, err := reader.ReadSessionFile(ctx, sessionID, path.Join(skillDir, ".weknora", "install-report.json"))
 	if err != nil {
-		return fail(
+		return nil, fail(
 			"Write .weknora/install-report.json after assessing CLI and external runtime prerequisites: "+err.Error(),
 			true,
 		)
 	}
 	var report skillRuntimeReport
 	if len(raw) > 64*1024 {
-		return fail("install-report.json exceeds 64 KiB", true)
+		return nil, fail("install-report.json exceeds 64 KiB", true)
 	}
 	if err := json.Unmarshal(raw, &report); err != nil || report.Commands == nil || report.Blockers == nil {
-		return fail(`Write a valid .weknora/install-report.json with commands and blockers arrays of strings`, true)
+		return nil, fail(
+			`Write a valid .weknora/install-report.json with commands and blockers arrays of strings`,
+			true,
+		)
 	}
-	if len(report.Commands) > 100 || len(report.Blockers) > 100 {
-		return fail("install report has too many entries", true)
+	if len(report.Commands) > 100 || len(report.Blockers) > 100 || len(report.Notes) > 100 {
+		return nil, fail("install report has too many entries", true)
+	}
+	var notes []string
+	for _, note := range report.Notes {
+		if note = strings.TrimSpace(note); note != "" {
+			notes = append(notes, note)
+		}
 	}
 	for _, name := range report.Commands {
 		if !skillRuntimeCommandName.MatchString(name) || len(name) > 128 {
-			return fail("commands must contain bare executable names, without paths or arguments", true)
+			return notes, fail("commands must contain bare executable names, without paths or arguments", true)
 		}
 	}
 	for _, blocker := range report.Blockers {
 		if strings.TrimSpace(blocker) == "" {
-			return fail("blockers must contain non-empty explanations", true)
+			return notes, fail("blockers must contain non-empty explanations", true)
 		}
 	}
 	if len(report.Blockers) > 0 {
-		return fail("Unresolved runtime prerequisites: "+strings.Join(report.Blockers, "; "), false)
+		return notes, fail("Unresolved runtime prerequisites: "+strings.Join(report.Blockers, "; "), false)
 	}
 	if len(report.Commands) == 0 {
-		return nil
+		return notes, nil
 	}
 	var command strings.Builder
 	command.WriteString(
@@ -109,5 +126,5 @@ func (s *TenantSkillService) verifyRuntimePrerequisites(
 	}
 	command.WriteString("; exit $status")
 	_, err = s.execVerify(ctx, mgr, sessionID, skillDir, "runtime commands", command.String())
-	return err
+	return notes, err
 }

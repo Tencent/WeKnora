@@ -243,6 +243,47 @@ func TestList_CategoryPathFilterMatchesOnSQLite(t *testing.T) {
 	assert.Equal(t, "entity/in-people", got[0].Slug)
 }
 
+func TestList_QuerySearchesSQLiteTextFieldsAndEscapesWildcards(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	title := makeWikiPage("kb-search", "entity/title", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	title.Title = "SQLite Search Guide"
+	content := makeWikiPage("kb-search", "entity/content", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	content.Title = "Content page"
+	content.Content = "The important phrase is stored in CONTENT."
+	alias := makeWikiPage("kb-search", "entity/alias", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	alias.Title = "Alias page"
+	alias.Aliases = types.StringArray{"SQLiteAlias"}
+	wildcard := makeWikiPage("kb-search", "entity/wildcard", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	wildcard.Title = "literal_%_token"
+	for _, page := range []*types.WikiPage{title, content, alias, wildcard} {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	for _, tc := range []struct {
+		query string
+		slug  string
+	}{
+		{query: "search guide", slug: "entity/title"},
+		{query: "important phrase", slug: "entity/content"},
+		{query: "sqlitealias", slug: "entity/alias"},
+		{query: "literal_%", slug: "entity/wildcard"},
+	} {
+		pages, total, err := repo.List(ctx, &types.WikiPageListRequest{
+			KnowledgeBaseID: "kb-search",
+			Query:           tc.query,
+			Page:            1,
+			PageSize:        10,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), total, tc.query)
+		require.Len(t, pages, 1, tc.query)
+		assert.Equal(t, tc.slug, pages[0].Slug, tc.query)
+	}
+}
+
 // TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
 // child listing ordered by sort_order/name, find-by-name, page counting under
 // a folder, and that ListDistinctCategoryPaths reflects the folder paths.
@@ -782,4 +823,202 @@ func TestUpdateIssueStatus_ScopedToKnowledgeBase(t *testing.T) {
 	// Setting the same status again is not "not found": both supported
 	// databases count matched rows, and updated_at changes anyway.
 	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
+}
+
+func TestSearchAcross_RanksTitleAboveContentAndStaysInRequestedKBs(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	titleHit := makeWikiPage("kb-b", "entity/wangxin", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	titleHit.Title = "王新"
+	titleHit.Content = "unrelated body"
+	titleHit.UpdatedAt = time.Now().Add(-time.Hour)
+
+	contentHit := makeWikiPage("kb-a", "entity/huawei", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	contentHit.Title = "华为"
+	contentHit.Content = "mentions 王新 in passing"
+	contentHit.UpdatedAt = time.Now()
+
+	archived := makeWikiPage("kb-a", "entity/wangxin-old", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.Title = "王新"
+
+	outside := makeWikiPage("kb-c", "entity/wangxin-other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	outside.Title = "王新"
+
+	for _, p := range []*types.WikiPage{titleHit, contentHit, archived, outside} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a", "kb-b"}, "王新", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+	assert.Equal(t, titleHit.ID, pages[0].ID, "title match in another KB must outrank a newer body mention")
+	assert.Equal(t, contentHit.ID, pages[1].ID)
+}
+
+func TestSearch_UsesSharedAcrossQueryForSingleKB(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	hit := makeWikiPage("kb-a", "concept/deploy", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	hit.Title = "部署"
+	miss := makeWikiPage("kb-b", "concept/deploy-other", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	miss.Title = "部署"
+	require.NoError(t, repo.Create(ctx, hit))
+	require.NoError(t, repo.Create(ctx, miss))
+
+	pages, err := repo.Search(ctx, "kb-a", "部署", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, hit.ID, pages[0].ID)
+}
+
+func TestSearchAcross_ClampsLimit(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		p := makeWikiPage("kb-a", "entity/p"+strconv.Itoa(i), types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+		p.Title = "match-term"
+		p.UpdatedAt = time.Now().Add(time.Duration(i) * time.Minute)
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "match-term", 2)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+
+	empty, err := repo.SearchAcross(ctx, nil, "match-term", 10)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
+func TestFindSimilarPagesSQLiteRanksAndFiltersCandidates(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	exact := makeWikiPage("kb-a", "entity/acme-corporation", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	exact.Title = "Acme Corporation"
+	partial := makeWikiPage("kb-a", "concept/acme-corp", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	partial.Title = "Acme Corp"
+	unrelated := makeWikiPage("kb-a", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	unrelated.Title = "Different Company"
+	archived := makeWikiPage("kb-a", "entity/acme-archived", types.WikiPageTypeEntity, types.WikiPageStatusArchived)
+	archived.Title = "Acme Corporation"
+	wrongType := makeWikiPage("kb-a", "summary/acme", "summary", types.WikiPageStatusPublished)
+	wrongType.Title = "Acme Corporation"
+	otherKB := makeWikiPage("kb-b", "entity/acme-other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	otherKB.Title = "Acme Corporation"
+	for _, page := range []*types.WikiPage{exact, partial, unrelated, archived, wrongType, otherKB} {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	pages, err := repo.FindSimilarPages(ctx, "kb-a", "Acme Corporation", nil, 1)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, exact.Slug, pages[0].Slug)
+
+	pages, err = repo.FindSimilarPages(ctx, "kb-a", "Acme Corporation", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+	assert.Equal(t, []string{exact.Slug, partial.Slug}, []string{pages[0].Slug, pages[1].Slug})
+
+	pages, err = repo.FindSimilarPages(ctx, "kb-a", "zzzz", nil, 10)
+	require.NoError(t, err)
+	assert.Empty(t, pages)
+}
+
+func TestFindSimilarPagesSQLiteOrdersEqualScoresBySlug(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	zulu := makeWikiPage("kb-a", "entity/zulu", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	zulu.Title = "Acme"
+	alpha := makeWikiPage("kb-a", "entity/alpha", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	alpha.Title = "Acme"
+	require.NoError(t, repo.Create(ctx, zulu))
+	require.NoError(t, repo.Create(ctx, alpha))
+
+	pages, err := repo.FindSimilarPages(ctx, "kb-a", "Acme", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+	assert.Equal(t, []string{alpha.Slug, zulu.Slug}, []string{pages[0].Slug, pages[1].Slug})
+}
+
+func TestWikiTitleTrigramsAndJaccard(t *testing.T) {
+	assert.Empty(t, wikiTitleTrigrams("  \t"))
+	assert.Equal(t, 1.0, wikiTrigramJaccard(wikiTitleTrigrams("Acme"), wikiTitleTrigrams("Acme")))
+	assert.Equal(t, 1.0, wikiTrigramJaccard(wikiTitleTrigrams("ACME"), wikiTitleTrigrams("acme")))
+	assert.Zero(t, wikiTrigramJaccard(wikiTitleTrigrams("Acme"), wikiTitleTrigrams("Different")))
+	assert.Greater(t, wikiTrigramJaccard(wikiTitleTrigrams("Acme Corporation"), wikiTitleTrigrams("Acme Corp")), 0.0)
+}
+
+func TestSearchAcross_SQLiteLikeEscapesWildcards(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	literalPct := makeWikiPage("kb-a", "entity/pct", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	literalPct.Title = "100% done"
+	other := makeWikiPage("kb-a", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	other.Title = "other page"
+	literalUnderscore := makeWikiPage("kb-a", "entity/under", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	literalUnderscore.Title = "a_b"
+	plain := makeWikiPage("kb-a", "entity/plain", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	plain.Title = "axb"
+	for _, p := range []*types.WikiPage{literalPct, other, literalUnderscore, plain} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "%", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalPct.ID, pages[0].ID)
+
+	pages, err = repo.SearchAcross(ctx, []string{"kb-a"}, "100%", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalPct.ID, pages[0].ID)
+
+	pages, err = repo.SearchAcross(ctx, []string{"kb-a"}, "a_b", 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, literalUnderscore.ID, pages[0].ID)
+}
+
+func TestWikiTitleTrigramsWordBoundaries(t *testing.T) {
+	for _, tt := range []struct{ name, left, right string }{
+		{"punctuation", "a-b", "a b"},
+		{"word order", "a b", "b a"},
+		{"repeated whitespace", "a\t  b", "a b"},
+		{"unicode words", "甲-乙", "甲 乙"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, wikiTitleTrigrams(tt.left), wikiTitleTrigrams(tt.right))
+			assert.Equal(t, 1.0, wikiTrigramJaccard(wikiTitleTrigrams(tt.left), wikiTitleTrigrams(tt.right)))
+		})
+	}
+	assert.Empty(t, wikiTitleTrigrams("--- !!!"))
+	assert.Equal(t, map[string]struct{}{
+		"  f": {}, " fo": {}, "foo": {}, "oo ": {},
+		"  b": {}, " ba": {}, "bar": {}, "ar ": {},
+	}, wikiTitleTrigrams("foo|bar"))
+}
+
+func TestFindSimilarPagesSQLitePunctuationVariants(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	page := makeWikiPage("kb-a", "entity/a-b", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	page.Title = "A-B"
+	require.NoError(t, repo.Create(context.Background(), page))
+
+	pages, err := repo.FindSimilarPages(context.Background(), "kb-a", "A B", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, page.Slug, pages[0].Slug)
 }

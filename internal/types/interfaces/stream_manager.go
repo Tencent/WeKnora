@@ -31,6 +31,10 @@ type StreamManager interface {
 	// Returns: events slice, next offset for subsequent reads, error
 	GetEvents(ctx context.Context, sessionID, messageID string, fromOffset int) ([]StreamEvent, int, error)
 
+	// ResetEvents drops a message's stream events so a run resumed into the
+	// same message starts a fresh stream. Steer events are kept.
+	ResetEvents(ctx context.Context, sessionID, messageID string) error
+
 	// AppendSteerEvents appends control events (steer instructions) to a
 	// dedicated per-run sub-list that is never surfaced on the SSE stream.
 	// Producers are incoming "append a message to the running turn" HTTP

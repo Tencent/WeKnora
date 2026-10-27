@@ -95,3 +95,62 @@
     color: var(--td-success-color);
   }
 }
+
+// 标题旁的补充说明入口，保持设置页标题本身的字号与字重。
+.settings-title-help() {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: help;
+
+  &:hover {
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+}
+
+// 资源管理类设置页：固定顶部工具栏，列表在剩余空间内滚动。
+.settings-list-page() {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--td-text-color-primary);
+}
+
+.settings-list-action() {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  font-weight: 400;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+
+  :deep(.t-icon) { color: var(--td-brand-color); }
+}

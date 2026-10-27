@@ -372,6 +372,33 @@ func TestFetchSkillArchiveFromSkillsShInstallResolver(t *testing.T) {
 	require.NotContains(t, bundle.Files, "README.md")
 }
 
+func TestFetchSkillArchiveFromUnfederatedSkillsShExplainsGitHubSource(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	_, err := fetchSkillArchive(t.Context(),
+		server.URL+"/skills-sh/acedatacloud/skills/suno-music", server.Client())
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "not available through ClawHub")
+	require.ErrorContains(t, err, "GitHub folder URL")
+}
+
+func TestFetchSkillArchiveFromOtherSourceKeepsHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	_, err := fetchSkillArchive(t.Context(), server.URL+"/demo.zip", server.Client())
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "download returned HTTP 404")
+	require.NotContains(t, err.Error(), "ClawHub federation")
+}
+
 func TestFetchSkillArchiveFromRegistry(t *testing.T) {
 	archive := zipBundle(t, map[string]string{"SKILL.md": validSkillMD})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -158,6 +158,7 @@ func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/agents/placeholders"},
 		{http.MethodGet, "/api/v1/agents/type-presets"},
+		{http.MethodGet, "/api/v1/agents/tools"},
 		{http.MethodGet, "/api/v1/agents"},
 		{http.MethodGet, "/api/v1/agents/:id"},
 		{http.MethodGet, "/api/v1/agents/:id/suggested-questions"},
@@ -228,6 +229,7 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPut, "/api/v1/knowledge-bases/:id"},
+		{http.MethodPatch, "/api/v1/knowledge-bases/:id"},
 		{http.MethodDelete, "/api/v1/knowledge-bases/:id"},
 		{http.MethodPost, "/api/v1/initialization/initialize/:kbId"},
 		{http.MethodPut, "/api/v1/initialization/config/:kbId"},
@@ -313,6 +315,7 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
 		{http.MethodPost, "/api/v1/knowledge-search"},
+		{http.MethodPost, "/api/v1/wiki-search"},
 		{http.MethodGet, "/api/v1/initialization/config/:kbId"},
 		{http.MethodGet, "/api/v1/knowledgebase/:kb_id/wiki/pages"},
 	}
@@ -362,6 +365,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/tenants", types.APIKeyCapabilityManageTenantSettings},
 		{http.MethodGet, "/api/v1/models", types.APIKeyCapabilityManageModels},
 		{http.MethodDelete, "/api/v1/models/:id", types.APIKeyCapabilityManageModels},
+		{http.MethodPost, "/api/v1/models/:id/copy", types.APIKeyCapabilityManageModels},
 		{http.MethodPost, "/api/v1/evaluation", types.APIKeyCapabilityRunEvaluations},
 		{http.MethodGet, "/api/v1/system/info", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
@@ -369,6 +373,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 			http.MethodPost, "/api/v1/mcp-services/:id/usage-instructions/generate",
 			types.APIKeyCapabilityManageMCPServices,
 		},
+		{http.MethodPost, "/api/v1/mcp-services/:id/oauth/assertion", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
@@ -409,6 +414,8 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 		{http.MethodPut, "/api/v1/sandbox-configs/:id"},
 		{http.MethodDelete, "/api/v1/sandbox-configs/:id"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/user-sandboxes"},
+		{http.MethodPost, "/api/v1/sandbox-configs/:id/user-sandboxes/:digest/release"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
@@ -604,6 +611,7 @@ func TestKnowledgeBatchWriteRoutesDeclareIngestCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge/move"},
 		{http.MethodPost, "/api/v1/knowledge/batch-delete"},
 		{http.MethodPost, "/api/v1/knowledge/batch-reparse"},
+		{http.MethodPost, "/api/v1/knowledge-bases/:id/rebuild-index"},
 		{http.MethodPut, "/api/v1/knowledge/tags"},
 	}
 	for _, tc := range cases {
@@ -654,6 +662,48 @@ func TestFAQImportProgressRouteRequiresRetrieveOrIngestCapability(t *testing.T) 
 	}
 	if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
 		t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+	}
+}
+
+// Listing shared knowledge bases is read-only discovery: a scoped key that
+// may already retrieve KB data must be able to discover the shared KBs its
+// allow-list covers, without being promoted to manage_spaces.
+func TestSharedKnowledgeBaseDiscoveryAdmitsRetrieveCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
+
+	for _, path := range []string{
+		"/api/v1/shared-knowledge-bases",
+		"/api/v1/organizations/:id/shared-knowledge-bases",
+	} {
+		t.Run(path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+				t.Fatalf("policy capabilities = %#v, want retrieve", policy.Capabilities)
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityManageSpaces) {
+				t.Fatalf("policy capabilities = %#v, want manage_spaces preserved", policy.Capabilities)
+			}
+		})
+	}
+
+	// Opening the two discovery routes must not leak the capability into the
+	// rest of the organization group, nor into the shared-agents listing.
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/organizations"},
+		{http.MethodGet, "/api/v1/organizations/:id/members"},
+		{http.MethodGet, "/api/v1/shared-agents"},
+	} {
+		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+		if policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+			t.Fatalf("%s %s must not admit retrieve", tc.method, tc.path)
+		}
 	}
 }
 

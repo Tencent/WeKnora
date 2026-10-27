@@ -35,12 +35,25 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
+	"github.com/Tencent/WeKnora/internal/envfile"
+	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 func main() {
+	// Load dotenv configuration before any container provider reads it.
+	// Explicit ENV_FILE is honored on every build; automatic .env.lite
+	// discovery is scoped to Lite builds (internal/handler.Edition is
+	// injected at build time), so a standard binary built in the repo root
+	// never picks up Lite defaults. Process variables remain authoritative.
+	if err := envfile.Load(handler.Edition == "lite"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+	// Dotenv loading happens after the logger package initialized, so
+	// re-apply file-based LOG_LEVEL / LOG_PATH (mirrors cmd/desktop).
+	logger.ConfigureFromEnv()
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -99,31 +112,34 @@ func main() {
 			sig := <-signals
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
 
-			// Close listener first to release port immediately,
-			// so the next process can bind during our graceful drain.
-			listener.Close()
-
-			shutdownTimeout := cfg.Server.ShutdownTimeout
-			if shutdownTimeout == 0 {
-				shutdownTimeout = 30 * time.Second
-			}
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			drainBudget, cleanupBudget := runtime.ShutdownBudgets(cfg.Server.ShutdownTimeout)
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), drainBudget)
 			defer shutdownCancel()
 
-			// Second signal → force close all connections immediately
+			// Second signal → force close all connections immediately.
 			go func() {
 				sig := <-signals
 				logger.Warnf(context.Background(), "Received second signal: %v, forcing shutdown...", sig)
 				server.Close()
 			}()
 
+			// Do NOT close the listener manually before Shutdown. Serve would
+			// return the raw accept error ("use of closed network connection")
+			// instead of ErrServerClosed, and logger.Fatalf → os.Exit(1) would
+			// kill the process before ResourceCleaner runs. Shutdown closes
+			// listeners first, so the port is released before the drain.
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
 				server.Close()
 			}
 
 			logger.Info(context.Background(), "Cleaning up resources...")
-			errs := resourceCleaner.Cleanup(shutdownCtx)
+			// Fresh context sized from the reserved slice of ShutdownTimeout.
+			// Drain must not hand cleanup an already-expired context, and the
+			// two slices must still add up to one supervisor grace period.
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), cleanupBudget)
+			defer cleanupCancel()
+			errs := resourceCleaner.Cleanup(cleanupCtx)
 			if len(errs) > 0 {
 				logger.Errorf(context.Background(), "Errors occurred during resource cleanup: %v", errs)
 			}

@@ -9,6 +9,7 @@ import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 import { shownStall } from '@/utils/knowledgeProcessingStall';
+import type { FolderEntry } from '../folderTree';
 
 interface KnowledgeCard {
   id: string;
@@ -48,6 +49,12 @@ const props = defineProps<{
   /** Every folder of the knowledge base, for the "move to folder" picker. */
   folderOptions?: FolderOption[];
   /**
+   * Direct sub-folders of the folder being browsed, shown as chips above
+   * the document cards when the sidebar tree is collapsed. Filtering
+   * searches the subtree for documents, so the caller passes an empty list.
+   */
+  subFolders?: FolderEntry[];
+  /**
    * Replace the updated-at line with the card's folder. Only meaningful when
    * the grid spans several folders, i.e. while filtering.
    */
@@ -78,6 +85,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const tagEditorId = ref<string | null>(null);
+const subFolderCards = computed(() => props.subFolders || []);
 const cardSummaries = computed(() => new Map(props.items.map(item => [item.id, formatReferenceSnippet(item.description)])));
 
 // Which row's action popup is currently showing the folder picker. Kept local so
@@ -154,6 +162,7 @@ const channelLabelMap: Record<string, string> = {
   wecom: 'knowledgeBase.channelWecom',
   feishu: 'knowledgeBase.channelFeishu',
   gitlab: 'knowledgeBase.channelGitLab',
+  seafile: 'knowledgeBase.channelSeafile',
   confluence: 'knowledgeBase.channelConfluence',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
@@ -325,8 +334,37 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 
 <template>
   <div class="doc-card-view">
+    <section v-if="subFolderCards.length" class="doc-section">
+      <h3 class="doc-section-header">
+        <span>{{ t('knowledgeBase.folderTree.folderSection') }}</span>
+        <span class="doc-section-count">{{ subFolderCards.length }}</span>
+      </h3>
+      <nav class="doc-folder-strip" :aria-label="t('knowledgeBase.folderTree.folderSection')">
+        <button
+          v-for="folder in subFolderCards"
+          :key="`folder:${folder.path}`"
+          type="button"
+          class="doc-folder-tile"
+          :data-folder-path="folder.path"
+          :title="folder.path"
+          @click="onOpenFolder(folder.path)"
+        >
+          <t-icon name="folder" class="doc-folder-tile__icon" size="20px" />
+          <span class="doc-folder-tile__name">{{ folder.name }}</span>
+          <span class="doc-folder-tile__count"
+            :title="t('knowledgeBase.folderTree.countHint', { direct: folder.document_count, total: folder.total_count })">
+            {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+          </span>
+        </button>
+      </nav>
+    </section>
 
-    <div class="doc-card-list doc-card-list-animated">
+    <section v-if="items.length" class="doc-section">
+      <h3 v-if="subFolderCards.length" class="doc-section-header">
+        <span>{{ t('knowledgeBase.folderTree.documentSection') }}</span>
+        <span class="doc-section-count">{{ items.length }}</span>
+      </h3>
+      <div class="doc-card-list doc-card-list-animated">
     <div
       class="knowledge-card"
       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
@@ -578,7 +616,8 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
         <span v-else class="card-time" :title="t('knowledgeBase.columnUpdatedAt')">{{ formatDocTime(item.updated_at) }}</span>
       </div>
     </div>
-    </div>
+      </div>
+    </section>
   </div>
 
   <!-- Hover popover -->
@@ -659,6 +698,90 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   padding-top: 12px;
 }
 
+.doc-section + .doc-section {
+  margin-top: 16px;
+}
+
+.doc-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0 2px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.doc-section-count {
+  color: var(--td-text-color-placeholder);
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-folder-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.doc-folder-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--app-motion-base) ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--td-text-color-primary) 12%, var(--td-bg-color-secondarycontainer));
+  }
+
+  &:hover .doc-folder-tile__icon {
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 2px;
+  }
+}
+
+.doc-folder-tile__icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+  transition: color var(--app-motion-base) ease;
+}
+
+.doc-folder-tile__name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.doc-folder-tile__count {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xs);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
 .doc-card-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
@@ -678,13 +801,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   cursor: pointer;
-  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
+  transition: background-color var(--app-motion-base) ease;
   &:hover {
-    border-color: var(--app-selection-border);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.035);
+    background: var(--td-bg-color-container-hover);
   }
 
-  &.is-selected { border-color: var(--app-selection-border); background: var(--td-bg-color-container); box-shadow: none; }
+  &.is-selected {
+    background: var(--app-selection-bg);
+  }
 
   .card-content { min-width: 0; }
   .card-content-nav { display: flex; align-items: flex-start; gap: 7px; height: 36px; margin-bottom: 4px; }
@@ -773,7 +897,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     line-height: 18px;
   }
   .card-time { flex-shrink: 0; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .card-tags-anchor { flex: 1; min-width: 0; width: auto; }
+  .card-tags-anchor { flex: 0 1 auto; min-width: 0; width: auto; }
   .card-folder {
     display: inline-flex;
     align-items: center;
@@ -791,6 +915,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .t-icon { flex-shrink: 0; }
   }
+
 }
 
 .card-tags {
@@ -820,10 +945,22 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     text-overflow: ellipsis;
     cursor: pointer;
     &:disabled { cursor: default; }
-    &:not(:disabled):hover { color: var(--td-brand-color); border-color: var(--app-selection-border); background: var(--app-selection-bg); }
+    &:not(:disabled):hover { color: var(--td-text-color-primary); border-color: var(--td-component-stroke); background: var(--td-bg-color-container-hover); }
   }
   .card-tag-chip { display: block; min-width: 0; }
-  .card-tag-add { max-width: none; padding: 0; border-color: transparent; color: var(--td-text-color-placeholder); background: transparent; }
+  .card-tag-add {
+    width: auto;
+    max-width: 100%;
+    padding: 0;
+    border-color: transparent;
+    color: var(--td-text-color-placeholder);
+    background: transparent;
+    &:not(:disabled):hover {
+      color: var(--td-text-color-secondary);
+      border-color: transparent;
+      background: transparent;
+    }
+  }
   .card-tag-overflow { flex-shrink: 0; }
 }
 .card-tag-menu-action { width: 100%; border: 0; background: transparent; font-family: inherit; text-align: left; }

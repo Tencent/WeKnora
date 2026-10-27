@@ -62,3 +62,60 @@ func TestUpdateAgentAvatarPresence(t *testing.T) {
 		})
 	}
 }
+
+func TestPatchAgentSkills(t *testing.T) {
+	selected, all := "selected", "all"
+	names, empty := []string{"ppt-generator"}, []string{}
+	for _, tc := range []struct {
+		name string
+		req  PatchAgentRequest
+		want string
+	}{
+		{"omitted", PatchAgentRequest{}, `{}`},
+		{"names alone", PatchAgentRequest{SelectedSkills: &names}, `{"selected_skills":["ppt-generator"]}`},
+		{
+			"selected",
+			PatchAgentRequest{SkillsSelectionMode: &selected, SelectedSkills: &names},
+			`{"skills_selection_mode":"selected","selected_skills":["ppt-generator"]}`,
+		},
+		{"empty", PatchAgentRequest{SelectedSkills: &empty}, `{"selected_skills":[]}`},
+		{"all", PatchAgentRequest{SkillsSelectionMode: &all}, `{"skills_selection_mode":"all"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/agents/agent-1" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				got, err := json.Marshal(body)
+				if err != nil {
+					t.Error(err)
+				}
+				var want map[string]any
+				if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+					t.Error(err)
+				}
+				canonical, err := json.Marshal(want)
+				if err != nil || string(got) != string(canonical) {
+					t.Errorf("body = %s, want %s (error: %v)", got, canonical, err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				response := AgentResponse{Success: true, Data: Agent{ID: "agent-1"}}
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer srv.Close()
+			agent, err := NewClient(srv.URL).PatchAgent(context.Background(), "agent-1", &tc.req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if agent.ID != "agent-1" {
+				t.Errorf("agent ID = %q", agent.ID)
+			}
+		})
+	}
+}

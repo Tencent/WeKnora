@@ -5,12 +5,50 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+func TestReadDocumentCitationIdentitySurvivesClientAndHistoryCompaction(t *testing.T) {
+	knowledge := &types.Knowledge{
+		ID: "doc-1", KnowledgeBaseID: "kb-1", Title: "Proposal.pptx", FileName: "Proposal.pptx",
+	}
+	rows := []readChunkRow{
+		{chunk: &types.Chunk{ID: "chunk-1", Content: "First body"}},
+		{chunk: &types.Chunk{
+			ID: "chunk-2", Content: "Cited body",
+			SourceLocators: types.SourceLocators{{Type: types.SourceLocatorSlide, Slide: 8}},
+		}},
+	}
+	data := (&ReadDocumentTool{}).buildData(knowledge, 2, rows)
+	result := &types.ToolResult{Success: true, Data: data, Output: "full model-only output"}
+	steps := []types.AgentStep{{ToolCalls: []types.ToolCall{{Name: ToolReadDocument, Result: result}}}}
+	stored := SanitizeAgentStepsForStorage(steps)[0].ToolCalls[0].Result
+	for name, compact := range map[string]map[string]interface{}{
+		"live":    SanitizeToolResultForClient(ToolReadDocument, result),
+		"history": stored.Data,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if compact["knowledge_id"] != "doc-1" || compact["knowledge_base_id"] != "kb-1" ||
+				compact["source_chunk_id"] != "chunk-2" {
+				t.Fatalf("lost citation provenance: %#v", compact)
+			}
+			if !reflect.DeepEqual(compact["chunk_ids"], []string{"chunk-1", "chunk-2"}) {
+				t.Fatalf("lost cited chunk IDs: %#v", compact["chunk_ids"])
+			}
+			if _, exists := compact["chunks"]; exists {
+				t.Fatal("chunk bodies should still be omitted")
+			}
+		})
+	}
+	if len(data["chunks"].([]map[string]interface{})) != 2 || result.Output != "full model-only output" {
+		t.Fatal("compaction must not mutate the full model result")
+	}
+}
 
 // ---- fakes -----------------------------------------------------------------
 

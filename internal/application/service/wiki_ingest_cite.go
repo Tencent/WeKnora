@@ -418,13 +418,38 @@ func (s *wikiIngestService) resolveCitedChunks(
 		// "drop entirely" behavior on concept/entity pages.
 		imageInfoByID := searchutil.CollectImageInfoByChunkIDs(ctx, s.chunkRepo, tenantID, ids)
 
+		// Citation enrichment is an in-memory copy. Reload OCR Content for the
+		// same image-only parents here so Reduce does not lose that evidence
+		// when image_info is missing. Keep ordinary prose on its existing path.
+		var scannedIDs []string
 		for _, c := range chunks {
-			if c == nil || c.Content == "" {
+			if c != nil && c.IsEnabled && !chunkHasExtractableText(c.Content) {
+				scannedIDs = append(scannedIDs, c.ID)
+			}
+		}
+		ocrByParent := make(map[string][]*types.Chunk)
+		if len(scannedIDs) > 0 {
+			children, childErr := s.chunkRepo.ListChunksByParentIDs(ctx, tenantID, scannedIDs)
+			if childErr != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to resolve cited OCR: %v", childErr)
+			} else {
+				inputs := append(append([]*types.Chunk(nil), chunks...), children...)
+				for _, child := range scannedOCRForWiki(inputs) {
+					ocrByParent[child.ParentChunkID] = append(ocrByParent[child.ParentChunkID], child)
+				}
+			}
+		}
+
+		for _, c := range chunks {
+			if c == nil || !c.IsEnabled || c.Content == "" {
 				continue
 			}
 			content := c.Content
 			if info := imageInfoByID[c.ID]; info != "" {
 				content = searchutil.EnrichContentWithImageInfo(content, info)
+			}
+			if ocr := ocrByParent[c.ID]; len(ocr) > 0 {
+				content = appendScannedPageText(content, append([]*types.Chunk{c}, ocr...))
 			}
 			out[c.ID] = content
 		}

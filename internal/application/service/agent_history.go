@@ -104,6 +104,7 @@ func LoadAgentHistory(
 		used         int
 		replay       = newHistoryReplay(estimator, 0, retainRetrievalHistory)
 	)
+	replay.locale = types.LanguageFromContextOrDefault(ctx)
 	for len(rows) < agentHistoryMaxRows {
 		page, err := messageRepo.ListMessagesBySessionBeforeCursor(
 			ctx, sessionID, before, beforeID, agentHistoryPageSize,
@@ -259,6 +260,7 @@ type historyReplay struct {
 	estimator              *agenttoken.Estimator
 	budget                 int
 	retainRetrievalHistory bool
+	locale                 string
 	built                  map[string][]chat.Message
 	tokens                 map[string]int
 	// full holds stored rows by ID until their turn is replayed.
@@ -305,7 +307,7 @@ func (r *historyReplay) messages(t *agentHistoryTurn) []chat.Message {
 	for i, u := range t.users {
 		users[i] = r.stored(u)
 	}
-	msgs := append([]chat.Message{buildUserHistoryMessage(users[0])},
+	msgs := append([]chat.Message{r.openingUserMessage(users[0])},
 		buildTurnBodyMessages(r.stored(t.assistant), users[1:])...)
 	for i := range msgs {
 		msgs[i].TurnID = id
@@ -450,6 +452,7 @@ func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Messag
 			appendUser(midRunUsers[next])
 			next++
 		}
+		out = append(out, backgroundInjectionMessages(step)...)
 		out = append(out, buildAgentStepMessages(step)...)
 	}
 	for _, user := range midRunUsers {
@@ -464,19 +467,33 @@ func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Messag
 	return out
 }
 
+// openingUserMessage replays the message that started a turn. One sent as only
+// an image or file has no stored text; replayed empty, the sanitizer would drop
+// it and merge the answers on either side.
+func (r *historyReplay) openingUserMessage(m *types.Message) chat.Message {
+	if strings.TrimSpace(m.Content) == "" && (len(m.Images) > 0 || len(m.Attachments) > 0) {
+		asked := *m
+		asked.Content = types.UploadOnlyQuestion(r.locale)
+		return buildUserHistoryMessage(&asked)
+	}
+	return buildUserHistoryMessage(m)
+}
+
 // buildUserHistoryMessage converts a stored user message into the chat.Message
 // form that should appear in LLM history. It deliberately ignores
 // RenderedContent: that field is a snapshot of the old prompt and retrieval
 // context format, which must not be mixed into the current request protocol.
 // Image captions and attachments are reconstructed from their canonical DB
 // columns so useful user-provided context is retained without stale RAG data.
+// Stored documents replay as manifest entries the agent can read again, so
+// excerpts chosen for an earlier question do not ride along in every turn.
 func buildUserHistoryMessage(m *types.Message) chat.Message {
 	content := m.Content
 	if captions := extractImageCaptionsFromMessage(m.Images); captions != "" {
 		content += "\n\n[用户上传图片内容]\n" + captions
 	}
 	if len(m.Attachments) > 0 {
-		content += m.Attachments.BuildPrompt()
+		content += m.Attachments.BuildAgentPrompt()
 	}
 	return chat.Message{Role: "user", Content: content}
 }
@@ -492,12 +509,26 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 	msgs := make([]chat.Message, 0, len(m.AgentSteps)*2+1)
 	for _, step := range m.AgentSteps {
+		msgs = append(msgs, backgroundInjectionMessages(step)...)
 		msgs = append(msgs, buildAgentStepMessages(step)...)
 	}
 	if final := finalAnswerHistoryMessage(m); final != nil {
 		msgs = append(msgs, *final)
 	}
 	return msgs
+}
+
+// backgroundInjectionMessages replays the background-work messages delivered
+// before a step, where the model saw them.
+func backgroundInjectionMessages(step types.AgentStep) []chat.Message {
+	out := make([]chat.Message, 0, len(step.BackgroundInjections))
+	for _, injection := range step.BackgroundInjections {
+		if strings.TrimSpace(injection.Content) == "" {
+			continue
+		}
+		out = append(out, chat.Message{Role: "user", Content: injection.Content})
+	}
+	return out
 }
 
 // buildAgentStepMessages expands one persisted step into the OpenAI-shaped

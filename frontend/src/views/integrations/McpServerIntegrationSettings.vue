@@ -260,8 +260,9 @@ import { useAuthStore } from '@/stores/auth'
 import { copyWithToast } from '@/utils/clipboard'
 import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import { listAgents, type CustomAgent } from '@/api/agent'
-import { listKnowledgeBases } from '@/api/knowledge-base'
+import type { CustomAgent } from '@/api/agent'
+import { useChatResourcesStore } from '@/stores/chatResources'
+import { useOrganizationStore } from '@/stores/organization'
 import {
   createMcpEndpoint,
   deleteMcpEndpoint,
@@ -276,6 +277,7 @@ import {
 import {
   buildClaudeCodeCommand,
   buildHttpClientSnippet,
+  buildVsCodeClientSnippet,
   buildMcpEndpointUrl,
   buildStdioBridgeSnippet,
   groupTools,
@@ -283,6 +285,8 @@ import {
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const chatResources = useChatResourcesStore()
+const orgStore = useOrganizationStore()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
 
 const isAdmin = computed(() => authStore.hasRole('admin'))
@@ -343,6 +347,7 @@ const connectSnippets = computed(() => {
   const url = endpointUrl(ep)
   return [
     { key: 'http', text: buildHttpClientSnippet(ep.name, url, freshToken.value, ep.id) },
+    { key: 'vscode', text: buildVsCodeClientSnippet(ep.name, url, freshToken.value, ep.id) },
     { key: 'claudeCode', text: buildClaudeCodeCommand(ep.name, url, freshToken.value, ep.id) },
     { key: 'stdio', text: buildStdioBridgeSnippet(ep.name, url, freshToken.value, ep.id) },
   ]
@@ -398,13 +403,25 @@ async function loadOptions() {
   kbLoading.value = true
   agentsLoading.value = true
   try {
-    const [kbRes, agentRes] = await Promise.all([
-      listKnowledgeBases({ creator: 'all' }).catch(() => null),
-      listAgents().catch(() => null),
+    // 刷新失败时给空列表，而不是把上一次的共享快照当成本次结果展示。
+    const [kbResult, sharedKbResult, agentResult] = await Promise.allSettled([
+      chatResources.ensureKnowledgeBases(),
+      orgStore.fetchSharedKnowledgeBases(),
+      chatResources.ensureAgents(),
     ])
-    const kbRows = ((kbRes as any)?.data ?? []) as Array<{ id: string | number; name?: string }>
-    knowledgeBases.value = kbRows.map((kb) => ({ id: String(kb.id), name: kb.name || String(kb.id) }))
-    agents.value = ((agentRes as any)?.data ?? []) as CustomAgent[]
+    const kbRows = kbResult.status === 'fulfilled'
+      ? (chatResources.rawKnowledgeBases as Array<{ id: string | number; name?: string }>)
+      : []
+    const myKbs = kbRows.map((kb) => ({ id: String(kb.id), name: kb.name || String(kb.id) }))
+    const sharedKbs = sharedKbResult.status === 'fulfilled' && !orgStore.error
+      ? orgStore.sharedKnowledgeBases.flatMap((shared) => {
+        const kb = shared.knowledge_base
+        return kb ? [{ id: String(kb.id), name: kb.name || String(kb.id) }] : []
+      })
+      : []
+    const myKbIds = new Set(myKbs.map((kb) => kb.id))
+    knowledgeBases.value = [...myKbs, ...sharedKbs.filter((kb) => !myKbIds.has(kb.id))]
+    agents.value = agentResult.status === 'fulfilled' ? (chatResources.agents as CustomAgent[]) : []
   } finally {
     kbLoading.value = false
     agentsLoading.value = false

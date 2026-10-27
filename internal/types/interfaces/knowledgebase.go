@@ -67,11 +67,12 @@ type KnowledgeBaseService interface {
 	//   - name: New knowledge base name
 	//   - description: New knowledge base description
 	//   - config: Knowledge base configuration, including chunking strategy, vectorization settings, etc.
+	//   - vlmConfig: Optional multimodal (vision) config; nil means no change
 	// Returns:
 	//   - Updated knowledge base object
 	//   - Possible errors such as not existing, insufficient permissions, etc.
 	UpdateKnowledgeBase(ctx context.Context,
-		id string, name string, description string, config *types.KnowledgeBaseConfig,
+		id string, name string, description string, config *types.KnowledgeBaseConfig, vlmConfig *types.VLMConfig,
 	) (*types.KnowledgeBase, error)
 
 	// DeleteKnowledgeBase deletes a knowledge base
@@ -103,12 +104,14 @@ type KnowledgeBaseService interface {
 
 	// GetQueryEmbedding computes the query embedding using the embedding model
 	// associated with the given knowledge base. This allows callers to pre-compute
-	// and reuse embeddings across multiple KBs that share the same model.
+	// and reuse embeddings across multiple KBs that share the same model and
+	// vector space.
 	GetQueryEmbedding(ctx context.Context, kbID string, queryText string) ([]float32, error)
 
 	// ResolveEmbeddingModelKeys resolves embedding model IDs to their actual
-	// model identity key (name + endpoint). KBs using the same underlying model
-	// across different tenants will share the same key, enabling optimal grouping.
+	// model identity key (name + endpoint + configured vector dimension). KBs
+	// using the same underlying model and vector space across different tenants
+	// will share the same key, enabling optimal grouping.
 	// Returns a map from KB ID to model identity key string.
 	ResolveEmbeddingModelKeys(ctx context.Context, kbs []*types.KnowledgeBase) map[string]string
 
@@ -142,6 +145,10 @@ type KnowledgeBaseService interface {
 	// Returns:
 	//   - Possible errors during deletion
 	ProcessKBDelete(ctx context.Context, t *asynq.Task) error
+	// ReadChunkImage reads the image a search result shows (the first image
+	// of its image_info) from the storage of its knowledge base. The result
+	// must come from a search the caller was authorized to run.
+	ReadChunkImage(ctx context.Context, result *types.SearchResult) ([]byte, error)
 }
 
 // KnowledgeBaseRepository defines the knowledge base repository interface

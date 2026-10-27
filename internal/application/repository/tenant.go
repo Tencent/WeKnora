@@ -83,12 +83,16 @@ func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, te
 	// Build search conditions
 	if tenantID > 0 && keyword != "" {
 		escaped := escapeLikeKeyword(keyword)
-		query = query.Where("id = ? OR name LIKE ? OR description LIKE ?", tenantID, "%"+escaped+"%", "%"+escaped+"%")
+		query = query.Where(
+			"id = ? OR name LIKE ? ESCAPE ? OR description LIKE ? ESCAPE ?",
+			tenantID, "%"+escaped+"%", likeEscapeChar, "%"+escaped+"%", likeEscapeChar)
 	} else if tenantID > 0 {
 		query = query.Where("id = ?", tenantID)
 	} else if keyword != "" {
 		escaped := escapeLikeKeyword(keyword)
-		query = query.Where("name LIKE ? OR description LIKE ?", "%"+escaped+"%", "%"+escaped+"%")
+		query = query.Where(
+			"name LIKE ? ESCAPE ? OR description LIKE ? ESCAPE ?",
+			"%"+escaped+"%", likeEscapeChar, "%"+escaped+"%", likeEscapeChar)
 	}
 
 	// Count total
@@ -116,6 +120,21 @@ func (r *tenantRepository) SearchTenants(ctx context.Context, keyword string, te
 // UpdateTenant updates tenant.
 func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenant) error {
 	return r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", tenant.ID).Updates(tenant).Error
+}
+
+func (r *tenantRepository) UpdateTenantProfile(ctx context.Context, id uint64, name, description *string) error {
+	fields := map[string]interface{}{}
+	if name != nil {
+		fields["name"] = *name
+	}
+	if description != nil {
+		fields["description"] = *description
+	}
+	if id == 0 || len(fields) == 0 {
+		return errors.New("workspace id and profile fields are required")
+	}
+	result := r.db.WithContext(ctx).Model(&types.Tenant{}).Where("id = ?", id).Updates(fields)
+	return result.Error
 }
 
 // DeleteTenant soft-deletes the tenant and every active membership row

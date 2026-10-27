@@ -52,7 +52,7 @@
           />
           <div v-if="session.role === 'user'" class="message-row">
             <EmbedUserMessage
-              :content="String(session.content || '')"
+              :content="stripHostContextFromQuery(String(session.content || ''))"
               :mentioned_items="asUnknownArray(session.mentioned_items)"
               :images="asEmbedImages(session.images)"
               :attachments="asEmbedAttachments(session.attachments)"
@@ -100,6 +100,14 @@
     </transition>
 
     <div class="embed-chat__input">
+      <PendingPromptDock
+        embedded-mode
+        :embed-channel-id="channelId"
+        :embed-token="token"
+        :embed-session-id="sessionId"
+        :embed-session-sig="sessionSig"
+        :embed-visitor-id="visitorId"
+      />
       <EmbedInputField
         :isReplying="isReplying"
         :show-web-search-toggle="showWebSearchToggle"
@@ -128,11 +136,15 @@ import EmbedInputField from '@/components/EmbedInputField.vue'
 import EmbedBotMessage from '@/views/embed/EmbedBotMessage.vue'
 import EmbedUserMessage from '@/views/embed/EmbedUserMessage.vue'
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue'
+import PendingPromptDock from '@/views/chat/components/PendingPromptDock.vue'
+import { providePromptDock } from '@/composables/usePromptDock'
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
+import { isAwaitingInput } from '@/composables/useChatStreamHandler'
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue'
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue'
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp'
+import { stripHostContextFromQuery } from '@/utils/embedContext'
 import type { MessageSuggestionItem, MessageSuggestionSet } from '@/api/message-suggestion'
 
 provideChatReferencesDrawer()
@@ -179,6 +191,7 @@ const loadFollowUpSuggestions = async (
   const messageId = String(message.id || message.assistant_message_id || '')
   const targetSessionId = props.sessionId
   if (!props.showSuggestedQuestions || !messageId || !targetSessionId || message.suggestionsDismissed) return
+  if (isAwaitingInput(message)) return
   message.suggestionLoading = true
   try {
     let response = ensure
@@ -293,6 +306,7 @@ const {
   onTurnComplete: (message) => { void loadFollowUpSuggestions(message, true) },
   onMessagesLoaded: loadPersistedFollowUps,
 })
+providePromptDock(messagesList)
 
 const welcomeText = computed(() => props.welcomeMessage?.trim() || '')
 const hasWelcomeText = computed(() => welcomeText.value.length > 0)
@@ -330,11 +344,17 @@ const fetchSuggestedQuestions = async () => {
   }
 }
 
-const onSendMsg = (query: string, imageFiles: File[] = [], attachmentFiles: File[] = []) => {
+const onSendMsg = (
+  query: string,
+  imageFiles: File[] = [],
+  attachmentFiles: File[] = [],
+  onPrepared?: () => void,
+) => {
   void sendMsg(query, {
     webSearchEnabled: webSearchEnabled.value,
     imageFiles,
     attachmentFiles,
+    onPrepared,
   })
 }
 
@@ -364,11 +384,10 @@ const recordFollowUpEvent = (
 
 const handleFollowUpSelect = (message: Record<string, unknown>, item: MessageSuggestionItem) => {
   const set = message.suggestionSet as MessageSuggestionSet | undefined
-  if (set) {
-    recordFollowUpEvent(set, 'click', item.id)
-    setSuggestionAttribution(set.id, item.id)
-  }
-  if (!isReplying.value) void sendMsg(item.text, { webSearchEnabled: webSearchEnabled.value })
+  if (set) recordFollowUpEvent(set, 'click', item.id)
+  if (isReplying.value) return
+  if (set) setSuggestionAttribution(set.id, item.id)
+  void sendMsg(item.text, { webSearchEnabled: webSearchEnabled.value })
 }
 
 const dismissFollowUps = (message: Record<string, unknown>, set: MessageSuggestionSet) => {
@@ -549,6 +568,10 @@ watch(
   flex-shrink: 0;
   padding: 8px 16px 16px;
   box-sizing: border-box;
+}
+
+.embed-chat__input :deep(.prompt-dock) {
+  max-width: 800px;
 }
 
 .msg-skeleton-list {

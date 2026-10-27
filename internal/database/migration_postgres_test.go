@@ -18,7 +18,7 @@ import (
 // at a disposable database, for example:
 //
 //	docker run -d --rm -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=weknora -p 55432:5432 \
-//	  paradedb/paradedb:v0.22.6-pg17
+//	  paradedb/paradedb:v0.25.11-pg17
 //	WEKNORA_MIGRATION_TEST_POSTGRES_DSN=postgres://postgres:pg@localhost:55432/weknora?sslmode=disable
 //
 // It checks what SQLite cannot: that 000106 builds its index CONCURRENTLY

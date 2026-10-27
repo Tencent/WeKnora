@@ -32,6 +32,12 @@ export const domPurifySecurityHooks = {
         element.removeAttribute(attr);
       }
     });
+    // target is allowed only so the afterSanitizeElements hook can add
+    // target="_blank" together with rel="noopener noreferrer"; never keep an
+    // author-supplied value (SVG <a>, <area>, non-http hrefs skip the hook).
+    if (element.hasAttribute('target')) {
+      element.removeAttribute('target');
+    }
   },
   afterSanitizeElements: (currentNode: Node) => {
     if (!('tagName' in currentNode) || !('getAttribute' in currentNode)) return;
@@ -83,7 +89,7 @@ export const markdownDomPurifyConfig = {
   ],
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
-    'data-chunk-id', 'data-doc', 'data-slug', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src', 'data-img-loading',
+    'data-chunk-id', 'data-doc', 'data-slug', 'data-entity-kind', 'data-entity-id', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src', 'data-img-loading',
     'data-artifact-index', 'data-protected-resource', 'download',
     'width', 'height', 'style', 'id', 'type', 'aria-label', 'data-mermaid', 'disabled',
     'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
@@ -102,5 +108,9 @@ export const markdownDomPurifyConfig = {
     'mathvariant', 'encoding', 'aria-hidden',
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
+  // USE_PROFILES 会整体替换 ALLOWED_ATTR，而 html profile 默认不含 target，
+  // 导致 afterSanitizeElements hook 加上的 target="_blank" 在随后的
+  // _sanitizeAttributes 中被剥离。用 ADD_ATTR 在 profile 之上追加该属性。
+  ADD_ATTR: ['target'],
   ...domPurifySecurityOptions,
 };

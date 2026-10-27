@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	modelapi "github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -230,7 +231,7 @@ type InitializationRequest struct {
 // @Produce      json
 // @Param        kbId     path      string               true  "知识库ID"
 // @Param        request  body      KBModelConfigRequest true  "配置请求"
-// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Success      200      {object}  handler.MessageResponse  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "知识库不存在"
 // @Security     Bearer
@@ -416,7 +417,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		return
 	}
 
-	// 更新问题生成配置
+	// 更新问题生成配置。检索是否使用问句由查询时的开关决定，保存设置不改索引。
 	if req.QuestionGeneration.Enabled {
 		questionCount := req.QuestionGeneration.QuestionCount
 		if questionCount <= 0 {
@@ -1278,7 +1279,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        taskId  path      string  true  "任务ID"
-// @Success      200     {object}  map[string]interface{}  "下载进度"
+// @Success      200     {object}  handler.DataResponse{data=handler.DownloadTask}  "下载进度"
 // @Failure      404     {object}  errors.AppError         "任务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1312,7 +1313,7 @@ func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 // @Tags         初始化
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "任务列表"
+// @Success      200  {object}  handler.DataResponse{data=[]handler.DownloadTask}  "任务列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /initialization/ollama/download/tasks [get]
@@ -2047,6 +2048,27 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	})
 }
 
+// authFailureMarkers are lower-cased fragments that mark an upstream error
+// body as a credential problem, whatever status code carried it.
+var authFailureMarkers = []string{
+	"api_key_invalid", "api key not valid", "invalid api key", "invalid_api_key",
+	"unauthorized", "authentication",
+}
+
+// isAuthFailureBody reports whether an upstream error body describes a bad
+// or missing credential. Gemini's native API answers an invalid key with
+// 400 INVALID_ARGUMENT / API_KEY_INVALID, so a 400 alone does not prove the
+// key was accepted.
+func isAuthFailureBody(body string) bool {
+	b := strings.ToLower(body)
+	for _, m := range authFailureMarkers {
+		if strings.Contains(b, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // classifyConnectionError maps an upstream error string to a short
 // human-readable hint in Chinese. Callers should always combine the hint
 // with the raw error message (e.g. fmt.Sprintf("%s：%v", hint, err)) so
@@ -2055,7 +2077,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 // "what actually happened".
 func classifyConnectionError(errMsg string) string {
 	switch {
-	case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "unauthorized"):
+	case strings.Contains(errMsg, "401") || isAuthFailureBody(errMsg):
 		return "认证失败，请检查API Key"
 	case strings.Contains(errMsg, "403") || strings.Contains(errMsg, "forbidden"):
 		return "权限不足，请检查API Key权限"
@@ -2089,12 +2111,19 @@ func (h *InitializationHandler) checkChatModelConnection(
 
 	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
 	if err != nil {
-		errMsg := err.Error()
 		// 400 = endpoint reachable + auth ok, just a parameter mismatch
-		// (e.g. max_tokens vs max_completion_tokens). Treat as success.
-		if strings.Contains(errMsg, "status code: 400") {
+		// (e.g. max_tokens vs max_completion_tokens, or a reasoning model
+		// that cannot finish within the 1-token probe). Treat as success.
+		// Match the status code, not the message: the wording belongs to
+		// whichever HTTP client built the error and has changed before.
+		// Exception: some vendors (Gemini native) report an invalid key as
+		// 400, which must still fail the check.
+		var httpErr *modelapi.HTTPError
+		if stderrors.As(err, &httpErr) && httpErr.StatusCode == http.StatusBadRequest &&
+			!isAuthFailureBody(httpErr.Body) {
 			return true, "连接正常，模型可用"
 		}
+		errMsg := err.Error()
 		// For every other failure mode we surface a human-readable hint
 		// AND the upstream error verbatim. Swallowing the underlying
 		// message used to hide things like the actual URL the SDK
@@ -2558,7 +2587,7 @@ type TextRelationExtractionResponse struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      TextRelationExtractionRequest  true  "提取请求"
-// @Success      200      {object}  map[string]interface{}         "提取结果"
+// @Success      200      {object}  handler.DataResponse{data=handler.TextRelationExtractionResponse}         "提取结果"
 // @Failure      400      {object}  errors.AppError                "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -2659,7 +2688,7 @@ type FabriTextResponse struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      FabriTextRequest  true  "生成请求"
-// @Success      200      {object}  map[string]interface{}  "生成的文本"
+// @Success      200      {object}  handler.DataResponse{data=handler.FabriTextResponse}  "生成的文本"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -2736,7 +2765,7 @@ var tagOptions = []string{
 // @Tags         初始化
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "生成的标签"
+// @Success      200  {object}  handler.DataResponse{data=handler.FabriTagResponse}  "生成的标签"
 // @Router       /initialization/extract/fabri-tag [post]
 func (h *InitializationHandler) FabriTag(c *gin.Context) {
 	tagRandom := RandomSelect(tagOptions, rand.Intn(len(tagOptions)-1)+1)

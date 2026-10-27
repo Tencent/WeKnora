@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/docreader/proto"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/resolver"
 )
 
 func getMaxMessageSize() int {
@@ -57,8 +56,6 @@ func NewClientWithAuth(addr string, authConfig *AuthConfig) (*Client, error) {
 		Logger.Printf("ERROR: Failed to build dial options: %v", err)
 		return nil, err
 	}
-
-	resolver.SetDefaultScheme("dns")
 
 	startTime := time.Now()
 	conn, err := grpc.Dial("dns:///"+addr, opts...)

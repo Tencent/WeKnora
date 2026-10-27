@@ -130,3 +130,48 @@ func TestMCPToolApprovalConcurrentColumnPatches(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, required)
 }
+
+func TestMCPToolApprovalObservedRiskOnlyRises(t *testing.T) {
+	repo := newMCPToolApprovalTestRepo(t)
+	ctx := context.Background()
+	observe := func(risk string) string {
+		require.NoError(t, repo.UpsertPolicy(ctx, 1, "svc", "tool", types.MCPToolPolicyPatch{ObservedRisk: &risk}))
+		row, err := repo.Get(ctx, 1, "svc", "tool")
+		require.NoError(t, err)
+		return row.ObservedRisk
+	}
+	require.Equal(t, "read", observe("read"), "the first observation is recorded")
+	require.Equal(t, "write", observe("write"))
+	require.Equal(t, "write", observe("read"), "a stale lower observation does not lower it")
+	require.Equal(t, "write", observe("probe"))
+	require.Equal(t, "destructive", observe("destructive"))
+}
+
+func TestMCPToolApprovalConcurrentObservationsKeepTheHighest(t *testing.T) {
+	repo := newMCPToolApprovalTestRepo(t)
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make(chan error, 20)
+	for i := range 20 {
+		risk := "read"
+		if i == 7 {
+			risk = "write"
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- repo.UpsertPolicy(ctx, 1, "svc", "tool", types.MCPToolPolicyPatch{ObservedRisk: &risk})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	row, err := repo.Get(ctx, 1, "svc", "tool")
+	require.NoError(t, err)
+	require.Equal(t, "write", row.ObservedRisk)
+}

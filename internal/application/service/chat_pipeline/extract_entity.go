@@ -22,8 +22,6 @@ type PluginExtractEntity struct {
 	modelService      interfaces.ModelService         // Model service for calling large language models
 	template          *types.PromptTemplateStructured // Template for generating prompts
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
-	knowledgeService  interfaces.KnowledgeService // For shared KB document resolution
-	knowledgeRepo     interfaces.KnowledgeRepository
 }
 
 // NewPluginExtractEntity creates a new extract-entity plugin instance
@@ -32,16 +30,12 @@ func NewPluginExtractEntity(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
-	knowledgeService interfaces.KnowledgeService,
-	knowledgeRepo interfaces.KnowledgeRepository,
 	config *config.Config,
 ) *PluginExtractEntity {
 	res := &PluginExtractEntity{
 		modelService:      modelService,
 		template:          config.ExtractManager.ExtractEntity,
 		knowledgeBaseRepo: knowledgeBaseRepo,
-		knowledgeService:  knowledgeService,
-		knowledgeRepo:     knowledgeRepo,
 	}
 	eventManager.Register(res)
 	return res
@@ -68,6 +62,12 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		logger.Debugf(ctx, "skipping extract entity, intent %q needs no KB retrieval", chatManage.Intent)
 		return next()
 	}
+	// SearchTargets already include access checks and resolved document/tag
+	// scopes. An empty scope must not fall back to the raw request's KB IDs.
+	allKBIDs := chatManage.SearchTargets.GetAllKnowledgeBaseIDs()
+	if len(allKBIDs) == 0 {
+		return next()
+	}
 
 	// Prefer the rewritten query: it resolves pronouns and ellipsis from the
 	// conversation, which the raw follow-up question lacks.
@@ -76,37 +76,10 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		query = rewritten
 	}
 
-	model, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	model, err := p.modelService.GetChatModel(chatManage.ChatModelContext(ctx), chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get model, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
-	}
-
-	// Collect all knowledge base IDs to query
-	kbIDSet := make(map[string]struct{})
-	for _, id := range chatManage.KnowledgeBaseIDs {
-		kbIDSet[id] = struct{}{}
-	}
-
-	// If KnowledgeIDs is specified, retrieve them and collect their knowledge base IDs (include shared KB docs)
-	// Also build a mapping from KnowledgeID to KnowledgeBaseID
-	knowledgeToKBMap := make(map[string]string)
-	if len(chatManage.KnowledgeIDs) > 0 {
-		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, chatManage.TenantID, chatManage.KnowledgeIDs)
-		if err != nil {
-			logger.Errorf(ctx, "failed to get knowledges: %v", err)
-			return next()
-		}
-		for _, k := range knowledges {
-			kbIDSet[k.KnowledgeBaseID] = struct{}{}
-			knowledgeToKBMap[k.ID] = k.KnowledgeBaseID
-		}
-	}
-
-	// Convert set to slice
-	allKBIDs := make([]string, 0, len(kbIDSet))
-	for id := range kbIDSet {
-		allKBIDs = append(allKBIDs, id)
 	}
 
 	// Batch retrieve all knowledge bases
@@ -135,15 +108,6 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	}
 	chatManage.EntityKBIDs = enabledKBIDs
 
-	// Filter knowledgeToKBMap to only include files from enabled knowledge bases
-	entityKnowledge := make(map[string]string)
-	for knowledgeID, kbID := range knowledgeToKBMap {
-		if _, ok := enabledKBSet[kbID]; ok {
-			entityKnowledge[knowledgeID] = kbID
-		}
-	}
-	chatManage.EntityKnowledge = entityKnowledge
-
 	template := &types.PromptTemplateStructured{
 		Description: p.template.Description,
 		Examples:    p.template.Examples,
@@ -165,6 +129,34 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 
 // Graph extraction can return many nodes and relations; 4096 tokens can truncate the JSON payload.
 const entityExtractionMaxTokens = 8192
+
+// ErrModelDeclined marks an LLM response that is prose rather than the
+// requested structured output — typically a refusal for chunks that carry
+// no extractable entities (table-of-contents pages, prompts with no content).
+// Retrying the same input cannot change the outcome (issue #3600), so the
+// async chunk-extraction task treats it as a skip. Other callers (the
+// /initialization "try extract" endpoint, query-side entity extraction)
+// keep reporting it as a failure.
+var ErrModelDeclined = errors.New("model output is prose, not extractable structured content")
+
+// previewDeclinedText truncates the model's prose for compact error logs.
+func previewDeclinedText(s string) string {
+	runes := []rune(strings.TrimSpace(s))
+	if len(runes) > 120 {
+		return string(runes[:120]) + "…"
+	}
+	return string(runes)
+}
+
+// modelStoppedOnItsOwn reports whether finish_reason proves the model ended
+// its answer by itself, which is the only case where a prose answer can be
+// read as a refusal. Budget exhaustion (every spelling IsLengthFinishReason
+// accepts), a stream that broke before the stop event ("incomplete"), and an
+// adapter that reports no reason at all are treated as possible truncation.
+func modelStoppedOnItsOwn(reason string) bool {
+	r := strings.ToLower(strings.TrimSpace(reason))
+	return r != "" && r != types.FinishReasonIncomplete && !IsLengthFinishReason(r)
+}
 
 // Extractor is a struct for extracting entities
 type Extractor struct {
@@ -208,6 +200,14 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 
 	graph, err := e.formater.ParseGraph(ctx, chatResponse.Content)
 	if err != nil {
+		if errors.Is(err, ErrModelDeclined) && !modelStoppedOnItsOwn(chatResponse.FinishReason) {
+			// The output budget ran out (or the stream broke) before any JSON
+			// was written, e.g. the model spent it on prose "Step 1/Step 2"
+			// reasoning. That is truncation, not a refusal: keep it retriable.
+			// %v drops the ErrModelDeclined wrap on purpose.
+			err = fmt.Errorf("graph extraction stopped before JSON (finish_reason=%q): %v",
+				chatResponse.FinishReason, err)
+		}
 		logger.Errorf(ctx, "failed to parse graph: %v", err)
 		return nil, err
 	}
@@ -406,6 +406,17 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 		err = json.Unmarshal([]byte(content), &parsed)
 	}
 	if err != nil {
+		// Distinguish "the model answered in prose" (e.g. it declined to
+		// extract a table-of-contents chunk with a Chinese "抱歉…" refusal)
+		// from "the model produced JSON that is malformed/truncated". A
+		// refusal contains no JSON structure at all; retrying the exact
+		// same input can never succeed, so callers treat it as a terminal
+		// skip instead of a retriable failure (issue #3600). Check the whole
+		// response, not just the extracted fence: a prose fence followed by a
+		// JSON one is a parse problem, not a refusal.
+		if !strings.ContainsAny(text, "{[") {
+			return nil, fmt.Errorf("%w: %s", ErrModelDeclined, previewDeclinedText(content))
+		}
 		return nil, fmt.Errorf("failed to parse %s content: %s", strings.ToUpper(string(f.formatType)), err.Error())
 	}
 	if parsed == nil {
@@ -435,6 +446,8 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {
 	matchData, err := f.parseOutput(ctx, text)
 	if err != nil {
+		// A prose refusal comes back wrapped in ErrModelDeclined; the caller
+		// decides whether that is a skip (async chunk task) or a failure.
 		return nil, err
 	}
 	if len(matchData) == 0 {

@@ -50,8 +50,9 @@ func performHybridSearchResourceURLRequest(
 func TestHybridSearch_PublicResourceURLs(t *testing.T) {
 	svc := &hybridSearchTestService{
 		results: []*types.SearchResult{{
-			Content:   "chunk ![c](" + testResourceHandle + ")",
-			ImageInfo: `[{"url":"` + testResourceHandle + `"}]`,
+			Content:       "chunk ![c](" + testResourceHandle + ")",
+			MatchedImages: []types.MatchedImage{{ChunkID: "image-1", URL: testResourceHandle}},
+			ImageInfo:     `[{"url":"` + testResourceHandle + `"}]`,
 		}},
 	}
 	fileSvc := &stubResourceFileService{url: "https://cdn.example.com/signed.png"}

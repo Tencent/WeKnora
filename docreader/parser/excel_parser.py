@@ -21,7 +21,11 @@ from docreader.parser.excel_convert import (
     normalize_excel_bytes,
 )
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
-from docreader.parser.xlsx_repair import repair_xlsx_bytes
+from docreader.parser.xlsx_repair import (
+    repair_xlsx_bytes,
+    sanitize_xlsx_styles,
+    strip_unreadable_ranges_xlsx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +74,16 @@ class ExcelParser(BaseParser):
         file_name: str = "",
         file_type: str | None = None,
         xlsx_first_row_as_header: Any = False,
+        xlsx_percent_as_text: Any = None,
         **kwargs: Any,
     ):
         super().__init__(file_name=file_name, file_type=file_type, **kwargs)
         self.xlsx_first_row_as_header = _parse_bool(xlsx_first_row_as_header)
-    
+        # Tri-state: None (or an empty value) keeps the deployment default from
+        # DOCREADER_XLSX_PERCENT_AS_TEXT, an explicit value wins. Same
+        # precedence as the pdf_force_scanned parser override.
+        self.xlsx_percent_as_text = _parse_optional_bool(xlsx_percent_as_text)
+
     def parse_into_text(self, content: bytes) -> Document:
         """Parse Excel file bytes into a Document object.
         
@@ -96,7 +105,11 @@ class ExcelParser(BaseParser):
         source_blocks: List[dict] = []
         start, end = 0, 0
 
-        excel_file = _open_excel_file(content, file_type=self.file_type)
+        excel_file = _open_excel_file(
+            content,
+            file_type=self.file_type,
+            percent_as_text=self.xlsx_percent_as_text,
+        )
         
         # Process each sheet in the Excel file
         for excel_sheet_name in excel_file.sheet_names:
@@ -105,17 +118,16 @@ class ExcelParser(BaseParser):
                 excel_sheet_name,
                 xlsx_first_row_as_header=self.xlsx_first_row_as_header,
             )
-            # Remove rows where all values are NaN (completely empty rows)
-            df.dropna(how="all", inplace=True)
-
             # Process each row in the DataFrame. The index is the 0-based
-            # sheet row (rows are read from row 1 and dropped rows keep
+            # sheet row (rows are read from row 1 and skipped rows keep
             # their labels), so index + 1 is the row number users see.
             for row_index, row in df.iterrows():
                 page_content = []
-                # Build key-value pairs for non-null values
+                # Build key-value pairs for non-empty values. A blank cell is
+                # read as "" (see _read_sheet_dataframe), so an empty row has
+                # no pairs and is skipped below.
                 for k, v in row.items():
-                    if pd.notna(v) and not _is_image_function(v):
+                    if pd.notna(v) and v != "" and not _is_image_function(v):
                         page_content.append(f"{k}: {v}")
                 
                 # Skip rows with no valid content
@@ -167,7 +179,11 @@ def _read_sheet_dataframe(
     # Keep row 1 as data by default for both XLSX and legacy XLS. Users can
     # explicitly restore the historical behavior where row 1 supplies semantic
     # labels for every row.
-    df = excel_file.parse(sheet_name=sheet_name, header=None)
+    # keep_default_na=False: by default pandas reads a cell whose text is
+    # "N/A", "NA", "NULL", "None", "NaN" or "n/a" as missing, and its pair is
+    # dropped, though the cell says "not applicable" or "none". Blank cells are
+    # then read as "", which parse_into_text skips like a missing value.
+    df = excel_file.parse(sheet_name=sheet_name, header=None, keep_default_na=False)
     if xlsx_first_row_as_header and len(df.index) >= 2:
         df.columns = _stable_header_labels(df.iloc[0].tolist())
         return df.iloc[1:].copy()
@@ -181,6 +197,7 @@ def _stable_header_labels(values: List[object]) -> List[str]:
     from openpyxl.utils import get_column_letter
 
     labels: List[str] = []
+    used_labels: set[str] = set()
     counts: dict[str, int] = {}
     for index, value in enumerate(values, start=1):
         label = ""
@@ -190,8 +207,13 @@ def _stable_header_labels(values: List[object]) -> List[str]:
             label = get_column_letter(index)
 
         count = counts.get(label, 0) + 1
+        unique_label = label if count == 1 else f"{label}_{count}"
+        while unique_label in used_labels:
+            count += 1
+            unique_label = f"{label}_{count}"
         counts[label] = count
-        labels.append(label if count == 1 else f"{label}_{count}")
+        used_labels.add(unique_label)
+        labels.append(unique_label)
     return labels
 
 
@@ -201,14 +223,43 @@ def _parse_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _prepare_xlsx_bytes(data: bytes) -> bytes:
+def _parse_optional_bool(value: Any) -> bool | None:
+    """Parse a tri-state parser override; None keeps the deployment default."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _prepare_xlsx_bytes(data: bytes, percent_as_text: bool | None = None) -> bytes:
     repaired = repair_xlsx_bytes(data)
     if repaired is not None:
         data = repaired
-    return fill_merged_cells_xlsx(data)
+    readable = strip_unreadable_ranges_xlsx(data)
+    if readable is not None:
+        data = readable
+    try:
+        return fill_merged_cells_xlsx(data, percent_as_text=percent_as_text)
+    except TypeError:
+        # A non-conforming styles.xml (empty/malformed fills) makes openpyxl's
+        # load_workbook raise before pandas ever sees the file (#3637).
+        # sanitize_xlsx_styles returns None when the fills are clean, in which
+        # case the TypeError has a different cause and must propagate.
+        sanitized = sanitize_xlsx_styles(data)
+        if sanitized is None:
+            raise
+        return fill_merged_cells_xlsx(sanitized, percent_as_text=percent_as_text)
 
 
-def _open_excel_file(content: bytes, file_type: str | None = None) -> pd.ExcelFile:
+def _open_excel_file(
+    content: bytes,
+    file_type: str | None = None,
+    percent_as_text: bool | None = None,
+) -> pd.ExcelFile:
     """Open an Excel workbook with explicit engine selection and fallbacks."""
     data = content
     converted_via_soffice = False
@@ -237,7 +288,7 @@ def _open_excel_file(content: bytes, file_type: str | None = None) -> pd.ExcelFi
 
         engine = engine_for_format(ext)
         if ext == "xlsx":
-            data = _prepare_xlsx_bytes(data)
+            data = _prepare_xlsx_bytes(data, percent_as_text=percent_as_text)
             engine = "openpyxl"
         try:
             return pd.ExcelFile(BytesIO(data), engine=engine)
@@ -252,7 +303,7 @@ def _open_excel_file(content: bytes, file_type: str | None = None) -> pd.ExcelFi
             if repaired is None:
                 raise
             logger.info("Repaired XLSX sharedStrings packaging before parse")
-            data = _prepare_xlsx_bytes(repaired)
+            data = _prepare_xlsx_bytes(repaired, percent_as_text=percent_as_text)
             continue
         except ValueError as exc:
             if converted_via_soffice or "cannot be determined" not in str(exc):
