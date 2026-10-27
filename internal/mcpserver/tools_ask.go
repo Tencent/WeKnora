@@ -70,11 +70,15 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	question = strings.TrimSpace(question)
 
+	selectors, err := optionalKnowledgeBaseSelectors(req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	agent, err := s.resolveAskAgent(ctx, ep)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	kbIDs, err := s.resolveAskKnowledgeBases(ctx, ep, agent, req.GetStringSlice("knowledge_base_ids", nil))
+	kbIDs, err := s.resolveAskKnowledgeBases(ctx, ep, agent, selectors)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

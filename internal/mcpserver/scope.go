@@ -10,7 +10,26 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/mark3labs/mcp-go/mcp"
 )
+
+// optionalKnowledgeBaseSelectors rejects malformed explicit scopes instead of
+// silently widening them to the endpoint's default scope.
+func optionalKnowledgeBaseSelectors(req mcp.CallToolRequest) ([]string, error) {
+	if _, supplied := req.GetArguments()["knowledge_base_ids"]; !supplied {
+		return nil, nil
+	}
+	selectors, err := req.RequireStringSlice("knowledge_base_ids")
+	if err != nil {
+		return nil, err
+	}
+	for _, selector := range selectors {
+		if strings.TrimSpace(selector) == "" {
+			return nil, fmt.Errorf("knowledge_base_ids must not contain empty selectors")
+		}
+	}
+	return selectors, nil
+}
 
 // allowedKnowledgeBases returns every knowledge base the endpoint may touch,
 // each one re-authorized for the calling principal through access.ResolveKB

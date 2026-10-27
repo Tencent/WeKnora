@@ -2871,6 +2871,7 @@ export default {
     chooseAction: "기능을 선택하거나 원하는 작업을 입력하세요.",
     create: {
       agentTitle: "자연어로 에이전트 만들기",
+      agentAction: "어시스턴트로 만들기",
       agentHint: "누구를 위해 어떤 일을 해야 하는지 설명하면 어시스턴트가 리소스를 선택하고 생성합니다.",
       agentPlaceholder: "예: 제품 지식 베이스로 질문에 답하고 출처를 제시하며 정보가 없으면 알려주는 고객 지원 에이전트.",
       automationTitle: "어시스턴트로 작업 만들기",
@@ -8337,6 +8338,8 @@ export default {
       countHint: '현재 폴더 문서 {direct}개, 하위 폴더 포함 {total}개',
       filteredCount: '일치하는 문서 {count}개',
       title: '폴더',
+      folderSection: '폴더',
+      documentSection: '문서',
       rootRow: '루트',
       rootRowTip: '지식 베이스 루트 디렉터리, 하위 폴더에 없는 문서가 여기에 있습니다',
       folderCardCount: '문서 {count}개',

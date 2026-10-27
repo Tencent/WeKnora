@@ -945,6 +945,8 @@ export default {
       countHint: 'このフォルダ内 {direct} 件、サブフォルダを含めて {total} 件',
       filteredCount: '{count} 件一致',
       title: 'フォルダ',
+      folderSection: 'フォルダ',
+      documentSection: 'ドキュメント',
       rootRow: 'ルート',
       rootRowTip: 'ナレッジベースのルート。サブフォルダに属さないドキュメントはここに置かれます',
       folderCardCount: '{count}件のドキュメント',
@@ -6660,6 +6662,7 @@ export default {
       chooseAction: "機能を選ぶか、希望する内容を入力してください。",
     create: {
       agentTitle: "自然言語でエージェントを作成",
+      agentAction: "アシスタントで作成",
       agentHint: "利用者と目的を説明してください。アシスタントがリソースを選び、作成します。",
       agentPlaceholder: "例：製品ナレッジベースから質問に回答し、出典を示し、不明な点は説明するサポート担当。",
       automationTitle: "アシスタントでタスクを作成",

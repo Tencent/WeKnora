@@ -945,6 +945,8 @@ export default {
       countHint: '{direct} documents in this folder; {total} including subfolders',
       filteredCount: '{count} matching documents',
       title: 'Folders',
+      folderSection: 'Folders',
+      documentSection: 'Documents',
       rootRow: 'Root',
       rootRowTip: 'Knowledge base root; documents not in a subfolder live here',
       folderCardCount: '{count} document | {count} documents',
@@ -6660,6 +6662,7 @@ export default {
       chooseAction: "Choose an action, or describe what you need.",
     create: {
       agentTitle: "Describe your agent",
+      agentAction: "Create with assistant",
       agentHint: "Describe who it serves and what it should do. The assistant will choose resources and create it.",
       agentPlaceholder: "For example: a support agent that answers product questions using our knowledge base, cites sources and acknowledges missing information.",
       automationTitle: "Create a task with the assistant",

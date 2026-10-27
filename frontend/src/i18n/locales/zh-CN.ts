@@ -2873,6 +2873,7 @@ export default {
     chooseAction: "选择一个功能，或直接输入你的需求。",
     create: {
       agentTitle: "用自然语言创建智能体",
+      agentAction: "用助手创建",
       agentHint: "说说它为谁服务、需要完成什么，助手会帮你选择资源并创建。",
       agentPlaceholder: "例如：创建一个产品客服助手，根据产品知识库回答使用问题，回答附上来源，找不到答案时说明原因。",
       automationTitle: "用助手创建任务",
@@ -8338,6 +8339,8 @@ export default {
       countHint: '当前目录 {direct} 个文档，含子目录共 {total} 个',
       filteredCount: '匹配 {count} 个文档',
       title: '目录',
+      folderSection: '文件夹',
+      documentSection: '文档',
       rootRow: '根目录',
       rootRowTip: '知识库根目录，未归入子文件夹的文档在此',
       folderCardCount: '{count} 个文档',
