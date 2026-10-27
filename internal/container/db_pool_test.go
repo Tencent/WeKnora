@@ -33,7 +33,7 @@ func TestApplyDBMaxOpenConns(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sql.Open: %v", err)
 			}
-			defer sqlDB.Close()
+			t.Cleanup(func() { _ = sqlDB.Close() })
 
 			applyDBMaxOpenConns(context.Background(), sqlDB)
 
