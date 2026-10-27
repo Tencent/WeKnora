@@ -85,16 +85,20 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 // listDimensionTables returns only existing vector shards whose names exactly
 // match <tableBaseName>_<ASCII digits>. Old shards may outlive a model's
 // configured dimension, so cleanup must discover them rather than infer names.
-func (r *dorisRepository) listDimensionTables(ctx context.Context) ([]string, error) {
+func (r *dorisRepository) listDimensionTables(ctx context.Context) (tables []string, err error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = ?`, r.database)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close dimension table rows: %w", closeErr)
+		}
+	}()
 
 	prefix := r.tableBaseName + "_"
-	tables := make([]string, 0)
+	tables = make([]string, 0)
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
