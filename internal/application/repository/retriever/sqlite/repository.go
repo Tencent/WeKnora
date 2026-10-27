@@ -542,6 +542,9 @@ func (r *sqliteRepository) updateChunkIndexColumn(
 // --- Retrieve ---
 
 func (r *sqliteRepository) Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	var results []*types.RetrieveResult
 
 	if params.RetrieverType == types.KeywordsRetrieverType || params.RetrieverType == "" {

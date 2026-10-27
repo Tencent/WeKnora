@@ -100,3 +100,27 @@ func TestUpdateChunkEnabledStatusInCollectionsIgnoresExtendedPrefix(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, []string{"weknora_embeddings_1024"}, seen)
 }
+
+// The scope guard must fire before the store is touched: a repository with no
+// client is constructible here, so a nil-dereference or a live call would show
+// up as a different failure than the scope error.
+func TestRetrieveRejectsEmptyScope(t *testing.T) {
+	repo := &milvusRepository{}
+
+	for _, retrieverType := range []types.RetrieverType{
+		types.VectorRetrieverType,
+		types.KeywordsRetrieverType,
+	} {
+		t.Run(string(retrieverType), func(t *testing.T) {
+			results, err := repo.Retrieve(context.Background(), types.RetrieveParams{
+				Query:         "month end close",
+				Embedding:     []float32{1, 0},
+				TopK:          5,
+				RetrieverType: retrieverType,
+			})
+
+			require.ErrorIs(t, err, types.ErrRetrieveScopeRequired)
+			require.Nil(t, results)
+		})
+	}
+}

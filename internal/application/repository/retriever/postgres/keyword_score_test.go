@@ -174,14 +174,15 @@ func TestVectorRetrieveDoesNotRequireKeywordScoreFunction(t *testing.T) {
 			mock.ExpectExec("SET LOCAL hnsw.ef_search = 100").WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectExec("SET LOCAL hnsw.iterative_scan = strict_order").WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectQuery(`SELECT .*FROM embeddings.*`).
-				WithArgs(sqlmock.AnyArg(), 2, true, 100, 0.5, 3).
+				WithArgs(sqlmock.AnyArg(), 2, "kb-test", true, 100, 0.5, 3).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "chunk_id", "score"}).AddRow(1, "vector-chunk", 0.9))
 			mock.ExpectCommit()
 			results, err := repo.Retrieve(context.Background(), types.RetrieveParams{
-				RetrieverType: types.VectorRetrieverType,
-				Embedding:     []float32{0.1, 0.2},
-				Threshold:     0.5,
-				TopK:          3,
+				RetrieverType:    types.VectorRetrieverType,
+				Embedding:        []float32{0.1, 0.2},
+				KnowledgeBaseIDs: []string{"kb-test"},
+				Threshold:        0.5,
+				TopK:             3,
 			})
 			require.NoError(t, err)
 			require.Len(t, results, 1)

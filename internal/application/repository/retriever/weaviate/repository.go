@@ -557,6 +557,9 @@ func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters
 func (w *weaviateRepository) Retrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	log := logger.GetLogger(ctx)
 	log.Debugf("[Weaviate] Processing retrieval request of type: %s", params.RetrieverType)
 
