@@ -4800,6 +4800,8 @@ export default {
           pending: '排隊',
           scheduled: '定時',
           retry: '重試',
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失敗嘗試',
           archived: '歷史失敗封存', completed: '保留的完成記錄',
           latency: '最早等待',
           status: '狀態'
@@ -4808,7 +4810,11 @@ export default {
           title: '運行概覽',
           active: '運行中',
           pending: '排隊中',
+          scheduled: '定時',
           retry: '重試中',
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失敗嘗試',
+          dailyFormula: '今日成功 = max(今日 processed − 今日 failed, 0)。兩項皆為當日任務執行次數，包含重試，不是完成的文件數；每日重設。',
           archived: '歷史失敗封存'
         },
         pools: {

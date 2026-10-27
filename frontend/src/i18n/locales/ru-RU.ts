@@ -4798,6 +4798,8 @@ export default {
           pending: 'Ожидают',
           scheduled: 'Запланир.',
           retry: 'Повтор',
+          todaySuccess: 'Успешно сегодня',
+          todayFailedAttempts: 'Неудачных попыток сегодня',
           archived: 'Архив прошлых сбоев', completed: 'Сохраненные завершенные записи',
           latency: 'Макс. ожидание',
           status: 'Статус'
@@ -4806,7 +4808,11 @@ export default {
           title: 'Обзор выполнения',
           active: 'Активные',
           pending: 'В очереди',
+          scheduled: 'Запланировано',
           retry: 'Повтор',
+          todaySuccess: 'Успешно сегодня',
+          todayFailedAttempts: 'Неудачных попыток сегодня',
+          dailyFormula: 'Успехи сегодня = max(processed за сегодня − failed за сегодня, 0). Это число запусков задач за день, включая повторы, а не завершённых документов; счётчики сбрасываются ежедневно.',
           archived: 'Архив прошлых сбоев'
         },
         pools: {

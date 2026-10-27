@@ -4771,7 +4771,11 @@ export default {
           title: 'Runtime overview',
           active: 'Active',
           pending: 'Pending',
+          scheduled: 'Scheduled',
           retry: 'Retrying',
+          todaySuccess: 'Today successful',
+          todayFailedAttempts: "Today's failed attempts",
+          dailyFormula: 'Today successful = max(today processed − today failed, 0). Both are daily task executions, including retries, not completed documents; they reset daily.',
           archived: 'Failed (stopped)'
         },
         columns: {
@@ -4780,6 +4784,8 @@ export default {
           pending: 'Pending',
           scheduled: 'Scheduled',
           retry: 'Retry',
+          todaySuccess: 'Today successful',
+          todayFailedAttempts: "Today's failed attempts",
           archived: 'Failed',
           completed: 'Completed',
           latency: 'Oldest wait',

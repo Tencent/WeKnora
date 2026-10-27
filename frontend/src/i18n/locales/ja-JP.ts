@@ -4771,7 +4771,11 @@ export default {
           title: 'ランタイム概要',
           active: '実行中',
           pending: '保留中',
+          scheduled: '予約済み',
           retry: '再試行中',
+          todaySuccess: '今日の成功',
+          todayFailedAttempts: '今日の失敗試行',
+          dailyFormula: '今日の成功 = max(今日の processed − 今日の failed, 0)。どちらも再試行を含む当日のタスク実行回数で、完了ドキュメント数ではありません。毎日リセットされます。',
           archived: '失敗（停止）'
         },
         columns: {
@@ -4780,6 +4784,8 @@ export default {
           pending: '保留中',
           scheduled: '予約済み',
           retry: '再試行',
+          todaySuccess: '今日の成功',
+          todayFailedAttempts: '今日の失敗試行',
           archived: '失敗',
           completed: '完了',
           latency: '最長待ち時間',

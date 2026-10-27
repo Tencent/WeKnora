@@ -4804,6 +4804,8 @@ export default {
           pending: '排队',
           scheduled: '定时',
           retry: '重试',
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失败尝试',
           archived: '历史失败归档',
           completed: '保留的成功记录',
           latency: '最早等待',
@@ -4813,7 +4815,11 @@ export default {
           title: '运行概览',
           active: '运行中',
           pending: '排队中',
+          scheduled: '定时',
           retry: '重试中',
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失败尝试',
+          dailyFormula: '今日成功 = max(今日 processed − 今日 failed, 0)。两项均为当日任务执行次数，包含重试，不是完成的文档数；每日重置。',
           archived: '历史失败归档'
         },
         pools: {
