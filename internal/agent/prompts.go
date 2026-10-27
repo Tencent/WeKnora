@@ -348,6 +348,39 @@ func formatToolGuidance(names []string) string {
 }
 
 func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout sandbox.WorkspaceLayout) string {
+	return formatToolGuidanceWithDesktop(names, skillInstallMode, layout, false)
+}
+
+// sandboxDesktopGuidance describes the graphical desktop of a sandbox whose
+// configuration enables it. The screen number is only known inside the
+// sandbox, so the text teaches the model to look at DISPLAY instead of naming
+// one, and to claim a screen only when it needs to see or drive one: a held
+// screen costs one of a few seats on the machine.
+func sandboxDesktopGuidance() string {
+	return "Desktop: this machine has a graphical desktop that the user can watch and operate in " +
+		"the Desktop tab, so they may see or touch the screen while you work. The screen is " +
+		"1280x800. Shell commands get DISPLAY only while this session holds a screen; without " +
+		"one, X tools fail rather than touch another session's screen. Screens are limited, so " +
+		"claim one only when you must see or drive a window: run " +
+		"`wk-display claim \"$WEKNORA_SESSION_ID\"` and use DISPLAY from the next command on. " +
+		"Work that needs no screen stays headless.\n" +
+		"  - `scrot <file.png>` captures the screen; view the PNG with your image reading. " +
+		"Keep captures in the session workspace outside the output directory unless the user " +
+		"asks for them.\n" +
+		"  - `xdotool` clicks, types and presses keys (`mousemove X Y click 1`, `type`, `key`). " +
+		"Coordinates are screen pixels of a fresh capture. `xdotool search --name <title> " +
+		"getwindowgeometry` finds a window's id, position and size.\n" +
+		"  - `xwininfo -root -tree` lists windows, `xprop -id <id>` shows a window's properties " +
+		"and state, `xdpyinfo` reports the screen.\n" +
+		"  - Use agent-browser for browser web pages and xdotool for other windows and native dialogs. " +
+		"Re-capture after every action before the next click.\n" +
+		"  - Never set DISPLAY yourself or target :0, and never kill other processes. A captcha, " +
+		"2FA code or password is for the user to type on the desktop, not for xdotool or the chat.\n"
+}
+
+func formatToolGuidanceWithDesktop(
+	names []string, skillInstallMode bool, layout sandbox.WorkspaceLayout, desktop bool,
+) string {
 	if len(names) == 0 {
 		return ""
 	}
@@ -420,6 +453,9 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 				"Files and installed packages persist within the session.\n")
 			b.WriteString(sandboxArtifactReferenceGuidance())
 		}
+	}
+	if desktop && !skillInstallMode && has("shell_exec") && !layout.IsHost() {
+		b.WriteString(sandboxDesktopGuidance())
 	}
 	if !skillInstallMode && has("shell_exec") && has("read_file") {
 		b.WriteString("For listed skills, run bundled scripts and your own scripts with " +
@@ -516,6 +552,8 @@ type BuildSystemPromptOptions struct {
 	MemoryPrompt     string
 	ProtocolPrompt   string
 	WorkspaceLayout  sandbox.WorkspaceLayout
+	// DesktopEnabled mirrors the sandbox configuration's desktop switch.
+	DesktopEnabled bool
 }
 
 // BuildSystemPrompt builds the progressive RAG system prompt
@@ -605,8 +643,10 @@ func BuildSystemPromptSections(
 	}
 	skillInstallMode := options != nil && options.SkillInstallMode
 	var layout sandbox.WorkspaceLayout
+	desktop := false
 	if options != nil {
 		layout = options.WorkspaceLayout
+		desktop = options.DesktopEnabled
 	}
 	sources := formatGroundingGuidance(names)
 	if skillInstallMode {
@@ -616,7 +656,7 @@ func BuildSystemPromptSections(
 			"as part of installation."
 	}
 	sections = append(sections, SystemPromptSection{"sources", sources},
-		SystemPromptSection{"tools", formatToolGuidanceForMode(names, skillInstallMode, layout)},
+		SystemPromptSection{"tools", formatToolGuidanceWithDesktop(names, skillInstallMode, layout, desktop)},
 		SystemPromptSection{"output", types.SourcedAnswerOutputPrompt})
 	if options != nil {
 		if !skillInstallMode && slices.Contains(names, "read_file") && len(options.SkillsMetadata) > 0 {

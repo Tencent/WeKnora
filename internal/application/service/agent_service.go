@@ -364,6 +364,7 @@ func (s *agentService) CreateAgentEngine(
 	s.attachBackgroundWork(ctx, engine, toolRegistry, sessionID, assistantMessageID)
 	toolRegistry.BindSession(sessionID)
 	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
+	engine.SetDesktopEnabled(s.lookupSessionDesktopEnabled(ctx, sessionID, config))
 
 	return engine, nil
 }
@@ -796,6 +797,22 @@ func (s *agentService) lookupSessionWorkspaceLayout(
 	}
 	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
 	return sessionWorkspaceLayout(ctx, sessionID, mgr, err, s.hostSandbox, configID)
+}
+
+// lookupSessionDesktopEnabled reports whether the session's sandbox
+// configuration has the desktop switched on. A failed or empty resolution
+// means no desktop section in the prompt.
+func (s *agentService) lookupSessionDesktopEnabled(
+	ctx context.Context,
+	sessionID string,
+	config *types.AgentConfig,
+) bool {
+	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
+	if err != nil || mgr == nil {
+		return false
+	}
+	reporter, ok := mgr.(sandbox.SessionDesktopPromptReporter)
+	return ok && reporter.DesktopEnabledForPrompt()
 }
 
 // sessionWorkspaceLayout is the layout prompts and attachment staging share.

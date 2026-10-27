@@ -22,6 +22,7 @@ func TestToolGuidanceUsesActualCapabilities(t *testing.T) {
 	require.Contains(t, shell, "including /tmp/task/previews, are internal working files")
 	require.Contains(t, shell, "Rendering pages for your own layout checks does not publish them")
 	require.Contains(t, shell, "translate execute_skill_script")
+	require.NotContains(t, shell, "points DISPLAY and WK_SEAT")
 	require.NotContains(t, formatToolGuidance([]string{"knowledge_search"}), "/workspace")
 	require.NotContains(t, formatToolGuidance([]string{"read_file"}), "shell_exec")
 	require.NotContains(t, formatToolGuidance([]string{"read_file"}), "execute_skill_script")
@@ -29,6 +30,27 @@ func TestToolGuidanceUsesActualCapabilities(t *testing.T) {
 	require.NotContains(t, formatToolGuidance([]string{"execute_skill_script"}), "execute_skill_script is available")
 	require.NotContains(t, shell, "Browser source:")
 	require.Contains(t, formatToolGuidance([]string{"local_browser"}), "requires no shell command")
+}
+
+func TestToolGuidanceDescribesTheDesktopOnlyWhenEnabled(t *testing.T) {
+	names := []string{"shell_exec", "read_file", "write_sandbox_file"}
+	remote := sandbox.RemoteWorkspaceLayout()
+	on := formatToolGuidanceWithDesktop(names, false, remote, true)
+	for _, want := range []string{
+		"Desktop tab", "1280x800", "scrot", "xdotool", "xwininfo", "xprop", "xdpyinfo",
+		`wk-display claim "$WEKNORA_SESSION_ID"`, "claim one only when you must",
+		"Never set DISPLAY yourself",
+	} {
+		require.Contains(t, on, want)
+	}
+	require.NotContains(t, on, "points DISPLAY and WK_SEAT")
+
+	require.NotContains(t, formatToolGuidanceWithDesktop(names, false, remote, false), "Desktop tab")
+	require.NotContains(t, formatToolGuidanceForMode(names, false, remote), "Desktop tab")
+	require.NotContains(t, formatToolGuidanceWithDesktop([]string{"read_file"}, false, remote, true), "Desktop tab")
+	require.NotContains(t, formatToolGuidanceWithDesktop(names, true, remote, true), "Desktop tab")
+	host := sandbox.WorkspaceLayout{Origin: sandbox.WorkspaceOriginHost, Root: "/Users/dev/p"}
+	require.NotContains(t, formatToolGuidanceWithDesktop(names, false, host, true), "Desktop tab")
 }
 
 func TestToolGuidanceForHostUsesActualWorkspace(t *testing.T) {
@@ -41,6 +63,7 @@ func TestToolGuidanceForHostUsesActualWorkspace(t *testing.T) {
 		[]string{"shell_exec", "read_file", "write_sandbox_file"}, false, layout,
 	)
 	require.Contains(t, text, "Session workspace: /Users/dev/My Project")
+	require.NotContains(t, text, "points DISPLAY and WK_SEAT")
 	require.NotContains(t, text, sandbox.SessionWorkspaceRoot)
 	require.NotContains(t, text, "is the only directory collected")
 	require.NotContains(t, text, "sandbox:<file name>")
