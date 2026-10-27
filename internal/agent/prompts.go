@@ -391,6 +391,25 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 				b.WriteString(" on every call unless work_dir names a subdirectory. " +
 					"Files persist on the user's machine.\n")
 			}
+		} else if layout.IsSharedRemote() {
+			root := sandbox.PromptSafePath(layout.Root)
+			input := sandbox.PromptSafePath(layout.InputDir)
+			output := sandbox.PromptSafePath(layout.OutputDir)
+			if root != "" && input != "" && output != "" {
+				b.WriteString("Session workspace: ")
+				b.WriteString(root)
+				b.WriteString(". Preserve uploaded originals in ")
+				b.WriteString(input)
+				b.WriteString(". ")
+				b.WriteString(output)
+				b.WriteString(" is the only directory collected for download, so it takes finished " +
+					"deliverables only; keep drafts and intermediate files in another directory under ")
+				b.WriteString(root)
+				b.WriteString(". Commands start from ")
+				b.WriteString(root)
+				b.WriteString(" unless work_dir names a subdirectory.\n")
+				b.WriteString(sandboxArtifactReferenceGuidance())
+			}
 		} else {
 			b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. ")
 			b.WriteString(skills.ArtifactOutputDir())

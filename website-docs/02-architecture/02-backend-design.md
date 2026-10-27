@@ -338,7 +338,7 @@ type AppError struct {
 
 ## 日志体系（internal/logger） {#_8-日志体系-internal-logger}
 
-- 基于 **logrus**，私有 `appLogger` 单例 + 自定义 Formatter（彩色终端输出；`LOG_FORMAT` 可用 `%d` `%level` `%traceId` `%msg` 等占位符自定义模板；`LOG_PATH` 设置后经 lumberjack 轮转写文件并剥离 ANSI 颜色码）；
+- 基于 **logrus**，私有 `appLogger` 单例 + 自定义 Formatter（彩色终端输出；`WEKNORA_LOG_FORMAT` 可用 `%d` `%level` `%traceId` `%msg` 等占位符自定义模板；`LOG_PATH` 设置后经 lumberjack 轮转写文件并剥离 ANSI 颜色码）；
 - **request_id 贯穿**：`middleware.RequestID` 写入 context → `logger.GetLogger(ctx)` 自动提取并注入 `request_id` 字段；常用出口为 `logger.Infof/Warnf/Errorf(ctx, format, ...)` 与 `ErrorWithFields`；
 - **LLM 调试日志**（`llm_logger.go`）：`LLM_DEBUG_LOG=true` 时启用，按 request_id 分文件记录每次 LLM 调用（`LLMCallRecord`：CallType Chat/Embedding/Rerank/VLM、模型、耗时、完整消息与工具调用、错误），7 天自动清理，用于排查提示词和上下文问题。
 

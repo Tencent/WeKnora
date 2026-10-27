@@ -504,7 +504,12 @@ type Message struct {
 	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
 	// PendingPrompt is the prompt an awaiting_input message waits on. The
 	// message list fills it in for the prompt's owner; it is never stored.
-	PendingPrompt *PendingPromptView `json:"pending_prompt,omitempty" gorm:"-"`
+	PromptHistory    []*PendingPromptView `json:"prompt_history,omitempty" gorm:"-"`
+	DelegatedPrompts []*PendingPromptView `json:"delegated_prompts,omitempty" gorm:"-"`
+	// CollaborationStatus is projected from durable collaboration state at read
+	// time, including completed tasks after the transient stream has expired.
+	CollaborationStatus json.RawMessage    `json:"collaboration_status,omitempty" gorm:"-"`
+	PendingPrompt       *PendingPromptView `json:"pending_prompt,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// RunState refines an incomplete message: MessageRunStateAwaitingInput

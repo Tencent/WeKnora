@@ -25,6 +25,8 @@ type ResourceRepository interface {
 	GetByID(ctx context.Context, id string) (*types.StoredResource, error)
 	GetByHandle(ctx context.Context, handle string) (*types.StoredResource, error)
 	GetByTenantLocation(ctx context.Context, tenantID uint64, locationHash string) (*types.StoredResource, error)
+	// BindStorageBackend fills an absent binding without replacing an existing one.
+	BindStorageBackend(ctx context.Context, id, backendID string) (*types.StoredResource, error)
 	// GetActiveByContentHash finds a live resource holding the exact same
 	// bytes. Unlike location, content is not unique: several rows may carry
 	// the same hash (duplicates registered before this lookup existed), so
@@ -52,12 +54,24 @@ type ResourceRepository interface {
 
 // ResourceRegistration describes one physical object at registration time.
 type ResourceRegistration struct {
-	Kind         string
-	MimeType     string
-	OriginalName string
-	Size         int64
-	ContentHash  string
-	Temporary    bool
+	StorageBackendID string
+	Kind             string
+	MimeType         string
+	OriginalName     string
+	Size             int64
+	ContentHash      string
+	Temporary        bool
+}
+
+// GlobalResourceRegistrar records the concrete instance used by the process-wide writer.
+type GlobalResourceRegistrar interface {
+	RegisterGlobal(ctx context.Context, tenantID uint64, physicalPath string, meta ResourceRegistration) (string, error)
+}
+
+// ResourceStorageBindingResolver resolves legacy, unbound resources only when
+// their physical location identifies a single storage instance.
+type ResourceStorageBindingResolver interface {
+	ResolveStorageBinding(ctx context.Context, reference string) (*types.StoredResource, error)
 }
 
 // ResourceCatalog maps public resource references to internal storage

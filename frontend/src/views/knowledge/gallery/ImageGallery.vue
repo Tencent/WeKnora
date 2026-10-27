@@ -114,6 +114,12 @@ const blobByRawUrl = new Map<string, string>()
 // Fetches in flight, so the grid and the viewer asking for the same image at
 // once share one request.
 const inflight = new Map<string, Promise<string>>()
+let imageRequests = new AbortController()
+
+function abortImageRequests(): void {
+  imageRequests.abort()
+  inflight.clear()
+}
 
 /** Revoke every cached object URL whose raw URL is not in keep. */
 function releaseBlobs(keep: Set<string> = new Set()): void {
@@ -124,13 +130,17 @@ function releaseBlobs(keep: Set<string> = new Set()): void {
   }
 }
 
-async function fetchBlobUrl(rawUrl: string): Promise<string> {
+async function fetchBlobUrl(rawUrl: string, signal: AbortSignal): Promise<string> {
   const req = galleryImageRequest(rawUrl, props.knowledgeBaseId)
   if (!req) return rawUrl
   try {
-    const resp = await fetch(req.url, { headers: req.headers })
-    if (!resp.ok) return rawUrl
-    const objectUrl = URL.createObjectURL(await resp.blob())
+    const resp = await fetch(req.url, { headers: req.headers, signal })
+    if (!resp.ok || signal.aborted) return rawUrl
+    const blob = await resp.blob()
+    // Cancellation can race with a completed body read. Never create a URL
+    // after this query's cleanup, even if the response ignored the abort.
+    if (signal.aborted) return rawUrl
+    const objectUrl = URL.createObjectURL(blob)
     blobByRawUrl.set(rawUrl, objectUrl)
     return objectUrl
   } catch {
@@ -139,11 +149,15 @@ async function fetchBlobUrl(rawUrl: string): Promise<string> {
 }
 
 function resolveImageSrc(rawUrl: string): Promise<string> {
+  if (imageRequests.signal.aborted) return Promise.resolve(rawUrl)
   const cached = blobByRawUrl.get(rawUrl)
   if (cached) return Promise.resolve(cached)
   let pending = inflight.get(rawUrl)
   if (!pending) {
-    pending = fetchBlobUrl(rawUrl).finally(() => inflight.delete(rawUrl))
+    pending = fetchBlobUrl(rawUrl, imageRequests.signal).finally(() => {
+      // A newer query may already have started the same URL's replacement.
+      if (inflight.get(rawUrl) === pending) inflight.delete(rawUrl)
+    })
     inflight.set(rawUrl, pending)
   }
   return pending
@@ -493,6 +507,8 @@ function loadMore(): Promise<boolean> {
 
 function resetResults() {
   listToken++
+  abortImageRequests()
+  imageRequests = new AbortController()
   viewerOpen.value = false
   items.value = []
   total.value = 0
@@ -583,6 +599,7 @@ onBeforeUnmount(() => {
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
+  abortImageRequests()
   cardObserver?.disconnect()
   scrollObserver?.disconnect()
   releaseBlobs()

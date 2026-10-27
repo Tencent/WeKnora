@@ -4,6 +4,8 @@ import { generateRandomString } from '@/utils/index';
 import i18n from '@/i18n';
 import { getApiBaseUrl } from '@/utils/api-base';
 import type { AssistantAccessLevel } from '@/api/assistant';
+export type { CollaborationStatus, CollaborationTaskStatus, CollaborationProgress,
+  CollaborationStatusStreamEvent, ProgressStreamEvent, AgentStepRecord, ChatHistoryMessage } from './streamTypes';
 import {
   sanitizeStreamRequestBody,
   type StreamRequestMeta,
@@ -69,7 +71,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; local_browser_enabled?: boolean; summary_model_id?: string; reasoning_effort?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; question_origin?: { knowledge_base_id: string; knowledge_id?: string }; page_context?: PageContextPayload; assistant_access?: AssistantAccessLevel; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; local_browser_enabled?: boolean; summary_model_id?: string; reasoning_effort?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; question_origin?: { knowledge_base_id: string; knowledge_id?: string }; page_context?: PageContextPayload; assistant_access?: AssistantAccessLevel; method: string; url: string; resume_pending_id?: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
     const myGeneration = ++streamGeneration
     const streamAbort = controller
     // 重置状态
@@ -107,12 +109,24 @@ export function useStream() {
     const sentAt = performance.now();
     const requestID = generateRandomString(12);
     let firstAnswerLogged = false;
+    let receivedAssistantId = '';
+    let receivedTerminal = false;
+    let reconnectAttempts = 0;
+    let streamMethod = params.method;
+    // Never repeat an accepted POST: recovery attaches to its persisted message.
+    const canReconnect = () => !embedToken && receivedAssistantId && !receivedTerminal &&
+      (params.url === '/api/v1/agent-chat' || params.url === '/api/v1/sessions/continue-stream') &&
+      myGeneration === streamGeneration && !streamAbort.signal.aborted;
+
 
     try {
       let url =
         params.method == "POST"
           ? `${apiUrl}${params.url}/${params.session_id}`
           : `${apiUrl}${params.url}/${params.session_id}?message_id=${params.query}`;
+      if (params.method === "GET" && params.resume_pending_id) {
+        url += `&resume_pending_id=${encodeURIComponent(params.resume_pending_id)}`;
+      }
       console.log(`[TTFB] request:start request_id=${requestID} url=${url} sent_at=${Date.now()}`);
       
       // Prepare POST body with required fields for agent-chat
@@ -202,8 +216,25 @@ export function useStream() {
       // Wrapped so an expired access token can be refreshed and the request
       // replayed once. Nothing has been streamed to the UI yet when the
       // handshake 401s, so the replay is invisible to the user.
-      const runStream = (authToken: string) => fetchEventSource(url, {
-        method: params.method,
+      const runStream = async (authToken: string) => {
+        const connection = new AbortController();
+        const abortConnection = () => connection.abort();
+        streamAbort.signal.addEventListener('abort', abortConnection, { once: true });
+        let idleTimer: ReturnType<typeof setTimeout>;
+        let rejectIdle: (reason: Error) => void;
+        const idle = new Promise<never>((_, reject) => { rejectIdle = reject; });
+        const armIdle = () => {
+          clearTimeout(idleTimer);
+          if (!canReconnect()) return;
+          idleTimer = setTimeout(() => {
+            rejectIdle(new Error('stream heartbeat timed out'));
+            connection.abort();
+          }, 30000);
+        };
+        armIdle();
+        try {
+          await Promise.race([idle, fetchEventSource(url, {
+        method: streamMethod,
         headers: {
           "Content-Type": "application/json",
           "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${authToken}`,
@@ -214,10 +245,10 @@ export function useStream() {
           ...(params.embed_visitor_id ? { "X-Embed-Visitor": params.embed_visitor_id } : {}),
         },
         body:
-          params.method == "POST"
+          streamMethod == "POST"
             ? JSON.stringify(postBody)
             : null,
-        signal: streamAbort.signal,
+        signal: connection.signal,
         openWhenHidden: true,
 
         onopen: async (res) => {
@@ -225,12 +256,19 @@ export function useStream() {
           if (res.status === 401) throw new StreamAuthError(res.status);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           console.log(`[TTFB] response:headers request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
-          isLoading.value = false;
+          if (myGeneration === streamGeneration) isLoading.value = false;
         },
 
         onmessage: (ev) => {
           if (myGeneration !== streamGeneration) return
           const parsed = JSON.parse(ev.data);
+          reconnectAttempts = 0;
+          if (parsed?.response_type === 'agent_query' && typeof parsed.assistant_message_id === 'string') {
+            receivedAssistantId = parsed.assistant_message_id;
+          }
+          if (['complete', 'stop', 'error'].includes(parsed?.response_type)) receivedTerminal = true;
+          armIdle();
+          if (parsed?.response_type === 'heartbeat') return;
           // Log first answer chunk for end-to-end TTFB measurement.
           // Filter by event type so non-answer events (references, tool
           // calls, etc.) don't count as the "first token" arrival.
@@ -255,23 +293,52 @@ export function useStream() {
           // POST may still be open waiting for the session title. Both share one
           // controller, so only the current stream may stop it; otherwise the
           // old connection closing cuts the follow-up off mid-answer.
+          if (canReconnect()) throw new Error('stream closed before the turn completed');
           if (myGeneration === streamGeneration) stopStream();
         },
-      });
+          })]);
+        } finally {
+          clearTimeout(idleTimer!);
+          streamAbort.signal.removeEventListener('abort', abortConnection);
+          connection.abort();
+        }
+      };
 
-      await runStreamWithAuthRetry({
-        run: runStream,
-        initialToken: token,
-        isEmbed: Boolean(embedToken),
-        isCurrent: () => myGeneration === streamGeneration && !streamAbort.signal.aborted,
-        refreshAccessToken: () => refreshAccessTokenShared({
-          messages: {
-            pleaseRelogin: i18n.global.t('error.pleaseRelogin'),
-            tokenRefreshFailed: i18n.global.t('error.tokenRefreshFailed'),
-          },
-        }),
-        reloginMessage: i18n.global.t('error.pleaseRelogin'),
-      });
+      while (myGeneration === streamGeneration && !streamAbort.signal.aborted) {
+        try {
+          await runStreamWithAuthRetry({
+            run: runStream,
+            initialToken: token,
+            isEmbed: Boolean(embedToken),
+            isCurrent: () => myGeneration === streamGeneration && !streamAbort.signal.aborted,
+            refreshAccessToken: () => refreshAccessTokenShared({
+              messages: {
+                pleaseRelogin: i18n.global.t('error.pleaseRelogin'),
+                tokenRefreshFailed: i18n.global.t('error.tokenRefreshFailed'),
+              },
+            }),
+            reloginMessage: i18n.global.t('error.pleaseRelogin'),
+          });
+          break;
+        } catch (err) {
+          if (!canReconnect() || isStreamAuthError(err) || reconnectAttempts >= 8) throw err;
+          reconnectAttempts++;
+          // The server may still be restarting. A stop/new turn invalidates
+          // this retry before it can attach or change visible state.
+          await new Promise<void>((resolve) => {
+            const done = () => {
+              clearTimeout(timer);
+              streamAbort.signal.removeEventListener('abort', done);
+              resolve();
+            };
+            const timer = setTimeout(done, Math.min(1000 * 2 ** (reconnectAttempts - 1), 5000));
+            streamAbort.signal.addEventListener('abort', done, { once: true });
+          });
+          if (myGeneration !== streamGeneration || streamAbort.signal.aborted) return;
+          streamMethod = 'GET';
+          url = `${apiUrl}/api/v1/sessions/continue-stream/${encodeURIComponent(params.session_id)}?message_id=${encodeURIComponent(receivedAssistantId)}`;
+        }
+      }
     } catch (err) {
       // A superseded stream failing must not surface as the current error or
       // abort the stream that replaced it (see onclose).

@@ -138,6 +138,13 @@ func (e *AgentEngine) runCompaction(
 	// exists and compact again immediately.
 	e.lastUsage = types.TokenUsage{}
 	e.lastSentMsgCount = 0
+	// The exhausted mark describes the pre-compaction history too. A
+	// successful compaction rebuilds that history below wherever the last
+	// failure parked the count, so the guard's premise — below this count
+	// the answer has not changed — no longer holds. Keeping the mark would
+	// silently skip every later compaction, including overflow recovery,
+	// until the message count climbs back above it.
+	e.compactionExhaustedAt = 0
 
 	return result.Messages, true
 }
@@ -358,7 +365,7 @@ func isNaturalStopFinishReason(reason string) bool {
 // validation (missing path, unexpected end of JSON, etc.).
 func isLengthFinishReason(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
-	case "length", "max_tokens", "max_output_tokens":
+	case "length", "max_tokens", "max_output_tokens", "model_context_window_exceeded":
 		return true
 	default:
 		return false
@@ -465,7 +472,7 @@ func (e *AgentEngine) analyzeResponse(
 			answerID = response.AnswerEventID
 		} else {
 			answerID = generateEventID("answer")
-			if response.Content != "" {
+			if response.Content != "" && !e.holdCollaborationAnswer {
 				e.eventBus.Emit(ctx, event.Event{
 					ID:        answerID,
 					Type:      event.EventAgentFinalAnswer,
@@ -533,7 +540,10 @@ func (e *AgentEngine) analyzeResponse(
 		// text already went out, otherwise emit it once here. Done is left to
 		// the caller so a loop-end steer inject can still continue the turn.
 		answerID := response.AnswerEventID
-		if !response.AnswerStreamed || answerID == "" {
+		if e.holdCollaborationAnswer && answerID == "" {
+			answerID = generateEventID("answer")
+		}
+		if (!response.AnswerStreamed || answerID == "") && !e.holdCollaborationAnswer {
 			answerID = generateEventID("answer")
 			_ = e.eventBus.Emit(ctx, event.Event{
 				ID:        answerID,
@@ -1104,6 +1114,10 @@ func (e *AgentEngine) appendToolResults(
 		}
 
 		messages = append(messages, toolMsg)
+	}
+
+	if step.IntermediateAnswer {
+		messages = e.appendCollaborationDeliveryBoundary(messages, step.Thought)
 	}
 
 	return messages

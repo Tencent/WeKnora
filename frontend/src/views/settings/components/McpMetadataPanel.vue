@@ -19,6 +19,8 @@
         </t-tooltip>
       </div>
       <p v-if="snapshot" class="snapshot-meta">
+        <AssistantActionButton v-if="snapshot.tools.length" :label="t('assistant.actions.toolExamples')"
+          :query="t('assistant.prompts.explainMcpTools', { id: serviceId })" :disabled="busy || refreshing" />
         <span class="snapshot-meta__item">{{ t('mcpMetadata.toolCount', { count: snapshot.tools.length }) }}</span>
         <span v-if="snapshot.server_name" class="snapshot-meta__item">{{ snapshot.server_name }} {{ snapshot.server_version }}</span>
         <span class="snapshot-meta__item">{{ t('mcpMetadata.syncedAt') }}{{ formatTime(snapshot.synced_at) }}</span>
@@ -64,7 +66,13 @@
     </div>
     <t-loading :loading="busy" size="small" :text="busy ? t('mcpMetadata.fetching') : ''">
       <div class="metadata-body">
-        <p v-if="error" class="form-desc form-desc--error">{{ error }}</p>
+        <div v-if="error" class="metadata-error">
+          <p class="form-desc form-desc--error">{{ error }}</p>
+          <AssistantActionButton :label="t('assistant.actions.diagnose')"
+            :query="t('assistant.prompts.mcpFailure', { id: serviceId })"
+            :selection="{ field: t('mcpMetadata.tools'), text: error }"
+            :disabled="busy || disabled || policyBusy" />
+        </div>
         <p v-else-if="snapshot?.stale" class="form-desc form-desc--warn">{{ t('mcpMetadata.stale') }}</p>
         <p v-else-if="!busy && !snapshot" class="form-desc">{{ t('mcpMetadata.notSynced') }}</p>
         <template v-if="snapshot">
@@ -81,6 +89,7 @@ import { useI18n } from 'vue-i18n'
 import { getMCPMetadata, refreshMCPMetadata, type MCPMetadata } from '@/api/mcp-service'
 import McpToolsList from './McpToolsList.vue'
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 
 const props = defineProps<{ serviceId: string; disabled?: boolean }>()
 const emit = defineEmits<{ (e: 'busy', value: boolean): void; (e: 'synced', value: boolean): void }>()
@@ -183,6 +192,13 @@ onBeforeUnmount(() => { generation++; emit('busy', false); emit('synced', false)
 </script>
 
 <style scoped lang="less">
+.metadata-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .metadata-heading {
   display: flex;
   align-items: center;

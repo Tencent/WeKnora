@@ -201,3 +201,244 @@ test('a prompt without display steps remains answerable after orphan recovery', 
   assert.equal(cards(message).length, 1)
   assert.equal(cards(message)[0].pending_id, 'p1')
 })
+
+test('parallel child approvals reload on a running parent without suspending it', async () => {
+  const { handler, messagesList } = setup()
+  const base = awaitingRow() as Record<string, any>
+  base.run_state = ''
+  base.is_completed = false
+  const prompt = base.pending_prompt
+  delete base.pending_prompt
+  base.delegated_prompts = [
+    { ...prompt, id: 'child-1', delegated_task: 'research' },
+    { ...prompt, id: 'child-2', delegated_task: 'writer' },
+  ]
+  await handler.handleMsgList([base])
+  const m = messagesList[0]
+  assert.equal(m.run_state, '')
+  assert.equal(m.is_completed, false)
+  assert.deepEqual(Array.from(cards(m), (p) => p.pending_id), ['child-1', 'child-2'])
+  assert.equal(cards(m)[0].delegated_task, 'research')
+  handler.processStreamChunk({ response_type: 'tool_approval_required', id: 'r1', data: {
+    pending_id: 'child-1', suspended: true, suspendable: true,
+  } })
+  assert.equal(cards(m).length, 2)
+})
+
+test('forwarded live approval is parked while parent keeps streaming', () => {
+  const { handler, messagesList, isReplying } = setup()
+  isReplying.value = true
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' })
+  handler.processStreamChunk({ response_type: 'tool_approval_required', id: 'r1', data: {
+    pending_id: 'child', suspended: true, suspendable: true, description: 'writer: change a page',
+  } })
+  assert.equal(cards(messagesList[0])[0].suspended, true)
+  assert.equal(isReplying.value, true)
+  assert.notEqual(messagesList[0].run_state, 'awaiting_input')
+})
+
+test('child approval resolutions after steering update the original segment and not another turn', () => {
+  const { handler, messagesList } = setup()
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' })
+  for (const pending_id of ['child-a', 'child-b']) {
+    handler.processStreamChunk({ response_type: 'tool_approval_required', id: 'r1', data: { pending_id } })
+  }
+  handler.processStreamChunk({ response_type: 'agent_prompt_required', id: 'r1', data: { pending_id: 'child-question', kind: 'ask_user' } })
+  const original = messagesList[0]
+  handler.processStreamChunk({ response_type: 'user_message_injected', id: 'r1', data: {
+    steer_id: 's1', user_message_id: 'u1', content: 'cancel child-a only',
+  } })
+  assert.equal(original.steerForked, true)
+  // Replaying a required event after a segment split must not clone its card.
+  handler.processStreamChunk({ response_type: 'tool_approval_required', id: 'r1', data: { pending_id: 'child-a' } })
+  const foreign = { id: 'another-turn', role: 'assistant', is_completed: true, agentEventStream: [
+    { type: 'tool_approval_required', pending_id: 'child-a', resolved: false },
+  ] }
+  messagesList.unshift(foreign)
+  handler.processStreamChunk({ response_type: 'tool_approval_resolved', id: 'r1', data: { pending_id: 'child-a', approved: false, canceled: true } })
+  assert.equal(cards(original)[0].resolved, true)
+  assert.equal(cards(original)[0].canceled, true)
+  assert.equal(cards(original)[1].resolved, false)
+  handler.processStreamChunk({ response_type: 'agent_prompt_resolved', id: 'r1', data: { pending_id: 'child-question', answered: true } })
+  assert.equal(original.agentEventStream.find((e: any) => e.pending_id === 'child-question').resolved, true)
+  handler.processStreamChunk({ response_type: 'tool_approval_resolved', id: 'r1', data: { pending_id: 'child-b', approved: true } })
+  assert.equal(cards(original)[1].approved, true)
+  assert.equal(messagesList.length, 4)
+  assert.equal(cards(messagesList[3]).length, 0)
+  assert.equal(cards(foreign)[0].resolved, false)
+})
+
+test('stopping a suspended turn closes its cards even when its display row is completed', async () => {
+  const { handler, messagesList } = setup()
+  await handler.handleMsgList([awaitingRow()])
+  handler.markInFlightAssistantStopped('a1')
+  assert.equal(messagesList[0].run_state, '')
+  assert.equal(cards(messagesList[0])[0].resolved, true)
+  assert.equal(cards(messagesList[0])[0].canceled, true)
+  assert.equal(messagesList[0].is_completed, true)
+})
+
+
+test('stop still clears cards after a stream watcher has already settled the row', () => {
+  const { handler, messagesList } = setup()
+  messagesList.push({ id: 'a1', role: 'assistant', is_completed: true, run_state: '',
+    agentEventStream: [{type: 'tool_approval_required', pending_id: 'p1', suspended: true}, {type: 'tool_call', pending: true}] })
+  handler.markInFlightAssistantStopped()
+  assert.equal(messagesList[0].agentEventStream[1].pending, false)
+  assert.equal(cards(messagesList[0])[0].resolved, true)
+  assert.equal(cards(messagesList[0])[0].canceled, true)
+})
+
+test('rehydrated in-flight steps remain reactive while tools and thinking stream in', async () => {
+  const { handler, messagesList, currentAssistantMessageId } = setup()
+  const row = awaitingRow()
+  row.run_state = ''
+  await handler.handleMsgList([row])
+  currentAssistantMessageId.value = 'a1'
+  const m = messagesList[0]
+  const observed = vue.computed(() => (m.agentEventStream as any[]).map(e =>
+    `${e.type}:${e.content || ''}:${e.pending}:${e.success}`).join('|'))
+  const before = observed.value
+  assert.doesNotMatch(before, /agent_complete/, 'an elapsed duration must not settle a running timeline')
+  handler.processStreamChunk({ response_type: 'thinking', id: 'r1', content: 'new thought',
+    done: false, data: { event_id: 'thinking-2' } })
+  assert.notEqual(observed.value, before, 'new timeline rows must invalidate the render')
+  handler.processStreamChunk({ response_type: 'thinking', id: 'r1', content: ' continues',
+    done: false, data: { event_id: 'thinking-2' } })
+  assert.match(observed.value, /new thought continues/)
+  handler.processStreamChunk({ response_type: 'tool_call', id: 'r1',
+    data: { tool_call_id: 'call-2', tool_name: 'search', arguments: {} } })
+  assert.match(observed.value, /tool_call::true/)
+  handler.processStreamChunk({ response_type: 'tool_result', id: 'r1',
+    data: { tool_call_id: 'call-2', tool_name: 'search', success: true, output: 'found' } })
+  assert.match(observed.value, /tool_call::false:true/)
+})
+
+
+test('resolved approvals reload once in timeline order before completion and never become pending', async () => {
+  const { handler, messagesList } = setup()
+  const prompt = { id: 'approved', kind: 'tool_approval', status: 'done',
+    tool_call_id: 'call-1', created_at: '2026-10-13T08:00:01Z',
+    request: { service_name: 'KM', mcp_tool_name: 'hot-articles', args: { limit: 1 } },
+    response: { approved: true, modified_args: { limit: 2 } } }
+  await handler.handleMsgList([{ id: 'a', role: 'assistant', is_completed: true,
+    content: 'final', agent_duration_ms: 5000,
+    agent_steps: [{ iteration: 0, timestamp: '2026-10-13T08:00:00Z', thought: 'starting',
+      tool_calls: [{ id: 'call-1', name: 'mcp_x', args: {}, result: { success: true } }] }],
+    prompt_history: [prompt], delegated_prompts: [prompt,
+      { ...prompt, id: 'rejected', delegated_task: 'child', response: { approved: false } },
+      { ...prompt, id: 'canceled', delegated_task: 'child', status: 'canceled', response: {} }],
+  }])
+  const m = messagesList[0]
+  assert.equal(cards(m).length, 3)
+  assert.ok(cards(m).every(c => c.resolved && !c.suspended))
+  assert.equal(cards(m)[0].approved, true)
+  assert.equal(cards(m)[0].args_json, '{"limit":2}')
+  assert.equal(cards(m)[1].approved, false)
+  assert.equal(cards(m)[2].canceled, true)
+  const events = m.agentEventStream as Record<string, any>[]
+  assert.ok(events.findIndex(e => e.pending_id === 'approved') < events.findIndex(e => e.type === 'tool_call'))
+  assert.ok(events.findIndex(e => e.pending_id === 'canceled') < events.findIndex(e => e.type === 'agent_complete'))
+  assert.equal(events.at(-1)?.content, 'final')
+})
+
+for (const prepared of [false, true]) {
+  test(`same-request approval resume and reconnect retain the timeline (prepared=${prepared})`, async () => {
+    const { handler, messagesList } = setup()
+    await handler.handleMsgList([awaitingRow()])
+    const m = messagesList[0]
+    if (prepared) handler.prepareResumedMessage(m, 'p1')
+    const resume = () => {
+      handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+        data: { resume_pending_id: 'p1', resume_tool_call_id: 'call-1' } })
+      handler.processStreamChunk({ response_type: 'tool_approval_resolved', id: 'r1',
+        data: { pending_id: 'p1', approved: true } })
+      handler.processStreamChunk({ response_type: 'tool_call', id: 'r1',
+        data: { tool_call_id: 'call-1', tool_name: 'mcp_x', arguments: {} } })
+      handler.processStreamChunk({ response_type: 'tool_result', id: 'r1',
+        data: { tool_call_id: 'call-1', tool_name: 'mcp_x', success: true, output: 'approved result' } })
+      handler.processStreamChunk({ response_type: 'answer', id: 'r1', content: 'after approval',
+        data: { event_id: 'resume-progress' }, done: false })
+    }
+    resume()
+    resume()
+    resume()
+    assert.equal(messagesList.length, 1)
+    const events = m.agentEventStream as Record<string, any>[]
+    assert.equal(events.filter(e => e.content === 'checking').length, 1)
+    assert.equal(events.filter(e => e.type === 'tool_call' && e.tool_call_id === 'call-1').length, 1)
+    assert.equal(events.filter(e => e.type === 'answer' && e.content === 'after approval').length, 1)
+    assert.equal(cards(m).length, 1)
+    assert.equal(cards(m)[0].approved, true)
+    assert.equal(m.content, 'after approval')
+
+    // A second approval creates a new suffix, retaining the first one's history.
+    handler.processStreamChunk({ response_type: 'tool_approval_required', id: 'r1',
+      data: { pending_id: 'p2', tool_call_id: 'call-2' } })
+    handler.prepareResumedMessage(m, 'p2')
+    const secondResume = () => {
+      handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+        data: { resume_pending_id: 'p2', resume_tool_call_id: 'call-2' } })
+      handler.processStreamChunk({ response_type: 'tool_approval_resolved', id: 'r1',
+        data: { pending_id: 'p2', approved: true } })
+    }
+    secondResume()
+    secondResume()
+    assert.equal(cards(m).length, 2)
+    assert.ok(cards(m).every(e => e.approved))
+    assert.equal(m.agentEventStream.filter((e: any) => e.content === 'checking').length, 1)
+    assert.equal(m.agentEventStream.filter((e: any) => e.content === 'after approval').length, 1)
+  })
+}
+
+test('approval suffix replay preserves steer boundaries before and after suspension', async () => {
+  const { handler, messagesList } = setup()
+  const query = { response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' }
+  const steer = (id: string) => handler.processStreamChunk({ response_type: 'user_message_injected', id: 'r1',
+    data: { steer_id: id, user_message_id: id, content: id } })
+  const answer = (text: string) => handler.processStreamChunk({ response_type: 'answer', id: 'r1',
+    data: { event_id: text }, content: text, done: false })
+  handler.processStreamChunk(query)
+  answer('before-steer')
+  steer('u-before')
+  answer('before-approval')
+  const replay = () => {
+    handler.processStreamChunk({ ...query, data: { resume_pending_id: 'p1', resume_tool_call_id: 'c1' } })
+    answer('after-approval')
+    steer('u-after')
+    answer('after-steer')
+  }
+  replay()
+  replay()
+  const assistants = messagesList.filter(m => m.role === 'assistant')
+  assert.equal(assistants.length, 3)
+  const texts = assistants.map(m => m.agentEventStream.filter((e: any) => e.type === 'answer').map((e: any) => e.content))
+  assert.deepEqual(JSON.parse(JSON.stringify(texts)), [['before-steer'], ['before-approval', 'after-approval'], ['after-steer']])
+})
+
+
+test('reloaded history containing a later checkpoint does not duplicate the resumed suffix', async () => {
+  const { handler, messagesList } = setup()
+  await handler.handleMsgList([awaitingRow()])
+  const m = messagesList[0]
+  m.agentEventStream.push({ type: 'answer', content: 'persisted suffix', event_id: 'suffix', done: true })
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+    data: { resume_pending_id: 'p1', resume_tool_call_id: 'call-1' } })
+  handler.processStreamChunk({ response_type: 'answer', id: 'r1', content: 'persisted suffix',
+    data: { event_id: 'suffix' }, done: false })
+  assert.equal(m.agentEventStream.filter((e: any) => e.content === 'checking').length, 1)
+  assert.equal(m.agentEventStream.filter((e: any) => e.content === 'persisted suffix').length, 1)
+  assert.equal(cards(m).length, 1)
+})
+
+
+test('approval resume keeps updates that arrived while approval was pending', async () => {
+  const { handler, messagesList } = setup()
+  await handler.handleMsgList([awaitingRow()])
+  const m = messagesList[0]
+  handler.prepareResumedMessage(m, 'p1')
+  m.agentEventStream.push({ type: 'answer', content: 'another child finished', event_id: 'child-progress', done: true })
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1',
+    data: { resume_pending_id: 'p1', resume_tool_call_id: 'call-1' } })
+  assert.equal(m.agentEventStream.filter((e: any) => e.content === 'another child finished').length, 1)
+})

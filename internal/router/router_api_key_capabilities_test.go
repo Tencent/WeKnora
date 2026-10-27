@@ -414,6 +414,8 @@ func TestSandboxConfigRoutesRequireFullAccessOnly(t *testing.T) {
 		{http.MethodPut, "/api/v1/sandbox-configs/:id"},
 		{http.MethodDelete, "/api/v1/sandbox-configs/:id"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/sandboxes"},
+		{http.MethodGet, "/api/v1/sandbox-configs/:id/user-sandboxes"},
+		{http.MethodPost, "/api/v1/sandbox-configs/:id/user-sandboxes/:digest/release"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodPost, "/api/v1/sandbox-configs/:id/skills"},
 		{http.MethodGet, "/api/v1/sandbox-configs/:id/skills/:skillId"},
@@ -659,6 +661,48 @@ func TestFAQImportProgressRouteRequiresRetrieveOrIngestCapability(t *testing.T) 
 	}
 	if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
 		t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+	}
+}
+
+// Listing shared knowledge bases is read-only discovery: a scoped key that
+// may already retrieve KB data must be able to discover the shared KBs its
+// allow-list covers, without being promoted to manage_spaces.
+func TestSharedKnowledgeBaseDiscoveryAdmitsRetrieveCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
+
+	for _, path := range []string{
+		"/api/v1/shared-knowledge-bases",
+		"/api/v1/organizations/:id/shared-knowledge-bases",
+	} {
+		t.Run(path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+				t.Fatalf("policy capabilities = %#v, want retrieve", policy.Capabilities)
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityManageSpaces) {
+				t.Fatalf("policy capabilities = %#v, want manage_spaces preserved", policy.Capabilities)
+			}
+		})
+	}
+
+	// Opening the two discovery routes must not leak the capability into the
+	// rest of the organization group, nor into the shared-agents listing.
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/organizations"},
+		{http.MethodGet, "/api/v1/organizations/:id/members"},
+		{http.MethodGet, "/api/v1/shared-agents"},
+	} {
+		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+		if policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+			t.Fatalf("%s %s must not admit retrieve", tc.method, tc.path)
+		}
 	}
 }
 

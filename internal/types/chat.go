@@ -238,6 +238,8 @@ const (
 	ResponseTypeReferences ResponseType = "references"
 	// Thinking response type (for agent thought process)
 	ResponseTypeThinking ResponseType = "thinking"
+	// ResponseTypeProgress carries a user-visible intermediate update.
+	ResponseTypeProgress ResponseType = "progress"
 	// Tool call response type (for agent tool invocations)
 	ResponseTypeToolCall ResponseType = "tool_call"
 	// Tool result response type (for agent tool results)
@@ -246,6 +248,15 @@ const (
 	ResponseTypeInstallOutput ResponseType = "install_output"
 	// ResponseTypeCommandOutput updates the pending tool card without completing it.
 	ResponseTypeCommandOutput ResponseType = "command_output"
+	// ResponseTypeWorkStarted is a background work event of shared design §7.
+	// Features emit it through service.BackgroundEventEmitter, which picks the stream.
+	ResponseTypeWorkStarted ResponseType = "work_started"
+	// ResponseTypeWorkEvent is a background work event of shared design §7.
+	// Features emit it through service.BackgroundEventEmitter, which picks the stream.
+	ResponseTypeWorkEvent ResponseType = "work_event"
+	// ResponseTypeWorkFinished is a background work event of shared design §7.
+	// Features emit it through service.BackgroundEventEmitter, which picks the stream.
+	ResponseTypeWorkFinished ResponseType = "work_finished"
 	// Error response type
 	ResponseTypeError ResponseType = "error"
 	// Reflection response type (for agent reflection)

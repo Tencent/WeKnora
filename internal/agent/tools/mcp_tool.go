@@ -3,6 +3,8 @@ package tools
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -11,6 +13,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -165,6 +169,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			Error:   fmt.Sprintf("Failed to parse args: %v", err),
 		}, err
 	}
+	if result, err := checkMCPCallGuard(ctx, t.service.ID, t.mcpTool.Name, args); result != nil || err != nil {
+		return result, err
+	}
 
 	// The post-approval ctx is derived from ApprovalCtx, which does not carry
 	// the exec metadata; read it once here so the OAuth prompt still works
@@ -174,13 +181,24 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 
 	// Human approval gate for dangerous tools (issue #1173)
 	if t.gate != nil {
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		action := t.gate.Action(ctx, tenantID, t.service.ID, t.mcpTool)
+		rules := policy.Rules{Level: types.AccessLevelFromContext(ctx)}
+		verdict := policy.Decide(action, rules)
+		policy.Record(ctx, "mcp:"+t.service.Name+"/"+t.mcpTool.Name, action, rules, verdict)
+		if verdict == policy.Deny {
+			return &types.ToolResult{
+				Success: false,
+				Error: "this tool changes data, which this conversation's read-only access does not allow. " +
+					"Tell the user; do not retry.",
+			}, nil
+		}
 		if meta := execMeta; meta != nil && meta.EventBus != nil {
-			tenantID, _ := types.TenantIDFromContext(ctx)
 			// A resumed call already holds the user's decision. It is honored
 			// even if the tool stopped requiring approval meanwhile, since the
 			// user may have edited the arguments.
 			resumed := meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-			if resumed || t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
+			if resumed || verdict == policy.Ask {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
 				// human approval can legitimately wait longer than the per-tool 60s.
 				// User-stop / request cancel still propagates because ApprovalCtx is a
@@ -194,6 +212,10 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				if resumed {
 					decision = t.gate.ResumeDecision(waitCtx, meta.Answered, meta.EventBus)
 				} else {
+					var grant, grantScope string
+					if policy.Pregrantable(action) {
+						grant, grantScope = t.approvalGrant(ctx)
+					}
 					var snapshot []byte
 					var snapshotVersion int
 					if meta.Snapshot != nil {
@@ -222,6 +244,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						Description:        t.mcpTool.Description,
 						Args:               args,
 						ToolCallID:         meta.ToolCallID,
+						Grant:              grant,
+						GrantScope:         grantScope,
+						GrantRisk:          action.Risk,
 					})
 				}
 				if waitErr != nil {
@@ -317,6 +342,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			}()
 		}
 
+		if err := hitl.CheckDelegation(callCtx); err != nil {
+			return nil, err
+		}
 		result, err := client.CallTool(callCtx, t.mcpTool.Name, input)
 		if err != nil && !isStdio && callCtx.Err() == nil && mcp.IsToolCallRetrySafe(err) {
 			logger.GetLogger(callCtx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
@@ -326,6 +354,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				callCtx, t.mcpManager, t.service, t.gate, oauthSess, t.mcpTool.Name, toolCallID,
 			)
 			if err != nil {
+				return nil, err
+			}
+			if err := hitl.CheckDelegation(callCtx); err != nil {
 				return nil, err
 			}
 			result, err = client.CallTool(callCtx, t.mcpTool.Name, input)
@@ -860,4 +891,16 @@ func SerializeMCPToolResult(result *types.ToolResult) (string, error) {
 	}
 
 	return output, nil
+}
+
+// approvalGrant is what approving a call of this tool may allow for the rest
+// of the session: calls of the same tool while its argument schema stays the
+// same, so a changed tool asks again.
+func (t *MCPTool) approvalGrant(ctx context.Context) (grant, scope string) {
+	sum := sha256.Sum256(t.mcpTool.InputSchema)
+	grant = "mcp:" + t.service.ID + "/" + t.mcpTool.Name + "#" + hex.EncodeToString(sum[:6])
+	if strings.HasPrefix(types.LanguageFromContextOrDefault(ctx), "zh") {
+		return grant, fmt.Sprintf("调用 %s 的工具 %s", t.service.Name, t.mcpTool.Name)
+	}
+	return grant, fmt.Sprintf("Call %s tool %s", t.service.Name, t.mcpTool.Name)
 }

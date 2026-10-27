@@ -34,6 +34,10 @@ type MCPServiceHandler struct {
 	// runResumer continues a run suspended on an approval once it is
 	// answered. Nil leaves such answers to the reaper, which closes the run.
 	runResumer RunResumer
+	// scheduledPrompt queues automation-owned continuations without starting a chat run.
+	scheduledPrompt func(context.Context, *types.AgentPrompt) bool
+	// grants are the callers' remembered agent approvals.
+	grants interfaces.AgentGrantRepository
 }
 
 // RunResumer continues an agent run that ended suspended on prompt, now
@@ -44,6 +48,11 @@ type RunResumer interface {
 
 // SetRunResumer wires the resumer of suspended runs.
 func (h *MCPServiceHandler) SetRunResumer(r RunResumer) { h.runResumer = r }
+
+// SetScheduledPromptRouter routes automation approvals to their scheduler.
+func (h *MCPServiceHandler) SetScheduledPromptRouter(f func(context.Context, *types.AgentPrompt) bool) {
+	h.scheduledPrompt = f
+}
 
 // NewMCPServiceHandler creates a new MCP service handler
 func NewMCPServiceHandler(
@@ -780,6 +789,9 @@ func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 type setMCPToolApprovalBody struct {
 	RequireApproval *bool `json:"require_approval"`
 	Enabled         *bool `json:"enabled"`
+	// Risk is read, probe, write or destructive; an empty string returns the
+	// tool to the risk its service declares.
+	Risk *string `json:"risk"`
 }
 
 // SetMCPToolApproval updates per-tool MCP policy fields. The route name is kept
@@ -787,13 +799,15 @@ type setMCPToolApprovalBody struct {
 //
 // SetMCPToolApproval godoc
 // @Summary      设置 MCP 工具策略
-// @Description  为指定 MCP 服务下的某个工具更新启用状态和/或人工审批要求。至少提供 require_approval 或 enabled 之一；省略的字段保持原值。
+// @Description  为指定 MCP 服务下的某个工具更新启用状态、人工审批要求和/或风险等级。
+// @Description  至少提供 require_approval、enabled、risk 之一；省略的字段保持原值。
+// @Description  risk 为 read/probe/write/destructive，空字符串表示改回按服务注解推断。
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
 // @Param        id         path      string                  true  "MCP 服务 ID"
 // @Param        tool_name  path      string                  true  "工具名"
-// @Param        request    body      map[string]interface{}  true  "{require_approval?: bool, enabled?: bool}"
+// @Param        request    body      map[string]interface{}  true  "{require_approval?: bool, enabled?: bool, risk?: string}"
 // @Success      200        {object}  handler.SuccessResponse  "更新结果"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Failure      404        {object}  errors.AppError         "MCP 服务或工具不存在"
@@ -820,13 +834,17 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if body.RequireApproval == nil && body.Enabled == nil {
-		c.Error(errors.NewBadRequestError("require_approval or enabled is required"))
+	if body.RequireApproval == nil && body.Enabled == nil && body.Risk == nil {
+		_ = c.Error(errors.NewBadRequestError("require_approval, enabled or risk is required"))
 		return
 	}
-	if err := h.mcpToolApprovalService.SetPolicy(
-		ctx, tenantID, serviceID, toolName, body.RequireApproval, body.Enabled,
-	); err != nil {
+	if err := h.mcpToolApprovalService.SetPolicy(ctx, tenantID, serviceID, toolName, types.MCPToolPolicyPatch{
+		RequireApproval: body.RequireApproval, Enabled: body.Enabled, Risk: body.Risk,
+	}); err != nil {
+		if stderrors.Is(err, types.ErrInvalidMCPToolPolicy) {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			c.Error(errors.NewNotFoundError(err.Error()))
 			return
@@ -947,10 +965,20 @@ func (h *MCPServiceHandler) finishResolve(c *gin.Context, pendingID string, res 
 		}
 		return
 	}
-	// A suspended run has ended; this replica now continues it.
+	// Scheduled runs resume through their scheduler, but the client must still
+	// reattach to their stream after answering a suspended prompt.
+	scheduled := h.scheduledPrompt != nil && h.scheduledPrompt(ctx, res.Prompt)
 	resumed := res.Resume && h.runResumer != nil
-	if resumed {
+	if router, ok := h.runResumer.(interface {
+		HandlesDelegatedPrompt(context.Context, *types.AgentPrompt) bool
+	}); !scheduled && ok && router.HandlesDelegatedPrompt(ctx, res.Prompt) {
+		resumed = false
+	}
+	if resumed && !scheduled {
 		h.runResumer.ResumeSuspendedRun(c, res.Prompt, res.OwnerGone, res.OwnerLeaseUntil)
+	}
+	if scheduled {
+		resumed = res.Resume
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "resumed": resumed})
 }
@@ -968,7 +996,7 @@ type resolveAgentPromptBody struct {
 // @Description  tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；
 // @Description  page_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],
 // @Description  stayed?, return_path?}。
-// @Description  返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
+// @Description  返回 resumed=true 表示挂起的运行已请求恢复（自动化由调度器恢复），客户端需携带 resume_pending_id 重新接入该消息的事件流
 // @Tags         Agent
 // @Accept       json
 // @Produce      json

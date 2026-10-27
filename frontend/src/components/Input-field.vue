@@ -2745,8 +2745,12 @@ const handleStop = async () => {
 }
 
 onBeforeRouteUpdate((to, from, next) => {
-  clearvalue()
-  clearPendingUploads()
+  // The route belongs to the page behind an embedded assistant. Its draft
+  // and uploads belong to the assistant session, which the host manages.
+  if (!props.embeddedMode) {
+    clearvalue()
+    clearPendingUploads()
+  }
   next()
 })
 
@@ -2986,7 +2990,9 @@ defineExpose({
               </svg>
             </div>
           </t-tooltip>
+          <slot name="background-work" />
           </template>
+          <slot v-if="embeddedMode" name="background-work" />
 
           <slot name="controls" />
 

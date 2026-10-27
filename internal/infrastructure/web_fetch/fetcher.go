@@ -21,14 +21,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/chromedp/chromedp"
+	"golang.org/x/net/html/charset"
+	"golang.org/x/text/encoding"
 )
 
 const (
-	// defaultPageFetchTimeout is the agent web_fetch page budget when
-	// WEKNORA_WEB_FETCH_TIMEOUT is empty, invalid, or not positive. Three
-	// minutes covers a slow browser render plus HTTP fallback: a 150s cap is
-	// still shorter than the 150036ms success reported for this timeout.
-	defaultPageFetchTimeout = 3 * time.Minute
+	// Bound interactive reads; explicit environment overrides remain supported.
+	defaultPageFetchTimeout = 30 * time.Second
 	pipelineFetchTimeout    = 15 * time.Second
 	maxBodySize             = 100 * 1024
 	maxAgentBodySize        = 2 * 1024 * 1024
@@ -211,7 +210,11 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 		}
 		if f.renderBrowser != nil {
 			browserURL := firstNonEmpty(httpResult.finalURL, rawURL)
-			if rendered, browserErr := f.fetchWithBrowser(requestCtx, browserURL); browserErr == nil {
+			rendered, browserErr := f.fetchWithBrowser(requestCtx, browserURL)
+			if err := timeoutFetchError(browserErr); err != nil {
+				return "", err
+			}
+			if browserErr == nil {
 				content, browserParseErr := f.extractContent(&httpFetchResult{
 					body: []byte(rendered), finalURL: browserURL, contentType: "text/html",
 				})
@@ -231,7 +234,11 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 	}
 
 	if f.renderBrowser != nil && canRenderAfterHTTPError(httpErr) {
-		if rendered, browserErr := f.fetchWithBrowser(requestCtx, rawURL); browserErr == nil {
+		rendered, browserErr := f.fetchWithBrowser(requestCtx, rawURL)
+		if err := timeoutFetchError(browserErr); err != nil {
+			return "", err
+		}
+		if browserErr == nil {
 			content, browserParseErr := f.extractContent(&httpFetchResult{
 				body: []byte(rendered), finalURL: rawURL, contentType: "text/html",
 			})
@@ -273,15 +280,38 @@ func (f *Fetcher) fetchHTTP(ctx context.Context, rawURL string, parsedURL *url.U
 	if f.markdown && int64(len(body)) > f.maxBodySize {
 		return nil, newFetchError(ErrorBodyTooLarge, false, "page exceeds the %d byte download limit", f.maxBodySize)
 	}
-	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	rawContentType := resp.Header.Get("Content-Type")
+	contentType, _, _ := mime.ParseMediaType(rawContentType)
 	if contentType == "" {
 		contentType, _, _ = mime.ParseMediaType(http.DetectContentType(body))
+	}
+	if isHTMLContent(contentType) {
+		body = decodeHTMLBody(body, rawContentType)
 	}
 	finalURL := rawURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL.String()
 	}
 	return &httpFetchResult{body: body, finalURL: finalURL, contentType: contentType}, nil
+}
+
+// decodeHTMLBody converts an HTML body to UTF-8 when the page declares a
+// different charset through a BOM, the Content-Type header, or a <meta> tag.
+// Valid UTF-8 and undeclared bodies are returned unchanged: the HTML default
+// (windows-1252) would corrupt undeclared UTF-8 pages with an ASCII-only head.
+func decodeHTMLBody(body []byte, contentType string) []byte {
+	if utf8.Valid(body) {
+		return body
+	}
+	enc, name, certain := charset.DetermineEncoding(body, contentType)
+	if enc == encoding.Nop || (!certain && name == "windows-1252") {
+		return body
+	}
+	decoded, err := enc.NewDecoder().Bytes(body)
+	if err != nil {
+		return body
+	}
+	return decoded
 }
 
 func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net.Conn, error) {
@@ -310,11 +340,26 @@ func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net
 				return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s", host, ip)
 			}
 		}
-		pinnedAddress := net.JoinHostPort(ips[0].String(), port)
-		if f.dialContext != nil {
-			return f.dialContext(ctx, network, pinnedAddress)
+		// Try validated addresses without a second DNS lookup. A broken IPv6 route
+		// must not prevent reaching the same public host over IPv4.
+		var lastErr error
+		for _, ip := range ips {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			dial := f.dialContext
+			if dial == nil {
+				dial = (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext
+			}
+			conn, err := dial(dialCtx, network, net.JoinHostPort(ip.String(), port))
+			cancel()
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
 		}
-		return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, pinnedAddress)
+		return nil, lastErr
 	}
 }
 
@@ -461,6 +506,20 @@ func classifyValidationError(err error) error {
 		return newFetchError(ErrorDNS, true, "DNS lookup failed: %v", err)
 	}
 	return newFetchError(ErrorSSRFRejected, false, "URL rejected: %v", err)
+}
+
+func timeoutFetchError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return newFetchError(ErrorTimeout, true, "fetch timed out: %v", err)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return newFetchError(ErrorTimeout, true, "fetch timed out: %v", err)
+	}
+	return nil
 }
 
 func classifyRequestError(err error) error {

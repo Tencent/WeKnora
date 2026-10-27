@@ -77,9 +77,8 @@ type ContextConfig struct {
 // SessionKindAssistant keeps assistant conversations out of ordinary chat listings.
 const SessionKindAssistant = "assistant"
 
-// SessionKindAgentTrial holds one question the assistant asks an agent to
-// check its setup. Only the server creates it, and removes it afterwards.
-const SessionKindAgentTrial = "agent_trial"
+// SessionKindAgentDelegated retains a child transcript outside ordinary listings.
+const SessionKindAgentDelegated = "agent_delegated"
 
 // IsValidSessionKind restricts API kinds to ordinary chats (empty) and assistant history.
 func IsValidSessionKind(kind string) bool {
@@ -102,6 +101,12 @@ type Session struct {
 	// UserID is the owner scope for this session. WeKnora user UUIDs, API
 	// external-user principals, and embed visitor principals all use this column.
 	UserID string `json:"user_id,omitempty" gorm:"type:varchar(512);index"`
+	// OwnerAuthSource records, server-side, how UserID was authenticated when
+	// the session was created or its owner first bound (AuthSource*).
+	// Per-user sandbox allocation reads it; client input never sets it
+	// (CreateSession overwrites). Empty on rows created before the column
+	// existed, which means "unknown".
+	OwnerAuthSource string `json:"owner_auth_source,omitempty" gorm:"type:varchar(32);not null;default:''"`
 	// IsPinned indicates whether the session is pinned in the list.
 	IsPinned bool `json:"is_pinned" gorm:"default:false" extensions:"x-agent,x-agent-response"`
 	// PinnedAt records when the session was pinned; nil when not pinned.

@@ -452,6 +452,7 @@ func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Messag
 			appendUser(midRunUsers[next])
 			next++
 		}
+		out = append(out, backgroundInjectionMessages(step)...)
 		out = append(out, buildAgentStepMessages(step)...)
 	}
 	for _, user := range midRunUsers {
@@ -508,12 +509,26 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 	msgs := make([]chat.Message, 0, len(m.AgentSteps)*2+1)
 	for _, step := range m.AgentSteps {
+		msgs = append(msgs, backgroundInjectionMessages(step)...)
 		msgs = append(msgs, buildAgentStepMessages(step)...)
 	}
 	if final := finalAnswerHistoryMessage(m); final != nil {
 		msgs = append(msgs, *final)
 	}
 	return msgs
+}
+
+// backgroundInjectionMessages replays the background-work messages delivered
+// before a step, where the model saw them.
+func backgroundInjectionMessages(step types.AgentStep) []chat.Message {
+	out := make([]chat.Message, 0, len(step.BackgroundInjections))
+	for _, injection := range step.BackgroundInjections {
+		if strings.TrimSpace(injection.Content) == "" {
+			continue
+		}
+		out = append(out, chat.Message{Role: "user", Content: injection.Content})
+	}
+	return out
 }
 
 // buildAgentStepMessages expands one persisted step into the OpenAI-shaped

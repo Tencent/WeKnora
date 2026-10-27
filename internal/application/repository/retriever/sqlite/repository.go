@@ -889,6 +889,17 @@ func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereCla
 			args:   toInterfaceSlice(params.TagIDs),
 		})
 	}
+	if len(params.ExcludeGeneratedQuestionKBIDs) > 0 {
+		parts = append(parts, whereClause{
+			clause: fmt.Sprintf(
+				"NOT (%s.knowledge_base_id IN (%s) AND %s)",
+				tableAlias,
+				placeholders(len(params.ExcludeGeneratedQuestionKBIDs)),
+				types.GeneratedQuestionRowPredicate(tableAlias),
+			),
+			args: toInterfaceSlice(params.ExcludeGeneratedQuestionKBIDs),
+		})
+	}
 	return parts
 }
 

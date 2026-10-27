@@ -312,16 +312,59 @@ func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID 
 		}).Error
 }
 
-// CleanupOldLogs deletes sync logs older than the retention period
-func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, retentionDays int) error {
-	if retentionDays <= 0 {
-		retentionDays = 30
+// CleanupOldLogs applies each source's retention policy, including soft-deleted
+// sources. Missing sources and non-positive policies use the default (normally
+// 30 days). Failed logs of live sources may still be retried by Asynq.
+func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, defaultRetentionDays int) error {
+	if defaultRetentionDays <= 0 {
+		defaultRetentionDays = 30
 	}
-	// Delete logs older than the retention period
-	if err := r.db.WithContext(ctx).
-		Where("started_at < NOW() - INTERVAL ? DAY", retentionDays).
-		Delete(&types.SyncLog{}).Error; err != nil {
+	var periods []int
+	if err := r.db.WithContext(ctx).Unscoped().Model(&types.DataSource{}).
+		Where("sync_log_retention_days > 0 AND sync_log_retention_days <> ?", defaultRetentionDays).
+		Distinct().Pluck("sync_log_retention_days", &periods).Error; err != nil {
 		return err
+	}
+	periods = append(periods, defaultRetentionDays)
+	now := time.Now().UTC()
+	sourceByID := "data_sources.id = sync_logs.data_source_id"
+	sourceMatch := sourceByID + " AND data_sources.tenant_id = sync_logs.tenant_id"
+	liveSource := r.db.WithContext(ctx).Model(&types.DataSource{}).Select("1").Where(sourceByID)
+	terminal := r.db.WithContext(ctx).
+		Where("status IN ?", []string{
+			types.SyncLogStatusSuccess, types.SyncLogStatusPartial, types.SyncLogStatusCanceled,
+		}).
+		Or("status = ? AND NOT EXISTS (?)", types.SyncLogStatusFailed, liveSource)
+	for _, days := range periods {
+		// A very large user policy must not overflow a time.Duration and turn
+		// into a recent cutoff. No valid log can predate year 1.
+		if days > now.Year()*366 {
+			continue
+		}
+		cutoff := now.AddDate(0, 0, -days)
+		if cutoff.Year() < 1 {
+			continue
+		}
+		sources := r.db.WithContext(ctx).Unscoped().Model(&types.DataSource{}).
+			Select("1")
+		policy := "EXISTS (?)"
+		if days == defaultRetentionDays {
+			// Also retire orphan logs after the default horizon instead of
+			// keeping them forever once their source has been removed.
+			policy = "NOT EXISTS (?)"
+			sources = sources.Where(sourceByID).
+				Where("sync_log_retention_days > 0 AND sync_log_retention_days <> ?", days)
+		} else {
+			sources = sources.Where(sourceMatch).
+				Where("sync_log_retention_days = ?", days)
+		}
+		if err := r.db.WithContext(ctx).
+			Where(terminal).
+			Where("COALESCE(finished_at, started_at) < ?", cutoff).
+			Where(policy, sources).
+			Delete(&types.SyncLog{}).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
