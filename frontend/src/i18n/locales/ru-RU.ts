@@ -692,6 +692,35 @@ export default {
       emailPlaceholder: 'invitee{\'@\'}example.com',
       roleLabel: 'Роль'
     },
+    create: {
+      button: 'Новый аккаунт',
+      dialogTitle: 'Создать аккаунт',
+      description: 'Этот email ещё не зарегистрирован. Заполните данные, чтобы создать аккаунт и добавить его в это пространство.',
+      usernameLabel: 'Имя пользователя',
+      usernamePlaceholder: '2–50 символов',
+      emailLabel: 'Email',
+      emailPlaceholder: 'invitee{\'@\'}example.com',
+      passwordLabel: 'Начальный пароль',
+      passwordPlaceholder: '8–32 символа',
+      roleLabel: 'Роль',
+      submit: 'Создать аккаунт',
+      success: 'Аккаунт создан и добавлен в это пространство. Передайте пользователю начальный пароль.',
+      errors: {
+        usernameRequired: 'Укажите имя пользователя',
+        usernameLength: 'Имя пользователя должно быть от 2 до 50 символов',
+        emailRequired: 'Укажите email',
+        emailFormat: 'Неверный формат email',
+        passwordRequired: 'Укажите начальный пароль',
+        passwordLength: 'Пароль должен быть от 8 до 32 символов',
+        roleRequired: 'Выберите роль',
+        emailExists: 'Этот email уже зарегистрирован. Пригласите или добавьте существующего пользователя.',
+        usernameExists: 'Это имя пользователя уже занято.',
+        invalidInput: 'Некорректные данные. Проверьте имя пользователя, email и роль.',
+        passwordPolicy: 'Пароль не соответствует политике (8–32 символа; при включённой сложности нужны заглавные, строчные буквы, цифры и спецсимволы).',
+        forbidden: 'Ваша роль не позволяет создать аккаунт с этой ролью.',
+        generic: 'Что-то пошло не так. Попробуйте ещё раз.'
+      }
+    },
     role: {
       owner: 'Владелец',
       admin: 'Администратор',

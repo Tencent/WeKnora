@@ -8499,6 +8499,35 @@ export default {
       emailPlaceholder: 'invitee{\'@\'}example.com',
       roleLabel: 'ロール'
     },
+    create: {
+      button: 'アカウント作成',
+      dialogTitle: '新しいアカウントを作成',
+      description: 'このメールアドレスはまだ登録されていません。情報を入力すると、アカウントを作成してこのワークスペースに追加します。',
+      usernameLabel: 'ユーザー名',
+      usernamePlaceholder: '2〜50文字',
+      emailLabel: 'メールアドレス',
+      emailPlaceholder: 'invitee{\'@\'}example.com',
+      passwordLabel: '初期パスワード',
+      passwordPlaceholder: '8〜32文字',
+      roleLabel: 'ロール',
+      submit: 'アカウントを作成',
+      success: 'アカウントを作成し、このワークスペースに追加しました。初期パスワードを本人に伝えてください。',
+      errors: {
+        usernameRequired: 'ユーザー名は必須です',
+        usernameLength: 'ユーザー名は2〜50文字で入力してください',
+        emailRequired: 'メールアドレスは必須です',
+        emailFormat: 'メールアドレスの形式が正しくありません',
+        passwordRequired: '初期パスワードは必須です',
+        passwordLength: 'パスワードは8〜32文字で入力してください',
+        roleRequired: 'ロールは必須です',
+        emailExists: 'このメールアドレスは既に登録されています。既存ユーザーを招待または追加してください。',
+        usernameExists: 'このユーザー名は既に使われています。',
+        invalidInput: '入力内容が正しくありません。ユーザー名・メールアドレス・ロールを確認してください。',
+        passwordPolicy: 'パスワードがポリシーを満たしていません（8〜32文字。複雑なパスワードが有効な場合は大文字・小文字・数字・記号が必要です）。',
+        forbidden: '現在のロールではこのロールのアカウントを作成できません。',
+        generic: '問題が発生しました。もう一度お試しください。'
+      }
+    },
     remove: {
       button: '削除',
       confirmBody: '{name}をこのワークスペースから削除してもよろしいですか？このユーザはすぐにアクセスできなくなります。',

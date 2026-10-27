@@ -692,6 +692,35 @@ export default {
       emailPlaceholder: 'invitee{\'@\'}example.com',
       roleLabel: '角色'
     },
+    create: {
+      button: '建立帳號',
+      dialogTitle: '建立新帳號',
+      description: '該電子信箱尚未註冊。填寫資訊即可建立帳號並加入目前空間。',
+      usernameLabel: '使用者名稱',
+      usernamePlaceholder: '2–50 個字元',
+      emailLabel: '電子信箱',
+      emailPlaceholder: 'invitee{\'@\'}example.com',
+      passwordLabel: '初始密碼',
+      passwordPlaceholder: '8–32 個字元',
+      roleLabel: '角色',
+      submit: '建立帳號',
+      success: '帳號已建立並加入目前工作區，請將初始密碼轉交對方。',
+      errors: {
+        usernameRequired: '請輸入使用者名稱',
+        usernameLength: '使用者名稱須為 2–50 個字元',
+        emailRequired: '請輸入電子信箱',
+        emailFormat: '電子信箱格式不正確',
+        passwordRequired: '請輸入初始密碼',
+        passwordLength: '密碼須為 8–32 個字元',
+        roleRequired: '請選擇角色',
+        emailExists: '電子信箱已註冊，可直接邀請/加入',
+        usernameExists: '使用者名稱已被使用',
+        invalidInput: '提交的參數不符規定，請檢查使用者名稱、電子信箱和角色',
+        passwordPolicy: '密碼不符要求（8–32 位；開啟複雜密碼時需包含大小寫字母、數字和特殊字元）',
+        forbidden: '目前角色無權建立該角色的帳號',
+        generic: '操作失敗，請稍後重試。'
+      }
+    },
     role: {
       owner: '所有者',
       admin: '管理員',

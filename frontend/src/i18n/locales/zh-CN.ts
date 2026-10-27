@@ -692,6 +692,35 @@ export default {
       emailPlaceholder: 'invitee{\'@\'}example.com',
       roleLabel: '角色'
     },
+    create: {
+      button: '新建账号',
+      dialogTitle: '创建新账号',
+      description: '该邮箱尚未注册。填写信息即可创建账号并加入当前空间。',
+      usernameLabel: '用户名',
+      usernamePlaceholder: '2–50 个字符',
+      emailLabel: '邮箱',
+      emailPlaceholder: 'invitee{\'@\'}example.com',
+      passwordLabel: '初始密码',
+      passwordPlaceholder: '8–32 个字符',
+      roleLabel: '角色',
+      submit: '创建账号',
+      success: '账号已创建并加入当前工作区，请将初始密码转交对方。',
+      errors: {
+        usernameRequired: '请输入用户名',
+        usernameLength: '用户名须为 2–50 个字符',
+        emailRequired: '请输入邮箱',
+        emailFormat: '邮箱格式不正确',
+        passwordRequired: '请输入初始密码',
+        passwordLength: '密码须为 8–32 个字符',
+        roleRequired: '请选择角色',
+        emailExists: '邮箱已注册，可直接邀请/添加',
+        usernameExists: '用户名已被占用',
+        invalidInput: '提交的参数不合规，请检查用户名、邮箱和角色',
+        passwordPolicy: '密码不符合要求（8–32 位；开启复杂密码时需包含大小写字母、数字和特殊字符）',
+        forbidden: '当前角色无权创建该角色的账号',
+        generic: '操作失败，请稍后重试。'
+      }
+    },
     role: {
       owner: '所有者',
       admin: '管理员',

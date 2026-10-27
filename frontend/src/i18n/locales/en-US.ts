@@ -8499,6 +8499,35 @@ export default {
       emailPlaceholder: 'invitee{\'@\'}example.com',
       roleLabel: 'Role'
     },
+    create: {
+      button: 'New account',
+      dialogTitle: 'Create account',
+      description: 'This email is not registered yet. Fill in the details to create an account and add it to this workspace.',
+      usernameLabel: 'Username',
+      usernamePlaceholder: '2–50 characters',
+      emailLabel: 'Email',
+      emailPlaceholder: 'invitee{\'@\'}example.com',
+      passwordLabel: 'Initial password',
+      passwordPlaceholder: '8–32 characters',
+      roleLabel: 'Role',
+      submit: 'Create account',
+      success: 'Account created and added to this workspace. Please give the initial password to the user.',
+      errors: {
+        usernameRequired: 'Username is required',
+        usernameLength: 'Username must be 2–50 characters',
+        emailRequired: 'Email is required',
+        emailFormat: 'Invalid email address',
+        passwordRequired: 'Initial password is required',
+        passwordLength: 'Password must be 8–32 characters',
+        roleRequired: 'Role is required',
+        emailExists: 'This email is already registered; invite or add the existing user instead.',
+        usernameExists: 'This username is already taken.',
+        invalidInput: 'Invalid input. Check the username, email, and role.',
+        passwordPolicy: 'Password does not meet the policy (8–32 characters; with complexity enabled it needs uppercase, lowercase, digit and special character).',
+        forbidden: 'Your role cannot create an account with this role.',
+        generic: 'Something went wrong. Please try again.'
+      }
+    },
     remove: {
       button: 'Remove',
       confirmBody: 'Are you sure you want to remove {name} from this workspace? They will lose access immediately.',

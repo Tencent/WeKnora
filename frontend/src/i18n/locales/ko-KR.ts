@@ -692,6 +692,35 @@ export default {
       emailPlaceholder: 'invitee{\'@\'}example.com',
       roleLabel: '역할'
     },
+    create: {
+      button: '계정 생성',
+      dialogTitle: '새 계정 만들기',
+      description: '이 이메일은 아직 등록되지 않았습니다. 정보를 입력하면 계정을 만들고 이 워크스페이스에 추가합니다.',
+      usernameLabel: '사용자 이름',
+      usernamePlaceholder: '2~50자',
+      emailLabel: '이메일',
+      emailPlaceholder: 'invitee{\'@\'}example.com',
+      passwordLabel: '초기 비밀번호',
+      passwordPlaceholder: '8~32자',
+      roleLabel: '역할',
+      submit: '계정 생성',
+      success: '계정을 만들고 이 워크스페이스에 추가했습니다. 초기 비밀번호를 본인에게 전달하세요.',
+      errors: {
+        usernameRequired: '사용자 이름을 입력하세요',
+        usernameLength: '사용자 이름은 2~50자여야 합니다',
+        emailRequired: '이메일을 입력하세요',
+        emailFormat: '올바른 이메일 형식이 아닙니다',
+        passwordRequired: '초기 비밀번호를 입력하세요',
+        passwordLength: '비밀번호는 8~32자여야 합니다',
+        roleRequired: '역할을 선택하세요',
+        emailExists: '이미 등록된 이메일입니다. 기존 사용자를 초대하거나 추가하세요.',
+        usernameExists: '이미 사용 중인 사용자 이름입니다.',
+        invalidInput: '입력값이 올바르지 않습니다. 사용자 이름, 이메일, 역할을 확인하세요.',
+        passwordPolicy: '비밀번호가 정책을 충족하지 않습니다(8~32자, 복잡한 비밀번호 사용 시 대문자·소문자·숫자·특수문자 필요).',
+        forbidden: '현재 역할로는 이 역할의 계정을 만들 수 없습니다.',
+        generic: '오류가 발생했습니다. 다시 시도해 주세요.'
+      }
+    },
     role: {
       owner: '소유자',
       admin: '관리자',
