@@ -47,6 +47,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
@@ -216,7 +217,9 @@ func (c *DockerRemoteClient) Provider() RemoteProvider { return SandboxTypeDocke
 // refresh: idle reclamation is WeKnora's own sweep, not a provider feature.
 // SupportsVolumes is false until the volume-mount surface is mapped onto
 // Docker named volumes; advertising it early would let a workspace configure
-// a mount that silently never appears.
+// a mount that silently never appears. SupportsDesktop stays false: the
+// desktop needs a way to reach the container's websockify port, which this
+// backend has no gateway for yet.
 func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{
 		SupportsReconnect:             true,
@@ -230,6 +233,8 @@ func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// filesystem-only (no memory) and lives on this daemon.
 		SupportsSnapshots: true,
 		SupportsVolumes:   false,
+		// The terminal is a hijacked TTY exec; see docker_terminal.go.
+		SupportsTerminals: true,
 	}
 }
 
@@ -721,6 +726,19 @@ func (c *DockerRemoteClient) Exec(
 	return result, nil
 }
 
+// dockerKeepAliveTimeout bounds the no-op exec KeepAlive runs.
+const dockerKeepAliveTimeout = 10 * time.Second
+
+// KeepAlive runs a no-op exec. dockerExecCommand touches the activity marker on
+// every exec, and the marker's mtime is all the idle sweeper reads, so ttl is
+// not needed here.
+func (c *DockerRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, _ time.Duration) error {
+	_, err := c.Exec(ctx, handle, RemoteExecRequest{
+		Command: "true", Timeout: dockerKeepAliveTimeout, User: DefaultSandboxExecUser,
+	})
+	return err
+}
+
 // dockerExecGrace is the slack between the in-container timeout and the
 // client-side deadline. It covers the round-trip and the wrapper's own
 // teardown so a script killed at the deadline is still reported as Killed
@@ -1031,13 +1049,30 @@ func (c *DockerRemoteClient) dockerFileOpFailed(
 	}
 }
 
-// containerVanished reports whether the Engine confirms the container is
-// gone (404). A transport or daemon error returns false — only a confirmed
-// disappearance may reclassify, keeping unknown errors on the safe side of
-// CanReplaceRemoteBinding's allow-list.
+// containerVanished reports whether the Engine confirms the container can no
+// longer run this filesystem op. A 404 means the idle sweep already removed
+// it. exited, dead, and removing mean the sweep stopped it and has not
+// finished deleting it yet: exec then dies with a non-zero status while
+// inspect still succeeds, which used to stay InvalidRequest and block the
+// rebind (#4336). A transport or daemon error returns false — only a
+// confirmed disappearance may reclassify, keeping unknown errors on the safe
+// side of CanReplaceRemoteBinding's allow-list. paused and created stay
+// put so a container that can be resumed is not replaced.
 func (c *DockerRemoteClient) containerVanished(ctx context.Context, id, op string) bool {
-	_, err := c.api.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
-	return err != nil && IsRemoteNotFound(dockerError(op, err))
+	inspected, err := c.api.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return IsRemoteNotFound(dockerError(op, err))
+	}
+	state := inspected.Container.State
+	if state == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(string(state.Status))) {
+	case "exited", "dead", "removing":
+		return true
+	default:
+		return false
+	}
 }
 
 // MakeDir creates a directory (and its parents) inside the sandbox.
@@ -1317,12 +1352,18 @@ func dockerEnvSlice(env map[string]string) []string {
 }
 
 // firstNonEmptyLine trims a command's stderr down to something a user-facing
-// error can carry.
+// error can carry. The byte cap keeps one runaway line out of the error, and
+// the trailing partial rune (if the cap lands inside a multi-byte character)
+// is dropped so the surfaced message stays valid UTF-8.
 func firstNonEmptyLine(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			if len(trimmed) > 200 {
-				return trimmed[:200] + "…"
+				cut := trimmed[:200]
+				for len(cut) > 0 && !utf8.ValidString(cut) {
+					cut = cut[:len(cut)-1]
+				}
+				return cut + "…"
 			}
 			return trimmed
 		}

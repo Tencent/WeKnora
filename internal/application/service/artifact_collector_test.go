@@ -164,10 +164,18 @@ type fakeCatalog struct {
 	releaseRemaining map[string]int64
 	releaseErr       error
 	releases         []string
+	ownerRefs        map[string][]string
+	listErr          error
 }
 
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
 	return "", nil
+}
+
+// ReuseByContentHash stays a miss: these tests exercise binding and release, not
+// payload sharing, so the write path must keep running exactly as before.
+func (c *fakeCatalog) ReuseByContentHash(context.Context, uint64, string) (string, bool, error) {
+	return "", false, nil
 }
 
 func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
@@ -194,6 +202,19 @@ func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string)
 	}
 	return -1, nil
 }
+
+func (c *fakeCatalog) ListReferencesByOwner(_ context.Context, _ string, ownerIDs ...string) ([]string, error) {
+	if c.listErr != nil {
+		return nil, c.listErr
+	}
+	var out []string
+	for _, id := range ownerIDs {
+		out = append(out, c.ownerRefs[id]...)
+	}
+	return out, nil
+}
+
+var _ interfaces.ResourceCatalog = (*fakeCatalog)(nil)
 
 func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "", nil

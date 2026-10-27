@@ -21,10 +21,11 @@ const failures = [];
 for (const entry of await readdir(root)) {
   if (!['index.html', '404.html', 'docs'].includes(entry)) failures.push(`/${entry}: only index.html, 404.html and docs/ may sit at the site root`);
 }
-// Screenshot.vue renders a labelled placeholder until the image is added, so a
-// missing docs screenshot is reported as pending instead of failing the build.
+// Missing screenshots may use labelled placeholders; existing images must
+// reserve their intrinsic dimensions before loading to keep anchors stable.
 const pendingShots = new Set();
 const checked = new Map();
+const targetIds = new Map();
 const pages = await walk(root);
 for (const file of pages) {
   const html = await readFile(file, 'utf8');
@@ -42,13 +43,28 @@ for (const file of pages) {
         if (/class="wk-shot-img"/.test(tag) && url.pathname.startsWith('/docs/screenshots/')) pendingShots.add(url.pathname);
         else failures.push(`${route}: missing ${url.pathname}`);
       }
+      if (tag.startsWith('<img') && /class="wk-shot-img"/.test(tag)) {
+        if (!/\bwidth="[1-9]\d*"/.test(tag) || !/\bheight="[1-9]\d*"/.test(tag) || /display:\s*none/.test(tag)) {
+          failures.push(`${route}: screenshot ${url.pathname} must reserve its intrinsic size before loading`);
+        }
+      }
+      if (tag.startsWith('<a') && url.hash && checked.get(url.pathname)) {
+        const target = (await resolveSiteFile(root, url.pathname))?.path;
+        if (target?.endsWith('.html')) {
+          if (!targetIds.has(target)) {
+            const content = await readFile(target, 'utf8');
+            targetIds.set(target, new Set([...content.matchAll(/\bid="([^"]+)"/g)].map(match => match[1].replaceAll('&amp;', '&'))));
+          }
+          if (!targetIds.get(target).has(decodeURIComponent(url.hash.slice(1)))) failures.push(`${route}: missing anchor ${url.pathname}${url.hash}`);
+        }
+      }
       if (url.pathname === '/' && tag.startsWith('<a') && /target="_blank"/.test(tag)) failures.push(`${route}: homepage link opens a new tab`);
     }
   }
   if (/11\.141\.160\.83/.test(html)) failures.push(`${route}: stale private docs host`);
   if (route.startsWith('/docs/') && !route.endsWith('/404.html') && !/class="wk-brand"[^>]*href="\/"[^>]*target="_self"/.test(html)) failures.push(`${route}: documentation logo must navigate to the main site`);
 }
-for (const path of ['/docs/', '/docs/03-features/22-skills-sandbox.html', '/docs/03-features/23-memory.html', '/docs/07-releases/v0.8.2.html', '/docs/07-releases/v0.8.0.html']) assert.ok(await resolveSiteFile(root, path), path);
+for (const path of ['/docs/', '/docs/03-features/22-skills-sandbox.html', '/docs/03-features/23-memory.html', '/docs/07-releases/v0.8.3.html', '/docs/07-releases/v0.8.2.html', '/docs/07-releases/v0.8.0.html']) assert.ok(await resolveSiteFile(root, path), path);
 assert.equal(failures.length, 0, [...new Set(failures)].join('\n'));
 if (pendingShots.size) console.warn(`Screenshots still pending (placeholder shown): ${[...pendingShots].sort().join(', ')}`);
-console.log(`Unified site check passed: ${pages.length} pages, ${checked.size} local routes/assets, same-tab homepage links and documentation logos.`);
+console.log(`Unified site check passed: ${pages.length} pages, ${checked.size} local routes/assets, fragment targets, screenshot dimensions, same-tab homepage links and documentation logos.`);

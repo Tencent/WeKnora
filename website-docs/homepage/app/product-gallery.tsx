@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon } from "./ui";
 import { homeAssets } from "../../shared/header";
 import s from "./home.module.css";
@@ -11,7 +11,7 @@ export type GallerySlide = {
   name: string;
   icon: string;
   title: string;
-  description: string;
+  description: ReactNode;
   /** One screenshot, or several views of the same capability switched inside the figure. */
   shots: GalleryShot[];
   link?: string;
@@ -25,8 +25,8 @@ export type GallerySlide = {
 const STEP_MS = 4000;
 const AUTO_ROUNDS = 2;
 
-/** A feature list beside one large screenshot; the list doubles as the navigation. */
-export function ProductGallery({ id, label, slides }: { id: string; label: string; slides: GallerySlide[] }) {
+/** Feature descriptions beside a shared screenshot; each item switches its corresponding view. */
+export function ProductGallery({ id, label, slides, layout = "sidebar" }: { id: string; label: string; slides: GallerySlide[]; layout?: "sidebar" | "compact" }) {
   const root = useRef<HTMLDivElement>(null);
   const [item, setItem] = useState(0);
   const [shot, setShot] = useState(0);
@@ -71,7 +71,7 @@ export function ProductGallery({ id, label, slides }: { id: string; label: strin
     setShot(view);
   }
 
-  return <div id={id} ref={root} className={s.showcase} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
+  return <div id={id} ref={root} className={`${s.showcase} ${layout === "compact" ? s.showcaseCompact : ""}`} data-layout={layout} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
     <div className={s.showcaseList} aria-label={`${label} 功能`}>
       {slides.map((slide, index) => <div key={slide.name} className={s.showcaseItem} data-active={index === item} onClick={() => { if (index !== item) selectItem(index); }}>
         <h3><button type="button" aria-pressed={index === item} onClick={event => { event.stopPropagation(); selectItem(index); }}>

@@ -21,8 +21,9 @@ import (
 
 // fakeMinerUV1 is a minimal in-memory MinerU 4.0 api-server.
 type fakeMinerUV1 struct {
-	t      *testing.T
-	apiKey string
+	t          *testing.T
+	apiKey     string
+	authHealth bool
 
 	mu            sync.Mutex
 	uploadURL     string // absolute or relative; defaults to same-origin relative path
@@ -58,7 +59,13 @@ func (f *fakeMinerUV1) handler() http.Handler {
 		}
 	}
 
-	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
+		if f.authHealth && f.apiKey != "" && r.Header.Get("Authorization") != "Bearer "+f.apiKey {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"error": map[string]string{"message": "bad key", "type": "auth_error", "code": "invalid_api_key"},
+			})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": "1.0.0"})
 	})
 	mux.HandleFunc("POST /v1/uploads", authed(func(w http.ResponseWriter, r *http.Request) {
@@ -318,13 +325,41 @@ func TestMinerUV1ClientAPIErrorMessage(t *testing.T) {
 func TestDetectMinerUProtocol(t *testing.T) {
 	allowLoopbackSSRF(t)
 	tests := []struct {
-		name    string
-		status  int
-		body    string
-		want    minerUProtocol
-		wantErr string
+		name       string
+		apiKey     string
+		requireKey string
+		status     int
+		body       string
+		want       minerUProtocol
+		wantErr    string
 	}{
 		{name: "v1 healthy", status: 200, body: `{"status":"ok","version":"1.0.0"}`, want: minerUProtocolV1},
+		{
+			name:       "v1 healthy behind gateway with api key",
+			apiKey:     "test-key",
+			requireKey: "test-key",
+			status:     200,
+			body:       `{"status":"ok"}`,
+			want:       minerUProtocolV1,
+		},
+		{
+			name:       "v1 behind gateway missing api key",
+			requireKey: "test-key",
+			status:     401,
+			body: `{"error":{"message":"Authentication Error, No api key passed in.",` +
+				`"type":"auth_error","code":"401"}}`,
+			want:    minerUProtocolV1,
+			wantErr: "requires authentication, please configure API key",
+		},
+		{
+			name:       "v1 behind gateway invalid api key",
+			apiKey:     "bad-key",
+			requireKey: "test-key",
+			status:     401,
+			body:       `{"error":{"message":"Invalid API key","type":"auth_error","code":"401"}}`,
+			want:       minerUProtocolV1,
+			wantErr:    "401: Invalid API key",
+		},
 		{name: "legacy 404", status: 404, body: `{"detail":"Not Found"}`, want: minerUProtocolLegacy},
 		{name: "legacy 405", status: 405, body: ``, want: minerUProtocolLegacy},
 		{
@@ -341,12 +376,23 @@ func TestDetectMinerUProtocol(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/v1/health", r.URL.Path)
+				if tt.requireKey != "" {
+					auth := r.Header.Get("Authorization")
+					if auth != "Bearer "+tt.requireKey {
+						w.WriteHeader(http.StatusUnauthorized)
+						if tt.body != "" {
+							_, _ = w.Write([]byte(tt.body))
+						}
+						return
+					}
+				}
 				w.WriteHeader(tt.status)
 				_, _ = w.Write([]byte(tt.body))
 			}))
 			defer server.Close()
 
-			got, err := detectMinerUProtocol(context.Background(), http.DefaultClient, server.URL)
+			got, err := detectMinerUProtocol(
+				context.Background(), http.DefaultClient, server.URL, tt.apiKey)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -410,6 +456,18 @@ func TestPingMinerUV1(t *testing.T) {
 	ok, msg = PingMinerU(server.URL, "")
 	assert.False(t, ok)
 	assert.Contains(t, msg, "配置 API Key")
+
+	// Gateway requiring authentication on /v1/health
+	gwFake := &fakeMinerUV1{t: t, apiKey: "server-key", authHealth: true}
+	gwServer := httptest.NewServer(gwFake.handler())
+	defer gwServer.Close()
+
+	ok, msg = PingMinerU(gwServer.URL, "server-key")
+	assert.True(t, ok, msg)
+
+	ok, msg = PingMinerU(gwServer.URL, "wrong")
+	assert.False(t, ok)
+	assert.Contains(t, msg, "401")
 
 	open := &fakeMinerUV1{t: t}
 	openServer := httptest.NewServer(open.handler())

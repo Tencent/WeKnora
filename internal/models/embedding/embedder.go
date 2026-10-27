@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -56,12 +57,8 @@ type ImageEmbedder interface {
 	BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error)
 }
 
-// ImageLimits describes what one image may be. Zero values mean the vendor
-// documents no limit.
-type ImageLimits struct {
-	MaxBytes  int
-	MIMETypes []string
-}
+// ImageLimits describes what one image may be; see imageprep.Limits.
+type ImageLimits = imageprep.Limits
 
 // AsImageEmbedder returns e's image side when its model accepts images.
 func AsImageEmbedder(e Embedder) (ImageEmbedder, bool) {

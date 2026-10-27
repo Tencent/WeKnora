@@ -1,7 +1,18 @@
 # Build extension and daemon from the same pinned source on the runtime architecture.
 FROM --platform=$TARGETPLATFORM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS browserskill
 WORKDIR /build
-RUN apt-get update && \
+# Use the same optional Debian mirror as the Go builder and runtime stages.
+ARG APK_MIRROR_ARG
+# This base image has no CA certificates. Install them from the original HTTP
+# Debian source before swapping in a mirror: mirrors.tencent.com redirects
+# apt to HTTPS, and that handshake fails without a trust store.
+RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        apt-get update && \
+        apt-get install -y --no-install-recommends ca-certificates && \
+        rm -rf /var/lib/apt/lists/* && \
+        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
     apt-get install -y --no-install-recommends git python3 ca-certificates curl build-essential cmake pkg-config && \
     rm -rf /var/lib/apt/lists/*
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
@@ -75,8 +86,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         ./scripts/build-anydoc-lib.sh; \
     fi
 
-# Build the application with version info
+# Build the application with version info. Mount the Go build cache as well as
+# the module cache: `COPY . .` invalidates this layer on every source change,
+# and without the mount each rebuild regenerates the whole compile cache inside
+# the layer (~2.7 GB), which occupies disk locally and is uploaded to the CI
+# layer cache. Mounted, the cache lives outside the layer and repeated builds
+# reuse compiled objects instead of recompiling from scratch.
 RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     if [ "$WITH_ANYDOC" = "1" ]; then \
         make build-prod GO_BUILD_TAGS=anydoc; \
     else \
@@ -115,7 +132,7 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
         nodejs npm \
         gosu \
-        ffmpeg && \
+        ffmpeg qpdf && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
     mkdir -p /home/appuser/.local/bin && \
     curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/home/appuser/.cargo UV_INSTALL_DIR=/home/appuser/.local/bin sh && \

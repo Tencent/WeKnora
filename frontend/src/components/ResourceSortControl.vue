@@ -4,10 +4,7 @@
     <template #content>
       <div class="resource-sort-panel" role="menu" :aria-label="t('resourceSort.title')">
         <section v-for="group in groups" :key="group.key" class="resource-sort-group">
-          <div class="resource-sort-group__heading">
-            <div class="resource-sort-group__label">{{ group.label }}</div>
-            <div class="resource-sort-group__description">{{ group.description }}</div>
-          </div>
+          <div class="resource-sort-group__label" :title="group.description">{{ group.label }}</div>
           <div class="resource-sort-group__options">
             <button v-for="option in group.options" :key="option.value" type="button"
               class="resource-sort-option" :class="{ active: modelValue === option.value }"
@@ -85,23 +82,21 @@ function selectOption(value: ResourceSortValue) {
   justify-content: center;
   gap: 5px;
   max-width: 180px;
-  height: 28px;
-  padding: 0 8px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-sm);
-  background: var(--td-bg-color-secondarycontainer);
+  background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: var(--app-text-sm);
+  font-size: var(--app-text-md);
   cursor: pointer;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
   transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
 
   &:hover,
   &.active {
-    color: var(--td-brand-color);
-    border-color: color-mix(in srgb, var(--td-brand-color) 38%, var(--td-component-stroke));
-    background: var(--td-brand-color-light);
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container-hover);
   }
 
   &__label {
@@ -122,41 +117,31 @@ function selectOption(value: ResourceSortValue) {
 }
 
 .resource-sort-panel {
-  width: 330px;
+  width: 260px;
   max-width: calc(100vw - 32px);
-  padding: 6px;
+  padding: 4px;
   box-sizing: border-box;
   color: var(--td-text-color-primary);
 }
 
 .resource-sort-group {
-  padding: 7px 6px 8px;
-
   & + & {
+    margin-top: 4px;
+    padding-top: 4px;
     border-top: 1px solid var(--td-component-stroke);
   }
 
-  &__heading {
-    padding: 0 4px 6px;
-  }
-
   &__label {
-    font-size: var(--app-text-md);
-    line-height: 20px;
-    font-weight: 600;
-  }
-
-  &__description {
-    margin-top: 1px;
-    color: var(--td-text-color-secondary);
+    padding: 6px 8px 2px;
+    color: var(--td-text-color-placeholder);
     font-size: var(--app-text-xs);
-    line-height: 17px;
+    line-height: 18px;
   }
 
   &__options {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px;
+    gap: 2px;
   }
 }
 
@@ -166,7 +151,7 @@ function selectOption(value: ResourceSortValue) {
   justify-content: space-between;
   min-width: 0;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--app-radius-sm);
   background: transparent;
@@ -176,11 +161,10 @@ function selectOption(value: ResourceSortValue) {
   cursor: pointer;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer);
+    background: var(--td-bg-color-container-hover);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
     color: var(--td-brand-color);
     font-weight: 500;
   }

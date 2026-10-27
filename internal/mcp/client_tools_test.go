@@ -65,10 +65,13 @@ func TestRawToolsPaginationErrorsAndCancellation(t *testing.T) {
 				},
 			}
 			c := &mcpGoClient{client: client.NewClient(tpt)}
+			c.toolSchemas = map[string]json.RawMessage{"previous": json.RawMessage(`{"type":"object"}`)}
 			c.initialized.Store(true)
 			tools, err := c.ListTools(context.Background())
 			require.Error(t, err)
 			require.Nil(t, tools, "never publish a partial directory")
+			require.Contains(t, c.toolSchemas, "previous", "a failed refresh keeps the last complete header schema")
+			require.NotContains(t, c.toolSchemas, "first", "partial pages must not become call metadata")
 			require.Equal(t, 2, calls)
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()

@@ -142,7 +142,11 @@ func (c *Client) planThinking(opts *api.Options) thinkingPlan {
 	}
 	if !level.Enabled() {
 		if levels.Supports(api.ReasoningOff) && s.ThinkingMode == api.AnthropicThinkingAdaptive {
-			return thinkingPlan{body: map[string]any{"type": "disabled"}}
+			offType := s.ThinkingOffType
+			if offType == "" {
+				offType = "disabled"
+			}
+			return thinkingPlan{body: map[string]any{"type": offType}}
 		}
 		// Budget mode: omitting the thinking object disables it.
 		return thinkingPlan{}
@@ -150,7 +154,10 @@ func (c *Client) planThinking(opts *api.Options) thinkingPlan {
 	plan := thinkingPlan{enabled: true}
 	switch s.ThinkingMode {
 	case api.AnthropicThinkingAdaptive:
-		plan.body = map[string]any{"type": "adaptive"}
+		// Opus 4.7 and later default to display "omitted", which returns
+		// thinking blocks with empty text; ask for the summary so the
+		// reasoning stream has something to show.
+		plan.body = map[string]any{"type": "adaptive", "display": "summarized"}
 		if level.Graded() && s.SupportsEffort {
 			plan.effort = levels.Value(level)
 		}
@@ -274,6 +281,12 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 		// marshal to null and the API answers 400. A request whose only
 		// entries were system messages legitimately produces no turns.
 		converted = []message{}
+	}
+	// Anthropic has no in-sequence instruction role. Keep the marked runtime
+	// notice in a trailing input turn, after the existing cache breakpoint;
+	// never move transient recovery text into the stable system prefix.
+	if opts != nil && opts.RuntimeNotice != "" {
+		converted = append(converted, message{Role: "user", Content: opts.RuntimeNotice})
 	}
 	body["messages"] = converted
 
@@ -517,7 +530,7 @@ func mapStopReason(reason string, toolCalls int, incomplete bool) string {
 	switch {
 	case incomplete, reason == "":
 		return types.FinishReasonIncomplete
-	case reason == "max_tokens":
+	case reason == "max_tokens", reason == "model_context_window_exceeded":
 		return "length"
 	case reason == "tool_use" || (toolCalls > 0 && reason == "end_turn"):
 		return "tool_calls"

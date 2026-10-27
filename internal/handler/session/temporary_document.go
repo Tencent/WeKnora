@@ -95,7 +95,7 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": document})
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "data": document.ForClient()})
 }
 
 func (h *Handler) ListTemporaryDocuments(c *gin.Context) {
@@ -109,6 +109,9 @@ func (h *Handler) ListTemporaryDocuments(c *gin.Context) {
 	if err != nil {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
+	}
+	for i := range documents {
+		documents[i] = documents[i].ForClient()
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": documents})
 }
@@ -129,7 +132,7 @@ func (h *Handler) GetTemporaryDocument(c *gin.Context) {
 		c.Error(apperrors.NewNotFoundError("Attachment not found"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": document})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": document.ForClient()})
 }
 
 func (h *Handler) PreviewTemporaryDocument(c *gin.Context) {

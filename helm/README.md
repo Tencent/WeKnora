@@ -101,7 +101,9 @@ helm install weknora ./helm \
 
 ### Production Installation
 
-For production, use a values file:
+For production with the default local file storage, use a single App replica and
+an update strategy that releases the old Pod's volume before starting its
+replacement:
 
 ```yaml
 # values-production.yaml
@@ -109,7 +111,9 @@ global:
   storageClass: "fast-ssd"
 
 app:
-  replicaCount: 3
+  replicaCount: 1
+  strategy:
+    type: Recreate
   resources:
     requests:
       cpu: 500m
@@ -140,7 +144,127 @@ helm install weknora ./helm \
   -f values-production.yaml
 ```
 
+The chart-created data-files PVC uses `ReadWriteOnce` (RWO). RWO allows several
+Pods to mount the volume on the same node; it does not provide shared writable
+access across nodes. When `app.strategy.type` is omitted, the chart detects this
+single-writer storage and defaults to `Recreate`, which terminates the old Pods
+before starting replacements. **App upgrades have downtime**; volume
+detach/attach can still take time. This strategy does not make RWO storage
+suitable for multiple App replicas across nodes. See Kubernetes documentation on
+[access modes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes)
+and [Deployment strategies](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy).
+
+For multiple App replicas using local storage, first provision and verify a
+shared filesystem PVC that supports `ReadWriteMany` (RWX) on the intended nodes.
+Apply the following override together with `values-production.yaml`:
+
+```yaml
+# values-shared-storage.yaml
+app:
+  replicaCount: 3
+  strategy:
+    type: RollingUpdate
+
+dataFiles:
+  persistence:
+    enabled: true
+    existingClaim: weknora-shared-files  # Pre-provisioned, verified RWX PVC
+```
+
+```bash
+helm install weknora ./helm \
+  --namespace weknora \
+  --create-namespace \
+  -f values-production.yaml \
+  -f values-shared-storage.yaml
+```
+
+The existing claim must be in the release namespace and allow the App containers
+to read and write `/data/files`. The chart references it without creating or
+validating its access mode. All App replicas must see the same files; disabling
+persistence or assigning independent local volumes does not provide shared
+storage. This override addresses App file storage only, not high availability
+for the chart's database or other components. Object storage is another option
+only after configuring the provider and checking that all paths needed by your
+deployment are accessible to every replica.
+
+### Mounting Extra Volumes into the App Pod
+
+The chart mounts a single `data-files` volume by default. Use
+`app.extraVolumes` and `app.extraVolumeMounts` to attach additional ConfigMaps,
+Secrets, PVCs, `emptyDir` or any other volume type to the backend container —
+for example a CA bundle, a config file, or a credentials Secret:
+
+```yaml
+app:
+  extraVolumes:
+    - name: ca-bundle
+      configMap:
+        name: my-ca-bundle
+    - name: credentials
+      secret:
+        secretName: my-credentials
+  extraVolumeMounts:
+    - name: ca-bundle
+      mountPath: /etc/ssl/certs/custom
+      readOnly: true
+    - name: credentials
+      mountPath: /etc/credentials
+      readOnly: true
+```
+
+Both lists are rendered verbatim, so any field Kubernetes accepts in
+`spec.template.spec.volumes` and in a container's `volumeMounts` may be used.
+
+**Requirements and caveats:**
+
+- The referenced ConfigMap, Secret or PVC must already exist in the namespace.
+  The chart does not create them.
+- Each `name` in `extraVolumeMounts` must match a `name` in `extraVolumes`;
+  otherwise the API server rejects the Pod.
+- `dataFiles.persistence.enabled` still governs only the built-in `data-files`
+  volume. Extra volumes are unaffected by it.
+- Verify the rendering before applying:
+  `helm template weknora ./helm -f values-production.yaml | grep -A5 extraVolume`
+
 ## Configuration
+
+### Service names
+
+Optional Service name overrides preserve the following defaults:
+
+| Parameter | Default when omitted or empty |
+|-----------|-------------------------------|
+| `app.service.name` | `app` |
+| `frontend.service.name` | `frontend` |
+| `postgresql.service.name` | `postgres` |
+| `redis.service.name` | `redis` |
+| `docreader.service.name` | `docreader` |
+| `neo4j.service.name` | `neo4j` (when enabled) |
+
+For example, save this as `service-names.yaml`:
+
+```yaml
+app:        {service: {name: weknora-app}}
+frontend:   {service: {name: weknora-frontend}}
+postgresql: {service: {name: weknora-postgres}}
+redis:      {service: {name: weknora-redis}}
+docreader:  {service: {name: weknora-docreader}}
+neo4j:      {service: {name: weknora-neo4j}}
+```
+
+Pass `-f service-names.yaml` alongside your other values. Names must be valid
+Kubernetes Service names. Services, backend addresses, Ingress and installation
+notes use these names consistently. Frontend's `APP_HOST` follows the App Service
+unless `frontend.appHost` is explicitly set.
+
+For multiple releases in one namespace, use distinct names for every enabled
+Service (for example, `alpha-app` and `beta-app`). Defaults are not release-prefixed
+and still collide. Configure separate Ingress hosts when needed.
+
+Omitted or empty overrides preserve Service names on upgrade. Changing a name on
+an existing installation requires a DNS/consumer cutover plan; matching a
+pre-existing Service name does not automatically transfer its ownership to Helm.
 
 ### Global Parameters
 
@@ -166,11 +290,24 @@ helm install weknora ./helm \
 |-----------|-------------|---------|
 | `app.enabled` | Enable backend | `true` |
 | `app.replicaCount` | Number of replicas | `1` |
+| `app.strategy.type` | App update strategy: `RollingUpdate` or `Recreate`; empty selects `Recreate` for persistent non-RWX data-files storage and `RollingUpdate` otherwise | `""` |
+| `app.strategy.rollingUpdate.maxSurge` | Extra Pods during rolling updates (integer or percentage); ignored with `Recreate` | `1` |
+| `app.strategy.rollingUpdate.maxUnavailable` | Unavailable Pods during rolling updates (integer or percentage); ignored with `Recreate` | `0` |
 | `app.image.repository` | Image repository | `wechatopenai/weknora-app` |
 | `app.image.tag` | Image tag | `""` (uses appVersion) |
 | `app.resources` | Resource limits | See values.yaml |
 | `app.env` | Environment variables | See values.yaml |
 | `app.extraEnv` | Additional env vars | `[]` |
+| `app.extraVolumes` | Additional Pod volumes (rendered verbatim into `spec.template.spec.volumes`) | `[]` |
+| `app.extraVolumeMounts` | Additional volume mounts for the app container (names must match `extraVolumes`) | `[]` |
+
+### Data Files Storage
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `dataFiles.persistence.enabled` | Create or mount persistent uploaded-file storage | `true` |
+| `dataFiles.persistence.accessModes` | Access modes for a chart-created data-files PVC; `ReadWriteMany` permits rolling App updates | `[ReadWriteOnce]` |
+| `dataFiles.persistence.existingClaim` | Use a pre-provisioned PVC instead of creating one | `""` |
 
 ### Frontend
 

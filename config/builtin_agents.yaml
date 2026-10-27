@@ -79,6 +79,7 @@ builtin_agents:
         - "read_document"
         - "list_documents"
         - "query_knowledge_graph"
+        - "ask_user"
       web_search_enabled: true
       web_search_max_results: 5
       reflection_enabled: false
@@ -126,6 +127,7 @@ builtin_agents:
       allowed_tools:
         - "data_schema"
         - "data_analysis"
+        - "ask_user"
       web_search_enabled: false
       web_search_max_results: 0
       reflection_enabled: true
@@ -270,3 +272,66 @@ builtin_agents:
       reflection_enabled: false
       multi_turn_enabled: true
 
+
+  - id: "builtin-weknora-assistant"
+    avatar: "🧭"
+    is_builtin: true
+    i18n:
+      default:
+        name: "WeKnora Assistant"
+        description: "Answers how WeKnora works and manages your workspace: document parsing, knowledge base activity, Wiki health and repairs"
+      zh-CN:
+        name: "WeKnora 助手"
+        description: "解答 WeKnora 用法，查看和管理你的空间：文档解析、知识库动态、Wiki 健康与修订"
+      zh-TW:
+        name: "WeKnora 助手"
+        description: "解答 WeKnora 用法，檢視和管理你的空間：文件解析、知識庫動態、Wiki 健康與修訂"
+      ja-JP:
+        name: "WeKnora アシスタント"
+        description: "WeKnora の使い方に答え、ワークスペースを確認・管理：ドキュメント解析、ナレッジベースの履歴、Wiki の健全性と修正"
+      ko-KR:
+        name: "WeKnora 어시스턴트"
+        description: "WeKnora 사용법 안내와 워크스페이스 확인 및 관리: 문서 파싱, 지식 베이스 활동, Wiki 상태 점검과 수정"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "custom"
+      system_prompt_id: "weknora_assistant"
+      temperature: 0.3
+      max_completion_tokens: 24576
+      max_iterations: -1
+      # The workspace assistant can read the caller's accessible bases. Explicit
+      # mentions still narrow a turn; the current page is only contextual data.
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      retain_retrieval_history: true
+      # find_operations / run_operation and search_weknora_docs /
+      # read_weknora_doc are not listed: they are granted to this agent by ID
+      # at run time (types.GrantsOperationCatalog, types.GrantsProductDocs) and
+      # can never be selected on a tenant-editable agent.
+      allowed_tools:
+        - "ask_user"
+        - "todo_write"
+        - "search_knowledge"
+        - "read_document"
+        - "list_documents"
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_write_page"
+        - "wiki_replace_text"
+        - "wiki_rename_page"
+        - "wiki_delete_page"
+        - "wiki_flag_issue"
+        - "wiki_read_issue"
+        - "wiki_update_issue"
+      # web_search / web_fetch let it find a skill's or MCP service's source
+      # from a description. They follow this switch rather than allowed_tools,
+      # and web_search still needs a provider configured in the workspace.
+      web_search_enabled: true
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3

@@ -363,6 +363,16 @@
         }
       },
       {
+        "id": "tongyi-embedding-vision-flash",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
+        }
+      },
+      {
         "match": "tongyi-embedding-vision-flash",
         "type": "Embedding",
         "compat": {
@@ -384,6 +394,17 @@
         }
       },
       {
+        "id": "qwen3-vl-embedding",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 20,
+          "max_image_batch_size": 10,
+          "max_image_bytes": 10000000
+        }
+      },
+      {
         "match": "qwen3-vl-embedding*",
         "type": "Embedding",
         "compat": {
@@ -395,6 +416,17 @@
         }
       },
       {
+        "id": "qwen2.5-vl-embedding",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 1,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 5000000
+        }
+      },
+      {
         "match": "qwen2.5-vl-embedding*",
         "type": "Embedding",
         "compat": {
@@ -403,6 +435,17 @@
           "max_batch_size": 1,
           "max_image_batch_size": 1,
           "max_image_bytes": 5000000
+        }
+      },
+      {
+        "id": "multimodal-embedding-v1",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "",
+          "max_batch_size": 20,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -438,6 +481,8 @@
         "id": "claude-fable-5-1",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -452,9 +497,67 @@
         }
       },
       {
+        "id": "claude-opus-5-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-sonnet-5-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true,
+          "thinking_off_type": "between_tools"
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
         "id": "claude-opus-5",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -471,6 +574,8 @@
         "id": "claude-sonnet-5",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -487,6 +592,8 @@
         "id": "claude-fable-5",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -504,6 +611,8 @@
         "id": "claude-opus-4-8",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -520,6 +629,8 @@
         "id": "claude-opus-4-7",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -926,6 +1037,57 @@
           "minimal": "low",
           "xhigh": "high",
           "max": "high"
+        }
+      },
+      {
+        "match": "*qwen3-vl-embedding*",
+        "type": "Embedding",
+        "compat": {
+          "text_as_messages": true,
+          "batch_messages": true,
+          "max_image_batch_size": 5,
+          "extra_body": {
+            "add_special_tokens": true
+          }
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-2B",
+        "match": "*/WeMM-Embedding-2B",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-4B",
+        "match": "*/WeMM-Embedding-4B",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
+        }
+      },
+      {
+        "id": "tencent/WeMM-Embedding-9B",
+        "match": "*/WeMM-Embedding-9B",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "image_format": "messages",
+          "text_as_messages": true,
+          "batch_messages": true,
+          "accepts_truncate_prompt_tokens": false,
+          "max_image_batch_size": 5
         }
       }
     ],

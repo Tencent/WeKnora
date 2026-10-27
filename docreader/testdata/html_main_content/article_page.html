@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>深入理解 RAG 的召回策略 - 示例技术博客</title>
+  <link rel="stylesheet" href="/static/site.css">
+  <script src="/static/analytics.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="logo" href="/">示例技术博客</a>
+    <nav class="main-nav">
+      <ul>
+        <li><a href="/">首页</a></li>
+        <li><a href="/pricing">产品定价</a></li>
+        <li><a href="/docs">文档中心</a></li>
+        <li><a href="/blog">技术博客</a></li>
+        <li><a href="/about">关于我们</a></li>
+      </ul>
+    </nav>
+    <form class="site-search" action="/search">
+      <input type="search" name="q" placeholder="搜索文章">
+      <button type="submit">搜索</button>
+    </form>
+  </header>
+
+  <div class="layout">
+    <main>
+      <article>
+        <h1>深入理解 RAG 的召回策略</h1>
+        <p>检索增强生成的效果上限，几乎完全由召回阶段决定。如果召回的候选里没有包含答案所在的段落，后面再强的生成模型也无能为力。因此调优 RAG 的第一步，永远是先把召回率做上去。</p>
+        <p>关键词检索依赖倒排索引，对术语、编号、专有名词特别敏感；向量检索依赖语义空间，对同义改写和自然语言提问更友好，但对精确匹配反而容易失手。两者失败的样本分布并不重合。</p>
+        <p>混合检索把 BM25 的稀疏信号与向量召回融合在一起，常见做法是让两路各取前五十条候选，再用加权求和或倒数排名融合合并成一个列表。融合权重需要按语料特点调，不能直接照搬别人的参数。</p>
+        <p>重排模型只对前 N 条候选打分，N 通常取二十到一百之间。它比召回模型慢得多，因此不能用来扩大候选集，只能用来把已经召回的候选重新排序。把重排放在召回之后，是成本与效果之间最常见的折中。</p>
+        <p>分块策略同样影响召回。块太大会把多个主题混在一起，向量的语义被稀释；块太小则一句话被切成两半，答案的上下文不完整。实践中常用的做法是按标题切分，再对超长段落做二次切分，并保留一定的重叠。</p>
+        <p>评估召回质量不要只看最终答案对不对，而要单独测量命中率与排序位置。把每次线上提问的召回结果落盘，定期人工标注一批，是发现召回退化最直接的手段。</p>
+        <table>
+          <thead>
+            <tr><th>策略</th><th>优点</th><th>代价</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>关键词检索</td><td>术语与编号精确匹配</td><td>同义改写召回不到</td></tr>
+            <tr><td>向量检索</td><td>语义相近即可召回</td><td>专有名词容易漂移</td></tr>
+            <tr><td>混合检索</td><td>两路互补，召回率最高</td><td>需要调融合权重</td></tr>
+          </tbody>
+        </table>
+        <p>延伸阅读：<a href="/blog/99">分块器的实现细节</a>。</p>
+      </article>
+    </main>
+
+    <aside class="sidebar">
+      <h2>本周热读</h2>
+      <ul>
+        <li><a href="/blog/101">向量数据库选型指南</a></li>
+        <li><a href="/blog/102">从零实现一个分块器</a></li>
+        <li><a href="/blog/103">重排模型评测实录</a></li>
+      </ul>
+      <div class="subscribe">
+        <p>订阅我们的新闻邮件</p>
+        <input type="email" placeholder="邮箱地址">
+        <button type="button">订阅</button>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="site-footer">
+    <p>版权所有 © 2025 示例科技有限公司</p>
+    <p>京ICP备00000000号-1</p>
+    <ul>
+      <li><a href="/privacy">隐私政策</a></li>
+      <li><a href="/terms">服务条款</a></li>
+      <li><a href="/contact">联系我们</a></li>
+    </ul>
+  </footer>
+</body>
+</html>

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -365,12 +367,25 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		pattern := "%" + escapeLikeKeyword(req.Query) + "%"
+		if r.wikiDialect() == "sqlite" {
+			// SQLite does not provide PostgreSQL's full-text functions or casts.
+			// Search the same user-visible fields with a case-insensitive LIKE.
+			query = query.Where(
+				"(LOWER(COALESCE(title, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(COALESCE(content, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(CAST(aliases AS TEXT)) LIKE LOWER(?) ESCAPE ?)",
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
+			)
+		} else {
+			// Use PostgreSQL full-text search + ILIKE for aliases.
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || "+
+					"coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR "+
+					"aliases::text ILIKE ? ESCAPE ?)",
+				req.Query, pattern, likeEscapeChar,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -1036,16 +1051,13 @@ func (r *wikiPageRepository) ListByTypeRecent(
 }
 
 // FindSimilarPages returns the top-k entity/concept pages whose lowercase
-// title is most similar to the given query under PostgreSQL pg_trgm
-// trigram similarity. Backed by idx_wiki_pages_title_trgm (GIN
-// gin_trgm_ops, migration 000041). Used by the dedup pre-filter to
-// surface candidate merge targets without loading every entity/concept
-// page into Go.
+// title is most similar to the given query. PostgreSQL uses pg_trgm backed by
+// idx_wiki_pages_title_trgm (GIN gin_trgm_ops, migration 000041). SQLite does
+// not implement pg_trgm, so Lite loads the filtered title projection and ranks
+// it with a compatible padded-trigram Jaccard fallback in Go.
 //
 // types is an optional page_type allow-list; empty means entity+concept.
-// limit is clamped to [1, 50]. Pages whose title similarity is below
-// 0.1 are dropped server-side via the `%` operator (which respects
-// pg_trgm.similarity_threshold).
+// limit is clamped to [1, 50].
 func (r *wikiPageRepository) FindSimilarPages(
 	ctx context.Context,
 	kbID string,
@@ -1067,6 +1079,9 @@ func (r *wikiPageRepository) FindSimilarPages(
 	}
 
 	q := strings.ToLower(strings.TrimSpace(query))
+	if r.wikiDialect() == "sqlite" {
+		return r.findSimilarPagesSQLite(ctx, kbID, q, pageTypes, limit)
+	}
 
 	var rows []types.WikiPageLite
 	if err := r.db.WithContext(ctx).
@@ -1079,12 +1094,113 @@ func (r *wikiPageRepository) FindSimilarPages(
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]*types.WikiPageLite, len(rows))
-	for i := range rows {
-		r := rows[i]
-		out[i] = &r
+	return wikiPageLitePointers(rows), nil
+}
+
+// findSimilarPagesSQLite is the Lite equivalent of the PostgreSQL pg_trgm
+// query above. SQLite has no pg_trgm extension or compatible similarity
+// operator, so it fetches only the dedup projection and ranks padded rune
+// trigrams in-process. The corpus is already scoped to one knowledge base and
+// the entity/concept page types before any rows enter Go.
+func (r *wikiPageRepository) findSimilarPagesSQLite(
+	ctx context.Context,
+	kbID, query string,
+	pageTypes []string,
+	limit int,
+) ([]*types.WikiPageLite, error) {
+	var rows []types.WikiPageLite
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("slug, title, page_type, status, aliases, out_links").
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+			kbID, pageTypes, types.WikiPageStatusArchived).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	queryGrams := wikiTitleTrigrams(query)
+	scored := make([]scoredWikiPageLite, 0, len(rows))
+	for _, row := range rows {
+		score := wikiTrigramJaccard(queryGrams, wikiTitleTrigrams(row.Title))
+		if score >= wikiSQLiteTrigramScoreFloor {
+			scored = append(scored, scoredWikiPageLite{page: row, score: score})
+		}
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].page.Slug < scored[j].page.Slug
+	})
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+
+	out := make([]*types.WikiPageLite, len(scored))
+	for i := range scored {
+		page := scored[i].page
+		out[i] = &page
 	}
 	return out, nil
+}
+
+// wikiSQLiteTrigramScoreFloor uses pg_trgm's default similarity threshold.
+// It keeps a coincidental shared trigram from entering the dedup prompt on Lite.
+// PostgreSQL deployments may still configure pg_trgm with a different threshold.
+const wikiSQLiteTrigramScoreFloor = 0.3
+
+type scoredWikiPageLite struct {
+	page  types.WikiPageLite
+	score float64
+}
+
+func wikiPageLitePointers(rows []types.WikiPageLite) []*types.WikiPageLite {
+	out := make([]*types.WikiPageLite, len(rows))
+	for i := range rows {
+		row := rows[i]
+		out[i] = &row
+	}
+	return out
+}
+
+// wikiTitleTrigrams follows pg_trgm's word boundaries: non-alphanumeric
+// characters separate words, and each word receives two leading spaces and
+// one trailing space before its rune trigrams are added to the shared set.
+func wikiTitleTrigrams(value string) map[string]struct{} {
+	words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	if len(words) == 0 {
+		return nil
+	}
+	grams := make(map[string]struct{})
+	for _, word := range words {
+		runes := append([]rune{' ', ' '}, []rune(word)...)
+		runes = append(runes, ' ')
+		for i := 0; i+3 <= len(runes); i++ {
+			grams[string(runes[i:i+3])] = struct{}{}
+		}
+	}
+	return grams
+}
+
+func wikiTrigramJaccard(left, right map[string]struct{}) float64 {
+	if len(left) == 0 || len(right) == 0 {
+		return 0
+	}
+	if len(left) > len(right) {
+		left, right = right, left
+	}
+	intersection := 0
+	for gram := range left {
+		if _, ok := right[gram]; ok {
+			intersection++
+		}
+	}
+	if intersection == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(len(left)+len(right)-intersection)
 }
 
 func wikiNormalizedTitleSQL(db *gorm.DB) string {

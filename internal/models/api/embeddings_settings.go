@@ -1,10 +1,5 @@
 package api
 
-import (
-	"fmt"
-	"slices"
-)
-
 // EmbeddingsCompat is the overlay form (every field optional) of the
 // embedding settings. JSON keys are the documented names used in models.json
 // and config/models.json.
@@ -24,13 +19,37 @@ type EmbeddingsCompat struct {
 	MaxInputChars      *int              `json:"max_input_chars,omitempty"`
 	// AcceptsTruncatePromptTokens marks a vLLM-class runtime, the only kind
 	// that implements the `truncate_prompt_tokens` extension.
-	AcceptsTruncatePromptTokens *bool          `json:"accepts_truncate_prompt_tokens,omitempty"`
-	RequestTimeout              *int           `json:"request_timeout_seconds,omitempty"`
-	ExtraBody                   map[string]any `json:"extra_body,omitempty"`
-	ImageField                  *string        `json:"image_field,omitempty"`
-	MaxImageBatchSize           *int           `json:"max_image_batch_size,omitempty"`
-	MaxImageBytes               *int           `json:"max_image_bytes,omitempty"`
-	ImageMIMETypes              []string       `json:"image_mime_types,omitempty"`
+	AcceptsTruncatePromptTokens *bool                 `json:"accepts_truncate_prompt_tokens,omitempty"`
+	RequestTimeout              *int                  `json:"request_timeout_seconds,omitempty"`
+	ExtraBody                   map[string]any        `json:"extra_body,omitempty"`
+	ImageField                  *string               `json:"image_field,omitempty"`
+	MaxImageBatchSize           *int                  `json:"max_image_batch_size,omitempty"`
+	MaxImageBytes               *int                  `json:"max_image_bytes,omitempty"`
+	ImageMIMETypes              []string              `json:"image_mime_types,omitempty"`
+	ImageFormat                 *EmbeddingImageFormat `json:"image_format,omitempty"`
+	ImagePrompt                 *string               `json:"image_prompt,omitempty"`
+	TextAsMessages              *bool                 `json:"text_as_messages,omitempty"`
+	BatchMessages               *bool                 `json:"batch_messages,omitempty"`
+}
+
+// EmbeddingImageFormat is how an image travels on the OpenAI embedding
+// shape, which has no standard image input of its own.
+type EmbeddingImageFormat string
+
+const (
+	// EmbeddingImageObject puts {ImageField: data URI} in `input`, as Jina
+	// and SGLang document.
+	EmbeddingImageObject EmbeddingImageFormat = "object"
+	// EmbeddingImageMessages sends a chat conversation in `messages` instead
+	// of `input`, which is how vLLM serves multimodal embedding models
+	// (https://docs.vllm.ai/en/latest/models/pooling_models/embed/). Each
+	// conversation yields one vector; BatchMessages can batch conversations.
+	EmbeddingImageMessages EmbeddingImageFormat = "messages"
+)
+
+// Known reports whether f is a format this build can send; empty is known.
+func (f EmbeddingImageFormat) Known() bool {
+	return f == "" || f == EmbeddingImageObject || f == EmbeddingImageMessages
 }
 
 // EmbeddingsSettings is the resolved (fully defaulted) form.
@@ -76,49 +95,43 @@ type EmbeddingsSettings struct {
 	// without its own deadline and lets the caller's context govern.
 	RequestTimeout int
 	ExtraBody      map[string]any
-	// ImageField is the key of the input object that carries an image on
-	// the OpenAI shape — "image" on Jina. That shape has no standard image
-	// input, so an endpoint that does not name one takes no images. The
-	// multimodal protocols have their image part fixed by their own schema.
-	ImageField string `json:",omitempty"`
-	// MaxImageBatchSize is the documented number of images per request.
-	// 0 means one: a vendor that fuses its inputs, or does not say, must not
-	// be sent several.
-	MaxImageBatchSize int `json:",omitempty"`
-	// MaxImageBytes is the documented size limit of one image, 0 when the
-	// vendor states none. The caller shrinks an image to fit; the client
-	// refuses one that does not rather than spend a request on it.
-	MaxImageBytes int `json:",omitempty"`
-	// ImageMIMETypes lists the formats the vendor documents, empty when it
-	// takes any common one.
-	ImageMIMETypes []string `json:",omitempty"`
+	// ImageInput is how this endpoint takes images: on the OpenAI shape, the
+	// key of the input object that carries one ("image" on Jina; that shape
+	// has no standard image input, so an endpoint that names none takes no
+	// images), plus the documented per-request and per-image limits.
+	ImageInput
+	// ImageFormat chooses between ImageField's object in `input` and a chat
+	// conversation in `messages`. Empty means object when ImageField is set.
+	ImageFormat EmbeddingImageFormat `json:",omitempty"`
+	// ImagePrompt is the text sent beside each image in the messages format;
+	// some chat templates (VLM2Vec's) expect an instruction there. Empty
+	// sends the image alone.
+	ImagePrompt string `json:",omitempty"`
+	// TextAsMessages sends texts in the messages format too. A model whose
+	// chat template frames its inputs only places text and images in the same
+	// space when both pass through it; a plain `input` skips the template.
+	TextAsMessages bool `json:",omitempty"`
+	// BatchMessages enables independent conversations in a two-dimensional
+	// messages array (vLLM 0.29 supports this). False preserves the one-input
+	// request shape for older servers. Single inputs always keep that shape.
+	BatchMessages bool `json:",omitempty"`
+}
+
+// OpenAIImageFormat is the effective image format on the OpenAI shape, empty
+// when the endpoint takes no images there.
+func (s EmbeddingsSettings) OpenAIImageFormat() EmbeddingImageFormat {
+	switch {
+	case s.ImageFormat == EmbeddingImageMessages:
+		return EmbeddingImageMessages
+	case s.ImageField != "":
+		return EmbeddingImageObject
+	}
+	return ""
 }
 
 // BatchLimits renders the documented ceilings for SplitBatches.
 func (s EmbeddingsSettings) BatchLimits() BatchLimits {
 	return BatchLimits{MaxItems: s.MaxBatchSize, MaxItemRunes: s.MaxInputChars}
-}
-
-// ImageBatchLimit is the number of images one request may carry.
-func (s EmbeddingsSettings) ImageBatchLimit() int {
-	if s.MaxImageBatchSize > 0 {
-		return s.MaxImageBatchSize
-	}
-	return 1
-}
-
-// CheckImage reports an image the vendor documents it will not take.
-func (s EmbeddingsSettings) CheckImage(img EmbedImage) error {
-	if len(img.Data) == 0 {
-		return fmt.Errorf("image is empty")
-	}
-	if s.MaxImageBytes > 0 && len(img.Data) > s.MaxImageBytes {
-		return fmt.Errorf("image is %d bytes; the limit is %d", len(img.Data), s.MaxImageBytes)
-	}
-	if len(s.ImageMIMETypes) > 0 && !slices.Contains(s.ImageMIMETypes, img.MIMEType) {
-		return fmt.Errorf("image type %q is not one of %v", img.MIMEType, s.ImageMIMETypes)
-	}
-	return nil
 }
 
 // InputTypeValue maps a neutral input kind onto the vendor's vocabulary,

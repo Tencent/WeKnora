@@ -24,10 +24,12 @@
     </div>
 
     <template v-else>
-      <t-input v-if="catalog.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
-        :aria-label="$t('menu.search')" clearable>
-        <template #prefix-icon><t-icon name="search" size="16px" /></template>
-      </t-input>
+      <Teleport to="#toolbox-toolbar" defer>
+        <t-input v-if="catalog.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+          :aria-label="$t('menu.search')" clearable>
+          <template #prefix-icon><t-icon name="search" size="16px" /></template>
+        </t-input>
+      </Teleport>
       <div v-if="catalog.length === 0" class="empty-state">
         <t-empty :description="skillText('emptyDesc')" />
         <p v-if="skillConfigs.length === 0" class="empty-hint">
@@ -60,8 +62,8 @@
           <div class="skill-card__main">
             <div class="skill-card__body">
               <div class="skill-card__header">
-                <div class="skill-card__badge" aria-hidden="true">
-                  <t-icon :name="SKILL_ICON" size="14px" />
+                <div class="skill-card__badge" :style="skillBadgeStyle(item.name)" aria-hidden="true">
+                  {{ skillInitial(item.name) }}
                 </div>
                 <div class="skill-card__heading">
                   <h3 class="skill-card__title" :title="item.name">{{ item.name }}</h3>
@@ -91,9 +93,10 @@
                   :disabled="Boolean(view.installs[0] && !recordFor(view.installs[0].sandbox_config_id))"
                   :title="installSummaryTooltip(item, view)" :aria-label="installSummary(item, view)"
                   @click="onInstallChipClick(item, view)">
-                  <span v-if="view.installs.some(isInstallBusy)" class="skill-card__entry-dot" aria-hidden="true" />
-                  <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
-                  <t-icon name="chevron-right" size="14px" class="skill-card__chip-go" />
+                  <t-icon v-if="view.installs.length === 0" name="add" size="14px" class="skill-card__chip-lead" />
+                  <span v-else class="skill-card__chip-dot" aria-hidden="true" />
+                  <span class="skill-card__chip-text">{{ installChipText(view) }}</span>
+                  <t-icon v-if="view.installs.length > 0" name="chevron-right" size="14px" class="skill-card__chip-go" />
                 </button>
                 <t-popup v-else :visible="openPanelId === item.id" trigger="click" placement="bottom-left" attach="body"
                   destroy-on-close overlay-class-name="skill-install-panel-overlay"
@@ -102,34 +105,52 @@
                   <button type="button" class="skill-card__chip" :class="chipClass(item, view)"
                     :title="installSummaryTooltip(item, view)" :aria-label="installSummary(item, view)"
                     :aria-expanded="openPanelId === item.id">
-                    <span v-if="view.installs.some(isInstallBusy)" class="skill-card__entry-dot" aria-hidden="true" />
-                    <span class="skill-card__chip-text">{{ installSummary(item, view) }}</span>
-                    <t-icon name="chevron-down" size="14px" class="skill-card__chip-go" />
+                    <t-icon v-if="view.installs.length === 0" name="add" size="14px" class="skill-card__chip-lead" />
+                    <span v-else class="skill-card__chip-dot" aria-hidden="true" />
+                    <span class="skill-card__chip-text">{{ installChipText(view) }}</span>
+                    <span v-if="view.installs.length > CHIP_NAME_LIMIT" class="skill-card__chip-more">
+                      +{{ view.installs.length - CHIP_NAME_LIMIT }}
+                    </span>
+                    <t-icon name="chevron-down" size="14px" class="skill-card__chip-go"
+                      :class="{ 'is-open': openPanelId === item.id }" />
                   </button>
                   <template #content>
                     <div class="skill-install-panel">
                       <template v-if="view.installs.length > 0">
-                        <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelGroup') }}</p>
+                        <p class="skill-install-panel__group">
+                          {{ $t('settings.skills.installPanelGroup') }}
+                          <span class="skill-install-panel__group-count">{{ view.installs.length }}</span>
+                        </p>
                         <button v-for="inst in view.installs" :key="inst.skill_id" type="button"
                           class="skill-install-panel__item" :class="installEntryClass(item, inst)"
                           :disabled="!recordFor(inst.sandbox_config_id)" :title="installTooltip(item, inst)"
                           @click="openManageFromPanel(item, inst)">
                           <SandboxBackendBadge v-if="inst.sandbox_type" :type="inst.sandbox_type" size="xs" />
                           <span class="skill-install-panel__name">{{ installName(inst) }}</span>
-                          <span v-if="isInstallBusy(inst)" class="skill-card__entry-dot" aria-hidden="true" />
-                          <t-icon v-else-if="installChipStatusIcon(item, inst)"
-                            :name="installChipStatusIcon(item, inst)" size="14px" class="skill-card__entry-status" />
+                          <span v-if="installChipStatus(item, inst)" class="skill-install-panel__status">
+                            <span v-if="isInstallBusy(inst)" class="skill-card__entry-dot" aria-hidden="true" />
+                            <t-icon v-else-if="installChipStatusIcon(item, inst)"
+                              :name="installChipStatusIcon(item, inst)" size="12px" class="skill-card__entry-status" />
+                            {{ installChipStatus(item, inst) }}
+                          </span>
+                          <t-icon name="chevron-right" size="14px" class="skill-install-panel__go" />
                         </button>
                       </template>
                       <template v-if="view.available.length > 0">
                         <div v-if="view.installs.length > 0" class="skill-install-panel__split" role="separator" />
-                        <p class="skill-install-panel__group">{{ $t('settings.skills.installPanelAvailable') }}</p>
+                        <p class="skill-install-panel__group">
+                          {{ $t('settings.skills.installPanelAvailable') }}
+                          <span class="skill-install-panel__group-count">{{ view.available.length }}</span>
+                        </p>
                         <button v-for="cfg in view.available" :key="cfg.id" type="button"
                           class="skill-install-panel__item skill-install-panel__item--available"
                           :title="sandboxMetaLine(cfg)" @click="openInstallTo(item, cfg)">
                           <SandboxBackendBadge :type="cfg.sandbox_type" size="xs" />
                           <span class="skill-install-panel__name">{{ cfg.name }}</span>
-                          <t-icon name="add" size="14px" class="skill-install-panel__add" />
+                          <span class="skill-install-panel__add">
+                            <t-icon name="add" size="12px" />
+                            {{ $t('settings.skills.installAction') }}
+                          </span>
                         </button>
                       </template>
                     </div>
@@ -185,8 +206,8 @@
         <div class="skill-card__main">
           <div class="skill-card__body">
             <div class="skill-card__header">
-              <div class="skill-card__badge" aria-hidden="true">
-                <t-icon :name="SKILL_ICON" size="14px" />
+              <div class="skill-card__badge" :style="skillBadgeStyle(registeredCatalog.name)" aria-hidden="true">
+                {{ skillInitial(registeredCatalog.name) }}
               </div>
               <h3 class="skill-card__title" :title="registeredCatalog.name">{{ registeredCatalog.name }}</h3>
               <span v-if="registeredCatalog.version" class="skill-card__type">{{ registeredCatalog.version }}</span>
@@ -293,6 +314,11 @@
       :description="installDrawerDesc" :icon="SKILL_ICON" width="560px" :min-width="480" :max-width="760"
       storage-key="setting-drawer:width:skill-catalog-install" :confirm-loading="installing"
       :confirm-disabled="installConfirmDisabled" :confirm-text="installConfirmText" @confirm="onInstallDrawerConfirm">
+      <template v-if="installCatalog" #headerIcon>
+        <span class="skill-drawer-avatar" :style="skillBadgeStyle(installCatalog.name)">
+          {{ skillInitial(installCatalog.name) }}
+        </span>
+      </template>
       <p v-if="installMode === 'install'" class="installer-model-hint">{{ skillText('installToSandboxDesc') }}</p>
       <section v-if="!hostOnly && installPickRows.length > 0" class="setting-drawer__section">
         <div class="sandbox-pick-list">
@@ -343,6 +369,9 @@
     <SettingDrawer v-model:visible="showManage" :title="manageTitle" :description="manageDesc" :icon="SKILL_ICON"
       width="680px" :min-width="560" :max-width="920" storage-key="setting-drawer:width:skill-catalog-manage"
       :hide-footer="true" :z-index="2600">
+      <template v-if="manageTitle" #headerIcon>
+        <span class="skill-drawer-avatar" :style="skillBadgeStyle(manageTitle)">{{ skillInitial(manageTitle) }}</span>
+      </template>
       <SandboxSkillsPanel v-if="showManage && manageRecord && manageSkillId" :record="manageRecord" mode="list" hide-add
         :focus-skill-id="manageSkillId" :catalog-item="catalogItemById(manageCatalogId)" @updated="onPanelUpdated"
         @skills-changed="loadCatalog" />
@@ -381,6 +410,7 @@ import {
   type SkillCatalogRegisterResult,
 } from '@/api/skill'
 import { useSkillInstallerModel } from '@/composables/useSkillInstallerModel'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { installOutdated, installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import {
   HOST_SKILL_TARGET_ID,
@@ -400,7 +430,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ count: [value: number] }>()
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const uiStore = useUIStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const confirmDelete = useConfirmDelete()
@@ -731,6 +761,19 @@ function compactText(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
+const SKILL_BADGE_HUES = ['#366ef4', '#0594fa', '#00a870', '#8e56dd', '#e37318', '#d6418f', '#5b5bd6', '#b07b3b']
+
+function skillInitial(name: string): string {
+  const ch = Array.from((name || '').replace(/^[^\p{L}\p{N}]+/u, ''))[0] || '?'
+  return ch.toUpperCase()
+}
+
+function skillBadgeStyle(name: string): Record<string, string> {
+  let hash = 0
+  for (const ch of name || '') hash = (hash * 31 + ch.codePointAt(0)!) >>> 0
+  return { '--skill-hue': SKILL_BADGE_HUES[hash % SKILL_BADGE_HUES.length] }
+}
+
 function upgradeVersionText(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
   const versions = upgradeVersions(item, inst)
   return versions
@@ -758,8 +801,8 @@ function installChipStatus(item: SkillCatalogItem, inst: SkillCatalogInstall): s
 }
 
 function installChipStatusIcon(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
-  if (inst.status === 'failed') return 'close-circle'
-  if (inst.status === 'ready' && inst.enabled && installOutdated(item, inst)) return 'error-circle'
+  if (inst.status === 'failed') return 'close-circle-filled'
+  if (inst.status === 'ready' && inst.enabled && installOutdated(item, inst)) return 'error-circle-filled'
   if (inst.status === 'ready' && inst.enabled) return 'check-circle-filled'
   return ''
 }
@@ -816,6 +859,14 @@ function installSummary(item: SkillCatalogItem, view: ReturnType<typeof installs
     return skillText('installedOnName', { name: installName(view.installs[0]) })
   }
   return t('settings.skills.installedCount', { count: view.installs.length })
+}
+
+const CHIP_NAME_LIMIT = 2
+
+function installChipText(view: ReturnType<typeof installsView>): string {
+  if (view.installs.length === 0) return skillText('installToSandbox')
+  const sep = /^(zh|ja)/.test(String(locale.value)) ? '、' : ', '
+  return view.installs.slice(0, CHIP_NAME_LIMIT).map(installName).join(sep)
 }
 
 function chipClass(item: SkillCatalogItem, view: ReturnType<typeof installsView>): (string | undefined)[] {
@@ -1312,6 +1363,7 @@ watch(busyPickTargets, (targets) => {
 }, { immediate: true })
 
 onMounted(load)
+useAssistantDataChange(() => { void loadCatalog(true) }, { areas: ['skill'] })
 
 defineExpose({ openAdd })
 onUnmounted(() => {
@@ -1325,10 +1377,6 @@ onUnmounted(() => {
 @import (reference) '@/components/css/provider-card.less';
 
 @import (reference) '@/components/css/settings-section.less';
-
-.list-search {
-  margin-bottom: 20px;
-}
 
 .skill-settings {
   width: 100%;
@@ -1384,7 +1432,7 @@ onUnmounted(() => {
 
 :global(.skill-install-panel-overlay .t-popup__content) {
   padding: 0 !important;
-  border-radius: var(--app-radius-sm) !important;
+  border-radius: var(--app-radius-md) !important;
   border: 1px solid var(--td-component-stroke) !important;
   background: var(--td-bg-color-container) !important;
   box-shadow: var(--td-shadow-2) !important;
@@ -1421,7 +1469,7 @@ onUnmounted(() => {
 .skill-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  gap: 10px;
+  gap: 12px;
   align-items: stretch;
 }
 
@@ -1432,20 +1480,31 @@ onUnmounted(() => {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
   height: 100%;
+
+  &:hover:not(.skill-card--add, .skill-card--focused) {
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
 
   &--focused {
     border-color: var(--td-brand-color);
     box-shadow: 0 0 0 2px var(--td-brand-color-focus);
   }
 
-  &--installed .skill-card__badge {
-    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    color: var(--td-brand-color);
+  &--idle .skill-card__badge {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-placeholder);
+  }
+
+  &:hover .skill-card__actions,
+  &:focus-within .skill-card__actions,
+  &--focused .skill-card__actions {
+    opacity: 1;
   }
 
   &--add {
@@ -1499,19 +1558,38 @@ onUnmounted(() => {
 .skill-card__main {
   display: flex;
   align-items: stretch;
-  padding: 12px;
+  padding: 12px 14px 8px;
   min-width: 0;
   flex: 1;
 }
 
 .skill-card__badge {
-  .provider-card-badge(26px, 7px);
-  font-size: var(--app-text-md);
+  .provider-card-badge(28px, 7px);
+  --skill-hue: var(--td-brand-color);
+  margin-top: 0;
+  font-size: var(--app-text-base);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  background: color-mix(in srgb, var(--skill-hue) 12%, transparent);
+  color: var(--skill-hue);
+  user-select: none;
+}
 
-  :deep(.t-icon) {
-    display: block;
-    line-height: 1;
-  }
+.skill-drawer-avatar {
+  --skill-hue: var(--td-brand-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--skill-hue) 12%, var(--td-bg-color-container));
+  color: var(--skill-hue);
+  font-size: var(--app-text-md);
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
 }
 
 .skill-card__body {
@@ -1519,13 +1597,13 @@ onUnmounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .skill-card__header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   min-height: 28px;
 }
@@ -1556,6 +1634,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 2px;
+  opacity: 0;
+  transition: opacity var(--app-motion-fast) ease;
+
+  @media (hover: none) {
+    opacity: 1;
+  }
 }
 
 .skill-card__icon-btn {
@@ -1596,10 +1680,14 @@ onUnmounted(() => {
 
 .skill-card__type {
   flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
   font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 18px;
   color: var(--td-text-color-placeholder);
+  font-variant-numeric: tabular-nums;
 }
 
 .skill-card__desc {
@@ -1608,6 +1696,7 @@ onUnmounted(() => {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   margin: 0;
+  min-height: calc(2 * 1.5em);
   overflow: hidden;
   font-size: var(--app-text-sm);
   line-height: 1.5;
@@ -1621,6 +1710,8 @@ onUnmounted(() => {
   gap: 6px;
   min-width: 0;
   margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .skill-card__installs-label {
@@ -1632,22 +1723,25 @@ onUnmounted(() => {
 .skill-card__chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
-  margin: 0;
-  padding: 2px 6px;
+  height: 26px;
+  margin: 0 0 0 -6px;
+  padding: 0 6px;
   border: 0;
   border-radius: var(--app-radius-sm);
-  background: var(--td-bg-color-secondarycontainer);
+  background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   font: inherit;
   font-size: var(--app-text-sm);
   line-height: 18px;
   text-align: left;
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
-  &:hover:not(:disabled) {
+  &:hover:not(:disabled),
+  &[aria-expanded='true'] {
     color: var(--td-text-color-primary);
     background: var(--td-bg-color-container-hover);
   }
@@ -1657,14 +1751,31 @@ onUnmounted(() => {
     opacity: 0.6;
   }
 
-  &--upgrade {
-    flex-shrink: 0;
+  &--idle {
+    color: var(--td-brand-color);
+
+    &:hover:not(:disabled),
+    &[aria-expanded='true'] {
+      color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    }
+
+    .skill-card__chip-go {
+      color: var(--td-brand-color);
+    }
   }
 
-  &--idle,
   &--upgrade {
+    flex-shrink: 0;
+    gap: 2px;
+    margin: 0 0 0 auto;
+    height: 22px;
+    padding: 0 8px 0 6px;
+    border-radius: 999px;
     color: var(--td-brand-color);
     background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    font-size: var(--app-text-xs);
+    font-weight: 500;
 
     &:hover:not(:disabled) {
       color: var(--td-brand-color);
@@ -1676,32 +1787,21 @@ onUnmounted(() => {
     }
   }
 
-  &.skill-card__entry--off {
-    color: var(--td-text-color-placeholder);
+  &.skill-card__entry--off .skill-card__chip-dot {
+    background: var(--td-text-color-disabled);
   }
 
-  &--installed .skill-card__entry-status {
-    color: var(--td-success-color);
-  }
-
-  &.skill-card__entry--stale {
-    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
-
-    .skill-card__entry-status {
-      color: var(--td-warning-color);
-    }
-  }
-
-  &.skill-card__entry--failed {
-    background: color-mix(in srgb, var(--td-error-color) 10%, transparent);
-
-    .skill-card__entry-status {
-      color: var(--td-error-color);
-    }
-  }
-
-  &.skill-card__entry--busy .skill-card__entry-dot {
+  &.skill-card__entry--stale .skill-card__chip-dot {
     background: var(--td-warning-color);
+  }
+
+  &.skill-card__entry--failed .skill-card__chip-dot {
+    background: var(--td-error-color);
+  }
+
+  &.skill-card__entry--busy .skill-card__chip-dot {
+    background: var(--td-warning-color);
+    animation: skill-chip-dot 1.2s ease-in-out infinite;
   }
 }
 
@@ -1735,6 +1835,32 @@ onUnmounted(() => {
   color: currentColor;
 }
 
+.skill-card__chip-go {
+  transition: transform var(--app-motion-fast) ease;
+
+  &.is-open {
+    transform: rotate(180deg);
+  }
+}
+
+.skill-card__chip-lead {
+  flex-shrink: 0;
+}
+
+.skill-card__chip-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--td-success-color);
+}
+
+.skill-card__chip-more {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-variant-numeric: tabular-nums;
+}
+
 .skill-card__entry-dot {
   width: 6px;
   height: 6px;
@@ -1746,19 +1872,29 @@ onUnmounted(() => {
 .skill-install-panel {
   display: flex;
   flex-direction: column;
-  width: 240px;
+  width: 280px;
   max-width: calc(100vw - 32px);
-  max-height: min(360px, 70vh);
+  max-height: min(380px, 70vh);
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 6px;
+  box-sizing: border-box;
 }
 
 .skill-install-panel__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
-  padding: 6px 12px 4px;
-  font-size: var(--app-text-sm);
-  line-height: 20px;
+  padding: 4px 8px 4px;
+  font-size: var(--app-text-xs);
+  font-weight: 500;
+  line-height: 18px;
   color: var(--td-text-color-placeholder);
+}
+
+.skill-install-panel__group-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
 }
 
 .skill-install-panel__item {
@@ -1766,11 +1902,11 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 32px;
-  margin: 0;
-  padding: 0 12px;
+  min-height: 34px;
+  margin: 0 0 1px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--app-radius-sm);
   background: none;
   color: var(--td-text-color-primary);
   cursor: pointer;
@@ -1778,8 +1914,10 @@ onUnmounted(() => {
   font-size: var(--app-text-md);
   line-height: 22px;
   text-align: left;
+  transition: background-color var(--app-motion-fast) ease;
 
-  &:hover:not(:disabled) {
+  &:hover:not(:disabled),
+  &:focus-visible {
     background: var(--td-bg-color-container-hover);
   }
 
@@ -1788,21 +1926,27 @@ onUnmounted(() => {
     opacity: 0.5;
   }
 
-  &.skill-card__entry--stale .skill-card__entry-status {
-    color: var(--td-warning-color);
+  &.skill-card__entry--off .skill-install-panel__name {
+    color: var(--td-text-color-placeholder);
   }
 
-  &.skill-card__entry--failed .skill-card__entry-status {
+  &.skill-card__entry--stale .skill-install-panel__status {
+    color: var(--td-warning-color);
+    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
+  }
+
+  &.skill-card__entry--failed .skill-install-panel__status {
     color: var(--td-error-color);
+    background: color-mix(in srgb, var(--td-error-color) 10%, transparent);
+  }
+
+  &.skill-card__entry--busy .skill-install-panel__status {
+    color: var(--td-warning-color);
   }
 
   &.skill-card__entry--busy .skill-card__entry-dot {
     background: var(--td-warning-color);
   }
-}
-
-.skill-install-panel__item--available {
-  color: var(--td-text-color-secondary);
 }
 
 .skill-install-panel__name {
@@ -1813,18 +1957,77 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.skill-install-panel__add {
+.skill-install-panel__status {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 120px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.skill-install-panel__item--available:hover .skill-install-panel__add {
+.skill-install-panel__go {
+  flex-shrink: 0;
+  margin-right: -2px;
+  color: var(--td-text-color-placeholder);
+  opacity: 0;
+  transition: opacity var(--app-motion-fast) ease;
+}
+
+.skill-install-panel__item:hover:not(:disabled) .skill-install-panel__go,
+.skill-install-panel__item:focus-visible .skill-install-panel__go {
+  opacity: 1;
+}
+
+.skill-install-panel__item--available {
+  color: var(--td-text-color-secondary);
+
+  :deep(.sandbox-badge) {
+    filter: grayscale(1);
+    opacity: 0.7;
+    transition: filter var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-text-color-primary);
+
+    :deep(.sandbox-badge) {
+      filter: none;
+      opacity: 1;
+    }
+  }
+}
+
+.skill-install-panel__add {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--app-text-xs);
+  font-weight: 500;
+  line-height: 18px;
   color: var(--td-brand-color);
+  opacity: 0;
+  transition: opacity var(--app-motion-fast) ease;
+}
+
+.skill-install-panel__item--available:hover .skill-install-panel__add,
+.skill-install-panel__item--available:focus-visible .skill-install-panel__add {
+  opacity: 1;
 }
 
 .skill-install-panel__split {
   height: 1px;
-  margin: 4px 0;
+  margin: 5px 2px;
   background: var(--td-component-stroke);
 }
 

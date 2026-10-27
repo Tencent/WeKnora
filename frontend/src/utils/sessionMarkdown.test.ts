@@ -61,3 +61,40 @@ test('buildSessionMarkdown exports visible conversation content without internal
   assert.doesNotMatch(markdown, /hidden system prompt/)
   assert.equal(markdown.match(/\[Notes\]/g)?.length, 1)
 })
+
+
+test('export messages sort by instants across fractional timestamps and timezone offsets', async () => {
+  const messages = [
+    { id: 'late', role: 'assistant', created_at: '2026-01-01T00:00:00.100Z' },
+    { id: 'early', role: 'user', created_at: '2026-01-01T00:00:00Z' },
+    { id: 'earliest', role: 'user', created_at: '2026-01-01T08:59:59+09:00' },
+  ]
+  const result = await collectAllSessionMessages(async () => messages)
+  assert.deepEqual(result.map(message => message.id), ['earliest', 'early', 'late'])
+})
+
+test('equal instants use role ordering even with different timestamp representations', async () => {
+  const result = await collectAllSessionMessages(async () => [
+    { id: 'answer', role: 'assistant', created_at: '2026-01-01T00:00:00Z' },
+    { id: 'question', role: 'user', created_at: '2026-01-01T08:00:00+08:00' },
+  ])
+  assert.deepEqual(result.map(message => message.id), ['question', 'answer'])
+})
+
+
+test('export ordering preserves RFC3339Nano precision below a millisecond', async () => {
+  const result = await collectAllSessionMessages(async () => [
+    { id: 'later-user', role: 'user', created_at: '2026-01-01T00:00:00.000000200Z' },
+    { id: 'earlier-assistant', role: 'assistant', created_at: '2026-01-01T00:00:00.000000100Z' },
+  ])
+  assert.deepEqual(result.map(message => message.id), ['earlier-assistant', 'later-user'])
+})
+
+test('missing and invalid export timestamps have a deterministic fallback', async () => {
+  const result = await collectAllSessionMessages(async () => [
+    { id: 'valid', role: 'user', created_at: '2026-01-01T00:00:00Z' },
+    { id: 'invalid', role: 'user', created_at: 'not-a-date' },
+    { id: 'missing', role: 'assistant' },
+  ])
+  assert.deepEqual(result.map(message => message.id), ['missing', 'invalid', 'valid'])
+})

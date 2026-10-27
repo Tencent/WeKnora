@@ -2,9 +2,9 @@ package docparser
 
 import (
 	"context"
-	"encoding/csv"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -47,7 +47,7 @@ func IsSimpleFormat(fileType string) bool {
 type SimpleFormatReader struct{}
 
 // Read reads simple format files and returns markdown.
-func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+func (b *SimpleFormatReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	ft := strings.ToLower(strings.TrimPrefix(req.FileType, "."))
 	if ft == "" {
 		ft = strings.TrimPrefix(strings.ToLower(filepath.Ext(req.FileName)), ".")
@@ -59,7 +59,7 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
 	case ft == "txt" || ft == "text":
 		return &types.ReadResult{MarkdownContent: string(req.FileContent)}, nil
 	case ft == "csv":
-		md, err := csvToMarkdown(req.FileContent)
+		md, err := csvToMarkdownContext(ctx, req.FileContent, maxCSVMarkdownBytes)
 		if err != nil {
 			return nil, fmt.Errorf("csv conversion failed: %w", err)
 		}
@@ -85,17 +85,15 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 	if fileName == "" {
 		fileName = "image.png"
 	}
-	refPath := "images/" + fileName
-	// Encode spaces so the markdown URL is valid and matches the regex in ResolveAndStore.
-	safeRef := strings.ReplaceAll(refPath, " ", "%20")
+	markdown, refPath := originalImageMarkdown(fileName)
 	mime := http.DetectContentType(data)
 
 	return &types.ReadResult{
-		MarkdownContent: fmt.Sprintf("![%s](%s)", fileName, safeRef),
+		MarkdownContent: markdown,
 		ImageRefs: []types.ImageRef{
 			{
 				Filename:    fileName,
-				OriginalRef: safeRef,
+				OriginalRef: refPath,
 				MimeType:    mime,
 				ImageData:   data,
 				IsOriginal:  true,
@@ -103,6 +101,18 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 		},
 	}
 }
+
+// originalImageMarkdown keeps a filename from changing Markdown syntax. The
+// destination is also the exact lookup key used by ImageResolver.
+func originalImageMarkdown(fileName string) (markdown, refPath string) {
+	refPath = "images/" + url.PathEscape(fileName)
+	alt := markdownImageAltReplacer.Replace(fileName)
+	return fmt.Sprintf("![%s](%s)", alt, refPath), refPath
+}
+
+var markdownImageAltReplacer = strings.NewReplacer(
+	`\`, `\\`, "[", `\[`, "]", `\]`, "\r\n", " ", "\r", " ", "\n", " ",
+)
 
 // IsImageFormat returns true if the file type is a recognized image format.
 func IsImageFormat(fileType string) bool {
@@ -152,13 +162,12 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 	if fileName == "" {
 		fileName = "image." + ft
 	}
-	refPath := "images/" + fileName
+	imgLine, refPath := originalImageMarkdown(fileName)
 
-	if strings.Contains(mdContent, refPath) {
+	if strings.Contains(mdContent, "images/"+fileName) || strings.Contains(mdContent, refPath) {
 		return mdContent, imageRefs
 	}
 
-	imgLine := fmt.Sprintf("![%s](%s)", fileName, refPath)
 	if strings.TrimSpace(mdContent) == "" {
 		mdContent = imgLine
 	} else {
@@ -177,47 +186,9 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 	return mdContent, imageRefs
 }
 
-func csvToMarkdown(data []byte) (string, error) {
-	reader := csv.NewReader(strings.NewReader(string(data)))
-	reader.LazyQuotes = true
-	reader.TrimLeadingSpace = true
-
-	records, err := reader.ReadAll()
-	if err != nil {
-		return "", err
-	}
-	if len(records) == 0 {
-		return "", nil
-	}
-
-	var sb strings.Builder
-
-	// Header row
-	header := records[0]
-	sb.WriteString("| ")
-	sb.WriteString(strings.Join(header, " | "))
-	sb.WriteString(" |\n")
-
-	// Separator
-	sb.WriteString("|")
-	for range header {
-		sb.WriteString(" --- |")
-	}
-	sb.WriteString("\n")
-
-	// Data rows
-	for _, row := range records[1:] {
-		sb.WriteString("| ")
-		// Pad row if shorter than header
-		cells := make([]string, len(header))
-		for i := range cells {
-			if i < len(row) {
-				cells[i] = row[i]
-			}
-		}
-		sb.WriteString(strings.Join(cells, " | "))
-		sb.WriteString(" |\n")
-	}
-
-	return sb.String(), nil
-}
+// csvCellReplacer escapes what would end a GFM table cell or row: a pipe, and
+// the line breaks of a quoted multi-line field. They become <br />, as the
+// html-to-markdown table plugin writes them.
+// Escape existing backslashes too, so a literal backslash before a pipe does
+// not consume the pipe's escape and turn it back into a column separator.
+var csvCellReplacer = strings.NewReplacer(`\`, `\\`, "|", `\|`, "\r\n", "<br />", "\n", "<br />", "\r", "<br />")

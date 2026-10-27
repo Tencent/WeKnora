@@ -51,6 +51,12 @@ test('critical runtime i18n trees are present', () => {
   assert.deepEqual(missing, [], missing.join('\n'))
 })
 
+test('operation labels remain referenced when pruning locale bundles', () => {
+  const keys = [...localeKeysByName[REFERENCE_LOCALE]].filter((key) => key.startsWith('agentStream.operations.names.'))
+  assert.ok(keys.length > 0)
+  assert.deepEqual(keys.filter((key) => !referencedKeys.has(key)), [])
+})
+
 test('installer command progress messages resolve in the settings namespace', () => {
   for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
     for (const name of ['installCommandRunning', 'installCommandWaiting']) {

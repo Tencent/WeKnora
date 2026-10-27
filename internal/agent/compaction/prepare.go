@@ -66,7 +66,7 @@ func Prepare(messages []chat.Message, s Settings, estimator *agenttoken.Estimato
 		if messages[i].Kind != chat.MessageKindCompactionSummary {
 			continue
 		}
-		previousSummary = unwrapSummary(messages[i].Content)
+		previousSummary = unwrapSummary(messageText(messages[i]))
 		boundaryStart = i + 1
 		break
 	}

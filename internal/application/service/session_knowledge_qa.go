@@ -46,11 +46,12 @@ func (s *sessionService) KnowledgeQA(
 		if req.CustomAgent != nil {
 			configID = req.CustomAgent.Config.SandboxConfigID
 		}
-		releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
+		turnCtx, releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
 		if holdErr != nil {
 			return holdErr
 		}
 		defer releaseTurn()
+		ctx = turnCtx
 	}
 
 	// Span the request setup (KB / model resolution, search target building,
@@ -71,7 +72,7 @@ func (s *sessionService) KnowledgeQA(
 	}
 
 	// Resolve chat model ID using shared helper
-	chatModelID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
+	chatModelID, chatModelTenantID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
 	if err != nil {
 		return err
 	}
@@ -95,7 +96,9 @@ func (s *sessionService) KnowledgeQA(
 	var chatModelSupportsVision bool
 	var vlmModelID string
 	if chatModelID != "" {
-		if chatModelInfo, err := s.modelService.GetModelByID(ctx, chatModelID); err == nil && chatModelInfo != nil {
+		modelCtx := types.WithExecutionTenant(ctx, chatModelTenantID)
+		chatModelInfo, err := s.modelService.GetModelByID(modelCtx, chatModelID)
+		if err == nil && chatModelInfo != nil {
 			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
 		}
 	}
@@ -137,6 +140,7 @@ func (s *sessionService) KnowledgeQA(
 			RerankTopK:              s.cfg.Conversation.RerankTopK,
 			RerankThreshold:         s.cfg.Conversation.RerankThreshold,
 			ChatModelID:             chatModelID,
+			ChatModelTenantID:       chatModelTenantID,
 			SummaryConfig:           summaryConfig,
 			FallbackStrategy:        fallbackStrategy,
 			FallbackResponse:        s.cfg.Conversation.FallbackResponse,
@@ -260,89 +264,67 @@ func (s *sessionService) KnowledgeQA(
 	return nil
 }
 
-// selectChatModelID selects the appropriate chat model ID with priority for Remote models
-// Priority order:
-// 1. Session's SummaryModelID if it's a Remote model
-// 2. First knowledge base with a Remote model (from knowledgeBaseIDs or derived from knowledgeIDs)
-// 3. Session's SummaryModelID (if not Remote)
-// 4. First knowledge base's SummaryModelID
+// selectChatModelID prefers a remote model from an accessible KB, then the
+// first accessible KB's model, then an available model in the execution tenant.
+// Return the KB owner alongside its model ID without changing the request scope.
 func (s *sessionService) selectChatModelID(
 	ctx context.Context,
-	session *types.Session,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
-) (string, error) {
-	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
+) (string, uint64, error) {
+	tenantID, _ := types.TenantIDFromContext(ctx)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
-		tenantID := types.MustTenantIDFromContext(ctx)
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
-		} else {
-			// Collect unique KB IDs from knowledge items
-			kbIDSet := make(map[string]bool)
-			for _, k := range knowledgeList {
-				if k != nil && k.KnowledgeBaseID != "" {
-					kbIDSet[k.KnowledgeBaseID] = true
-				}
-			}
-			for kbID := range kbIDSet {
-				knowledgeBaseIDs = append(knowledgeBaseIDs, kbID)
-			}
-			logger.Infof(ctx, "Derived %d knowledge base IDs from %d knowledge IDs for model selection",
-				len(knowledgeBaseIDs), len(knowledgeIDs))
+			return "", 0, fmt.Errorf("resolve knowledge bases for chat model: %w", err)
 		}
-	}
-	// Check knowledge bases for models
-	if len(knowledgeBaseIDs) > 0 {
-		// Try to find a knowledge base with Remote model
-		for _, kbID := range knowledgeBaseIDs {
-			kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
-			if err != nil {
-				logger.Warnf(ctx, "Failed to get knowledge base: %v", err)
-				continue
-			}
-			if kb != nil && kb.SummaryModelID != "" {
-				model, err := s.modelService.GetModelByID(ctx, kb.SummaryModelID)
-				if err == nil && model != nil && model.Source == types.ModelSourceRemote {
-					logger.Info(ctx, "Using Remote summary model from knowledge base")
-					return kb.SummaryModelID, nil
-				}
+		for _, k := range knowledgeList {
+			if k != nil && k.KnowledgeBaseID != "" {
+				knowledgeBaseIDs = append(knowledgeBaseIDs, k.KnowledgeBaseID)
 			}
 		}
-
-		// If no Remote model found, use first knowledge base's model
-		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledgeBaseIDs[0])
-		if err != nil {
-			logger.Errorf(ctx, "Failed to get knowledge base for model ID: %v", err)
-			return "", fmt.Errorf("failed to get knowledge base %s: %w", knowledgeBaseIDs[0], err)
-		}
-		if kb != nil && kb.SummaryModelID != "" {
-			logger.Infof(
-				ctx,
-				"Using summary model from first knowledge base %s: %s",
-				knowledgeBaseIDs[0],
-				kb.SummaryModelID,
-			)
-			return kb.SummaryModelID, nil
-		}
+		knowledgeBaseIDs = uniqueNonEmptyStrings(knowledgeBaseIDs)
 	}
 
-	// No knowledge bases - try to find any available chat model
+	permissions := kbReadPermissions(ctx, s.kbShareService)
+	var firstKB *types.KnowledgeBase
+	for _, kbID := range knowledgeBaseIDs {
+		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+		if err != nil || kb == nil {
+			logger.Warnf(ctx, "Failed to get knowledge base %s for chat model: %v", kbID, err)
+			continue
+		}
+		allowed, err := permissions.Check(kb.ID, kb.TenantID, types.OrgRoleViewer)
+		if err != nil || !allowed {
+			logger.Warnf(ctx, "Cannot use chat model from inaccessible knowledge base %s", kb.ID)
+			continue
+		}
+		if firstKB == nil {
+			firstKB = kb
+		}
+		if kb.SummaryModelID == "" {
+			continue
+		}
+		modelCtx := types.WithExecutionTenant(ctx, kb.TenantID)
+		model, err := s.modelService.GetModelByID(modelCtx, kb.SummaryModelID)
+		if err == nil && model != nil && model.Source == types.ModelSourceRemote {
+			return kb.SummaryModelID, kb.TenantID, nil
+		}
+	}
+	if firstKB != nil && firstKB.SummaryModelID != "" {
+		return firstKB.SummaryModelID, firstKB.TenantID, nil
+	}
+
 	models, err := s.modelService.ListModels(ctx)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to list models: %v", err)
-		return "", fmt.Errorf("failed to list models: %w", err)
+		return "", 0, fmt.Errorf("failed to list models: %w", err)
 	}
 	for _, model := range models {
 		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
-			logger.Infof(ctx, "Using first available KnowledgeQA model: %s", model.ID)
-			return model.ID, nil
+			return model.ID, tenantID, nil
 		}
 	}
-
-	logger.Error(ctx, "No chat model ID available")
-	return "", fmt.Errorf("no chat model ID available: no knowledge bases configured and no available models")
+	return "", 0, fmt.Errorf("no chat model ID available: no accessible knowledge base model or available models")
 }
 
 // resolveKnowledgeBasesFromAgent resolves knowledge base IDs based on agent's KBSelectionMode.
@@ -692,6 +674,7 @@ func intersectStrings(left []string, right []string) []string {
 func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	chatManage *types.ChatManage, eventList []types.EventType,
 ) error {
+	ctx = types.WithSessionID(ctx, chatManage.SessionID)
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
 	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
 		chatManage.SessionID, chatManage.Query)
@@ -1076,7 +1059,7 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Get chat model
-	chatModel, err := s.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	chatModel, err := s.modelService.GetChatModel(chatManage.ChatModelContext(ctx), chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model for fallback: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)

@@ -233,6 +233,7 @@ func TestFetchPagePropagatesTruncationFromChildDatabase(t *testing.T) {
 		Parent: notionParent{Type: parentTypeWorkspace},
 	}
 
-	_, truncated := NewConnector().fetchPage(context.Background(), client, page, map[string]bool{})
+	_, truncated, err := NewConnector().fetchPage(context.Background(), client, page, map[string]bool{})
+	require.NoError(t, err)
 	require.True(t, truncated, "a capped child database query must reach the incremental round")
 }
