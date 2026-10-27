@@ -289,10 +289,7 @@ func grepFilePage(
 		if !matchesAll(matchers, lines[i]) {
 			continue
 		}
-		line := lines[i]
-		if runes := []rune(line); len(runes) > readFileMatchLineRunes {
-			line = string(runes[:readFileMatchLineRunes]) + "…"
-		}
+		line := readFileMatchSnippet(lines[i], matchers)
 		entry := fmt.Sprintf("%d: %s\n", i+1, line)
 		cost := utf8.RuneCountInString(entry)
 		if matches >= maxMatches || (matches > 0 && used+cost > budget) {
@@ -325,6 +322,37 @@ func grepFilePage(
 		resultData["next_offset"] = next
 	}
 	return &types.ToolResult{Success: true, Output: b.String(), Data: resultData}
+}
+
+// readFileMatchSnippet keeps an actual match visible when a long line is
+// shortened. Regexp offsets are bytes; convert them before slicing runes.
+func readFileMatchSnippet(line string, matchers []*regexp.Regexp) string {
+	runes := []rune(line)
+	if len(runes) <= readFileMatchLineRunes {
+		return line
+	}
+	first := len(line)
+	end := first
+	for _, matcher := range matchers {
+		if loc := matcher.FindStringIndex(line); loc != nil && loc[0] < first {
+			first, end = loc[0], loc[1]
+		}
+	}
+	startRune, endRune := utf8.RuneCountInString(line[:first]), utf8.RuneCountInString(line[:end])
+	start := 0
+	if endRune > readFileMatchLineRunes {
+		matchLength := min(endRune-startRune, readFileMatchLineRunes)
+		start = max(0, startRune-(readFileMatchLineRunes-matchLength)/2)
+		start = min(start, len(runes)-readFileMatchLineRunes)
+	}
+	snippet := string(runes[start : start+readFileMatchLineRunes])
+	if start > 0 {
+		snippet = "…" + snippet
+	}
+	if start+readFileMatchLineRunes < len(runes) {
+		snippet += "…"
+	}
+	return snippet
 }
 
 // renderFilePage is shared by workspace and skill resources. Content appears
