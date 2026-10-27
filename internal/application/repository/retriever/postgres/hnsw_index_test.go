@@ -114,6 +114,7 @@ func expectVerify(mock sqlmock.Sqlmock, valid bool) {
 }
 
 func TestEnsureHNSWIndexSchedulesOncePerDimension(t *testing.T) {
+	t.Setenv("AUTO_MIGRATE", "true")
 	repo, _ := newHNSWTestRepo(t)
 	wait := recordBuilds(repo)
 
@@ -294,6 +295,7 @@ func TestBuildHNSWIndexInBackgroundOnlyLogsAFailure(t *testing.T) {
 }
 
 func TestSaveSchedulesTheIndexForTheStoredDimension(t *testing.T) {
+	t.Setenv("AUTO_MIGRATE", "true")
 	repo, mock := newHNSWTestRepo(t)
 	wait := recordBuilds(repo)
 	mock.ExpectBegin()
@@ -311,6 +313,7 @@ func TestSaveSchedulesTheIndexForTheStoredDimension(t *testing.T) {
 }
 
 func TestBatchSaveSchedulesTheIndexForEveryStoredDimension(t *testing.T) {
+	t.Setenv("AUTO_MIGRATE", "true")
 	repo, mock := newHNSWTestRepo(t)
 	wait := recordBuilds(repo)
 	mock.ExpectBegin()
@@ -331,6 +334,7 @@ func TestBatchSaveSchedulesTheIndexForEveryStoredDimension(t *testing.T) {
 }
 
 func TestVectorRetrieveSchedulesTheIndexForTheQueryDimension(t *testing.T) {
+	t.Setenv("AUTO_MIGRATE", "true")
 	repo, mock := newHNSWTestRepo(t)
 	wait := recordBuilds(repo)
 	// The query runs inside the SET LOCAL transaction VectorRetrieve opens.
