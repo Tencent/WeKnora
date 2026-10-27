@@ -215,21 +215,21 @@ const (
 // monotonic ID acts as both primary key and pagination cursor (newest-
 // first is `WHERE id < AfterID ORDER BY id DESC`).
 type AuditLog struct {
-	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement;index:idx_audit_logs_tenant_scope_desc,priority:4,sort:desc"`
+	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement;index:idx_audit_logs_tenant_scope_desc,priority:4,sort:desc" extensions:"x-agent=event_id"`
 	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1;index:idx_audit_logs_tenant_scope_desc,priority:1"`
 	ActorUserID   string       `json:"actor_user_id"  gorm:"type:varchar(36);default:'';index:idx_audit_logs_actor"`
-	ActorRole     string       `json:"actor_role"     gorm:"type:varchar(32);default:''"`
-	Action        AuditAction  `json:"action"         gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2"`
+	ActorRole     string       `json:"actor_role"     gorm:"type:varchar(32);default:''" extensions:"x-agent"`
+	Action        AuditAction  `json:"action"         gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2" extensions:"x-agent"`
 	ScopeType     string       `json:"scope_type"     gorm:"type:varchar(32);default:'';index:idx_audit_logs_tenant_scope_desc,priority:2"`
 	ScopeID       string       `json:"scope_id"       gorm:"type:varchar(64);default:'';index:idx_audit_logs_tenant_scope_desc,priority:3"`
-	TargetType    string       `json:"target_type"    gorm:"type:varchar(32);default:''"`
+	TargetType    string       `json:"target_type"    gorm:"type:varchar(32);default:''" extensions:"x-agent"`
 	TargetID      string       `json:"target_id"      gorm:"type:varchar(64);default:''"`
 	TargetUserID  string       `json:"target_user_id" gorm:"type:varchar(36);default:''"`
 	RequestPath   string       `json:"request_path"   gorm:"type:varchar(512);default:''"`
 	RequestMethod string       `json:"request_method" gorm:"type:varchar(16);default:''"`
-	Outcome       AuditOutcome `json:"outcome"        gorm:"type:varchar(16);default:success"`
-	Details       JSON         `json:"details"        gorm:"type:jsonb;default:'{}'"`
-	CreatedAt     time.Time    `json:"created_at"     gorm:"index:idx_audit_logs_tenant_id_desc,priority:2,sort:desc"`
+	Outcome       AuditOutcome `json:"outcome"        gorm:"type:varchar(16);default:success" extensions:"x-agent"`
+	Details       JSON         `json:"details"        gorm:"type:jsonb;default:'{}'" extensions:"x-agent,x-agent-keys=title|trigger|via|processing_status"`
+	CreatedAt     time.Time    `json:"created_at"     gorm:"index:idx_audit_logs_tenant_id_desc,priority:2,sort:desc" extensions:"x-agent"`
 }
 
 // TableName pins the table name even if a future GORM convention

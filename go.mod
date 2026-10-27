@@ -51,6 +51,7 @@ require (
 	github.com/redis/go-redis/v9 v9.14.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/shakinm/xlsReader v0.9.12
 	github.com/sirupsen/logrus v1.9.4
 	github.com/slack-go/slack v0.23.1
 	github.com/spf13/viper v1.21.0
@@ -91,6 +92,8 @@ require (
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
+
+require github.com/metakeule/fmtdate v1.1.2 // indirect
 
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect
@@ -343,7 +346,7 @@ require (
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sys v0.46.0
 	golang.org/x/telemetry v0.0.0-20260508192327-42602be52be6 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/text v0.38.0
 	golang.org/x/tools v0.45.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect

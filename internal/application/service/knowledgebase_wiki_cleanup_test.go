@@ -276,19 +276,19 @@ func (r *blockingWikiRepo) wait(ctx context.Context) error {
 	}
 }
 
-func (r *blockingWikiRepo) DeleteByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *blockingWikiRepo) DeleteByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	return r.wait(ctx)
 }
 
-func (r *blockingWikiRepo) DeleteFoldersByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *blockingWikiRepo) DeleteFoldersByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	return r.wait(ctx)
 }
 
-func (r *blockingWikiRepo) DeleteRevisionsByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *blockingWikiRepo) DeleteRevisionsByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	return r.wait(ctx)
 }
 
-func (r *blockingWikiRepo) DeleteIssuesByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *blockingWikiRepo) DeleteIssuesByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	return r.wait(ctx)
 }
 
@@ -328,22 +328,22 @@ func (r *deadlineCapturingWikiRepo) record(ctx context.Context) {
 	}
 }
 
-func (r *deadlineCapturingWikiRepo) DeleteByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *deadlineCapturingWikiRepo) DeleteByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	r.record(ctx)
 	return nil
 }
 
-func (r *deadlineCapturingWikiRepo) DeleteFoldersByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *deadlineCapturingWikiRepo) DeleteFoldersByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	r.record(ctx)
 	return nil
 }
 
-func (r *deadlineCapturingWikiRepo) DeleteRevisionsByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *deadlineCapturingWikiRepo) DeleteRevisionsByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	r.record(ctx)
 	return nil
 }
 
-func (r *deadlineCapturingWikiRepo) DeleteIssuesByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error {
+func (r *deadlineCapturingWikiRepo) DeleteIssuesByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
 	r.record(ctx)
 	return nil
 }

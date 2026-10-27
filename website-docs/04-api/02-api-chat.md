@@ -13,10 +13,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `title` | string | 否 | 标题 |
+| `kind` | string | 否 | 空值（默认）为普通会话；`assistant` 为 WeKnora 助手会话；其他值返回 400 |
 | `description` | string | 否 | 描述 |
 | `project_dir` | string | 否 | 仅桌面版：把会话绑定到用户已批准的本机项目目录（绝对路径，须与批准列表完全一致），否则返回 400 |
 
-响应：201 `{"success":true,"data":{Session}}`（`id,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
+响应：201 `{"success":true,"data":{Session}}`（`id,kind,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
 
 ```bash
 curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
@@ -31,6 +32,7 @@ curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
 | --- | --- | --- | --- |
 | `page` / `page_size` | int | 否 | 分页 |
 | `keyword` | string | 否 | 标题模糊搜索 |
+| `kind` | string | 否 | 缺省或空值仅返回普通会话，适用于所有来源；`assistant` 仅返回调用者本人的助手会话（管理员也不能跨用户），按 `updated_at DESC` 排序；其他值返回 400 |
 | `source` | string | 否 | 来源过滤（web/embed/api/feishu/wechat/slack/...） |
 | `agent_id` | string | 否 | 按 Agent 过滤（IM 会话） |
 
@@ -73,7 +75,7 @@ curl -X DELETE $BASE/api/v1/sessions/s-1 -H "Authorization: Bearer $TOKEN"
 
 ### DELETE /api/v1/sessions/batch
 
-用途：批量删除会话。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
+用途：批量删除会话。`delete_all:true` 保留助手会话；指定 ID 删除仍按原有归属规则处理。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
 
 响应：200 `{"success":true,"message":"Sessions deleted successfully"}`
 
@@ -393,6 +395,8 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 | `channel` | string | 否 | 来源渠道 |
 | `suggestion_attribution` | object | 否 | 点击建议的归因信息 |
 | `question_origin` | object | 否 | 用户点选的建议问题来自哪里：`knowledge_base_id`、可选 `knowledge_id`。仅智能推理模式使用，智能体会先检索该来源；来源不在本轮检索范围内时忽略，不会扩大范围 |
+| `page_context` | object | 否 | 当前页面：`knowledge_base_id`、可选 `knowledge_id`、`wiki_slug`、`wiki_issue_ids`（最多保留 20 项），或 `agent_id`。知识库必须属于本轮检索范围；智能体独立校验，必须在当前租户可见（支持内置智能体）。无效部分丢弃，不扩大检索权限 |
+| `assistant_access` | string | 否 | WeKnora 助手权限等级：`read_only`、`confirm`、`auto_write`，默认 `confirm`，受空间上限约束 |
 
 所选 `reasoning_effort` 会写入会话的 `last_request_state.reasoning_effort`，重新打开会话时前端据此恢复。
 

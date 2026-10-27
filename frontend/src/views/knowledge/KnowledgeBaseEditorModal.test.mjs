@@ -33,8 +33,8 @@ test('shows a post-create hint after the first successful save', () => {
 
 test('create mode seeds the full default image actions table', () => {
   // Regression: an empty imageActions in initFormData made the attribute panel
-  // read `undefined.ocr.on_unobserved` the moment the attribute switch was turned
-  // on in the create dialog, crashing the modal.
+  // read `undefined.ocr.on` the moment the attribute switch was turned on in the
+  // create dialog, crashing the modal.
   const initBlock = source.match(/const initFormData[\s\S]*?imageActions: ([^,]+),/)?.[1]
   assert.ok(initBlock, 'expected to find imageActions in initFormData')
   assert.match(initBlock, /mergeImageActions\(\)/)
