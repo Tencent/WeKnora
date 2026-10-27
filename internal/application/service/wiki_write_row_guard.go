@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"errors"
 	"sort"
 	"strings"
@@ -55,6 +56,29 @@ func normalizeWikiWriteCell(cell string) string {
 	return strings.ToLower(strings.Join(strings.Fields(cell), " "))
 }
 
+// wikiWriteHeaderWidth counts explicitly supplied GFM header cells, including
+// empty ones. Escaped pipes are cell content, and outer pipes are optional.
+func wikiWriteHeaderWidth(line []byte) int {
+	header := strings.TrimSpace(string(line))
+	width := 1
+	for i := 0; i < len(header); i++ {
+		if header[i] == '\\' && i+1 < len(header) {
+			i++
+			continue
+		}
+		if header[i] == '|' {
+			width++
+			if i == 0 {
+				width--
+			}
+			if i == len(header)-1 {
+				width--
+			}
+		}
+	}
+	return width
+}
+
 // wikiWriteTableRowIdentities lists the data-row identities of every markdown
 // table in content, in file order. GFM permits optional outer pipes; parsing
 // table structure also keeps headers, prose and code examples out of the guard.
@@ -65,12 +89,15 @@ func wikiWriteTableRowIdentities(content string) []string {
 	identities := make([]string, 0, 8)
 	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if entering && node.Kind() == tableast.KindTable {
-			// Goldmark pads short headers. GFM requires the header and delimiter
-			// to have the same number of cells, as the frontend renderer does.
-			for cell := node.FirstChild().FirstChild(); cell != nil; cell = cell.NextSibling() {
-				if cell.Lines().Len() == 0 {
-					return ast.WalkSkipChildren, nil
-				}
+			// Goldmark pads short headers. Compare their actual source width
+			// with the delimiter width, while preserving explicitly empty cells.
+			header := node.FirstChild()
+			line := source[header.Pos():]
+			if end := bytes.IndexByte(line, '\n'); end >= 0 {
+				line = line[:end]
+			}
+			if wikiWriteHeaderWidth(line) != header.ChildCount() {
+				return ast.WalkSkipChildren, nil
 			}
 		}
 		if !entering || node.Kind() != tableast.KindTableRow {
