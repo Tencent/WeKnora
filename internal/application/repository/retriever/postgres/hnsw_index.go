@@ -86,6 +86,7 @@ func (g *pgRepository) createHNSWIndex(dimension int) error {
 		return nil
 	}
 	name := hnswIndexName(dimension)
+	predicate := fmt.Sprintf("(dimension = %d)", dimension)
 	return g.db.WithContext(ctx).Connection(func(conn *gorm.DB) error {
 		// Every statement gets its own session on the pinned connection: gorm
 		// keeps one statement per instance here, so an error from one would
@@ -110,8 +111,9 @@ func (g *pgRepository) createHNSWIndex(dimension int) error {
 			WHERE i.indrelid = 'embeddings'::regclass
 			  AND pg_get_indexdef(i.indexrelid) LIKE '%USING hnsw%'
 			  AND pg_get_indexdef(i.indexrelid) LIKE ?
-			  AND pg_get_indexdef(i.indexrelid) LIKE '%halfvec_cosine_ops%'`,
-			fmt.Sprintf("%%halfvec(%d)%%", dimension)).Scan(&rows).Error
+		  AND pg_get_indexdef(i.indexrelid) LIKE '%halfvec_cosine_ops%'
+		  AND (i.indpred IS NULL OR pg_get_expr(i.indpred, i.indrelid) = ?)`,
+			fmt.Sprintf("%%halfvec(%d)%%", dimension), predicate).Scan(&rows).Error
 		if err != nil {
 			return fmt.Errorf("could not read the catalog: %w", err)
 		}
@@ -173,15 +175,17 @@ func (g *pgRepository) createHNSWIndex(dimension int) error {
 		if err != nil {
 			return fmt.Errorf("could not build %s: %w", name, err)
 		}
-		// IF NOT EXISTS says nothing about the index it found, so read back
-		// what is there before calling it ready.
+		// IF NOT EXISTS says nothing about the index it found. A hand-built
+		// subset with the app's name may be valid yet cover only one KB, so
+		// verify coverage as well as validity before calling it ready.
 		var valid bool
-		result := on().Raw("SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(?)", name).Scan(&valid)
+		result := on().Raw(`SELECT indisvalid AND (indpred IS NULL OR pg_get_expr(indpred, indrelid) = ?)
+			FROM pg_index WHERE indexrelid = to_regclass(?)`, predicate, name).Scan(&valid)
 		if result.Error != nil {
 			return fmt.Errorf("could not verify %s: %w", name, result.Error)
 		}
 		if result.RowsAffected != 1 || !valid {
-			return fmt.Errorf("%s is missing or invalid after the build", name)
+			return fmt.Errorf("%s is missing or invalid for full %d-dim coverage after the build", name, dimension)
 		}
 		log.Infof("[Postgres] HNSW index %s for %d-dim embeddings is ready", name, dimension)
 		return nil
