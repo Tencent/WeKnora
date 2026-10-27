@@ -18,7 +18,9 @@ import (
 // upsertFAQProbe drives the batch-upsert handler with one body. The service is
 // only reached when binding succeeded, so a nil service doubles as proof that
 // the payload never got past the read.
-func upsertFAQProbe(t *testing.T, body string, svc *fakeFAQUpsertService) (*gin.Context, *httptest.ResponseRecorder) {
+func upsertFAQProbe(
+	t *testing.T, body string, svc *fakeFAQUpsertService,
+) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -38,7 +40,9 @@ type fakeFAQUpsertService struct {
 	calls int
 }
 
-func (s *fakeFAQUpsertService) UpsertFAQEntries(_ context.Context, _ string, _ *types.FAQBatchUpsertPayload) (string, error) {
+func (s *fakeFAQUpsertService) UpsertFAQEntries(
+	_ context.Context, _ string, _ *types.FAQBatchUpsertPayload,
+) (string, error) {
 	s.calls++
 	return "task-1", nil
 }

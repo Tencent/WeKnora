@@ -172,7 +172,7 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ upsert payload", err)
 		if isRequestBodyTooLarge(err) {
-			c.Error(errors.NewBadRequestError("request body is too large"))
+			_ = c.Error(errors.NewBadRequestError("request body is too large"))
 			return
 		}
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
