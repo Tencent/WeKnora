@@ -105,11 +105,17 @@ func TestNewCatalogRejectsUnsafeDeclarations(t *testing.T) {
 			Params: routeParams("/api/v1/messages/:session_id/:id"),
 			Target: &Target{Operation: "session.get", Label: "title"},
 		},
+		"delete an artifact": {
+			ID: "artifact.delete", Summary: "s", Risk: RiskDestructive, Method: http.MethodDelete,
+			Route:  "/api/v1/artifacts",
+			Target: &Target{Operation: "artifact.list", Label: "file_name"},
+		},
 	}
 	reasons := map[string]string{
-		"delete a session": "may only read",
-		"stop a session":   "may only read",
-		"delete a message": "may only read",
+		"delete a session":   "may only read",
+		"stop a session":     "may only read",
+		"delete a message":   "may only read",
+		"delete an artifact": "may only read",
 	}
 	// A sandbox config is reachable only for its installed skills, and never
 	// the installer conversation a user is watching.

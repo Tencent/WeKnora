@@ -107,7 +107,7 @@ func TestAllFailedImageIsAnError(t *testing.T) {
 		out := types.JSONMap{}
 		err := svc.processImage(context.Background(), &types.ImageMultimodalPayload{
 			ImageURL:            "local://test.png",
-			ImagePipelineParams: map[string]any{"enable_caption": false, "enable_ocr": true},
+			ImagePipelineParams: map[string]any{manualCaptionKey: false, manualOCRKey: true},
 			Attempt:             1,
 		}, newDown(), types.VLMConfig{}, tracker, out)
 		require.Error(t, err, "nothing was produced and every call failed: the image must not pass as skipped")
@@ -134,7 +134,7 @@ func TestAllFailedImageIsAnError(t *testing.T) {
 		out := types.JSONMap{}
 		err := svc.processImage(context.Background(), &types.ImageMultimodalPayload{
 			ImageURL:            "local://test.png",
-			ImagePipelineParams: map[string]any{"enable_caption": true, "enable_ocr": true},
+			ImagePipelineParams: map[string]any{manualCaptionKey: true, manualOCRKey: true},
 			Attempt:             1,
 		}, model, types.VLMConfig{}, tracker, out)
 		require.NoError(t, err, "a valid caption must not be duplicated by an OCR retry")
@@ -159,7 +159,7 @@ func TestCancelledAllFailedImageIsCancelled(t *testing.T) {
 	cancel()
 	err := svc.processImage(ctx, &types.ImageMultimodalPayload{
 		ImageURL:            "local://test.png",
-		ImagePipelineParams: map[string]any{"enable_caption": false, "enable_ocr": true},
+		ImagePipelineParams: map[string]any{manualCaptionKey: false, manualOCRKey: true},
 		Attempt:             1,
 	}, model, types.VLMConfig{}, tracker, out)
 	require.Error(t, err)
@@ -193,13 +193,18 @@ func TestCaptionOnlyFailureFailsImage(t *testing.T) {
 			err := svc.processImage(ctx, &types.ImageMultimodalPayload{
 				ImageURL: "local://test.png", Attempt: 1,
 				ImagePipelineID:     types.ImagePipelineDefault,
-				ImagePipelineParams: map[string]any{"enable_caption": true, "enable_ocr": false},
+				ImagePipelineParams: map[string]any{manualCaptionKey: true, manualOCRKey: false},
 			}, model, types.VLMConfig{}, tracker, out)
 			require.ErrorIs(t, err, tc.err)
 			require.Equal(t, "failed", out["outcome"])
 			require.Equal(t, 0, out["chunks_created"])
 			require.NotContains(t, out, "skipped")
-			require.NotContains(t, out, "ocr_status")
+			// OCR is switched off for this run, so the failure is the caption's
+			// and the OCR step says why it did not run. A failed call must read
+			// as failed, never as skipped — the two are different stories.
+			require.Equal(t, "failed", out[keyCaptionResult])
+			require.Equal(t, resultSkippedDisabled, out[keyOCRResult],
+				"the switched-off step must say so rather than borrow the other's failure")
 			require.Equal(t, tc.permanent, errors.Is(wrapSkipRetry(err), asynq.SkipRetry))
 			code := "MULTIMODAL_VLM_FAILED"
 			if errors.Is(tc.err, context.Canceled) {

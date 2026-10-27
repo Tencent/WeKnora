@@ -104,7 +104,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	protocol, err := detectMinerUProtocol(ctx, utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 		Timeout:      mineruV1APITimeout,
 		MaxRedirects: 5,
-	}), c.endpoint)
+	}), c.endpoint, c.apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("MinerU protocol detection: %w", err)
 	}
@@ -434,7 +434,7 @@ func validateMinerUOutboundURL(rawURL string) error {
 
 // PingMinerU checks if the self-hosted MinerU service is reachable. For
 // MinerU 4.0 it also verifies the configured API key, since /v1/health itself
-// is served without authentication.
+// is served without authentication unless sitting behind an authenticating gateway.
 func PingMinerU(endpoint, apiKey string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
@@ -449,7 +449,7 @@ func PingMinerU(endpoint, apiKey string) (bool, string) {
 	})
 	ctx := context.Background()
 
-	protocol, err := detectMinerUProtocol(ctx, client, endpoint)
+	protocol, err := detectMinerUProtocol(ctx, client, endpoint, apiKey)
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可用: %v", err)
 	}

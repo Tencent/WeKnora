@@ -87,7 +87,7 @@ func (t *AskUserTool) Execute(ctx context.Context, args json.RawMessage) (*types
 	}
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindAskUser
-	if !resumed && (meta == nil || !meta.Interactive || meta.EventBus == nil || t.asker == nil) {
+	if !resumed && (!meta.Attended() || meta.EventBus == nil || t.asker == nil) {
 		return &types.ToolResult{
 			Success: true,
 			Output: "This conversation cannot show an interactive question. Ask the user directly in your " +

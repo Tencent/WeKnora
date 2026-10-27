@@ -42,11 +42,23 @@ func settingsRequest(router http.Handler, method, path, body string) *httptest.R
 	return w
 }
 
+func setupSearchProviderSettingsTables(t *testing.T, db *gorm.DB, tenantIDs ...uint64) {
+	t.Helper()
+	require.NoError(t, db.Exec(`CREATE TABLE tenants (
+		id INTEGER PRIMARY KEY,
+		deleted_at DATETIME
+	)`).Error)
+	require.NoError(t, db.AutoMigrate(&types.WebSearchProviderEntity{}))
+	for _, tenantID := range tenantIDs {
+		require.NoError(t, db.Exec("INSERT INTO tenants (id) VALUES (?)", tenantID).Error)
+	}
+}
+
 func TestSearchProviderPatchPreservesParametersAndDefault(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
 	db := settingsTestDB(t)
-	require.NoError(t, db.AutoMigrate(&types.WebSearchProviderEntity{}))
+	setupSearchProviderSettingsTables(t, db, 1, 2)
 	repo := repository.NewWebSearchProviderRepository(db)
 	svc := service.NewWebSearchProviderService(repo)
 	ctx := context.Background()
@@ -423,7 +435,7 @@ func TestDataSourceResourcePatchRejectsConcurrentConfigChange(t *testing.T) {
 
 func TestSearchProviderPatchRollsBackDefaultWhenTargetDisappears(t *testing.T) {
 	db := settingsTestDB(t)
-	require.NoError(t, db.AutoMigrate(&types.WebSearchProviderEntity{}))
+	setupSearchProviderSettingsTables(t, db, 1)
 	repo := repository.NewWebSearchProviderRepository(db)
 	ctx := context.Background()
 	original := &types.WebSearchProviderEntity{ID: "current", TenantID: 1, Name: "Current", IsDefault: true}

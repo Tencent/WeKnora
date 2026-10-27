@@ -945,6 +945,14 @@ func (c *CubeRemoteClient) Exec(
 			"cube returned an empty command result", nil,
 		)
 	}
+	if request.OnOutput != nil {
+		if sdkResult.Stdout != "" {
+			request.OnOutput("stdout", []byte(sdkResult.Stdout))
+		}
+		if sdkResult.Stderr != "" {
+			request.OnOutput("stderr", []byte(sdkResult.Stderr))
+		}
+	}
 	return &RemoteExecResult{
 		Stdout:   sdkResult.Stdout,
 		Stderr:   sdkResult.Stderr,
@@ -1388,6 +1396,13 @@ func normalizeCubeError(op string, err error) error {
 			kind = RemoteErrorKindUnavailable
 		}
 	}
+	// Cube's file List wraps a missing path as a plain error ("path not
+	// found" / "no such file"), not NotFoundError. A new session on a shared
+	// machine has no directory yet; listing it must stay NotFound so callers
+	// can treat the tree as empty instead of failing the turn.
+	if kind == RemoteErrorKindInternal && op == "ListDir" && isSDKNotFound(err) {
+		kind = RemoteErrorKindNotFound
+	}
 	kind = snapshotDeleteKind(op, kind, err.Error())
 	remoteErr := NewRemoteError(SandboxTypeCube, op, kind, err.Error(), err)
 	remoteErr.StatusCode = status
@@ -1544,6 +1559,20 @@ func (c *CubeRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handle Re
 	startTerminalTTLRefresh(ctx, nil, ttl, func(rctx context.Context) error {
 		return sb.SetTimeout(rctx, ttl)
 	})
+}
+
+// KeepAlive moves the sandbox's idle timeout to ttl from now. Cube already
+// counts commands as activity; the explicit call keeps background work from
+// depending on which requests the control plane happens to count.
+func (c *CubeRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, ttl time.Duration) error {
+	sb, err := cubeHandleSandbox("KeepAlive", handle)
+	if err != nil {
+		return err
+	}
+	if ttl <= 0 {
+		return nil
+	}
+	return sb.SetTimeout(ctx, ttl)
 }
 
 var (

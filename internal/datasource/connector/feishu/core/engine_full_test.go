@@ -144,3 +144,30 @@ func TestFullSyncCheckpointRetainsUnseenDeletionBaseline(t *testing.T) {
 	require.Len(t, ops.fetched, len(ops.nodes["first"]),
 		"a later independent full sync must refetch everything")
 }
+
+// A round where every node is already at its recorded edit time is the normal
+// incremental case after a quiet period. It must still checkpoint the cursor:
+// otherwise the next run starts from the previous snapshot and re-fetches the
+// whole tree (#4712).
+func TestStreamCheckpointsARoundThatSkipsEveryNode(t *testing.T) {
+	nodeCount := FeishuStreamCheckpointInterval + 1
+	nodes := make([]string, 0, nodeCount)
+	previous := make(map[string]string, nodeCount)
+	for i := 0; i < nodeCount; i++ {
+		name := fmt.Sprintf("node%d", i)
+		nodes = append(nodes, name)
+		previous[name] = "100"
+	}
+
+	ops := &fullSyncOps{nodes: map[string][]string{"r": nodes}}
+	cfg := &types.DataSourceConfig{ResourceIDs: []string{"r"}}
+	cursor := ops.EncodeCursor(map[string]map[string]string{"r": previous}, time.Now())
+	h := &fullSyncHandler{}
+
+	next, err := FetchStreamEngine(context.Background(), nil, cfg, cursor, h, ops)
+	require.NoError(t, err)
+	require.Empty(t, ops.fetched, "an unchanged tree must not be re-fetched")
+	require.NotNil(t, h.checkpoint, "a fully skipped round must still checkpoint the cursor")
+	require.Equal(t, previous, ops.DecodeCursorTimes(h.checkpoint.ConnectorCursor)["r"])
+	require.Equal(t, previous, ops.DecodeCursorTimes(next.ConnectorCursor)["r"])
+}

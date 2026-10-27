@@ -44,7 +44,10 @@ async function fixture(showFileUploadToggle = true) {
   })
   const app = renderer.createApp(exports.default, {
     isReplying: false, showFileUploadToggle,
-    onSendMsg: (...args: any[]) => sent.push(args),
+    onSendMsg: (...args: any[]) => {
+      sent.push(args)
+      args[3]?.()
+    },
   })
   app.component('t-textarea', defineComponent({ props: ['modelValue'], setup: (props, { attrs }) => () => h('textarea', { ...attrs, value: props.modelValue }) }))
   app.component('t-icon', { render: () => null })

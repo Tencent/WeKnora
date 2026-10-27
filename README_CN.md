@@ -325,7 +325,7 @@ docker compose up -d    # 用新镜像重建容器
 |------|--------|
 | [模型厂商](https://weknora.weixin.qq.com/docs/03-features/06-models) | 内置 29 家，包括 OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama |
 | Embedding | Ollama / BGE / GTE / 智谱 / OpenAI 兼容接口 |
-| 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / 腾讯云 VectorDB |
+| 向量数据库 | PostgreSQL (pgvector + ParadeDB) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / 腾讯云 VectorDB |
 | [对象存储](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | 本地 / 腾讯云 COS / MinIO / AWS S3 / 火山引擎 TOS / 阿里云 OSS / 金山云 KS3 / 华为云 OBS |
 | [文档格式](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 图片 |
 | [数据源](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | 飞书知识库 / 飞书云盘 / Lark / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / Seafile / RSS |

@@ -108,7 +108,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.ImagePipelineID != nil {
 		// The pick and its params travel as one unit: params keyed for one
 		// pipeline say nothing to another, so an id without its params would
-		// silently run the new pipeline on the old pipeline's switches.
+		// silently run the new pipeline on the old pipeline's switches — and
+		// the params are also where every setting of that pipeline lives,
+		// including the ones the run reads from this layer.
 		eff.ImagePipelineID = types.NormalizeImagePipelineID(*overrides.ImagePipelineID)
 		eff.ImagePipelineParams = overrides.ImagePipelineParams
 		// The explicit pick also decides the legacy switch, so the fallback

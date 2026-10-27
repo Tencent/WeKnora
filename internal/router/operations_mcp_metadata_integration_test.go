@@ -144,11 +144,11 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	interactive := tools.WithToolExecContext(
 		ctx,
 		&tools.ToolExecContext{
-			SessionID:   "session",
-			UserID:      "web_user:user-a",
-			ToolCallID:  "call",
-			EventBus:    event.NewEventBus(),
-			Interactive: true,
+			SessionID:  "session",
+			UserID:     "web_user:user-a",
+			ToolCallID: "call",
+			EventBus:   event.NewEventBus(),
+			Mode:       types.RunModeAttended,
 		},
 	)
 	run := func(id string) *types.ToolResult {

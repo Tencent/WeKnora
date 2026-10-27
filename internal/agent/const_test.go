@@ -55,3 +55,10 @@ func TestToolExecutionTimeout(t *testing.T) {
 		assert.Equal(t, 35*time.Second, toolExecutionTimeout("web_fetch"))
 	})
 }
+
+func TestWorkWaitToolTimeoutCoversTheWait(t *testing.T) {
+	assert.Equal(t, 90*time.Second, toolExecutionTimeout("work_wait", `{"work_ids":["a"]}`))
+	assert.Equal(t, 30*time.Second, toolExecutionTimeout("work_wait", `{"wait_sec":0}`))
+	assert.Equal(t, 330*time.Second, toolExecutionTimeout("work_wait", `{"wait_sec":999}`))
+	assert.Equal(t, 90*time.Second, toolExecutionTimeout("work_wait"))
+}

@@ -220,7 +220,9 @@ func (l *redisLimiter) hold(zkey, token string) func() {
 				// dropping every live lease and admitting over the limit. The
 				// heartbeat pushes the key TTL out in lockstep with the lease.
 				bg := context.Background()
-				_ = l.rdb.ZAdd(bg, zkey, redis.Z{
+				// A release or expiry may remove the token while this heartbeat
+				// is in flight. Refresh existing leases only; never recreate one.
+				_ = l.rdb.ZAddXX(bg, zkey, redis.Z{
 					Score:  float64(now + l.ttl.Milliseconds()),
 					Member: token,
 				}).Err()

@@ -73,31 +73,65 @@ func NewSandboxDesktopService(terminals *SandboxTerminalService) *SandboxDesktop
 	return &SandboxDesktopService{terminals: terminals}
 }
 
-// EnsureSessionDesktop starts the desktop listeners and dials websockify.
-//
-// A zero provision pin is lookup-only: a running session sandbox is
-// attached (and XFCE is lazily started if needed), a paused one returns
-// sandbox.ErrSandboxPaused, and a missing one returns
-// sandbox.ErrNoLiveSessionSandbox. A non-zero pin is the confirmed-click
-// path and may create or resume, the same contract as EnsureSessionTerminal.
-func (s *SandboxDesktopService) EnsureSessionDesktop(
-	ctx context.Context,
-	sessionID string,
-	provision SandboxPin,
-) (*SessionDesktop, error) {
+// DesktopTarget is a located desktop. The caller holds its operation, fixes
+// the machine, claims the machine's slot, then starts it.
+type DesktopTarget struct {
+	SessionID string
+	MachineID string
+	SandboxID string
+	mgr       sandbox.Manager
+}
+
+// HoldOperation registers the desktop relay so a rebuild or reclaim of a
+// shared machine waits for it. The returned context ends if the hold is lost.
+// A no-op for per-session machines.
+func (t *DesktopTarget) HoldOperation(ctx context.Context) (context.Context, func(), error) {
+	if holder, ok := t.mgr.(interface {
+		HoldSessionOperation(context.Context, string, string) (context.Context, func(), error)
+	}); ok {
+		return holder.HoldSessionOperation(ctx, t.SessionID, "desktop")
+	}
+	return ctx, func() {}, nil
+}
+
+// FixMachine records which machine and sandbox this desktop is for. Managers
+// that cannot name the machine fall back to the session id (one machine per
+// session), with no sandbox pin.
+func (t *DesktopTarget) FixMachine(ctx context.Context) error {
+	t.MachineID = t.SessionID
+	namer, ok := t.mgr.(interface {
+		DesktopMachine(context.Context, string) (string, string, error)
+	})
+	if !ok {
+		return nil
+	}
+	machineID, sandboxID, err := namer.DesktopMachine(ctx, t.SessionID)
+	if err != nil {
+		return err
+	}
+	t.MachineID, t.SandboxID = machineID, sandboxID
+	return nil
+}
+
+// LocateSessionDesktop resolves (and, with a provision pin, creates or
+// resumes) the session's machine without starting anything on it.
+func (s *SandboxDesktopService) LocateSessionDesktop(
+	ctx context.Context, sessionID string, provision SandboxPin,
+) (*DesktopTarget, error) {
 	if s == nil || s.terminals == nil {
 		return nil, sandbox.ErrNoLiveSessionSandbox
 	}
-
-	// 1. Resolve. Lookup-only skips create/resume; a confirmed config ID
-	//    provisions through the same path a chat turn uses. Either way the
-	//    inbound token is registered on THIS replica, which is what keeps
-	//    the gateway from answering 401.
 	mgr, err := s.resolveRunningManager(ctx, sessionID, provision)
 	if err != nil {
 		return nil, err
 	}
+	return &DesktopTarget{SessionID: sessionID, mgr: mgr}, nil
+}
 
+// StartSessionDesktop starts the desktop listeners and dials websockify on
+// t's fixed sandbox.
+func (s *SandboxDesktopService) StartSessionDesktop(ctx context.Context, t *DesktopTarget) (*SessionDesktop, error) {
+	mgr := t.mgr
 	provider, ok := mgr.(sandbox.SessionDesktopProvider)
 	if !ok {
 		return nil, ErrDesktopUnsupported
@@ -112,14 +146,14 @@ func (s *SandboxDesktopService) EnsureSessionDesktop(
 		return nil, ErrDesktopUnsupported
 	}
 
-	secret, err := readDesktopSecret(ctx, exec, sessionID)
+	secret, err := readDesktopSecret(ctx, exec, t.SessionID, t.SandboxID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Dial. The secret stays in memory for exactly one handshake and is
 	// never sent to the browser.
-	dialed, err := desktops.OpenSessionDesktop(ctx, sessionID, sandbox.RemoteDesktopOptions{
+	dialed, err := desktops.OpenSessionDesktop(ctx, t.SessionID, sandbox.RemoteDesktopOptions{
 		BasicAuthUser:     sandbox.DesktopBasicAuthUser,
 		BasicAuthPassword: secret,
 	})
@@ -129,6 +163,11 @@ func (s *SandboxDesktopService) EnsureSessionDesktop(
 		}
 		return nil, err
 	}
+	if t.SandboxID != "" && dialed.SandboxID != t.SandboxID {
+		_ = dialed.Conn.Close()
+		return nil, fmt.Errorf("%w: desktop dialed %s, expected %s",
+			sandbox.ErrNoLiveSessionSandbox, dialed.SandboxID, t.SandboxID)
+	}
 	return &SessionDesktop{
 		Conn:            dialed.Conn,
 		Backend:         mgr.GetType(),
@@ -136,6 +175,35 @@ func (s *SandboxDesktopService) EnsureSessionDesktop(
 		IdleDisconnect:  terminalIdleDisconnectFromManager(mgr),
 		StartTTLRefresh: dialed.StartTTLRefresh,
 	}, nil
+}
+
+// EnsureSessionDesktop is the slot-less path: locate, hold, fix, start. The
+// hold is released when the call returns; the WebSocket handler keeps its
+// own for the relay's lifetime.
+//
+// A zero provision pin is lookup-only: a running session sandbox is
+// attached (and XFCE is lazily started if needed), a paused one returns
+// sandbox.ErrSandboxPaused, and a missing one returns
+// sandbox.ErrNoLiveSessionSandbox. A non-zero pin is the confirmed-click
+// path and may create or resume, the same contract as EnsureSessionTerminal.
+func (s *SandboxDesktopService) EnsureSessionDesktop(
+	ctx context.Context,
+	sessionID string,
+	provision SandboxPin,
+) (*SessionDesktop, error) {
+	t, err := s.LocateSessionDesktop(ctx, sessionID, provision)
+	if err != nil {
+		return nil, err
+	}
+	opCtx, release, err := t.HoldOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if err := t.FixMachine(opCtx); err != nil {
+		return nil, err
+	}
+	return s.StartSessionDesktop(opCtx, t)
 }
 
 // resolveRunningManager returns a manager whose session sandbox is live.
@@ -206,16 +274,21 @@ type sessionShellOptionsExecutor interface {
 	) (*sandbox.ExecuteResult, error)
 }
 
-func desktopSkipPrepOpts(timeout time.Duration) sandbox.ShellExecOptions {
-	return sandbox.ShellExecOptions{Timeout: timeout, SkipWorkspacePrep: true}
+func desktopSkipPrepOpts(timeout time.Duration, expectedSandboxID string) sandbox.ShellExecOptions {
+	return sandbox.ShellExecOptions{
+		Timeout:           timeout,
+		SkipWorkspacePrep: true,
+		ExpectedSandboxID: expectedSandboxID,
+	}
 }
 
 func readDesktopSecret(
 	ctx context.Context,
 	exec sessionShellOptionsExecutor,
 	sessionID string,
+	expectedSandboxID string,
 ) (string, error) {
-	secret, err := runDesktopEnsure(ctx, exec, sessionID)
+	secret, err := runDesktopEnsure(ctx, exec, sessionID, expectedSandboxID)
 	if err == nil {
 		return secret, nil
 	}
@@ -224,20 +297,21 @@ func readDesktopSecret(
 	}
 	logger.Warnf(ctx, "[sandbox-desktop] ensure failed; resetting stack session=%s: %v",
 		sessionID, err)
-	if _, resetErr := exec.ExecShellCommandWithOptions(ctx, sessionID,
-		sandbox.DesktopResetListenersCmd(), desktopSkipPrepOpts(desktopProbeTimeout)); resetErr != nil {
+	if _, resetErr := exec.ExecShellCommandWithOptions(ctx, sessionID, sandbox.DesktopResetListenersCmd(),
+		desktopSkipPrepOpts(desktopProbeTimeout, expectedSandboxID)); resetErr != nil {
 		return "", fmt.Errorf("%w: reset desktop stack: %v", ErrDesktopStartFailed, resetErr)
 	}
-	return runDesktopEnsure(ctx, exec, sessionID)
+	return runDesktopEnsure(ctx, exec, sessionID, expectedSandboxID)
 }
 
 func runDesktopEnsure(
 	ctx context.Context,
 	exec sessionShellOptionsExecutor,
 	sessionID string,
+	expectedSandboxID string,
 ) (string, error) {
 	result, err := exec.ExecShellCommandWithOptions(ctx, sessionID,
-		sandbox.DesktopEnsureCmd(), desktopSkipPrepOpts(desktopStartTimeout))
+		sandbox.DesktopEnsureCmd(), desktopSkipPrepOpts(desktopStartTimeout, expectedSandboxID))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrDesktopStartFailed, err)
 	}

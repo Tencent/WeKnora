@@ -29,7 +29,7 @@ func (f *fakePageActor) RequestPageAction(
 func pageToolContext() context.Context {
 	return WithToolExecContext(context.Background(), &ToolExecContext{
 		SessionID: "s1", AssistantMessageID: "m1", ToolCallID: "tc1", UserID: "user:u1",
-		EventBus: event.NewEventBus(), Interactive: true,
+		EventBus: event.NewEventBus(), Mode: types.RunModeAttended,
 	})
 }
 

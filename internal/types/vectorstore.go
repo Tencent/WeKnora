@@ -837,7 +837,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "postgres":
 		return &VectorStore{
 			ID:         "__env_postgres__",
-			Name:       "PostgreSQL",
+			Name:       "PostgreSQL (pgvector + ParadeDB)",
 			EngineType: PostgresRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				UseDefaultConnection: true,

@@ -53,6 +53,7 @@ type AgentEngine struct {
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
+	runNote              string                  // How this run was started; see SetRunNote
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
@@ -87,23 +88,27 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
-	workspaceLayout   sandbox.WorkspaceLayout
+	// backgroundRun, when set, supplies background-work notices and reminders
+	// at the same two boundaries as steer. Nil disables them.
+	backgroundRun   BackgroundRun
+	workspaceLayout sandbox.WorkspaceLayout
 	// suspendable lets a user prompt end the run so it can be resumed later;
 	// suspendRequest is saved with the run for that (see EnableSuspension).
 	suspendable    bool
 	suspendRequest []byte
 	// collaborationOnlySuspension limits suspension to collaboration waits.
 	collaborationOnlySuspension bool
-	// interactive: the client renders prompt cards and can answer them.
-	interactive bool
-	progress    turnProgress
+	// mode: whether the client renders prompt cards and can answer them.
+	mode     types.RunMode
+	progress turnProgress
 	// Hold speculative parent prose until delegated work has been reviewed.
 	holdCollaborationAnswer bool
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
-// lets a last-moment nudge revise the answer; further injects stay queued for
-// a follow-up turn instead of stretching the same run indefinitely.
+// lets a last-moment nudge (a steered message or a background reminder) revise
+// the answer; further injects stay queued for a follow-up turn instead of
+// stretching the same run indefinitely.
 const maxSteerOverruns = 1
 
 // ImageDescriberFunc generates a text description of an image.
@@ -230,7 +235,16 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 	for _, section := range sections {
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
 	}
-	return renderSystemPromptSections(sections) + e.collaborationGuidance()
+	prompt := renderSystemPromptSections(sections) + e.collaborationGuidance()
+	if e.runNote != "" {
+		prompt += "\n\n" + e.runNote
+	}
+	return prompt
+}
+
+// SetRunNote adds note to the end of this run's system prompt.
+func (e *AgentEngine) SetRunNote(note string) {
+	e.runNote = strings.TrimSpace(note)
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
@@ -530,9 +544,8 @@ func (e *AgentEngine) withinIterationBudget(round int) bool {
 }
 
 // loopGuards is the per-turn state the ReAct loop uses to notice it is not
-// making progress. All three counters exist because a model can keep the loop
-// spinning without ever finishing: empty answers, the same answer repeated,
-// and rounds cut off at the completion-token cap.
+// making progress. The counters cover empty answers, repeated answers,
+// completion-token cutoffs, and identical failed tool calls.
 type loopGuards struct {
 	// emptyRetries counts nudges sent after a stop with no content.
 	emptyRetries         int
@@ -549,6 +562,48 @@ type loopGuards struct {
 	// consecutiveLength counts rounds in a row that the provider cut off at
 	// the completion-token cap.
 	consecutiveLength int
+	// failedToolCallSignature and consecutiveFailedToolCalls track identical
+	// failed calls across rounds. A single guidance message is sent per streak.
+	failedToolCallSignature    string
+	consecutiveFailedToolCalls int
+	failedToolCallNudged       bool
+}
+
+// recordFailedToolCall tracks consecutive failures of the same model-facing
+// tool name and arguments. A successful or different call breaks the streak.
+func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, bool) {
+	if call.Result != nil && call.Result.Success {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	if call.Name == "" {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	args, err := json.Marshal(call.Args)
+	if err != nil {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	signature := call.Name + "\x00" + string(args)
+	if signature != g.failedToolCallSignature {
+		g.failedToolCallSignature = signature
+		g.consecutiveFailedToolCalls = 1
+		g.failedToolCallNudged = false
+	} else {
+		g.consecutiveFailedToolCalls++
+	}
+	if g.consecutiveFailedToolCalls >= maxConsecutiveFailedToolCalls && !g.failedToolCallNudged {
+		g.failedToolCallNudged = true
+		return call.Name, g.consecutiveFailedToolCalls, true
+	}
+	return "", g.consecutiveFailedToolCalls, false
+}
+
+func (g *loopGuards) resetFailedToolCallStreak() {
+	g.failedToolCallSignature = ""
+	g.consecutiveFailedToolCalls = 0
+	g.failedToolCallNudged = false
 }
 
 // closeAnswerStream emits the Done:true marker for an answer that is actually
@@ -880,6 +935,9 @@ func (e *AgentEngine) runReActIteration(
 	if guards.childAnswerRevised {
 		tools = nil
 	}
+	// Background-work context rides the same boundary for the same reasons,
+	// after the user's own messages.
+	e.injectBackground(ctx, state, messagesPtr, false)
 
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
@@ -1001,6 +1059,7 @@ func (e *AgentEngine) runReActIteration(
 	// round, which used to land in the else branch and reset the counter, so
 	// the guard could never fire on the one shape that needs it most (#3446).
 	if len(response.ToolCalls) == 0 {
+		guards.resetFailedToolCallStreak()
 		if guards.sawPlainRound && response.Content == guards.lastResponseContent {
 			guards.consecutiveSameContent++
 		} else {
@@ -1030,16 +1089,18 @@ func (e *AgentEngine) runReActIteration(
 
 	// Create agent step
 	step := types.AgentStep{
-		UserMessagesBefore: state.PendingSteerMessages,
-		Iteration:          state.CurrentRound,
-		Thought:            response.Content,
-		ReasoningContent:   response.ReasoningContent,
-		ReasoningSignature: response.ReasoningSignature,
-		ReasoningMetadata:  response.ReasoningMetadata,
-		ToolCalls:          make([]types.ToolCall, 0),
-		Timestamp:          time.Now(),
+		UserMessagesBefore:   state.PendingSteerMessages,
+		BackgroundInjections: state.PendingBackground,
+		Iteration:            state.CurrentRound,
+		Thought:              response.Content,
+		ReasoningContent:     response.ReasoningContent,
+		ReasoningSignature:   response.ReasoningSignature,
+		ReasoningMetadata:    response.ReasoningMetadata,
+		ToolCalls:            make([]types.ToolCall, 0),
+		Timestamp:            time.Now(),
 	}
 	state.PendingSteerMessages = nil
+	state.PendingBackground = nil
 
 	// If the request was cancelled while the LLM was streaming (e.g. the
 	// user pressed "stop"), the stream driver still returns a usable
@@ -1054,7 +1115,8 @@ func (e *AgentEngine) runReActIteration(
 	if ctx.Err() != nil {
 		logger.Warnf(ctx, "[Agent][Round-%d] Context cancelled during LLM call; preserving partial step",
 			round)
-		if step.Thought != "" || len(step.ToolCalls) > 0 || len(step.UserMessagesBefore) > 0 {
+		if step.Thought != "" || len(step.ToolCalls) > 0 || len(step.UserMessagesBefore) > 0 ||
+			len(step.BackgroundInjections) > 0 {
 			state.RoundSteps = append(state.RoundSteps, step)
 		}
 		return iterOutcomeBreak, nil
@@ -1097,8 +1159,22 @@ func (e *AgentEngine) runReActIteration(
 		return iterOutcomeBreak, fmt.Errorf("delegated answer revision requested tools despite text-only recovery")
 	}
 
-	// 2. Analyze: Check for stop conditions (natural stop with no tool calls)
-	verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
+	// 2. Analyze: Check for stop conditions (natural stop with no tool calls).
+	// An answer with page buttons stops like a plain answer once the buttons
+	// are offered; if one fails, the round goes on so the model can fix it.
+	analyzed, buttonsRan := response, false
+	if answersWithPageButtons(response) {
+		if e.runRoundTools(ctx, state, response, &step, sessionID, assistantMessageID) {
+			return iterOutcomeBreak, nil
+		}
+		buttonsRan = true
+		if toolCallsSucceeded(step.ToolCalls) {
+			answer := *response
+			answer.ToolCalls, answer.FinishReason = nil, "stop"
+			analyzed = &answer
+		}
+	}
+	verdict := e.analyzeResponse(ctx, analyzed, step, state.CurrentRound, sessionID, roundStart)
 	if verdict.isDone {
 		// Guard against empty content: when the LLM stops naturally with no
 		// content and no tool calls (e.g., thinking-only loop without KB),
@@ -1108,6 +1184,7 @@ func (e *AgentEngine) runReActIteration(
 			guards.emptyRetries++
 			if guards.emptyRetries <= maxEmptyResponseRetries {
 				state.PendingSteerMessages = step.UserMessagesBefore
+				state.PendingBackground = step.BackgroundInjections
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
 					round, guards.emptyRetries, maxEmptyResponseRetries)
 				guards.pendingRuntimeNotice = emptyResponseRetryNotice
@@ -1152,7 +1229,8 @@ func (e *AgentEngine) runReActIteration(
 			return iterOutcomeBreak, nil
 		}
 		// Loop-end inject: a user message queued while this finishing round
-		// ran should keep the agent going instead of emitting a final answer.
+		// ran, or background work this run started that is still running,
+		// keeps the agent going instead of emitting a final answer.
 		// Content-filter stops are terminal and do not take this path.
 		// Past MaxIterations only the first inject gets an extra round;
 		// anything after that stays in the queue for a follow-up turn.
@@ -1168,6 +1246,7 @@ func (e *AgentEngine) runReActIteration(
 					ReasoningMetadata:  response.ReasoningMetadata,
 				})
 				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
+				injected += e.injectBackground(ctx, state, messagesPtr, true)
 				if injected > 0 {
 					*messagesPtr = e.appendCollaborationDeliveryBoundary(*messagesPtr, verdict.finalAnswer)
 					verdict.step.IntermediateAnswer = true
@@ -1245,6 +1324,11 @@ func (e *AgentEngine) runReActIteration(
 		}
 		state.FinalAnswer = verdict.finalAnswer
 		state.IsComplete = true
+		if buttonsRan {
+			// The text is the turn's answer; left on the step it would replay
+			// twice in later turns and show again as a step on reload.
+			verdict.step.Thought = ""
+		}
 		state.RoundSteps = append(state.RoundSteps, verdict.step)
 		e.closeAnswerStream(ctx, sessionID, verdict.answerID, verdict.truncated)
 		return iterOutcomeBreak, nil
@@ -1262,8 +1346,11 @@ func (e *AgentEngine) runReActIteration(
 	// Thought.
 	// A tool-bearing response is an intermediate user update. Publish it on its
 	// own channel, never as reasoning or as part of the final deliverable.
+	// Page buttons that failed leave their answer text live, since the stream
+	// handler and the client keep text before a page button; retract it the
+	// same way.
 	progress := agenttools.StripThinkBlocks(response.Content)
-	if e.collaboration != nil && e.collaboration.Child == nil && strings.TrimSpace(progress) != "" {
+	if (buttonsRan || e.collaboration != nil && e.collaboration.Child == nil) && strings.TrimSpace(progress) != "" {
 		step.Progress = progress
 		progressID := response.AnswerEventID
 		if progressID == "" {
@@ -1277,31 +1364,94 @@ func (e *AgentEngine) runReActIteration(
 	}
 
 	// 3. Act: Execute tool calls
-	e.beginRound(step, response.ToolCalls)
-	suspended := e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
-	e.endRound()
-	toolCallCount = len(step.ToolCalls)
-	if suspended != nil {
-		// The blocked call and the ones after it have not run, so the round
-		// is not part of the transcript yet; it is completed on resume.
-		logger.Infof(ctx, "[Agent][Round-%d] Suspended waiting on prompt %s", round, suspended.PromptID)
-		state.Suspended = suspended
-		state.SuspendedStep = &step
+	if !buttonsRan && e.runRoundTools(ctx, state, response, &step, sessionID, assistantMessageID) {
 		return iterOutcomeBreak, nil
 	}
+	toolCallCount = len(step.ToolCalls)
 
 	// 4. Observe: Add tool results to messages and write to context
+	var (
+		failedToolName     string
+		failedToolAttempts int
+	)
+	for _, toolCall := range step.ToolCalls {
+		if name, attempts, shouldNudge := guards.recordFailedToolCall(toolCall); shouldNudge {
+			failedToolName = name
+			failedToolAttempts = attempts
+		}
+	}
+
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
 	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
+	if failedToolName != "" {
+		logger.Warnf(ctx, "[Agent][Round-%d] Repeated failed call to %q (%d attempts); "+
+			"asking the model to change strategy", round, failedToolName, failedToolAttempts)
+		guidance := fmt.Sprintf(
+			"The tool %q has failed %d consecutive times with identical arguments. "+
+				"Do not call it again with those arguments. Switch to a different tool "+
+				"or use another approach to complete the task.",
+			failedToolName, failedToolAttempts,
+		)
+		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: guidance})
+	}
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
 		"tool_calls":  toolCallCount,
 		"thought_len": len(step.Thought),
 	})
-
 	return iterOutcomeNext, nil
+}
+
+// runRoundTools executes the round's tool calls and reports whether the run
+// suspended on a prompt.
+func (e *AgentEngine) runRoundTools(
+	ctx context.Context,
+	state *types.AgentState,
+	response *types.ChatResponse,
+	step *types.AgentStep,
+	sessionID, assistantMessageID string,
+) bool {
+	e.beginRound(*step, response.ToolCalls)
+	suspended := e.executeToolCalls(ctx, response, step, state.CurrentRound, sessionID, assistantMessageID)
+	e.endRound()
+	step.BackgroundSeenIDs = e.takeBackgroundSeen()
+	if suspended == nil {
+		return false
+	}
+	// The blocked call and the ones after it have not run, so the round is
+	// not part of the transcript yet; it is completed on resume.
+	logger.Infof(ctx, "[Agent][Round-%d] Suspended waiting on prompt %s",
+		state.CurrentRound+1, suspended.PromptID)
+	state.Suspended = suspended
+	state.SuspendedStep = step
+	return true
+}
+
+// answersWithPageButtons reports whether a reply wrote its answer and only
+// offers page buttons beside it. That is a final answer, not a step: the
+// buttons render under it, and their results tell the model nothing.
+func answersWithPageButtons(response *types.ChatResponse) bool {
+	if len(response.ToolCalls) == 0 || isLengthFinishReason(response.FinishReason) ||
+		strings.TrimSpace(agenttools.StripThinkBlocks(response.Content)) == "" {
+		return false
+	}
+	for _, tc := range response.ToolCalls {
+		if !agenttools.IsPageButtonTool(tc.Function.Name) {
+			return false
+		}
+	}
+	return true
+}
+
+func toolCallsSucceeded(calls []types.ToolCall) bool {
+	for _, tc := range calls {
+		if tc.Result == nil || !tc.Result.Success {
+			return false
+		}
+	}
+	return true
 }
 
 // String returns a stable label for Langfuse output payloads.
@@ -1342,6 +1492,18 @@ const (
 	toolImageDescribeConcurrency = 4
 	toolImageDescribeTimeout     = 120 * time.Second
 )
+
+// DescribeDataURIImages turns user-uploaded data URIs into text with the
+// configured VLM. A chat model that cannot see images uses this instead of
+// dropping the upload. Uploads ask for a full read; tool results keep the
+// prompt that came with the tool call.
+func (e *AgentEngine) DescribeDataURIImages(ctx context.Context, imageDataURIs []string) []string {
+	prompts := make([]string, len(imageDataURIs))
+	for i := range prompts {
+		prompts[i] = toolImageFullPrompt
+	}
+	return e.describeImages(ctx, imageDataURIs, prompts)
+}
 
 // describeImages asks the configured VLM to describe tool result images, a
 // few at a time, each under its own timeout so a slow image cannot starve the

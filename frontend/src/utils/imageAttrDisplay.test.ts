@@ -46,7 +46,6 @@ const SCHEMA: ImageAttrSchema = {
         { prop: 'contain.text', is: 'block' },
         { prop: 'contain.data_visual', is: 'true' },
       ],
-      on_unobserved: true,
     },
   },
 }

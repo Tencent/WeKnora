@@ -86,7 +86,7 @@ func newRunTool(d *fakeDispatcher, gate approval.BuiltinApproval) *RunOperationT
 func interactiveCtx() context.Context {
 	return WithToolExecContext(context.Background(), &ToolExecContext{
 		SessionID: "s1", UserID: "web_user:u1", ToolCallID: "call-1",
-		EventBus: event.NewEventBus(), Interactive: true,
+		EventBus: event.NewEventBus(), Mode: types.RunModeAttended,
 	})
 }
 
@@ -597,7 +597,7 @@ func TestRunOperationAutoWriteHonorsResumedAnswer(t *testing.T) {
 			tool.rt.Access.Level = types.AssistantAccessAutoWrite
 			ctx := interactiveCtx()
 			meta, _ := ToolExecFromContext(ctx)
-			meta.Interactive = false
+			meta.Mode = types.RunModeUnattended
 			meta.Answered = &types.AgentPrompt{Kind: types.AgentPromptKindToolApproval}
 			res, err := tool.Execute(ctx, runArgs("knowledge.reparse", map[string]any{"knowledge_id": "k1"}))
 			require.NoError(t, err)
@@ -669,6 +669,13 @@ func TestFindOperationsDescribesMatches(t *testing.T) {
 
 	res, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"zzz-unmatched"}`))
 	assert.Contains(t, res.Output, "hint")
+
+	res, err = tool.Execute(context.Background(), json.RawMessage(`{"query":"generated files","domain":"artifact"}`))
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.NoError(t, json.Unmarshal([]byte(res.Output), &out))
+	require.Len(t, out.Operations, 1)
+	assert.Equal(t, "artifact.list", out.Operations[0].ID)
 }
 
 func TestRunOperationAgentSkillsApproval(t *testing.T) {

@@ -50,9 +50,9 @@ type AgentEngine interface {
 	// types.ResumableAgentRequest. Must be called before Execute.
 	EnableSuspension(request json.RawMessage)
 
-	// SetInteractive marks the client as able to render and answer prompts
-	// (ask_user). Must be called before Execute or Resume.
-	SetInteractive(interactive bool)
+	// SetRunMode says whether the client can render and answer prompts
+	// (ask_user, approvals). Must be called before Execute or Resume.
+	SetRunMode(mode types.RunMode)
 
 	// Resume continues a suspended run from its saved snapshot, delivering
 	// the answered prompt to the call it was blocked on. Use instead of
