@@ -179,8 +179,13 @@ func (g *pgRepository) createHNSWIndex(dimension int) error {
 		// subset with the app's name may be valid yet cover only one KB, so
 		// verify coverage as well as validity before calling it ready.
 		var valid bool
-		result := on().Raw(`SELECT indisvalid AND (indpred IS NULL OR pg_get_expr(indpred, indrelid) = ?)
-			FROM pg_index WHERE indexrelid = to_regclass(?)`, predicate, name).Scan(&valid)
+		result := on().Raw(`SELECT indisvalid
+			AND pg_get_indexdef(indexrelid) LIKE '%USING hnsw%'
+			AND pg_get_indexdef(indexrelid) LIKE ?
+			AND pg_get_indexdef(indexrelid) LIKE '%halfvec_cosine_ops%'
+			AND (indpred IS NULL OR pg_get_expr(indpred, indrelid) = ?)
+			FROM pg_index WHERE indexrelid = to_regclass(?)`,
+			fmt.Sprintf("%%halfvec(%d)%%", dimension), predicate, name).Scan(&valid)
 		if result.Error != nil {
 			return fmt.Errorf("could not verify %s: %w", name, result.Error)
 		}

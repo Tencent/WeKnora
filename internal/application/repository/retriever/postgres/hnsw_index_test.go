@@ -70,7 +70,7 @@ const (
 	createSQL   = `CREATE INDEX CONCURRENTLY IF NOT EXISTS embeddings_embedding_idx_2560 ON embeddings ` +
 		`USING hnsw \(\(embedding::halfvec\(2560\)\) halfvec_cosine_ops\) ` +
 		`WITH \(m = 16, ef_construction = 64\) WHERE \(dimension = 2560\)`
-	verifySQL = `SELECT indisvalid AND \(indpred IS NULL OR pg_get_expr\(indpred, indrelid\) = \$1\)[\s\S]*FROM pg_index WHERE indexrelid = to_regclass\(\$2\)`
+	verifySQL = `SELECT indisvalid[\s\S]*FROM pg_index WHERE indexrelid = to_regclass\(\$3\)`
 	unlockSQL = `SELECT pg_advisory_unlock\(\$1, \$2\)`
 	liftSQL   = `SET statement_timeout = 0`
 	resetSQL  = `RESET statement_timeout`
@@ -109,7 +109,7 @@ func expectUnlock(mock sqlmock.Sqlmock, dimension int) {
 }
 
 func expectVerify(mock sqlmock.Sqlmock, valid bool) {
-	mock.ExpectQuery(verifySQL).WithArgs("(dimension = 2560)", "embeddings_embedding_idx_2560").
+	mock.ExpectQuery(verifySQL).WithArgs("%halfvec(2560)%", "(dimension = 2560)", "embeddings_embedding_idx_2560").
 		WillReturnRows(sqlmock.NewRows([]string{"indisvalid"}).AddRow(valid))
 }
 
