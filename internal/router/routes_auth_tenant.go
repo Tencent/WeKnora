@@ -19,6 +19,7 @@ import (
 //   - GET/POST/PUT/DELETE /:id/api-keys   Owner+ (scoped API key management)
 //   - GET    /:id/members            Viewer+ (any member can see who else is in)
 //   - POST   /:id/members            Owner+ (only Owner can add new members)
+//   - POST   /:id/members/create     Admin+ (role matrix enforced in handler)
 //   - PUT    /:id/members/:user_id   Owner+ (only Owner can change roles)
 //   - DELETE /:id/members/:user_id   Owner+ (only Owner can remove members)
 //   - POST   /:id/leave              Viewer+ (any member can quit on their own)
@@ -118,6 +119,11 @@ func RegisterTenantRoutes(
 			if memberHandler != nil {
 				g.apiKeyRoute(tenantByID, http.MethodGet, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Viewer(), memberHandler.ListMembers)
 				g.apiKeyRoute(tenantByID, http.MethodPost, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.AddMember)
+				// 建号接口：路由层只保证 Admin+，细粒度角色矩阵（owner 可建
+				// admin/contributor/viewer，admin 只能建 viewer，禁止建 owner）
+				// 在 handler 内判定，见 service.CanCreateRole。JWT-only：
+				// 不通过 apiKeyRoute 声明，API key 默认拒绝。
+				tenantByID.POST("/members/create", g.Admin(), memberHandler.CreateMemberAccount)
 				g.apiKeyRoute(tenantByID, http.MethodPut, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.UpdateMemberRole)
 				g.apiKeyRoute(tenantByID, http.MethodDelete, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.RemoveMember)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)

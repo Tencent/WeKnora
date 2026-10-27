@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -66,6 +67,17 @@ type addMemberRequest struct {
 // updateMemberRoleRequest is the JSON body for PUT /tenants/:id/members/:user_id.
 type updateMemberRoleRequest struct {
 	Role types.TenantRole `json:"role" binding:"required"`
+}
+
+// createMemberAccountRequest is the JSON body for
+// POST /tenants/:id/members/create. Unlike addMemberRequest, it carries the
+// new account's credentials: this endpoint provisions a user and immediately
+// joins them to the workspace, so callers no longer have to pre-register.
+type createMemberAccountRequest struct {
+	Username string           `json:"username" binding:"required,min=2,max=50"`
+	Email    string           `json:"email"    binding:"required,email"`
+	Password string           `json:"password" binding:"required"`
+	Role     types.TenantRole `json:"role"     binding:"required"`
 }
 
 // parseTenantIDFromPath reads :id from the gin route and validates it as
@@ -238,6 +250,114 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	// Add the member and write the 201 / mapped-error response through the
 	// shared helper (also used by the invitation auto-accept path).
 	addMemberAndRespond(c, ctx, h.memberService, user, tenantID, req.Role, invitedBy)
+}
+
+// CreateMemberAccount godoc
+// @Summary      创建成员账号并加入空间
+// @Description  工作区 Owner（系统管理员按 Owner 处理）可创建 admin/contributor/viewer，
+// @Description  Admin 只能创建 viewer；任何人都不能创建 owner。一次请求完成建号与入组。
+// @Tags         空间成员
+// @Accept       json
+// @Produce      json
+// @Param        id       path  string                      true  "空间 ID"
+// @Param        request  body  createMemberAccountRequest  true  "建号请求"
+// @Success      201  {object}  map[string]interface{}  "成员已创建（响应不含密码）"
+// @Failure      400  {object}  map[string]interface{}  "参数或密码不合规 / 试图创建 owner"
+// @Failure      403  {object}  map[string]interface{}  "角色越权"
+// @Failure      409  {object}  map[string]interface{}  "邮箱或用户名已注册"
+// @Failure      500  {object}  map[string]interface{}  "内部错误"
+// @Security     Bearer
+// @Router       /tenants/{id}/members/create [post]
+func (h *TenantMemberHandler) CreateMemberAccount(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return
+	}
+
+	var req createMemberAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
+	// 密码刻意不做 trim：与 Register / AdminCreateUser 一致，按原字节校验并哈希。
+	if n := utf8.RuneCountInString(req.Username); n < 2 || n > 50 {
+		c.Error(apperrors.NewValidationError("username must be 2-50 characters"))
+		return
+	}
+	if !req.Role.IsValid() {
+		c.Error(apperrors.NewValidationError("role must be one of owner/admin/contributor/viewer"))
+		return
+	}
+	// 任何人都不能创建 owner；owner 转让/新增走另立需求（A2）。
+	if req.Role == types.TenantRoleOwner {
+		c.Error(apperrors.NewValidationError("cannot create an owner account"))
+		return
+	}
+
+	// 系统管理员按 owner 处理（D4）；其余调用者取当前活动空间里的角色。
+	actorRole := types.CallerFromContext(ctx).Role
+	if types.IsSystemAdminFromContext(ctx) {
+		actorRole = types.TenantRoleOwner
+	}
+	if !service.CanCreateRole(actorRole, req.Role) {
+		logger.Warnf(ctx, "CreateMemberAccount denied: actor_role=%s target_role=%s tenant=%d",
+			actorRole, req.Role, tenantID)
+		c.Error(apperrors.NewForbiddenError("your role cannot create a member with this role"))
+		return
+	}
+
+	// tenantless 模式只建用户、不建个人空间；随后由 AddMember 加入当前空间。
+	password := req.Password
+	user, _, err := h.userService.AdminCreateUser(ctx, &types.AdminCreateUserRequest{
+		Username: req.Username,
+		Email:    req.Email,
+		Password: &password,
+	}, types.TenantProvisioningTenantless)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserEmailExists):
+			// AC-5：已注册邮箱直接冲突，不覆盖现有账号、也不把老账号拉进空间。
+			c.Error(apperrors.NewConflictError(
+				"this email is already registered; invite or add the existing user instead"))
+		case errors.Is(err, service.ErrUserUsernameExists):
+			c.Error(apperrors.NewConflictError("this username is already taken"))
+		case errors.Is(err, service.ErrUserIdentityConflict):
+			c.Error(apperrors.NewConflictError(err.Error()))
+		case service.IsPasswordPolicyError(err):
+			c.Error(apperrors.NewValidationError("password does not meet the password policy"))
+		default:
+			// 不记录密码；邮箱做脱敏后再进日志。
+			logger.Errorf(ctx, "AdminCreateUser failed: email=%s err=%v",
+				secutils.SanitizeForLog(req.Email), err)
+			c.Error(apperrors.NewInternalServerError("failed to create user account"))
+		}
+		return
+	}
+
+	// invited_by 只记真实人类调用者；API key 的合成用户留空，与 AddMember 一致。
+	caller, _ := types.UserIDFromContext(ctx)
+	var invitedBy *string
+	if caller != "" && !types.IsSyntheticUserID(caller) {
+		invitedBy = &caller
+	}
+
+	member, err := h.memberService.AddMember(ctx, user.ID, tenantID, req.Role, invitedBy)
+	if err != nil {
+		// D5：入组失败时尽力软删刚建的用户，避免留下没有任何空间的孤儿账号。
+		// 回滚本身失败只告警，对外仍返回入组错误。
+		if rollbackErr := h.userService.DeleteUser(ctx, user.ID); rollbackErr != nil {
+			logger.Warnf(ctx, "rollback of newly created user failed: user=%s tenant=%d err=%v",
+				user.ID, tenantID, rollbackErr)
+		}
+		writeAddMemberError(c, ctx, user, tenantID, err)
+		return
+	}
+
+	// AddMember 内部已经发过 rbac.member_added 审计，这里不重复。
+	writeAddMemberSuccess(c, user, member)
 }
 
 func writeAddMemberError(
