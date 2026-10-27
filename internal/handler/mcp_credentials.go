@@ -59,7 +59,7 @@ type mcpCredentialsPutRequest struct {
 // @Produce      json
 // @Param        id       path      string                  true  "MCP 服务 ID"
 // @Param        request  body      map[string]interface{}  true  "{api_key?, token?, client_secret?: string}"
-// @Success      200      {object}  map[string]interface{}  "写入后的凭据状态"
+// @Success      200      {object}  handler.DataResponse{data=dto.CredentialsResponse}  "写入后的凭据状态"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "服务不存在"
 // @Security     Bearer

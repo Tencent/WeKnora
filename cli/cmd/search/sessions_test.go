@@ -21,7 +21,9 @@ type fakeSessionsSearchSvc struct {
 	calls []int
 }
 
-func (f *fakeSessionsSearchSvc) GetSessionsByTenant(_ context.Context, page, pageSize int) ([]sdk.Session, int, error) {
+func (f *fakeSessionsSearchSvc) GetSessionsByTenant(
+	_ context.Context, page, _ int, _ ...sdk.SessionListOptions,
+) ([]sdk.Session, int, error) {
 	f.calls = append(f.calls, page)
 	if f.err != nil {
 		return nil, 0, f.err

@@ -11,6 +11,9 @@ const (
 	ToolCallMCPTool      = "call_mcp_tool"
 	ToolThinking         = "thinking"
 	ToolTodoWrite        = "todo_write"
+	// ToolAskUser asks the user a question through a card and waits for the
+	// answer; the run may suspend until it arrives.
+	ToolAskUser = "ask_user"
 	// Knowledge retrieval surface. search_knowledge covers semantic, keyword
 	// and hybrid retrieval over chunk-indexed knowledge bases; read_document
 	// reads a document's metadata and chunks (by page, by chunk handle, or by
@@ -66,6 +69,14 @@ const (
 	// keys it on SkillsEnabled (or install mode), so the shell follows the
 	// skills switch and not a per-agent tool checkbox.
 	ToolShellExec = "shell_exec"
+	// ToolShellExecAsync submits a shell command as background work (plan 4).
+	// Like shell_exec it is registered per run, not in AvailableToolDefinitions.
+	ToolShellExecAsync = "shell_exec_async"
+	// ToolWorkWait / ToolWorkCancel wait on and stop background work. They are
+	// registered per run, only when the run can submit background work, so
+	// they are absent from AvailableToolDefinitions like shell_exec.
+	ToolWorkWait   = "work_wait"
+	ToolWorkCancel = "work_cancel"
 	// Wiki-related tools (only available when wiki KBs are in scope)
 	ToolWikiReadPage    = "wiki_read_page"
 	ToolWikiWritePage   = "wiki_write_page"
@@ -106,6 +117,7 @@ func AvailableToolDefinitions() []AvailableTool {
 	return []AvailableTool{
 		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具", Group: ToolGroupBase},
 		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划", Group: ToolGroupBase},
+		{Name: ToolAskUser, Label: "向用户提问", Description: "需要用户补充信息或做选择时，弹出卡片等待回答", Group: ToolGroupBase},
 		{
 			Name:        ToolSearchConversations,
 			Label:       "回顾历史对话",
@@ -173,6 +185,7 @@ func SwitchManagedTools() []string {
 		ToolWebFetch,
 		ToolSearchMemory,
 		ToolShellExec,
+		ToolShellExecAsync,
 		ToolReadFile,
 		ToolListSandboxFiles,
 		ToolWriteSandboxFile,
@@ -194,6 +207,9 @@ func DefaultAllowedTools() []string {
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
 		// without stuffing every past conversation into the context window.
 		ToolSearchConversations,
+		// Asking the user only reaches someone on clients that render the
+		// card; elsewhere the tool tells the model to ask in its reply.
+		ToolAskUser,
 		// ToolSearchMemory is deliberately absent here and from
 		// AvailableToolDefinitions. Like web_search it is not chosen from this
 		// list at all: registerTools injects it whenever the workspace, the
@@ -287,14 +303,17 @@ func RetiredToolReplacement(name string) string {
 		return "knowledge_search is no longer available; use search_knowledge(query=..., mode=\"semantic\"|\"hybrid\")"
 	case LegacyToolGrepChunks:
 		return "grep_chunks is no longer available; use search_knowledge(query=..., mode=\"keyword\") for exact " +
-			"terms, or read_document(id=dN, query=...) to search inside one document"
+			"terms, or read_document(id=doc://N, query=...) to search inside one document"
 	case LegacyToolListKnowledgeChunks:
-		return "list_knowledge_chunks is no longer available; use read_document(id=dN or cN, offset=..., limit=...)"
+		return "list_knowledge_chunks is no longer available; use " +
+			"read_document(id=doc://N or chunk://N, offset=..., limit=...)"
 	case LegacyToolGetDocumentInfo:
-		return "get_document_info is no longer available; read_document(id=dN) returns the document metadata " +
+		return "get_document_info is no longer available; read_document(id=doc://N) " +
+			"returns the document metadata " +
 			"with its first page"
 	case LegacyToolWikiReadSourceDoc:
-		return "wiki_read_source_doc is no longer available; use read_document(id=dN, query=... or offset=...)"
+		return "wiki_read_source_doc is no longer available; use " +
+			"read_document(id=doc://N, query=... or offset=...)"
 	default:
 		return ""
 	}

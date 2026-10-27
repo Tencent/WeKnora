@@ -30,7 +30,8 @@ func TestSSEReaderJSONProviderFraming(t *testing.T) {
 				if err := json.Unmarshal([]byte(got[0]), &decoded); err != nil {
 					t.Fatalf("provider payload %q: %v", got[0], err)
 				}
-				if len(decoded.Choices) != 1 || decoded.Choices[0].Delta.Content != "hello" || decoded.Choices[0].FinishReason != "stop" {
+				if len(decoded.Choices) != 1 || decoded.Choices[0].Delta.Content != "hello" ||
+					decoded.Choices[0].FinishReason != "stop" {
 					t.Fatalf("packet = %#v", decoded)
 				}
 				if !strings.Contains(got[0], "\n") {
@@ -46,10 +47,22 @@ func TestSSEReaderKeepsAdjacentJSONProviderCompatibility(t *testing.T) {
 		name, body string
 		want       []string
 	}{
-		{"adjacent complete packets", "data: {\"a\":1}\ndata: {\"b\":2}\ndata: [DONE]\n", []string{`{"a":1}`, `{"b":2}`, "[DONE]"}},
-		{"malformed packet before healthy packet", "data: not-json\ndata: {\"a\":1}\n\n", []string{"not-json", `{"a":1}`}},
+		{
+			"adjacent complete packets",
+			"data: {\"a\":1}\ndata: {\"b\":2}\ndata: [DONE]\n",
+			[]string{`{"a":1}`, `{"b":2}`, "[DONE]"},
+		},
+		{
+			"malformed packet before healthy packet",
+			"data: not-json\ndata: {\"a\":1}\n\n",
+			[]string{"not-json", `{"a":1}`},
+		},
 		{"incomplete malformed object before healthy packet", "data: {\ndata: {\"a\":1}\n\n", []string{"{", `{"a":1}`}},
-		{"array with independently valid JSON element", "data: [\ndata: {\"a\":1}\ndata: ]\n\n", []string{"[\n{\"a\":1}\n]"}},
+		{
+			"array with independently valid JSON element",
+			"data: [\ndata: {\"a\":1}\ndata: ]\n\n",
+			[]string{"[\n{\"a\":1}\n]"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -101,7 +114,7 @@ func TestSSEReaderCompletePacketDoesNotWaitForAnotherFrame(t *testing.T) {
 		for _, oneByte := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/oneByte=%t", ending.name, oneByte), func(t *testing.T) {
 				source, writer := io.Pipe()
-				t.Cleanup(func() { source.Close(); writer.Close() })
+				t.Cleanup(func() { _ = source.Close(); _ = writer.Close() })
 				type result struct {
 					event *SSEEvent
 					err   error
@@ -113,7 +126,8 @@ func TestSSEReaderCompletePacketDoesNotWaitForAnotherFrame(t *testing.T) {
 				}
 				go func() { event, err := NewSSEReader(input).ReadEvent(); results <- result{event, err} }()
 				go func() {
-					_, _ = io.WriteString(writer, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}"+ending.value)
+					_, _ = io.WriteString(writer,
+						"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}"+ending.value)
 				}()
 				// The writer deliberately remains open, like a provider pausing before
 				// its next token. This must not require the next frame or stream closure.
@@ -143,7 +157,7 @@ func TestSSEReaderLimitsAssembledProviderPacket(t *testing.T) {
 
 func TestSSEReaderPendingHealthyPacketDoesNotWait(t *testing.T) {
 	source, writer := io.Pipe()
-	t.Cleanup(func() { source.Close(); writer.Close() })
+	t.Cleanup(func() { _ = source.Close(); _ = writer.Close() })
 	results := make(chan error, 1)
 	go func() {
 		reader := NewSSEReader(source)

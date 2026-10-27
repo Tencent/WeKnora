@@ -45,17 +45,17 @@ func TestLiveImageOCRValidation(t *testing.T) {
 			defer cancel()
 			start := time.Now()
 			err = svc.processImage(ctx, &types.ImageMultimodalPayload{
-				ImageURL: "local://fixture", EnableOCR: true, Attempt: 1,
+				ImageURL: "local://fixture", Attempt: 1,
 			}, model, types.VLMConfig{}, tracker, out)
 			require.NoError(t, err)
 			require.Empty(t, tracker.failed)
-			require.Equal(t, "succeeded", out["ocr_status"], "OCR outcome: %v", out)
+			require.Equal(t, "done", out[keyOCRResult], "OCR outcome: %v", out)
 			require.Len(t, repo.created, 1)
 			chunk := repo.created[0]
 			require.Equal(t, types.ChunkTypeImageOCR, chunk.ChunkType)
 			require.NotEmpty(t, chunk.Content)
 			t.Logf("duration=%s chars=%d status=%s preview=%q", time.Since(start), len([]rune(chunk.Content)),
-				out["ocr_status"], previewText(chunk.Content, 180))
+				out[keyOCRResult], previewText(chunk.Content, 180))
 		})
 	}
 }

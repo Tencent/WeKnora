@@ -97,7 +97,31 @@ func TestCheckOwnershipOrRoleResolvesCreator(t *testing.T) {
 }
 
 func TestCheckOwnershipOrRoleMissingLookupFailsClosed(t *testing.T) {
-	decision, err := CheckOwnershipOrRole(OwnershipRequest{Enforce: true}, types.TenantRoleAdmin, nil)
+	decision, err := CheckOwnershipOrRole(
+		OwnershipRequest{Role: types.TenantRoleContributor, Enforce: true}, types.TenantRoleAdmin, nil)
 	require.Error(t, err)
 	require.True(t, decision.LookupFailed)
+}
+
+func TestCheckOwnershipOrRoleDeniesCreatorsBelowTheFloor(t *testing.T) {
+	for _, role := range []types.TenantRole{types.TenantRoleViewer, ""} {
+		t.Run(string(role)+"-creator", func(t *testing.T) {
+			decision, err := CheckOwnershipOrRole(
+				OwnershipRequest{UserID: "user", Role: role, Enforce: true},
+				types.TenantRoleAdmin,
+				func() (string, error) { return "user", nil },
+			)
+			require.ErrorIs(t, err, ErrOwnershipForbidden)
+			require.False(t, decision.LookupFailed)
+		})
+	}
+}
+
+func TestCheckOwnershipOrRoleKeepsNotFoundBelowTheFloor(t *testing.T) {
+	_, err := CheckOwnershipOrRole(
+		OwnershipRequest{UserID: "user", Role: types.TenantRoleViewer, Enforce: true},
+		types.TenantRoleAdmin,
+		func() (string, error) { return "", ErrResourceNotFound },
+	)
+	require.ErrorIs(t, err, ErrResourceNotFound)
 }

@@ -101,6 +101,24 @@ test('remote sandbox capability fails closed', () => {
   )
 })
 
+test('user allocation stays hidden unless the deployment explicitly enables it', () => {
+  assert.equal(isDeploymentCapabilitySupported({}, 'settings.sandbox.user_allocation'), false)
+  assert.equal(
+    isDeploymentCapabilitySupported(
+      { 'settings.sandbox.user_allocation': { supported: false, reason: 'deployment_gate_off' } },
+      'settings.sandbox.user_allocation',
+    ),
+    false,
+  )
+  assert.equal(
+    isDeploymentCapabilitySupported(
+      { 'settings.sandbox.user_allocation': { supported: true } },
+      'settings.sandbox.user_allocation',
+    ),
+    true,
+  )
+})
+
 test('skill settings need a remote sandbox or the host sandbox', () => {
   assert.equal(skillSettingsSupported({ 'settings.sandbox': { supported: true }, 'settings.sandbox.remote': { supported: true } }), true)
   assert.equal(skillSettingsSupported({ 'settings.sandbox': { supported: true }, 'settings.sandbox.host': { supported: true } }), true)

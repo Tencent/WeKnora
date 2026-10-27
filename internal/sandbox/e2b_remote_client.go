@@ -1164,7 +1164,8 @@ func (c *E2BRemoteClient) MakeDir(
 		return e2bInvalidRequest("MakeDir", "path is required", nil)
 	}
 	return makeDirTree(dir, func(component string) error {
-		return normalizeE2BError("MakeDir", sandbox.Filesystem.MakeDir(ctx, component, e2b.WithFileUser(remoteFileUser(ctx))))
+		err := sandbox.Filesystem.MakeDir(ctx, component, e2b.WithFileUser(remoteFileUser(ctx)))
+		return normalizeE2BError("MakeDir", err)
 	})
 }
 
@@ -1596,6 +1597,24 @@ func (c *E2BRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handle Rem
 	startTerminalTTLRefresh(ctx, nil, c.timeout, func(rctx context.Context) error {
 		return sbx.SetTimeoutWithContext(rctx, timeoutSeconds)
 	})
+}
+
+// KeepAlive moves the sandbox's timeout to ttl from now. E2B does not count
+// commands, file access or URL requests as activity on a running sandbox; only
+// SetTimeout resets it.
+func (c *E2BRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, ttl time.Duration) error {
+	sbx, err := e2bHandleSandbox("KeepAlive", handle)
+	if err != nil {
+		return err
+	}
+	seconds, err := e2bTimeoutSeconds(RemoteTimeoutPolicy{Mode: RemoteTimeoutExplicit, Value: ttl}, 0)
+	if err != nil {
+		return err
+	}
+	if seconds <= 0 {
+		return nil
+	}
+	return sbx.SetTimeoutWithContext(ctx, seconds)
 }
 
 var (

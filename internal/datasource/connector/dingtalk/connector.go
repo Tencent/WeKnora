@@ -112,11 +112,19 @@ func (c *Connector) Type() string {
 const maxValidateProbes = 5
 
 // Validate checks the application credentials and operator access, including
-// node listing and a sample document read when one is visible in a workspace.
+// node listing and a sample document read when one is visible.
 //
-// The operator is not expected to reach every workspace in the tenant: app
-// credentials are valid as long as one reachable workspace yields one readable
-// document. A failed probe does not condemn that workspace; the walk keeps
+// A data source that selects resources is validated against those resources
+// only. They are what the operator asked to sync, so an unrelated workspace
+// that happens to be listed first, and that the operator cannot read, must not
+// decide whether the selection is usable: a selected folder or workspace is
+// walked for one readable document, and a selected document is probed
+// directly. Without a selection there is nothing narrower to sample, so the
+// whole tenant is walked as before.
+//
+// In both modes the operator is not expected to reach every object: app
+// credentials are valid as long as one reachable document can be read. A
+// failed probe does not condemn the object it was found in; the walk keeps
 // looking, inside the probe cap, for another document the operator can read.
 // When the cap itself stops a conclusive walk, the error says how many
 // documents were read.
@@ -127,6 +135,15 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	}
 	api := c.api(cfg)
 	settings := parseDocumentSettings(dataSourceConfig)
+	if selected := uniqueIDs(dataSourceConfig.ResourceIDs); len(selected) > 0 {
+		return validateSelectedResources(ctx, api, selected, settings)
+	}
+	return validateTenantCredentials(ctx, api, settings)
+}
+
+// validateTenantCredentials samples every workspace in the tenant, which is
+// what a data source without a selection is going to sync.
+func validateTenantCredentials(ctx context.Context, api dingTalkAPI, settings documentSettings) error {
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
@@ -174,19 +191,168 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 			break
 		}
 	}
-	// Folders were left unexplored, because the listing budget ran out or a
-	// folder could not be listed, so an unreadable document elsewhere does not
-	// prove the data source is unusable. A probe cap hit in that situation
-	// stays quiet too: the walk cannot claim it sampled every visible document.
+	return validateOutcome(inconclusive, sawDocument, workspaceFail, probeCapHit, lastErr)
+}
+
+// validateSelectedResources checks only the scopes a data source selects.
+// References are resolved through the same code path a sync uses, so Validate
+// answers the question the operator asked — would this selection sync
+// anything? — instead of sampling workspaces the selection never mentions.
+//
+// A reference this build cannot resolve is reported rather than quietly
+// replaced by the tenant walk: the data source would fail on that resource,
+// and a selection the picker can no longer resolve is exactly what the
+// operator needs to see.
+func validateSelectedResources(
+	ctx context.Context,
+	api dingTalkAPI,
+	selected []string,
+	settings documentSettings,
+) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("validate DingTalk data source: %w", err)
+	}
+	workspaces, err := api.listWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("validate DingTalk data source: %w", err)
+	}
+	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected, settings)
+	if err != nil {
+		return fmt.Errorf("validate DingTalk data source: %w", err)
+	}
+	names := make(map[string]string, len(workspaces))
+	for _, item := range workspaces {
+		names[item.ID] = item.Name
+	}
+
+	var (
+		lastErr      error
+		resolveErr   error
+		sawDocument  bool
+		inconclusive bool
+		scopeFail    int
+		probes       int
+		listings     int
+		probeCapHit  bool
+	)
+	for _, resourceID := range selected {
+		failure := failures[resourceID]
+		if failure == nil {
+			continue
+		}
+		scopeFail++
+		if resolveErr == nil {
+			resolveErr = fmt.Errorf("resource %s: %w", resourceID, failure)
+		}
+	}
+	for i, scope := range scopes {
+		// A failed probe names the workspace it was found in, the way the
+		// tenant-wide sample does, so it stays actionable.
+		name := names[scope.Reference.WorkspaceID]
+		if name == "" {
+			name = scope.Reference.WorkspaceID
+		}
+		readable, unexplored, hitCap, err := sampleScope(
+			ctx, api, scope, name, settings,
+			&listings, &probes, &sawDocument, &lastErr,
+		)
+		if err != nil {
+			// Name the selected node when the selection is one: a folder that
+			// cannot be listed is what the operator has to look at, and the
+			// workspace alone would not say which folder.
+			label := fmt.Sprintf("workspace %q", name)
+			if scope.Reference.NodeID != "" {
+				label = fmt.Sprintf("workspace %q node %q", name, scope.Reference.NodeID)
+			}
+			lastErr = fmt.Errorf("%s: %w", label, err)
+			// A cancelled or timed-out request proves nothing about the
+			// credentials, so it must never fall through to acceptance.
+			if ctx.Err() != nil || isContextError(err) {
+				return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+			}
+			scopeFail++
+			continue
+		}
+		if readable {
+			return nil
+		}
+		if unexplored {
+			inconclusive = true
+		}
+		if probes >= maxValidateProbes {
+			probeCapHit = hitCap || i+1 < len(scopes)
+			break
+		}
+	}
+	if lastErr == nil {
+		// A failed probe names a workspace and a document the operator can act
+		// on; a reference that does not resolve can only name itself.
+		lastErr = resolveErr
+	}
+	return validateOutcome(inconclusive, sawDocument, scopeFail, probeCapHit, lastErr)
+}
+
+// sampleScope probes one resolved selection scope. A selected document is read
+// through its own read API, while a selected folder or workspace is walked the
+// way the tenant sample walks a workspace root, so a readable document below
+// the selected folder is still found.
+func sampleScope(
+	ctx context.Context,
+	api dingTalkAPI,
+	scope syncScope,
+	workspaceName string,
+	settings documentSettings,
+	listings *int,
+	probes *int,
+	sawDocument *bool,
+	lastErr *error,
+) (readable, unexplored, capHit bool, err error) {
+	if scope.Document == nil {
+		return sampleWorkspace(
+			ctx, api, workspaceName, scope.StartNodeID, settings,
+			listings, probes, sawDocument, lastErr,
+		)
+	}
+	document := *scope.Document
+	*probes++
+	*sawDocument = true
+	if probeErr := verifyDocument(ctx, api, document); probeErr != nil {
+		if ctx.Err() != nil || isContextError(probeErr) {
+			return false, false, false, fmt.Errorf("document %q: %w", document.title(), probeErr)
+		}
+		*lastErr = fmt.Errorf(
+			"workspace %q document %q: %w", workspaceName, document.title(), probeErr,
+		)
+		return false, false, false, nil
+	}
+	return true, false, false, nil
+}
+
+// validateOutcome folds the counters of a validate walk into its result. The
+// tenant-wide sample and the selection-scoped one both end here, because they
+// answer the same question: is there a document in what this data source syncs
+// that the operator can read?
+//
+// Folders were left unexplored, because the listing budget ran out or a folder
+// could not be listed, so an unreadable document elsewhere does not prove the
+// data source is unusable. A probe cap hit in that situation stays quiet too:
+// the walk cannot claim it sampled every visible document.
+//
+// Nothing readable anywhere. Only a scope that exposed no document at all is
+// accepted: there was nothing to read, so credentials could not be disproved.
+// A document that exists but cannot be read means the data source would sync
+// nothing, which is worth reporting.
+func validateOutcome(
+	inconclusive bool,
+	sawDocument bool,
+	failures int,
+	probeCapHit bool,
+	lastErr error,
+) error {
 	if inconclusive {
 		return nil
 	}
-
-	// Nothing readable anywhere. Only a tenant that exposed no document at all
-	// is accepted: there was nothing to read, so credentials could not be
-	// disproved. A document that exists but cannot be read means the data
-	// source would sync nothing, which is worth reporting.
-	if !sawDocument && workspaceFail == 0 {
+	if !sawDocument && failures == 0 {
 		return nil
 	}
 	if lastErr == nil {
@@ -647,6 +813,12 @@ type syncScope struct {
 	Reference   resourceReference
 	StartNodeID string
 	Document    *node
+	// FolderPath is the folder hierarchy between the workspace root and the
+	// scope's own node, root-first, with the scope's own folder name last. It
+	// anchors every document the scope yields, so selecting a subfolder and
+	// selecting the whole workspace file the same document under the same
+	// folder instead of under two.
+	FolderPath []string
 }
 
 func (s syncScope) contains(candidate syncScope) bool {
@@ -688,6 +860,9 @@ func (c *Connector) sync(
 
 	api := c.api(cfg)
 	settings := parseDocumentSettings(dataSourceConfig)
+	if settings.PreserveFolderStructure {
+		logger.Infof(ctx, "[DingTalk] source folder structure is encoded into document file names")
+	}
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -695,6 +870,13 @@ func (c *Connector) sync(
 	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected, settings)
 	if err != nil {
 		return nil, nil, err
+	}
+	// The workspace name is the first folder segment of every encoded path. It
+	// is read from the listing the sync already made, so the leading level
+	// costs no extra request.
+	workspaceFolderNames := make(map[string]string, len(workspaces))
+	for _, item := range workspaces {
+		workspaceFolderNames[item.ID] = workspaceFolderName(item)
 	}
 
 	next := &cursorState{
@@ -757,7 +939,8 @@ func (c *Connector) sync(
 		synced := 0
 		failed := 0
 
-		for _, document := range documents {
+		for _, scanned := range documents {
+			document := scanned.node
 			if document.ID == "" {
 				continue
 			}
@@ -770,7 +953,13 @@ func (c *Connector) sync(
 				continue
 			}
 
-			item, err := readDocument(ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document)
+			folders := documentFolders(
+				settings, workspaceFolderNames[scope.Reference.WorkspaceID],
+				scope.FolderPath, scanned.folders,
+			)
+			item, err := readDocument(
+				ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document, folders,
+			)
 			if err != nil {
 				if isContextError(err) {
 					return nil, nil, err
@@ -894,6 +1083,7 @@ func resolveSyncScopes(
 			}, nil
 		}
 
+		var ancestorFolders []string
 		parentNodeID := rootNodeID
 		for _, ancestorID := range ref.Ancestors {
 			children, err := listChildren(parentNodeID)
@@ -908,6 +1098,11 @@ func resolveSyncScopes(
 			if ancestor.WorkspaceID != "" && ancestor.WorkspaceID != ref.WorkspaceID {
 				return syncScope{}, fmt.Errorf("DingTalk ancestor %q belongs to a different workspace", ancestorID)
 			}
+			// The name is read off a listing this resolution has to make
+			// anyway, so anchoring the path at the workspace root costs no
+			// extra request. A selection saved without ancestors yields a
+			// shallower path rather than an error.
+			ancestorFolders = append(ancestorFolders, ancestor.title())
 			parentNodeID = ancestor.ID
 		}
 		children, err := listChildren(parentNodeID)
@@ -926,11 +1121,13 @@ func resolveSyncScopes(
 		case selectedNode.isFolder():
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, StartNodeID: selectedNode.ID,
+				FolderPath: appendFolder(ancestorFolders, selectedNode.title()),
 			}, nil
 		case selectedNode.isIngestible(settings):
 			document := selectedNode
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, Document: &document,
+				FolderPath: ancestorFolders,
 			}, nil
 		default:
 			return syncScope{}, fmt.Errorf("DingTalk node %q is not a supported online document or folder",
@@ -990,6 +1187,26 @@ func childByID(children []node, nodeID string) (node, bool) {
 	return node{}, false
 }
 
+// scannedDocument pairs an ingestible node with the folder hierarchy the walk
+// found it under, relative to the scan's root node. The hierarchy is carried
+// alongside the node rather than recomputed later: the breadth-first walk is
+// the only place that knows which parent listed the node.
+type scannedDocument struct {
+	node
+	// folders holds the folder titles between the scan root and the document,
+	// root-first. A document sitting directly in the scan root has none.
+	folders []string
+}
+
+// appendFolder returns parent plus one folder title. The result is always a
+// fresh slice: appending in place would let one sibling's name overwrite
+// another's inside a shared backing array.
+func appendFolder(parent []string, name string) []string {
+	folders := make([]string, 0, len(parent)+1)
+	folders = append(folders, parent...)
+	return append(folders, name)
+}
+
 // scanScope lists every ingestible document in one scope, together with the
 // nodes it saw but cannot ingest. The skipped nodes are returned rather than
 // discarded so the caller can report them: a full sync must never look clean
@@ -999,26 +1216,34 @@ func scanScope(
 	api dingTalkAPI,
 	scope syncScope,
 	settings documentSettings,
-) ([]node, []node, error) {
+) ([]scannedDocument, []node, error) {
 	if scope.Document != nil {
-		return []node{*scope.Document}, nil, nil
+		// A single-document scope has no tree to walk; the scope's own
+		// FolderPath already carries the folders above it.
+		return []scannedDocument{{node: *scope.Document}}, nil, nil
 	}
 	return scanWorkspace(ctx, api, scope.Reference.WorkspaceID, scope.StartNodeID, settings)
 }
 
 // scanWorkspace walks a workspace subtree breadth-first. Folders are traversal
-// only; every file is either an ingestible document or a skip.
+// only; every file is either an ingestible document or a skip. Each document is
+// reported with the folder titles the walk descended through to reach it, so
+// the caller can mirror the source hierarchy in the knowledge base.
 func scanWorkspace(
 	ctx context.Context,
 	api dingTalkAPI,
 	workspaceID string,
 	rootNodeID string,
 	settings documentSettings,
-) ([]node, []node, error) {
+) ([]scannedDocument, []node, error) {
 	queue := []string{rootNodeID}
 	visitedParents := make(map[string]struct{})
 	seenNodes := make(map[string]struct{})
-	var documents []node
+	// foldersByParent maps a node ID to the folder titles between the scan root
+	// and that node, root-first. Only nodes the walk descends through get an
+	// entry; the scan root itself has none.
+	foldersByParent := map[string][]string{rootNodeID: nil}
+	var documents []scannedDocument
 	var skipped []node
 
 	for len(queue) > 0 {
@@ -1052,7 +1277,10 @@ func scanWorkspace(
 			}
 			switch {
 			case child.isIngestible(settings):
-				documents = append(documents, child)
+				documents = append(documents, scannedDocument{
+					node:    child,
+					folders: foldersByParent[parentID],
+				})
 			case child.isFolder():
 				// Containers hold no content of their own, so they are never
 				// reported as skipped.
@@ -1060,6 +1288,7 @@ func scanWorkspace(
 				skipped = append(skipped, child)
 			}
 			if child.isFolder() || child.HasChildren {
+				foldersByParent[child.ID] = appendFolder(foldersByParent[parentID], child.title())
 				queue = append(queue, child.ID)
 			}
 		}
@@ -1141,13 +1370,16 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 
 // readDocument turns one supported wiki node into a FetchedItem. Native adoc
 // documents are rendered from their blocks, and uploaded files are transferred
-// byte-for-byte so WeKnora's own parsers can read them.
+// byte-for-byte so WeKnora's own parsers can read them. folders is the source
+// folder hierarchy to encode in the item's FileName, or nil to keep the
+// historical flat name.
 func readDocument(
 	ctx context.Context,
 	api dingTalkAPI,
 	sourceResourceID string,
 	workspaceID string,
 	document node,
+	folders []string,
 ) (types.FetchedItem, error) {
 	switch {
 	case document.isOnlineDocument():
@@ -1160,14 +1392,71 @@ func readDocument(
 		// both the request context and the node identity are known. Uploaded
 		// files take the default branch and have no rendering step to lose.
 		warnUnknownBlockTypes(ctx, document, rendered)
-		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
+		return fetchedDocument(sourceResourceID, workspaceID, document, rendered, folders), nil
 	default:
 		data, err := api.downloadDocument(ctx, document.ID)
 		if err != nil {
 			return types.FetchedItem{}, err
 		}
-		return fetchedBinaryDocument(sourceResourceID, workspaceID, document, data), nil
+		return fetchedBinaryDocument(sourceResourceID, workspaceID, document, data, folders), nil
 	}
+}
+
+// documentFolders assembles the folder segments a document's FileName encodes:
+// the workspace, the folders between the workspace root and the scope's own
+// node, then the folders the scan descended through.
+//
+// It returns nil when the switch is off, which is what keeps the emitted
+// FileName byte-for-byte identical to previous releases for every data source
+// that never turned it on.
+func documentFolders(
+	settings documentSettings,
+	workspaceName string,
+	scopeFolders []string,
+	scanFolders []string,
+) []string {
+	if !settings.PreserveFolderStructure {
+		return nil
+	}
+	folders := make([]string, 0, len(scopeFolders)+len(scanFolders)+1)
+	if workspaceName != "" {
+		folders = append(folders, workspaceName)
+	}
+	folders = append(folders, scopeFolders...)
+	return append(folders, scanFolders...)
+}
+
+// workspaceFolderName names a workspace the way the resource picker does: the
+// workspace name, falling back to its ID, which is what an operator sees when a
+// tenant exposes no name.
+func workspaceFolderName(item workspace) string {
+	if name := strings.TrimSpace(item.Name); name != "" {
+		return name
+	}
+	return item.ID
+}
+
+// buildFolderFileName prepends the folder hierarchy to a document's file name.
+//
+// folder_path downstream is derived from FileName alone
+// (SplitKnowledgeRelativePath → NormalizeKnowledgeFolderPath), so the hierarchy
+// has to be encoded here as a relative path.
+//
+// Every level is sanitised on its own, as the Yuque connector's own folder
+// encoding does, so a "/" inside a folder name cannot silently create an extra
+// nesting level. Folder names the downstream normaliser rejects outright — ".",
+// "..", an empty name — drop their level instead of failing the sync. An empty
+// folder list, which is what the default settings produce, returns the file
+// name unchanged.
+func buildFolderFileName(folders []string, fileName string) string {
+	if len(folders) == 0 {
+		return fileName
+	}
+	segments := make([]string, 0, len(folders))
+	for _, folder := range folders {
+		segments = append(segments, datasource.SanitizeFileName(folder))
+	}
+	return strings.Join(segments, "/") + "/" + fileName
 }
 
 // documentMetadata describes a wiki node the same way for rendered and
@@ -1195,6 +1484,7 @@ func fetchedDocument(
 	workspaceID string,
 	document node,
 	rendered renderResult,
+	folders []string,
 ) types.FetchedItem {
 	metadata := documentMetadata(workspaceID, document)
 	if len(rendered.UnknownTypes) > 0 {
@@ -1205,7 +1495,7 @@ func fetchedDocument(
 		Title:            document.title(),
 		Content:          []byte(rendered.Markdown),
 		ContentType:      "text/markdown",
-		FileName:         renderedDocumentFileName(document.title()),
+		FileName:         buildFolderFileName(folders, renderedDocumentFileName(document.title())),
 		URL:              documentURL(document),
 		UpdatedAt:        document.modifiedAt(),
 		Metadata:         metadata,
@@ -1234,6 +1524,7 @@ func fetchedBinaryDocument(
 	workspaceID string,
 	document node,
 	data []byte,
+	folders []string,
 ) types.FetchedItem {
 	contentType, ok := document.binaryContentType()
 	if !ok {
@@ -1244,7 +1535,7 @@ func fetchedBinaryDocument(
 		Title:            document.title(),
 		Content:          data,
 		ContentType:      contentType,
-		FileName:         binaryDocumentFileName(document),
+		FileName:         buildFolderFileName(folders, binaryDocumentFileName(document)),
 		URL:              documentURL(document),
 		UpdatedAt:        document.modifiedAt(),
 		Metadata:         documentMetadata(workspaceID, document),

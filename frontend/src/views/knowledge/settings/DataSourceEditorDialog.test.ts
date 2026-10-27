@@ -45,7 +45,7 @@ async function fixture({
   const api = {
     async validateCredentials(type: string, credentials: Record<string, string>) {
       calls.push({ method: 'validateCredentials', args: [type, { ...credentials }] })
-      if (credentials.access_token !== 'rotated-token') throw new Error('gitlab API /user: status 401')
+      if (type !== 'confluence' && credentials.access_token !== 'rotated-token') throw new Error('gitlab API /user: status 401')
     },
     async validateConnection(id: string) {
       calls.push({ method: 'validateConnection', args: [id] })
@@ -392,5 +392,104 @@ test('Cloud hierarchy limitation stays visible after an empty space expansion', 
     f.vm.resources = [{ ...f.vm.resources[0], has_children: false }]
     await nextTick()
     assert.equal(f.vm.visibleTree.some((row: any) => row.noticeAfter), true)
+  } finally { f.close() }
+})
+
+for (const type of ['feishu', 'lark', 'feishu_drive', 'lark_drive']) {
+  test(`${type} preserves inherited parse mode when saving unrelated settings`, async () => {
+    const settings = { timezone: 'Asia/Shanghai', resync_required: true }
+    const f = await fixture({ type, settings })
+    try {
+      assert.equal(f.vm.feishuParseMode, '')
+      assert.equal(f.vm.form.config.settings.parse_mode, undefined)
+      f.vm.form.name = 'Renamed source'
+      await f.vm.handleSubmit()
+      const saved = f.calls.find(call => call.method === 'updateDataSource')
+      assert.ok(saved)
+      assert.deepEqual(saved.args[1].config.settings, settings)
+      assert.equal('parse_mode' in settings, false, 'opening the editor must not mutate props')
+    } finally { f.close() }
+  })
+}
+
+test('Feishu explicit mode changes are saved without mutating the source configuration', async () => {
+  const settings = { parse_mode: 'export', timezone: 'Asia/Shanghai' }
+  const f = await fixture({ type: 'feishu', settings })
+  try {
+    assert.equal(f.vm.feishuParseMode, 'export')
+    f.vm.feishuParseMode = 'blocks'
+    assert.equal(settings.parse_mode, 'export')
+    assert.equal(f.vm.buildConfigPayload().settings.parse_mode, 'blocks')
+    f.vm.feishuParseMode = ''
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildConfigPayload().settings)), { timezone: 'Asia/Shanghai' })
+    assert.equal(settings.parse_mode, 'export')
+  } finally { f.close() }
+})
+
+test('new Feishu sources keep the blocks default and do not leak it to another connector', async () => {
+  const f = await fixture({ create: true })
+  try {
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'feishu'))
+    assert.equal(f.vm.feishuParseMode, 'blocks')
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
+    assert.equal(f.vm.form.config.settings.parse_mode, undefined)
+  } finally { f.close() }
+})
+
+
+test('Confluence PAT permits connection testing and saving without Basic credentials', async () => {
+  const f = await fixture({ create: true, configured: false, settings: {} })
+  try {
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'confluence'))
+    f.vm.form.config.credentials = { edition: 'server', base_url: 'https://confluence.test/wiki', token: 'pat-value' }
+    await nextTick()
+    const fields = f.vm.displayedCredentialFields
+    assert.equal(fields.find((field: any) => field.key === 'token').secret, true)
+    assert.equal(fields.find((field: any) => field.key === 'username').optional, true)
+    assert.equal(fields.find((field: any) => field.key === 'password').optional, true)
+    assert.equal(fields.some((field: any) => field.key === 'api_token'), false)
+    await f.vm.testConnection()
+    assert.equal(f.vm.testResult, 'success')
+    assert.equal(f.calls.find(c => c.method === 'validateCredentials')?.args[1].token, 'pat-value')
+    await f.vm.loadResources()
+    const created = f.calls.find(c => c.method === 'createDataSource')?.args[0]
+    assert.equal(created.config.credentials.token, 'pat-value')
+    assert.equal(created.config.settings.token, undefined)
+    assert.deepEqual(f.warnings, [])
+  } finally { f.close() }
+})
+
+test('Confluence requires Basic credentials without a PAT and hides PAT in Cloud', async () => {
+  const f = await fixture({ type: 'confluence', configured: false, settings: {} })
+  try {
+    f.vm.form.config.credentials = { edition: 'server', base_url: 'https://confluence.test/wiki', token: '  ' }
+    await nextTick()
+    assert.equal(f.vm.displayedCredentialFields.find((field: any) => field.key === 'username').optional, false)
+    assert.equal(f.vm.displayedCredentialFields.find((field: any) => field.key === 'password').optional, false)
+    await f.vm.testConnection()
+    assert.equal(f.calls.some(c => c.method === 'validateCredentials'), false)
+    f.vm.form.config.credentials.edition = 'cloud'
+    f.vm.form.config.credentials.token = 'stale-server-token'
+    await nextTick()
+    assert.deepEqual(Array.from(f.vm.displayedCredentialFields, (field: any) => field.key), ['base_url', 'username', 'api_token'])
+    assert.equal(f.vm.displayedCredentialFields.find((field: any) => field.key === 'username').optional, false)
+  } finally { f.close() }
+})
+
+
+test('Confluence PAT replacement uses the credentials subresource and keeps the token out of settings', async () => {
+  const f = await fixture({ type: 'confluence', settings: { edition: 'server', base_url: 'https://confluence.test/wiki' } })
+  try {
+    f.vm.enterReplaceCredentials()
+    f.vm.form.config.credentials.token = 'replacement-pat'
+    await nextTick()
+    await f.vm.testConnection()
+    assert.equal(f.vm.testResult, 'success')
+    await f.vm.handleSubmit()
+    const replacement = f.calls.find(c => c.method === 'putDataSourceCredentials')
+    assert.equal(replacement?.args[1].token, 'replacement-pat')
+    const update = f.calls.find(c => c.method === 'updateDataSource')?.args[1]
+    assert.deepEqual(update.config.credentials, {})
+    assert.equal(update.config.settings.token, undefined)
   } finally { f.close() }
 })

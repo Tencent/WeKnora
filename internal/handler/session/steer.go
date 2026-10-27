@@ -357,7 +357,7 @@ func (h *Handler) liveAgentRun(ctx context.Context, sessionID string) (string, e
 	if err != nil {
 		return "", err
 	}
-	if msg == nil || msg.IsCompleted {
+	if msg == nil || msg.IsCompleted || msg.RunState == types.MessageRunStateAwaitingInput {
 		if err := h.streamManager.ClearLiveRun(ctx, sessionID, assistantID); err != nil {
 			logger.Warnf(ctx, "stale live run cleanup failed for session %s: %v", sessionID, err)
 		}
@@ -520,9 +520,15 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 
 	// Same ownership scope as StopSession: steer mutates an in-flight turn, so
 	// use the strict owner scope and reject cross-tenant access.
-	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
+	session, err := h.sessionService.GetOwnedSession(ctx, sessionID)
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		_ = c.Error(errors.NewNotFoundError("Session not found"))
+		return
+	}
+
+	if session.Kind == types.SessionKindAutomation {
+		_ = c.Error(errors.NewForbiddenError("automation conversations do not accept manual messages"))
 		return
 	}
 
@@ -651,9 +657,15 @@ func (h *Handler) PromoteSteerMessage(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.sessionService.GetOwnedSession(ctx, sessionID); err != nil {
+	session, err := h.sessionService.GetOwnedSession(ctx, sessionID)
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		_ = c.Error(errors.NewNotFoundError("Session not found"))
+		return
+	}
+
+	if session.Kind == types.SessionKindAutomation {
+		_ = c.Error(errors.NewForbiddenError("automation conversations do not accept manual messages"))
 		return
 	}
 
@@ -947,6 +959,8 @@ func (h *Handler) claimNextSteerFollowUp(
 		prevReqCtx.sessionID, len(backlog), len(injected))
 
 	followUp := *prevReqCtx
+	// A queued message starts a new turn, never another replay of this one.
+	followUp.resume = nil
 	followUp.ctx = ctx
 	followUp.query = first.Content
 	followUp.userInput = first.Content

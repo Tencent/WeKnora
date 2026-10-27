@@ -198,19 +198,27 @@
             </div>
             <div class="setting-control setting-control-full" style="position: relative;">
               <!-- Agent模式：统一提示词（使用 {{web_search_status}} 占位符动态控制行为） -->
-              <div v-if="isAgentMode" class="textarea-with-template">
+              <div v-if="isAgentMode" class="textarea-with-template textarea-with-assistant">
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
+                <AssistantActionButton class="prompt-assistant-action"
+                  :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                  :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                  :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
                 <PromptTemplateSelector type="agentSystemPrompt" position="corner"
                   :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
                   @reset-default="handleAgentSystemPromptResetDefault" />
               </div>
               <!-- 普通模式：单个提示词 -->
-              <div v-else class="textarea-with-template">
+              <div v-else class="textarea-with-template textarea-with-assistant">
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
+                <AssistantActionButton class="prompt-assistant-action"
+                  :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                  :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                  :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
                 <PromptTemplateSelector type="systemPrompt" position="corner"
                   :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
                   @reset-default="handleSystemPromptTemplateSelect" />
@@ -1281,6 +1289,20 @@
                 theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
             </div>
           </div>
+
+          <!-- 执行权限上限：修改数据的工具（MCP、Wiki 写入）能否不经确认直接执行 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.mcp.accessLevel') }}</label>
+              <p class="desc">{{ $t('agentEditor.mcp.accessLevelDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.access_level">
+                <t-option v-for="level in ASSISTANT_ACCESS_LEVELS" :key="level" :value="level"
+                  :label="$t(`assistant.access.levels.${level}.label`)" />
+              </t-select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1849,6 +1871,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
@@ -1862,7 +1885,9 @@ import { hydrateAgentPromptRefs, serializeAgentPrompts } from '@/utils/agentProm
 import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useModalShell } from '@/composables/useModalShell'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import {
   createAgent,
   updateAgent,
@@ -1905,6 +1930,7 @@ import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/setti
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
+import { ASSISTANT_ACCESS_LEVELS, type AssistantAccessLevel } from '@/api/assistant';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
 import { toolboxLocation } from '@/config/toolbox';
@@ -1974,6 +2000,17 @@ const savedAgent = ref<CustomAgent | null>(null);
 const editorMode = computed(() => (savedAgent.value ? 'edit' : props.mode));
 const editorAgent = computed(() => savedAgent.value ?? props.agent ?? null);
 const isPostCreateSession = computed(() => !!savedAgent.value);
+
+useAssistantDataChange((changes) => {
+  const agentId = editorAgent.value?.id;
+  if (!props.visible || !agentId) return;
+  const relevant = changes.filter(change => change.ids.agentIds.includes(agentId)
+    && change.operation !== 'agent.copy');
+  if (!relevant.length) return;
+  const deleted = relevant.some(change => change.operation === 'agent.delete');
+  MessagePlugin.warning(t(deleted ? 'agent.editor.assistantDeleted' : 'agent.editor.assistantChanged'));
+}, { areas: ['agent'] });
+
 const saveButtonLabel = computed(() =>
   editorMode.value === 'create'
     ? t('agent.editor.buttons.create')
@@ -1995,6 +2032,8 @@ function resolveEditorSection(section?: string | null): string {
 }
 
 const currentSection = ref(resolveEditorSection(props.initialSection));
+// Refines the agent AgentList publishes; on its own it names no page.
+useAssistantPageContext(() => props.visible && props.mode === 'edit' ? { section: currentSection.value } : null);
 const suggestionTab = ref<'starters' | 'followUps'>('starters');
 const contentWrapperRef = ref<HTMLElement | null>(null);
 const highlightedField = ref<AgentNotReadyReasonKey | null>(null);
@@ -2453,7 +2492,7 @@ const defaultVectorThreshold = ref(0.5);
 const defaultRerankTopK = ref(5);
 const defaultRerankThreshold = ref(0.5);
 const defaultQuickAnswerMaxCompletionTokens = 2048;
-const defaultSmartReasoningMaxCompletionTokens = 4096;
+const defaultSmartReasoningMaxCompletionTokens = 24576;
 const defaultSandboxWriteMaxCompletionTokens = 24576;
 const defaultTemperature = ref(0.7);
 
@@ -2494,6 +2533,7 @@ const keepAllowedToolsUnset = ref(false);
 const toolTexts = computed<Record<string, ToolText>>(() => ({
   thinking: { label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc') },
   todo_write: { label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc') },
+  ask_user: { label: t('agentEditor.tools.askUser'), description: t('agentEditor.tools.askUserDesc') },
   search_conversations: { label: t('agentEditor.tools.searchConversations'), description: t('agentEditor.tools.searchConversationsDesc') },
   search_knowledge: { label: t('agentEditor.tools.searchKnowledge'), description: t('agentEditor.tools.searchKnowledgeDesc') },
   read_document: { label: t('agentEditor.tools.readDocument'), description: t('agentEditor.tools.readDocumentDesc') },
@@ -2876,6 +2916,8 @@ const defaultFormData = {
     mcp_services: [] as string[],
     // 对话中触发 OAuth 授权时的等待超时（秒），默认 600
     mcp_auth_wait_timeout: 600,
+    // 执行权限上限，默认自动执行
+    access_level: 'auto_write' as AssistantAccessLevel,
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
@@ -3618,6 +3660,7 @@ watch(() => props.visible, async (val) => {
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
         agentData.config.mcp_auth_wait_timeout = 600;
       }
+      if (!agentData.config.access_level) agentData.config.access_level = 'auto_write';
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
       if (!agentData.config.chat_parser_engine_rules) agentData.config.chat_parser_engine_rules = [];
@@ -3676,6 +3719,7 @@ watch(() => props.visible, async (val) => {
       newFormData.config.rerank_top_k = defaultRerankTopK.value;
       newFormData.config.rerank_threshold = defaultRerankThreshold.value;
       newFormData.config.max_completion_tokens = 0;
+      newFormData.config.max_iterations = -1;
       newFormData.config.temperature = defaultTemperature.value;
       // 应用系统默认提示词（根据模式填充）
       const isAgent = newFormData.config.agent_mode === 'smart-reasoning';
@@ -3785,7 +3829,10 @@ const initMcpSelectionMode = () => {
     // 有指定 MCP 服务
     mcpSelectionMode.value = 'selected';
   } else {
-    mcpSelectionMode.value = 'none';
+    // Legacy configs with no mode run with every enabled MCP service for the
+    // owner (registerMCPTools treats "" as "all"). Show that actual runtime
+    // behaviour so the editor matches what the agent can call.
+    mcpSelectionMode.value = 'all';
   }
 };
 
@@ -3853,6 +3900,10 @@ watch(kbSelectionMode, (mode) => {
 
 // 监听 MCP 选择模式变化
 watch(mcpSelectionMode, (mode) => {
+  // Hydration may map a legacy empty mode to "all" for display only; do not
+  // persist that translation or clear the stored service list until the user
+  // actually edits the MCP selection.
+  if (isInitializing.value) return;
   formData.value.config.mcp_selection_mode = mode;
   if (mode === 'none') {
     // 不使用 MCP，清空相关配置
@@ -3863,6 +3914,14 @@ watch(mcpSelectionMode, (mode) => {
   }
   // selected 模式保持 mcp_services 不变
 });
+
+// Editing a legacy list is an explicit selection even if the radio was
+// already displayed as "selected". An empty list must also stay selected,
+// since an unset mode would allow every enabled service at runtime.
+watch(() => formData.value.config.mcp_services, () => {
+  if (isInitializing.value || mcpSelectionMode.value !== 'selected') return;
+  formData.value.config.mcp_selection_mode = 'selected';
+}, { deep: true });
 
 watch(() => formData.value.config.sandbox_config_id, async () => {
   if (!props.visible) return
@@ -3922,7 +3981,7 @@ watch(agentMode, (val, _oldVal) => {
     // 用户主动切换模式后列表即为显式选择，不再保持未设置。
     if (!isInitializing.value) keepAllowedToolsUnset.value = false;
     if (!isInitializing.value && formData.value.config.allowed_tools.length === 0) {
-      const tools: string[] = [];
+      const tools: string[] = ['ask_user'];
       if (hasRagKnowledgeBase.value) {
         tools.push(...knowledgeBaseTools);
       }
@@ -3932,7 +3991,7 @@ watch(agentMode, (val, _oldVal) => {
       formData.value.config.allowed_tools = tools;
     }
     if (formData.value.config.max_iterations >= 0 && formData.value.config.max_iterations <= 1) {
-      formData.value.config.max_iterations = 10;
+      formData.value.config.max_iterations = -1;
     }
     // 切换到 Agent 模式时，如果系统提示词是快速问答的默认值或为空，替换为 Agent 默认提示词
     if (defaultAgentSystemPrompt.value) {
@@ -6342,6 +6401,18 @@ const handleSave = async () => {
 .textarea-with-template {
   position: relative;
   width: 100%;
+}
+
+.textarea-with-assistant {
+  .prompt-assistant-action {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+  }
+
+  :deep(.t-textarea__inner) {
+    padding-bottom: 44px;
+  }
 }
 
 .intent-prompts-editor {

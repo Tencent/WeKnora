@@ -172,6 +172,12 @@ func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.Resou
 	return "", nil
 }
 
+// ReuseByContentHash stays a miss: these tests exercise binding and release, not
+// payload sharing, so the write path must keep running exactly as before.
+func (c *fakeCatalog) ReuseByContentHash(context.Context, uint64, string) (string, bool, error) {
+	return "", false, nil
+}
+
 func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
 	return nil, nil
 }
