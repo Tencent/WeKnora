@@ -176,6 +176,7 @@ var toolDisplayNames = map[string]string{
 	agenttools.LegacyToolListKnowledgeChunks: "查看文档分块",
 	agenttools.LegacyToolGetDocumentInfo:     "获取文档信息",
 	agenttools.ToolSearchConversations:       "回顾历史对话",
+	agenttools.ToolAskUser:                   "向用户提问",
 	agenttools.ToolSearchMemory:              "查询长期记忆",
 	agenttools.ToolDatabaseQuery:             "查询数据",
 	agenttools.ToolDataAnalysis:              "数据分析",
@@ -211,9 +212,7 @@ func formatToolHint(name string, args map[string]any) string {
 	}
 	for _, v := range args {
 		if s, ok := v.(string); ok {
-			if len(s) > 40 {
-				s = s[:40] + "…"
-			}
+			s = truncateForLangfuse(s, 40)
 			return fmt.Sprintf(`%s("%s")`, displayName, s)
 		}
 	}
@@ -223,12 +222,15 @@ func formatToolHint(name string, args map[string]any) string {
 // executeToolCalls runs every tool call in the LLM response, appending results to step.ToolCalls.
 // It also emits tool-call and tool-result events, and optionally runs reflection after each call.
 // When ParallelToolCalls is enabled and there are 2+ tool calls, they execute concurrently.
+//
+// A call that suspends on a user prompt stops the round: it and the calls
+// after it do not run and are not appended, and the suspension is returned.
 func (e *AgentEngine) executeToolCalls(
 	ctx context.Context, response *types.ChatResponse,
 	step *types.AgentStep, iteration int, sessionID, assistantMessageID string,
-) {
+) *types.PromptSuspension {
 	if len(response.ToolCalls) == 0 {
-		return
+		return nil
 	}
 
 	round := iteration + 1
@@ -243,20 +245,22 @@ func (e *AgentEngine) executeToolCalls(
 			"refusing %d tool call(s) with possibly truncated arguments",
 			round, response.FinishReason, n)
 		e.failTruncatedToolCalls(ctx, response, step, iteration, sessionID)
-		return
+		return nil
 	}
 
 	logger.Infof(ctx, "[Agent][Round-%d] Executing %d tool call(s)", round, n)
 
 	// Use parallel execution when enabled and there are multiple tool calls
 	if e.config.ParallelToolCalls && n >= 2 {
-		e.executeToolCallsParallel(ctx, response, step, iteration, sessionID, assistantMessageID)
-		return
+		return e.executeToolCallsParallel(ctx, response, step, iteration, sessionID, assistantMessageID)
 	}
 
 	for i, tc := range response.ToolCalls {
-		e.executeSingleToolCall(ctx, tc, i, step, iteration, round, sessionID, assistantMessageID)
+		if s := e.executeSingleToolCall(ctx, tc, i, step, iteration, round, sessionID, assistantMessageID); s != nil {
+			return s
+		}
 	}
+	return nil
 }
 
 // truncatedArgumentsError is handed to the model instead of a tool result when
@@ -293,7 +297,7 @@ func (e *AgentEngine) failTruncatedToolCalls(
 func (e *AgentEngine) executeToolCallsParallel(
 	ctx context.Context, response *types.ChatResponse,
 	step *types.AgentStep, iteration int, sessionID, assistantMessageID string,
-) {
+) *types.PromptSuspension {
 	round := iteration + 1
 	n := len(response.ToolCalls)
 	logger.Infof(ctx, "[Agent][Round-%d] Parallel execution of %d tool calls", round, n)
@@ -310,6 +314,12 @@ func (e *AgentEngine) executeToolCallsParallel(
 			// before starting later reads. Preserve model order across barriers.
 			_ = g.Wait()
 			results[i] = e.runToolCall(ctx, tc, i, iteration, round, sessionID, assistantMessageID)
+			if s := suspensionOf(results[i]); s != nil {
+				// Everything before the barrier has finished; keep it.
+				e.appendToolOutcomes(ctx, step, results[:i], iteration, sessionID)
+				return s
+			}
+			e.recordCall(i, results[i])
 			g, gCtx = errgroup.WithContext(ctx)
 			g.SetLimit(8)
 			continue
@@ -326,20 +336,30 @@ func (e *AgentEngine) executeToolCallsParallel(
 					mu.Lock()
 					results[i] = panickedToolCall(tc, i)
 					mu.Unlock()
+					e.recordCall(i, results[i])
 				}
 			}()
 			toolCall := e.runToolCall(readCtx, tc, i, iteration, round, sessionID, assistantMessageID)
 			mu.Lock()
 			results[i] = toolCall
 			mu.Unlock()
+			e.recordCall(i, toolCall)
 			return nil // best-effort: don't cancel siblings on failure
 		})
 	}
 
 	_ = g.Wait()
 
-	// Append results and emit events in original order
-	for _, toolCall := range results {
+	e.appendToolOutcomes(ctx, step, results, iteration, sessionID)
+	return nil
+}
+
+// appendToolOutcomes appends finished calls to step and emits their events
+// in original order.
+func (e *AgentEngine) appendToolOutcomes(
+	ctx context.Context, step *types.AgentStep, calls []types.ToolCall, iteration int, sessionID string,
+) {
+	for _, toolCall := range calls {
 		step.ToolCalls = append(step.ToolCalls, toolCall)
 		e.emitToolOutcome(ctx, toolCall, iteration, sessionID)
 	}
@@ -383,7 +403,7 @@ func (e *AgentEngine) emitToolOutcome(
 			Success:    result.Success,
 			Duration:   toolCall.Duration,
 			Iteration:  iteration,
-			Data:       agenttools.SanitizeToolDataForPersist(toolCall.Name, result.Data),
+			Data:       agenttools.SanitizeToolDataForClient(toolCall.Name, result.Data),
 		},
 	})
 
@@ -404,13 +424,20 @@ func (e *AgentEngine) emitToolOutcome(
 }
 
 // executeSingleToolCall runs one tool call sequentially (original behavior).
+// A call suspended on a user prompt is not appended; its suspension is
+// returned instead.
 func (e *AgentEngine) executeSingleToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
 	step *types.AgentStep, iteration, round int, sessionID, assistantMessageID string,
-) {
+) *types.PromptSuspension {
 	toolCall := e.runToolCall(ctx, tc, i, iteration, round, sessionID, assistantMessageID)
+	if s := suspensionOf(toolCall); s != nil {
+		return s
+	}
+	e.recordCall(i, toolCall)
 	step.ToolCalls = append(step.ToolCalls, toolCall)
 	e.emitToolOutcome(ctx, toolCall, iteration, sessionID)
+	return nil
 }
 
 // runToolCall handles argument parsing, execution, logging, and pipeline events for a single tool call.
@@ -418,6 +445,15 @@ func (e *AgentEngine) executeSingleToolCall(
 func (e *AgentEngine) runToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
 	iteration, round int, sessionID, assistantMessageID string,
+) types.ToolCall {
+	return e.runToolCallAnswered(ctx, tc, i, iteration, round, sessionID, assistantMessageID, nil)
+}
+
+// runToolCallAnswered is runToolCall for a call whose prompt may already be
+// answered (see ToolExecContext.Answered).
+func (e *AgentEngine) runToolCallAnswered(
+	ctx context.Context, tc types.LLMToolCall, i int,
+	iteration, round int, sessionID, assistantMessageID string, answered *types.AgentPrompt,
 ) types.ToolCall {
 	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
 	total := "?" // unknown in isolation; callers log the batch size
@@ -572,13 +608,16 @@ func (e *AgentEngine) runToolCall(
 		// so MCP tool human-approval (issue #1173) can legitimately block longer.
 		ApprovalCtx: toolCtx,
 		ExecTimeout: execTimeout,
+		Snapshot:    e.snapshotFunc(i, tc.Function.Name),
+		Answered:    answered,
+		Mode:        e.mode,
 	})
 
 	var result *types.ToolResult
 	var err error
-	if len(tc.UnresolvedHandles) > 0 {
+	if len(tc.UnresolvedHandles) > 0 && !webFetchValidatesReferences(tc) {
 		// A temporary handle is not an application identity. Fail before tool
-		// execution so a hallucinated/stale cN/dN/bN/wN/iN/res:// token can
+		// execution so a hallucinated/stale kb://, doc://, chunk://, url://, iN or res:// token can
 		// never reach persistence, an external service, or a routing decision.
 		err = fmt.Errorf("tool arguments contain unresolved model handles: %v", tc.UnresolvedHandles)
 	} else {
@@ -655,4 +694,19 @@ func (e *AgentEngine) runToolCall(
 	}
 
 	return toolCall
+}
+
+// web_fetch validates each URL before any I/O. Unknown web references are item
+// errors, so one invented handle cannot discard valid pages in the same batch.
+// Other tools and other handle namespaces retain the fail-closed boundary.
+func webFetchValidatesReferences(tc types.LLMToolCall) bool {
+	if tc.Function.Name != agenttools.ToolWebFetch {
+		return false
+	}
+	for _, handle := range tc.UnresolvedHandles {
+		if !agenttools.IsPageHandleShaped(handle) {
+			return false
+		}
+	}
+	return true
 }

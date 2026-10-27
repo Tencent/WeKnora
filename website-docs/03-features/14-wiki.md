@@ -18,10 +18,36 @@ Wiki 将知识库资料整理为相互链接的 Markdown 页面。文档入库�
 
 Wiki 生成会增加模型调用，用量取决于文档规模和抽取密度。可在知识库 Wiki 配置中选择 `focused`、`standard` 或 `exhaustive`，详细说明见[抽取粒度](#抽取粒度)。
 
+## 新增资料入库与修订 Wiki 页面 {#ingest-or-edit}
+
+需要长期保存的新报告、笔记、研究总结或网页，应先作为源文档加入知识库。文档处理管道负责分块、建立已启用的检索索引；知识库开启 Wiki 索引时，还会生成或更新带来源引用的 Wiki 页面及页面间链接。
+
+使用助手时，按内容选择入口：
+
+| 任务 | 入口 |
+| --- | --- |
+| 保存新的文本或 Markdown 内容 | `knowledge.create_manual`，传入完整正文和 `status: publish` |
+| 导入用户提供的网页或文件 URL | `knowledge.create_from_url` |
+| 修订、合并已存在的 Wiki 页面 | 先读取页面，再使用 `wiki_write_page` 整页更新或 `wiki_replace_text` 局部替换 |
+
+手工文档省略 `status` 时默认为 `draft`，只保存草稿，不启动索引。发布和 URL 导入都是异步处理，通过 `knowledge.get_parse_progress` 查看进度。
+
+直接写 Wiki 页面仍可维护链接、出现在 Wiki 图谱中并被 Wiki 搜索命中；但不会创建源文档、分块或文档检索索引，不能替代入库。
+
+## 浏览 Wiki 图谱 {#wiki-graph}
+
 <Screenshot
-  src="/screenshots/wiki-graph.png"
+  src="/screenshots/wiki-graph-groups.png"
   caption="Wiki 图谱视图：条目之间的链接关系"
-  hint="展示图谱概览模式，节点按页面类型着色，可点击跳转到具体页面。" />
+  hint="展示新图谱布局、主题说明及分组聚焦状态，可点击节点打开条目。" />
+
+图谱按页面关联组织分组布局，并展示概括组内内容的主题说明。节点与标题会避让重叠，便于从整体关系找到感兴趣的内容。
+
+- 点击分组主题可聚焦这组页面，使用分组菜单切换其他组，通过「返回全图」或 Esc 退出聚焦。
+- 可隐藏无关联页面，也可继续通过搜索与页面类型筛选定位条目。
+- 点击节点阅读页面，沿连线查看关联；页面与来源文档的摘要页建立连接，便于追溯资料。
+
+此图展示 Wiki 页面之间的链接关系，与知识库设置中抽取实体和关系的知识图谱不同。
 
 ## 编辑和回滚页面
 
@@ -181,7 +207,7 @@ migration `000061_wiki_page_hierarchy.up.sql` 引入独立的 `wiki_folders` 表
 | --- | --- | --- |
 | `wiki_read_page` | 按 slug 批量读取页面全文 | `slugs: string[]` |
 | `wiki_search` | 搜索页面（标题 / slug / 别名 / 摘要 / 内容；`query` 按大小写不敏感的 POSIX 正则解释，不是合法正则的文本如 `C++` 按字面匹配；`regex=false` 强制字面匹配） | `query`、`regex?`、`knowledge_base_ids?`、`limit?`（旧参数 `queries`、`knowledge_base_id` 仍接受） |
-| `wiki_write_page` | 创建/整页覆盖（`synthesis`、`comparison` 页只能由此创建） | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?` |
+| `wiki_write_page` | 整页修订或合并已有页面；也支持从已入库来源重建缺失衍生页，不执行文档入库 | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?` |
 | `wiki_replace_text` | 页内精确文本替换 | `slug`、`old_text`、`new_text` |
 | `wiki_rename_page` | 重命名 slug，自动更新反向链接 | `slug`、`new_slug` |
 | `wiki_delete_page` | 删除页面并清理死链 | `slug` |

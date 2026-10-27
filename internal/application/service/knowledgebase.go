@@ -161,6 +161,13 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		}
 	}
 
+	// The image settings have to survive the same check the settings panel
+	// makes: a pipeline whose every action switch is off would process images
+	// by ignoring them.
+	if err := s.validateImagePipelineConfig(ctx, kb); err != nil {
+		return nil, err
+	}
+
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
 
 	if err := s.repo.CreateKnowledgeBase(ctx, kb); err != nil {
@@ -604,6 +611,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		// know about the image settings cannot wipe them.
 		if config.ImageProcessingConfig != nil {
 			kb.ImageProcessingConfig = *config.ImageProcessingConfig
+			// Same rule as on create: the update lands only if the pipeline the
+			// request names can actually run what it declares.
+			if err := s.validateImagePipelineConfig(ctx, kb); err != nil {
+				return nil, err
+			}
 		}
 		if config.FAQConfig != nil {
 			kb.FAQConfig = config.FAQConfig
@@ -618,6 +630,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		if config.ProfileConfig != nil {
 			profileWasEnabled = kb.ProfileConfig.IsEnabled()
 			kb.ProfileConfig = config.ProfileConfig
+		}
+		if config.ExtractConfig != nil {
+			kb.ExtractConfig = config.ExtractConfig
+			changedFields = append(changedFields, "extract_config")
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
@@ -636,6 +652,49 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			} else if config.IndexingStrategy.GraphEnabled {
 				kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
 			}
+		}
+		if config.EmbeddingModelID != nil {
+			next := strings.TrimSpace(*config.EmbeddingModelID)
+			if next != kb.EmbeddingModelID {
+				if err := s.rejectEmbeddingModelChange(ctx, kb, next); err != nil {
+					return nil, err
+				}
+				changedFields = append(changedFields, "embedding_model_id")
+				kb.EmbeddingModelID = next
+			}
+		}
+		if config.SummaryModelID != nil {
+			next := strings.TrimSpace(*config.SummaryModelID)
+			if err := s.requireModelType(ctx, next, types.ModelTypeKnowledgeQA, "summary_model_id"); err != nil {
+				return nil, err
+			}
+			if kb.SummaryModelID != next {
+				changedFields = append(changedFields, "summary_model_id")
+			}
+			kb.SummaryModelID = next
+		}
+		if config.StorageBackendID != nil {
+			changed, err := s.updateStorageBackend(ctx, kb, *config.StorageBackendID)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				changedFields = append(changedFields, "storage_backend_id")
+			}
+		}
+		if config.ASRConfig != nil {
+			if config.ASRConfig.Enabled {
+				modelID := strings.TrimSpace(config.ASRConfig.ModelID)
+				if err := s.requireModelType(ctx, modelID, types.ModelTypeASR, "asr_model_id"); err != nil {
+					return nil, err
+				}
+			}
+			kb.ASRConfig = *config.ASRConfig
+			changedFields = append(changedFields, "asr_config")
+		}
+		if config.QuestionGenerationConfig != nil {
+			kb.QuestionGenerationConfig = config.QuestionGenerationConfig
+			changedFields = append(changedFields, "question_generation_config")
 		}
 	}
 	// Apply multimodal (vision) config only when the caller provided it,
@@ -672,6 +731,81 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+// updateStorageBackend preserves existing file locations. Echoing a binding is
+// a no-op, including for shared KBs whose storage belongs to another workspace.
+func (s *knowledgeBaseService) updateStorageBackend(
+	ctx context.Context, kb *types.KnowledgeBase, id string,
+) (bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, apperrors.NewBadRequestError("storage_backend_id cannot be empty")
+	}
+	if kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) == id {
+		return false, nil
+	}
+	if types.CallerFromContext(ctx).TenantID != kb.TenantID {
+		return false, apperrors.NewForbiddenError("只有知识库所属空间可以修改存储配置")
+	}
+	total, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+	if err != nil {
+		return false, fmt.Errorf("check files before changing storage backend: %w", err)
+	}
+	if total > 0 {
+		return false, apperrors.NewBadRequestError(
+			"Storage backend cannot be changed while the knowledge base contains files; migrate storage first")
+	}
+	next := *kb
+	next.StorageBackendID = &id
+	if err := s.applyAndValidateStorageBackend(ctx, &next); err != nil {
+		return false, err
+	}
+	kb.StorageBackendID = next.StorageBackendID
+	kb.StorageProviderConfig = next.StorageProviderConfig
+	return true, nil
+}
+
+func (s *knowledgeBaseService) rejectEmbeddingModelChange(
+	ctx context.Context, kb *types.KnowledgeBase, next string,
+) error {
+	if next == "" {
+		return apperrors.NewBadRequestError("embedding_model_id cannot be empty")
+	}
+	if err := s.requireModelType(ctx, next, types.ModelTypeEmbedding, "embedding_model_id"); err != nil {
+		return err
+	}
+	if kb.EmbeddingModelID == "" {
+		return nil
+	}
+	_, total, err := s.kgRepo.ListPagedKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID,
+		&types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
+	if err != nil {
+		return err
+	}
+	if total > 0 {
+		return apperrors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型")
+	}
+	return nil
+}
+
+func (s *knowledgeBaseService) requireModelType(
+	ctx context.Context, id string, want types.ModelType, field string,
+) error {
+	if strings.TrimSpace(id) == "" {
+		return apperrors.NewBadRequestError(field + " cannot be empty")
+	}
+	if s.modelService == nil {
+		return apperrors.NewInternalServerError("model service is not configured")
+	}
+	model, err := s.modelService.GetModelByID(ctx, id)
+	if err != nil || model == nil {
+		return apperrors.NewBadRequestError(field + " does not match a model")
+	}
+	if model.Type != want {
+		return apperrors.NewBadRequestError(field + " must be a " + string(want) + " model")
+	}
+	return nil
 }
 
 // TogglePinKnowledgeBase toggles whether the calling user has pinned

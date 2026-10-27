@@ -38,6 +38,7 @@ type AgentQARequest struct {
 	Images           []ImageAttachment `json:"images,omitempty"`             // Attached images for multimodal chat
 	Channel          string            `json:"channel,omitempty"`            // Source channel: "web", "api", "im", etc.
 	QuestionOrigin   *QuestionOrigin   `json:"question_origin,omitempty"`    // Source of a picked suggested question
+	PageContext      *PageContext      `json:"page_context,omitempty"`       // Page the user has open (hint only)
 }
 
 // AgentResponseType defines the type of agent response
@@ -114,8 +115,7 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newAPIError(resp.StatusCode, body)
+		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 	}
 
 	// Process SSE stream

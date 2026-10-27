@@ -116,6 +116,15 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 }
 
 // ListProviders lists all web search providers for the current tenant
+// @Summary 获取网络搜索服务列表
+// @Tags 网络搜索
+// @Produce json
+// @Success 200 {object} DataResponse{data=[]dto.WebSearchProviderResponse}
+// @Security Bearer
+// @Security ApiKeyAuth
+// @x-agent {"id":"web_search_provider.list","risk":"read","max_items":200}
+// @x-agent-hint "Lists configured search services and the workspace default. Use these IDs for agent.update web_search_provider_id. No provider-wide enable switch exists; web_search_enabled is an agent setting."
+// @Router /web-search-providers [get]
 func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -145,11 +154,12 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 // @Description  根据 ID 获取指定 provider 配置
 // @Tags         网络搜索
 // @Produce      json
-// @Param        id   path      string                          true  "Provider ID"
-// @Success      200  {object}  types.WebSearchProviderEntity   "Provider 详情"
+// @Param        id   path      string                          true  "Provider ID" extensions(x-agent=web_search_provider_id)
+// @Success      200  {object}  DataResponse{data=dto.WebSearchProviderResponse}   "Provider 详情"
 // @Failure      404  {object}  map[string]interface{}          "Provider 不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"web_search_provider.get","risk":"read"}
 // @Router       /web-search-providers/{id} [get]
 func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -181,7 +191,7 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 // @Tags         网络搜索
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                          true  "Provider ID"
+// @Param        id       path      string                          true  "Provider ID" extensions(x-agent=web_search_provider_id)
 // @Param        request  body      handler.UpdateProviderRequest   true  "更新字段"
 // @Success      200      {object}  types.WebSearchProviderEntity   "更新后的 Provider"
 // @Failure      400      {object}  map[string]interface{}          "请求参数错误"
@@ -276,11 +286,13 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 // @Description  删除指定 provider 配置
 // @Tags         网络搜索
 // @Produce      json
-// @Param        id   path      string                  true  "Provider ID"
-// @Success      200  {object}  map[string]interface{}  "success: true"
+// @Param        id   path      string                  true  "Provider ID" extensions(x-agent=web_search_provider_id)
+// @Success      200  {object}  handler.SuccessResponse  "success: true"
 // @Failure      404  {object}  map[string]interface{}  "Provider 不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent-hint "Deletes a saved search service and its credential. Agents referring to it may lose search access. Cannot be undone."
+// @x-agent {"id":"web_search_provider.delete","risk":"destructive","role":"admin","target":"web_search_provider.get","label":"name"}
 // @Router       /web-search-providers/{id} [delete]
 func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -315,9 +327,10 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 // @Description  返回 UI 表单需要的 provider 类型及参数定义
 // @Tags         网络搜索
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "provider 类型列表"
+// @Success      200  {object}  handler.DataResponse{data=[]types.WebSearchProviderTypeInfo}  "provider 类型列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"web_search_provider.list_types","risk":"read"}
 // @Router       /web-search-providers/types [get]
 func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
@@ -333,11 +346,13 @@ func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
 // @Description  使用数据库中已保存的凭证测试连通性
 // @Tags         网络搜索
 // @Produce      json
-// @Param        id   path      string                  true  "Provider ID"
-// @Success      200  {object}  map[string]interface{}  "测试结果"
+// @Param        id   path      string                  true  "Provider ID" extensions(x-agent=web_search_provider_id)
+// @Success      200  {object}  handler.WebSearchProviderTestResponse  "测试结果"
 // @Failure      404  {object}  map[string]interface{}  "Provider 不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent-hint "Performs a sample search using saved credentials; success false means connection/configuration failed. No configuration is changed. Credentials are entered on the settings page."
+// @x-agent {"id":"web_search_provider.test","risk":"probe","role":"admin"}
 // @Router       /web-search-providers/{id}/test [post]
 func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -357,7 +372,13 @@ func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 
 	if err := h.doTestSearch(ctx, string(provider.Provider), provider.Parameters); err != nil {
 		logger.Warnf(ctx, "Web search provider test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		c.JSON(
+			http.StatusOK,
+			gin.H{
+				"success": false,
+				"error":   "Search connection test failed; check the saved credentials and connection settings.",
+			},
+		)
 		return
 	}
 
@@ -379,7 +400,7 @@ type TestProviderRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      handler.TestProviderRequest  true  "{provider, parameters}"
-// @Success      200      {object}  map[string]interface{}  "测试结果"
+// @Success      200      {object}  handler.SuccessErrorResponse  "测试结果"
 // @Failure      400      {object}  map[string]interface{}  "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth

@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -157,8 +157,13 @@ func (p *DuckDuckGoProvider) searchAPI(
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("duckduckgo API returned status %d: %s", resp.StatusCode, string(body))
+		preview := readErrorPreview(resp.Body)
+		return nil, fmt.Errorf("duckduckgo API returned status %d: %s", resp.StatusCode, preview)
+	}
+
+	bodyBytes, err := readCapped(resp.Body, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	var apiResponse struct {
@@ -174,7 +179,7 @@ func (p *DuckDuckGoProvider) searchAPI(
 			Text     string `json:"Text"`
 		} `json:"Results"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+	if err := json.Unmarshal(bodyBytes, &apiResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode API response: %w", err)
 	}
 
@@ -245,8 +250,16 @@ func extractTitle(text string) string {
 	lines := strings.Split(text, "\n")
 	if len(lines) > 0 {
 		title := strings.TrimSpace(lines[0])
-		if len(title) > 100 {
-			title = title[:100] + "..."
+		const maxTitleBytes = 100
+		if len(title) > maxTitleBytes {
+			// Back off to a rune boundary: titles are often Chinese, and a partial
+			// rune is invalid UTF-8 that the knowledge base's title column rejects.
+			// Same rule as #4555 / #4583.
+			cut := maxTitleBytes
+			for cut > 0 && !utf8.RuneStart(title[cut]) {
+				cut--
+			}
+			title = title[:cut] + "..."
 		}
 		return title
 	}

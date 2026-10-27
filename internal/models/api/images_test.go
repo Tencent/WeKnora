@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +50,83 @@ func TestStripImagesFromMessages_DropsEmptiedMultiContent(t *testing.T) {
 	}
 	if cleaned[0].Content != "what is this" {
 		t.Fatalf("Content = %q, want it untouched", cleaned[0].Content)
+	}
+}
+
+// A stored image is referenced by the scheme of the backend holding it: an
+// object-storage FileService returns "minio://bucket/key", "s3://bucket/key"
+// and so on, optionally wrapped as "storage://<backendID>/<provider>://...".
+// The predicate has to recognize the storage layer's scheme table, otherwise
+// the handle travels to the vendor verbatim: remote APIs got "minio://..." as
+// the image URL and the Ollama path dropped the picture without a word.
+func TestResolveImageURLForStoredImages(t *testing.T) {
+	pngBytes := []byte("\x89PNG\r\n\x1a\nstored image payload")
+	resolved := map[string]bool{}
+	originalResolver := LocalImageResolver
+	LocalImageResolver = func(storageURL string) ([]byte, bool) {
+		resolved[storageURL] = true
+		return pngBytes, true
+	}
+	t.Cleanup(func() { LocalImageResolver = originalResolver })
+
+	stored := []struct {
+		name string
+		url  string
+	}{
+		{name: "local", url: "local://10000/1/img.png"},
+		{name: "minio", url: "minio://bucket/1/img.png"},
+		{name: "s3", url: "s3://bucket/1/img.png"},
+		{name: "cos", url: "cos://bucket/region/1/img.png"},
+		{name: "tos", url: "tos://bucket/1/img.png"},
+		{name: "oss", url: "oss://bucket/1/img.png"},
+		{name: "ks3", url: "ks3://bucket/1/img.png"},
+		{name: "resource reference", url: "resource://a1b2c3/1/img.png"},
+		{name: "backend-wrapped provider", url: "storage://backend-a/cos://bucket/region/1/img.png"},
+	}
+	for _, tc := range stored {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveImageURLForLLM(tc.url)
+			if !strings.HasPrefix(got, "data:image/png;base64,") {
+				t.Fatalf("ResolveImageURLForLLM(%q) = %q, want a base64 PNG data URI", tc.url, got)
+			}
+			if data := ResolveImageURLForOllama(tc.url); !bytes.Equal(data, pngBytes) {
+				t.Fatalf("ResolveImageURLForOllama(%q) = %q, want the stored bytes", tc.url, data)
+			}
+			if !resolved[tc.url] {
+				t.Errorf("resolver was never asked for %q", tc.url)
+			}
+		})
+	}
+}
+
+// A data: or http(s) URL is not application-stored: it must pass through
+// untouched and must never be routed through the storage resolver.
+func TestResolveImageURLForNonStoredURLs(t *testing.T) {
+	originalResolver := LocalImageResolver
+	LocalImageResolver = func(storageURL string) ([]byte, bool) {
+		t.Errorf("resolver called for non-stored URL %q", storageURL)
+		return nil, false
+	}
+	t.Cleanup(func() { LocalImageResolver = originalResolver })
+
+	const dataURI = "data:image/png;base64,cGF5bG9hZA=="
+	const remoteURL = "https://example.com/1/img.png"
+	for _, tc := range []struct {
+		name       string
+		url        string
+		wantOllama []byte
+	}{
+		{name: "data URI", url: dataURI, wantOllama: []byte("payload")},
+		{name: "http URL", url: remoteURL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResolveImageURLForLLM(tc.url); got != tc.url {
+				t.Errorf("ResolveImageURLForLLM(%q) = %q, want it unchanged", tc.url, got)
+			}
+			if data := ResolveImageURLForOllama(tc.url); !bytes.Equal(data, tc.wantOllama) {
+				t.Errorf("ResolveImageURLForOllama(%q) = %q, want %q", tc.url, data, tc.wantOllama)
+			}
+		})
 	}
 }
 

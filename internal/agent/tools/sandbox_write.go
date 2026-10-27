@@ -300,7 +300,7 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 
 	content := chunk
 	if mode == writeModeAppend {
-		existing, appendErr := t.readForAppend(ctx, sessionID, clean)
+		existing, appendErr := t.readForAppend(ctx, sessionID, clean, len(chunk))
 		if appendErr != "" {
 			return &types.ToolResult{Success: false, Error: appendErr}, nil
 		}
@@ -401,7 +401,7 @@ func normalizeWriteMode(requested string) (string, string) {
 // file would drop everything written so far. Failing tells the model exactly
 // which call to repeat.
 func (t *WriteSandboxFileTool) readForAppend(
-	ctx context.Context, sessionID, filePath string,
+	ctx context.Context, sessionID, filePath string, chunkBytes int,
 ) ([]byte, string) {
 	stat, err := t.sink.StatSessionFile(ctx, sessionID, filePath)
 	if err != nil || stat == nil {
@@ -411,6 +411,14 @@ func (t *WriteSandboxFileTool) readForAppend(
 	}
 	if stat.Type != sandbox.RemoteEntryFile {
 		return nil, fmt.Sprintf("cannot append to %s: it is not a regular file", filePath)
+	}
+	// Refuse a known oversized append before downloading the existing file.
+	// Execute still checks the actual bytes in case the file grows after Stat.
+	if stat.Size > int64(maxSandboxFileBytes-chunkBytes) {
+		return nil, fmt.Sprintf(
+			"appending %d bytes would take %s past the %d-byte file limit (currently %d)",
+			chunkBytes, filePath, maxSandboxFileBytes, stat.Size,
+		)
 	}
 	existing, err := t.sink.ReadSessionFile(ctx, sessionID, filePath)
 	if err != nil {

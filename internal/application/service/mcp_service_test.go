@@ -348,6 +348,24 @@ func TestUpdateMCPService_DoesNotTouchSecretsEvenIfPassed(t *testing.T) {
 	assert.Equal(t, "renamed", got.Name, "non-secret field updates still apply")
 }
 
+func TestUpdateMCPService_DropSecretsClearsCredentialsAndHeaders(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestService()
+	id := seedService(t, repo, "stored-api", "stored-token")
+	repo.store[id].AuthConfig.CustomHeaders = map[string]string{"Authorization": "Bearer x"}
+	repo.store[id].Headers = types.MCPHeaders{"X-Secret": "y"}
+
+	upd := &types.MCPService{ID: id, TenantID: 1, TransportType: types.MCPTransportHTTPStreamable}
+	require.NoError(t, svc.UpdateMCPService(ctx, upd, map[string]bool{types.MCPUpdateDropSecrets: true}))
+
+	got := repo.store[id]
+	assert.Equal(t, types.MCPTransportHTTPStreamable, got.TransportType)
+	assert.Empty(t, got.AuthConfig.APIKey)
+	assert.Empty(t, got.AuthConfig.Token)
+	assert.Empty(t, got.AuthConfig.CustomHeaders)
+	assert.Empty(t, got.Headers)
+}
+
 func TestUpdateMCPService_CustomHeadersPreserveOnNil(t *testing.T) {
 	ctx := context.Background()
 	svc, repo := newTestService()

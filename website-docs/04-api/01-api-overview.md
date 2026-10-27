@@ -277,10 +277,12 @@ X-Accel-Buffering: no
 
 rerank 的过程和问答链路、智能推理的 `search_knowledge` 工具共用同一套实现（`internal/reranking`）：
 
-1. 送给模型打分的文本 = 文档标题 + 去掉 Markdown 标记的分块正文 + 图片描述与 OCR 文本 + 生成的问题。FAQ 条目不加标题。模型配置了单篇或单次请求长度上限（`max_document_chars` / `max_request_chars`）时，超长的文本从尾部截到上限再送出，先截掉的是附加的图片文本和生成问题；不会因为一条超长文本让整批打分失败。
+1. 文本候选送给模型打分的文本 = 文档标题 + 去掉 Markdown 标记的分块正文 + 图片描述与 OCR 文本 + 生成的问题。FAQ 条目不加标题。模型配置了单篇或单次请求长度上限（`max_document_chars` / `max_request_chars`）时，超长的文本从尾部截到上限再送出，先截掉的是附加的图片文本和生成问题；不会因为一条超长文本让整批打分失败。
 2. 保留分数不低于 `threshold` 的结果。如果一条都没有、而 `threshold` 高于 0.3，就把阈值降到 `max(threshold×0.7, 0.3)` 再筛一次。还是没有的话，最高分不低于 0.15 时只保留这一条，否则返回空列表。
 3. 排序分 = `0.6×模型分 + 0.3×召回分 + 0.1×来源权重`；结果的 `metadata` 里带 `model_score` 和 `base_score`。
 4. 用 MMR（λ=0.7）从中挑出 `top_k` 条，降低内容重复。
+
+图片向量命中还可按原图重排：需要重排模型声明并实现图片输入，普通文本重排仍使用文本信息；视觉对话模型可以接收保留下来的命中图片。图片候选的保留与上下文规则见[检索问答流程](../02-architecture/04-rag-pipeline.md)。
 
 `hybrid-search` 开启 rerank 时，召回深度至少与 `top_k` 相同，候选池是融合后排名前 `max(top_k, 50)` 的分块，所以 `match_count` 很小也有足够的候选给模型挑。
 
@@ -349,7 +351,7 @@ rerank 模型加载失败或调用出错时，请求不会失败，而是按召�
 | 认证与用户 | [02-api-auth.md](./02-api-auth.md) | `/auth`、`/me/invitations` |
 | 租户（空间）与成员 | [02-api-tenant.md](./02-api-tenant.md) | `/tenants` |
 | 组织与共享 | [02-api-org.md](./02-api-org.md) | `/organizations`、`/shared-*`、`/knowledge-bases/:id/shares`、`/agents/:id/shares` |
-| 知识库与知识 | [02-api-knowledge.md](./02-api-knowledge.md) | `/knowledge-bases`、`/knowledge`、知识库文件夹 |
+| 知识库与知识 | [02-api-knowledge.md](./02-api-knowledge.md) | `/knowledge-bases`、`/knowledge`、知识库文件夹、画廊、`/image-attrs/schema` |
 | 分块与标签 | [02-api-chunks.md](./02-api-chunks.md) | `/chunks`、`/knowledge-bases/:id/tags`、`/chunker/preview` |
 | FAQ 与 Wiki | [02-api-faq-wiki.md](./02-api-faq-wiki.md) | `/knowledge-bases/:id/faq`、`/faq`、`/knowledgebase/:kb_id/wiki`、`/wiki-search` |
 | 会话、消息与聊天 | [02-api-chat.md](./02-api-chat.md) | `/sessions`、`/messages`、`/knowledge-chat`、`/agent-chat`、`/knowledge-search` |

@@ -114,6 +114,24 @@ onMounted(async () => {
     const highlight = (CSS as any).highlights?.get('source-locate')
     return highlight ? [...highlight].map((r: Range) => r.toString()).join('') : [...document.querySelectorAll('.source-locate-mark')].map(e => e.textContent).join('')
   }
+  // Manual/clipped documents have no source_locators. Match their raw chunk
+  // Markdown against the complete document returned by the preview endpoint.
+  const manualChunk = '| Model | Flagged as AI | Judged human |\n| --- | --- | --- |\n| v2 | 11 / 210 (5%) | 95% |\n\nFlagged less than half as often as the previous release.'
+  const manualDocument = '# Model card\n\n' + 'Unrelated introduction.\n\n'.repeat(60) + manualChunk + '\n\nUnrelated appendix.'
+  const manualRequest = { sourceMarkdown: manualChunk, sentence: '本次版本被标记的次数不到上一版本的一半。' }
+  await runOther('Manual Markdown without locators highlights the cited table and paragraph and scrolls to them', new Blob([manualDocument]), 'md', manualRequest, r => {
+    assert(r.found && r.precise, JSON.stringify(r))
+    const text = highlightedText()
+    assert(text.includes('11 / 210 (5%)') && text.includes('95%') && text.includes('Flagged less than half'), text)
+    assert(!text.includes('Unrelated'), 'unrelated paragraphs must not be highlighted')
+    const box = document.querySelector<HTMLElement>('.preview-markdown')!
+    assert(box.scrollTop > 0, 'the cited passage must be scrolled into view')
+  })
+  await runOther('Manual Markdown rejects changed source evidence', new Blob([manualDocument.replace('11 / 210', '15 / 210')]), 'md', manualRequest, r => {
+    assert(!r.found, JSON.stringify(r))
+    assert(!highlightedText(), 'missing evidence must not leave stale highlights')
+  })
+  await runOther('Manual Markdown rejects duplicate source passages', new Blob([manualDocument + '\n\n' + manualChunk]), 'md', manualRequest, r => assert(!r.found, JSON.stringify(r)))
   await runOther('Markdown fenced language is not treated as visible evidence', new Blob([fenced]), 'md', { sourceMarkdown: fenced }, r => assert(r.found && r.precise, JSON.stringify(r)))
   await runOther('Markdown paraphrase narrows within its verified source block', new Blob([fenced]), 'md', { sourceMarkdown: fenced, sentence: 'This operation preserves the current commit and files, freeing the branch.' }, r => {
     assert(r.found && !r.precise, JSON.stringify(r))

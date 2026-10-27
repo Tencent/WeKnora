@@ -353,7 +353,6 @@ func TestValidateChunks_TolerantTinyTail(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeSplitterConfig_PreservesExplicitZeroOverlap(t *testing.T) {
 	// Wiki-only / atomic FAQ presets store ChunkSize>0 with ChunkOverlap=0.
 	cfg := NormalizeSplitterConfig(SplitterConfig{ChunkSize: 2048, ChunkOverlap: 0})
