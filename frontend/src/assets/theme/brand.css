@@ -1,0 +1,126 @@
+/* 客户版主题。
+ *
+ * 所有规则都挂在 html[data-customer="true"] 下：
+ * 管理员端不设置该属性，因此这里的任何一条都不会命中，继续使用 theme.css 的绿色。
+ *
+ * 颜色值由 src/brand/colors.ts 在运行时按 public/config.js 的配置重算，
+ * 并写到 document.documentElement 的内联样式上（优先级最高）。
+ * 这里保留一份默认配置的静态值，保证 T03 挂上标记到 JS 写入之间不会闪回绿色。
+ */
+
+:root:root[data-customer="true"] {
+    /* 默认主色 #0EA5E9 的 TDesign 色阶（与 brandCssVars 默认输出一致） */
+    --td-brand-color-1: #e8f3f8;
+    --td-brand-color-2: #37b9f3;
+    --td-brand-color-3: #1fb0f2;
+    --td-brand-color-4: #0EA5E9;
+    --td-brand-color-5: #0d94d1;
+    --td-brand-color-6: #0b83b9;
+    --td-brand-color-7: #0a72a1;
+    --td-brand-color-8: #09648e;
+    --td-brand-color-9: #07577a;
+    --td-brand-color-10: #064967;
+
+    /* 可点击元素用深一档的 action 色，保证白字对比度 */
+    --brand-main: #0EA5E9;
+    --td-brand-color: #0284C7;
+    --td-brand-color-light: #e8f3f8;
+    --td-brand-color-hover: #2093ce;
+    --td-brand-color-active: #0274af;
+    --td-brand-color-disabled: #93d7f5;
+    --td-brand-color-focus: color-mix(in srgb, #0284C7 20%, transparent);
+
+    /* 线条比默认灰更冷、更浅，和天蓝同一色温 */
+    --app-selection-border: #e8ecf2;
+    --td-component-stroke: #e8ecf2;
+    --td-component-border: #e8ecf2;
+
+    /* 圆角：按钮/输入 12，卡片/弹层 14 */
+    --td-radius-default: 12px;
+    --td-radius-medium: 12px;
+    --td-radius-large: 14px;
+    --td-radius-extraLarge: 14px;
+    --app-radius-md: 12px;
+    --app-radius-lg: 14px;
+    --app-radius-xl: 14px;
+
+    /* 轻阴影：偏冷灰的软投影，避免黑块感 */
+    --td-shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(15, 23, 42, 0.06);
+    --td-shadow-2: 0 2px 6px rgba(15, 23, 42, 0.07), 0 12px 28px rgba(15, 23, 42, 0.08);
+    --td-shadow-3: 0 8px 24px rgba(15, 23, 42, 0.1), 0 24px 48px rgba(15, 23, 42, 0.08);
+}
+
+:root:root[data-customer="true"][theme-mode="dark"] {
+    --td-brand-color-1: #0EA5E920;
+    --td-brand-color-2: #096892;
+    --td-brand-color-3: #0a79aa;
+    --td-brand-color-4: #0b86be;
+    --td-brand-color-5: #0d97d6;
+    --td-brand-color-6: #0EA5E9;
+    --td-brand-color-7: #1aaef1;
+    --td-brand-color-8: #32b7f3;
+    --td-brand-color-9: #4abff4;
+    --td-brand-color-10: #67caf6;
+
+    --brand-main: #0EA5E9;
+    --td-brand-color: #0284C7;
+    --td-brand-color-light: #0EA5E920;
+    --td-brand-color-hover: #0277b3;
+    --td-brand-color-active: #2093ce;
+    --td-brand-color-disabled: #145776;
+    --td-brand-color-focus: color-mix(in srgb, #0284C7 28%, transparent);
+
+    /* 深色下线条压到低对比的冷灰蓝，避免比背景还亮 */
+    --app-selection-border: #2b3846;
+    --td-component-stroke: #2b3846;
+    --td-component-border: #2b3846;
+
+    --td-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.28);
+    --td-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.38), 0 12px 28px rgba(0, 0, 0, 0.36);
+    --td-shadow-3: 0 8px 24px rgba(0, 0, 0, 0.42), 0 24px 48px rgba(0, 0, 0, 0.4);
+}
+
+/* 登录页背景。
+ * 登录页自 T03 起不再自带渐变（Login.vue 的 scoped 样式只保留装饰性
+ * radial 高光），背景整体由本规则提供；html[data-customer] 同时是作用域，
+ * 管理员端不设置该属性，这条规则不会命中。
+ *
+ * 色阶由 src/brand/colors.ts 的 buildLoginGradient 按 primaryColor 生成，
+ * 通过 --customer-login-gradient 注入；下面的 color-mix 只是 JS 写入前的
+ * 兜底（同样跟随 --td-brand-color-4 的默认色阶），没有任何写死的天蓝值（H3）。
+ */
+html[data-customer="true"] .login-layout {
+    background: var(
+        --customer-login-gradient,
+        linear-gradient(
+            225deg,
+            color-mix(in srgb, var(--td-brand-color-4) 12%, #00121c) 0%,
+            color-mix(in srgb, var(--td-brand-color-4) 22%, #00121c) 15%,
+            color-mix(in srgb, var(--td-brand-color-4) 32%, #00121c) 25%,
+            color-mix(in srgb, var(--td-brand-color-4) 46%, #00121c) 38%,
+            color-mix(in srgb, var(--td-brand-color-4) 62%, #00121c) 50%,
+            var(--td-brand-color-4) 65%,
+            color-mix(in srgb, var(--td-brand-color-4) 35%, #ffffff) 78%,
+            color-mix(in srgb, var(--td-brand-color-4) 65%, #ffffff) 90%,
+            color-mix(in srgb, var(--td-brand-color-4) 80%, #ffffff) 100%
+        )
+    );
+}
+
+html[data-customer="true"][theme-mode="dark"] .login-layout {
+    background: var(
+        --customer-login-gradient,
+        linear-gradient(
+            225deg,
+            color-mix(in srgb, var(--td-brand-color-4) 7%, #000000) 0%,
+            color-mix(in srgb, var(--td-brand-color-4) 14%, #000000) 15%,
+            color-mix(in srgb, var(--td-brand-color-4) 21%, #000000) 25%,
+            color-mix(in srgb, var(--td-brand-color-4) 29%, #000000) 38%,
+            color-mix(in srgb, var(--td-brand-color-4) 38%, #000000) 50%,
+            color-mix(in srgb, var(--td-brand-color-4) 52%, #000000) 65%,
+            color-mix(in srgb, var(--td-brand-color-4) 67%, #000000) 78%,
+            color-mix(in srgb, var(--td-brand-color-4) 82%, #000000) 90%,
+            color-mix(in srgb, var(--td-brand-color-4) 92%, #000000) 100%
+        )
+    );
+}

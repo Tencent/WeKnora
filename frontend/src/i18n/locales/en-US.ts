@@ -8809,5 +8809,35 @@ export default {
       description:
         'Observe the image attributes and describe the image first, then decide from the attributes whether to run OCR, saving model calls and speeding up parsing. When the image is recognised as a photograph of a correctable page or label, it is straightened and cropped before recognition to improve OCR accuracy; if that fails, the original image is used.'
     }
-  }
+  },
+  brand: {
+    sidebarShow: 'Show conversation list',
+    loginHint: 'Accounts are created by the administrator. Contact the administrator if you forgot your password.',
+    emailLabel: 'Email',
+    emailPlaceholder: 'Enter your email address',
+    passwordLabel: 'Password',
+    passwordPlaceholder: 'Enter your password',
+    loginButton: 'Log in',
+    loggingIn: 'Logging in...',
+    featureKnowledge: 'Enterprise knowledge, ready when you ask',
+    featureInstant: 'Accurate answers grounded in the knowledge base',
+    featureAdmin: 'Accounts are managed centrally by the administrator',
+    lineSelector: {
+      changeLine: 'Switch product line',
+      currentLine: 'Current product line',
+      listLabel: 'Product line list',
+      empty: 'No product line available',
+    },
+    welcome: {
+      title: 'Hi, welcome to {name}',
+      subtitle: 'Choose a product line, then ask away',
+      lineGroupLabel: 'Product lines',
+      samplesLabel: 'Example questions',
+      fallbackNotice: 'Product line configuration is invalid; using the default lines',
+    },
+    settings: {
+      title: 'General',
+      description: 'Set the interface language and appearance',
+    },
+  },
 }

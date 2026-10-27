@@ -133,30 +133,40 @@ export const useUIStore = defineStore('ui', {
       localStorage.setItem('sidebar_browser_status', String(visible))
     },
 
-    toggleSidebar() {
+    // persist:false 用于客户版：只改当前界面的内存态，不覆盖同一浏览器里
+    // 管理员保存的 sidebar_collapsed 偏好（C6 / M4）。
+    toggleSidebar(options: { persist?: boolean } = {}) {
       this.sidebarCollapsed = !this.sidebarCollapsed
-      localStorage.setItem('sidebar_collapsed', String(this.sidebarCollapsed))
+      if (options.persist !== false) {
+        localStorage.setItem('sidebar_collapsed', String(this.sidebarCollapsed))
+      }
     },
 
-    resizeSidebar(width: number) {
+    resizeSidebar(width: number, options: { persist?: boolean } = {}) {
       if (!Number.isFinite(width)) return
       if (width < SIDEBAR_COLLAPSE_THRESHOLD) {
-        this.collapseSidebar()
+        this.collapseSidebar(options)
         return
       }
       this.sidebarWidth = clampSidebarWidth(width)
-      localStorage.setItem('sidebar_width', String(this.sidebarWidth))
-      this.expandSidebar()
+      if (options.persist !== false) {
+        localStorage.setItem('sidebar_width', String(this.sidebarWidth))
+      }
+      this.expandSidebar(options)
     },
 
-    collapseSidebar() {
+    collapseSidebar(options: { persist?: boolean } = {}) {
       this.sidebarCollapsed = true
-      localStorage.setItem('sidebar_collapsed', 'true')
+      if (options.persist !== false) {
+        localStorage.setItem('sidebar_collapsed', 'true')
+      }
     },
 
-    expandSidebar() {
+    expandSidebar(options: { persist?: boolean } = {}) {
       this.sidebarCollapsed = false
-      localStorage.setItem('sidebar_collapsed', 'false')
+      if (options.persist !== false) {
+        localStorage.setItem('sidebar_collapsed', 'false')
+      }
     }
   }
 })

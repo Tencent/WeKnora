@@ -74,10 +74,14 @@ test('one composer action switches between stop and send', () => {
   assert.doesNotMatch(inputField, /steer-delivery-toggle/)
   assert.doesNotMatch(inputField, /setSteerDelivery/)
   assert.match(inputField, /emit\('steer-msg', val\.trim\(\), steerMentions, delivery\)/)
-  assert.match(controls, /v-if="isReplying && \(!canSteer \|\| !query\.trim\(\)\)"/)
+  // T09 / AC-28：客户版发送成功后先展示对勾反馈，这段时间仍占住发送按钮，
+  // 所以停止按钮的条件里带 !showSendFeedback。
+  assert.match(controls, /v-if="isReplying && \(!canSteer \|\| !query\.trim\(\)\) && !showSendFeedback"/)
   assert.match(controls, /handleStop/)
   assert.match(controls, /v-else[\s\S]*createSession\(query\)[\s\S]*send-btn/)
-  assert.match(controls, /<t-icon name="arrow-up"/)
+  // 管理员继续用原 t-icon；客户版用 MorphIcon（AC-28）。
+  assert.match(controls, /<MorphIcon v-if="customerMode"/)
+  assert.match(controls, /<t-icon v-else name="arrow-up"/)
   assert.doesNotMatch(controls, /steer-inject-btn|<t-icon[^>]*'time'/)
 })
 

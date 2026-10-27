@@ -8802,5 +8802,35 @@ export default {
       },
       description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。当识别到图片为可校正的文档或标签页照片时，会在识别前自动摆正并裁剪页面，以提升 OCR 准确率；若校正失败则直接使用原图。'
     }
-  }
+  },
+  brand: {
+    sidebarShow: '显示会话列表',
+    loginHint: '账号由管理员创建，忘记密码请联系管理员',
+    emailLabel: '邮箱',
+    emailPlaceholder: '输入邮箱地址',
+    passwordLabel: '密码',
+    passwordPlaceholder: '输入密码',
+    loginButton: '登录',
+    loggingIn: '登录中...',
+    featureKnowledge: '企业知识，随时可问',
+    featureInstant: '基于知识库的准确回答',
+    featureAdmin: '账号由管理员统一管理',
+    lineSelector: {
+      changeLine: '切换产品线',
+      currentLine: '当前产品线',
+      listLabel: '产品线列表',
+      empty: '暂无可用产品线',
+    },
+    welcome: {
+      title: '你好，欢迎使用{name}',
+      subtitle: '选择产品线，然后直接提问',
+      lineGroupLabel: '产品线',
+      samplesLabel: '示例问题',
+      fallbackNotice: '产品线配置异常，已使用默认产线',
+    },
+    settings: {
+      title: '常规',
+      description: '设置界面语言与外观',
+    },
+  },
 }

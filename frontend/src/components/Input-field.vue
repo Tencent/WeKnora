@@ -19,6 +19,10 @@ import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
+import LineSelector from './customer/LineSelector.vue';
+import { MorphIcon } from 'morphicons/vue';
+import { ArrowUp, Check } from 'lucide';
+import { useProductLineStore } from '@/stores/productLine';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { type ModelConfig } from '@/api/model';
@@ -99,6 +103,8 @@ const isImageFile = (file: File) => {
 
 const handleDroppedFiles = (files: File[]) => {
   if (!files.length) return;
+  // 客户版没有上传入口，拖拽也不应该偷偷上传文件。
+  if (props.customerMode) return;
 
   const imageFiles = files.filter(isImageFile);
   const attachmentFiles = files.filter(file => !isImageFile(file));
@@ -131,6 +137,8 @@ const handleImageSelect = (event: Event) => {
 };
 
 const addImageFiles = (files: File[]) => {
+  // 客户版没有图片上传入口，任何路径都不加入预览（M8）。
+  if (props.customerMode) return;
   if (!isImageUploadEnabledByAgent.value) return;
   const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   const maxSize = 10 * 1024 * 1024;
@@ -312,6 +320,8 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   return agentKBSelectionMode.value === 'none';
 });
 const isMentionDisabled = computed(() => {
+  // 客户版输入区只有产线选择器，@ 提及（KB/文件/MCP/技能）一律不可用（M8）。
+  if (props.customerMode) return true;
   // The host pins the scope; @-mentions would edit the main chat's selection.
   if (props.embeddedMode) return true;
   if (settingsStore.isAgentStreamMode && isKnowledgeBaseDisabledByAgent.value) {
@@ -565,8 +575,52 @@ const props = defineProps({
   canSteer: {
     type: Boolean,
     default: false
+  },
+  // 客户版输入区：只保留产线选择器和发送，隐藏智能体/KB/文件/MCP/Skill/模型入口。
+  // 管理员不传或传 false，模板与行为保持改造前一致（C6）。
+  customerMode: {
+    type: Boolean,
+    default: false
   }
 });
+
+// 客户模式才创建产线 store：管理员不读也不写 weknora_customer_line:*，
+// 避免给管理员也留下产线偏好数据。
+const productLineStore = computed(() => (props.customerMode ? useProductLineStore() : null));
+
+// 发送成功反馈（仅客户版，AC-28）：ArrowUp → Check → ArrowUp，约 900ms 后复原。
+// 只有客户模式会渲染 MorphIcon，管理员仍用原来的 t-icon，行为不变（C6）。
+// 对勾先停稳约 0.5s，再花约 0.4s 形变回箭头，合计约 0.9s 完成「还原」。
+const SEND_FEEDBACK_MS = 520;
+// 箭头形变完成后还要留一小段，让用户真的看到「回到箭头」，再让位给停止按钮。
+const SEND_FEEDBACK_LINGER_MS = 460;
+const sendShowingCheck = ref(false);
+const sendFeedbackActive = ref(false);
+let sendCheckTimer: ReturnType<typeof setTimeout> | null = null;
+let sendFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+// 反馈期间输入框已被清空、isReplying 也已置真，正常会立刻切成「停止」按钮；
+// 但那样对勾形变根本来不及显示。所以这段时间仍占住发送按钮的位置，
+// 让用户看清发送成功后再切回停止（对勾只在输入为空时显示，用户重新输入立刻回箭头）。
+const showSendFeedback = computed(
+  () => props.customerMode && sendFeedbackActive.value && !query.value.trim(),
+);
+const sendIcon = computed(() => (sendShowingCheck.value ? Check : ArrowUp));
+
+function flashSendSuccess(): void {
+  if (!props.customerMode) return;
+  sendShowingCheck.value = true;
+  sendFeedbackActive.value = true;
+  if (sendCheckTimer) clearTimeout(sendCheckTimer);
+  if (sendFeedbackTimer) clearTimeout(sendFeedbackTimer);
+  sendCheckTimer = setTimeout(() => {
+    sendShowingCheck.value = false;
+    sendCheckTimer = null;
+  }, SEND_FEEDBACK_MS);
+  sendFeedbackTimer = setTimeout(() => {
+    sendFeedbackActive.value = false;
+    sendFeedbackTimer = null;
+  }, SEND_FEEDBACK_MS + SEND_FEEDBACK_LINGER_MS);
+}
 
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
@@ -2034,6 +2088,14 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
+  if (sendCheckTimer) {
+    clearTimeout(sendCheckTimer);
+    sendCheckTimer = null;
+  }
+  if (sendFeedbackTimer) {
+    clearTimeout(sendFeedbackTimer);
+    sendFeedbackTimer = null;
+  }
   if (!props.embeddedMode) browserConnection.unwatchStatus();
   window.removeEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
   document.removeEventListener('click', closeAgentModeSelector);
@@ -2119,7 +2181,7 @@ const createSession = async (
       return;
     }
     // Embedded scope belongs to the host, including queued and injected turns.
-    const steerMentions: MentionRequestItem[] = (props.embeddedMode ? [] : allSelectedItems.value).map(item => ({
+    const steerMentions: MentionRequestItem[] = (props.embeddedMode || props.customerMode ? [] : allSelectedItems.value).map(item => ({
       id: item.id,
       name: item.name,
       type: item.type,
@@ -2202,8 +2264,11 @@ const createSession = async (
     );
     return;
   }
-  // 获取@提及的知识库和文件信息
-  const mentionedItems: MentionRequestItem[] = allSelectedItems.value.map(item => ({
+  // 获取@提及的知识库和文件信息。
+  // 客户版界面上没有 KB/文件/MCP/技能入口，但 settings store 是全局共享的，
+  // 同一浏览器先由管理员选过就会残留；这里按客户模式清空，不让隐藏选择跟着请求走（M7）。
+  const mentionSource = props.customerMode ? [] : allSelectedItems.value;
+  const mentionedItems: MentionRequestItem[] = mentionSource.map(item => ({
     id: item.id,
     name: item.name,
     type: item.type,
@@ -2213,10 +2278,12 @@ const createSession = async (
     service_id: item.serviceId,
     skill_name: item.skillName,
   }));
-  const imageFiles = uploadedImages.value.map(img => img.file);
-  const attachmentFiles = uploadedAttachments.value;
+  const imageFiles = props.customerMode ? [] : uploadedImages.value.map(img => img.file);
+  const attachmentFiles = props.customerMode ? [] : uploadedAttachments.value;
 
   emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, options);
+  // 走到这里说明校验都过了、消息已经发出，客户版给一个短暂的对勾反馈。
+  flashSendSuccess();
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2516,6 +2583,8 @@ const onKeydown = (val: string, event: { e: KeyboardEvent }) => {
 }
 
 const onPaste = (e: ClipboardEvent) => {
+  // 客户版没有图片上传入口，粘贴截图也不应该偷偷加入附件（M8）。
+  if (props.customerMode) return;
   const items = e.clipboardData?.items;
   if (!items) return;
   const imageFiles: File[] = [];
@@ -2805,21 +2874,21 @@ defineExpose({
     </div>
     <div class="rich-input-container" data-guide="chat-input">
       <!-- 图片预览区域 -->
-      <div v-if="uploadedImages.length > 0" class="image-preview-bar">
+      <div v-if="!customerMode && uploadedImages.length > 0" class="image-preview-bar">
         <div v-for="(img, idx) in uploadedImages" :key="idx" class="image-preview-item">
           <img :src="img.preview" class="image-preview-thumb" />
           <span class="image-preview-remove" @click="removeImage(idx)">×</span>
         </div>
       </div>
 
-      <!-- 附件列表区域 (由 AttachmentUpload 组件渲染) -->
-      <AttachmentUpload ref="attachmentUploadRef" :max-files="5"
+      <!-- 附件列表区域 (由 AttachmentUpload 组件渲染)；客户版没有文件上传入口 -->
+      <AttachmentUpload v-if="!customerMode" ref="attachmentUploadRef" :max-files="5"
         :session-id="sessionId" :agent-id="selectedAgentId"
         :agent-source-tenant-id="settingsStore.selectedAgentSourceTenantId ?? undefined"
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
-      <div v-if="$slots.chips || (!embeddedMode && allSelectedItems.length > 0)" class="selected-tags-inline">
+      <div v-if="!customerMode && ($slots.chips || (!embeddedMode && allSelectedItems.length > 0))" class="selected-tags-inline">
         <slot name="chips" />
         <span v-for="item in (embeddedMode ? [] : allSelectedItems)" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
@@ -2852,6 +2921,14 @@ defineExpose({
         <div class="control-left">
           <!-- 嵌入时宿主已定好 agent/KB，只保留模型选择 -->
           <template v-if="!embeddedMode">
+          <!-- 客户版左侧只保留产线选择器；智能体/KB/文件/MCP/Skill 等入口全部不进 DOM -->
+          <LineSelector
+            v-if="customerMode"
+            :model-value="productLineStore?.currentLineId ?? ''"
+            :lines="productLineStore?.lines ?? []"
+            @update:model-value="productLineStore?.selectLine($event)"
+          />
+          <template v-else>
           <!-- Agent 模式切换按钮 -->
           <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
             'is-normal': !isCustomAgent && !isAgentEnabled,
@@ -2992,8 +3069,10 @@ defineExpose({
           </t-tooltip>
           <slot name="background-work" />
           </template>
+          </template>
           <slot v-if="embeddedMode" name="background-work" />
 
+          <template v-if="!customerMode">
           <slot name="controls" />
 
           <!-- 模型显示 -->
@@ -3047,6 +3126,7 @@ defineExpose({
               </div>
             </template>
           </t-popup>
+          </template>
         </div>
 
         <Teleport to="body">
@@ -3101,7 +3181,7 @@ defineExpose({
 
         <!-- 右侧控制：回复中且输入为空是停止，一旦输入新内容同一位置变成发送 -->
         <div class="control-right">
-          <t-tooltip v-if="isReplying && (!canSteer || !query.trim())" :content="$t('input.stopGeneration')" placement="top">
+          <t-tooltip v-if="isReplying && (!canSteer || !query.trim()) && !showSendFeedback" :content="$t('input.stopGeneration')" placement="top">
             <button type="button" @click="handleStop" class="control-btn stop-btn" :aria-label="$t('input.stopGeneration')">
               <t-icon name="stop" />
             </button>
@@ -3110,7 +3190,10 @@ defineExpose({
             <button type="button" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
               :disabled="!query.trim() || composerLocked" :class="{ 'disabled': !query.trim() || composerLocked }"
               :aria-label="isReplying && canSteer ? $t('input.steerAfter') : $t('input.send')">
-              <t-icon name="arrow-up" />
+              <!-- 客户版：发送成功后 ArrowUp → Check → ArrowUp（AC-28）；管理员保持原图标 -->
+              <MorphIcon v-if="customerMode" class="send-btn__morph" :icon="sendIcon" :size="18" :stroke-width="2"
+                spring="snappy" reduced-motion="user" aria-hidden="true" />
+              <t-icon v-else name="arrow-up" />
             </button>
           </t-tooltip>
         </div>

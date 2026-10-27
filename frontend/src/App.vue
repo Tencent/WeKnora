@@ -7,6 +7,7 @@ import ProtectedResourcePreview from '@/components/ProtectedResourcePreview.vue'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import UploadConfirmHost from '@/components/UploadConfirmHost.vue'
 import { useAuthStore } from '@/stores/auth'
+import { isCustomerViewer } from '@/config/customerAccess'
 import { useSettingsStore } from '@/stores/settings'
 import { getCurrentUser, userInfoFromApi } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
@@ -27,6 +28,9 @@ const { formatRole, roleIcon } = useRoleLabel()
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
+// 登录 → 主界面的整页过渡只给客户版（AC-27）。管理员把 css 关掉，
+// Transition 只负责切换组件、不挂任何过渡类，行为与改造前一致（C6）。
+const isCustomer = computed(() => isCustomerViewer(authStore))
 
 const tdLocaleMap: Record<string, object> = {
   'en-US': enUSConfig,
@@ -278,7 +282,15 @@ onUnmounted(() => {
 <template>
   <t-config-provider :globalConfig="tdGlobalConfig">
     <div id="app">
-      <RouterView />
+      <!-- 客户版整页切换（登录 → 主界面）用 customer-motion.css 里的 customer-page 过渡；
+           管理员 :css 为 false，不产生任何动画，且不启用 out-in 的等待。
+           Vue Router 4 要求用 v-slot 把组件交给 Transition。 -->
+      <RouterView v-slot="{ Component }">
+        <Transition :name="isCustomer ? 'customer-page' : 'app-noop'" :css="isCustomer"
+          :mode="isCustomer ? 'out-in' : undefined">
+          <component :is="Component" />
+        </Transition>
+      </RouterView>
       <ManualKnowledgeEditor />
       <ProtectedResourcePreview />
       <UploadConfirmHost />

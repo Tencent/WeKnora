@@ -408,6 +408,9 @@ import {
   type MemoryStatus,
   type MemoryTopic,
 } from '@/api/memory'
+import { brandConfig } from '@/brand'
+import { isCustomerViewer } from '@/config/customerAccess'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -858,6 +861,25 @@ const handleConsolidate = async () => {
   }
 }
 
+// L1：客户导出的记忆文件名从品牌产品名派生（小写 slug + 当天日期），
+// 管理员端保持 weknora-memories.json 原名（C6）。中文产品名保留原字符，
+// 只有拉丁字母会被转小写；拿不到有效字符时退回 memories，保证文件名始终可用。
+// F3：slug 截断到 60 字符（截在连字符上时再剪掉尾部连字符），
+// 防止超长 productName 生成超出文件系统 255 字符上限的文件名；正常长度名称输出不变。
+const memoryExportFileName = (): string => {
+  if (!isCustomerViewer(useAuthStore())) return 'weknora-memories.json'
+  const slug = brandConfig.productName.trim().toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^\p{L}\p{N}-]+/gu, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+    .replace(/-+$/g, '')
+  const now = new Date()
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  return `${slug || 'memories'}-memories-${date}.json`
+}
+
 const handleExport = async () => {
   try {
     const response = await exportMemoryItems()
@@ -867,7 +889,7 @@ const handleExport = async () => {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'weknora-memories.json'
+    link.download = memoryExportFileName()
     link.click()
     URL.revokeObjectURL(url)
   } catch (error: any) {

@@ -19,7 +19,8 @@
         <span v-if="loading" class="cmdk__input-spinner">
           <t-loading size="small" />
         </span>
-        <t-popup v-model:visible="settingsVisible" trigger="click" placement="bottom-right"
+        <!-- 检索微调（top-k/阈值）属于管理员设置，客户版不渲染入口与弹层（M11 / AC-23） -->
+        <t-popup v-if="!isCustomerPalette" v-model:visible="settingsVisible" trigger="click" placement="bottom-right"
           overlay-class-name="cmdk-settings-popup" :overlay-inner-style="{ padding: '0' }" :z-index="3100">
           <button type="button" class="cmdk__icon-btn" :class="{ active: settingsVisible }"
             :title="t('commandPalette.retrieval')" :aria-label="t('retrievalSettings.title')"
@@ -143,7 +144,7 @@
                 <template #icon><t-icon name="chat" size="14px" /></template>
                 {{ t('commandPalette.empty.askAi') }}
               </t-button>
-              <t-button variant="outline" size="small" @click="settingsVisible = true">
+              <t-button v-if="!isCustomerPalette" variant="outline" size="small" @click="settingsVisible = true">
                 <template #icon><t-icon name="setting" size="14px" /></template>
                 {{ t('commandPalette.empty.adjustRetrieval') }}
               </t-button>
@@ -173,6 +174,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useAuthStore } from '@/stores/auth'
+import { isCustomerViewer } from '@/config/customerAccess'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useCmdkSearch, type CmdkFileGroup, type CmdkChunk, type CmdkMsgGroup } from './GlobalCommandPalette/useSearch'
 import { highlightText } from './GlobalCommandPalette/useHighlight'
@@ -201,6 +203,11 @@ const MSG_LIMIT = 4
 const activeKbScope = ref<{ id: string; name: string } | null>(null)
 const scopeDismissed = ref(false) // user clicked ✕, remember for this session
 
+// 客户命令面板只保留 T04 白名单内的入口：对话与个人设置。
+// 助手、知识库、智能体、组织、新手引导对客户无意义或属管理员功能，一律不出现。
+const CUSTOMER_COMMAND_IDS: readonly string[] = ['new-chat', 'open-settings']
+const isCustomerPalette = computed(() => isCustomerViewer(authStore))
+
 const {
   query, loading, hasSearched,
   fileGroups, messageGroups, kbMatches,
@@ -210,7 +217,9 @@ const {
   clearResults,
 } = useCmdkSearch({
   lockedKbIds: () => (activeKbScope.value ? [activeKbScope.value.id] : []),
-  agentsEnabled: () => deploymentCapabilities.isSupported('agents'),
+  // 客户版没有智能体/KB 结果，预加载与全库语义检索都跳过（M12）。
+  agentsEnabled: () => !isCustomerPalette.value && deploymentCapabilities.isSupported('agents'),
+  knowledgeEnabled: () => !isCustomerPalette.value,
 })
 
 const settingsVisible = ref(false)
@@ -268,6 +277,9 @@ const allCommands = computed(() => {
     close: () => commandPaletteStore.closePalette(),
   })
   return cmds.filter((command) => {
+    if (isCustomerPalette.value) {
+      return CUSTOMER_COMMAND_IDS.includes(command.id)
+    }
     if (command.id === 'open-agents') {
       return deploymentCapabilities.isSupported('agents')
     }
@@ -285,6 +297,12 @@ const filteredCommands = computed(() => filterCommands(allCommands.value, query.
 // when their backing list is empty, so users with nothing to show don't see
 // empty headers.
 const groupOrder = computed<readonly string[]>(() => {
+  if (isCustomerPalette.value) {
+    // 客户只保留对话相关结果：历史会话与消息；知识库/智能体/文件分块都会跳到客户白名单外的页面。
+    return query.value.trim()
+      ? ['messages', 'sessions', 'commands'] as const
+      : ['recent', 'commands'] as const
+  }
   if (!query.value.trim()) {
     // Empty state: recents + full command list.
     return ['recent', 'commands'] as const

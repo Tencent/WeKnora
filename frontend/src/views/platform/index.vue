@@ -1,14 +1,24 @@
 <template>
     <div class="main" ref="dropzone" :style="{ '--sidebar-width': `${uiStore.sidebarDisplayWidth}px` }">
         <Menu></Menu>
-        <div v-if="isRouterAlive" class="platform-route-outlet">
+        <!-- 客户版页面切换（AC-27）用一次性的淡入 keyframes 挂在路由出口上：
+             creatChat 这类页面是多根节点，Vue 的 <Transition> 无法直接包裹。
+             管理员不会加 customer-page-enter 类，出口保持原样（C6）。
+             历史会话之间（/platform/chat/a → /platform/chat/b）交给 chat/index.vue
+             自己先淡出再换，避免两套动画叠加。 -->
+        <div v-if="isRouterAlive" class="platform-route-outlet"
+            :class="{ 'customer-page-enter': customerPageAnimating }" @animationend.self="onCustomerPageAnimationEnd">
             <RouterView />
         </div>
         <!-- WeKnora 助手：停靠时作为布局右栏挤压页面，悬浮时浮在页面上；都不加遮罩，
-             跨页面保留会话，从侧栏、右侧边缘按钮或命令面板唤出（设置里可选） -->
-        <AssistantPanel />
-        <AssistantLauncher />
-        <AssistantPageBridge />
+             跨页面保留会话，从侧栏、右侧边缘按钮或命令面板唤出（设置里可选）。
+             客户版整体不挂载（H2）：这样即使 sessionStorage 里残留 visible=true
+             或代码里调用 open()，也没有面板可渲染；管理员保持原样。 -->
+        <template v-if="!isCustomer">
+            <AssistantPanel />
+            <AssistantLauncher />
+            <AssistantPageBridge />
+        </template>
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
@@ -18,13 +28,15 @@
         <GlobalCommandPalette />
         <!-- 知识库文件上传进度浮层：上传队列放在 store 里，切换页面不中断 -->
         <UploadTasksPanel />
-        <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开 -->
-        <NewUserGuide />
+        <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开。
+             客户版不挂载，避免首次登录出现「欢迎使用 WeKnora」品牌泄漏（AC-6/AC-7 延伸）；
+             管理员保持原样。 -->
+        <NewUserGuide v-if="!isCustomer" />
     </div>
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
@@ -41,6 +53,10 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
+import { useAuthStore } from '@/stores/auth'
+import { isCustomerViewer } from '@/config/customerAccess'
+import { useCustomerAgent } from '@/composables/useCustomerAgent'
+import { useAssistantStore } from '@/stores/assistant'
 
 const route = useRoute();
 const router = useRouter();
@@ -48,6 +64,42 @@ const commandPaletteStore = useCommandPaletteStore();
 const uiStore = useUIStore();
 let ismask = ref(false)
 const { t } = useI18n();
+
+// 客户进入平台时统一把智能体对齐到产线配置（管理员分支不创建产线 store，也不改智能体）。
+const authStore = useAuthStore();
+const isCustomer = computed(() => isCustomerViewer(authStore));
+useCustomerAgent(() => isCustomer.value);
+
+// 客户身份下把助手的 visible 状态收掉，避免之后切回管理员时又“自动打开”。
+// 这只是界面状态，不涉及权限（C4）。
+const assistantStore = useAssistantStore();
+watch(isCustomer, (customer) => {
+    if (customer && assistantStore.visible) assistantStore.close();
+}, { immediate: true });
+
+// 客户版页面切换：给路由出口播放一次淡入 keyframes（AC-27）。
+// 先摘类、等一帧再加，同名动画才会重新播放；动画结束后自动摘掉，
+// 避免后续路由变化因为类还在而不重播。
+const customerPageAnimating = ref(false);
+
+function onCustomerPageAnimationEnd(event: AnimationEvent) {
+    if (event.animationName === 'customer-page-in') customerPageAnimating.value = false;
+}
+
+watch(() => route.path, async (next, prev) => {
+    if (!isCustomer.value) return;
+    const looksReduced = typeof window !== 'undefined'
+        && typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (looksReduced) return;
+    // 会话 → 会话由 chat/index.vue 负责“旧内容先淡出”，这里不叠加。
+    if (next.startsWith('/platform/chat/') && prev.startsWith('/platform/chat/')) return;
+    // 设置页的进出场由弹窗壳单独负责，路由出口不再叠一层。
+    if (next === '/platform/settings' || prev === '/platform/settings') return;
+    customerPageAnimating.value = false;
+    await nextTick();
+    customerPageAnimating.value = true;
+});
 
 const isRouterAlive = ref(true)
 const reloadApp = () => {

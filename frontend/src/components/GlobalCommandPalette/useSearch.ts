@@ -76,7 +76,10 @@ export function useCmdkSearch(options: {
   debounceMs?: number
   /** 当前部署是否提供智能体路由；不提供时不发起预加载请求。 */
   agentsEnabled?: () => boolean
+  /** 是否搜索知识库（语义检索）。客户版隐藏了知识库结果，返回 false 可跳过全库检索（M12）。 */
+  knowledgeEnabled?: () => boolean
 }) {
+  const knowledgeEnabled = (): boolean => options.knowledgeEnabled?.() !== false
   const debounceMs = options.debounceMs ?? 350
   const query = ref('')
   const loading = ref(false)
@@ -249,8 +252,12 @@ export function useCmdkSearch(options: {
     // narrows the scope and also disables message search (out of scope).
     const locked = options.lockedKbIds?.() || []
     const scoped = locked.length > 0
+    const searchKnowledge = knowledgeEnabled()
     let kbIds: string[]
-    if (scoped) {
+    if (!searchKnowledge) {
+      // 客户版只搜消息/会话，不预加载 KB，也不发语义检索（M12）。
+      kbIds = []
+    } else if (scoped) {
       kbIds = locked
     } else {
       await ensureKbs()
@@ -353,7 +360,8 @@ export function useCmdkSearch(options: {
     // Preload KB and agent lists so name matches show up instantly on first
     // keystroke. Sessions come from the menuStore (already populated by the
     // sidebar) so no extra fetch needed here.
-    ensureKbs()
+    // 客户版不搜知识库、也不展示智能体，两个预加载都跳过（M12）。
+    if (knowledgeEnabled()) ensureKbs()
     if (options.agentsEnabled?.() !== false) {
       ensureAgents()
     }

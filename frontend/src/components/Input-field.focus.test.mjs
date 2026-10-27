@@ -50,6 +50,9 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
         if (name === 'send-msg') sentModel = model
       },
       clearvalue: () => effects.push(['clear']),
+      // T09 / AC-28：客户版发送成功后切换到对勾图标；本用例只关心草稿与焦点，
+      // 用空实现隔离这条反馈链路。
+      flashSendSuccess: () => {},
       getTextareaEl: () => textarea,
       nextTick: () => new Promise(resolve => ticks.push(resolve)),
     }

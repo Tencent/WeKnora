@@ -8803,5 +8803,35 @@ export default {
       description:
         'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます 画像が補正可能な書類やラベルの写真と判定された場合、認識前にページを傾き補正・トリミングして OCR 精度を高めます。補正に失敗した場合は元の画像を使用します。'
     }
-  }
+  },
+  brand: {
+    sidebarShow: '会話リストを表示',
+    loginHint: 'アカウントは管理者が作成します。パスワードをお忘れの場合は管理者にお問い合わせください。',
+    emailLabel: 'メールアドレス',
+    emailPlaceholder: 'メールアドレスを入力',
+    passwordLabel: 'パスワード',
+    passwordPlaceholder: 'パスワードを入力',
+    loginButton: 'ログイン',
+    loggingIn: 'ログイン中...',
+    featureKnowledge: '企業の知識を、いつでも質問',
+    featureInstant: 'ナレッジベースに基づく正確な回答',
+    featureAdmin: 'アカウントは管理者が一元管理',
+    lineSelector: {
+      changeLine: '製品ラインを切り替え',
+      currentLine: '現在の製品ライン',
+      listLabel: '製品ライン一覧',
+      empty: '利用可能な製品ラインがありません',
+    },
+    welcome: {
+      title: 'こんにちは、{name}へようこそ',
+      subtitle: '製品ラインを選んで、そのまま質問できます',
+      lineGroupLabel: '製品ライン',
+      samplesLabel: '質問例',
+      fallbackNotice: '製品ラインの設定に問題があるため、既定の製品ラインを使用しています',
+    },
+    settings: {
+      title: '一般',
+      description: '画面の言語と外観を設定します',
+    },
+  },
 }

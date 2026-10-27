@@ -6,6 +6,11 @@ import TDesign from "tdesign-vue-next";
 // 引入组件库的少量全局样式变量
 import "tdesign-vue-next/dist/tdesign.css";
 import "@/assets/theme/theme.css";
+// 客户版主题必须在 theme.css 之后加载：同优先级下后加载的 html[data-customer] 规则才能覆盖绿色令牌。
+import "@/assets/theme/brand.css";
+// 客户版容器动效（AC-27）。同样全部挂在 html[data-customer="true"] 下，
+// 放在 brand.css 之后只是保持「客户版样式成组、后加载」的阅读顺序。
+import "@/assets/theme/customer-motion.css";
 import "@/assets/theme/tdesign-overrides.less";
 import "@/assets/dropdown-menu.less";
 import "@/components/css/chat-hljs-dark.less";
@@ -17,6 +22,7 @@ import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import i18n from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 import { initFont } from "@/composables/useFont";
+import { initCustomerBrandTheme } from "@/brand";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
 import { installAutofillGuard } from "@/utils/disable-autofill";
 import { useAuthStore } from "@/stores/auth";
@@ -26,6 +32,9 @@ installTDesignIconOfflineGuard();
 
 initTheme();
 initFont();
+// 只登记主题监听并补写已有客户版变量；这里不设置 data-customer，
+// 登录页与登录后的角色判定分别由 T03 / T04 决定。
+initCustomerBrandTheme();
 
 async function bootstrap() {
   const app = createApp(App);

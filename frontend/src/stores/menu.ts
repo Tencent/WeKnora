@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import type { QuestionOrigin } from '@/utils/questionOrigin'
+import { isCustomerMenuPath, isCustomerViewer } from '@/config/customerAccess'
 
 type MenuChild = Record<string, any>
 
@@ -75,7 +76,13 @@ export const useMenuStore = defineStore('menuStore', () => {
   const visibleMenuArr = computed(() => {
     const authStore = useAuthStore()
     const deploymentCapabilities = useDeploymentCapabilitiesStore()
+    // 客户侧边栏只保留新对话；历史会话由 menu.vue 独立渲染，不受这里影响。
+    // 个人设置与退出登录在底部 UserMenu 里，不走 menuArr。
+    const customerViewer = isCustomerViewer(authStore)
     return menuArr.filter(item => {
+      if (customerViewer && !isCustomerMenuPath(item.path)) {
+        return false
+      }
       if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
         return false
       }

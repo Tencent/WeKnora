@@ -1,0 +1,160 @@
+/* 客户版容器动效（AC-27）。
+ *
+ * 所有规则都挂在 html[data-customer="true"] 下：管理员不设置这个属性，一条也命不中，
+ * 管理员端的弹窗/页面/分区保持改造前的行为（C6）。
+ *
+ * 只做 AC-27 允许的几类容器动效，统一口径：
+ * - 只淡入淡出 + 不超过 6px 的位移，不做弹跳、缩放类夸张效果；
+ * - 时长一律取 --app-motion-instant / fast / base（120 / 150 / 200ms），不写字面量；
+ * - 减少动态效果时全部退化为直接显示/隐藏（包括过渡和 keyframes）。
+ */
+
+/* 1. 个人设置弹窗开合（SettingsModalShell 的 Transition 类）。
+ * 打开比关闭慢一档：打开 200ms 淡入并上移 6px；关闭 150ms 淡出并轻微下沉，
+ * 关闭更快符合“退场不磨蹭”的直觉。 */
+html[data-customer="true"] .settings-modal-shell-enter-active {
+    transition: opacity var(--app-motion-base) ease-out;
+}
+
+html[data-customer="true"] .settings-modal-shell-enter-active .settings-modal {
+    transition:
+        transform var(--app-motion-base) ease-out,
+        opacity var(--app-motion-base) ease-out;
+}
+
+html[data-customer="true"] .settings-modal-shell-enter-from {
+    opacity: 0;
+}
+
+html[data-customer="true"] .settings-modal-shell-enter-from .settings-modal {
+    opacity: 0;
+    transform: translateY(6px);
+}
+
+html[data-customer="true"] .settings-modal-shell-leave-active {
+    transition: opacity var(--app-motion-fast) ease-in;
+}
+
+html[data-customer="true"] .settings-modal-shell-leave-active .settings-modal {
+    transition:
+        transform var(--app-motion-fast) ease-in,
+        opacity var(--app-motion-fast) ease-in;
+}
+
+html[data-customer="true"] .settings-modal-shell-leave-to {
+    opacity: 0;
+}
+
+html[data-customer="true"] .settings-modal-shell-leave-to .settings-modal {
+    opacity: 0;
+    transform: translateY(4px);
+}
+
+/* 2. 页面切换。
+ * 2a. 登录 → 主界面：App.vue 顶层的 RouteView 过渡（Login/Platform 都是单根组件）。
+ *     进入 200ms 从下方 6px 淡入；离开 120ms 先淡出并上移 3px。
+ * 2b. 平台内部页面切换：creatChat 等页面是多根节点，Vue 的 Transition 包不住，
+ *     改为给路由出口加一次 customer-page-enter 的 keyframes（200ms / 6px）。
+ * 会话之间的切换由 chat/index.vue 单独做（同一个路由组件，路由级动画不会触发）。 */
+html[data-customer="true"] .customer-page-enter-active {
+    transition:
+        opacity var(--app-motion-base) ease-out,
+        transform var(--app-motion-base) ease-out;
+}
+
+html[data-customer="true"] .customer-page-leave-active {
+    transition:
+        opacity var(--app-motion-instant) ease-in,
+        transform var(--app-motion-instant) ease-in;
+}
+
+html[data-customer="true"] .customer-page-enter-from {
+    opacity: 0;
+    transform: translateY(6px);
+}
+
+html[data-customer="true"] .customer-page-leave-to {
+    opacity: 0;
+    transform: translateY(-3px);
+}
+
+/* 平台内部换页：路由出口整体淡入，动画结束由组件摘掉类名（animationend）。 */
+html[data-customer="true"] .platform-route-outlet.customer-page-enter {
+    animation: customer-page-in var(--app-motion-base) cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes customer-page-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 3. 设置内分区切换。
+ * Settings.vue 原有的 .section 动画是 0.3s + 10px，超出客户版口径；
+ * 这里用更高优先级的选择器只给客户版换成 200ms + 4px，管理员的旧规则保持原样。 */
+html[data-customer="true"] .settings-modal-shell .section {
+    animation: customer-section-in var(--app-motion-base) cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes customer-section-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 4. 历史会话切换。
+ * chat/index.vue 在换会话时先加 .customer-session-leaving 让旧消息淡出（令牌时长），
+ * 再清空并载入新会话；移除类名后新内容按同一条过渡淡入。 */
+html[data-customer="true"] .msg_list {
+    transition:
+        opacity var(--app-motion-instant) ease-out,
+        transform var(--app-motion-instant) ease-out;
+}
+
+html[data-customer="true"] .msg_list.customer-session-leaving {
+    opacity: 0;
+    transform: translateY(3px);
+}
+
+/* 5. 减少动态效果：过渡和 keyframes 全部清零。
+ * 除了 transition/animation 置 none，还要把起始态的 opacity/transform 复位，
+ * 否则 Vue 的过渡类在“零时长”下仍可能闪一帧透明或位移。 */
+@media (prefers-reduced-motion: reduce) {
+    html[data-customer="true"] .settings-modal-shell-enter-active,
+    html[data-customer="true"] .settings-modal-shell-leave-active,
+    html[data-customer="true"] .settings-modal-shell-enter-active .settings-modal,
+    html[data-customer="true"] .settings-modal-shell-leave-active .settings-modal,
+    html[data-customer="true"] .customer-page-enter-active,
+    html[data-customer="true"] .customer-page-leave-active,
+    html[data-customer="true"] .msg_list {
+        transition: none;
+    }
+
+    html[data-customer="true"] .settings-modal-shell .section,
+    html[data-customer="true"] .platform-route-outlet.customer-page-enter {
+        animation: none;
+    }
+
+    html[data-customer="true"] .settings-modal-shell-enter-from,
+    html[data-customer="true"] .settings-modal-shell-leave-to,
+    html[data-customer="true"] .settings-modal-shell-enter-from .settings-modal,
+    html[data-customer="true"] .settings-modal-shell-leave-to .settings-modal,
+    html[data-customer="true"] .customer-page-enter-from,
+    html[data-customer="true"] .customer-page-leave-to,
+    html[data-customer="true"] .msg_list.customer-session-leaving {
+        opacity: 1;
+        transform: none;
+    }
+}

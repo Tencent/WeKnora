@@ -1,11 +1,18 @@
 <template>
-    <div class="dialogue-wrap">
+    <div class="dialogue-wrap" :class="{ 'customer-shell': isCustomer }">
+        <!-- 客户版把外层直接切到 flex column（customer-shell），顶部加客户顶栏；
+             非客户不加任何 wrapper，DOM 与改造前完全一致（C6）。 -->
+        <CustomerTopBar v-if="isCustomer" />
         <div class="dialogue-answers">
-            <div class="dialogue-title" style="--wails-draggable: drag">
+            <!-- 原标题含 WeKnora 字样，客户版由顶栏产品名代替，管理员分支保持原样 -->
+            <div v-if="!isCustomer" class="dialogue-title" style="--wails-draggable: drag">
                 <span style="--wails-draggable: drag">{{ $t('createChat.title') }}</span>
             </div>
+            <!-- 客户新对话：欢迎区 + 产线卡片 + 示例问题；creatChat 本身就是无消息的新会话，
+                 所以这里只按客户视角判断。管理员分支的推荐问题逻辑完全不动（C6）。 -->
+            <CustomerWelcome v-if="isCustomer" @send="handleSampleQuestion" />
             <!-- 推荐问题 -->
-            <div ref="sqContainerRef" class="suggested-questions-container">
+            <div v-else ref="sqContainerRef" class="suggested-questions-container">
                 <!-- 骨架屏占位 -->
                 <div v-if="sqInitialLoad && suggestedQuestions.length === 0" class="suggested-questions-inner">
                     <div class="suggested-questions-title"><t-skeleton animation="gradient"
@@ -57,7 +64,7 @@
                     <button v-if="selectedProjectDir" type="button" class="project-dir-bar__clear"
                         :aria-label="$t('createChat.clearProject')" @click="clearProjectDir">×</button>
                 </div>
-                <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+                <InputField ref="inputFieldRef" :customer-mode="isCustomer" @send-msg="sendMsg"></InputField>
             </div>
         </div>
     </div>
@@ -88,6 +95,10 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
+import { useAuthStore } from '@/stores/auth';
+import { isCustomerViewer } from '@/config/customerAccess';
+import CustomerTopBar from '@/components/customer/CustomerTopBar.vue';
+import CustomerWelcome from '@/components/customer/CustomerWelcome.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -101,6 +112,9 @@ onBeforeRouteLeave((to) => {
     }
 });
 const uiStore = useUIStore();
+// 客户/管理员两套视图的唯一开关：角色未水合时按管理员处理，避免误套客户外壳（D8）
+const authStore = useAuthStore();
+const isCustomer = computed(() => isCustomerViewer(authStore));
 const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
@@ -112,6 +126,8 @@ const selectedProjectDir = ref('');
 const pickingProjectDir = ref(false);
 
 const showChatContextualGuide = computed(() => {
+    // 客户版不展示情境引导，避免在客户对话页出现「选择知识范围」等管理员引导。
+    if (isCustomer.value) return false;
     return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
 });
 
@@ -175,6 +191,8 @@ const onQuestionsEntered = () => {
 };
 
 const fetchSuggestedQuestions = async (force = false) => {
+    // 客户版已用产线示例问题代替推荐问题，不再请求后端的推荐问题接口。
+    if (isCustomer.value) return;
     const agentId = settingsStore.selectedAgentId;
     const params = settingsStore.getSuggestedQuestionsParams();
     const requestKey = JSON.stringify([agentId, params]);
@@ -239,6 +257,11 @@ const inputFieldRef = ref();
 // request, so the agent searches it before answering.
 const handleSuggestedQuestionClick = (item: SuggestedQuestion) => {
     inputFieldRef.value?.triggerSend(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
+};
+
+// 欢迎区示例问题：交给 Input-field 的公开 triggerSend，与手动发送同一条链路（AC-20）。
+const handleSampleQuestion = (question: string) => {
+    inputFieldRef.value?.triggerSend(question);
 };
 
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
@@ -322,6 +345,19 @@ async function openProjectDir() {
     justify-content: center;
     align-items: center;
     // position: relative;
+}
+
+// 客户版：顶栏占用顶部固定高度，剩余空间继续水平居中、垂直居中
+.dialogue-wrap.customer-shell {
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+}
+
+.dialogue-wrap.customer-shell .dialogue-answers {
+    flex: 1;
+    justify-content: center;
+    margin: 0 auto;
 }
 
 .dialogue-answers {

@@ -1,13 +1,24 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed, 'aside_box--resizing': uiStore.sidebarResizing }">
+    <div class="aside_box" :class="{
+        'aside_box--collapsed': uiStore.sidebarCollapsed,
+        'aside_box--resizing': uiStore.sidebarResizing,
+        'aside_box--customer': isCustomer,
+        'aside_box--customer-hidden': isCustomer && uiStore.sidebarCollapsed,
+    }" :inert="isCustomer && uiStore.sidebarCollapsed"
+        :aria-hidden="isCustomer && uiStore.sidebarCollapsed ? 'true' : undefined">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
+            <div class="logo_box" @click="handleLogoClick" style="cursor: pointer;">
+                <!-- U2：侧栏 logo 客户与管理员统一走下方 .logo 的 108px；
+                     运行时配置 logoWidth 只管登录页的 150px，两处语义分开 -->
+                <img class="logo" :src="sidebarLogoSrc" :alt="isCustomer ? brandConfig.productName : ''"
+                    @error="handleLogoError">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
-                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
+                <!-- WeKnora 助手入口对客户隐藏（H2）；管理员保持原样 -->
+                <t-tooltip v-if="assistantStore.entry === 'sidebar' && !isCustomer" :content="assistantName"
+                    placement="bottom">
                     <div class="header-icon-btn" :class="{ 'is-active': assistantStore.visible }"
                         :aria-label="assistantName" @click="assistantStore.toggle()">
                         <t-icon name="compass" size="18px" />
@@ -25,7 +36,16 @@
                         <img class="header-icon-img" :src="getImgSrc('search.svg')" alt="">
                     </div>
                 </t-tooltip>
-                <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
+                <!-- F1：客户态给收起按钮补键盘可达（tabindex/role/aria-expanded/Enter/Space），
+                     与鼠标点击走同一个 toggleSidebar；管理员态这些绑定全为 undefined，
+                     渲染出的 DOM 属性逐位不变（C6）。aria-label 复用既有 menu.collapseSidebar，
+                     不新增 locale 键（brand.sidebarHide 已作为死键删除）。 -->
+                <div class="sidebar-toggle" @click="toggleSidebar" :title="t('menu.collapseSidebar')"
+                    :tabindex="isCustomer ? 0 : undefined" :role="isCustomer ? 'button' : undefined"
+                    :aria-label="isCustomer ? t('menu.collapseSidebar') : undefined"
+                    :aria-expanded="isCustomer ? !uiStore.sidebarCollapsed : undefined"
+                    @keydown.enter.prevent="toggleSidebarFromKeyboard"
+                    @keydown.space.prevent="toggleSidebarFromKeyboard">
                     <svg viewBox="0 0 20 20" width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.5" />
                         <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.5" />
@@ -37,7 +57,7 @@
         </div>
         <!-- 折叠时：展开按钮 -->
         <t-tooltip v-else :content="t('menu.expandSidebar')" placement="right">
-            <div class="menu_item sidebar-toggle-item" @click="uiStore.toggleSidebar">
+            <div class="menu_item sidebar-toggle-item" @click="toggleSidebar">
                 <div class="menu_item-box">
                     <div class="menu_icon">
                         <svg class="icon icon--toggle" viewBox="0 0 20 20" width="16" height="16" fill="none"
@@ -83,7 +103,8 @@
                         </div>
                     </div>
                 </t-tooltip>
-                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="right">
+                <t-tooltip v-if="assistantStore.entry === 'sidebar' && !isCustomer" :content="assistantName"
+                    placement="right">
                     <div class="menu_item menu_item--cmdk" :class="{ 'menu_item_active': assistantStore.visible }"
                         :aria-label="assistantName" @click="assistantStore.toggle()">
                         <div class="menu_item-box">
@@ -102,7 +123,18 @@
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
                             <div class="menu_icon" :class="`menu_icon--${item.icon}`">
-                                <img class="icon"
+                                <!-- 客户激活态的对话图标内联渲染，用 currentColor 跟随主色（H3）；
+                                     其余图标仍走图片资源，管理员渲染路径完全不变。 -->
+                                <svg v-if="prefixIcon === 'customer-active'" class="icon" viewBox="0 0 20 20" fill="none"
+                                    aria-hidden="true">
+                                    <path fill-rule="evenodd" clip-rule="evenodd"
+                                        d="M1.875 2.5C1.875 2.15483 2.15482 1.875 2.5 1.875H17.5C17.8451 1.875 18.125 2.15483 18.125 2.5V13.75C18.125 14.0951 17.8451 14.375 17.5 14.375H9.04274L6.10514 17.9001C5.93669 18.1023 5.65965 18.1773 5.41224 18.0876C5.16481 17.9981 5 17.7631 5 17.5V14.375H2.5C2.15482 14.375 1.875 14.0951 1.875 13.75V2.5ZM3.125 3.125V13.125H5.625C5.97017 13.125 6.25 13.4049 6.25 13.75V15.7738L8.26986 13.3499C8.38861 13.2074 8.56451 13.125 8.75 13.125H16.875V3.125H3.125Z"
+                                        fill="currentColor" fill-opacity=".9" />
+                                    <path fill-rule="evenodd" clip-rule="evenodd"
+                                        d="M9.375 5H10.625V8.44961L13.5154 10.762L12.7346 11.738L9.375 9.05039V5Z"
+                                        fill="currentColor" fill-opacity=".9" />
+                                </svg>
+                                <img v-else class="icon"
                                     :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'automation' ? automationIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
@@ -227,6 +259,26 @@
         </div>
 
     </div>
+
+    <!-- U4：客户版收起态的展开入口。客户收起是整栏滑出（宽 0 + 根节点 inert），
+         侧栏内部的展开按钮不可达，所以在侧栏右缘放一条只含展开按钮的浮出栏，
+         交互与管理员收起态的展开按钮一致（tooltip + 点击展开）。
+         persist:false 只改内存态，不覆盖管理员的折叠偏好（M4）；管理员不渲染（C6）。 -->
+    <div v-if="isCustomer" class="sidebar-float-rail"
+        :class="{ 'sidebar-float-rail--visible': uiStore.sidebarCollapsed }" :inert="!uiStore.sidebarCollapsed"
+        :aria-hidden="!uiStore.sidebarCollapsed ? 'true' : undefined">
+        <t-tooltip :content="t('brand.sidebarShow')" placement="right">
+            <button type="button" class="sidebar-float-rail__btn" :aria-label="t('brand.sidebarShow')"
+                :aria-expanded="false" @click="uiStore.expandSidebar({ persist: false })">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                    <path d="M9 4v16" />
+                    <path d="M9.5 9.5 12 12l-2.5 2.5" />
+                </svg>
+            </button>
+        </t-tooltip>
+    </div>
 </template>
 
 <script setup lang="ts">
@@ -283,6 +335,9 @@ import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAuthStore } from '@/stores/auth';
+import { brandConfig } from '@/brand';
+import { defaultLandingPath, isCustomerViewer } from '@/config/customerAccess';
+import allstarLogoUrl from '@/assets/img/allstar-logo.png';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
 import { TOOLBOX_ITEMS, canAccessToolboxSection } from '@/config/toolbox';
 import BrowserIcon from '@/components/icons/BrowserIcon.vue';
@@ -360,6 +415,36 @@ const isMacLike = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.tes
 const cmdModKeyLabel = isMacLike ? '⌘' : 'Ctrl';
 const route = useRoute();
 const router = useRouter();
+
+// 客户视角才换品牌 logo 与落点；管理员仍然只看 Allstar 静态图、点回知识库列表（C6）
+const isCustomer = computed(() => isCustomerViewer(authStore));
+const sidebarLogoSrc = computed(() => (isCustomer.value ? brandConfig.logoUrl : allstarLogoUrl));
+
+// 客户版的收起/展开只影响当前界面，不写共享的 sidebar_collapsed，
+// 否则会把同一浏览器里管理员保存的折叠偏好覆盖掉（C6 / M4）。
+// 管理员仍走原来的持久化行为。
+const toggleSidebar = () => {
+    uiStore.toggleSidebar({ persist: !isCustomer.value });
+};
+
+// F1：logo 行收起按钮的键盘触发（Enter/Space），与点击共用 toggleSidebar。
+// 管理员态该按钮无 tabindex 不可聚焦，keydown 不会命中；守卫再兜一层，保证零影响（C6）。
+const toggleSidebarFromKeyboard = () => {
+    if (!isCustomer.value) return;
+    toggleSidebar();
+};
+
+function handleLogoClick() {
+    router.push(defaultLandingPath(authStore, '/platform/knowledge-bases'));
+}
+
+// 运行时品牌配置可以指向任意地址，加载失败时回落到内置 Allstar 图，避免出现破图
+function handleLogoError(event: Event) {
+    const img = event.target as HTMLImageElement;
+    const fallback = '/brand/allstar-logo.png';
+    if (!img.src.endsWith(fallback)) img.src = fallback;
+}
+
 const currentpath = ref('');
 const total = ref(0);
 const sessionBuckets = ref<Record<string, SidebarSessionBucket>>({});
@@ -1172,8 +1257,11 @@ const getIcon = (path: string) => {
     // 组织图标：只在组织页面显示绿色
     organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
 
-    // 对话图标：只在对话创建页面显示绿色，其他情况显示默认
-    prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 'prefixIcon.svg';
+    // 对话图标：只在对话创建页面显示激活色，其他情况显示默认。
+    // 客户版用内联 SVG + currentColor 跟随主色，管理员继续用品牌绿色图标（C6 / AC-4 / H3）。
+    prefixIcon.value = creatChatActiveState.isCreatChatActive
+        ? (isCustomer.value ? 'customer-active' : 'prefixIcon-green.svg')
+        : 'prefixIcon.svg';
 
     // 设置图标：只在设置页面显示绿色
     settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
@@ -1265,12 +1353,13 @@ const startSidebarResize = () => {
     uiStore.sidebarResizing = true
 }
 const resizeSidebar = (delta: number, keyboard: boolean) => {
+    const persist = !isCustomer.value
     if (keyboard && uiStore.sidebarCollapsed && delta > 0) {
-        uiStore.expandSidebar()
+        uiStore.expandSidebar({ persist })
     } else if (keyboard && uiStore.sidebarWidth === SIDEBAR_MIN_WIDTH && delta < 0) {
-        uiStore.collapseSidebar()
+        uiStore.collapseSidebar({ persist })
     } else {
-        uiStore.resizeSidebar(sidebarResizeStartWidth + delta)
+        uiStore.resizeSidebar(sidebarResizeStartWidth + delta, { persist })
     }
 }
 
@@ -1352,6 +1441,59 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         .menu_top {
             margin-right: 0;
             padding-right: 0;
+        }
+    }
+
+    // 客户版收起时整栏滑出（264px → 0），收起/展开入口都在侧栏自身（U4）：
+    // 展开态是 logo 行的折叠按钮，收起态是模板尾部的 .sidebar-float-rail 浮出按钮；
+    // 管理员仍是上面的 48px 图标栏，两套行为互不影响（C6）。
+    &.aside_box--customer:not(.aside_box--resizing) {
+        // 0.26s：现有令牌没有 260ms，用 base(200ms) × 1.3 得出，避免写死时长
+        transition: width calc(var(--app-motion-base) * 1.3) cubic-bezier(0.22, 0.61, 0.36, 1),
+            min-width calc(var(--app-motion-base) * 1.3) cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+
+    &.aside_box--customer-hidden {
+        width: 0;
+        min-width: 0;
+        padding: 0;
+        border-right: 0;
+        overflow: hidden;
+    }
+
+    // —— 客户版排版统一（U1/U3，R2）：只挂在客户类上，管理员栅格不动（C6）——
+    &.aside_box--customer {
+        // U3：图标列收窄到 16px，略小于同行 20px 行高的文字；
+        // 文案列缩进（--sidebar-text-inset）由同一令牌联动，栅格仍对齐。
+        --sidebar-icon-size: 16px;
+
+        .menu_icon .icon {
+            width: var(--sidebar-icon-size);
+            height: var(--sidebar-icon-size);
+        }
+
+        // U3：顶部图标按钮点击区域放大到 32px，与浮出栏展开按钮一致
+        .logo_actions .header-icon-btn,
+        .logo_actions .sidebar-toggle {
+            width: 32px;
+            height: 32px;
+        }
+
+        // U1：「新对话」吸顶块整体下移，与顶部 logo 拉开呼吸间距；
+        // 与历史分组之间同样留出大于组内行距的间隔（U3）。
+        .menu_top .menu_box--sticky {
+            margin-top: 14px;
+            margin-bottom: 10px;
+        }
+
+        .submenu {
+            padding-top: 2px;
+        }
+
+        // U3：今天/昨天等日期标题的组间距明显大于组内 1px 行距，层级一眼可分
+        .timeline_header {
+            margin-top: 12px;
+            padding-top: 0;
         }
     }
 
@@ -1794,6 +1936,57 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
 }
 
+// U4：客户版收起态浮出栏。宽度与侧栏用同一段 0.26s 过渡（base × 1.3，AC-29 节奏），
+// 收起/展开时主内容区宽度单调变化，不出现跳变；未收起时宽 0 且 inert，不占焦点与点击。
+.sidebar-float-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 0 0 auto;
+    width: 0;
+    padding-top: 8px;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: var(--td-bg-color-sidebar);
+    transition: width calc(var(--app-motion-base) * 1.3) cubic-bezier(0.22, 0.61, 0.36, 1);
+
+    &.sidebar-float-rail--visible {
+        width: 44px;
+        border-right: 1px solid var(--td-component-stroke);
+    }
+}
+
+.sidebar-float-rail__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--app-radius-sm);
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+    &:hover {
+        background: var(--td-bg-color-container-hover);
+        color: var(--td-text-color-primary);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--td-brand-color);
+        outline-offset: 2px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar-float-rail {
+        transition: none;
+    }
+}
+
 .batch-inline-footer {
     flex-shrink: 0;
     display: flex;
@@ -1946,6 +2139,13 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     }
 }
 
+// 系统开启「减少动态效果」时，客户版侧栏不再滑动，但展开/收起状态仍然生效
+@media (prefers-reduced-motion: reduce) {
+    .aside_box.aside_box--customer:not(.aside_box--resizing) {
+        transition: none;
+    }
+}
+
 @keyframes menu-toolbox-stack-in {
     from {
         opacity: 0;
@@ -2002,10 +2202,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 }
 </style>
 <style lang="less">
-// Dark mode: invert dark logo to light
-html[theme-mode="dark"] .aside_box .logo_box .logo {
-    filter: invert(1) hue-rotate(180deg);
-}
+// Logo 两套视图都保持原色：反色会改变蓝字标，提亮会把橙色星环洗成黄色（AC-5）
 
 // Dark mode: 滚动条在深色背景下需要更亮的颜色才看得见
 html[theme-mode="dark"] .aside_box .menu_top:hover {

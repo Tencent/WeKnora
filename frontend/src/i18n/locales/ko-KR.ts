@@ -8803,5 +8803,35 @@ export default {
       description:
         '먼저 이미지 특징을 관찰하여 설명을 생성하고, 그 특징을 바탕으로 OCR 실행 여부를 결정합니다. 모델 호출을 절약하고 분석 속도를 높입니다 이미지가 보정 가능한 문서나 라벨 사진으로 인식되면 인식 전에 페이지를 자동으로 정렬하고 잘라내어 OCR 정확도를 높입니다. 보정에 실패하면 원본 이미지를 사용합니다.'
     }
-  }
+  },
+  brand: {
+    sidebarShow: '대화 목록 표시',
+    loginHint: '계정은 관리자가 생성합니다. 비밀번호를 잊으셨다면 관리자에게 문의하세요.',
+    emailLabel: '이메일',
+    emailPlaceholder: '이메일 주소 입력',
+    passwordLabel: '비밀번호',
+    passwordPlaceholder: '비밀번호 입력',
+    loginButton: '로그인',
+    loggingIn: '로그인 중...',
+    featureKnowledge: '기업 지식을 언제든 질문',
+    featureInstant: '지식베이스 기반의 정확한 답변',
+    featureAdmin: '계정은 관리자가 일괄 관리합니다',
+    lineSelector: {
+      changeLine: '제품 라인 전환',
+      currentLine: '현재 제품 라인',
+      listLabel: '제품 라인 목록',
+      empty: '사용 가능한 제품 라인이 없습니다',
+    },
+    welcome: {
+      title: '안녕하세요, {name}에 오신 것을 환영합니다',
+      subtitle: '제품 라인을 선택한 뒤 바로 질문하세요',
+      lineGroupLabel: '제품 라인',
+      samplesLabel: '예시 질문',
+      fallbackNotice: '제품 라인 설정에 문제가 있어 기본 제품 라인을 사용합니다',
+    },
+    settings: {
+      title: '일반',
+      description: '인터페이스 언어와 모양을 설정합니다',
+    },
+  },
 }

@@ -75,9 +75,10 @@
         <div class="role-denied-desc">{{ $t('settings.roleDenied.desc') }}</div>
       </div>
       <template v-else>
-        <!-- 常规设置 -->
+        <!-- 常规设置：客户只看语言/主题，管理员保持 WeKnora 默认内容（C6） -->
         <div v-if="currentSection === 'general'" class="section">
-          <GeneralSettings />
+          <CustomerGeneralSettings v-if="isCustomerViewerActive" />
+          <GeneralSettings v-else />
         </div>
 
         <!-- Ollama 设置 -->
@@ -110,8 +111,8 @@
           <MemoryWorkspaceSettings />
         </div>
 
-        <!-- 助手（个人偏好 + 空间名称与权限上限） -->
-        <div v-if="currentSection === 'assistant'" class="section">
+        <!-- 助手（个人偏好 + 空间名称与权限上限）；客户版整体不渲染（H2 / AC-23） -->
+        <div v-if="currentSection === 'assistant' && !isCustomerViewerActive" class="section">
           <AssistantSettings />
         </div>
 
@@ -212,6 +213,7 @@ import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
+import CustomerGeneralSettings from './CustomerGeneralSettings.vue'
 import ModelSettings from './ModelSettings.vue'
 import ModelCatalog from '../system/ModelCatalog.vue'
 import OllamaSettings from './OllamaSettings.vue'
@@ -252,6 +254,7 @@ import {
   normalizeSettingsSection as normalizeSettingsSectionFromQuery,
   settingsQueryUnchanged,
 } from '@/config/settingsRoute'
+import { isCustomerSettingsSection, isCustomerViewer } from '@/config/customerAccess'
 
 const route = useRoute()
 const router = useRouter()
@@ -259,6 +262,9 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const { t, te } = useI18n()
+// 客户视角（viewer 且不可跨空间）在「常规」里渲染精简版；管理员分支保持原组件。
+// 只决定渲染哪套界面，权限仍以后端 RBAC 为准（C4）。
+const isCustomerViewerActive = computed(() => isCustomerViewer(authStore))
 const hostSkills = computed(() => hostSkillsOnly(
   deploymentCapabilities.isSupported('settings.sandbox.remote'),
   deploymentCapabilities.isSupported('settings.sandbox.host'),
@@ -331,6 +337,11 @@ const isSectionSupported = (key: string): boolean => {
 }
 
 const canSeeSection = (key: string): boolean => {
+  // 客户视角只保留三个个人分区（常规/账号/记忆）；其余入口不渲染，deep-link 落到 role-denied 兜底。
+  // 这只是界面可见性，后端 RBAC 仍是最终权限（C4）。
+  if (isCustomerViewer(authStore) && !isCustomerSettingsSection(key)) {
+    return false
+  }
   if (isIntegrationSection(key)) {
     const min = INTEGRATION_TAB_MIN_ROLE[integrationTabFromSection(key)]
     if (!min) return true

@@ -76,7 +76,7 @@
             <t-tooltip :content="t('input.steerRetry')"><button type="button" :aria-label="t('input.steerRetry')" @click="emit('retry-steer')"><t-icon name="refresh" /></button></t-tooltip>
             <t-tooltip :content="t('common.remove')"><button type="button" :aria-label="t('common.remove')" @click="emit('remove-steer')"><t-icon name="close" /></button></t-tooltip>
         </div>
-        <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg" />
+        <picturePreview v-if="reviewImg" :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg" />
     </div>
 </template>
 <script setup>

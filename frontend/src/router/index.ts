@@ -9,6 +9,15 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
+import { applyDocumentBrand } from '@/brand'
+import {
+  CUSTOMER_LANDING_PATH,
+  defaultLandingPath,
+  isCustomerAllowedRoute,
+  isCustomerSettingsSection,
+  isCustomerViewer,
+  normalizeSettingsSection as normalizeCustomerSettingsSection,
+} from '@/config/customerAccess'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -41,12 +50,47 @@ function hasPendingOIDCCallback() {
   return hash.includes('oidc_result=') || hash.includes('oidc_error=')
 }
 
+/**
+ * 首屏默认落点按当前角色决定：客户回对话页，其他人保持知识库列表。
+ * 这个函数只在导航时执行（Pinia 已安装），不会在模块加载阶段读取 store。
+ */
+function landingPathForCurrentAuth(): string {
+  return defaultLandingPath(useAuthStore(), '/platform/knowledge-bases')
+}
+
+// 进入登录页之前的默认标题。登录页会统一写成客户产品名，SPA 内再登录管理员时
+// 需要还原，管理员端标题必须保持 WeKnora（C6）。
+const DEFAULT_DOCUMENT_TITLE = typeof document !== 'undefined' ? document.title : 'WeKnora'
+
+// 记住上一次写入的品牌角色，避免每次导航都重写 DOM 引起抖动。
+let appliedDocumentBrand: 'customer' | 'admin' | null = null
+
+/** 按角色切换文档品牌标记；客户天蓝 + 标题，管理员保持 WeKnora 默认。 */
+function applyDocumentBrandForRole(customer: boolean): void {
+  if (typeof document === 'undefined') return
+  const wanted = customer ? 'customer' : 'admin'
+  // 登录页会在 setup 阶段把文档切成客户品牌，所以除了记忆值还要核对实际的
+  // data-customer：SPA 内从登录页直接进管理端时，必须真正把品牌切回去。
+  const domIsCustomer = document.documentElement.dataset.customer === 'true'
+  if (appliedDocumentBrand === wanted && domIsCustomer === customer) return
+
+  appliedDocumentBrand = wanted
+  if (customer) {
+    applyDocumentBrand({ customer: true })
+    return
+  }
+  applyDocumentBrand({ customer: false, title: false })
+  if (document.title !== DEFAULT_DOCUMENT_TITLE) {
+    document.title = DEFAULT_DOCUMENT_TITLE
+  }
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: "/",
-      redirect: "/platform/knowledge-bases",
+      redirect: () => landingPathForCurrentAuth(),
     },
     {
       path: "/login",
@@ -94,7 +138,7 @@ const router = createRouter({
     {
       path: "/platform",
       name: "Platform",
-      redirect: "/platform/knowledge-bases",
+      redirect: () => landingPathForCurrentAuth(),
       component: () => import("../views/platform/index.vue"),
       meta: { requiresInit: true, requiresAuth: true },
       children: [
@@ -326,7 +370,7 @@ router.beforeEach(async (to, from, next) => {
       }
     }
     if (authStore.hasValidTenant) {
-      next('/platform/knowledge-bases')
+      next(landingPathForCurrentAuth())
     } else {
       next()
     }
@@ -337,7 +381,11 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
+      next(
+        authStore.hasValidTenant
+          ? landingPathForCurrentAuth()
+          : '/onboarding/workspace',
+      )
       return
     }
     next()
@@ -382,6 +430,48 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
+  // 走到这里角色已经可用于判断（会员关系来自本地缓存或 /auth/me）。
+  // 客户挂天蓝与客户标题；管理员保持 WeKnora 默认（C6）。
+  // 角色为空时不切品牌，等水合后的下一次导航再判定（D8）。
+  if (authStore.currentTenantRole || authStore.canAccessAllTenants) {
+    applyDocumentBrandForRole(isCustomerViewer(authStore))
+  }
+
+  // 客户界面入口收敛：白名单之外的页面一律回对话页。
+  // 前端裁剪只影响可见性，不是权限边界（C4 / AC-15）。
+  if (isCustomerViewer(authStore)) {
+    // 严格版 AC-13：路由表里被 redirect 到设置页的兼容路径（/platform/tenant、
+    // /platform/system/* 等）不能因为最终落在 settings 就放行，要看原始路径。
+    //
+    // 但「客户直接访问 settings?section=非法分区」会先被下面的归一化 next() 跳一次，
+    // 那次内部跳转同样会带上 redirectedFrom（original path 就是 /platform/settings）。
+    // 若把它当成兼容路径，AC-23 的「回落到常规」会变成跳去对话页；所以这里排除
+    // settings 自身作为来源，只对真正的外部兼容路径做严格判定。
+    const redirectedFrom = to.redirectedFrom
+    if (redirectedFrom && to.path !== CUSTOMER_LANDING_PATH
+      && redirectedFrom.path !== '/platform/settings'
+      && !isCustomerAllowedRoute(redirectedFrom)) {
+      next(CUSTOMER_LANDING_PATH)
+      return
+    }
+
+    // 个人设置的分区先归一化：客户带非法 section 时回落到「常规」，并保留其余 query。
+    const rawSection = to.query.section
+    if (to.name === 'settings' && typeof rawSection === 'string' && rawSection !== ''
+      && !isCustomerSettingsSection(rawSection)) {
+      next({
+        path: '/platform/settings',
+        query: { ...to.query, section: normalizeCustomerSettingsSection(authStore, rawSection) },
+        replace: true,
+      })
+      return
+    }
+    if (!isCustomerAllowedRoute(to)) {
+      next(CUSTOMER_LANDING_PATH)
+      return
+    }
+  }
+
   // 部署能力只描述“后端是否提供该功能”，不反映服务健康或是否已配置。
   // 探测失败时 Store 会 fail-open，真正的权限和可用性仍由后端接口校验。
   const deploymentCapabilities = useDeploymentCapabilitiesStore()
@@ -389,7 +479,7 @@ router.beforeEach(async (to, from, next) => {
   const requiredCapability = to.meta.requiredCapability as DeploymentCapabilityKey | undefined
   if (requiredCapability && !deploymentCapabilities.isSupported(requiredCapability)) {
     MessagePlugin.warning(i18n.global.t('settings.capabilityUnavailable'))
-    next('/platform/knowledge-bases')
+    next(landingPathForCurrentAuth())
     return
   }
 
@@ -399,7 +489,7 @@ router.beforeEach(async (to, from, next) => {
   // the bounce. This is UI-only; the server enforces the real check.
   if (to.meta.requiresSystemAdmin === true) {
     if (!authStore.isSystemAdmin) {
-      next('/platform/knowledge-bases')
+      next(landingPathForCurrentAuth())
       return
     }
   }
