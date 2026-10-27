@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // uploadEnvelopeSlack is the multipart framing allowed on top of the file
@@ -39,6 +41,18 @@ const knowledgeBaseJSONMaxBytes = 1 << 20
 // applies to a much broader audience than the knowledge-base lifecycle routes,
 // which need manage_kbs.
 const hybridSearchJSONMaxBytes = 1 << 20
+
+// faqJSONMaxBytes caps a FAQ batch upsert body.
+//
+// entries has no count limit of its own: UpsertEntries binds the payload,
+// validates it, and only then starts the import, so ShouldBindJSON buffers the
+// whole array first. A batch is the JSON equivalent of the CSV import, which is
+// bounded by GetMaxFileSize() (50 MiB by default), so the cap follows that
+// limit plus a MiB of JSON framing instead of inventing a second budget. It is
+// read per request, so an operator who raises MAX_FILE_SIZE_MB raises this too.
+func faqJSONMaxBytes() int64 {
+	return secutils.GetMaxFileSize() + uploadEnvelopeSlack
+}
 
 // limitUploadBody caps the request body before anything parses it.
 //
