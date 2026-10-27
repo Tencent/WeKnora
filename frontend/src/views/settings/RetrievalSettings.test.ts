@@ -44,7 +44,8 @@ async function editConfig(
   const clearTimeout = (id: number) => timers.delete(id)
   const writes: Record<string, unknown>[] = []
   const mocks: Record<string, unknown> = {
-    vue: { ...vue, onMounted: (callback: () => Promise<void>) => { mounted = callback } },
+    // 这组序列化测试直接执行 setup；卸载行为由真实挂载的自动保存测试覆盖。
+    vue: { ...vue, onMounted: (callback: () => Promise<void>) => { mounted = callback }, onUnmounted() {} },
     'tdesign-vue-next': { MessagePlugin: { success() {}, error() {} } },
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     '@/components/ModelSelector.vue': {},

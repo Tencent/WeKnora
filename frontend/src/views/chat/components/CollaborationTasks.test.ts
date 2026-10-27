@@ -40,3 +40,19 @@ test('completed child rows hide obsolete running tool progress', async () => {
   assert.match(html, /已完成/)
   assert.doesNotMatch(html, /正在使用工具/)
 })
+
+test('only a running child animates its icon, and a sealed parent pauses it', async () => {
+  for (const status of ['running', 'queued', 'waiting', 'succeeded', 'failed', 'cancelled', 'interrupted']) {
+    const html = await render({ task: { id: 'a', displayName: '检索', sessionId: 's', status } })
+    const icon = html.match(/<svg[^>]*data-icon="agent"[^>]*>/)?.[0]
+    assert.ok(icon)
+    assert.equal(icon.includes('is-active'), status === 'running')
+    const disclosure = html.match(/<svg[^>]*data-icon="chevron-right"[^>]*>/)?.[0]
+    assert.ok(disclosure)
+    assert.doesNotMatch(disclosure, /is-active/)
+  }
+  const sealed = await render({
+    task: { id: 'a', displayName: '检索', sessionId: 's', status: 'running' }, motionPaused: true,
+  })
+  assert.doesNotMatch(sealed, /is-active/)
+})

@@ -51,6 +51,7 @@ const folderPickerVisible = ref(false);
           </t-button>
         </div>
         <div class="batch-bar-actions">
+          <slot name="assistant" />
           <t-tooltip v-if="canDownload" :content="t('knowledgeBase.batchDownloadHint')">
             <span class="batch-download-trigger">
               <t-button theme="primary" size="small" :loading="downloadLoading"

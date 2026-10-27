@@ -34,6 +34,20 @@ class SplitUtilsTest(unittest.TestCase):
     def test_split_by_regex_keeps_separators(self):
         self.assertEqual(split_by_regex("\n")("a\nb\nc"), ["a", "\n", "b", "\n", "c"])
 
+    def test_split_by_regex_keeps_nested_captures_once(self):
+        self.assertEqual(
+            split_by_regex(r"(([,;]))")("a,b;c"), ["a", ",", "b", ";", "c"]
+        )
+
+    def test_split_by_regex_preserves_backreferences(self):
+        self.assertEqual(split_by_regex(r"(\w)\1")("book"), ["b", "oo", "k"])
+
+    def test_split_by_regex_accepts_inline_flags(self):
+        self.assertEqual(split_by_regex(r"(?i)sep")("aSePb"), ["a", "SeP", "b"])
+
+    def test_split_by_regex_keeps_zero_width_boundaries(self):
+        self.assertEqual(split_by_regex(r"(?=b)")("abc"), ["a", "bc"])
+
     def test_match_by_regex(self):
         self.assertTrue(match_by_regex(r"^\d+")("123"))
         self.assertFalse(match_by_regex(r"^\d+")("abc"))

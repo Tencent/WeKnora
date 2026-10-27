@@ -75,10 +75,12 @@ func inheritedChildSnapshot(ctx context.Context, cfg *types.AgentConfig, toolNam
 		}
 	}
 	// Marshal immediately: later changes to parent config cannot change queued work.
-	data, err := json.Marshal(delegatedConfig{
+	saved := delegatedConfig{
 		Agent: *source.Agent, Access: cfg.AssistantAccess, AssistantParent: cfg.OperationsAgentID != "",
 		Inherited: inherited,
-	})
+	}
+	saved.captureExecution(ctx)
+	data, err := json.Marshal(saved)
 	return string(data), err
 }
 

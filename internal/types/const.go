@@ -26,6 +26,9 @@ const (
 	UserIDContextKey ContextKey = "UserID"
 	// PrincipalContextKey is the context key for the terminal caller principal.
 	PrincipalContextKey ContextKey = "Principal"
+	// PrincipalAuthSourceContextKey records how the auth middleware verified
+	// the principal (web session, API key mode, embed, IM, MCP endpoint).
+	PrincipalAuthSourceContextKey ContextKey = "PrincipalAuthSource"
 	// TenantAPIKeyScopeContextKey carries per-API-key operation and KB scopes.
 	TenantAPIKeyScopeContextKey ContextKey = "TenantAPIKeyScope"
 	// AuditAPIKeyContextKey carries the API key id/name for activity
@@ -55,6 +58,9 @@ const (
 	// distinct key from SessionTenantIDContextKey, which also re-scopes
 	// session/message repository lookups. See SandboxTenantIDFromContext.
 	SandboxTenantIDContextKey ContextKey = "SandboxTenantID"
+	// SandboxAdmissionExemptContextKey carries the shared-machine admission
+	// members of the current request and its chat turn ([]string).
+	SandboxAdmissionExemptContextKey ContextKey = "sandbox_admission_exempt"
 	// EmbedQueryContextKey marks an embedding call as a search query; see
 	// WithEmbedQuery.
 	EmbedQueryContextKey ContextKey = "EmbedQuery"

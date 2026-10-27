@@ -91,19 +91,22 @@ func TestKnowledgeBaseParsingParamsAndProjection(t *testing.T) {
     "image_processing_config": {
       "image_pipeline": "default",
       "image_pipeline_params": {
-        "default.enable_ocr": false,
+        "default.ocr_enabled": false,
+        "default.caption_enabled": true,
+        "default.enable_ocr": true,
         "enable_ocr": true,
         "private_token": "secret",
         "default": {
-          "enable_ocr": true
+          "ocr_enabled": true
         }
       }
     }
   }
 }`)
 	assert.Contains(t, out, `"engine":"builtin"`)
-	assert.Contains(t, out, `"default.enable_ocr":false`, "literal map keys must not resolve as nested paths")
-	assert.Contains(t, out, `"enable_ocr":true`)
+	assert.Contains(t, out, `"default.ocr_enabled":false`, "literal map keys must not resolve as nested paths")
+	assert.Contains(t, out, `"default.caption_enabled":true`)
+	assert.NotContains(t, out, "enable_ocr", "obsolete keys must not report stale switch values")
 	assert.NotContains(t, out, "secret")
 	assert.NotContains(t, out, `"default":`)
 	_, exposed := op.Param("parser_engine_rules")

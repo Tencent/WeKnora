@@ -249,6 +249,20 @@ func offeredGrantScope(req PendingRequest) string {
 	return req.GrantScope
 }
 
+func grantRiskLabel(req PendingRequest) string {
+	if req.Grant == "" {
+		return ""
+	}
+	return string(req.grantRisk())
+}
+
+func grantLabel(req PendingRequest) string {
+	if req.Grant == "" {
+		return ""
+	}
+	return req.GrantScope
+}
+
 func (req PendingRequest) grantRisk() policy.Risk {
 	if req.GrantRisk == "" {
 		return policy.RiskWrite
@@ -282,6 +296,8 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 		Grant:              req.Grant,
 		GrantScope:         offeredGrantScope(req),
 		GrantLapsed:        lapse,
+		GrantRisk:          grantRiskLabel(req),
+		GrantLabel:         grantLabel(req),
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("encode tool approval: %w", err)

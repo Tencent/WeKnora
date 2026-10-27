@@ -213,3 +213,31 @@ func TestDataAnalysisExecuteEndToEndUsesDatasetTable(t *testing.T) {
 		t.Fatalf("rejection must name the dataset table: %s", result.Error)
 	}
 }
+
+func TestDataAnalysisExecuteAggregatesTextNumbers(t *testing.T) {
+	db := newPlainDuckDB(t)
+	knowledge := &types.Knowledge{ID: "cast-doc", FileName: "amounts.csv", FileType: "csv", FilePath: "amounts.csv"}
+	tool := NewDataAnalysisTool(nil,
+		&mapKnowledgeService{docs: map[string]*types.Knowledge{knowledge.ID: knowledge}}, nil,
+		&csvFileService{files: map[string]string{"amounts.csv": "amount\n10\n20\n30\n"}}, db, "test-casts")
+	ctx := context.Background()
+	t.Cleanup(func() { tool.Cleanup(ctx) })
+	for _, typ := range []string{"INTEGER", "BIGINT", "DOUBLE PRECISION", "DECIMAL(12,2)"} {
+		t.Run(typ, func(t *testing.T) {
+			args, err := json.Marshal(DataAnalysisInput{
+				KnowledgeID: knowledge.ID,
+				SQL:         "SELECT SUM(CAST(amount AS " + typ + ")) AS total FROM dataset",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := tool.Execute(ctx, args)
+			if err != nil || result == nil || !result.Success {
+				t.Fatalf("execute failed: result=%+v err=%v", result, err)
+			}
+			if !strings.Contains(result.Output, `"total":"60"`) {
+				t.Fatalf("unexpected aggregate: %s", result.Output)
+			}
+		})
+	}
+}

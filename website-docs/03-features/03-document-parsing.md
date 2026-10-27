@@ -75,6 +75,8 @@ Go 侧客户端在 `docreader/client/auth.go`（`LoadAuthConfigFromEnv` 读取�
 
 Go App 中 `internal/application/service/knowledge_process.go` 在文档入库流水线的 docreader stage 调用解析（超时由 `docreader_call_timeout` 配置控制，防止挂死的 docreader 长时间占用 worker）。注意：**md/markdown/txt/csv/json/图片/音频由 Go 侧 `SimpleFormatReader` 原生处理，不经过 docreader**（见 `internal/infrastructure/docparser/builtin_converter.go` 的 `simpleFormats`）。
 
+CSV 使用 Go `simple` 解析器时，转换后的 Markdown 上限为 **64 MiB**，与原始上传文件大小限制分别检查。解析器会在生成表格前核算全部行按最大列数补齐后的大小，以及单元格转义后的字节数；超过上限会明确失败，不返回截断内容，也不会自动重试同一份文件。可按行或列拆分 CSV 后重新上传。正常规模的长短行仍会补齐空单元格并保留全部字段。
+
 ```mermaid
 sequenceDiagram
     participant U as "用户 / 前端"
@@ -401,7 +403,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `WEKNORA_DOCREADER_CALL_TIMEOUT` | Go duration | `30m` | 单次 docreader 调用超时，须小于文档处理超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | Go duration | `1000s` | 自建 PaddleOCR-VL 引擎的 HTTP 请求超时；空值、无效值或非正数使用默认值 |
 | `WEKNORA_MINERU_TIMEOUT` | Go duration | `1000s` | 自建 MinerU 引擎的单次解析超时（V1 API 覆盖上传到下载的整个任务，旧版覆盖 `/file_parse` 请求）；空值、无效值或非正数使用默认值 |
-| `WEKNORA_MINERU_CLOUD_TIMEOUT` | Go duration | `600s` | MinerU 云端（mineru.net）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
+| `WEKNORA_MINERU_CLOUD_TIMEOUT` | Go duration | `30m` | MinerU 云端（mineru.net）每个批次/分片轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
 | `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | Go duration | `600s` | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
 | `WEKNORA_WEKNORACLOUD_TIMEOUT` | Go duration | `20m` | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT`；空值、无效值或非正数使用默认值 |
 
@@ -528,3 +530,26 @@ V1 流程的几个细节：
 - **OCR / VLM**：docreader 内部零 OCR、零 VLM；扫描页与插图作为图片回传，OCR（PaddleOCR-VL）与 caption 由 Go App 完成。
 - **图片回传**：inline bytes（`ImageRef.image_data`），持久化到 local/minio/cos/tos 由 Go 负责。
 - **分块**：生产路径在 Go 侧 chunker；Python `TextSplitter`（512/80）仅为 sidecar 保留并与 Go 对齐。
+
+
+### MinerU Cloud 大 PDF 自动拆分
+
+Cloud 模式使用 qpdf 对 PDF 按顺序拆分，每片最多 100 页；超过 10 MiB 的分片继续按页二分，单页无法再拆分，因此单个超大页面仍可能触发供应商大小限制。合并结果保留原 PDF 页号及独立图片引用。不栅格化 PDF，不改变原文页序。
+
+Docker app 镜像包含 qpdf。独立部署和桌面应用必须在运行后端的机器安装 qpdf，并确保该进程的 PATH 可以找到它：
+
+- Debian / Ubuntu：`sudo apt-get update && sudo apt-get install -y qpdf`。
+- Fedora / RHEL：`sudo dnf install qpdf`。
+- macOS：`brew install qpdf`。
+- Windows：从 [qpdf 官方发布页](https://github.com/qpdf/qpdf/releases) 下载适合系统的 Windows 二进制 ZIP，解压，将其中 `bin` 目录加入用户 PATH，重新打开终端并重新启动桌面应用。
+
+运行 `qpdf --version` 验证安装。若后端通过 systemd 启动，检查服务进程的 PATH；修改服务环境后重启 app。qpdf 未安装时仍尝试原来的整文件 Cloud 解析；小文件可正常使用，大文件可能被 Cloud 页数/大小上限拒绝，并提示安装 qpdf。
+
+超时分为不同层级：
+
+- 每个上传 PUT 和结果 ZIP 下载的 HTTP 超时由 120 秒提高为 10 分钟；ZIP 下载现在使用调用者 context，可被上层取消。
+- `WEKNORA_MINERU_CLOUD_TIMEOUT` 的默认值由 600 秒提高为 30 分钟，每个批次/分片重新开始轮询期限。申请上传 URL 和单次状态查询的 HTTP 超时仍为 30 秒。
+- 这些局部期限不会延长整个文档的 context。`WEKNORA_DOCREADER_CALL_TIMEOUT` 默认 30 分钟，覆盖完整解析调用（包括全部分片、上传、轮询、下载）；`WEKNORA_DOCUMENT_PROCESS_TIMEOUT` 默认 2 小时，覆盖整个文档处理任务。实际运行始终受最早的上层期限限制。轮询截止检查发生在请求之间，因此单个进行中的请求可能跨过轮询期限，但仍受 HTTP 超时与调用者 context 限制。
+- 大书可按实际耗时配置 `WEKNORA_DOCREADER_CALL_TIMEOUT=4h`、`WEKNORA_DOCUMENT_PROCESS_TIMEOUT=6h`，保留每片 Cloud 轮询 30 分钟。不要把每片的 30 分钟误认为整个文档获得相同或累计的执行时间；修改 .env 后重新创建 app 容器。
+
+此功能不持久化云端 job ID 或完成结果。重试会重新提交分片，跨重启断点续传不属于此变更。

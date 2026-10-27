@@ -14,7 +14,7 @@ import (
 // @Tags System Admin
 // @Produce json
 // @Param key query string false "完整设置键；省略返回所有已注册设置" extensions(x-agent)
-// @Success 200 {array} types.SystemSettingSummary
+// @Success 200 {array} github_com_Tencent_WeKnora_internal_types.SystemSettingSummary
 // @x-agent {"id":"system_admin.list_settings","risk":"read","system_admin":true,"max_items":100}
 // @x-agent-hint "Reads registered platform settings, optionally selecting an exact key from this list. value_json encodes the settings page value, including service fallbacks; it is not proof that a running process has reloaded a restart-required change. value_hidden means secret, invalid or oversized and never means empty/default. Unknown out-of-band database rows are excluded. Read-only: cannot change or reset settings."
 // @Router /system/admin/settings-summary [get]

@@ -125,18 +125,18 @@ type ArtifactLibraryQuery struct {
 // Versions are the artifacts that share a session and sandbox source path:
 // regenerating report.pptx three times is one item with VersionCount 3.
 type ArtifactLibraryItem struct {
-	SessionID    string    `json:"session_id"    gorm:"column:session_id"`
-	SessionTitle string    `json:"session_title" gorm:"column:session_title"`
-	MessageID    string    `json:"message_id"    gorm:"column:message_id"`
-	Index        int       `json:"index"         gorm:"column:position"`
+	SessionID    string    `json:"session_id"    gorm:"column:session_id" extensions:"x-agent"`
+	SessionTitle string    `json:"session_title" gorm:"column:session_title" extensions:"x-agent"`
+	MessageID    string    `json:"message_id"    gorm:"column:message_id" extensions:"x-agent"`
+	Index        int       `json:"index"         gorm:"column:position" extensions:"x-agent"`
 	URL          string    `json:"-"             gorm:"column:url"`
-	Handle       string    `json:"handle,omitempty" gorm:"-"`
-	FileName     string    `json:"file_name"     gorm:"column:file_name"`
-	FileType     string    `json:"file_type"     gorm:"column:file_type"`
-	FileSize     int64     `json:"file_size"     gorm:"column:file_size"`
+	Handle       string    `json:"handle,omitempty" gorm:"-" extensions:"x-agent"`
+	FileName     string    `json:"file_name"     gorm:"column:file_name" extensions:"x-agent"`
+	FileType     string    `json:"file_type"     gorm:"column:file_type" extensions:"x-agent"`
+	FileSize     int64     `json:"file_size"     gorm:"column:file_size" extensions:"x-agent"`
 	SourcePath   string    `json:"source_path"   gorm:"column:source_path"`
-	CreatedAt    time.Time `json:"created_at"    gorm:"column:created_at"`
-	VersionCount int       `json:"version_count" gorm:"column:version_count"`
+	CreatedAt    time.Time `json:"created_at"    gorm:"column:created_at" extensions:"x-agent"`
+	VersionCount int       `json:"version_count" gorm:"column:version_count" extensions:"x-agent"`
 }
 
 // ArtifactRef addresses one artifact row by its business key. The primary key

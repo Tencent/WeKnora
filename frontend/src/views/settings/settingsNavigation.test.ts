@@ -44,3 +44,58 @@ test('settings sidebar preserves visibility filtering without hiding CLI', () =>
   assert.deepEqual(integrationMenu(visible), visible)
   assert.deepEqual(integrationMenu(['general']), [])
 })
+
+// Keep navigation tests tied to the real close handler, without mounting
+// settings panels that require backend services.
+const closeHandler = ast.statements.find((statement) =>
+  ts.isVariableStatement(statement) && statement.declarationList.declarations.some(
+    (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === 'handleClose',
+  ),
+)
+assert.ok(closeHandler, 'Settings must define a close handler')
+const compiledClose = ts.transpileModule(closeHandler.getText(ast), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+}).outputText
+
+function closeSettings(back: unknown, section = 'members', path = '/platform/settings'): string[] {
+  const actions: string[] = []
+  class FocusedElement {
+    blur() { actions.push('blur') }
+  }
+  runInNewContext(`${compiledClose}\nhandleClose()`, {
+    document: { activeElement: new FocusedElement() },
+    HTMLElement: FocusedElement,
+    route: { path, query: { section } },
+    uiStore: { closeSettings: () => actions.push('close') },
+    router: {
+      options: { history: { state: { back } } },
+      push: (target: string) => actions.push(`push:${target}`),
+      back: () => actions.push('back'),
+    },
+  })
+  return actions
+}
+
+test('closing a directly opened settings route stays in the application', () => {
+  for (const back of [null, undefined, '', 'https://example.com/', '//example.com/', '/login']) {
+    assert.deepEqual(closeSettings(back), ['blur', 'close', 'push:/platform/knowledge-bases'])
+  }
+})
+
+test('closing settings preserves a known in-app previous route', () => {
+  for (const back of ['/platform/knowledge-bases', '/platform/chat/session-123']) {
+    assert.deepEqual(closeSettings(back), ['blur', 'close', 'back'])
+  }
+})
+
+test('closing system settings retains its explicit knowledge-base destination', () => {
+  for (const section of ['model-catalog', 'system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log']) {
+    assert.deepEqual(closeSettings('/platform/chat/session-123', section), [
+      'blur', 'close', 'push:/platform/knowledge-bases',
+    ])
+  }
+})
+
+test('closing an overlaid settings panel leaves the underlying route alone', () => {
+  assert.deepEqual(closeSettings(null, 'general', '/platform/chat/session-123'), ['blur', 'close'])
+})

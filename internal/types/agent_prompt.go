@@ -168,8 +168,10 @@ func (p *AgentPrompt) TimelineView() *PendingPromptView {
 // ResumableAgentRequest is the part of a QARequest needed to rebuild the run
 // on another replica. It holds the original query and durable request settings.
 type ResumableAgentRequest struct {
-	AgentID string `json:"agent_id"`
-	Query   string `json:"query,omitempty"`
+	// ActingVia keeps scheduler-owned runs out of ordinary chat recovery.
+	ActingVia string `json:"acting_via,omitempty"`
+	AgentID   string `json:"agent_id"`
+	Query     string `json:"query,omitempty"`
 	// AgentTenantID is the agent owner's workspace; it differs from the
 	// session's when the agent is shared.
 	AgentTenantID       uint64          `json:"agent_tenant_id,omitempty"`
@@ -208,6 +210,11 @@ type ToolApprovalPromptRequest struct {
 	// GrantLapsed, when set, is why an earlier grant for this call no longer
 	// applies (an AgentGrantLapse value).
 	GrantLapsed string `json:"grant_lapsed,omitempty"`
+	// GrantRisk is the risk Grant would be given for, and GrantLabel its
+	// description, whether or not the card offers it: an automation's owner
+	// may later allow the same call for its future runs.
+	GrantRisk  string `json:"grant_risk,omitempty"`
+	GrantLabel string `json:"grant_label,omitempty"`
 }
 
 // ToolApprovalPromptResponse is the Response of an AgentPromptKindToolApproval.

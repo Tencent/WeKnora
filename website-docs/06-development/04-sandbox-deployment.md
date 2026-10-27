@@ -32,7 +32,7 @@ Docker 后端默认关闭。系统管理员在「系统设置 → 网络安全�
 | 网络模式 | 仅 `bridge` 或 `none`；不接受 `host`、`container:` 或自定义网络名 |
 | OCI runtime | 可选择 daemon 已安装的 runtime，如 `runsc` |
 
-app 运行在容器里时，要挂载实际 Docker socket，或改连远端 daemon。socket 授予控制宿主机 Docker 的能力，只应交给可信 app。入口脚本在降权前根据 socket GID 配置 appuser 的组；不要通过 `chmod 666` 放开 socket。若 socket 为 `root:root` 且仅所有者可写，应先在宿主机配置合适的非 root 组权限。
+app 运行在容器里时，要挂载实际 Docker socket，或改连远端 daemon。socket 授予控制宿主机 Docker 的能力，只应交给可信 app。入口脚本在降权前根据 socket GID 配置 appuser 的组；不要依赖 compose `group_add`，也不要通过 `chmod 666` 放开 socket。Docker Desktop 可能把 socket 映射为 `root:root 0660`；入口脚本会先确认组读写位，再把 appuser 加入对应的补充组。若 socket 为 `root:root 0600` 等仅所有者可写模式，入口脚本不会修改其属主或权限，部署方应改用组可读写的 socket 或带 TLS 的远端 daemon。
 
 优先使用标准镜像。自定义镜像需满足适配器的 root、Bash、GNU `find -printf`、coreutils `timeout` 和可写工作区要求；会话文件检查点与回退还依赖 Git。HTTP 请求取消本身不会终止容器进程，适配器通过容器内 `timeout` 执行命令超时控制。
 

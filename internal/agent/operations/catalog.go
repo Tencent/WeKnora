@@ -314,7 +314,8 @@ var (
 
 // allowedRouteAreas are the first path segments under /api/v1 an operation
 // may live in: the user's knowledge content, their agents, the models and
-// MCP services an agent can be bound to, and their own conversations. Every
+// MCP services an agent can be bound to, their conversations, and the
+// files those conversations generated. Every
 // other area is refused,
 // so an API added later (credentials, integrations, identity, the agent's
 // own approval and prompt endpoints) stays unreachable until it is listed
@@ -329,6 +330,10 @@ var allowedRouteAreas = map[string]bool{
 	"faq":                    true,
 	"agents":                 true,
 	"skills":                 true,
+	// The caller's own automations. Runs, grants and notifications live
+	// in other areas or behind routes left unannotated: the owner approves
+	// standing grants themselves.
+	"automations": true,
 	// Model and MCP responses carry endpoints and headers next to the
 	// names; only fields tagged x-agent are projected, so annotate the
 	// identifying ones and nothing else.
@@ -340,8 +345,9 @@ var allowedRouteAreas = map[string]bool{
 	// Sandbox configs hold provider credentials; see sandboxSkillsRoute.
 	"sandbox-configs": true,
 	// The caller's own conversations, read-only; see readOnlyRouteAreas.
-	"sessions": true,
-	"messages": true,
+	"sessions":  true,
+	"messages":  true,
+	"artifacts": true,
 }
 
 // readOnlyRouteAreas admit only operations that change nothing. Deleting,
@@ -349,9 +355,10 @@ var allowedRouteAreas = map[string]bool{
 // chat itself, and content the assistant reads (documents, past answers)
 // must never be able to talk it into erasing history.
 var readOnlyRouteAreas = map[string]bool{
-	"sessions": true,
-	"messages": true,
-	"system":   true, // Only info and parser-engines are reachable; see parseRoute.
+	"sessions":  true,
+	"messages":  true,
+	"artifacts": true,
+	"system":    true, // Only info and parser-engines are reachable; see parseRoute.
 }
 
 // forbiddenRouteSegments are refused anywhere inside an allowed area:

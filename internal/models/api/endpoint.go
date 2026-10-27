@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -126,9 +127,16 @@ func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentT
 	if e.Auth != nil {
 		e.Auth(req, data)
 	}
-	// User headers are applied last but the helper skips reserved names so
-	// they cannot clobber auth or content negotiation.
+	// The helper skips reserved names so custom headers cannot clobber auth
+	// or content negotiation.
 	secutils.ApplyCustomHeaders(req, e.Headers)
+	// Identity belongs to this call, not the shared model configuration or
+	// a per-request UUID. Derived contexts retain it across turns and retries.
+	req.Header.Set("User-Agent", "WeKnora")
+	req.Header.Del("X-Conversation-ID")
+	if sessionID, ok := types.SessionIDFromContext(ctx); ok {
+		req.Header.Set("X-Conversation-ID", sessionID)
+	}
 	return req, nil
 }
 

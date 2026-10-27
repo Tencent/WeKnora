@@ -125,7 +125,8 @@ func (s *sessionService) restrictTagScopesToAgentScope(
 	return filtered
 }
 
-// resolveChatModelID resolves the effective chat model ID for a QA request.
+// resolveChatModelID resolves the effective chat model ID and its execution tenant.
+// KB-derived models are scoped only after checking read access to the KB.
 //
 // When a user-configured agent is selected, its model configuration must be
 // complete and valid. The internal wiki fixer is the one exception: it is not
@@ -133,17 +134,17 @@ func (s *sessionService) restrictTagScopesToAgentScope(
 // selection. A request-level override may choose another valid model for this
 // request, but it must not make an unconfigured or stale agent appear usable.
 //
-// Without an agent, the legacy KB / session / system fallback remains
+// Without an agent, the KB / system fallback remains
 // available for non-agent callers.
 func (s *sessionService) resolveChatModelID(
 	ctx context.Context,
 	req *types.QARequest,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
-) (string, error) {
+) (string, uint64, error) {
 	summaryModelID := req.SummaryModelID
 	customAgent := req.CustomAgent
-	session := req.Session
+	tenantID, _ := types.TenantIDFromContext(ctx)
 	configuredAgentModelID := ""
 	// A shared agent runs in its owner's workspace, where an override could
 	// pick any of the owner's models rather than the one the agent was
@@ -155,12 +156,14 @@ func (s *sessionService) resolveChatModelID(
 	if customAgent != nil {
 		configuredAgentModelID = strings.TrimSpace(customAgent.Config.ModelID)
 		if configuredAgentModelID == "" && !types.UsesWorkspaceModelFallback(customAgent) {
-			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
+			return "", 0, fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
 		}
 		if configuredAgentModelID != "" {
 			model, err := s.modelService.GetModelByID(ctx, configuredAgentModelID)
 			if err != nil || model == nil || model.Type != types.ModelTypeKnowledgeQA {
-				return "", fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredAgentModelID, customAgent.ID)
+				return "", 0, fmt.Errorf(
+					"configured chat model %s is unavailable for agent %s", configuredAgentModelID, customAgent.ID,
+				)
 			}
 		} else {
 			// Internal built-in agents are omitted from the agent-management
@@ -175,15 +178,15 @@ func (s *sessionService) resolveChatModelID(
 		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil &&
 			model.Type == types.ModelTypeKnowledgeQA {
 			logger.Infof(ctx, "Using request's summary model override: %s", summaryModelID)
-			return summaryModelID, nil
+			return summaryModelID, tenantID, nil
 		}
 		logger.Warnf(ctx, "Request provided invalid summary model ID %s, falling back", summaryModelID)
 	}
 	if configuredAgentModelID != "" {
 		logger.Infof(ctx, "Using custom agent's model_id: %s", configuredAgentModelID)
-		return configuredAgentModelID, nil
+		return configuredAgentModelID, tenantID, nil
 	}
-	return s.selectChatModelID(ctx, session, knowledgeBaseIDs, knowledgeIDs)
+	return s.selectChatModelID(ctx, knowledgeBaseIDs, knowledgeIDs)
 }
 
 // resolveRetrievalTenantID determines the tenant ID to use for retrieval scope.

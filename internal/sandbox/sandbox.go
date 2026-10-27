@@ -179,6 +179,9 @@ var (
 	// ErrSessionTurnActive means a chat turn already holds the session lease,
 	// so rewind must not take the exclusive lock or reset the workspace.
 	ErrSessionTurnActive = errors.New("sandbox: session turn is active")
+	// ErrSessionWorkActive means background work is still live in the session,
+	// so rewind must not take the exclusive lock or reset the workspace.
+	ErrSessionWorkActive = errors.New("sandbox: session has live background work")
 	// ErrTerminalUnsupported is returned when the active backend cannot
 	// stream PTYs (Docker, a disabled manager). Distinct from
 	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,

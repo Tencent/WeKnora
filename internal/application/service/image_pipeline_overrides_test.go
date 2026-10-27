@@ -14,7 +14,7 @@ func TestResolveProcessConfig_LegacyOverrideSelectsImagePipeline(t *testing.T) {
 		for _, explicitKB := range []bool{false, true} {
 			kb := &types.KnowledgeBase{ImageProcessingConfig: types.ImageProcessingConfig{
 				ImageAttrsEnabled:   base,
-				ImagePipelineParams: map[string]any{"caption.thinking": true},
+				ImagePipelineParams: map[string]any{"default.caption.thinking_enabled": true},
 			}}
 			if explicitKB {
 				kb.ImageProcessingConfig.ImagePipelineID = string(types.ImagePipelineIDFor(base))
@@ -38,11 +38,11 @@ func TestResolveProcessConfig_LegacyOverrideSelectsImagePipeline(t *testing.T) {
 	id := types.ImagePipelineLegacyCaptionOCR
 	eff := ResolveProcessConfig(&types.KnowledgeBase{}, &types.KnowledgeProcessOverrides{
 		ImageAttrsEnabled: processConfigBoolPtr(true), ImagePipelineID: &id,
-		ImagePipelineParams: map[string]any{"enable_caption": false},
+		ImagePipelineParams: map[string]any{manualCaptionKey: false},
 	})
 	require.Equal(t, types.ImagePipelineDefault, eff.ImagePipelineID)
 	require.False(t, eff.ImageAttrsEnabled)
-	require.Equal(t, false, eff.ImagePipelineParams["enable_caption"])
+	require.Equal(t, false, eff.ImagePipelineParams[manualCaptionKey])
 }
 
 func TestProcessOverrides_ValidateImagePipelineBeforePersistence(t *testing.T) {
@@ -52,7 +52,7 @@ func TestProcessOverrides_ValidateImagePipelineBeforePersistence(t *testing.T) {
 			kb := &types.KnowledgeBase{}
 			overrides := &types.KnowledgeProcessOverrides{
 				EnableMultimodel: &enabled, ImagePipelineID: &id,
-				ImagePipelineParams: map[string]any{"enable_caption": caption, "enable_ocr": false},
+				ImagePipelineParams: map[string]any{manualCaptionKey: caption, manualOCRKey: false},
 			}
 			knowledge := &types.Knowledge{}
 			_, uploadErr := resolveFileImportProcessConfig(context.Background(), kb, "pdf", overrides, nil)
@@ -82,7 +82,7 @@ func TestProcessOverrides_ValidateLegacyMultimodalFlag(t *testing.T) {
 	id := types.ImagePipelineDefault
 	overrides := &types.KnowledgeProcessOverrides{
 		ImagePipelineID:     &id,
-		ImagePipelineParams: map[string]any{"enable_caption": false, "enable_ocr": false},
+		ImagePipelineParams: map[string]any{manualCaptionKey: false, manualOCRKey: false},
 	}
 	enabled := true
 	_, err := resolveFileImportProcessConfig(context.Background(), &types.KnowledgeBase{}, "pdf", overrides, &enabled)

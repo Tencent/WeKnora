@@ -26,6 +26,22 @@
       <t-icon v-if="session?.is_pinned" name="pin" size="12px" class="chat-header__pin" />
       <span ref="titleTextRef" class="chat-header__title-text">{{ displayTitle }}</span>
     </h1>
+    <router-link
+      v-if="!titleEditing && automation"
+      class="chat-header__automation"
+      :to="`/platform/automations/${encodeURIComponent(automation.id)}`"
+      :title="t('chatHeader.automationOpen', { name: automation.name })"
+    >
+      <t-icon name="time" size="12px" />
+      <span>{{ automation.name }}</span>
+    </router-link>
+    <span
+      v-else-if="!titleEditing && session?.kind === 'automation'"
+      class="chat-header__automation"
+    >
+      <t-icon name="time" size="12px" />
+      <span>{{ t('chatHeader.automationTask') }}</span>
+    </span>
     <span
       v-if="!titleEditing && workspaceLabel"
       class="chat-header__workspace"
@@ -121,11 +137,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { copyToClipboard } from '@/utils/clipboard'
 import { getMessageList } from '@/api/chat'
+import { getAutomationBySession } from '@/api/automation'
 import { listAgentGrants, revokeAgentGrant, type AgentGrant } from '@/api/mcp-service'
 import {
   removeSession,
@@ -141,6 +158,7 @@ interface ChatHeaderSession {
   id: string
   title?: string
   description?: string
+  kind?: string
   tenant_id?: number | string
   is_pinned?: boolean
   host_workspace_dir?: string
@@ -162,6 +180,20 @@ const titleDraft = ref('')
 const titleInputRef = ref<HTMLInputElement | null>(null)
 
 const displayTitle = computed(() => props.session?.title?.trim() || t('menu.newSession'))
+const automation = ref<{ id: string; name: string } | null>(null)
+
+watch(() => [props.session?.id, props.session?.kind] as const, async ([id, kind]) => {
+  automation.value = null
+  if (!id || kind !== 'automation') return
+  try {
+    const res = await getAutomationBySession(id)
+    if (props.session?.id === id && res.data?.id) {
+      automation.value = { id: res.data.id, name: res.data.name }
+    }
+  } catch {
+    // The badge stays, without a link, when the automation is gone.
+  }
+}, { immediate: true })
 const titleTextRef = ref<HTMLElement | null>(null)
 useSessionTitleMotion(titleTextRef, () => props.session?.id, () => displayTitle.value)
 const workspaceLabel = computed(() => {
@@ -339,7 +371,7 @@ async function submitDeleteSession(): Promise<void> {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  max-width: min(360px, calc(100% - 36px));
+  max-width: min(520px, calc(100% - 36px));
   min-width: 0;
   box-sizing: border-box;
 }
@@ -389,6 +421,36 @@ async function submitDeleteSession(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-header__automation {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 160px;
+  margin-left: 6px;
+  padding: 0 8px;
+  height: 22px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  line-height: 22px;
+  text-decoration: none;
+  white-space: nowrap;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer-hover);
+  }
 }
 
 .chat-header__workspace {

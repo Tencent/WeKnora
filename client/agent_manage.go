@@ -70,6 +70,7 @@ func AllKBSelectionModes() []KBSelectionMode {
 
 // AgentConfig represents the configuration for an agent.
 // Field names and JSON tags mirror internal/types.CustomAgentConfig.
+// An empty ReasoningEffort retains the legacy Thinking boolean semantics.
 type AgentConfig struct {
 	AgentMode                   string                    `json:"agent_mode"`
 	AgentType                   string                    `json:"agent_type,omitempty"`
@@ -82,6 +83,7 @@ type AgentConfig struct {
 	Temperature                 float64                   `json:"temperature"`
 	MaxCompletionTokens         int                       `json:"max_completion_tokens"`
 	Thinking                    *bool                     `json:"thinking"`
+	ReasoningEffort             string                    `json:"reasoning_effort,omitempty"`
 	CitationEnabled             *bool                     `json:"citation_enabled"`
 	MaxIterations               int                       `json:"max_iterations"` // -1 = unlimited
 	LLMCallTimeout              int                       `json:"llm_call_timeout,omitempty"`
