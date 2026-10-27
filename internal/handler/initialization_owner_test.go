@@ -143,7 +143,9 @@ func TestUpdateKBConfigFromAnotherWorkspace(t *testing.T) {
 		},
 		{
 			name: "share admin keeping storage", permission: types.OrgRoleAdmin,
-			body:       `{"llmModelId":"m-llm","storageBackendId":"backend-of-owner","storageProvider":"minio","documentSplitting":{"enableParentChild":true,"parentChunkSize":4096,"childChunkSize":384,"childChunkOverlap":0}}`,
+			body: `{"llmModelId":"m-llm","storageBackendId":"backend-of-owner",` +
+				`"storageProvider":"minio","documentSplitting":{"enableParentChild":true,` +
+				`"parentChunkSize":4096,"childChunkSize":384,"childChunkOverlap":0}}`,
 			wantStatus: http.StatusOK,
 		},
 	}

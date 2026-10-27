@@ -227,7 +227,9 @@ func NormalizeLineEndings(text string) string {
 // and ingestion remain in lockstep as the parent-child defaults evolve.
 // Languages are copied to both levels so parent and child splitters use the same boundary rules.
 // TokenLimit is copied only to children because parents keep the configured context window.
-func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int, childOverlap ...*int) (parent, child SplitterConfig) {
+func DeriveParentChildConfigs(
+	base SplitterConfig, parentSize, childSize int, childOverlap ...*int,
+) (parent, child SplitterConfig) {
 	if parentSize <= 0 {
 		parentSize = 4096
 	}
