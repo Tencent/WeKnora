@@ -31,6 +31,7 @@ func SetLiteSetupToken(token string) { liteSetupToken = token }
 
 const (
 	oidcNonceCookieName   = "weknora_oidc_nonce"
+	oidcPKCECookieName    = "weknora_oidc_pkce"
 	oidcNonceCookieMaxAge = 600
 )
 
@@ -331,6 +332,7 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 	// Bind the state nonce to this browser so an attacker cannot replay
 	// their own authorization code into a victim's callback.
 	setOIDCNonceCookie(c, resp.Nonce)
+	setOIDCPKCECookie(c, resp.PKCEVerifier)
 
 	c.JSON(http.StatusOK, resp)
 }
@@ -345,6 +347,15 @@ func setOIDCNonceCookie(c *gin.Context, nonce string) {
 	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(oidcNonceCookieName, nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
+}
+
+func setOIDCPKCECookie(c *gin.Context, verifier string) {
+	if verifier == "" {
+		return
+	}
+	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(oidcPKCECookieName, verifier, oidcNonceCookieMaxAge, "/", "", secure, true)
 }
 
 // oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
@@ -376,6 +387,7 @@ func (h *AuthHandler) OIDCStart(c *gin.Context) {
 		return
 	}
 	setOIDCNonceCookie(c, resp.Nonce)
+	setOIDCPKCECookie(c, resp.PKCEVerifier)
 	c.Redirect(http.StatusFound, resp.AuthorizationURL)
 }
 
@@ -436,6 +448,7 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	}
 	// One-time use: clear the binding cookie as soon as it is checked.
 	c.SetCookie(oidcNonceCookieName, "", -1, "/", "", false, true)
+	c.SetCookie(oidcPKCECookieName, "", -1, "/", "", false, true)
 
 	code := strings.TrimSpace(c.Query("code"))
 	if code == "" {
@@ -443,7 +456,10 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.userService.LoginWithOIDC(ctx, code, strings.TrimSpace(decodedState.RedirectURI), h.resolveDefaultTenantMode(ctx))
+	resp, err := h.userService.LoginWithOIDC(
+		ctx, code, strings.TrimSpace(decodedState.RedirectURI),
+		h.resolveDefaultTenantMode(ctx), decodedState.PKCEVerifier,
+	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to complete OIDC login via redirect callback: %v", err)
 		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("login_failed")+"&oidc_error_description="+urlQueryEscape(err.Error()))
@@ -473,8 +489,9 @@ func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error)
 }
 
 type oidcStatePayload struct {
-	Nonce       string
-	RedirectURI string
+	Nonce        string
+	RedirectURI  string
+	PKCEVerifier string
 }
 
 func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
@@ -489,9 +506,18 @@ func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
 	if cookieNonce.Value != payload.Nonce {
 		return nil, errors.NewValidationError("oidc nonce mismatch")
 	}
+	var verifier string
+	if payload.PKCEEnabled {
+		cookie, err := req.Cookie(oidcPKCECookieName)
+		if err != nil || cookie == nil || cookie.Value == "" {
+			return nil, errors.NewValidationError("oidc PKCE verifier cookie missing")
+		}
+		verifier = cookie.Value
+	}
 	return &oidcStatePayload{
-		Nonce:       payload.Nonce,
-		RedirectURI: strings.TrimSpace(payload.RedirectURI),
+		Nonce:        payload.Nonce,
+		RedirectURI:  strings.TrimSpace(payload.RedirectURI),
+		PKCEVerifier: verifier,
 	}, nil
 }
 
