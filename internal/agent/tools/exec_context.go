@@ -35,9 +35,18 @@ type ToolExecContext struct {
 	// it raised, now answered. The tool acts on the answer instead of
 	// raising the prompt again.
 	Answered *types.AgentPrompt
-	// Interactive is set when the client can show and answer prompts; IM
-	// and MCP-server runs have no such surface.
-	Interactive bool
+	// Mode says whether the client can show and answer prompts; IM and
+	// MCP-server runs have no such surface.
+	Mode types.RunMode
+}
+
+// Attended reports whether a client can answer prompts now.
+func (m *ToolExecContext) Attended() bool { return m != nil && m.Mode.Attended() }
+
+// CanAsk reports whether the run may raise an approval, now or by suspending
+// until its owner answers.
+func (m *ToolExecContext) CanAsk() bool {
+	return m != nil && m.Mode.Normalize() != types.RunModeUnattended
 }
 
 // WithToolExecContext returns ctx that carries ToolExecContext for MCP approval and similar features.

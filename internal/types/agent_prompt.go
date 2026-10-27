@@ -40,25 +40,25 @@ const (
 // Request and Response; the row is the source of truth for the answer and
 // process memory only holds a wake-up hook.
 type AgentPrompt struct {
-	ID                 string `json:"id"                   gorm:"type:varchar(36);primaryKey"`
-	TenantID           uint64 `json:"tenant_id"            gorm:"not null"`
-	UserID             string `json:"user_id"              gorm:"type:varchar(64);not null;default:''"`
-	SessionID          string `json:"session_id"           gorm:"type:varchar(36);not null"`
-	AssistantMessageID string `json:"assistant_message_id" gorm:"type:varchar(36);not null;default:''"`
-	RequestID          string `json:"request_id"           gorm:"type:varchar(128);not null;default:''"`
-	Kind               string `json:"kind"                 gorm:"type:varchar(32);not null"`
-	ToolCallID         string `json:"tool_call_id"         gorm:"type:varchar(255);not null;default:''"`
+	ID                 string `json:"id"                    gorm:"type:varchar(36);primaryKey"`
+	TenantID           uint64 `json:"tenant_id"             gorm:"not null"`
+	UserID             string `json:"user_id"               gorm:"type:varchar(64);not null;default:''"`
+	SessionID          string `json:"session_id"            gorm:"type:varchar(36);not null"`
+	AssistantMessageID string `json:"assistant_message_id"  gorm:"type:varchar(36);not null;default:''"`
+	RequestID          string `json:"request_id"            gorm:"type:varchar(128);not null;default:''"`
+	Kind               string `json:"kind"                  gorm:"type:varchar(32);not null"`
+	ToolCallID         string `json:"tool_call_id"          gorm:"type:varchar(255);not null;default:''"`
 	// Suspendable prompts may outlive the run that raised them. Prompts raised
 	// while an external operation is in flight cannot.
-	Suspendable bool   `json:"suspendable" gorm:"not null;default:false"`
+	Suspendable bool   `json:"suspendable"           gorm:"not null;default:false"`
 	Request     JSON   `json:"request,omitempty"`
 	Response    JSON   `json:"response,omitempty"`
-	Status      string `json:"status" gorm:"type:varchar(32);not null"`
+	Status      string `json:"status"                gorm:"type:varchar(32);not null"`
 	// CloseReason explains a system-side ending (timeout, cancel, supersede).
-	CloseReason   string     `json:"close_reason"   gorm:"type:text;not null;default:''"`
-	ResolvedBy    string     `json:"resolved_by"    gorm:"type:varchar(64);not null;default:''"`
+	CloseReason   string     `json:"close_reason"          gorm:"type:text;not null;default:''"`
+	ResolvedBy    string     `json:"resolved_by"           gorm:"type:varchar(64);not null;default:''"`
 	ResolvedAt    *time.Time `json:"resolved_at,omitempty"`
-	OwnerInstance string     `json:"owner_instance" gorm:"type:varchar(64);not null;default:''"`
+	OwnerInstance string     `json:"owner_instance"        gorm:"type:varchar(64);not null;default:''"`
 	LeaseUntil    *time.Time `json:"lease_until,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -129,22 +129,49 @@ type PromptSuspension struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
-// PendingPromptView is what a client needs to render and answer a suspended
-// prompt when it reloads the conversation.
+// PendingPromptView restores both open prompts and resolved timeline records.
 type PendingPromptView struct {
-	ID         string     `json:"id"`
-	Kind       string     `json:"kind"`
-	ToolCallID string     `json:"tool_call_id"`
-	Request    JSON       `json:"request,omitempty"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	Status        string     `json:"status,omitempty"`
+	Response      JSON       `json:"response,omitempty"`
+	CloseReason   string     `json:"close_reason,omitempty"`
+	DelegatedTask string     `json:"delegated_task,omitempty"`
+	ID            string     `json:"id"`
+	Kind          string     `json:"kind"`
+	ToolCallID    string     `json:"tool_call_id"`
+	Request       JSON       `json:"request,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// AgentPromptHistoryStatuses includes answered and terminal prompts for timeline replay.
+var AgentPromptHistoryStatuses = []string{
+	AgentPromptPending,
+	AgentPromptSuspended,
+	AgentPromptAnswered,
+	AgentPromptExecuting,
+	AgentPromptDone,
+	AgentPromptFailed,
+	AgentPromptCanceled,
+	AgentPromptExpired,
+	AgentPromptSuperseded,
+}
+
+// TimelineView returns the prompt fields needed to restore a historical timeline card.
+func (p *AgentPrompt) TimelineView() *PendingPromptView {
+	return &PendingPromptView{
+		ID: p.ID, Kind: p.Kind, ToolCallID: p.ToolCallID,
+		Request: p.Request, Response: p.Response, Status: p.Status, CloseReason: p.CloseReason,
+		ExpiresAt: p.ExpiresAt, CreatedAt: p.CreatedAt,
+	}
 }
 
 // ResumableAgentRequest is the part of a QARequest needed to rebuild the run
 // on another replica. It holds the original query and durable request settings.
 type ResumableAgentRequest struct {
-	AgentID string `json:"agent_id"`
-	Query   string `json:"query,omitempty"`
+	// ActingVia keeps scheduler-owned runs out of ordinary chat recovery.
+	ActingVia string `json:"acting_via,omitempty"`
+	AgentID   string `json:"agent_id"`
+	Query     string `json:"query,omitempty"`
 	// AgentTenantID is the agent owner's workspace; it differs from the
 	// session's when the agent is shared.
 	AgentTenantID       uint64          `json:"agent_tenant_id,omitempty"`
@@ -158,8 +185,12 @@ type ResumableAgentRequest struct {
 	SkillNames          []string        `json:"skill_names,omitempty"`
 	WebSearchEnabled    bool            `json:"web_search_enabled,omitempty"`
 	QuestionOrigin      *QuestionOrigin `json:"question_origin,omitempty"`
-	UserMessageID       string          `json:"user_message_id,omitempty"`
-	Language            string          `json:"language,omitempty"`
+	PageContext         *PageContext    `json:"page_context,omitempty"`
+	// AssistantAccess is the level the user asked for; the ceiling is
+	// applied again on resume, so lowering it in between takes effect.
+	AssistantAccess AssistantAccessLevel `json:"assistant_access,omitempty"`
+	UserMessageID   string               `json:"user_message_id,omitempty"`
+	Language        string               `json:"language,omitempty"`
 }
 
 // ToolApprovalPromptRequest is the Request of an AgentPromptKindToolApproval.
@@ -170,6 +201,20 @@ type ToolApprovalPromptRequest struct {
 	RegisteredToolName string          `json:"registered_tool_name"`
 	Description        string          `json:"description,omitempty"`
 	Args               json.RawMessage `json:"args,omitempty"`
+	// Grant, when set, names the kind of call this approval can allow for the
+	// rest of the session: approving with AllowInSession lets later calls
+	// with the same Grant in the same session run without asking. The server
+	// derives it from the call; GrantScope describes it to the user.
+	Grant      string `json:"grant,omitempty"`
+	GrantScope string `json:"grant_scope,omitempty"`
+	// GrantLapsed, when set, is why an earlier grant for this call no longer
+	// applies (an AgentGrantLapse value).
+	GrantLapsed string `json:"grant_lapsed,omitempty"`
+	// GrantRisk is the risk Grant would be given for, and GrantLabel its
+	// description, whether or not the card offers it: an automation's owner
+	// may later allow the same call for its future runs.
+	GrantRisk  string `json:"grant_risk,omitempty"`
+	GrantLabel string `json:"grant_label,omitempty"`
 }
 
 // ToolApprovalPromptResponse is the Response of an AgentPromptKindToolApproval.
@@ -178,6 +223,8 @@ type ToolApprovalPromptResponse struct {
 	// ModifiedArgs, when set on approval, replaces the original arguments.
 	ModifiedArgs json.RawMessage `json:"modified_args,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
+	// AllowInSession approves later calls with the request's Grant too.
+	AllowInSession bool `json:"allow_in_session,omitempty"`
 }
 
 // MCPOAuthPromptRequest is the Request of an AgentPromptKindMCPOAuth.

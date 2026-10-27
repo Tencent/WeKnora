@@ -25,6 +25,8 @@ export function isIntegrationSection(section: string): boolean {
   return (INTEGRATION_TABS as readonly string[]).includes(raw)
 }
 
+const SYSTEM_SETTINGS_PANELS = new Set(['access', 'users', 'tenant', 'runtime', 'security', 'other'])
+
 function isBareIntegrationTab(section: string): section is IntegrationTab {
   return (INTEGRATION_TABS as readonly string[]).includes(section)
 }
@@ -47,6 +49,7 @@ export function normalizeSettingsSection(section: string, tab?: string | null): 
 /**
  * Settings left-nav → URL. Every page, including integrations, is
  * `?section=<navKey>` (e.g. `integration-claw`). `tab` is dropped.
+ * `panel` is the tab inside system settings and stays only on that page.
  */
 export function buildSettingsRouteQuery(
   sectionKey: string,
@@ -56,6 +59,13 @@ export function buildSettingsRouteQuery(
   delete query.tab
   if (!isIntegrationSection(sectionKey)) {
     delete query.agentId
+  }
+  if (sectionKey === 'system-global') {
+    const raw = Array.isArray(query.panel) ? query.panel[0] : query.panel
+    if (typeof raw === 'string' && SYSTEM_SETTINGS_PANELS.has(raw)) query.panel = raw
+    else delete query.panel
+  } else {
+    delete query.panel
   }
   query.section = sectionKey
   return query
@@ -70,4 +80,5 @@ export function settingsQueryUnchanged(
     && current.tab == null
     && nextQuery.tab == null
     && String(current.agentId ?? '') === String(nextQuery.agentId ?? '')
+    && String(current.panel ?? '') === String(nextQuery.panel ?? '')
 }

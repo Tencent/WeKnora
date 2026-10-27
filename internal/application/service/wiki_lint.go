@@ -33,24 +33,24 @@ const (
 
 // WikiLintIssue represents a single lint finding
 type WikiLintIssue struct {
-	Type     WikiLintIssueType     `json:"type"`
-	Severity WikiLintIssueSeverity `json:"severity"`
-	PageSlug string                `json:"page_slug"`
+	Type     WikiLintIssueType     `json:"type" extensions:"x-agent"`
+	Severity WikiLintIssueSeverity `json:"severity" extensions:"x-agent"`
+	PageSlug string                `json:"page_slug" extensions:"x-agent=slug"`
 	// TargetSlug identifies the other page involved in the issue (e.g. the
 	// broken link target, or the entity slug for a missing cross-ref). It is
 	// the structured field used by AutoFix instead of parsing Description.
-	TargetSlug  string `json:"target_slug,omitempty"`
-	Description string `json:"description"`
-	AutoFixable bool   `json:"auto_fixable"`
+	TargetSlug  string `json:"target_slug,omitempty" extensions:"x-agent"`
+	Description string `json:"description" extensions:"x-agent"`
+	AutoFixable bool   `json:"auto_fixable" extensions:"x-agent"`
 }
 
 // WikiLintReport is the complete lint report for a wiki KB
 type WikiLintReport struct {
 	KnowledgeBaseID string           `json:"knowledge_base_id"`
 	Issues          []WikiLintIssue  `json:"issues"`
-	HealthScore     int              `json:"health_score"` // 0-100
+	HealthScore     int              `json:"health_score" extensions:"x-agent"` // 0-100
 	Stats           *types.WikiStats `json:"stats"`
-	Summary         string           `json:"summary"`
+	Summary         string           `json:"summary" extensions:"x-agent"`
 }
 
 // WikiLintService provides wiki health checking capabilities

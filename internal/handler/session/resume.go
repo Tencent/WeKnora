@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -46,6 +47,9 @@ var (
 func (h *Handler) ResumeSuspendedRun(
 	c *gin.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time,
 ) {
+	if h.HandlesDelegatedPrompt(c.Request.Context(), prompt) {
+		return
+	}
 	if h.promptBroker == nil || h.suspendedRuns == nil {
 		return
 	}
@@ -170,6 +174,9 @@ func (h *Handler) buildResumeRequest(
 	if err != nil || session == nil {
 		return nil, state, fmt.Errorf("load session: %v", err)
 	}
+	if session.Kind == types.SessionKindAgentDelegated {
+		return nil, state, fmt.Errorf("delegated prompts must resume through the scheduler")
+	}
 	msg, err := h.messageService.GetMessage(ctx, prompt.SessionID, prompt.AssistantMessageID)
 	if err != nil || msg == nil {
 		return nil, state, fmt.Errorf("load assistant message: %v", err)
@@ -180,6 +187,18 @@ func (h *Handler) buildResumeRequest(
 	customAgent, effectiveTenantID, shared := h.resolveAgent(ctx, c, req.AgentID, sharedSourceTenant(session, req))
 	if customAgent == nil {
 		return nil, state, fmt.Errorf("agent %s is no longer available", req.AgentID)
+	}
+	if types.RunsInSharedKBWorkspace(customAgent) {
+		// The saved tenant is the KB's execution workspace, not an agent
+		// share. Resolve the local built-in again and recheck the current
+		// caller's KB permission before borrowing that workspace's resources.
+		customAgent, effectiveTenantID = h.resolveWikiFixerTenantScope(
+			ctx, customAgent, session.TenantID, types.TenantRoleFromContext(ctx), req.KnowledgeBaseIDs,
+		)
+	}
+	if types.IsBuiltinAgentID(req.AgentID) && req.AgentTenantID != 0 &&
+		req.AgentTenantID != session.TenantID && effectiveTenantID != req.AgentTenantID {
+		return nil, state, fmt.Errorf("shared KB workspace is no longer available for agent %s", req.AgentID)
 	}
 
 	// Mark the message as generating again before the run publishes itself
@@ -223,6 +242,8 @@ func (h *Handler) buildResumeRequest(
 		userMessageID:       req.UserMessageID,
 		channel:             msg.Channel,
 		questionOrigin:      req.QuestionOrigin,
+		pageContext:         req.PageContext,
+		assistantAccess:     req.AssistantAccess,
 		skipSSE:             true,
 		resume:              &types.AgentResume{Snapshot: state.Snapshot, Prompt: prompt},
 	}, state, nil
@@ -231,7 +252,9 @@ func (h *Handler) buildResumeRequest(
 // sharedSourceTenant is the workspace to resolve a shared agent from, or 0
 // for the session's own agents.
 func sharedSourceTenant(session *types.Session, req types.ResumableAgentRequest) uint64 {
-	if req.AgentTenantID == 0 || req.AgentTenantID == session.TenantID {
+	// Built-ins are never shared agents. A different tenant can only be the
+	// execution scope of a shared KB, which must be revalidated separately.
+	if types.IsBuiltinAgentID(req.AgentID) || req.AgentTenantID == 0 || req.AgentTenantID == session.TenantID {
 		return 0
 	}
 	return req.AgentTenantID
@@ -331,4 +354,29 @@ func (h *Handler) writeRunResumedEvent(ctx context.Context, sessionID, messageID
 	}); err != nil {
 		logger.Warnf(ctx, "append run_resumed of message %s: %v", messageID, err)
 	}
+}
+
+// SetDelegatedPromptRouter installs the delegated prompt ownership router.
+func (h *Handler) SetDelegatedPromptRouter(f func(context.Context, *types.AgentPrompt) bool) {
+	h.delegatedPrompt = f
+}
+
+// HandlesDelegatedPrompt reports whether the collaboration runtime owns this prompt.
+func (h *Handler) HandlesDelegatedPrompt(ctx context.Context, p *types.AgentPrompt) bool {
+	return h.delegatedPrompt != nil && h.delegatedPrompt(ctx, p)
+}
+
+// CollaborationEvents publishes a child or resumed parent execution to its own stream.
+func (h *Handler) CollaborationEvents(ctx context.Context,
+	s *types.Session,
+	m *types.Message,
+	bus *event.EventBus,
+) func(context.Context) error {
+	stream := h.setupStreamHandler(ctx, s.ID, m.ID, m.RequestID, s.TenantID, time.Now(), m, bus)
+	return stream.publishCompletion
+}
+
+// CollaborationSteer builds a steer sink for a collaboration execution.
+func (h *Handler) CollaborationSteer(ctx context.Context, s *types.Session, m *types.Message) types.SteerSink {
+	return newSteerSink(ctx, s.ID, m.RequestID, m, h.messageService, h.streamManager)
 }

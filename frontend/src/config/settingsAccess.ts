@@ -29,6 +29,8 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   members: 'viewer',
   mymemory: 'viewer',
   memory: 'admin',
+  // Everyone sets their own preferences; the workspace part is Admin+ inside.
+  assistant: 'viewer',
   // Every member fills in their own environment variables; the workspace-wide
   // values stay on the Admin+ skills page.
   envvars: 'viewer',

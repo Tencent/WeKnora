@@ -10,10 +10,39 @@ service DocReader {
   // ReadStreamResponse carrying the parse metadata (markdown / metadata /
   // error), then emits one message per image. This keeps every gRPC message
   // small so large scanned PDFs (hundreds of page images, far exceeding the
-  // unary message-size cap) can be returned without RESOURCE_EXHAUSTED and
-  // with bounded memory on both ends.
+  // unary message-size cap) can be returned without RESOURCE_EXHAUSTED. Parsers
+  // that support incremental images can render and send a bounded number of
+  // pages at a time instead of retaining the full image set in the server.
   rpc ReadStream(ReadRequest) returns (stream ReadStreamResponse) {}
   rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse) {}
+  // PreprocessImage straightens and crops a photographed page so that OCR sees
+  // an upright, content-tight image. The caller sends the raw photograph and
+  // receives either the corrected page or a verdict that this input is not a
+  // page worth correcting — never an error for "not correctable", because the
+  // caller's fallback (use the original bytes) is a normal outcome rather than
+  // a failure to report.
+  rpc PreprocessImage(PreprocessImageRequest) returns (PreprocessImageResponse) {}
+}
+
+// PreprocessImageRequest carries one photographed page.
+message PreprocessImageRequest {
+  bytes image = 1;
+}
+
+message PreprocessImageResponse {
+  // image is the corrected page, JPEG-encoded. Empty when fallback_needed.
+  bytes image = 1;
+  // fallback_needed tells the caller to keep its original bytes: the input is
+  // not a correctable page, or correcting it would not be an improvement.
+  bool fallback_needed = 2;
+  // Diagnostics for the run's trace and for tuning the thresholds.
+  float  theta = 3;      // dominant text-line angle (degrees)
+  float  residual = 4;   // residual skew after alignment; > 2 means low quality
+  bool   flip = 5;       // whether a 180-degree flip was applied
+  int32  n_boxes = 6;    // text boxes detected
+  int32  n_kept = 7;     // text boxes kept after filtering
+  // status is "ok" | "no_text" | "low_quality", for logs and metrics.
+  string status = 8;
 }
 
 message ReadConfig {

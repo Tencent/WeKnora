@@ -3,7 +3,7 @@
 MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 MCP 服务，也提供独立 MCP Server 供其他客户端调用：
 
 1. **WeKnora 作为 MCP 客户端**：在「工具箱 → MCP服务」中接入任意外部 MCP server（SSE / Streamable HTTP），其工具通过目录按需加载，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE，也可填写预注册客户端；支持以 JWT Bearer 断言代用户获取 token）三种认证策略、按工具粒度的启停与人工审批，以及会话内（in-conversation）OAuth 授权。
-2. **WeKnora 作为 MCP Server**：在「设置 → 发布集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，Claude Desktop、Cursor、Claude Code、VS Code Copilot 等 MCP 客户端通过 Streamable HTTP 直接连接，无需额外部署进程。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
+2. **WeKnora 作为 MCP Server**：在「设置 → 发布集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，支持 Streamable HTTP 和 Bearer 请求头的客户端可直接连接，无需额外部署桥接进程；具体配置方式见下方说明。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
 
 接入外部服务可扩展 WeKnora 智能体的工具；运行 WeKnora MCP Server 可让外部客户端使用知识库检索、问答和管理能力。
 
@@ -33,14 +33,16 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 ## 供外部客户端调用
 
-在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
+在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面给出 Cursor 可用的 `mcpServers` JSON、VS Code 专用的 `servers` JSON、Claude Code 的一行命令，以及 STDIO 备用配置。将 VS Code 选项卡中的 JSON 写入工作区的 `.vscode/mcp.json`；若已有配置，请将对应条目合并到现有 `servers` 对象中，保留其他服务。该配置使用 `type: "http"`、端点 URL 和 `Authorization` 请求头，无需桥接进程。Claude Desktop 需在自定义连接器中填写可访问的 HTTPS 地址，并在可用时选择「无需登录」和 Request headers；该请求头功能为有限开放的测试版，并非所有组织都可用。
+
+仅支持 stdio，或无法使用原生 HTTP/Bearer 配置的客户端，可使用固定版本 `mcp-remote@0.15.1`。STDIO 示例在 `args` 中保留字面量 `Authorization:${WEKNORA_MCP_AUTH}`，完整的 `Bearer <token>` 填入对应服务的 `env.WEKNORA_MCP_AUTH`，避免将令牌直接写入命令参数。令牌仍保存在客户端配置中，请按凭证妥善管理。
 
 使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。
 
 <Screenshot
   src="/screenshots/mcp-server-endpoint.png"
   caption="发布集成 → MCP Server：端点创建完成后的地址、令牌与客户端配置"
-  hint="新建端点后的结果页：一次性令牌与 /mcp/<endpoint_id> 地址、Cursor / Claude Desktop 的 mcpServers 配置与 Claude Code 命令；背景可见端点的知识库范围与四组工具勾选。" />
+  hint="新建端点后的结果页：一次性令牌与 /mcp/<endpoint_id> 地址、客户端配置与 Claude Code 命令；背景可见端点的知识库范围与四组工具勾选。" />
 
 一个空间可以创建多个端点。例如给客服团队一个只开检索和问答、只看两个知识库的端点，给内容团队另一个开了写入工具的端点。令牌可随时轮换，端点可随时停用，删除端点后使用它的客户端立即断开。
 
@@ -48,16 +50,20 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 | 组 | 工具 | 说明 |
 |---|---|---|
-| 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；`search_knowledge` 用 `mode`（hybrid / semantic / keyword）选择检索方式并可设 `limit`（默认 10，上限 30）；`grep_chunks` 保持大小写不敏感的正则语义：从模式里提取字面词作为关键词索引的检索词（没有关键词索引的库改用语义索引取候选），再逐条用正则校验，返回的分块都匹配该模式；不含任何字面词的模式（如 `^\d+$`）会被拒绝；`read_document` 按 `offset` / `limit` 翻页，或用 `query` 在文档内查找短语 |
+| 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；`search_knowledge` 用 `mode`（hybrid / semantic / keyword）选择检索方式并可设 `limit`（默认 10，上限 30）；`grep_chunks` 保持大小写不敏感的正则语义：从模式里提取字面词作为关键词索引的检索词（没有关键词索引的库改用语义索引取候选），再逐条用正则校验，返回的分块都匹配该模式；不含任何字面词的模式（如 `^\d+$`）会被拒绝；`read_document` 无 `query` 时按 `offset` / `limit` 翻页；传入 `query` 时按空白分词，不区分大小写，同一分块必须包含所有词，顺序不限 |
 | 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent；未配置时使用内置快速问答），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
 | Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
+
+`search_knowledge` 的结构化结果 `results[].chunk_type` 和文本结果的 `chunk_type` 属性保留命中片段的原始类型，例如 `text`、`summary`、`image_ocr`、`image_caption` 或 `image_vector`。空字符串表示类型未知，不能据此认定为原文；客户端可据类型决定是否补读文档正文。
 
 现有 MCP 工具的返回结果会复用 REST/IM 的资源链接转换：正文、Wiki 内容以及结构化数据中的图片引用，都会在权限校验后转换为可直接访问的 HTTP(S) 链接，不需要新增工具或修改端点工具清单。`ask` 的 `references[].images` 保留图片 URL、caption 和 OCR 文本，文本引用列表也包含图片链接，避免正文摘要截断后丢失图片信息。
 
 本地或私有存储请配置外部客户端可访问的 `APP_EXTERNAL_URL`，并确保反向代理转发 `/r/`。`resource://` 图片沿用有时效的 `/r/<token>` 链接；其他存储地址使用对应存储服务生成的 HTTP(S) URL。一次工具调用中同一资源只转换一次，返回链接不写回文档或会话记录。无法生成可访问链接时保留原引用，不中断文本结果。
 
 生成链接前会重新检查端点知识库范围、共享权限、资源所属空间和有效文档绑定，沿用知识库图片预览的权限规则；未限定知识库的端点按调用者可查看的知识库判断，因此 `ask` 通过智能体检索到的共享知识库图片同样可以转换；原始上传文件不会因为出现在结果文本中就获得下载链接。已有绑定的历史存储路径可以转换。对于缺少图片绑定的历史文档，需要由有权限的管理员重新解析文档，完成后重新检索；不能仅凭可编辑的正文或 `image_info` 自动补授文件权限。
+
+`read_document` 的 `offset` 是文档阅读顺序中从 0 开始的位置，不是 chunk index。无 `query` 时，`limit` 默认 20、最多 100，输出预算可能减少每页片段数。`query` 模式不使用 `limit`，每次最多返回 20 个匹配，并附加每个匹配前后各一个分块作为上下文，重叠上下文会去重，且受输出预算限制。返回 `truncated=true` 时，用响应中的 `next_offset` 作为下一次的 `offset`，并保留原 `query` 继续读取。
 
 > **`grep_chunks` 的召回有上限。** 它基于索引取候选，每次最多 30 条，再用正则筛选，所以返回的每条都匹配模式，但不保证穷尽：库里存在的匹配也可能没进候选池。容易漏的情况有三类：`foo.*bar` 这类组合模式，候选按 foo、bar 的相关度排序，真正相邻出现的分块可能排不进前 30；`C++` 这类几乎只剩符号的模式，抽出的字面词只有 `C`，在索引里几乎没有区分度；没有关键词索引的库改用语义索引取候选，字面匹配更依赖运气。旧实现对 chunks 表做全表正则扫描，能保证"有就能找到"，但数据量大时代价过高，已经移除。需要在某篇文档里穷尽查找时，用 `read_document` 的 `query`，它会顺序扫完整篇文档。
 
@@ -69,7 +75,7 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 |---|---|---|
 | 代码位置 | `internal/mcp/` + handler/service/repository + `internal/agent/tools/` | `internal/mcpserver/` + `internal/middleware/mcp_endpoint_auth.go` + `internal/handler/mcp_endpoint.go` |
 | 协议库 | `github.com/mark3labs/mcp-go`（client） | `github.com/mark3labs/mcp-go`（server，Streamable HTTP，无状态模式） |
-| 传输 | SSE、Streamable HTTP（stdio 因安全禁用） | Streamable HTTP；stdio 客户端用 `mcp-remote` 桥接 |
+| 传输 | SSE、Streamable HTTP（stdio 因安全禁用） | Streamable HTTP；无法使用原生 HTTP/Bearer 时，可用 `mcp-remote@0.15.1` 作为 STDIO 备用配置 |
 | 认证 | API Key / Bearer / OAuth 2.0（DCR + PKCE，token AES 加密、按 principal 隔离） | 入站 `Authorization: Bearer mcp_…`，每个端点独立令牌（SHA-256 存储，可轮换） |
 | 安全控制 | 工具级人工审批、SSRF 校验、不可信输出前缀、DTO 级密钥隔离 | 端点级工具白名单（列表与调用双重校验）、知识库范围、每分钟限流、令牌只展示一次 |
 | 消费者 | WeKnora Agent（对话中自动调用） | Claude Desktop / Cursor / Claude Code / VS Code Copilot 等任意 MCP 客户端 |
@@ -343,6 +349,12 @@ Agent 启动时由 `internal/application/service/agent_service.go` 按 Agent 配
 函数名使用服务 ID 和原始工具名的稳定哈希后缀避免清洗后的碰撞；引用绑定具体 schema，定义变化后需重新读取。Schema 校验不访问外部 URL 或文件，审批修改后的参数也会校验。服务说明与工具结果按外部数据处理，不具有覆盖用户请求或扩大权限的效力。
 
 Mention 只是优先选择，不改变 Agent 的 `all / selected / none` 范围。全量函数暴露保留为兼容路径，不是生产默认。
+
+##### 工具调用失败与重试
+
+远端工具可能已经执行操作，但响应在网络中丢失，或服务端在操作完成后返回错误。此时 WeKnora 会提示执行结果不确定，在同一次调用中不自动重复提交工具。请先在远端系统核实操作是否已完成，再决定是否重新调用；新调用仍按原有工具审批策略处理。
+
+客户端尚未连接，或服务端因会话失效返回 HTTP 404 时，保留最多一次重连重试；请求取消后不发起该重试。OAuth 401 的刷新和重试仍按原有授权流程处理。
 
 ##### 持久目录的管理 {#mcp-tool-directory}
 

@@ -5,6 +5,7 @@
 package modelcontext
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"regexp"
@@ -14,24 +15,30 @@ import (
 const sourceHandleProtocolPrompt = `
 
 ## Source handling protocol (system-owned)
-Retrieved content uses request-local source handles: cN identifies a knowledge chunk, wN a web page, dN a document, and bN a knowledge base.
-- Use dN and bN only as tool arguments when a tool requests a document or knowledge base.
-- Never reveal raw chunk IDs, knowledge IDs, knowledge-base IDs, or private source handles in user-visible output. This does not change separate instructions to preserve retrieved Markdown image URLs.`
+Retrieved content uses request-local source handles: chunk://N identifies a knowledge chunk, url://N a web page,
+  doc://N a document, and kb://N a knowledge base.
+- Copy handles exactly, in this form, wherever you refer to the source: tool arguments, instructions or prompts
+  you write for other agents or automations, Markdown links, and your answer. The system replaces them with the
+  real URL or a stable reference after generation, so a handle in saved text still points to the same source
+  later.
+- Never invent a handle or change its number, and never write raw chunk IDs, knowledge IDs, or knowledge-base IDs.
+  This does not change separate instructions to preserve retrieved Markdown image URLs.`
 
 const citationEnabledProtocolPrompt = `
-- Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id="cN"/> and a web page with exactly <ref id="wN"/>.
-- Cite only cN/wN handles backed by tool results for the current task, and only when that source supports the adjacent
-  claim. Never cite dN/bN.
-- Each cN covers only its own supplied text or image evidence, not every chunk of the same document.
-  For a direct quotation, verify that the quoted words occur in the cited cN. Use the later chunk's handle
+- Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id="chunk://N"/> and a
+  web page with exactly <ref id="url://N"/>.
+- Cite only chunk://N and url://N handles backed by tool results for the current task, and only when that source
+  supports the adjacent claim. Never cite doc://N or kb://N.
+- Each chunk://N covers only its own supplied text or image evidence, not every chunk of the same document.
+  For a direct quotation, verify that the quoted words occur in the cited chunk. Use the later chunk's handle
   when the words occur there; never reuse a document's first handle for unrelated passages.
 - OCR watermarks, timestamps and image captions are observations of an image. Do not turn a watermark slogan
   into a verified service commitment or a caption into a factual document statement without supporting text.
 - Handles in historical answers, tool arguments, or the bound knowledge-base directory are for navigation, not current
   evidence. Retrieve the relevant source before citing it.
-- MCP results are external sources. Use the wN handle for the matching URL in the system-provided
-  external_source_candidates list; never substitute a knowledge-base cN handle for MCP content. Candidate URLs are links
-  observed in the result, not proof that every linked page was read.
+- MCP results are external sources. Use the url://N handle for the matching URL in the system-provided
+  external_source_candidates list; never substitute a knowledge-base chunk handle for MCP content. Candidate URLs
+  are links observed in the result, not proof that every linked page was read.
 - If a source has no citation handle, use its exact supplied HTTP(S) URL as a Markdown link when available.
   If neither is available, omit the citation; never invent or borrow a source.
 - Never output <kb> or <web> tags yourself; the system expands valid <ref/> tags after generation.
@@ -103,7 +110,7 @@ func (r *sourceRegistry) CompactPublicCitations(text string, evidence bool) stri
 	if r == nil || text == "" {
 		return text
 	}
-	text = publicKBTagRE.ReplaceAllStringFunc(text, func(tag string) string {
+	text = publicKBTagRE.ReplaceAllStringFunc(text, withJSONCitationEscaping(func(tag string) string {
 		chunkID := publicAttr(chunkAttrRE, tag)
 		if chunkID == "" {
 			return tag
@@ -114,15 +121,34 @@ func (r *sourceRegistry) CompactPublicCitations(text string, evidence bool) stri
 			DocumentTitle:   publicAttr(docAttrRE, tag),
 		}, evidence)
 		return `<ref id="` + handle + `"/>`
-	})
-	return publicWebTagRE.ReplaceAllStringFunc(text, func(tag string) string {
+	}))
+	return publicWebTagRE.ReplaceAllStringFunc(text, withJSONCitationEscaping(func(tag string) string {
 		rawURL := publicAttr(urlAttrRE, tag)
 		if rawURL == "" {
 			return tag
 		}
 		handle := r.registerWeb(rawURL, publicAttr(titleAttrRE, tag), evidence)
 		return `<ref id="` + handle + `"/>`
-	})
+	}))
+}
+
+// withJSONCitationEscaping preserves one layer of JSON string escaping around a citation.
+func withJSONCitationEscaping(rewrite func(string) string) func(string) string {
+	return func(tag string) string {
+		if !jsonCitationTagRE.MatchString(tag) {
+			return rewrite(tag)
+		}
+		var decoded string
+		if err := json.Unmarshal([]byte(`"`+tag+`"`), &decoded); err != nil {
+			return ""
+		}
+		var encoded strings.Builder
+		encoder := json.NewEncoder(&encoded)
+		// Keep angle brackets visible to the citation scanner when this output is replayed.
+		encoder.SetEscapeHTML(false)
+		_ = encoder.Encode(rewrite(decoded))
+		return encoded.String()[1 : encoded.Len()-2] // Remove the JSON quotes and encoder newline.
+	}
 }
 
 func publicAttr(expression *regexp.Regexp, tag string) string {
@@ -139,6 +165,8 @@ var (
 	modelKBTagRE   = regexp.MustCompile(`(?is)<kb(?:\s|$)[^>]*(?:>|$)`)
 	modelWebTagRE  = regexp.MustCompile(`(?is)<web(?:\s|$)[^>]*(?:>|$)`)
 )
+
+var jsonCitationTagRE = regexp.MustCompile(`(?i)^<(?:ref|kb|web)\s+[a-z_]+\s*=\s*\\"`)
 
 var (
 	documentAttrRE    = regexp.MustCompile(`(?i)\bknowledge_id\s*=\s*"([^"]+)"`)
@@ -183,27 +211,36 @@ func (r *sourceRegistry) ExpandText(text string) string {
 	if !r.citationsEnabled {
 		return refCandidateRE.ReplaceAllString(text, "")
 	}
-	return refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
+	return refCandidateRE.ReplaceAllStringFunc(text, withJSONCitationEscaping(func(tag string) string {
 		match := refTagRE.FindStringSubmatch(tag)
 		if len(match) != 2 {
 			return ""
 		}
-		handle := strings.ToLower(match[1])
-		if _, citable := r.citable.Load(handle); !citable {
-			return ""
-		}
-		if chunkID, chunkRef, ok := r.chunks.resolve(handle); ok {
-			attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
-			if chunkRef.KnowledgeBaseID != "" {
-				attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
-			}
-			return "<kb " + attrs + " />"
-		}
-		if rawURL, web, ok := r.webs.resolve(handle); ok {
-			return fmt.Sprintf(`<web url="%s" title="%s" />`, escapeAttr(rawURL), escapeAttr(web.title))
-		}
+		return r.citationTag(match[1])
+	}))
+}
+
+// citationTag renders the public citation for a handle backed by current
+// evidence, or "" when the handle may not be cited.
+func (r *sourceRegistry) citationTag(handle string) string {
+	if r == nil || !r.citationsEnabled {
 		return ""
-	})
+	}
+	handle = canonicalSourceHandle(handle)
+	if _, citable := r.citable.Load(handle); !citable {
+		return ""
+	}
+	if chunkID, chunkRef, ok := r.chunks.resolve(handle); ok {
+		attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
+		if chunkRef.KnowledgeBaseID != "" {
+			attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
+		}
+		return "<kb " + attrs + " />"
+	}
+	if rawURL, web, ok := r.webs.resolve(handle); ok {
+		return fmt.Sprintf(`<web url="%s" title="%s" />`, escapeAttr(rawURL), escapeAttr(web.title))
+	}
+	return ""
 }
 
 func escapeAttr(value string) string { return html.EscapeString(value) }
@@ -246,9 +283,7 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 				break
 			}
 			tag := data[:end+1]
-			if refTagRE.MatchString(tag) {
-				out.WriteString(d.registry.ExpandText(tag))
-			}
+			out.WriteString(d.registry.ExpandText(tag))
 			data = data[end+1:]
 			continue
 		}

@@ -49,7 +49,7 @@ func TestAskUserTool_NotInteractiveAsksInReply(t *testing.T) {
 
 func TestAskUserTool_RejectsInvalidQuestion(t *testing.T) {
 	res, err := NewAskUserTool(&fakeAsker{}).Execute(
-		askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()}),
+		askCtx(&ToolExecContext{Mode: types.RunModeAttended, EventBus: event.NewEventBus()}),
 		json.RawMessage(`{"question":"q","options":["a"],"fields":[{"name":"n","type":"text"}]}`))
 	require.NoError(t, err)
 	assert.False(t, res.Success)
@@ -61,7 +61,7 @@ func TestAskUserTool_ReturnsAnswer(t *testing.T) {
 		Values: map[string]any{"replicas": float64(3), "env": "prod"},
 	}}}
 	meta := &ToolExecContext{
-		Interactive: true, EventBus: event.NewEventBus(), SessionID: "s1", AssistantMessageID: "m1",
+		Mode: types.RunModeAttended, EventBus: event.NewEventBus(), SessionID: "s1", AssistantMessageID: "m1",
 		ToolCallID: "tc1", UserID: "user:u1",
 		Snapshot: func() ([]byte, int, error) { return []byte("state"), 1, nil },
 	}
@@ -79,7 +79,8 @@ func TestAskUserTool_Suspends(t *testing.T) {
 	suspension := &types.PromptSuspension{PromptID: "p1", Kind: types.AgentPromptKindAskUser}
 	asker := &fakeAsker{answer: approval.Answer{PromptID: "p1", Suspended: suspension}}
 	res, err := NewAskUserTool(asker).Execute(
-		askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()}), json.RawMessage(`{"question":"q"}`))
+		askCtx(&ToolExecContext{Mode: types.RunModeAttended, EventBus: event.NewEventBus()}),
+		json.RawMessage(`{"question":"q"}`))
 	require.NoError(t, err)
 	assert.Same(t, suspension, res.Suspend)
 }
@@ -102,7 +103,8 @@ func TestAskUserTool_ResumedUsesStoredAnswer(t *testing.T) {
 func TestAskUserTool_NoAnswer(t *testing.T) {
 	asker := &fakeAsker{answer: approval.Answer{PromptID: "p1", Reason: "the user declined to answer"}}
 	res, err := NewAskUserTool(asker).Execute(
-		askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()}), json.RawMessage(`{"question":"q"}`))
+		askCtx(&ToolExecContext{Mode: types.RunModeAttended, EventBus: event.NewEventBus()}),
+		json.RawMessage(`{"question":"q"}`))
 	require.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Contains(t, res.Output, "did not answer (the user declined to answer)")
@@ -112,7 +114,7 @@ func TestAskUserUsesCallerTenantForSharedAgent(t *testing.T) {
 	asker := &fakeAsker{}
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
 	ctx = types.WithExecutionTenant(ctx, 2)
-	ctx = WithToolExecContext(ctx, &ToolExecContext{Interactive: true, EventBus: event.NewEventBus()})
+	ctx = WithToolExecContext(ctx, &ToolExecContext{Mode: types.RunModeAttended, EventBus: event.NewEventBus()})
 	_, err := NewAskUserTool(asker).Execute(ctx, json.RawMessage(`{"question":"which?"}`))
 	require.NoError(t, err)
 	require.Len(t, asker.asked, 1)
@@ -141,7 +143,7 @@ func TestAskUserRegistryValidatesSerializedOptions(t *testing.T) {
 			asker := &fakeAsker{}
 			registry := NewToolRegistry()
 			registry.RegisterTool(NewAskUserTool(asker))
-			ctx := askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()})
+			ctx := askCtx(&ToolExecContext{Mode: types.RunModeAttended, EventBus: event.NewEventBus()})
 			args, err := json.Marshal(map[string]any{"question": "which?", "options": tc.options})
 			require.NoError(t, err)
 			result, err := registry.ExecuteTool(ctx, ToolAskUser, args)
@@ -161,7 +163,7 @@ func TestAskUserRegistryValidatesSerializedOptions(t *testing.T) {
 func TestAskUserRejectsSerializedFormChoices(t *testing.T) {
 	asker := &fakeAsker{}
 	result, err := NewAskUserTool(asker).Execute(
-		askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()}),
+		askCtx(&ToolExecContext{Mode: types.RunModeAttended, EventBus: event.NewEventBus()}),
 		json.RawMessage(`{"question":"which?","fields":[
 			{"name":"env","type":"select","options":["[\"dev\",\"prod\"]"]}
 		]}`))

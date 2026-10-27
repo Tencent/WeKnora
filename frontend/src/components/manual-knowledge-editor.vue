@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { marked } from 'marked'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { registerUnsavedChanges } from '@/utils/unsavedChanges'
 import { useUIStore } from '@/stores/ui'
 import {
   getKnowledgeDetails,
@@ -17,6 +18,7 @@ import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import { sanitizeHTML, safeMarkdownToHTML, hydrateProtectedFileImages } from '@/utils/security'
 import { continueListOnEnter, countContent, indentOnTab } from '@/utils/markdownEditing'
 import { useI18n } from 'vue-i18n'
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue'
 
 interface KnowledgeBaseOption {
   label: string
@@ -59,6 +61,12 @@ const uploadConfirmStore = useUploadConfirmStore()
 const organizationStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
+// The assistant fills the open editor; the user saves the result.
+const assistantActions = computed(() => ['continue', 'outline', 'polish', 'summarize'].map(action => ({
+  key: action,
+  label: t(`manualEditor.assistant.${action}`),
+  query: t(`manualEditor.assistant.prompts.${action}`),
+})))
 
 const visible = computed({
   get: () => uiStore.manualEditorVisible,
@@ -876,6 +884,7 @@ const markPristine = () => {
   pristineSnapshot.value = snapshot()
 }
 const isDirty = () => initialLoaded.value && snapshot() !== pristineSnapshot.value
+onBeforeUnmount(registerUnsavedChanges(() => visible.value && isDirty()))
 
 const handleClose = () => {
   if (!isDirty()) {
@@ -1048,6 +1057,8 @@ onBeforeUnmount(() => {
             </template>
           </div>
           <div class="editor-toolbar__view">
+            <AssistantActionsButton :label="$t('manualEditor.assistant.button')"
+              :title="$t('manualEditor.assistant.tooltip')" :actions="assistantActions" @mousedown.prevent />
             <t-tooltip placement="top-right" :show-arrow="false">
               <template #content>
                 <div class="shortcut-sheet">
@@ -1109,7 +1120,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="editor-pane editor-pane--preview" v-show="showPreview">
-            <div ref="previewRoot" class="preview-container" v-html="previewHTML" />
+            <div ref="previewRoot" class="preview-container" data-assistant-ignore v-html="previewHTML" />
           </div>
         </div>
 

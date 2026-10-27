@@ -277,6 +277,10 @@ func grepFilePage(
 		lines = lines[:n-1]
 	}
 	start := max(input.Offset, 1)
+	maxMatches := readFileMaxMatches
+	if input.Limit > 0 {
+		maxMatches = min(input.Limit, maxMatches)
+	}
 	budget := OutputBudget(ctx) - readSandboxPageOverhead - utf8.RuneCountInString(clean) -
 		utf8.RuneCountInString(query)
 	var body strings.Builder
@@ -291,7 +295,7 @@ func grepFilePage(
 		}
 		entry := fmt.Sprintf("%d: %s\n", i+1, line)
 		cost := utf8.RuneCountInString(entry)
-		if matches >= readFileMaxMatches || (matches > 0 && used+cost > budget) {
+		if matches >= maxMatches || (matches > 0 && used+cost > budget) {
 			next = i + 1
 			break
 		}
@@ -398,7 +402,7 @@ func renderFileContent(
 	}
 	page := paginateSandboxFile(string(data), input.Offset, input.Limit, maxBytes, maxRunes)
 	if (page.lineTooLarge || input.LineOffset != 0) &&
-		(rootDir == types.AttachmentPathScheme || rootDir == "web://") {
+		(rootDir == types.AttachmentPathScheme || rootDir == "web://" || rootDir == types.ResourceScheme) {
 		return renderFileLinePage(input, string(data), clean, resultData, maxBytes, maxRunes)
 	}
 

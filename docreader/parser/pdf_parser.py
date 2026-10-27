@@ -17,19 +17,21 @@ self-sufficient using pypdfium2 + the Go-side OCR that already exists.
 """
 
 import base64
-from collections import Counter
+from collections import Counter, deque
 import io
 import logging
 import os
 import re
 import statistics
 import threading
+from typing import Iterator
 
 from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.concurrency import parser_worker_limit
 from docreader.parser.source_locator import PageGeometry, page_blocks
+from docreader.parser.stream import ParsedDocumentStream, StreamedImage
 
 logger = logging.getLogger(__name__)
 
@@ -1121,6 +1123,11 @@ def _render_page_to_jpeg(page, scale: float, quality: int, max_edge: int = 0) ->
 # per-page render (the dominant cost for big scanned PDFs — hours on
 # CPU-constrained containers) into a near-linear speedup.
 
+# PDFium retains decoded page resources on some inputs until its document closes.
+# ReadStream therefore restarts the renderer every fixed-size batch; the bound
+# is independent of total page count while retaining useful parallel work.
+PDF_STREAM_RENDER_BATCH_PAGES = 16
+
 # Per-worker document handle, populated by the pool initializer.
 _WORKER_RENDER_DOC = None
 
@@ -1129,8 +1136,7 @@ def _render_pool_init(pdf_path: str) -> None:
     global _WORKER_RENDER_DOC
     import pypdfium2 as pdfium
 
-    with open(pdf_path, "rb") as f:
-        _WORKER_RENDER_DOC = pdfium.PdfDocument(f.read())
+    _WORKER_RENDER_DOC = pdfium.PdfDocument(pdf_path)
 
 
 def _render_pool_task(args):
@@ -1212,6 +1218,191 @@ def _render_pages_parallel(
                 pass
 
 
+def _write_pdf_temp_file(content: bytes) -> str:
+    import tempfile
+
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="docreader_stream_", suffix=".pdf", delete=False
+        ) as tmp:
+            path = tmp.name
+            tmp.write(content)
+        return path
+    except Exception:
+        if path is not None:
+            _unlink_pdf_temp_file(path)
+        raise
+
+
+def _unlink_pdf_temp_file(path: str) -> None:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Failed to remove temporary PDF %s", path, exc_info=True)
+
+
+def _iter_scanned_pages_from_open_pdf(
+    pdf,
+    indices: list[int],
+    base_name: str,
+    scale: float,
+    quality: int,
+    max_edge: int,
+) -> Iterator[StreamedImage]:
+    """Render one page at a time from an already-open PdfDocument."""
+    for index in indices:
+        with _PDFIUM_LOCK, parser_worker_limit(
+            "pdf_render", CONFIG.pdf_render_max_workers
+        ):
+            page = pdf[index]
+            try:
+                image_bytes = _render_page_to_jpeg(page, scale, quality, max_edge)
+            finally:
+                _close_pdfium_resource(page)
+        yield StreamedImage(
+            ref_path=f"images/{base_name}_page_{index + 1}.jpg",
+            image_data=image_bytes,
+        )
+
+
+def _iter_scanned_pages_serial_batch(
+    pdf_path: str,
+    indices: list[int],
+    base_name: str,
+    scale: float,
+    quality: int,
+    max_edge: int,
+) -> Iterator[StreamedImage]:
+    import pypdfium2 as pdfium
+
+    with _PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(pdf_path)
+    try:
+        yield from _iter_scanned_pages_from_open_pdf(
+            pdf, indices, base_name, scale, quality, max_edge
+        )
+    finally:
+        with _PDFIUM_LOCK:
+            _close_pdfium_resource(pdf)
+
+
+def _iter_scanned_pages_parallel_batch(
+    pdf_path: str,
+    indices: list[int],
+    base_name: str,
+    scale: float,
+    quality: int,
+    max_edge: int,
+    workers: int,
+    mp_context,
+) -> Iterator[StreamedImage]:
+    from concurrent.futures import ProcessPoolExecutor
+
+    max_workers = min(workers, len(indices))
+    window_size = max_workers * 2
+    pending = deque()
+    executor = None
+    sent = False
+    fallback = False
+
+    # Hold the limiter until the executor has shut down, including when the
+    # consumer cancels mid-batch. Otherwise another request could start a new
+    # pool while the old worker processes still hold their PDFium documents.
+    with parser_worker_limit("pdf_render", CONFIG.pdf_render_max_workers):
+        try:
+            executor = ProcessPoolExecutor(
+                max_workers=max_workers,
+                mp_context=mp_context,
+                initializer=_render_pool_init,
+                initargs=(pdf_path,),
+            )
+            indices_iter = iter(indices)
+            for _ in range(window_size):
+                try:
+                    index = next(indices_iter)
+                except StopIteration:
+                    break
+                pending.append(
+                    executor.submit(
+                        _render_pool_task,
+                        (index, scale, quality, max_edge),
+                    )
+                )
+
+            while pending:
+                future = pending.popleft()
+                index, image_bytes = future.result()
+                try:
+                    next_index = next(indices_iter)
+                except StopIteration:
+                    pass
+                else:
+                    pending.append(
+                        executor.submit(
+                            _render_pool_task,
+                            (next_index, scale, quality, max_edge),
+                        )
+                    )
+                sent = True
+                yield StreamedImage(
+                    ref_path=f"images/{base_name}_page_{index + 1}.jpg",
+                    image_data=image_bytes,
+                )
+        except Exception:
+            if sent:
+                raise
+            logger.warning(
+                "parallel streamed PDF rendering failed before the first image; "
+                "falling back to serial rendering for this batch",
+                exc_info=True,
+            )
+            fallback = True
+        finally:
+            if executor is not None:
+                for future in pending:
+                    future.cancel()
+                executor.shutdown(wait=True, cancel_futures=True)
+                pending.clear()
+
+    if fallback:
+        yield from _iter_scanned_pages_serial_batch(
+            pdf_path, indices, base_name, scale, quality, max_edge
+        )
+
+
+def _iter_scanned_pages_from_path(
+    pdf_path: str,
+    indices: list[int],
+    base_name: str,
+    scale: float,
+    quality: int,
+    max_edge: int,
+    workers: int,
+) -> Iterator[StreamedImage]:
+    """Yield images in fixed-size batches to cap PDFium and result memory."""
+    for start in range(0, len(indices), PDF_STREAM_RENDER_BATCH_PAGES):
+        batch = indices[start : start + PDF_STREAM_RENDER_BATCH_PAGES]
+        mp_context = _select_mp_context() if workers > 1 and len(batch) > 1 else None
+        if workers > 1 and len(batch) > 1 and mp_context is not None:
+            yield from _iter_scanned_pages_parallel_batch(
+                pdf_path,
+                batch,
+                base_name,
+                scale,
+                quality,
+                max_edge,
+                workers,
+                mp_context,
+            )
+        else:
+            yield from _iter_scanned_pages_serial_batch(
+                pdf_path, batch, base_name, scale, quality, max_edge
+            )
+
+
 def _render_scanned_pages(
     pdf, content: bytes, indices: list, scale: float, quality: int, max_edge: int
 ) -> dict:
@@ -1235,6 +1426,23 @@ def _render_scanned_pages(
         finally:
             _close_pdfium_resource(page)
     return out
+
+
+def _encode_rendered_page_images(rendered: dict, base_name: str) -> dict:
+    """Encode rendered pages while releasing each raw JPEG immediately.
+
+    ``_render_scanned_pages`` returns raw JPEG bytes because the render workers
+    need that representation.  Keeping the raw mapping alive while building a
+    second base64 mapping temporarily doubles the image memory for a scanned
+    document.  Pop each page before encoding it so the parser retains only the
+    representation that the gRPC response needs.
+    """
+    encoded = {}
+    for index in sorted(rendered):
+        image_bytes = rendered.pop(index)
+        ref_path = f"images/{base_name}_page_{index + 1}.jpg"
+        encoded[ref_path] = base64.b64encode(image_bytes).decode("utf-8")
+    return encoded
 
 
 def _select_embedded_images(
@@ -1339,7 +1547,7 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
     if not text_indices:
         return {}
 
-    candidates: list = []  # parallel to meta; holds heavy pixel data
+    candidates: list = []
     meta: list = []
     for i in text_indices:
         page = pdf[i]
@@ -1348,7 +1556,7 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
             page_area = float(width) * float(height)
             if page_area <= 0:
                 continue
-            for obj in page.get_objects():
+            for object_index, obj in enumerate(page.get_objects()):
                 if obj.type != raw.FPDF_PAGEOBJ_IMAGE:
                     continue
                 try:
@@ -1362,17 +1570,20 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
                     pil = _decode_embedded_image_pil(obj)
                 except Exception:
                     continue
-                content_hash = hashlib.md5(pil.tobytes()).hexdigest()
-                candidates.append((i, top, pil))
-                meta.append(
-                    {
-                        "page": i,
-                        "width": pil.width,
-                        "height": pil.height,
-                        "area_ratio": area_ratio,
-                        "hash": content_hash,
-                    }
-                )
+                try:
+                    content_hash = hashlib.md5(pil.tobytes()).hexdigest()
+                    candidates.append((i, object_index, top))
+                    meta.append(
+                        {
+                            "page": i,
+                            "width": pil.width,
+                            "height": pil.height,
+                            "area_ratio": area_ratio,
+                            "hash": content_hash,
+                        }
+                    )
+                finally:
+                    pil.close()
         finally:
             _close_pdfium_resource(page)
 
@@ -1386,22 +1597,40 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
     per_page_count: dict = defaultdict(int)
     max_edge = CONFIG.pdf_render_max_edge
     for idx in kept_idx:
-        page_i, y_top, pil = candidates[idx]
-        if pil.mode not in ("RGB", "L"):
-            pil = pil.convert("RGB")
-        if max_edge > 0 and max(pil.size) > max_edge:
-            ratio = max_edge / max(pil.size)
-            pil = pil.resize(
-                (max(1, int(pil.width * ratio)), max(1, int(pil.height * ratio)))
-            )
-        buf = io.BytesIO()
-        pil.save(buf, format="JPEG", quality=quality, optimize=True)
-        per_page_count[page_i] += 1
-        fname = f"{base_name}_p{page_i+1}_img{per_page_count[page_i]}.jpg"
-        ref_path = f"images/{fname}"
-        result[page_i].append(
-            (ref_path, base64.b64encode(buf.getvalue()).decode("utf-8"), y_top)
-        )
+        # Reopen only selected figures so rejected candidates do not retain pixels.
+        page_i, object_index, y_top = candidates[idx]
+        page = pdf[page_i]
+        pil = None
+        try:
+            for index, obj in enumerate(page.get_objects()):
+                if index == object_index:
+                    pil = _decode_embedded_image_pil(obj)
+                    break
+            if pil is None:
+                raise ValueError("Selected embedded image is no longer available")
+            if pil.mode not in ("RGB", "L"):
+                converted = pil.convert("RGB")
+                pil.close()
+                pil = converted
+            if max_edge > 0 and max(pil.size) > max_edge:
+                ratio = max_edge / max(pil.size)
+                resized = pil.resize(
+                    (max(1, int(pil.width * ratio)), max(1, int(pil.height * ratio)))
+                )
+                pil.close()
+                pil = resized
+            with io.BytesIO() as buf:
+                pil.save(buf, format="JPEG", quality=quality, optimize=True)
+                per_page_count[page_i] += 1
+                fname = f"{base_name}_p{page_i+1}_img{per_page_count[page_i]}.jpg"
+                ref_path = f"images/{fname}"
+                result[page_i].append(
+                    (ref_path, base64.b64encode(buf.getvalue()).decode("utf-8"), y_top)
+                )
+        finally:
+            if pil is not None:
+                pil.close()
+            _close_pdfium_resource(page)
 
     # Top-to-bottom within each page (PDF y grows upward, so larger y first).
     for page_i in result:
@@ -1491,6 +1720,7 @@ class PDFScannedParser(BaseParser):
 
             source_blocks = []
             offset = 0
+            images.update(_encode_rendered_page_images(rendered, base_name))
             for i in range(page_count):
                 page_filename = f"{base_name}_page_{i+1}.jpg"
                 ref_path = f"images/{page_filename}"
@@ -1506,7 +1736,6 @@ class PDFScannedParser(BaseParser):
                     }
                 )
                 offset += len(line)
-                images[ref_path] = base64.b64encode(rendered[i]).decode("utf-8")
 
             text = "\n\n".join(markdown_lines)
             return Document(
@@ -1521,6 +1750,66 @@ class PDFScannedParser(BaseParser):
         except Exception as e:
             logger.exception("PDFScannedParser failed to parse PDF: %s", e)
             raise e
+
+    def parse_stream(self, content: bytes) -> ParsedDocumentStream:
+        """Return metadata first and lazily render each scanned page."""
+        import pypdfium2 as pdfium
+
+        base_name = os.path.splitext(self.file_name or "document")[0]
+        with _PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(content)
+            try:
+                page_count = len(pdf)
+            finally:
+                _close_pdfium_resource(pdf)
+
+        markdown_lines = []
+        source_blocks = []
+        offset = 0
+        for index in range(page_count):
+            page_filename = f"{base_name}_page_{index + 1}.jpg"
+            ref_path = f"images/{page_filename}"
+            line = f"![{page_filename}]({ref_path})"
+            if markdown_lines:
+                offset += 2
+            markdown_lines.append(line)
+            source_blocks.append(
+                {
+                    "start": offset,
+                    "end": offset + len(line),
+                    "locator": {"type": "pdf", "page": index + 1, "mapping": "exact"},
+                }
+            )
+            offset += len(line)
+
+        document = Document(
+            content="\n\n".join(markdown_lines),
+            metadata={"image_source_type": "scanned_pdf", "page_count": page_count},
+            source_blocks=source_blocks,
+        )
+        image_count = page_count
+        if page_count == 0:
+            return ParsedDocumentStream(document=document, image_count=0)
+
+        scale = max(1, CONFIG.pdf_render_dpi) / 72
+        quality = _normalize_image_quality(CONFIG.pdf_jpeg_quality)
+        indices = list(range(page_count))
+
+        pdf_path = _write_pdf_temp_file(content)
+        return ParsedDocumentStream(
+            document=document,
+            image_count=image_count,
+            images=_iter_scanned_pages_from_path(
+                pdf_path,
+                indices,
+                base_name,
+                scale,
+                quality,
+                CONFIG.pdf_render_max_edge,
+                CONFIG.pdf_render_parallelism,
+            ),
+            _cleanup=lambda: _unlink_pdf_temp_file(pdf_path),
+        )
 
 
 class PDFParser(BaseParser):
@@ -1584,15 +1873,77 @@ class PDFParser(BaseParser):
                 file_name=self.file_name, file_type=self.file_type
             ).parse_into_text(content)
 
+    def parse_stream(self, content: bytes) -> ParsedDocumentStream:
+        """Prepare PDF metadata, then render scanned pages only as consumed."""
+        if self._force_scanned:
+            stream = PDFScannedParser(
+                file_name=self.file_name, file_type=self.file_type
+            ).parse_stream(content)
+            page_count = stream.document.metadata.get("page_count", 0)
+            stream.document.metadata.update(
+                {
+                    "scanned_page_count": page_count,
+                    "text_page_count": 0,
+                    "embedded_image_count": 0,
+                    "vector_figure_count": 0,
+                }
+            )
+            return stream
+
+        try:
+            with _PDFIUM_LOCK:
+                document, scanned_indices = self._route_locked(
+                    content, include_scanned_images=False
+                )
+        except Exception:
+            logger.exception(
+                "PDFParser: per-page streaming preparation failed for %s; "
+                "falling back to full image rendering",
+                self.file_name,
+            )
+            return PDFScannedParser(
+                file_name=self.file_name, file_type=self.file_type
+            ).parse_stream(content)
+
+        image_count = len(document.images or {}) + len(scanned_indices)
+        if not scanned_indices:
+            return ParsedDocumentStream(document=document, image_count=image_count)
+
+        scale = max(1, CONFIG.pdf_render_dpi) / 72
+        quality = _normalize_image_quality(CONFIG.pdf_jpeg_quality)
+        base_name = os.path.splitext(self.file_name or "document")[0]
+
+        # Use a temporary source file for every stream mode so each fixed-size
+        # batch can close its PdfDocument before the next batch starts. This
+        # bounds PDFium's decoded-page cache independently of document length.
+        pdf_path = _write_pdf_temp_file(content)
+        return ParsedDocumentStream(
+            document=document,
+            image_count=image_count,
+            images=_iter_scanned_pages_from_path(
+                pdf_path,
+                scanned_indices,
+                base_name,
+                scale,
+                quality,
+                CONFIG.pdf_render_max_edge,
+                CONFIG.pdf_render_parallelism,
+            ),
+            _cleanup=lambda: _unlink_pdf_temp_file(pdf_path),
+        )
+
     def _route(self, content: bytes) -> Document:
         # Serialize all pdfium work: see _PDFIUM_LOCK. Holding it for the whole
         # route (both the text pass and the render pass) is what prevents the
         # concurrent-upload deadlock; the trailing markdown assembly is cheap
         # pure-Python so keeping it inside the lock costs nothing meaningful.
         with _PDFIUM_LOCK:
-            return self._route_locked(content)
+            document, _scanned_indices = self._route_locked(content)
+        return document
 
-    def _route_locked(self, content: bytes) -> Document:
+    def _route_locked(
+        self, content: bytes, *, include_scanned_images: bool = True
+    ) -> tuple[Document, list[int]]:
         import pypdfium2 as pdfium
         import pypdfium2.raw as pdfium_r
 
@@ -1662,7 +2013,10 @@ class PDFParser(BaseParser):
             scanned_indices = [i for i, c in enumerate(classes) if c == "scanned"]
 
             # Pass 2: render only the scanned pages (heavy work, rate-limited).
-            if scanned_indices:
+            # ReadStream defers this work until after its metadata frame and
+            # renders pages incrementally; unary Read keeps the materialized
+            # response path for compatibility.
+            if scanned_indices and include_scanned_images:
                 with parser_worker_limit("pdf_render", CONFIG.pdf_render_max_workers):
                     rendered = _render_scanned_pages(
                         pdf,
@@ -1672,9 +2026,7 @@ class PDFParser(BaseParser):
                         quality,
                         CONFIG.pdf_render_max_edge,
                     )
-                for i, img_bytes in rendered.items():
-                    ref_path = f"images/{base_name}_page_{i+1}.jpg"
-                    images[ref_path] = base64.b64encode(img_bytes).decode("utf-8")
+                images.update(_encode_rendered_page_images(rendered, base_name))
 
             # Pass 3: extract embedded figures from native text pages so the Go
             # App can OCR/caption them (logos/watermarks/tiny images filtered).
@@ -1763,9 +2115,10 @@ class PDFParser(BaseParser):
             embedded_count,
             len(content_text),
         )
-        return Document(
+        document = Document(
             content=content_text,
             images=images,
             metadata=metadata,
             source_blocks=source_blocks,
         )
+        return document, scanned_indices

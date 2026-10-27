@@ -4,25 +4,26 @@ import (
 	"bytes"
 	"context"
 	stderrors "errors"
-	"os"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// captureServiceLogs redirects the process logger for one test, so the WARN
-// raised for a partial retrieve can be asserted on. Not parallel-safe: the
-// logger output is process-wide.
-func captureServiceLogs(t *testing.T) *bytes.Buffer {
+// captureServiceLogs supplies a request-scoped logger with a known format and
+// level, independent of host configuration and without changing the global logger.
+func captureServiceLogs(t *testing.T) (context.Context, *bytes.Buffer) {
 	t.Helper()
 	var buf bytes.Buffer
-	logger.SetOutput(&buf)
-	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
-	return &buf
+	log := logrus.New()
+	log.SetOutput(&buf)
+	log.SetFormatter(&logrus.TextFormatter{DisableColors: true, DisableTimestamp: true})
+	log.SetLevel(logrus.WarnLevel)
+	ctx := context.WithValue(context.Background(), types.LoggerContextKey, logrus.NewEntry(log))
+	return ctx, &buf
 }
 
 func keywordsRetrieveParams(query string) []types.RetrieveParams {
@@ -39,7 +40,7 @@ func keywordsRetrieveParams(query string) []types.RetrieveParams {
 // travels with the results (RetrieveResult.Error -> CompositeRetrieveEngine)
 // and is logged here, without discarding what was retrieved (#3835).
 func TestRetrieveFromStores_LogsPartialFailureAndKeepsResults(t *testing.T) {
-	logs := captureServiceLogs(t)
+	ctx, logs := captureServiceLogs(t)
 	cause := stderrors.New("qdrant keyword search failed in 1 of 2 matched collections")
 	fake := &fakeRetrieveEngineService{
 		engineType:      types.QdrantRetrieverEngineType,
@@ -56,7 +57,7 @@ func TestRetrieveFromStores_LogsPartialFailureAndKeepsResults(t *testing.T) {
 	}
 
 	res, err := (&knowledgeBaseService{}).retrieveFromStores(
-		context.Background(), []*storeGroup{g}, retriever.EngineAwareNormalizer{})
+		ctx, []*storeGroup{g}, retriever.EngineAwareNormalizer{})
 
 	require.NoError(t, err, "a partial failure must not fail the search")
 	require.Len(t, res, 1)
@@ -70,7 +71,7 @@ func TestRetrieveFromStores_LogsPartialFailureAndKeepsResults(t *testing.T) {
 // The multi-store path must keep partial results too, instead of cancelling
 // siblings and failing the whole search.
 func TestRetrieveFromStores_MultiGroupKeepsPartialResults(t *testing.T) {
-	logs := captureServiceLogs(t)
+	ctx, logs := captureServiceLogs(t)
 	cause := stderrors.New("milvus keyword search failed in 2 of 3 matched collections")
 	partial := &fakeRetrieveEngineService{
 		engineType:      types.MilvusRetrieverEngineType,
@@ -101,7 +102,7 @@ func TestRetrieveFromStores_MultiGroupKeepsPartialResults(t *testing.T) {
 	}
 
 	res, err := (&knowledgeBaseService{}).retrieveFromStores(
-		context.Background(), groups, retriever.EngineAwareNormalizer{})
+		ctx, groups, retriever.EngineAwareNormalizer{})
 
 	require.NoError(t, err, "one degraded store must not fail the whole search")
 	require.Len(t, res, 2)
@@ -112,7 +113,7 @@ func TestRetrieveFromStores_MultiGroupKeepsPartialResults(t *testing.T) {
 // A complete search that legitimately hit nothing must stay quiet: no partial
 // warning, nil error.
 func TestRetrieveFromStores_CompleteEmptySearchStaysQuiet(t *testing.T) {
-	logs := captureServiceLogs(t)
+	ctx, logs := captureServiceLogs(t)
 	fake := &fakeRetrieveEngineService{
 		engineType: types.QdrantRetrieverEngineType,
 		support:    []types.RetrieverType{types.KeywordsRetrieverType},
@@ -126,7 +127,7 @@ func TestRetrieveFromStores_CompleteEmptySearchStaysQuiet(t *testing.T) {
 	}
 
 	res, err := (&knowledgeBaseService{}).retrieveFromStores(
-		context.Background(), []*storeGroup{g}, retriever.EngineAwareNormalizer{})
+		ctx, []*storeGroup{g}, retriever.EngineAwareNormalizer{})
 
 	require.NoError(t, err)
 	require.Len(t, res, 1)
@@ -138,7 +139,7 @@ func TestRetrieveFromStores_CompleteEmptySearchStaysQuiet(t *testing.T) {
 // An engine-level failure still fails the search: exposing partial results must
 // not weaken the all-or-nothing policy for stores that did not answer at all.
 func TestRetrieveFromStores_EngineLevelErrorStillFails(t *testing.T) {
-	logs := captureServiceLogs(t)
+	ctx, logs := captureServiceLogs(t)
 	cause := stderrors.New("vector store unavailable")
 	fake := &fakeRetrieveEngineService{
 		engineType: types.QdrantRetrieverEngineType,
@@ -155,7 +156,7 @@ func TestRetrieveFromStores_EngineLevelErrorStillFails(t *testing.T) {
 	}
 
 	res, err := (&knowledgeBaseService{}).retrieveFromStores(
-		context.Background(), []*storeGroup{g}, retriever.EngineAwareNormalizer{})
+		ctx, []*storeGroup{g}, retriever.EngineAwareNormalizer{})
 
 	require.ErrorIs(t, err, cause)
 	assert.Nil(t, res, "an engine-level failure still returns no results")

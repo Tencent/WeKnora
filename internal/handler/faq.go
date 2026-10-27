@@ -39,7 +39,8 @@ func NewFAQHandler(
 
 // faqDeleteRequest is a request for deleting FAQ entries in batch
 type faqDeleteRequest struct {
-	IDs []int64 `json:"ids" binding:"required,min=1"`
+	// Entries to delete (entry_id).
+	IDs []int64 `json:"ids" binding:"required,min=1" extensions:"x-agent=entry_ids,x-agent-maximum=20"`
 }
 
 // faqEntryTagBatchRequest is a request for updating tags for FAQ entries in batch
@@ -50,7 +51,8 @@ type faqEntryTagBatchRequest struct {
 
 // addSimilarQuestionsRequest is a request for adding similar questions to a FAQ entry
 type addSimilarQuestionsRequest struct {
-	SimilarQuestions []string `json:"similar_questions" binding:"required,min=1"`
+	// Phrasings to add to the entry.
+	SimilarQuestions []string `json:"similar_questions" binding:"required,min=1" extensions:"x-agent"`
 }
 
 // updateLastFAQImportResultDisplayStatusRequest is the request payload for UpdateLastImportResultDisplayStatus
@@ -64,19 +66,21 @@ type updateLastFAQImportResultDisplayStatusRequest struct {
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json
-// @Param        id           path      string  true   "知识库ID"
-// @Param        page         query     int     false  "页码"
-// @Param        page_size    query     int     false  "每页数量"
+// @Param        id           path      string  true   "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        page         query     int     false  "页码"  minimum(1)  extensions(x-agent,x-agent-maximum=10000)
+// @Param        page_size    query     int     false  "每页数量"  minimum(1)  maximum(1000)  extensions(x-agent,x-agent-maximum=50)
 // @Param        tag_id       query     int     false  "标签ID筛选(seq_id)，兼容旧版单标签"
-// @Param        tag_ids      query     string  false  "标签UUID筛选，逗号分隔（OR语义）"
-// @Param        keyword      query     string  false  "关键词搜索"
-// @Param        search_field query     string  false  "搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案), 默认搜索全部"
-// @Param        sort_order   query     string  false  "排序方式: asc(按更新时间正序), 默认按更新时间倒序"
-// @Param        is_enabled   query     bool    false  "启用状态筛选；不传时返回全部"
-// @Success      200        {object}  map[string]interface{}  "FAQ列表"
+// @Param        tag_ids      query     string  false  "标签UUID筛选，逗号分隔（OR语义）"  extensions(x-agent)
+// @Param        keyword      query     string  false  "关键词搜索"  extensions(x-agent)
+// @Param        search_field query     string  false  "搜索字段，默认搜索全部"  Enums(standard_question,similar_questions,answers)  extensions(x-agent)
+// @Param        sort_order   query     string  false  "排序方式: asc(按更新时间正序), 默认按更新时间倒序"  Enums(asc)  extensions(x-agent)
+// @Param        is_enabled   query     bool    false  "启用状态筛选；不传时返回全部"  extensions(x-agent)
+// @Success      200        {object}  handler.DataResponse{data=handler.FAQEntryPage}  "FAQ列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"faq.list_entries","risk":"read","root":"data.data"}
+// @x-agent-hint "FAQ entries of an FAQ knowledge base, newest first; keyword searches questions and answers."
 // @Router       /knowledge-bases/{id}/faq/entries [get]
 func (h *FAQHandler) ListEntries(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -152,7 +156,7 @@ func parseOptionalFAQEnabled(c *gin.Context) (*bool, error) {
 // @Produce      json
 // @Param        id       path      string                    true  "知识库ID"
 // @Param        request  body      types.FAQBatchUpsertPayload  true  "批量操作请求"
-// @Success      200      {object}  map[string]interface{}    "任务ID"
+// @Success      200      {object}  handler.DataResponse{data=handler.TaskIDData}  "任务ID"
 // @Failure      400      {object}  errors.AppError           "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -189,12 +193,14 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                true  "知识库ID"
+// @Param        id       path      string                true  "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Param        request  body      types.FAQEntryPayload true  "FAQ条目"
-// @Success      200      {object}  map[string]interface{}  "创建的FAQ条目"
+// @Success      200      {object}  handler.DataResponse{data=types.FAQEntry}  "创建的FAQ条目"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"faq.create_entry","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Adds one FAQ entry. Questions already used by another entry are refused."
 // @Router       /knowledge-bases/{id}/faq/entry [post]
 func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -226,13 +232,15 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json
-// @Param        id        path      string                true  "知识库ID"
-// @Param        entry_id  path      int                   true  "FAQ条目ID(seq_id)"
+// @Param        id        path      string                true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        entry_id  path      int                   true  "FAQ条目ID(seq_id)"  extensions(x-agent)
 // @Param        request   body      types.FAQEntryPayload true  "FAQ条目"
-// @Success      200       {object}  map[string]interface{}  "更新成功"
+// @Success      200       {object}  handler.DataResponse{data=types.FAQEntry}  "更新成功"
 // @Failure      400       {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"faq.update_entry","risk":"write","require_complete_target":true,"target":"faq.get_entry","label":"standard_question"}
+// @x-agent-hint "Replaces the whole entry. Read it with faq.get_entry first and send every field, changed or not, or the rest is lost. Updates are refused if the current entry is truncated; use the FAQ editor for entries beyond the complete-read limits. To only add phrasings, use faq.add_similar_questions."
 // @Router       /knowledge-bases/{id}/faq/entries/{entry_id} [put]
 func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -272,7 +280,7 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
 // @Param        request  body      object  true  "标签更新请求"
-// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Success      200      {object}  handler.SuccessResponse  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -305,7 +313,7 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                        true  "知识库ID"
 // @Param        request  body      types.FAQEntryFieldsBatchUpdate  true  "字段更新请求"
-// @Success      200      {object}  map[string]interface{}        "更新成功"
+// @Success      200      {object}  handler.SuccessResponse        "更新成功"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -336,12 +344,14 @@ func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{ids=[]int}  true  "要删除的FAQ ID列表(seq_id)"
-// @Success      200      {object}  map[string]interface{}  "删除成功"
+// @Param        id       path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        request  body      faqDeleteRequest  true  "要删除的FAQ ID列表(seq_id)"
+// @Success      200      {object}  handler.SuccessResponse  "删除成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"faq.delete_entries","risk":"destructive","target":"knowledge_base.get","label":"name","items":{"param":"entry_ids","target":"faq.get_entry","as":"entry_id","label":"standard_question"}}
+// @x-agent-hint "Removes up to 20 FAQ entries. Cannot be undone; the confirmation lists every question."
 // @Router       /knowledge-bases/{id}/faq/entries [delete]
 func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -373,7 +383,7 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                true  "知识库ID"
 // @Param        request  body      types.FAQSearchRequest  true  "搜索请求"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
+// @Success      200      {object}  handler.DataResponse{data=[]types.FAQEntry}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -461,13 +471,14 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json
-// @Param        id        path      string  true  "知识库ID"
-// @Param        entry_id  path      int     true  "FAQ条目ID(seq_id)"
-// @Success      200       {object}  map[string]interface{}  "FAQ条目详情"
+// @Param        id        path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        entry_id  path      int     true  "FAQ条目ID(seq_id)"  extensions(x-agent)
+// @Success      200       {object}  handler.DataResponse{data=types.FAQEntry}  "FAQ条目详情"
 // @Failure      400       {object}  errors.AppError         "请求参数错误"
 // @Failure      404       {object}  errors.AppError         "条目不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"faq.get_entry","risk":"read"}
 // @Router       /knowledge-bases/{id}/faq/entries/{entry_id} [get]
 func (h *FAQHandler) GetEntry(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -499,7 +510,7 @@ func (h *FAQHandler) GetEntry(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        task_id  path      string  true  "任务ID"
-// @Success      200      {object}  map[string]interface{}  "导入进度"
+// @Success      200      {object}  handler.DataResponse{data=types.FAQImportProgress}  "导入进度"
 // @Failure      404      {object}  errors.AppError         "任务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -533,7 +544,7 @@ func (h *FAQHandler) GetImportProgress(c *gin.Context) {
 // @Produce      json
 // @Param        id      path      string                                         true  "知识库ID"
 // @Param        request body      updateLastFAQImportResultDisplayStatusRequest  true  "状态更新请求"
-// @Success      200     {object}  map[string]interface{}                         "更新成功"
+// @Success      200     {object}  handler.SuccessResponse                         "更新成功"
 // @Failure      400     {object}  errors.AppError                                "请求参数错误"
 // @Failure      404     {object}  errors.AppError                                "知识库不存在或无导入记录"
 // @Security     Bearer
@@ -567,14 +578,16 @@ func (h *FAQHandler) UpdateLastImportResultDisplayStatus(c *gin.Context) {
 // @Tags         FAQ管理
 // @Accept       json
 // @Produce      json
-// @Param        id        path      string                      true  "知识库ID"
-// @Param        entry_id  path      int                         true  "FAQ条目ID(seq_id)"
+// @Param        id        path      string                      true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        entry_id  path      int                         true  "FAQ条目ID(seq_id)"  extensions(x-agent)
 // @Param        request   body      addSimilarQuestionsRequest  true  "相似问列表"
-// @Success      200       {object}  map[string]interface{}      "更新后的FAQ条目"
+// @Success      200       {object}  handler.DataResponse{data=types.FAQEntry}      "更新后的FAQ条目"
 // @Failure      400       {object}  errors.AppError             "请求参数错误"
 // @Failure      404       {object}  errors.AppError             "条目不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"faq.add_similar_questions","risk":"write","target":"faq.get_entry","label":"standard_question"}
+// @x-agent-hint "Adds phrasings to an entry and keeps everything else."
 // @Router       /knowledge-bases/{id}/faq/entries/{entry_id}/similar-questions [post]
 func (h *FAQHandler) AddSimilarQuestions(c *gin.Context) {
 	ctx := c.Request.Context()

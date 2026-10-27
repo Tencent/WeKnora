@@ -51,10 +51,10 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 			err: fmt.Errorf("request: %w", vlm.ErrTruncatedCompletion),
 		},
 		{name: "request failure", status: "failed", code: "OCR_REQUEST_FAILED", err: errors.New("model unavailable")},
-		{name: "no text", raw: "No text content.", status: "no_text"},
-		{name: "HTML no text", raw: "<p>No text content.</p>", status: "no_text"},
-		{name: "HTML short no text", raw: "<p>empty</p>", status: "no_text"},
-		{name: "HTML emphasized no text", raw: "<p><strong>No text content.</strong></p>", status: "no_text"},
+		{name: "no text", raw: "No text content.", status: "skipped_no_text"},
+		{name: "HTML no text", raw: "<p>No text content.</p>", status: "skipped_no_text"},
+		{name: "HTML short no text", raw: "<p>empty</p>", status: "skipped_no_text"},
+		{name: "HTML emphasized no text", raw: "<p><strong>No text content.</strong></p>", status: "skipped_no_text"},
 		{name: "empty HTML", raw: "<html><body></body></html>", status: "failed", code: "OCR_INVALID_OUTPUT"},
 	} {
 		for _, caption := range []bool{false, true} {
@@ -69,17 +69,40 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 				}}
 				tracker := &ocrTestTracker{failed: map[string]string{}, outputs: map[string]types.JSONMap{}}
 				out := types.JSONMap{}
+				// The pipeline framework carries the caption/OCR switches as
+				// the manual pipeline's own tunables (both default true), the
+				// whole-task EnableOCR/EnableCaption pair of the action loop
+				// having been superseded by the image_pipeline field.
 				err := svc.processImage(context.Background(), &types.ImageMultimodalPayload{
-					ImageURL: "local://test.png", EnableOCR: true, EnableCaption: caption, Attempt: 1,
+					ImageURL: "local://test.png",
+					ImagePipelineParams: map[string]any{
+						manualCaptionKey: caption,
+						manualOCRKey:     true,
+					},
+					Attempt: 1,
 				}, model, types.VLMConfig{}, tracker, out)
-				require.NoError(t, err, "bad OCR must not retry the whole image and duplicate a valid caption")
-				require.Equal(t, tc.status, out["ocr_status"])
-				require.Equal(t, 0, out["ocr_chars"])
+				if caption {
+					// A valid caption exists: the OCR failure is recorded, not
+					// propagated — failing the image would retry it and
+					// duplicate the caption chunk (#4132).
+					require.NoError(t, err)
+				} else if tc.code != "" {
+					// Caption off + OCR failed = every VLM call failed and
+					// nothing was produced: the image fails honestly instead
+					// of passing as a silent skip (there is no caption to
+					// protect, so the #4132 no-duplicate rationale is void).
+					require.Error(t, err, "bad OCR with no caption must fail the image")
+				} else {
+					// OCR answered no_text: a genuine blank, not a failure.
+					require.NoError(t, err)
+				}
+				require.Equal(t, tc.status, out[keyOCRResult])
+				require.Equal(t, 0, out[keyOCRChars])
 				require.NotContains(t, out, "ocr_preview")
 				require.Equal(t, tc.code, tracker.failed["multimodal.image[0].ocr"])
 				if tc.code != "" {
-					require.Equal(t, tc.code, out["ocr_error_code"])
-					require.NotEmpty(t, out["ocr_error"])
+					require.Equal(t, tc.code, out[keyOCRErrorCode])
+					require.NotEmpty(t, out[keyOCRError])
 					require.NotContains(t, tracker.outputs, "multimodal.image[0].ocr",
 						"failed OCR must not be marked done")
 					if caption {
@@ -89,10 +112,18 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 					}
 				} else {
 					require.Empty(t, tracker.failed)
-					require.NotContains(t, out, "ocr_error")
-					require.NotContains(t, out, "ocr_error_code")
-					require.NotContains(t, out, "outcome")
-					require.Equal(t, "no_text", tracker.outputs["multimodal.image[0].ocr"]["status"])
+					require.NotContains(t, out, keyOCRError)
+					require.NotContains(t, out, keyOCRErrorCode)
+					// Every image states its end state now, so "no text" is a
+					// verdict rather than an absent key: nothing was extracted
+					// when there was no caption to keep, and the run is a plain
+					// success when the caption is what survived.
+					if caption {
+						require.Equal(t, "done", out["outcome"])
+					} else {
+						require.Equal(t, "skipped_no_content", out["outcome"])
+					}
+					require.Equal(t, "skipped_no_text", tracker.outputs["multimodal.image[0].ocr"]["status"])
 				}
 				if caption {
 					require.Len(t, repo.created, 1)

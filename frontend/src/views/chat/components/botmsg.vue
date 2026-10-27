@@ -53,10 +53,11 @@
                 </div>
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
-            <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar">
+            <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar"
+                :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting }">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                     <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
-                        <t-icon name="git-branch" />
+                        <ChatActionIcon name="git-branch" />
                     </t-button>
                 </t-tooltip>
                 <t-popconfirm
@@ -75,17 +76,19 @@
                     </template>
                     <t-tooltip :content="rewindTooltip">
                         <t-button size="small" variant="outline" shape="round" @click.stop>
-                            <t-icon name="rollback" />
+                            <ChatActionIcon name="rollback" />
                         </t-button>
                     </t-tooltip>
                 </t-popconfirm>
+                <AssistantActionsButton v-if="canAskAssistant" icon-only :label="askAssistantTitle"
+                    :actions="answerAssistantActions" @before-open="emitAskAssistant" />
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
-                    <t-icon name="copy" />
+                    <ChatActionIcon name="copy" />
                 </t-button>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
                     :title="$t('agent.addToKnowledgeBase')">
-                    <t-icon name="bookmark-add" />
+                    <ChatActionIcon name="bookmark-add" />
                 </t-button>
                 <!-- Skill artifact download: only shown when this reply's
                      assistant message actually recorded any generated files.
@@ -99,20 +102,20 @@
                         :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
                         @click.stop="openArtifactDrawer()">
                         <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
-                        <t-icon v-else name="folder" />
+                        <ChatActionIcon v-else name="folder" />
                     </t-button>
                     <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                        <t-icon name="info-circle" />
+                        <ChatActionIcon name="info-circle" />
                     </t-button>
                 </t-tooltip>
                 <!-- 输出被单次上限截断的提示 -->
                 <t-tooltip v-if="session.truncated" :content="$t('chat.truncatedHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                        <t-icon name="info-circle" />
+                        <ChatActionIcon name="info-circle" />
                     </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
@@ -149,6 +152,8 @@ import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
+import ChatActionIcon from '@/components/ChatActionIcon.vue';
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -164,10 +169,12 @@ import {
     hydrateArtifactImages,
     isArtifactRefHref,
     renderArtifactReference,
+    installArtifactLinkRenderer,
 } from '@/utils/sandboxArtifactRefs';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
+import { useAssistantStore } from '@/stores/assistant';
 import {
     buildManualMarkdown,
     formatManualTitle,
@@ -203,7 +210,7 @@ const mentionTagIcon = (item) => {
     return 'file';
 };
 
-const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 'rewind'])
+const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 'rewind', 'ask-assistant'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
@@ -248,6 +255,10 @@ const props = defineProps({
     canRewind: {
         type: Boolean,
         default: false
+    },
+    canAskAssistant: {
+        type: Boolean,
+        default: false
     }
 });
 // The popover evaluates sessionId during setup, so it must follow defineProps.
@@ -268,6 +279,22 @@ const emitRewind = () => {
     const messageId = persistedAssistantId(props.session) || props.session?.id
     if (messageId) emit('rewind', messageId)
 }
+const assistant = useAssistantStore()
+const canAskAssistant = computed(() => props.canAskAssistant === true && !props.embeddedMode)
+const askAssistantTitle = computed(() =>
+    t('assistant.askAboutAnswer', { name: assistant.displayName || t('assistant.title') }))
+const emitAskAssistant = () => {
+    const messageId = persistedAssistantId(props.session) || props.session?.id
+    if (messageId) emit('ask-assistant', messageId)
+}
+const answerAssistantActions = computed(() => {
+    const source = JSON.stringify({ session_id: props.sessionId, message_id: persistedAssistantId(props.session) || props.session?.id })
+    return [
+        { key: 'document', label: t('assistant.actions.answerToDocument'), query: t('assistant.prompts.answerToDocument', { source }) },
+        { key: 'faq', label: t('assistant.actions.answerToFaq'), query: t('assistant.prompts.answerToFaq', { source }) },
+        { key: 'automation', label: t('assistant.actions.answerToAutomation'), query: t('assistant.prompts.answerToAutomation', { source }) },
+    ]
+})
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 
@@ -380,6 +407,13 @@ const markdownRenderer = createChatMarkdownRenderer({
     invalidImageHtml: () => `<p>${t('error.invalidImageLink')}</p>`,
     isValidImageUrl: (href) => isArtifactRefHref(href) || isValidImageURL(href),
 });
+
+installArtifactLinkRenderer(markdownRenderer, () => ({
+    artifacts: artifactList.value,
+    labels: artifactRefLabels.value,
+    context: artifactRefContext.value,
+    streaming: !props.session?.is_completed,
+}));
 
 // 计算属性：将 Markdown 文本转换为 tokens
 const mentionedItems = computed(() => {

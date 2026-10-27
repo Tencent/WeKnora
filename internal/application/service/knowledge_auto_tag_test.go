@@ -92,15 +92,25 @@ func (s *autoTagKBService) GetKnowledgeBaseByIDOnly(
 	return s.kb, nil
 }
 
-type autoTagChunkService struct {
-	interfaces.ChunkService
+type autoTagChunkRepo struct {
+	interfaces.ChunkRepository
 	chunks []*types.Chunk
 }
 
-func (s *autoTagChunkService) ListChunksByKnowledgeID(
-	context.Context, string,
+func (r *autoTagChunkRepo) ListChunksByKnowledgeIDAndTypes(
+	_ context.Context, _ uint64, _ string, chunkTypes []types.ChunkType,
 ) ([]*types.Chunk, error) {
-	return s.chunks, nil
+	wanted := make(map[types.ChunkType]struct{}, len(chunkTypes))
+	for _, t := range chunkTypes {
+		wanted[t] = struct{}{}
+	}
+	out := make([]*types.Chunk, 0, len(r.chunks))
+	for _, c := range r.chunks {
+		if _, ok := wanted[c.ChunkType]; ok {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 type autoTagChatModel struct {
@@ -152,7 +162,7 @@ func newAutoTagFixture(t *testing.T, response string, opts ...func(*autoTagFixtu
 			SummaryModelID: "model-1",
 			AutoTagConfig:  &types.AutoTagConfig{Enabled: true, MaxTags: 3},
 		}},
-		chunkService: &autoTagChunkService{chunks: []*types.Chunk{
+		chunkRepo: &autoTagChunkRepo{chunks: []*types.Chunk{
 			{ChunkType: types.ChunkTypeText, Content: "quarterly HR policy", StartAt: 1},
 		}},
 		modelService: &stubModelService{chatModel: chatModel},
@@ -371,4 +381,38 @@ func TestEnqueueAutoTagTaskCarriesScopeWithoutOwningFinalizingSlot(t *testing.T)
 	assert.Equal(t, "kb", payload.KnowledgeBaseID)
 	assert.Equal(t, "doc", payload.KnowledgeID)
 	assert.Equal(t, 4, payload.Attempt)
+}
+
+// For a scanned PDF parsed with OCR the text chunks hold only image-reference
+// placeholders while the real content lives in the image_ocr / image_caption
+// children. The classifier must receive the OCR text, not placeholders alone.
+func TestAutoTagHandleFeedsOCRChunksToClassifier(t *testing.T) {
+	scanned := []*types.Chunk{
+		{
+			ID: "p1", ChunkType: types.ChunkTypeText,
+			Content: "![page_1.jpg](resource://k/scanned/page_1.jpg)", StartAt: 1,
+		},
+		{
+			ID: "ocr1", ChunkType: types.ChunkTypeImageOCR,
+			Content: "quarterly HR policy for construction safety", ParentChunkID: "p1",
+		},
+		{
+			ID: "cap1", ChunkType: types.ChunkTypeImageCaption,
+			Content: "figure: policy cover", ParentChunkID: "p1",
+		},
+	}
+	fixture := newAutoTagFixture(t, `{"matches":[{"index":1,"confidence":0.9}]}`)
+	fixture.service.chunkRepo = &autoTagChunkRepo{chunks: scanned}
+	require.NoError(t, fixture.handle(t))
+
+	prompt := ""
+	for _, m := range fixture.chatModel.messages {
+		prompt += m.Content + "\n"
+	}
+	assert.Contains(t, prompt, "quarterly HR policy for construction safety",
+		"OCR text must reach the classifier")
+	assert.Contains(t, prompt, "figure: policy cover", "captions must reach the classifier")
+	assert.Contains(t, prompt, "resource://k/scanned/page_1.jpg",
+		"the placeholder itself is still part of the document")
+	assert.Equal(t, []string{"tag-a"}, fixture.repo.added)
 }

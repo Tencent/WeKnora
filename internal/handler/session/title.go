@@ -9,6 +9,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Use the validated request override, which has already been cleared when the
+// conversation executes in another workspace. An empty result keeps the
+// title service's existing default-model fallback.
+func (rc *qaRequestContext) titleModelID() string {
+	if rc.summaryModelID != "" {
+		return rc.summaryModelID
+	}
+	if rc.customAgent != nil {
+		return rc.customAgent.Config.ModelID
+	}
+	return ""
+}
+
 // GenerateTitle godoc
 // @Summary      生成会话标题
 // @Description  根据消息内容自动生成会话标题

@@ -1,10 +1,13 @@
 package docparser
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -85,17 +88,15 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 	if fileName == "" {
 		fileName = "image.png"
 	}
-	refPath := "images/" + fileName
-	// Encode spaces so the markdown URL is valid and matches the regex in ResolveAndStore.
-	safeRef := strings.ReplaceAll(refPath, " ", "%20")
+	markdown, refPath := originalImageMarkdown(fileName)
 	mime := http.DetectContentType(data)
 
 	return &types.ReadResult{
-		MarkdownContent: fmt.Sprintf("![%s](%s)", fileName, safeRef),
+		MarkdownContent: markdown,
 		ImageRefs: []types.ImageRef{
 			{
 				Filename:    fileName,
-				OriginalRef: safeRef,
+				OriginalRef: refPath,
 				MimeType:    mime,
 				ImageData:   data,
 				IsOriginal:  true,
@@ -103,6 +104,18 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 		},
 	}
 }
+
+// originalImageMarkdown keeps a filename from changing Markdown syntax. The
+// destination is also the exact lookup key used by ImageResolver.
+func originalImageMarkdown(fileName string) (markdown, refPath string) {
+	refPath = "images/" + url.PathEscape(fileName)
+	alt := markdownImageAltReplacer.Replace(fileName)
+	return fmt.Sprintf("![%s](%s)", alt, refPath), refPath
+}
+
+var markdownImageAltReplacer = strings.NewReplacer(
+	`\`, `\\`, "[", `\[`, "]", `\]`, "\r\n", " ", "\r", " ", "\n", " ",
+)
 
 // IsImageFormat returns true if the file type is a recognized image format.
 func IsImageFormat(fileType string) bool {
@@ -152,13 +165,12 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 	if fileName == "" {
 		fileName = "image." + ft
 	}
-	refPath := "images/" + fileName
+	imgLine, refPath := originalImageMarkdown(fileName)
 
-	if strings.Contains(mdContent, refPath) {
+	if strings.Contains(mdContent, "images/"+fileName) || strings.Contains(mdContent, refPath) {
 		return mdContent, imageRefs
 	}
 
-	imgLine := fmt.Sprintf("![%s](%s)", fileName, refPath)
 	if strings.TrimSpace(mdContent) == "" {
 		mdContent = imgLine
 	} else {
@@ -178,9 +190,14 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 }
 
 func csvToMarkdown(data []byte) (string, error) {
-	reader := csv.NewReader(strings.NewReader(string(data)))
+	// Excel's "CSV UTF-8" export starts the file with a byte order mark.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	reader := csv.NewReader(bytes.NewReader(data))
 	reader.LazyQuotes = true
 	reader.TrimLeadingSpace = true
+	// Rows may differ in length. The default, the first row's length, made
+	// one short or long row fail the whole file.
+	reader.FieldsPerRecord = -1
 
 	records, err := reader.ReadAll()
 	if err != nil {
@@ -190,34 +207,83 @@ func csvToMarkdown(data []byte) (string, error) {
 		return "", nil
 	}
 
+	// The table is as wide as the widest row, so no field is dropped, and
+	// shorter rows are padded with empty cells.
+	width := 0
+	for _, record := range records {
+		width = max(width, len(record))
+	}
+
+	// Padding every row out to the widest row amplifies a ragged file
+	// quadratically: a few wide rows among many narrow ones turn
+	// rows × columns cells into output. Budget the exact rendered size
+	// before building the table and reject the blowup with an error
+	// instead of allocating it.
+	if size := projectedCSVTableSize(records, width); size > maxCSVMarkdownBytes {
+		return "", fmt.Errorf(
+			"csv table would render %d bytes (padding %d rows to %d columns) from %d bytes of input; "+
+				"the conversion limit is %d bytes — flatten or split the file before uploading",
+			size, len(records), width, len(data), maxCSVMarkdownBytes,
+		)
+	}
+
 	var sb strings.Builder
+	writeRow := func(record []string) {
+		cells := make([]string, width)
+		for i, cell := range record {
+			cells[i] = csvCellReplacer.Replace(cell)
+		}
+		sb.WriteString("| ")
+		sb.WriteString(strings.Join(cells, " | "))
+		sb.WriteString(" |\n")
+	}
 
 	// Header row
-	header := records[0]
-	sb.WriteString("| ")
-	sb.WriteString(strings.Join(header, " | "))
-	sb.WriteString(" |\n")
+	writeRow(records[0])
 
 	// Separator
 	sb.WriteString("|")
-	for range header {
+	for range width {
 		sb.WriteString(" --- |")
 	}
 	sb.WriteString("\n")
 
 	// Data rows
 	for _, row := range records[1:] {
-		sb.WriteString("| ")
-		// Pad row if shorter than header
-		cells := make([]string, len(header))
-		for i := range cells {
-			if i < len(row) {
-				cells[i] = row[i]
-			}
-		}
-		sb.WriteString(strings.Join(cells, " | "))
-		sb.WriteString(" |\n")
+		writeRow(row)
 	}
 
 	return sb.String(), nil
 }
+
+// maxCSVMarkdownBytes caps the rendered size of one CSV upload's table.
+// A legitimate conversion renders roughly the input size plus table
+// syntax, and uploads default to 50 MB (MAX_FILE_SIZE_MB), so a table
+// anywhere near 64 MB means widest-row padding is amplifying a
+// pathological file rather than preserving its fields.
+const maxCSVMarkdownBytes = 64 << 20
+
+// projectedCSVTableSize returns the exact byte length of the GFM table
+// csvToMarkdown renders for these records padded to width cells —
+// including the escaping csvCellReplacer applies — without allocating
+// the output.
+func projectedCSVTableSize(records [][]string, width int) int64 {
+	// A rendered row is "| " + width cells joined by " | " + " |\n";
+	// the separator line is "|" + width times " --- |" + "\n".
+	total := int64(len("|") + width*len(" --- |") + len("\n"))
+	for _, record := range records {
+		total += int64(len("| ") + len(" |\n") + 3*(width-1))
+		for _, cell := range record {
+			n, _ := csvCellReplacer.WriteString(io.Discard, cell)
+			total += int64(n)
+		}
+	}
+	return total
+}
+
+// csvCellReplacer escapes what would end a GFM table cell or row: a pipe, and
+// the line breaks of a quoted multi-line field. They become <br />, as the
+// html-to-markdown table plugin writes them.
+// Escape existing backslashes too, so a literal backslash before a pipe does
+// not consume the pipe's escape and turn it back into a column separator.
+var csvCellReplacer = strings.NewReplacer(`\`, `\\`, "|", `\|`, "\r\n", "<br />", "\n", "<br />", "\r", "<br />")

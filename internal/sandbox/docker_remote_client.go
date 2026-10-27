@@ -47,6 +47,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
@@ -725,6 +726,19 @@ func (c *DockerRemoteClient) Exec(
 	return result, nil
 }
 
+// dockerKeepAliveTimeout bounds the no-op exec KeepAlive runs.
+const dockerKeepAliveTimeout = 10 * time.Second
+
+// KeepAlive runs a no-op exec. dockerExecCommand touches the activity marker on
+// every exec, and the marker's mtime is all the idle sweeper reads, so ttl is
+// not needed here.
+func (c *DockerRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, _ time.Duration) error {
+	_, err := c.Exec(ctx, handle, RemoteExecRequest{
+		Command: "true", Timeout: dockerKeepAliveTimeout, User: DefaultSandboxExecUser,
+	})
+	return err
+}
+
 // dockerExecGrace is the slack between the in-container timeout and the
 // client-side deadline. It covers the round-trip and the wrapper's own
 // teardown so a script killed at the deadline is still reported as Killed
@@ -1321,12 +1335,18 @@ func dockerEnvSlice(env map[string]string) []string {
 }
 
 // firstNonEmptyLine trims a command's stderr down to something a user-facing
-// error can carry.
+// error can carry. The byte cap keeps one runaway line out of the error, and
+// the trailing partial rune (if the cap lands inside a multi-byte character)
+// is dropped so the surfaced message stays valid UTF-8.
 func firstNonEmptyLine(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			if len(trimmed) > 200 {
-				return trimmed[:200] + "…"
+				cut := trimmed[:200]
+				for len(cut) > 0 && !utf8.ValidString(cut) {
+					cut = cut[:len(cut)-1]
+				}
+				return cut + "…"
 			}
 			return trimmed
 		}

@@ -133,13 +133,45 @@ func TestFetcherUsesBrowserFallbackForClientRenderedPage(t *testing.T) {
 }
 
 func TestNewFetcherKeepsAgentCompatibleTimeout(t *testing.T) {
-	assert.Equal(t, 60*time.Second, NewFetcher().timeout)
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "")
+	assert.Equal(t, 30*time.Second, NewFetcher().timeout)
+	assert.Equal(t, PageFetchTimeout(), NewFetcher().timeout)
+
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "150s")
+	assert.Equal(t, 150*time.Second, NewFetcher().timeout)
 }
 
 func TestNewPipelineFetcherUsesHTTPOnlyAndLegacyTimeout(t *testing.T) {
 	fetcher := NewPipelineFetcher()
 	assert.Equal(t, 15*time.Second, fetcher.timeout)
 	assert.Nil(t, fetcher.renderBrowser)
+}
+
+func TestPipelineFetcherIgnoresWebFetchToolTimeout(t *testing.T) {
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "180")
+	fetcher := NewPipelineFetcher()
+	assert.Equal(t, 15*time.Second, fetcher.timeout)
+	assert.Nil(t, fetcher.renderBrowser)
+	assert.Equal(t, 180*time.Second, PageFetchTimeout())
+}
+
+func TestPageFetchTimeout(t *testing.T) {
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "")
+	assert.Equal(t, 30*time.Second, PageFetchTimeout())
+
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "150s")
+	assert.Equal(t, 150*time.Second, PageFetchTimeout())
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "3m")
+	assert.Equal(t, 3*time.Minute, PageFetchTimeout())
+	t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", "180")
+	assert.Equal(t, 180*time.Second, PageFetchTimeout())
+
+	for _, raw := range []string{"", "0", "-1", "0s", "-5s", "nope", "   "} {
+		t.Run("fallback_"+raw, func(t *testing.T) {
+			t.Setenv("WEKNORA_WEB_FETCH_TIMEOUT", raw)
+			assert.Equal(t, 30*time.Second, PageFetchTimeout())
+		})
+	}
 }
 
 func TestFetcherReturnsErrorWhenBrowserFallbackFailsOnSPA(t *testing.T) {
@@ -240,4 +272,27 @@ func newTestFetcher(client *http.Client) *Fetcher {
 		maxBodySize: maxBodySize,
 		validateURL: func(string) error { return nil },
 	}
+}
+
+func TestPinnedDialFallsBackToAnotherValidatedAddress(t *testing.T) {
+	var addresses []string
+	expected, peer := net.Pipe()
+	defer func() { _ = expected.Close() }()
+	defer func() { _ = peer.Close() }()
+	f := &Fetcher{
+		resolveIPs: func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("2606:4700:4700::1111"), net.ParseIP("1.1.1.1")}, nil
+		},
+		dialContext: func(_ context.Context, _ string, address string) (net.Conn, error) {
+			addresses = append(addresses, address)
+			if len(addresses) == 1 {
+				return nil, errors.New("IPv6 route unavailable")
+			}
+			return expected, nil
+		},
+	}
+	conn, err := f.pinnedDialContext()(t.Context(), "tcp", "example.com:443")
+	require.NoError(t, err)
+	require.Same(t, expected, conn)
+	require.Equal(t, []string{"[2606:4700:4700::1111]:443", "1.1.1.1:443"}, addresses)
 }

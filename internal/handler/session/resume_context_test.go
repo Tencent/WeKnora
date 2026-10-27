@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,6 +19,90 @@ import (
 type resumeMessages struct {
 	interfaces.MessageService
 	rows map[string]*types.Message
+}
+
+type resumeKBService struct {
+	interfaces.KnowledgeBaseService
+	*wikiFixerKBLookupStub
+}
+
+func (s *resumeKBService) GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	return s.wikiFixerKBLookupStub.GetKnowledgeBaseByIDOnly(ctx, id)
+}
+
+type resumeKBShareService struct {
+	interfaces.KBShareService
+	*wikiFixerKBShareStub
+}
+
+func (s *resumeKBShareService) CheckTenantKBPermission(
+	ctx context.Context, kbID string, tenantID uint64, role types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
+	return s.wikiFixerKBShareStub.CheckTenantKBPermission(ctx, kbID, tenantID, role)
+}
+
+func TestBuildResumeRequestRevalidatesSharedKBBuiltin(t *testing.T) {
+	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
+	for _, agentID := range []string{types.BuiltinWeKnoraAssistantID, types.BuiltinWikiFixerID} {
+		for _, allowed := range []bool{true, false} {
+			name := agentID + "/editor"
+			if !allowed {
+				name = agentID + "/revoked"
+			}
+			t.Run(name, func(t *testing.T) {
+				c, ctx := newResolveAgentTestContext(1)
+				ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleContributor)
+				messages := &resumeMessages{rows: map[string]*types.Message{
+					"m": {ID: "m", SessionID: "s", RunState: types.MessageRunStateAwaitingInput},
+				}}
+				b := hitl.NewBroker(nil, nil)
+				request, err := json.Marshal(types.ResumableAgentRequest{
+					AgentID: agentID, AgentTenantID: 2, KnowledgeBaseIDs: []string{"shared-kb"},
+					PageContext: &types.PageContext{KnowledgeBaseID: "shared-kb"},
+				})
+				require.NoError(t, err)
+				snapshot, err := json.Marshal(agent.RunSnapshot{Version: agent.RunSnapshotVersion, Request: request})
+				require.NoError(t, err)
+				require.NoError(t, b.Suspensions().Save(ctx, &types.AgentRunSuspension{
+					AssistantMessageID: "m", PromptID: "p", Snapshot: types.JSON(snapshot),
+				}))
+				permission := types.OrgRoleViewer
+				if allowed {
+					permission = types.OrgRoleEditor
+				}
+				share := &wikiFixerKBShareStub{permission: permission, isShared: true}
+				own := types.GetBuiltinAgent(agentID, 1)
+				h := &Handler{
+					promptBroker: b, messageService: messages, sessionService: &resumeSessionService{},
+					streamManager:      stream.NewMemoryStreamManager(),
+					customAgentService: &resolveOwnAgentStub{agent: own},
+					agentShareService:  &resolveAgentShareStub{err: service.ErrAgentShareNotFound},
+					knowledgebaseService: &resumeKBService{wikiFixerKBLookupStub: &wikiFixerKBLookupStub{
+						kb: &types.KnowledgeBase{ID: "shared-kb", TenantID: 2},
+					}},
+					kbShareService: &resumeKBShareService{wikiFixerKBShareStub: share},
+				}
+				req, _, err := h.buildResumeRequest(ctx, c, &types.AgentPrompt{
+					ID: "p", SessionID: "s", AssistantMessageID: "m", Kind: types.AgentPromptKindToolApproval,
+				})
+				if !allowed {
+					require.Error(t, err)
+					require.Nil(t, req)
+					require.Equal(t, types.MessageRunStateAwaitingInput, messages.rows["m"].RunState)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, uint64(2), req.effectiveTenantID)
+					require.Equal(t, uint64(2), req.customAgent.TenantID)
+					require.Equal(t, []string{"shared-kb"}, req.customAgent.Config.KnowledgeBases)
+					require.False(t, req.sharedAgentReadOnly)
+					require.Equal(t, "shared-kb", req.buildQARequest().PageContext.KnowledgeBaseID)
+				}
+				require.Equal(t, "shared-kb", share.checkedKBID)
+				require.Equal(t, uint64(1), share.checkedTenantID)
+				require.Equal(t, uint64(1), own.TenantID)
+			})
+		}
+	}
 }
 
 func (m *resumeMessages) GetMessage(_ context.Context, sessionID, id string) (*types.Message, error) {

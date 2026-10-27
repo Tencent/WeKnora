@@ -156,6 +156,47 @@ func TestDecodesTheScoreAlias(t *testing.T) {
 	assert.InDelta(t, 0.42, got[0].Score, 1e-9)
 }
 
+// sglangBareArrayResponse is what SGLang's /v1/rerank answers to the same
+// request: a bare array with score/document instead of the Cohere envelope.
+// Self-hosted Qwen3-Reranker deployments are commonly served this way.
+const sglangBareArrayResponse = `[
+  {"score": 0.0015978454940173438, "document": "doc one", "index": 0, "meta_info": null},
+  {"score": 0.0011695108220694027, "document": "doc two", "index": 1, "meta_info": null}
+]`
+
+func TestDecodesABareArrayResponse(t *testing.T) {
+	server, _, _ := serve(t, sglangBareArrayResponse)
+	defer server.Close()
+
+	c := newClient(t, server.URL+"/v1", api.RerankSettings{})
+	got, err := c.Rerank(context.Background(), "q", []string{"doc one", "doc two"})
+	require.NoError(t, err)
+	assert.Equal(t, []api.RerankResult{
+		{Index: 0, Score: 0.0015978454940173438, Text: "doc one"},
+		{Index: 1, Score: 0.0011695108220694027, Text: "doc two"},
+	}, got)
+}
+
+func TestBareArrayResponseStillValidatesIndexes(t *testing.T) {
+	server, _, _ := serve(t, `[{"index":5,"score":0.5,"document":"d"}]`)
+	defer server.Close()
+
+	c := newClient(t, server.URL, api.RerankSettings{})
+	_, err := c.Rerank(context.Background(), "q", []string{"d"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "out of range")
+}
+
+func TestRejectsAnUnsupportedResponseEnvelope(t *testing.T) {
+	server, _, _ := serve(t, `"not a rerank response"`)
+	defer server.Close()
+
+	c := newClient(t, server.URL, api.RerankSettings{})
+	_, err := c.Rerank(context.Background(), "q", []string{"d"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode response")
+}
+
 func TestAppendsTheRerankPathToABareBaseURL(t *testing.T) {
 	server, path, _ := serve(t, `{"results":[]}`)
 	defer server.Close()

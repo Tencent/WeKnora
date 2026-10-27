@@ -25,7 +25,7 @@
       :close-on-overlay-click="true"
       :destroy-on-close="false"
       attach="body"
-      :z-index="3000"
+      :z-index="2300"
     >
       <div class="drawer-body">
         <!-- Input section -->
@@ -99,6 +99,9 @@
               <span v-if="fallbackWarning" class="fallback-warning">
                 {{ $t('knowledgeEditor.chunking.debug.fallbackWarning') }}
               </span>
+              <AssistantActionButton class="chunk-analysis-action"
+                :label="$t('assistant.actions.analyzeChunks')" :query="$t('assistant.prompts.analyzeChunks')"
+                :selection="assistantPreviewSelection" />
             </div>
             <div v-if="(result.rejected || []).length > 0" class="tier-row">
               <span class="result-label">{{ $t('knowledgeEditor.chunking.debug.rejected') }}:</span>
@@ -216,7 +219,8 @@ import {
   ErrorCircleIcon,
 } from 'tdesign-icons-vue-next'
 import { previewChunking } from '@/api/chunker'
-import type { PreviewChunkingResponse, StrategyTier } from '@/types/chunker'
+import type { PreviewChunkingRequest, PreviewChunkingResponse, StrategyTier } from '@/types/chunker'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import { CHUNKING_SAMPLES, DEFAULT_SAMPLE_ID } from './chunkingSamples'
 
 interface Props {
@@ -244,7 +248,28 @@ const sample = ref('')
 const loading = ref(false)
 const error = ref('')
 const result = ref<PreviewChunkingResponse | null>(null)
+const previewInput = ref<PreviewChunkingRequest | null>(null)
 const expandedChunks = ref(new Set<number>())
+
+const assistantPreviewSelection = computed(() => {
+  const input = previewInput.value
+  const output = result.value
+  if (!input || !output) return undefined
+  return {
+    field: t('knowledgeEditor.chunking.debug.toggle'),
+    // The backend accepts at most 4000 selection characters. Keep parameters,
+    // statistics and both kinds of excerpt within that budget.
+    text: [
+      'Preview excerpts (not the full document):',
+      `Parameters: ${JSON.stringify(input.chunking_config)}`,
+      `Selected strategy: ${output.selected_tier}`,
+      `Statistics: ${JSON.stringify(output.stats)}`,
+      `Original text excerpt:\n${input.text.slice(0, 900)}`,
+      ...output.chunks.slice(0, 3).map(chunk =>
+        `Chunk #${chunk.seq} [${chunk.start}–${chunk.end}], ${chunk.size_chars} characters:\n${chunk.content.slice(0, 600)}`),
+    ].join('\n\n').slice(0, 4000),
+  }
+})
 
 const samples = CHUNKING_SAMPLES
 
@@ -264,6 +289,7 @@ const loadSample = (id: string) => {
   // Clear any previous run so the user isn't looking at stale results
   // attributed to the old text.
   result.value = null
+  previewInput.value = null
   error.value = ''
   expandedChunks.value = new Set()
 }
@@ -277,25 +303,27 @@ const runPreview = async () => {
   loading.value = true
   error.value = ''
   result.value = null
+  previewInput.value = null
   expandedChunks.value = new Set()
   try {
     // Send all fields explicitly (including empty / 0 / []) so the
     // preview faithfully reflects what would happen on save. Mirrors
     // the buildSubmitData convention in KnowledgeBaseEditorModal.
-    const resp = await previewChunking({
+    const input: PreviewChunkingRequest = {
       text: sample.value,
       chunking_config: {
         chunk_size: props.config.chunkSize,
         chunk_overlap: props.config.chunkOverlap,
-        separators: props.config.separators,
+        separators: [...props.config.separators],
         enable_parent_child: props.config.enableParentChild,
         parent_chunk_size: props.config.parentChunkSize,
         child_chunk_size: props.config.childChunkSize,
         strategy: props.config.strategy ?? '',
         token_limit: props.config.tokenLimit ?? 0,
-        languages: props.config.languages ?? []
+        languages: [...(props.config.languages ?? [])]
       }
-    })
+    }
+    const resp = await previewChunking(input)
     // The axios interceptor in utils/request.ts already unwraps the
     // outer envelope and returns the response body. So resp here is
     // { success: true, data: PreviewChunkingResponse } directly.
@@ -310,6 +338,7 @@ const runPreview = async () => {
     if (!resp.data) {
       throw new Error('response missing data')
     }
+    previewInput.value = input
     result.value = resp.data
   } catch (e: any) {
     // Pull a useful message out of the error shapes our request layer
@@ -361,6 +390,10 @@ const tierTheme = (tier: StrategyTier) => {
 </script>
 
 <style lang="less" scoped>
+.chunk-analysis-action {
+  margin-left: auto;
+}
+
 .kb-chunking-debug {
   flex-shrink: 0;
 }

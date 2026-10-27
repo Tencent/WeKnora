@@ -20,9 +20,22 @@ export function Header() {
   const menu = useRef<HTMLButtonElement>(null);
   return <header className="wk-header" onKeyDown={event => { if (event.key === "Escape" && open) { setOpen(false); menu.current?.focus(); } }}>
     <div className="wk-header-inner">
-      <a className="wk-brand" href="/" aria-label="WeKnora 首页"><BrandLogo priority /></a>
+      <a className="wk-brand" href="/" target="_self" aria-label="WeKnora 首页"><BrandLogo priority /></a>
       <nav id="main-navigation" className={`wk-navigation ${open ? "is-open" : ""}`} aria-label="主导航" onClick={() => setOpen(false)}>
-        {siteNavigation.map(item => <a key={item.href} href={item.href}>{item.label}{item.badge && <span className="wk-new-label">{item.badge}</span>}</a>)}
+        {siteNavigation.map(item => {
+          if (item.children?.length) {
+            return (
+              <div key={item.href} className="wk-nav-menu">
+                <a href={item.href}>{item.label}{item.badge && <span className="wk-new-label">{item.badge}</span>}</a>
+                <button type="button" className="wk-nav-caret" aria-label={`${item.label}栏目`}><HeaderIcon name="chevron" /></button>
+                <div className="wk-nav-dropdown">
+                  {item.children.map(child => <a key={child.href} href={child.href}>{child.label}</a>)}
+                </div>
+              </div>
+            );
+          }
+          return <a key={item.href} href={item.href}>{item.label}{item.badge && <span className="wk-new-label">{item.badge}</span>}</a>;
+        })}
         <a className="wk-mobile-github" href={repositoryUrl} target="_blank" rel="noreferrer">GitHub <HeaderIcon name="external" /></a>
       </nav>
       <ThemeToggle />

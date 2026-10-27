@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,15 +94,30 @@ type fakeRemoteClient struct {
 	createHook  func(context.Context, RemoteCreateRequest) error
 	afterCreate func(RemoteSandboxHandle)
 	deleteHook  func(context.Context, string) error
+	execHook    func(RemoteExecRequest) (*RemoteExecResult, error)
 
-	makeDirPaths        []string
-	failMakeDirIfExists bool
-	execRequests        []RemoteExecRequest
-	writeFiles          []fakeRemoteWriteFile
+	makeDirPaths         []string
+	failMakeDirIfExists  bool
+	vanishOnFirstMakeDir bool
+	missingPathMakeDir   bool
+	execRequests         []RemoteExecRequest
+	writeFiles           []fakeRemoteWriteFile
 
 	// snapshots maps snapshotID -> source sandboxID.
 	snapshots   map[string]string
 	snapshotSeq int
+
+	// ptyClosed is set when a fake PTY opened on this client is closed.
+	ptyClosed atomic.Bool
+
+	// terminalOptions records OpenTerminal arguments so tests can see the
+	// options the manager actually passed through.
+	terminalOptions []RemoteTerminalOptions
+
+	// openTerminalHook, when set, runs instead of opening immediately. It
+	// sees the context the manager passed, so a test can block the dial
+	// until that context is cancelled.
+	openTerminalHook func(context.Context) error
 }
 
 func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
@@ -326,6 +342,9 @@ func (c *fakeRemoteClient) Exec(
 	c.mu.Lock()
 	c.execRequests = append(c.execRequests, request)
 	c.mu.Unlock()
+	if c.execHook != nil {
+		return c.execHook(request)
+	}
 	return &RemoteExecResult{ExitCode: 0}, nil
 }
 
@@ -360,9 +379,19 @@ func (c *fakeRemoteClient) ListDir(
 	return nil, nil
 }
 
-func (c *fakeRemoteClient) MakeDir(_ context.Context, _ RemoteSandboxHandle, path string) error {
+func (c *fakeRemoteClient) MakeDir(_ context.Context, handle RemoteSandboxHandle, path string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.missingPathMakeDir {
+		return NewRemoteError(c.provider, "MakeDir", RemoteErrorKindNotFound, path+" does not exist", nil)
+	}
+	if c.vanishOnFirstMakeDir {
+		c.vanishOnFirstMakeDir = false
+		if handle != nil {
+			delete(c.sandboxes, handle.ID())
+		}
+		return NewRemoteError(c.provider, "MakeDir", RemoteErrorKindNotFound, "container vanished mid-op", nil)
+	}
 	if c.failMakeDirIfExists {
 		for _, existing := range c.makeDirPaths {
 			if existing == path {
@@ -449,10 +478,72 @@ func (c *fakeRemoteClient) addSandbox(
 	}
 }
 
+// addSandboxWithMetadata registers a running sandbox that already carries
+// metadata, the way a failed create can leave a duplicate behind.
+func (c *fakeRemoteClient) addSandboxWithMetadata(metadata map[string]string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextID++
+	id := fmt.Sprintf("%s-%d", c.provider, c.nextID)
+	c.sandboxes[id] = &fakeRemoteRecord{
+		id:        id,
+		state:     RemoteStateRunning,
+		rawState:  string(RemoteStateRunning),
+		metadata:  cloneStringMap(metadata),
+		startedAt: time.Now().UTC(),
+	}
+	return id
+}
+
 func (c *fakeRemoteClient) counts() (creates, connects, gets, lists, deletes int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.createCount, len(c.connectIDs), len(c.getIDs), c.listCount, len(c.deleteIDs)
+}
+
+func (c *fakeRemoteClient) OpenTerminal(
+	ctx context.Context, _ RemoteSandboxHandle, opts RemoteTerminalOptions,
+) (RemoteTerminalSession, error) {
+	if c.openTerminalHook != nil {
+		if err := c.openTerminalHook(ctx); err != nil {
+			return nil, err
+		}
+	}
+	c.mu.Lock()
+	c.terminalOptions = append(c.terminalOptions, opts)
+	c.mu.Unlock()
+	return &fakeRemoteTerminal{client: c}, nil
+}
+
+func (c *fakeRemoteClient) lastTerminalOptions() RemoteTerminalOptions {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.terminalOptions) == 0 {
+		return RemoteTerminalOptions{}
+	}
+	return c.terminalOptions[len(c.terminalOptions)-1]
+}
+
+func (c *fakeRemoteClient) terminalClosed() bool { return c.ptyClosed.Load() }
+
+// fakeRemoteTerminal is the PTY the shared fake opens. Close records that
+// the stream was torn down, which is how a lost admission lease is observed.
+type fakeRemoteTerminal struct {
+	client *fakeRemoteClient
+}
+
+func (s *fakeRemoteTerminal) Output() <-chan RemoteTerminalEvent  { return nil }
+func (s *fakeRemoteTerminal) PID() uint32                         { return 1 }
+func (s *fakeRemoteTerminal) Write(context.Context, []byte) error { return nil }
+func (s *fakeRemoteTerminal) Resize(context.Context, uint32, uint32) error {
+	return nil
+}
+
+func (s *fakeRemoteTerminal) Close() error {
+	if s.client != nil {
+		s.client.ptyClosed.Store(true)
+	}
+	return nil
 }
 
 func (c *fakeRemoteClient) hasSandbox(id string) bool {
