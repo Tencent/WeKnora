@@ -352,3 +352,31 @@ func TestValidateChunks_TolerantTinyTail(t *testing.T) {
 		t.Errorf("tiny last chunk should be tolerated, got: %s", v.Reason)
 	}
 }
+
+func TestNormalizeSplitterConfig_PreservesExplicitZeroOverlap(t *testing.T) {
+	// Wiki-only / atomic FAQ presets store ChunkSize>0 with ChunkOverlap=0.
+	cfg := NormalizeSplitterConfig(SplitterConfig{ChunkSize: 2048, ChunkOverlap: 0})
+	if cfg.ChunkSize != 2048 {
+		t.Fatalf("chunk size: got %d want 2048", cfg.ChunkSize)
+	}
+	if cfg.ChunkOverlap != 0 {
+		t.Fatalf("explicit zero overlap rewritten to %d", cfg.ChunkOverlap)
+	}
+}
+
+func TestEnsureDefaults_PreservesExplicitZeroOverlap(t *testing.T) {
+	cfg := ensureDefaults(SplitterConfig{ChunkSize: 512, ChunkOverlap: 0})
+	if cfg.ChunkOverlap != 0 {
+		t.Fatalf("explicit zero overlap rewritten to %d", cfg.ChunkOverlap)
+	}
+	if cfg.ChunkSize != 512 {
+		t.Fatalf("chunk size: got %d want 512", cfg.ChunkSize)
+	}
+}
+
+func TestNormalizeSplitterConfig_EmptyStillDefaultsOverlap(t *testing.T) {
+	cfg := NormalizeSplitterConfig(SplitterConfig{})
+	if cfg.ChunkOverlap != DefaultChunkOverlap {
+		t.Fatalf("empty config overlap: got %d want %d", cfg.ChunkOverlap, DefaultChunkOverlap)
+	}
+}

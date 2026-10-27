@@ -7,7 +7,53 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
+
+func TestEstimateMessageCountsAnthropicThinkingOnce(t *testing.T) {
+	est, err := NewEstimator()
+	require.NoError(t, err)
+	thinking := strings.Repeat("synthetic reasoning ", 1000)
+	signature := strings.Repeat("c2ln", 200)
+	blocks, err := json.Marshal([]map[string]string{
+		{"type": "thinking", "thinking": thinking, "signature": signature},
+		{"type": "redacted_thinking", "data": "opaque-block"},
+	})
+	require.NoError(t, err)
+	canonical := chat.Message{Role: "assistant", ReasoningMetadata: types.ProviderMetadata{
+		"anthropic_thinking_blocks": blocks,
+	}}
+	duplicated := canonical
+	duplicated.ReasoningContent = thinking
+	duplicated.ReasoningSignature = "anthropic-messages:" + signature
+	duplicated.ReasoningMetadata = types.ProviderMetadata{
+		"anthropic_thinking_blocks":   blocks,
+		"anthropic_redacted_thinking": json.RawMessage(`["opaque-block"]`),
+	}
+	require.Equal(t, est.EstimateMessage(&canonical), est.EstimateMessage(&duplicated),
+		"the provider replays the canonical blocks instead of the legacy display fields")
+	require.Equal(t, est.EstimateReasoningArtifacts(&canonical), est.EstimateReasoningArtifacts(&duplicated))
+	require.Greater(t, est.EstimateMessage(&duplicated), est.EstimateString(thinking),
+		"the signed thinking and opaque artifacts must still be counted")
+}
+
+func TestEstimateMessageInvalidAnthropicMetadataKeepsLegacyReasoning(t *testing.T) {
+	est, err := NewEstimator()
+	require.NoError(t, err)
+	for _, raw := range []string{`{}`, `[{"thinking":42}]`, `invalid`} {
+		t.Run(raw, func(t *testing.T) {
+			plain := chat.Message{Role: "assistant", ReasoningMetadata: types.ProviderMetadata{
+				"anthropic_thinking_blocks": json.RawMessage(raw),
+			}}
+			legacy := plain
+			legacy.ReasoningContent = strings.Repeat("legacy reasoning ", 100)
+			legacy.ReasoningSignature = "anthropic-messages:signature"
+			require.Equal(t, est.EstimateString(legacy.ReasoningContent)+est.EstimateString("signature"),
+				est.EstimateMessage(&legacy)-est.EstimateMessage(&plain),
+				"malformed canonical metadata falls back to the legacy fields on the wire")
+		})
+	}
+}
 
 // TestEstimateMessageCountsReasoningArtifacts pins the fix for the compaction
 // trigger under-measuring replayed assistant turns. An OpenAI Responses

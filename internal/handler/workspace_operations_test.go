@@ -44,7 +44,7 @@ func TestCurrentWorkspaceProfilePersistsOnlyRequestedFields(t *testing.T) {
 	} {
 		require.NoError(t, db.Create(tenant).Error)
 	}
-	svc := service.NewTenantService(repository.NewTenantRepository(db), nil)
+	svc := service.NewTenantService(repository.NewTenantRepository(db), nil, nil)
 	h := &TenantHandler{service: svc}
 	caller := types.Caller{TenantID: 7, UserID: "owner", Role: types.TenantRoleOwner}
 	enforce := true
