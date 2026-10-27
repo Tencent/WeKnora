@@ -20,8 +20,16 @@
                   {{ $t('agent.createAgent') }}
                 </t-button>
               </t-tooltip>
-              <AssistantActionButton v-if="authStore.hasRole('contributor')" icon-only
-                :label="$t('assistant.create.agentTitle')" :query="$t('assistant.prompts.startAgentCreation')" />
+              <t-tooltip v-if="authStore.hasRole('contributor') && assistantStore.pageAccess"
+                :content="$t('assistant.create.agentHint')" placement="bottom">
+                <t-button variant="text" theme="default" size="small" class="header-action-btn"
+                  style="--wails-draggable: no-drag" @click="assistantCreateVisible = true">
+                  <template #icon>
+                    <ResourceIcon type="assistant" :size="16" />
+                  </template>
+                  {{ $t('assistant.create.agentAction') }}
+                </t-button>
+              </t-tooltip>
             </div>
           </div>
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
@@ -589,6 +597,13 @@
             </template>
             <span>{{ $t('agent.createAgent') }}</span>
           </t-button>
+          <t-button v-if="authStore.hasRole('contributor') && assistantStore.pageAccess" variant="outline"
+            class="agent-create-btn" @click="assistantCreateVisible = true">
+            <template #icon>
+              <ResourceIcon type="assistant" :size="16" />
+            </template>
+            {{ $t('assistant.create.agentAction') }}
+          </t-button>
         </EmptyState>
 
         <!-- 空状态：收藏 / 最近 — 不放创建按钮，参见 KnowledgeBaseList 的同处理由 -->
@@ -622,6 +637,13 @@
               </span>
             </template>
             <span>{{ $t('agent.createAgent') }}</span>
+          </t-button>
+          <t-button v-if="authStore.hasRole('contributor') && assistantStore.pageAccess" variant="outline"
+            class="agent-create-btn" @click="assistantCreateVisible = true">
+            <template #icon>
+              <ResourceIcon type="assistant" :size="16" />
+            </template>
+            {{ $t('assistant.create.agentAction') }}
           </t-button>
         </EmptyState>
         <!-- 空状态：空间下 -->
@@ -698,6 +720,8 @@
       </div>
     </Transition>
 
+    <AssistantCreateDialog v-model:visible="assistantCreateVisible" kind="agent" @manual="handleCreateAgent" />
+
     <!-- 智能体编辑器弹窗 -->
     <AgentEditorModal :visible="editorVisible" :mode="editorMode" :agent="editingAgent"
       :initialSection="editorInitialSection"
@@ -728,7 +752,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
-import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
+import AssistantCreateDialog from '@/components/assistant/AssistantCreateDialog.vue'
+import { useAssistantStore } from '@/stores/assistant'
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
@@ -756,6 +781,8 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const assistantStore = useAssistantStore()
+const assistantCreateVisible = ref(false)
 const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
@@ -1636,7 +1663,8 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   }
 
   :deep(.t-icon),
-  :deep(.btn-icon-wrapper) {
+  :deep(.btn-icon-wrapper),
+  :deep(.resource-icon) {
     color: var(--td-brand-color);
     display: inline-flex;
     align-items: center;

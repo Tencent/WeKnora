@@ -120,7 +120,7 @@
               </div>
 
               <!-- MCP tool human approval (issue #1173) -->
-              <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
+              <div v-else-if="event.type === 'tool_approval_required' && showInlineToolApproval(event)" class="tool-event">
                 <ToolApprovalCard :pending-id="event.pending_id" :delegated-task="event.delegated_task" :service-name="event.service_name || ''"
                   :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
                   :args-json="event.args_json" :grant-scope="event.grant_scope" :grant-lapsed="event.grant_lapsed" :timeout-seconds="event.timeout_seconds"
@@ -148,6 +148,22 @@
                   :resolved="event.resolved" :authorized="event.authorized"
                   :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled"
                   v-bind="embedAuthProps" />
+              </div>
+
+              <div v-else-if="showInlineHostApproval(event)" class="tool-event">
+                <HostApprovalCard :pending-id="event.pending_id"
+                  :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
+                  :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
+                  :resolved="event.resolved" :approved="event.approved"
+                  :resolve-reason="event.resolve_reason" :resolve-scope="event.resolve_scope" />
+              </div>
+
+              <div v-else-if="showInlineToolApproval(event)" class="tool-event">
+                <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
+                  :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
+                  :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
+                  :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
               </div>
 
               <!-- Tool Call Event (non-thinking) -->
@@ -399,7 +415,7 @@
             </div>
 
             <!-- MCP tool human approval -->
-            <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
+            <div v-else-if="event.type === 'tool_approval_required' && showInlineToolApproval(event)" class="tool-event">
               <ToolApprovalCard :pending-id="event.pending_id" :delegated-task="event.delegated_task" :service-name="event.service_name || ''"
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
                 :grant-scope="event.grant_scope" :grant-lapsed="event.grant_lapsed" :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
@@ -425,6 +441,22 @@
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
                 :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
                 :canceled="event.canceled" v-bind="embedAuthProps" />
+            </div>
+
+            <div v-else-if="showInlineHostApproval(event)" class="tool-event">
+              <HostApprovalCard :pending-id="event.pending_id"
+                :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
+                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
+                :resolved="event.resolved" :approved="event.approved"
+                :resolve-reason="event.resolve_reason" :resolve-scope="event.resolve_scope" />
+            </div>
+
+            <div v-else-if="showInlineToolApproval(event)" class="tool-event">
+              <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
+                :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
+                :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
+                :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
+                :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
             </div>
 
             <!-- Thinking Tool Call -->
@@ -756,6 +788,8 @@ import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
+import HostApprovalCard from './HostApprovalCard.vue';
+import { isHostApprovalEvent } from './hostApproval';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -1178,6 +1212,9 @@ const props = defineProps<{
   followUpLoading?: boolean;
   canFork?: boolean;
   canRewind?: boolean;
+  // The main chat draws the approval above the composer. Embed and skill
+  // install have no composer slot, so they render the MCP card inline.
+  deferToolApprovals?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -1207,6 +1244,28 @@ const embedAuthProps = computed(() => ({
   embedSessionSig: props.embedSessionSig,
   embedVisitorId: props.embedVisitorId,
 }));
+
+// Host command cards stay above the chat composer. MCP cards render here
+// unless that composer is already showing them.
+const approvalEvent = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) =>
+  event?.type === 'tool_approval_required';
+
+// Pending host cards sit above the composer. A resolved approval stays in the
+// timeline so the turn still shows what was allowed or refused.
+const showInlineHostApproval = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) =>
+  approvalEvent(event) && isHostApprovalEvent(event) && !!event.resolved;
+
+const showInlineToolApproval = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) => {
+  if (!approvalEvent(event) || isHostApprovalEvent(event)) return false;
+  if (event.resolved) return true;
+  return !props.deferToolApprovals;
+};
+
+const hideApprovalFromTimeline = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) => {
+  if (event?.type === 'tool_approval_resolved') return true;
+  if (!approvalEvent(event)) return false;
+  return !showInlineHostApproval(event) && !showInlineToolApproval(event);
+};
 
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
@@ -2237,6 +2296,7 @@ const intermediateEvents = computed(() => {
   const hidden = hiddenThinkingEventIds.value;
   return result.filter((e: any) => {
     if (e.type === 'answer' || e.type === 'agent_complete') return false;
+    if (hideApprovalFromTimeline(e)) return false;
     // Mid-run injected user messages render as normal user bubbles in the
     // message list, not inside the steps tree — the tree template has no
     // branch for this type and would otherwise emit an empty node.
@@ -2266,7 +2326,7 @@ const displayEvents = computed(() => {
     // Injected user messages render as normal user bubbles in the message
     // list — never inside the agent timeline (the template has no branch for
     // the type and would render an empty card).
-    (e: any) => e.type !== 'user_message_injected',
+    (e: any) => e.type !== 'user_message_injected' && !hideApprovalFromTimeline(e),
   );
 
   // Quick-answer RAG: pipeline steps (including attachment prep) live in

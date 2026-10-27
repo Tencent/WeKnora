@@ -30,7 +30,7 @@ type hostSandboxDeps struct {
 	homeDir    string
 	appDataDir string
 	// sessionRoot is where auto-allocated session workspaces go. Empty falls
-	// back to ~/Documents/WeKnoraLite.
+	// back to ~/.weknora/sessions.
 	sessionRoot string
 	skillsRoot  string
 	// projects maps a session to a user-approved project directory.
@@ -76,7 +76,9 @@ func buildHostSandbox(deps hostSandboxDeps) *hostSandboxParts {
 	resolver := localsandbox.NewWorkspaceResolver(localsandbox.DirLayout{
 		SessionRoot: sessionRoot,
 	}, deps.projects)
-	builder := localsandbox.NewPolicyBuilder(homeDir, appDataDir).WithSkillsRoot(deps.skillsRoot)
+	builder := localsandbox.NewPolicyBuilder(homeDir, appDataDir).
+		WithSkillsRoot(deps.skillsRoot).
+		WithSessionRoot(sessionRoot)
 	svc := localsandbox.NewService(backend, resolver, builder, deps.modes)
 	return &hostSandboxParts{manager: adapter.New(svc), service: svc, builder: builder}
 }
@@ -161,7 +163,7 @@ func finishHostSandbox(parts *hostSandboxParts, skillsRoot string) service.HostS
 }
 
 func defaultHostSessionRoot(homeDir string) string {
-	return filepath.Join(homeDir, "Documents", "WeKnoraLite")
+	return filepath.Join(homeDir, ".weknora", "sessions")
 }
 
 func defaultHostSkillsRoot(homeDir string) string {

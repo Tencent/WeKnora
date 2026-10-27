@@ -2520,6 +2520,29 @@ export default {
         smartReasoning: '智能推理',
         indexSep: '、'
       }
+    },
+    hostApproval: {
+      titleDelete: '刪除檔案前需要你確認',
+      titleDangerous: '危險操作確認',
+      titleDenied: '命令被沙盒攔截，需要存取以下目錄',
+      titleGeneric: '需要你確認',
+      command: '命令',
+      cwd: '目錄',
+      grantPath: '需要存取',
+      accessWrite: '讀寫',
+      accessRead: '唯讀',
+      firstAttemptRan: '這條命令已經執行過一次並失敗，批准後會整條重新執行',
+      snippet: '攔截詳情',
+      sessionRules: '本工作階段允許後，同目錄下這類刪除不再詢問（檔名可以不同）',
+      reject: '拒絕',
+      approveOnce: '允許一次',
+      approveSession: '本工作階段允許',
+      approvedOnce: '已允許一次',
+      approvedSession: '本工作階段已允許',
+      rejectedTag: '已拒絕',
+      submitted: '已提交',
+      submitFailed: '提交失敗',
+      userRejected: '使用者拒絕'
     }
   },
   kbSettings: {
@@ -2896,6 +2919,7 @@ export default {
     chooseAction: "選擇一項功能，或直接輸入你的需求。",
     create: {
       agentTitle: "用自然語言建立智慧體",
+      agentAction: "用助手建立",
       agentHint: "說說它為誰服務、需要完成什麼，助手會協助選擇資源並建立。",
       agentPlaceholder: "例如：建立產品客服智慧體，根據產品知識庫回答使用問題，附上來源，找不到答案時說明原因。",
       automationTitle: "用助手建立任務",
@@ -8361,6 +8385,8 @@ export default {
       countHint: '當前目錄 {direct} 個文件，含子目錄共 {total} 個',
       filteredCount: '比對 {count} 個文件',
       title: '目錄',
+      folderSection: '資料夾',
+      documentSection: '文件',
       rootRow: '根目錄',
       rootRowTip: '知識庫根目錄，未歸入子資料夾的文件在此',
       folderCardCount: '{count} 個文件',

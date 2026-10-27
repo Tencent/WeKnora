@@ -968,6 +968,8 @@ export default {
       countHint: 'このフォルダ内 {direct} 件、サブフォルダを含めて {total} 件',
       filteredCount: '{count} 件一致',
       title: 'フォルダ',
+      folderSection: 'フォルダ',
+      documentSection: 'ドキュメント',
       rootRow: 'ルート',
       rootRowTip: 'ナレッジベースのルート。サブフォルダに属さないドキュメントはここに置かれます',
       folderCardCount: '{count}件のドキュメント',
@@ -6683,6 +6685,7 @@ export default {
       chooseAction: "機能を選ぶか、希望する内容を入力してください。",
     create: {
       agentTitle: "自然言語でエージェントを作成",
+      agentAction: "アシスタントで作成",
       agentHint: "利用者と目的を説明してください。アシスタントがリソースを選び、作成します。",
       agentPlaceholder: "例：製品ナレッジベースから質問に回答し、出典を示し、不明な点は説明するサポート担当。",
       automationTitle: "アシスタントでタスクを作成",
@@ -7184,6 +7187,29 @@ export default {
         smartReasoning: 'スマート推論',
         indexSep: '、'
       }
+    },
+    hostApproval: {
+      titleDelete: 'ファイルを削除する前に確認してください',
+      titleDangerous: '危険な操作の確認',
+      titleDenied: 'サンドボックスがこのコマンドを拒否しました。次のディレクトリへのアクセスが必要です',
+      titleGeneric: '確認が必要です',
+      command: 'コマンド',
+      cwd: 'ディレクトリ',
+      grantPath: 'アクセス先',
+      accessWrite: '読み書き',
+      accessRead: '読み取り専用',
+      firstAttemptRan: 'このコマンドは一度実行して失敗しています。承認するとコマンド全体が再実行されます',
+      snippet: '拒否の詳細',
+      sessionRules: 'このセッションで許可すると、このディレクトリでの次の削除は再確認しません（ファイル名は異なっても可）',
+      reject: '拒否',
+      approveOnce: '今回のみ許可',
+      approveSession: 'このセッションでは許可',
+      approvedOnce: '今回のみ許可しました',
+      approvedSession: 'このセッションでは許可済み',
+      rejectedTag: '拒否済み',
+      submitted: '送信しました',
+      submitFailed: '送信に失敗しました',
+      userRejected: 'ユーザーが拒否しました'
     },
     mcpOAuth: {
       waiting: '認可待ち · {target}',

@@ -1176,9 +1176,11 @@ func (s *agentService) registerSandboxShellTool(
 	}
 	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
 		resolver := s.userEnvResolver(ctx, config)
-		toolRegistry.RegisterTool(
-			tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config)),
-		)
+		shell := tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config))
+		if gate, ok := s.toolApprovalGate.(tools.HostApproval); ok {
+			shell = shell.WithHostApproval(gate)
+		}
+		toolRegistry.RegisterTool(shell)
 		logger.Infof(ctx, "Registered shell_exec tool")
 		s.registerShellExecAsync(ctx, toolRegistry, executor, resolver, config)
 	} else {

@@ -31,11 +31,13 @@ func (m *MAPMetric) Compute(metricInput *types.MetricInput) float64 {
 
 	// Calculate average precision for each query
 	for _, gtSet := range gtSets {
+		relevantCount := len(gtSet)
 		// Mark which predicted documents are relevant
 		predHits := make([]bool, len(ids))
 		for i, predID := range ids {
 			if _, ok := gtSet[predID]; ok {
 				predHits[i] = true
+				delete(gtSet, predID) // Count each relevant document only at its first retrieved rank.
 			} else {
 				predHits[i] = false
 			}
@@ -56,7 +58,7 @@ func (m *MAPMetric) Compute(metricInput *types.MetricInput) float64 {
 		}
 		// Normalize by number of relevant documents
 		if hitCount > 0 {
-			ap /= float64(hitCount)
+			ap /= float64(relevantCount)
 		}
 		apSum += ap
 	}
