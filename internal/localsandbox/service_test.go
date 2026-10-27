@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ type fakeBackend struct {
 	calls       []string
 	proc        Process
 	onSpawn     func()
+	preps       []*fakePrepared
 }
 
 func (f *fakeBackend) Name() string { return "fake" }
@@ -47,17 +49,25 @@ func (f *fakeBackend) EnsureReady(context.Context) error {
 }
 func (f *fakeBackend) TearDown(context.Context) error { return nil }
 
-type fakePrepared struct{ fp string }
+type fakePrepared struct {
+	fp     string
+	closed atomic.Bool
+}
 
-func (p fakePrepared) Fingerprint() string { return p.fp }
-func (p fakePrepared) Close() error        { return nil }
+func (p *fakePrepared) Fingerprint() string { return p.fp }
+func (p *fakePrepared) Close() error {
+	p.closed.Store(true)
+	return nil
+}
 
 func (f *fakeBackend) Prepare(_ context.Context, p Policy) (Prepared, error) {
+	prep := &fakePrepared{fp: p.Fingerprint()}
 	f.mu.Lock()
 	f.calls = append(f.calls, "prepare")
 	f.prepared = append(f.prepared, p.Fingerprint())
+	f.preps = append(f.preps, prep)
 	f.mu.Unlock()
-	return fakePrepared{fp: p.Fingerprint()}, nil
+	return prep, nil
 }
 
 func (f *fakeBackend) Spawn(_ context.Context, _ Prepared, cmd Command) (Process, error) {

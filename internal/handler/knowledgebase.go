@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"io"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -336,9 +338,9 @@ type HybridSearchResponse struct {
 
 // DuplicateKnowledgeBaseData is the data object of POST /knowledge-bases/{id}/duplicate.
 type DuplicateKnowledgeBaseData struct {
-	SourceID      string            `json:"source_id"`
-	TargetID      string            `json:"target_id"`
-	Message       string            `json:"message"`
+	SourceID      string            `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID      string            `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Message       string            `json:"message" extensions:"x-agent"`
 	KnowledgeBase KnowledgeBaseView `json:"knowledge_base"`
 }
 
@@ -356,7 +358,7 @@ type ImageAttrSchemaData struct {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id             path      string             true   "知识库ID"
+// @Param        id             path      string             true   "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Param        request        body      types.SearchParams true   "搜索参数"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200            {object}  handler.HybridSearchResponse  "搜索结果"
@@ -364,6 +366,8 @@ type ImageAttrSchemaData struct {
 // @Failure      404            {object}  errors.AppError               "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.search","risk":"probe","method":"post","max_items":30}
+// @x-agent-hint "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
 // @Router       /knowledge-bases/{id}/hybrid-search [post]
 // @Router       /knowledge-bases/{id}/hybrid-search [get]
 func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
@@ -379,8 +383,13 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 
 	// Parse request body
+	limitJSONBody(c, hybridSearchJSONMaxBytes)
 	var req types.SearchParams
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
@@ -470,8 +479,13 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge base")
 
 	// Parse request body
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
@@ -932,6 +946,16 @@ type PatchKnowledgeBaseRequest struct {
 	SummaryModelID *string `json:"summary_model_id" extensions:"x-agent=summary_model_id"`
 	// Storage instance to bind. Omit to keep the current one.
 	StorageBackendID *string `json:"storage_backend_id" extensions:"x-agent=storage_backend_id"`
+	// File extensions whose parser routing should change, e.g. ["pdf", "docx"]. Other file types keep their rules.
+	ParserFileTypes []string `json:"parser_file_types,omitempty" extensions:"x-agent,x-agent-maximum=20"`
+	// Engine name from knowledge_base.list_parser_engines; empty removes explicit routing for parser_file_types.
+	ParserEngine *string `json:"parser_engine,omitempty" extensions:"x-agent"`
+	// Treat the first XLSX row as headers. Requires parser_file_types including xlsx and an explicit parser_engine.
+	ParserXLSXFirstRowAsHeader *bool `json:"parser_xlsx_first_row_as_header,omitempty" extensions:"x-agent"`
+	// Run image captions in the default image pipeline. Set image_pipeline=default to select that pipeline.
+	ImageCaptionEnabled *bool `json:"image_caption_enabled,omitempty" extensions:"x-agent"`
+	// Run OCR in the default image pipeline. At least one of captions or OCR must stay enabled.
+	ImageOCREnabled *bool `json:"image_ocr_enabled,omitempty" extensions:"x-agent"`
 	// Chunking settings. Only the fields present are changed.
 	Chunking *types.ChunkingConfig `json:"chunking_config"`
 	// Indexing pipelines. A flag left out stays as it is.
@@ -998,6 +1022,12 @@ func applyKnowledgeBasePatch(
 	if err := merge("chunking_config", &chunking); err != nil {
 		return out, err
 	}
+	if patch.ParserFileTypes != nil || patch.ParserEngine != nil || patch.ParserXLSXFirstRowAsHeader != nil {
+		if err := applyParserRoutingPatch(&chunking, patch, sections); err != nil {
+			return out, err
+		}
+		used = true
+	}
 	cfg.ChunkingConfig = chunking
 
 	strategy := kb.IndexingStrategy
@@ -1010,10 +1040,39 @@ func applyKnowledgeBasePatch(
 	}
 
 	image := kb.ImageProcessingConfig
+	image.ImagePipelineParams = maps.Clone(image.ImagePipelineParams)
 	if err := merge("image_processing_config", &image); err != nil {
 		return out, err
 	}
-	if _, ok := sections["image_processing_config"]; ok && string(sections["image_processing_config"]) != "null" {
+	if patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
+		if types.ResolveImagePipelineID(&image) != types.ImagePipelineDefault {
+			return out, apperrors.NewBadRequestError(
+				"image_caption_enabled and image_ocr_enabled require image_pipeline=default",
+			)
+		}
+		if image.ImagePipelineParams == nil {
+			image.ImagePipelineParams = map[string]any{}
+		}
+		// The switch is stored under the slot of the pipeline that declares it,
+		// and nowhere else: a second spelling would be a setting with two homes,
+		// and the run reads only the slot. The keys come from the pipeline's own
+		// declaration rather than being spelled here, so a rename cannot leave
+		// this call site writing something nothing reads.
+		for key, value := range map[string]*bool{
+			service.ImageCaptionSwitchKey: patch.ImageCaptionEnabled,
+			service.ImageOCRSwitchKey:     patch.ImageOCREnabled,
+		} {
+			if value != nil {
+				image.ImagePipelineParams[types.SlotKey(string(types.ImagePipelineDefault), key)] = *value
+			}
+		}
+		used = true
+	}
+	if (len(
+		sections["image_processing_config"],
+	) > 0 && string(
+		sections["image_processing_config"],
+	) != "null") || patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
 		cfg.ImageProcessingConfig = &image
 	}
 
@@ -1165,7 +1224,7 @@ func fillOmittedIndexingFlags(raw []byte, kb *types.KnowledgeBase) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge_base.update","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Graph node types stay in the knowledge base editor."
+// @x-agent-hint "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Parsing settings (strategy, enable_parent_child, parent_chunk_size, child_chunk_size, VLM/ASR and question_generation_enabled/question_count) affect future parses; existing documents need an explicit knowledge.reparse or knowledge.batch_reparse. Read current settings first. For parser routing send parser_file_types and parser_engine from knowledge_base.list_parser_engines; empty parser_engine restores defaults. Use image_pipeline=smartocr for adaptive OCR, or default plus image_caption_enabled/image_ocr_enabled for manual image processing. Graph node types stay in the knowledge base editor."
 // @Router       /knowledge-bases/{id} [patch]
 func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1178,8 +1237,13 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
 		return
 	}
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
@@ -1343,17 +1407,18 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 }
 
 type CopyKnowledgeBaseRequest struct {
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id" binding:"required"`
+	TaskID string `json:"task_id"`
+	// Source knowledge base ID; the assistant always copies to a new knowledge base.
+	SourceID string `json:"source_id" binding:"required" extensions:"x-agent=knowledge_base_id"`
 	TargetID string `json:"target_id"`
 }
 
 // CopyKnowledgeBaseResponse defines the response for copy knowledge base
 type CopyKnowledgeBaseResponse struct {
-	TaskID   string `json:"task_id"`
-	SourceID string `json:"source_id"`
-	TargetID string `json:"target_id"`
-	Message  string `json:"message"`
+	TaskID   string `json:"task_id" extensions:"x-agent"`
+	SourceID string `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID string `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Message  string `json:"message" extensions:"x-agent"`
 }
 
 type DuplicateKnowledgeBaseResponse struct {
@@ -1376,6 +1441,8 @@ type DuplicateKnowledgeBaseResponse struct {
 // @Failure      403      {object}  errors.AppError                                              "无权限"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"knowledge_base.copy","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Copy content into a NEW knowledge base in the same workspace. Starts a background job; follow knowledge_base.get_copy_progress until completed before claiming success. Existing destination replacement is not supported."
 // @Router       /knowledge-bases/copy [post]
 func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1523,12 +1590,14 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                  true  "源知识库 ID"
+// @Param        id       path      string                  true  "源知识库 ID" extensions(x-agent=knowledge_base_id)
 // @Success      201      {object}  handler.DataResponse{data=handler.DuplicateKnowledgeBaseData}  "创建后的知识库副本"
 // @Failure      400      {object}  errors.AppError                                               "请求参数错误"
 // @Failure      403      {object}  errors.AppError                                               "无权限"
 // @Failure      404      {object}  errors.AppError                                               "知识库不存在"
 // @Security     Bearer
+// @x-agent {"id":"knowledge_base.duplicate","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Create an empty knowledge base with the source settings only. Does NOT copy documents, FAQ, chunks, indexes, wiki, sharing or pins. To copy content use knowledge_base.copy instead. Rename the new knowledge_base_id with knowledge_base.update if needed."
 // @Router       /knowledge-bases/{id}/duplicate [post]
 func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1591,12 +1660,14 @@ func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        task_id  path      string  true  "任务ID"
+// @Param        task_id  path      string  true  "任务ID" extensions(x-agent)
 // @Success      200      {object}  handler.DataResponse{data=types.KBCloneProgress}  "进度信息"
 // @Failure      400      {object}  errors.AppError                                  "请求参数错误"
 // @Failure      404      {object}  errors.AppError                                  "任务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent {"id":"knowledge_base.get_copy_progress","risk":"read"}
+// @x-agent-hint "Read a task_id from knowledge_base.copy; distinguish queued/running work from a completed or failed copy."
 // @Router       /knowledge-bases/copy/progress/{task_id} [get]
 func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1796,5 +1867,69 @@ func (h *KnowledgeBaseHandler) GetImageAttrsSchema(c *gin.Context) {
 			"attributes":      types.ImageAttrRegistry,
 			"default_actions": types.DefaultImageActions(),
 		},
+	})
+}
+
+// GetImagePipelines returns every registered image pipeline in the shape the
+// settings panel renders: id, name, and the fields each one owns. The panel
+// reads this instead of carrying a list of its own, so adding a pipeline is a
+// backend-only change — its fields arrive here already described, and no UI code
+// mentions the pipeline by name.
+//
+// The fields of two pipelines are deliberately allowed to share a key. Each is
+// private to the pipeline that declared it, which is why the knowledge base
+// stores them under that pipeline's own group rather than in one flat map.
+// Read-only, and global rather than per-KB, so only the Viewer role is required.
+func (h *KnowledgeBaseHandler) GetImagePipelines(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    service.ListImagePipelines(),
+	})
+}
+
+// ValidateImagePipelines answers the settings panel's question — could what is
+// on screen be saved? — without saving anything. The panel asks as the user
+// types so the warnings arrive before the save rather than as a rejection after
+// it; the save path asks again on its own, so this endpoint is the polite half
+// of one check, not the whole of it.
+//
+// Nothing is judged here. The rules come from the pipeline being validated, the
+// same ones ListImagePipelines publishes, so a pipeline whose actions are not
+// the user's to switch off declares none and is never told that it is wrong.
+// Every broken rule is reported, each with the i18n key of its own wording and
+// the name of the field that is at fault: the panel translates and points, as
+// it does for the strings already on it.
+func (h *KnowledgeBaseHandler) ValidateImagePipelines(c *gin.Context) {
+	var request struct {
+		PipelineID types.ImagePipelineID `json:"pipeline_id"`
+		Params     map[string]any        `json:"params"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "invalid request body",
+		})
+		return
+	}
+
+	broken := service.BrokenImagePipelineRules(request.PipelineID, request.Params)
+	if len(broken) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    gin.H{"valid": true, "violations": []any{}},
+		})
+		return
+	}
+
+	violations := make([]gin.H, 0, len(broken))
+	for _, invalid := range broken {
+		violations = append(violations, gin.H{
+			"message_key": invalid.MessageKey,
+			"field":       invalid.Field,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gin.H{"valid": false, "violations": violations},
 	})
 }

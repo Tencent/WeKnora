@@ -7,6 +7,7 @@ import { createSSRApp, h, type Component } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { createI18n } from 'vue-i18n'
 import en from '../../../i18n/locales/en-US'
+import zh from '../../../i18n/locales/zh-CN'
 
 const REAL_COMPONENTS = [
   'ToolResultRenderer.vue',
@@ -39,9 +40,9 @@ before(async () => {
 })
 after(async () => { await server?.close() })
 
-async function render(props: Record<string, unknown>) {
+async function render(props: Record<string, unknown>, locale = 'en-US') {
   const app = createSSRApp({ render: () => h(Renderer, props) })
-  app.use(createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': en } }))
+  app.use(createI18n({ legacy: false, locale, messages: { 'en-US': en, 'zh-CN': zh } }))
   app.component('t-icon', { render: () => h('span') })
   return renderToString(app)
 }
@@ -61,11 +62,13 @@ test('find_operations renders rows instead of raw JSON', async () => {
     }),
   })
   assert.match(html, /knowledge\.get/)
+  assert.match(html, /title="knowledge\.get"[^>]*>Get knowledge details</)
   assert.match(html, /Read a knowledge base/)
   assert.match(html, /Read</)
   assert.match(html, /knowledge_base_id/)
   assert.match(html, /Required/)
   assert.match(html, /knowledge\.delete/)
+  assert.match(html, /title="knowledge\.delete"[^>]*>Delete knowledge</)
   assert.match(html, /Destructive/)
   assert.match(html, /&lt;script&gt;/)
   assert.doesNotMatch(html, /fallback-output|hint|Call find_operations|<script>/)
@@ -81,6 +84,7 @@ test('run_operation renders projected fields and keeps failures out of the raw d
     }),
   })
   assert.match(html, /knowledge\.list/)
+  assert.match(html, /title="knowledge\.list"[^>]*>List knowledge</)
   assert.match(html, /员工手册/)
   assert.match(html, /parse_status/)
   assert.match(html, /failed/)
@@ -91,6 +95,17 @@ test('run_operation renders projected fields and keeps failures out of the raw d
   assert.match(error, /role="alert"/)
   assert.match(error, /unknown operation/)
   assert.doesNotMatch(error, /fallback-output/)
+})
+
+test('operation results show localized names and retain IDs as tooltips', async () => {
+  for (const [operation, label] of [['model.list', '获取模型列表'], ['agent.list', '获取智能体列表'], ['future.unknown', 'future.unknown']]) {
+    const html = await render({
+      displayType: 'run_operation', success: true,
+      output: JSON.stringify({ operation, result: { data: [] } }),
+    }, 'zh-CN')
+    assert.ok(html.includes(`title="${operation}"`), html)
+    assert.ok(html.includes(`>${label}</span>`), html)
+  }
 })
 
 test('product docs render pages, sections, and markdown instead of raw JSON', async () => {

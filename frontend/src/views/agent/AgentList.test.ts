@@ -26,8 +26,9 @@ function setup(t: TestContext) {
     '@/composables/useListUrlState': { useListUrlState: () => ({ scope: vue.ref('all'), creator: vue.ref('all'), query: vue.ref('') }) },
     '@/composables/useResourcePins': { useResourcePins: () => ({ favorites: vue.ref([]), recents: vue.ref([]) }) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
+    '@/stores/assistant': { useAssistantStore: () => ({ pageAccess: true }) },
     '@/api/agent': {}, '@/api/chat/index': {}, '@/api/organization': {},
-    '@/config/contextualGuides': {}, '@/config/settingsRoute': {},
+    '@/config/contextualGuides': { markContextualGuideDone() {} }, '@/config/settingsRoute': {},
     '@/utils/resourceListSearch': {}, '@/utils/card-list-badge': {}, '@/utils/resourceSorting': sorting,
   })
   return { ...f, ...page, fetchAgentsForList }
@@ -52,4 +53,26 @@ test('refreshes the mounted agent list once per burst, ignoring other areas and 
   f.emit(change('agent.update'))
   t.mock.timers.tick(300)
   assert.equal(f.fetchAgentsForList.mock.callCount(), 1)
+})
+
+test('the assistant create entry opens its own dialog instead of the editor', async t => {
+  const f = setup(t)
+  await flush()
+  assert.equal(f.vm.assistantCreateVisible, false)
+  f.vm.assistantCreateVisible = true
+  assert.equal(f.vm.assistantCreateVisible, true)
+  assert.equal(f.vm.editorVisible, false)
+})
+
+test('the original create entry opens the configuration form directly', async t => {
+  const f = setup(t)
+  await flush()
+  f.vm.editingAgent = { id: 'previous-agent' }
+  f.vm.editorMode = 'edit'
+  f.vm.editorInitialSection = 'knowledge'
+  f.vm.handleCreateAgent()
+  assert.equal(f.vm.editorVisible, true)
+  assert.equal(f.vm.editorMode, 'create')
+  assert.equal(f.vm.editorInitialSection, 'basic')
+  assert.equal(f.vm.editingAgent, null)
 })

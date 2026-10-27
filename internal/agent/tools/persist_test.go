@@ -375,6 +375,9 @@ func TestOperationDataChangeIsClientOnly(t *testing.T) {
 	if SanitizeToolResultForClient(ToolRunOperation, result)["data_change"] == nil {
 		t.Fatal("live operation results must retain the marker")
 	}
+	if SanitizeToolResultForClient(ToolWikiWritePage, result)["data_change"] == nil {
+		t.Fatal("Wiki edits must retain the marker so open Wiki pages reload")
+	}
 	if SanitizeToolResultForClient("other_tool", result)["data_change"] != nil {
 		t.Fatal("other tools must not emit operation change markers")
 	}

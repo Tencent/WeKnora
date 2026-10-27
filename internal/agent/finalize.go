@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -20,6 +22,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	sessionID string,
 	conversation []chat.Message,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	totalToolCalls := countTotalToolCalls(state.RoundSteps)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Synthesizing from %d steps, %d tool calls",
 		len(state.RoundSteps), totalToolCalls)
@@ -34,52 +39,129 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	// messages. Tool output must retain its role and call ID; never promote it
 	// into user instructions during error recovery or iteration-limit synthesis.
 	messages := append([]chat.Message(nil), conversation...)
-	messages = append(messages, chat.Message{
-		Role: "user",
-		Content: "Tool execution has ended for this run. Respond to the current task, including " +
-			"the latest user corrections and source restrictions in the conversation. Base claims on " +
-			"the evidence actually obtained; distinguish completed work from remaining work and explain " +
-			"any missing evidence. Use the user's requested language and format. Do not claim that an " +
-			"unperformed action succeeded.",
-	})
+	runtimeNotice := "<runtime_event>{\"source\":\"runtime\",\"type\":\"final_synthesis\",\"message\":\"Tool " +
+		"execution has ended for this run. Respond to the current task, including the " +
+		"latest user corrections and source restrictions in the conversation. Base " +
+		"claims on the evidence actually obtained; distinguish completed work from " +
+		"remaining work and explain any missing evidence. Use the user's requested " +
+		"language and format. Do not claim that an unperformed action " +
+		"succeeded.\"}</runtime_event>"
+	if e.finalAnswerNeedsCompaction(messages, runtimeNotice) {
+		messages, _ = e.compactFinalAnswerContext(ctx, messages, state.CurrentRound+1,
+			runtimeNotice, compaction.ReasonThreshold)
+	}
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
-	answerDoneEmitted := false
+	answerStreamed := false
+	providerDone := false
+	terminalContent := ""
+	splitter := agenttools.NewThinkStreamSplitter()
 
-	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
-	llmResult, err := e.streamLLMToEventBus(
-		ctx,
-		messages,
-		&chat.ChatOptions{
-			Temperature:         e.config.Temperature,
-			MaxCompletionTokens: budget,
-			PromptCacheKey:      sessionID,
-			ToolChoice:          "none",
-		}, // Thinking disabled for final answer synthesis
-		func(chunk *types.StreamResponse, fullContent string) {
-			// Defensive filter: only emit answer content, skip thinking chunks
-			if chunk.ResponseType == types.ResponseTypeThinking {
-				return
-			}
-			if chunk.Content != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID,
-					Type:      event.EventAgentFinalAnswer,
-					SessionID: sessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: chunk.Content,
-						Done:    chunk.Done,
-					},
-				})
-				if chunk.Done {
-					answerDoneEmitted = true
+	var llmResult *streamLLMResult
+	var err error
+	// This phase has its own single overflow retry. The last tool results and
+	// the tool-free synthesis request differ from the preceding ReAct round.
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		inputTokens := e.finalAnswerInputTokens(messages, runtimeNotice)
+		budget := e.clampCompletionBudgetToContext(inputTokens)
+		if e.config.MaxContextTokens > 0 && inputTokens+budget > e.config.MaxContextTokens {
+			return fmt.Errorf("final answer synthesis cannot fit after compaction: estimated input %d tokens "+
+				"plus completion budget %d exceeds context window %d", inputTokens, budget, e.config.MaxContextTokens)
+		}
+		llmResult, err = e.streamLLMToEventBus(
+			ctx,
+			messages,
+			&chat.ChatOptions{
+				RuntimeNotice:       runtimeNotice,
+				Temperature:         e.config.Temperature,
+				MaxCompletionTokens: budget,
+				PromptCacheKey:      sessionID,
+				ToolChoice:          "none",
+			}, // Thinking disabled for final answer synthesis
+			func(chunk *types.StreamResponse, _ string) {
+				// Defensive filter: only emit answer content, skip thinking chunks
+				if chunk.ResponseType == types.ResponseTypeThinking {
+					return
 				}
+				_, answerContent := splitter.Feed(chunk.Content)
+				if splitter.TakeAnswerReset() {
+					_ = e.eventBus.Emit(
+						ctx,
+						event.Event{
+							ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+							Data: event.AgentFinalAnswerData{Replace: true},
+						},
+					)
+				}
+				if chunk.Done {
+					_, tail := splitter.Flush()
+					answerContent += tail
+					providerDone = true
+				}
+				// Do not close the answer until the whole stream has succeeded: a
+				// later error may require replacing this attempt with a retry.
+				if providerDone {
+					terminalContent += answerContent
+					return
+				}
+				if answerContent != "" {
+					logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(answerContent))
+					_ = e.eventBus.Emit(ctx, event.Event{
+						ID:        answerID,
+						Type:      event.EventAgentFinalAnswer,
+						SessionID: sessionID,
+						Data: event.AgentFinalAnswerData{
+							Content: answerContent,
+						},
+					})
+					answerStreamed = true
+				}
+			},
+		)
+		// A provider can report a full window as a length stop instead of an
+		// HTTP/stream error. Reuse the ReAct detector, and account for every
+		// measured attempt even when its answer is replaced by recovery.
+		overflow := compaction.IsOverflowError(err)
+		if llmResult != nil && llmResult.Usage != nil {
+			state.TurnUsage.Accumulate(*llmResult.Usage)
+			if err == nil && e.responseHitContextLimit(&types.ChatResponse{
+				FinishReason: llmResult.FinishReason, Usage: *llmResult.Usage,
+			}) {
+				overflow = true
+				err = fmt.Errorf("final answer synthesis reached the context window: finish=%s prompt=%d completion=%d",
+					llmResult.FinishReason, llmResult.Usage.PromptTokens, llmResult.Usage.CompletionTokens)
 			}
-		},
-	)
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err == nil || attempt == 1 || !overflow {
+			break
+		}
+		logger.Warnf(ctx, "[Agent][FinalAnswer] Context overflow; compacting before one retry: %v", err)
+		compacted, changed := e.compactFinalAnswerContext(ctx, messages, state.CurrentRound+1,
+			runtimeNotice, compaction.ReasonOverflow)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if !changed {
+			break // Sending the same rejected context again cannot recover.
+		}
+		messages = compacted
+		if answerStreamed {
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{Replace: true},
+			})
+		}
+		answerStreamed, providerDone, terminalContent = false, false, ""
+		splitter = agenttools.NewThinkStreamSplitter()
+	}
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
@@ -88,24 +170,11 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		})
 		return err
 	}
-
-	if !answerDoneEmitted {
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        answerID,
-			Type:      event.EventAgentFinalAnswer,
-			SessionID: sessionID,
-			Data: event.AgentFinalAnswerData{
-				Content: "",
-				Done:    true,
-			},
-		})
-	}
-
-	// The synthesis call is often the largest of the turn — fold its usage
-	// into the turn aggregate like every ReAct round.
-	if llmResult.Usage != nil {
-		state.TurnUsage.Accumulate(*llmResult.Usage)
-	}
+	_, tail := splitter.Flush()
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true},
+	})
 
 	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
@@ -114,15 +183,73 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		"session_id": sessionID,
 		"answer_len": len(fullAnswer),
 	})
+	// Delegated callers must distinguish a synthesized partial answer from a
+	// completed deliverable too, including the iteration-budget fallback path.
+	if e.collaboration != nil && e.collaboration.Child != nil && isLengthFinishReason(llmResult.FinishReason) {
+		state.RoundSteps = append(state.RoundSteps, types.AgentStep{
+			Iteration: state.CurrentRound,
+			Thought:   fullAnswer, Truncated: true, Timestamp: time.Now(),
+		})
+	}
 	state.FinalAnswer = fullAnswer
 	return nil
 }
 
+// Measure the same handle-encoded conversation sent by streamLLMToEventBus,
+// plus the runtime notice appended by the protocol adapter.
+func (e *AgentEngine) finalAnswerInputTokens(messages []chat.Message, notice string) int {
+	return e.tokenEstimator.EstimateMessages(e.modelContext.EncodeMessages(messages)) +
+		e.tokenEstimator.EstimateMessage(&chat.Message{Role: "system", Content: notice})
+}
+
+func (e *AgentEngine) finalAnswerInputBudget() int {
+	return max(e.config.MaxContextTokens-e.getCompletionTokenBudget()-contextSafetyTokens, 1)
+}
+
+func (e *AgentEngine) finalAnswerNeedsCompaction(messages []chat.Message, notice string) bool {
+	return e.config.MaxContextTokens > 0 && e.finalAnswerInputTokens(messages, notice) > e.finalAnswerInputBudget()
+}
+
+// Reuse normal compaction and checkpoint persistence. A last tool result can
+// exceed the entire window on its own; after summarizing older history, trim
+// it to the space left by the fixed prompt, notice and completion budget.
+func (e *AgentEngine) compactFinalAnswerContext(
+	ctx context.Context, messages []chat.Message, round int, notice string, reason compaction.Reason,
+) ([]chat.Message, bool) {
+	if ctx.Err() != nil || e.config.MaxContextTokens <= 0 {
+		return messages, false
+	}
+	before := e.finalAnswerInputTokens(messages, notice)
+	compacted, changed := e.runCompaction(ctx, messages, round, reason)
+	if ctx.Err() != nil {
+		return messages, false
+	}
+	inputTokens := e.finalAnswerInputTokens(compacted, notice)
+	if inputTokens > e.finalAnswerInputBudget() || (reason == compaction.ReasonOverflow && !changed) {
+		toolTokens := 0
+		for _, msg := range e.modelContext.EncodeMessages(compacted) {
+			if msg.Role == "tool" {
+				toolTokens += e.tokenEstimator.EstimateMessage(&msg)
+			}
+		}
+		budget := min(toolResultBudget(e.config.MaxContextTokens),
+			max(e.finalAnswerInputBudget()-(inputTokens-toolTokens), 1))
+		var trimmed bool
+		compacted, trimmed = trimToolResultsToBudget(compacted, e.tokenEstimator, budget)
+		if trimmed {
+			e.contextRewrites++
+			logger.Infof(ctx, "[Agent][FinalAnswer] Trimmed tool results to %d tokens", budget)
+		}
+	}
+	return compacted, e.finalAnswerInputTokens(compacted, notice) < before
+}
+
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
-// without the LLM producing a natural stop. It marks state.IsComplete = true.
+// without the LLM producing a natural stop. Completion still persists the
+// fallback and prior steps on failure, while the error remains observable.
 func (e *AgentEngine) handleMaxIterations(
 	ctx context.Context, query string, state *types.AgentState, sessionID string, messages []chat.Message,
-) {
+) error {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
 	common.PipelineWarn(ctx, "Agent", "max_iterations_reached", map[string]interface{}{
 		"iterations": state.CurrentRound,
@@ -136,8 +263,11 @@ func (e *AgentEngine) handleMaxIterations(
 			"error": err.Error(),
 		})
 		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		state.IsComplete = true
+		return fmt.Errorf("failed to synthesize final answer after max iterations: %w", err)
 	}
 	state.IsComplete = true
+	return nil
 }
 
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.
@@ -148,11 +278,15 @@ func (e *AgentEngine) emitCompletionEvent(
 	if state.SuspendedStep != nil {
 		steps = append(append([]types.AgentStep(nil), steps...), *state.SuspendedStep)
 	}
-	if len(state.PendingSteerMessages) > 0 {
+	seen := e.takeBackgroundSeen()
+	if len(state.PendingSteerMessages) > 0 || len(state.PendingBackground) > 0 || len(seen) > 0 {
 		// A stop or model failure can arrive after delivery but before the next
 		// response exists. Preserve that boundary without inventing an answer.
 		steps = append(append([]types.AgentStep(nil), steps...), types.AgentStep{
-			Iteration: state.CurrentRound, UserMessagesBefore: state.PendingSteerMessages,
+			Iteration:            state.CurrentRound,
+			UserMessagesBefore:   state.PendingSteerMessages,
+			BackgroundInjections: state.PendingBackground,
+			BackgroundSeenIDs:    seen,
 		})
 	}
 	// Convert knowledge refs to interface{} slice for event data
@@ -162,6 +296,7 @@ func (e *AgentEngine) emitCompletionEvent(
 	}
 
 	data := event.AgentCompleteData{
+		Artifacts:       e.collaborationArtifacts(),
 		FinalAnswer:     state.FinalAnswer,
 		KnowledgeRefs:   knowledgeRefsInterface,
 		AgentSteps:      steps,

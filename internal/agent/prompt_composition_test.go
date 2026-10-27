@@ -117,7 +117,8 @@ func TestFinalSynthesisKeepsConversationRolesImagesAndSteering(t *testing.T) {
 	))
 	require.Len(t, model.calls, 1)
 	got := model.calls[0]
-	require.Len(t, got, len(messages)+1)
+	require.Len(t, got, len(messages))
+	require.Contains(t, model.opts[0].RuntimeNotice, `"type":"final_synthesis"`)
 	require.Equal(t, original, got[:len(messages)],
 		"synthesis must use the same live conversation, including tool roles and latest steering")
 	require.Empty(t, model.opts[0].Tools)

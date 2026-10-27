@@ -13,11 +13,12 @@ function setup(t: TestContext) {
     listKnowledgeBases: t.mock.fn(async () => ({ data: [{ id: 'kb' }] })),
     getKnowledgeBaseById: t.mock.fn(async () => ({ data: { id: 'kb' } })),
     listAgents: t.mock.fn(async () => ({ data: [{ id: 'agent' }] })),
+    listModels: t.mock.fn(async () => [{ id: 'model' }]),
   }
   const { useChatResourcesStore } = f.evaluate(readFileSync(new URL('./chatResources.ts', import.meta.url), 'utf8'), {
     vue, pinia, '@/utils/assistantDataChange': f.dataChange,
     '@/api/knowledge-base': api, '@/api/agent': api,
-    '@/api/model': {}, '@/api/web-search-provider': {}, '@/api/system': {},
+    '@/api/model': api, '@/api/web-search-provider': {}, '@/api/system': {},
     '@/utils/request': { getCurrentLanguage: () => 'en-US' },
     '@/stores/organization': { useOrganizationStore: () => ({
       async fetchSharedKnowledgeBases() {}, async fetchSharedAgents() {},
@@ -64,12 +65,22 @@ for (const operation of ['knowledge_base.generate_profile', 'knowledge.delete', 
   })
 }
 
-test('ignores unknown and read-only catalog areas', async t => {
+test('refreshes the model selectors on a model change', async t => {
+  const { store, api, emit } = setup(t)
+  emit(change('model.update'))
+  t.mock.timers.tick(300)
+  await flush()
+  assert.equal(api.listModels.mock.callCount(), 1)
+  assert.equal(store.allModels[0].id, 'model')
+  assert.equal(api.listAgents.mock.callCount(), 0)
+})
+
+test('ignores unknown areas', async t => {
   const { api, emit } = setup(t)
   emit(change('unknown.update'))
-  emit(change('model.update'))
   t.mock.timers.tick(300)
   await flush()
   assert.equal(api.listAgents.mock.callCount(), 0)
   assert.equal(api.listKnowledgeBases.mock.callCount(), 0)
+  assert.equal(api.listModels.mock.callCount(), 0)
 })

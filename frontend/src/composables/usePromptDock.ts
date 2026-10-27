@@ -1,5 +1,7 @@
 import { computed, inject, provide, reactive, ref, type ComputedRef, type InjectionKey, type Ref } from 'vue'
 import { isAwaitingInput } from '@/composables/useChatStreamHandler'
+import { persistedAssistantId } from '@/utils/steerStreamFork'
+import { isHostApprovalEvent } from '@/views/chat/components/hostApproval'
 
 type PromptEvent = Record<string, any>
 type ChatRow = Record<string, unknown>
@@ -22,6 +24,8 @@ export function promptSubmission(pendingId: string): Record<string, unknown> | u
 
 function isDockable(e: PromptEvent): boolean {
   if (!DOCKED_TYPES.has(String(e?.type || '')) || e.resolved || !e.pending_id) return false
+  // Lite host commands use the composer card, which shows the command and grant.
+  if (e.type === 'tool_approval_required' && isHostApprovalEvent(e)) return false
   if (e.type === 'agent_prompt_required' && e.kind !== 'ask_user') return false
   if (submissions.has(e.pending_id)) return false
   if (e.suspended && e.expires_at) {
@@ -38,11 +42,21 @@ function isDockable(e: PromptEvent): boolean {
  */
 export function pendingPrompts(messages: ChatRow[]): PromptEvent[] {
   const out: PromptEvent[] = []
+  const liveTurns = new Set(messages
+    .filter(m => m.role === 'assistant' && (!m.is_completed || isAwaitingInput(m)))
+    .map(persistedAssistantId).filter(Boolean))
+  const seen = new Set<string>()
   for (const message of messages) {
     if (message.role !== 'assistant') continue
-    if (message.is_completed && !isAwaitingInput(message)) continue
+    // Steering seals a display segment, not the parent run or its children.
+    // Keep that segment's cards actionable while its continuation is live.
+    if (message.is_completed && !isAwaitingInput(message) &&
+      !(message.steerForked && liveTurns.has(persistedAssistantId(message)))) continue
     for (const e of (message.agentEventStream as PromptEvent[] | undefined) || []) {
-      if (isDockable(e)) out.push(e)
+      if (isDockable(e) && !seen.has(e.pending_id)) {
+        seen.add(e.pending_id)
+        out.push(e)
+      }
     }
   }
   return out

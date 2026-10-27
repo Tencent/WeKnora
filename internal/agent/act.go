@@ -212,9 +212,7 @@ func formatToolHint(name string, args map[string]any) string {
 	}
 	for _, v := range args {
 		if s, ok := v.(string); ok {
-			if len(s) > 40 {
-				s = s[:40] + "…"
-			}
+			s = truncateForLangfuse(s, 40)
 			return fmt.Sprintf(`%s("%s")`, displayName, s)
 		}
 	}
@@ -610,16 +608,16 @@ func (e *AgentEngine) runToolCallAnswered(
 		// so MCP tool human-approval (issue #1173) can legitimately block longer.
 		ApprovalCtx: toolCtx,
 		ExecTimeout: execTimeout,
-		Snapshot:    e.snapshotFunc(i),
+		Snapshot:    e.snapshotFunc(i, tc.Function.Name),
 		Answered:    answered,
-		Interactive: e.interactive,
+		Mode:        e.mode,
 	})
 
 	var result *types.ToolResult
 	var err error
-	if len(tc.UnresolvedHandles) > 0 {
+	if len(tc.UnresolvedHandles) > 0 && !webFetchValidatesReferences(tc) {
 		// A temporary handle is not an application identity. Fail before tool
-		// execution so a hallucinated/stale cN/dN/bN/wN/iN/res:// token can
+		// execution so a hallucinated/stale kb://, doc://, chunk://, url://, iN or res:// token can
 		// never reach persistence, an external service, or a routing decision.
 		err = fmt.Errorf("tool arguments contain unresolved model handles: %v", tc.UnresolvedHandles)
 	} else {
@@ -696,4 +694,19 @@ func (e *AgentEngine) runToolCallAnswered(
 	}
 
 	return toolCall
+}
+
+// web_fetch validates each URL before any I/O. Unknown web references are item
+// errors, so one invented handle cannot discard valid pages in the same batch.
+// Other tools and other handle namespaces retain the fail-closed boundary.
+func webFetchValidatesReferences(tc types.LLMToolCall) bool {
+	if tc.Function.Name != agenttools.ToolWebFetch {
+		return false
+	}
+	for _, handle := range tc.UnresolvedHandles {
+		if !agenttools.IsPageHandleShaped(handle) {
+			return false
+		}
+	}
+	return true
 }

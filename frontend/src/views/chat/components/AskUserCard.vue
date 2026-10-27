@@ -13,13 +13,24 @@
     </div>
 
     <div v-for="field in fields" :key="field.name" class="ask-field">
-      <label class="ask-field-label">
+      <label :id="`${pendingId}-${field.name}-label`" class="ask-field-label">
         {{ field.label || field.name }}<span v-if="field.required" class="ask-required">*</span>
       </label>
       <t-input-number v-if="field.type === 'number'" v-model="values[field.name]" :disabled="submitting"
         theme="normal" size="small" class="ask-number" />
-      <t-select v-else-if="field.type === 'select' || field.type === 'multiselect'" v-model="values[field.name]"
-        :multiple="field.type === 'multiselect'" :disabled="submitting" size="small" clearable
+      <div v-else-if="field.type === 'multiselect'" class="ask-field-options" role="group"
+        :aria-labelledby="`${pendingId}-${field.name}-label`">
+        <label v-for="option in field.options || []" :key="option" class="ask-field-option"
+          :class="{ 'is-selected': fieldHasOption(field.name, option), 'is-disabled': submitting }">
+          <input type="checkbox" :checked="fieldHasOption(field.name, option)" :disabled="submitting"
+            @change="toggleFieldOption(field.name, option)" />
+          <span class="ask-field-option-mark" aria-hidden="true"><CheckIcon size="12px" /></span>
+          <span class="ask-field-option-text">{{ option }}</span>
+        </label>
+      </div>
+      <t-select v-else-if="field.type === 'select'" v-model="values[field.name]"
+        :disabled="submitting" size="small" clearable
+        :popup-props="{ overlayClassName: 'wk-popover' }"
         :placeholder="$t('agentStream.askUser.selectPlaceholder')">
         <t-option v-for="option in field.options || []" :key="option" :value="option" :label="option" />
       </t-select>
@@ -46,36 +57,34 @@
     </div>
   </div>
 
-  <div v-else class="action-card interaction-inline" :class="{ 'action-pending': !resolved }">
+  <div v-else class="action-card interaction-inline ask-inline" :class="{ 'action-pending': open }">
     <div class="action-header no-results">
       <div class="action-title">
-        <t-icon class="action-title-icon" :name="headerIcon" />
+        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" :active="open" />
         <span class="action-name">{{ $t('agentStream.askUser.title') }}</span>
+        <span class="ask-status" role="status">
+          {{ awaitingInDock ? $t('agentStream.promptDock.waiting') : statusLine }}
+        </span>
+        <button v-if="awaitingInDock" type="button" class="inline-action is-primary" @click.stop="dock?.focus(pendingId)">
+          {{ $t('agentStream.promptDock.handle') }}
+        </button>
       </div>
     </div>
 
     <div class="ask-question">{{ question.question }}</div>
 
-    <div class="interaction-status-summary">
-      <div class="results-summary-text">
-        <template v-if="awaitingInDock">
-          <span class="status-label">{{ $t('agentStream.promptDock.waiting') }}</span>
-          <span class="inline-dot">·</span>
-          <button type="button" class="inline-action is-primary" @click.stop="dock?.focus(pendingId)">
-            {{ $t('agentStream.promptDock.handle') }}
-          </button>
-        </template>
-        <span v-else class="status-label">{{ statusLine }}</span>
-      </div>
+    <div v-if="answerSummary" class="ask-answer">
+      <span class="ask-answer-label">{{ $t('agentStream.askUser.answerLabel') }}</span>
+      <div class="ask-answer-text">{{ answerSummary }}</div>
     </div>
-
-    <div v-if="answerSummary" class="ask-answer">{{ answerSummary }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { computed, inject, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { CheckIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { resolveAgentPrompt } from '@/api/mcp-service'
 import { resolveEmbedAgentPrompt } from '@/api/embed'
@@ -135,6 +144,17 @@ const selectedMany = ref<string[]>([])
 const values = reactive<Record<string, unknown>>({})
 const text = ref('')
 const submitting = ref(false)
+
+const fieldHasOption = (name: string, option: string) =>
+  Array.isArray(values[name]) && (values[name] as string[]).includes(option)
+
+const toggleFieldOption = (name: string, option: string) => {
+  if (submitting.value) return
+  const selected = Array.isArray(values[name]) ? values[name] as string[] : []
+  values[name] = selected.includes(option)
+    ? selected.filter(value => value !== option)
+    : [...selected, option]
+}
 
 const isSelected = (option: string) =>
   multiSelect.value ? selectedMany.value.includes(option) : selectedOne.value === option
@@ -232,20 +252,41 @@ defineExpose({ handleKey })
 <style scoped lang="less">
 @import './agent-interaction-card.less';
 
-// The question reads like the agent's other step text in the timeline.
+.ask-inline {
+  min-width: 0;
+
+  .action-title {
+    column-gap: 8px;
+    row-gap: 4px;
+  }
+
+  .action-name {
+    font-size: var(--agent-step-summary-size, 13px);
+  }
+}
+
+.ask-status {
+  padding: 1px 6px;
+  border-radius: var(--app-radius-sm, 4px);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs, 12px);
+  line-height: 1.5;
+}
+
 .ask-question {
-  padding: 2px 0 0;
-  font-size: var(--agent-step-text-size, 14px);
-  line-height: 1.55;
+  margin-top: 6px;
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.65;
   color: var(--td-text-color-secondary);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ask-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .ask-field-label {
@@ -258,10 +299,91 @@ defineExpose({ handleKey })
   width: 100%;
 }
 
-.ask-text {
-  :deep(.t-textarea__inner) {
-    font-size: var(--agent-step-summary-size, 13px);
+.ask-field-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+.ask-field-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-size: var(--agent-step-summary-size, 13px);
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
+
+  &:hover:not(.is-disabled) { background: var(--td-bg-color-container-hover); }
+  &.is-selected {
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-component-border);
   }
+  &:has(input:focus-visible) { outline: 2px solid var(--td-brand-color); outline-offset: 1px; }
+  &.is-disabled { opacity: .5; cursor: not-allowed; }
+  input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+}
+
+.ask-field-option-text { min-width: 0; overflow-wrap: anywhere; }
+.ask-field-option-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-xs, 3px);
+  color: transparent;
+}
+.is-selected .ask-field-option-mark {
+  background: var(--td-brand-color);
+  border-color: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+}
+
+// Filled, borderless fields, like the option rows and argument editor of the
+// other prompts in the dock.
+.ask-field :deep(.t-input),
+.ask-text :deep(.t-textarea__inner) {
+  min-height: 32px;
+  border-color: transparent;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  box-shadow: none;
+  font-size: var(--agent-step-summary-size, 13px);
+  transition: background var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
+
+  &:hover:not(.t-is-disabled):not(.t-input--focused):not(:focus) {
+    border-color: transparent;
+    background: var(--td-bg-color-secondarycontainer-hover);
+  }
+}
+
+.ask-field :deep(.t-input.t-input--focused),
+.ask-text :deep(.t-textarea__inner:focus) {
+  border-color: color-mix(in srgb, var(--td-brand-color) 45%, var(--td-component-stroke));
+  background: var(--td-bg-color-container);
+  box-shadow: none;
+}
+
+.ask-field :deep(.t-input__inner::placeholder),
+.ask-text :deep(.t-textarea__inner::placeholder) {
+  color: var(--td-text-color-placeholder);
+}
+
+.ask-text {
 
   // The limit is far above a typical answer; the counter is noise here.
   :deep(.t-textarea__info_wrapper),
@@ -271,12 +393,27 @@ defineExpose({ handleKey })
 }
 
 .ask-answer {
-  padding: 2px 0 0;
-  font-size: var(--agent-step-summary-size, 13px);
-  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-md, 8px);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.ask-answer-label {
+  font-size: var(--app-text-xs, 12px);
+  line-height: 1.5;
   color: var(--td-text-color-secondary);
+}
+
+.ask-answer-text {
+  font-size: var(--agent-step-text-size, 14px);
+  line-height: 1.6;
+  color: var(--td-text-color-primary);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ask-required {

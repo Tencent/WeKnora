@@ -31,12 +31,12 @@ type CompositeRetrieveEngine struct {
 // Retrieve performs retrieval operations by delegating to the appropriate engine
 // based on the retriever type specified in the parameters.
 //
-// Error contract: a store-level failure is returned with no results, matching
-// the long-standing all-or-nothing policy. A result set that reports a partial
-// failure in RetrieveResult.Error is different — the hits it did return are
-// kept and the failure is returned *alongside* them, so callers can log the
-// gap without losing the evidence. Callers must therefore treat a non-nil
-// error with non-nil results as "incomplete", not as "no results".
+// Error contract: a failure in one retriever leg does not discard results
+// collected from other successful legs. Any such error is returned alongside
+// the available results (or nil results when every leg fails), so callers can
+// degrade gracefully without treating an incomplete answer as complete. A
+// result set that reports a partial failure in RetrieveResult.Error follows
+// the same contract: its returned hits are kept alongside the failure.
 func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 	retrieveParams []types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
@@ -76,8 +76,8 @@ func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 		},
 	)
 	if err != nil {
-		// Engine-level failure: drop the results collected so far, unchanged.
-		return nil, err
+		// Keep results from successful retriever legs alongside the failure.
+		return results, err
 	}
 	if len(partialErrs) > 0 {
 		return results, fmt.Errorf("retrieve returned partial results: %w", errors.Join(partialErrs...))
@@ -181,7 +181,7 @@ func concurrentRetrieve(
 	// Check for errors
 	for err := range errCh {
 		if err != nil {
-			return nil, err
+			return results, err
 		}
 	}
 

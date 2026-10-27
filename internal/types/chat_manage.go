@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"maps"
 	"slices"
 	"strings"
@@ -30,6 +31,10 @@ type PipelineRequest struct {
 	RerankModelID   string  `json:"rerank_model_id"`
 	RerankTopK      int     `json:"rerank_top_k"`
 	RerankThreshold float64 `json:"rerank_threshold"`
+
+	// ChatModelTenantID is set internally after authorizing the source KB.
+	// It scopes only ChatModelID lookups, never retrieval or message storage.
+	ChatModelTenantID uint64 `json:"-"`
 
 	// Chat model parameters
 	ChatModelID      string           `json:"chat_model_id"`
@@ -81,6 +86,15 @@ type PipelineRequest struct {
 	WebFetchEnabled     bool   `json:"-"` // Auto-fetch full page content for web search results after rerank
 	WebFetchTopN        int    `json:"-"` // Max pages to fetch (default 3)
 	Language            string `json:"-"`
+}
+
+// ChatModelContext scopes initialization of the selected chat model only.
+// Dedicated query-understanding and vision models retain their own request scope.
+func (c *PipelineRequest) ChatModelContext(ctx context.Context) context.Context {
+	if c.ChatModelTenantID == 0 {
+		return ctx
+	}
+	return WithExecutionTenant(ctx, c.ChatModelTenantID)
 }
 
 // CitationsEnabled returns the effective citation setting for this request.
@@ -172,15 +186,14 @@ type PipelineState struct {
 	// History (a first turn) is not fetched again by a later stage.
 	HistoryLoaded bool `json:"-"`
 
-	SearchResult     []*SearchResult   `json:"-"`
-	RerankResult     []*SearchResult   `json:"-"`
-	MergeResult      []*SearchResult   `json:"-"`
-	Entity           []string          `json:"-"`
-	EntityKBIDs      []string          `json:"-"`
-	EntityKnowledge  map[string]string `json:"-"`
-	GraphResult      *GraphData        `json:"-"`
-	UserContent      string            `json:"-"`
-	RenderedContexts string            `json:"-"`
+	SearchResult     []*SearchResult `json:"-"`
+	RerankResult     []*SearchResult `json:"-"`
+	MergeResult      []*SearchResult `json:"-"`
+	Entity           []string        `json:"-"`
+	EntityKBIDs      []string        `json:"-"`
+	GraphResult      *GraphData      `json:"-"`
+	UserContent      string          `json:"-"`
+	RenderedContexts string          `json:"-"`
 	// ContextImages are retrieved images, as data URIs, shown to a vision
 	// chat model beside the contexts they belong to; see INTO_CHAT_MESSAGE.
 	ContextImages []string `json:"-"`
@@ -290,9 +303,6 @@ func (c *ChatManage) Clone() *ChatManage {
 	entityKBIDs := make([]string, len(c.EntityKBIDs))
 	copy(entityKBIDs, c.EntityKBIDs)
 
-	entityKnowledge := make(map[string]string)
-	maps.Copy(entityKnowledge, c.EntityKnowledge)
-
 	return &ChatManage{
 		PipelineRequest: PipelineRequest{
 			Query:                    c.Query,
@@ -312,6 +322,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			RerankTopK:               c.RerankTopK,
 			RerankThreshold:          c.RerankThreshold,
 			ChatModelID:              c.ChatModelID,
+			ChatModelTenantID:        c.ChatModelTenantID,
 			SummaryConfig:            c.SummaryConfig,
 			FallbackStrategy:         c.FallbackStrategy,
 			FallbackResponse:         c.FallbackResponse,
@@ -352,7 +363,6 @@ func (c *ChatManage) Clone() *ChatManage {
 			ContextImageChunkIDs: slices.Clone(c.ContextImageChunkIDs),
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
-			EntityKnowledge:      entityKnowledge,
 		},
 	}
 }

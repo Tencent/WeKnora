@@ -101,6 +101,14 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kbImagesRead.GET("/gallery-config", g.Viewer(), g.KBAccessRead("id"), handler.GetGalleryConfig)
 	}
 
+	// Whole-KB index rebuild after an indexing-strategy change (called by the
+	// KB settings modal via POST /api/v1/knowledge-bases/:id/rebuild-index).
+	// Content write like /knowledge/batch-reparse: ingest-capable API keys
+	// may call it; JWT callers need Contributor+ with KB write access, and
+	// the handler re-validates ownership before enqueueing.
+	kbRebuild := g.apiKeyGroup(r.Group("/knowledge-bases/:id"), apiKeyIngest(apiKeyFullAccess()))
+	kbRebuild.POST("/rebuild-index", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RebuildKnowledgeBaseIndex)
+
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	kgrp := r.Group("/knowledge")
 	k := g.apiKeyGroup(kgrp, apiKeyIngest(apiKeyFullAccess()))
@@ -176,6 +184,7 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 		faqRead.GET("/entries/export", g.Viewer(), g.KBAccessRead("id"), handler.ExportEntries)
 		faqRead.GET("/entries/:entry_id", g.Viewer(), g.KBAccessRead("id"), handler.GetEntry)
 		faq.POST("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpsertEntries)
+		faq.PATCH("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.PatchEntriesBatch)
 		faq.POST("/entry", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateEntry)
 		faq.PUT("/entries/:entry_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntry)
 		faq.POST("/entries/:entry_id/similar-questions", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.AddSimilarQuestions)
@@ -281,6 +290,18 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 func RegisterImageAttrRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
 	g.apiKeyRoute(r, http.MethodGet, "/image-attrs/schema",
 		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImageAttrsSchema)
+	// Same shape and the same audience as the schema above: a read-only list of
+	// what the settings panel can offer, with no KB id, so the Viewer role is
+	// enough. Mounted here rather than under /knowledge-bases because neither
+	// the list nor a pipeline id is knowledge-base-specific.
+	g.apiKeyRoute(r, http.MethodGet, "/image-pipelines",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.GetImagePipelines)
+	// The settings panel asks this while the user edits, so that a combination
+	// the pipeline cannot run is pointed out before the save rather than
+	// rejected by it. Read-only, global, and answered from the pipeline's own
+	// rules, so only the Viewer role is required.
+	g.apiKeyRoute(r, http.MethodPost, "/image-pipelines/validate",
+		apiKeyRetrieve(apiKeyFullAccess()), g.Viewer(), handler.ValidateImagePipelines)
 }
 
 // RegisterKnowledgeBaseActivityRoutes exposes the read-only per-KB activity

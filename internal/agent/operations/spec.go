@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,7 +83,13 @@ type agentOperation struct {
 	CatchAll string `json:"catch_all"`
 	// Role is the lowest workspace role the route accepts, when it differs
 	// from the default for the risk.
-	Role types.TenantRole `json:"role,omitempty"`
+	Role        types.TenantRole `json:"role,omitempty"`
+	SystemAdmin bool             `json:"system_admin,omitempty"`
+	// AlwaysConfirm asks before every call of a write; see Operation.
+	AlwaysConfirm bool `json:"always_confirm,omitempty"`
+	// Method picks one route when the handler's doc lists several (a legacy
+	// GET next to the POST, say); the others stay out of the catalog.
+	Method string `json:"method,omitempty"`
 }
 
 type specDocument struct {
@@ -175,36 +182,57 @@ func FromSpec(document []byte) ([]Operation, error) {
 			if len(sop.Agent) == 0 {
 				continue
 			}
-			op, err := doc.compile(strings.ToUpper(method), path, sop)
+			op, skip, err := doc.compile(strings.ToUpper(method), path, sop)
 			if err != nil {
 				return nil, fmt.Errorf("%s %s: %w", strings.ToUpper(method), path, err)
 			}
-			ops = append(ops, op)
+			if !skip {
+				ops = append(ops, op)
+			}
 		}
 	}
 	return ops, nil
 }
 
-func (doc *specDocument) compile(method, path string, sop specOperation) (Operation, error) {
+// compile builds the operation for one route, or reports skip when the
+// annotation names another of the handler's methods.
+func (doc *specDocument) compile(method, path string, sop specOperation) (Operation, bool, error) {
 	var meta agentOperation
 	dec := json.NewDecoder(bytes.NewReader(sop.Agent))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&meta); err != nil {
-		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
+		return Operation{}, false, fmt.Errorf("%s: %w", extAgent, err)
 	}
+	if meta.Method != "" {
+		if !slices.Contains(specMethods, strings.ToLower(meta.Method)) {
+			return Operation{}, false, fmt.Errorf("%s: unknown method %q", extAgent, meta.Method)
+		}
+		if !strings.EqualFold(meta.Method, method) {
+			return Operation{}, true, nil
+		}
+	}
+	op, err := doc.compileOperation(method, path, sop, meta)
+	return op, false, err
+}
+
+func (doc *specDocument) compileOperation(
+	method, path string, sop specOperation, meta agentOperation,
+) (Operation, error) {
 	route, err := ginRoute(doc.BasePath, path, meta.CatchAll)
 	if err != nil {
 		return Operation{}, fmt.Errorf("%s: %w", extAgent, err)
 	}
 	op := Operation{
-		ID:          meta.ID,
-		Summary:     strings.TrimSpace(sop.Summary),
-		Description: strings.TrimSpace(sop.Hint),
-		Risk:        meta.Risk,
-		Method:      method,
-		Route:       route,
-		Role:        meta.Role,
-		LabelParam:  meta.LabelParam,
+		ID:            meta.ID,
+		Summary:       strings.TrimSpace(sop.Summary),
+		Description:   strings.TrimSpace(sop.Hint),
+		Risk:          meta.Risk,
+		Method:        method,
+		Route:         route,
+		Role:          meta.Role,
+		SystemAdmin:   meta.SystemAdmin,
+		LabelParam:    meta.LabelParam,
+		AlwaysConfirm: meta.AlwaysConfirm,
 	}
 	if op.Description == "" {
 		op.Description = strings.TrimSpace(sop.Description)
@@ -367,7 +395,7 @@ func (doc *specDocument) bodyParams(sp specParameter) ([]Param, error) {
 			Name:        name,
 			In:          InBody,
 			Key:         key,
-			Required:    sp.Required && (required[key] || prop.AgentRequired),
+			Required:    (sp.Required && required[key]) || prop.AgentRequired,
 			AllowEmpty:  prop.AgentRequired && !required[key],
 			Description: strings.TrimSpace(prop.Description),
 		}
@@ -424,7 +452,7 @@ func (doc *specDocument) flattenBodyObject(obj *specSchema, prefix string, bodyR
 			Name:        name,
 			In:          InBody,
 			Key:         path,
-			Required:    bodyRequired && (required[key] || prop.AgentRequired),
+			Required:    (bodyRequired && required[key]) || prop.AgentRequired,
 			AllowEmpty:  prop.AgentRequired && !required[key],
 			Description: strings.TrimSpace(prop.Description),
 		}
@@ -443,6 +471,8 @@ func (doc *specDocument) typeParam(p *Param, shape *specSchema, agentMax, agentM
 		p.Enum = enumStrings(shape.Enum)
 	case "integer":
 		p.Type = TypeInteger
+	case "number":
+		p.Type = TypeNumber
 	case "boolean":
 		p.Type = TypeBoolean
 	case "array":
@@ -621,7 +651,8 @@ func (doc *specDocument) result(responses map[string]specResponse, meta agentOpe
 }
 
 // fields lists the projected fields of obj. Nested objects marked with
-// x-agent are flattened: their marked fields are named on their own. list
+// x-agent are flattened: their marked fields are named on their own. A list of
+// objects keeps each element's marked fields under the list's name. list
 // drops fields marked x-agent-detail.
 func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Field, error) {
 	var out []Field
@@ -660,9 +691,28 @@ func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Fi
 			if err != nil {
 				return nil, err
 			}
+			if items != nil && len(items.Properties) > 0 {
+				if runes > 0 {
+					return nil, fmt.Errorf("field %q: %s applies to strings", from, extAgentMaxRunes)
+				}
+				elem, err := doc.fields(items, "", list)
+				if err != nil {
+					return nil, fmt.Errorf("field %q: %w", from, err)
+				}
+				if len(elem) == 0 {
+					return nil, fmt.Errorf("field %q: list items expose no fields", from)
+				}
+				for _, f := range elem {
+					if len(f.Items) > 0 {
+						return nil, fmt.Errorf("field %q: list items cannot hold lists of objects", from)
+					}
+				}
+				out = append(out, Field{From: from, As: name, Items: elem})
+				continue
+			}
 			if items == nil || !isScalar(items.Type) {
-				return nil, fmt.Errorf("field %q: only lists of scalars are projected; "+
-					"point the operation's root at a list of objects instead", from)
+				return nil, fmt.Errorf("field %q: only lists of scalars or of objects with %s fields are projected",
+					from, extAgent)
 			}
 			if runes > 0 && items.Type != "string" {
 				return nil, fmt.Errorf("field %q: %s applies to strings", from, extAgentMaxRunes)
@@ -686,7 +736,11 @@ func (doc *specDocument) fields(obj *specSchema, prefix string, list bool) ([]Fi
 		case raw.AgentKeys != "":
 			for _, sub := range strings.Split(raw.AgentKeys, "|") {
 				if sub = strings.TrimSpace(sub); sub != "" {
-					out = append(out, Field{From: from + "." + sub, As: sub})
+					if strings.Contains(sub, ".") {
+						out = append(out, Field{From: from, MapKey: sub, As: sub})
+					} else {
+						out = append(out, Field{From: from + "." + sub, As: sub})
+					}
 				}
 			}
 		default:

@@ -41,6 +41,7 @@ func TestToolGuidanceForHostUsesActualWorkspace(t *testing.T) {
 		[]string{"shell_exec", "read_file", "write_sandbox_file"}, false, layout,
 	)
 	require.Contains(t, text, "Session workspace: /Users/dev/My Project")
+	require.Contains(t, text, "asks the user before opening it")
 	require.NotContains(t, text, sandbox.SessionWorkspaceRoot)
 	require.NotContains(t, text, "is the only directory collected")
 	require.NotContains(t, text, "sandbox:<file name>")
@@ -77,4 +78,16 @@ func TestArtifactGuidanceUsesConfiguredOutputDirectory(t *testing.T) {
 	guidance := formatToolGuidance([]string{"shell_exec", "read_file"})
 	require.Contains(t, guidance, "/workspace/deliverables is the only directory collected for download")
 	require.NotContains(t, guidance, "/workspace/output is the only directory collected")
+}
+
+func TestSharedLayoutPromptNamesTheSessionDirectory(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	text := formatToolGuidanceForMode([]string{"shell_exec"}, false, l)
+	require.Contains(t, text, "Session workspace: "+l.Root)
+	require.Contains(t, text, l.InputDir)
+	require.Contains(t, text, l.OutputDir)
+	require.NotContains(t, text, "share this machine")
+	require.NotContains(t, text, "other conversations")
+	require.NotContains(t, text, "Session workspace: /workspace.")
 }

@@ -7,6 +7,7 @@ import DocumentFileIcon from './DocumentFileIcon.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
 import { shownStall } from '@/utils/knowledgeProcessingStall';
+import type { FolderEntry } from '../folderTree';
 
 interface Tag {
   id: string;
@@ -46,6 +47,12 @@ const props = defineProps<{
   /** Every folder of the knowledge base, for the "move to folder" picker. */
   folderOptions?: FolderOption[];
   /**
+   * Direct sub-folders of the folder being browsed. They sit in their own
+   * group above the document table. Filtering searches the subtree for
+   * documents, so the caller passes an empty list.
+   */
+  subFolders?: FolderEntry[];
+  /**
    * Show each row's folder under its name. Only useful when the list spans
    * several folders, i.e. while filtering; inside one folder the path would be
    * identical on every row.
@@ -79,6 +86,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const tagEditorId = ref<string | null>(null);
+const subFolderRows = computed(() => props.subFolders || []);
+const openFolder = (folder: FolderEntry) => emit('open-folder', folder.path);
 
 const formatTime = (time?: string) => {
   if (!time) return '--';
@@ -264,9 +273,39 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 </script>
 
 <template>
-  <div class="doc-list-view" :class="{ 'is-loading': loading }" role="table" :aria-label="t('knowledgeEditor.document.title')">
-    <div ref="stickySentinel" class="doc-list-sticky-sentinel" aria-hidden="true"></div>
-    <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
+  <div class="doc-list-view" :class="{ 'is-loading': loading }">
+    <section v-if="subFolderRows.length" class="doc-section">
+      <h3 class="doc-section-header">
+        <span>{{ t('knowledgeBase.folderTree.folderSection') }}</span>
+        <span class="doc-section-count">{{ subFolderRows.length }}</span>
+      </h3>
+      <nav class="doc-folder-strip" :aria-label="t('knowledgeBase.folderTree.folderSection')">
+        <button
+          v-for="folder in subFolderRows"
+          :key="`folder:${folder.path}`"
+          type="button"
+          class="doc-folder-tile"
+          :data-folder-path="folder.path"
+          :title="folder.path"
+          @click="openFolder(folder)"
+        >
+          <t-icon name="folder" class="doc-folder-tile__icon" size="20px" />
+          <span class="doc-folder-tile__name">{{ folder.name }}</span>
+          <span class="doc-folder-tile__count"
+            :title="t('knowledgeBase.folderTree.countHint', { direct: folder.document_count, total: folder.total_count })">
+            {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
+          </span>
+        </button>
+      </nav>
+    </section>
+
+    <section v-if="items.length" class="doc-section" role="table" :aria-label="t('knowledgeEditor.document.title')">
+      <h3 v-if="subFolderRows.length" class="doc-section-header">
+        <span>{{ t('knowledgeBase.folderTree.documentSection') }}</span>
+        <span class="doc-section-count">{{ items.length }}</span>
+      </h3>
+      <div ref="stickySentinel" class="doc-list-sticky-sentinel" aria-hidden="true"></div>
+      <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
       <div class="cell cell-check" role="columnheader" @click.stop>
         <t-checkbox v-if="canEdit || canDownload" class="doc-list-check" size="small" :checked="allSelected" :indeterminate="someSelected"
           :disabled="!items.length" :title="t('knowledgeBase.selectAll')" @change="onHeaderCheckboxChange" />
@@ -451,6 +490,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
         </div>
       </div>
     </div>
+    </section>
   </div>
 </template>
 
@@ -471,6 +511,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   display: flex;
   flex-direction: column;
   width: 100%;
+  padding-top: 12px;
   background: transparent;
   /* 不能用 overflow:hidden，否则表头 position:sticky 相对外层滚动区失效 */
   overflow: visible;
@@ -518,6 +559,89 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   flex-direction: column;
   gap: 2px;
   padding: 6px 0 72px;
+}
+
+.doc-section + .doc-section {
+  margin-top: 16px;
+}
+
+.doc-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0 2px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.doc-section-count {
+  color: var(--td-text-color-placeholder);
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-folder-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 10px;
+}
+
+.doc-folder-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--app-motion-base) ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--td-text-color-primary) 12%, var(--td-bg-color-secondarycontainer));
+  }
+
+  &:hover .doc-folder-tile__icon {
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 2px;
+  }
+}
+
+.doc-folder-tile__icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+  transition: color var(--app-motion-base) ease;
+}
+
+.doc-folder-tile__name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.doc-folder-tile__count {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xs);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
 }
 
 .doc-list-row {
@@ -698,7 +822,8 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   &.status-default { color: var(--td-text-color-placeholder); }
 }
 .row-title-line { display: flex; align-items: center; min-width: 0; }
-.row-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; width: 100%; }
+.row-tag-trigger { display: inline-flex; min-width: 0; max-width: 100%; }
+.row-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; max-width: 100%; }
 .row-tag {
   flex: 0 0 auto;
   max-width: min(180px, 100%);
@@ -716,7 +841,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   white-space: nowrap;
   cursor: pointer;
   &:disabled { cursor: default; }
-  &:not(:disabled):hover { color: var(--td-brand-color); background: var(--td-brand-color-light); }
+  &:not(:disabled):hover { color: var(--td-text-color-primary); background: var(--td-bg-color-container-hover); }
   &--overflow { background: transparent; color: var(--td-text-color-placeholder); }
 }
 .row-tag-add {
@@ -736,9 +861,9 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   transition: color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover {
-    color: var(--td-brand-color);
-    border-color: var(--td-brand-color);
-    background: var(--td-brand-color-light);
+    color: var(--td-text-color-secondary);
+    border-color: var(--td-component-stroke);
+    background: var(--td-bg-color-container-hover);
   }
 }
 .row-tag-menu-action {

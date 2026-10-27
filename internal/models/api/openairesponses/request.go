@@ -212,6 +212,9 @@ func appendToLastUserText(items []any, suffix string) bool {
 func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream bool) (map[string]any, error) {
 	s := c.cfg.Settings
 	instructions, input := c.convertMessages(messages)
+	if opts != nil && opts.RuntimeNotice != "" {
+		input = append(input, inputMessage{Type: "message", Role: "developer", Content: opts.RuntimeNotice})
+	}
 	body := map[string]any{
 		"model": c.cfg.Endpoint.Model,
 		"input": input,

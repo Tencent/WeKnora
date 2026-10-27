@@ -53,6 +53,16 @@ func TestAttachSessionAffinityHeaders(t *testing.T) {
 	assert.Equal(t, "sess-1", req.Header.Get("x-session-affinity"))
 }
 
+func TestSessionAffinityPrefersBusinessSessionOverCacheKey(t *testing.T) {
+	ctx := types.WithSessionID(context.Background(), "business-session")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://example.com", nil)
+	require.NoError(t, err)
+	AttachSessionAffinityHeaders(req, "shared-cache-prefix")
+	for _, header := range []string{"session_id", "x-session-affinity", "x-client-request-id"} {
+		assert.Equal(t, "business-session", req.Header.Get(header))
+	}
+}
+
 // parseUsage decodes a response envelope the way the Chat Completions client
 // does, so these cases exercise the same path production takes.
 func parseUsage(t *testing.T, body string) (OpenAIUsage, bool) {

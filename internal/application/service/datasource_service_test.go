@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -187,7 +188,7 @@ func TestAllFetchedItemsFailedError(t *testing.T) {
 		Total:  2,
 		Failed: 2,
 		Errors: []types.SyncItemError{{Message: "doc one: export failed"}},
-	})
+	}, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "all fetched items failed during sync (2/2)")
 	assert.Contains(t, err.Error(), "doc one: export failed")
@@ -198,7 +199,7 @@ func TestAllFetchedItemsFailedErrorIgnoresPartialFailure(t *testing.T) {
 		Total:   3,
 		Created: 1,
 		Failed:  2,
-	})
+	}, 0)
 	require.NoError(t, err)
 }
 
@@ -206,7 +207,7 @@ func TestAllFetchedItemsFailedErrorIgnoresSkippedItems(t *testing.T) {
 	err := allFetchedItemsFailedError(&types.SyncResult{
 		Total:   3,
 		Skipped: 3,
-	})
+	}, 0)
 	require.NoError(t, err)
 }
 
@@ -215,10 +216,24 @@ func TestAllFetchedItemsFailedErrorTruncatesLongDetail(t *testing.T) {
 		Total:  1,
 		Failed: 1,
 		Errors: []types.SyncItemError{{Message: strings.Repeat("x", 600)}},
-	})
+	}, 0)
 	require.Error(t, err)
 	assert.LessOrEqual(t, len(err.Error()), 560)
 	assert.Contains(t, err.Error(), "...")
+}
+
+func TestAllFetchedItemsFailedErrorTruncatesChineseDetailAtRuneBoundary(t *testing.T) {
+	// 499 ASCII bytes put byte 500 inside the first three-byte rune.
+	message := strings.Repeat("x", 499) + strings.Repeat("导出失败", 50)
+	err := allFetchedItemsFailedError(&types.SyncResult{
+		Total:  1,
+		Failed: 1,
+		Errors: []types.SyncItemError{{Message: message}},
+	}, 0)
+	require.Error(t, err)
+	assert.True(t, utf8.ValidString(err.Error()), "error message must be valid UTF-8")
+	assert.LessOrEqual(t, len(err.Error()), 560)
+	assert.True(t, strings.HasSuffix(err.Error(), strings.Repeat("x", 499)+"..."))
 }
 
 const deletedItemConnectorType = "test-sync-deletion"

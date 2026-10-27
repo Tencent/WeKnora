@@ -42,11 +42,11 @@ type ModelConcurrencyLimiter interface {
 // deliberately process-local: waiters block in application processes and are
 // not represented in Redis.
 type RuntimeStat struct {
-	ModelID string `json:"model_id"`
-	Name    string `json:"name"`
-	Active  int64  `json:"active"`
-	Waiting int64  `json:"waiting"`
-	Limit   int    `json:"limit"`
+	ModelID string `json:"model_id" extensions:"x-agent"`
+	Name    string `json:"name" extensions:"x-agent"`
+	Active  int64  `json:"active" extensions:"x-agent"`
+	Waiting int64  `json:"waiting" extensions:"x-agent"`
+	Limit   int    `json:"limit" extensions:"x-agent"`
 }
 
 type runtimeInspectable interface {
@@ -220,7 +220,9 @@ func (l *redisLimiter) hold(zkey, token string) func() {
 				// dropping every live lease and admitting over the limit. The
 				// heartbeat pushes the key TTL out in lockstep with the lease.
 				bg := context.Background()
-				_ = l.rdb.ZAdd(bg, zkey, redis.Z{
+				// A release or expiry may remove the token while this heartbeat
+				// is in flight. Refresh existing leases only; never recreate one.
+				_ = l.rdb.ZAddXX(bg, zkey, redis.Z{
 					Score:  float64(now + l.ttl.Milliseconds()),
 					Member: token,
 				}).Err()

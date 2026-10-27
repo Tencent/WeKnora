@@ -7,6 +7,7 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import * as vue from 'vue'
 import * as pinia from 'pinia'
 import ts from 'typescript'
+import * as childAgentTabs from '../../composables/useChildAgentTabs'
 
 const filename = fileURLToPath(new URL('./AssistantPanel.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
@@ -14,6 +15,7 @@ const panelScript = compileScript(descriptor, { id: 'assistant-panel-test', inli
 const storeScript = readFileSync(new URL('../../stores/assistant.ts', import.meta.url), 'utf8')
 const groupingScript = readFileSync(new URL('../sessionGrouping.ts', import.meta.url), 'utf8')
 const assistantApiScript = readFileSync(new URL('../../api/assistant.ts', import.meta.url), 'utf8')
+const dragScript = readFileSync(new URL('../../composables/useFloatingPreviewDrag.ts', import.meta.url), 'utf8')
 
 function evaluate(source: string, dependencies: Record<string, unknown>, globals = {}) {
   const exports: any = {}
@@ -48,7 +50,9 @@ async function fixture(
   workspaceConfig = { display_name: '', max_access_level: 'confirm' },
   api: Record<string, (...args: any[]) => Promise<any>> = {},
 ) {
-  const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1 })
+  let workspaceRefreshes = 0
+  let workspaceChanged: (() => void) | undefined
+  const auth = vue.reactive({ user: { id: 'user-a' }, effectiveTenantId: 1, refreshFromAuthMe: async () => { workspaceRefreshes++; return true } })
   const assistantApi = evaluate(assistantApiScript, {
     '@/utils/request': { get: async () => ({ success: true, data: workspaceConfig }), put: assert.fail },
   })
@@ -84,17 +88,29 @@ async function fixture(
       return () => null
     },
   })
+  const viewport = { innerWidth: 1440, innerHeight: 1000, addEventListener() {}, removeEventListener() {} }
+  const route = vue.reactive({ name: '', params: {} as Record<string, string> })
+  const floatingDrag = evaluate(dragScript, { vue }, {
+    window: viewport,
+    ResizeObserver: class { observe() {} disconnect() {} },
+  })
   const component = evaluate(panelScript, {
     vue,
-    'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
+    'vue-i18n': { useI18n: () => ({ t: (key: string) => key, te: () => true }) },
+    'vue-router': { useRoute: () => route },
     'tdesign-vue-next': {
       MessagePlugin: { error: (message: string) => errors.push(message) },
       DialogPlugin: { confirm: (options: any) => { dialogs.push(options); return { destroy() {} } } },
     },
     '@/views/chat/index.vue': ChatView,
+    '@/views/chat/components/ChildAgentTabBar.vue': emptyComponent,
+    '@/composables/useChildAgentTabs': childAgentTabs,
+    '@/composables/useFloatingPreviewDrag': floatingDrag,
     '@/components/Input-field.vue': emptyComponent,
     '@/components/PanelResizeHandle.vue': emptyComponent,
-    './AssistantContextChip.vue': emptyComponent,
+    '@/components/icons/ResourceIcon.vue': emptyComponent,
+    './AssistantContextMenu.vue': emptyComponent,
+    './AssistantSelectionChip.vue': emptyComponent,
     './AssistantAccessPicker.vue': emptyComponent,
     '@/api/chat': {
       createSessions: createSession,
@@ -109,6 +125,10 @@ async function fixture(
     '@/stores/menu': { useMenuStore: () => ({ updataMenuChildren: (entry: unknown) => menuEntries.push(entry) }) },
     '@/stores/auth': { useAuthStore: () => auth },
     '@/stores/assistant': stores,
+    '@/utils/assistantDataChange': { useAssistantDataChange: (callback: () => void, options: { areas: string[] }) => {
+      assert.deepEqual(Array.from(options.areas), ['workspace'])
+      workspaceChanged = callback
+    } },
     '@/components/sessionMutations': {
       SESSION_MUTATION_EVENT: 'session-mutation',
       removeSession: async (id: string) => {
@@ -116,7 +136,7 @@ async function fixture(
         deleted.push(id)
       },
     },
-  }, { window: { addEventListener() {}, removeEventListener() {} } }).default
+  }, { window: viewport }).default
   type HostNode = { children: HostNode[]; parent?: HostNode; tag?: string; props: Record<string, any>; style: Record<string, any>; text?: string }
   const node = (tag?: string): HostNode => ({ children: [], tag, props: {}, style: {} })
   const remove = (child: HostNode) => {
@@ -135,6 +155,7 @@ async function fixture(
     patchProp(node, key, _prev, next) { node.props[key] = next },
     parentNode: child => child.parent ?? null,
     nextSibling: child => child.parent?.children[child.parent.children.indexOf(child) + 1] ?? null,
+    querySelector: selector => selector === 'body' ? body : null,
   })
   const app = renderer.createApp(component)
   app.use(storeRoot)
@@ -143,7 +164,10 @@ async function fixture(
   app.component('t-loading', emptyComponent)
   app.component('t-tooltip', vue.defineComponent({ inheritAttrs: false, setup: (_, { slots }) => () => slots.default?.() }))
   app.component('t-button', vue.defineComponent({ setup: (_, { slots }) => () => vue.h('button', slots.default?.()) }))
-  const root = node()
+  const body = node('body')
+  const root = node('app-root')
+  root.parent = body
+  body.children.push(root)
   app.mount(root)
   const findAll = (predicate: (node: HostNode) => boolean): HostNode[] => {
     const found: HostNode[] = []
@@ -151,7 +175,7 @@ async function fixture(
       if (predicate(node)) found.push(node)
       node.children.forEach(walk)
     }
-    walk(root)
+    walk(body)
     return found
   }
   const click = async (label: string) => {
@@ -161,8 +185,132 @@ async function fixture(
     await flush()
   }
   await flush()
-  return { auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
+  return { workspaceChanged: () => workspaceChanged?.(), workspaceRefreshes: () => workspaceRefreshes, route, auth, assistant, mounted, sent, menuEntries, sessionStorage, localStorage, findAll, click, listCalls, deleted, dialogs, errors, close: () => app.unmount() }
 }
+
+test('welcome descriptions and questions change with pages and toolbox tabs without starting a conversation', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open()
+    await flush()
+    const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
+      .map(node => node.text?.replace('assistant.starters.', ''))
+    const description = () => f.findAll(node => node.props.class === 'assistant-welcome-desc')[0]?.text
+    const general = ['releaseHighlights', 'gettingStarted', 'workflow']
+    assert.deepEqual(questions(), general)
+    assert.equal(description(), 'assistant.welcomeDesc')
+    const pages: Array<[string, Record<string, string>, string, string[]]> = [
+      ['knowledgeBaseList', {}, 'knowledgeBases', ['knowledgeOverview', 'knowledgeType', 'knowledgeOrganize']],
+      ['knowledgeBaseDetail', {}, 'knowledgeBase', ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
+      ['artifactLibrary', {}, 'artifacts', ['artifactRecent', 'artifactSources', 'artifactCreate']],
+      ['agentList', {}, 'agents', ['agents', 'agentCreate', 'agentChoose']],
+      ['organizationList', {}, 'organizations', ['organizationShared', 'organizationJoin', 'organizationCreate']],
+      ['automationList', {}, 'automation', ['automationIdeas', 'automationCreate', 'automationOverview']],
+      ['automationList', { automationId: 'weekly' }, 'automation', ['automationSummary', 'automationSchedule', 'automationImprove']],
+      ['toolbox', { section: 'skills' }, 'skills', ['skillFind', 'skillAdd', 'skillUse']],
+      ['toolbox', { section: 'mcp' }, 'mcp', ['mcpFind', 'mcpSetup', 'mcpExamples']],
+      ['toolbox', { section: 'browserconnection' }, 'browser', ['browserConnect', 'browserTasks', 'browserReconnect']],
+      ['chat', {}, 'chat', ['chatSummary', 'chatCheck', 'chatFollowup']],
+    ]
+    for (const [name, params, intro, expected] of pages) {
+      f.route.name = name
+      f.route.params = params
+      f.assistant.setPageTitle(`${name}/${params.section || params.automationId || ''}`)
+      await flush()
+      assert.deepEqual(questions(), expected, `questions for ${name}/${JSON.stringify(params)}`)
+      assert.equal(description(), `assistant.welcomeDescriptions.${intro}`)
+    }
+    f.assistant.dismissPageContext()
+    await flush()
+    assert.deepEqual(questions(), general, 'dismissed page context does not influence suggestions')
+    assert.equal(description(), 'assistant.welcomeDesc', 'dismissed page context does not influence the introduction')
+    f.assistant.restorePageContext()
+    f.assistant.setPageAccess(false)
+    await flush()
+    assert.deepEqual(questions(), general, 'page access off also disables route-based suggestions')
+    assert.equal(description(), 'assistant.welcomeDesc', 'page access off also disables the contextual introduction')
+    assert.equal(f.mounted.length, 0)
+    assert.equal(f.sent.length, 0)
+  } finally { f.close() }
+})
+
+test('open resources and dialogs have their own welcome content and return to page content when closed', async () => {
+  const f = await fixture()
+  try {
+    f.route.name = 'agentList'
+    f.assistant.setPageTitle('Agents')
+    const owner = Symbol('open-resource')
+    const cases: Array<[Record<string, string>, string, string[]]> = [
+      [{ page: 'settings_models', modelId: 'model' }, 'welcomeDescriptions.model', ['modelFit', 'modelCheck', 'modelUsage']],
+      [{ page: 'settings_models' }, 'welcomeDescriptions.model', ['modelSetup', 'modelTypes', 'modelUsage']],
+      [{ page: 'mcp_services', mcpServiceId: 'mcp' }, 'welcomeDescriptions.mcp', ['mcpTools', 'mcpUsage', 'mcpCheck']],
+      [{ page: 'mcp_services' }, 'welcomeDescriptions.mcp', ['mcpFind', 'mcpSetup', 'mcpExamples']],
+      [{ agentId: 'agent' }, 'agentWelcomeDesc', ['agentConfig', 'agentModel', 'agentKnowledge']],
+      [{ knowledgeBaseId: 'kb', wikiSlug: 'page' }, 'welcomeDescriptions.wiki', ['wikiSummary', 'wikiSources', 'wikiIssues']],
+      [{ knowledgeBaseId: 'kb', knowledgeId: 'document' }, 'welcomeDescriptions.document', ['documentSummary', 'documentSteps', 'documentFaq']],
+      [{ knowledgeBaseId: 'kb', section: 'faq' }, 'welcomeDescriptions.faq', ['faqCoverage', 'faqDuplicates', 'faqImprove']],
+      [{ knowledgeBaseId: 'kb' }, 'welcomeDescriptions.knowledgeBase', ['knowledgeTopics', 'recentActivity', 'knowledgeGaps']],
+      [{ page: 'chat', chatSessionId: 'chat' }, 'welcomeDescriptions.chat', ['chatSummary', 'chatCheck', 'chatFollowup']],
+      [{ page: 'settings', section: 'members' }, 'settingsPages.members.description', ['settingsPages.members.q1', 'settingsPages.members.q2', 'settingsPages.members.q3']],
+      [{ page: 'settings', section: 'integration-im' }, 'settingsPages.integration-im.description', ['settingsPages.integration-im.q1', 'settingsPages.integration-im.q2', 'settingsPages.integration-im.q3']],
+      [{ chatSessionId: 'chat', messageId: 'answer' }, 'welcomeDescriptions.message', ['messageSources', 'messageCheck', 'messageReuse']],
+    ]
+    const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
+      .map(node => node.text?.replace(/^assistant\.(starters\.)?/, ''))
+    const description = () => f.findAll(node => node.props.class === 'assistant-welcome-desc')[0]?.text
+    for (const [context, intro, expected] of cases) {
+      f.assistant.publishPageContext(owner, context)
+      await flush()
+      assert.deepEqual(questions(), expected, `questions for ${JSON.stringify(context)}`)
+      assert.equal(description(), `assistant.${intro}`)
+    }
+    f.assistant.retractPageContext(owner)
+    await flush()
+    assert.deepEqual(questions(), ['agents', 'agentCreate', 'agentChoose'])
+    assert.equal(description(), 'assistant.welcomeDescriptions.agents')
+    f.route.name = 'toolbox'
+    f.route.params = { section: 'mcp' }
+    f.assistant.publishPageContext(owner, { agentId: 'agent' })
+    await flush()
+    assert.deepEqual(questions(), ['agentConfig', 'agentModel', 'agentKnowledge'], 'an open agent takes precedence over the underlying MCP tab')
+    assert.equal(description(), 'assistant.agentWelcomeDesc')
+    assert.equal(f.sent.length, 0)
+  } finally { f.close() }
+})
+
+test('each settings section has its own welcome questions', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open()
+    const owner = Symbol('settings')
+    const questions = () => f.findAll(node => node.props.class === 'assistant-starter')
+      .map(node => node.text?.replace(/^assistant\.(starters\.)?/, ''))
+    for (const section of ['general', 'members', 'sandbox', 'websearch', 'integration-api', 'runtime-queues', 'system-global-users']) {
+      f.assistant.publishPageContext(owner, { page: 'settings', section })
+      await flush()
+      assert.deepEqual(questions(), [
+        `settingsPages.${section}.q1`,
+        `settingsPages.${section}.q2`,
+        `settingsPages.${section}.q3`,
+      ], section)
+    }
+  } finally { f.close() }
+})
+
+test('the current-version question starts one conversation only when selected', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open()
+    await flush()
+    assert.equal(f.sent.length, 0)
+    const question = f.findAll(node => node.text === 'assistant.starters.releaseHighlights')[0]
+    assert.ok(question)
+    question.props.onClick()
+    await flush()
+    assert.equal(f.sent.length, 1)
+    assert.equal(f.sent[0].query, 'assistant.starters.releaseHighlights')
+  } finally { f.close() }
+})
 
 test('layout and width persist, with the width kept within bounds', async () => {
   const f = await fixture()
@@ -175,6 +323,156 @@ test('layout and width persist, with the width kept within bounds', async () => 
     f.assistant.setWidth(12)
     assert.equal(f.assistant.width, 360)
     assert.equal(f.localStorage.getItem('weknora:assistant-width'), '360')
+  } finally { f.close() }
+})
+
+test('floating panels escape the app root without remounting the conversation', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open({ query: 'Explain this connection error' })
+    await flush()
+    const panel = f.findAll(node => node.tag === 'aside')[0]
+    assert.equal(panel.parent?.tag, 'app-root')
+    f.assistant.setLayout('floating')
+    await flush()
+    assert.equal(panel.parent?.tag, 'body')
+    f.assistant.setLayout('docked')
+    await flush()
+    assert.equal(panel.parent?.tag, 'app-root')
+    assert.equal(f.mounted.length, 1)
+    assert.equal(f.sent.length, 1)
+  } finally { f.close() }
+})
+
+test('the floating header moves the panel without intercepting controls or remounting the conversation', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.open({ query: 'Keep this conversation running' })
+    await flush()
+    const panel = f.findAll(node => node.tag === 'aside')[0]
+    const header = f.findAll(node => node.tag === 'header')[0]
+    Object.defineProperties(panel, {
+      offsetWidth: { get: () => parseFloat(panel.props.style.width) },
+      offsetHeight: { value: 720 },
+      offsetLeft: { get: () => 1440 - parseFloat(panel.props.style.width) - parseFloat(panel.props.style.right || '12') },
+      offsetTop: { get: () => parseFloat(panel.props.style.top || '268') },
+      getBoundingClientRect: { value: () => ({ width: parseFloat(panel.props.style.width) }) },
+    })
+    let captured: number | null = null
+    Object.assign(header, {
+      setPointerCapture: (id: number) => { captured = id },
+      hasPointerCapture: (id: number) => captured === id,
+      releasePointerCapture: () => { captured = null },
+    })
+    const pointer = (clientX: number, clientY: number, control = false) => ({
+      clientX, clientY, pointerId: 1, isPrimary: true, button: 0,
+      currentTarget: header, target: { closest: () => control ? {} : null }, preventDefault() {},
+    })
+    header.props.onPointerdown(pointer(1000, 280))
+    assert.equal(captured, null, 'docked headers cannot drag')
+    f.assistant.setLayout('floating')
+    await flush()
+    header.props.onPointerdown(pointer(1000, 280, true))
+    assert.equal(captured, null, 'buttons and conversation tabs retain their normal interactions')
+    header.props.onPointerdown(pointer(1000, 280))
+    header.props.onPointermove(pointer(800, 180))
+    await flush()
+    assert.equal(captured, 1)
+    assert.match(panel.props.class, /is-dragging/)
+    assert.equal(panel.props.style.right, '212px')
+    assert.equal(panel.props.style.top, '168px')
+    header.props.onPointerup(pointer(800, 180))
+    await flush()
+    assert.equal(captured, null)
+    assert.doesNotMatch(panel.props.class, /is-dragging/)
+
+    f.assistant.close()
+    await flush()
+    f.assistant.open()
+    await flush()
+    assert.equal(panel.props.style.right, '212px')
+    assert.equal(panel.props.style.top, '168px')
+    f.assistant.setLayout('docked')
+    await flush()
+    assert.equal(panel.props.style.right, undefined)
+    assert.equal(panel.props.style.top, undefined)
+    assert.equal(f.mounted.length, 1)
+    assert.equal(f.sent.length, 1)
+  } finally { f.close() }
+})
+
+for (const existing of [false, true]) {
+  test(`contextual actions open inside the ${existing ? 'existing conversation' : 'welcome panel'} and send only on selection`, async () => {
+    let creations = 0
+    const f = await fixture(async () => { creations++; return { data: { id: 'new-session' } } })
+    try {
+      if (existing) f.assistant.setSession('ongoing-session')
+      f.assistant.publishPageContext(Symbol(), { knowledgeBaseId: 'kb-a', knowledgeId: 'document-a' })
+      f.assistant.setPageSelection({ text: 'Selected content', field: 'Document' })
+      await flush()
+      const mounts = f.mounted.length
+      await f.click('assistant.history')
+      f.assistant.showActionSuggestions({ label: 'Read this document', actions: [
+        { key: 'summary', label: 'Summarize', query: 'Summarize document-a' },
+        { key: 'compare', label: 'Compare', query: 'Compare documents', disabled: true },
+      ] })
+      await flush()
+      assert.equal(f.assistant.visible, true)
+      assert.equal(creations, 0, 'opening actions must not create a conversation or send a prompt')
+      assert.equal(f.sent.length, 0)
+      assert.equal(f.mounted.length, mounts, 'existing conversations stay mounted')
+      assert.equal(f.findAll(node => node.props.class === 'assistant-history').length, 0)
+      const buttons = f.findAll(node => node.tag === 'button')
+      const summary = buttons.find(node => node.text === 'Summarize')
+      const compare = buttons.find(node => node.text === 'Compare')
+      assert.ok(summary)
+      assert.equal(compare?.props.disabled, true)
+      f.assistant.askSuggestedAction('compare')
+      f.assistant.askSuggestedAction('missing')
+      assert.equal(f.assistant.queuedMessage, null)
+      assert.equal(creations, 0)
+      summary.props.onClick()
+      await flush()
+      assert.equal(f.assistant.actionSuggestions, null)
+      if (existing) {
+        assert.equal(f.assistant.sessionId, 'ongoing-session')
+        assert.equal(f.assistant.queuedMessage.query, 'Summarize document-a')
+        assert.equal(creations, 0)
+      } else {
+        assert.equal(creations, 1)
+        assert.equal(f.sent[0].query, 'Summarize document-a')
+        assert.equal(f.sent[0].scope.pageContext.knowledge_id, 'document-a')
+        assert.equal(f.sent[0].scope.pageContext.selection.text, 'Selected content')
+      }
+    } finally { f.close() }
+  })
+}
+
+test('contextual actions expire when their page, conversation, workspace or access changes', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { knowledgeBaseId: 'kb-a', knowledgeId: 'document-a' })
+    const suggest = () => f.assistant.showActionSuggestions({ label: 'Document actions', actions: [
+      { key: 'summary', label: 'Summarize', query: 'Summarize document-a' },
+    ] })
+    for (const change of [
+      () => f.assistant.publishPageContext(owner, { knowledgeBaseId: 'kb-a', knowledgeId: 'document-b' }),
+      () => f.assistant.setPageView('Another dialog'),
+      () => f.assistant.dismissPageContext(),
+      () => f.assistant.startNewConversation(),
+      () => f.assistant.setSession('another-session'),
+      () => { f.auth.effectiveTenantId = 2 },
+      () => f.assistant.setPageAccess(false),
+    ]) {
+      suggest()
+      assert.ok(f.assistant.actionSuggestions)
+      change()
+      await flush()
+      assert.equal(f.assistant.actionSuggestions, null)
+    }
+    suggest()
+    assert.equal(f.assistant.actionSuggestions, null, 'page access must be enabled')
   } finally { f.close() }
 })
 
@@ -435,5 +733,104 @@ test('agent layers merge, dismissal follows the agent id, and the payload has no
     assert.equal(f.assistant.pageContext.knowledgeBaseId, 'kb-a')
     f.assistant.retractPageContext(nested)
     assert.equal(f.assistant.pageContext, null)
+  } finally { f.close() }
+})
+
+test('settings and chat pages send their resources without widening the search scope', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { page: 'chat', chatSessionId: 'chat-1', messageId: 'msg-1' })
+    f.assistant.open({ query: 'Why this answer?' })
+    await flush()
+    assert.equal(f.sent.length, 1)
+    assert.deepEqual(Array.from(f.sent[0].scope.knowledgeBaseIds), [])
+    assert.equal(JSON.stringify(f.sent[0].scope.pageContext),
+      JSON.stringify({ page: 'chat', session_id: 'chat-1', message_id: 'msg-1' }))
+
+    f.assistant.publishPageContext(owner, { page: 'settings_models', section: 'chat', modelId: 'm-1', messageId: 'stale' })
+    assert.ok(f.assistant.pageContext)
+    f.assistant.open({ query: 'Check it' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext),
+      JSON.stringify({ page: 'settings_models', section: 'chat', model_id: 'm-1' }),
+      'a message without its session is not sent')
+
+    f.assistant.publishPageContext(owner, { section: 'tools' })
+    assert.equal(f.assistant.pageContext, null, 'a section alone names no page')
+  } finally { f.close() }
+})
+
+test('the open dialog and the selection go with the message, the selection only once', async () => {
+  const f = await fixture()
+  try {
+    const owner = Symbol()
+    f.assistant.publishPageContext(owner, { knowledgeBaseId: 'kb-a', knowledgeBaseName: 'KB' })
+    f.assistant.setPageView('Edit Markdown')
+    f.assistant.setPageSelection({ text: 'Run setup.', field: 'Content', ref: 'e2', startLine: 7, endLine: 7 })
+    f.assistant.open({ query: 'Polish this' })
+    await flush()
+    assert.deepEqual(Array.from(f.sent[0].scope.knowledgeBaseIds), [],
+      'the current page must not become an explicit KB selection')
+    assert.equal(JSON.stringify(f.sent[0].scope.pageContext), JSON.stringify({
+      knowledge_base_id: 'kb-a', view: 'Edit Markdown',
+      selection: { text: 'Run setup.', field: 'Content', ref: 'e2', start_line: 7, end_line: 7 },
+    }))
+    assert.equal(f.assistant.pageSelection, null, 'the selection is used up by the message')
+
+    f.assistant.retractPageContext(owner)
+    f.assistant.setPageView('')
+    f.assistant.setPageSelection({ text: 'page text' })
+    f.assistant.open({ query: 'Explain' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext), JSON.stringify({ selection: { text: 'page text' } }),
+      'a selection alone is a page context')
+
+    f.assistant.setPageView('Edit Markdown')
+    f.assistant.dismissPageContext()
+    assert.equal(f.assistant.contextAttached, false)
+    f.assistant.setPageView('Another dialog')
+    assert.equal(f.assistant.contextAttached, true, 'a new dialog brings the context back')
+  } finally { f.close() }
+})
+
+test('a page that publishes nothing still sends its route title', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.setPageTitle('Agents')
+    assert.equal(f.assistant.contextAttached, true)
+    f.assistant.open({ query: 'What is here?' })
+    await flush()
+    assert.equal(JSON.stringify(f.sent.at(-1)?.scope.pageContext), JSON.stringify({ title: 'Agents' }))
+
+    f.assistant.dismissPageContext()
+    assert.equal(f.assistant.contextAttached, false)
+    f.assistant.setPageTitle('Toolbox')
+    assert.equal(f.assistant.contextAttached, true, 'another page brings it back')
+  } finally { f.close() }
+})
+
+test('ask sends into the open conversation and starts one when there is none', async () => {
+  const f = await fixture()
+  try {
+    f.assistant.ask('First')
+    await flush()
+    assert.equal(f.sent.at(-1)?.query, 'First')
+    assert.equal(f.assistant.queuedMessage, null)
+    f.assistant.ask('Second')
+    assert.equal(f.assistant.queuedMessage?.query, 'Second', 'the open conversation sends it')
+    assert.equal(f.assistant.takeQueuedMessage()?.query, 'Second')
+    assert.equal(f.assistant.queuedMessage, null)
+  } finally { f.close() }
+})
+
+ test('workspace changes refresh the shared profile and workspace selector even while the panel is hidden', async () => {
+  const f = await fixture()
+  try {
+    assert.equal(f.assistant.visible, false)
+    assert.equal(f.workspaceRefreshes(), 0)
+    f.workspaceChanged()
+    await flush()
+    assert.equal(f.workspaceRefreshes(), 1)
   } finally { f.close() }
 })

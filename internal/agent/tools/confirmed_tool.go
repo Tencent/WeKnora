@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -30,6 +33,28 @@ func NewConfirmedTool(
 	return &ConfirmedTool{inner: inner, risk: risk, access: access, gate: gate}
 }
 
+// RequireConfirmation decorates an existing tool without permitting replacement
+// by another implementation. Duplicate registration remains first-wins.
+func (r *ToolRegistry) RequireConfirmation(
+	name string, risk operations.Risk, access operations.Access, gate approval.BuiltinApproval,
+) error {
+	inner, err := r.GetTool(name)
+	if err != nil {
+		return err
+	}
+	if _, wrapped := inner.(*ConfirmedTool); !wrapped {
+		r.tools[name] = NewConfirmedTool(inner, risk, access, gate)
+	}
+	return nil
+}
+
+// BindSession preserves the underlying sandbox tool's session-local layout.
+func (t *ConfirmedTool) BindSession(id string) {
+	if bound, ok := t.inner.(sessionBinder); ok {
+		bound.BindSession(id)
+	}
+}
+
 // Name returns the wrapped tool's name.
 func (t *ConfirmedTool) Name() string { return t.inner.Name() }
 
@@ -43,10 +68,18 @@ func (t *ConfirmedTool) Parameters() json.RawMessage { return t.inner.Parameters
 func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	meta, _ := ToolExecFromContext(ctx)
 	resumed := meta != nil && meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
-	if !resumed && !t.access.NeedsApprovalFor(t.risk) {
+	action := policy.Action{Risk: t.risk}
+	verdict := policy.Decide(action, t.access.Rules())
+	policy.Record(ctx, t.Name(), action, t.access.Rules(), verdict)
+	if verdict == policy.Deny {
+		return operationFailure(fmt.Sprintf(
+			"%s changes data, which this conversation's read-only access does not allow. "+
+				"Tell the user; do not retry.", t.Name())), nil
+	}
+	if !resumed && verdict == policy.Allow {
 		return t.inner.Execute(ctx, args)
 	}
-	if t.gate == nil || meta == nil || meta.EventBus == nil || (!meta.Interactive && !resumed) {
+	if t.gate == nil || meta == nil || meta.EventBus == nil || (!meta.CanAsk() && !resumed) {
 		return operationFailure(fmt.Sprintf(
 			"%s changes data and needs the user's confirmation, which cannot be shown here. "+
 				"Tell the user what you would do and let them do it in WeKnora.", t.Name())), nil
@@ -69,6 +102,7 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 				snapshot = nil
 			}
 		}
+		grant, grantScope := t.grant(ctx, args)
 		var err error
 		decision, err = t.gate.RequestBuiltinApproval(waitCtx, approval.PendingRequest{
 			Snapshot:           snapshot,
@@ -82,9 +116,12 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			ServiceName:        operationApprovalService,
 			MCPToolName:        t.Name(),
 			RegisteredToolName: t.Name(),
-			Description:        confirmedToolSummary(ctx, t.Name(), args),
+			Description:        t.summary(ctx, args),
 			Args:               args,
 			ToolCallID:         meta.ToolCallID,
+			Grant:              grant,
+			GrantScope:         grantScope,
+			GrantRisk:          t.risk,
 		})
 		if err != nil {
 			return operationFailure(fmt.Sprintf("could not ask the user to confirm %s: %v", t.Name(), err)), nil
@@ -119,7 +156,53 @@ func (t *ConfirmedTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		ctx, cancel = context.WithTimeout(WithToolExecContext(meta.ApprovalCtx, meta), timeout)
 		defer cancel()
 	}
+	if err := hitl.CheckDelegation(ctx); err != nil {
+		return operationFailure(err.Error()), nil
+	}
 	return t.inner.Execute(ctx, args)
+}
+
+// approvalDescriber is a wrapped tool that writes its own confirmation card
+// text; an empty description falls back to the summary below.
+type approvalDescriber interface {
+	ApprovalDescription(ctx context.Context, args json.RawMessage) string
+}
+
+func (t *ConfirmedTool) summary(ctx context.Context, args json.RawMessage) string {
+	if d, ok := t.inner.(approvalDescriber); ok {
+		if description := d.ApprovalDescription(ctx, args); description != "" {
+			return description
+		}
+	}
+	return confirmedToolSummary(ctx, t.Name(), args)
+}
+
+// approvalGranter is a wrapped tool whose approval may be extended to the
+// rest of the session; see approval.PendingRequest.Grant.
+type approvalGranter interface {
+	ApprovalGrant(ctx context.Context, args json.RawMessage) (grant, scope string)
+}
+
+// grant names the call for remembered grants. The card offers to remember
+// only recoverable changes; a destructive one can match a standing grant.
+func (t *ConfirmedTool) grant(ctx context.Context, args json.RawMessage) (string, string) {
+	if !policy.Pregrantable(policy.Action{Risk: t.risk}) {
+		return "", ""
+	}
+	if g, ok := t.inner.(approvalGranter); ok {
+		return g.ApprovalGrant(ctx, args)
+	}
+	return "", ""
+}
+
+// wikiApprovalGrant scopes a Wiki tool's session approval to the knowledge
+// bases the run may write to, so a turn that writes elsewhere asks again.
+func wikiApprovalGrant(ctx context.Context, name string, kbIDs []string) (string, string) {
+	if len(kbIDs) == 0 {
+		return "", ""
+	}
+	sorted := slices.Sorted(slices.Values(kbIDs))
+	return name + " knowledge_base:" + strings.Join(sorted, ","), confirmedToolSummary(ctx, name, nil)
 }
 
 // confirmedToolSummaries name each wrapped tool on the confirmation card, in

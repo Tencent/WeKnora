@@ -34,7 +34,7 @@ test('the editor publishes existing local agents and retracts on create, close a
     assert.equal(context, null)
     state.editorVisible.value = true
     await vue.nextTick()
-    assert.equal(JSON.stringify(context), JSON.stringify({ agentId: 'local', agentName: 'Local' }))
+    assert.equal(JSON.stringify(context), JSON.stringify({ page: 'agent_editor', agentId: 'local', agentName: 'Local' }))
     state.editorVisible.value = false
     await vue.nextTick()
     assert.equal(context, null)

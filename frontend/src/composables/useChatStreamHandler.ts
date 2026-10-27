@@ -1,12 +1,26 @@
 import { emitAssistantDataChange } from '@/utils/assistantDataChange'
+import { approvalEventFromRecord, clearComposerApproval, showComposerApproval } from '@/views/chat/components/hostApproval'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
 import { applyMessageCreatedAt, bindServerTurnTimestamps, ensureMessageCreatedAt } from '@/utils/messageTimestamp'
-import { expandSteerForksInHistory, forkAfterInjectedUser, steerStepEvents, resetSteerTurnForReplay } from '@/utils/steerStreamFork'
+import { expandSteerForksInHistory, forkAfterInjectedUser, persistedAssistantId, steerStepEvents, resetSteerTurnForReplay } from '@/utils/steerStreamFork'
+import type { CollaborationStatus, CollaborationTaskStatus } from '@/api/chat/streamTypes'
 
-export type ChatMessage = Record<string, unknown>
+export type { CollaborationStatus, CollaborationTaskStatus } from '@/api/chat/streamTypes'
+export type ChatMessage = Record<string, unknown> & {
+  collaborationStatus?: CollaborationStatus
+  collaboration_status?: CollaborationStatus
+}
+
+const TERMINAL_COLLABORATION_STATES = new Set(['succeeded', 'completed', 'failed', 'interrupted', 'cancelled', 'canceled'])
+
+// Tools whose results tell open pages what changed (see dataChangeTools on
+// the server).
+const DATA_CHANGE_TOOLS = new Set([
+  'run_operation', 'wiki_write_page', 'wiki_replace_text', 'wiki_rename_page', 'wiki_delete_page', 'wiki_update_issue',
+])
 
 export interface UseChatStreamHandlerOptions {
   messagesList: ChatMessage[]
@@ -34,6 +48,8 @@ export interface UseChatStreamHandlerOptions {
   onAgentAnswerDone?: (message: ChatMessage) => void
   onAgentChunkBound?: (message: ChatMessage, created: boolean) => void
   onUserMessageInjected?: (steerId: string) => void
+  /** The assistant asks to read or fill the page; answered by the page, not shown. */
+  onPageAction?: (prompt: ChatMessage) => void
   /** Remote or local stop: the composer overlay must drop server-discarded items. */
   onGenerationStopped?: () => void
   debug?: boolean
@@ -64,25 +80,39 @@ export function isAwaitingInput(message: ChatMessage | undefined): boolean {
   return message?.run_state === AWAITING_INPUT
 }
 
-/** Rebuilds the card of the prompt a suspended run waits on, from history. */
+/** Rebuilds open and resolved prompt cards from durable history. */
 export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
   const p = prompt as Record<string, any> | undefined
   if (!p?.id) return []
   const request = (p.request || {}) as Record<string, any>
   const createdAt = Date.parse(String(p.created_at || ''))
   const requestedAt = Number.isNaN(createdAt) ? undefined : Math.floor(createdAt / 1000)
+  const response = p.response || {}
+  const resolved = Boolean(p.status && !['pending', 'suspended'].includes(p.status))
+  const state = {
+    resolved,
+    timestamp: Number.isNaN(createdAt) ? undefined : createdAt,
+    canceled: p.status === 'canceled',
+    abandoned: ['expired', 'superseded'].includes(p.status),
+    resolve_reason: p.close_reason || response.reason,
+    suspended: !resolved,
+  }
   if (p.kind === 'ask_user') {
     return [{
       type: 'agent_prompt_required',
       pending_id: p.id,
       kind: p.kind,
-      request,
+      delegated_task: p.delegated_task,
+      request: p.delegated_task ? { ...request, question: `${p.delegated_task}: ${request.question || ""}` } : request,
       tool_call_id: p.tool_call_id,
       requested_at: requestedAt,
       suspendable: true,
-      suspended: true,
       expires_at: p.expires_at,
-      resolved: false,
+      ...state,
+      answered: resolved && Boolean(p.response) && !response.declined,
+      response,
+      resolve_reason: response.declined ? 'declined' : state.resolve_reason,
+      timed_out: p.status === 'expired',
     }]
   }
   if (p.kind !== 'tool_approval') return []
@@ -91,14 +121,19 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
     pending_id: p.id,
     service_name: request.service_name,
     mcp_tool_name: request.mcp_tool_name,
+    delegated_task: p.delegated_task,
     description: request.description,
-    args_json: request.args === undefined ? '' : JSON.stringify(request.args),
+    args_json: response.approved && response.modified_args !== undefined
+      ? JSON.stringify(response.modified_args)
+      : request.args === undefined ? '' : JSON.stringify(request.args),
+    grant_scope: request.grant_scope,
+    grant_lapsed: request.grant_lapsed,
     tool_call_id: p.tool_call_id,
     requested_at: requestedAt,
     suspendable: true,
-    suspended: true,
     expires_at: p.expires_at,
-    resolved: false,
+    ...state,
+    approved: Boolean(response.approved),
   }]
 }
 
@@ -178,7 +213,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   }
 
   const markAssistantStopped = (message: ChatMessage) => {
-    if (!message || message.is_completed) return
+    if (!message) return
+    message.run_state = ''
     message.is_completed = true
     if (message.isAgentMode) {
       if (!message.agentEventStream) message.agentEventStream = []
@@ -221,14 +257,24 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       target = messagesList.find(
         (m) =>
           m.role === 'assistant' &&
-          !m.is_completed &&
           (m.id === messageId ||
             m.assistant_message_id === messageId ||
             m.request_id === messageId),
       )
     }
-    if (!target) target = getTrailingIncompleteAssistant()
-    if (target) markAssistantStopped(target)
+    if (!target) target = getTrailingIncompleteAssistant() || findLastMessage(m => m.role === 'assistant')
+    if (target) {
+      const turnId = persistedAssistantId(target)
+      for (const row of messagesList) {
+        if (row.role !== 'assistant' || persistedAssistantId(row) !== turnId) continue
+        row.run_state = ''
+        for (const e of (row.agentEventStream as ChatMessage[] | undefined) || []) {
+          if (isPromptCard(e) && !e.resolved) Object.assign(e, { resolved: true, canceled: true })
+          if (e.pending) Object.assign(e, { pending: false, canceled: true })
+        }
+      }
+      markAssistantStopped(target)
+    }
     fullContent.value = ''
   }
 
@@ -253,6 +299,14 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       undefined
 
     if (dataId && replaySegments.has(dataId)) return replaySegments.get(dataId)
+
+    // A delayed event from an earlier request must not bind to the current
+    // assistant merely because it appears later in the transcript.
+    if (dataId) {
+      const requestMatch = findLastMessage(item => item.role === 'assistant' &&
+        (item.request_id === dataId || item.id === dataId))
+      if (requestMatch) return requestMatch
+    }
 
     const matched = findLastMessage((item) => {
       if (item.role !== 'assistant') return false
@@ -337,6 +391,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   const shouldRenderAssistantMessage = (session: ChatMessage) => {
     if (!session?.isAgentMode) return true
     if (!session.is_completed) return true
+    if (session.collaborationStatus?.tasks.length) return true
     const stream = session.agentEventStream
     if (Array.isArray(stream) && stream.length > 0) return true
     if (Array.isArray(session.knowledge_references) && session.knowledge_references.length > 0) {
@@ -400,6 +455,26 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     Array.isArray(agentSteps) &&
     agentSteps.some((step) => (step as ChatMessage | undefined)?.truncated === true)
 
+  // Steering splits presentation, not the collaboration group. Its current
+  // snapshot appears only on the last assistant segment of the parent turn.
+  const consolidateCollaborationStatus = () => {
+    const turns = new Map<string, { last: ChatMessage; snapshot?: CollaborationStatus }>()
+    for (const row of messagesList) {
+      if (row.role !== 'assistant') continue
+      const id = persistedAssistantId(row)
+      if (!id) continue
+      const prior = turns.get(id)?.snapshot
+      const incoming = row.collaborationStatus
+      const snapshot = !incoming || (prior?.group_id === incoming.group_id && prior.revision > incoming.revision)
+        ? prior : incoming
+      turns.set(id, { last: row, snapshot })
+      delete row.collaborationStatus
+    }
+    for (const { last, snapshot } of turns.values()) {
+      if (snapshot) last.collaborationStatus = snapshot
+    }
+  }
+
   const reconstructEventStreamFromSteps = (
     agentSteps: unknown[],
     messageContent: string,
@@ -433,12 +508,17 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             duration_ms: step.duration || undefined,
           })
         }
+        const progressText = step.progress && String(step.progress).trim() ? String(step.progress) : ''
         const preambleText = step.thought && String(step.thought).trim() ? String(step.thought) : ''
-        if (preambleText && step.intermediate_answer) {
+        if (progressText) {
+          events.push({ type: 'progress', event_id: step.progress_event_id || `step-${step.iteration}-progress`,
+            content: progressText, done: true, iteration: step.iteration, timestamp: stepTimestamp || undefined })
+        }
+        if (!progressText && preambleText && step.intermediate_answer) {
           events.push({ type: 'answer', event_id: `step-${step.iteration}-answer`,
             content: preambleText, done: true, intermediate_answer: true, timestamp: stepTimestamp || undefined })
         }
-        if (preambleText && hasToolCalls) {
+        if (!progressText && preambleText && hasToolCalls && !step.intermediate_answer) {
           events.push({
             type: 'answer',
             event_id: `step-${step.iteration}-preamble`,
@@ -448,6 +528,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             timestamp: stepTimestamp || undefined,
           })
         }
+
+        const approvals = Array.isArray(step.approvals) ? step.approvals as ChatMessage[] : []
+        approvals.forEach((record) => {
+          events.push(approvalEventFromRecord(record))
+        })
 
         if (toolCalls && Array.isArray(toolCalls)) {
           toolCalls.forEach((toolCall: ChatMessage) => {
@@ -479,7 +564,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       })
     }
 
-    if (agentDurationMs > 0 || usage) {
+    if (isCompleted && (agentDurationMs > 0 || usage)) {
       events.push({
         type: 'agent_complete',
         total_duration_ms: agentDurationMs,
@@ -542,14 +627,19 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     for (const raw of chatlist) {
       const item = preserveIncompleteStreamReactive ? raw : { ...raw }
+      if (item.collaboration_status) item.collaborationStatus = item.collaboration_status
       if (item.id && existingIds.has(item.id)) continue
       if (item.id) existingIds.add(item.id)
 
       item.isAgentMode = false
+      if (item.collaborationStatus) {
+        item.isAgentMode = true
+        item.hideContent = true
+      }
       // A run awaiting input has ended for now: nothing streams until its
       // prompt is answered, so it renders as settled.
       const awaiting = isAwaitingInput(item)
-      const willContinueStream = preserveIncompleteStreamReactive && !item.is_completed
+      const willContinueStream = preserveIncompleteStreamReactive && (!item.is_completed || awaiting)
       if (willContinueStream) {
         item.agentEventStream = item.agentEventStream || []
         item._eventMap = new Map()
@@ -563,16 +653,15 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
       if (item.agent_steps && Array.isArray(item.agent_steps) && item.agent_steps.length > 0) {
         item.isAgentMode = true
-        item.agentEventStream = markRaw(
-          reconstructEventStreamFromSteps(
-            item.agent_steps as unknown[],
-            String(item.content || ''),
-            Boolean(item.is_completed),
-            Boolean(item.is_fallback),
-            Number(item.agent_duration_ms) || 0,
-            item.usage,
-          ),
+        const restoredEvents = reconstructEventStreamFromSteps(
+          item.agent_steps as unknown[],
+          String(item.content || ''),
+          Boolean(item.is_completed),
+          Boolean(item.is_fallback),
+          Number(item.agent_duration_ms) || 0,
+          item.usage,
         )
+        item.agentEventStream = willContinueStream ? restoredEvents : markRaw(restoredEvents)
         item.hideContent = true
         if (agentStepsAreTruncated(item.agent_steps as unknown[])) item.truncated = true
       }
@@ -580,12 +669,34 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       if (awaiting) {
         item.isAgentMode = true
         item.hideContent = true
-        item.agentEventStream = markRaw(
-          (item.agentEventStream as ChatMessage[])
-            .filter((e) => e.type !== 'agent_complete')
-            .concat(pendingPromptEvents(item.pending_prompt)),
-        )
+        const awaitingEvents = (item.agentEventStream as ChatMessage[])
+          .filter((e) => e.type !== 'agent_complete')
+
+        item.agentEventStream = willContinueStream ? awaitingEvents : markRaw(awaitingEvents)
         item.is_completed = true
+      }
+      const promptCards = [
+        ...(Array.isArray(item.prompt_history) ? item.prompt_history : []),
+        ...(Array.isArray(item.delegated_prompts) ? item.delegated_prompts : []),
+        ...(item.pending_prompt ? [item.pending_prompt] : []),
+      ].flatMap(pendingPromptEvents)
+      if (promptCards.length) {
+        item.isAgentMode = true
+        item.hideContent = true
+        const events = [...(item.agentEventStream as ChatMessage[])]
+        promptCards.sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
+        for (const card of promptCards) {
+          if (events.some(e => isPromptCard(e) && e.pending_id === card.pending_id)) continue
+          // Replace ask_user's tool-result fallback with the authoritative row.
+          const fallback = events.findIndex(e => e.pending_id === `history-${card.tool_call_id}` && !card.delegated_task)
+          if (fallback >= 0) events.splice(fallback, 1)
+          const at = events.findIndex(e =>
+            (!card.delegated_task && e.type === 'tool_call' && e.tool_call_id === card.tool_call_id) ||
+            (card.timestamp && e.timestamp && Number(e.timestamp) > Number(card.timestamp)) ||
+            e.type === 'agent_complete' || (e.type === 'answer' && !e.event_id))
+          events.splice(at < 0 ? events.length : at, 0, card)
+        }
+        item.agentEventStream = willContinueStream ? events : markRaw(events)
       }
       restoreQuickAnswerFlags(item)
 
@@ -623,6 +734,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       } else {
         messagesList.push(...expandSteerForksInHistory(processed))
       }
+      consolidateCollaborationStatus()
     }
 
     if (isFirstEnter?.value) {
@@ -679,11 +791,30 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     let message = resolveActiveAssistantMessage(data)
     let created = false
 
+    if (data.response_type === 'collaboration_status' || data.response_type === 'progress') {
+      // These updates describe an existing parent run. Never create a new
+      // bubble or attach an unknown/old request to an unrelated active turn.
+      const matchesRequest = message && dataId && (message.request_id === dataId || message.id === dataId)
+      const matchesAssistant = message && data.assistant_message_id &&
+        persistedAssistantId(message) === data.assistant_message_id &&
+        (!dataId || !message.request_id || message.request_id === dataId)
+      if (!matchesRequest && !matchesAssistant) return
+    }
+
     if (message?.role === 'user') {
       message = undefined
     }
 
     if (!message) {
+      // Background notices attach to a turn that already exists. Opening a
+      // shell here would start a new assistant turn after the parent run.
+      if (
+        data.response_type === 'work_event' ||
+        data.response_type === 'work_started' ||
+        data.response_type === 'work_finished'
+      ) {
+        return
+      }
       const newMsg: ChatMessage = {
         id: dataId,
         request_id: dataId,
@@ -715,6 +846,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (
       loading.value &&
       (data.response_type === 'thinking' ||
+        data.response_type === 'progress' ||
         data.response_type === 'answer' ||
         data.response_type === 'tool_call' ||
         data.response_type === 'tool_approval_required' ||
@@ -726,8 +858,72 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     const responseType = data.response_type as string
     const dataPayload = data.data as ChatMessage | undefined
+    // Child prompts can predate a steer boundary. Their resolution still
+    // belongs to the same persisted turn, even when the active bubble changed.
+    const turnPromptEvents = () => {
+      const turnID = persistedAssistantId(message)
+      return messagesList
+        .filter(m => m.role === 'assistant' && (m === message || (turnID && persistedAssistantId(m) === turnID)))
+        .flatMap(m => (m.agentEventStream as ChatMessage[] | undefined) || [])
+    }
+    // work_* cases read `payload` so the source-extracted tests, which call
+    // the case with the event object, and this handler share one binding.
+    const payload = dataPayload
 
     switch (responseType) {
+      case 'collaboration_status': {
+        const snapshot = dataPayload as unknown as CollaborationStatus | undefined
+        if (!snapshot?.group_id || !Number.isSafeInteger(snapshot.revision) || !Array.isArray(snapshot.tasks)) break
+        const turnID = persistedAssistantId(message)
+        const previous = messagesList
+          .filter(m => m.role === 'assistant' && persistedAssistantId(m) === turnID)
+          .map(m => m.collaborationStatus)
+          .filter((s): s is CollaborationStatus => s?.group_id === snapshot.group_id)
+          .sort((a, b) => b.revision - a.revision)[0]
+        if (previous && snapshot.revision <= previous.revision) break
+        const tasks = snapshot.tasks.map((task): CollaborationTaskStatus => {
+          const prior = previous?.tasks.find(t => t.id === task.id && t.run_id === task.run_id)
+          // A follow-up has a new run_id and can become queued/running again;
+          // late updates to a completed run cannot undo its terminal state.
+          return prior && TERMINAL_COLLABORATION_STATES.has(prior.status)
+            ? { ...prior }
+            : { ...task, progress: task.progress ? { ...task.progress } : task.progress }
+        })
+        message.collaborationStatus = { group_id: snapshot.group_id, revision: snapshot.revision, tasks }
+        consolidateCollaborationStatus()
+        break
+      }
+      case 'progress': {
+        const eventId = String(dataPayload?.event_id || dataPayload?.id || '')
+        if (!eventId) break
+        const previous = turnPromptEvents().find(e => (e.type === 'progress' || e.type === 'answer') && e.event_id === eventId)
+        if (previous?.type === 'progress' && previous.done) break
+        if (previous) {
+          const wasAnswer = previous.type === 'answer'
+          previous.type = 'progress'
+          delete previous.superseded
+          if (typeof data.content === 'string') previous.content = data.content
+          previous.done = Boolean(data.done)
+          previous.iteration = dataPayload?.iteration
+          if (wasAnswer) {
+            // Older streams can emit the provisional text as answer first.
+            // Reclassify that same event rather than displaying it twice or
+            // seeding the final answer with the progress text.
+            for (const row of messagesList) {
+              if ((row.agentEventStream as ChatMessage[] | undefined)?.includes(previous)) {
+                row.content = recomposeAgentAnswer(row)
+                if (row === message) fullContent.value = String(row.content || '')
+              }
+            }
+          }
+        } else {
+          ;(message.agentEventStream as ChatMessage[]).push({
+            type: 'progress', event_id: eventId, content: String(data.content || ''),
+            done: Boolean(data.done), iteration: dataPayload?.iteration,
+          })
+        }
+        break
+      }
       case 'thinking': {
         const eventId = dataPayload?.event_id as string | undefined
         log('[Thinking Event]', {
@@ -798,33 +994,57 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       case 'tool_approval_required': {
         if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
-        ;(message.agentEventStream as ChatMessage[]).push({
+        if (turnPromptEvents().some(e => e.pending_id === d.pending_id)) break
+        const approvalEvent = {
           type: 'tool_approval_required',
           pending_id: d.pending_id,
           service_name: d.service_name,
           mcp_tool_name: d.mcp_tool_name,
           description: d.description,
+          delegated_task: d.delegated_task,
           args_json: d.args_json,
+          grant_scope: d.grant_scope,
+          grant_lapsed: d.grant_lapsed,
           timeout_seconds: d.timeout_seconds,
           hot_wait_seconds: d.hot_wait_seconds,
           suspendable: d.suspendable,
+          suspended: d.suspended,
+          expires_at: d.expires_at,
           requested_at: d.requested_at,
           tool_call_id: d.tool_call_id,
+          kind: d.kind,
+          host: d.host,
           resolved: false,
-        })
+        }
+        // Replace the array. A markRaw stream ignores push, so the open chat
+        // stayed on "running" until a session reload rebuilt it.
+        message.agentEventStream = [
+          ...(message.agentEventStream as ChatMessage[]),
+          approvalEvent,
+        ]
+        message.pendingHostApproval = approvalEvent
+        showComposerApproval(approvalEvent)
         break
       }
       case 'agent_prompt_required': {
-        if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
+        if (d.kind === 'page_action') {
+          options.onPageAction?.(d)
+          break
+        }
+        if (!message.agentEventStream) message.agentEventStream = []
+        if (turnPromptEvents().some(e => e.pending_id === d.pending_id)) break
         ;(message.agentEventStream as ChatMessage[]).push({
           type: 'agent_prompt_required',
           pending_id: d.pending_id,
           kind: d.kind,
+          delegated_task: d.delegated_task,
           request: d.request,
           timeout_seconds: d.timeout_seconds,
           hot_wait_seconds: d.hot_wait_seconds,
           suspendable: d.suspendable,
+          suspended: d.suspended,
+          expires_at: d.expires_at,
           requested_at: d.requested_at,
           tool_call_id: d.tool_call_id,
           resolved: false,
@@ -833,7 +1053,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       case 'agent_prompt_resolved': {
         const d = dataPayload || {}
-        const ev = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+        const ev = turnPromptEvents().find(
           (e) => e.type === 'agent_prompt_required' && e.pending_id === d.pending_id,
         )
         if (ev) {
@@ -867,7 +1087,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       case 'tool_approval_resolved': {
         const d = dataPayload || {}
         const pid = d.pending_id
-        const ev = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+        const ev = turnPromptEvents().find(
           (e) => e.type === 'tool_approval_required' && e.pending_id === pid,
         )
         if (ev) {
@@ -876,7 +1096,14 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ev.resolve_reason = d.reason
           ev.timed_out = d.timed_out
           ev.canceled = d.canceled
+          ev.resolve_scope = d.scope
+          message.agentEventStream = [...(message.agentEventStream as ChatMessage[])]
         }
+        const pending = message.pendingHostApproval as { pending_id?: string } | undefined
+        if (pending && pending.pending_id === pid) {
+          message.pendingHostApproval = null
+        }
+        clearComposerApproval(typeof pid === 'string' ? pid : undefined)
         break
       }
       case 'mcp_oauth_required': {
@@ -899,7 +1126,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         const d = dataPayload || {}
         const pid = d.pending_id
         const sid = d.service_id
-        const list = message.agentEventStream as ChatMessage[] | undefined
+        const list = turnPromptEvents()
         // Resolve the matching card; also clear any other still-pending cards
         // for the same service (parallel tool calls dedup to a single auth).
         list?.forEach((e) => {
@@ -916,7 +1143,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       case 'tool_call': {
         if (dataPayload?.tool_name === 'final_answer') break
-        if (message.agentEventStream) {
+        // A page button follows the answer rather than starting more work; the
+        // server retracts that text with a progress event if the turn goes on.
+        if (message.agentEventStream && dataPayload?.tool_name !== 'open_page') {
           let retracted = false
           for (const ev of message.agentEventStream as ChatMessage[]) {
             if (ev.type === 'answer' && !ev.superseded && ev.content && String(ev.content).trim()) {
@@ -1001,13 +1230,52 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
+      case 'work_event': {
+        const inner = dataPayload?.inner as { response_type?: string; data?: ChatMessage } | undefined
+        if (inner?.response_type === 'command_output' && inner.data?.tool_call_id) {
+          // The async tool returns at the yield window, so later previews
+          // arrive after pending is cleared. Attach them to that card anyway.
+          // done on the preview hides the live tail; it does not complete the tool.
+          const toolCallId = inner.data.tool_call_id
+          const tool = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+            event => event.type === 'tool_call' && event.tool_call_id === toolCallId
+              && (event.tool_name === 'shell_exec' || event.tool_name === 'shell_exec_async'),
+          )
+          if (tool) {
+            tool.command_output = { ...inner.data }
+          }
+        }
+        break
+      }
+      case 'work_started':
+      case 'work_finished': {
+        const event = payload as ChatMessage | undefined
+        const workId = typeof event?.work_id === 'string' ? event.work_id : ''
+        if (workId) {
+          if (!message.background_work) message.background_work = {}
+          const backgroundWork = message.background_work as Record<string, {
+            state: unknown
+            title: unknown
+            kind: unknown
+            payload: unknown
+          }>
+          backgroundWork[workId] = {
+            state: (event?.state as string | undefined) ?? 'running',
+            title: event?.title,
+            kind: event?.kind,
+            payload: event?.payload,
+          }
+        }
+      }
+      break
       case 'tool_result':
       case 'error': {
         if (dataPayload) {
           const toolCallId = dataPayload.tool_call_id as string | undefined
           const toolName = dataPayload.tool_name as string | undefined
           const success = responseType !== 'error' && dataPayload.success !== false
-          if (responseType === 'tool_result' && dataPayload.success === true && toolName === 'run_operation') {
+          if (responseType === 'tool_result' && dataPayload.success === true && toolName
+            && DATA_CHANGE_TOOLS.has(toolName)) {
             emitAssistantDataChange(dataPayload.data_change)
           }
           log('[Tool Result]', {
@@ -1021,7 +1289,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             if (toolCallId && pending.has(toolCallId)) {
               toolCallEvent = pending.get(toolCallId)
               pending.delete(toolCallId)
-            } else {
+            } else if (!toolCallId) {
               Array.from(pending.entries()).some(([key, value]) => {
                 if (value.tool_name === toolName) {
                   toolCallEvent = value
@@ -1085,12 +1353,44 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         let answerEvent = eventId
           ? eventMap.get(eventId)
           : stream.find((e) => e.type === 'answer' && !e.event_id)
+        const replaceAnswer = dataPayload?.replace === true
+        if (replaceAnswer && eventId) {
+          const turnID = persistedAssistantId(message)
+          // A protocol correction can arrive after a steer boundary or after
+          // that provisional event was reclassified as progress. Retract only
+          // this ID, never another round's legitimate answer.
+          for (const row of messagesList) {
+            if (row.role !== 'assistant' || (row !== message && persistedAssistantId(row) !== turnID)) continue
+            const events = (row.agentEventStream as ChatMessage[] | undefined) || []
+            for (const prior of events) {
+              if (prior.event_id !== eventId || !['answer', 'progress'].includes(String(prior.type))) continue
+              prior.content = ''
+              prior.done = true
+            }
+            if (row !== message) {
+              row.agentEventStream = events.filter(e => e.event_id !== eventId || !['answer', 'progress'].includes(String(e.type)))
+              ;(row._eventMap as Map<string, ChatMessage> | undefined)?.delete(eventId)
+            }
+            row.content = recomposeAgentAnswer(row)
+          }
+          answerEvent = eventMap.get(eventId) || stream.find(e => e.event_id === eventId)
+          if (answerEvent) {
+            Object.assign(answerEvent, { type: 'answer', content: '', done: false, superseded: false })
+            eventMap.set(eventId, answerEvent)
+          }
+        }
+        // Replayed provisional answer chunks may follow a progress snapshot
+        // for the same event. They must not append to or revive that answer.
+        if (!replaceAnswer && (answerEvent?.type === 'progress' || (eventId && turnPromptEvents().some(
+          e => e.type === 'progress' && e.event_id === eventId,
+        )))) break
         if (!answerEvent) {
           answerEvent = { type: 'answer', event_id: eventId, content: '', done: false }
           stream.push(answerEvent)
           if (eventId) eventMap.set(eventId, answerEvent)
         }
-        if (!answerEvent.content && message.content && String(message.content).trim()) {
+        if (replaceAnswer) answerEvent.protocol_replaced = true
+        if (!replaceAnswer && !answerEvent.protocol_replaced && !answerEvent.content && message.content && String(message.content).trim()) {
           // Seeding exists for resume paths where message.content holds text no
           // stream event carries. When a live prior answer event exists, its
           // text is already counted by recomposeAgentAnswer, so seeding the new
@@ -1107,8 +1407,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             answerEvent.content = message.content
           }
         }
-        if (data.content) {
-          answerEvent.content = String(answerEvent.content || '') + String(data.content)
+        if (data.content || replaceAnswer) {
+          answerEvent.content = replaceAnswer ? String(data.content || '') : String(answerEvent.content || '') + String(data.content)
           message.content = recomposeAgentAnswer(message)
           fullContent.value = String(message.content || '')
         }
@@ -1182,6 +1482,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             injectedUser,
             steerId,
           )
+          consolidateCollaborationStatus()
           if (dataId && replaySegments.has(dataId)) replaySegments.set(dataId, continuation)
           if (!alreadyInList) emitMessageCreated(injectedUser)
           if (continuation !== message) {
@@ -1236,6 +1537,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           timestamp: Date.now(),
           reason: dataPayload?.reason || 'user_requested',
         })
+        markInFlightAssistantStopped(persistedAssistantId(message))
         message.is_completed = true
         loading.value = false
         isReplying.value = false
@@ -1285,7 +1587,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     if (data.response_type === 'agent_query') {
       if (data.id) replaySegments.delete(String(data.id))
-      const replay = resetSteerTurnForReplay(messagesList, String(data.id || ''))
+      const resumeData = (data.data || {}) as ChatMessage
+      const replay = resetSteerTurnForReplay(messagesList, String(data.id || ''),
+        String(resumeData.resume_pending_id || ''), String(resumeData.resume_tool_call_id || ''))
       if (replay) replaySegments.set(String(data.id), replay)
       if (data.id) {
         const earlyMsg = getTrailingIncompleteAssistant()
@@ -1355,9 +1659,14 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     const isAgentOnlyResponse =
       data.response_type === 'thinking' ||
+      data.response_type === 'progress' ||
+      data.response_type === 'collaboration_status' ||
       data.response_type === 'tool_call' ||
       data.response_type === 'tool_result' ||
       data.response_type === 'command_output' ||
+      data.response_type === 'work_event' ||
+      data.response_type === 'work_started' ||
+      data.response_type === 'work_finished' ||
       data.response_type === 'reflection' ||
       data.response_type === 'artifacts_pending' ||
       data.response_type === 'context_compacted' ||
@@ -1365,7 +1674,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'run_suspended' ||
       data.response_type === 'run_resumed' ||
       data.response_type === 'agent_prompt_required' ||
-      data.response_type === 'agent_prompt_resolved'
+      data.response_type === 'agent_prompt_resolved' ||
+      data.response_type === 'tool_approval_required' ||
+      data.response_type === 'tool_approval_resolved' ||
+      data.response_type === 'mcp_oauth_required' ||
+      data.response_type === 'mcp_oauth_resolved'
 
     const activeAssistant = getTrailingIncompleteAssistant()
     const isCurrentlyAgentMode = activeAssistant?.isAgentMode === true

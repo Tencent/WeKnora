@@ -51,6 +51,12 @@ test('critical runtime i18n trees are present', () => {
   assert.deepEqual(missing, [], missing.join('\n'))
 })
 
+test('operation labels remain referenced when pruning locale bundles', () => {
+  const keys = [...localeKeysByName[REFERENCE_LOCALE]].filter((key) => key.startsWith('agentStream.operations.names.'))
+  assert.ok(keys.length > 0)
+  assert.deepEqual(keys.filter((key) => !referencedKeys.has(key)), [])
+})
+
 test('installer command progress messages resolve in the settings namespace', () => {
   for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
     for (const name of ['installCommandRunning', 'installCommandWaiting']) {
@@ -321,7 +327,8 @@ test('DingTalk configuration and sync failures remain localized after pruning', 
     'field.clientId', 'field.clientSecret', 'field.operatorId', 'field.operatorIdHint',
     'prereqBarText_dingtalk', 'prereqOpenConsole_dingtalk',
     ...[1, 2, 3].flatMap(step => [`prereqStep${step}Brief_dingtalk`, `prereqStep${step}Desc_dingtalk`]),
-    'syncError.dingtalk_document_failed', 'syncError.dingtalk_resource_failed',
+    'syncError.dingtalk_document_failed', 'syncError.dingtalk_document_too_large',
+    'syncError.dingtalk_resource_failed',
   ].map(key => `datasource.${key}`)
   for (const key of keys) {
     assert.ok(referencedKeys.has(key), `pruning would remove ${key}`)

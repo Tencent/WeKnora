@@ -264,11 +264,11 @@ func (c *AutoTagConfig) Normalize() {
 
 // ParserEngineRule maps a set of file types to a specific parser engine.
 type ParserEngineRule struct {
-	FileTypes []string `yaml:"file_types" json:"file_types"`
-	Engine    string   `yaml:"engine"     json:"engine"`
+	FileTypes []string `yaml:"file_types" json:"file_types" extensions:"x-agent"`
+	Engine    string   `yaml:"engine"     json:"engine" extensions:"x-agent"`
 	// XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.
 	// nil preserves the parser default; an explicit false disables the mode.
-	XLSXFirstRowAsHeader *bool `yaml:"xlsx_first_row_as_header,omitempty" json:"xlsx_first_row_as_header,omitempty"`
+	XLSXFirstRowAsHeader *bool `yaml:"xlsx_first_row_as_header,omitempty" json:"xlsx_first_row_as_header,omitempty" extensions:"x-agent"`
 }
 
 // ChunkingConfig represents the document splitting configuration
@@ -284,7 +284,7 @@ type ChunkingConfig struct {
 	// types that only a specific engine can parse: ppt/pptx fall back to
 	// markitdown). A linked anydoc binding is preferred for every type it
 	// converts.
-	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
+	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty" extensions:"x-agent,x-agent-response"`
 	// EnableParentChild splits into large parent chunks and small child chunks.
 	// Search matches a child and returns its parent.
 	EnableParentChild bool `yaml:"enable_parent_child,omitempty" json:"enable_parent_child,omitempty" extensions:"x-agent"`
@@ -553,7 +553,10 @@ type ImageProcessingConfig struct {
 	ModelID string `yaml:"model_id" json:"model_id" extensions:"x-agent=image_model_id"`
 	// ImageActions overrides the built-in attribute→work table (see
 	// DefaultImageActions). A nil value keeps the conservative default: run OCR
-	// for block text, data visuals, and unobserved images.
+	// for block text and data visuals. What to do about an image whose
+	// attributes were NOT observed is deliberately not part of this table — it
+	// is a scheduling decision, so it belongs to the pipeline that observes
+	// (`ocr_on_unobserved` in that pipeline's slot).
 	ImageActions *ImageActionsConfig `yaml:"image_actions,omitempty" json:"image_actions,omitempty"`
 	// ImageAttrsEnabled turns the attribute-observed image pipeline on for this
 	// knowledge base. It is off by default on purpose, so upgrading an
@@ -564,6 +567,18 @@ type ImageProcessingConfig struct {
 	// override it per document through
 	// KnowledgeProcessOverrides.ImageAttrsEnabled.
 	ImageAttrsEnabled bool `yaml:"image_attrs_enabled,omitempty" json:"image_attrs_enabled,omitempty" extensions:"x-agent"` //nolint:lll // one-line struct tag
+	// ImagePipelineID selects the image pipeline by id, so the choice the
+	// settings panel offers is the choice the backend runs. It is unset on
+	// knowledge bases configured before the field existed; those follow
+	// ImageAttrsEnabled — see ResolveImagePipelineID. An explicit id always
+	// wins over the switch.
+	ImagePipelineID string `yaml:"image_pipeline,omitempty" json:"image_pipeline,omitempty" enums:"default,smartocr" extensions:"x-agent"`
+	// ImagePipelineParams holds the tunables of ImagePipelineID, keyed by each
+	// field's slot — the pipeline id joined to the field's own key, built by
+	// SlotKey and read back by ImagePipelineParam. The map travels whole: a key
+	// a pipeline no longer declares is dropped when the run reads it, so an old
+	// stored config stays loadable rather than being rewritten on save.
+	ImagePipelineParams map[string]any `yaml:"image_pipeline_params,omitempty" json:"image_pipeline_params,omitempty" extensions:"x-agent,x-agent-response,x-agent-keys=default.caption_enabled|default.ocr_enabled"`
 	// ImageVectorEnabled lets a knowledge base whose embedding model takes
 	// images index each image by its own vector and recall it with one. It
 	// is off by default on purpose: a model that takes images is also used
@@ -571,6 +586,93 @@ type ImageProcessingConfig struct {
 	// and widens vector recall. Existing knowledge bases stay off after an
 	// upgrade because the stored JSON has no such key.
 	ImageVectorEnabled bool `yaml:"image_vector_enabled,omitempty" json:"image_vector_enabled,omitempty" extensions:"x-agent"` //nolint:lll // one-line struct tag
+}
+
+// The modes the preprocessing action's own switch accepts, and what each means:
+//
+//	auto   the describe round also observes the page's geometry
+//	       (layout.margin / layout.upright) and the page is straightened
+//	       and cropped only when those say it is worth it;
+//	off    (default) never preprocess, and leave the describe prompt exactly as it was
+//	       before this feature existed;
+//	always preprocess every readable page without asking, and likewise leave
+//	       the describe prompt untouched.
+//
+// Only auto changes the describe prompt; off and always cannot disturb an
+// observation pipeline that is already tuned. The switch is declared by the
+// preprocessing action (types.ImageActionPreprocess) and stored in the slot of
+// the pipeline that offers it, like every other pipeline setting.
+//
+// A mode is a SETTING — what the knowledge base asked for. What actually
+// happened to an image is a different question with a different vocabulary, and
+// it is recorded on the trace as preprocess.result.
+const (
+	PreprocessModeOff    = "off"
+	PreprocessModeAuto   = "auto"
+	PreprocessModeAlways = "always"
+)
+
+// SlotKey namespaces a pipeline-private key with the pipeline that owns it. A key
+// already carrying this pipeline's own namespace — an action scoped to one
+// pipeline, whose id is "<pipeline>.<action>" — is left alone, so the pipeline id
+// is never doubled. The runtime lookup in the image service and the settings
+// panel, through its own mirror, both go through it, so a stored key is read the
+// way it was written.
+func SlotKey(pipelineID, key string) string {
+	if pipelineID == "" || strings.HasPrefix(key, pipelineID+".") {
+		return key
+	}
+	return pipelineID + "." + key
+}
+
+// ImagePipelineParam reads one pipeline setting out of a params map. The key is
+// the running pipeline's slot and nothing else: a params map with no such entry
+// means the setting was never stored, and the caller falls back to what the
+// field declares — which is the same answer the panel draws.
+func ImagePipelineParam(params map[string]any, pipelineID, key string) (any, bool) {
+	if params == nil {
+		return nil, false
+	}
+	v, ok := params[SlotKey(pipelineID, key)]
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
+}
+
+// PreprocessModeKey is the preprocessing action's tunable, as the panel declares
+// it. The setting lives in the pipeline's slot under this key.
+const PreprocessModeKey = "preprocess.mode"
+
+// PreprocessObservesGeometry reports whether the describe round should ask the
+// geometry attributes; PreprocessRunsUnconditionally reports whether the page is
+// straightened without consulting them. The three modes are mutually exclusive,
+// so a caller reads exactly one of these.
+//
+// An empty mode answers false to both, which is the honest answer for a caller
+// that read a switch nobody offers: a pipeline that does not declare the setting
+// has no reason to ask the model about geometry it could not use.
+func PreprocessObservesGeometry(mode string) bool { return mode == PreprocessModeAuto }
+
+// PreprocessRunsUnconditionally is the other half of the pair above: the mode
+// that straightens every page without asking, which is also why it leaves the
+// describe prompt alone (there is no question to ask).
+func PreprocessRunsUnconditionally(mode string) bool { return mode == PreprocessModeAlways }
+
+// ResolveImagePipelineID returns the pipeline id a knowledge base asks for. An
+// explicit ImagePipelineID wins; without one the old attribute-observation
+// switch still decides, so a knowledge base saved before the selector existed
+// runs the pipeline the switch pointed at. An id that no pipeline registers is
+// ignored here and falls back to the switch, which is what keeps a stored
+// config from pointing at a pipeline that has since been removed.
+func ResolveImagePipelineID(cfg *ImageProcessingConfig) ImagePipelineID {
+	if cfg == nil {
+		return ImagePipelineIDFor(false)
+	}
+	if id := strings.TrimSpace(cfg.ImagePipelineID); id != "" {
+		return NormalizeImagePipelineID(ImagePipelineID(id))
+	}
+	return ImagePipelineIDFor(cfg.ImageAttrsEnabled)
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value

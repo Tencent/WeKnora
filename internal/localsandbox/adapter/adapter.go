@@ -32,6 +32,15 @@ type Adapter struct {
 // New wraps a localsandbox Service as the session-scoped Manager the agent uses.
 func New(svc *localsandbox.Service) *Adapter { return &Adapter{svc: svc} }
 
+// LocalSandboxService exposes the wrapped service for desktop composition
+// (local shell jobs). Not part of the remote-facing capability interfaces.
+func (a *Adapter) LocalSandboxService() *localsandbox.Service {
+	if a == nil {
+		return nil
+	}
+	return a.svc
+}
+
 // maxListSessionFiles stops WalkDir once the listing is as large as the
 // list_sandbox_files tool will ever keep (500). The tool also truncates,
 // but that is after the whole tree is already in memory.
@@ -43,6 +52,7 @@ var (
 	_ sandbox.SessionWorkspaceLayoutProvider = (*Adapter)(nil)
 	_ sandbox.SessionShellExecutor           = (*Adapter)(nil)
 	_ sandbox.SessionFileStore               = (*Adapter)(nil)
+	_ sandbox.SessionStateReleaser           = (*Adapter)(nil)
 )
 
 // GetType reports SandboxTypeHost.
@@ -58,6 +68,14 @@ func (a *Adapter) VersionsWorkspace(context.Context, string) bool { return false
 
 // Cleanup is a no-op; host holds no process-wide resources to tear down.
 func (a *Adapter) Cleanup(context.Context) error { return nil }
+
+// ReleaseSessionState forgets every approval made in a deleted session.
+func (a *Adapter) ReleaseSessionState(_ context.Context, sessionID string) {
+	if a == nil || a.svc == nil {
+		return
+	}
+	a.svc.ReleaseSession(sessionID)
+}
 
 // Execute is the legacy script entry point. The local sandbox exposes shell
 // execution only, so callers must use ExecShellCommand.
@@ -95,7 +113,7 @@ func (a *Adapter) SessionWorkspaceLayout(
 		logger.Warnf(ctx, "[LocalSandbox] layout session=%s: %v", sessionID, err)
 		return sandbox.WorkspaceLayout{}, err
 	}
-	layout := LayoutFor(ws)
+	layout := LayoutFor(ws, a.svc.SessionGrants(sessionID)...)
 	logger.Debugf(ctx, "[LocalSandbox] layout session=%s root=%s", sessionID, layout.Root)
 	return layout, nil
 }
@@ -107,12 +125,15 @@ func (a *Adapter) ExecShellCommand(
 	timeout time.Duration,
 	env map[string]string,
 ) (*sandbox.ExecuteResult, error) {
+	approver, review := runApproval(ctx)
 	res, err := a.svc.Run(ctx, localsandbox.RunRequest{
-		SessionID: sessionID,
-		Command:   command,
-		WorkDir:   workDir,
-		Timeout:   timeout,
-		Env:       env,
+		SessionID:     sessionID,
+		Command:       command,
+		WorkDir:       workDir,
+		Timeout:       timeout,
+		Env:           env,
+		ReviewCommand: review,
+		Approver:      approver,
 	})
 	if err != nil {
 		logger.Warnf(ctx, "[LocalSandbox] exec session=%s work_dir=%q: %v", sessionID, workDir, err)
@@ -130,11 +151,13 @@ func executeResult(ctx context.Context, sessionID string, res *localsandbox.RunR
 		Killed:   res.Exit.Killed,
 	}
 	if res.Denial.IsDenied() {
-		// A denial is a normal, reportable outcome: the model must see why the
-		// command failed so it can choose a path inside the workspace.
 		logger.Warnf(ctx, "[LocalSandbox] exec denied session=%s reason=%d path=%q",
 			sessionID, res.Denial.Reason, res.Denial.Path)
-		out.Stderr += "\n[sandbox] denied by workspace policy"
+	}
+	if res.Notice != "" {
+		// The model must see why the command failed or was refused so it can
+		// choose another path instead of retrying the same one.
+		out.Stderr += "\n" + res.Notice
 	}
 	return out
 }

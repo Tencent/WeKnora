@@ -220,11 +220,14 @@ func buildContentSignature(content string) string {
 // Two thresholds are used:
 //   - Substring containment: if the normalized short text is a literal substring
 //     of the normalized long text, the shorter chunk is removed.
-//   - Token overlap coefficient >= 0.85: if 85%+ of the smaller chunk's tokens
-//     appear in the larger chunk, the smaller one is redundant. Only applied
-//     when the two token sets are within maxOverlapSizeRatio of each other:
-//     near-duplicates are of similar size, while a long web page or parent
-//     chunk shares most words with any short chunk on its topic.
+//   - Token overlap coefficient >= 0.85, and only when the shorter text's
+//     tokens are almost a subset of the longer text's (shorter-only fraction
+//     at most maxShorterOnlyFraction). Overlap alone is not enough: shared
+//     boilerplate can clear 0.85 while each side still has its own
+//     requirement, number, or conclusion. Only applied when the two token
+//     sets are within maxOverlapSizeRatio of each other: near-duplicates are
+//     of similar size, while a long web page or parent chunk shares most
+//     words with any short chunk on its topic.
 //
 // Each text is tokenized once; tokenizing both sides of every pair ran jieba
 // O(n²) times over parent- and page-sized texts before the first token of
@@ -237,6 +240,11 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 	const (
 		overlapThreshold    = 0.85
 		maxOverlapSizeRatio = 3
+		// maxShorterOnlyFraction is the largest share of the shorter token set
+		// that may be missing from the longer set and still count as one fact.
+		// It sits far below the 0.15 residue the overlap coefficient allows, so
+		// boilerplate cannot hide a requirement, a number, or a conclusion.
+		maxShorterOnlyFraction = 0.02
 	)
 
 	if len(results) <= 1 {
@@ -292,6 +300,11 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 					searchutil.TokenOverlapRatio(shortTokens, longTokens) < overlapThreshold {
 					continue
 				}
+				// Drop only when the longer chunk actually carries the shorter
+				// one's tokens. A pair where each side has its own tokens is kept.
+				if shorterOnlyFraction(shortTokens, longTokens) > maxShorterOnlyFraction {
+					continue
+				}
 			}
 
 			victim := shortIdx
@@ -320,6 +333,21 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 		}
 	}
 	return out
+}
+
+// shorterOnlyFraction is the share of short's tokens that do not appear in long.
+// An empty short set is not evidence that long carries it.
+func shorterOnlyFraction(short, long map[string]struct{}) float64 {
+	if len(short) == 0 {
+		return 1
+	}
+	only := 0
+	for tok := range short {
+		if _, ok := long[tok]; !ok {
+			only++
+		}
+	}
+	return float64(only) / float64(len(short))
 }
 
 func logSearchScoreSample(ctx context.Context, action string, results []*types.SearchResult) {
@@ -361,10 +389,10 @@ func targetReportsEmbedFailure(kb *types.KnowledgeBase) bool {
 }
 
 // searchByTargets performs KB searches using pre-computed SearchTargets.
-// Targets sharing the same underlying embedding model (identified by model
-// name + endpoint, not just model ID) are grouped so the query embedding is
-// computed once per model AND all full-KB targets in a group are combined into
-// a single retrieval call, reducing both embedding API calls and DB round-trips.
+// Targets sharing the same model name, endpoint and configured vector dimension
+// are grouped even across model IDs. Each group computes one query embedding
+// and combines all full-KB targets into a single retrieval call, reducing both
+// embedding API calls and DB round-trips.
 func (p *PluginSearch) searchByTargets(
 	ctx context.Context,
 	chatManage *types.ChatManage,
@@ -397,8 +425,9 @@ func (p *PluginSearch) searchByTargets(
 		})
 	}
 
-	// Resolve actual model identities (name + endpoint) so that cross-tenant
-	// KBs backed by the same physical model share one embedding computation.
+	// Resolve actual model identities (name + endpoint + configured dimension)
+	// so that cross-tenant KBs backed by the same vector space share one
+	// embedding computation.
 	modelKeyMap := p.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
 	groups := make(map[string][]*types.SearchTarget)

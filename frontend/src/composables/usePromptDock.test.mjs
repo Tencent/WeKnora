@@ -4,6 +4,7 @@ import test from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
+import * as steering from '../utils/steerStreamFork.ts'
 import { isSubmitKey, optionIndexForKey, optionKey } from '../utils/promptKeys.ts'
 
 const source = readFileSync(new URL('./usePromptDock.ts', import.meta.url), 'utf8')
@@ -12,8 +13,12 @@ const compiled = ts.transpileModule(source, {
 }).outputText
 const modules = {
   vue,
+  '@/utils/steerStreamFork': steering,
   '@/composables/useChatStreamHandler': {
     isAwaitingInput: (m) => m?.run_state === 'awaiting_input',
+  },
+  '@/views/chat/components/hostApproval': {
+    isHostApprovalEvent: (e) => e?.kind === 'host_command' || e?.host != null,
   },
 }
 const exports = {}
@@ -45,6 +50,16 @@ test('docks the open prompts of streaming and suspended runs, oldest first', () 
     },
   ])
   assert.deepEqual(ids(prompts), ['a', 'b', 'c'])
+})
+
+test('leaves Lite host approvals to the composer card', () => {
+  const prompts = pendingPrompts([{
+    role: 'assistant', is_completed: false, agentEventStream: [
+      approval('host', { kind: 'host_command', host: { command: 'rm a' } }),
+      approval('mcp'),
+    ],
+  }])
+  assert.deepEqual(ids(prompts), ['mcp'])
 })
 
 test('leaves settled runs, resolved prompts and unknown kinds in the timeline', () => {
@@ -89,7 +104,7 @@ test('both chat views mount the dock above their composer and feed it their mess
   const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
   const chat = read('../views/chat/index.vue')
   assert.match(chat, /providePromptDock\(messagesList\)/)
-  assert.match(chat, /<PendingPromptDock[^>]*\/>\s*<InputField/)
+  assert.match(chat, /<PendingPromptDock[^>]*\/>[\s\S]*?<InputField/)
 
   const embed = read('../views/embed/EmbedChatCore.vue')
   assert.match(embed, /providePromptDock\(messagesList\)/)
@@ -175,4 +190,21 @@ test('Enter on an unselected option selects it instead of submitting the previou
     assert.equal(handleKey(key), true)
     assert.deepEqual(submitted, [['B']])
   }
+})
+
+test('steering keeps earlier child approvals docked only while the same turn is active', () => {
+  const messages = vue.reactive([
+    { id: 'parent', role: 'assistant', is_completed: true, steerForked: true, agentEventStream: [approval('child-a'), approval('child-b')] },
+    { id: 'steer-user', role: 'user' },
+    { id: 'continuation', assistant_message_id: 'parent', role: 'assistant', is_completed: false, agentEventStream: [] },
+    { id: 'other-turn', role: 'assistant', is_completed: true, agentEventStream: [approval('old')] },
+  ])
+  assert.deepEqual(ids(pendingPrompts(messages)), ['child-a', 'child-b'])
+  messages[0].agentEventStream[0].resolved = true
+  assert.deepEqual(ids(pendingPrompts(messages)), ['child-b'])
+  messages[2].is_completed = true
+  assert.deepEqual(ids(pendingPrompts(messages)), [])
+  // A new turn must never revive the old approval cards.
+  messages.push({ id: 'new-turn', role: 'assistant', is_completed: false, agentEventStream: [] })
+  assert.deepEqual(ids(pendingPrompts(messages)), [])
 })

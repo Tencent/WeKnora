@@ -32,10 +32,8 @@ func AgentMaxContextTokens(configured, modelContextWindow int) int {
 }
 
 // DefaultSmartReasoningMaxCompletionTokens is the per-round budget when the
-// agent cannot emit write_sandbox_file / edit_sandbox_file. 4096 matches
-// typical OpenAI-compatible provider defaults and is enough for ordinary
-// tool-call JSON.
-const DefaultSmartReasoningMaxCompletionTokens = 4096
+// agent has no sandbox. Leave room for complete reports as well as tool calls.
+const DefaultSmartReasoningMaxCompletionTokens = 24576
 
 // DefaultAgentMaxCompletionTokens is the per-round budget when the agent
 // can write or edit sandbox files. Those tool calls carry the file body in
@@ -53,7 +51,7 @@ func NeedsSandboxWriteCompletionBudget(sandboxConfigID string) bool {
 }
 
 // DefaultMaxCompletionTokens is the unset-config default for one agent:
-// quick-answer 2048, smart-reasoning 4096, smart-reasoning with a sandbox 24576.
+// quick-answer 2048, smart-reasoning 24576 with or without a sandbox.
 func DefaultMaxCompletionTokens(agentMode, sandboxConfigID string) int {
 	if agentMode == AgentModeSmartReasoning {
 		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) {
@@ -201,6 +199,9 @@ type AgentConfig struct {
 	// DefaultMaxCompletionTokens for this agent's mode and sandbox.
 	// Explicit values are sent as-is.
 	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
+	// ModelMaxOutputTokens is the resolved model's per-response output limit,
+	// or zero when unknown. It caps the round budget and is resolved per run.
+	ModelMaxOutputTokens int `json:"-"`
 
 	// Maximum character length for tool output (default: 16000).
 	// Outputs exceeding this limit are truncated with head + tail preservation.
@@ -469,13 +470,31 @@ func IsPipelineToolCallID(id string) bool {
 	return strings.HasPrefix(id, PipelineToolCallIDPrefix)
 }
 
+// BackgroundInjection is one background-work message the engine put in front
+// of the model before a step's LLM call. History replays it in place; AckIDs
+// are the completion notices it delivered, acknowledged once the assistant
+// message carrying the step is persisted.
+type BackgroundInjection struct {
+	Content string   `json:"content"`
+	AckIDs  []string `json:"ack_ids,omitempty"`
+}
+
 // AgentStep represents one iteration of the ReAct loop
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
 	Thought   string `json:"thought"`   // LLM's reasoning/thinking (Think phase)
+	// Progress is user-facing commentary from a non-terminal round. Thought stays intact for model replay.
+	Progress        string `json:"progress,omitempty"`
+	ProgressEventID string `json:"progress_event_id,omitempty"`
 	// UserMessagesBefore records consumed steer rows in delivery order, before
 	// this model response. Unlike timestamps, this remains unambiguous on replay.
 	UserMessagesBefore []string `json:"user_messages_before,omitempty"`
+	// BackgroundInjections are background-work messages delivered before this
+	// model response, after the step's steered messages, in delivery order.
+	BackgroundInjections []BackgroundInjection `json:"background_injections,omitempty"`
+	// BackgroundSeenIDs are finished background items whose results this
+	// step's tool calls (work_wait, work_cancel) returned to the model.
+	BackgroundSeenIDs []string `json:"background_seen_ids,omitempty"`
 	// IntermediateAnswer preserves a plain answer followed by a loop-end steer.
 	// The canonical final answer is still stored in Message.Content.
 	IntermediateAnswer bool `json:"intermediate_answer,omitempty"`
@@ -490,13 +509,49 @@ type AgentStep struct {
 	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
 	ReasoningMetadata  ProviderMetadata `json:"reasoning_metadata,omitempty"`
 	ToolCalls          []ToolCall       `json:"tool_calls"` // Tools called in this step (Act phase)
-	Timestamp          time.Time        `json:"timestamp"`  // When this step occurred
+	// Approvals is the user decision for tools in this step. It is stored with
+	// the step so a reloaded transcript can show what was allowed or refused.
+	Approvals []ToolApprovalRecord `json:"approvals,omitempty"`
+	Timestamp time.Time            `json:"timestamp"` // When this step occurred
 	// Truncated marks the round the completion-token cap cut off. It rides in
 	// the agent_steps JSON so a reloaded, shared or re-opened conversation can
 	// still show that the answer stops mid-sentence by design, rather than
 	// looking finished. Live streaming carries the same fact on the answer
 	// event; this is what survives the round trip.
 	Truncated bool `json:"truncated,omitempty"`
+}
+
+// HostApprovalSnapshot is the Lite host card stored with a tool approval.
+type HostApprovalSnapshot struct {
+	Reason          string   `json:"reason"`
+	Command         string   `json:"command,omitempty"`
+	Cwd             string   `json:"cwd,omitempty"`
+	GrantPath       string   `json:"grant_path,omitempty"`
+	GrantAccess     string   `json:"grant_access,omitempty"`
+	DenialSnippet   string   `json:"denial_snippet,omitempty"`
+	FirstAttemptRan bool     `json:"first_attempt_ran,omitempty"`
+	AllowSession    bool     `json:"allow_session"`
+	SessionRules    []string `json:"session_rules,omitempty"`
+}
+
+// ToolApprovalRecord is one human approval attached to an agent step.
+type ToolApprovalRecord struct {
+	PendingID      string                `json:"pending_id"`
+	ToolCallID     string                `json:"tool_call_id,omitempty"`
+	Kind           string                `json:"kind,omitempty"`
+	ServiceName    string                `json:"service_name,omitempty"`
+	MCPToolName    string                `json:"mcp_tool_name,omitempty"`
+	Description    string                `json:"description,omitempty"`
+	ArgsJSON       string                `json:"args_json,omitempty"`
+	TimeoutSeconds int                   `json:"timeout_seconds,omitempty"`
+	RequestedAt    int64                 `json:"requested_at,omitempty"`
+	Host           *HostApprovalSnapshot `json:"host,omitempty"`
+	Resolved       bool                  `json:"resolved,omitempty"`
+	Approved       bool                  `json:"approved,omitempty"`
+	Reason         string                `json:"reason,omitempty"`
+	TimedOut       bool                  `json:"timed_out,omitempty"`
+	Canceled       bool                  `json:"canceled,omitempty"`
+	Scope          string                `json:"scope,omitempty"`
 }
 
 // GetObservations returns observations from all tool calls in this step
@@ -516,13 +571,14 @@ func (s *AgentStep) GetObservations() []string {
 
 // AgentState tracks the execution state of an agent across iterations
 type AgentState struct {
-	PendingSteerMessages []string        `json:"-"`
-	CurrentRound         int             `json:"current_round"`  // Current round number
-	RoundSteps           []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
-	IsComplete           bool            `json:"is_complete"`    // Whether agent has finished
-	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
-	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
-	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
+	PendingSteerMessages []string              `json:"-"`
+	PendingBackground    []BackgroundInjection `json:"-"`
+	CurrentRound         int                   `json:"current_round"`  // Current round number
+	RoundSteps           []AgentStep           `json:"round_steps"`    // All steps taken so far in the current round
+	IsComplete           bool                  `json:"is_complete"`    // Whether agent has finished
+	FinalAnswer          string                `json:"final_answer"`   // The final answer to the query
+	KnowledgeRefs        []*SearchResult       `json:"knowledge_refs"` // Collected knowledge references
+	TurnUsage            TokenUsage            `json:"turn_usage"`     // LLM usage accumulated across this turn
 	// Suspended is set when the run ended waiting on a user prompt.
 	// SuspendedStep is the interrupted round: its thought and the calls
 	// that finished before the blocked one, kept for display.

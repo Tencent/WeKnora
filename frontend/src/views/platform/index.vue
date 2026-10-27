@@ -8,6 +8,7 @@
              跨页面保留会话，从侧栏、右侧边缘按钮或命令面板唤出（设置里可选） -->
         <AssistantPanel />
         <AssistantLauncher />
+        <AssistantPageBridge />
         <div class="upload-mask" v-show="ismask">
             <UploadMask></UploadMask>
         </div>
@@ -15,9 +16,6 @@
         <Settings />
         <!-- 全局命令面板 (⌘K)，随 platform 路由存活 -->
         <GlobalCommandPalette />
-        <!-- 全局右上角"待处理邀请"铃铛。固定定位，z-index 低于抽屉，业务页面
-             右侧抽屉弹出时会自然覆盖；仅在有待处理邀请时渲染。 -->
-        <GlobalInvitationBell />
         <!-- 知识库文件上传进度浮层：上传队列放在 store 里，切换页面不中断 -->
         <UploadTasksPanel />
         <!-- 带遮罩层的新手引导：首次进入自动开启，可从用户菜单顶部昵称旁帮助按钮重新打开 -->
@@ -33,7 +31,7 @@ import Settings from '@/views/settings/Settings.vue'
 import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
 import AssistantPanel from '@/components/assistant/AssistantPanel.vue'
 import AssistantLauncher from '@/components/assistant/AssistantLauncher.vue'
-import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
+import AssistantPageBridge from '@/components/assistant/AssistantPageBridge.vue'
 import UploadTasksPanel from '@/components/upload-tasks/UploadTasksPanel.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'

@@ -488,7 +488,7 @@ type CreateKnowledgeFromURLRequest struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.create_from_url","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Fetches a public web page or file into the knowledge base and parses it in the background; follow with knowledge.get_parse_progress. Only use a URL the user gave."
+// @x-agent-hint "Imports a user-provided public web page or file URL as a source document; ingests asynchronously. Check knowledge.get_parse_progress."
 // @Router       /knowledge-bases/{id}/knowledge/url [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -578,7 +578,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.create_manual","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Creates a Markdown document. Send the full content, and status draft to keep it out of search or publish to index it."
+// @x-agent-hint "Creates a source document from complete Markdown. Set status publish to start asynchronous ingestion; omitted status defaults to draft without indexing. Use draft only when requested. Check knowledge.get_parse_progress."
 // @Router       /knowledge-bases/{id}/knowledge/manual [post]
 func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2726,7 +2726,7 @@ func applyKnowledgeTagBatch(req *KnowledgeTagBatchRequest) error {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.set_tags","risk":"write","target":"knowledge_base.get","label":"name","items":{"param":"knowledge_ids","target":"knowledge.get","as":"knowledge_id","label":"title"}}
-// @x-agent-hint "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
+// @x-agent-hint "Sets the same tags on up to 20 documents in one knowledge base, replacing the tags they have now. To add or remove one tag, read each document's tags with knowledge.get or knowledge.list first and pass the full resulting list. tag_ids come from knowledge_base.list_tags; an empty tag_ids clears every tag. It does not delete documents."
 // @Router       /knowledge/tags [put]
 func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -3430,6 +3430,99 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		"data": gin.H{
 			"task_id":       taskID,
 			"reparse_count": len(ids),
+		},
+	})
+}
+
+// RebuildKnowledgeBaseIndex godoc
+// @Summary      重建整个知识库的索引
+// @Description  索引策略变更后，把知识库下全部文档提交重新解析。前端知识库设置弹窗
+// @Description  (KnowledgeBaseEditorModal) 在保存新策略后调用此接口，此前该路由在后端缺失，调用返回 404。
+// @Tags         知识管理
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  handler.DataResponse  "任务已提交"
+// @Failure      400  {object}  errors.AppError       "请求参数错误"
+// @Failure      403  {object}  errors.AppError       "权限不足"
+// @Failure      404  {object}  errors.AppError       "知识库不存在"
+// @Failure      409  {object}  errors.AppError       "有文档正在迁移中"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/rebuild-index [post]
+func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
+	kbID := strings.TrimSpace(c.Param("id"))
+	if kbID == "" {
+		_ = c.Error(errors.NewBadRequestError("knowledge base id is required"))
+		return
+	}
+
+	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(errors.NewForbiddenError("no permission to rebuild index of this knowledge base"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	knowledges, err := h.kgService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to list knowledge for rebuild-index, kb_id: %s, err: %v",
+			secutils.SanitizeForLog(kbID), err)
+		_ = c.Error(errors.NewInternalServerError("failed to list knowledge of the knowledge base"))
+		return
+	}
+	ids := make([]string, 0, len(knowledges))
+	for _, k := range knowledges {
+		if k == nil || strings.TrimSpace(k.ID) == "" {
+			continue
+		}
+		// Same admission rule as /knowledge/batch-reparse: fail visibly
+		// instead of silently dropping a document that is mid-move.
+		if err := access.RejectMovingKnowledge(k); err != nil {
+			_ = c.Error(err)
+			return
+		}
+		ids = append(ids, k.ID)
+	}
+	if len(ids) == 0 {
+		_ = c.Error(errors.NewBadRequestError("no documents to rebuild in this knowledge base"))
+		return
+	}
+
+	// Keep the per-task admission cap of /knowledge/batch-reparse.
+	const maxBatch = 200
+	taskIDs := make([]string, 0, (len(ids)+maxBatch-1)/maxBatch)
+	for start := 0; start < len(ids); start += maxBatch {
+		end := start + maxBatch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, kbID, ids[start:end], nil)
+		if err != nil {
+			logger.Errorf(ctx, "failed to enqueue rebuild-index task, kb_id: %s, err: %v",
+				secutils.SanitizeForLog(kbID), err)
+			_ = c.Error(errors.NewInternalServerError("failed to enqueue rebuild index task"))
+			return
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+
+	logger.Infof(ctx, "Rebuild index tasks enqueued: kb_id: %s, documents: %d, tasks: %d",
+		secutils.SanitizeForLog(kbID), len(ids), len(taskIDs))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Rebuild index tasks submitted",
+		"data": gin.H{
+			"document_count": len(ids),
+			"task_ids":       taskIDs,
 		},
 	})
 }

@@ -76,6 +76,14 @@ func getSlugParam(c *gin.Context) string {
 	return strings.TrimSpace(slug)
 }
 
+// wikiListMaxPageSize caps how many wiki pages one list request may return.
+// The repository only floors page_size (no ceiling), so an unbounded value
+// such as ?page_size=100000000 reaches the SQL LIMIT and pulls every page of
+// the knowledge base — Content column included — into memory in a single
+// request. 200 mirrors the cap ListRevisions applies to its own limit and
+// stays above the largest batch the frontend fetches.
+const wikiListMaxPageSize = 200
+
 // ListPages godoc
 // @Summary      List wiki pages
 // @Description  List wiki pages with optional filtering and pagination
@@ -102,6 +110,12 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > wikiListMaxPageSize {
+		pageSize = wikiListMaxPageSize
+	}
 	categoryPath := parseWikiCategoryPath(c.Query("category_path"))
 	// folder_id is an exact placement filter. An explicitly-present but empty
 	// value means "root" (folder_id = ''); an absent param means "no filter".
