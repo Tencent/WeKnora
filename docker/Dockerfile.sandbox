@@ -227,6 +227,8 @@ ENV WK_CHROME_REAL=/usr/bin/google-chrome
 # (same profile, synced by wk-browser-sync), falling back to chrome-wk
 # outside session context.
 COPY docker/desktop/google-chrome.desktop /root/Desktop/google-chrome.desktop
+# XFCE's bottom panel refers to this generic browser entry by filename.
+COPY docker/desktop/xfce4-web-browser.desktop /usr/share/applications/xfce4-web-browser.desktop
 RUN chmod 0755 /root/Desktop/google-chrome.desktop \
     # Every GUI entry must reach wk-chrome, not the raw binary: the packaged
     # Applications menu entry (all its Exec lines, incl. the incognito/new
