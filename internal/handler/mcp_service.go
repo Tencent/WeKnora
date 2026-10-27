@@ -34,6 +34,8 @@ type MCPServiceHandler struct {
 	// runResumer continues a run suspended on an approval once it is
 	// answered. Nil leaves such answers to the reaper, which closes the run.
 	runResumer RunResumer
+	// scheduledPrompt queues automation-owned continuations without starting a chat run.
+	scheduledPrompt func(context.Context, *types.AgentPrompt) bool
 	// grants are the callers' remembered agent approvals.
 	grants interfaces.AgentGrantRepository
 }
@@ -46,6 +48,11 @@ type RunResumer interface {
 
 // SetRunResumer wires the resumer of suspended runs.
 func (h *MCPServiceHandler) SetRunResumer(r RunResumer) { h.runResumer = r }
+
+// SetScheduledPromptRouter routes automation approvals to their scheduler.
+func (h *MCPServiceHandler) SetScheduledPromptRouter(f func(context.Context, *types.AgentPrompt) bool) {
+	h.scheduledPrompt = f
+}
 
 // NewMCPServiceHandler creates a new MCP service handler
 func NewMCPServiceHandler(
@@ -958,15 +965,20 @@ func (h *MCPServiceHandler) finishResolve(c *gin.Context, pendingID string, res 
 		}
 		return
 	}
-	// A suspended run has ended; this replica now continues it.
+	// Scheduled runs resume through their scheduler, but the client must still
+	// reattach to their stream after answering a suspended prompt.
+	scheduled := h.scheduledPrompt != nil && h.scheduledPrompt(ctx, res.Prompt)
 	resumed := res.Resume && h.runResumer != nil
 	if router, ok := h.runResumer.(interface {
 		HandlesDelegatedPrompt(context.Context, *types.AgentPrompt) bool
-	}); ok && router.HandlesDelegatedPrompt(ctx, res.Prompt) {
+	}); !scheduled && ok && router.HandlesDelegatedPrompt(ctx, res.Prompt) {
 		resumed = false
 	}
-	if resumed {
+	if resumed && !scheduled {
 		h.runResumer.ResumeSuspendedRun(c, res.Prompt, res.OwnerGone, res.OwnerLeaseUntil)
+	}
+	if scheduled {
+		resumed = res.Resume
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "resumed": resumed})
 }
@@ -984,7 +996,7 @@ type resolveAgentPromptBody struct {
 // @Description  tool_approval 为 {approved: bool, modified_args?: object, reason?: string, allow_in_session?: bool}；
 // @Description  page_action 为 {declined?, error?, location?, snapshot?, applied?: [{ref, label?, summary?}],
 // @Description  stayed?, return_path?}。
-// @Description  返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
+// @Description  返回 resumed=true 表示挂起的运行已请求恢复（自动化由调度器恢复），客户端需携带 resume_pending_id 重新接入该消息的事件流
 // @Tags         Agent
 // @Accept       json
 // @Produce      json

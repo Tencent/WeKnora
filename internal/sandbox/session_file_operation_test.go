@@ -100,7 +100,7 @@ func TestExpectedSandboxMaintenanceDoesNotPrepareOrProvision(t *testing.T) {
 		_, err := mgr.ExecShellCommandWithOptions(ctx, tc.session, "git status", ShellExecOptions{
 			ExpectedSandboxID: tc.expected, SkipWorkspacePrep: true,
 		})
-		require.Error(t, err)
+		require.ErrorIs(t, err, ErrBoundSandboxChanged)
 	}
 	require.Len(t, client.connectIDs, 1, "do not resume a mismatched sandbox")
 	require.Len(t, client.execRequests, 1)

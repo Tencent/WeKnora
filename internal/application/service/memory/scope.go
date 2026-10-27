@@ -25,10 +25,20 @@ var ErrNoMemoryScope = errors.New("memory: no principal in context")
 // which covers web users, IM users, API external users and embed visitors
 // alike, and it is paired with the workspace so the same person's memories do
 // not leak between workspaces.
+//
+// The workspace is the caller's own, not the execution tenant: a shared agent
+// runs under its owner's tenant so its models and knowledge resolve there, and
+// WithExecutionTenant keeps Caller intact precisely so identity-scoped data
+// (memory) still follows the person who is chatting. Reading TenantIDContextKey
+// here would look up the owner's workspace and never find the caller's memories.
 func ResolveScope(ctx context.Context) (interfaces.MemoryScope, error) {
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok || tenantID == 0 {
-		return interfaces.MemoryScope{}, ErrNoMemoryScope
+	tenantID := types.CallerFromContext(ctx).TenantID
+	if tenantID == 0 {
+		var ok bool
+		tenantID, ok = types.TenantIDFromContext(ctx)
+		if !ok || tenantID == 0 {
+			return interfaces.MemoryScope{}, ErrNoMemoryScope
+		}
 	}
 	principal, ok := types.PrincipalFromContext(ctx)
 	if !ok {

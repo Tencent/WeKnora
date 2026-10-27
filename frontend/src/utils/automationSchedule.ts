@@ -1,8 +1,14 @@
-import type { AutomationTrigger } from '@/api/automation'
+import type { Automation, AutomationTrigger } from '@/api/automation'
 
 // The editor offers a few schedule shapes and falls back to a raw cron
 // expression for anything else. Cron here is the server's five-field form,
 // minute first, evaluated in the trigger's timezone.
+
+/** An elapsed one-shot schedule has no future occurrence to resume. */
+export function hasEndedOnceSchedule(automation: Pick<Automation, 'enabled' | 'trigger'>, now = Date.now()): boolean {
+  return !automation.enabled && automation.trigger.type === 'once'
+    && Date.parse(automation.trigger.at || '') <= now
+}
 
 export type ScheduleKind = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'once' | 'custom'
 
@@ -141,7 +147,7 @@ function offsetMs(date: Date, timeZone: string): number {
   return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) - Math.floor(date.getTime() / 1000) * 1000
 }
 
-const WALL = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/
+const WALL = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/
 
 /** RFC 3339 instant of wall-clock time local in timeZone, or '' if local is malformed. */
 export function wallClockToISO(local: string, timeZone: string): string {
@@ -149,10 +155,19 @@ export function wallClockToISO(local: string, timeZone: string): string {
   if (!match) return ''
   const [, y, mo, d, h, mi] = match.map(Number)
   const guess = Date.UTC(y, mo - 1, d, h, mi)
-  let t = guess - offsetMs(new Date(guess), timeZone)
-  // A second pass settles instants near a daylight-saving change.
-  t = guess - offsetMs(new Date(t), timeZone)
-  return new Date(t).toISOString()
+  try {
+    let t = guess - offsetMs(new Date(guess), timeZone)
+    // A second pass settles instants near a daylight-saving change.
+    t = guess - offsetMs(new Date(t), timeZone)
+    const date = new Date(t)
+    const p = zoneParts(date, timeZone)
+    // Date.UTC normalizes invalid fields, and offset iteration can land on a
+    // different local time inside a DST gap. Never schedule that other time.
+    if (p.y !== y || p.mo !== mo || p.d !== d || p.h !== h || p.mi !== mi || p.s !== 0) return ''
+    return date.toISOString()
+  } catch {
+    return ''
+  }
 }
 
 /** Wall-clock "YYYY-MM-DD HH:mm" of iso in timeZone. */

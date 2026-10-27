@@ -11,7 +11,7 @@
             :placeholder="t('menu.search')" :aria-label="t('menu.search')" clearable>
             <template #prefix-icon><t-icon name="search" size="16px" /></template>
           </t-input>
-          <t-button variant="text" theme="default" size="small" class="automation-page__add" @click="openEditor(null)">
+          <t-button variant="text" theme="default" size="small" class="automation-page__add" @click="startCreate">
             <template #icon><t-icon name="add" size="16px" /></template>
             {{ t('automation.add') }}
           </t-button>
@@ -36,20 +36,28 @@
             <div class="automation-card__badge" aria-hidden="true"><t-icon name="time" size="14px" /></div>
             <h3 class="automation-card__title" :title="item.name">{{ item.name }}</h3>
             <div class="automation-card__actions">
-              <button type="button" class="automation-card__icon-btn" :title="t('automation.actions.runNow')"
-                :aria-label="`${item.name} · ${t('automation.actions.runNow')}`" :disabled="busy.has(item.id)"
-                @click="runNow(item)">
-                <t-icon name="play-circle" size="14px" />
-              </button>
+              <t-popconfirm :content="t('automation.runConfirm', { name: item.name })"
+                :confirm-btn="{ content: t('automation.actions.runNow'), theme: 'primary' }"
+                :cancel-btn="t('common.cancel')" theme="default" placement="bottom"
+                :popup-props="{ disabled: busy.has(item.id) }" @confirm="runNow(item)">
+                <button type="button" class="automation-card__icon-btn" :title="t('automation.actions.runNow')"
+                  :aria-label="`${item.name} · ${t('automation.actions.runNow')}`" :disabled="busy.has(item.id)">
+                  <ChatActionIcon name="play" />
+                </button>
+              </t-popconfirm>
               <button type="button" class="automation-card__icon-btn" :title="t('common.edit')"
                 :aria-label="`${item.name} · ${t('common.edit')}`" @click="openEditor(item)">
-                <t-icon name="edit" size="14px" />
+                <ChatActionIcon name="edit" />
               </button>
-              <button type="button" class="automation-card__icon-btn automation-card__icon-btn--danger"
-                :title="t('common.delete')" :aria-label="`${item.name} · ${t('common.delete')}`"
-                :disabled="busy.has(item.id)" @click="remove(item)">
-                <t-icon name="delete" size="14px" />
-              </button>
+              <t-popconfirm :content="t('automation.deleteBody', { name: item.name })"
+                :confirm-btn="{ content: t('common.delete'), theme: 'danger' }"
+                :cancel-btn="t('common.cancel')" theme="danger" placement="bottom"
+                :popup-props="{ disabled: busy.has(item.id) }" @confirm="remove(item)">
+                <button type="button" class="automation-card__icon-btn" :title="t('common.delete')"
+                  :aria-label="`${item.name} · ${t('common.delete')}`" :disabled="busy.has(item.id)">
+                  <ChatActionIcon name="delete" />
+                </button>
+              </t-popconfirm>
             </div>
           </div>
           <p class="automation-card__schedule">{{ describeTrigger(item.trigger, t, locale) }}</p>
@@ -58,13 +66,15 @@
           </p>
           <div class="automation-card__footer">
             <div class="automation-card__meta">
-              <span>{{ agentName(item.agent_id) }}</span>
               <span v-if="item.enabled && item.next_run_at">
                 {{ t('automation.nextRunAt', { time: formatInZone(item.next_run_at, item.trigger.timezone, locale) }) }}
               </span>
-              <AutomationStatusTag :status="item.last_run_status" />
+              <AutomationStatusTag :status="item.active_run_status || item.last_run_status" />
             </div>
-            <button type="button" role="switch" class="automation-card__status" :class="{ 'is-enabled': item.enabled }"
+            <span v-if="hasEndedOnceSchedule(item)" class="automation-card__status is-ended" :title="t('automation.scheduleEndedHint')">
+              {{ t('automation.scheduleEnded') }}
+            </span>
+            <button v-else type="button" role="switch" class="automation-card__status" :class="{ 'is-enabled': item.enabled }"
               :aria-checked="item.enabled" :aria-label="`${item.name} · ${t('automation.fields.enabled')}`"
               :disabled="busy.has(item.id)" @click="toggle(item)">
               <t-loading v-if="busy.has(item.id)" size="12px" />
@@ -73,7 +83,7 @@
             </button>
           </div>
         </article>
-        <button type="button" class="automation-card automation-card--add" @click="openEditor(null)">
+        <button type="button" class="automation-card automation-card--add" @click="startCreate">
           <span class="automation-card--add__icon" aria-hidden="true"><t-icon name="add" /></span>
           <span class="automation-card--add__label">{{ t('automation.add') }}</span>
           <span class="automation-card--add__hint">{{ t('automation.addHint') }}</span>
@@ -81,19 +91,18 @@
       </div>
     </section>
 
-    <AutomationEditor v-model:visible="editorVisible" :automation="editing" :agents="agents"
-      :agents-loading="agentsLoading" :default-agent-id="BUILTIN_WEKNORA_ASSISTANT_ID" @saved="onSaved" />
-    <AutomationDetail v-model:visible="detailVisible" :automation="detail" :agent-name="detail ? agentName(detail.agent_id) : ''"
+    <AssistantCreateDialog v-model:visible="assistantCreateVisible" kind="automation" @manual="openEditor(null)" />
+    <AutomationEditor v-model:visible="editorVisible" :automation="editing" @saved="onSaved" />
+    <AutomationDetail v-model:visible="detailVisible" :automation="detail"
       :focus-run-id="focusRunId" @changed="onSaved" @edit="openEditor" />
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
-import { BUILTIN_WEKNORA_ASSISTANT_ID } from '@/api/agent'
+import { MessagePlugin } from 'tdesign-vue-next'
 import {
   deleteAutomation,
   getAutomation,
@@ -103,30 +112,35 @@ import {
   runAutomationNow,
   type Automation,
 } from '@/api/automation'
-import { useAuthStore } from '@/stores/auth'
-import { describeTrigger, formatInZone } from '@/utils/automationSchedule'
+import { describeTrigger, formatInZone, hasEndedOnceSchedule } from '@/utils/automationSchedule'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import AutomationEditor from './AutomationEditor.vue'
 import AutomationDetail from './AutomationDetail.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
+import ChatActionIcon from '@/components/ChatActionIcon.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
-import { loadAutomationAgents, type AutomationAgentOption } from './agents'
+import AssistantCreateDialog from '@/components/assistant/AssistantCreateDialog.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
 
 const automations = ref<Automation[]>([])
 const loading = ref(true)
 const query = ref('')
 const busy = ref(new Set<string>())
-const agents = ref<AutomationAgentOption[]>([])
-const agentsLoading = ref(false)
 const editorVisible = ref(false)
+const assistantCreateVisible = ref(false)
+function startCreate() {
+  assistantCreateVisible.value = true
+}
 const editing = ref<Automation | null>(null)
 const detailVisible = ref(false)
 const detail = ref<Automation | null>(null)
 const focusRunId = ref('')
+let loadVersion = 0
+let poll: ReturnType<typeof setTimeout> | undefined
+let disposed = false
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -135,30 +149,43 @@ const filtered = computed(() => {
     a.name.toLowerCase().includes(q) || a.instruction.toLowerCase().includes(q))
 })
 
-const agentName = (id: string) =>
-  agents.value.find((a) => a.id === id)?.name ?? t('automation.agentUnavailable')
+function schedulePoll() {
+  clearTimeout(poll)
+  if (!disposed) poll = setTimeout(() => { void load(true) }, 5000)
+}
 
-async function load() {
+async function load(silent = false) {
+  if (disposed) return
+  clearTimeout(poll)
+  const version = ++loadVersion
   try {
     const res = await listAutomations()
+    if (version !== loadVersion) return
     automations.value = res.data ?? []
+    if (detail.value) {
+      const fresh = automations.value.find(item => item.id === detail.value?.id)
+      if (fresh) detail.value = fresh
+      else {
+        detailVisible.value = false
+        detail.value = null
+      }
+    }
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('common.operationFailed'))
+    if (version === loadVersion && !silent) MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
-    loading.value = false
+    if (version === loadVersion) {
+      loading.value = false
+      schedulePoll()
+    }
   }
 }
 
-async function loadAgents() {
-  agentsLoading.value = true
-  try {
-    agents.value = await loadAutomationAgents(authStore.currentTenantId, t('assistant.title'))
-  } catch {
-    agents.value = [{ id: BUILTIN_WEKNORA_ASSISTANT_ID, name: t('assistant.title') }]
-  } finally {
-    agentsLoading.value = false
-  }
-}
+useAssistantDataChange(() => { void load() }, { areas: ['automation'] })
+onBeforeUnmount(() => {
+  disposed = true
+  ++loadVersion
+  clearTimeout(poll)
+})
 
 function replace(item: Automation) {
   const index = automations.value.findIndex((a) => a.id === item.id)
@@ -169,6 +196,7 @@ function replace(item: Automation) {
 
 function onSaved(item: Automation) {
   replace(item)
+  void load(true)
 }
 
 function openEditor(item: Automation | null) {
@@ -212,10 +240,15 @@ watch(detailVisible, (open) => {
 })
 
 async function toggle(item: Automation) {
+  if (busy.value.has(item.id)) return
+  if (hasEndedOnceSchedule(item)) {
+    MessagePlugin.warning(t('automation.scheduleEndedHint'))
+    return
+  }
   busy.value.add(item.id)
   try {
     const res = item.enabled ? await pauseAutomation(item.id) : await resumeAutomation(item.id)
-    replace(res.data)
+    onSaved(res.data)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
@@ -224,11 +257,13 @@ async function toggle(item: Automation) {
 }
 
 async function runNow(item: Automation) {
+  if (busy.value.has(item.id)) return
   busy.value.add(item.id)
   try {
     const res = await runAutomationNow(item.id)
     MessagePlugin.success(t('automation.messages.queued'))
     openDetail(item, res.data?.id ?? '')
+    void load(true)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
@@ -236,31 +271,24 @@ async function runNow(item: Automation) {
   }
 }
 
-function remove(item: Automation) {
-  const dialog = DialogPlugin.confirm({
-    header: t('automation.deleteTitle'),
-    body: t('automation.deleteBody', { name: item.name }),
-    theme: 'danger',
-    confirmBtn: { content: t('common.delete'), theme: 'danger' },
-    onConfirm: async () => {
-      dialog.hide()
-      busy.value.add(item.id)
-      try {
-        await deleteAutomation(item.id)
-        automations.value = automations.value.filter((a) => a.id !== item.id)
-        if (detail.value?.id === item.id) detailVisible.value = false
-        MessagePlugin.success(t('common.deleteSuccess'))
-      } catch (e: any) {
-        MessagePlugin.error(e?.message || t('common.deleteFailed'))
-      } finally {
-        busy.value.delete(item.id)
-      }
-    },
-  })
+async function remove(item: Automation) {
+  if (busy.value.has(item.id)) return
+  busy.value.add(item.id)
+  try {
+    await deleteAutomation(item.id)
+    ++loadVersion
+    schedulePoll()
+    automations.value = automations.value.filter((a) => a.id !== item.id)
+    if (detail.value?.id === item.id) detailVisible.value = false
+    MessagePlugin.success(t('common.deleteSuccess'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('common.deleteFailed'))
+  } finally {
+    busy.value.delete(item.id)
+  }
 }
 
 onMounted(async () => {
-  void loadAgents()
   await load()
   await openFromRoute()
 })
@@ -308,7 +336,12 @@ onMounted(async () => {
 }
 
 .automation-page__search {
-  width: 240px;
+  width: 260px;
+  max-width: 100%;
+
+  :deep(.t-input) {
+    border-radius: var(--app-radius-sm);
+  }
 }
 
 .automation-page__add.t-button {
@@ -321,7 +354,12 @@ onMounted(async () => {
   color: var(--td-text-color-primary);
 
   :deep(.t-icon) {
-    color: var(--td-brand-color);
+    color: var(--td-text-color-secondary);
+  }
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    border-color: var(--td-component-stroke);
   }
 }
 
@@ -367,10 +405,9 @@ onMounted(async () => {
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
-  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
+  transition: background-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
 
   &:hover:not(.automation-card--add) {
-    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
     box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
   }
 
@@ -392,9 +429,10 @@ onMounted(async () => {
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      color: var(--td-text-color-primary);
+      border-color: var(--td-component-border);
+      background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 15%, var(--td-bg-color-container));
+      box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
     }
 
     &__icon {
@@ -474,23 +512,22 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: var(--app-radius-sm);
   background: none;
-  color: var(--td-text-color-placeholder);
+  color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
   cursor: pointer;
 
   &:hover:not(:disabled) {
-    color: var(--td-text-color-primary);
-    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-secondary);
+    background: color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
   }
 
-  &--danger:hover:not(:disabled) {
-    color: var(--td-error-color);
-    background: color-mix(in srgb, var(--td-error-color) 8%, transparent);
+  &:active:not(:disabled) {
+    background: color-mix(in srgb, var(--td-text-color-primary) 9%, transparent);
   }
 
   &:disabled {
@@ -550,7 +587,9 @@ onMounted(async () => {
     color: var(--td-success-color);
   }
 
-  &:hover:not(:disabled) {
+  &.is-ended { cursor: default; }
+
+  &:hover:not(:disabled):not(.is-ended) {
     background: var(--td-bg-color-container-hover);
   }
 
@@ -568,7 +607,7 @@ onMounted(async () => {
 
 .automation-card button:focus-visible,
 .automation-card--add:focus-visible {
-  outline: 2px solid var(--td-brand-color);
+  outline: 2px solid var(--td-text-color-secondary);
   outline-offset: -2px;
 }
 </style>

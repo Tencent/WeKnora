@@ -1,148 +1,181 @@
 <template>
-  <SettingDrawer :visible="visible" :title="automation?.name || ''" icon="time" width="640px" :min-width="480"
-    :max-width="960" storage-key="setting-drawer:width:automation-detail" class="automation-detail-drawer"
-    @update:visible="(v: boolean) => !v && close()">
+  <SettingDrawer :visible="visible" :title="automation?.name || ''" icon="time" width="720px" :min-width="480"
+    :max-width="960" storage-key="setting-drawer:width:automation-detail" class="automation-detail-drawer" hide-footer
+    :z-index="2300" @update:visible="(v: boolean) => !v && close()">
+    <template #headerIcon><t-icon name="time" class="automation-detail__header-icon" /></template>
     <template v-if="automation" #subtitle>
       <span class="automation-detail__subtitle">
-        <AutomationStatusTag v-if="!automation.enabled" status="paused" />
+        <t-tag v-if="hasEndedOnceSchedule(automation)" size="small" variant="light" :title="t('automation.scheduleEndedHint')">{{ t('automation.scheduleEnded') }}</t-tag>
+        <AutomationStatusTag v-else-if="!automation.enabled" status="paused" />
         <span>{{ describeTrigger(automation.trigger, t, locale) }} · {{ automation.trigger.timezone || 'UTC' }}</span>
       </span>
+    </template>
+
+    <template v-if="automation" #header-actions>
+      <div class="automation-detail__actions">
+        <t-popconfirm :content="t('automation.runConfirm', { name: automation.name })" theme="default" placement="bottom-right"
+          :confirm-btn="{ content: t('automation.actions.runNow'), theme: 'primary' }" :cancel-btn="t('common.cancel')"
+          :popup-props="{ zIndex: 2600, disabled: !!busy }" @confirm="runNow">
+          <button type="button" class="automation-detail__icon-btn" :disabled="!!busy" :aria-busy="busy === 'run'"
+            :title="t('automation.actions.runNow')" :aria-label="t('automation.actions.runNow')">
+            <t-loading v-if="busy === 'run'" size="14px" />
+            <ChatActionIcon v-else name="play" />
+          </button>
+        </t-popconfirm>
+        <button v-if="!hasEndedOnceSchedule(automation)" type="button" class="automation-detail__icon-btn" :disabled="!!busy" :aria-busy="busy === 'toggle'"
+          :title="automation.enabled ? t('automation.actions.pause') : t('automation.actions.resume')"
+          :aria-label="automation.enabled ? t('automation.actions.pause') : t('automation.actions.resume')" @click="toggle">
+          <t-loading v-if="busy === 'toggle'" size="14px" />
+          <ChatActionIcon v-else :name="automation.enabled ? 'pause' : 'resume'" />
+        </button>
+        <button type="button" class="automation-detail__icon-btn" :title="t('common.edit')"
+          :aria-label="t('common.edit')" @click="emit('edit', automation)">
+          <ChatActionIcon name="edit" />
+        </button>
+      </div>
     </template>
 
     <template v-if="automation">
       <t-alert v-if="!automation.enabled && automation.paused_reason" theme="warning" class="automation-detail__alert"
         :message="t('automation.detail.pausedBecause', { reason: automation.paused_reason })" />
-
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ t('automation.detail.overview') }}</h4>
-        <dl class="automation-detail__fields">
-          <div class="automation-detail__field">
-            <dt>{{ t('automation.fields.nextRun') }}</dt>
-            <dd>{{ automation.enabled && automation.next_run_at ? when(automation.next_run_at) : t('automation.notScheduled') }}</dd>
+      <section class="automation-detail__brief" :aria-label="t('automation.detail.task')">
+        <div class="automation-detail__brief-heading">
+          <div class="automation-detail__brief-context">
+            <h3>{{ t('automation.detail.task') }}</h3>
+            <div class="automation-detail__execution">
+              <span :title="t('automation.fields.accessLevel')">{{ t(`assistant.access.levels.${automation.access_level}.label`) }}</span>
+              <span :title="t('automation.fields.sessionMode')">{{ t(`automation.sessionMode.${automation.session_mode}`) }}</span>
+            </div>
           </div>
-          <div class="automation-detail__field">
-            <dt>{{ t('automation.detail.lastRun') }}</dt>
-            <dd class="automation-detail__inline">
-              <template v-if="automation.last_run_at">
-                {{ when(automation.last_run_at) }}
-                <AutomationStatusTag v-if="automation.last_run_status" :status="automation.last_run_status" />
-              </template>
-              <template v-else>{{ t('automation.detail.noRuns') }}</template>
-            </dd>
-          </div>
-          <div class="automation-detail__field">
-            <dt>{{ t('automation.fields.agent') }}</dt>
-            <dd>{{ agentName }}</dd>
-          </div>
-          <div class="automation-detail__field">
-            <dt>{{ t('automation.fields.accessLevel') }}</dt>
-            <dd>{{ t(`assistant.access.levels.${automation.access_level}.label`) }}</dd>
-          </div>
-          <div class="automation-detail__field">
-            <dt>{{ t('automation.fields.sessionMode') }}</dt>
-            <dd>{{ t(`automation.sessionMode.${automation.session_mode}`) }}</dd>
-          </div>
-        </dl>
+          <t-popup v-model:visible="grantsVisible" trigger="click" placement="bottom-right" :z-index="2600">
+            <button type="button" class="automation-detail__grants-trigger" :class="{ 'is-attention': candidates.length }"
+              :aria-expanded="grantsVisible">
+              <t-icon name="secured" size="14px" />
+              {{ t('automation.detail.grants') }}
+              <span v-if="candidates.length || grants.length" class="automation-detail__count"
+                :title="candidates.length ? t('automation.grants.candidates') : t('automation.grants.active')">
+                {{ candidates.length || grants.length }}
+              </span>
+              <t-icon name="chevron-down" size="12px" />
+            </button>
+            <template #content>
+              <div class="automation-detail__grants-panel" role="region" :aria-label="t('automation.detail.grants')">
+                <h3>{{ t('automation.detail.grants') }}</h3>
+                <p class="automation-detail__muted">{{ t('automation.grants.intro') }}</p>
+                <div v-if="grantsLoading" class="automation-detail__loading"><t-loading size="small" /></div>
+                <template v-else>
+                  <ul v-if="grants.length" class="automation-detail__list">
+                    <li v-for="grant in grants" :key="grant.id" class="automation-grant">
+                      <span class="automation-grant__label">{{ grant.label || grant.grant_key }}</span>
+                      <t-tag size="small" variant="light" :theme="grant.risk === 'destructive' ? 'danger' : 'warning'">
+                        {{ t(`automation.risk.${grant.risk}`, grant.risk) }}
+                      </t-tag>
+                      <span v-if="grant.lapse" class="automation-grant__lapse">{{ t('automation.grants.lapsed') }}</span>
+                      <t-link theme="danger" hover="color" class="automation-grant__action" @click="revoke(grant)">
+                        {{ t('automation.grants.revoke') }}
+                      </t-link>
+                    </li>
+                  </ul>
+                  <template v-if="candidates.length">
+                    <div class="automation-detail__subhead">{{ t('automation.grants.candidates') }}</div>
+                    <ul class="automation-detail__list">
+                      <li v-for="candidate in candidates" :key="candidate.prompt_id" class="automation-grant">
+                        <span class="automation-grant__label">{{ candidate.label || candidate.tool }}</span>
+                        <t-tag size="small" variant="light" :theme="candidate.risk === 'destructive' ? 'danger' : 'warning'">
+                          {{ t(`automation.risk.${candidate.risk}`, candidate.risk) }}
+                        </t-tag>
+                        <span v-if="candidate.service_name" class="automation-grant__meta">{{ candidate.service_name }}</span>
+                        <t-link theme="primary" hover="color" class="automation-grant__action" @click="allow(candidate)">
+                          {{ t('automation.grants.allow') }}
+                        </t-link>
+                      </li>
+                    </ul>
+                  </template>
+                  <p v-if="!grants.length && !candidates.length" class="automation-detail__muted">{{ t('automation.grants.none') }}</p>
+                </template>
+              </div>
+            </template>
+          </t-popup>
+        </div>
+        <div
+          ref="instructionScroller"
+          class="automation-detail__instruction-scroll"
+          :class="{
+            'automation-detail__instruction-scroll--more': instructionHasMore,
+            'automation-detail__instruction-scroll--expanded': instructionExpanded,
+          }"
+          :style="{ maxHeight: instructionExpanded ? 'none' : `${INSTRUCTION_PREVIEW_HEIGHT}px` }"
+          @scroll="updateInstructionOverflow"
+        >
+          <p ref="instructionContent" class="automation-detail__instruction">{{ automation.instruction }}</p>
+        </div>
+        <button
+          v-if="instructionCanExpand"
+          type="button"
+          class="automation-detail__instruction-toggle"
+          :aria-label="t(instructionExpanded ? 'common.collapse' : 'common.expand')"
+          :title="t(instructionExpanded ? 'common.collapse' : 'common.expand')"
+          :aria-expanded="instructionExpanded"
+          @click="toggleInstruction"
+        >
+          <t-icon :name="instructionExpanded ? 'chevron-up' : 'chevron-down'" size="16px" />
+        </button>
       </section>
 
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">
-          {{ t('automation.detail.task') }}
-          <t-button v-if="instructionLong" size="small" variant="text" theme="primary" class="automation-detail__toggle"
-            @click="instructionOpen = !instructionOpen">
-            {{ instructionOpen ? t('common.collapse') : t('common.expand') }}
-          </t-button>
-        </h4>
-        <p class="automation-detail__instruction" :class="{ 'is-clamped': instructionLong && !instructionOpen }">
-          {{ automation.instruction }}
-        </p>
-      </section>
-
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">
-          {{ t('automation.detail.runs') }}
-          <span v-if="runsTotal" class="automation-detail__count">{{ runsTotal }}</span>
-        </h4>
+      <section class="automation-detail__history" :aria-label="t('automation.detail.runs')">
+        <div class="automation-detail__history-header">
+          <h3 class="automation-detail__history-heading">
+            {{ t('automation.detail.runs') }}<span class="automation-detail__count">{{ runsTotal }}</span>
+          </h3>
+          <span v-if="automation.enabled && automation.next_run_at" class="automation-detail__next-run">
+            {{ t('automation.fields.nextRun') }}
+            <time :datetime="automation.next_run_at">{{ when(automation.next_run_at) }}</time>
+          </span>
+        </div>
         <div v-if="runsLoading && !runs.length" class="automation-detail__loading"><t-loading size="small" /></div>
         <p v-else-if="!runs.length" class="automation-detail__muted">{{ t('automation.detail.noRuns') }}</p>
-        <ul v-else class="automation-detail__list">
-          <li v-for="run in runs" :key="run.id" class="automation-run"
-            :class="{ 'is-focused': run.id === focusRunId, 'is-link': !!run.session_id }"
-            :role="run.session_id ? 'button' : undefined" :tabindex="run.session_id ? 0 : undefined"
-            @click="run.session_id && openRun(run)"
-            @keydown.enter="run.session_id && openRun(run)">
-            <span class="automation-run__dot" :class="`is-${run.status}`" aria-hidden="true" />
-            <div class="automation-run__body">
-              <div class="automation-run__head">
-                <span class="automation-run__time">{{ when(run.scheduled_at) }}</span>
-                <span class="automation-run__status">{{ t(`automation.status.${run.status}`) }}</span>
-                <span class="automation-run__meta">
-                  {{ t(`automation.runTrigger.${run.trigger_kind}`) }}<template v-if="duration(run)"> · {{ duration(run) }}</template>
-                </span>
-                <t-link v-if="cancellable(run)" theme="danger" hover="color" class="automation-run__stop"
-                  :disabled="run.cancel_requested" @click.stop="cancel(run)">
-                  {{ run.cancel_requested ? t('automation.detail.stopping') : t('automation.actions.stop') }}
-                </t-link>
-              </div>
-              <p v-if="run.error" class="automation-run__text is-error">{{ run.error }}</p>
-              <p v-else-if="run.answer" class="automation-run__text">{{ run.answer }}</p>
-            </div>
-            <t-icon v-if="run.session_id" name="chevron-right" size="16px" class="automation-run__chevron" />
-          </li>
-        </ul>
+        <div v-else class="automation-detail__timeline">
+          <section v-for="group in runGroups" :key="group.date" class="automation-detail__day">
+            <h5 class="automation-detail__date">{{ group.date }}</h5>
+            <ul class="automation-detail__runs">
+              <li v-for="run in group.runs" :key="run.id" class="automation-run" :class="{ 'is-focused': run.id === focusRunId }">
+                <span class="automation-run__marker"><AutomationStatusTag :status="run.status" icon-only /></span>
+                <div class="automation-run__body">
+                  <div class="automation-run__head">
+                    <time class="automation-run__time" :datetime="run.scheduled_at">{{ runTime(run.scheduled_at) }}</time>
+                    <span class="automation-run__meta">
+                      {{ t(`automation.runTrigger.${run.trigger_kind}`) }}<template v-if="duration(run)"> · {{ duration(run) }}</template>
+                    </span>
+                    <t-link v-if="cancellable(run)" theme="danger" hover="color" class="automation-run__stop"
+                      :disabled="run.cancel_requested" @click="cancel(run)">
+                      {{ run.cancel_requested ? t('automation.detail.stopping') : t('automation.actions.stop') }}
+                    </t-link>
+                  </div>
+                  <component :is="run.session_id ? 'button' : 'div'" class="automation-run__result"
+                    :type="run.session_id ? 'button' : undefined"
+                    :aria-label="run.session_id ? `${when(run.scheduled_at)} · ${t('automation.actions.openConversation')}` : undefined"
+                    @click="run.session_id && openRun(run)">
+                    <p v-if="run.error" class="automation-run__text is-error">{{ run.error }}</p>
+                    <p v-else-if="run.answer" class="automation-run__text">{{ run.answer }}</p>
+                    <span v-else class="automation-detail__muted">{{ t(`automation.status.${run.status}`) }}</span>
+                    <t-icon v-if="run.session_id" name="arrow-right-up" size="16px" class="automation-run__chevron" />
+                  </component>
+                  <AssistantActionsButton v-if="run.status === 'succeeded' && run.answer" :label="t('assistant.actions.analyzeRun')"
+                    :actions="runAssistantActions(run)"
+                    :selection="{ field: t('automation.detail.runs'), text: run.answer.slice(0, 3000) }" />
+                </div>
+              </li>
+            </ul>
+          </section>
+        </div>
         <div v-if="runs.length < runsTotal" class="automation-detail__more">
           <t-button size="small" variant="text" :loading="runsLoading" @click="loadRuns(false)">
             {{ t('common.loadMore') }}
           </t-button>
         </div>
       </section>
-
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ t('automation.detail.grants') }}</h4>
-        <p class="automation-detail__muted">{{ t('automation.grants.intro') }}</p>
-        <div v-if="grantsLoading" class="automation-detail__loading"><t-loading size="small" /></div>
-        <template v-else>
-          <ul v-if="grants.length" class="automation-detail__list">
-            <li v-for="grant in grants" :key="grant.id" class="automation-grant">
-              <span class="automation-grant__label">{{ grant.label || grant.grant_key }}</span>
-              <t-tag size="small" variant="light" :theme="grant.risk === 'destructive' ? 'danger' : 'warning'">
-                {{ t(`automation.risk.${grant.risk}`, grant.risk) }}
-              </t-tag>
-              <span v-if="grant.lapse" class="automation-grant__lapse">{{ t('automation.grants.lapsed') }}</span>
-              <t-link theme="danger" hover="color" class="automation-grant__action" @click="revoke(grant)">
-                {{ t('automation.grants.revoke') }}
-              </t-link>
-            </li>
-          </ul>
-          <template v-if="candidates.length">
-            <div class="automation-detail__subhead">{{ t('automation.grants.candidates') }}</div>
-            <ul class="automation-detail__list">
-              <li v-for="candidate in candidates" :key="candidate.prompt_id" class="automation-grant">
-                <span class="automation-grant__label">{{ candidate.label || candidate.tool }}</span>
-                <t-tag size="small" variant="light" :theme="candidate.risk === 'destructive' ? 'danger' : 'warning'">
-                  {{ t(`automation.risk.${candidate.risk}`, candidate.risk) }}
-                </t-tag>
-                <span v-if="candidate.service_name" class="automation-grant__meta">{{ candidate.service_name }}</span>
-                <t-link theme="primary" hover="color" class="automation-grant__action" @click="allow(candidate)">
-                  {{ t('automation.grants.allow') }}
-                </t-link>
-              </li>
-            </ul>
-          </template>
-          <p v-if="!grants.length && !candidates.length" class="automation-detail__muted">{{ t('automation.grants.none') }}</p>
-        </template>
-      </section>
     </template>
 
-    <template v-if="automation" #footer-left>
-      <t-button variant="outline" :loading="busy === 'toggle'" @click="toggle">
-        {{ automation.enabled ? t('automation.actions.pause') : t('automation.actions.resume') }}
-      </t-button>
-      <t-button variant="outline" @click="emit('edit', automation)">{{ t('common.edit') }}</t-button>
-    </template>
-    <template v-if="automation" #footer-right>
-      <t-button theme="primary" :loading="busy === 'run'" @click="runNow">{{ t('automation.actions.runNow') }}</t-button>
-    </template>
   </SettingDrawer>
 </template>
 
@@ -166,14 +199,16 @@ import {
   type AutomationGrantCandidate,
   type AutomationRun,
 } from '@/api/automation'
-import { describeTrigger, formatInZone } from '@/utils/automationSchedule'
+import { describeTrigger, formatInZone, hasEndedOnceSchedule } from '@/utils/automationSchedule'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
+import ChatActionIcon from '@/components/ChatActionIcon.vue'
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue'
 
 const props = defineProps<{
   visible: boolean
   automation: Automation | null
-  agentName: string
   focusRunId?: string
 }>()
 const emit = defineEmits<{
@@ -183,11 +218,26 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+function runAssistantActions(run: AutomationRun) {
+  const previous = runs.value.filter(item => item.id !== run.id && item.status === 'succeeded'
+    && item.scheduled_at <= run.scheduled_at).slice(0, 2)
+  const source = JSON.stringify({
+    automation_id: props.automation?.id,
+    run_id: run.id,
+    session_id: run.session_id,
+    message_id: run.assistant_message_id,
+  })
+  return [
+    { key: 'summary', label: t('assistant.actions.summarizeRun'), query: t('assistant.prompts.summarizeRun', { source }) },
+    { key: 'compare', label: t('assistant.actions.compareRuns'), disabled: previous.length === 0,
+      query: t('assistant.prompts.compareRuns', { source, ids: JSON.stringify(previous.map(item => item.id)) }) },
+  ]
+}
 const router = useRouter()
 
 const PAGE = 20
 const busy = ref<'' | 'run' | 'toggle'>('')
-const instructionOpen = ref(false)
+const grantsVisible = ref(false)
 const runs = ref<AutomationRun[]>([])
 const runsTotal = ref(0)
 const runsPage = ref(0)
@@ -195,14 +245,60 @@ const runsLoading = ref(false)
 const grants = ref<AutomationGrant[]>([])
 const candidates = ref<AutomationGrantCandidate[]>([])
 const grantsLoading = ref(false)
+const instructionScroller = ref<HTMLElement | null>(null)
+const instructionContent = ref<HTMLElement | null>(null)
+const instructionHasMore = ref(false)
+const instructionCanExpand = ref(false)
+const instructionExpanded = ref(false)
+const INSTRUCTION_PREVIEW_HEIGHT = 160
 let poll: ReturnType<typeof setInterval> | undefined
+let detailVersion = 0
+let refreshRunsAfterLoad = false
 
-const instructionLong = computed(() => {
-  const text = props.automation?.instruction ?? ''
-  return text.length > 160 || text.split('\n').length > 4
-})
+function updateInstructionOverflow() {
+  const el = instructionScroller.value
+  instructionCanExpand.value = !!el && el.scrollHeight > INSTRUCTION_PREVIEW_HEIGHT + 1
+  instructionHasMore.value = !instructionExpanded.value && !!el && el.scrollHeight - el.clientHeight - el.scrollTop > 1
+}
+
+function toggleInstruction() {
+  instructionExpanded.value = !instructionExpanded.value
+  if (instructionScroller.value) instructionScroller.value.scrollTop = 0
+}
+
+watch(instructionExpanded, updateInstructionOverflow, { flush: 'post' })
+
+watch(
+  [instructionScroller, instructionContent, () => props.visible, () => props.automation?.instruction],
+  (_, __, onCleanup) => {
+    updateInstructionOverflow()
+    if (!props.visible || !instructionScroller.value || !instructionContent.value) return
+    const observer = new ResizeObserver(updateInstructionOverflow)
+    observer.observe(instructionScroller.value)
+    observer.observe(instructionContent.value)
+    onCleanup(() => observer.disconnect())
+  },
+  { flush: 'post' },
+)
 
 const when = (iso: string | null) => formatInZone(iso, props.automation?.trigger.timezone, locale.value)
+const runDateFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
+  timeZone: props.automation?.trigger.timezone || 'UTC', year: 'numeric', month: 'long', day: 'numeric',
+}))
+const runTimeFormatter = computed(() => new Intl.DateTimeFormat(locale.value, {
+  timeZone: props.automation?.trigger.timezone || 'UTC', hour: '2-digit', minute: '2-digit', hour12: false,
+}))
+const runTime = (iso: string) => runTimeFormatter.value.format(new Date(iso))
+const runGroups = computed(() => {
+  const groups = new Map<string, AutomationRun[]>()
+  for (const run of runs.value) {
+    const date = runDateFormatter.value.format(new Date(run.scheduled_at))
+    const group = groups.get(date) ?? []
+    group.push(run)
+    groups.set(date, group)
+  }
+  return [...groups].map(([date, runs]) => ({ date, runs }))
+})
 const cancellable = (run: AutomationRun) =>
   run.status === 'queued' || run.status === 'running' || run.status === 'awaiting_approval'
 
@@ -221,28 +317,43 @@ function close() {
 async function loadRuns(reset: boolean) {
   const a = props.automation
   if (!a) return
+  const version = detailVersion
   runsLoading.value = true
   try {
     const page = reset ? 1 : runsPage.value + 1
     const res = await listAutomationRuns(a.id, page, PAGE)
+    if (version !== detailVersion) return
     const items = res.data ?? []
     runs.value = reset ? items : [...runs.value, ...items]
     runsTotal.value = res.total ?? runs.value.length
     runsPage.value = page
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('common.operationFailed'))
+    if (version === detailVersion) MessagePlugin.error(e?.message || t('common.operationFailed'))
   } finally {
-    runsLoading.value = false
+    if (version === detailVersion) {
+      runsLoading.value = false
+      if (refreshRunsAfterLoad) {
+        refreshRunsAfterLoad = false
+        void refreshActive(true)
+      }
+    }
   }
 }
 
 // Refresh the first page in place while a run is in flight, so its status
 // moves without the user reopening the drawer.
-async function refreshActive() {
+async function refreshActive(force = false) {
   const a = props.automation
-  if (!a || runsLoading.value || !runs.value.some(cancellable)) return
+  if (!props.visible || !a) return
+  if (runsLoading.value) {
+    if (force) refreshRunsAfterLoad = true
+    return
+  }
+  if (!force && !runs.value.some(cancellable)) return
+  const version = detailVersion
   try {
     const res = await listAutomationRuns(a.id, 1, PAGE)
+    if (version !== detailVersion) return
     const fresh = new Map((res.data ?? []).map((run) => [run.id, run]))
     const known = new Set(runs.value.map((run) => run.id))
     runs.value = [
@@ -254,6 +365,10 @@ async function refreshActive() {
     // The next tick tries again.
   }
 }
+
+useAssistantDataChange(changes => {
+  if (changes.some(change => change.operation === 'automation.run_now')) void refreshActive(true)
+}, { areas: ['automation'] })
 
 async function loadGrants() {
   const a = props.automation
@@ -270,10 +385,13 @@ async function loadGrants() {
   }
 }
 
-watch(() => [props.visible, props.automation?.id] as const, ([open, id]) => {
+watch([() => props.visible, () => props.automation?.id], ([open, id]) => {
+  ++detailVersion
+  refreshRunsAfterLoad = false
+  instructionExpanded.value = false
   clearInterval(poll)
   if (!open || !id) return
-  instructionOpen.value = false
+  grantsVisible.value = false
   runs.value = []
   runsTotal.value = 0
   grants.value = []
@@ -283,9 +401,13 @@ watch(() => [props.visible, props.automation?.id] as const, ([open, id]) => {
   poll = setInterval(refreshActive, 5000)
 }, { immediate: true })
 
-onBeforeUnmount(() => clearInterval(poll))
+onBeforeUnmount(() => {
+  ++detailVersion
+  clearInterval(poll)
+})
 
 async function runNow() {
+  if (busy.value) return
   const a = props.automation
   if (!a) return
   busy.value = 'run'
@@ -293,6 +415,7 @@ async function runNow() {
     const res = await runAutomationNow(a.id)
     MessagePlugin.success(t('automation.messages.queued'))
     if (res.data) {
+      grantsVisible.value = false
       runs.value = [res.data, ...runs.value]
       runsTotal.value += 1
     }
@@ -305,7 +428,11 @@ async function runNow() {
 
 async function toggle() {
   const a = props.automation
-  if (!a) return
+  if (!a || busy.value) return
+  if (hasEndedOnceSchedule(a)) {
+    MessagePlugin.warning(t('automation.scheduleEndedHint'))
+    return
+  }
   busy.value = 'toggle'
   try {
     const res = a.enabled ? await pauseAutomation(a.id) : await resumeAutomation(a.id)
@@ -334,6 +461,7 @@ async function cancel(run: AutomationRun) {
 function allow(candidate: AutomationGrantCandidate) {
   const a = props.automation
   if (!a) return
+  grantsVisible.value = false
   const destructive = candidate.risk === 'destructive'
   const dialog = DialogPlugin.confirm({
     header: t('automation.grants.allowTitle'),
@@ -365,6 +493,42 @@ async function revoke(grant: AutomationGrant) {
 </script>
 
 <style scoped lang="less">
+.automation-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.automation-detail__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: var(--td-text-color-secondary);
+    background: color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
+  }
+  &:active:not(:disabled) {
+    background: color-mix(in srgb, var(--td-text-color-primary) 9%, transparent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+}
+
 .automation-detail__subtitle {
   display: inline-flex;
   align-items: center;
@@ -375,69 +539,168 @@ async function revoke(grant: AutomationGrant) {
   margin-bottom: 12px;
 }
 
-.automation-detail__fields {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
+.automation-detail__header-icon {
+  color: var(--td-text-color-secondary);
 }
 
-.automation-detail__field {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 12px;
-  align-items: baseline;
-
-  dt {
-    color: var(--td-text-color-placeholder);
-    font-size: var(--app-text-sm);
-    line-height: 1.45;
-    white-space: nowrap;
-  }
-
-  dd {
-    margin: 0;
-    color: var(--td-text-color-primary);
-    font-size: var(--app-text-md);
-    line-height: 1.55;
-    overflow-wrap: anywhere;
-  }
+:global(.automation-detail-drawer .setting-drawer__header-icon) {
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
-.automation-detail__inline {
-  display: flex;
+.automation-detail__next-run {
+  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  line-height: 1.6;
+
+  time { font-variant-numeric: tabular-nums; }
 }
 
-.automation-detail__toggle {
-  margin-left: auto;
+.automation-detail__brief {
+  padding: 14px 16px 16px;
+  border-radius: var(--app-radius-lg);
+  background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 40%, var(--td-bg-color-container));
+}
+
+.automation-detail__brief-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+
+  h3 { margin: 0; font-size: var(--app-text-sm); font-weight: 600; color: var(--td-text-color-primary); }
+}
+
+.automation-detail__brief-context { min-width: 0; }
+
+.automation-detail__grants-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-xs);
+  cursor: pointer;
+
+  &:hover, &[aria-expanded="true"] { color: var(--td-text-color-primary); background: var(--td-bg-color-container-hover); }
+  &:focus-visible { outline: 1px solid var(--td-brand-color-focus); outline-offset: 2px; }
+  &.is-attention { color: var(--td-warning-color); }
 }
 
 .automation-detail__count {
   color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xs);
   font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.is-attention .automation-detail__count { color: inherit; }
+
+.automation-detail__grants-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 48px));
+  max-height: min(480px, 65vh);
+  overflow-y: auto;
+  padding: 12px;
+
+  h3 { margin: 0; font-size: var(--app-text-md); font-weight: 600; color: var(--td-text-color-primary); }
+}
+
+.automation-detail__execution {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  margin-top: 4px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+
+  > span + span::before { content: '·'; margin: 0 8px; color: var(--td-text-color-placeholder); }
+}
+
+.automation-detail__history { margin-top: 24px; }
+
+.automation-detail__history-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 18px;
+}
+
+.automation-detail__history-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  font-weight: 600;
+}
+
+.automation-detail__instruction-scroll {
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+
+  &--expanded {
+    overflow: visible;
+    overscroll-behavior: auto;
+  }
+}
+
+.automation-detail__instruction-scroll--more {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+
+.automation-detail__instruction-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 24px;
+  margin: 6px auto -6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-text-color-secondary);
+    outline-offset: 2px;
+  }
 }
 
 .automation-detail__instruction {
   margin: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-md);
-  background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   font-size: var(--app-text-md);
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-
-  &.is-clamped {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
-    line-clamp: 4;
-    overflow: hidden;
-  }
 }
 
 .automation-detail__muted {
@@ -470,43 +733,74 @@ async function revoke(grant: AutomationGrant) {
   }
 }
 
+.automation-detail__day + .automation-detail__day { margin-top: 20px; }
+
+.automation-detail__date {
+  margin: 0 0 12px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+}
+
+.automation-detail__runs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .automation-run {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 12px;
+  padding-bottom: 20px;
 
-  &.is-link {
-    cursor: pointer;
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color-focus);
-      outline-offset: -2px;
-    }
+  &::before {
+    content: '';
+    position: absolute;
+    left: 9px;
+    top: 24px;
+    bottom: 0;
+    width: 1px;
+    background: var(--td-component-stroke);
   }
-
-  &.is-focused {
-    background: var(--td-bg-color-container-hover);
+  &:last-child { padding-bottom: 0; }
+  &:last-child::before { display: none; }
+  &.is-focused .automation-run__result {
+    background: color-mix(in srgb, var(--td-brand-color) 5%, var(--td-bg-color-container));
   }
 }
 
-.automation-run__dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  margin-top: 7px;
-  border-radius: 50%;
-  background: var(--td-text-color-placeholder);
+.automation-run__marker {
+  display: flex;
+  justify-content: center;
+  min-width: 20px;
+  padding-top: 2px;
+}
 
-  &.is-succeeded { background: var(--td-success-color); }
-  &.is-failed { background: var(--td-error-color); }
-  &.is-running { background: var(--td-brand-color); }
-  &.is-awaiting_approval,
-  &.is-needs_attention { background: var(--td-warning-color); }
+.automation-run__result {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--app-radius-lg);
+  background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 40%, var(--td-bg-color-container));
+  text-align: left;
+  font: inherit;
+  transition: background-color var(--app-motion-fast) ease;
+}
+
+button.automation-run__result {
+  cursor: pointer;
+  &:hover { background: var(--td-bg-color-container-hover); }
+  &:focus-visible {
+    outline: 1px solid var(--td-brand-color-focus);
+    outline-offset: 2px;
+  }
 }
 
 .automation-run__body {
@@ -516,6 +810,7 @@ async function revoke(grant: AutomationGrant) {
 
 .automation-run__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -525,12 +820,6 @@ async function revoke(grant: AutomationGrant) {
   color: var(--td-text-color-primary);
   font-size: var(--app-text-md);
   font-variant-numeric: tabular-nums;
-}
-
-.automation-run__status {
-  color: var(--td-text-color-secondary);
-  font-size: var(--app-text-sm);
-  white-space: nowrap;
 }
 
 .automation-run__meta {
@@ -546,7 +835,8 @@ async function revoke(grant: AutomationGrant) {
 
 .automation-run__chevron {
   flex-shrink: 0;
-  align-self: center;
+  margin-left: auto;
+  margin-top: 3px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -555,10 +845,12 @@ async function revoke(grant: AutomationGrant) {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   line-clamp: 3;
-  margin: 6px 0 0;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   overflow: hidden;
-  color: var(--td-text-color-secondary);
-  font-size: var(--app-text-sm);
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -570,6 +862,7 @@ async function revoke(grant: AutomationGrant) {
 
 .automation-grant {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -578,11 +871,10 @@ async function revoke(grant: AutomationGrant) {
 
 .automation-grant__label {
   min-width: 0;
-  overflow: hidden;
+  flex-basis: 100%;
   color: var(--td-text-color-primary);
-  font-size: var(--app-text-md);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--app-text-sm);
+  overflow-wrap: anywhere;
 }
 
 .automation-grant__meta,

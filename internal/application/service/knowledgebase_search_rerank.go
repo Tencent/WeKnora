@@ -181,6 +181,7 @@ func (s *knowledgeBaseService) rerankCandidates(
 		diag.Error = err.Error()
 		return retrievalOrder
 	}
+	s.markSkipGeneratedQuestions(ctx, candidates)
 
 	res := reranking.Rerank(ctx, model, query, candidates, reranking.Options{
 		Threshold:        threshold,

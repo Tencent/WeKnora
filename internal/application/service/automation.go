@@ -72,6 +72,7 @@ type AutomationService struct {
 	messages interfaces.MessageService
 	grants   interfaces.AgentGrantRepository
 	notices  *NotificationService
+	models   interfaces.ModelService
 
 	sessions interfaces.SessionService
 	broker   *hitl.Broker
@@ -80,6 +81,8 @@ type AutomationService struct {
 	// Events publishes a run to its message's event stream; see
 	// AgentCollaboration.ChildEvents.
 	Events func(context.Context, *types.Session, *types.Message, *event.EventBus) func(context.Context) error
+	// StopDelegation fences children and discards recoverable parent waits.
+	StopDelegation func(context.Context, uint64, string, string, string) error
 
 	cfg      AutomationConfig
 	instance string
@@ -101,10 +104,11 @@ func NewAutomationService(
 	messages interfaces.MessageService,
 	grants interfaces.AgentGrantRepository,
 	notices *NotificationService,
+	models interfaces.ModelService,
 ) *AutomationService {
 	s := &AutomationService{
 		db: db, agents: agents, users: users, members: members, tenants: tenants,
-		messages: messages, grants: grants, notices: notices,
+		messages: messages, grants: grants, notices: notices, models: models,
 		instance: uuid.NewString(),
 		now:      time.Now,
 		wake:     make(chan struct{}, 1),
@@ -196,12 +200,55 @@ func (s *AutomationService) List(ctx context.Context) ([]*types.Automation, erro
 		return nil, err
 	}
 	out := []*types.Automation{}
-	return out, query.Order("created_at DESC").Find(&out).Error
+	if err := query.Order("created_at DESC").Find(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, s.populateActiveRunStatus(ctx, out)
 }
 
 // Get returns one of the caller's automations.
 func (s *AutomationService) Get(ctx context.Context, id string) (*types.Automation, error) {
-	return s.load(ctx, id)
+	a, err := s.load(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return a, s.populateActiveRunStatus(ctx, []*types.Automation{a})
+}
+
+// populateActiveRunStatus batches only the caller's already-authorized automations.
+// Running or approval-waiting work takes precedence over a queued future run.
+func (s *AutomationService) populateActiveRunStatus(ctx context.Context, automations []*types.Automation) error {
+	if len(automations) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(automations))
+	byID := make(map[string]*types.Automation, len(automations))
+	for _, a := range automations {
+		ids = append(ids, a.ID)
+		byID[a.ID] = a
+		a.ActiveRunStatus = ""
+	}
+	var runs []struct {
+		AutomationID string
+		Status       string
+	}
+	if err := s.db.WithContext(ctx).Model(&types.AutomationRun{}).
+		Select("automation_id, status").Distinct().
+		Where("automation_id IN ? AND status IN ?", ids, []string{
+			types.AutomationRunQueued, types.AutomationRunRunning, types.AutomationRunAwaitingApproval,
+		}).Find(&runs).Error; err != nil {
+		return err
+	}
+	priority := map[string]int{
+		types.AutomationRunQueued: 1, types.AutomationRunRunning: 2, types.AutomationRunAwaitingApproval: 3,
+	}
+	for _, run := range runs {
+		a := byID[run.AutomationID]
+		if priority[run.Status] > priority[a.ActiveRunStatus] {
+			a.ActiveRunStatus = run.Status
+		}
+	}
+	return nil
 }
 
 // FindBySession returns the caller's automation whose run, or persistent
@@ -236,8 +283,8 @@ func applyAutomationPatch(a *types.Automation, p *types.AutomationPatch) {
 	if p.Description != nil {
 		a.Description = strings.TrimSpace(*p.Description)
 	}
-	if p.AgentID != nil {
-		a.AgentID = strings.TrimSpace(*p.AgentID)
+	if p.ModelID != nil {
+		a.ModelID = strings.TrimSpace(*p.ModelID)
 	}
 	if p.Instruction != nil {
 		a.Instruction = strings.TrimSpace(*p.Instruction)
@@ -279,10 +326,10 @@ func (s *AutomationService) validate(ctx context.Context, a *types.Automation) (
 	if a.Instruction == "" || len([]rune(a.Instruction)) > maxAutomationInstructionRune {
 		return nil, badAutomation("instruction is required, at most %d characters", maxAutomationInstructionRune)
 	}
-	if a.AgentID == "" {
-		a.AgentID = types.BuiltinWeKnoraAssistantID
+	if _, err := s.runnableAssistant(ctx); err != nil {
+		return nil, apperrors.NewBadRequestError(err.Error())
 	}
-	if _, err := s.runnableAgent(ctx, a.AgentID, a.TenantID); err != nil {
+	if err := s.validateModel(ctx, a.ModelID, a.TenantID); err != nil {
 		return nil, apperrors.NewBadRequestError(err.Error())
 	}
 	sched, err := automation.Parse(a.Trigger)
@@ -336,23 +383,30 @@ func (s *AutomationService) validate(ctx context.Context, a *types.Automation) (
 	return sched, nil
 }
 
-// runnableAgent loads agent id for a run in tenantID: a smart-reasoning
-// agent of the workspace, or the WeKnora assistant. ctx must carry tenantID.
-func (s *AutomationService) runnableAgent(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
-	if id == types.BuiltinWikiFixerID || id == types.BuiltinSkillInstallerID {
-		return nil, errors.New("this built-in agent cannot run automations")
+// runnableAssistant loads the workspace assistant, the sole automation executor.
+// Tasks may ask it to delegate work to other agents through the instruction.
+func (s *AutomationService) runnableAssistant(ctx context.Context) (*types.CustomAgent, error) {
+	assistant, err := s.agents.GetAgentByID(ctx, types.BuiltinWeKnoraAssistantID)
+	if err != nil || assistant == nil || !types.GrantsOperationCatalog(assistant) || !assistant.IsAgentMode() {
+		return nil, errors.New("the WeKnora assistant is unavailable in this workspace")
 	}
-	agent, err := s.agents.GetAgentByID(ctx, id)
-	if err != nil || agent == nil {
-		return nil, fmt.Errorf("agent %s is not available in this workspace", id)
+	return assistant, nil
+}
+
+func (s *AutomationService) validateModel(ctx context.Context, id string, tenantID uint64) error {
+	if id == "" {
+		return nil
 	}
-	if !types.GrantsOperationCatalog(agent) && agent.TenantID != tenantID {
-		return nil, fmt.Errorf("agent %s is not available in this workspace", id)
+	if s.models == nil {
+		return errors.New("model service is unavailable")
 	}
-	if !agent.IsAgentMode() {
-		return nil, fmt.Errorf("agent %s must use smart reasoning to run automations", id)
+	model, err := s.models.GetModelByID(ctx, id)
+	if err != nil || model == nil || model.DeletedAt.Valid ||
+		(!model.IsBuiltin && model.TenantID != tenantID) ||
+		model.Type != types.ModelTypeKnowledgeQA || model.Status != types.ModelStatusActive {
+		return errors.New("the selected chat model is unavailable in this workspace")
 	}
-	return agent, nil
+	return nil
 }
 
 // Create adds an automation owned by the caller.
@@ -389,7 +443,7 @@ func (s *AutomationService) Create(ctx context.Context, p *types.AutomationPatch
 }
 
 var automationEditable = []string{
-	"name", "description", "agent_id", "instruction", "trigger_config", "session_mode", "carry_last_result",
+	"name", "description", "model_id", "instruction", "trigger_config", "session_mode", "carry_last_result",
 	"misfire_policy", "overlap_policy", "access_level", "approval_timeout_minutes", "limits",
 	"notify_on_success", "enabled", "next_run_at", "paused_reason", "consecutive_failures", "version",
 	"updated_at",
@@ -621,14 +675,35 @@ func (s *AutomationService) cancelRun(ctx context.Context, run *types.Automation
 			Update("cancel_requested", true).Error; err != nil {
 			return err
 		}
+		stopErr := s.stopRunDelegation(ctx, run)
 		s.mu.Lock()
 		cancel := s.running[run.ID]
 		s.mu.Unlock()
 		if cancel != nil {
 			cancel()
 		}
+		return stopErr
 	}
 	return nil
+}
+
+func (s *AutomationService) stopRunDelegation(ctx context.Context, run *types.AutomationRun) error {
+	if s.StopDelegation == nil {
+		return nil
+	}
+	// The caller may hold the row from before the executor created its turn.
+	var current types.AutomationRun
+	if err := s.db.WithContext(ctx).Where("id = ?", run.ID).Take(&current).Error; err != nil {
+		return err
+	}
+	if current.SessionID == "" || current.AssistantMessageID == "" {
+		return nil
+	}
+	a, err := s.automationOf(ctx, &current)
+	if err != nil {
+		return err
+	}
+	return s.StopDelegation(ctx, a.TenantID, a.OwnerUserID, current.SessionID, current.AssistantMessageID)
 }
 
 // closePrompt ends the open prompt id a run waits on and completes the
@@ -681,7 +756,7 @@ type AutomationGrantCandidate struct {
 
 // binding is what a's standing grants are given under right now.
 func (s *AutomationService) binding(ctx context.Context, a *types.Automation) (string, error) {
-	agent, err := s.runnableAgent(ctx, a.AgentID, a.TenantID)
+	agent, err := s.runnableAssistant(ctx)
 	if err != nil {
 		return "", err
 	}
