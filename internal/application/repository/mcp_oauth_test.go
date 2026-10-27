@@ -148,3 +148,47 @@ func TestMCPOAuthRepositoryStoresTokenTimesInUTC(t *testing.T) {
 	require.Equal(t, time.UTC, loaded.ExpiresAt.Location())
 	require.Equal(t, time.UTC, loaded.UpdatedAt.Location())
 }
+
+func TestMCPOAuthRepositoryDeletesEveryTokenForAService(t *testing.T) {
+	repo := newMCPOAuthTestRepo(t)
+	ctx := context.Background()
+	expiresAt := time.Now().Add(time.Hour).UTC()
+	web := types.Principal{Type: types.PrincipalWebUser, ID: "u1"}
+	api := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:external-u1"}
+	save := func(principal types.Principal, serviceID, access string) {
+		t.Helper()
+		require.NoError(t, repo.SaveTokenForPrincipal(ctx, &types.MCPOAuthToken{
+			TenantID:      7,
+			UserID:        principal.StorageID(),
+			PrincipalType: principal.Type,
+			PrincipalID:   principal.ID,
+			ServiceID:     serviceID,
+			AccessToken:   access,
+			RefreshToken:  access + "-refresh",
+			TokenType:     "Bearer",
+			ExpiresAt:     expiresAt,
+		}))
+	}
+	save(web, "svc-delete", "web")
+	save(api, "svc-delete", "api")
+	save(web, "svc-keep", "keep")
+	require.NoError(t, repo.SaveClient(ctx, &types.MCPOAuthClient{
+		TenantID: 7, ServiceID: "svc-delete", ClientID: "client-1", ClientSecret: "secret",
+	}))
+
+	require.NoError(t, repo.DeleteTokensByService(ctx, 7, "svc-delete"))
+	require.NoError(t, repo.DeleteClient(ctx, 7, "svc-delete"))
+
+	webGone, err := repo.GetTokenForPrincipal(ctx, 7, web, "svc-delete")
+	require.NoError(t, err)
+	require.Nil(t, webGone)
+	apiGone, err := repo.GetTokenForPrincipal(ctx, 7, api, "svc-delete")
+	require.NoError(t, err)
+	require.Nil(t, apiGone)
+	kept, err := repo.GetTokenForPrincipal(ctx, 7, web, "svc-keep")
+	require.NoError(t, err)
+	require.Equal(t, "keep", kept.AccessToken)
+	client, err := repo.GetClient(ctx, 7, "svc-delete")
+	require.NoError(t, err)
+	require.Nil(t, client)
+}

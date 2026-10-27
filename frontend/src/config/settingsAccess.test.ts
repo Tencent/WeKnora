@@ -14,6 +14,10 @@ test('management shortcuts are stricter than read-only settings pages', () => {
   assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models, 'admin')
 })
 
+test('every member can open plugins; only admins add or delete a marketplace', () => {
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.plugins, 'viewer')
+})
+
 test('the skill catalog is admin-only like the sandbox it installs into', () => {
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, 'admin')
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, SETTINGS_SECTION_MIN_ROLE.sandbox)

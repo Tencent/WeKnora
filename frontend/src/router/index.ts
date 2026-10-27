@@ -39,6 +39,7 @@ function hasPendingOIDCCallback() {
   if (typeof window === 'undefined') return false
   const hash = window.location.hash || ''
   return hash.includes('oidc_result=') || hash.includes('oidc_error=')
+    || hash.includes('mcp_oauth_result=') || hash.includes('mcp_oauth_error=')
 }
 
 const router = createRouter({
@@ -287,8 +288,8 @@ let liteDeepLinkRestoreDone = false
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
-  // OIDC 回跳登录结果依赖 App.vue 在挂载后消费 URL hash。
-  // 如果这里先按“未登录”拦截到 /login，会导致回调结果没有机会落盘。
+  // OIDC 登录和 MCP 授权回跳都把结果放在 URL hash 里，由 App.vue 挂载后消费。
+  // 如果这里先按“未登录”拦截到 /login，回调结果没有机会被原页面收到。
   if (hasPendingOIDCCallback()) {
     next()
     return

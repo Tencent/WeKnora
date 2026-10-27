@@ -1,7 +1,7 @@
 <template>
   <SettingDrawer
     :visible="dialogVisible"
-    :z-index="2300"
+    :z-index="zIndex"
     :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
     class="mcp-drawer"
     icon="tools"
@@ -399,6 +399,7 @@ import {
   type McpCredentialField,
   type MCPOAuthTokenState,
 } from '@/api/mcp-service'
+import { openMcpOAuthPopup } from '@/utils/mcpOAuthPopup'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import McpMetadataPanel from './McpMetadataPanel.vue'
 import CredentialResource, {
@@ -411,6 +412,8 @@ interface Props {
   service: MCPService | null
   mode: 'add' | 'edit'
   initialStep?: 0 | 1
+  /** Stack above another settings drawer, such as plugin detail. */
+  zIndex?: number
 }
 
 interface Emits {
@@ -421,7 +424,9 @@ interface Emits {
   (e: 'created', service: MCPService): void
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  zIndex: 2300,
+})
 const emit = defineEmits<Emits>()
 
 const savedService = ref<MCPService | null>(null)
@@ -644,13 +649,13 @@ const oauthTokenState = ref<MCPOAuthTokenState>('reauth_required')
 const oauthChecking = ref(false)
 const oauthAuthorizing = ref(false)
 let oauthGeneration = 0
-let oauthPollTimer: number | null = null
+let oauthPopupStop: (() => void) | null = null
 
 // The drawer is reused; cancellation must also invalidate requests already in flight.
 function cancelOAuthRequests() {
   oauthGeneration++
-  if (oauthPollTimer !== null) window.clearInterval(oauthPollTimer)
-  oauthPollTimer = null
+  oauthPopupStop?.()
+  oauthPopupStop = null
   oauthChecking.value = false
   oauthAuthorizing.value = false
 }
@@ -687,43 +692,34 @@ async function startAuthorize(serviceId: string) {
   const generation = oauthGeneration
   oauthAuthorizing.value = true
   try {
-    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
-    // After the backend completes the exchange it bounces the popup here. The
-    // app root is harmless; the popup is closed by the opener below once the
-    // authorization status flips, so this page is only shown briefly.
-    const frontendRedirect = '/'
-    const authorization = await getMCPOAuthAuthorizeURL(serviceId, {
-      redirect_uri: redirectUri,
-      frontend_redirect: frontendRedirect,
+    // After the backend completes the exchange it bounces the popup to the app
+    // root. The popup is closed once this attempt is authorized, so that page
+    // is only shown briefly.
+    const result = await openMcpOAuthPopup({
+      win: window,
+      serviceId,
+      redirectUri: window.location.origin + MCP_OAUTH_CALLBACK_PATH,
+      frontendRedirect: '/',
+      authorize: getMCPOAuthAuthorizeURL,
+      pollStatus: getMCPOAuthStatus,
+      isActive: () => isCurrentOAuthRequest(generation, serviceId),
+      onStatus: (authorized) => {
+        oauthAuthorized.value = authorized
+        if (authorized) oauthTokenState.value = 'authorized'
+      },
+      onAuthorized: () => {
+        cancelOAuthRequests()
+        MessagePlugin.success(t('mcpServiceDialog.toasts.authorized', '授权成功') as string)
+      },
+      onClosed: () => { cancelOAuthRequests() },
     })
     if (!isCurrentOAuthRequest(generation, serviceId)) return
-    if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
+    if (result.status === 'missing') {
       MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
       oauthAuthorizing.value = false
       return
     }
-    const popup = window.open(authorization.authorizationUrl, 'mcp_oauth', 'width=600,height=720')
-    // Poll for completion: either the popup closes or the status flips.
-    oauthPollTimer = window.setInterval(async () => {
-      if (!isCurrentOAuthRequest(generation, serviceId)) return
-      const closed = !popup || popup.closed
-      let authorized: boolean | undefined
-      try {
-        authorized = await getMCPOAuthStatus(serviceId, authorization.authorizationAttempt)
-      } catch { /* keep polling */ }
-      if (!isCurrentOAuthRequest(generation, serviceId)) return
-      if (authorized !== undefined) {
-        oauthAuthorized.value = authorized
-        if (authorized) oauthTokenState.value = 'authorized'
-      }
-      if (authorized || closed) {
-        cancelOAuthRequests()
-        if (authorized) {
-          try { popup?.close() } catch { /* cross-origin close may throw */ }
-          MessagePlugin.success(t('mcpServiceDialog.toasts.authorized', '授权成功') as string)
-        }
-      }
-    }, 1500)
+    if (result.status === 'opened') oauthPopupStop = result.stop
   } catch (e) {
     if (!isCurrentOAuthRequest(generation, serviceId)) return
     console.error('Failed to start MCP OAuth authorization:', e)

@@ -19,19 +19,21 @@ const (
 	SkillFileName        = "SKILL.md"
 )
 
-// Reserved words that cannot be used in skill names
-var reservedWords = []string{"anthropic", "claude"}
-
 // namePattern is the install identity: a single path segment of letters
 // (any script), digits, hyphens, and underscores. Display titles such as
 // "Word / DOCX" are not this; those are rewritten via slug / slugify
 // before Validate. Slashes stay out so the name cannot walk SkillsImageRoot.
-var namePattern = regexp.MustCompile(`^[\p{L}\p{N}_-]+$`)
+// Dots are allowed so a plugin name such as acme.tools can prefix its skills.
+// ".." is rejected separately: it would walk out of the skill directory.
+//
+// "claude" and "anthropic" are not reserved. Official Claude plugins use
+// those words in their own names (claude-code-setup, claude-security), and
+// WeKnora does not grant a skill any privilege based on them. Descriptions
+// may contain angle brackets such as <name>: the system prompt escapes
+// them before they are placed in the skill directory XML.
+var namePattern = regexp.MustCompile(`^[\p{L}\p{N}_.-]+$`)
 
 var skillNameSepRE = regexp.MustCompile(`[^\p{L}\p{N}]+`)
-
-// xmlTagPattern detects XML tags in content
-var xmlTagPattern = regexp.MustCompile(`<[^>]+>`)
 
 // Skill represents a loaded skill with its metadata and content
 // It follows the Progressive Disclosure pattern:
@@ -87,16 +89,8 @@ func (s *Skill) Validate() error {
 	if n := utf8.RuneCountInString(s.Name); n > MaxNameLength {
 		return fmt.Errorf("skill name is %d characters; maximum is %d", n, MaxNameLength)
 	}
-	if !namePattern.MatchString(s.Name) {
-		return errors.New("skill name must contain only letters, numbers, hyphens, and underscores")
-	}
-	for _, reserved := range reservedWords {
-		if strings.Contains(s.Name, reserved) {
-			return fmt.Errorf("skill name cannot contain reserved word: %s", reserved)
-		}
-	}
-	if xmlTagPattern.MatchString(s.Name) {
-		return errors.New("skill name cannot contain XML tags")
+	if !namePattern.MatchString(s.Name) || strings.Contains(s.Name, "..") {
+		return errors.New("skill name must contain only letters, numbers, hyphens, underscores, and dots")
 	}
 
 	// Validate description
@@ -105,9 +99,6 @@ func (s *Skill) Validate() error {
 	}
 	if n := utf8.RuneCountInString(s.Description); n > MaxDescriptionLength {
 		return fmt.Errorf("skill description is %d characters; maximum is %d", n, MaxDescriptionLength)
-	}
-	if xmlTagPattern.MatchString(s.Description) {
-		return errors.New("skill description cannot contain XML tags")
 	}
 
 	return nil
@@ -133,12 +124,12 @@ func (s *Skill) applyInstallName() error {
 		s.Name = derived
 		return nil
 	}
-	return errors.New("skill name must contain only letters, numbers, hyphens, and underscores (or set slug)")
+	return errors.New("skill name must contain only letters, numbers, hyphens, underscores, and dots (or set slug)")
 }
 
 func installableSkillName(name string) bool {
 	name = strings.TrimSpace(name)
-	return name != "" && namePattern.MatchString(name)
+	return name != "" && namePattern.MatchString(name) && !strings.Contains(name, "..")
 }
 
 func slugifySkillName(name string) string {

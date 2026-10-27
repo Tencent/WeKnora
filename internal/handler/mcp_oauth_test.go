@@ -166,7 +166,7 @@ func newMCPOAuthTestEnv(t *testing.T) *mcpOAuthTestEnv {
 	env.repo = repo
 	env.oauth = oauth
 	env.manager = manager
-	env.handler = NewMCPOAuthHandler(oauth, manager, mcpOAuthTestServices{service: service}, nil)
+	env.handler = NewMCPOAuthHandler(oauth, manager, mcpOAuthTestServices{service: service}, nil, nil)
 	return env
 }
 
@@ -421,4 +421,46 @@ func TestMCPOAuthCallbackWithAPreRegisteredClientRecyclesOnlyTheAuthorizingUsers
 	require.Equal(t, "pre-registered", env.tokenForms[len(env.tokenForms)-1].Get("client_id"))
 	require.False(t, aliceConn.IsConnected())
 	require.True(t, bobConn.IsConnected())
+}
+
+type recordingAuthorizedTools struct {
+	interfaces.MCPServiceService
+	tenant    uint64
+	serviceID string
+	principal string
+}
+
+func (recordingAuthorizedTools) GetMCPMetadata(context.Context, uint64, string) (*types.MCPMetadata, error) {
+	return nil, nil
+}
+
+func (recordingAuthorizedTools) ListMCPMetadataSummaries(
+	context.Context, uint64, []*types.MCPService,
+) (map[string]*types.MCPMetadataSummary, error) {
+	return nil, nil
+}
+
+func (recordingAuthorizedTools) PersistMCPMetadata(context.Context, uint64, string, []*types.MCPTool, string) error {
+	return nil
+}
+
+func (r *recordingAuthorizedTools) RefreshMCPMetadata(
+	ctx context.Context, tenant uint64, id string,
+) (*types.MCPMetadata, error) {
+	r.tenant = tenant
+	r.serviceID = id
+	r.principal = types.MCPOAuthPrincipalFromContext(ctx).StorageID()
+	return &types.MCPMetadata{ServiceID: id}, nil
+}
+
+func TestSyncAuthorizedToolsUsesTheAuthorizingPrincipal(t *testing.T) {
+	meta := &recordingAuthorizedTools{}
+	handler := &MCPOAuthHandler{svc: meta}
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: "alice"}
+
+	handler.syncAuthorizedTools(context.Background(), mcpOAuthTestTenant, "svc-1", principal)
+
+	require.Equal(t, mcpOAuthTestTenant, meta.tenant)
+	require.Equal(t, "svc-1", meta.serviceID)
+	require.Equal(t, principal.StorageID(), meta.principal)
 }
