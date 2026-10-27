@@ -313,6 +313,13 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 		}
 		result.ToolCalls = calls
 	}
+	if rest, dsmlCalls := extractDSMLToolCalls(result.Content); len(dsmlCalls) > 0 {
+		result.Content = rest
+		result.ToolCalls = append(result.ToolCalls, dsmlCalls...)
+		if result.FinishReason == "stop" {
+			result.FinishReason = "tool_calls"
+		}
+	}
 	// Classify the cache status even when the vendor omitted the usage block,
 	// so "no counters at all" is still distinguishable from a real miss on the
 	// usage dashboards instead of landing as an empty CacheStatus.
@@ -347,8 +354,32 @@ func (c *Client) processStream(
 	reader := api.NewSSEReader(body)
 	var reasoningDetails []json.RawMessage
 	toolIndexes := &streamToolIndex{}
+	dsml := &dsmlFilter{}
+
+	// flushDSML releases the held-back content and, when it carried DSML tool
+	// calls, merges them into the delta so they land before the finish chunk.
+	flushDSML := func(delta *api.Delta) {
+		rest, calls := dsml.Flush()
+		delta.Content += rest
+		if len(calls) == 0 {
+			return
+		}
+		logger.Infof(ctx, "[LLM Stream] Recovered %d DSML tool call(s) from content", len(calls))
+		delta.ToolCalls = append(delta.ToolCalls, dsmlToolCallDeltas(calls, dsmlIndexBase+assembler.ToolCallCount())...)
+		if delta.FinishReason == "stop" {
+			delta.FinishReason = "tool_calls"
+		}
+	}
 
 	finish := func(end func(chan<- types.StreamResponse)) {
+		var tail api.Delta
+		flushDSML(&tail)
+		if tail.Content != "" || len(tail.ToolCalls) > 0 {
+			assembler.Process(ch, tail)
+			if len(tail.ToolCalls) > 0 && assembler.LastFinishReason == "stop" {
+				assembler.LastFinishReason = "tool_calls"
+			}
+		}
 		if len(reasoningDetails) > 0 {
 			merged, _ := json.Marshal(reasoningDetails)
 			assembler.ReasoningMetadata = types.ProviderMetadata{metadataReasoningDetails: merged}
@@ -410,7 +441,7 @@ func (c *Client) processStream(
 		choice := env.Choices[0]
 		delta := api.Delta{
 			Reasoning:    c.reasoningText(choice.Delta),
-			Content:      choice.Delta.Content,
+			Content:      dsml.Feed(choice.Delta.Content),
 			FinishReason: choice.FinishReason,
 		}
 		if len(choice.Delta.ReasoningDetails) > 0 {
@@ -435,6 +466,9 @@ func (c *Client) processStream(
 					assembler.SetToolCallMetadata(idx, md)
 				}
 			}
+		}
+		if delta.FinishReason != "" {
+			flushDSML(&delta)
 		}
 		assembler.Process(ch, delta)
 	}
