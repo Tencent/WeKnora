@@ -721,6 +721,28 @@ export default {
         generic: '操作失敗，請稍後重試。'
       }
     },
+    resetPassword: {
+      button: '重設密碼',
+      dialogTitle: '重設成員密碼',
+      description: '為 {name} 設定新密碼。重設後對方的舊密碼和已登入的工作階段將立即失效。',
+      newPasswordLabel: '新密碼',
+      newPasswordPlaceholder: '8–32 個字元',
+      confirmPasswordLabel: '確認密碼',
+      confirmPasswordPlaceholder: '再次輸入新密碼',
+      submit: '重設密碼',
+      success: '密碼已重設，請將新密碼轉交對方。',
+      errors: {
+        passwordRequired: '請輸入新密碼',
+        passwordLength: '密碼須為 8–32 個字元',
+        confirmRequired: '請再次輸入新密碼',
+        passwordMismatch: '兩次輸入的密碼不一致',
+        passwordPolicy: '密碼不符要求（8–32 位；開啟複雜密碼時需包含大小寫字母、數字和特殊字元）',
+        cannotResetSelf: '不能在管理端重設自己的密碼，請使用「修改密碼」。',
+        forbidden: '目前角色無權重設該成員的密碼',
+        notFound: '該使用者不是目前空間的成員',
+        generic: '操作失敗，請稍後重試。'
+      }
+    },
     role: {
       owner: '所有者',
       admin: '管理員',

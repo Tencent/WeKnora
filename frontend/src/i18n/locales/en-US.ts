@@ -8528,6 +8528,28 @@ export default {
         generic: 'Something went wrong. Please try again.'
       }
     },
+    resetPassword: {
+      button: 'Reset password',
+      dialogTitle: 'Reset member password',
+      description: 'Set a new password for {name}. After reset, their old password and all signed-in sessions stop working immediately.',
+      newPasswordLabel: 'New password',
+      newPasswordPlaceholder: '8–32 characters',
+      confirmPasswordLabel: 'Confirm password',
+      confirmPasswordPlaceholder: 'Enter the new password again',
+      submit: 'Reset password',
+      success: 'Password reset. Please give the new password to the user.',
+      errors: {
+        passwordRequired: 'New password is required',
+        passwordLength: 'Password must be 8–32 characters',
+        confirmRequired: 'Please confirm the new password',
+        passwordMismatch: 'The two passwords do not match',
+        passwordPolicy: 'Password does not meet the policy (8–32 characters; with complexity enabled it needs uppercase, lowercase, digit and special character).',
+        cannotResetSelf: 'You cannot reset your own password here; use "Change password" instead.',
+        forbidden: 'Your role cannot reset this member\'s password.',
+        notFound: 'This user is not a member of this workspace.',
+        generic: 'Something went wrong. Please try again.'
+      }
+    },
     remove: {
       button: 'Remove',
       confirmBody: 'Are you sure you want to remove {name} from this workspace? They will lose access immediately.',

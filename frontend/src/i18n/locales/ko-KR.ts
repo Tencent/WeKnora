@@ -721,6 +721,28 @@ export default {
         generic: '오류가 발생했습니다. 다시 시도해 주세요.'
       }
     },
+    resetPassword: {
+      button: '비밀번호 재설정',
+      dialogTitle: '멤버 비밀번호 재설정',
+      description: '{name} 님의 새 비밀번호를 설정합니다. 재설정 후 상대의 기존 비밀번호와 로그인된 세션은 즉시 무효화됩니다.',
+      newPasswordLabel: '새 비밀번호',
+      newPasswordPlaceholder: '8~32자',
+      confirmPasswordLabel: '비밀번호 확인',
+      confirmPasswordPlaceholder: '새 비밀번호를 다시 입력하세요',
+      submit: '비밀번호 재설정',
+      success: '비밀번호를 재설정했습니다. 새 비밀번호를 본인에게 전달하세요.',
+      errors: {
+        passwordRequired: '새 비밀번호를 입력하세요',
+        passwordLength: '비밀번호는 8~32자여야 합니다',
+        confirmRequired: '비밀번호를 다시 입력하세요',
+        passwordMismatch: '두 비밀번호가 일치하지 않습니다',
+        passwordPolicy: '비밀번호가 정책을 충족하지 않습니다(8~32자, 복잡한 비밀번호 사용 시 대문자·소문자·숫자·특수문자 필요).',
+        cannotResetSelf: '관리 화면에서는 자신의 비밀번호를 재설정할 수 없습니다. "비밀번호 변경"을 사용하세요.',
+        forbidden: '현재 역할로는 이 멤버의 비밀번호를 재설정할 수 없습니다.',
+        notFound: '이 사용자는 현재 워크스페이스의 멤버가 아닙니다.',
+        generic: '오류가 발생했습니다. 다시 시도해 주세요.'
+      }
+    },
     role: {
       owner: '소유자',
       admin: '관리자',

@@ -142,6 +142,27 @@ export async function createMemberAccount(
 }
 
 /**
+ * Reset a member's login password (admin-supplied new password).
+ * Backend: POST /api/v1/tenants/:id/members/:user_id/reset-password (Admin+
+ * guard; the owner/admin role matrix and the "not yourself" rule are enforced
+ * in the handler). On success the target's old password and all issued tokens
+ * are invalidated immediately.
+ *
+ * 400 = 密码不合规 / 重置本人；403 = 越权；404 = 目标不是本空间成员。
+ * 响应只有 { success: true }，不包含密码。
+ */
+export async function resetMemberPassword(
+  tenantId: number,
+  userId: string,
+  newPassword: string,
+): Promise<SimpleResponse> {
+  return (await post(
+    `/api/v1/tenants/${tenantId}/members/${userId}/reset-password`,
+    { new_password: newPassword },
+  )) as unknown as SimpleResponse
+}
+
+/**
  * Change an existing member's role.
  * Backend: PUT /api/v1/tenants/:id/members/:user_id (Owner+).
  *

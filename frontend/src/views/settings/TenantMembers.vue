@@ -361,6 +361,15 @@
               </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
+                <!-- 重置密码：按 AC-2 矩阵显示，本人与同级/上级不显示。
+                     放在移除按钮左侧，保持图标按钮 + tooltip 的既有风格。 -->
+                <t-tooltip v-if="canResetRow(row)" :content="$t('tenantMember.resetPassword.button')"
+                  placement="top">
+                  <t-button shape="square" variant="text" size="small"
+                    :aria-label="$t('tenantMember.resetPassword.button')" @click.stop="openResetDialog(row)">
+                    <template #icon><t-icon name="lock-on" /></template>
+                  </t-button>
+                </t-tooltip>
                 <t-popconfirm
                   v-if="canManage && row.user_id !== currentUserId"
                   :content="$t('tenantMember.remove.confirmBody', { name: row.username || row.email })"
@@ -386,6 +395,10 @@
       </div>
 
     </div>
+
+    <!-- 重置成员密码弹窗（AC-11）：管理员自填新密码 + 确认。 -->
+    <MemberResetPasswordDialog v-model:visible="resetDialogVisible" :tenant-id="activeTenantId"
+      :member="resetTarget" />
 
     <!-- Audit log drawer. Only rendered for Admin+ because the backend
          route is g.Admin()-gated; rendering it for lower roles would
@@ -528,8 +541,9 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import MemberCreateAccountForm from '@/components/settings/MemberCreateAccountForm.vue'
+import MemberResetPasswordDialog from '@/components/settings/MemberResetPasswordDialog.vue'
 import { copyWithToast } from '@/utils/clipboard'
-import { canCreateAccount as canCreateAccountForRole } from '@/utils/memberRoles'
+import { canCreateAccount as canCreateAccountForRole, canResetTarget } from '@/utils/memberRoles'
 import { useAuthStore } from '@/stores/auth'
 import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
 import { auditActionLabel } from '@/i18n/auditActionLabel'
@@ -577,6 +591,9 @@ const adding = ref(false)
 const invitePopupVisible = ref(false)
 // Admin 的独立建号入口（Admin 没有邀请/共享链接权限，只开放建号）。
 const createPopupVisible = ref(false)
+// 重置成员密码弹窗（AC-11）：记录当前要重置的那一行，弹窗由子组件自己管表单。
+const resetDialogVisible = ref(false)
+const resetTarget = ref<TenantMember | null>(null)
 // share-link generator state (separate popup next to the email
 // invite). shareLinkResult is non-null after a successful create —
 // the popup then switches into "here's your link, copy it" mode.
@@ -686,6 +703,27 @@ const canCreateAccount = computed(
 // 链接权限，只给一个独立的建号入口。
 const showCreateEntry = computed(() => canCreateAccount.value && !canManage.value)
 
+// 重置密码的操作者角色：跨租户系统管理员在后端按 Owner 处理（D4），
+// 这里同样视作 Owner，否则超管在自己角色较低的租户里会看不到入口。
+const resetActorRole = computed<TenantRole | ''>(() =>
+  authStore.canAccessAllTenants === true ? 'owner' : currentRole.value,
+)
+
+// 行内「重置密码」是否可见：AC-2 矩阵 + 排除本人。不能挂在 canManage
+// （owner-only）上——Admin 也要能看到并操作自己权限范围内的成员。
+function canResetRow(row: TenantMember): boolean {
+  return canResetTarget(
+    resetActorRole.value,
+    row.role,
+    row.user_id === currentUserId.value,
+  )
+}
+
+function openResetDialog(row: TenantMember) {
+  resetTarget.value = row
+  resetDialogVisible.value = true
+}
+
 watch(showCreateEntry, (visible) => {
   if (!visible) createPopupVisible.value = false
 })
@@ -777,7 +815,7 @@ const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 230 },
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 168 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
-  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
+  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 112, align: 'left' },
 ])
 
 function memberPrimary(row: { username?: string; email?: string }) {

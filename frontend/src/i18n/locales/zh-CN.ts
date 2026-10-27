@@ -721,6 +721,28 @@ export default {
         generic: '操作失败，请稍后重试。'
       }
     },
+    resetPassword: {
+      button: '重置密码',
+      dialogTitle: '重置成员密码',
+      description: '为 {name} 设置新密码。重置后对方的旧密码和已登录会话将立即失效。',
+      newPasswordLabel: '新密码',
+      newPasswordPlaceholder: '8–32 个字符',
+      confirmPasswordLabel: '确认密码',
+      confirmPasswordPlaceholder: '再次输入新密码',
+      submit: '重置密码',
+      success: '密码已重置，请将新密码转交对方。',
+      errors: {
+        passwordRequired: '请输入新密码',
+        passwordLength: '密码须为 8–32 个字符',
+        confirmRequired: '请再次输入新密码',
+        passwordMismatch: '两次输入的密码不一致',
+        passwordPolicy: '密码不符合要求（8–32 位；开启复杂密码时需包含大小写字母、数字和特殊字符）',
+        cannotResetSelf: '不能在管理端重置自己的密码，请使用「修改密码」。',
+        forbidden: '当前角色无权重置该成员的密码',
+        notFound: '该用户不是当前空间的成员',
+        generic: '操作失败，请稍后重试。'
+      }
+    },
     role: {
       owner: '所有者',
       admin: '管理员',

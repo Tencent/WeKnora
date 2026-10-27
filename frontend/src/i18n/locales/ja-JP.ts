@@ -8528,6 +8528,28 @@ export default {
         generic: '問題が発生しました。もう一度お試しください。'
       }
     },
+    resetPassword: {
+      button: 'パスワードをリセット',
+      dialogTitle: 'メンバーのパスワードをリセット',
+      description: '{name} の新しいパスワードを設定します。リセット後、相手の旧パスワードとログイン中のセッションはすぐに無効になります。',
+      newPasswordLabel: '新しいパスワード',
+      newPasswordPlaceholder: '8〜32文字',
+      confirmPasswordLabel: 'パスワードの確認',
+      confirmPasswordPlaceholder: '新しいパスワードをもう一度入力',
+      submit: 'パスワードをリセット',
+      success: 'パスワードをリセットしました。新しいパスワードを本人に伝えてください。',
+      errors: {
+        passwordRequired: '新しいパスワードは必須です',
+        passwordLength: 'パスワードは8〜32文字で入力してください',
+        confirmRequired: '確認用パスワードを入力してください',
+        passwordMismatch: 'パスワードが一致しません',
+        passwordPolicy: 'パスワードがポリシーを満たしていません（8〜32文字。複雑なパスワードが有効な場合は大文字・小文字・数字・記号が必要です）。',
+        cannotResetSelf: '管理画面から自分のパスワードはリセットできません。「パスワード変更」を使用してください。',
+        forbidden: '現在のロールではこのメンバーのパスワードをリセットできません。',
+        notFound: 'このユーザーは現在のワークスペースのメンバーではありません。',
+        generic: '問題が発生しました。もう一度お試しください。'
+      }
+    },
     remove: {
       button: '削除',
       confirmBody: '{name}をこのワークスペースから削除してもよろしいですか？このユーザはすぐにアクセスできなくなります。',
