@@ -52,6 +52,14 @@ Windows installers place them next to the installed executable.
   implementation; the upstream Go converter, `liuzl/da`, and GPL-licensed
   `cedar-go` code are not included.
 
+## Goldmark
+
+- Component: `github.com/yuin/goldmark`, version `v1.8.2`.
+- Used to identify GFM tables for Wiki machine-write row preservation.
+- License: MIT, reproduced in [`licenses/goldmark-MIT.txt`](licenses/goldmark-MIT.txt).
+- Copyright: 2019 Yusuke Inuzuka. Modifications by WeKnora: none.
+- Source: [upstream repository](https://github.com/yuin/goldmark/tree/v1.8.2).
+
 ## Build-only component
 
 The Windows installer template in `cmd/desktop/build/windows/installer/project.nsi`

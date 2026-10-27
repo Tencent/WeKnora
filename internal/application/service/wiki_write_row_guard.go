@@ -4,6 +4,12 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	tableast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 // ErrWikiWriteDroppedTableRows is the explicit refusal signal a machine write
@@ -38,26 +44,6 @@ const wikiWriteIngestRowIdentityLossLimit = 0.20
 // one spelling of a row against another.
 var wikiWriteEmphasisMarkers = strings.NewReplacer("*", "", "_", "", "`", "")
 
-// isWikiWriteTableRow reports whether line is a markdown table row: trimmed it
-// starts with '|' and carries at least two pipes. A single pipe is a stray
-// character in prose, not a table.
-func isWikiWriteTableRow(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "|") && strings.Count(trimmed, "|") >= 2
-}
-
-// isWikiWriteDelimiterRow reports whether line is the `| --- | :--: |` row that
-// separates a table's header from its data: every cell is built only from '-',
-// ':' and spaces. The delimiter names no entity of its own.
-func isWikiWriteDelimiterRow(line string) bool {
-	for _, cell := range strings.Split(line, "|") {
-		if strings.Trim(cell, "-: \t") != "" {
-			return false
-		}
-	}
-	return true
-}
-
 // normalizeWikiWriteCell makes two spellings of the same cell compare equal:
 // the full-width space becomes an ordinary one, emphasis/code markers are
 // dropped, whitespace runs collapse, and the result is lower-cased. Formatting
@@ -69,36 +55,35 @@ func normalizeWikiWriteCell(cell string) string {
 	return strings.ToLower(strings.Join(strings.Fields(cell), " "))
 }
 
-// wikiWriteRowIdentity returns the normalized first non-empty cell of a table
-// row — the cell that says what the row is about — or "" when the row names
-// nothing at all.
-func wikiWriteRowIdentity(line string) string {
-	for _, cell := range strings.Split(line, "|") {
-		if identity := normalizeWikiWriteCell(cell); identity != "" {
-			return identity
-		}
-	}
-	return ""
-}
-
 // wikiWriteTableRowIdentities lists the data-row identities of every markdown
-// table in content, in file order. Header rows are skipped: the row directly
-// above the `| --- |` delimiter names columns, not entities, and a model
-// renames it freely, so counting it would refuse healthy rewrites.
+// table in content, in file order. GFM permits optional outer pipes; parsing
+// table structure also keeps headers, prose and code examples out of the guard.
+// Each row still names its normalized first non-empty cell.
 func wikiWriteTableRowIdentities(content string) []string {
-	lines := strings.Split(content, "\n")
+	source := []byte(content)
+	document := goldmark.New(goldmark.WithExtensions(extension.Table)).Parser().Parse(text.NewReader(source))
 	identities := make([]string, 0, 8)
-	for i, line := range lines {
-		if !isWikiWriteTableRow(line) || isWikiWriteDelimiterRow(line) {
-			continue
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering && node.Kind() == tableast.KindTable {
+			// Goldmark pads short headers. GFM requires the header and delimiter
+			// to have the same number of cells, as the frontend renderer does.
+			for cell := node.FirstChild().FirstChild(); cell != nil; cell = cell.NextSibling() {
+				if cell.Lines().Len() == 0 {
+					return ast.WalkSkipChildren, nil
+				}
+			}
 		}
-		if i+1 < len(lines) && isWikiWriteTableRow(lines[i+1]) && isWikiWriteDelimiterRow(lines[i+1]) {
-			continue
+		if !entering || node.Kind() != tableast.KindTableRow {
+			return ast.WalkContinue, nil
 		}
-		if identity := wikiWriteRowIdentity(line); identity != "" {
-			identities = append(identities, identity)
+		for cell := node.FirstChild(); cell != nil; cell = cell.NextSibling() {
+			if identity := normalizeWikiWriteCell(string(cell.Lines().Value(source))); identity != "" {
+				identities = append(identities, identity)
+				break
+			}
 		}
-	}
+		return ast.WalkSkipChildren, nil
+	})
 	return identities
 }
 
