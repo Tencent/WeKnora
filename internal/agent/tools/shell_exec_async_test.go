@@ -84,7 +84,9 @@ func TestShellExecAsyncClampsYieldAndPassesContext(t *testing.T) {
 	require.Equal(t, "m1", submitter.requests[0].ParentMessageID)
 	require.Equal(t, "tc1", submitter.requests[0].ToolCallID)
 	require.Equal(t, "build", submitter.requests[0].Description)
-	require.Equal(t, commandInWorkDir("/workspace", sandbox.WithSessionDisplay("make build")), submitter.requests[0].Command)
+	require.Equal(t,
+		commandInWorkDir("/workspace", sandbox.WithSessionDisplay("make build")),
+		submitter.requests[0].Command)
 	require.Equal(t, "make build", submitter.requests[0].DisplayCommand)
 	require.Equal(t, "/workspace", submitter.requests[0].WorkDir)
 	require.Equal(t, interfaces.SessionRef{TenantID: 7, SessionID: "session-1"}, submitter.refs[0])
