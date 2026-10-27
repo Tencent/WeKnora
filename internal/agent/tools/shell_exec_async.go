@@ -243,7 +243,8 @@ func (t *ShellExecAsyncTool) Execute(ctx context.Context, args json.RawMessage) 
 	// itself is wrapped in its own cd, and the exec cwd is the session layout
 	// root the manager picks (never "/"; shared machines reject that).
 	// A brace group keeps a later ";" (skill PATH setup) from running when cd fails.
-	execCommand = commandInWorkDir(workDir, execCommand)
+	// The seat pin sits inside the group, so a failed cd does not claim a screen.
+	execCommand = commandInWorkDir(workDir, sandbox.WithSessionDisplay(execCommand))
 
 	request := ShellJobSubmitRequest{
 		Command:        execCommand,

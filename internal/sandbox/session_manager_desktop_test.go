@@ -135,6 +135,15 @@ func TestSessionDesktopManagerNilWhenDesktopDisabled(t *testing.T) {
 		"DesktopEnabled=false must hide the capability before any sandbox exists")
 }
 
+func TestDesktopPromptFollowsTheConfigurationSwitch(t *testing.T) {
+	on, _ := newSessionManagerDesktopHarness(t, true)
+	require.True(t, on.DesktopEnabledForPrompt())
+	off, _ := newSessionManagerDesktopHarness(t, false)
+	require.False(t, off.DesktopEnabledForPrompt())
+	var none *SessionBoundManager
+	require.False(t, none.DesktopEnabledForPrompt())
+}
+
 func TestOpenSessionDesktopDisabledDoesNotDial(t *testing.T) {
 	ctx := terminalTestContext()
 	mgr, inner := newSessionManagerDesktopHarness(t, false)

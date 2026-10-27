@@ -595,6 +595,9 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		execCommand = "printf %s " + sandbox.ShellQuote(base64.StdEncoding.EncodeToString([]byte(input.Stdin))) +
 			" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote(execCommand)
 	}
+	// After stdin wrapping so the child shell inherits the seat, and before
+	// the command text, which may itself assign DISPLAY.
+	execCommand = sandbox.WithSessionDisplay(execCommand)
 	output, finishOutput := shellCommandOutput(ctx, command)
 	defer finishOutput()
 	// Observe only the requested command, not skill staging or artifact probes.
