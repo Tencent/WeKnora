@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,18 +32,49 @@ func TestCleanWriteFileInRemoteMatchesHistoricalErrors(t *testing.T) {
 	require.EqualError(t, err, `sandbox: workspace write path "/" must be an absolute file path`)
 }
 
-func TestCleanWriteFileInSharedStaysInsideTheSession(t *testing.T) {
+func TestCleanWriteFileInSharedAllowsTheWholeMachine(t *testing.T) {
 	l := userLayout(t)
 	got, err := CleanWriteFileIn(l, "report.md")
 	require.NoError(t, err)
 	require.Equal(t, l.Root+"/report.md", got)
 
-	_, err = CleanWriteFileIn(l, "/workspace/sessions/11111111-2222-4333-8444-555555555555/a.md")
-	require.ErrorContains(t, err, "outside the session workspace")
-	_, err = CleanWriteFileIn(l, "../11111111-2222-4333-8444-555555555555/a.md")
-	require.ErrorContains(t, err, "outside the session workspace")
+	got, err = CleanWriteFileIn(l, "/workspace/sessions/11111111-2222-4333-8444-555555555555/a.md")
+	require.NoError(t, err, "a sibling session's directory is not refused any more")
+	require.Equal(t, "/workspace/sessions/11111111-2222-4333-8444-555555555555/a.md", got)
 	_, err = CleanWriteFileIn(l, l.InputDir+"/x")
 	require.ErrorContains(t, err, "read-only")
+}
+
+func TestSharedWritesProtectEverySessionInput(t *testing.T) {
+	l := userLayout(t)
+	sibling, err := UserSession("7c9e6679-7425-40de-944b-e07fc1f90ae7")
+	require.NoError(t, err)
+	for _, p := range []string{
+		l.InputDir + "/original.txt",
+		sibling.InputDir,
+		sibling.InputDir + "/original.txt",
+		sibling.InputDir + "/nested/original.txt",
+		sibling.Root + "/output/../input/original.txt",
+		"../" + path.Base(sibling.Root) + "/input/original.txt",
+		InputDir + "/original.txt",
+	} {
+		_, err := CleanWriteFileIn(l, p)
+		require.ErrorContains(t, err, "read-only", p)
+	}
+	for _, p := range []string{
+		sibling.Root + "/notes.txt",
+		sibling.OutputDir + "/report.txt",
+		sibling.Root + "/input-copy/original.txt",
+		sibling.Root + "/project/input/data.txt",
+	} {
+		got, err := CleanWriteFileIn(l, p)
+		require.NoError(t, err, p)
+		require.Equal(t, p, got)
+	}
+	// A host project may legitimately contain a sessions/name/input tree.
+	host := Layout{Origin: OriginHost, Root: Root}
+	require.Empty(t, host.ReadOnlyInputRoot(sibling.InputDir+"/data.txt"))
+	require.Empty(t, Remote().ReadOnlyInputRoot(sibling.InputDir+"/data.txt"))
 }
 
 func TestCleanWorkDirIn(t *testing.T) {
@@ -57,14 +89,13 @@ func TestCleanWorkDirIn(t *testing.T) {
 	require.EqualError(t, err, `sandbox: work dir "rel" must be absolute`)
 
 	shared := userLayout(t)
-	for _, ok := range []string{shared.Root, shared.Root + "/src", "/tmp", "/tmp/x", SkillsImageRoot + "/pdf"} {
+	for _, ok := range []string{shared.Root, "/workspace", "/workspace/sessions", "/tmp", "/opt", "/"} {
 		_, err := CleanWorkDirIn(shared, ok, false)
 		require.NoError(t, err, ok)
 	}
-	for _, bad := range []string{"/workspace", "/workspace/sessions", "/opt", "/"} {
-		_, err := CleanWorkDirIn(shared, bad, false)
-		require.Error(t, err, bad)
-	}
+	_, err = CleanWorkDirIn(shared, "/opt/build", true)
+	require.EqualError(t, err,
+		`sandbox: work dir "/opt/build" is outside allowed roots (`+shared.Root+`, /opt/weknora/tenant/skills)`)
 }
 
 func TestCleanInputPathIn(t *testing.T) {

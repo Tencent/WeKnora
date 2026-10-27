@@ -40,12 +40,12 @@
             <div v-if="content || canFork || canRewind" class="user_msg_actions">
                 <t-tooltip v-if="content" :content="t('agent.copy')">
                     <button type="button" class="user_msg_action" :aria-label="t('agent.copy')" @click="handleCopy">
-                        <t-icon name="copy" />
+                        <ChatActionIcon name="copy" />
                     </button>
                 </t-tooltip>
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                     <button type="button" class="user_msg_action" :aria-label="forkTooltip" @click="emit('fork', messageId)">
-                        <t-icon name="git-branch" />
+                        <ChatActionIcon name="git-branch" />
                     </button>
                 </t-tooltip>
                 <t-popconfirm
@@ -65,7 +65,7 @@
                     </template>
                     <t-tooltip :content="rewindTooltip">
                         <button type="button" class="user_msg_action" :class="{ 'is-active': rewindConfirmOpen }" :aria-label="rewindTooltip" @click.stop>
-                            <t-icon name="rollback" />
+                            <ChatActionIcon name="rollback" />
                         </button>
                     </t-tooltip>
                 </t-popconfirm>
@@ -84,6 +84,7 @@ import { computed, ref, watch, onMounted, nextTick } from "vue";
 import { hydrateProtectedFileImages } from '@/utils/security';
 import picturePreview from '@/components/picture-preview.vue';
 import ArtifactFileIcon from './ArtifactFileIcon.vue';
+import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
@@ -428,6 +429,7 @@ html[theme-mode="dark"] {
     display: flex;
     align-items: center;
     gap: 2px;
+    color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
 }
 
 .user_msg_container:hover .user_msg_meta,
@@ -450,6 +452,13 @@ html[theme-mode="dark"] {
     color: inherit;
     font-size: var(--app-text-xl);
     cursor: pointer;
+}
+
+.user_msg_action :deep(.chat-action-icon) {
+    display: block;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
 }
 
 .user_msg_action:hover,

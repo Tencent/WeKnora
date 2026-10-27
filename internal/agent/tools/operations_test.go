@@ -669,6 +669,13 @@ func TestFindOperationsDescribesMatches(t *testing.T) {
 
 	res, _ = tool.Execute(context.Background(), json.RawMessage(`{"query":"zzz-unmatched"}`))
 	assert.Contains(t, res.Output, "hint")
+
+	res, err = tool.Execute(context.Background(), json.RawMessage(`{"query":"generated files","domain":"artifact"}`))
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.NoError(t, json.Unmarshal([]byte(res.Output), &out))
+	require.Len(t, out.Operations, 1)
+	assert.Equal(t, "artifact.list", out.Operations[0].ID)
 }
 
 func TestRunOperationAgentSkillsApproval(t *testing.T) {

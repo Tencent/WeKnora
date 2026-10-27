@@ -147,16 +147,19 @@ func TestEntityRetrievalUsesSearchTargets(t *testing.T) {
 				Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-shared",
 				TenantID: 2, KnowledgeIDs: []string{"doc-shared"}, ScopeTagIDs: []string{"tag-selected"},
 			}},
-			wantIDs: []string{"shared"}, wantScopes: []types.NameSpace{{KnowledgeBase: "kb-shared", Knowledge: "doc-shared"}},
+			wantIDs:    []string{"shared"},
+			wantScopes: []types.NameSpace{{KnowledgeBase: "kb-shared", Knowledge: "doc-shared"}},
 		},
 		{
 			name:    "normalized targets override raw request IDs",
 			rawKBs:  []string{"kb-other"},
 			rawDocs: []string{"doc-other"},
 			targets: types.SearchTargets{{
-				Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-shared", KnowledgeIDs: []string{"doc-shared"},
+				Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-shared",
+				KnowledgeIDs: []string{"doc-shared"},
 			}},
-			wantIDs: []string{"shared"}, wantScopes: []types.NameSpace{{KnowledgeBase: "kb-shared", Knowledge: "doc-shared"}},
+			wantIDs:    []string{"shared"},
+			wantScopes: []types.NameSpace{{KnowledgeBase: "kb-shared", Knowledge: "doc-shared"}},
 		},
 		{
 			name:   "empty tag results never fall back to raw KB or file IDs",
@@ -179,15 +182,20 @@ func TestEntityRetrievalUsesSearchTargets(t *testing.T) {
 					KnowledgeIDs:    []string{"doc-shared"},
 				},
 			},
-			wantIDs:    []string{"full", "shared"},
-			wantScopes: []types.NameSpace{{KnowledgeBase: "kb-full"}, {KnowledgeBase: "kb-shared", Knowledge: "doc-shared"}},
+			wantIDs: []string{"full", "shared"},
+			wantScopes: []types.NameSpace{
+				{KnowledgeBase: "kb-full"}, {KnowledgeBase: "kb-shared", Knowledge: "doc-shared"},
+			},
 		},
 		{
 			name: "whole KB covers repeated KB and file targets without extra queries",
 			targets: types.SearchTargets{
 				{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-full"},
 				{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-full"},
-				{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-full", KnowledgeIDs: []string{"doc-full", "doc-full"}},
+				{
+					Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-full",
+					KnowledgeIDs: []string{"doc-full", "doc-full"},
+				},
 			},
 			wantIDs: []string{"full"}, wantScopes: []types.NameSpace{{KnowledgeBase: "kb-full"}},
 		},
@@ -228,7 +236,9 @@ func TestEntityRetrievalUsesSearchTargets(t *testing.T) {
 			knowledge := map[string]*types.Knowledge{}
 			for _, chunk := range chunks {
 				if chunk.KnowledgeID != "doc-gone" {
-					knowledge[chunk.KnowledgeID] = &types.Knowledge{ID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID}
+					knowledge[chunk.KnowledgeID] = &types.Knowledge{
+						ID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
+					}
 				}
 			}
 			search := &PluginSearchEntity{
@@ -236,7 +246,8 @@ func TestEntityRetrievalUsesSearchTargets(t *testing.T) {
 				knowledgeRepo: &entityKnowledgeRepo{knowledge: knowledge},
 			}
 			cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{
-				Query: "Docker", TenantID: 1, KnowledgeBaseIDs: tt.rawKBs, KnowledgeIDs: tt.rawDocs, SearchTargets: tt.targets,
+				Query: "Docker", TenantID: 1, KnowledgeBaseIDs: tt.rawKBs,
+				KnowledgeIDs: tt.rawDocs, SearchTargets: tt.targets,
 			}}
 			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 			if err := extract.OnEvent(ctx, types.QUERY_UNDERSTAND, cm, func() *PluginError { return nil }); err != nil {

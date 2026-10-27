@@ -231,7 +231,7 @@ func (s *AutomationService) runOnce(ctx context.Context, run *types.AutomationRu
 		}
 		return failed(err.Error())
 	}
-	agentConfig, err := s.runnableAgent(ctx, a.AgentID, a.TenantID)
+	agentConfig, err := s.runnableAssistant(ctx)
 	if err != nil {
 		return runOutcome{status: types.AutomationRunFailed, reason: err.Error(), pause: err.Error()}
 	}
@@ -363,7 +363,7 @@ func (s *AutomationService) runSession(
 		ID: uuid.NewString(), TenantID: a.TenantID, UserID: a.OwnerUserID, Kind: types.SessionKindAutomation,
 		Title: clipRunes(title, 200), CreatedAt: now, UpdatedAt: now,
 		LastRequestState: &types.SessionLastRequestState{
-			AgentID: a.AgentID, AgentEnabled: true, ModelID: a.ModelID,
+			AgentID: types.BuiltinWeKnoraAssistantID, AgentEnabled: true, ModelID: a.ModelID,
 		},
 	}
 	if err := s.db.WithContext(ctx).Session(&gorm.Session{SkipHooks: true}).

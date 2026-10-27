@@ -122,7 +122,7 @@ func resolveIn(l sandbox.WorkspaceLayout, p string) string {
 // and must not sit under the read-only attachment directory. When several
 // roots match, the most specific one is reported.
 func writableRootIn(l sandbox.WorkspaceLayout, clean string) (string, bool) {
-	if l.InputDir != "" && isUnderRoot(clean, l.InputDir) {
+	if l.ReadOnlyInputRoot(clean) != "" {
 		return "", false
 	}
 	best := ""
@@ -153,18 +153,23 @@ func inspectableRootIn(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 
 // inspectRoot reports the metadata root for a read/list. A session-owned
 // remote sandbox labels misses as "/" and still inspects (tmp, installed
-// skills). Host layouts and shared remote machines allow ReadRoots only.
+// skills). Host layouts allow ReadRoots only.
 func inspectRoot(l sandbox.WorkspaceLayout, clean string) (string, bool) {
 	if root, ok := inspectableRootIn(l, clean); ok {
 		return root, true
 	}
-	if l.IsHost() || l.IsSharedRemote() {
+	if l.IsHost() {
 		return "", false
 	}
 	return "/", true
 }
 
 func writeScopeErrorIn(l sandbox.WorkspaceLayout, requested string) string {
+	if l.IsSharedRemote() {
+		if input := l.ReadOnlyInputRoot(resolveIn(l, requested)); input != "" {
+			return fmt.Sprintf("session input %s is read-only; write a copy outside attachment directories", input)
+		}
+	}
 	scope := layoutScopeName(l)
 	if strings.TrimSpace(l.InputDir) == "" {
 		return fmt.Sprintf(

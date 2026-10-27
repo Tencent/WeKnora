@@ -29,22 +29,19 @@ func Align(markdown string, units []Unit) []types.SourceBlock {
 	var blocks []types.SourceBlock
 	cursor, floor := 0, 0
 	counts := make(map[string]int)
-	matches := make(map[string][]int)
 	for _, u := range units {
 		counts[normalizeKey(u.Text)]++
 	}
+	matches := indexNormalizedMatches(norm.text, counts)
 	for _, u := range units {
 		key := normalizeKey(u.Text)
 		if utf8.RuneCountInString(key) < alignMinRunes {
 			continue
 		}
-		// Repeated source text is safe only when every occurrence is accounted
-		// for by a source unit in reading order (not a TOC or an omitted block).
-		positions, known := matches[key]
-		if !known {
-			positions = normalizedMatches(norm.text, key)
-			matches[key] = positions
-		}
+		// A unit may only be placed when every occurrence of its text in the
+		// document is accounted for by a source unit (not a TOC or an omitted
+		// block). The occurrence index is built in one pass over the document.
+		positions := matches[key]
 		if len(positions) != counts[key] {
 			continue
 		}
@@ -79,31 +76,61 @@ func Align(markdown string, units []Unit) []types.SourceBlock {
 	return blocks
 }
 
-// normalizedMatches rejects a number embedded in a different numeric value.
-func normalizedMatches(text, key string) []int {
-	var out []int
-	if key == "" {
-		return out
+// alignIndexPrefixBytes bounds the prefix used to bucket patterns. Long unit
+// keys in tables and office documents usually diverge in their first few
+// cells, so a fixed prefix gives an O(1) candidate lookup per document
+// position while keeping the full key comparison as the correctness check.
+const alignIndexPrefixBytes = 32
+
+// indexNormalizedMatches finds every occurrence of the requested normalized
+// keys in one pass. Align used to call normalizedMatches once per distinct
+// unit, so a table with one unit per row scanned the whole document once per
+// row. Long keys are bucketed by a fixed byte prefix; short keys are grouped
+// by their first rune and checked directly.
+func indexNormalizedMatches(text string, counts map[string]int) map[string][]int {
+	long := make(map[string][]string)
+	short := make(map[rune][]string)
+	for key := range counts {
+		if utf8.RuneCountInString(key) < alignMinRunes {
+			continue
+		}
+		if len(key) >= alignIndexPrefixBytes {
+			long[key[:alignIndexPrefixBytes]] = append(long[key[:alignIndexPrefixBytes]], key)
+			continue
+		}
+		first, _ := utf8.DecodeRuneInString(key)
+		short[first] = append(short[first], key)
 	}
+
+	matches := make(map[string][]int)
+	for at := 0; at < len(text); {
+		first, size := utf8.DecodeRuneInString(text[at:])
+		for _, key := range short[first] {
+			if strings.HasPrefix(text[at:], key) && normalizedBoundaryOK(text, at, key) {
+				matches[key] = append(matches[key], at)
+			}
+		}
+		if end := at + alignIndexPrefixBytes; end <= len(text) {
+			for _, key := range long[text[at:end]] {
+				if strings.HasPrefix(text[at:], key) && normalizedBoundaryOK(text, at, key) {
+					matches[key] = append(matches[key], at)
+				}
+			}
+		}
+		at += size
+	}
+	return matches
+}
+
+// normalizedBoundaryOK rejects a key embedded in a different numeric value.
+func normalizedBoundaryOK(text string, at int, key string) bool {
 	first, _ := utf8.DecodeRuneInString(key)
 	last, _ := utf8.DecodeLastRuneInString(key)
-	for from := 0; from <= len(text)-len(key); {
-		i := strings.Index(text[from:], key)
-		if i < 0 {
-			break
-		}
-		at := from + i
-		before, _ := utf8.DecodeLastRuneInString(text[:at])
-		after, _ := utf8.DecodeRuneInString(text[at+len(key):])
-		left := unicode.IsDigit(first) && (unicode.IsDigit(before) || strings.ContainsRune(".,:/+−-", before))
-		right := unicode.IsDigit(last) && (unicode.IsDigit(after) || strings.ContainsRune(".,:/%‰", after))
-		if !left && !right {
-			out = append(out, at)
-		}
-		_, size := utf8.DecodeRuneInString(text[at:])
-		from = at + size
-	}
-	return out
+	before, _ := utf8.DecodeLastRuneInString(text[:at])
+	after, _ := utf8.DecodeRuneInString(text[at+len(key):])
+	left := unicode.IsDigit(first) && (unicode.IsDigit(before) || strings.ContainsRune(".,:/+−-", before))
+	right := unicode.IsDigit(last) && (unicode.IsDigit(after) || strings.ContainsRune(".,:/%‰", after))
+	return !left && !right
 }
 
 // lineLeadStart moves pos back to the start of its line when everything

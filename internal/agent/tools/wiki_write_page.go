@@ -60,12 +60,15 @@ func NewWikiWritePageTool(
 					"aliases": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "A list of aliases for the page (optional). If provided, these will COMPLETELY REPLACE the existing aliases of the page."
+						"description": "A list of aliases for the page (optional). If provided, `+
+				`these will COMPLETELY REPLACE the existing aliases of the page."
 					},
 					"source_refs": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "A list of short dN source document IDs that contributed to this page. If provided, these will COMPLETELY REPLACE the existing source_refs of the page."
+						"description": "A list of doc://N `+
+				`source document handles that contributed to this page. If provided, these `+
+				`will COMPLETELY REPLACE the existing source_refs of the page."
 					}
 				},
 				"required": ["slug", "title", "summary", "content", "page_type"]

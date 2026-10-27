@@ -13,7 +13,11 @@
       <span v-if="durationLabel">{{ durationLabel }}</span>
       <span v-if="view.killed">{{ $t('agentStream.shellExec.killed') }}</span>
       <span v-if="view.truncated">{{ $t('agentStream.shellExec.truncated') }}</span>
+      <span v-if="workId">{{ workId }}</span>
+      <span v-if="workState">{{ workState }}</span>
     </div>
+
+    <div v-if="note" class="shell-exec-note">{{ note }}</div>
 
     <div v-if="view.stdoutBinary || view.stderrBinary" class="shell-exec-note">
       {{ $t('agentStream.shellExec.binarySuppressed') }}
@@ -37,18 +41,34 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { ShellJobPayload } from '@/api/chat/background-work'
 import type { ShellExecData } from '@/types/tool-results'
 import { buildShellExecView } from '@/utils/shellExecResult'
 
 const props = defineProps<{
-  data: ShellExecData | Record<string, unknown>
+  data?: ShellExecData | ShellJobPayload | Record<string, unknown> | null
   output?: string
   arguments?: Record<string, unknown>
 }>()
 
+const source = computed(() => {
+  const value = props.data
+  if (value && typeof value === 'object') return value as unknown as Record<string, unknown>
+  return null
+})
+
 const view = computed(() =>
-  buildShellExecView(props.data as Record<string, unknown>, props.arguments, props.output),
+  buildShellExecView(source.value, props.arguments, props.output),
 )
+
+function textField(key: string): string {
+  const value = source.value?.[key]
+  return typeof value === 'string' ? value : ''
+}
+
+const workId = computed(() => textField('work_id'))
+const workState = computed(() => textField('state'))
+const note = computed(() => textField('note'))
 
 const hasMeta = computed(() =>
   Boolean(
@@ -56,7 +76,9 @@ const hasMeta = computed(() =>
     view.value.exitCode !== null ||
     view.value.durationMs !== null ||
     view.value.killed ||
-    view.value.truncated,
+    view.value.truncated ||
+    workId.value ||
+    workState.value,
   ),
 )
 

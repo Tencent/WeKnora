@@ -3,6 +3,7 @@ from typing import Any, Optional
 
 from docreader.models.document import Document
 from docreader.parser.registry import registry
+from docreader.parser.stream import ParsedDocumentStream
 from docreader.parser.web_parser import WebParser
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,38 @@ class Parser:
             logger.warning("Parser returned empty content for file: %s", file_name)
         logger.info("Parsed file %s, content length=%d", file_name, len(result.content))
         return result
+
+    def parse_file_stream(
+        self,
+        file_name: str,
+        file_type: str,
+        content: bytes,
+        parser_engine: Optional[str] = None,
+        engine_overrides: Optional[dict[str, Any]] = None,
+    ) -> ParsedDocumentStream:
+        """Parse a file for ReadStream, using a parser's lazy image path when available."""
+        engine = parser_engine or ""
+        overrides = engine_overrides or {}
+        effective_file_type = detect_effective_file_type(file_type, content)
+        cls = self.registry.get_parser_class(engine, effective_file_type)
+        parser = cls(
+            file_name=file_name,
+            file_type=effective_file_type,
+            **overrides,
+        )
+
+        parse_stream = getattr(parser, "parse_stream", None)
+        if callable(parse_stream):
+            return parse_stream(content)
+
+        # Non-streaming parsers retain their established behavior. Their images
+        # are still sent one at a time by ReadStream, but parsing itself may
+        # materialize them before the first frame.
+        result = parser.parse(content)
+        return ParsedDocumentStream(
+            document=result,
+            image_count=len(result.images or {}),
+        )
 
     def parse_url(
         self,

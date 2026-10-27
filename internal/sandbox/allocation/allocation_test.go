@@ -141,7 +141,7 @@ func TestAssignmentLayout(t *testing.T) {
 	require.Equal(t, ModeUser, u.Mode())
 	l, err = u.Layout()
 	require.NoError(t, err)
-	require.Equal(t, "/workspace/sessions/"+sid, l.Root)
+	require.Equal(t, "/workspace/sessions/c812e1edb644", l.Root)
 	m, ok := u.UserMachine()
 	require.True(t, ok)
 	require.Equal(t, want, m)

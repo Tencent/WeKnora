@@ -39,7 +39,6 @@ export interface Automation {
   name: string
   description: string
   enabled: boolean
-  agent_id: string
   model_id: string
   instruction: string
   trigger: AutomationTrigger
@@ -56,6 +55,7 @@ export interface Automation {
   last_run_at: string | null
   last_success_at: string | null
   last_run_status: AutomationRunStatus | ''
+  active_run_status?: 'queued' | 'running' | 'awaiting_approval' | ''
   consecutive_failures: number
   paused_reason: string
   created_at: string
@@ -66,7 +66,6 @@ export interface Automation {
 export type AutomationInput = Partial<Pick<Automation,
   | 'name'
   | 'description'
-  | 'agent_id'
   | 'model_id'
   | 'instruction'
   | 'trigger'

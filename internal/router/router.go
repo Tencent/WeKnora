@@ -170,8 +170,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		r.Use(embedFrameAncestorsMiddleware(params.EmbedChannelService))
 	}
 
-	// 前端静态文件（仅 Lite 版本内嵌前端）
-	if handler.Edition == "lite" {
+	// Lite bundles the frontend; other editions can explicitly opt in.
+	if handler.Edition == "lite" || strings.TrimSpace(os.Getenv("WEKNORA_WEB_DIR")) != "" {
 		serveFrontendStatic(r)
 	}
 

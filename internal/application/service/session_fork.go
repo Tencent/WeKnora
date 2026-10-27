@@ -169,6 +169,7 @@ type SessionForkService struct {
 	messages    forkMessageStore
 	sandbox     SessionForkSandboxPort
 	allocations forkAllocations
+	activity    interfaces.ActivityRegistry
 }
 
 // NewSessionForkService wires the service. A nil sandbox port makes every fork
@@ -187,8 +188,11 @@ func NewSessionForkServiceFromRepos(
 	sessions interfaces.SessionRepository,
 	messages interfaces.MessageRepository,
 	sandboxPort SessionForkSandboxPort,
+	activity interfaces.ActivityRegistry,
 ) *SessionForkService {
-	return NewSessionForkService(sessions, messages, sandboxPort)
+	s := NewSessionForkService(sessions, messages, sandboxPort)
+	s.activity = activity
+	return s
 }
 
 // WithAllocations enables user-mode forks.
@@ -258,6 +262,9 @@ func (s *SessionForkService) Fork(
 		if busy {
 			return nil, ErrForkSourceBusy
 		}
+	}
+	if err := s.rejectIfBackgroundActive(ctx, source); err != nil {
+		return nil, err
 	}
 
 	workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), forkSnapshotTimeout)
@@ -469,6 +476,22 @@ func forkLeaseLost(ctx context.Context, err error) error {
 	return nil
 }
 
+// rejectIfBackgroundActive refuses while background work is live in the
+// session. Snapshotting pauses the source sandbox and would freeze the work.
+func (s *SessionForkService) rejectIfBackgroundActive(ctx context.Context, source *types.Session) error {
+	if s.activity == nil {
+		return nil
+	}
+	live, err := s.activity.List(ctx, interfaces.SessionRef{TenantID: source.TenantID, SessionID: source.ID})
+	if err != nil {
+		return fmt.Errorf("session fork: check background work: %w", err)
+	}
+	if len(live) > 0 {
+		return ErrForkSourceBusy
+	}
+	return nil
+}
+
 // prepareBootstrap decides whether the fork can carry the source sandbox's
 // workspace state. When every condition holds, it takes a snapshot.
 //
@@ -632,27 +655,33 @@ func inheritUnconsumedForkSnapshot(source *types.Session, checkpoint *types.Sand
 }
 
 // latestCheckpoint returns the checkpoint of the last assistant message in
-// history, or nil when that message has none.
+// history, or nil when that message has none or took it while background work
+// was live.
 func latestCheckpoint(history []*types.Message) *types.SandboxCheckpoint {
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role != "assistant" {
 			continue
 		}
-		return history[i].SandboxCheckpoint
+		cp := history[i].SandboxCheckpoint
+		if cp != nil && cp.BackgroundActive {
+			return nil
+		}
+		return cp
 	}
 	return nil
 }
 
 // latestReachableCheckpoint walks kept assistant messages until it finds one
-// with a non-empty commit SHA. Rewind uses this so a failed last-turn
-// checkpoint does not skip an earlier SHA that can still reset the workspace.
+// with a non-empty commit SHA that was not taken during live background work.
+// Rewind uses this so a failed or flagged last-turn checkpoint does not skip an
+// earlier SHA that can still reset the workspace.
 func latestReachableCheckpoint(history []*types.Message) *types.SandboxCheckpoint {
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i] == nil || history[i].Role != "assistant" {
 			continue
 		}
 		cp := history[i].SandboxCheckpoint
-		if cp == nil || strings.TrimSpace(cp.CommitSHA) == "" {
+		if cp == nil || strings.TrimSpace(cp.CommitSHA) == "" || cp.BackgroundActive {
 			continue
 		}
 		return cp

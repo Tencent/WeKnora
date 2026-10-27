@@ -33,6 +33,7 @@ _ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Cells of a GFM alignment row as matched by the previous ``align_pattern``.
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
+_CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
 
 
 class MarkdownTableUtil:
@@ -141,6 +142,38 @@ class MarkdownTableUtil:
         return "\n".join(out)
 
     def format_table(self, content: str) -> str:
+        """Normalize tables outside fenced code blocks, preserving code examples."""
+        unified = content.replace("\r\n", "\n").replace("\r", "\n")
+        out: List[str] = []
+        pending: List[str] = []
+        fence: Optional[str] = None
+
+        def flush_pending() -> None:
+            if pending:
+                out.extend(self._format_table_block("\n".join(pending)).split("\n"))
+                pending.clear()
+
+        for line in unified.split("\n"):
+            marker = _CODE_FENCE.fullmatch(line)
+            if fence is not None:
+                out.append(line)
+                if (
+                    marker
+                    and marker[1][0] == fence[0]
+                    and len(marker[1]) >= len(fence)
+                    and not marker[2].strip(" \t")
+                ):
+                    fence = None
+            elif marker and (marker[1][0] != "`" or "`" not in marker[2]):
+                flush_pending()
+                fence = marker[1]
+                out.append(line)
+            else:
+                pending.append(line)
+        flush_pending()
+        return "\n".join(out)
+
+    def _format_table_block(self, content: str) -> str:
         """Format all Markdown tables in the content.
 
         Line-based and regex-free: only well-formed rows (leading *and*

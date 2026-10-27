@@ -86,6 +86,7 @@ func TestSharedLayoutPromptNamesTheSessionDirectory(t *testing.T) {
 	require.Contains(t, text, "Session workspace: "+l.Root)
 	require.Contains(t, text, l.InputDir)
 	require.Contains(t, text, l.OutputDir)
-	require.Contains(t, text, "share this machine")
+	require.NotContains(t, text, "share this machine")
+	require.NotContains(t, text, "other conversations")
 	require.NotContains(t, text, "Session workspace: /workspace.")
 }

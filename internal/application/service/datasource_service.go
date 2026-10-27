@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
-	"net/textproto"
 	"reflect"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -1325,7 +1325,13 @@ func allFetchedItemsFailedError(result *types.SyncResult) error {
 		detail = result.Errors[0].Display()
 		const maxDetailLen = 500
 		if len(detail) > maxDetailLen {
-			detail = detail[:maxDetailLen] + "..."
+			// Back off to a rune boundary: a partial multi-byte rune is invalid
+			// UTF-8, which PostgreSQL rejects when the error is persisted.
+			cut := maxDetailLen
+			for cut > 0 && !utf8.RuneStart(detail[cut]) {
+				cut--
+			}
+			detail = detail[:cut] + "..."
 		}
 	}
 	if detail == "" {
@@ -1418,6 +1424,24 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
 		} else if existing != nil {
+			// Conflict strategy "skip" (跳过已存在): the item already exists in
+			// the KB, so leave it untouched and report the conflict as a skip
+			// via the shared DuplicateKnowledgeError path (Tencent/WeKnora#4640 —
+			// this strategy was silently ignored and the item was overwritten).
+			if ds.ConflictStrategy == types.ConflictStrategySkip {
+				logger.Infof(
+					ctx,
+					"item %q (external_id=%s) already exists as knowledge %s, conflict strategy skip → skipping",
+					item.Title, item.ExternalID, existing.ID,
+				)
+				return false, &types.DuplicateKnowledgeError{
+					Message: fmt.Sprintf(
+						"knowledge already exists for external_id %s (conflict strategy: skip)",
+						item.ExternalID,
+					),
+					Knowledge: existing,
+				}
+			}
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
 				logger.Warnf(ctx, "failed to delete existing knowledge %s: %v", existing.ID, err)
@@ -1593,12 +1617,7 @@ func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, err
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Create a form file part
-	partHeader := make(textproto.MIMEHeader)
-	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
-	partHeader.Set("Content-Type", "application/octet-stream")
-
-	part, err := writer.CreatePart(partHeader)
+	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		return nil, fmt.Errorf("create multipart part: %w", err)
 	}

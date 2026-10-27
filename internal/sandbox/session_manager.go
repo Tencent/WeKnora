@@ -89,6 +89,10 @@ const sessionArtifactDirBootstrapTimeout = 15 * time.Second
 // disappearance).
 const sessionLifecycleCleanupTimeout = 30 * time.Second
 
+// ErrBoundSandboxChanged confirms that a maintenance command's original
+// sandbox is gone. Transport failures must not be treated as this condition.
+var ErrBoundSandboxChanged = errors.New("sandbox: bound sandbox changed before maintenance command")
+
 // SessionBoundManager is a sandbox.Manager that binds one remote sandbox per
 // tenant session. Concrete provider work is delegated to RemoteSandboxClient;
 // this type owns validation and the mapping between application concepts
@@ -626,9 +630,6 @@ func (m *SessionBoundManager) EnsureSessionDir(ctx context.Context, sessionID, d
 	if err != nil {
 		return err
 	}
-	if !sc.allowsPath(dir) {
-		return fmt.Errorf("sandbox: path %q is outside the session workspace %s", dir, sc.layout.Root)
-	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
 		return err
@@ -673,10 +674,30 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 		return err
 	}
 	defer release()
-	handle, err := m.resolveScope(ctx, sc)
-	if err != nil {
-		return err
+	var handle RemoteSandboxHandle
+	for attempt := 0; attempt < 2; attempt++ {
+		handle, err = m.resolveScope(ctx, sc)
+		if err != nil {
+			return err
+		}
+		err = m.writeSessionInputOnHandle(ctx, handle, clean, content)
+		if err == nil || attempt == 1 || !sessionBindingLost(err) {
+			return err
+		}
+		// The idle sweep can delete the container after resolve and before
+		// mkdir. The binding still points at that container, so drop it and
+		// provision once more. A missing path inside a live container does
+		// not take this branch.
+		if dropErr := m.dropBoundSandbox(ctx, sc.machine(), handle.ID()); dropErr != nil {
+			return err
+		}
 	}
+	return err
+}
+
+func (m *SessionBoundManager) writeSessionInputOnHandle(
+	ctx context.Context, handle RemoteSandboxHandle, clean string, content []byte,
+) error {
 	if err := ignoreExistingDir(m.client.MakeDir(ctx, handle, path.Dir(clean))); err != nil {
 		return fmt.Errorf("sandbox: create input directory: %w", err)
 	}
@@ -684,6 +705,29 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 		return fmt.Errorf("sandbox: write session input %s: %w", clean, err)
 	}
 	return nil
+}
+
+// sessionBindingLost reports a sandbox that is gone. A missing path inside a
+// live container is also NotFound ("does not exist"); rebinding on that
+// would discard the session.
+func sessionBindingLost(err error) bool {
+	if !CanReplaceRemoteBinding(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "does not exist") && !strings.Contains(msg, "vanished") {
+		return false
+	}
+	return true
+}
+
+func (m *SessionBoundManager) dropBoundSandbox(ctx context.Context, key SessionSandboxKey, sandboxID string) error {
+	binding, err := m.bindings.Get(ctx, key)
+	if err != nil || binding == nil || binding.SandboxID != sandboxID || binding.Provider != m.client.Provider() {
+		return err
+	}
+	_, err = m.bindings.DeleteIfMatch(ctx, key, binding.Provider, binding.SandboxID)
+	return err
 }
 
 // WriteSessionWorkspaceFile writes a model-authored file into the session's
@@ -826,9 +870,6 @@ func (m *SessionBoundManager) ListSessionFiles(
 	if err != nil {
 		return nil, err
 	}
-	if !sc.allowsPath(dir) {
-		return nil, fmt.Errorf("sandbox: path %q is outside the session workspace %s", dir, sc.layout.Root)
-	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
 		return nil, err
@@ -857,9 +898,6 @@ func (m *SessionBoundManager) StatSessionFile(
 	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if !sc.allowsPath(filePath) {
-		return nil, fmt.Errorf("sandbox: path %q is outside the session workspace %s", filePath, sc.layout.Root)
 	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
@@ -890,9 +928,6 @@ func (m *SessionBoundManager) ReadSessionFile(
 	sc, err := m.scope(ctx, sessionID)
 	if err != nil {
 		return nil, err
-	}
-	if !sc.allowsPath(filePath) {
-		return nil, fmt.Errorf("sandbox: path %q is outside the session workspace %s", filePath, sc.layout.Root)
 	}
 	ctx, release, err := m.admitUser(ctx, sc, "file")
 	if err != nil {
@@ -1102,7 +1137,7 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 			return nil, nil, err
 		}
 		if !found || handle.ID() != opts.ExpectedSandboxID {
-			return nil, nil, errors.New("sandbox: bound sandbox changed before maintenance command")
+			return nil, nil, ErrBoundSandboxChanged
 		}
 	} else {
 		handle, err = m.resolveScope(ctx, sc)
@@ -1801,7 +1836,7 @@ func (m *SessionBoundManager) lookupSessionHandleForKey(
 		return nil, false, nil
 	}
 	if expectedID != "" && binding.SandboxID != expectedID {
-		return nil, false, errors.New("sandbox: bound sandbox changed before maintenance command")
+		return nil, false, ErrBoundSandboxChanged
 	}
 	handle, err := m.client.Connect(ctx, RemoteConnectRequest{
 		SandboxID:          binding.SandboxID,
@@ -2294,7 +2329,10 @@ func (m *SessionBoundManager) DeleteSessionWorkspaces(
 	}
 	var targets []string
 	for _, id := range ready {
-		l, _ := UserWorkspaceLayout(id)
+		l, err := UserWorkspaceLayout(id)
+		if err != nil {
+			return nil, err
+		}
 		targets = append(targets, ShellQuote(l.Root), ShellQuote(l.GitDir))
 	}
 	// Refuse a symlinked parent instead of following it: an agent on this
@@ -2355,21 +2393,6 @@ func withSessionEnv(env map[string]string, layout WorkspaceLayout) map[string]st
 	out[skillOutputEnvVar] = layout.OutputDir
 	out[sessionInputEnvVar] = layout.InputDir
 	return out
-}
-
-// allowsPath reports whether a shared-machine file access stays in the
-// session's scope (its read roots, /tmp, the skills image).
-func (s sessionScope) allowsPath(p string) bool {
-	if !s.user {
-		return true
-	}
-	clean := path.Clean(strings.TrimSpace(p))
-	for _, root := range append(append([]string{}, s.layout.ReadRoots...), s.layout.WorkDirRoots...) {
-		if workspace.IsUnder(clean, root) {
-			return true
-		}
-	}
-	return false
 }
 
 // userScriptDir is where an uploaded skill script lands on a shared machine.

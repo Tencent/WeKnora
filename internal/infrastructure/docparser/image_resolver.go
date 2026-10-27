@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"html"
 	"image"
-	_ "image/gif"
+	"image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
@@ -23,6 +25,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
+
+	_ "golang.org/x/image/bmp"  // Register BMP decoding for image.Decode and DecodeConfig.
+	_ "golang.org/x/image/webp" // Register WebP decoding for image.Decode and DecodeConfig.
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -39,6 +46,9 @@ const (
 	// minImageBytes is the minimum file size in bytes; very small images are
 	// almost certainly icons or decorative elements.
 	minImageBytes = 512 // 512 bytes
+	// inlineImageRollbackTimeout bounds cleanup even if the request context was
+	// cancelled while one of the inline image saves was failing.
+	inlineImageRollbackTimeout = 5 * time.Second
 )
 
 // isIconImage returns true if the image data looks like a small icon or
@@ -61,6 +71,16 @@ type StoredImage struct {
 	OriginalRef string // reference in the original markdown
 	ServingURL  string // provider:// URL (e.g. local://images/xxx.png, minio://bucket/key)
 	MimeType    string
+	// Inline marks Base64 images stored from inline document content, so only
+	// resources created by this resolver are eligible for partial-save cleanup.
+	Inline bool
+	// NewlyStored marks a resource created by this resolver invocation, including
+	// document-parser ImageRefs, so guard failures can clean up unbound uploads.
+	NewlyStored bool
+	// SkipMultimodal keeps a saved inline image out of OCR/caption fan-out once
+	// its syntax-specific legacy budget is exhausted. The image still remains in
+	// the document and resource bindings.
+	SkipMultimodal bool
 	// SourceLocators place the image in the original file (e.g. the scanned
 	// page it was rendered from). Filled by ingestion after resolution.
 	SourceLocators types.SourceLocators
@@ -87,18 +107,51 @@ func (r *ImageResolver) ResolveAndStore(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
+	var inlineImages []StoredImage
+	defer func() {
+		if err == nil {
+			return
+		}
+		updatedMarkdown = result.MarkdownContent
+		if fileSvc == nil {
+			return
+		}
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineImageRollbackTimeout)
+		defer cancel()
+		for _, image := range inlineImages {
+			if deleteErr := fileSvc.DeleteFile(rollbackCtx, image.ServingURL); deleteErr != nil {
+				log.Printf("WARN: failed to rollback inline image %s: %v", image.ServingURL, deleteErr)
+			}
+		}
+	}()
+
+	ctx = context.WithValue(ctx, inlineQuotaKey{}, &inlineQuota{})
 	markdown := UnwrapLinkedImages(result.MarkdownContent)
-	md2, imgDataURIs, _ := r.ResolveDataURIImages(ctx, markdown, fileSvc, tenantID)
-	markdown = md2
+	// When the document-wide storage cap is reached, this resolver order gives
+	// Markdown, HTML, then bare Base64 references deterministic priority.
+	md2, imgDataURIs, err := r.ResolveDataURIImages(ctx, markdown, fileSvc, tenantID)
+	inlineImages = append(inlineImages, imgDataURIs...)
 	images = append(images, imgDataURIs...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md2
 
-	md3, imgHTML, _ := r.ResolveHTMLDataURIImages(ctx, markdown, fileSvc, tenantID)
-	markdown = md3
+	md3, imgHTML, err := r.ResolveHTMLDataURIImages(ctx, markdown, fileSvc, tenantID)
+	inlineImages = append(inlineImages, imgHTML...)
 	images = append(images, imgHTML...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md3
 
-	md4, imgBare, _ := r.ResolveBareBase64Content(ctx, markdown, fileSvc, tenantID)
-	markdown = md4
+	md4, imgBare, err := r.ResolveBareBase64Content(ctx, markdown, fileSvc, tenantID)
+	inlineImages = append(inlineImages, imgBare...)
 	images = append(images, imgBare...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md4
 
 	if len(result.ImageRefs) == 0 {
 		return markdown, sortImagesByPosition(markdown, images), nil
@@ -230,6 +283,7 @@ func (r *ImageResolver) saveReferencedImage(
 		OriginalRef: refPath,
 		ServingURL:  servingURL,
 		MimeType:    ref.MimeType,
+		NewlyStored: true,
 	}
 	savedRefs[refPath] = stored
 	if ref.Filename != "" {
@@ -348,13 +402,39 @@ func sniffImageMime(data []byte) string {
 	return ""
 }
 
+func sniffInlineImageMime(data []byte) string {
+	if mimeType := sniffImageMime(data); mimeType != "" {
+		return mimeType
+	}
+	// Read through declarations and comments without imposing a prefix length.
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		if text, ok := token.(xml.CharData); ok && len(bytes.TrimSpace(text)) != 0 {
+			break
+		}
+		if root, ok := token.(xml.StartElement); ok {
+			if root.Name.Local == "svg" {
+				return "image/svg+xml"
+			}
+			break
+		}
+	}
+
+	return ""
+}
+
 // ---------------------------------------------------------------------------
 // HTML <img> tag data URI resolution
 // ---------------------------------------------------------------------------
 
 // imgHTMLDataURI matches HTML <img> tags with inline data:image/*;base64,... in the src attribute.
+// A missing quote must not extend the payload into subsequent tags or prose.
 var imgHTMLDataURI = regexp.MustCompile(
-	`(?i)<img\s[^>]*?src\s*=\s*["'](data:image/[^;]+;base64,[^"']+)["'][^>]*?/?\s*>`,
+	`(?i)<img\s[^>]*?src\s*=\s*["'](data:image/[^;<>]+;base64,[^"'<>]+)["'][^>]*?/?\s*>`,
 )
 
 // imgHTMLSrc matches an HTML <img> tag carrying a quoted src attribute. It does
@@ -366,6 +446,69 @@ var imgHTMLDataURI = regexp.MustCompile(
 // matched back to the tag it came from. See searchutil.HTMLImageSrcRegex for
 // the submatch layout and the known limits.
 var imgHTMLSrc = searchutil.HTMLImageSrcRegex
+
+// Inline resource caps are independent from the legacy per-syntax 30-image AI budget.
+// Excess images are omitted instead of leaving Base64 in searchable text.
+const (
+	maxInlineImagesPerDocument = 1000
+	maxInlineBytesPerDocument  = 100 * 1024 * 1024
+	inlineImageOmitted         = "[image omitted]"
+)
+
+type inlineQuotaKey struct{}
+
+type inlineQuota struct {
+	count int
+	bytes int
+}
+
+// Check decoded-byte limits before allocating a potentially huge image.
+func oversizedInlinePayload(payload string) bool {
+	return len(payload) > ((maxRemoteImageSize+2)/3)*4
+}
+
+func quotaForInlineImages(ctx context.Context) *inlineQuota {
+	if q, ok := ctx.Value(inlineQuotaKey{}).(*inlineQuota); ok {
+		return q
+	}
+	return &inlineQuota{}
+}
+
+func (q *inlineQuota) permits(size int) bool {
+	if q.count >= maxInlineImagesPerDocument || size > maxInlineBytesPerDocument-q.bytes {
+		return false
+	}
+	q.count++
+	q.bytes += size
+	return true
+}
+
+type inlineRewrite struct {
+	start int
+	end   int
+	value string
+}
+
+// The regex match offsets refer to the original Markdown. Build the output
+// in one pass instead of copying the entire document on each substitution.
+func applyInlineRewrites(markdown string, edits []inlineRewrite) string {
+	if len(edits) == 0 {
+		return markdown
+	}
+	var b strings.Builder
+	b.Grow(len(markdown))
+	cursor := 0
+	for _, e := range edits {
+		if e.start < cursor {
+			continue
+		}
+		b.WriteString(markdown[cursor:e.start])
+		b.WriteString(e.value)
+		cursor = e.end
+	}
+	b.WriteString(markdown[cursor:])
+	return b.String()
+}
 
 // ResolveHTMLDataURIImages finds <img src="data:image/*;base64,..."> tags in markdown,
 // decodes the images, stores them via fileSvc, and replaces each tag with a markdown
@@ -380,32 +523,50 @@ func (r *ImageResolver) ResolveHTMLDataURIImages(
 	if len(matches) == 0 {
 		return markdown, nil, nil
 	}
+	codeRanges := markdownCodeLiteralRanges(markdown)
+	var rewrites []inlineRewrite
+	quota := quotaForInlineImages(ctx)
 
-	processed := 0
-	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
-			break
-		}
+	for i := range matches {
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		dataURI := markdown[m[2]:m[3]]
 		mimeType, payload, ok := parseImageDataURI(dataURI)
 		if !ok {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		payload = cleanBase64Payload(payload)
 		if payload == "" {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
+			continue
+		}
+		if oversizedInlinePayload(payload) {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		data, decErr := decodeBase64Flexible(payload)
 		if decErr != nil {
 			log.Printf("WARN: HTML img data URI base64 decode failed: %v", decErr)
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		if len(data) > maxRemoteImageSize {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
+			continue
+		}
+		if !isCompleteInlineImage(data, mimeType) {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		if isIconImage(data) {
-			markdown = markdown[:m[0]] + markdown[m[1]:]
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], ""})
+			continue
+		}
+		if !quota.permits(len(data)) {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		ext := extFromMime(mimeType)
@@ -415,18 +576,18 @@ func (r *ImageResolver) ResolveHTMLDataURIImages(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save HTML img data URI image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save HTML data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: "html-img-data-uri",
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
-		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
-		processed++
+		rewrites = append(rewrites, inlineRewrite{m[0], m[1], fmt.Sprintf("![image](%s)", servingURL)})
 	}
-	return markdown, images, nil
+	applyMultimodalBudget(images)
+	return applyInlineRewrites(markdown, rewrites), images, nil
 }
 
 // ResolveRelativeHTMLImages finds HTML <img> tags whose src points at a
@@ -470,12 +631,633 @@ func (r *ImageResolver) ResolveRelativeHTMLImages(
 
 // bareDataURIPattern matches standalone data:image/*;base64,... strings.
 var bareDataURIPattern = regexp.MustCompile(
-	`(?i)data:image/([^;\s]+);base64,([A-Za-z0-9+/=]{100,})`,
+	`(?i)data:image/([^;\s]+);base64,[ \t\r\n]*([^\r\n\s"'<>)]{1,})`,
 )
 
 // bareBase64CommaPrefixed matches base64,DATA patterns (partial data URIs missing the mime prefix).
 var bareBase64CommaPrefixed = regexp.MustCompile(
-	`base64,([A-Za-z0-9+/=]{200,})`,
+	`base64,[ \t\r\n]*([^\r\n\s"'<>)]{32,})`,
+)
+
+const wrappedBase64LineLength = 76
+
+// wrappedBase64PayloadEnd extends a payload over Base64 fragments separated by newlines.
+// Width is not a boundary: encoding syntax and a complete image determine the end.
+// On failure the returned end stays on the first line. Callers must reject an
+// ambiguous continuation rather than erase its prefix and allow the tail through.
+// supported is true only after full validation within the decode budget.
+// Decoded data never grows beyond the existing single-image cap.
+func wrappedBase64PayloadEnd(markdown string, payloadStart, payloadEnd int) (end int, complete, supported bool) {
+	// Sentence punctuation belongs to the document, including after damaged tokens.
+	firstLine := strings.TrimRight(markdown[payloadStart:payloadEnd], ".,;")
+	payloadEnd = payloadStart + len(firstLine)
+	if len(firstLine) < 32 && !looksLikeImageBase64(firstLine) {
+		return payloadEnd, true, false
+	}
+	if !isStrictBase64Line(firstLine) || oversizedInlinePayload(firstLine) {
+		return payloadEnd, false, false
+	}
+	// Keep partial encoding groups across line breaks, which need not align
+	// with Base64's four-character groups.
+	pending := firstLine[len(firstLine)/4*4:]
+	imageData, err := decodeBase64Flexible(firstLine[:len(firstLine)/4*4])
+	if err != nil {
+		return payloadEnd, false, false
+	}
+	imageValidity := func() (complete, supported bool) {
+		data := imageData
+		if pending != "" {
+			tail, err := decodeBase64Flexible(pending)
+			if err != nil || len(tail) > maxRemoteImageSize-len(data) {
+				return false, false
+			}
+			data = append(data, tail...)
+		}
+		return validateInlineImageData(data)
+	}
+	if complete, supported := imageValidity(); complete {
+		return payloadEnd, true, supported
+	}
+
+	currentEnd := payloadEnd
+	binaryImage := sniffImageMime(imageData) != ""
+	// Cache the opening element boundary. A self-closing root can end on a
+	// full encoded line; child /> tags must not trigger repeated XML validation.
+	svgOpeningEnd := -1
+	for {
+		lineStart := currentEnd
+		if lineStart < len(markdown) && markdown[lineStart] == '\r' {
+			lineStart++
+		}
+		if lineStart >= len(markdown) || markdown[lineStart] != '\n' {
+			return payloadEnd, false, false
+		}
+		lineStart++
+		lineEnd := strings.IndexByte(markdown[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(markdown)
+		} else {
+			lineEnd += lineStart
+		}
+		candidateEnd := lineEnd
+		if candidateEnd > lineStart && markdown[candidateEnd-1] == '\r' {
+			candidateEnd--
+		}
+		linePayloadEnd := candidateEnd
+		fragment := markdown[lineStart:candidateEnd]
+		if boundary := strings.IndexAny(fragment, " \t\"'<>)]"); boundary >= 0 {
+			fragment = fragment[:boundary]
+		}
+		fragment = strings.TrimRight(fragment, ".,;")
+		candidateEnd = lineStart + len(fragment)
+		line := fragment
+		if len(line) == 0 || !isStrictBase64Line(line) {
+			return payloadEnd, false, false
+		}
+		if oversizedInlinePayload(line) {
+			return payloadEnd, false, false
+		}
+		encoded := pending + line
+		end := len(encoded) / 4 * 4
+		pending = encoded[end:]
+		lineData, err := decodeBase64Flexible(encoded[:end])
+		if err != nil {
+			return payloadEnd, false, false
+		}
+		if len(lineData) > maxRemoteImageSize-len(imageData) {
+			return payloadEnd, false, false
+		}
+		needed := len(imageData) + len(lineData)
+		if needed > cap(imageData) {
+			grown := make([]byte, len(imageData), min(maxRemoteImageSize, max(needed, 2*cap(imageData))))
+			copy(grown, imageData)
+			imageData = grown
+		}
+		imageData = append(imageData, lineData...)
+		tail := bytes.TrimSpace(imageData[max(0, len(imageData)-64):])
+		if !binaryImage && svgOpeningEnd < 0 && bytes.HasSuffix(tail, []byte("/>")) {
+			decoder := xml.NewDecoder(bytes.NewReader(imageData))
+			for {
+				token, err := decoder.Token()
+				if err != nil {
+					break
+				}
+				if _, ok := token.(xml.StartElement); ok {
+					svgOpeningEnd = int(decoder.InputOffset())
+					break
+				}
+			}
+		}
+		selfClosingRoot := svgOpeningEnd >= 2 &&
+			bytes.Equal(imageData[svgOpeningEnd-2:svgOpeningEnd], []byte("/>")) &&
+			len(bytes.TrimSpace(imageData[svgOpeningEnd:])) == 0
+		if binaryImage || candidateEnd < linePayloadEnd || strings.Contains(line, "=") || len(line)%4 != 0 ||
+			bytes.HasSuffix(tail, []byte("</svg>")) || selfClosingRoot {
+			if complete, supported := imageValidity(); complete {
+				return candidateEnd, true, supported
+			}
+		}
+		if candidateEnd < linePayloadEnd || (strings.Contains(line, "=") && pending == "") {
+			return payloadEnd, false, false
+		}
+		currentEnd = candidateEnd
+	}
+}
+
+// ErrAmbiguousInlineImage means the image cannot be separated from following
+// lines without guessing. Callers should keep the source and stop ingestion.
+var ErrAmbiguousInlineImage = errors.New(
+	"cannot determine the end of a malformed multiline inline image; repair or remove the image")
+
+func hasInlineImageContinuation(markdown string, end int) bool {
+	rest := strings.TrimLeft(markdown[end:], " \t\r")
+	if !strings.HasPrefix(rest, "\n") {
+		return false
+	}
+	line, _, _ := strings.Cut(rest[1:], "\n")
+	line = strings.TrimSpace(line)
+	if line == "" || markdownATXHeading.MatchString(line) {
+		return false
+	}
+	// A non-ASCII letter establishes a prose start. ASCII text and corrupt
+	// prefixes such as !AAAA remain ambiguous; do not leave their tails behind.
+	first, _ := utf8.DecodeRuneInString(line)
+	return first < utf8.RuneSelf || !unicode.IsLetter(first)
+}
+
+func isStrictBase64Line(line string) bool {
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '+' || c == '/' || c == '_' || c == '-' || c == '=' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+const (
+	// Fixed support limits for inline raster images bound decoding memory.
+	// Even valid images over 16,777,216 pixels are omitted; this is not corruption.
+	// GIFs also have aggregate pixel and frame limits.
+	maxInlineImagePixels = 16 * 1024 * 1024
+	maxInlineGIFPixels   = 32 * 1024 * 1024
+	maxInlineGIFFrames   = 256
+)
+
+func isCompleteInlineImage(data []byte, mimeType string) bool {
+	// A declared image MIME type alone cannot validate unrecognized bytes.
+	if extFromMime(mimeType) == "" && sniffInlineImageMime(data) == "" {
+		return false
+	}
+	_, supported := validateInlineImageData(data)
+	return supported
+}
+
+// validateInlineImageData distinguishes a complete boundary from permission to store.
+// Over-budget containers with an end boundary may be omitted without decoding
+// their pixels. Only images that pass full validation are supported for storage.
+func validateInlineImageData(data []byte) (complete, supported bool) {
+	mimeType := sniffImageMime(data)
+	// Header checks allocate decoder buffers too: run them only once an image
+	// boundary is present, rather than for every fragment of a truncated payload.
+	switch mimeType {
+	case "image/png":
+		complete = bytes.HasSuffix(data, []byte{0, 0, 0, 0, 'I', 'E', 'N', 'D', 0xAE, 0x42, 0x60, 0x82})
+	case "image/jpeg":
+		complete = bytes.HasSuffix(data, []byte{0xFF, 0xD9})
+	case "image/gif":
+		complete = len(data) > 0 && data[len(data)-1] == ';'
+	case "image/webp":
+		complete = len(data) >= 12 && uint64(binary.LittleEndian.Uint32(data[4:8]))+8 == uint64(len(data))
+	case "image/bmp":
+		complete = len(data) >= 6 && uint64(binary.LittleEndian.Uint32(data[2:6])) == uint64(len(data))
+	}
+	if mimeType != "" {
+		if !complete {
+			return false, false
+		}
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+			return false, false
+		}
+		withinBudget := uint64(cfg.Width) <= maxInlineImagePixels/uint64(cfg.Height)
+		if mimeType == "image/gif" {
+			valid, framesWithinBudget := gifDecodeBudget(data)
+			if !valid {
+				return false, false
+			}
+			withinBudget = withinBudget && framesWithinBudget
+		}
+		if !withinBudget {
+			log.Printf("WARN: inline %s image %dx%d exceeds supported decode budget; omitted",
+				mimeType, cfg.Width, cfg.Height)
+			return true, false
+		}
+		if mimeType == "image/gif" {
+			_, err = gif.DecodeAll(bytes.NewReader(data))
+		} else {
+			_, _, err = image.Decode(bytes.NewReader(data))
+		}
+		return err == nil, err == nil
+	}
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	depth, roots := 0, 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			valid := roots == 1 && depth == 0
+			return valid, valid
+		}
+		if err != nil {
+			return false, false
+		}
+		switch token := token.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				roots++
+				if roots != 1 || token.Name.Local != "svg" {
+					return false, false
+				}
+			}
+			depth++
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if depth == 0 && len(bytes.TrimSpace(token)) != 0 {
+				return false, false
+			}
+		}
+	}
+}
+
+// gifDecodeBudget checks the frame envelope before bounded LZW validation.
+func gifDecodeBudget(data []byte) (valid, withinBudget bool) {
+	if len(data) < 13 {
+		return false, false
+	}
+	offset := 13
+	if data[10]&0x80 != 0 {
+		offset += 3 << (1 + (data[10] & 7))
+	}
+	frames, pixels := 0, uint64(0)
+	skipBlocks := func() bool {
+		for offset < len(data) {
+			size := int(data[offset])
+			offset++
+			if size == 0 {
+				return true
+			}
+			if size > len(data)-offset {
+				return false
+			}
+			offset += size
+		}
+		return false
+	}
+	for offset < len(data) {
+		block := data[offset]
+		offset++
+		switch block {
+		case 0x3B:
+			return frames > 0 && offset == len(data), frames <= maxInlineGIFFrames && pixels <= maxInlineGIFPixels
+		case 0x21:
+			if offset >= len(data) {
+				return false, false
+			}
+			offset++ // Extension label; its data uses the same sub-block envelope.
+			if !skipBlocks() {
+				return false, false
+			}
+		case 0x2C:
+			if len(data)-offset < 9 {
+				return false, false
+			}
+			descriptor := data[offset : offset+9]
+			width := uint64(binary.LittleEndian.Uint16(descriptor[4:6]))
+			height := uint64(binary.LittleEndian.Uint16(descriptor[6:8]))
+			pixels += width * height
+			frames++
+			if width == 0 || height == 0 {
+				return false, false
+			}
+			offset += 9
+			if descriptor[8]&0x80 != 0 {
+				offset += 3 << (1 + (descriptor[8] & 7))
+			}
+			if offset >= len(data) {
+				return false, false
+			}
+			offset++ // LZW minimum code size.
+			if !skipBlocks() {
+				return false, false
+			}
+		default:
+			return false, false
+		}
+	}
+	return false, false
+}
+
+// HasUnresolvedInlineImagePayload guards the chunking boundary against data
+// URIs that a parser could not recognize or resolve. It deliberately ignores
+// ordinary prose mentioning base64 and non-image base64 examples.
+func HasUnresolvedInlineImagePayload(markdown string) bool {
+	if !containsBase64Marker(markdown) {
+		return false
+	}
+	markdown = withoutMarkdownCodeLiterals(markdown)
+	for _, match := range unresolvedImageDataURI.FindAllString(markdown, -1) {
+		if idx := strings.Index(strings.ToLower(match), "base64,"); idx >= 0 &&
+			looksLikeImageBase64(strings.TrimSpace(match[idx+len("base64,"):])) {
+			return true
+		}
+	}
+	for _, match := range unresolvedBareBase64Image.FindAllStringSubmatch(markdown, -1) {
+		if looksLikeImageBase64(match[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsBase64Marker(markdown string) bool {
+	const marker = "base64,"
+	for i := 0; i+len(marker) <= len(markdown); i++ {
+		if markdown[i] != 'b' && markdown[i] != 'B' {
+			continue
+		}
+		if strings.EqualFold(markdown[i:i+len(marker)], marker) {
+			return true
+		}
+	}
+	return false
+}
+
+type markdownCodeLiteralRange struct {
+	start int
+	end   int
+}
+
+// withoutMarkdownCodeLiterals masks fenced and inline code while preserving
+// byte offsets. The image resolver uses the same ranges before replacing a
+// match, so documentation snippets cannot be either uploaded or rejected.
+func withoutMarkdownCodeLiterals(markdown string) string {
+	ranges := markdownCodeLiteralRanges(markdown)
+	if len(ranges) == 0 {
+		return markdown
+	}
+	masked := []byte(markdown)
+	for _, r := range ranges {
+		for i := r.start; i < r.end; i++ {
+			if masked[i] != '\n' {
+				masked[i] = ' '
+			}
+		}
+	}
+	return string(masked)
+}
+
+// Literal code containers must not be interpreted as image references.
+var (
+	htmlCodeLiteralPattern = regexp.MustCompile(`(?is)<pre\b[^>]*>.*?</pre\s*>|<code\b[^>]*>.*?</code\s*>`)
+	markdownListItemPrefix = regexp.MustCompile(`^(?:[-*+]|[0-9]+[.)])[ \t]`)
+	markdownATXHeading     = regexp.MustCompile(`^#{1,6}(?:[ \t]|$)`)
+)
+
+// indentedCodeLiteralRanges identifies indented code and list content in one
+// forward scan. A list child may have four leading spaces and still contain a
+// normal image, while four more spaces beyond its content indent introduce code.
+func indentedCodeLiteralRanges(markdown string, blocks []markdownCodeLiteralRange) []markdownCodeLiteralRange {
+	var ranges []markdownCodeLiteralRange
+	var listContentIndent int
+	hasListItem := false
+	blankLines := 0
+	inParagraph := false
+
+	for lineStart := 0; lineStart < len(markdown); {
+		lineEnd := strings.IndexByte(markdown[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(markdown)
+		} else {
+			lineEnd += lineStart
+		}
+		line := markdown[lineStart:lineEnd]
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		trimmed := strings.TrimSpace(line)
+
+		// An indented code block cannot interrupt an existing paragraph.
+		indentedCode := strings.HasPrefix(line, "\t") || indent >= 4
+		if _, inBlock := codeLiteralRangeAt(blocks, lineStart); inBlock {
+			inParagraph = false
+		} else if indentedCode && !inParagraph && (!hasListItem || blankLines >= 2 || indent >= listContentIndent) {
+			ranges = append(ranges, markdownCodeLiteralRange{start: lineStart, end: lineEnd})
+		} else {
+			inParagraph = trimmed != "" && !markdownATXHeading.MatchString(trimmed)
+		}
+
+		if trimmed == "" {
+			blankLines++
+			if blankLines >= 2 {
+				hasListItem = false
+			}
+		} else {
+			if marker := markdownListItemPrefix.FindString(trimmed); marker != "" {
+				blankLines = 0
+				listContentIndent = indent + len(marker) + 4
+				hasListItem = true
+			} else if indent == 0 {
+				hasListItem = false
+			}
+		}
+
+		if lineEnd == len(markdown) {
+			break
+		}
+		lineStart = lineEnd + 1
+	}
+	return ranges
+}
+
+func mergeCodeLiteralRanges(ranges []markdownCodeLiteralRange) []markdownCodeLiteralRange {
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start < ranges[j].start })
+	merged := make([]markdownCodeLiteralRange, 0, len(ranges))
+	for _, span := range ranges {
+		if len(merged) > 0 && span.start <= merged[len(merged)-1].end {
+			if span.end > merged[len(merged)-1].end {
+				merged[len(merged)-1].end = span.end
+			}
+			continue
+		}
+		merged = append(merged, span)
+	}
+	return merged
+}
+
+func markdownCodeLiteralRanges(markdown string) []markdownCodeLiteralRange {
+	protected := fencedCodeLiteralRanges(markdown)
+	for _, match := range htmlCodeLiteralPattern.FindAllStringIndex(markdown, -1) {
+		protected = append(protected, markdownCodeLiteralRange{start: match[0], end: match[1]})
+	}
+	protected = mergeCodeLiteralRanges(protected)
+	protected = append(protected, indentedCodeLiteralRanges(markdown, protected)...)
+	protected = mergeCodeLiteralRanges(protected)
+	var inline []markdownCodeLiteralRange
+	for i := 0; i < len(markdown); {
+		if end, ok := codeLiteralRangeAt(protected, i); ok {
+			i = end
+			continue
+		}
+		if markdown[i] != '`' || isEscaped(markdown, i) {
+			i++
+			continue
+		}
+		runLength := 1
+		for i+runLength < len(markdown) && markdown[i+runLength] == '`' {
+			runLength++
+		}
+		closePos := findInlineCodeLiteralClose(markdown, protected, i+runLength, runLength)
+		if closePos < 0 {
+			i += runLength
+			continue
+		}
+		inline = append(inline, markdownCodeLiteralRange{start: i, end: closePos + runLength})
+		i = closePos + runLength
+	}
+	return mergeCodeLiteralRanges(append(protected, inline...))
+}
+
+func fencedCodeLiteralRanges(markdown string) []markdownCodeLiteralRange {
+	var ranges []markdownCodeLiteralRange
+	var fence byte
+	var fenceLength, fenceStart, fenceQuoteDepth int
+
+	for lineStart := 0; lineStart < len(markdown); {
+		lineEnd := strings.IndexByte(markdown[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(markdown)
+		} else {
+			lineEnd += lineStart
+		}
+		line := markdown[lineStart:lineEnd]
+		trimmed := strings.TrimLeft(line, " \t")
+		quoteDepth := 0
+		for strings.HasPrefix(trimmed, ">") {
+			quoteDepth++
+			trimmed = strings.TrimLeft(trimmed[1:], " \t")
+		}
+		// A quoted fence ends with its container, even if it is unclosed.
+		if fence != 0 && quoteDepth < fenceQuoteDepth {
+			ranges = append(ranges, markdownCodeLiteralRange{start: fenceStart, end: lineStart})
+			fence = 0
+		}
+		if fence == 0 {
+			if marker, length := codeFence(trimmed); length > 0 {
+				fence, fenceLength, fenceStart, fenceQuoteDepth = marker, length, lineStart, quoteDepth
+			}
+		} else if marker, length := codeFence(trimmed); quoteDepth == fenceQuoteDepth &&
+			marker == fence && length >= fenceLength &&
+			strings.TrimSpace(trimmed[length:]) == "" {
+			end := lineEnd
+			if end < len(markdown) {
+				end++
+			}
+			ranges = append(ranges, markdownCodeLiteralRange{start: fenceStart, end: end})
+			fence, fenceLength = 0, 0
+		}
+		if lineEnd == len(markdown) {
+			break
+		}
+		lineStart = lineEnd + 1
+	}
+	if fence != 0 {
+		ranges = append(ranges, markdownCodeLiteralRange{start: fenceStart, end: len(markdown)})
+	}
+	return ranges
+}
+
+func codeLiteralRangeAt(ranges []markdownCodeLiteralRange, offset int) (int, bool) {
+	index := sort.Search(len(ranges), func(i int) bool { return ranges[i].end > offset })
+	if index < len(ranges) && ranges[index].start <= offset {
+		return ranges[index].end, true
+	}
+	return 0, false
+}
+
+func findInlineCodeLiteralClose(markdown string, ranges []markdownCodeLiteralRange, start, runLength int) int {
+	for i := start; i < len(markdown); {
+		if end, ok := codeLiteralRangeAt(ranges, i); ok {
+			// Inline HTML does not terminate the surrounding Markdown code span.
+			if strings.EqualFold(markdown[i:min(i+5, len(markdown))], "<code") {
+				i = end
+				continue
+			}
+			return -1
+		}
+		if markdown[i] == '\n' {
+			next := i + 1
+			for next < len(markdown) && (markdown[next] == ' ' || markdown[next] == '\t' || markdown[next] == '\r') {
+				next++
+			}
+			if next < len(markdown) && markdown[next] == '\n' {
+				return -1
+			}
+		}
+		if markdown[i] != '`' {
+			i++
+			continue
+		}
+		end := i
+		for end < len(markdown) && markdown[end] == '`' {
+			end++
+		}
+		if end-i == runLength {
+			return i
+		}
+		i = end
+	}
+	return -1
+}
+
+func codeFence(line string) (byte, int) {
+	if len(line) < 3 || (line[0] != '`' && line[0] != '~') {
+		return 0, 0
+	}
+	marker := line[0]
+	length := 0
+	for length < len(line) && line[length] == marker {
+		length++
+	}
+	if length < 3 {
+		return 0, 0
+	}
+	return marker, length
+}
+
+func looksLikeImageBase64(payload string) bool {
+	// A short prefix is sufficient for binary magic, but not for an SVG root.
+	header, err := decodeBase64Flexible(payload[:min(len(payload), 64)])
+	if err == nil && sniffImageMime(header) != "" {
+		return true
+	}
+	// Even the guard must not allocate more than the single-image limit.
+	limit := (maxRemoteImageSize / 3) * 4
+	data, err := decodeBase64Flexible(payload[:min(len(payload), limit)])
+	if err != nil {
+		return false
+	}
+	if sniffInlineImageMime(data) != "" {
+		return true
+	}
+	// The guard can also recognize a root start split across wrapped lines.
+	trimmed := bytes.TrimSpace(data)
+	return bytes.HasPrefix(trimmed, []byte("<svg ")) || bytes.HasPrefix(trimmed, []byte("<svg>"))
+}
+
+var (
+	unresolvedImageDataURI    = regexp.MustCompile(`(?i)data:image/[^;\s"'<>)]*;base64,\s*[^\s"'<>)]{1,}`)
+	unresolvedBareBase64Image = regexp.MustCompile(`(?i)base64,([A-Za-z0-9+/_=-]{64,})`)
 )
 
 // ResolveBareBase64Content finds remaining bare data URIs and base64 image content
@@ -487,13 +1269,23 @@ func (r *ImageResolver) ResolveBareBase64Content(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
-	md, imgs1 := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID)
-	markdown = md
+	originalMarkdown := markdown
+	if _, ok := ctx.Value(inlineQuotaKey{}).(*inlineQuota); !ok {
+		ctx = context.WithValue(ctx, inlineQuotaKey{}, &inlineQuota{})
+	}
+	md, imgs1, err := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs1...)
+	if err != nil {
+		return originalMarkdown, images, err
+	}
+	markdown = md
 
-	md2, imgs2 := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID)
-	markdown = md2
+	md2, imgs2, err := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs2...)
+	if err != nil {
+		return originalMarkdown, images, err
+	}
+	markdown = md2
 
 	return markdown, images, nil
 }
@@ -503,48 +1295,82 @@ func (r *ImageResolver) resolveBareDataURIs(
 	markdown string,
 	fileSvc interfaces.FileService,
 	tenantID uint64,
-) (string, []StoredImage) {
+	codeRanges []markdownCodeLiteralRange,
+) (string, []StoredImage, error) {
 	matches := bareDataURIPattern.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
-		return markdown, nil
+		return markdown, nil, nil
 	}
 
 	var images []StoredImage
-	processed := 0
-	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
-			break
-		}
+	var rewrites []inlineRewrite
+	quota := quotaForInlineImages(ctx)
+	for i := range matches {
 		m := matches[i]
-		// Check context: skip HTML src attributes, but handle broken markdown refs
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
+		// Well-formed HTML images were handled above. Quoted leftovers may
+		// be malformed attributes and still need local resolution or omission.
 		insideWrapper := false
 		if m[0] > 0 {
 			prev := markdown[m[0]-1]
-			if prev == '"' || prev == '\'' {
-				continue // inside HTML attribute — already handled by ResolveHTMLDataURIImages
-			}
-			if prev == '(' {
+			insideWrapper = prev == '"' || prev == '\''
+			if prev == '(' || (prev == '<' && m[0] >= 2 && markdown[m[0]-2] == '(') {
 				insideWrapper = true // likely inside a broken ![...](...) ref
 			}
 		}
-		mimeSubtype := strings.ToLower(markdown[m[2]:m[3]])
+		mimeType := "image/" + strings.ToLower(markdown[m[2]:m[3]])
+		payloadEnd, complete, supported := m[5], true, false
+		if extFromMime(mimeType) != "" || looksLikeImageBase64(markdown[m[4]:m[5]]) {
+			payloadEnd, complete, supported = wrappedBase64PayloadEnd(markdown, m[4], m[5])
+		}
+		if !complete {
+			if hasInlineImageContinuation(markdown, payloadEnd) {
+				return markdown, images, ErrAmbiguousInlineImage
+			}
+			rewrites = append(rewrites, inlineRewrite{m[0], payloadEnd, inlineImageOmitted})
+			continue
+		}
+		m[1], m[5] = payloadEnd, payloadEnd
 		payload := markdown[m[4]:m[5]]
-		mimeType := "image/" + mimeSubtype
 
 		payload = cleanBase64Payload(payload)
 		if payload == "" {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
+			continue
+		}
+		if oversizedInlinePayload(payload) {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		data, decErr := decodeBase64Flexible(payload)
 		if decErr != nil {
-			log.Printf("WARN: bare data URI base64 decode failed: %v", decErr)
+			// Preserve short explanatory data-URI examples instead of treating
+			// them as actual broken images.
+			if len(payload) >= 64 {
+				log.Printf("WARN: bare data URI base64 decode failed: %v", decErr)
+				rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
+			}
 			continue
 		}
 		if len(data) > maxRemoteImageSize {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
+			continue
+		}
+		if sniffInlineImageMime(data) == "" && mimeType != "image/svg+xml" && len(payload) < 100 {
+			continue // not a real image, e.g. a short unquoted tutorial example
+		}
+		if !supported {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		if isIconImage(data) {
-			markdown = markdown[:m[0]] + markdown[m[1]:]
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], ""})
+			continue
+		}
+		if !quota.permits(len(data)) {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		ext := extFromMime(mimeType)
@@ -554,23 +1380,23 @@ func (r *ImageResolver) resolveBareDataURIs(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save bare data URI image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save bare data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: "bare-data-uri",
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
 		if insideWrapper {
 			// Inside a broken markdown ref like ![weird]alt](data:...) — replace data URI only
-			markdown = markdown[:m[0]] + servingURL + markdown[m[1]:]
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], servingURL})
 		} else {
-			markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], fmt.Sprintf("![image](%s)", servingURL)})
 		}
-		processed++
 	}
-	return markdown, images
+	applyMultimodalBudget(images)
+	return applyInlineRewrites(markdown, rewrites), images, nil
 }
 
 func (r *ImageResolver) resolveBareBase64Prefix(
@@ -578,41 +1404,72 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 	markdown string,
 	fileSvc interfaces.FileService,
 	tenantID uint64,
-) (string, []StoredImage) {
+	codeRanges []markdownCodeLiteralRange,
+) (string, []StoredImage, error) {
 	matches := bareBase64CommaPrefixed.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
-		return markdown, nil
+		return markdown, nil, nil
 	}
 
 	var images []StoredImage
-	processed := 0
-	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
-			break
-		}
+	var rewrites []inlineRewrite
+	quota := quotaForInlineImages(ctx)
+	for i := range matches {
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		// Skip if preceded by ';' — this is part of a data URI handled above
 		if m[0] > 0 && markdown[m[0]-1] == ';' {
 			continue
 		}
+		payloadEnd, complete, supported := wrappedBase64PayloadEnd(markdown, m[2], m[3])
+		if !complete && hasInlineImageContinuation(markdown, payloadEnd) &&
+			looksLikeImageBase64(markdown[m[2]:m[3]]) {
+			return markdown, images, ErrAmbiguousInlineImage
+		}
+		m[1], m[3] = payloadEnd, payloadEnd
 		payload := markdown[m[2]:m[3]]
 		payload = cleanBase64Payload(payload)
 		if payload == "" {
 			continue
 		}
+		if oversizedInlinePayload(payload) {
+			if !looksLikeImageBase64(payload) {
+				continue
+			}
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
+			continue
+		}
 		data, decErr := decodeBase64Flexible(payload)
 		if decErr != nil {
+			if !looksLikeImageBase64(payload) {
+				continue
+			}
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		if len(data) > maxRemoteImageSize {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
-		mimeType := sniffImageMime(data)
+		mimeType := sniffInlineImageMime(data)
 		if mimeType == "" {
+			if looksLikeImageBase64(payload) {
+				rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
+			}
+			continue
+		}
+		if !supported {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		if isIconImage(data) {
-			markdown = markdown[:m[0]] + markdown[m[1]:]
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], ""})
+			continue
+		}
+		if !quota.permits(len(data)) {
+			rewrites = append(rewrites, inlineRewrite{m[0], m[1], inlineImageOmitted})
 			continue
 		}
 		ext := extFromMime(mimeType)
@@ -622,18 +1479,18 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save bare base64 image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save bare base64 image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: "bare-base64",
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
-		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
-		processed++
+		rewrites = append(rewrites, inlineRewrite{m[0], m[1], fmt.Sprintf("![image](%s)", servingURL)})
 	}
-	return markdown, images
+	applyMultimodalBudget(images)
+	return applyInlineRewrites(markdown, rewrites), images, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -645,9 +1502,23 @@ const (
 	maxRemoteImageSize = 10 * 1024 * 1024 // 10 MB
 	// maxRemoteImages is the maximum number of remote images to process per document.
 	maxRemoteImages = 30
+	// maxInlineImagesForMultimodal is the legacy per-syntax number of inline
+	// images that reach image understanding. Additional inline images are saved
+	// and bound, but do not fan out OCR/caption work.
+	maxInlineImagesForMultimodal = 30
 	// remoteImageFetchTimeout is the per-image HTTP request timeout.
 	remoteImageFetchTimeout = 15 * time.Second
 )
+
+// applyMultimodalBudget flags images beyond the per-syntax AI quota.
+// Inline resolvers visit matches in document order and construct text in one pass,
+// the document's leading maxInlineImagesForMultimodal go to AI understanding,
+// the rest stay stored and bound but skip OCR/caption fan-out.
+func applyMultimodalBudget(images []StoredImage) {
+	for i := range images {
+		images[i].SkipMultimodal = i >= maxInlineImagesForMultimodal
+	}
+}
 
 // reLinkedImage matches the nested [![alt](img_url)](link_url) pattern where
 // an image is wrapped inside a Markdown link. We unwrap it to just ![alt](img_url)
@@ -663,7 +1534,20 @@ var reLinkedImage = regexp.MustCompile(
 // This should be called before any image-extraction regex so that only the
 // flat ![alt](url) form needs to be handled.
 func UnwrapLinkedImages(markdown string) string {
-	return reLinkedImage.ReplaceAllString(markdown, "![$1]($2)")
+	matches := reLinkedImage.FindAllStringSubmatchIndex(markdown, -1)
+	if len(matches) == 0 {
+		return markdown
+	}
+	codeRanges := markdownCodeLiteralRanges(markdown)
+	var rewrites []inlineRewrite
+	for _, match := range matches {
+		if _, ok := codeLiteralRangeAt(codeRanges, match[0]); !ok {
+			rewrites = append(rewrites, inlineRewrite{
+				match[0], match[1], markdown[match[0]+1 : match[5]+1],
+			})
+		}
+	}
+	return applyInlineRewrites(markdown, rewrites)
 }
 
 // imgMarkdownPattern matches Markdown image syntax: ![alt](url).
@@ -671,14 +1555,6 @@ func UnwrapLinkedImages(markdown string) string {
 // The URL group supports one level of balanced parentheses so that URLs
 // like https://example.com/item_(abc)/123 are captured in full.
 var imgMarkdownPattern = regexp.MustCompile(`!\[(.*?)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
-
-// imgMarkdownDataURI matches markdown images whose URL is a data:image/*;base64,...
-// payload. (?i) applies to the whole parenthesized data URI.
-// The alt-text group uses .*? (non-greedy) to allow literal ] inside alt text
-// (e.g. file paths like ![C:\img]name.png](data:...)).
-var imgMarkdownDataURI = regexp.MustCompile(
-	`!\[(.*?)\]\((?i:(data:image/[^;]+;base64,\s*[^)]+))\)`,
-)
 
 // parseImageDataURI splits a data URI into image MIME type and base64 payload.
 func parseImageDataURI(dataURI string) (mimeType string, b64Payload string, ok bool) {
@@ -702,8 +1578,8 @@ func parseImageDataURI(dataURI string) (mimeType string, b64Payload string, ok b
 }
 
 // ResolveDataURIImages finds embedded data:image/*;base64 images in markdown,
-// decodes them, stores via fileSvc, and replaces each reference with the returned
-// provider URL (same limits as remote images: count and decoded size).
+// decodes and stores each valid image, and replaces each reference with the
+// returned provider URL. A per-image decoded-size limit still applies.
 func (r *ImageResolver) ResolveDataURIImages(
 	ctx context.Context,
 	markdown string,
@@ -711,40 +1587,70 @@ func (r *ImageResolver) ResolveDataURIImages(
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
 	markdown = UnwrapLinkedImages(markdown)
-	matches := imgMarkdownDataURI.FindAllStringSubmatchIndex(markdown, -1)
+	matches := scanMarkdownImageTargets(markdown)
 	if len(matches) == 0 {
 		return markdown, nil, nil
 	}
+	codeRanges := markdownCodeLiteralRanges(markdown)
+	var rewrites []inlineRewrite
+	quota := quotaForInlineImages(ctx)
 
-	processed := 0
-	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= types.MaxInlineDocumentImages {
-			break
-		}
-		m := matches[i]
-		if len(m) < 6 {
+	for _, match := range matches {
+		if _, ok := codeLiteralRangeAt(codeRanges, match.ImageStart); ok {
 			continue
 		}
-		dataURI := markdown[m[4]:m[5]]
+		start, end := trimMarkdownSpaceBounds(markdown, match.TargetStart, match.TargetEnd)
+		if titleStart, ok := parseMarkdownImageTitleSuffix(markdown[start:end]); ok {
+			start, end = trimMarkdownSpaceBounds(markdown, start, start+titleStart)
+		}
+		if end-start >= 2 && markdown[start] == '<' && markdown[end-1] == '>' {
+			start++
+			end--
+		}
+		dataURI := markdown[start:end]
+		if !strings.HasPrefix(strings.ToLower(dataURI), "data:image/") || !containsBase64Marker(dataURI) {
+			continue
+		}
+		// A missing ')' can make the scanner consume the next paragraph.
+		// Let the bare resolver find a wrapped payload's actual boundary.
+		if strings.ContainsAny(dataURI, "\r\n") {
+			continue
+		}
 		mimeType, payload, ok := parseImageDataURI(dataURI)
 		if !ok {
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, inlineImageOmitted})
 			continue
 		}
 		payload = cleanBase64Payload(payload)
 		if payload == "" {
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, inlineImageOmitted})
+			continue
+		}
+		if oversizedInlinePayload(payload) {
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, inlineImageOmitted})
 			continue
 		}
 		data, decErr := decodeBase64Flexible(payload)
 		if decErr != nil {
 			log.Printf("WARN: data URI base64 decode failed: %v", decErr)
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, inlineImageOmitted})
 			continue
 		}
 		if len(data) > maxRemoteImageSize {
 			log.Printf("WARN: data URI image exceeds size limit (%d bytes)", maxRemoteImageSize)
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, inlineImageOmitted})
+			continue
+		}
+		if !isCompleteInlineImage(data, mimeType) {
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, inlineImageOmitted})
 			continue
 		}
 		if isIconImage(data) {
-			markdown = markdown[:m[0]] + markdown[m[1]:]
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, ""})
+			continue
+		}
+		if !quota.permits(len(data)) {
+			rewrites = append(rewrites, inlineRewrite{match.ImageStart, match.TargetEnd + 1, inlineImageOmitted})
 			continue
 		}
 		ext := extFromMime(mimeType)
@@ -754,18 +1660,18 @@ func (r *ImageResolver) ResolveDataURIImages(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save data URI image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: dataURI,
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
-		markdown = markdown[:m[4]] + servingURL + markdown[m[5]:]
-		processed++
+		rewrites = append(rewrites, inlineRewrite{start, end, servingURL})
 	}
-	return markdown, images, nil
+	applyMultimodalBudget(images)
+	return applyInlineRewrites(markdown, rewrites), images, nil
 }
 
 // errRemoteImageIsIcon marks the one skip reason worth aggregating: a page can

@@ -1,7 +1,7 @@
 <template>
   <SettingDrawer :visible="visible" :title="automation?.name || ''" icon="time" width="720px" :min-width="480"
     :max-width="960" storage-key="setting-drawer:width:automation-detail" class="automation-detail-drawer" hide-footer
-    @update:visible="(v: boolean) => !v && close()">
+    :z-index="2300" @update:visible="(v: boolean) => !v && close()">
     <template #headerIcon><t-icon name="time" class="automation-detail__header-icon" /></template>
     <template v-if="automation" #subtitle>
       <span class="automation-detail__subtitle">
@@ -43,7 +43,6 @@
           <div class="automation-detail__brief-context">
             <h3>{{ t('automation.detail.task') }}</h3>
             <div class="automation-detail__execution">
-              <span :title="t('automation.fields.agent')">{{ agentName }}</span>
               <span :title="t('automation.fields.accessLevel')">{{ t(`assistant.access.levels.${automation.access_level}.label`) }}</span>
               <span :title="t('automation.fields.sessionMode')">{{ t(`automation.sessionMode.${automation.session_mode}`) }}</span>
             </div>
@@ -101,7 +100,10 @@
         <div
           ref="instructionScroller"
           class="automation-detail__instruction-scroll"
-          :class="{ 'automation-detail__instruction-scroll--more': instructionHasMore }"
+          :class="{
+            'automation-detail__instruction-scroll--more': instructionHasMore,
+            'automation-detail__instruction-scroll--expanded': instructionExpanded,
+          }"
           :style="{ maxHeight: instructionExpanded ? 'none' : `${INSTRUCTION_PREVIEW_HEIGHT}px` }"
           @scroll="updateInstructionOverflow"
         >
@@ -158,6 +160,9 @@
                     <span v-else class="automation-detail__muted">{{ t(`automation.status.${run.status}`) }}</span>
                     <t-icon v-if="run.session_id" name="arrow-right-up" size="16px" class="automation-run__chevron" />
                   </component>
+                  <AssistantActionsButton v-if="run.status === 'succeeded' && run.answer" :label="t('assistant.actions.analyzeRun')"
+                    :actions="runAssistantActions(run)"
+                    :selection="{ field: t('automation.detail.runs'), text: run.answer.slice(0, 3000) }" />
                 </div>
               </li>
             </ul>
@@ -199,11 +204,11 @@ import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
 import ChatActionIcon from '@/components/ChatActionIcon.vue'
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue'
 
 const props = defineProps<{
   visible: boolean
   automation: Automation | null
-  agentName: string
   focusRunId?: string
 }>()
 const emit = defineEmits<{
@@ -213,6 +218,21 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+function runAssistantActions(run: AutomationRun) {
+  const previous = runs.value.filter(item => item.id !== run.id && item.status === 'succeeded'
+    && item.scheduled_at <= run.scheduled_at).slice(0, 2)
+  const source = JSON.stringify({
+    automation_id: props.automation?.id,
+    run_id: run.id,
+    session_id: run.session_id,
+    message_id: run.assistant_message_id,
+  })
+  return [
+    { key: 'summary', label: t('assistant.actions.summarizeRun'), query: t('assistant.prompts.summarizeRun', { source }) },
+    { key: 'compare', label: t('assistant.actions.compareRuns'), disabled: previous.length === 0,
+      query: t('assistant.prompts.compareRuns', { source, ids: JSON.stringify(previous.map(item => item.id)) }) },
+  ]
+}
 const router = useRouter()
 
 const PAGE = 20
@@ -638,6 +658,11 @@ async function revoke(grant: AutomationGrant) {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+
+  &--expanded {
+    overflow: visible;
+    overscroll-behavior: auto;
+  }
 }
 
 .automation-detail__instruction-scroll--more {

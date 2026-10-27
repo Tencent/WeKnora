@@ -793,7 +793,7 @@ func NewWikiSearchTool(
     "knowledge_base_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional bN knowledge-base handles to restrict the search"
+      "description": "Optional kb://N knowledge-base handles to restrict the search"
     },
     "limit": {
       "type": "integer",

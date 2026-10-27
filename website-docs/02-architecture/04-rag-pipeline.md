@@ -216,7 +216,7 @@ pipeline = types.NewPipelineBuilder().
 
 **PluginRerank**（`rerank.go`，720 行）：
 
-1. **Passage 清洗** `cleanPassageForRerank`：重排模型做的是语义相似度，Markdown 结构语法是噪声。代码块与 `$$...$$` 公式块**只脱掉围栏、保留内部正文**（早期实现整块删除，纯代码或纯公式的候选会被清成空串而丢分）；HTML 标签、图片引用、链接标记（保留文字）、裸 URL、表格分隔行（数据行转逗号拼接）、标题/引用/加粗/列表标记按序剥离，最后压缩多余空行。
+1. **Passage 清洗** `reranking.CleanPassage`：重排模型做的是语义相似度，Markdown 结构语法是噪声。顶层反引号或波浪线代码围栏只移除开闭标记，正文不再经过 HTML、URL 或 Markdown 清洗，避免 XML 标签、接口地址和代码运算符被删除；匹配围栏类型和长度，未闭合围栏保护到分块末尾。这里只识别至多三个前导空格的顶层围栏，不覆盖行内代码、缩进代码或引用/列表容器中的代码块。围栏外的 `$$...$$` 公式块脱掉定界符、保留正文；HTML 标签、图片引用、链接标记（保留文字）、裸 URL、表格分隔行（数据行转逗号拼接）、标题/引用/加粗/列表标记按序剥离，并压缩围栏外的多余空行。整个 passage 仍去除首尾空白；原始分块正文不变。
 2. **Passage 增强** `getEnrichedPassage`：拼入 `ImageInfo` 的 Caption/OCR 文本与 `ChunkMetadata` 中的生成问题（GeneratedQuestions）；与正文相同的图片文本（OCR / 描述分块自身）不重复拼接。模型配置了单篇或单次请求长度上限时，超长 passage 从尾部截到上限；候选按检索分最多取 200 条送去打分。
 3. 调用 `rerankModel.Rerank(ctx, RewriteQuery, passages)`，按 `RerankThreshold` 过滤：
    - 全部低于阈值且 top1 ≥ `rerankFallbackMinScore`（默认 0.15；用户显式圈定标签/文档范围时为 0，保留权威范围的最佳候选）→ 保留 top1 兜底；

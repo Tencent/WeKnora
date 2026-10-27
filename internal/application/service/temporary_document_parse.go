@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -103,22 +104,26 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 	if parseErr != nil {
 		retryCount, hasRetryCount := asynq.GetRetryCount(ctx)
 		maxRetry, hasMaxRetry := asynq.GetMaxRetry(ctx)
-		if hasRetryCount && hasMaxRetry && retryCount < maxRetry {
+		permanent := errors.Is(parseErr, docparser.ErrCSVMarkdownTooLarge)
+		if !permanent && hasRetryCount && hasMaxRetry && retryCount < maxRetry {
 			logger.Warnf(ctx, "temporary document parse will retry: document_id=%s attempt=%d/%d err=%v",
 				payload.DocumentID, retryCount+1, maxRetry+1, parseErr)
 			return parseErr
 		}
 		message := parseErr.Error()
 		if len(message) > 2000 {
-			message = message[:2000]
+			message = common.TruncateUTF8Bytes(message, 2000)
 		}
-		_ = s.repo.MarkFailed(ctx, payload.TenantID, payload.DocumentID, message)
+		if err := s.repo.MarkFailed(ctx, payload.TenantID, payload.DocumentID, message); err != nil {
+			return fmt.Errorf("mark temporary document failed: %w", err)
+		}
 		logger.Errorf(ctx, "temporary document parse failed: document_id=%s err=%v", payload.DocumentID, parseErr)
-		if hasRetryCount && hasMaxRetry {
+		if !permanent && hasRetryCount && hasMaxRetry {
 			return parseErr
 		}
-		// Lite mode doesn't expose Asynq retry metadata in the context. Surface
-		// a terminal state immediately instead of leaving the UI spinning.
+		// A permanent rejection is complete once its failed state is saved.
+		// Lite mode also lacks Asynq retry metadata, so surface a terminal state
+		// there instead of leaving the UI spinning.
 		return nil
 	}
 	content = common.CleanInvalidUTF8(content)

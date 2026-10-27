@@ -71,6 +71,22 @@ func selectSessionBindingStore(
 	return sandbox.NewMemorySessionSandboxBindingStore(), "memory", nil
 }
 
+// newSessionBindingStore selects the process-wide session→sandbox binding
+// store. The tenant sandbox resolver and the background activity registry
+// share it: the registry's Redis hash must use the binding store's client,
+// namespace and hash tag so the turn-lease scripts can read it. A nil result
+// disables per-tenant sandbox configs, as a failed selection always has.
+func newSessionBindingStore(redisClient *redis.Client) sandbox.SessionSandboxBindingStore {
+	ctx := context.Background()
+	store, storeKind, err := selectSessionBindingStore(redisClient, true)
+	if err != nil {
+		logger.Warnf(ctx, "Per-tenant sandbox config disabled: %v", err)
+		return nil
+	}
+	logger.Infof(ctx, "Session sandbox binding store: %s", storeKind)
+	return store
+}
+
 // sessionExistenceLookup is the narrow slice of SessionRepository the
 // session existence checker actually needs. Declaring it here (rather than
 // depending on interfaces.SessionRepository) keeps the checker easy to test
@@ -133,7 +149,7 @@ func buildGlobalSandboxConfig() *sandbox.Config {
 func newTenantSandboxResolver(
 	defaultManager sandbox.Manager,
 	loader sandbox.TenantSandboxConfigLoader,
-	redisClient *redis.Client,
+	store sandbox.SessionSandboxBindingStore,
 	sessionRepo interfaces.SessionRepository,
 	bootstrapper sandbox.SessionBootstrapper,
 	alloc *sandboxalloc.Service,
@@ -143,10 +159,8 @@ func newTenantSandboxResolver(
 
 	// Tenants may configure any supported backend regardless of process startup
 	// mode. Remote configs use this binding store for session persistence.
-	store, storeKind, err := selectSessionBindingStore(redisClient, true)
-	if err != nil {
-		logger.Warnf(ctx,
-			"Per-tenant sandbox config disabled: %v", err)
+	if store == nil {
+		logger.Warnf(ctx, "Per-tenant sandbox config disabled: no session binding store")
 		return nil
 	}
 	resolver, err := sandbox.NewTenantSandboxResolver(sandbox.TenantSandboxResolverDeps{
@@ -167,7 +181,7 @@ func newTenantSandboxResolver(
 				"(per-tenant sandbox config disabled)", err)
 		return nil
 	}
-	logger.Infof(ctx, "Tenant sandbox resolver configured: binding=%s", storeKind)
+	logger.Infof(ctx, "Tenant sandbox resolver configured")
 	return resolver
 }
 

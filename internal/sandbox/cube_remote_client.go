@@ -945,6 +945,14 @@ func (c *CubeRemoteClient) Exec(
 			"cube returned an empty command result", nil,
 		)
 	}
+	if request.OnOutput != nil {
+		if sdkResult.Stdout != "" {
+			request.OnOutput("stdout", []byte(sdkResult.Stdout))
+		}
+		if sdkResult.Stderr != "" {
+			request.OnOutput("stderr", []byte(sdkResult.Stderr))
+		}
+	}
 	return &RemoteExecResult{
 		Stdout:   sdkResult.Stdout,
 		Stderr:   sdkResult.Stderr,
@@ -1551,6 +1559,20 @@ func (c *CubeRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handle Re
 	startTerminalTTLRefresh(ctx, nil, ttl, func(rctx context.Context) error {
 		return sb.SetTimeout(rctx, ttl)
 	})
+}
+
+// KeepAlive moves the sandbox's idle timeout to ttl from now. Cube already
+// counts commands as activity; the explicit call keeps background work from
+// depending on which requests the control plane happens to count.
+func (c *CubeRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, ttl time.Duration) error {
+	sb, err := cubeHandleSandbox("KeepAlive", handle)
+	if err != nil {
+		return err
+	}
+	if ttl <= 0 {
+		return nil
+	}
+	return sb.SetTimeout(ctx, ttl)
 }
 
 var (
