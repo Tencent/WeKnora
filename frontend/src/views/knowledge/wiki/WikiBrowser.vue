@@ -1283,9 +1283,8 @@ function preferredDefaultTab(tabs: Array<{ type: string }>): string {
 
 // groupedPages projects the bucketed state into the shape the sidebar
 // template expects: one {type, label, items, total, loading, hasMore}
-// per displayed group. Groups with zero total are hidden (nothing to
-// show) but groups with total > 0 but items.length === 0 still render
-// so the collapse header can trigger a lazy fetch.
+// per displayed group. Built-in tab totals come from whole-library stats;
+// groups with no pages remain visible when they still contain directories.
 const groupedPages = computed(() => {
   type Group = {
     type: string
@@ -1308,8 +1307,10 @@ const groupedPages = computed(() => {
   const push = (tab: string) => {
     const bucket = pagesByType.value[tab]
     if (!bucket) return
-    const total = bucket.total || statTotal(tab) || bucket.categoryPaths.length
-    if (total === 0) return
+    const total = CONTENT_TABS.includes(tab)
+      ? statTotal(tab)
+      : bucket.total || statTotal(tab) || bucket.categoryPaths.length
+    if (total === 0 && bucket.items.length === 0 && bucket.categoryPaths.length === 0) return
     out.push({
       type: tab,
       label: getTypeLabel(tab),
