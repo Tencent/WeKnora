@@ -4798,7 +4798,7 @@ export default {
           pending: '대기',
           scheduled: '예약',
           retry: '재시도',
-          todaySuccess: '오늘 성공', todayFailedAttempts: '오늘 실패 시도', archived: '과거 실패 보관', completed: '보존된 완료 기록',
+          archived: '과거 실패 보관', completed: '보존된 완료 기록',
           latency: '최장 대기',
           status: '상태'
         },
@@ -4806,9 +4806,8 @@ export default {
           title: '실행 개요',
           active: '실행 중',
           pending: '대기 중',
-          scheduled: '예약',
           retry: '재시도 중',
-          todaySuccess: '오늘 성공', todayFailedAttempts: '오늘 실패 시도', dailyFormula: "오늘 성공 = max(오늘 processed − 오늘 failed, 0). 재시도를 포함한 당일 작업 실행 횟수이며 완료 문서 수가 아닙니다. 매일 초기화됩니다."
+          archived: '과거 실패 보관'
         },
         pools: {
           core: '핵심 파싱',
