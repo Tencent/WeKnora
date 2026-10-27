@@ -76,8 +76,9 @@ func skillsForRun(
 //     either not in the image yet, not in it any more, or deliberately hidden
 //     by an administrator.
 //
-// Every failure returns nothing: a chat turn must not fail because a skill
-// lookup did, and a workspace with no installed skills is the common case.
+// Every failure returns nothing, except that server-provided skills for a
+// desktop config survive them: they describe tools in the base template, not
+// in a skill image.
 func effectiveTenantSkills(
 	ctx context.Context,
 	configs skillImageConfigReader,
@@ -98,6 +99,9 @@ func effectiveTenantSkills(
 	if cfgEntity == nil || cfgEntity.Config == nil {
 		return nil
 	}
+	// Server-provided skills do not depend on the skill image: they describe
+	// tools that are in the base template itself.
+	builtin := builtinSkillRows(ctx, cfgEntity.Config, tenantID, configID)
 	if !sandbox.SkillImageActive(cfgEntity.Config) {
 		if image := cfgEntity.Config.SkillImage; image != nil && image.SnapshotID != "" {
 			logger.Warnf(ctx,
@@ -105,15 +109,15 @@ func effectiveTenantSkills(
 					"no installed skills are offered to the agent",
 				configID, image.SnapshotID)
 		}
-		return nil
+		return builtin
 	}
 
 	rows, err := skills.ListSkillsByConfig(ctx, tenantID, configID)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] list skills of sandbox config %s failed: %v", configID, err)
-		return nil
+		return builtin
 	}
-	usable := make([]*types.TenantSkillEntity, 0, len(rows))
+	usable := make([]*types.TenantSkillEntity, 0, len(rows)+len(builtin))
 	for _, row := range rows {
 		if row == nil || !row.Enabled {
 			continue
@@ -122,10 +126,7 @@ func effectiveTenantSkills(
 			usable = append(usable, served)
 		}
 	}
-	if len(usable) == 0 {
-		return nil
-	}
-	return usable
+	return mergeBuiltinSkills(usable, builtin)
 }
 
 // hostSkillsForRun is skillsForRun on Lite: skills installed on this machine,
