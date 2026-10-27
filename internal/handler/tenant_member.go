@@ -333,7 +333,16 @@ func (h *TenantMemberHandler) CreateMemberAccount(c *gin.Context) {
 		case errors.Is(err, service.ErrUserUsernameExists):
 			c.Error(apperrors.NewConflictError("this username is already taken"))
 		case errors.Is(err, service.ErrUserIdentityConflict):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			// 邮箱和用户名只撞了一个时，AdminCreateUser 返回的是笼统的
+			// identity conflict。这里按邮箱优先（Register 也先查邮箱）补一句
+			// 具体提示：前端靠消息里的 email/username 关键字选文案，笼统
+			// 消息会被误判成「用户名已占用」（AC-5 要求提示邮箱已注册）。
+			if existing, lookupErr := h.userService.GetUserByEmail(ctx, req.Email); lookupErr == nil && existing != nil {
+				c.Error(apperrors.NewConflictError(
+					"this email is already registered; invite or add the existing user instead"))
+			} else {
+				c.Error(apperrors.NewConflictError("this username is already taken"))
+			}
 		case service.IsPasswordPolicyError(err):
 			c.Error(apperrors.NewValidationError("password does not meet the password policy"))
 		default:
