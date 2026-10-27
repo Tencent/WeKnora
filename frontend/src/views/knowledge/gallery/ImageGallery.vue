@@ -1405,7 +1405,7 @@ watch(
     border-radius: 4px;
     color: #fff;
     background: rgba(0, 0, 0, 0.6);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     pointer-events: none;
   }
 
