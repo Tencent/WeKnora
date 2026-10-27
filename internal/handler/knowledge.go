@@ -3450,33 +3450,32 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/rebuild-index [post]
 func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
-	ctx := c.Request.Context()
 	kbID := strings.TrimSpace(c.Param("id"))
 	if kbID == "" {
-		c.Error(errors.NewBadRequestError("knowledge base id is required"))
+		_ = c.Error(errors.NewBadRequestError("knowledge base id is required"))
 		return
 	}
 
 	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(errors.NewForbiddenError("no permission to rebuild index of this knowledge base"))
+		_ = c.Error(errors.NewForbiddenError("no permission to rebuild index of this knowledge base"))
 		return
 	}
 	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
 		_ = c.Error(err)
 		return
 	}
-	ctx = types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
 
 	knowledges, err := h.kgService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to list knowledge for rebuild-index, kb_id: %s, err: %v",
 			secutils.SanitizeForLog(kbID), err)
-		c.Error(errors.NewInternalServerError("failed to list knowledge of the knowledge base"))
+		_ = c.Error(errors.NewInternalServerError("failed to list knowledge of the knowledge base"))
 		return
 	}
 	ids := make([]string, 0, len(knowledges))
@@ -3493,7 +3492,7 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 		ids = append(ids, k.ID)
 	}
 	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("no documents to rebuild in this knowledge base"))
+		_ = c.Error(errors.NewBadRequestError("no documents to rebuild in this knowledge base"))
 		return
 	}
 
@@ -3509,7 +3508,7 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 		if err != nil {
 			logger.Errorf(ctx, "failed to enqueue rebuild-index task, kb_id: %s, err: %v",
 				secutils.SanitizeForLog(kbID), err)
-			c.Error(errors.NewInternalServerError("failed to enqueue rebuild index task"))
+			_ = c.Error(errors.NewInternalServerError("failed to enqueue rebuild index task"))
 			return
 		}
 		taskIDs = append(taskIDs, taskID)

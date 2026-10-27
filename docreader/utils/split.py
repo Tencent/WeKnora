@@ -57,12 +57,21 @@ def split_by_regex(regex: str) -> Callable[[str], List[str]]:
         
     Returns:
         A callable function that takes text and returns a list of split strings
-        The regex pattern is captured, so the separators are included in the result
+        The full separator matches are included in the result.
     """
-    # Compile regex with capturing group to keep separators in result
-    pattern = re.compile(f"({regex})")
-    # Split by pattern and filter out None/empty values
-    return lambda text: list(filter(None, pattern.split(text)))
+    # Preserve capture numbering and inline flags in the supplied pattern.
+    pattern = re.compile(regex)
+
+    def split(text: str) -> List[str]:
+        parts = []
+        start = 0
+        for match in pattern.finditer(text):
+            parts.extend((text[start:match.start()], match.group()))
+            start = match.end()
+        parts.append(text[start:])
+        return list(filter(None, parts))
+
+    return split
 
 
 def match_by_regex(regex: str) -> Callable[[str], bool]:

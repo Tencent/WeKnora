@@ -338,6 +338,12 @@ func (o *driveOps) EditTime(n core.DriveFile) string {
 func (o *driveOps) Fetch(
 	ctx context.Context, client *core.Client, n core.DriveFile, resourceID string,
 ) ([]*types.FetchedItem, error) {
+	// OS bookkeeping files are not documents. Fetching one fails as an
+	// unsupported type and turns an otherwise clean incremental round into a
+	// failure; an empty result is reported as skipped by the engine (#4712).
+	if isSystemJunkFileName(n.Name) {
+		return nil, nil
+	}
 	items, err := fetchDriveFileContent(ctx, client, n, resourceID, o.region, o.parseMode)
 	if err != nil {
 		return nil, err
@@ -346,6 +352,18 @@ func (o *driveOps) Fetch(
 	// cleaned directory path so ingestion derives the KB folder_path from it.
 	qualifyItemFileNames(items, o.dirPaths[n.ParentToken])
 	return items, nil
+}
+
+// isSystemJunkFileName reports OS metadata that Finder, Windows Explorer and
+// Office drop into shared folders. These names carry no user content, so a
+// drive sync skips them instead of counting every copy as a failed document.
+func isSystemJunkFileName(name string) bool {
+	base := strings.ToLower(strings.TrimSpace(name))
+	switch base {
+	case ".ds_store", "thumbs.db", "desktop.ini":
+		return true
+	}
+	return strings.HasPrefix(base, "._") || strings.HasPrefix(base, "~$")
 }
 
 func (o *driveOps) ListFailureItems(resourceID string, partial error) []types.FetchedItem {

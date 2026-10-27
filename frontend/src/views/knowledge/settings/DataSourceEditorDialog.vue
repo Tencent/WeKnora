@@ -348,25 +348,18 @@ async function loadDriveRoot() {
   driveRootLoaded.value = false
   loadingResources.value = true
   try {
-    if (!tempDsId.value) {
-      const res = await createDataSource({
-        ...form.value,
-        knowledge_base_id: props.kbId,
-        status: 'paused',
-      } as any)
-      const created = res?.data || res
-      tempDsId.value = created.id
-    } else {
-      // Edit mode OR a previously-created temp row: persist the new folder_token
-      // so listResources sees the updated config. Previously this branch skipped
-      // updates in edit mode, leaving listResources reading the old folder_token.
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-    }
+    // The Drive root lists through the very same single draft as the generic
+    // picker, obtained through the same guard: an answer without an id is a
+    // reported failure instead of a listing against an empty id, and two quick
+    // Enter presses share one create instead of leaving a second paused row
+    // behind. Drive additionally needs the new folder_token stored before it
+    // lists (the listing reads the token from the row), so it flushes the form
+    // even in edit mode — which the generic picker deliberately does not do,
+    // leaving the existing row untouched until submit.
+    const dsId = await ensureTempDataSource(true)
+    if (!dsId) return
 
-    const res = await listResources(tempDsId.value)
+    const res = await listResources(dsId)
     resources.value = res?.data || res || []
     if (resources.value.length > 0) {
       // Mirror loadResources' tree initialization: index parents that already
@@ -395,8 +388,11 @@ async function loadDriveRoot() {
     }
   } catch (e: any) {
     MessagePlugin.error(classifyDriveLoadError(e))
+  } finally {
+    // A skipped load returns from the try block, so the spinner is cleared here
+    // rather than after the block.
+    loadingResources.value = false
   }
-  loadingResources.value = false
 }
 
 // classifyDriveLoadError turns a raw Drive list error into an actionable i18n
@@ -800,7 +796,21 @@ const displayedCredentialFields = computed(() => {
 })
 
 // --- Drawer lifecycle ---
+
+// The draft the picker lists through is per-session state: one open drawer, one
+// draft. `drawerSession` counts opens and closes; a create that was sent in an
+// earlier session is recognized by the mismatch and cleans its own row up (see
+// ensureTempDataSource), instead of writing its id into a drawer that may by
+// then be closed — or reopened with a different form.
+let drawerSession = 0
+let tempDsPromise: Promise<string> | null = null
+
 watch(visible, async (v) => {
+  // Both edges start a new session: opening begins one, closing ends it.
+  drawerSession++
+  // A create from the session that was just left is not something a session
+  // starting now may join, so the shared slot is emptied on both edges.
+  tempDsPromise = null
   if (!v) {
     if (!isEdit.value && tempDsId.value) {
       try {
@@ -997,26 +1007,116 @@ async function testConnection() {
 }
 
 // --- Load resources ---
-async function loadResources() {
-  loadingResources.value = true
-  try {
-    syncConfluencePublicFieldsToSettings()
-    if (!tempDsId.value) {
+
+// canCreateTempDataSource reports whether the create endpoint could accept a
+// request built from the form as it stands. The endpoint rejects a request
+// without a knowledge base (ErrKnowledgeBaseNotFound) and one whose type is not
+// a registered connector (ErrConnectorNotFound) before the connector is ever
+// reached, so a request missing either is certain to fail and must not be sent.
+// The one thing left that the endpoint checks — the credentials a connector
+// validates against the remote service — can only be answered by making the
+// call, so it is deliberately not pre-empted here.
+function canCreateTempDataSource(): boolean {
+  return (props.kbId || '').trim() !== '' && String(form.value.type || '').trim() !== ''
+}
+
+// ensureTempDataSource returns the data source the picker lists through,
+// creating the paused draft on first use (a data source must exist before the
+// resource endpoint can be called) and keeping it in step with the form while
+// the dialog is still a draft.
+//
+// This is not a side-effect-free lookup: with a draft already in hand it PUTs
+// the current form to it (create mode), which is what keeps the row equal to
+// the form the user sees. `persist` extends that flush to edit mode, where the
+// row is otherwise left alone until submit — the Drive root loader needs it,
+// because the listing it is about to make reads the folder token from the row.
+//
+// A single in-flight creation is shared, so two callers cannot create two rows
+// for one dialog. The shared attempt is scoped to the drawer session that
+// started it (see the visible watcher above): if the drawer was closed or
+// reopened while the create was in flight, the row it produced is deleted and
+// no id is handed back, so a late answer can neither be adopted by a new
+// session nor be left behind as an orphan.
+async function ensureTempDataSource(persist = false): Promise<string> {
+  if (tempDsId.value) {
+    if (persist || !isEdit.value) {
+      await updateDataSource(tempDsId.value, {
+        ...form.value,
+        knowledge_base_id: props.kbId,
+      } as any)
+    }
+    return tempDsId.value
+  }
+  // A form that cannot produce a data source yet has nothing to list through,
+  // so the create is skipped rather than sent: no request, no error, and — this
+  // is the point of returning early — no cached promise, so a later attempt
+  // with a real type creates the draft normally.
+  if (!canCreateTempDataSource()) {
+    // The drawer cannot reach this state through its own UI (a connector type
+    // is always picked before step 2, and the parent only renders the dialog
+    // once it has a knowledge base), so there is no form field the user could
+    // be pointed at. A console line is what makes a "I pressed load and nothing
+    // happened" report diagnosable.
+    console.warn(
+      '[DataSourceEditorDialog] skipped creating a temporary data source: ' +
+      `connector type ${JSON.stringify(form.value.type)} or knowledge base id ${JSON.stringify(props.kbId)} is empty`,
+    )
+    return ''
+  }
+  if (!tempDsPromise) {
+    const ownSession = drawerSession
+    let pending: Promise<string>
+    pending = (async () => {
       const res = await createDataSource({
         ...form.value,
         knowledge_base_id: props.kbId,
         status: 'paused',
       } as any)
       const created = res?.data || res
-      tempDsId.value = created.id
-    } else if (!isEdit.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-    }
+      const createdId = typeof created?.id === 'string' ? created.id.trim() : ''
+      if (drawerSession !== ownSession) {
+        // The drawer was closed (or closed and reopened) while the create was
+        // in flight. Nobody will ever list through — or clean up — this row, so
+        // it is removed here, and '' tells the stale caller to stop rather than
+        // report an error about a drawer the user already dismissed.
+        if (createdId) {
+          try {
+            await deleteDataSource(createdId)
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+        return ''
+      }
+      if (!createdId) {
+        // A create that answered without an id cannot be listed through, and
+        // /datasource//resources is certain to fail. Failing here instead keeps
+        // tempDsId unset, so the next attempt can create a usable draft.
+        throw new Error(t('datasource.saveFailed'))
+      }
+      tempDsId.value = createdId
+      return createdId
+    })().finally(() => {
+      // A settled attempt is never cached — a failed create must stay
+      // retryable — but it must not clear a create a later session started.
+      if (tempDsPromise === pending) tempDsPromise = null
+    })
+    tempDsPromise = pending
+  }
+  return tempDsPromise
+}
 
-    const res = await listResources(tempDsId.value)
+async function loadResources() {
+  loadingResources.value = true
+  try {
+    syncConfluencePublicFieldsToSettings()
+    // No id means the form cannot be created yet (a blank connector type, or a
+    // missing knowledge base): the tree simply does not load, and nothing is
+    // reported — the request that would have produced that error is not sent.
+    const dsId = await ensureTempDataSource()
+    if (!dsId) return
+
+    const res = await listResources(dsId)
     resources.value = res?.data || res || []
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
@@ -1045,8 +1145,11 @@ async function loadResources() {
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  } finally {
+    // A skipped load returns from the try block, so the spinner is cleared here
+    // rather than after the block.
+    loadingResources.value = false
   }
-  loadingResources.value = false
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to

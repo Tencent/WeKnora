@@ -383,8 +383,13 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 
 	// Parse request body
+	limitJSONBody(c, hybridSearchJSONMaxBytes)
 	var req types.SearchParams
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
@@ -474,8 +479,13 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge base")
 
 	// Parse request body
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
@@ -1227,8 +1237,13 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
 		return
 	}
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}

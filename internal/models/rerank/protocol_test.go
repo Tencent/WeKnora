@@ -135,6 +135,10 @@ func TestLogitConversionPreservesOrder(t *testing.T) {
 func TestProbabilityScoresPassThroughUntouched(t *testing.T) {
 	assert.Equal(t, 0.9819, normalizeScore(0.9819, api.ScoreProbability))
 	assert.Equal(t, 0.9819, normalizeScore(0.9819, ""))
+	// Already-normalized Qwen3 no/yes endpoint scores must not be sigmoid-ed twice.
+	for _, score := range []float64{0.0177, 0.9995, 0.9996} {
+		assert.Equal(t, score, normalizeScore(score, api.ScoreProbability))
+	}
 }
 
 // A vendor that caps the query cannot be satisfied by splitting documents,

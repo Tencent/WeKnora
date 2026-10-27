@@ -70,6 +70,10 @@ const (
 	// rounds are the clearest stuck loop there is.
 	maxRepeatedResponseRounds = 2
 
+	// maxConsecutiveFailedToolCalls is the number of identical failed tool
+	// calls allowed before the model is asked to switch tools or strategies.
+	maxConsecutiveFailedToolCalls = 3
+
 	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
 	// the completion-token cap before the loop gives up. A truncated answer
 	// already ends the turn (analyzeResponse Case 2), so reaching this limit

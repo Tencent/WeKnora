@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 	"testing/iotest"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -59,6 +62,10 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 		{name: "file fetch fails", getErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{name: "file read fails", readErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{name: "reader call fails", rpcErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
+		{
+			name: "CSV expansion budget exceeded", rpcErr: docparser.ErrCSVMarkdownTooLarge,
+			code: werrors.ErrCodeDocReaderParseFailed,
+		},
 	} {
 		for _, retried := range []int{0, 3} {
 			name := tc.name + "/retry_available"
@@ -110,4 +117,56 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 			})
 		}
 	}
+}
+
+// An anydoc resource_limit is a property of the file. Retries burn memory and
+// still fail, and the knowledge row must say which parser limit was hit
+// instead of sending the user to DocReader logs (anydoc runs in-process).
+func TestConvertAnydocResourceLimitIsPermanent(t *testing.T) {
+	const limitDetail = "resource limit exceeded (max_xml_nodes): part exceeds 2000000 xml nodes"
+	rpcErr := fmt.Errorf("anydoc conversion failed for %q: %w: %s",
+		"xlsx50k.xlsx", anydoc.ErrResourceLimit, limitDetail)
+
+	tracker, db := setupSpanTrackerTest(t)
+	// Retries are still available. A permanent rejection must not use them.
+	ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
+	knowledge := &types.Knowledge{
+		ID: "doc", TenantID: 1, KnowledgeBaseID: "kb", FilePath: "xlsx50k.xlsx",
+		ParseStatus: types.ParseStatusProcessing,
+	}
+	_, attempt, err := tracker.OpenAttempt(ctx, knowledge.ID, "")
+	require.NoError(t, err)
+	ctx = withAttempt(ctx, attempt)
+	svc := &knowledgeService{
+		repo:           &embedFailureKnowledgeRepo{knowledge: knowledge},
+		spanTracker:    tracker,
+		tenantService:  &stubTenantServiceForModelDelete{},
+		fileSvc:        spanRetryFileService{},
+		documentReader: &spanRetryDocReader{err: rpcErr},
+	}
+	result, err := svc.convert(ctx, types.DocumentProcessPayload{
+		FilePath: "xlsx50k.xlsx", FileName: "xlsx50k.xlsx", FileType: "xlsx",
+	}, &types.KnowledgeBase{ID: "kb"}, knowledge, types.EffectiveProcessConfig{
+		ChunkingConfig: types.ChunkingConfig{
+			ParserEngineRules: []types.ParserEngineRule{{
+				FileTypes: []string{"xlsx"},
+				Engine:    "builtin",
+			}},
+		},
+	}, false)
+
+	// nil error is what ProcessDocument returns to asynq, so the task is not
+	// retried. ReadResult.Error is the existing permanent-failure path.
+	require.Nil(t, result)
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
+	require.NotContains(t, knowledge.ErrorMessage, "DocReader logs")
+	require.Contains(t, knowledge.ErrorMessage, "too large")
+	require.Contains(t, knowledge.ErrorMessage, "max_xml_nodes")
+	require.Contains(t, knowledge.ErrorMessage, "2000000")
+
+	status, code, message := rootSpan(t, db, knowledge.ID, attempt)
+	require.Equal(t, types.SpanStatusFailed, status)
+	require.Equal(t, werrors.ErrCodeDocReaderParseFailed, code)
+	require.Equal(t, knowledge.ErrorMessage, message)
 }

@@ -43,8 +43,6 @@ func (r *sharedAgentWebSearchRepo) Update(context.Context, *types.WebSearchProvi
 
 func (r *sharedAgentWebSearchRepo) Delete(context.Context, uint64, string) error { return nil }
 
-func (r *sharedAgentWebSearchRepo) ClearDefault(context.Context, uint64, string) error { return nil }
-
 func TestSharedAgentWebSearchReadyUsesSourceWorkspace(t *testing.T) {
 	repo := &sharedAgentWebSearchRepo{
 		explicit: &types.WebSearchProviderEntity{ID: "source-provider", TenantID: 42},
