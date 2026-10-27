@@ -230,10 +230,8 @@ func zhipuHTTPError(statusCode int, body []byte) error {
 	if err := json.Unmarshal(body, &response); err == nil && (response.Error.Code != "" || response.Error.Message != "") {
 		return fmt.Errorf("Zhipu API returned status %d (%s): %s", statusCode, response.Error.Code, response.Error.Message)
 	}
-	detail := strings.TrimSpace(string(body))
-	if len(detail) > 4096 {
-		detail = detail[:4096]
-	}
+	detail := errorPreviewString(body)
+
 	if detail == "" {
 		return fmt.Errorf("Zhipu API returned status %d", statusCode)
 	}

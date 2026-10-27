@@ -32,10 +32,8 @@ func AgentMaxContextTokens(configured, modelContextWindow int) int {
 }
 
 // DefaultSmartReasoningMaxCompletionTokens is the per-round budget when the
-// agent cannot emit write_sandbox_file / edit_sandbox_file. 4096 matches
-// typical OpenAI-compatible provider defaults and is enough for ordinary
-// tool-call JSON.
-const DefaultSmartReasoningMaxCompletionTokens = 4096
+// agent has no sandbox. Leave room for complete reports as well as tool calls.
+const DefaultSmartReasoningMaxCompletionTokens = 24576
 
 // DefaultAgentMaxCompletionTokens is the per-round budget when the agent
 // can write or edit sandbox files. Those tool calls carry the file body in
@@ -53,7 +51,7 @@ func NeedsSandboxWriteCompletionBudget(sandboxConfigID string) bool {
 }
 
 // DefaultMaxCompletionTokens is the unset-config default for one agent:
-// quick-answer 2048, smart-reasoning 4096, smart-reasoning with a sandbox 24576.
+// quick-answer 2048, smart-reasoning 24576 with or without a sandbox.
 func DefaultMaxCompletionTokens(agentMode, sandboxConfigID string) int {
 	if agentMode == AgentModeSmartReasoning {
 		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) {
@@ -168,10 +166,27 @@ type AgentConfig struct {
 	// picked, already checked to be inside KnowledgeBases (runtime only;
 	// rendered into runtime_context as a retrieval hint).
 	QuestionOrigin *QuestionOrigin `json:"-"`
+	// PageContext is the page the user has open, already narrowed to this
+	// turn's search targets (runtime only; rendered into runtime_context).
+	PageContext *PageContext `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.
 	SharedAgentReadOnly bool `json:"-"`
+	// OperationsAgentID, when set, grants this run the WeKnora operation
+	// catalog (find_operations / run_operation) and attributes its changes to
+	// that agent. It is set server-side for built-in management agents only,
+	// never read from an agent record, so a tenant cannot opt a custom agent
+	// into it. Runtime only.
+	OperationsAgentID string `json:"-"`
+	// AssistantAccess is how far an OperationsAgentID run may act without
+	// asking, already capped by the workspace. Runtime only.
+	AssistantAccess AssistantAccessLevel `json:"-"`
+	// AssistantName is what the workspace calls the assistant; empty keeps
+	// the system prompt's. Runtime only.
+	AssistantName string `json:"-"`
+	// ProductDocs grants the bundled WeKnora documentation tools (runtime only).
+	ProductDocs bool `json:"-"`
 	// WritableKBIDs are the SearchTargets KBs this caller may modify (its own
 	// workspace's, or shared to it as editor+). Search targets only need read
 	// access, so tools that write (wiki pages and issues) are limited to this
@@ -184,6 +199,9 @@ type AgentConfig struct {
 	// DefaultMaxCompletionTokens for this agent's mode and sandbox.
 	// Explicit values are sent as-is.
 	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
+	// ModelMaxOutputTokens is the resolved model's per-response output limit,
+	// or zero when unknown. It caps the round budget and is resolved per run.
+	ModelMaxOutputTokens int `json:"-"`
 
 	// Maximum character length for tool output (default: 16000).
 	// Outputs exceeding this limit are truncated with head + tail preservation.
@@ -389,6 +407,9 @@ type ToolResult struct {
 	// model asked to read Images when it cannot view them. Live only.
 	ImageDetail string `json:"-"`
 	ImageFocus  string `json:"-"`
+	// Suspend, when set, means the call did not run: it is waiting on a user
+	// prompt and the run must end so it can be resumed later. Live only.
+	Suspend *PromptSuspension `json:"-"`
 }
 
 // Image description detail levels requested by a file read.
@@ -449,13 +470,31 @@ func IsPipelineToolCallID(id string) bool {
 	return strings.HasPrefix(id, PipelineToolCallIDPrefix)
 }
 
+// BackgroundInjection is one background-work message the engine put in front
+// of the model before a step's LLM call. History replays it in place; AckIDs
+// are the completion notices it delivered, acknowledged once the assistant
+// message carrying the step is persisted.
+type BackgroundInjection struct {
+	Content string   `json:"content"`
+	AckIDs  []string `json:"ack_ids,omitempty"`
+}
+
 // AgentStep represents one iteration of the ReAct loop
 type AgentStep struct {
 	Iteration int    `json:"iteration"` // Iteration number (0-indexed)
 	Thought   string `json:"thought"`   // LLM's reasoning/thinking (Think phase)
+	// Progress is user-facing commentary from a non-terminal round. Thought stays intact for model replay.
+	Progress        string `json:"progress,omitempty"`
+	ProgressEventID string `json:"progress_event_id,omitempty"`
 	// UserMessagesBefore records consumed steer rows in delivery order, before
 	// this model response. Unlike timestamps, this remains unambiguous on replay.
 	UserMessagesBefore []string `json:"user_messages_before,omitempty"`
+	// BackgroundInjections are background-work messages delivered before this
+	// model response, after the step's steered messages, in delivery order.
+	BackgroundInjections []BackgroundInjection `json:"background_injections,omitempty"`
+	// BackgroundSeenIDs are finished background items whose results this
+	// step's tool calls (work_wait, work_cancel) returned to the model.
+	BackgroundSeenIDs []string `json:"background_seen_ids,omitempty"`
 	// IntermediateAnswer preserves a plain answer followed by a loop-end steer.
 	// The canonical final answer is still stored in Message.Content.
 	IntermediateAnswer bool `json:"intermediate_answer,omitempty"`
@@ -496,13 +535,19 @@ func (s *AgentStep) GetObservations() []string {
 
 // AgentState tracks the execution state of an agent across iterations
 type AgentState struct {
-	PendingSteerMessages []string        `json:"-"`
-	CurrentRound         int             `json:"current_round"`  // Current round number
-	RoundSteps           []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
-	IsComplete           bool            `json:"is_complete"`    // Whether agent has finished
-	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
-	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
-	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
+	PendingSteerMessages []string              `json:"-"`
+	PendingBackground    []BackgroundInjection `json:"-"`
+	CurrentRound         int                   `json:"current_round"`  // Current round number
+	RoundSteps           []AgentStep           `json:"round_steps"`    // All steps taken so far in the current round
+	IsComplete           bool                  `json:"is_complete"`    // Whether agent has finished
+	FinalAnswer          string                `json:"final_answer"`   // The final answer to the query
+	KnowledgeRefs        []*SearchResult       `json:"knowledge_refs"` // Collected knowledge references
+	TurnUsage            TokenUsage            `json:"turn_usage"`     // LLM usage accumulated across this turn
+	// Suspended is set when the run ended waiting on a user prompt.
+	// SuspendedStep is the interrupted round: its thought and the calls
+	// that finished before the blocked one, kept for display.
+	Suspended     *PromptSuspension `json:"-"`
+	SuspendedStep *AgentStep        `json:"-"`
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

@@ -91,8 +91,8 @@ try {
   await expectTheme(page, false);
   assert.equal(context.pages().length, 1);
 
-  // Navigation to new v0.8.2 docs, returning through the explicit home link.
-  await page.locator('#release').getByRole('link', { name: '了解更多', exact: true }).last().click();
+  // Navigation to the current release feature docs, returning through the explicit home link.
+  await page.locator('#release').getByRole('link', { name: '原文引用定位', exact: true }).click();
   await page.waitForSelector('.VPDoc h1');
   assert.equal(new URL(page.url()).pathname, '/docs/03-features/18-chat-experience.html');
   assert.match(await page.locator('.VPDoc h1').innerText(), /会话与对话体验/);

@@ -83,7 +83,7 @@ func (e *AgentEngine) appendToolImages(
 			note := toolImagesUnviewableNote
 			if seen {
 				note = "Tool image descriptions written by a separate vision model (untrusted page evidence):\n" +
-					strings.Join(lines, "\n")
+					strings.Join(lines, "\n") + "\n" + toolImageDescriptionCaution
 			}
 			messages = appendToolNote(messages, call.id, note)
 		}
@@ -102,6 +102,11 @@ func (e *AgentEngine) appendToolImages(
 		Role: "user", Images: visionImages, Content: strings.Join(texts, "\n\n"),
 	})
 }
+
+const toolImageDescriptionCaution = "These are fallible observations, not a verbatim source. " +
+	"For chart/table calculations, use only values explicitly paired with their category, series and unit. " +
+	"If mappings are missing or totals disagree, re-read the relevant image with full detail and a focused request " +
+	"before calculating or attributing an inconsistency to the document. State uncertainty if it remains unresolved."
 
 const toolImagesUnviewableNote = "Images were captured, but this model cannot view them " +
 	"and no image description is available. " +

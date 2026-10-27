@@ -172,6 +172,51 @@ func searchTargetsFor(kbs []*types.KnowledgeBase) types.SearchTargets {
 	return targets
 }
 
+// maxSearchKnowledgeDocuments bounds validation lookups and backend filter size.
+const maxSearchKnowledgeDocuments = 100
+
+// documentSearchTargets narrows an already authorized KB selection to explicit
+// documents. Never leave whole-KB targets for bases with no selected documents.
+func (s *Server) documentSearchTargets(
+	ctx context.Context, kbs []*types.KnowledgeBase, knowledgeIDs []string,
+) (types.SearchTargets, error) {
+	if len(knowledgeIDs) == 0 {
+		return nil, fmt.Errorf("knowledge_ids must contain at least one document id; " +
+			"omit it to search whole knowledge bases")
+	}
+	if len(knowledgeIDs) > maxSearchKnowledgeDocuments {
+		return nil, fmt.Errorf("knowledge_ids must contain at most %d document ids", maxSearchKnowledgeDocuments)
+	}
+	targets := make(types.SearchTargets, 0)
+	byKB := make(map[string]*types.SearchTarget)
+	seen := make(map[string]bool, len(knowledgeIDs))
+	for _, id := range knowledgeIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return nil, fmt.Errorf("knowledge_ids must not contain blank document ids")
+		}
+		if seen[id] {
+			continue
+		}
+		k, kb, err := s.knowledgeInKnowledgeBases(ctx, kbs, id)
+		if err != nil {
+			return nil, err
+		}
+		target := byKB[kb.ID]
+		if target == nil {
+			target = &types.SearchTarget{
+				Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: kb.ID, TenantID: kb.TenantID,
+				DisableRecallThresholds: true,
+			}
+			byKB[kb.ID] = target
+			targets = append(targets, target)
+		}
+		target.KnowledgeIDs = append(target.KnowledgeIDs, k.ID)
+		seen[id] = true
+	}
+	return targets, nil
+}
+
 func knowledgeBaseIDs(kbs []*types.KnowledgeBase) []string {
 	ids := make([]string, 0, len(kbs))
 	for _, kb := range kbs {
@@ -214,6 +259,18 @@ func wikiScopesFor(kbs []*types.KnowledgeBase) []tools.WikiScope {
 func (s *Server) knowledgeInScope(
 	ctx context.Context, ep *types.MCPEndpoint, knowledgeID string,
 ) (*types.Knowledge, *types.KnowledgeBase, error) {
+	allowed, err := s.allowedKnowledgeBases(ctx, ep)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.knowledgeInKnowledgeBases(ctx, allowed, knowledgeID)
+}
+
+// knowledgeInKnowledgeBases applies the same document/owner checks to either
+// the full endpoint scope or a narrower, already authorized KB selection.
+func (s *Server) knowledgeInKnowledgeBases(
+	ctx context.Context, kbs []*types.KnowledgeBase, knowledgeID string,
+) (*types.Knowledge, *types.KnowledgeBase, error) {
 	knowledgeID = strings.TrimSpace(knowledgeID)
 	if knowledgeID == "" {
 		return nil, nil, fmt.Errorf("knowledge_id is required")
@@ -222,13 +279,16 @@ func (s *Server) knowledgeInScope(
 	if err != nil || k == nil {
 		return nil, nil, fmt.Errorf("document %q was not found", knowledgeID)
 	}
-	allowed, err := s.allowedKnowledgeBases(ctx, ep)
-	if err != nil {
-		return nil, nil, err
+	var kb *types.KnowledgeBase
+	for _, candidate := range kbs {
+		if candidate.ID == k.KnowledgeBaseID {
+			kb = candidate
+			break
+		}
 	}
-	kb := matchKnowledgeBase(allowed, k.KnowledgeBaseID)
 	if kb == nil || kb.TenantID != k.TenantID {
-		return nil, nil, fmt.Errorf("document %q is outside this endpoint's scope", knowledgeID)
+		return nil, nil, fmt.Errorf("document %q is outside this endpoint's scope or the selected knowledge bases",
+			knowledgeID)
 	}
 	return k, kb, nil
 }

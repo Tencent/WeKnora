@@ -1,5 +1,6 @@
 <template>
   <SettingDrawer :visible="dialogVisible" :title="isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle')"
+    :z-index="2300"
     :description="getModalDescription()" :icon="modelTypeIcon" :confirm-loading="saving" :cancel-disabled="saving"
     :confirm-text="$t('model.editor.saveAndClose')"
     :close-on-overlay-click="!saving" :close-on-esc-keydown="!saving"
@@ -33,9 +34,14 @@
         <div v-if="remoteChecked && !remoteAvailable" class="connection-result error">
           <div class="connection-result__header">
             <strong>{{ $t('model.editor.connectionFailed') }}</strong>
-            <t-button size="small" variant="text" @click="copyWithToast(remoteMessage, 'common.copied')">
-              {{ $t('common.copy') }}
-            </t-button>
+            <div class="connection-result__actions">
+              <AssistantActionButton :label="$t('assistant.actions.diagnose')"
+                :query="$t('assistant.prompts.modelFailure')" :disabled="remoteStale || checking || saving"
+                :selection="{ field: $t('model.editor.connectionFailed'), text: remoteMessage }" />
+              <t-button size="small" variant="text" @click="copyWithToast(remoteMessage, 'common.copied')">
+                {{ $t('common.copy') }}
+              </t-button>
+            </div>
           </div>
           <div class="connection-result__details" tabindex="0">{{ remoteMessage }}</div>
         </div>
@@ -610,7 +616,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import {
   checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels,
@@ -644,6 +650,7 @@ import { levelLabelKey, supportedLevels } from '@/utils/reasoningEffort'
 import { DEFAULT_MODEL_CONTEXT_WINDOW, formatTokenCount } from '@/utils/contextWindow'
 import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
@@ -722,6 +729,8 @@ interface Props {
   visible: boolean
   modelType: EditorModelType
   modelData?: ModelFormData | null
+  /** Create mode only: fields to start the new model's form with. */
+  draft?: Partial<ModelFormData> | null
   saveModel: (data: ModelFormData & { modelType?: EditorModelType }) => Promise<void>
 }
 
@@ -731,7 +740,8 @@ const providersStore = useModelProvidersStore()
 
 const props = withDefaults(defineProps<Props>(), {
   visible: false,
-  modelData: null
+  modelData: null,
+  draft: null
 })
 
 const emit = defineEmits<{
@@ -1470,8 +1480,7 @@ const selectModelType = async (type: EditorModelType) => {
   }
 }
 
-// 监听 visible 变化，初始化表单
-watch(() => props.visible, (val) => {
+const initializeVisibleForm = (val: boolean) => {
   if (val) {
     const typeChanged = draftModelType.value !== props.modelType
     // Sync the entry type before loading its catalog; the previous draft may
@@ -1522,6 +1531,9 @@ watch(() => props.visible, (val) => {
             : [],
         }
         legacyThinkingControlLoaded.value = !!props.modelData.thinkingControl
+      } else if (props.draft) {
+        resetForm()
+        Object.assign(formData.value, props.draft)
       } else if (typeChanged || lastOpenedModelId.value !== null || !formData.value.id) {
         // 切换类型、上次是编辑某个模型，或第一次新增 → 重置成空白
         resetForm()
@@ -1555,7 +1567,12 @@ watch(() => props.visible, (val) => {
       }
     })
   }
-})
+}
+
+watch(() => props.visible, initializeVisibleForm)
+// An assistant link can open the dialog before its first mount. Wait until
+// setup has initialized the form helpers, then hydrate that initial draft too.
+onMounted(() => initializeVisibleForm(props.visible))
 
 watch(
   () => [
@@ -2463,6 +2480,12 @@ const handleCancel = () => {
     overflow-wrap: anywhere;
     line-height: 1.5;
     user-select: text;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 }
 

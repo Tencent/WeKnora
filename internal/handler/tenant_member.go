@@ -314,7 +314,7 @@ func addMemberAndRespond(
 // @Param        id       path  string                  true  "空间 ID"
 // @Param        user_id  path  string                  true  "用户 ID"
 // @Param        request  body  updateMemberRoleRequest true  "目标角色"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.SuccessResponse
 // @Security     Bearer
 // @Router       /tenants/{id}/members/{user_id} [put]
 func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
@@ -367,7 +367,7 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 // @Produce      json
 // @Param        id       path  string  true  "空间 ID"
 // @Param        user_id  path  string  true  "用户 ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.SuccessResponse
 // @Security     Bearer
 // @Router       /tenants/{id}/members/{user_id} [delete]
 func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
@@ -409,7 +409,7 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 // @Tags         空间成员
 // @Produce      json
 // @Param        id  path  string  true  "空间 ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.SuccessResponse
 // @Security     Bearer
 // @Router       /tenants/{id}/leave [post]
 func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {

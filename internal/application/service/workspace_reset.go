@@ -21,6 +21,13 @@ import (
 // so this is more generous than the per-turn checkpoint.
 const workspaceResetTimeout = 90 * time.Second
 
+// errWorkspaceCommitMissing: the requested checkpoint is not in this
+// session's repository (it was rebuilt, deleted, or belongs elsewhere).
+// Detected before anything is modified.
+var errWorkspaceCommitMissing = errors.New("workspace reset: checkpoint commit is not in the session repository")
+
+const exitCommitMissing = 3
+
 // workspaceResetScript renders the rollback of workspace to sha.
 //
 // reset --hard restores tracked files (including input/ and output/). Other
@@ -37,10 +44,29 @@ func workspaceResetScript(workspace, gitDir, sha string) (string, error) {
 		gitWorkspacePruneAndClean(), nil
 }
 
+// workspaceResetScriptFor rolls l back to sha. The commit is checked first so
+// a missing checkpoint fails before any file changes.
+func workspaceResetScriptFor(l sandbox.WorkspaceLayout, sha string) (string, error) {
+	if !gitSHAPattern.MatchString(sha) {
+		return "", fmt.Errorf("workspace reset: invalid commit sha %q", truncateForLog(sha))
+	}
+	return "set -e\n" + gitWorkspacePreambleFor(l) +
+		fmt.Sprintf("git_ws cat-file -e \"%s^{commit}\" 2>/dev/null || exit %d\n", sha, exitCommitMissing) +
+		"git_ws reset --hard " + sha + "\n" +
+		gitWorkspacePruneAndClean(), nil
+}
+
 // workspaceEmptyResetScript is the start-over path: kept history has no SHA,
 // so we commit an empty tree and run the same reset+prune+clean as a SHA rewind.
 func workspaceEmptyResetScript(workspace, gitDir string) string {
 	return "set -e\n" + gitWorkspacePreamble(workspace, gitDir) + gitWorkspaceEnsureRepo() + `
+empty=$(git_ws commit-tree "$(git_ws mktree </dev/null)" -m 'rewind: empty')
+git_ws reset --hard "$empty"
+` + gitWorkspacePruneAndClean()
+}
+
+func workspaceEmptyResetScriptFor(l sandbox.WorkspaceLayout) string {
+	return "set -e\n" + gitWorkspacePreambleFor(l) + gitWorkspaceEnsureRepo() + `
 empty=$(git_ws commit-tree "$(git_ws mktree </dev/null)" -m 'rewind: empty')
 git_ws reset --hard "$empty"
 ` + gitWorkspacePruneAndClean()
@@ -76,13 +102,45 @@ git_ws clean -fdx
 // cannot drift onto different git layouts. GIT_DIR is outside /workspace;
 // --work-tree still edits the session files.
 func gitWorkspacePreamble(workspace, gitDir string) string {
+	return gitWorkspaceVars(workspace, gitDir) + gitWorkspaceAdoptLegacyRepo()
+}
+
+func gitWorkspaceVars(workspace, gitDir string) string {
 	return fmt.Sprintf(`WORK_TREE=%[1]s
 GIT_DIR=%[2]s
 git_ws() {
   git -c safe.directory='*' --git-dir="$GIT_DIR" --work-tree="$WORK_TREE" "$@"
 }
 mkdir -p "$WORK_TREE"
-`, shellSingleQuote(workspace), shellSingleQuote(gitDir)) + gitWorkspaceAdoptLegacyRepo()
+`, shellSingleQuote(workspace), shellSingleQuote(gitDir))
+}
+
+// gitWorkspacePreambleFor is gitWorkspacePreamble for a layout. Only a
+// per-session machine adopts a legacy $WORK_TREE/.git; on a shared machine
+// that directory is an agent's own repository and must be left alone.
+func gitWorkspacePreambleFor(l sandbox.WorkspaceLayout) string {
+	if l.IsSharedRemote() {
+		return gitWorkspaceVars(l.Root, l.GitDir)
+	}
+	return gitWorkspacePreamble(l.Root, l.GitDir)
+}
+
+// workspaceLayoutFor asks the runner for the session's layout; runners that
+// do not advertise one keep the /workspace contract.
+func workspaceLayoutFor(ctx context.Context, runner any, sessionID string) (sandbox.WorkspaceLayout, error) {
+	provider, ok := runner.(sandbox.SessionWorkspaceLayoutProvider)
+	if !ok || provider == nil {
+		return sandbox.RemoteWorkspaceLayout(), nil
+	}
+	l, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+	if err != nil {
+		return sandbox.WorkspaceLayout{}, err
+	}
+	l = l.Normalized()
+	if !l.HasRoot() || l.GitDir == "" {
+		return sandbox.WorkspaceLayout{}, errors.New("workspace reset: session layout has no versioned workspace")
+	}
+	return l, nil
 }
 
 // gitWorkspaceAdoptLegacyRepo migrates a sandbox that still keeps its
@@ -120,21 +178,21 @@ func gitResetFailure(sha, stderr string) error {
 }
 
 func execWorkspaceReset(
-	ctx context.Context, runner SandboxShellRunner, sessionID, script, expectedSandboxID string,
+	ctx context.Context, runner SandboxShellRunner, sessionID, script, expectedSandboxID, workDir string,
 ) (*sandbox.ExecuteResult, error) {
 	if runner == nil {
 		return nil, errors.New("workspace reset: no shell runner wired")
 	}
 	if withOpts, ok := runner.(sandbox.SessionInstallShellExecutor); ok {
 		return withOpts.ExecShellCommandWithOptions(ctx, sessionID, script, sandbox.ShellExecOptions{
-			WorkDir:           sandbox.SessionWorkspaceRoot,
+			WorkDir:           workDir,
 			Timeout:           workspaceResetTimeout,
 			SkipWorkspacePrep: true,
 			ExpectedSandboxID: expectedSandboxID,
 		})
 	}
 	return runner.ExecShellCommand(
-		ctx, sessionID, script, sandbox.SessionWorkspaceRoot, workspaceResetTimeout, nil,
+		ctx, sessionID, script, workDir, workspaceResetTimeout, nil,
 	)
 }
 
@@ -149,13 +207,20 @@ func resetWorkspaceToCommit(
 	ctx context.Context, runner SandboxShellRunner, sessionID, sha, expectedSandboxID string,
 ) error {
 	sha = strings.TrimSpace(sha)
-	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, sha)
+	layout, err := workspaceLayoutFor(ctx, runner, sessionID)
 	if err != nil {
 		return err
 	}
-	result, err := execWorkspaceReset(ctx, runner, sessionID, script, expectedSandboxID)
+	script, err := workspaceResetScriptFor(layout, sha)
+	if err != nil {
+		return err
+	}
+	result, err := execWorkspaceReset(ctx, runner, sessionID, script, expectedSandboxID, layout.Root)
 	if err != nil {
 		return fmt.Errorf("workspace reset: git reset exec: %w", err)
+	}
+	if result != nil && result.ExitCode == exitCommitMissing {
+		return errWorkspaceCommitMissing
 	}
 	if result == nil || result.ExitCode != 0 {
 		stderr := ""
@@ -170,8 +235,12 @@ func resetWorkspaceToCommit(
 func resetWorkspaceToEmpty(
 	ctx context.Context, runner SandboxShellRunner, sessionID, expectedSandboxID string,
 ) error {
-	script := workspaceEmptyResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir)
-	result, err := execWorkspaceReset(ctx, runner, sessionID, script, expectedSandboxID)
+	layout, err := workspaceLayoutFor(ctx, runner, sessionID)
+	if err != nil {
+		return err
+	}
+	script := workspaceEmptyResetScriptFor(layout)
+	result, err := execWorkspaceReset(ctx, runner, sessionID, script, expectedSandboxID, layout.Root)
 	if err != nil {
 		return fmt.Errorf("workspace reset: empty workspace exec: %w", err)
 	}

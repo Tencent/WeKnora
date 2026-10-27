@@ -36,8 +36,8 @@
       v-else-if="mode === 'file'"
       class="reference-source__preview"
       :knowledge-id="target.knowledgeId"
-      :file-type="meta.fileType"
-      :file-name="meta.fileName"
+      :file-type="isManual ? 'md' : meta.fileType"
+      :file-name="meta.fileName || displayName"
       :active="active"
       source-mode
       fill-height
@@ -117,6 +117,10 @@ let shownKnowledgeId = ''
 
 const displayName = computed(() => meta.fileName || props.target.fileName || props.target.title || '')
 const displayTitle = computed(() => props.target.title || meta.title || displayName.value)
+// The preview endpoint streams manual metadata.content as Markdown, even
+// though these entries have file_type="manual" and no physical file path.
+const isManual = computed(() => meta.knowledgeSource === 'manual' ||
+  (meta.knowledgeType || meta.fileType).toLowerCase() === 'manual')
 
 const documentHref = computed(() => {
   if (!props.target.knowledgeBaseId) return ''
@@ -266,7 +270,8 @@ async function loadChunk(version: number) {
 
 function resolveMode(): Mode {
   const type = (meta.knowledgeType || meta.fileType || '').toLowerCase()
-  if (meta.knowledgeSource === 'manual' || type === 'manual' || type === 'faq' || props.target.chunkType === 'faq') return 'none'
+  if (type === 'faq' || props.target.chunkType === 'faq') return 'none'
+  if (isManual.value) return 'file'
   if (meta.fileName && isKnownPreviewableFile(meta.fileName, meta.fileType)) return 'file'
   if (isWebUrl(meta.knowledgeSource)) return 'web'
   return 'none'

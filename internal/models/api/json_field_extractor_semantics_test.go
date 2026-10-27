@@ -102,7 +102,8 @@ func TestSandboxWriteProgressRetainsJSONFieldValues(t *testing.T) {
 			progress := NewSandboxFileProgress("write_sandbox_file")
 			payload, ok := progress.Feed(arguments)
 			if !ok || payload["path"] != want.Path || payload["bytes"] != len(want.Content) {
-				t.Fatalf("progress = %#v, emitted=%t; want path %q and %d bytes", payload, ok, want.Path, len(want.Content))
+				t.Fatalf("progress = %#v, emitted=%t; want path %q and %d bytes",
+					payload, ok, want.Path, len(want.Content))
 			}
 		})
 	}

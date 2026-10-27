@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { resolve, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { copyPdfJsWasm } from './scripts/copy-pdfjs-wasm.mjs'
 import { createRequire } from 'node:module'
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -56,14 +57,34 @@ function resolveVueOfficePptxEntry(): string {
   try {
     const pkgDir = dirname(require.resolve('@vue-office/pptx/package.json'))
     const candidates = [
+      // Use ESM so setup hooks and render helpers share the application's Vue
+      // runtime. The UMD entry's require('vue') can produce a second runtime in
+      // Vite's dev optimizer, leaving template refs null and PPTX previews blank.
+      resolve(pkgDir, 'lib/v3/vue-office-pptx.mjs'),
       resolve(pkgDir, 'lib/v3/index.js'),
       resolve(pkgDir, 'lib/index.js'),
-      resolve(pkgDir, 'lib/v3/vue-office-pptx.mjs'),
     ]
     const matched = candidates.find((candidate) => existsSync(candidate))
     return matched ?? '@vue-office/pptx'
   } catch {
     return '@vue-office/pptx'
+  }
+}
+
+function pdfJsWasmAssets(): Plugin {
+  let wasmSource = ''
+  let wasmOutput = ''
+  return {
+    name: 'pdfjs-wasm-assets',
+    apply: 'build',
+    configResolved(config) {
+      const pdfjsBuild = require.resolve('pdfjs-dist/legacy/build/pdf.mjs')
+      wasmSource = resolve(dirname(pdfjsBuild), '../../wasm')
+      wasmOutput = resolve(config.root, config.build.outDir, 'pdfjs', 'wasm')
+    },
+    closeBundle() {
+      copyPdfJsWasm(wasmSource, wasmOutput)
+    },
   }
 }
 
@@ -120,8 +141,10 @@ export default defineConfig({
     vue(),
     vueJsx(),
     embedHtmlDevFallback(),
+    pdfJsWasmAssets(),
   ],
   resolve: {
+    dedupe: ['vue', 'vue-demi'],
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       '@vue-office/pptx': resolveVueOfficePptxEntry(),

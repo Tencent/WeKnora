@@ -1349,6 +1349,49 @@ func TestFileOpAgainstVanishedContainerRebinds(t *testing.T) {
 		"the exit code must survive in the message (#3942 diagnostic gap)")
 }
 
+// The idle sweep stops a container before it deletes it (#4336). Inspect
+// still finds the container, so a 404-only check leaves the exec's exit 128
+// as InvalidRequest and the session binding cannot be replaced.
+func TestFileOpAgainstStoppedContainerRebinds(t *testing.T) {
+	for _, status := range []string{"exited", "dead", "removing"} {
+		t.Run(status, func(t *testing.T) {
+			engine := newFakeDockerEngine()
+			engine.execExit = 128
+			engine.execStderr = ""
+			engine.inspect["stopped-1"] = container.InspectResponse{
+				ID:    "stopped-1",
+				State: &container.State{Status: container.ContainerState(status)},
+			}
+			docker := newTestDockerClient(t, engine)
+			err := docker.MakeDir(context.Background(), testHandle("stopped-1"), "/workspace/input/b528f57f52be")
+			require.True(t, IsRemoteNotFound(err), "got %+v", err)
+			require.True(t, CanReplaceRemoteBinding(err), "got %+v", err)
+			require.Contains(t, err.Error(), "vanished")
+		})
+	}
+}
+
+// A non-zero exec in a container that is still running, or only paused, is
+// the command's own failure. Rebinding would throw away a sandbox that can
+// still be used.
+func TestFileOpOnLiveContainerKeepsBinding(t *testing.T) {
+	for _, status := range []string{"running", "paused", "created"} {
+		t.Run(status, func(t *testing.T) {
+			engine := newFakeDockerEngine()
+			engine.execExit = 128
+			engine.execStderr = ""
+			engine.inspect["container-1"] = container.InspectResponse{
+				ID:    "container-1",
+				State: &container.State{Status: container.ContainerState(status)},
+			}
+			docker := newTestDockerClient(t, engine)
+			err := docker.MakeDir(context.Background(), testHandle("container-1"), "/data/out")
+			require.True(t, IsRemoteInvalidRequest(err), "got %+v", err)
+			require.False(t, CanReplaceRemoteBinding(err))
+		})
+	}
+}
+
 // A genuine command failure with the container still alive keeps the
 // InvalidRequest classification — and with it the binding.
 func TestFileOpGenuineFailureKeepsBinding(t *testing.T) {

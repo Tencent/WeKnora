@@ -52,6 +52,13 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		if err := json.Unmarshal(rawVal, &val); err != nil {
 			continue
 		}
+		// Integer literals already have the requested JSON representation. A
+		// float64-to-int64 round trip would corrupt values above 2^53. Keep
+		// decimal/exponent notation on the existing normalization path.
+		if _, isNumber := val.(float64); isNumber && targetType == "integer" &&
+			!strings.ContainsAny(string(rawVal), ".eE") {
+			continue
+		}
 		newVal, didCast := castValue(val, targetType)
 		if didCast {
 			converted, err := json.Marshal(newVal)
@@ -84,6 +91,11 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 			var parsed []interface{}
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				return parsed, true
+			}
+			// An attempted array with invalid JSON must reach validation as an
+			// error, not silently become one option/path/query containing the list.
+			if strings.HasPrefix(strings.TrimSpace(s), "[") {
+				return val, false
 			}
 			// Fall back: single string → string array
 			return []string{s}, true
