@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -99,15 +100,39 @@ func TestAutomationDuplicateSlotDoesNotWake(t *testing.T) {
 // A due task still claims exactly once, and a once trigger then stops.
 func TestAutomationDueTaskStillClaimsUnderUTCClock(t *testing.T) {
 	f := newAutomationFixture(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	f.sessions.run = func(ctx context.Context, _ *types.QARequest, bus *event.EventBus) error {
+		close(entered)
+		select {
+		case <-release:
+			return complete(ctx, bus, event.AgentCompleteData{FinalAnswer: "done"})
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	// Release the executor and wait for its slot before the fixture closes the database,
+	// including when an assertion fails.
+	t.Cleanup(func() {
+		close(release)
+		require.Eventually(t, func() bool { return len(f.svc.slots) == 0 }, 5*time.Second, 10*time.Millisecond)
+	})
 	due := f.now.Add(time.Minute)
 	a := f.create(t, types.AutomationPatch{Trigger: onceTrigger(due)})
 
 	f.now = due.Add(time.Second)
 	f.svc.tick(context.Background())
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("executor did not start")
+	}
 
 	runs := f.runs(t, a.ID)
 	require.Len(t, runs, 1)
-	require.Contains(t, []string{types.AutomationRunQueued, types.AutomationRunRunning}, runs[0].Status)
+	require.Equal(t, types.AutomationRunRunning, runs[0].Status)
+	require.Equal(t, types.AutomationRunSchedule, runs[0].TriggerKind)
+	require.True(t, runs[0].ScheduledAt.Equal(due))
 	reloaded := f.reload(t, a.ID)
 	require.False(t, reloaded.Enabled)
 	require.Nil(t, reloaded.NextRunAt)
