@@ -192,6 +192,7 @@ type rawUsage struct {
 	PromptTokenCount        int  `json:"promptTokenCount"`
 	CandidatesTokenCount    int  `json:"candidatesTokenCount"`
 	ThoughtsTokenCount      int  `json:"thoughtsTokenCount"`
+	ToolUsePromptTokenCount int  `json:"toolUsePromptTokenCount"`
 	TotalTokenCount         int  `json:"totalTokenCount"`
 	CachedContentTokenCount *int `json:"cachedContentTokenCount"`
 }
@@ -210,8 +211,12 @@ type rawResponse struct {
 }
 
 func (c *Client) usage(u rawUsage) types.TokenUsage {
+	// Tokens read by Gemini's built-in tools (URL context, search, code
+	// execution) are billed as input but reported apart from promptTokenCount;
+	// totalTokenCount counts them as "tool-use prompt".
+	promptTokens := u.PromptTokenCount + u.ToolUsePromptTokenCount
 	out := types.TokenUsage{
-		PromptTokens:     u.PromptTokenCount,
+		PromptTokens:     promptTokens,
 		CompletionTokens: u.CandidatesTokenCount + u.ThoughtsTokenCount,
 		TotalTokens:      u.TotalTokenCount,
 	}
@@ -221,7 +226,7 @@ func (c *Client) usage(u rawUsage) types.TokenUsage {
 	switch {
 	case u.CachedContentTokenCount != nil:
 		cached := *u.CachedContentTokenCount
-		out.SetPromptCacheUsage(cached, 0, max(0, u.PromptTokenCount-cached), true)
+		out.SetPromptCacheUsage(cached, 0, max(0, promptTokens-cached), true)
 	case c.cfg.Settings.PromptCacheAcct:
 		out.SetPromptCacheUsage(0, 0, 0, false)
 	default:

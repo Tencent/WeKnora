@@ -19,7 +19,12 @@ spec:
       {{- include "weknora.componentSelectorLabels" (dict "component" "app" "context" .) | nindent 6 }}
   strategy:
     {{- $strategy := .Values.app.strategy | default dict }}
-    {{- $strategyType := $strategy.type | default "RollingUpdate" }}
+    {{- $accessModes := .Values.dataFiles.persistence.accessModes | default (list "ReadWriteOnce") }}
+    {{- $defaultStrategyType := "RollingUpdate" }}
+    {{- if and .Values.dataFiles.persistence.enabled (not (has "ReadWriteMany" $accessModes)) }}
+    {{- $defaultStrategyType = "Recreate" }}
+    {{- end }}
+    {{- $strategyType := $strategy.type | default $defaultStrategyType }}
     {{- if not (has $strategyType (list "RollingUpdate" "Recreate")) }}
     {{- fail "app.strategy.type must be RollingUpdate or Recreate" }}
     {{- end }}
@@ -158,6 +163,10 @@ spec:
           volumeMounts:
             - name: data-files
               mountPath: /data/files
+            {{- with .Values.app.extraVolumeMounts }}
+            # Additional volume mounts
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
           {{- with .Values.app.livenessProbe }}
@@ -176,6 +185,10 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- with .Values.app.extraVolumes }}
+        # Additional volumes
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.app.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

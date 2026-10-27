@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -71,7 +70,7 @@ func useActivityTestSandbox(t *testing.T, mgr *SessionBoundManager, sessionID st
 	return id
 }
 
-func TestRedisActivityProtectsSharedMachineFromSiblingRebuild(t *testing.T) {
+func TestSharedMachineKeepsSandboxAfterBackgroundActivityEnds(t *testing.T) {
 	for _, release := range []string{"remove", "expire"} {
 		t.Run(release, func(t *testing.T) {
 			h1, h2, registry, mini := newSharedActivityManagers(t)
@@ -98,47 +97,11 @@ func TestRedisActivityProtectsSharedMachineFromSiblingRebuild(t *testing.T) {
 				mini.SetTime(now.Add(time.Minute))
 				mini.FastForward(time.Minute)
 			}
-			require.NotEqual(t, first, useActivityTestSandbox(t, h2.mgr, userSessionB))
-			require.Equal(t, []string{first}, h1.client.deleteIDs)
+			require.Equal(t, first, useActivityTestSandbox(t, h2.mgr, userSessionB),
+				"ending background work must not trigger a deferred rebuild")
+			require.Empty(t, h1.client.deleteIDs)
 		})
 	}
-}
-
-type activityBeforeCloseRegistry struct {
-	admission.Registry
-	beforeClose func()
-}
-
-func (r *activityBeforeCloseRegistry) Close(
-	ctx context.Context, scope admission.Scope, ttl time.Duration,
-) (admission.Barrier, error) {
-	if r.beforeClose != nil {
-		f := r.beforeClose
-		r.beforeClose = nil
-		f()
-	}
-	return r.Registry.Close(ctx, scope, ttl)
-}
-
-func TestSharedRebuildRechecksActivityAfterClosingAdmission(t *testing.T) {
-	h1, h2, registry, _ := newSharedActivityManagers(t)
-	ctx := ownerCtx()
-	first := useActivityTestSandbox(t, h1.mgr, userSessionA)
-	_, err := h1.mgr.InvalidateConfigSandboxesForMachines(ctx, "cfg-1",
-		[]allocation.UserMachine{userAssignmentFor(userSessionA).Machine})
-	require.NoError(t, err)
-	ref := interfaces.SessionRef{TenantID: 42, SessionID: userSessionA}
-	raced := false
-	h2.mgr.lifecycle.admission = &activityBeforeCloseRegistry{
-		Registry: h2.mgr.admission,
-		beforeClose: func() {
-			raced = true
-			require.NoError(t, registry.Add(ctx, ref, interfaces.BackgroundActivity{ID: "sj_1"}, time.Minute, 0))
-		},
-	}
-	require.Equal(t, first, useActivityTestSandbox(t, h2.mgr, userSessionB))
-	require.True(t, raced, "register between the optimistic check and the machine barrier")
-	require.Empty(t, h1.client.deleteIDs)
 }
 
 func TestRedisActivityCannotRegisterThroughClosedAdmission(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -366,12 +367,25 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		pattern := "%" + escapeLikeKeyword(req.Query) + "%"
+		if r.wikiDialect() == "sqlite" {
+			// SQLite does not provide PostgreSQL's full-text functions or casts.
+			// Search the same user-visible fields with a case-insensitive LIKE.
+			query = query.Where(
+				"(LOWER(COALESCE(title, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(COALESCE(content, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(CAST(aliases AS TEXT)) LIKE LOWER(?) ESCAPE ?)",
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
+			)
+		} else {
+			// Use PostgreSQL full-text search + ILIKE for aliases.
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || "+
+					"coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR "+
+					"aliases::text ILIKE ? ESCAPE ?)",
+				req.Query, pattern, likeEscapeChar,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -1149,19 +1163,23 @@ func wikiPageLitePointers(rows []types.WikiPageLite) []*types.WikiPageLite {
 	return out
 }
 
-// wikiTitleTrigrams returns the padded rune trigrams used by pg_trgm's text
-// similarity model. Padding lets short titles still share a meaningful signal
-// only when their beginnings or endings agree.
+// wikiTitleTrigrams follows pg_trgm's word boundaries: non-alphanumeric
+// characters separate words, and each word receives two leading spaces and
+// one trailing space before its rune trigrams are added to the shared set.
 func wikiTitleTrigrams(value string) map[string]struct{} {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
+	words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	if len(words) == 0 {
 		return nil
 	}
-	runes := append([]rune{' ', ' '}, []rune(value)...)
-	runes = append(runes, ' ')
-	grams := make(map[string]struct{}, len(runes)-2)
-	for i := 0; i+3 <= len(runes); i++ {
-		grams[string(runes[i:i+3])] = struct{}{}
+	grams := make(map[string]struct{})
+	for _, word := range words {
+		runes := append([]rune{' ', ' '}, []rune(word)...)
+		runes = append(runes, ' ')
+		for i := 0; i+3 <= len(runes); i++ {
+			grams[string(runes[i:i+3])] = struct{}{}
+		}
 	}
 	return grams
 }

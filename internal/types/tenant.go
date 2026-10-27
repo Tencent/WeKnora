@@ -687,6 +687,7 @@ type TenantSandboxConfig struct {
 	// SkillRolloutNextTurn rebuild on the next chat turn. SkillRolloutNewSession
 	// leaves those sandboxes on the previous image; only sessions that start
 	// afterwards boot the new snapshot.
+	// User allocation always keeps existing shared machines, regardless of this setting.
 	SkillRollout string `json:"skill_rollout,omitempty"`
 
 	// AllocationMode decides how a session that has not yet used a sandbox
@@ -861,13 +862,14 @@ const (
 )
 
 // RebuildsExistingOnSkillChange reports whether an install or removal should
-// mark already-bound sandboxes stale. Unknown values fail toward rebuilding
-// so a corrupted row cannot pin every session on a retired image.
+// mark already-bound sandboxes stale. Shared user machines always keep their
+// current image. Unknown rollout values retain the per-session rebuild default.
 func (c *TenantSandboxConfig) RebuildsExistingOnSkillChange() bool {
 	if c == nil {
 		return true
 	}
-	return strings.TrimSpace(c.SkillRollout) != SkillRolloutNewSession
+	return strings.TrimSpace(c.AllocationMode) != SandboxAllocationUser &&
+		strings.TrimSpace(c.SkillRollout) != SkillRolloutNewSession
 }
 
 // SkillImageConfig is the pointer to the snapshot that carries the skills

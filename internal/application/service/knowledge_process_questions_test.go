@@ -25,10 +25,11 @@ func TestParseGeneratedQuestions(t *testing.T) {
 			want:    []string{"First question?", "Second question?"},
 		},
 		{
-			name:    "inline think block is not parsed as questions",
-			content: "<think>\nThe chunk talks about indexing.\nI should ask about it.\n</think>\nWhat is WeKnora?\nHow are chunks indexed?",
-			count:   3,
-			want:    []string{"What is WeKnora?", "How are chunks indexed?"},
+			name: "inline think block is not parsed as questions",
+			content: "<think>\nThe chunk talks about indexing.\nI should ask about it.\n</think>\n" +
+				"What is WeKnora?\nHow are chunks indexed?",
+			count: 3,
+			want:  []string{"What is WeKnora?", "How are chunks indexed?"},
 		},
 		{
 			name:    "unterminated think block yields nothing",

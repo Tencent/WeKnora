@@ -10,8 +10,9 @@ service DocReader {
   // ReadStreamResponse carrying the parse metadata (markdown / metadata /
   // error), then emits one message per image. This keeps every gRPC message
   // small so large scanned PDFs (hundreds of page images, far exceeding the
-  // unary message-size cap) can be returned without RESOURCE_EXHAUSTED and
-  // with bounded memory on both ends.
+  // unary message-size cap) can be returned without RESOURCE_EXHAUSTED. Parsers
+  // that support incremental images can render and send a bounded number of
+  // pages at a time instead of retaining the full image set in the server.
   rpc ReadStream(ReadRequest) returns (stream ReadStreamResponse) {}
   rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse) {}
   // PreprocessImage straightens and crops a photographed page so that OCR sees

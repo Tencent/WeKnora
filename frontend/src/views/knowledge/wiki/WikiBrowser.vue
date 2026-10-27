@@ -450,11 +450,8 @@
                                 })
                                 }}</span>
                               </div>
-                              <t-button v-if="props.canEdit" size="small" theme="primary" variant="base"
-                                @click="triggerAutoFix">
-                                <template #icon><t-icon name="tools" /></template>
-                                {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
-                              </t-button>
+                              <AssistantButton v-if="props.canEdit"
+                                :label="$t('knowledgeEditor.wikiBrowser.issueFixBtn')" @click="triggerAutoFix" />
                             </div>
                             <div class="wiki-issue-popup-list">
                               <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
@@ -485,11 +482,8 @@
                                         }) }}
                                     </span>
                                     <div v-if="props.canEdit" class="wiki-issue-popup-actions">
-                                      <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)"
-                                        style="margin-right: 12px; font-weight: 500;">
-                                        <t-icon name="tools" style="margin-right: 4px;" />{{
-                                          $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
-                                      </span>
+                                      <AssistantButton :label="$t('knowledgeEditor.wikiBrowser.issueFixSingle')"
+                                        @click="triggerFixIssue(issue)" />
                                       <span class="wiki-issue-popup-action"
                                         style="color: var(--td-text-color-placeholder);"
                                         @click="handleIssueIgnore(issue.id)">{{
@@ -547,6 +541,8 @@
                         </t-button>
                       </template>
                       <template v-else>
+                        <AssistantActionsButton icon-only :label="$t('assistant.actions.readContent')"
+                          :actions="readingAssistantActions" />
                         <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.editBtn')"
                           placement="top">
                           <button type="button" class="wiki-action-btn"
@@ -729,7 +725,7 @@
               </span>
               <div class="wiki-issue-popup-actions">
                 <span class="wiki-issue-popup-action" @click="navigateToSlugAndFix(issue.slug)"
-                  style="margin-right: 12px; font-weight: 500;">
+                  style="font-weight: 500;">
                   <t-icon name="arrow-right-circle" style="margin-right: 4px;" />{{
                     $t('knowledgeEditor.wikiBrowser.issueGoFix') }}
                 </span>
@@ -834,6 +830,8 @@ import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
 import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { useAssistantStore } from '@/stores/assistant'
+import AssistantButton from '@/components/assistant/AssistantButton.vue'
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue'
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import {
   listWikiPages,
@@ -1003,6 +1001,14 @@ const activeSystemView = ref<'' | 'index'>('')
 // the scenes so clearing the query can snap back without re-fetching.
 const searchResults = ref<WikiPage[] | null>(null)
 const pageIssues = ref<WikiPageIssue[]>([])
+const readingAssistantActions = computed(() => {
+  const source = JSON.stringify({ knowledge_base_id: props.knowledgeBaseId, wiki_slug: selectedPage.value?.slug });
+  return [
+    { key: 'summary', label: t('assistant.actions.readSummary'), query: t('assistant.prompts.readSummary', { source }) },
+    { key: 'steps', label: t('assistant.actions.readSteps'), query: t('assistant.prompts.readSteps', { source }) },
+    { key: 'faq', label: t('assistant.actions.extractFaq'), query: t('assistant.prompts.extractFaq', { source }) },
+  ];
+})
 const showIssuesBox = ref(false)
 useAssistantPageContext(() => {
   const page = selectedPage.value
@@ -7001,6 +7007,7 @@ span.graph-focus-name {
 .wiki-issue-popup-actions {
   display: flex;
   align-items: center;
+  gap: 12px;
 }
 
 .wiki-issue-popup-action {

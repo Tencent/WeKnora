@@ -3338,15 +3338,6 @@ func slugify(s string) string {
 	return s
 }
 
-// truncateString truncates a string to maxLen runes
-func truncateString(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
-}
-
 // appendUnique appends a string to a StringArray if not already present
 func appendUnique(arr types.StringArray, s string) types.StringArray {
 	for _, v := range arr {

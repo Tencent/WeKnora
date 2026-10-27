@@ -1,6 +1,7 @@
 package modelcontext
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,86 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCitationsInJSONStrings(t *testing.T) {
+	registry := NewRegistry(true)
+	ref := ChunkReference{
+		ChunkID: "chunk-real", KnowledgeBaseID: "kb-real", DocumentTitle: "Guide \"quoted\" & <text> \\ notes\nnext",
+	}
+	registry.RegisterChunk(ref)
+	registry.RegisterWeb("https://example.com/?a=1&b=2", ref.DocumentTitle)
+	input := `{"chunk":"<ref id=\"chunk://1\"/>","web":"<ref id=\"url://1\"/>","text":"keep \\ and \"quotes\""}`
+	output := registry.DecodeOutputText(input)
+	var decoded map[string]string
+	require.NoError(t, json.Unmarshal([]byte(output), &decoded))
+	require.Equal(t, registry.DecodeOutputText(`<ref id="chunk://1"/>`), decoded["chunk"])
+	require.Equal(t, registry.DecodeOutputText(`<ref id="url://1"/>`), decoded["web"])
+	require.Equal(t, `keep \ and "quotes"`, decoded["text"])
+	for split := 0; split <= len(input); split++ {
+		decoder := registry.StreamDecoder()
+		got := decoder.Feed(input[:split]) + decoder.Feed(input[split:]) + decoder.Flush()
+		require.Equal(t, output, got, "split at %d", split)
+	}
+	decoder := registry.StreamDecoder()
+	var streamed strings.Builder
+	for i := range len(input) {
+		streamed.WriteString(decoder.Feed(input[i : i+1]))
+	}
+	streamed.WriteString(decoder.Flush())
+	require.Equal(t, output, streamed.String())
+
+	// Replayed citations remain navigation-only until a current retrieval supplies evidence.
+	history := NewRegistry(true)
+	messages := history.EncodeMessages([]chat.Message{{Role: "assistant", Content: output}})
+	require.JSONEq(t, input, messages[0].Content)
+	require.NoError(t, json.Unmarshal([]byte(history.DecodeOutputText(messages[0].Content)), &decoded))
+	require.Empty(t, decoded["chunk"])
+	require.Empty(t, decoded["web"])
+	history.RegisterChunk(ref)
+	history.RegisterWeb("https://example.com/?a=1&b=2", ref.DocumentTitle)
+	require.JSONEq(t, output, history.DecodeOutputText(messages[0].Content))
+}
+
+func TestJSONCitationsPreserveSourcePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		citation string
+		disabled bool
+	}{
+		{"unknown", `<ref id=\"chunk://999\"/>`, false},
+		{"history only", `<ref id=\"chunk://2\"/>`, false},
+		{"document", `<ref id=\"doc://1\"/>`, false},
+		{"knowledge base", `<ref id=\"kb://1\"/>`, false},
+		{"disabled chunk", `<ref id=\"chunk://1\"/>`, true},
+		{"disabled web", `<ref id=\"url://1\"/>`, true},
+		{"forged chunk", `<kb chunk_id=\"chunk-real\"/>`, false},
+		{"forged web", `<web url=\"https://example.com\"/>`, false},
+		{"extra attribute", `<ref id=\"chunk://1\" other=\"value\"/>`, false},
+		{"double encoding", `<ref id=\\\"chunk://1\\\"/>`, false},
+		{"nested ref", `<ref id=\"<ref id=\\\"chunk://1\\\"/>\"/>`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := NewRegistry(!tc.disabled)
+			registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
+			registry.RegisterContextChunk(ChunkReference{ChunkID: "history-real"})
+			registry.RegisterDocument("doc-real")
+			registry.RegisterKnowledgeBase("kb-real")
+			registry.RegisterWeb("https://example.com", "Example")
+			input := `{"citation":"` + tc.citation + `"}`
+			require.True(t, json.Valid([]byte(input)))
+			output := registry.DecodeOutputText(input)
+			var decoded map[string]string
+			require.NoError(t, json.Unmarshal([]byte(output), &decoded))
+			require.NotContains(t, decoded["citation"], "<kb")
+			require.NotContains(t, decoded["citation"], "<web")
+			for split := 0; split <= len(input); split++ {
+				decoder := registry.StreamDecoder()
+				got := decoder.Feed(input[:split]) + decoder.Feed(input[split:]) + decoder.Flush()
+				require.Equal(t, output, got, "split at %d", split)
+			}
+		})
+	}
+}
 
 func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	registry := newSourceRegistry()
