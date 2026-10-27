@@ -35,7 +35,7 @@ type BaiduProvider struct {
 }
 
 // NewBaiduProvider creates a new Baidu web search provider from parameters.
-func NewBaiduProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewBaiduProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Baidu provider")
 	}
@@ -58,10 +58,9 @@ func (p *BaiduProvider) Name() string {
 // Search performs a web search using Baidu AI Search API.
 func (p *BaiduProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	preparedQuery := normalizeBaiduQuery(query)
 	if preparedQuery == "" {
 		return nil, fmt.Errorf("query is empty")

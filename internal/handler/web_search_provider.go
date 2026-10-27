@@ -333,9 +333,15 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 // @x-agent {"id":"web_search_provider.list_types","risk":"read"}
 // @Router       /web-search-providers/types [get]
 func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
+	providerTypes := types.GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if clients, err := h.registry.Clients(providerTypes[i].ID); err == nil {
+			providerTypes[i].Clients = &clients
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.GetWebSearchProviderTypes(),
+		"data":    providerTypes,
 	})
 }
 
@@ -432,12 +438,12 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 // via /test instead.
 func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerType string, params types.WebSearchProviderParameters) error {
 	logger.Infof(ctx, "[WebSearch][Test] testing provider type=%s", providerType)
-	searchProvider, err := h.registry.CreateProvider(providerType, params)
+	searchProvider, err := h.registry.NewSearcher(providerType, params)
 	if err != nil {
 		logger.Warnf(ctx, "[WebSearch][Test] failed to create provider: %v", err)
 		return fmt.Errorf("failed to create provider: %w", err)
 	}
-	results, err := searchProvider.Search(ctx, "test", 1, false)
+	results, err := searchProvider.Search(ctx, types.WebSearchRequest{Query: "test", MaxResults: 1})
 	if err != nil {
 		logger.Warnf(ctx, "[WebSearch][Test] search failed: %v", err)
 		return err

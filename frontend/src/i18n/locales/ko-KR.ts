@@ -7072,6 +7072,14 @@ export default {
     baseUrlLabel: '인스턴스 URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'API 키를 입력하세요',
+    clients: {
+      label: '검색 및 페이지 읽기',
+      search: '검색',
+      fetch: '페이지 읽기',
+      viaApi: '{name} API',
+      local: '내장 페이지 리더',
+      help: '검색 결과는 이 프로바이더에서 가져오며, 에이전트는 위의 방식으로 페이지 본문을 읽습니다.'
+    },
     toasts: {
       providerCreated: '검색 엔진 프로바이더가 생성되었습니다',
       providerUpdated: '검색 엔진 프로바이더가 업데이트되었습니다',

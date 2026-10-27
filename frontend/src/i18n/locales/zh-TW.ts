@@ -7073,6 +7073,14 @@ export default {
     baseUrlLabel: '實例地址',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: '請輸入 API 金鑰',
+    clients: {
+      label: '搜尋與網頁讀取',
+      search: '搜尋',
+      fetch: '網頁讀取',
+      viaApi: '{name} API',
+      local: '內建網頁讀取器',
+      help: '搜尋結果由該引擎回傳；智慧體讀取網頁內文時使用上方的網頁讀取方式。'
+    },
     toasts: {
       providerCreated: '搜尋引擎設定已建立',
       providerUpdated: '搜尋引擎設定已更新',

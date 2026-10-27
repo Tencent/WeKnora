@@ -1319,9 +1319,19 @@ func (s *agentService) registerTools(
 	allowedTools = withoutString(allowedTools, tools.ToolWebSearch)
 	allowedTools = withoutString(allowedTools, tools.ToolWebFetch)
 	// If web search is enabled, add web_search to allowedTools
+	var webClient interfaces.WebClient
 	if config.WebSearchEnabled {
 		allowedTools = append(allowedTools, tools.ToolWebSearch)
 		allowedTools = append(allowedTools, tools.ToolWebFetch)
+		// The provider type selects the web_search schema and the web_fetch reader for this run.
+		if s.webSearchService != nil {
+			client, err := s.webSearchService.Resolve(ctx, config.WebSearchProviderID)
+			if err != nil {
+				logger.Warnf(ctx, "Web search provider %q unavailable: %v", config.WebSearchProviderID, err)
+			} else {
+				webClient = client
+			}
+		}
 	}
 
 	// Long-term memory search follows the memory switches, not the tool list.
@@ -1469,16 +1479,13 @@ func (s *agentService) registerTools(
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
 		case tools.ToolWebSearch:
-			toolToRegister = tools.NewWebSearchTool(
-				s.webSearchService,
-				config.WebSearchMaxResults,
-				config.WebSearchProviderID,
-			)
+			toolToRegister = tools.NewWebSearchTool(webClient, config.WebSearchMaxResults)
 			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
 
 		case tools.ToolWebFetch:
-			toolToRegister = tools.NewWebFetchTool()
-			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
+			toolToRegister = tools.NewWebFetchTool(webClient)
+			logger.Infof(ctx, "Registered web_fetch tool for session: %s, providerID: %s",
+				sessionID, config.WebSearchProviderID)
 
 		case tools.ToolDataAnalysis:
 			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).

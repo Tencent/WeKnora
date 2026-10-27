@@ -43,103 +43,112 @@ func NewWebSearchService(
 	}, nil
 }
 
-// Search performs web search using the provider entity identified by providerID.
-// If providerID is empty, it falls back to the deprecated config.Provider field for backward compatibility.
-func (s *WebSearchService) Search(
-	ctx context.Context,
-	providerID string,
-	config *types.WebSearchConfig,
-	query string,
-) ([]*types.WebSearchResult, error) {
-	if config == nil {
-		return nil, fmt.Errorf("web search config is required")
+// Resolve loads providerID once and binds it to the clients registered for its type and to the
+// tenant's blacklist.
+func (s *WebSearchService) Resolve(ctx context.Context, providerID string) (interfaces.WebClient, error) {
+	var cfg *types.WebSearchConfig
+	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil {
+		cfg = tenant.WebSearchConfig
 	}
-
-	// Resolve the provider
-	searchProvider, err := s.resolveProvider(ctx, providerID, config)
+	providerType, params, err := resolveProviderCall(ctx, s.providerRepo, strings.TrimSpace(providerID), cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	// Set timeout
+	capabilities, err := s.registry.Capabilities(providerType)
+	if err != nil {
+		return nil, err
+	}
 	timeout := time.Duration(s.timeout) * time.Second
-	if timeout == 0 {
+	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	client := &webClient{
+		registry:     s.registry,
+		providerType: providerType,
+		params:       params,
+		capabilities: capabilities,
+		timeout:      timeout,
+	}
+	if cfg != nil {
+		client.blacklist = cfg.Blacklist
+	}
+	// The fetch client is built once so a run reuses its connections.
+	client.fetcher, err = s.registry.NewFetcher(providerType, params)
+	if err != nil {
+		logger.Warnf(ctx, "[WebFetch] %s fetch client unavailable, using local reader: %v", providerType, err)
+		client.fetcher = infra_web_search.LocalFetcher()
+	}
+	return client, nil
+}
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+// webClient is one stored provider resolved by WebSearchService.Resolve.
+type webClient struct {
+	registry     *infra_web_search.Registry
+	providerType string
+	params       types.WebSearchProviderParameters
+	capabilities types.WebSearchCapabilities
+	timeout      time.Duration
+	blacklist    []string
+	fetcher      interfaces.WebFetcher
+}
 
-	// Perform search
-	var results []*types.WebSearchResult
-	if config.Filters.Country != "" || config.Filters.Freshness != "" {
-		if err := config.Filters.Validate(); err != nil {
+func (c *webClient) Capabilities() types.WebSearchCapabilities {
+	return c.capabilities
+}
+
+// Search builds the search client per call so a bad credential surfaces as this call's error.
+func (c *webClient) Search(ctx context.Context, req types.WebSearchRequest) ([]*types.WebSearchResult, error) {
+	if req.Filters != (types.WebSearchFilters{}) {
+		if !c.capabilities.Filters {
+			return nil, fmt.Errorf("provider %s does not support country/freshness filters; "+
+				"omit them or select Brave or Serply", c.providerType)
+		}
+		if err := req.Filters.Validate(); err != nil {
 			return nil, err
 		}
-		filtered, ok := searchProvider.(interfaces.FilteredWebSearchProvider)
-		if !ok {
-			return nil, fmt.Errorf("provider %s does not support country/freshness filters; "+
-				"omit them or select Brave or Serply", searchProvider.Name())
-		}
-		results, err = filtered.SearchWithFilters(ctx, query, config.MaxResults, config.IncludeDate, config.Filters)
-	} else {
-		results, err = searchProvider.Search(ctx, query, config.MaxResults, config.IncludeDate)
 	}
+	searcher, err := c.registry.NewSearcher(c.providerType, c.params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider %s: %w", c.providerType, err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	results, err := searcher.Search(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("web search failed: %w", err)
 	}
-
-	// Apply blacklist filtering
-	results = s.filterBlacklist(results, config.Blacklist)
-
-	return results, nil
+	return filterBlacklist(results, c.blacklist), nil
 }
 
-// resolveProvider resolves a WebSearchProvider instance from either:
-// 1. A provider entity ID (new path) — loads from DB, creates via registry
-// 2. The deprecated config.Provider field (backward compatibility) — creates with empty params
-func (s *WebSearchService) resolveProvider(
+func (c *webClient) Fetch(ctx context.Context, pageURL string) (*types.WebPage, error) {
+	return c.fetcher.Fetch(ctx, pageURL)
+}
+
+// resolveProviderCall loads the saved WebSearchProviderEntity for this call.
+// The provider ID is chosen by the caller: an agent override, or the tenant's
+// default provider. WebSearchConfig no longer selects the engine or its API key.
+func resolveProviderCall(
 	ctx context.Context,
+	providerRepo interfaces.WebSearchProviderRepository,
 	providerID string,
 	cfg *types.WebSearchConfig,
-) (interfaces.WebSearchProvider, error) {
-	// New path: load provider entity from DB
-	if providerID != "" {
-		tenantID, ok := types.TenantIDFromContext(ctx)
-		if !ok {
-			return nil, fmt.Errorf("workspace ID not found in context")
-		}
-
-		entity, err := s.providerRepo.GetByID(ctx, tenantID, providerID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load web search provider %s: %w", providerID, err)
-		}
-		if entity == nil {
-			return nil, fmt.Errorf("web search provider not found: %s", providerID)
-		}
-
-		params := mergeProxyFromWebSearchConfig(entity.Parameters, cfg)
-		provider, err := s.registry.CreateProvider(string(entity.Provider), params)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create provider %s (%s): %w", entity.Name, entity.Provider, err)
-		}
-		return provider, nil
+) (string, types.WebSearchProviderParameters, error) {
+	if providerID == "" {
+		return "", types.WebSearchProviderParameters{}, fmt.Errorf("no web search provider configured")
 	}
-
-	// Backward compatibility: use the deprecated config.Provider field
-	if cfg.Provider != "" {
-		logger.Warnf(ctx, "Using deprecated WebSearchConfig.Provider field: %s. Please migrate to WebSearchProviderEntity.", cfg.Provider)
-		params := mergeProxyFromWebSearchConfig(types.WebSearchProviderParameters{
-			APIKey: cfg.APIKey,
-		}, cfg)
-		provider, err := s.registry.CreateProvider(cfg.Provider, params)
-		if err != nil {
-			return nil, fmt.Errorf("web search provider %s is not available: %w", cfg.Provider, err)
-		}
-		return provider, nil
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return "", types.WebSearchProviderParameters{}, fmt.Errorf("workspace ID not found in context")
 	}
-
-	return nil, fmt.Errorf("no web search provider configured")
+	entity, err := providerRepo.GetByID(ctx, tenantID, providerID)
+	if err != nil {
+		return "", types.WebSearchProviderParameters{}, fmt.Errorf(
+			"failed to load web search provider %s: %w", providerID, err)
+	}
+	if entity == nil {
+		return "", types.WebSearchProviderParameters{}, fmt.Errorf("web search provider not found: %s", providerID)
+	}
+	return string(entity.Provider), mergeProxyFromWebSearchConfig(entity.Parameters, cfg), nil
 }
 
 // mergeProxyFromWebSearchConfig applies cfg.ProxyURL over stored provider params when non-empty (call-time override).
@@ -152,229 +161,8 @@ func mergeProxyFromWebSearchConfig(base types.WebSearchProviderParameters, cfg *
 	return base
 }
 
-// CompressWithRAG performs RAG-based compression using a temporary, hidden knowledge base.
-// The temporary knowledge base is deleted after use. The UI will not list it due to repo filtering.
-func (s *WebSearchService) CompressWithRAG(
-	ctx context.Context, sessionID string, tempKBID string, questions []string,
-	webSearchResults []*types.WebSearchResult, cfg *types.WebSearchConfig,
-	kbSvc interfaces.KnowledgeBaseService, knowSvc interfaces.KnowledgeService,
-	seenURLs map[string]bool, knowledgeIDs []string,
-) (compressed []*types.WebSearchResult, kbID string, newSeen map[string]bool, newIDs []string, err error) {
-	if len(webSearchResults) == 0 || len(questions) == 0 {
-		return
-	}
-	if cfg == nil {
-		return nil, tempKBID, seenURLs, knowledgeIDs, fmt.Errorf("web search config is required for RAG compression")
-	}
-	if cfg.EmbeddingModelID == "" {
-		return nil, tempKBID, seenURLs, knowledgeIDs, fmt.Errorf("embedding_model_id is required for RAG compression")
-	}
-	var createdKB *types.KnowledgeBase
-	// reuse or create temp KB
-	if strings.TrimSpace(tempKBID) != "" {
-		createdKB, err = kbSvc.GetKnowledgeBaseByID(ctx, tempKBID)
-		if err != nil {
-			logger.Warnf(ctx, "Temp KB %s not available, recreating: %v", tempKBID, err)
-			createdKB = nil
-		}
-	}
-	if createdKB == nil {
-		kb := &types.KnowledgeBase{
-			Name:             fmt.Sprintf("tmp-websearch-%d", time.Now().UnixNano()),
-			Description:      "Ephemeral search compression KB",
-			IsTemporary:      true,
-			EmbeddingModelID: cfg.EmbeddingModelID,
-		}
-		createdKB, err = kbSvc.CreateKnowledgeBase(ctx, kb)
-		if err != nil {
-			return nil, tempKBID, seenURLs, knowledgeIDs, fmt.Errorf(
-				"failed to create temporary knowledge base: %w",
-				err,
-			)
-		}
-		tempKBID = createdKB.ID
-	}
-
-	// Ingest all web results as passages synchronously
-	// dedupe by URL across queries within the same temp KB for this request/session
-	if seenURLs == nil {
-		seenURLs = map[string]bool{}
-	}
-	for _, r := range webSearchResults {
-		sourceURL := r.URL
-		title := strings.TrimSpace(r.Title)
-		snippet := strings.TrimSpace(r.Snippet)
-		body := strings.TrimSpace(r.Content)
-		// skip if already ingested for this KB
-		if sourceURL != "" && seenURLs[sourceURL] {
-			continue
-		}
-		contentLines := make([]string, 0, 4)
-		contentLines = append(contentLines, fmt.Sprintf("[sourceUrl]: %s", sourceURL))
-		if title != "" {
-			contentLines = append(contentLines, title)
-		}
-		if snippet != "" {
-			contentLines = append(contentLines, snippet)
-		}
-		if body != "" {
-			contentLines = append(contentLines, body)
-		}
-		knowledge, err := knowSvc.CreateKnowledgeFromPassageSync(ctx, createdKB.ID, contentLines, "")
-		if err != nil {
-			logger.Warnf(ctx, "failed to ingest passage into temp KB: %v", err)
-			continue
-		}
-		if sourceURL != "" {
-			seenURLs[sourceURL] = true
-		}
-		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
-	}
-
-	// Retrieve references for questions
-	matchCount := cfg.DocumentFragments
-	if matchCount <= 0 {
-		matchCount = 3
-	}
-	var allRefs []*types.SearchResult
-	for _, q := range questions {
-		params := types.SearchParams{
-			QueryText:        q,
-			VectorThreshold:  0.2,
-			KeywordThreshold: 0.2,
-			MatchCount:       matchCount,
-		}
-		results, err := kbSvc.HybridSearch(ctx, tempKBID, params)
-		if err != nil {
-			logger.Warnf(ctx, "hybrid search failed for temp KB: %v", err)
-			continue
-		}
-		allRefs = append(allRefs, results...)
-	}
-
-	// Round-robin select references across the original results by source URL
-	selected := s.selectReferencesRoundRobin(webSearchResults, allRefs, matchCount*len(webSearchResults))
-	// Consolidate by URL back into the web results
-	compressedResults := s.consolidateReferencesByURL(webSearchResults, selected)
-	return compressedResults, tempKBID, seenURLs, knowledgeIDs, nil
-}
-
-// selectReferencesRoundRobin selects up to limit references, distributing fairly across source URLs.
-func (s *WebSearchService) selectReferencesRoundRobin(
-	raw []*types.WebSearchResult,
-	refs []*types.SearchResult,
-	limit int,
-) []*types.SearchResult {
-	if limit <= 0 || len(refs) == 0 {
-		return nil
-	}
-	// group refs by url marker in content
-	urlToRefs := map[string][]*types.SearchResult{}
-	for _, r := range refs {
-		url := extractSourceURLFromContent(r.Content)
-		if url == "" {
-			continue
-		}
-		urlToRefs[url] = append(urlToRefs[url], r)
-	}
-	// preserve order based on raw results
-	order := make([]string, 0, len(raw))
-	seen := map[string]bool{}
-	for _, r := range raw {
-		if r.URL != "" && !seen[r.URL] {
-			order = append(order, r.URL)
-			seen[r.URL] = true
-		}
-	}
-	var out []*types.SearchResult
-	for len(out) < limit {
-		progress := false
-		for _, url := range order {
-			if len(out) >= limit {
-				break
-			}
-			list := urlToRefs[url]
-			if len(list) == 0 {
-				continue
-			}
-			out = append(out, list[0])
-			urlToRefs[url] = list[1:]
-			progress = true
-		}
-		if !progress {
-			break
-		}
-	}
-	return out
-}
-
-// consolidateReferencesByURL merges selected references back into the original results grouped by URL.
-func (s *WebSearchService) consolidateReferencesByURL(
-	raw []*types.WebSearchResult,
-	selected []*types.SearchResult,
-) []*types.WebSearchResult {
-	if len(selected) == 0 {
-		return raw
-	}
-	agg := map[string][]string{}
-	for _, ref := range selected {
-		url := extractSourceURLFromContent(ref.Content)
-		if url == "" {
-			continue
-		}
-		// strip the first marker line to avoid duplication
-		agg[url] = append(agg[url], stripMarker(ref.Content))
-	}
-	// build outputs, preserving raw ordering and metadata
-	out := make([]*types.WebSearchResult, 0, len(raw))
-	for _, r := range raw {
-		parts := agg[r.URL]
-		if len(parts) == 0 {
-			out = append(out, r)
-			continue
-		}
-		merged := strings.Join(parts, "\n---\n")
-		out = append(out, &types.WebSearchResult{
-			Title:       r.Title,
-			URL:         r.URL,
-			Snippet:     r.Snippet,
-			Content:     merged,
-			Source:      r.Source,
-			PublishedAt: r.PublishedAt,
-		})
-	}
-	return out
-}
-
-func extractSourceURLFromContent(content string) string {
-	if content == "" {
-		return ""
-	}
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 {
-		return ""
-	}
-	first := strings.TrimSpace(lines[0])
-	const prefix = "[sourceUrl]: "
-	if strings.HasPrefix(first, prefix) {
-		return strings.TrimSpace(strings.TrimPrefix(first, prefix))
-	}
-	return ""
-}
-
-func stripMarker(content string) string {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 {
-		return content
-	}
-	if strings.HasPrefix(strings.TrimSpace(lines[0]), "[sourceUrl]: ") {
-		return strings.Join(lines[1:], "\n")
-	}
-	return content
-}
-
 // filterBlacklist filters results based on blacklist rules
-func (s *WebSearchService) filterBlacklist(
+func filterBlacklist(
 	results []*types.WebSearchResult,
 	blacklist []string,
 ) []*types.WebSearchResult {
@@ -388,7 +176,7 @@ func (s *WebSearchService) filterBlacklist(
 		shouldFilter := false
 
 		for _, rule := range blacklist {
-			if s.matchesBlacklistRule(result.URL, rule) {
+			if matchesBlacklistRule(result.URL, rule) {
 				shouldFilter = true
 				break
 			}
@@ -404,7 +192,7 @@ func (s *WebSearchService) filterBlacklist(
 
 // matchesBlacklistRule checks if a URL matches a blacklist rule
 // Supports both pattern matching (e.g., *://*.example.com/*) and regex patterns (e.g., /example\.(net|org)/)
-func (s *WebSearchService) matchesBlacklistRule(url, rule string) bool {
+func matchesBlacklistRule(url, rule string) bool {
 	// Check if it's a regex pattern (starts and ends with /)
 	if strings.HasPrefix(rule, "/") && strings.HasSuffix(rule, "/") {
 		pattern := rule[1 : len(rule)-1]

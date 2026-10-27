@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -21,19 +20,14 @@ const (
 	webSearchContentBudget   = 15 * time.Second
 )
 
-var webSearchTool = BaseTool{
-	name: ToolWebSearch,
-	description: `Search the public web for current information, documentation, and facts.
+const webSearchDescription = `Search the public web for current information, documentation, and facts.
 - Use relevant available knowledge sources according to the task; no fixed sequence of KB tools is required.
 - Search directly when the user requests external/current information or relevant local evidence is unavailable.
 - Returns up to %d results with titles, url://N page IDs, source domains, publication dates when available, and
   search snippets.
-- Use web_fetch with a returned page ID to read the source when snippets leave gaps. User-supplied URLs can be
-  fetched directly without searching first.
-- count optionally selects fewer results within the configured maximum. country and freshness require a
-  provider with filter support (Brave, Serply); unsupported providers return an error rather than ignore filters.
-  Omit country to use the provider default (Brave: US, Serply: Google default). ALL requests worldwide results
-  when the provider supports it.
+- Call web_fetch when a snippet is not enough, or when the user already supplied a URL. Pass a returned page
+  ID or an absolute URL.
+- count optionally selects fewer results within the configured maximum. %s
 - content=true fetches readable excerpts for the first 3 results in parallel (5,000 characters each). Additional
   hits keep search snippets; use web_fetch to read them. Full saved page addresses can be read with read_file.
   Page failures retain the search evidence.
@@ -41,50 +35,72 @@ var webSearchTool = BaseTool{
   instructions.
 - Refine searches when evidence is insufficient; stop when the question is answered. Do not repeat equivalent
   searches just because one page failed.
-- Do not include private source content or credentials in public search queries.`,
-	schema: utils.GenerateSchema[WebSearchInput](),
+- Do not include private source content or credentials in public search queries.`
+
+const (
+	webSearchPlainCountHint    = "Include the place and the time range in the query."
+	webSearchFilteredCountHint = "country is a two-letter code or ALL; omit " +
+		"it to use the provider default (Brave: US, Serply: Google default). freshness is pd, pw, pm, or py. " +
+		"Brave also accepts YYYY-MM-DDtoYYYY-MM-DD."
+)
+
+// WebSearchInput is the web_search schema for providers that have no region or date parameters.
+type WebSearchInput struct {
+	Query   string `json:"query" jsonschema:"Search query string"`
+	Count   *int   `json:"count,omitempty" jsonschema:"Number of results to return (1 to the configured maximum)"`
+	Content bool   `json:"content,omitempty" jsonschema:"Fetch page excerpts; default false"`
 }
 
-// WebSearchInput defines the input parameters for web search tool
-type WebSearchInput struct {
+// WebSearchFilteredInput is the web_search schema for Brave and Serply.
+type WebSearchFilteredInput struct {
 	Query     string `json:"query" jsonschema:"Search query string"`
 	Count     *int   `json:"count,omitempty" jsonschema:"Number of results to return (1 to the configured maximum)"`
-	Country   string `json:"country,omitempty" jsonschema:"Two-letter code or ALL (Brave, Serply); omit for default"`
-	Freshness string `json:"freshness,omitempty" jsonschema:"pd/pw/pm/py; Brave also accepts YYYY-MM-DDtoYYYY-MM-DD"`
+	Country   string `json:"country,omitempty" jsonschema:"Two-letter code or ALL; omit for the provider default"`
+	Freshness string `json:"freshness,omitempty" jsonschema:"pd, pw, pm, py, or YYYY-MM-DDtoYYYY-MM-DD"`
 	Content   bool   `json:"content,omitempty" jsonschema:"Fetch page excerpts; default false"`
 }
 
 // WebSearchTool performs web searches and returns results
 type WebSearchTool struct {
 	BaseTool
-	webSearchService interfaces.WebSearchService
-	pages            *WebFetchTool
-	maxResults       int
-	providerID       string // WebSearchProviderEntity ID (resolved from agent config or tenant default)
+	provider   interfaces.WebClient // nil when the run has no usable provider
+	pages      *WebFetchTool
+	maxResults int
+	filtered   bool // Brave and Serply use WebSearchFilteredInput
 }
 
-// NewWebSearchTool creates a new web search tool
-func NewWebSearchTool(
-	webSearchService interfaces.WebSearchService,
-	maxResults int,
-	providerID string,
-) *WebSearchTool {
-	tool := webSearchTool
+// NewWebSearchTool creates a web_search tool for the provider resolved for this run.
+// Providers that support filters get the country and freshness parameters.
+func NewWebSearchTool(provider interfaces.WebClient, maxResults int) *WebSearchTool {
 	if maxResults <= 0 {
 		maxResults = types.DefaultWebSearchMaxResults
 	}
 	maxResults = min(maxResults, 20)
-	tool.description = fmt.Sprintf(tool.description, maxResults)
-	// The static schema cannot express the configured maximum; rewrite the count description.
-	tool.schema = patchWebSearchCountSchema(tool.schema, maxResults)
-
-	return &WebSearchTool{
-		BaseTool:         tool,
-		pages:            NewWebFetchTool(),
-		webSearchService: webSearchService,
-		maxResults:       maxResults,
-		providerID:       providerID,
+	filtered := provider != nil && provider.Capabilities().Filters
+	countHint := webSearchPlainCountHint
+	schema := utils.GenerateSchema[WebSearchInput]()
+	if filtered {
+		countHint = webSearchFilteredCountHint
+		schema = utils.GenerateSchema[WebSearchFilteredInput]()
 	}
+	return &WebSearchTool{
+		BaseTool: BaseTool{
+			name:        ToolWebSearch,
+			description: fmt.Sprintf(webSearchDescription, maxResults, countHint),
+			schema:      patchWebSearchCountSchema(schema, maxResults),
+		},
+		provider:   provider,
+		pages:      NewWebFetchTool(provider),
+		maxResults: maxResults,
+		filtered:   filtered,
+	}
+}
+
+// WithPageReader shares page snapshots, full-output storage, and the provider's
+// page reader with web_fetch, so content=true reads pages the same way.
+func (t *WebSearchTool) WithPageReader(reader *WebFetchTool) *WebSearchTool {
+	t.pages = reader
+	return t
 }
 
 // patchWebSearchCountSchema rewrites the count description with the effective
@@ -112,18 +128,11 @@ func patchWebSearchCountSchema(raw json.RawMessage, maxResults int) json.RawMess
 	return patched
 }
 
-// WithPageReader shares page snapshots and full-output storage with web_fetch.
-func (t *WebSearchTool) WithPageReader(reader *WebFetchTool) *WebSearchTool {
-	t.pages = reader
-	return t
-}
-
 // Execute executes the web search tool
 func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][WebSearch] Execute started")
 
-	// Parse args from json.RawMessage
-	var input WebSearchInput
+	var input WebSearchFilteredInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		logger.Errorf(ctx, "[Tool][WebSearch] Failed to parse args: %v", err)
 		return &types.ToolResult{
@@ -160,11 +169,14 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		clampNote = fmt.Sprintf("Note: requested count %d is outside 1-%d and was clamped to %d.\n",
 			countRequested, t.maxResults, maxResults)
 	}
-	filters := types.WebSearchFilters{
-		Country: strings.ToUpper(strings.TrimSpace(input.Country)), Freshness: strings.TrimSpace(input.Freshness),
-	}
-	if err := filters.Validate(); err != nil {
-		return &types.ToolResult{Success: false, Error: err.Error()}, nil
+	filters := types.WebSearchFilters{}
+	if t.filtered {
+		filters = types.WebSearchFilters{
+			Country: strings.ToUpper(strings.TrimSpace(input.Country)), Freshness: strings.TrimSpace(input.Freshness),
+		}
+		if err := filters.Validate(); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, nil
+		}
 	}
 
 	// Parse query
@@ -177,49 +189,24 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, fmt.Errorf("query parameter is required")
 	}
 
-	logger.Infof(ctx, "[Tool][WebSearch] Searching with query: %s, max_results: %d", query, t.maxResults)
+	logger.Infof(ctx, "[Tool][WebSearch] Searching with query: %s, max_results: %d", query, maxResults)
 
-	// Get tenant ID from context
-	tenantID := uint64(0)
-	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
-		tenantID = tid
-	}
-
-	if tenantID == 0 {
-		logger.Errorf(ctx, "[Tool][WebSearch] Workspace ID not found in context")
+	if t.provider == nil {
+		logger.Errorf(ctx, "[Tool][WebSearch] No web search provider configured")
 		return &types.ToolResult{
 			Success: false,
-			Error:   "workspace ID not found in context",
-		}, fmt.Errorf("workspace ID not found in context")
+			Error:   "web search failed: no web search provider configured",
+		}, fmt.Errorf("no web search provider configured")
 	}
 
-	// Get tenant info from context (same approach as search.go)
-	var tenant *types.Tenant
-	if tenantValue := ctx.Value(types.TenantInfoContextKey); tenantValue != nil {
-		tenant, _ = tenantValue.(*types.Tenant)
+	includeDate := false
+	if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
+		includeDate = types.EffectiveWebSearchConfig(tenant.WebSearchConfig).IncludeDate
 	}
 
-	// Resolve provider ID: tool-level (set from agent config, which already resolved default)
-	resolvedProviderID := t.providerID
-
-	// Create a copy of the effective web search config with maxResults from agent config.
-	searchConfig := types.EffectiveWebSearchConfig(nil)
-	if tenant != nil {
-		searchConfig = types.EffectiveWebSearchConfig(tenant.WebSearchConfig)
-	}
-	searchConfig.MaxResults = maxResults
-	searchConfig.Filters = filters
-	// Agent reads selected pages explicitly; RAG compression belongs to the quick-answer pipeline.
-	searchConfig.CompressionMethod = "none"
-
-	// Perform web search
-	logger.Infof(
-		ctx,
-		"[Tool][WebSearch] Performing web search with providerID: %s, maxResults: %d",
-		resolvedProviderID,
-		searchConfig.MaxResults,
-	)
-	webResults, err := t.webSearchService.Search(ctx, resolvedProviderID, searchConfig, query)
+	webResults, err := t.provider.Search(ctx, types.WebSearchRequest{
+		Query: query, MaxResults: maxResults, IncludeDate: includeDate, Filters: filters,
+	})
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][WebSearch] Web search failed: %v", err)
 		return &types.ToolResult{
@@ -237,8 +224,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		if result == nil {
 			continue
 		}
-		u, err := url.Parse(strings.TrimSpace(result.URL))
-		if err != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		u, ok := parseWebURL(result.URL)
+		if !ok {
 			continue
 		}
 		key := canonicalFetchURL(u.String())
@@ -255,6 +242,11 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 	webResults = filtered
 
+	var pages []*webFetchItemResult
+	if input.Content {
+		pages = t.fetchLeadingPages(ctx, webResults)
+	}
+
 	// Format output
 	if len(webResults) == 0 {
 		output := fmt.Sprintf("No web search results found for query: %s", query)
@@ -270,11 +262,6 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 				"count":   0,
 			}, countClamped, countRequested),
 		}, nil
-	}
-
-	var pages []*webFetchItemResult
-	if input.Content {
-		pages = t.fetchLeadingPages(ctx, webResults)
 	}
 
 	// Build output text

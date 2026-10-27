@@ -667,7 +667,13 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 			"max_results": webConfig.MaxResults,
 		},
 	})
-	webResults, err := p.webSearchService.Search(webCtx, providerID, webConfig, chatManage.RewriteQuery)
+	var webResults []*types.WebSearchResult
+	client, err := p.webSearchService.Resolve(webCtx, providerID)
+	if err == nil {
+		webResults, err = client.Search(webCtx, types.WebSearchRequest{
+			Query: chatManage.RewriteQuery, MaxResults: webConfig.MaxResults, IncludeDate: webConfig.IncludeDate,
+		})
+	}
 	webSpan.Finish(map[string]interface{}{
 		"hit_count": len(webResults),
 	}, nil, err)
@@ -682,10 +688,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
 	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
 	// tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
-	// compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
-	// 	ctx, chatManage.SessionID, tempKBID, questions, webResults, webConfig,
-	// 	p.knowledgeBaseService, p.knowledgeService, seen, ids,
-	// )
+	// state := &types.WebSearchCompressionState{TempKBID: tempKBID, SeenURLs: seen, KnowledgeIDs: ids}
+	// compressed, err := p.webResultCompressor.Compress(ctx, state, questions, webResults, webConfig)
 	// if err != nil {
 	// 	pipelineWarn(ctx, "Search", "web_compress_error", map[string]interface{}{
 	// 		"error": err.Error(),
@@ -693,7 +697,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// } else {
 	// 	webResults = compressed
 	// 	// Persist temp KB state back into Redis using WebSearchStateRepository
-	// 	p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
+	// 	p.webSearchStateService.SaveWebSearchTempKBState(
+	// 		ctx, chatManage.SessionID, state.TempKBID, state.SeenURLs, state.KnowledgeIDs)
 	// }
 	res := searchutil.ConvertWebSearchResults(webResults)
 	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{

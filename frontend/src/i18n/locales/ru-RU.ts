@@ -7072,6 +7072,14 @@ export default {
     baseUrlLabel: 'URL экземпляра',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'Введите API-ключ',
+    clients: {
+      label: 'Поиск и чтение страниц',
+      search: 'Поиск',
+      fetch: 'Чтение страниц',
+      viaApi: '{name} API',
+      local: 'Встроенный загрузчик страниц',
+      help: 'Результаты поиска возвращает этот провайдер; агент читает страницы способом, указанным выше.'
+    },
     toasts: {
       providerCreated: 'Поисковый провайдер создан',
       providerUpdated: 'Поисковый провайдер обновлён',

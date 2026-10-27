@@ -5,7 +5,7 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply'
+  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply' | 'deepseek'
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -37,6 +37,14 @@ export interface WebSearchProviderTypeInfo {
   description?: string
   docs_url?: string
   config_fields?: WebSearchProviderConfigField[]
+  clients?: WebSearchClients
+}
+
+// Readers registered for a provider type. search/fetch hold a provider type id,
+// or 'local' for WeKnora's built-in page reader.
+export interface WebSearchClients {
+  search: string
+  fetch: string
 }
 
 export interface WebSearchProviderConfigField {
