@@ -53,6 +53,7 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 		for _, scenario := range []string{
 			"mixed", "all-failed", "many-oversized", "transient-only",
 			"mixed-failures", "ingest-failed", "paused", "fetch-failed",
+			"mixed-permanent", "oversized-and-ingest-failed",
 		} {
 			name := scenario + "/batch"
 			if stream {
@@ -93,6 +94,12 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 					c.items[0].Metadata = map[string]string{
 						"error": "temporary API error", "error_reason_code": "dingtalk_document_failed",
 					}
+				case "mixed-permanent":
+					healthy.FileName = "unsupported.mp4"
+					c.items = append(c.items, healthy)
+				case "oversized-and-ingest-failed":
+					c.items = append(c.items, healthy)
+					h.knowledgeSvc.createErr = errors.New("storage unavailable")
 				case "ingest-failed":
 					c.items = []types.FetchedItem{healthy, healthy}
 					h.knowledgeSvc.createErr = errors.New("storage unavailable")
@@ -116,10 +123,14 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 				err = h.svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload))
 				log := h.syncLogRepo.logs[h.syncLogID]
 				if scenario == "fetch-failed" || scenario == "transient-only" ||
-					scenario == "mixed-failures" || scenario == "ingest-failed" {
+					scenario == "mixed-failures" || scenario == "ingest-failed" ||
+					scenario == "oversized-and-ingest-failed" {
 					require.Error(t, err)
 					require.Equal(t, types.SyncLogStatusFailed, log.Status)
 					require.Equal(t, types.DataSourceStatusError, h.ds.Status)
+					if !stream && scenario == "oversized-and-ingest-failed" {
+						require.JSONEq(t, string(mustCursorJSON(t, oldCursor)), string(h.ds.LastSyncCursor))
+					}
 					return
 				}
 				require.NoError(t, err, "oversized files must not replay the whole task")
