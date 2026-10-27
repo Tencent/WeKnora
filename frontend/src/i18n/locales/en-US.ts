@@ -1,4 +1,27 @@
 export default {
+  wikiRecovery: {
+    "failureDetails": "Failure details · {count} attempts",
+    "selectPage": "Select failed documents on this page",
+    "documents": "Document Wiki results",
+    "description": "Source ingestion and Wiki construction have separate results. Retry Wiki reuses existing chunks, indexes and pages.",
+    "refresh": "Refresh",
+    "retrySelected": "Retry selected ({count})",
+    "sourceStatus": "Source ingestion",
+    "relatedPages": "Related Wiki pages",
+    "retry": "Retry Wiki",
+    "empty": "No matching documents",
+    "noPages": "No associated Wiki pages",
+    "failed": "Wiki failed",
+    "all": "All documents",
+    "pending": "Queued",
+    "running": "Building",
+    "completed": "Completed",
+    "skipped": "Skipped",
+    "not_started": "Not started",
+    "loadFailed": "Could not load Wiki results",
+    "retryFailed": "Could not retry Wiki",
+    "queued": "Queued {count} documents for Wiki construction"
+},
   modelCatalog: {
     "title": "Model catalog",
     "description": "The model catalog defines which models are offered when adding a model, along with defaults such as context window and reasoning support. Changes here apply to all workspaces immediately.",

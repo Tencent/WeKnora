@@ -1,5 +1,43 @@
 basePath: /api/v1
 definitions:
+  internal_handler.WikiRetryResponse:
+    properties:
+      requeued:
+        type: integer
+    type: object
+  internal_handler.WikiRetryRequest:
+    properties:
+      knowledge_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiDocumentList:
+    properties:
+      documents:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiDocument'
+        type: array
+      failed_total:
+        type: integer
+      total:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiDocument:
+    properties:
+      fail_count:
+        type: integer
+      knowledge_id:
+        type: string
+      last_error:
+        type: string
+      parse_status:
+        type: string
+      title:
+        type: string
+      wiki_status:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_agent_tools.AgentToolCatalog:
     properties:
       default_tools:
@@ -14466,6 +14504,81 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /knowledgebase/{kb_id}/wiki/retry:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Restores up to 100 failed documents and schedules the existing Wiki worker.
+        Duplicate requests reuse pending work. Chunks, indexes, and existing Wiki pages are retained.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Source document IDs
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.WikiRetryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.WikiRetryResponse'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Retry failed Wiki operations without reparsing source documents
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/documents:
+    get:
+      description: |-
+        Source ingestion and Wiki results are reported separately.
+        Filter failed to locate recoverable Wiki dead letters.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Wiki status
+        enum:
+        - failed
+        - pending
+        - running
+        - completed
+        - skipped
+        - not_started
+        in: query
+        name: status
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Page size (1-100)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiDocumentList'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List source document Wiki results
+      tags:
+      - Wiki
   /agent-chat/{session_id}:
     post:
       consumes:
@@ -21706,6 +21819,10 @@ paths:
       - description: Filter by status
         in: query
         name: status
+        type: string
+      - description: Source document ID
+        in: query
+        name: source_ref
         type: string
       - description: Full-text search
         in: query

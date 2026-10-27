@@ -31,6 +31,9 @@
         <!-- Graph Search Overlay -->
         <div v-if="graphControlsVisible" class="wiki-graph-search-container">
           <div class="wiki-graph-search-row">
+    <WikiDocumentRecovery ref="recoveryPanel" :knowledge-base-id="knowledgeBaseId" :can-edit="canEdit"
+      @open-source-doc="id => emit('open-source-doc', id)" @open-page="navigateToSlug" @retried="loadStats" />
+
             <div class="wiki-graph-search">
               <t-select v-model="graphSearchValue" filterable :options="graphSearchEffectiveOptions"
                 :loading="graphSearchLoading" :on-search="handleGraphRemoteSearch"
@@ -194,6 +197,9 @@
       <!-- Left Panel: Page List -->
       <aside class="wiki-sidebar">
         <div class="wiki-sidebar-header">
+    <WikiDocumentRecovery ref="recoveryPanel" :knowledge-base-id="knowledgeBaseId" :can-edit="canEdit"
+      @open-source-doc="id => emit('open-source-doc', id)" @open-page="navigateToSlug" @retried="loadStats" />
+
           <div v-if="stats && (stats.pending_tasks > 0 || stats.is_active)" class="wiki-queue-status">
             <t-loading size="small" />
             <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.queueStatus', {
@@ -816,6 +822,7 @@ import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde'
 import { MessagePlugin } from 'tdesign-vue-next'
+import WikiDocumentRecovery from './WikiDocumentRecovery.vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess'
@@ -1023,6 +1030,7 @@ useAssistantPageContext(() => {
 })
 const showGlobalIssuesDrawer = ref(false)
 const globalIssues = ref<WikiPageIssue[]>([])
+const recoveryPanel = ref<InstanceType<typeof WikiDocumentRecovery> | null>(null)
 const stats = ref<WikiStats | null>(null)
 const graphData = ref<WikiGraphData | null>(null)
 const searchQuery = ref('')
@@ -2964,6 +2972,7 @@ async function loadStats() {
   try {
     const res = await getWikiStats(props.knowledgeBaseId)
     stats.value = (res as any).data || res as any
+    void recoveryPanel.value?.refresh()
 
     // Notify parent so it can reflect wiki status (e.g. indexing badge in the breadcrumb)
     if (stats.value) {

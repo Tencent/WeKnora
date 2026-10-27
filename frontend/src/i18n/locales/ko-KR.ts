@@ -1,4 +1,27 @@
 export default {
+  wikiRecovery: {
+    "failureDetails": "실패 세부 정보 · {count}회",
+    "selectPage": "Select failed documents on this page",
+    "documents": "Document Wiki results",
+    "description": "Source ingestion and Wiki construction have separate results. Retry Wiki reuses existing chunks, indexes and pages.",
+    "refresh": "Refresh",
+    "retrySelected": "Retry selected ({count})",
+    "sourceStatus": "Source ingestion",
+    "relatedPages": "Related Wiki pages",
+    "retry": "Retry Wiki",
+    "empty": "No matching documents",
+    "noPages": "No associated Wiki pages",
+    "failed": "Wiki failed",
+    "all": "All documents",
+    "pending": "Queued",
+    "running": "Building",
+    "completed": "Completed",
+    "skipped": "Skipped",
+    "not_started": "Not started",
+    "loadFailed": "Could not load Wiki results",
+    "retryFailed": "Could not retry Wiki",
+    "queued": "Queued {count} documents for Wiki construction"
+},
   modelCatalog: {
     "title": "모델 카탈로그",
     "description": "모델 카탈로그는 모델 추가 시 선택할 수 있는 모델 목록과 컨텍스트 창, 추론 지원 여부 같은 기본값을 정의합니다. 여기서 변경하면 모든 워크스페이스에 즉시 적용됩니다.",

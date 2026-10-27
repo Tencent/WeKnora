@@ -1,4 +1,27 @@
 export default {
+  wikiRecovery: {
+    "failureDetails": "失敗詳情 · {count} 次",
+    "selectPage": "Select failed documents on this page",
+    "documents": "Document Wiki results",
+    "description": "Source ingestion and Wiki construction have separate results. Retry Wiki reuses existing chunks, indexes and pages.",
+    "refresh": "Refresh",
+    "retrySelected": "Retry selected ({count})",
+    "sourceStatus": "Source ingestion",
+    "relatedPages": "Related Wiki pages",
+    "retry": "Retry Wiki",
+    "empty": "No matching documents",
+    "noPages": "No associated Wiki pages",
+    "failed": "Wiki failed",
+    "all": "All documents",
+    "pending": "Queued",
+    "running": "Building",
+    "completed": "Completed",
+    "skipped": "Skipped",
+    "not_started": "Not started",
+    "loadFailed": "Could not load Wiki results",
+    "retryFailed": "Could not retry Wiki",
+    "queued": "Queued {count} documents for Wiki construction"
+},
   modelCatalog: {
     "title": "模型目錄",
     "description": "模型目錄決定新增模型時可選的模型清單，以及脈絡視窗、是否支持思考等預設參數。在這裡修改後，所有空間立即生效。",

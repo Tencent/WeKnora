@@ -21,11 +21,12 @@ import (
 
 // WikiPageHandler handles HTTP requests for wiki page operations
 type WikiPageHandler struct {
-	wikiService   interfaces.WikiPageService
-	kbService     interfaces.KnowledgeBaseService
-	lintService   *service.WikiLintService
-	auditService  interfaces.AuditLogService
-	memoryService interfaces.MemoryService
+	recoveryService *service.WikiRecoveryService
+	wikiService     interfaces.WikiPageService
+	kbService       interfaces.KnowledgeBaseService
+	lintService     *service.WikiLintService
+	auditService    interfaces.AuditLogService
+	memoryService   interfaces.MemoryService
 }
 
 // NewWikiPageHandler creates a new wiki page handler
@@ -35,13 +36,15 @@ func NewWikiPageHandler(
 	lintService *service.WikiLintService,
 	auditService interfaces.AuditLogService,
 	memoryService interfaces.MemoryService,
+	recoveryService *service.WikiRecoveryService,
 ) *WikiPageHandler {
 	return &WikiPageHandler{
-		wikiService:   wikiService,
-		kbService:     kbService,
-		lintService:   lintService,
-		auditService:  auditService,
-		memoryService: memoryService,
+		wikiService:     wikiService,
+		kbService:       kbService,
+		lintService:     lintService,
+		auditService:    auditService,
+		memoryService:   memoryService,
+		recoveryService: recoveryService,
 	}
 }
 
@@ -92,6 +95,7 @@ const wikiListMaxPageSize = 200
 // @Param        kb_id      path      string  true   "Knowledge base ID"
 // @Param        page_type  query     string  false  "Filter by page type; comma-separated for multiple (e.g. entity,concept)"
 // @Param        status     query     string  false  "Filter by status"
+// @Param        source_ref query string false "Source document ID"
 // @Param        query      query     string  false  "Full-text search"
 // @Param        page       query     int     false  "Page number"
 // @Param        page_size  query     int     false  "Page size"
@@ -133,6 +137,7 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 
 	req := &types.WikiPageListRequest{
 		KnowledgeBaseID: kbID,
+		SourceRef:       c.Query("source_ref"),
 		PageType:        c.Query("page_type"),
 		Status:          c.Query("status"),
 		Query:           c.Query("query"),

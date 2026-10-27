@@ -114,6 +114,7 @@ export interface WikiPageIssue {
 
 // Wiki API Functions
 export function listWikiPages(kbId: string, params?: {
+  source_ref?: string;
   page_type?: string;
   status?: string;
   query?: string;
@@ -360,4 +361,22 @@ export function updateWikiIssueStatus(kbId: string, issueId: string, status: str
 
 export function rebuildWikiLinks(kbId: string) {
   return post(`/api/v1/knowledgebase/${kbId}/wiki/rebuild-links`, {});
+}
+
+export interface WikiDocument {
+  knowledge_id: string;
+  title: string;
+  parse_status: string;
+  wiki_status: 'failed' | 'pending' | 'running' | 'completed' | 'skipped' | 'not_started';
+  last_error: string;
+  fail_count: number;
+}
+
+export function listWikiDocuments(kbId: string, params: { status: string; page: number; page_size: number }) {
+  const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]));
+  return get<{ documents: WikiDocument[]; total: number; failed_total: number }>(`/api/v1/knowledgebase/${kbId}/wiki/documents?${query}`);
+}
+
+export function retryWikiDocuments(kbId: string, knowledgeIds: string[]) {
+  return post<{ requeued: number }>(`/api/v1/knowledgebase/${kbId}/wiki/retry`, { knowledge_ids: knowledgeIds });
 }
