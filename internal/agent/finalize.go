@@ -52,7 +52,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	// Defensive filter: only emit answer content, skip thinking chunks. Shared
 	// across the initial attempt and the overflow retry so both stream into the
 	// same answer event.
-	emitChunk := func(chunk *types.StreamResponse, fullContent string) {
+	emitChunk := func(chunk *types.StreamResponse, _ string) {
 		if chunk.ResponseType == types.ResponseTypeThinking {
 			return
 		}
@@ -72,7 +72,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		}
 		if answerContent != "" {
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(answerContent))
-			e.eventBus.Emit(ctx, event.Event{
+			_ = e.eventBus.Emit(ctx, event.Event{
 				ID:        answerID,
 				Type:      event.EventAgentFinalAnswer,
 				SessionID: sessionID,
