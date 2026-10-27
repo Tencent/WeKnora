@@ -82,7 +82,9 @@ func expectLock(mock sqlmock.Sqlmock, dimension int, granted bool) {
 }
 
 func expectCatalog(mock sqlmock.Sqlmock, dimension int, rows *sqlmock.Rows) {
-	mock.ExpectQuery(catalogSQL).WithArgs(fmt.Sprintf("%%halfvec(%d)%%", dimension), fmt.Sprintf("(dimension = %d)", dimension)).WillReturnRows(rows)
+	mock.ExpectQuery(catalogSQL).
+		WithArgs(fmt.Sprintf("%%halfvec(%d)%%", dimension), fmt.Sprintf("(dimension = %d)", dimension)).
+		WillReturnRows(rows)
 }
 
 func catalogRows(entries ...hnswIndexRow) *sqlmock.Rows {
