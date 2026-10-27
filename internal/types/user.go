@@ -165,7 +165,10 @@ type AuthToken struct {
 
 // LoginRequest represents a login request
 type LoginRequest struct {
-	Email    string `json:"email"    binding:"required,email"`
+	// Email 允许填邮箱或用户名（不含 @ 时按用户名解析）。
+	// 原标签为 required,email，会把用户名登录直接卡在参数校验阶段，
+	// 且只返回笼统的 "Invalid login parameters"，用户无法判断是格式问题。
+	Email    string `json:"email"    binding:"required"`
 	Password string `json:"password" binding:"required,min=6"`
 }
 

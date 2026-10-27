@@ -231,6 +231,18 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 	logger.Info(ctx, "Start user login")
 	// Get user by email
 	user, err := s.userRepo.GetUserByEmail(ctx, req.Email)
+	if user == nil || err != nil {
+		// 回退：输入不含 @ 时按用户名查（账户页显示的 username 通常短得多，
+		// 用户习惯拿它登录；否则会卡在 email 格式校验上）
+		if !strings.Contains(req.Email, "@") {
+			if u2, err2 := s.userRepo.GetUserByUsername(ctx, req.Email); err2 == nil && u2 != nil {
+				user, err = u2, nil
+				logger.Infof(ctx, "Login resolved by username fallback")
+			} else {
+				logger.Warn(ctx, "Username fallback lookup found no user")
+			}
+		}
+	}
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get user by email: %v", err)
 		return &types.LoginResponse{
