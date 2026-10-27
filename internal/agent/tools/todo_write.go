@@ -151,7 +151,7 @@ type TodoWriteInput struct {
 type PlanStep struct {
 	ID          string `json:"id" jsonschema:"Unique identifier for this step (e.g., 'step1', 'step2')"`
 	Description string `json:"description" jsonschema:"Clear description of what to investigate or accomplish in this step"`
-	Status      string `json:"status" jsonschema:"Current status: pending (not started), in_progress (executing), completed (finished), skipped (not completed)"`
+	Status      string `json:"status" jsonschema:"Status: pending, in_progress, completed, or skipped"`
 }
 
 // NewTodoWriteTool creates a new todo_write tool instance
