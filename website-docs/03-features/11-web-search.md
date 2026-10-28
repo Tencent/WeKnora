@@ -23,6 +23,7 @@ registry.Register("metaso", infra_web_search.NewMetasoProvider)
 registry.Register("bocha", infra_web_search.NewBochaProvider)
 registry.Register("brave", infra_web_search.NewBraveProvider)
 registry.Register("serply", infra_web_search.NewSerplyProvider)
+registry.Register("deepseek", infra_web_search.NewDeepSeekProvider)
 ```
 
 | 引擎 | 源码文件 | 是否需要 API Key | 端点 | 备注 |
@@ -41,8 +42,9 @@ registry.Register("serply", infra_web_search.NewSerplyProvider)
 | 博查 Bocha | `bocha.go` | 是 | `https://api.bochaai.com/v1/web-search` | extra_config.freshness、summary |
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
 | Serply | `serply.go` | 是 | `https://api.serply.io/v1/search` | Google 结果；支持按次传 country/freshness（仅 pd/pw/pm/py） |
+| DeepSeek Search | `deepseek.go` | 是 | `https://api.deepseek.com/v1/tools/search` | 独立搜索接口；`count` 1–50，查询按 Unicode 字符截断到 128 |
 
-当前共注册 14 个引擎。
+当前共注册 15 个引擎。
 
 | 提供商附加配置 | 值 |
 | --- | --- |
@@ -52,6 +54,8 @@ registry.Register("serply", infra_web_search.NewSerplyProvider)
 | Bocha summary | 默认请求摘要；设为 `"false"` 时关闭 |
 | Brave 按次过滤 | country/freshness 是 web_search 工具参数，见下文；与 Bocha 固定配置的字段取值不同 |
 | Serply 按次过滤 | 同 Brave；country 映射为 Google 的 gl，freshness 只接受 pd/pw/pm/py，不支持日期区间 |
+| DeepSeek snippet_source | snippet（默认，100–200 字符展示用摘要）、summary（600–800 字符，供模型阅读；为空时回落到 snippet） |
+| DeepSeek need_content | 默认 `"false"`；设为 `"true"` 时额外取回页面 Markdown，填入结果 `content` |
 
 除 SearXNG 外，所有引擎端点均硬编码、租户不可配置——这是防 SSRF 的第一道措施（源码注释：`Not configurable by tenants — prevents SSRF`）。
 

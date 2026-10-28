@@ -101,6 +101,32 @@ func TestGetWebSearchProviderTypesIncludesBocha(t *testing.T) {
 	}
 }
 
+func TestGetWebSearchProviderTypesIncludesDeepSeek(t *testing.T) {
+	var deepseek *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeDeepSeek) {
+			deepseek = &providerTypes[i]
+			break
+		}
+	}
+	if deepseek == nil {
+		t.Fatal("DeepSeek provider type not found")
+	}
+	if !deepseek.RequiresAPIKey || !deepseek.SupportsProxy || len(deepseek.ConfigFields) != 2 {
+		t.Fatalf("unexpected DeepSeek metadata: %+v", deepseek)
+	}
+	snippetSource := deepseek.ConfigFields[0]
+	if snippetSource.Key != "snippet_source" || snippetSource.Default != "snippet" ||
+		len(snippetSource.Options) != 2 {
+		t.Fatalf("unexpected DeepSeek snippet source metadata: %+v", snippetSource)
+	}
+	if needContent := deepseek.ConfigFields[1]; needContent.Key != "need_content" ||
+		needContent.Default != "false" {
+		t.Fatalf("unexpected DeepSeek need_content metadata: %+v", needContent)
+	}
+}
+
 func TestGetWebSearchProviderTypesIncludesSerply(t *testing.T) {
 	var serply *WebSearchProviderTypeInfo
 	providerTypes := GetWebSearchProviderTypes()

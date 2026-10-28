@@ -84,6 +84,32 @@ func TestValidateProviderParametersBocha(t *testing.T) {
 	}
 }
 
+func TestValidateProviderParametersDeepSeek(t *testing.T) {
+	valid := types.WebSearchProviderParameters{
+		APIKey:      "sk-deepseek-test",
+		ExtraConfig: map[string]string{"snippet_source": "summary", "need_content": "true"},
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDeepSeek, valid); err != nil {
+		t.Fatalf("valid DeepSeek parameters rejected: %v", err)
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDeepSeek,
+		types.WebSearchProviderParameters{APIKey: "sk-deepseek-test"}); err != nil {
+		t.Fatalf("DeepSeek parameters without extra config rejected: %v", err)
+	}
+	invalid := valid
+	invalid.ExtraConfig = map[string]string{"snippet_source": "highlight"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDeepSeek, invalid); err == nil {
+		t.Fatal("invalid DeepSeek snippet source was accepted")
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDeepSeek,
+		types.WebSearchProviderParameters{}); err == nil {
+		t.Fatal("missing DeepSeek API key was accepted")
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeDeepSeek) {
+		t.Fatal("DeepSeek provider type is not accepted")
+	}
+}
+
 func TestValidateProviderParametersSerply(t *testing.T) {
 	valid := types.WebSearchProviderParameters{APIKey: "serply-test"}
 	if err := validateProviderParameters(types.WebSearchProviderTypeSerply, valid); err != nil {

@@ -30,6 +30,7 @@ const (
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
 	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
+	WebSearchProviderTypeDeepSeek   WebSearchProviderType = "deepseek"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -367,6 +368,41 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					Type:        "select",
 					Default:     "true",
 					Description: "Request long text summaries and prefer them as result snippets.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Enabled", Value: "true"},
+						{Label: "Disabled", Value: "false"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "deepseek",
+			Name:           "DeepSeek Search",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "DeepSeek Search API (standalone web search, requires a DeepSeek API key)",
+			DocsURL:        "https://api-docs.deepseek.com/guides/search/",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:      "snippet_source",
+					Label:    "Snippet source",
+					Type:     "select",
+					Required: true,
+					Default:  "snippet",
+					Description: "Which DeepSeek text field fills the result snippet: the short " +
+						"display snippet (100–200 chars) or the long model-oriented summary (600–800 chars).",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Short snippet", Value: "snippet"},
+						{Label: "Long summary", Value: "summary"},
+					},
+				},
+				{
+					Key:     "need_content",
+					Label:   "Page content",
+					Type:    "select",
+					Default: "false",
+					Description: "Fetch each page's Markdown content alongside the hit. " +
+						"Larger responses, slower searches.",
 					Options: []WebSearchProviderConfigFieldOption{
 						{Label: "Enabled", Value: "true"},
 						{Label: "Disabled", Value: "false"},
