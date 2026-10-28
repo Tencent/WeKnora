@@ -570,6 +570,11 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 	}
 
 	ftsQuery := sanitizeFTS5Query(params.Query)
+	// Punctuation and symbols can leave no searchable terms after tokenization.
+	// MATCH rejects an empty expression; let hybrid retrieval continue with vectors.
+	if ftsQuery == "" {
+		return nil, nil
+	}
 
 	sql := `
 		SELECT e.id, e.source_id, e.source_type, e.chunk_id,
