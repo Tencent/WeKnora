@@ -12,9 +12,16 @@ for (const term of ['帮你找到答案', '并将知识付诸实践', 'v0.9.0', 
 for (const term of ['三套', '方案选择', '历史 Demo', '18K+', '成为行动力', '从零散文档', '到鲜活知识', '模型接入与目录管理']) {
   assert.ok(!visible.includes(term), `Retired content still visible: ${term}`);
 }
-assert.match(html, /<video[^>]+preload="none"/, 'Video should not load before user interaction');
-assert.match(html, /https:\/\/github.com\/user-attachments\/assets\/2819598d-3140-4623-814a-8162a22b653c/, 'Use the README video');
-assert.ok(!/<video[^>]+autoplay/i.test(html), 'Do not autoplay the product film');
+const films = html.match(/<figure id="demo"[\s\S]*?<\/figure>/)?.[0];
+assert.ok(films, 'Keep the product film on the homepage');
+assert.equal((films.match(/<video\b/g) || []).length, 1, 'Films must share one player');
+const selectedFilm = films.match(/<button[^>]*aria-pressed="true"[^>]*>([\s\S]*?)<\/button>/)?.[1];
+assert.ok(selectedFilm?.includes('v0.9.0 工作助手'), 'Feature the current release first');
+assert.ok(films.includes('WeKnora 产品全览'), 'Keep the previous product film selectable');
+assert.match(films, /poster="\/docs\/videos\/weknora-v0.9.0-poster.png"/, 'Use the approved release cover');
+assert.match(films, /https:\/\/github.com\/user-attachments\/assets\/de0e490a-e738-405e-bb3a-64b63edd7278/, 'Link to the current README film');
+assert.match(films, /<video[^>]+preload="none"/, 'Video should not load before user interaction');
+assert.ok(!/<video[^>]+(?:autoplay|\bsrc=)/i.test(films), 'Load the selected film only after playback is requested');
 const capabilities = html.match(/<section id="capabilities"[\s\S]*?<\/section>/)?.[0];
 assert.ok(capabilities && !capabilities.includes('画廊') && !capabilities.includes('继续了解'), 'Keep gallery and cross-topic links out of the RAG, Agent and Wiki overview');
 const gallery = html.match(/<section id="knowledge-gallery"[\s\S]*?<\/section>/)?.[0];
@@ -28,7 +35,7 @@ for (const term of ['/docs/_home/product/wiki-browser.png', '/docs/_home/product
 }
 // Release highlights and enduring capabilities must survive independently.
 const release = html.match(/<section id="release"[\s\S]*?<\/section>/)?.[0];
-for (const term of ['WeKnora 助手', '多智能体协作', '自动化', '执行权限与审批', '按用户复用沙箱', '飞书 / Lark 同步', '产品问答', '任务协助', '一句话设置', '手动设置', '以你的身份']) {
+for (const term of ['WeKnora 助手：解答问题，执行任务', '多智能体协作', '自动化', '执行权限与审批', '按用户复用沙箱', '飞书 / Lark 同步', '产品问答', '任务协助', '一句话设置', '手动设置', '以你的身份']) {
   assert.ok(release?.includes(term), `Missing release highlight: ${term}`);
 }
 for (const shot of ['assistant-release-guide', 'assistant-overview', 'agent-collaboration', 'automation-conversation', 'automation-setup', 'assistant-permissions']) {
@@ -57,5 +64,5 @@ const pendingShots = [...html.matchAll(/website-docs\/homepage\/public(\/docs\/_
 for (const [, image] of html.matchAll(/\\?"image\\?":\\?"([\w-]+)\\?"[^{}]*?\\?"available\\?":false/g)) pendingShots.push(`/docs/_home/product/${image}.png`);
 if (pendingShots.length) console.warn(`Product screenshots still pending (placeholder shown): ${[...new Set(pendingShots)].join(', ')}`);
 assert.match(html, /aria-controls="main-navigation"/);
-assert.match(html, /aria-label="播放 WeKnora 产品介绍视频/);
-console.log(`Homepage audit passed: product content, README video, navigation anchors, ${assets.size} local assets, and retired design choices.`);
+assert.match(html, /aria-label="播放 v0.9.0 工作助手视频/);
+console.log(`Homepage audit passed: product content, release-first video selection, navigation anchors, ${assets.size} local assets, and retired design choices.`);

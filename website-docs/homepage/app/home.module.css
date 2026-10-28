@@ -38,10 +38,23 @@
 .primary svg, .secondary svg { width: 18px; height: 18px; }
 .heroNote { color: var(--mute); font-size: 13px; margin: 19px 0 0; letter-spacing: .02em; }
 .videoFigure { margin: 0; border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; box-shadow: 0 22px 55px -35px rgba(16, 31, 56, .28); background: var(--wk-surface); }
+.videoChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
+.videoChoices > button { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-width: 0; padding: 20px 24px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--soft); text-align: left; font: inherit; transition: background .2s, border-color .2s; }
+.videoChoices > button + button { border-left: 1px solid var(--rule); }
+.videoChoices > button:hover { background: var(--paper2); }
+.videoChoices > button[aria-pressed="true"] { border-bottom-color: var(--gold); background: var(--paper2); color: var(--ink); }
+.videoChoices > button:focus-visible { outline: 2px solid var(--gold); outline-offset: -5px; }
+.videoChoiceText { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.videoChoiceTitle { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; font-size: 16px; font-weight: 550; line-height: 1.5; }
+.videoBadge { padding: 1px 6px; border: 1px solid var(--wk-accent-border); border-radius: 3px; color: var(--wk-accent-text); font-size: 10px; font-weight: 500; }
+.videoChoiceSummary { color: var(--mute); font-size: 13px; line-height: 1.5; }
+.videoChoiceDuration { display: inline-flex; align-items: center; gap: 16px; color: var(--mute); font: 12px ui-monospace, monospace; }
+.videoChoiceDuration svg { width: 15px; height: 15px; }
+.videoChoices > button[aria-pressed="true"] .videoChoiceDuration { color: var(--gold); }
 .videoTop { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 22px; color: var(--soft); background: var(--paper2); font-family: ui-monospace, monospace; font-size: 12px; letter-spacing: .1em; }
 .videoTop > span { display: inline-flex; align-items: center; gap: 10px; }
 .videoDot { margin-inline: 5px; color: var(--gold); }
-.videoStage { position: relative; aspect-ratio: 16 / 8.5; background: #14191e; }
+.videoStage { position: relative; aspect-ratio: 16 / 9; background: #14191e; }
 .videoStage video { width: 100%; height: 100%; display: block; object-fit: contain; }
 .videoCover { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; background: linear-gradient(180deg, rgba(18,22,26,.24), rgba(18,22,26,.6)); transition: background .2s; }
 .playCircle { width: 82px; height: 82px; display: flex; align-items: center; justify-content: center; background: #fdfcfa; color: #101f38; border-radius: 50%; box-shadow: 0 4px 24px #0002; transition: transform .2s; }
@@ -205,6 +218,10 @@
   .heroAside > .eyebrow { display: none; }
   .heroDescription { max-width: 100%; }
   .heroNote { margin-top: 17px; }
+  .videoChoices > button { padding: 16px; gap: 12px; }
+  .videoChoiceTitle { font-size: 14px; }
+  .videoChoiceSummary { font-size: 12px; }
+  .videoChoiceDuration { display: none; }
   .videoTop { padding: 11px 15px; font-size: 12px; }
   .videoCaption { align-items: start; flex-direction: column; padding: 13px 15px; gap: 3px; }
   .videoCaption a { font-size: 12px; }
@@ -242,6 +259,9 @@
   .hero h1 { font-size: clamp(28px, 7.9vw, 38px); }
   .releaseLink { font-size: 12px; gap: 8px; }
   .heroDescription br { display: none; }
+  .videoChoices > button { padding: 12px 10px; }
+  .videoChoiceTitle { font-size: 13px; gap: 5px; }
+  .videoChoiceSummary { display: none; }
   .videoTop { letter-spacing: 0; padding-inline: 10px; }
   .videoTop > span { gap: 6px; }
   .videoTop > span:last-child { display: none; }

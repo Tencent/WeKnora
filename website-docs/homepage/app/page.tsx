@@ -109,7 +109,7 @@ export default function Home() {
         </article>)}</div>
       </div></section>
       <section id="release" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.9.0</p><h2 id="release-title">你的 WeKnora 工作助手</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.0")}>版本说明与发布视频 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.9.0</p><h2 id="release-title">WeKnora 助手：解答问题，执行任务</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.0")}>版本说明与发布视频 <Icon name="arrow" /></a></div>
         <ProductGallery id="release-gallery" label="v0.9.0" slides={releaseSlides} layout="compact" />
         <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link)}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>

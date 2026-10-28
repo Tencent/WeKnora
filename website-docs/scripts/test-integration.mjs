@@ -101,6 +101,31 @@ try {
   await homepage();
   assert.equal(context.pages().length, 1);
 
+  // Release and overview films share a player and load only after a playback gesture.
+  const releaseFilm = page.getByRole('button', { name: /^v0\.9\.0 工作助手/ });
+  const overviewFilm = page.getByRole('button', { name: /^WeKnora 产品全览/ });
+  assert.equal(await page.locator('#demo video').count(), 1);
+  assert.equal(await releaseFilm.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#demo video').getAttribute('src'), null);
+  await page.getByRole('button', { name: '播放 v0.9.0 工作助手视频，2 分 45 秒', exact: true }).click();
+  await page.waitForFunction(() => {
+    const video = document.querySelector('#demo video');
+    return video && !video.paused && video.currentTime > 0 && video.duration === 165;
+  });
+  const previousPlayer = await page.locator('#demo video').elementHandle();
+  await overviewFilm.click();
+  assert.equal(await previousPlayer.evaluate(video => video.paused && !video.isConnected && !video.hasAttribute('src')), true);
+  await previousPlayer.dispose();
+  assert.equal(await overviewFilm.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#demo video').getAttribute('src'), null);
+  assert.equal(await page.locator('#video-caption a').getAttribute('href'), 'https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c');
+  assert.ok(await page.getByRole('button', { name: '播放 WeKnora 产品全览视频，2 分 25 秒', exact: true }).isVisible());
+  await releaseFilm.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await releaseFilm.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#demo video').getAttribute('src'), null);
+  assert.equal(await page.locator('#demo video').getAttribute('poster'), '/docs/videos/weknora-v0.9.0-poster.png');
+
   // Preferences propagate between open homepage and docs tabs in both directions.
   const docs = await context.newPage();
   await docs.goto(origin + '/docs/');
@@ -130,6 +155,11 @@ try {
   // Switch and return links remain reachable on a narrow phone viewport.
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto(origin + '/');
+  const filmButtons = await page.getByRole('group', { name: '选择演示视频' }).getByRole('button').all();
+  const filmBounds = await Promise.all(filmButtons.map(button => button.boundingBox()));
+  assert.equal(filmBounds.length, 2);
+  assert.equal(Math.round(filmBounds[0].y), Math.round(filmBounds[1].y), 'Film choices remain side by side on mobile');
+  assert.ok(filmBounds.every(box => box.x >= 0 && box.x + box.width <= 320));
   await checkVisibleControl(page, 'button[role="switch"]');
   await page.getByRole('switch', { name: '切换到深色' }).click();
   await expectTheme(page, true);
@@ -185,7 +215,7 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log('Integration checks passed: compact full-width mastheads, distinct product/docs navigation, quickstart entry, header search, theme toggle, reload, shared preferences, system theme, same-tab docs/home/logo navigation, mobile controls, and direct docs/404 routes.');
+  console.log('Integration checks passed: shared video playback and switching, release-first selection, side-by-side mobile choices, compact full-width mastheads, distinct product/docs navigation, quickstart entry, header search, theme toggle, reload, shared preferences, system theme, same-tab docs/home/logo navigation, mobile controls, and direct docs/404 routes.');
 } finally {
   await browser.close();
 }
