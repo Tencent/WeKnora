@@ -8,8 +8,9 @@ import s from "./home.module.css";
 const productFilms = [
   {
     id: "v090",
+    label: "v0.9.0 发布",
     title: "v0.9.0 工作助手",
-    summary: "助手、协作、自动化与执行权限",
+    summary: "WeKnora 助手、多智能体协作、自动化与执行权限",
     duration: "02:45",
     durationLabel: "2 分 45 秒",
     quality: "1080P · 60 FPS",
@@ -20,6 +21,7 @@ const productFilms = [
   },
   {
     id: "overview",
+    label: "产品全览",
     title: "WeKnora 产品全览",
     summary: "知识问答、Agent 推理与 Wiki 整理",
     duration: "02:25",
@@ -85,23 +87,22 @@ export function ProductVideo() {
     }
   }
   return <figure id="demo" className={s.videoFigure}>
-    <div className={s.videoChoices} role="group" aria-label="选择演示视频">
-      {productFilms.map((entry, index) => <button key={entry.id} type="button" aria-pressed={selected === index} aria-controls="product-video-stage" onClick={() => {
-        if (index === selected) return;
-        const video = player.current;
-        if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
-        setSelected(index);
-        setStarted(false);
-        setFailed(false);
-      }}>
-        <span className={s.videoChoiceText}><span className={s.videoChoiceTitle}>{entry.title}{index === 0 && <span className={s.videoBadge}>最新</span>}</span><span className={s.videoChoiceSummary}>{entry.summary}</span></span>
-        <span className={s.videoChoiceDuration}>{entry.duration}<Icon name="play" /></span>
-      </button>)}
+    <div className={s.videoTop}>
+      <div className={s.videoChoices} role="group" aria-label="选择演示视频">
+        {productFilms.map((entry, index) => <button key={entry.id} type="button" aria-label={entry.title} aria-pressed={selected === index} aria-controls="product-video-stage" onClick={() => {
+          if (index === selected) return;
+          const video = player.current;
+          if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
+          setSelected(index);
+          setStarted(false);
+          setFailed(false);
+        }}>{entry.label}</button>)}
+      </div>
+      <span className={s.videoMeta}>{film.duration}<span className={s.videoQuality}> / {film.quality}</span></span>
     </div>
-    <div className={s.videoTop}><span>{film.title}</span><span>{film.duration} <span className={s.videoDot}>/</span> {film.quality}</span></div>
     <div id="product-video-stage" className={s.videoStage}>
       <video key={film.id} ref={player} controls={started} playsInline preload="none" poster={film.poster} aria-label={`${film.title}，${film.audio}`} aria-describedby="video-caption" tabIndex={started ? 0 : -1} onError={() => setFailed(true)} />
-      {!started && <button className={s.videoCover} onClick={play} aria-label={`播放 ${film.title}视频，${film.durationLabel}`}><span className={s.playCircle}><Icon name="play" /></span><span className={s.videoCoverTitle}>{film.title}</span><span className={s.videoCoverHint}>{film.durationLabel} · {film.audio}</span></button>}
+      {!started && <button className={s.videoCover} onClick={play} aria-label={`播放 ${film.title}视频，${film.durationLabel}`}><span className={s.playCircle}><Icon name="play" /></span><span className={s.videoCoverHint}>播放 · {film.durationLabel}</span></button>}
       {failed && <div className={s.videoError} role="status"><p>视频暂时无法加载</p><a href={film.original} target="_blank" rel="noreferrer">在 GitHub 打开原视频 <Icon name="external" /></a></div>}
     </div>
     <figcaption id="video-caption" className={s.videoCaption}><span>{film.summary}</span><a href={film.original} target="_blank" rel="noreferrer">{film.audio} <Icon name="external" /></a></figcaption>
