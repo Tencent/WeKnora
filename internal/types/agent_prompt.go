@@ -225,6 +225,10 @@ type ToolApprovalPromptResponse struct {
 	Reason       string          `json:"reason,omitempty"`
 	// AllowInSession approves later calls with the request's Grant too.
 	AllowInSession bool `json:"allow_in_session,omitempty"`
+	// Scope is "once" or "session" for Lite host approvals; empty means once.
+	Scope string `json:"scope,omitempty"`
+	// Access narrows a host grant to "read"; empty keeps the proposal.
+	Access string `json:"access,omitempty"`
 }
 
 // MCPOAuthPromptRequest is the Request of an AgentPromptKindMCPOAuth.

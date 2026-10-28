@@ -49,6 +49,10 @@ type Decision struct {
 	// Suspended is set when no decision arrived during the in-memory wait
 	// and the prompt now outlives the run; the call must not execute.
 	Suspended *types.PromptSuspension
+	// Scope is "once" or "session" for host approvals; empty means once.
+	Scope string
+	// Access narrows a host grant to "read"; empty keeps the proposal.
+	Access string
 }
 
 // PendingRequest carries everything needed to block and notify the UI.
@@ -270,6 +274,104 @@ func (req PendingRequest) grantRisk() policy.Risk {
 	return req.GrantRisk
 }
 
+// HostApprovalKindCommand marks a Lite host shell command approval.
+const HostApprovalKindCommand = "host_command"
+
+// HostPendingRequest asks the session owner about one Lite host command.
+type HostPendingRequest struct {
+	TenantID           uint64
+	UserID             string
+	SessionID          string
+	AssistantMessageID string
+	RequestID          string
+	ToolCallID         string
+	EventBus           *event.EventBus
+	Host               event.HostApprovalPayload
+}
+
+// RequestHostAndWait blocks until the session owner answers a Lite host
+// command approval, the wait times out, or ctx is canceled. Unlike
+// RequestAndWait it never consults the MCP checker: a nil checker must not
+// turn a host question into an automatic yes.
+func (g *Gate) RequestHostAndWait(ctx context.Context, req HostPendingRequest) (Decision, error) {
+	if g == nil || g.broker == nil {
+		return Decision{}, fmt.Errorf("host approval: nil gate")
+	}
+	if req.EventBus == nil {
+		return Decision{}, fmt.Errorf("host approval: EventBus is nil")
+	}
+	if strings.TrimSpace(req.UserID) == "" {
+		return Decision{}, fmt.Errorf("host approval: session owner is unknown")
+	}
+
+	host := req.Host
+	request, err := json.Marshal(types.ToolApprovalPromptRequest{
+		RegisteredToolName: "shell_exec",
+	})
+	if err != nil {
+		return Decision{}, fmt.Errorf("encode host approval: %w", err)
+	}
+	out, err := g.broker.Await(ctx, hitl.Spec{
+		Prompt: &types.AgentPrompt{
+			TenantID:           req.TenantID,
+			UserID:             req.UserID,
+			SessionID:          req.SessionID,
+			AssistantMessageID: req.AssistantMessageID,
+			RequestID:          req.RequestID,
+			Kind:               types.AgentPromptKindToolApproval,
+			ToolCallID:         req.ToolCallID,
+			Request:            types.JSON(request),
+		},
+		Timeout:       g.timeout,
+		TimeoutReason: "approval timeout",
+		Emit: func(ctx context.Context, p *types.AgentPrompt) error {
+			timeoutSec := promptWaitSeconds(p, g.timeout, g.timeout)
+			return req.EventBus.Emit(ctx, event.Event{
+				ID:        p.ID + "-approval-required",
+				Type:      event.EventToolApprovalRequired,
+				SessionID: req.SessionID,
+				Data: event.ToolApprovalRequiredData{
+					PendingID:          p.ID,
+					TenantID:           req.TenantID,
+					SessionID:          req.SessionID,
+					AssistantMessageID: req.AssistantMessageID,
+					RegisteredToolName: "shell_exec",
+					TimeoutSeconds:     timeoutSec,
+					HotWaitSeconds:     timeoutSec,
+					Suspendable:        p.Suspendable,
+					RequestedAtUnix:    time.Now().Unix(),
+					ToolCallID:         req.ToolCallID,
+					RequestID:          req.RequestID,
+					Kind:               HostApprovalKindCommand,
+					Host:               &host,
+				},
+				Metadata: map[string]interface{}{
+					"assistant_message_id": req.AssistantMessageID,
+					"pending_id":           p.ID,
+				},
+				RequestID: req.RequestID,
+			})
+		},
+	})
+	if err != nil {
+		return Decision{}, fmt.Errorf("host approval: %w", err)
+	}
+	if out.Suspended {
+		return Decision{
+			PendingID: out.Prompt.ID,
+			Suspended: &types.PromptSuspension{
+				Detached:  out.Detached,
+				PromptID:  out.Prompt.ID,
+				Kind:      types.AgentPromptKindToolApproval,
+				ExpiresAt: out.ExpiresAt,
+			},
+		}, nil
+	}
+	d := toolApprovalDecision(out)
+	g.consumeDecision(ctx, &d, req.EventBus, out.Prompt)
+	return d, nil
+}
+
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
 	granted, lapse := g.granted(ctx, req)
 	if granted {
@@ -416,6 +518,8 @@ func (g *Gate) consumeDecision(ctx context.Context, d *Decision, bus *event.Even
 	if !consumed && d.answered {
 		d.Approved = false
 		d.ModifiedArgs = nil
+		d.Scope = ""
+		d.Access = ""
 		d.Reason = "approval is no longer owned or was already consumed"
 		if consumeErr == nil {
 			d.Suspended = &types.PromptSuspension{
@@ -441,6 +545,7 @@ func (g *Gate) consumeDecision(ctx context.Context, d *Decision, bus *event.Even
 			Reason:    d.Reason,
 			TimedOut:  d.TimedOut,
 			Canceled:  d.ContextCanceled,
+			Scope:     d.Scope,
 		},
 		Metadata: map[string]interface{}{
 			"assistant_message_id": assistantMessageID,
@@ -578,7 +683,12 @@ func (g *Gate) ResolveForResume(ctx context.Context, req ResolveRequest) (hitl.R
 	var response any
 	switch kind {
 	case types.AgentPromptKindToolApproval:
-		r := types.ToolApprovalPromptResponse{Approved: req.Decision.Approved, Reason: req.Decision.Reason}
+		r := types.ToolApprovalPromptResponse{
+			Approved: req.Decision.Approved,
+			Reason:   req.Decision.Reason,
+			Scope:    req.Decision.Scope,
+			Access:   req.Decision.Access,
+		}
 		if r.Approved {
 			r.ModifiedArgs = req.Decision.ModifiedArgs
 			r.AllowInSession = req.Decision.AllowInSession
@@ -642,6 +752,7 @@ func toolApprovalDecision(out hitl.Outcome) Decision {
 		return d
 	}
 	d.Approved, d.Reason = r.Approved, r.Reason
+	d.Scope, d.Access = r.Scope, r.Access
 	if r.Approved && len(r.ModifiedArgs) > 0 {
 		d.ModifiedArgs = r.ModifiedArgs
 	}
@@ -678,6 +789,8 @@ func validateToolApprovalResponse(request, response json.RawMessage) error {
 		ModifiedArgs   json.RawMessage `json:"modified_args,omitempty"`
 		Reason         string          `json:"reason,omitempty"`
 		AllowInSession bool            `json:"allow_in_session,omitempty"`
+		Scope          string          `json:"scope,omitempty"`
+		Access         string          `json:"access,omitempty"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(response))
 	dec.DisallowUnknownFields()
