@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 
@@ -268,9 +269,12 @@ func (t *DataAnalysisTool) Cleanup(ctx context.Context) {
 
 	logger.Infof(ctx, "[Tool][DataAnalysis] Cleaning up %d tables for session: %s", len(t.createdTables), t.sessionID)
 
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
 	for _, tableName := range t.createdTables {
 		dropSQL := fmt.Sprintf("DROP TABLE IF EXISTS \"%s\"", tableName)
-		if _, err := t.db.ExecContext(ctx, dropSQL); err != nil {
+		if _, err := t.db.ExecContext(cleanupCtx, dropSQL); err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to drop table '%s': %v", tableName, err)
 			// Continue to drop other tables even if one fails
 			continue

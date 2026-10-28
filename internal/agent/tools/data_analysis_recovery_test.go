@@ -214,3 +214,26 @@ func TestDataAnalysisCleanupIncludesFailedCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDataAnalysisCleanupAfterRequestCancellation(t *testing.T) {
+	db := newPlainDuckDB(t)
+	path := writeCSV(t, "aborted.csv", "id,amount", "1,10", "2,20")
+	tool := &DataAnalysisTool{db: db, sessionID: "test-aborted-request"}
+	if _, err := tool.LoadFromCSV(context.Background(), path, "k_aborted"); err != nil {
+		t.Fatalf("initial load: %v", err)
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tool.Cleanup(canceled)
+
+	retryTool := &DataAnalysisTool{db: db, sessionID: "test-retry-after-abort"}
+	defer retryTool.Cleanup(context.Background())
+	schema, err := retryTool.LoadFromCSV(context.Background(), path, "k_aborted")
+	if err != nil {
+		t.Fatalf("reload after request cancellation: %v", err)
+	}
+	if schema.RowCount != 2 {
+		t.Fatalf("row count after reload = %d, want 2", schema.RowCount)
+	}
+}
