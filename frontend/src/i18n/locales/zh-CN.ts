@@ -8923,6 +8923,11 @@ export default {
       }
     }
   },
+  assistantEntryGuide: {
+    stepOf: 'v0.9.0 新功能',
+    skip: '知道了',
+    interactHint: '点击高亮入口，打开助手试试。',
+  },
   newUserGuide: {
     stepOf: '{current} / {total}',
     skip: '跳过引导',
@@ -8931,6 +8936,10 @@ export default {
     done: '完成',
     reopen: '新手引导',
     steps: {
+      assistant: {
+        title: '认识 WeKnora 助手',
+        desc: '可以问 WeKnora 的版本、功能和配置，也可以结合当前页面，以你的身份创建智能体、设置定时任务或整理知识。'
+      },
       done: {
         title: '一切就绪',
         desc: '你已经了解了核心功能，现在就开始构建你的知识助手吧！随时可点击菜单顶部昵称旁的帮助按钮重新查看引导。'

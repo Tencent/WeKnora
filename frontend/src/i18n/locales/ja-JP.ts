@@ -609,6 +609,11 @@ export default {
       references: '出典'
     }
   },
+  assistantEntryGuide: {
+    stepOf: 'v0.9.0 の新機能',
+    skip: 'わかりました',
+    interactHint: '強調表示された入口をクリックしてアシスタントを開いてみましょう。',
+  },
   newUserGuide: {
     stepOf: '{current} / {total}',
     skip: 'スキップ',
@@ -617,6 +622,10 @@ export default {
     done: '完了',
     reopen: 'プロダクトツアー',
     steps: {
+      assistant: {
+        title: 'WeKnora アシスタントのご紹介',
+        desc: 'WeKnora のバージョン、機能、設定について質問できます。現在のページをもとに、あなたの権限でエージェントの作成、定期タスクの設定、ナレッジの整理も行えます。'
+      },
       welcome: {
         title: 'WeKnoraへようこそ',
         desc: '数ステップでナレッジベース、チャット、エージェントの使い方をご紹介します。「次へ」をクリックして開始してください。'

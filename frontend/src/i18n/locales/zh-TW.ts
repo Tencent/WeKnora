@@ -8923,6 +8923,11 @@ export default {
       }
     }
   },
+  assistantEntryGuide: {
+    stepOf: 'v0.9.0 新功能',
+    skip: '知道了',
+    interactHint: '點擊反白的入口，開啟助手試試。',
+  },
   newUserGuide: {
     stepOf: '{current} / {total}',
     skip: '跳過引導',
@@ -8931,6 +8936,10 @@ export default {
     done: '完成',
     reopen: '新手引導',
     steps: {
+      assistant: {
+        title: '認識 WeKnora 助手',
+        desc: '可以詢問 WeKnora 的版本、功能與設定，也可以結合目前頁面，以你的身分建立智慧代理、設定定時任務或整理知識。'
+      },
       done: {
         title: '一切就緒',
         desc: '你已經了解了核心功能，現在就開始建構你的知識助手吧！隨時可點擊選單頂部暱稱旁的幫助按鈕重新查看引導。'
