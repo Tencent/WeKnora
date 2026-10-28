@@ -6953,6 +6953,68 @@ export default {
     clearSuccess: '내 값을 삭제했습니다.',
     updatedAt: '{time}에 설정함'
   },
+  defaultSettings: {
+    loadFailed: '기본 설정을 불러오지 못했습니다. 편집하기 전에 다시 시도하세요.',
+    title: '기본 설정',
+    description: '이 워크스페이스의 각 기능이 기본으로 사용하는 모델과 검색 엔진을 한곳에서 관리합니다.',
+    introTitle: '리소스에서 따로 지정하지 않으면 여기의 기본값을 사용합니다',
+    introDescription: '에이전트, 지식베이스, 대화에서 직접 선택한 모델이 우선합니다. 선택하지 않았으면 여기의 워크스페이스 기본값을, 그것도 없으면 배포에 내장된 기본 모델을 사용합니다.',
+    readOnly: '워크스페이스 관리자만 변경할 수 있습니다. 현재 적용 중인 기본값은 확인할 수 있습니다.',
+    modelGroup: '모델',
+    webSearchGroup: '웹 검색',
+    unsetPlaceholder: '설정 안 함(시스템 기본값)',
+    followChatPlaceholder: '설정 안 함(기본 대화 모델 따름)',
+    slots: {
+      chat: {
+        label: '기본 대화 모델',
+        description: '새 에이전트와 Q&A에서 사용하며, 백그라운드 작업의 대체 모델로도 쓰입니다.',
+        none: '사용 가능한 대화 모델이 없어 Q&A와 백그라운드 생성을 사용할 수 없습니다.',
+      },
+      utility: {
+        label: '경량 생성 모델',
+        description: '세션 제목, MCP 사용 안내, 기억 추출 같은 짧은 텍스트 작업에 사용합니다. 더 빠르고 저렴한 모델을 권장합니다.',
+        none: '사용 가능한 대화 모델이 없어 제목과 안내를 생성할 수 없습니다.',
+      },
+      embedding: {
+        label: '기본 Embedding 모델',
+        description: '새 지식베이스를 만들 때 기본으로 선택됩니다. 기존 지식베이스에는 영향이 없습니다.',
+        none: '사용 가능한 Embedding 모델이 없어 지식베이스를 만들 수 없습니다.',
+      },
+      rerank: {
+        label: '기본 Rerank 모델',
+        description: '자체 재정렬 모델이 없는 검색과 내장 에이전트에서 사용합니다.',
+        none: '사용 가능한 Rerank 모델이 없어 검색 결과가 검색 순서대로 반환됩니다.',
+      },
+      vlm: {
+        label: '기본 비전 모델',
+        description: '이미지 이해와 멀티모달 파싱의 기본 선택입니다.',
+        none: '사용 가능한 비전 모델이 없어 이미지 이해를 사용할 수 없습니다.',
+      },
+      asr: {
+        label: '기본 음성 인식 모델',
+        description: '오디오·비디오 전사의 기본 선택입니다.',
+        none: '사용 가능한 음성 인식 모델이 없어 전사를 사용할 수 없습니다.',
+      },
+    },
+    hints: {
+      workspace: '워크스페이스 설정을 사용 중입니다.',
+      system: '설정 안 됨. 현재 시스템 기본값 사용 중: {name}',
+      auto: '설정 안 됨. 현재 첫 번째 사용 가능 모델 사용 중: {name}',
+      followChat: '설정 안 됨. 기본 대화 모델을 따릅니다: {name}',
+      staleFallback: '선택한 모델이 삭제되었거나 사용할 수 없습니다. 현재 대체 모델: {name}',
+      staleNone: '선택한 모델이 삭제되었거나 사용할 수 없으며, 대체할 모델도 없습니다.',
+    },
+    webSearch: {
+      label: '기본 검색 엔진',
+      description: '자체 검색 엔진이 없는 에이전트에서 웹 검색을 켜면 사용합니다.',
+      unset: '기본 검색 엔진이 없습니다. 자체 검색 엔진이 없는 에이전트는 웹 검색을 할 수 없습니다.',
+      placeholder: '검색 엔진 선택',
+    },
+    toasts: {
+      saveSuccess: '기본 설정을 저장했습니다',
+      saveFailed: '저장 실패: {message}',
+    },
+  },
   memoryWorkspaceSettings: {
     title: '장기 기억',
     description: '구성원이 말한 개인 정보, 선호, 사실, 진행 중인 일을 어시스턴트가 대화를 넘어 기억하도록 합니다.',

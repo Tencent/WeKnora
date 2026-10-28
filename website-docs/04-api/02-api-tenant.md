@@ -100,9 +100,11 @@ curl -X DELETE $BASE/api/v1/tenants/1 -H "Authorization: Bearer $TOKEN"
 
 ## 空间 KV 配置
 
-`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`、`memory-config`、`assistant-config`。
+`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`、`memory-config`、`assistant-config`、`default-settings`。
 
 `assistant-config` 是 WeKnora 助手的空间设置：`display_name`（界面上的助手名称，最多 24 字，空表示默认名称）和 `max_access_level`（成员可选的最高权限等级：`read_only` 只读、`confirm` 修改前确认、`auto_write` 可恢复的修改直接执行，删除类仍需确认；默认 `confirm`）。成员在对话请求里用 `assistant_access` 选择自己的等级，服务端按空间上限截断。
+
+`default-settings` 是空间默认模型：`chat_model_id`、`utility_model_id`（标题、MCP 使用说明、记忆提取等短文本生成，空表示跟随 `chat_model_id`）、`embedding_model_id`、`rerank_model_id`、`vlm_model_id`、`asr_model_id`。读取需 Viewer+，写入需 Admin+；PUT 提交完整对象，非空 ID 必须是本空间可用且类型匹配的模型，空字符串表示使用部署内置模型的 `is_default`。智能体、知识库等资源上显式选择的模型优先于空间默认；所选模型被删除或停用时自动回退到部署默认，再回退到第一个可用模型。设置生效后，`GET /models` 返回的 `is_default` 表示每种类型当前生效的默认模型。默认搜索引擎仍由网络搜索服务的 `is_default` 决定（`PATCH /web-search-providers/:id`）。
 
 ### GET /api/v1/tenants/kv/:key
 

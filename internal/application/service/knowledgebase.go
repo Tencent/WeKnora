@@ -549,7 +549,7 @@ func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 	if err != nil {
 		return types.VLMConfig{}, fmt.Errorf("get vlm model %s: %w", next.ModelID, err)
 	}
-	if model.Type != types.ModelTypeVLLM {
+	if !model.SupportsType(types.ModelTypeVLLM) {
 		return types.VLMConfig{}, apperrors.NewBadRequestError(
 			fmt.Sprintf("vlm_config.model_id: model type is %s, want %s", model.Type, types.ModelTypeVLLM))
 	}

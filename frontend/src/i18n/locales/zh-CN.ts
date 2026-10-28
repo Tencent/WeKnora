@@ -6954,6 +6954,68 @@ export default {
     clearSuccess: '已清除你的值。',
     updatedAt: '你于 {time} 设置'
   },
+  defaultSettings: {
+    loadFailed: '默认设置加载失败，请重试后再编辑。',
+    title: '默认配置',
+    description: '集中管理本空间各项功能默认使用的模型和搜索引擎。',
+    introTitle: '资源未单独指定时使用这里的默认值',
+    introDescription: '智能体、知识库或单次对话明确选择的模型优先；没有选择时使用这里的空间默认；空间也没设置时，使用部署内置的默认模型。',
+    readOnly: '仅空间管理员可以修改，你可以查看当前生效的默认值。',
+    modelGroup: '模型',
+    webSearchGroup: '网络搜索',
+    unsetPlaceholder: '未设置（使用系统默认）',
+    followChatPlaceholder: '未设置（跟随默认对话模型）',
+    slots: {
+      chat: {
+        label: '默认对话模型',
+        description: '新建智能体和问答默认使用，也作为后台任务的兜底模型。',
+        none: '空间内没有可用的对话模型，问答和后台生成将无法使用。',
+      },
+      utility: {
+        label: '轻量生成模型',
+        description: '用于生成会话标题、MCP 服务使用说明、记忆提取等短文本任务，可选更快更便宜的模型。',
+        none: '空间内没有可用的对话模型，标题和说明生成将无法使用。',
+      },
+      embedding: {
+        label: '默认 Embedding 模型',
+        description: '新建知识库时默认选用。已有知识库不受影响。',
+        none: '空间内没有可用的 Embedding 模型，无法新建知识库。',
+      },
+      rerank: {
+        label: '默认 Rerank 模型',
+        description: '未单独配置重排模型的检索和内置智能体使用。',
+        none: '空间内没有可用的 Rerank 模型，检索将按召回顺序返回。',
+      },
+      vlm: {
+        label: '默认视觉模型',
+        description: '用于图片理解和多模态解析的默认选择。',
+        none: '空间内没有可用的视觉模型，图片理解不可用。',
+      },
+      asr: {
+        label: '默认语音识别模型',
+        description: '用于音视频转写的默认选择。',
+        none: '空间内没有可用的语音识别模型，音视频转写不可用。',
+      },
+    },
+    hints: {
+      workspace: '使用空间设置。',
+      system: '未设置，当前使用系统默认：{name}',
+      auto: '未设置，当前自动使用首个可用模型：{name}',
+      followChat: '未设置，跟随默认对话模型：{name}',
+      staleFallback: '所选模型已删除或不可用，当前回退到：{name}',
+      staleNone: '所选模型已删除或不可用，且没有可回退的模型。',
+    },
+    webSearch: {
+      label: '默认搜索引擎',
+      description: '未单独指定搜索引擎的智能体开启联网搜索时使用。',
+      unset: '未设置默认搜索引擎，未单独指定搜索引擎的智能体将无法联网搜索。',
+      placeholder: '选择搜索引擎',
+    },
+    toasts: {
+      saveSuccess: '默认配置已保存',
+      saveFailed: '保存失败：{message}',
+    },
+  },
   memoryWorkspaceSettings: {
     title: '长期记忆',
     description: '让助手跨会话记住成员说过的个人信息、偏好、事实与在办事项。',
