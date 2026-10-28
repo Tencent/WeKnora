@@ -923,7 +923,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	queryImage, queryImageType, imageErr := decodeQueryImage(request.QueryImage)
 	if imageErr != nil {
 		logger.Warnf(ctx, "Rejected query image: %v", imageErr)
-		c.Error(errors.NewBadRequestError(imageErr.Error()))
+		_ = c.Error(errors.NewBadRequestError(imageErr.Error()))
 		return
 	}
 
