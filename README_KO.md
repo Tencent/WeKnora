@@ -42,9 +42,9 @@
 
 [**WeKnora**](https://weknora.weixin.qq.com)는 엔터프라이즈 문서 이해, 시맨틱 검색, 추론을 위한 오픈소스 LLM 기반 지식 프레임워크입니다. 팀에 흩어진 문서를 한데 모아 검색하고 추론에 활용할 수 있게 하며, 자료가 바뀌면 함께 갱신합니다.
 
-https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
+https://github.com/user-attachments/assets/de0e490a-e738-405e-bb3a-64b63edd7278
 
-<p align="center"><sub>1분 52초 · 1080p · 내레이션 없음, 영어 화면 텍스트</sub></p>
+<p align="center"><sub>v0.9.0 · 2분 45초 · 1080p60 · 영어 내레이션 및 자막</sub></p>
 
 자료 조회는 RAG, 다단계 작업은 Agent, 지식 정리는 Wiki로 합니다. 세 기능은 같은 지식베이스를 공유합니다.
 
