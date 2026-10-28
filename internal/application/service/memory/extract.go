@@ -839,13 +839,7 @@ func (s *Service) workspaceChatModelID(ctx context.Context) string {
 		logger.Warnf(ctx, "memory: list models for extraction fallback failed: %v", err)
 		return ""
 	}
-	for _, model := range models {
-		if model == nil || model.Type != types.ModelTypeKnowledgeQA {
-			continue
-		}
-		if model.Status != "" && model.Status != types.ModelStatusActive {
-			continue
-		}
+	if model := types.PickChatModel(models, types.UtilityModelIDFromContext(ctx)); model != nil {
 		logger.Infof(ctx, "memory: no extraction model configured, using workspace model %s", model.ID)
 		return model.ID
 	}

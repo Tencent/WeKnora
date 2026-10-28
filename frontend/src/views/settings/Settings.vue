@@ -106,6 +106,11 @@
           <ChatHistorySettings />
         </div>
 
+        <!-- 默认配置（空间级默认模型与搜索引擎） -->
+        <div v-if="currentSection === 'defaults'" class="section">
+          <DefaultSettings />
+        </div>
+
         <!-- 长期记忆（空间级开关） -->
         <div v-if="currentSection === 'memory'" class="section">
           <MemoryWorkspaceSettings />
@@ -223,6 +228,7 @@ import ChatHistorySettings from './ChatHistorySettings.vue'
 import MemorySettings from './MemorySettings.vue'
 import EnvVarSettings from './EnvVarSettings.vue'
 import MemoryWorkspaceSettings from './MemoryWorkspaceSettings.vue'
+import DefaultSettings from './DefaultSettings.vue'
 import AssistantSettings from './AssistantSettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
@@ -367,6 +373,7 @@ const navItems = computed(() => {
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
+    { key: 'defaults', icon: 'setting-1', label: t('defaultSettings.title') },
     { key: 'memory', icon: 'bulletpoint', label: t('memoryWorkspaceSettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
@@ -411,7 +418,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'workspace',
       label: t('settings.navGroups.workspace'),
-      items: pickItems(['tenant', 'members', 'chathistory', 'memory']),
+      items: pickItems(['tenant', 'members', 'defaults', 'chathistory', 'memory']),
     },
     {
       key: 'models_runtime',

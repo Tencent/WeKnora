@@ -1,4 +1,4 @@
-import { get, post, put, del } from '@/utils/request'
+import { get, post, put, patch, del } from '@/utils/request'
 
 // WebSearchProviderEntity represents a configured web search provider instance
 export interface WebSearchProviderEntity {
@@ -69,6 +69,14 @@ export function getWebSearchProvider(id: string) {
 // Update an existing web search provider
 export function updateWebSearchProvider(id: string, data: Partial<WebSearchProviderEntity>) {
   return put(`/api/v1/web-search-providers/${id}`, data)
+}
+
+// Change display/default settings only; connection parameters are preserved
+export function patchWebSearchProvider(
+  id: string,
+  data: { name?: string; description?: string; is_default?: boolean },
+) {
+  return patch(`/api/v1/web-search-providers/${id}`, data)
 }
 
 // Delete a web search provider
