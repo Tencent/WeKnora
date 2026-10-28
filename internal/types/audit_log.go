@@ -25,6 +25,12 @@ const (
 	// AuditActionMemberLeft fires on POST /tenants/:id/leave — the
 	// actor and target are the same user.
 	AuditActionMemberLeft AuditAction = "rbac.member_left"
+	// AuditActionMemberPasswordReset fires when an Owner / Admin resets
+	// another member's password through
+	// POST /tenants/:id/members/:user_id/reset-password. The Details
+	// payload carries the target user id and role; the password (and any
+	// hash of it) MUST NOT appear in details or logs.
+	AuditActionMemberPasswordReset AuditAction = "rbac.member_password_reset"
 	// AuditActionAccessDenied fires when middleware/rbac.go's
 	// RequireRole or RequireOwnershipOrRole rejects a request under
 	// EnableRBAC=true. Subject to 1-minute sliding-window dedup so a

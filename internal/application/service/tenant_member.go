@@ -257,6 +257,34 @@ func (s *tenantMemberService) GetMembership(
 	return s.repo.Get(ctx, userID, tenantID)
 }
 
+// AuditMemberPasswordReset 落一条重置成功的 rbac.member_password_reset
+// 审计。handler 在 userService.AdminResetPassword 成功后，通过可选的
+// interfaces.MemberPasswordResetAuditor 窄接口调用本方法。
+//
+// Details 只记目标用户与目标角色：新密码（以及它的哈希）绝不进审计、
+// 不进日志。审计本身是尽力而为，失败不影响已经完成的密码重置。
+func (s *tenantMemberService) AuditMemberPasswordReset(
+	ctx context.Context,
+	tenantID uint64,
+	targetUserID string,
+	targetRole types.TenantRole,
+) {
+	details, _ := json.Marshal(map[string]string{
+		"target_user_id": targetUserID,
+		"target_role":    string(targetRole),
+	})
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID:     tenantID,
+		ActorUserID:  auditActor(ctx),
+		ActorRole:    auditActorRole(ctx),
+		Action:       types.AuditActionMemberPasswordReset,
+		TargetType:   "tenant_member",
+		TargetUserID: targetUserID,
+		Outcome:      types.AuditOutcomeSuccess,
+		Details:      types.JSON(details),
+	})
+}
+
 // ListByUser proxies to the repository; included on the service so HTTP
 // handlers depend only on the service interface.
 func (s *tenantMemberService) ListByUser(ctx context.Context, userID string) ([]*types.TenantMember, error) {

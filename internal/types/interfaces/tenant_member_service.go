@@ -52,3 +52,15 @@ type TenantMemberService interface {
 	// "cannot remove the last active Owner" invariant.
 	RemoveMember(ctx context.Context, userID string, tenantID uint64) error
 }
+
+// MemberPasswordResetAuditor 是 TenantMemberService 实现的可选窄接口：
+// 实现它的服务能在成员密码重置成功后落一条 rbac.member_password_reset
+// 审计。
+//
+// 单独成接口而不把方法并进 TenantMemberService，是为了不破坏所有逐方法
+// 显式实现该接口的既有实现/测试替身（例如中间件的角色测试）。handler 在
+// 重置成功后对该窄接口做类型断言；审计尽力而为，与 emitAudit 的既有
+// 语义一致。
+type MemberPasswordResetAuditor interface {
+	AuditMemberPasswordReset(ctx context.Context, tenantID uint64, targetUserID string, targetRole types.TenantRole)
+}

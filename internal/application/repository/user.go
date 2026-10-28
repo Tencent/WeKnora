@@ -146,6 +146,16 @@ func (r *userRepository) DeleteUser(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.User{}).Error
 }
 
+// HardDeleteUser 物理删除用户行（绕过 gorm 软删）。只服务于「建号入组失败」
+// 的回滚：那种用户刚创建、没有任何成员关系/令牌/空间，物理删除不产生孤儿。
+// 走普通 Delete 的软删行仍占用 users.email / users.username 的全表唯一索引，
+// 会让同邮箱/用户名重试建号永久失败。其余删除场景继续用 DeleteUser 软删。
+// 刻意不放进 interfaces.UserRepository：那是全量契约，加方法会迫使所有
+// 逐方法显式实现该接口的测试替身跟着补实现。
+func (r *userRepository) HardDeleteUser(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Unscoped().Where("id = ?", id).Delete(&types.User{}).Error
+}
+
 // DeleteUserRetiringSessions locks the web user, retires every session visible
 // under that lock, and soft-deletes the user in the same transaction. A user
 // row that is already soft-deleted is still held for the re-read; its sessions

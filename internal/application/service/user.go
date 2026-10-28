@@ -68,6 +68,13 @@ var (
 	// one so callers can reject no-op rotations that would still revoke
 	// every session.
 	ErrSamePassword = errors.New("new password must differ from current password")
+
+	// ErrCannotResetPrivilegedTarget 由 AdminResetPassword 返回：目标用户持有
+	// 平台级特权（IsSystemAdmin 或 CanAccessAllTenants），而调用方不在系统
+	// 管理边界上。空间级重置会改掉该账号的全局密码并吊销其全部会话——
+	// 等于接管账号——因此在这里按 fail-closed 拒绝，而不是只拦在某一条
+	// HTTP 边界上。
+	ErrCannotResetPrivilegedTarget = errors.New("cannot reset this member's password from a workspace endpoint")
 )
 
 // Machine-readable change-password failure reasons for HTTP details fields.
@@ -758,6 +765,25 @@ func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	return nil
 }
 
+// 编译期守卫：生产实现必须满足建号回滚的窄接口。没有它，方法被改名或
+// 删掉后 handler 的类型断言会静默失效、回滚退化成软删，编译却照样通过。
+var _ interfaces.NewlyCreatedUserRemover = (*userService)(nil)
+
+// RemoveNewlyCreatedUser 物理删除刚建号流程创建、尚未入组的用户，仅用于
+// CreateMemberAccount 入组失败后的回滚：软删行会一直占用 email / username
+// 的全表唯一索引，同邮箱重试建号必然失败。仓库层的 HardDeleteUser 刻意
+// 不在 interfaces.UserRepository 里（避免破坏既有测试替身），这里按
+// DeleteUserRetiringSessions 的既有先例用匿名接口断言拿到它。
+func (s *userService) RemoveNewlyCreatedUser(ctx context.Context, id string) error {
+	hardDeleter, ok := s.userRepo.(interface {
+		HardDeleteUser(ctx context.Context, id string) error
+	})
+	if !ok {
+		return errors.New("user repository does not support hard delete")
+	}
+	return hardDeleter.HardDeleteUser(ctx, id)
+}
+
 // ChangePassword changes user password after verifying the current
 // credential. The new password must satisfy ValidatePasswordPolicy so
 // self-service rotation cannot introduce weaker passwords than
@@ -818,6 +844,15 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID, newPasswor
 	if err != nil {
 		return err
 	}
+	// F1（R1 修复，fail-closed）：目标持有平台级特权（IsSystemAdmin /
+	// CanAccessAllTenants）时，只有站在「系统管理边界」上的调用方能重置其
+	// 密码。空间级 Owner/Admin 的重置会改掉对方的全局密码并吊销其全部会话，
+	// 等于接管平台账号，必须拒绝。系统管理端与租户端共用本方法，门禁放在
+	// 这里才能对每个调用方生效，而不是只挡住一条 HTTP 路径。
+	if (user.IsSystemAdmin || user.CanAccessAllTenants) && !callerOnSystemAdminBoundary(ctx) {
+		logger.Warnf(ctx, "AdminResetPassword denied: privileged target user=%s", userID)
+		return ErrCannotResetPrivilegedTarget
+	}
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -830,6 +865,20 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID, newPasswor
 	}
 
 	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
+}
+
+// callerOnSystemAdminBoundary 判定调用方是否站在「系统管理边界」上：与
+// middleware.RequireSystemAdmin 的放行口径保持一致（ctx 的系统管理员标记，
+// 或平台级 API key）。平台 key 走系统管理端重置特权用户属于既有运维能力，
+// 门禁不能让它回退。
+func callerOnSystemAdminBoundary(ctx context.Context) bool {
+	if types.IsSystemAdminFromContext(ctx) {
+		return true
+	}
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.IsPlatform() {
+		return true
+	}
+	return false
 }
 
 // AdminCreateUser provisions a new local user on behalf of a SystemAdmin.

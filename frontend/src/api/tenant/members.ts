@@ -64,6 +64,13 @@ export interface SimpleResponse {
   message?: string
 }
 
+export interface CreateMemberAccountRequest {
+  username: string
+  email: string
+  password: string
+  role: TenantRole
+}
+
 /**
  * 分页列出空间成员。
  * Backend: GET /api/v1/tenants/:id/members (Viewer+)。查询参数：`q`、`page`、`page_size`。
@@ -113,6 +120,46 @@ export async function addMember(
   body: AddMemberRequest,
 ): Promise<AddMemberResponse> {
   return (await post(`/api/v1/tenants/${tenantId}/members`, body)) as unknown as AddMemberResponse
+}
+
+/**
+ * Create a brand-new account and add it to the tenant in one call.
+ * Backend: POST /api/v1/tenants/:id/members/create (Admin+, 角色矩阵在
+ * handler 内判定：Owner 可建 admin/contributor/viewer，Admin 只能建
+ * viewer，不能建 owner)。
+ *
+ * 409 = 邮箱或用户名已注册；400 = 参数或密码不合规；403 = 角色越权。
+ * 响应复用成员投影（不含密码）。
+ */
+export async function createMemberAccount(
+  tenantId: number,
+  body: CreateMemberAccountRequest,
+): Promise<AddMemberResponse> {
+  return (await post(
+    `/api/v1/tenants/${tenantId}/members/create`,
+    body,
+  )) as unknown as AddMemberResponse
+}
+
+/**
+ * Reset a member's login password (admin-supplied new password).
+ * Backend: POST /api/v1/tenants/:id/members/:user_id/reset-password (Admin+
+ * guard; the owner/admin role matrix and the "not yourself" rule are enforced
+ * in the handler). On success the target's old password and all issued tokens
+ * are invalidated immediately.
+ *
+ * 400 = 密码不合规 / 重置本人；403 = 越权；404 = 目标不是本空间成员。
+ * 响应只有 { success: true }，不包含密码。
+ */
+export async function resetMemberPassword(
+  tenantId: number,
+  userId: string,
+  newPassword: string,
+): Promise<SimpleResponse> {
+  return (await post(
+    `/api/v1/tenants/${tenantId}/members/${userId}/reset-password`,
+    { new_password: newPassword },
+  )) as unknown as SimpleResponse
 }
 
 /**

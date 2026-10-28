@@ -53,7 +53,9 @@
                   {{
                     addDialogStep === 'form'
                       ? $t('tenantMember.add.dialogTitle')
-                      : $t('tenantInvitation.confirmInviteTitle')
+                      : addDialogStep === 'create'
+                        ? $t('tenantMember.create.dialogTitle')
+                        : $t('tenantInvitation.confirmInviteTitle')
                   }}
                 </div>
                 <t-form v-if="addDialogStep === 'form'" ref="addFormRef" :data="addForm" :rules="addFormRules"
@@ -66,13 +68,19 @@
                     <t-select v-model="addForm.role" :options="roleOptions" :popup-props="roleSelectPopupProps" />
                   </t-form-item>
                 </t-form>
-                <div v-else class="invite-confirm-body">
+                <div v-else-if="addDialogStep === 'confirm'" class="invite-confirm-body">
                   {{ $t('tenantInvitation.confirmInviteBody', {
                     email: addConfirmEmail,
                     role: addConfirmRoleLabel,
                   }) }}
                 </div>
-                <div class="invite-popup-footer">
+                <!-- AC-10：邮箱未注册时邀请弹窗原地切到建号表单，邮箱预填；
+                     已选角色也一并带过去（owner 这类不可建角色会被表单忽略，
+                     回落默认），避免 Owner 白选一次。 -->
+                <MemberCreateAccountForm v-else :tenant-id="activeTenantId" :actor-role="createActorRole"
+                  :initial-email="addForm.email.trim()" :initial-role="addForm.role" @cancel="goBackToForm"
+                  @created="onMemberAccountCreated" />
+                <div v-if="addDialogStep !== 'create'" class="invite-popup-footer">
                   <t-button v-if="addDialogStep === 'form'" variant="outline" :disabled="adding"
                     @click="invitePopupVisible = false">
                     {{ $t('common.cancel') }}
@@ -146,6 +154,23 @@
                     {{ $t('tenantInvitation.shareLink.generate') }}
                   </t-button>
                 </div>
+              </div>
+            </template>
+          </t-popup>
+          <!-- Admin 的建号入口：Admin 没有邀请/共享链接权限，只开放
+               「直接创建账号」，角色选项由 allowedCreateRoles 过滤为只有 viewer。 -->
+          <t-popup v-if="showCreateEntry" v-model="createPopupVisible" trigger="click" placement="bottom-end"
+            destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
+            <t-button theme="default" variant="text" size="small" class="members-list-add-btn"
+              :title="$t('tenantMember.create.button')" :aria-label="$t('tenantMember.create.button')">
+              <template #icon><t-icon name="user-add" /></template>
+              {{ $t('tenantMember.create.button') }}
+            </t-button>
+            <template #content>
+              <div class="member-invite-popup-inner" @click.stop>
+                <div class="member-invite-popup-title">{{ $t('tenantMember.create.dialogTitle') }}</div>
+                <MemberCreateAccountForm :tenant-id="activeTenantId" :actor-role="createActorRole"
+                  @cancel="createPopupVisible = false" @created="onMemberAccountCreated" />
               </div>
             </template>
           </t-popup>
@@ -338,6 +363,15 @@
               </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
+                <!-- 重置密码：按 AC-2 矩阵显示，本人与同级/上级不显示。
+                     放在移除按钮左侧，保持图标按钮 + tooltip 的既有风格。 -->
+                <t-tooltip v-if="canResetRow(row)" :content="$t('tenantMember.resetPassword.button')"
+                  placement="top">
+                  <t-button shape="square" variant="text" size="small"
+                    :aria-label="$t('tenantMember.resetPassword.button')" @click.stop="openResetDialog(row)">
+                    <template #icon><t-icon name="lock-on" /></template>
+                  </t-button>
+                </t-tooltip>
                 <t-popconfirm
                   v-if="canManage && row.user_id !== currentUserId"
                   :content="$t('tenantMember.remove.confirmBody', { name: row.username || row.email })"
@@ -363,6 +397,10 @@
       </div>
 
     </div>
+
+    <!-- 重置成员密码弹窗（AC-11）：管理员自填新密码 + 确认。 -->
+    <MemberResetPasswordDialog v-model:visible="resetDialogVisible" :tenant-id="activeTenantId"
+      :member="resetTarget" />
 
     <!-- Audit log drawer. Only rendered for Admin+ because the backend
          route is g.Admin()-gated; rendering it for lower roles would
@@ -504,7 +542,10 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import MemberCreateAccountForm from '@/components/settings/MemberCreateAccountForm.vue'
+import MemberResetPasswordDialog from '@/components/settings/MemberResetPasswordDialog.vue'
 import { copyWithToast } from '@/utils/clipboard'
+import { canCreateAccount as canCreateAccountForRole, canResetTarget } from '@/utils/memberRoles'
 import { useAuthStore } from '@/stores/auth'
 import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
 import { auditActionLabel } from '@/i18n/auditActionLabel'
@@ -550,6 +591,11 @@ const error = ref('')
 const adding = ref(false)
 /** 邀请流程：锚在列表头「+」按钮旁的弹出层（非居中模态）。 */
 const invitePopupVisible = ref(false)
+// Admin 的独立建号入口（Admin 没有邀请/共享链接权限，只开放建号）。
+const createPopupVisible = ref(false)
+// 重置成员密码弹窗（AC-11）：记录当前要重置的那一行，弹窗由子组件自己管表单。
+const resetDialogVisible = ref(false)
+const resetTarget = ref<TenantMember | null>(null)
 // share-link generator state (separate popup next to the email
 // invite). shareLinkResult is non-null after a successful create —
 // the popup then switches into "here's your link, copy it" mode.
@@ -558,8 +604,10 @@ const shareLinkForm = reactive<{ role: TenantRole }>({ role: 'contributor' })
 const creatingShareLink = ref(false)
 const shareLinkResult = ref<TenantInvitation | null>(null)
 // Two-step invite inside the popup: 'form' renders the email/role inputs;
-// 'confirm' swaps the body for an in-place summary; primary CTA toggles label.
-const addDialogStep = ref<'form' | 'confirm'>('form')
+// 'confirm' swaps the body for an in-place summary; 'create' is the
+// unregistered-email branch (AC-10), which swaps in the account form.
+// Primary CTA toggles label.
+const addDialogStep = ref<'form' | 'confirm' | 'create'>('form')
 const addFormRef = ref<any>(null)
 const searchQuery = ref('')
 const activeListTab = ref('members')
@@ -640,6 +688,47 @@ const currentRole = computed<TenantRole | ''>(() => (authStore.currentTenantRole
 const canManage = computed(
   () => currentRole.value === 'owner' || authStore.canAccessAllTenants === true,
 )
+
+// 建号权限（AC-9）：Owner 可建 admin/contributor/viewer，Admin 只能建
+// viewer（后端矩阵见 02-plan D3）。跨租户系统管理员后端按 Owner 处理
+// （D4），这里同样视作 Owner，避免把可用角色收窄成 viewer。
+const createActorRole = computed<TenantRole>(() => {
+  if (authStore.canAccessAllTenants === true) return 'owner'
+  const role = currentRole.value
+  if (role === 'owner' || role === 'admin') return role
+  return 'viewer'
+})
+const canCreateAccount = computed(
+  () => canCreateAccountForRole(currentRole.value) || authStore.canAccessAllTenants === true,
+)
+// Owner 沿用现有邀请弹窗（404 后再切建号表单）；Admin 没有邀请/共享
+// 链接权限，只给一个独立的建号入口。
+const showCreateEntry = computed(() => canCreateAccount.value && !canManage.value)
+
+// 重置密码的操作者角色：跨租户系统管理员在后端按 Owner 处理（D4），
+// 这里同样视作 Owner，否则超管在自己角色较低的租户里会看不到入口。
+const resetActorRole = computed<TenantRole | ''>(() =>
+  authStore.canAccessAllTenants === true ? 'owner' : currentRole.value,
+)
+
+// 行内「重置密码」是否可见：AC-2 矩阵 + 排除本人。不能挂在 canManage
+// （owner-only）上——Admin 也要能看到并操作自己权限范围内的成员。
+function canResetRow(row: TenantMember): boolean {
+  return canResetTarget(
+    resetActorRole.value,
+    row.role,
+    row.user_id === currentUserId.value,
+  )
+}
+
+function openResetDialog(row: TenantMember) {
+  resetTarget.value = row
+  resetDialogVisible.value = true
+}
+
+watch(showCreateEntry, (visible) => {
+  if (!visible) createPopupVisible.value = false
+})
 // Admin+ (and cross-tenant superusers) can view the audit log. Mirrors
 // the server's g.Admin() guard on /tenants/:id/audit-log so we don't
 // render a tab that would just 403.
@@ -728,7 +817,7 @@ const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 230 },
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 168 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
-  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
+  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 112, align: 'left' },
 ])
 
 function memberPrimary(row: { username?: string; email?: string }) {
@@ -1344,6 +1433,12 @@ async function sendInvitation(email: string, role: TenantRole) {
   } catch (err: any) {
     const status = err?.status
     if (status === 404) {
+      // AC-10：邮箱未注册时不再只提示，直接把弹窗切到建号表单；
+      // 邮箱沿用刚刚输入的值。只有具备建号权限的角色才走这一支。
+      if (canCreateAccount.value) {
+        addDialogStep.value = 'create'
+        return
+      }
       MessagePlugin.error(t('tenantMember.errors.userNotFound'))
     } else if (status === 409) {
       // Server returns the same 409 for both "already a member" and
@@ -1364,6 +1459,20 @@ async function sendInvitation(email: string, role: TenantRole) {
   } finally {
     adding.value = false
   }
+}
+
+// 建号成功（Owner 的 404 分支或 Admin 的独立入口）：关弹窗、回到第一页
+// 并刷新成员列表，保证新成员立刻可见。初始密码由创建者线下转交。
+async function onMemberAccountCreated() {
+  invitePopupVisible.value = false
+  createPopupVisible.value = false
+  addDialogStep.value = 'form'
+  searchQuery.value = ''
+  memberSearchQ.value = ''
+  window.clearTimeout(memberSearchDebounceTimer)
+  membersPage.value = 1
+  await loadMembers()
+  MessagePlugin.success(t('tenantMember.create.success'))
 }
 
 async function onRoleChange(row: TenantMember, newRole: string) {
