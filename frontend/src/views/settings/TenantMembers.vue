@@ -74,9 +74,11 @@
                     role: addConfirmRoleLabel,
                   }) }}
                 </div>
-                <!-- AC-10：邮箱未注册时邀请弹窗原地切到建号表单，邮箱预填。 -->
+                <!-- AC-10：邮箱未注册时邀请弹窗原地切到建号表单，邮箱预填；
+                     已选角色也一并带过去（owner 这类不可建角色会被表单忽略，
+                     回落默认），避免 Owner 白选一次。 -->
                 <MemberCreateAccountForm v-else :tenant-id="activeTenantId" :actor-role="createActorRole"
-                  :initial-email="addForm.email.trim()" @cancel="goBackToForm"
+                  :initial-email="addForm.email.trim()" :initial-role="addForm.role" @cancel="goBackToForm"
                   @created="onMemberAccountCreated" />
                 <div v-if="addDialogStep !== 'create'" class="invite-popup-footer">
                   <t-button v-if="addDialogStep === 'form'" variant="outline" :disabled="adding"

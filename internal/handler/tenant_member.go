@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -69,10 +70,9 @@ type updateMemberRoleRequest struct {
 	Role types.TenantRole `json:"role" binding:"required"`
 }
 
-// createMemberAccountRequest is the JSON body for
-// POST /tenants/:id/members/create. Unlike addMemberRequest, it carries the
-// new account's credentials: this endpoint provisions a user and immediately
-// joins them to the workspace, so callers no longer have to pre-register.
+// createMemberAccountRequest 是 POST /tenants/:id/members/create 的请求体。
+// 与 addMemberRequest 的差别在于携带新账号的凭据：该接口一步完成建号并入
+// 组，调用方不必先走公开注册。
 type createMemberAccountRequest struct {
 	Username string           `json:"username" binding:"required,min=2,max=50"`
 	Email    string           `json:"email"    binding:"required,email"`
@@ -80,10 +80,10 @@ type createMemberAccountRequest struct {
 	Role     types.TenantRole `json:"role"     binding:"required"`
 }
 
-// resetMemberPasswordRequest is the JSON body for
-// POST /tenants/:id/members/:user_id/reset-password. The caller supplies the
-// new password directly (Q3：管理员自填密码，不强制首次登录改密). The value is
-// never logged, echoed back, or written into audit details.
+// resetMemberPasswordRequest 是
+// POST /tenants/:id/members/:user_id/reset-password 的请求体。新密码由调用
+// 方直接自填（Q3：管理员自填密码，不强制首次登录改密）。密码不写日志、
+// 不回显、不进审计 details。
 type resetMemberPasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required"`
 }
@@ -363,9 +363,23 @@ func (h *TenantMemberHandler) CreateMemberAccount(c *gin.Context) {
 
 	member, err := h.memberService.AddMember(ctx, user.ID, tenantID, req.Role, invitedBy)
 	if err != nil {
-		// D5：入组失败时尽力软删刚建的用户，避免留下没有任何空间的孤儿账号。
-		// 回滚本身失败只告警，对外仍返回入组错误。
-		if rollbackErr := h.userService.DeleteUser(ctx, user.ID); rollbackErr != nil {
+		// D5：入组失败时回滚刚建的用户，避免留下没有任何空间的孤儿账号。
+		// 回滚两点要求（评审 F3）：
+		//  1. 用不受请求取消影响的 ctx——AddMember 常见的失败原因就是客户端
+		//     断连/超时，拿原 ctx 做补偿删除必然 context canceled，孤儿照留；
+		//  2. 物理删除而不是软删——users.email/username 的唯一索引覆盖软删
+		//     行，软删会把该邮箱/用户名永久占死，同邮箱重试建号必然失败。
+		// 生产 userService 实现了 NewlyCreatedUserRemover 窄接口；拿不到
+		// （如测试替身）时退回软删保持既有行为。回滚失败只记日志，对外仍
+		// 返回入组错误。
+		rbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if remover, ok := h.userService.(interfaces.NewlyCreatedUserRemover); ok {
+			if rollbackErr := remover.RemoveNewlyCreatedUser(rbCtx, user.ID); rollbackErr != nil {
+				logger.Errorf(ctx, "hard-delete rollback of newly created user failed: user=%s tenant=%d err=%v",
+					user.ID, tenantID, rollbackErr)
+			}
+		} else if rollbackErr := h.userService.DeleteUser(rbCtx, user.ID); rollbackErr != nil {
 			logger.Warnf(ctx, "rollback of newly created user failed: user=%s tenant=%d err=%v",
 				user.ID, tenantID, rollbackErr)
 		}
@@ -394,9 +408,11 @@ func writeAddMemberError(
 		// fine, the conflict is semantic ("already a member").
 		c.Error(apperrors.NewConflictError(err.Error()))
 	default:
+		// 500 只回笼统信息：err.Error() 可能带出仓储层细节（F6），完整错误
+		// 已在上面记日志。
 		logger.Errorf(ctx, "AddMember failed: user=%s tenant=%d err=%v",
 			user.ID, tenantID, err)
-		c.Error(apperrors.NewInternalServerError("failed to add member").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to add member"))
 	}
 }
 
@@ -446,6 +462,7 @@ func addMemberAndRespond(
 // @Summary      重置成员密码
 // @Description  工作区 Owner（系统管理员按 Owner 处理）可重置 admin/contributor/viewer 的密码，
 // @Description  Admin 只能重置 contributor/viewer；不能重置与自己同级或更高级的成员，也不能重置本人。
+// @Description  目标若持有全局特权（系统管理员/跨空间访问），空间级接口一律拒绝。
 // @Description  成功后旧密码立即失效，该用户所有已签发 token 被吊销。
 // @Tags         空间成员
 // @Accept       json
@@ -490,9 +507,10 @@ func (h *TenantMemberHandler) ResetMemberPassword(c *gin.Context) {
 	// 先确认目标确实是当前空间的 active 成员，才能拿到目标角色做矩阵判定。
 	member, err := h.memberService.GetMembership(ctx, targetUserID, tenantID)
 	if err != nil {
+		// 500 不带 err.Error()：仓储错误细节不外泄（F6），日志里已有全文。
 		logger.Errorf(ctx, "GetMembership failed: user=%s tenant=%d err=%v",
 			targetUserID, tenantID, err)
-		c.Error(apperrors.NewInternalServerError("failed to look up membership").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to look up membership"))
 		return
 	}
 	if member == nil {
@@ -513,8 +531,17 @@ func (h *TenantMemberHandler) ResetMemberPassword(c *gin.Context) {
 	}
 
 	// AdminResetPassword 内部已做密码策略校验，并吊销该用户全部 token。
+	// 它还会做 F1 门禁：目标持有全局特权（IsSystemAdmin / CanAccessAllTenants）
+	// 时拒绝重置——空间级 Owner/Admin 的重置等于接管平台账号。403 文案与
+	// 矩阵拒绝保持同一句笼统话，不泄漏对方的特权细节。
 	// 失败分支不记录密码，只记目标 ID 与错误。
 	if err := h.userService.AdminResetPassword(ctx, targetUserID, req.NewPassword); err != nil {
+		if errors.Is(err, service.ErrCannotResetPrivilegedTarget) {
+			logger.Warnf(ctx, "ResetMemberPassword denied: privileged target user=%s tenant=%d actor_role=%s",
+				targetUserID, tenantID, actorRole)
+			c.Error(apperrors.NewForbiddenError("your role cannot reset this member's password"))
+			return
+		}
 		if service.IsPasswordPolicyError(err) {
 			c.Error(apperrors.NewValidationError("password does not meet the password policy"))
 			return

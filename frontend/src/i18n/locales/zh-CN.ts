@@ -644,6 +644,7 @@ export default {
         'rbac.member_removed': '移除成员',
         'rbac.member_role_changed': '角色变更',
         'rbac.member_left': '成员退出',
+        'rbac.member_password_reset': '重置成员密码',
         'rbac.access_denied': '访问被拒',
         'rbac.invitation_sent': '发出邀请',
         'rbac.invitation_accepted': '接受邀请',
@@ -740,6 +741,7 @@ export default {
         cannotResetSelf: '不能在管理端重置自己的密码，请使用「修改密码」。',
         forbidden: '当前角色无权重置该成员的密码',
         notFound: '该用户不是当前空间的成员',
+        invalidInput: '提交的参数不合规，请检查后重试',
         generic: '操作失败，请稍后重试。'
       }
     },

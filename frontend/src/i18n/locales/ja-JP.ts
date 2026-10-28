@@ -8547,6 +8547,7 @@ export default {
         cannotResetSelf: '管理画面から自分のパスワードはリセットできません。「パスワード変更」を使用してください。',
         forbidden: '現在のロールではこのメンバーのパスワードをリセットできません。',
         notFound: 'このユーザーは現在のワークスペースのメンバーではありません。',
+        invalidInput: '入力内容が正しくありません。確認してもう一度お試しください。',
         generic: '問題が発生しました。もう一度お試しください。'
       }
     },
@@ -8597,6 +8598,7 @@ export default {
         'rbac.member_removed': 'メンバー削除',
         'rbac.member_role_changed': 'ロール変更',
         'rbac.member_left': 'メンバー退出',
+        'rbac.member_password_reset': 'メンバーのパスワードをリセット',
         'rbac.access_denied': 'アクセス拒否',
         'rbac.invitation_sent': '招待送信',
         'rbac.invitation_accepted': '招待承諾',

@@ -114,6 +114,19 @@ type UserService interface {
 	UpdateUserPreferences(ctx context.Context, userID string, patch types.UserPreferences) (types.UserPreferences, error)
 }
 
+// NewlyCreatedUserRemover 由 UserService 的生产实现可选实现：物理删除一个
+// 刚创建、尚未产生任何从属数据（成员关系/令牌/空间）的用户行，供「建号入组
+// 失败」的回滚使用。
+//
+// 单独成窄接口而不把方法并进 UserService，原因与
+// MemberPasswordResetAuditor（见 tenant_member_service.go）相同：
+// UserService 的既有实现和测试替身逐方法显式实现接口，直接加方法会让
+// 它们全部编译失败。handler 在回滚时对该接口做类型断言，拿不到时退回
+// 软删，保持既有行为。
+type NewlyCreatedUserRemover interface {
+	RemoveNewlyCreatedUser(ctx context.Context, id string) error
+}
+
 // UserRepository defines the user repository interface
 type UserRepository interface {
 	// CreateUser creates a user

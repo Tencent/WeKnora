@@ -8547,6 +8547,7 @@ export default {
         cannotResetSelf: 'You cannot reset your own password here; use "Change password" instead.',
         forbidden: 'Your role cannot reset this member\'s password.',
         notFound: 'This user is not a member of this workspace.',
+        invalidInput: 'Invalid input. Please check and try again.',
         generic: 'Something went wrong. Please try again.'
       }
     },
@@ -8597,6 +8598,7 @@ export default {
         'rbac.member_removed': 'Member removed',
         'rbac.member_role_changed': 'Role changed',
         'rbac.member_left': 'Member left',
+        'rbac.member_password_reset': 'Member password reset',
         'rbac.access_denied': 'Access denied',
         'rbac.invitation_sent': 'Invitation sent',
         'rbac.invitation_accepted': 'Invitation accepted',

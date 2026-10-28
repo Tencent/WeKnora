@@ -39,6 +39,8 @@ const props = defineProps<{
   actorRole: TenantRole
   /** Owner 邀请遇到 404 时带着刚输入的邮箱切过来，表单里预填。 */
   initialEmail?: string
+  /** 邀请弹窗切建号表单时沿用已选的角色；不可建的角色（如 owner）忽略，回落默认。 */
+  initialRole?: TenantRole
 }>()
 
 const emit = defineEmits<{
@@ -58,8 +60,10 @@ const roleOptions = computed(() =>
 )
 
 // Owner 默认建「编辑」账号（和邀请弹窗的默认角色一致）；Admin 只有 viewer。
-function defaultCreateRole(actorRole: TenantRole): TenantRole {
+// initialRole 在允许范围内时优先沿用（邀请 404 切过来时不丢已选角色）。
+function defaultCreateRole(actorRole: TenantRole, initial?: TenantRole): TenantRole {
   const allowed = allowedCreateRoles(actorRole)
+  if (initial && allowed.includes(initial)) return initial
   return allowed.includes('contributor') ? 'contributor' : (allowed[0] ?? 'viewer')
 }
 
@@ -67,15 +71,21 @@ const form = reactive<{ username: string; email: string; password: string; role:
   username: '',
   email: props.initialEmail ?? '',
   password: '',
-  role: defaultCreateRole(props.actorRole),
+  role: defaultCreateRole(props.actorRole, props.initialRole),
 })
 
-// 弹层是 destroy-on-close，正常每次重开都会重建；这两个 watch 只是兜底：
-// 同一实例内邮箱被重新预填、或操作者角色变化时保持表单可用。
+// 弹层是 destroy-on-close，正常每次重开都会重建；这三个 watch 只是兜底：
+// 同一实例内邮箱/角色被重新预填、或操作者角色变化时保持表单可用。
 watch(
   () => props.initialEmail,
   (email) => {
     if (email) form.email = email
+  },
+)
+watch(
+  () => props.initialRole,
+  (role) => {
+    if (role && allowedCreateRoles(props.actorRole).includes(role)) form.role = role
   },
 )
 watch(

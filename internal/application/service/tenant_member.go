@@ -257,10 +257,9 @@ func (s *tenantMemberService) GetMembership(
 	return s.repo.Get(ctx, userID, tenantID)
 }
 
-// AuditMemberPasswordReset records a successful
-// rbac.member_password_reset. Handlers call it through the optional
-// interfaces.MemberPasswordResetAuditor narrow interface after
-// userService.AdminResetPassword succeeds.
+// AuditMemberPasswordReset 落一条重置成功的 rbac.member_password_reset
+// 审计。handler 在 userService.AdminResetPassword 成功后，通过可选的
+// interfaces.MemberPasswordResetAuditor 窄接口调用本方法。
 //
 // Details 只记目标用户与目标角色：新密码（以及它的哈希）绝不进审计、
 // 不进日志。审计本身是尽力而为，失败不影响已经完成的密码重置。

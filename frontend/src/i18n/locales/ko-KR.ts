@@ -644,6 +644,7 @@ export default {
         'rbac.member_removed': '멤버 제거',
         'rbac.member_role_changed': '역할 변경',
         'rbac.member_left': '멤버 탈퇴',
+        'rbac.member_password_reset': '멤버 비밀번호 재설정',
         'rbac.access_denied': '접근 거부',
         'rbac.invitation_sent': '초대 전송',
         'rbac.invitation_accepted': '초대 수락',
@@ -740,6 +741,7 @@ export default {
         cannotResetSelf: '관리 화면에서는 자신의 비밀번호를 재설정할 수 없습니다. "비밀번호 변경"을 사용하세요.',
         forbidden: '현재 역할로는 이 멤버의 비밀번호를 재설정할 수 없습니다.',
         notFound: '이 사용자는 현재 워크스페이스의 멤버가 아닙니다.',
+        invalidInput: '입력값이 올바르지 않습니다. 확인 후 다시 시도해 주세요.',
         generic: '오류가 발생했습니다. 다시 시도해 주세요.'
       }
     },

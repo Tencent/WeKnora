@@ -644,6 +644,7 @@ export default {
         'rbac.member_removed': '移除成員',
         'rbac.member_role_changed': '角色變更',
         'rbac.member_left': '成員退出',
+        'rbac.member_password_reset': '重設成員密碼',
         'rbac.access_denied': '存取被拒',
         'rbac.invitation_sent': '發出邀請',
         'rbac.invitation_accepted': '接受邀請',
@@ -740,6 +741,7 @@ export default {
         cannotResetSelf: '不能在管理端重設自己的密碼，請使用「修改密碼」。',
         forbidden: '目前角色無權重設該成員的密碼',
         notFound: '該使用者不是目前空間的成員',
+        invalidInput: '提交的參數不符規定，請檢查後重試',
         generic: '操作失敗，請稍後重試。'
       }
     },
