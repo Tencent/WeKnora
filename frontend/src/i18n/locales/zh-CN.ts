@@ -1098,6 +1098,8 @@ export default {
         list_documentsDesc: '分页列出某个知识库下的文档',
         read_document: '阅读文档',
         read_documentDesc: '按顺序读取文档的元信息和分块内容',
+        list_tags: '列出标签',
+        list_tagsDesc: '列出某个知识库下的标签，返回的标签 ID 可用于约束问答的检索范围',
         ask: '问答',
         askDesc: '运行端点配置的默认 Agent，返回带引用的完整回答，支持多轮续聊',
         wiki_search: '搜索 Wiki',

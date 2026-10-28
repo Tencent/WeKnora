@@ -51,6 +51,7 @@ type Server struct {
 	agentService     interfaces.CustomAgentService
 	kbShareService   interfaces.KBShareService
 	tenantService    interfaces.TenantService
+	tagService       interfaces.KnowledgeTagService
 	resourceCatalog  interfaces.ResourceCatalog
 	fileService      interfaces.FileService
 	storageResolver  interfaces.StorageBackendResolver
@@ -76,6 +77,7 @@ func NewServer(
 	agentService interfaces.CustomAgentService,
 	kbShareService interfaces.KBShareService,
 	tenantService interfaces.TenantService,
+	tagService interfaces.KnowledgeTagService,
 	endpointRepo interfaces.MCPEndpointRepository,
 	db *gorm.DB,
 	cfg *config.Config,
@@ -94,6 +96,7 @@ func NewServer(
 		agentService:     agentService,
 		kbShareService:   kbShareService,
 		tenantService:    tenantService,
+		tagService:       tagService,
 		endpointRepo:     endpointRepo,
 		db:               db,
 		cfg:              cfg,
@@ -211,6 +214,7 @@ func (s *Server) toolCatalog() []server.ServerTool {
 		{Tool: grepChunksTool(), Handler: s.handleGrepChunks},
 		{Tool: listDocumentsTool(), Handler: s.handleListDocuments},
 		{Tool: readDocumentTool(), Handler: s.handleReadDocument},
+		{Tool: listTagsTool(), Handler: s.handleListTags},
 		{Tool: askTool(), Handler: s.handleAsk},
 		{Tool: wikiSearchTool(), Handler: s.handleWikiSearch},
 		{Tool: wikiReadPageTool(), Handler: s.handleWikiReadPage},
