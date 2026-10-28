@@ -1828,6 +1828,9 @@ func initRetrieveEngineRegistry(
 			); err != nil {
 				log.Errorf("Register vastbase retrieve engine failed: %v", err)
 			} else {
+				// The registered KVHybrid engine serves both channels: vector
+				// via the native Graph_Index and keywords via the native BM25
+				// full-text index, so a single registration covers retrieval.
 				log.Infof("Register vastbase retrieve engine success")
 			}
 		}
