@@ -88,7 +88,8 @@ func TestOllamaChatStreamPropagatesDoneReason(t *testing.T) {
 				case "/api/tags":
 					_, _ = fmt.Fprint(w, `{"models":[{"name":"m:latest"}]}`)
 				case "/api/chat":
-					_, _ = fmt.Fprint(w, `{"model":"m","message":{"role":"assistant","content":"Step 1"},"done":false}`+"\n")
+					_, _ = fmt.Fprint(w, `{"model":"m","message":{"role":"assistant","content":"Step 1"},`+
+						`"done":false}`+"\n")
 					_, _ = fmt.Fprintf(w, `{"model":"m","message":{"role":"assistant","content":""},`+
 						`"done":true,"done_reason":%q,"eval_count":3}`+"\n", reason)
 				default:
