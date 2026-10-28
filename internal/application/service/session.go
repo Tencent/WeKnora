@@ -1041,7 +1041,7 @@ func (s *sessionService) releaseForkSnapshots(ctx context.Context, sessions []*t
 }
 
 // GenerateTitle generates a title for the current conversation content
-// modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
+// modelID: optional model ID; when empty, uses the workspace utility/chat default.
 func (s *sessionService) GenerateTitle(ctx context.Context,
 	session *types.Session, messages []types.Message, modelID string,
 ) (string, error) {
@@ -1088,7 +1088,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 			logger.ErrorWithFields(ctx, err, nil)
 			return "", fmt.Errorf("failed to list models: %w", err)
 		}
-		if model := types.PickChatModel(models, types.UtilityModelIDFromContext(ctx)); model != nil {
+		if model := types.PickUtilityModel(models); model != nil {
 			modelID = model.ID
 			logger.Infof(ctx, "Using workspace default KnowledgeQA model for title: %s", modelID)
 		}

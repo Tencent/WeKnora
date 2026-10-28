@@ -48,3 +48,17 @@ test('the utility slot follows the chat default when unset or stale', () => {
   assert.equal(stale.stale, true)
   assert.equal(effectiveUtilityDefault([], '', '').source, 'none')
 })
+
+test('vision-capable chat choices are usable without inheriting chat default flags', () => {
+  const models = [
+    { id: 'chat', type: 'KnowledgeQA', is_default: true, parameters: { supports_vision: true } },
+    { id: 'native', type: 'VLLM', is_default: true },
+  ]
+  const explicit = effectiveModelDefault(models, 'VLLM', 'chat')
+  assert.equal(explicit.source, 'workspace')
+  assert.equal(explicit.stale, false)
+  assert.equal(explicit.model?.id, 'chat')
+  const fallback = effectiveModelDefault(models, 'VLLM', 'deleted')
+  assert.equal(fallback.model?.id, 'native')
+  assert.equal(fallback.stale, true)
+})

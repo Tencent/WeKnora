@@ -15,12 +15,17 @@
     </div>
 
     <h3 class="group-title">{{ t('defaultSettings.modelGroup') }}</h3>
+    <t-alert v-if="settingsLoadFailed" theme="error" :message="t('defaultSettings.loadFailed')">
+      <template #operation>
+        <t-button variant="text" @click="loadSettings">{{ t('common.retry') }}</t-button>
+      </template>
+    </t-alert>
     <div class="settings-group">
       <div v-for="slot in modelSlots" :key="slot.field" class="setting-row">
         <div class="setting-info">
           <label>{{ t(`defaultSettings.slots.${slot.key}.label`) }}</label>
           <p class="desc">{{ t(`defaultSettings.slots.${slot.key}.description`) }}</p>
-          <p class="desc hint" :class="{ warn: effective[slot.field].stale || effective[slot.field].source === 'none' }">
+          <p v-if="settingsLoaded" class="desc hint" :class="{ warn: effective[slot.field].stale || effective[slot.field].source === 'none' }">
             {{ effectiveHint(slot, effective[slot.field]) }}
           </p>
         </div>
@@ -28,7 +33,8 @@
           <ModelSelector
             :model-type="slot.type"
             :selected-model-id="settings[slot.field]"
-            :disabled="!canEdit || saving"
+            :disabled="!canEdit || saving || !settingsLoaded"
+            :all-models="models"
             :clearable="true"
             :placeholder="slotPlaceholder(slot)"
             @update:selected-model-id="(id: string) => onModelChange(slot.field, id)"
@@ -51,7 +57,7 @@
             <t-select
               :value="webSearchDefaultId"
               :options="webSearchOptions"
-              :disabled="!canEdit || saving"
+              :disabled="!canEdit || saving || webSearchLoading"
               :loading="webSearchLoading"
               :placeholder="t('defaultSettings.webSearch.placeholder')"
               clearable
@@ -76,11 +82,7 @@ import {
   updateTenantDefaultSettings,
   type DefaultSettings,
 } from '@/api/default-settings'
-import {
-  listWebSearchProviders,
-  patchWebSearchProvider,
-  type WebSearchProviderEntity,
-} from '@/api/web-search-provider'
+import { patchWebSearchProvider } from '@/api/web-search-provider'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -117,6 +119,8 @@ const deploymentCapabilities = useDeploymentCapabilitiesStore()
 
 const canEdit = computed(() => authStore.hasRole('admin'))
 const saving = ref(false)
+const settingsLoaded = ref(false)
+const settingsLoadFailed = ref(false)
 
 const settings = reactive<DefaultSettings>({
   chat_model_id: '',
@@ -127,7 +131,7 @@ const settings = reactive<DefaultSettings>({
   asr_model_id: '',
 })
 
-const models = computed<ModelConfig[]>(() => chatResources.allModels)
+const models = computed<ModelConfig[]>(() => chatResources.allModels.filter((m) => m.status === 'active'))
 
 const effective = computed(() => {
   const out = {} as Record<ModelField, EffectiveDefault<ModelConfig>>
@@ -168,28 +172,32 @@ const slotPlaceholder = (slot: ModelSlot) =>
     : t('defaultSettings.unsetPlaceholder')
 
 const loadSettings = async () => {
+  settingsLoaded.value = false
+  settingsLoadFailed.value = false
   try {
     const response = await getTenantDefaultSettings()
-    if (response.data) {
-      for (const slot of modelSlots) {
-        settings[slot.field] = response.data[slot.field] || ''
-      }
+    if (!response.data) throw new Error('Default settings response is missing data')
+    for (const slot of modelSlots) {
+      settings[slot.field] = response.data[slot.field] || ''
     }
+    settingsLoaded.value = true
   } catch (error) {
+    settingsLoadFailed.value = true
     console.error('Failed to load default settings:', error)
   }
 }
 
 const onModelChange = async (field: ModelField, id: string) => {
-  if (!canEdit.value || settings[field] === (id || '')) return
+  if (!canEdit.value || !settingsLoaded.value || saving.value || settings[field] === (id || '')) return
   const previous = settings[field]
   settings[field] = id || ''
   saving.value = true
   try {
     await updateTenantDefaultSettings({ ...settings })
-    // The model list reports the effective default in is_default, which every
-    // model picker reads, so refresh it.
-    await chatResources.ensureModels(true)
+    // Refresh every picker. A failed refresh must not undo an already saved choice.
+    await chatResources.ensureModels(true).catch((error) => {
+      console.error('Failed to refresh models after saving defaults:', error)
+    })
     MessagePlugin.success(t('defaultSettings.toasts.saveSuccess'))
   } catch (error: any) {
     settings[field] = previous
@@ -200,7 +208,7 @@ const onModelChange = async (field: ModelField, id: string) => {
 }
 
 const webSearchSupported = computed(() => deploymentCapabilities.isSupported('settings.websearch'))
-const webSearchProviders = ref<WebSearchProviderEntity[]>([])
+const webSearchProviders = computed(() => chatResources.webSearchProviders)
 const webSearchLoading = ref(false)
 
 const webSearchDefaultId = computed(() => webSearchProviders.value.find((p) => p.is_default)?.id || '')
@@ -213,11 +221,9 @@ const webSearchOptions = computed(() =>
 const loadWebSearchProviders = async () => {
   webSearchLoading.value = true
   try {
-    const response: any = await listWebSearchProviders()
-    webSearchProviders.value = Array.isArray(response?.data) ? response.data : []
+    await chatResources.ensureWebSearchProviders(true)
   } catch (error) {
     console.error('Failed to load web search providers:', error)
-    webSearchProviders.value = []
   } finally {
     webSearchLoading.value = false
   }
@@ -228,13 +234,16 @@ const loadWebSearchProviders = async () => {
 const onWebSearchChange = async (value: unknown) => {
   const id = typeof value === 'string' ? value : ''
   const current = webSearchDefaultId.value
-  if (!canEdit.value || id === current) return
+  if (!canEdit.value || saving.value || webSearchLoading.value || id === current) return
   saving.value = true
   try {
     if (id) {
       await patchWebSearchProvider(id, { is_default: true })
     } else if (current) {
       await patchWebSearchProvider(current, { is_default: false })
+    }
+    for (const provider of webSearchProviders.value) {
+      provider.is_default = provider.id === id
     }
     await loadWebSearchProviders()
     MessagePlugin.success(t('defaultSettings.toasts.saveSuccess'))

@@ -6954,6 +6954,7 @@ export default {
     updatedAt: '{time}에 설정함'
   },
   defaultSettings: {
+    loadFailed: '기본 설정을 불러오지 못했습니다. 편집하기 전에 다시 시도하세요.',
     title: '기본 설정',
     description: '이 워크스페이스의 각 기능이 기본으로 사용하는 모델과 검색 엔진을 한곳에서 관리합니다.',
     introTitle: '리소스에서 따로 지정하지 않으면 여기의 기본값을 사용합니다',

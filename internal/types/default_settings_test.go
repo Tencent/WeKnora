@@ -1,7 +1,6 @@
 package types
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -69,9 +68,53 @@ func TestPickDefaultModelSkipsInactive(t *testing.T) {
 	assert.Nil(t, PickDefaultModel(models, ModelTypeEmbedding))
 }
 
-func TestUtilityModelIDFromContext(t *testing.T) {
-	assert.Empty(t, UtilityModelIDFromContext(context.Background()))
-	ctx := context.WithValue(context.Background(), TenantInfoContextKey,
-		&Tenant{ID: 1, DefaultSettings: &DefaultSettings{UtilityModelID: " fast "}})
-	assert.Equal(t, "fast", UtilityModelIDFromContext(ctx))
+func TestPickUtilityModel(t *testing.T) {
+	for _, id := range []string{"chat-a", "gone", "chat-down", "rerank-a", ""} {
+		t.Run(id, func(t *testing.T) {
+			models := defaultSettingsModels()
+			(&DefaultSettings{UtilityModelID: id}).ApplyModelDefaults(models)
+			want := "chat-yaml"
+			if id == "chat-a" {
+				want = id
+			}
+			assert.Equal(t, want, PickUtilityModel(models).ID)
+			assert.Equal(t, "chat-yaml", PickChatModel(models, "").ID)
+		})
+	}
+	assert.Nil(t, PickUtilityModel(nil))
+}
+
+func TestVisionDefaultDoesNotReplaceChatDefault(t *testing.T) {
+	models := []*Model{
+		{
+			ID: "chat", Type: ModelTypeKnowledgeQA, Status: ModelStatusActive,
+			Parameters: ModelParameters{SupportsVision: true},
+		},
+		{
+			ID: "vision-chat", Type: ModelTypeKnowledgeQA, Status: ModelStatusActive,
+			Parameters: ModelParameters{SupportsVision: true},
+		},
+		{ID: "vision-yaml", Type: ModelTypeVLLM, Status: ModelStatusActive, IsDefault: true},
+		{ID: "asr", Type: ModelTypeASR, Status: ModelStatusActive},
+	}
+	(&DefaultSettings{ChatModelID: "chat", VLMModelID: "vision-chat", ASRModelID: "asr"}).ApplyModelDefaults(models)
+	assert.Equal(t, "chat", PickDefaultModel(models, ModelTypeKnowledgeQA).ID)
+	assert.Equal(t, "vision-chat", PickDefaultModel(models, ModelTypeVLLM).ID)
+	assert.Equal(t, "asr", PickDefaultModel(models, ModelTypeASR).ID)
+	assert.True(t, models[0].IsDefault)
+	assert.False(t, models[1].IsDefault)
+	assert.False(t, models[2].IsDefault)
+	assert.Contains(t, models[1].DefaultFor, string(ModelTypeVLLM))
+}
+
+func TestVisionFallbackPrefersNativeDefaultOverChatDefault(t *testing.T) {
+	models := []*Model{
+		{
+			ID: "chat", Type: ModelTypeKnowledgeQA, Status: ModelStatusActive, IsDefault: true,
+			Parameters: ModelParameters{SupportsVision: true},
+		},
+		{ID: "vision", Type: ModelTypeVLLM, Status: ModelStatusActive, IsDefault: true},
+	}
+	(&DefaultSettings{VLMModelID: "deleted"}).ApplyModelDefaults(models)
+	assert.Equal(t, "vision", PickDefaultModel(models, ModelTypeVLLM).ID)
 }

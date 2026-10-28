@@ -1,9 +1,9 @@
 package types
 
 import (
-	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -23,7 +23,7 @@ type DefaultSettings struct {
 	EmbeddingModelID string `json:"embedding_model_id"`
 	// RerankModelID is the default Rerank model.
 	RerankModelID string `json:"rerank_model_id"`
-	// VLMModelID is the default VLLM (vision) model.
+	// VLMModelID is the default VLLM or vision-capable KnowledgeQA model.
 	VLMModelID string `json:"vlm_model_id"`
 	// ASRModelID is the default ASR model.
 	ASRModelID string `json:"asr_model_id"`
@@ -39,7 +39,7 @@ func (c *DefaultSettings) Normalize() {
 	c.ASRModelID = strings.TrimSpace(c.ASRModelID)
 }
 
-// ModelSlots maps each model-type slot to the type its model must have. The
+// ModelSlots maps each model-type slot to the capability its model must support. The
 // utility slot is a KnowledgeQA model chosen for a purpose rather than a
 // type, so it is listed separately by callers that validate it.
 func (c *DefaultSettings) ModelSlots() map[ModelType]string {
@@ -55,47 +55,75 @@ func (c *DefaultSettings) ModelSlots() map[ModelType]string {
 	}
 }
 
-// ApplyModelDefaults rewrites IsDefault on a workspace's model list so that it
-// reports the effective default of each type. A slot whose model is missing
-// or inactive leaves the stored flags alone, so the deployment default still
-// applies. The models must be fresh copies: the change is not persisted.
+// ApplyModelDefaults projects workspace defaults onto a fresh model list.
+// IsDefault remains specific to the model's native type. DefaultFor also
+// represents cross-type vision choices and the utility purpose. Missing or
+// inactive choices leave deployment defaults in effect.
 func (c *DefaultSettings) ApplyModelDefaults(models []*Model) {
 	for modelType, id := range c.ModelSlots() {
 		if id == "" || !hasActiveModel(models, id, modelType) {
 			continue
 		}
 		for _, m := range models {
-			if m != nil && m.Type == modelType {
+			if m == nil {
+				continue
+			}
+			if m.ID == id {
+				m.DefaultFor = append(m.DefaultFor, string(modelType))
+			}
+			if m.Type == modelType {
 				m.IsDefault = m.ID == id
+			}
+		}
+	}
+	if c != nil && hasActiveModel(models, c.UtilityModelID, ModelTypeKnowledgeQA) {
+		for _, m := range models {
+			if m != nil && m.ID == c.UtilityModelID {
+				m.DefaultFor = append(m.DefaultFor, "Utility")
 			}
 		}
 	}
 }
 
-// UtilityModelIDFromContext returns the workspace's utility model choice for
-// the tenant carried by ctx, or "" when none is set.
-func UtilityModelIDFromContext(ctx context.Context) string {
-	tenant, ok := TenantInfoFromContext(ctx)
-	if !ok || tenant.DefaultSettings == nil {
-		return ""
-	}
-	return strings.TrimSpace(tenant.DefaultSettings.UtilityModelID)
+// SupportsType includes chat models that can also be used for vision.
+func (m *Model) SupportsType(modelType ModelType) bool {
+	return m.Type == modelType || (modelType == ModelTypeVLLM &&
+		m.Type == ModelTypeKnowledgeQA && m.Parameters.SupportsVision)
 }
 
-// PickDefaultModel returns the active model of modelType that IsDefault
-// marks, else the first active one. Nil means there is none.
-func PickDefaultModel(models []*Model, modelType ModelType) *Model {
-	var first *Model
+// PickUtilityModel resolves background defaults from ListModels, including
+// workers whose context carries only a tenant ID. An explicit task model is
+// handled by the caller before falling back here.
+func PickUtilityModel(models []*Model) *Model {
 	for _, m := range models {
-		if m == nil || m.Type != modelType || m.Status != ModelStatusActive {
+		if m != nil && m.Type == ModelTypeKnowledgeQA && m.Status == ModelStatusActive &&
+			slices.Contains(m.DefaultFor, "Utility") {
+			return m
+		}
+	}
+	return PickDefaultModel(models, ModelTypeKnowledgeQA)
+}
+
+// PickDefaultModel prefers a workspace purpose default, then a deployment
+// default of the native type, then the first usable model.
+func PickDefaultModel(models []*Model, modelType ModelType) *Model {
+	var first, deploymentDefault *Model
+	for _, m := range models {
+		if m == nil || !m.SupportsType(modelType) || m.Status != ModelStatusActive {
 			continue
 		}
-		if m.IsDefault {
+		if slices.Contains(m.DefaultFor, string(modelType)) {
 			return m
+		}
+		if deploymentDefault == nil && m.Type == modelType && m.IsDefault {
+			deploymentDefault = m
 		}
 		if first == nil {
 			first = m
 		}
+	}
+	if deploymentDefault != nil {
+		return deploymentDefault
 	}
 	return first
 }
@@ -116,7 +144,7 @@ func PickChatModel(models []*Model, preferredID string) *Model {
 
 func hasActiveModel(models []*Model, id string, modelType ModelType) bool {
 	for _, m := range models {
-		if m != nil && m.ID == id && m.Type == modelType && m.Status == ModelStatusActive {
+		if m != nil && m.ID == id && m.SupportsType(modelType) && m.Status == ModelStatusActive {
 			return true
 		}
 	}

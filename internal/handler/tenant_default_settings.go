@@ -33,8 +33,9 @@ func (h *TenantHandler) GetTenantDefaultSettings(c *gin.Context) {
 }
 
 // updateTenantDefaultSettingsInternal replaces the workspace's default model
-// choices. Every non-empty ID must name a model of the slot's type that this
-// workspace can use; an empty ID returns the slot to the deployment default.
+// choices. Newly selected IDs must be usable models of the slot's type.
+// Unchanged stale IDs are allowed so admins can repair slots one at a time;
+// an empty ID returns the slot to the deployment default.
 func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -62,41 +63,52 @@ func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 		_ = c.Error(errors.NewInternalServerError("Failed to read models"))
 		return
 	}
-	modelTypes := make(map[string]types.ModelType, len(models))
+	modelsByID := make(map[string]*types.Model, len(models))
 	for _, m := range models {
 		if m != nil {
-			modelTypes[m.ID] = m.Type
+			modelsByID[m.ID] = m
 		}
+	}
+	previous := types.DefaultSettings{}
+	if tenant.DefaultSettings != nil {
+		previous = *tenant.DefaultSettings
+		previous.Normalize()
 	}
 	slots := []struct {
-		field string
-		id    string
-		want  types.ModelType
+		field    string
+		id       string
+		previous string
+		want     types.ModelType
 	}{
-		{"chat_model_id", cfg.ChatModelID, types.ModelTypeKnowledgeQA},
-		{"utility_model_id", cfg.UtilityModelID, types.ModelTypeKnowledgeQA},
-		{"embedding_model_id", cfg.EmbeddingModelID, types.ModelTypeEmbedding},
-		{"rerank_model_id", cfg.RerankModelID, types.ModelTypeRerank},
-		{"vlm_model_id", cfg.VLMModelID, types.ModelTypeVLLM},
-		{"asr_model_id", cfg.ASRModelID, types.ModelTypeASR},
+		{"chat_model_id", cfg.ChatModelID, previous.ChatModelID, types.ModelTypeKnowledgeQA},
+		{"utility_model_id", cfg.UtilityModelID, previous.UtilityModelID, types.ModelTypeKnowledgeQA},
+		{"embedding_model_id", cfg.EmbeddingModelID, previous.EmbeddingModelID, types.ModelTypeEmbedding},
+		{"rerank_model_id", cfg.RerankModelID, previous.RerankModelID, types.ModelTypeRerank},
+		{"vlm_model_id", cfg.VLMModelID, previous.VLMModelID, types.ModelTypeVLLM},
+		{"asr_model_id", cfg.ASRModelID, previous.ASRModelID, types.ModelTypeASR},
 	}
 	for _, slot := range slots {
-		if slot.id == "" {
+		if slot.id == "" || slot.id == slot.previous {
 			continue
 		}
-		got, ok := modelTypes[slot.id]
+		model, ok := modelsByID[slot.id]
 		if !ok {
 			_ = c.Error(errors.NewBadRequestError(fmt.Sprintf("%s: model not found", slot.field)))
 			return
 		}
-		if got != slot.want {
+		if !model.SupportsType(slot.want) {
 			_ = c.Error(errors.NewBadRequestError(fmt.Sprintf("%s must be a %s model", slot.field, slot.want)))
+			return
+		}
+		if model.Status != types.ModelStatusActive {
+			_ = c.Error(errors.NewBadRequestError(fmt.Sprintf("%s: model is not active", slot.field)))
 			return
 		}
 	}
 
-	tenant.DefaultSettings = &cfg
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	updated := *tenant
+	updated.DefaultSettings = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, &updated)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			_ = c.Error(appErr)

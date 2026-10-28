@@ -6955,6 +6955,7 @@ export default {
     updatedAt: '你于 {time} 设置'
   },
   defaultSettings: {
+    loadFailed: '默认设置加载失败，请重试后再编辑。',
     title: '默认配置',
     description: '集中管理本空间各项功能默认使用的模型和搜索引擎。',
     introTitle: '资源未单独指定时使用这里的默认值',

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -34,12 +35,16 @@ func (*titleGenerationModel) GetModelID() string   { return "qa-model" }
 
 type titleGenerationModels struct {
 	interfaces.ModelService
-	model      *titleGenerationModel
-	selectedID string
+	model           *titleGenerationModel
+	selectedID      string
+	availableModels []*types.Model
 }
 
-func (*titleGenerationModels) ListModels(context.Context) ([]*types.Model, error) {
-	return []*types.Model{{ID: "qa-model", Type: types.ModelTypeKnowledgeQA}}, nil
+func (m *titleGenerationModels) ListModels(context.Context) ([]*types.Model, error) {
+	if m.availableModels != nil {
+		return m.availableModels, nil
+	}
+	return []*types.Model{{ID: "qa-model", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive}}, nil
 }
 
 func (m *titleGenerationModels) GetChatModel(_ context.Context, id string) (chat.Chat, error) {
@@ -51,10 +56,14 @@ type titleGenerationRepository struct {
 	interfaces.SessionRepository
 	title   string
 	ownerID string
+	done    chan struct{}
 }
 
 func (r *titleGenerationRepository) Update(_ context.Context, session *types.Session, ownerID string) (int64, error) {
 	r.title, r.ownerID = session.Title, ownerID
+	if r.done != nil {
+		close(r.done)
+	}
 	return 1, nil
 }
 
@@ -100,4 +109,34 @@ func TestGenerateTitlePreservesExistingTitle(t *testing.T) {
 	title, err := svc.GenerateTitle(context.Background(), &types.Session{Title: "My project"}, nil, "")
 	require.NoError(t, err)
 	assert.Equal(t, "My project", title)
+}
+
+func TestGenerateTitleAsyncUsesWorkspaceUtilityDefault(t *testing.T) {
+	for _, explicit := range []string{"", "task-model"} {
+		t.Run("explicit="+explicit, func(t *testing.T) {
+			models := &titleGenerationModels{model: &titleGenerationModel{}, availableModels: []*types.Model{
+				{ID: "chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
+				{ID: "utility", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
+			}}
+			(&types.DefaultSettings{UtilityModelID: "utility"}).ApplyModelDefaults(models.availableModels)
+			repo := &titleGenerationRepository{done: make(chan struct{})}
+			svc := &sessionService{
+				cfg:          &config.Config{Conversation: &config.ConversationConfig{}},
+				modelService: models,
+				sessionRepo:  repo,
+			}
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+			svc.GenerateTitleAsync(ctx, &types.Session{ID: "session", UserID: "owner"}, "hello", explicit, nil)
+			select {
+			case <-repo.done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("title was not saved")
+			}
+			want := explicit
+			if want == "" {
+				want = "utility"
+			}
+			assert.Equal(t, want, models.selectedID)
+		})
+	}
 }

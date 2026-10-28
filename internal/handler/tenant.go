@@ -1263,7 +1263,9 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config、memory-config、assistant-config、default-settings）
+// @Description  获取空间级别的KV配置。支持 web-search-config、prompt-templates、parser-engine-config、
+// @Description  storage-engine-config、chat-history-config、retrieval-config、memory-config、
+// @Description  assistant-config、default-settings。
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1322,7 +1324,8 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config、memory-config、assistant-config、default-settings）
+// @Description  更新空间级别的KV配置。支持 web-search-config、parser-engine-config、storage-engine-config、
+// @Description  chat-history-config、retrieval-config、memory-config、assistant-config、default-settings。
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json

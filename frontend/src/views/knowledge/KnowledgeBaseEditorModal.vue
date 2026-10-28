@@ -907,11 +907,19 @@ const applyDefaultModelsIfEmpty = () => {
   if (!formData.value || editorMode.value !== 'create') return
   const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
   const embeddingModelId = selectInitialModelId(allModels.value, 'Embedding')
+  const vlmModelId = selectInitialModelId(allModels.value, 'VLLM')
+  const asrModelId = selectInitialModelId(allModels.value, 'ASR')
   if (!formData.value.modelConfig.llmModelId && chatModelId) {
     formData.value.modelConfig.llmModelId = chatModelId
   }
   if (!formData.value.modelConfig.embeddingModelId && embeddingModelId) {
     formData.value.modelConfig.embeddingModelId = embeddingModelId
+  }
+  if (!formData.value.multimodalConfig.vllmModelId && vlmModelId) {
+    formData.value.multimodalConfig.vllmModelId = vlmModelId
+  }
+  if (!formData.value.asrConfig.modelId && asrModelId) {
+    formData.value.asrConfig.modelId = asrModelId
   }
 }
 
@@ -1982,6 +1990,7 @@ watch(
 watch(() => chatResources.allModels, (list) => {
   if (props.visible) {
     allModels.value = list || []
+    applyDefaultModelsIfEmpty()
   }
 })
 </script>

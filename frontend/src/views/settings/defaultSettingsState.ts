@@ -1,11 +1,8 @@
+import { isDefaultModelForType, modelSupportsType, type ModelDefaultCandidate } from '../../utils/modelDefaults'
+
 export type DefaultModelType = 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
 
-export interface DefaultModelLike {
-  id?: string
-  type: string
-  status?: string
-  is_default?: boolean
-}
+export type DefaultModelLike = ModelDefaultCandidate
 
 // workspace: the slot's own choice. system: the deployment default (a
 // built-in model's is_default). auto: nothing chosen, the first usable model.
@@ -20,7 +17,7 @@ export interface EffectiveDefault<M extends DefaultModelLike> {
 }
 
 function usable<M extends DefaultModelLike>(model: M, type: DefaultModelType) {
-  return model.type === type && (!model.status || model.status === 'active')
+  return Boolean(model.id?.trim()) && modelSupportsType(model, type) && (!model.status || model.status === 'active')
 }
 
 // Mirrors the backend: the model list already marks the workspace choice as
@@ -36,7 +33,8 @@ export function effectiveModelDefault<M extends DefaultModelLike>(
   if (chosen) return { model: chosen, source: 'workspace', stale: false }
   const stale = id !== ''
   const candidates = models.filter((m) => usable(m, type))
-  const flagged = candidates.find((m) => m.is_default)
+  const flagged = candidates.find((m) => m.default_for?.includes(type))
+    ?? candidates.find((m) => isDefaultModelForType(m, type))
   if (flagged) return { model: flagged, source: 'system', stale }
   if (candidates[0]) return { model: candidates[0], source: 'auto', stale }
   return { model: null, source: 'none', stale }

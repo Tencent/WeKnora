@@ -2764,6 +2764,7 @@ export default {
     updatedAt: 'You set this on {time}'
   },
   defaultSettings: {
+    loadFailed: 'Could not load defaults. Retry before editing.',
     title: 'Defaults',
     description: 'Manage the models and search engine this workspace uses by default, in one place.',
     introTitle: 'Used whenever a resource does not pick its own',

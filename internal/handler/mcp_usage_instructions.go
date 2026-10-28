@@ -79,7 +79,7 @@ func (h *MCPServiceHandler) GenerateMCPUsageInstructions(c *gin.Context) {
 		_ = c.Error(errors.NewInternalServerError("Failed to read chat models"))
 		return
 	}
-	selected := types.PickChatModel(models, types.UtilityModelIDFromContext(ctx))
+	selected := types.PickUtilityModel(models)
 	if selected == nil {
 		_ = c.Error(errors.NewBadRequestError("Configure an active chat model before generating usage instructions"))
 		return

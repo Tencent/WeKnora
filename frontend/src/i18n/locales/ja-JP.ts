@@ -2764,6 +2764,7 @@ export default {
     updatedAt: '{time}に設定しました'
   },
   defaultSettings: {
+    loadFailed: 'デフォルト設定を読み込めませんでした。再試行してから編集してください。',
     title: 'デフォルト設定',
     description: 'このワークスペースの各機能が既定で使うモデルと検索エンジンをまとめて管理します。',
     introTitle: 'リソース側で指定がない場合に使われます',

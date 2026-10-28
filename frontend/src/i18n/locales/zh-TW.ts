@@ -6955,6 +6955,7 @@ export default {
     updatedAt: '你於 {time} 設定'
   },
   defaultSettings: {
+    loadFailed: '預設設定載入失敗，請重試後再編輯。',
     title: '預設設定',
     description: '集中管理本空間各項功能預設使用的模型和搜尋引擎。',
     introTitle: '資源未單獨指定時使用這裡的預設值',
