@@ -1,0 +1,22 @@
+{
+  "name": "weknora-v090-motion",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "description": "Hand-authored HTML product animation for WeKnora v0.9.0. No screen captures or music.",
+  "scripts": {
+    "stills": "node release-film/render.mjs stills",
+    "draft": "node release-film/render.mjs draft",
+    "render": "node release-film/render.mjs video",
+    "check": "node release-film/check.mjs",
+    "audio": ".venv-voice/bin/python release-film/sfx.py",
+    "narration": ".venv-voice/bin/python release-film/narration.py",
+    "mix": ".venv-voice/bin/python release-film/mix.py"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -1,0 +1,145 @@
+[
+  {
+    "start": 0.25,
+    "end": 5.5,
+    "text": "Meet WeKnora v0.9.0. Your assistant is right beside the logo.",
+    "spoken": "Meet Wee Nora, zero point nine. Your assistant is right beside the logo."
+  },
+  {
+    "start": 5.95,
+    "end": 11.65,
+    "text": "Ask what's new, or how something works. It checks the product docs before answering."
+  },
+  {
+    "start": 12.25,
+    "end": 21.5,
+    "text": "Get a practical overview of the release, and help with the page you're on. The Assistant works with your identity and permissions."
+  },
+  {
+    "start": 22.35,
+    "end": 27.5,
+    "text": "Need an agent? Start here, and describe the job."
+  },
+  {
+    "start": 28.0,
+    "end": 33.5,
+    "text": "It finds the knowledge, models, MCP tools, and skills already available.",
+    "spoken": "It finds the knowledge, models, M C P tools, and skills already available."
+  },
+  {
+    "start": 34.15,
+    "end": 39.45,
+    "text": "Review how they fit together, then approve the agent's creation."
+  },
+  {
+    "start": 40.0,
+    "end": 46.25,
+    "text": "Now your coordinator is ready, with the right knowledge and tools connected."
+  },
+  {
+    "start": 47.35,
+    "end": 52.05,
+    "text": "For a bigger task, let several agents share the work."
+  },
+  {
+    "start": 52.7,
+    "end": 58.15,
+    "text": "Atlas checks the agenda. Iris reviews sign-ups. Nova handles preparation."
+  },
+  {
+    "start": 58.9,
+    "end": 64.35,
+    "text": "Their results return to one conversation, as a briefing you can actually use."
+  },
+  {
+    "start": 65.35,
+    "end": 70.4,
+    "text": "For recurring work, describe the task and when it should run."
+  },
+  {
+    "start": 70.85,
+    "end": 77.1,
+    "text": "The Assistant adds your time zone and access rules. Check the schedule before saving."
+  },
+  {
+    "start": 77.7,
+    "end": 86.2,
+    "text": "Try a run now. Get the preparation brief, then let the schedule handle the next one."
+  },
+  {
+    "start": 87.35,
+    "end": 91.55,
+    "text": "Choose read only, ask first, or auto."
+  },
+  {
+    "start": 92.0,
+    "end": 96.5,
+    "text": "For a change, check the exact resource and proposed update."
+  },
+  {
+    "start": 96.95,
+    "end": 100.65,
+    "text": "Approve it. The name updates in your knowledge base."
+  },
+  {
+    "start": 101.35,
+    "end": 108.4,
+    "text": "Longer tasks can keep running in the background, with progress right in the conversation."
+  },
+  {
+    "start": 108.9,
+    "end": 112.6,
+    "text": "When it's ready, open the finished run sheet."
+  },
+  {
+    "start": 113.35,
+    "end": 118.15,
+    "text": "Browser Skill takes the work into your connected browser."
+  },
+  {
+    "start": 118.7,
+    "end": 126.2,
+    "text": "Fill the event form from your knowledge. Watch it happen, then review the draft before publishing."
+  },
+  {
+    "start": 127.35,
+    "end": 131.45,
+    "text": "Looking for an image? Search your documents visually."
+  },
+  {
+    "start": 131.8,
+    "end": 136.4,
+    "text": "See its description, extracted text, and the source document."
+  },
+  {
+    "start": 137.35,
+    "end": 141.35,
+    "text": "Wiki Graph groups connected ideas by topic."
+  },
+  {
+    "start": 141.75,
+    "end": 145.7,
+    "text": "Focus on a group to explore the connections."
+  },
+  {
+    "start": 146.1,
+    "end": 149.65,
+    "text": "Then open a page and read it in context."
+  },
+  {
+    "start": 150.35,
+    "end": 155.15,
+    "text": "And every sourced answer gives you a way to check the evidence."
+  },
+  {
+    "start": 155.6,
+    "end": 160.35,
+    "text": "Preview the citation, then jump straight to the supporting passage."
+  },
+  {
+    "start": 161.25,
+    "end": 164.8,
+    "text": "WeKnora. Ask. Create. Work together.",
+    "spoken": "Wee Nora. Ask. Create. Work together."
+  }
+]

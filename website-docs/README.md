@@ -31,11 +31,11 @@ npm run package:site
 
 只需把压缩包上传到服务器。服务器不需要 Node.js，也不需要 WeKnora 后端或独立文档服务。
 
-每次发布使用一个新的空目录，避免混入旧站点文件。下面的 `20260915-1` 是示例发布编号，后续发布换一个编号：
+每次发布使用一个新的空目录，避免混入旧站点文件。下面的 `20261027-v090` 是示例发布编号，后续发布换一个编号：
 
 ```bash
-sudo mkdir -p /srv/www/weknora/releases/20260915-1
-sudo tar -xzf weknora-site-v0.8.3.tar.gz -C /srv/www/weknora/releases/20260915-1
+sudo mkdir -p /srv/www/weknora/releases/20261027-v090
+sudo tar -xzf weknora-site-v0.9.0.tar.gz -C /srv/www/weknora/releases/20261027-v090
 ```
 
 解压后该目录下应直接有 `index.html`、`404.html`、`docs/`，无需再套一层 `static-site/`。
@@ -46,7 +46,7 @@ sudo tar -xzf weknora-site-v0.8.3.tar.gz -C /srv/www/weknora/releases/20260915-1
 
 ```nginx
 server_name 你的域名;
-root /srv/www/weknora/releases/20260915-1;
+root /srv/www/weknora/releases/20261027-v090;
 ```
 
 如果域名已有 HTTPS 配置，保留原来的证书及监听设置，把模板中的 `root`、`index` 和 `location` 规则合入现有站点配置。域名应指向这台服务器。
@@ -80,8 +80,8 @@ sudo nginx -s reload
 在仓库根目录执行：
 
 ```bash
-docker build -t weknora-site:0.8.3 website-docs
-docker run -d --name weknora-site --restart unless-stopped -p 8080:80 weknora-site:0.8.3
+docker build -t weknora-site:0.9.0 website-docs
+docker run -d --name weknora-site --restart unless-stopped -p 8080:80 weknora-site:0.9.0
 ```
 
 访问 `http://服务器地址:8080/`。如使用域名和 HTTPS，让现有反向代理转发到该端口即可。镜像内已经包含官网、文档和 Nginx 路由配置。
@@ -89,12 +89,12 @@ docker run -d --name weknora-site --restart unless-stopped -p 8080:80 weknora-si
 容器内的 Nginx 默认监听 80 端口，可以用环境变量 `WEBSITE_NGINX_PORT` 修改，无需重新构建。使用 `--network host`，或者部署平台要求容器监听指定端口时，这样设置：
 
 ```bash
-docker run -d --name weknora-site --restart unless-stopped -e WEBSITE_NGINX_PORT=8080 -p 8080:8080 weknora-site:0.8.3
+docker run -d --name weknora-site --restart unless-stopped -e WEBSITE_NGINX_PORT=8080 -p 8080:8080 weknora-site:0.9.0
 ```
 
 只是想换一个对外端口时，改 `-p` 左侧的宿主机端口就够了，例如 `-p 9000:80`。
 
-也可以只复制 `website-docs/` 目录，在该目录执行 `docker build -t weknora-site:0.8.3 .`。构建上下文必须是 `website-docs/`，宿主机的依赖、旧构建产物和部署包由 `.dockerignore` 排除。
+也可以只复制 `website-docs/` 目录，在该目录执行 `docker build -t weknora-site:0.9.0 .`。构建上下文必须是 `website-docs/`，宿主机的依赖、旧构建产物和部署包由 `.dockerignore` 排除。
 
 从旧文档镜像迁移时，将容器端口映射或反向代理目标端口从 `8081` 改为 `80`（宿主机端口可自行选择，例如 `-p 8081:80`）。域名根路径 `/` 现在提供官网，`/docs/` 提供文档，反向代理需覆盖整个站点并保留请求路径。容器使用 Nginx 官方镜像的默认入口，无需额外的 `docker-entrypoint.sh`。
 
@@ -102,7 +102,7 @@ docker run -d --name weknora-site --restart unless-stopped -e WEBSITE_NGINX_PORT
 
 ```bash
 cd website-docs
-npm run test:docker -- weknora-site:0.8.3
+npm run test:docker -- weknora-site:0.9.0
 ```
 
 ## 本地开发
@@ -174,4 +174,16 @@ npm run test:integration
 
 首页每项重点只用一句话说明用途，配置条件放到对应功能文档；引用定位与图谱更新同列版本重点；附件阅读、用户管理、Seafile 与 Docker 终端保留次级链接。本机浏览器复用「执行任务／连接扩展」两张大图与 BrowserSkill 图标、GitHub 入口。版本说明面向使用者，提交计数、代码快照和撤回记录留在发布核对报告。
 
-首页章节底色按顺序交替：01／03／05／07 使用基础底色，02／04／06 与使用入口使用浅色背景；深色模式使用对应主题变量。所有章节背景铺满页面，正文使用同一宽度容器，浅色背景区负责相邻章节的分隔线，统一章节间距。
+首页章节底色按顺序交替：01／03／05／07 与使用入口使用基础底色，02／04／06／08 使用浅色背景；深色模式使用对应主题变量。所有章节背景铺满页面，正文使用同一宽度容器，浅色背景区负责相邻章节的分隔线，统一章节间距。
+
+## v0.9.0 发布材料
+
+当前版本准备状态为待发布；正式 tag、镜像和官网发布前，按 `docs/release-v0.9.0-audit.md` 的清单验收，并统一补齐发布日期。
+
+- 文档与发布说明：`07-releases/v0.9.0.md`，新增助手、自动化和执行权限三篇指南。
+- 发布截图：助手「产品问答 / 任务协助」使用 `assistant-release-guide.png` 与 `assistant-overview.png`；自动化「一句话设置 / 手动设置」使用 `automation-conversation.png` 与 `automation-setup.png`；另有 `agent-collaboration.png` 和 `assistant-permissions.png`。实际浏览器采集，1920 × 1056，与上一版 3840 × 2112 保持相同宽高比，未放大像素或重绘界面。知识库使用卡片视图。
+- 截图来源为 `public/screenshots/`，首页同名副本由 prebuild 同步。
+- 视频源工程：主仓库 `misc/release-v0.9.0-video/`；72 秒、横屏 1920 × 1080、60 fps，全英文界面与字幕，无配音。
+- 群通知与 GitHub Release 文案：主仓库 `docs/release-v0.9.0-announcement.md`。
+
+历史版本页与旧截图继续保留，确保旧链接可用。

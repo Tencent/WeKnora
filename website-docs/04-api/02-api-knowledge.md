@@ -6,6 +6,13 @@
 
 分块、标签与分块预览接口（`/chunks`、`/knowledge-bases/:id/tags`、`/chunker/preview`）在[分块与标签](./02-api-chunks.md)。
 
+
+## 图片处理管线
+
+`GET /api/v1/image-pipelines` 返回可选管线、参数声明和校验规则；`POST /api/v1/image-pipelines/validate` 校验配置。保存知识库时仍会再次校验，不能仅依赖前端通过。显式 `image_pipeline` 优先于旧 `image_attrs_enabled`。
+
+知识库 PATCH 可用 `image_caption_enabled` / `image_ocr_enabled` 调整手动动作，这两个字段要求 `image_pipeline=default`。文档上传与重解析的 `process_config` 也可覆盖管线及其参数，未传项目沿用知识库配置。
+
 ## 知识库（/api/v1/knowledge-bases）
 
 ### POST /api/v1/knowledge-bases
@@ -21,7 +28,7 @@
 | `type` | string | 否 | `document`（默认）/`faq`/`wiki` |
 | `embedding_model_id` | string | 否 | Embedding 模型 ID |
 | `chunking_config` | object | 否 | 分块配置（chunk_size/overlap/separators/strategy…） |
-| `image_processing_config` | object | 否 | 图片处理配置：`model_id` / `image_attrs_enabled` / `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`）/ `image_vector_enabled`（图片向量索引与召回，默认 false，见[知识库功能](../03-features/02-knowledge-base.md)） |
+| `image_processing_config` | object | 否 | 图片处理配置：`model_id` / `image_pipeline`（`default`、`smartocr`）/ `image_pipeline_params` / `image_attrs_enabled`（兼容字段）/ `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`）/ `image_vector_enabled`（图片向量索引与召回，默认 false，见[知识库功能](../03-features/02-knowledge-base.md)） |
 | `vlm_config` | object | 否 | 图片理解配置：`enabled`（默认 false）与 `model_id`（已创建的多模态模型 ID）须同时设置才能启用；可选 `description_language`、`custom_instructions`（≤4000 字） |
 | `storage_provider_config` | object | 否 | 存储配置 |
 | `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |

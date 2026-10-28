@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="공식 웹사이트" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="문서" src="https://img.shields.io/badge/docs-중국어-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="릴리스" src="https://img.shields.io/badge/release-v0.8.3-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="릴리스" src="https://img.shields.io/badge/release-v0.9.0-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="라이선스" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -148,13 +148,13 @@ docker compose down     # 서비스 중지
 기존 배포가 있고 새 release를 다운로드한 경우:
 
 ```bash
-# .env에서 WEKNORA_VERSION을 대상 버전(예: 0.8.3)으로 설정하거나 latest 유지
+# .env에서 WEKNORA_VERSION을 대상 버전(예: 0.9.0)으로 설정하거나 latest 유지
 docker compose pull     # WEKNORA_VERSION에 맞는 이미지 가져오기
 docker compose up -d    # 새 이미지로 컨테이너 재생성
 ```
 
 > [!NOTE]
-> `docker compose up -d`만 실행하면 로컬 캐시 이미지가 재사용되어 Web UI 버전이 다운로드한 release와 일치하지 않을 수 있습니다. 업그레이드하기 전에 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)를 확인하세요.
+> `docker compose up -d`만 실행하면 로컬 캐시 이미지가 재사용되어 Web UI 버전이 다운로드한 release와 일치하지 않을 수 있습니다. 업그레이드하기 전에 [업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)를 확인하세요.
 
 ### 기타 배포 방식
 
@@ -175,6 +175,16 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 > - 보안 패치와 개선 사항 적용을 위해 최신 버전으로 정기 업데이트
 
 ## 최신 업데이트
+
+### v0.9.0 <sub>· 출시 예정 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
+
+- **[WeKnora 도우미](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#assistant)**: WeKnora의 버전 업데이트, 기능과 설정에 관한 질문에 답하고, 현재 페이지를 바탕으로 사용자 본인의 권한으로 에이전트 생성, 작업 예약, 지식과 설정 관리를 수행합니다.
+- **[멀티 에이전트 협업](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#collaboration)**: 작업을 나누어 진행 상황을 확인하고 결과를 모읍니다.
+- **[자동화](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#automations)**: 일회성 및 정기 실행, 실행 기록, 결과와 승인 알림.
+- **[실행 권한과 승인](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#permissions)**: 읽기 전용, 변경 전 확인, 자동 실행과 범위가 제한된 권한 부여.
+- **[샌드박스와 백그라운드 작업](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#sandbox)**: 사용자별 샌드박스 재사용 옵션, 백그라운드 Shell, 스킬 업데이트 정책.
+- **[파싱·동기화·검색](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#knowledge)**: 이미지 처리 파이프라인, OCR 전처리, Feishu/Lark 동기화, Confluence PAT 및 검색 개선.
+- **[업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)**: DB 마이그레이션, Feishu 재동기화, 샌드박스 재사용 스위치 및 설정 변경을 확인하세요.
 
 ### v0.8.3 <sub>· 2026-10-14 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
@@ -384,7 +394,7 @@ weknora chat "설계 문서를 요약해 줘"
 | [설정](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 환경 변수와 모델 설정 |
 | [문제 해결 FAQ](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | 자주 발생하는 문제와 해결 방법 |
 | [API 문서](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API 개요 |
-| [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3) | 버전별 변경 사항 |
+| [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0) | 버전별 변경 사항 |
 
 ## 개발자 가이드
 

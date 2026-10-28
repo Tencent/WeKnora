@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - Unreleased
+
+Changes since v0.8.3 through upstream main `256a3f296` (2026-10-27; 301 commits). [Website release notes](./website-docs/07-releases/v0.9.0.md) · [Full comparison](https://github.com/Tencent/WeKnora/compare/v0.8.3...256a3f2966866337f7dc3c5fcc10037f2ae18d52).
+
+### New Features
+
+- **WeKnora assistant**: a built-in workspace assistant with a launcher beside the logo and a side panel, page context, separate private history, bundled-documentation search for release, feature and configuration questions, and management operations performed as the current user within their permissions. It can create agents, schedule tasks, maintain knowledge bases, documents, FAQ, models, MCP services and skills, perform diagnostics and open relevant pages (#4302, #4303, #4314, #4342, #4344, #4375, #4427, #4429).
+- **Multi-agent collaboration**: durable child tasks, independent conversations, live progress and task views; use temporary workers or an existing reasoning-agent template without expanding resource access (#4438).
+- **Automations**: one-off and recurring schedules, timezone-aware validation, assistant execution, optional model override, persistent or per-run conversations, overlap/misfire policies, history, cancellation and in-app notifications (#4492, #4506, #4514, #4522, #4534, #4551).
+- **Permissions and approvals**: read-only, confirm-before-change and automatic-write access levels; persistent human-in-the-loop prompts, suspended runs, scoped grants and automation approval management (#4250, #4490).
+- **Sandbox allocation**: opt-in per-user machine reuse with session work directories, ownership-aware cleanup, idle retention and explicit skill rollout behavior (#4507, #4509, #4510, #4533, #4729).
+- **Background work**: managed asynchronous shell execution, incremental output, wait/cancel tools and session-scoped task APIs (#4579, #4580).
+- **Image pipelines**: configurable manual and smart OCR pipelines, pipeline-specific parameters and validation, plus optional OCR preprocessing (#3746, #4381).
+- **Datasource integrations**: deeper Feishu/Lark block parsing, folder and embedded-object handling; optional DingTalk folder preservation; Confluence Server/Data Center PAT support (#3497, #4422, #4549).
+- **Retrieval and browsing**: RRF settings, a standalone JSON knowledge-graph search API, document-scoped MCP search and FAQ list expansion controls (#4300, #4395, #4463, #4566).
+
+### Improvements
+
+- Improve assistant operation discovery, authorization, page links, task analysis, configuration guidance and interaction feedback.
+- Support optional HTML main-content extraction and Excel percentage display text; preserve CSV cells and JSON literals, improve file parser fidelity and bound large-file processing (#4424, #4423, #4435, #4436).
+- Reuse resource handles for identical image bytes; improve model image resolution, scanned-page OCR for Wiki and image-processing traces (#4419, #4405, #4430).
+- Improve model streaming compatibility, reasoning/refusal handling, provider response bounds and SDK/CLI interoperability.
+- Improve Lite host workspace handling and approval for deletions or broader sandbox execution (#4076).
+- Add a model leaderboard and update website navigation, release assets, product documentation and API references.
+
+### Bug Fixes
+
+- Fix retrieval error propagation, vector-dimension isolation, reranking passage preservation and shared-knowledge model resolution.
+- Fix datasource pagination and repeated-cursor handling, failed attachment downloads, sync-log retention, selected-scope validation and deletion reconciliation.
+- Fix ambiguous MCP call retries, SSE connection/request lifetimes, stale OAuth dialogs and tool-result compatibility.
+- Fix failed quick-answer persistence, conversation export ordering, source-citation alignment and Unicode matching, attachment and task timeline behavior.
+- Bound web-search/provider/IM request bodies and archive expansion; avoid logging token fragments or bound slow-query parameters; strengthen resource scope checks.
+- Improve IM mention targeting, Wiki maintenance, parser failure/cancellation handling, deployment configuration and frontend status polling.
+
+### Upgrade Notes
+
+- Back up the database, file storage, deployment settings and required sandbox files. Apply PostgreSQL migrations **000119–000133** or SQLite **000037–000050**.
+- Existing Feishu/Lark sources are scheduled for resync. Review parsing mode and downstream workload; new sources default to blocks parsing while explicit export choices remain supported.
+- Migration 000125 (SQLite 000042) removes eligible empty image-derived chunks, not source documents or files.
+- Per-user sandbox reuse remains gated by `WEKNORA_SANDBOX_USER_ALLOCATION=enabled` and requires Redis. Upgrade every replica before enabling it; inspect active shared assignments before any downgrade.
+- Review assistant and custom-agent access ceilings, MCP risk policies and automation grants. Ordinary writes and destructive actions have distinct approval rules.
+- Prefer `WEKNORA_LOG_FORMAT`; legacy `LOG_FORMAT` is used only when the new variable is unset. Nonempty templates must include `%msg`.
+- Review new-workspace quota defaults, OCR preprocessing limits and optional HTML/Excel parser switches. Existing documents are not automatically reparsed when these switches change.
+- MinerU Cloud defaults to a 30-minute budget per batch/shard; Agent web fetch uses one shared 3-minute budget. Check outer timeouts as well.
+- Set `WEKNORA_VERSION=0.9.0` only after the release images are available, pull images explicitly and verify migrations, UI version, parsing, retrieval, approvals and scheduled runs. See the [upgrade guide](./website-docs/07-releases/v0.9.0.md#upgrade-notes).
+
 ## [0.8.3] - 2026-10-14
 
 Changes since v0.8.2, through upstream main `31c605568` (2026-10-13; 282 commits). The plugin-system series was reverted and is not part of this release. [Website release notes](./website-docs/07-releases/v0.8.3.md) · [Full commit comparison](https://github.com/Tencent/WeKnora/compare/v0.8.2...31c6055687d33f9ad7a92cf453a264ce13a1700d).
