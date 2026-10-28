@@ -3,7 +3,13 @@ package openaicompletions
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/models/api"
 )
+
+var dsmlTestOptions = &api.Options{Tools: []api.Tool{{
+	Type: "function", Function: api.FunctionDef{Name: "search_knowledge"},
+}}}
 
 const dsmlSample = "先查一下。\n<｜DSML｜function_calls>\n" +
 	"<｜DSML｜invoke name=\"search_knowledge\">\n" +
@@ -16,8 +22,8 @@ const dsmlSample = "先查一下。\n<｜DSML｜function_calls>\n" +
 	"</｜DSML｜function_calls>"
 
 func TestExtractDSMLToolCalls(t *testing.T) {
-	rest, calls := extractDSMLToolCalls(dsmlSample)
-	if rest != "先查一下。" {
+	rest, calls := extractDSMLToolCalls(dsmlSample, dsmlTestOptions)
+	if rest != "先查一下。\n" {
 		t.Fatalf("rest = %q", rest)
 	}
 	if len(calls) != 2 || calls[0].Function.Name != "search_knowledge" {
@@ -36,12 +42,12 @@ func TestExtractDSMLToolCalls(t *testing.T) {
 }
 
 func TestDSMLFilterStreamedByteByByte(t *testing.T) {
-	var f dsmlFilter
+	f := dsmlFilter{options: dsmlTestOptions}
 	shown := ""
-	for _, r := range dsmlSample {
-		shown += f.Feed(string(r))
+	for i := range len(dsmlSample) {
+		shown += f.Feed(dsmlSample[i : i+1])
 	}
-	rest, calls := f.Flush()
+	rest, calls := f.Flush(true)
 	if shown != "先查一下。\n" || rest != "" {
 		t.Fatalf("shown = %q rest = %q", shown, rest)
 	}
@@ -51,9 +57,9 @@ func TestDSMLFilterStreamedByteByByte(t *testing.T) {
 }
 
 func TestDSMLFilterPassesPlainText(t *testing.T) {
-	var f dsmlFilter
+	f := dsmlFilter{options: dsmlTestOptions}
 	shown := f.Feed("a < b and <c")
-	rest, calls := f.Flush()
+	rest, calls := f.Flush(true)
 	if shown+rest != "a < b and <c" || calls != nil {
 		t.Fatalf("shown=%q rest=%q calls=%v", shown, rest, calls)
 	}
@@ -61,7 +67,7 @@ func TestDSMLFilterPassesPlainText(t *testing.T) {
 
 func TestDSMLMalformedKeptVisible(t *testing.T) {
 	in := "x <｜DSML｜function_calls> broken"
-	rest, calls := extractDSMLToolCalls(in)
+	rest, calls := extractDSMLToolCalls(in, dsmlTestOptions)
 	if rest != in || calls != nil {
 		t.Fatalf("rest=%q calls=%v", rest, calls)
 	}
