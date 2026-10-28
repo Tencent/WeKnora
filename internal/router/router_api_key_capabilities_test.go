@@ -611,6 +611,7 @@ func TestKnowledgeBatchWriteRoutesDeclareIngestCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge/move"},
 		{http.MethodPost, "/api/v1/knowledge/batch-delete"},
 		{http.MethodPost, "/api/v1/knowledge/batch-reparse"},
+		{http.MethodPost, "/api/v1/knowledge-bases/:id/rebuild-index"},
 		{http.MethodPut, "/api/v1/knowledge/tags"},
 	}
 	for _, tc := range cases {

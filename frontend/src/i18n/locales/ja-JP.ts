@@ -945,6 +945,8 @@ export default {
       countHint: 'このフォルダ内 {direct} 件、サブフォルダを含めて {total} 件',
       filteredCount: '{count} 件一致',
       title: 'フォルダ',
+      folderSection: 'フォルダ',
+      documentSection: 'ドキュメント',
       rootRow: 'ルート',
       rootRowTip: 'ナレッジベースのルート。サブフォルダに属さないドキュメントはここに置かれます',
       folderCardCount: '{count}件のドキュメント',
@@ -4967,6 +4969,7 @@ export default {
           max_owned_per_user: 'ユーザごとの所有ワークスペース数の上限',
           self_service_creation_enabled: 'ユーザによるワークスペース作成を許可',
           default_storage_quota_gb: '新規ワークスペースのデフォルトストレージクォータ（GB）',
+          default_storage_quota_mb: '新規ワークスペースのデフォルトストレージクォータ（MB）',
           auto_create_api_key: '新規ワークスペースにAPIキーを自動作成',
           auto_accept_invitation: '招待した登録済みユーザを自動的に参加させる'
         },
@@ -4998,6 +5001,7 @@ export default {
           max_owned_per_user: 'スーパーユーザ以外がセルフサービスで所有できるワークスペース数の上限です。ワークスペース作成のたびに参照され、保存後すぐに反映されます。0を指定すると組み込みのデフォルト値10が使われ、負の値を指定すると上限が無効になります（公開環境では非推奨）。',
           self_service_creation_enabled: 'スーパーユーザ以外が自分でワークスペースを作成できるかどうかです。無効にすると、一般ユーザは招待によって既存のワークスペースに参加することしかできません。ワークスペース横断のスーパーユーザは対象外です。すぐに反映されます。',
           default_storage_quota_gb: '新規ワークスペースの作成時に割り当てられるデフォルトのストレージクォータ（GB）です。ベクトル、原本、テキスト、インデックスなどのデータが対象です。作成時にのみ参照されるため、変更は新規作成のワークスペースにのみ適用され、既存のワークスペースには遡って反映されません。0または負の値の場合は組み込みのデフォルト値10GBが使われます。',
+          default_storage_quota_mb: '登録時に自動作成される個人スペースにも適用します。正の値はGB設定より優先され、0以下はGB設定を使用します。各設定はデータベース、環境変数、既定値の順に解決し、新規スペースにのみ適用します。',
           auto_create_api_key: '新規ワークスペースにfull_accessのAPIキーを自動作成し、作成レスポンスで平文のトークンを返します。従来の動作に依存する連携でのみ利用してください。デフォルトでは無効で、APIキーは明示的に作成することを推奨します。',
           auto_accept_invitation: '有効にすると、登録済みユーザをメールで招待した際に、受信確認を待たずにすぐメンバーとして追加されます。無効の場合、招待された側がメールから承諾する必要があります。すぐに反映されます。'
         },
@@ -5150,8 +5154,8 @@ export default {
         label: '既存のすべてのワークスペースに適用',
         tooltip: '値を保存してもデフォルトでは新規ワークスペースにのみ適用されます。ここをクリックすると既存のすべてのワークスペースも上書きします。',
         confirmBtn: '適用を確認',
-        confirmBody: '既存のすべてのワークスペースのストレージクォータを{value}GBに上書きします。運用担当者が個別に調整したワークスペースも上書きされます。続行しますか？',
-        success: '{count}件のワークスペースのストレージクォータを{gb}GBに更新しました',
+        confirmBody: '既存のすべてのワークスペースのストレージクォータを{value} {unit}に上書きします。運用担当者が個別に調整したワークスペースも上書きされます。続行しますか？',
+        success: '{count}件のワークスペースのストレージクォータを{value} {unit}に更新しました',
         failed: 'すべてのワークスペースへの適用に失敗しました'
       },
       audit: {
@@ -6660,6 +6664,7 @@ export default {
       chooseAction: "機能を選ぶか、希望する内容を入力してください。",
     create: {
       agentTitle: "自然言語でエージェントを作成",
+      agentAction: "アシスタントで作成",
       agentHint: "利用者と目的を説明してください。アシスタントがリソースを選び、作成します。",
       agentPlaceholder: "例：製品ナレッジベースから質問に回答し、出典を示し、不明な点は説明するサポート担当。",
       automationTitle: "アシスタントでタスクを作成",
@@ -7161,6 +7166,29 @@ export default {
         smartReasoning: 'スマート推論',
         indexSep: '、'
       }
+    },
+    hostApproval: {
+      titleDelete: 'ファイルを削除する前に確認してください',
+      titleDangerous: '危険な操作の確認',
+      titleDenied: 'サンドボックスがこのコマンドを拒否しました。次のディレクトリへのアクセスが必要です',
+      titleGeneric: '確認が必要です',
+      command: 'コマンド',
+      cwd: 'ディレクトリ',
+      grantPath: 'アクセス先',
+      accessWrite: '読み書き',
+      accessRead: '読み取り専用',
+      firstAttemptRan: 'このコマンドは一度実行して失敗しています。承認するとコマンド全体が再実行されます',
+      snippet: '拒否の詳細',
+      sessionRules: 'このセッションで許可すると、このディレクトリでの次の削除は再確認しません（ファイル名は異なっても可）',
+      reject: '拒否',
+      approveOnce: '今回のみ許可',
+      approveSession: 'このセッションでは許可',
+      approvedOnce: '今回のみ許可しました',
+      approvedSession: 'このセッションでは許可済み',
+      rejectedTag: '拒否済み',
+      submitted: '送信しました',
+      submitFailed: '送信に失敗しました',
+      userRejected: 'ユーザーが拒否しました'
     },
     mcpOAuth: {
       waiting: '認可待ち · {target}',
@@ -8359,6 +8387,7 @@ export default {
     daysAgo: '{n}日前',
     syncError: {
       dingtalk_document_failed: 'DingTalkドキュメントを読み取れません。アクセス権限を確認して同期を再試行してください。',
+      dingtalk_document_too_large: 'DingTalkファイルが64 MiBのダウンロード上限を超えたため、今回の同期ではスキップしました。圧縮または分割してください。',
       dingtalk_resource_failed: 'DingTalkリソースを利用できません。アクセス権限と選択したリソースを確認して再試行してください。',
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',
       deletion_failed: '削除に失敗しました。サーバログを確認してください',

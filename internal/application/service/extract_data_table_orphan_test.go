@@ -187,7 +187,7 @@ func TestDataTableSummaryHandleProcessesLiveKnowledgeAfterResourcePreparation(t 
 	worker := &DataTableSummaryService{
 		knowledgeService:     f.svc,
 		knowledgeBaseService: f.kbs,
-		tenantService:        NewTenantService(f.tenants, nil),
+		tenantService:        NewTenantService(f.tenants, nil, nil),
 		modelService:         tableSummaryUnusedModels{},
 		retrieveEngine:       retriever.NewRetrieveEngineRegistry(nil, nil),
 		fileService:          tableSummaryUnavailableFile{err: fileErr},

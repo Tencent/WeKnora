@@ -3434,6 +3434,99 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	})
 }
 
+// RebuildKnowledgeBaseIndex godoc
+// @Summary      重建整个知识库的索引
+// @Description  索引策略变更后，把知识库下全部文档提交重新解析。前端知识库设置弹窗
+// @Description  (KnowledgeBaseEditorModal) 在保存新策略后调用此接口，此前该路由在后端缺失，调用返回 404。
+// @Tags         知识管理
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  handler.DataResponse  "任务已提交"
+// @Failure      400  {object}  errors.AppError       "请求参数错误"
+// @Failure      403  {object}  errors.AppError       "权限不足"
+// @Failure      404  {object}  errors.AppError       "知识库不存在"
+// @Failure      409  {object}  errors.AppError       "有文档正在迁移中"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/rebuild-index [post]
+func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
+	kbID := strings.TrimSpace(c.Param("id"))
+	if kbID == "" {
+		_ = c.Error(errors.NewBadRequestError("knowledge base id is required"))
+		return
+	}
+
+	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(errors.NewForbiddenError("no permission to rebuild index of this knowledge base"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	knowledges, err := h.kgService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to list knowledge for rebuild-index, kb_id: %s, err: %v",
+			secutils.SanitizeForLog(kbID), err)
+		_ = c.Error(errors.NewInternalServerError("failed to list knowledge of the knowledge base"))
+		return
+	}
+	ids := make([]string, 0, len(knowledges))
+	for _, k := range knowledges {
+		if k == nil || strings.TrimSpace(k.ID) == "" {
+			continue
+		}
+		// Same admission rule as /knowledge/batch-reparse: fail visibly
+		// instead of silently dropping a document that is mid-move.
+		if err := access.RejectMovingKnowledge(k); err != nil {
+			_ = c.Error(err)
+			return
+		}
+		ids = append(ids, k.ID)
+	}
+	if len(ids) == 0 {
+		_ = c.Error(errors.NewBadRequestError("no documents to rebuild in this knowledge base"))
+		return
+	}
+
+	// Keep the per-task admission cap of /knowledge/batch-reparse.
+	const maxBatch = 200
+	taskIDs := make([]string, 0, (len(ids)+maxBatch-1)/maxBatch)
+	for start := 0; start < len(ids); start += maxBatch {
+		end := start + maxBatch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, kbID, ids[start:end], nil)
+		if err != nil {
+			logger.Errorf(ctx, "failed to enqueue rebuild-index task, kb_id: %s, err: %v",
+				secutils.SanitizeForLog(kbID), err)
+			_ = c.Error(errors.NewInternalServerError("failed to enqueue rebuild index task"))
+			return
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+
+	logger.Infof(ctx, "Rebuild index tasks enqueued: kb_id: %s, documents: %d, tasks: %d",
+		secutils.SanitizeForLog(kbID), len(ids), len(taskIDs))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Rebuild index tasks submitted",
+		"data": gin.H{
+			"document_count": len(ids),
+			"task_ids":       taskIDs,
+		},
+	})
+}
+
 func requireTenantAPIKeyKnowledgeBase(ctx context.Context, kbID string) error {
 	return requireTenantAPIKeyKnowledgeBases(ctx, kbID)
 }

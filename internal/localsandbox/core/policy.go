@@ -34,8 +34,12 @@ type WritableRoot struct {
 	// Path is an absolute, cleaned host path.
 	Path string
 	// ReadOnlySubpaths sit inside Path but must not be written, typically
-	// Path/.git.
+	// Path/.git. They stay read-only even where another root covers them.
 	ReadOnlySubpaths []string
+	// ProtectGitDirs keeps every directory named .git anywhere under Path
+	// read-only, including ones created later. A git hook or config written
+	// there runs with the user's own rights outside the sandbox.
+	ProtectGitDirs bool
 }
 
 // Policy is the platform-neutral permission declaration. It is a value
@@ -242,7 +246,9 @@ func (p Policy) canonical() Policy {
 	for i, root := range p.WritableRoots {
 		subs := append([]string(nil), root.ReadOnlySubpaths...)
 		sort.Strings(subs)
-		out.WritableRoots[i] = WritableRoot{Path: root.Path, ReadOnlySubpaths: subs}
+		out.WritableRoots[i] = WritableRoot{
+			Path: root.Path, ReadOnlySubpaths: subs, ProtectGitDirs: root.ProtectGitDirs,
+		}
 	}
 	sort.Slice(out.WritableRoots, func(i, j int) bool {
 		return out.WritableRoots[i].Path < out.WritableRoots[j].Path

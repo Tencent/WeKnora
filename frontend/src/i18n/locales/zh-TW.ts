@@ -1463,6 +1463,7 @@ export default {
     },
     syncError: {
       dingtalk_document_failed: '無法讀取釘釘文件，請檢查存取權限後重試同步。',
+      dingtalk_document_too_large: '釘釘檔案超過 64 MiB 下載上限，本次已略過，請壓縮或分割後再同步。',
       dingtalk_resource_failed: '釘釘資源不可用，請檢查存取權限和已選資源後重試。',
       deletion_lookup_failed: '刪除前尋找文件失敗，請查看伺服器日誌',
       deletion_failed: '刪除失敗，請查看伺服器日誌',
@@ -2496,6 +2497,29 @@ export default {
         smartReasoning: '智能推理',
         indexSep: '、'
       }
+    },
+    hostApproval: {
+      titleDelete: '刪除檔案前需要你確認',
+      titleDangerous: '危險操作確認',
+      titleDenied: '命令被沙盒攔截，需要存取以下目錄',
+      titleGeneric: '需要你確認',
+      command: '命令',
+      cwd: '目錄',
+      grantPath: '需要存取',
+      accessWrite: '讀寫',
+      accessRead: '唯讀',
+      firstAttemptRan: '這條命令已經執行過一次並失敗，批准後會整條重新執行',
+      snippet: '攔截詳情',
+      sessionRules: '本工作階段允許後，同目錄下這類刪除不再詢問（檔名可以不同）',
+      reject: '拒絕',
+      approveOnce: '允許一次',
+      approveSession: '本工作階段允許',
+      approvedOnce: '已允許一次',
+      approvedSession: '本工作階段已允許',
+      rejectedTag: '已拒絕',
+      submitted: '已提交',
+      submitFailed: '提交失敗',
+      userRejected: '使用者拒絕'
     }
   },
   kbSettings: {
@@ -2872,6 +2896,7 @@ export default {
     chooseAction: "選擇一項功能，或直接輸入你的需求。",
     create: {
       agentTitle: "用自然語言建立智慧體",
+      agentAction: "用助手建立",
       agentHint: "說說它為誰服務、需要完成什麼，助手會協助選擇資源並建立。",
       agentPlaceholder: "例如：建立產品客服智慧體，根據產品知識庫回答使用問題，附上來源，找不到答案時說明原因。",
       automationTitle: "用助手建立任務",
@@ -4445,8 +4470,8 @@ export default {
         label: '應用到所有現有空間',
         tooltip: '儲存的值預設只對之後新建的空間生效；點擊此按鈕將當前值同步寫入所有現有空間。',
         confirmBtn: '應用',
-        confirmBody: '將把所有現有空間的存儲配額覆蓋為 {value} GB。如有空間被運維單獨調整過的配額，也會一併被覆蓋。是否繼續？',
-        success: '已將 {count} 個空間的存儲配額更新為 {gb} GB',
+        confirmBody: '將把所有現有空間的存儲配額覆蓋為 {value} {unit}。如有空間被運維單獨調整過的配額，也會一併被覆蓋。是否繼續？',
+        success: '已將 {count} 個空間的存儲配額更新為 {value} {unit}',
         failed: '應用到所有空間失敗'
       },
       userList: {
@@ -4598,6 +4623,7 @@ export default {
           max_owned_per_user: '每個非超管使用者透過自助建立可擁有的最大空間數。每次建立空間時實時讀取，修改後立即生效。0 表示使用內建預設值 10；負數表示完全關閉限制（不建議在公開部署使用）。',
           self_service_creation_enabled: '是否允許非超管使用者主動建立空間。關閉後，普通使用者只能透過邀請加入已有空間；跨空間超管仍可建立。修改後立即生效。',
           default_storage_quota_gb: '新建空間時預設分配的存儲配額（GB），包含向量、原文、文字、索引等。僅在建立時讀取，修改後只對之後新建的空間生效，不會回寫已存在的空間。0 或負數表示使用內建預設值 10GB。',
+          default_storage_quota_mb: '包括註冊自動建立的個人空間。正數優先於 GB 設定；0 或負數沿用 GB 設定。每個設定按資料庫、環境變數、內建預設值的順序讀取，僅影響之後新建的空間。',
           auto_create_api_key: '為新空間自動生成 full_access API Key，並在建立回應中返回明文 token。僅用於相容依賴舊行為的集成；預設關閉，建議透過 API Key 管理顯式建立。',
           auto_accept_invitation: '開啟後，空間管理員透過電子信箱邀請已註冊使用者時，對方會立即成為成員，不再經過收件匣確認。關閉時保持「發出邀請 → 被邀請人確認」流程。修改後立即生效。'
         },
@@ -4629,6 +4655,7 @@ export default {
           max_owned_per_user: '每使用者最大空間數',
           self_service_creation_enabled: '允許使用者自助建立空間',
           default_storage_quota_gb: '新空間預設存儲配額 (GB)',
+          default_storage_quota_mb: '新空間預設存儲配額 (MB)',
           auto_create_api_key: '建立空間時自動生成 API Key',
           auto_accept_invitation: '邀請已註冊使用者時自動加入'
         },
@@ -8337,6 +8364,8 @@ export default {
       countHint: '當前目錄 {direct} 個文件，含子目錄共 {total} 個',
       filteredCount: '比對 {count} 個文件',
       title: '目錄',
+      folderSection: '資料夾',
+      documentSection: '文件',
       rootRow: '根目錄',
       rootRowTip: '知識庫根目錄，未歸入子資料夾的文件在此',
       folderCardCount: '{count} 個文件',

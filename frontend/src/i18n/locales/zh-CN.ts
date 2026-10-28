@@ -1463,6 +1463,7 @@ export default {
     },
     syncError: {
       dingtalk_document_failed: '无法读取钉钉文档，请检查访问权限后重试同步。',
+      dingtalk_document_too_large: '钉钉文件超过 64 MiB 下载上限，本次已跳过，请压缩或拆分后再同步。',
       dingtalk_resource_failed: '钉钉资源不可用，请检查访问权限和已选资源后重试。',
       deletion_lookup_failed: '删除前查找文档失败，请查看服务器日志',
       deletion_failed: '删除失败，请查看服务器日志',
@@ -2496,6 +2497,29 @@ export default {
         smartReasoning: '智能推理',
         indexSep: '、'
       }
+    },
+    hostApproval: {
+      titleDelete: '删除文件前需要你确认',
+      titleDangerous: '危险操作确认',
+      titleDenied: '命令被沙盒拦截，需要访问以下目录',
+      titleGeneric: '需要你确认',
+      command: '命令',
+      cwd: '目录',
+      grantPath: '需要访问',
+      accessWrite: '读写',
+      accessRead: '只读',
+      firstAttemptRan: '这条命令已经执行过一次并失败，批准后会整条重新执行',
+      snippet: '拦截详情',
+      sessionRules: '本会话允许后，同目录下这类删除不再询问（文件名可以不同）',
+      reject: '拒绝',
+      approveOnce: '允许一次',
+      approveSession: '本会话允许',
+      approvedOnce: '已允许一次',
+      approvedSession: '本会话已允许',
+      rejectedTag: '已拒绝',
+      submitted: '已提交',
+      submitFailed: '提交失败',
+      userRejected: '用户拒绝'
     }
   },
   kbSettings: {
@@ -2872,6 +2896,7 @@ export default {
     chooseAction: "选择一个功能，或直接输入你的需求。",
     create: {
       agentTitle: "用自然语言创建智能体",
+      agentAction: "用助手创建",
       agentHint: "说说它为谁服务、需要完成什么，助手会帮你选择资源并创建。",
       agentPlaceholder: "例如：创建一个产品客服助手，根据产品知识库回答使用问题，回答附上来源，找不到答案时说明原因。",
       automationTitle: "用助手创建任务",
@@ -4445,8 +4470,8 @@ export default {
         label: '应用到所有现有空间',
         tooltip: '保存的值默认只对之后新建的空间生效；点击此按钮将当前值同步写入所有现有空间。',
         confirmBtn: '应用',
-        confirmBody: '将把所有现有空间的存储配额覆盖为 {value} GB。如有空间被运维单独调整过的配额，也会一并被覆盖。是否继续？',
-        success: '已将 {count} 个空间的存储配额更新为 {gb} GB',
+        confirmBody: '将把所有现有空间的存储配额覆盖为 {value} {unit}。如有空间被运维单独调整过的配额，也会一并被覆盖。是否继续？',
+        success: '已将 {count} 个空间的存储配额更新为 {value} {unit}',
         failed: '应用到所有空间失败'
       },
       userList: {
@@ -4598,6 +4623,7 @@ export default {
           max_owned_per_user: '每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。',
           self_service_creation_enabled: '是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；跨空间超管仍可创建。修改后立即生效。',
           default_storage_quota_gb: '新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。0 或负数表示使用内置默认值 10GB。',
+          default_storage_quota_mb: '包括注册自动创建的个人空间。正数优先于 GB 设置；0 或负数沿用 GB 设置。每个设置按数据库、环境变量、内置默认值的顺序读取，仅影响之后新建的空间。',
           auto_create_api_key: '为新空间自动生成 full_access API Key，并在创建响应中返回明文 token。仅用于兼容依赖旧行为的集成；默认关闭，建议通过 API Key 管理显式创建。',
           auto_accept_invitation: '开启后，空间管理员通过邮箱邀请已注册用户时，对方会立即成为成员，不再经过收件箱确认。关闭时保持「发出邀请 → 被邀请人确认」流程。修改后立即生效。'
         },
@@ -4629,6 +4655,7 @@ export default {
           max_owned_per_user: '每用户最大空间数',
           self_service_creation_enabled: '允许用户自助创建空间',
           default_storage_quota_gb: '新空间默认存储配额 (GB)',
+          default_storage_quota_mb: '新空间默认存储配额 (MB)',
           auto_create_api_key: '创建空间时自动生成 API Key',
           auto_accept_invitation: '邀请已注册用户时自动加入'
         },
@@ -8337,6 +8364,8 @@ export default {
       countHint: '当前目录 {direct} 个文档，含子目录共 {total} 个',
       filteredCount: '匹配 {count} 个文档',
       title: '目录',
+      folderSection: '文件夹',
+      documentSection: '文档',
       rootRow: '根目录',
       rootRowTip: '知识库根目录，未归入子文件夹的文档在此',
       folderCardCount: '{count} 个文档',
