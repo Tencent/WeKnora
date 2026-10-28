@@ -758,7 +758,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				}()
 				changed, affectedType, additionFailed, updateDeferred, reduceErr = s.reduceSlugUpdates(
 					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
-				return reduceErr
+				// 归并失败交给下方统一分类；这里仅返回获取锁的错误。
+				return nil
 			})
 			if lockErr != nil {
 				collectUnapplied(updates)
@@ -1955,12 +1956,15 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		if pageSpan == nil {
 			return
 		}
+		// 取消后仍以有界清理上下文记录终态，避免页面 span 留在 running。
+		spanCtx, spanCancel := wikiIngestCleanupContext(ctx)
+		defer spanCancel()
 		if err != nil {
-			s.tracker().FailSpan(ctx, pageSpan, "REDUCE_FAILED", err.Error(), err)
+			s.tracker().FailSpan(spanCtx, pageSpan, "REDUCE_FAILED", err.Error(), err)
 			return
 		}
 		if !changed {
-			s.tracker().SkipSpan(ctx, pageSpan, "no_change")
+			s.tracker().SkipSpan(spanCtx, pageSpan, "no_change")
 			return
 		}
 		out := types.JSONMap{
@@ -1977,10 +1981,49 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			out["chunk_refs"] = len(page.ChunkRefs)
 			out["aliases"] = []string(page.Aliases)
 		}
-		s.tracker().EndSpan(ctx, pageSpan, out)
+		s.tracker().EndSpan(spanCtx, pageSpan, out)
 	}()
 
-	page, err = s.wikiService.GetPageBySlug(ctx, kbID, slug)
+	for attempt := 1; ; attempt++ {
+		if ctx.Err() != nil {
+			return false, "", false, false, ctx.Err()
+		}
+		if attempt > 1 {
+			// 重试重新读取来源存活状态；不重新执行整篇 Map。
+			updates, err = s.filterLiveUpdates(ctx, kbID, updates)
+			if err != nil || len(updates) == 0 {
+				return false, "", false, false, err
+			}
+			batchCtx = s.wikiPageRetryContext(kbID, batchCtx)
+		}
+		changed, affectedType, additionFailed, updateDeferred, err = s.reduceSlugUpdatesOnce(
+			ctx, chatModel, kbID, slug, updates, tenantID, batchCtx, &page)
+		if !errors.Is(err, apprepo.ErrWikiPageConflict) || attempt >= wikiPageConflictMaxAttempts {
+			// 未落库的生成结果不能记入成功页面集合。
+			if err != nil {
+				changed = false
+			}
+			return changed, affectedType, additionFailed, updateDeferred, err
+		}
+		logger.Debugf(ctx, "wiki ingest: retrying conflicted page %s (attempt %d/%d)",
+			slug, attempt+1, wikiPageConflictMaxAttempts)
+		if waitErr := waitWikiPageConflictRetry(ctx, attempt); waitErr != nil {
+			return false, "", false, false, waitErr
+		}
+	}
+}
+
+// reduceSlugUpdatesOnce 只计算当前页；保存必须仍对应本次读取的快照。
+// pageResult 供外层唯一的页面 span 记录最终结果，不承载跨尝试的可变状态。
+func (s *wikiIngestService) reduceSlugUpdatesOnce(
+	ctx context.Context, chatModel chat.Chat, kbID, slug string, updates []SlugUpdate,
+	tenantID uint64, batchCtx *WikiBatchContext, pageResult **types.WikiPage,
+) (changed bool, affectedType string, additionFailed bool, updateDeferred bool, err error) {
+	readCtx := context.WithValue(ctx, wikiPageRawReadKey{}, true)
+	page, err := s.wikiService.GetPageBySlug(readCtx, kbID, slug)
+	if ctx.Err() != nil {
+		return false, "", false, false, ctx.Err()
+	}
 	exists := (err == nil && page != nil)
 
 	if !exists {
@@ -2009,6 +2052,12 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// the named return — subsequent assignments would mask it
 		// anyway, but be explicit.
 		err = nil
+	}
+
+	*pageResult = page
+	if exists {
+		// 模型生成期间不持锁，真正写入时由仓储再次原子核对。
+		ctx = types.WithWikiPageWriteSnapshot(ctx, page)
 	}
 
 	affectedType = "ingest"
@@ -2042,6 +2091,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		page.ChunkRefs = types.StringArray{}
 		changed = true
 
+		if err = s.checkWikiPageRetrySources(ctx, kbID, updates); err != nil {
+			return false, "", false, false, err
+		}
 		if exists {
 			// A summary rewrite can drop table rows too, and the refusal has
 			// the same meaning here: the page kept its previous body, so this
@@ -2254,6 +2306,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"InstructionScope":        "wiki_content",
 		})
 
+		if ctx.Err() != nil {
+			return false, "", false, false, ctx.Err()
+		}
+
 		if err == nil && updatedContent != "" {
 			// Translate request-local handles (ref-N) the model copied from the
 			// encoded context back to their real slugs BEFORE the content is
@@ -2298,6 +2354,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	if changed {
+		if err = s.checkWikiPageRetrySources(ctx, kbID, updates); err != nil {
+			return false, "", false, false, err
+		}
 		// Refresh chunk refs in-place on the page so they persist alongside
 		// the rest of the row. Retract-only updates (no additions) preserve
 		// the existing refs; addition rounds append the newly-cited chunks

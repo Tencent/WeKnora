@@ -119,6 +119,9 @@ func (r *wikiPageRepository) UpdateWithRevision(
 	ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+			return err
+		}
 		if rev != nil {
 			// An already-present (page_id, version) pair means a concurrent
 			// writer snapshotted the same version first; its copy is
@@ -299,25 +302,39 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 //
 // Used by link maintenance, re-ingest (same-content case), and status changes.
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
-	result := r.db.WithContext(ctx).
-		Model(page).
-		Where("id = ?", page.ID).
-		Updates(map[string]interface{}{
-			"in_links":      page.InLinks,
-			"out_links":     page.OutLinks,
-			"aliases":       page.Aliases,
-			"status":        page.Status,
-			"source_refs":   page.SourceRefs,
-			"chunk_refs":    page.ChunkRefs,
-			"page_metadata": page.PageMetadata,
-			"parent_slug":   page.ParentSlug,
-			"folder_id":     page.FolderID,
-			"category_path": page.CategoryPath,
-			"wiki_path":     page.WikiPath,
-			"depth":         page.Depth,
-			"sort_order":    page.SortOrder,
-			"updated_at":    page.UpdatedAt,
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+				return err
+			}
+			// 入链可能在模型生成期间被其他页面更新，本页贡献保存不覆盖它。
+			return updateWikiPageMeta(tx, page, false)
 		})
+	}
+	return updateWikiPageMeta(r.db.WithContext(ctx), page, true)
+}
+
+// updateWikiPageMeta 保留普通元数据写的兼容语义；受快照保护的贡献写不包含入链。
+func updateWikiPageMeta(db *gorm.DB, page *types.WikiPage, includeInLinks bool) error {
+	updates := map[string]interface{}{
+		"out_links":     page.OutLinks,
+		"aliases":       page.Aliases,
+		"status":        page.Status,
+		"source_refs":   page.SourceRefs,
+		"chunk_refs":    page.ChunkRefs,
+		"page_metadata": page.PageMetadata,
+		"parent_slug":   page.ParentSlug,
+		"folder_id":     page.FolderID,
+		"category_path": page.CategoryPath,
+		"wiki_path":     page.WikiPath,
+		"depth":         page.Depth,
+		"sort_order":    page.SortOrder,
+		"updated_at":    page.UpdatedAt,
+	}
+	if includeInLinks {
+		updates["in_links"] = page.InLinks
+	}
+	result := db.Model(page).Where("id = ?", page.ID).Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
