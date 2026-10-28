@@ -39,7 +39,10 @@ func TestFAQImportRetriesTenantLookupFailure(t *testing.T) {
 			payload := types.FAQImportPayload{
 				TenantID: 7, KBID: "kb", KnowledgeID: "faq", TaskID: "task",
 				InstanceID: "instance", Mode: types.FAQBatchModeReplace, DryRun: dryRun,
-				Entries: []types.FAQEntryPayload{{StandardQuestion: "How do I reset my password?", Answers: []string{"Use the reset link."}}},
+				Entries: []types.FAQEntryPayload{{
+					StandardQuestion: "How do I reset my password?",
+					Answers:          []string{"Use the reset link."},
+				}},
 			}
 			pending := &types.FAQImportProgress{
 				TaskID: payload.TaskID, KBID: payload.KBID, KnowledgeID: payload.KnowledgeID,
