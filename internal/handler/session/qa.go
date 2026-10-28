@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -912,10 +913,17 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Validate request parameters
-	if request.Query == "" {
+	// Validate request parameters. A request needs a text query, a query
+	// image, or both: an image alone searches by visual similarity.
+	if request.Query == "" && request.QueryImage == "" {
 		logger.Error(ctx, "Query content is empty")
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
+		return
+	}
+	queryImage, queryImageType, imageErr := decodeQueryImage(request.QueryImage)
+	if imageErr != nil {
+		logger.Warnf(ctx, "Rejected query image: %v", imageErr)
+		c.Error(errors.NewBadRequestError(imageErr.Error()))
 		return
 	}
 
@@ -967,6 +975,8 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	opts.QueryImage = queryImage
+	opts.QueryImageMediaType = queryImageType
 
 	logger.Infof(
 		ctx,
@@ -998,6 +1008,58 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		"data":    rewriter.CopyReferences(ctx, retrieval.Results),
 		"meta":    retrieval.Meta,
 	})
+}
+
+// maxQueryImageBytes bounds a query image so one request cannot turn into a
+// large embed call. Multimodal embedding models work on far smaller images.
+const maxQueryImageBytes = 8 << 20 // 8 MiB
+
+// queryImageMediaTypes are the image types a multimodal embedder accepts.
+var queryImageMediaTypes = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+}
+
+// decodeQueryImage decodes a base64 or data-URI query image and reports its
+// MIME type. An empty value means "no image". Anything undecodable, too large,
+// or not a supported image type is an error: silently dropping it would run a
+// text search the caller did not ask for.
+func decodeQueryImage(raw string) ([]byte, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, "", nil
+	}
+	mediaType := ""
+	if strings.HasPrefix(raw, "data:") {
+		header, payload, ok := strings.Cut(raw, ",")
+		if !ok {
+			return nil, "", fmt.Errorf("query_image data URI is missing its payload")
+		}
+		if !strings.HasSuffix(header, ";base64") {
+			return nil, "", fmt.Errorf("query_image data URI must be base64 encoded")
+		}
+		mediaType = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+		raw = payload
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("query_image is not valid base64: %w", err)
+	}
+	if len(decoded) == 0 {
+		return nil, "", fmt.Errorf("query_image decoded to no bytes")
+	}
+	if len(decoded) > maxQueryImageBytes {
+		return nil, "", fmt.Errorf("query_image exceeds %d bytes", maxQueryImageBytes)
+	}
+	if mediaType == "" {
+		mediaType = http.DetectContentType(decoded)
+	}
+	if _, ok := queryImageMediaTypes[mediaType]; !ok {
+		return nil, "", fmt.Errorf("query_image must be one of png, jpeg, webp or gif, got %q", mediaType)
+	}
+	return decoded, mediaType, nil
 }
 
 // knowledgeSearchOptions validates the retrieval overrides of a

@@ -27,6 +27,13 @@ type PipelineRequest struct {
 	DisableVectorMatch   bool `json:"disable_vector_match,omitempty"`
 	DisableKeywordsMatch bool `json:"disable_keywords_match,omitempty"`
 
+	// QueryImage is set when the caller submits an image to search by
+	// similarity instead of by text. Vector recall then embeds the image with
+	// the KB's image-capable embedding model; Query text still feeds keyword
+	// recall and rerank. Runtime only — never persisted or echoed.
+	QueryImage          []byte `json:"-"`
+	QueryImageMediaType string `json:"-"`
+
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
 	RerankTopK      int     `json:"rerank_top_k"`
