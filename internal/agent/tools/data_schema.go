@@ -181,7 +181,9 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	}, nil
 }
 
-func (t *DataSchemaTool) executeChatUpload(ctx context.Context, attachment ChatTabularAttachment) (*types.ToolResult, error) {
+func (t *DataSchemaTool) executeChatUpload(
+	ctx context.Context, attachment ChatTabularAttachment,
+) (*types.ToolResult, error) {
 	schema, err := t.analysis.loadChatAttachment(ctx, attachment)
 	if err != nil {
 		return &types.ToolResult{
@@ -195,7 +197,10 @@ func (t *DataSchemaTool) executeChatUpload(ctx context.Context, attachment ChatT
 	// loading the original file.
 	columns := schema.Description()
 	output := fmt.Sprintf(
-		"Schema for the chat-uploaded %s file %q. This file was not ingested into the knowledge base, so the schema is derived from the file itself.\n\n%s\n\nQuery this document with data_analysis as the table %q.",
+		"Schema for the chat-uploaded %s file %q. "+
+			"This file was not ingested into the knowledge base, "+
+			"so the schema is derived from the file itself.\n\n%s\n\n"+
+			"Query this document with data_analysis as the table %q.",
 		attachment.FileType, attachment.FileName, columns, DataAnalysisTableName,
 	)
 	return &types.ToolResult{

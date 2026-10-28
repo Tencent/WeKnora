@@ -336,7 +336,9 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}
 	} else {
 		if t.scopeEnforced {
-			if _, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
+			if _, err = authorizeKnowledgeInSearchTargets(
+				ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService,
+			); err != nil {
 				return &types.ToolResult{Success: false, Error: err.Error()}, err
 			}
 		}
@@ -898,7 +900,9 @@ func (t *DataAnalysisTool) chatAttachment(id string) (ChatTabularAttachment, boo
 // knowledge file is loaded: copy the bytes to a local temp file, then let
 // DuckDB read csv/xlsx. Chat uploads have no ChunkTypeTableSummary chunks, so
 // callers that need a schema use the DuckDB table description instead.
-func (t *DataAnalysisTool) loadChatAttachment(ctx context.Context, attachment ChatTabularAttachment) (*TableSchema, error) {
+func (t *DataAnalysisTool) loadChatAttachment(
+	ctx context.Context, attachment ChatTabularAttachment,
+) (*TableSchema, error) {
 	fileType := TabularFileType(attachment.FileType)
 	if fileType == "" {
 		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", attachment.FileType)
@@ -916,7 +920,7 @@ func (t *DataAnalysisTool) loadChatAttachment(ctx context.Context, attachment Ch
 	if err != nil {
 		return nil, fmt.Errorf("failed to open chat upload: %w", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	localPath, cleanup, err := materializeLocalCopy(ctx, reader, fileType)
 	if err != nil {

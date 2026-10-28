@@ -233,7 +233,7 @@ func readChatUpload(t *testing.T, item tools.ChatTabularAttachment) string {
 	t.Helper()
 	reader, err := item.Open(context.Background())
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	body, err := io.ReadAll(reader)
 	require.NoError(t, err)
 	return string(body)

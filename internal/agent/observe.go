@@ -695,8 +695,10 @@ func writeChatUploads(sb *strings.Builder, uploads []ChatUploadInfo) {
 		fmt.Fprintf(sb, "    <document knowledge_id=\"%s\" title=\"%s\" file_type=\"%s\" />\n",
 			escapeXMLAttr(upload.DocumentID), escapeXMLAttr(title), escapeXMLAttr(upload.FileType))
 	}
-	sb.WriteString("    <note>These CSV or Excel files were uploaded in the chat. They are not knowledge-base documents. " +
-		"Call data_schema and data_analysis with this knowledge_id. Do not substitute another document.</note>\n")
+	sb.WriteString("    <note>These CSV or Excel files were uploaded in the chat. " +
+		"They are not knowledge-base documents. " +
+		"Call data_schema and data_analysis with this knowledge_id. " +
+		"Do not substitute another document.</note>\n")
 	sb.WriteString("  </chat_uploads>\n")
 }
 
@@ -973,7 +975,8 @@ func commonStringPrefix(a, b string) string {
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(
-		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext, e.assistantName, e.chatUploadInfos())
+		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin,
+		e.pageContext, e.assistantName, e.chatUploadInfos())
 	runtimeCtx = e.modelContext.EncodeKnownIssues(e.modelContext.CompactKnownText(runtimeCtx))
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)

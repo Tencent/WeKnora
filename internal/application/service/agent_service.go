@@ -1433,7 +1433,8 @@ func (s *agentService) registerTools(
 	if slices.Contains(allowedTools, tools.ToolDataAnalysis) || slices.Contains(allowedTools, tools.ToolDataSchema) {
 		chatAttachments = tools.NewChatTabularAttachments()
 		sharedAnalysis = tools.NewDataAnalysisTool(
-			s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver,
+			s.knowledgeBaseService, s.knowledgeService, s.tenantService,
+			s.fileService, s.duckdb, sessionID, s.storageResolver,
 		).WithSearchTargets(config.SearchTargets).WithChatAttachments(chatAttachments)
 	}
 

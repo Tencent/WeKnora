@@ -51,7 +51,8 @@ func TestChatExcelUploadRegistersDocumentHandle(t *testing.T) {
 	assert.Contains(t, out, `<chat_uploads scope="this_turn">`)
 	assert.Contains(t, out, `<document knowledge_id="doc://2" title="sales.xlsx" file_type="xlsx" />`)
 	assert.Contains(t, out, "These CSV or Excel files were uploaded in the chat.")
-	assert.Contains(t, out, `<document knowledge_id="doc://1" chunk_id="" type="pdf"><name>manual.pdf</name></document>`)
+	assert.Contains(t, out,
+		`<document knowledge_id="doc://1" chunk_id="" type="pdf"><name>manual.pdf</name></document>`)
 	assert.Contains(t, out, "<type>.xlsx</type>", "extracted attachment text stays in the user turn")
 	assert.Contains(t, out, "name,qty")
 	assert.NotContains(t, out, excelID, "the durable temporary-document id must be compacted to a handle")
