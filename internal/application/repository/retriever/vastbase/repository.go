@@ -14,12 +14,14 @@
 //     hnsw.ef_search) to widen the graph search candidate list
 //   - cosine distance via the <=> operator, identical literal syntax
 //
-// Only vector retrieval is supported; keyword retrieval stays on engines that
-// provide a full-text/BM25 facility (postgres+ParadeDB, elasticsearch, ...).
+// Keyword retrieval runs in parallel through Vastbase's native BM25
+// full-text index (USING fulltext over content, ranked by bm25_score() on
+// the @~@ operator); vector retrieval stays on the native Graph_Index.
 package vastbase
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -129,6 +131,11 @@ func (r *vastbaseRepository) migrateSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_embeddings_knowledge_base_id ON embeddings(knowledge_base_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_embeddings_is_enabled ON embeddings(is_enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_embeddings_tag_id ON embeddings(tag_id)`,
+		// Keyword channel: Vastbase's native BM25 full-text index over the
+		// chunk content. The index is maintained by the store itself, so
+		// chunk inserts/updates/deletes keep the keyword channel current
+		// without write-path hooks.
+		`CREATE INDEX IF NOT EXISTS idx_embeddings_content_bm25 ON embeddings USING fulltext(content) WITH (algorithms='BM25')`,
 	}
 	for _, stmt := range statements {
 		if err := r.db.WithContext(ctx).Exec(stmt).Error; err != nil {
@@ -192,7 +199,7 @@ func (r *vastbaseRepository) EngineType() types.RetrieverEngineType {
 
 // Support returns supported retriever types (vector only)
 func (r *vastbaseRepository) Support() []types.RetrieverType {
-	return []types.RetrieverType{types.VectorRetrieverType}
+	return []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType}
 }
 
 // calculateIndexStorageSize calculates storage size for a single index entry
@@ -362,6 +369,8 @@ func (r *vastbaseRepository) Retrieve(ctx context.Context, params types.Retrieve
 	switch params.RetrieverType {
 	case types.VectorRetrieverType:
 		return r.VectorRetrieve(ctx, params)
+	case types.KeywordsRetrieverType:
+		return r.KeywordRetrieve(ctx, params)
 	}
 	err := fmt.Errorf("vastbase retriever does not support retriever type: %s", params.RetrieverType)
 	logger.GetLogger(ctx).Errorf("[Vastbase] %v", err)
@@ -539,6 +548,137 @@ func (r *vastbaseRepository) VectorRetrieve(ctx context.Context,
 			Results:             results,
 			RetrieverEngineType: types.VastbaseRetrieverEngineType,
 			RetrieverType:       types.VectorRetrieverType,
+			Error:               nil,
+		},
+	}, nil
+}
+
+// KeywordRetrieve performs BM25 keyword search over the chunk content using
+// Vastbase's native full-text index (USING fulltext) created by
+// migrateSchema.
+//
+// The @~@ operator drives the full-text index scan (the only possible path:
+// Vastbase full-text matching never falls back to a heap scan), and
+// bm25_score() returns each hit's BM25 relevance for ranking. Additional
+// predicates (knowledge base / knowledge / tag IDs, is_enabled) are plain
+// filters applied on top of the index result, same policy as VectorRetrieve.
+// No similarity threshold is applied because @~@ already restricts hits to
+// matching documents.
+func (r *vastbaseRepository) KeywordRetrieve(ctx context.Context,
+	params types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
+	query := strings.TrimSpace(params.Query)
+	if query == "" {
+		return nil, errors.New("empty keyword query")
+	}
+	logger.GetLogger(ctx).Infof("[Vastbase] Keyword retrieval: topK=%d", params.TopK)
+
+	whereParts := make([]string, 0)
+	allVars := make([]interface{}, 0)
+
+	whereParts = append(whereParts, "content @~@ $1")
+	allVars = append(allVars, query)
+
+	if len(params.KnowledgeBaseIDs) > 0 {
+		logger.GetLogger(ctx).Debugf(
+			"[Vastbase] Filtering keyword search by knowledge base IDs: %v",
+			params.KnowledgeBaseIDs,
+		)
+		whereParts = append(whereParts, inClause("knowledge_base_id", params.KnowledgeBaseIDs, &allVars))
+	}
+	if len(params.KnowledgeIDs) > 0 {
+		logger.GetLogger(ctx).Debugf(
+			"[Vastbase] Filtering keyword search by knowledge IDs: %v",
+			params.KnowledgeIDs,
+		)
+		whereParts = append(whereParts, inClause("knowledge_id", params.KnowledgeIDs, &allVars))
+	}
+	if len(params.TagIDs) > 0 {
+		logger.GetLogger(ctx).Debugf("[Vastbase] Filtering keyword search by tag IDs: %v", params.TagIDs)
+		whereParts = append(whereParts, inClause("tag_id", params.TagIDs, &allVars))
+	}
+
+	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
+	allVars = append(allVars, true)
+
+	limitParam := len(allVars) + 1
+	querySQL := fmt.Sprintf(`
+		SELECT
+			id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
+			bm25_score() AS score
+		FROM embeddings
+		WHERE %s
+		ORDER BY score DESC NULLS LAST
+		LIMIT $%d
+	`, strings.Join(whereParts, " AND "), limitParam)
+	allVars = append(allVars, params.TopK)
+
+	// The query runs on database/sql directly: gorm's Raw SQL parser treats
+	// the '@' in the @~@ full-text operator as a named-argument placeholder
+	// and silently drops the positional variables.
+	sqlDB, err := r.db.WithContext(ctx).DB()
+	if err != nil {
+		logger.GetLogger(ctx).Errorf("[Vastbase] Keyword retrieval: no underlying sql.DB: %v", err)
+		return nil, err
+	}
+	rows, err := sqlDB.QueryContext(ctx, querySQL, allVars...)
+	if err != nil {
+		logger.GetLogger(ctx).Errorf("[Vastbase] Keyword retrieval failed: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	embeddingDBList := make([]vbVectorWithScore, 0)
+	for rows.Next() {
+		var (
+			item                   vbVectorWithScore
+			chunkID, knowledgeID   sql.NullString
+			knowledgeBaseID, tagID sql.NullString
+		)
+		if err := rows.Scan(
+			&item.ID, &item.Content, &item.SourceID, &item.SourceType,
+			&chunkID, &knowledgeID, &knowledgeBaseID, &tagID,
+			&item.Score,
+		); err != nil {
+			logger.GetLogger(ctx).Errorf("[Vastbase] Keyword retrieval row scan failed: %v", err)
+			return nil, err
+		}
+		item.ChunkID = chunkID.String
+		item.KnowledgeID = knowledgeID.String
+		item.KnowledgeBaseID = knowledgeBaseID.String
+		item.TagID = tagID.String
+		embeddingDBList = append(embeddingDBList, item)
+	}
+	if err := rows.Err(); err != nil {
+		logger.GetLogger(ctx).Errorf("[Vastbase] Keyword retrieval rows error: %v", err)
+		return nil, err
+	}
+
+	if len(embeddingDBList) > int(params.TopK) {
+		embeddingDBList = embeddingDBList[:params.TopK]
+	}
+
+	logger.GetLogger(ctx).Infof("[Vastbase] Keyword retrieval found %d results", len(embeddingDBList))
+	results := make([]*types.IndexWithScore, len(embeddingDBList))
+	const maxKeywordResultLog = 8
+	for i := range embeddingDBList {
+		results[i] = fromDBVectorEmbeddingWithScore(&embeddingDBList[i], types.MatchTypeKeywords)
+		if i < maxKeywordResultLog {
+			logger.GetLogger(ctx).Debugf("[Vastbase] Keyword search result %d: chunk_id %s, score %.4f",
+				i, results[i].ChunkID, results[i].Score)
+		}
+	}
+	if len(results) > maxKeywordResultLog {
+		logger.GetLogger(ctx).Debugf(
+			"[Vastbase] Keyword search result summary: total=%d logged=%d truncated=%d",
+			len(results), maxKeywordResultLog, len(results)-maxKeywordResultLog,
+		)
+	}
+	return []*types.RetrieveResult{
+		{
+			Results:             results,
+			RetrieverEngineType: types.VastbaseRetrieverEngineType,
+			RetrieverType:       types.KeywordsRetrieverType,
 			Error:               nil,
 		},
 	}, nil

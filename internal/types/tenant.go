@@ -56,6 +56,7 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	},
 	"vastbase": {
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: VastbaseRetrieverEngineType},
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: VastbaseRetrieverEngineType},
 	},
 }
 

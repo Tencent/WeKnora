@@ -92,7 +92,7 @@ func TestVastbaseEndToEnd(t *testing.T) {
 	if got := repo.EngineType(); got != types.VastbaseRetrieverEngineType {
 		t.Fatalf("engine type = %s", got)
 	}
-	if got := repo.Support(); len(got) != 1 || got[0] != types.VectorRetrieverType {
+	if got := repo.Support(); len(got) != 2 || got[0] != types.VectorRetrieverType || got[1] != types.KeywordsRetrieverType {
 		t.Fatalf("support = %v", got)
 	}
 
@@ -176,9 +176,72 @@ func TestVastbaseEndToEnd(t *testing.T) {
 		}
 	}
 
-	// --- Unsupported retriever type ---
+	// --- Keyword channel: native BM25 full-text index ---
+	db.Raw("SELECT count(*) FROM pg_indexes WHERE tablename='embeddings' AND indexdef LIKE '%fulltext%'").Scan(&idxCount)
+	if idxCount != 1 {
+		t.Fatalf("fulltext index count = %d, want 1", idxCount)
+	}
+	// The default cn_tokenizer drops bare digits, so keyword fixtures use
+	// distinguishable natural-language tokens instead of the src-N content.
+	kinfos := []*types.IndexInfo{
+		{Content: "the quick brown fox jumps", SourceID: "kw-0", SourceType: 0, ChunkID: "chunk-kw-0", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true},
+		{Content: "the slow brown dog sleeps", SourceID: "kw-1", SourceType: 0, ChunkID: "chunk-kw-1", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true},
+		{Content: "a quick red cat runs", SourceID: "kw-2", SourceType: 0, ChunkID: "chunk-kw-2", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true},
+	}
+	kembs := make(map[string][]float32, len(kinfos))
+	for _, info := range kinfos {
+		v := make([]float32, dim)
+		for j := range v {
+			v[j] = rng.Float32()
+		}
+		kembs[info.SourceID] = v
+	}
+	if err := repo.BatchSave(ctx, kinfos, map[string]any{"embedding": kembs}); err != nil {
+		t.Fatalf("keyword fixture save: %v", err)
+	}
+	res, err = repo.Retrieve(ctx, types.RetrieveParams{
+		RetrieverType:    types.KeywordsRetrieverType,
+		KnowledgeBaseIDs: []string{"kb-kw"},
+		Query:            "quick fox",
+		TopK:             5,
+	})
+	if err != nil {
+		t.Fatalf("keyword retrieve: %v", err)
+	}
+	if len(res) != 1 || len(res[0].Results) == 0 {
+		t.Fatalf("unexpected keyword result shape: %+v", res)
+	}
+	if top := res[0].Results[0]; top.SourceID != "kw-0" {
+		t.Fatalf("keyword top result = %s, want kw-0", top.SourceID)
+	}
+	for _, r := range res[0].Results {
+		if r.SourceID == "kw-1" {
+			t.Fatalf("keyword match leaked non-matching doc kw-1")
+		}
+		if r.Score <= 0 {
+			t.Fatalf("keyword score = %f, want > 0", r.Score)
+		}
+	}
+	if res[0].RetrieverEngineType != types.VastbaseRetrieverEngineType ||
+		res[0].RetrieverType != types.KeywordsRetrieverType {
+		t.Fatalf("keyword result tags = %s/%s", res[0].RetrieverEngineType, res[0].RetrieverType)
+	}
+	// Knowledge base filter must exclude hits from other bases.
+	res, err = repo.Retrieve(ctx, types.RetrieveParams{
+		RetrieverType:    types.KeywordsRetrieverType,
+		KnowledgeBaseIDs: []string{"kb-src"},
+		Query:            "quick fox",
+		TopK:             5,
+	})
+	if err != nil {
+		t.Fatalf("keyword filtered retrieve: %v", err)
+	}
+	if len(res[0].Results) != 0 {
+		t.Fatalf("keyword filter leaked %d results", len(res[0].Results))
+	}
+	// Empty query is a caller error, not a zero-hit search.
 	if _, err := repo.Retrieve(ctx, types.RetrieveParams{RetrieverType: types.KeywordsRetrieverType}); err == nil {
-		t.Fatalf("expected error for keywords retrieval")
+		t.Fatalf("expected error for empty keyword query")
 	}
 
 	// --- Enable/disable filter ---
