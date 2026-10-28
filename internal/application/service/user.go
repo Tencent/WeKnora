@@ -69,12 +69,11 @@ var (
 	// every session.
 	ErrSamePassword = errors.New("new password must differ from current password")
 
-	// ErrCannotResetPrivilegedTarget is returned by AdminResetPassword when
-	// the target user holds platform-level privileges (IsSystemAdmin or
-	// CanAccessAllTenants) and the caller is not on the system-admin
-	// boundary. A workspace-scoped reset would replace that account's
-	// global password and revoke all of its sessions — an account takeover —
-	// so it is rejected fail-closed here rather than at one HTTP boundary.
+	// ErrCannotResetPrivilegedTarget 由 AdminResetPassword 返回：目标用户持有
+	// 平台级特权（IsSystemAdmin 或 CanAccessAllTenants），而调用方不在系统
+	// 管理边界上。空间级重置会改掉该账号的全局密码并吊销其全部会话——
+	// 等于接管账号——因此在这里按 fail-closed 拒绝，而不是只拦在某一条
+	// HTTP 边界上。
 	ErrCannotResetPrivilegedTarget = errors.New("cannot reset this member's password from a workspace endpoint")
 )
 
