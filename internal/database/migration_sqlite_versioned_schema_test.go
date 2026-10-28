@@ -69,6 +69,7 @@ var versionedSQLiteColumns = map[string][]string{
 		"sandbox_config_tenant_id", // 000027
 		"host_workspace_dir",       // 000029
 		"owner_auth_source",        // 000046
+		"product_line",             // 000051
 	},
 	"session_sandbox_assignments": {"released_at", "cleanup_due_at"},    // 000047
 	"tenant_invitations":          {"token", "accepted_count"},          // 000054
@@ -88,7 +89,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 50
+const expectedSQLiteMigrationVersion = 51
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
