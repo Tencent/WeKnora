@@ -1166,7 +1166,22 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_session.artifactLibraryResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler_session.artifactLibraryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 },
@@ -42734,12 +42749,7 @@ const docTemplate = `{
         "internal_handler_session.artifactLibraryResponse": {
             "type": "object",
             "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem"
-                    }
-                },
+                "data": {},
                 "page": {
                     "type": "integer",
                     "x-agent": true

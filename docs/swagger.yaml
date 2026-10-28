@@ -14414,10 +14414,7 @@ definitions:
     type: object
   internal_handler_session.artifactLibraryResponse:
     properties:
-      data:
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem'
-        type: array
+      data: {}
       page:
         type: integer
         x-agent: true
@@ -15242,7 +15239,14 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler_session.artifactLibraryResponse'
+            allOf:
+            - $ref: '#/definitions/internal_handler_session.artifactLibraryResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem'
+                  type: array
+              type: object
       security:
       - Bearer: []
       - ApiKeyAuth: []
