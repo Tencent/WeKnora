@@ -405,6 +405,15 @@
                 <div v-for="ref in runtimeTaskMeta(task)" :key="ref.key" class="rq-failed-ref">
                   <dt>{{ ref.label }}</dt>
                   <dd :title="ref.value">{{ ref.value }}</dd>
+                  <t-button
+                    v-if="ref.key === 'knowledge' && task.knowledge_base_id && task.knowledge_id"
+                    class="rq-failed-ref-link"
+                    variant="text"
+                    size="small"
+                    :loading="taskDocumentLoadingId === task.knowledge_id"
+                    :disabled="Boolean(taskDocumentLoadingId)"
+                    @click="openTaskDocument(task)"
+                  >{{ t('system.globalSettings.runtime.tasks.viewDocument') }}</t-button>
                 </div>
               </dl>
               <p v-else class="rq-failed-row-unknown">
@@ -503,14 +512,27 @@
         </div>
       </section>
     </SettingDrawer>
+    <DocContent
+      v-if="taskDocumentDetails.id && taskDrawerVisible"
+      :visible="taskDocumentVisible"
+      :details="taskDocumentDetails"
+      :kb-id="taskDocumentKbId"
+      :z-index="2600"
+      :readOnly="true"
+      :canDownloadKB="false"
+      @closeDoc="closeTaskDocument"
+      @getDoc="loadTaskDocumentChunks"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { getKnowledgeDetails, getKnowledgeDetailsCon } from '@/api/knowledge-base'
+import { formatStringDate } from '@/utils'
 import { mergeRuntimeTaskPage } from './runtimeTaskPagination'
 import {
   getRuntimeTasks,
@@ -526,6 +548,8 @@ import {
 } from '@/api/system'
 
 const { t, te, locale } = useI18n()
+// Load the sizeable document renderer only when an operator opens a document.
+const DocContent = defineAsyncComponent(() => import('@/components/doc-content.vue'))
 
 const POLL_INTERVAL_MS = 5000
 
@@ -552,6 +576,19 @@ const tasksSentinelRef = ref<HTMLElement | null>(null)
 const taskActionID = ref('')
 const taskAction = ref<RuntimeTaskAction | ''>('')
 const purging = ref(false)
+const taskDocumentVisible = ref(false)
+const taskDocumentLoadingId = ref('')
+const taskDocumentKbId = ref('')
+const taskDocumentDetails = reactive({
+  id: '', title: '', time: '', md: [] as any[], total: 0,
+  type: '', source: '', channel: '', file_type: '', description: '',
+  summary_status: '', parse_status: '', error_message: '',
+  custom_metadata: {} as Record<string, unknown>,
+  tags: [] as Array<{ id: string; name: string; color?: string }>,
+  chunkLoading: false, chunkLoadError: '',
+})
+let taskDocumentRequest = 0
+let taskChunkRequest = 0
 
 const TASK_PAGE_SIZE = 20
 const taskStates: RuntimeTaskState[] = ['active', 'pending', 'scheduled', 'retry', 'archived', 'completed']
@@ -723,6 +760,74 @@ function runtimeTaskMeta(task: RuntimeTask): RuntimeTaskMeta[] {
   if (task.worker) refs.push({ key: 'worker', label: t('system.globalSettings.runtime.tasks.worker'), value: task.worker })
   if (task.is_orphaned) refs.push({ key: 'orphaned', label: t('system.globalSettings.runtime.tasks.health'), value: t('system.globalSettings.runtime.tasks.orphaned') })
   return refs
+}
+
+function closeTaskDocument() {
+  taskDocumentRequest++
+  taskChunkRequest++
+  taskDocumentVisible.value = false
+  taskDocumentLoadingId.value = ''
+}
+
+async function loadTaskDocumentChunks(page: number) {
+  const id = taskDocumentDetails.id
+  if (!id) return
+  const request = ++taskChunkRequest
+  taskDocumentDetails.chunkLoading = true
+  taskDocumentDetails.chunkLoadError = ''
+  try {
+    const result: any = await getKnowledgeDetailsCon(id, page)
+    if (request !== taskChunkRequest || !taskDocumentVisible.value) return
+    if (!result?.success || !Array.isArray(result.data)) throw new Error()
+    taskDocumentDetails.md = result.data
+    taskDocumentDetails.total = result.total ?? 0
+  } catch (error: any) {
+    if (request !== taskChunkRequest || !taskDocumentVisible.value) return
+    taskDocumentDetails.chunkLoadError = error?.message || t('knowledgeBase.chunkLoadFailed')
+  } finally {
+    if (request === taskChunkRequest) taskDocumentDetails.chunkLoading = false
+  }
+}
+
+async function openTaskDocument(task: RuntimeTask) {
+  if (!task.knowledge_id || !task.knowledge_base_id || taskDocumentLoadingId.value) return
+  const request = ++taskDocumentRequest
+  taskDocumentLoadingId.value = task.knowledge_id
+  try {
+    // Resolve the document before opening the drawer so 403/404 never show an empty panel.
+    const result: any = await getKnowledgeDetails(task.knowledge_id)
+    if (request !== taskDocumentRequest || !taskDrawerVisible.value) return
+    const data = result?.data
+    if (!result?.success || !data?.id) throw new Error()
+    if (data.id !== task.knowledge_id || data.knowledge_base_id !== task.knowledge_base_id) {
+      MessagePlugin.warning(t('system.globalSettings.runtime.tasks.documentUnavailable'))
+      return
+    }
+    taskDocumentKbId.value = task.knowledge_base_id
+    Object.assign(taskDocumentDetails, {
+      id: data.id,
+      title: data.file_name || data.title || data.source || t('knowledgeBase.untitledDocument'),
+      time: data.updated_at ? formatStringDate(new Date(data.updated_at)) : '',
+      md: [], total: 0,
+      type: data.type || 'file', source: data.source || '', channel: data.channel || '',
+      file_type: data.file_type || '', description: data.description || '',
+      summary_status: data.summary_status || '', parse_status: data.parse_status || '',
+      error_message: data.error_message || '', custom_metadata: data.custom_metadata || {},
+      tags: data.tags || [], chunkLoading: false, chunkLoadError: '',
+    })
+    taskDocumentVisible.value = true
+    void loadTaskDocumentChunks(1)
+  } catch (error: any) {
+    if (request !== taskDocumentRequest || !taskDrawerVisible.value) return
+    const key = error?.status === 404
+      ? 'system.globalSettings.runtime.tasks.documentNotFound'
+      : error?.status === 403
+        ? 'system.globalSettings.runtime.tasks.documentForbidden'
+        : 'system.globalSettings.runtime.tasks.documentLoadFailed'
+    MessagePlugin.warning(t(key))
+  } finally {
+    if (request === taskDocumentRequest) taskDocumentLoadingId.value = ''
+  }
 }
 
 function poolLabel(pool: string): string {
@@ -947,6 +1052,8 @@ watch(autoRefresh, (on) => {
 
 watch(taskDrawerVisible, async (open) => {
   if (!open) {
+    closeTaskDocument()
+    taskDocumentDetails.id = ''
     detachTasksScrollObserver()
     return
   }
@@ -966,6 +1073,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  closeTaskDocument()
   stopPolling()
   detachTasksScrollObserver()
 })
@@ -1814,7 +1922,7 @@ onUnmounted(() => {
 
 .rq-failed-ref {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: baseline;
   margin: 0;
@@ -1835,6 +1943,12 @@ onUnmounted(() => {
     font-size: var(--app-text-xs);
     line-height: 1.45;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rq-failed-ref-link {
+    color: var(--td-brand-color);
+    font-size: var(--app-text-xs);
     white-space: nowrap;
   }
 }
