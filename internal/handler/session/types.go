@@ -17,6 +17,9 @@ type CreateSessionRequest struct {
 	// be an absolute path already present in the user-approved ProjectDirs
 	// list. Empty means the session gets an auto-allocated workspace.
 	ProjectDir string `json:"project_dir,omitempty"`
+	// ProductLine 可选，创建时携带的产线 id（config.js 产线清单里的 id，最长 64）。
+	// 只在创建时落定，PUT 不接受修改；缺省为空串（归「历史」组）。
+	ProductLine string `json:"product_line" binding:"max=64"`
 }
 
 // GenerateTitleRequest defines the request structure for generating a session title

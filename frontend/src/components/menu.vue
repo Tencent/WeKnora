@@ -195,6 +195,46 @@
                         <div class="submenu_empty">{{ t('menu.noSessions') }}</div>
                     </template>
                     <template v-else>
+                        <!-- 客户分支：产线组头 + 组内时间桶两级渲染（AC-16）；管理员不进入（C6） -->
+                        <template v-if="isCustomer">
+                            <template v-for="lineGroup in customerLineGroups" :key="lineGroup.lineId">
+                                <div class="timeline_header timeline_header--line session-list-row session-list-row--flat">
+                                    <span class="session-list-row__body">
+                                        <span class="timeline_header-label">{{ customerLineGroupLabel(lineGroup) }}</span>
+                                    </span>
+                                </div>
+                                <template v-for="timeBucket in customerLineGroupBuckets(lineGroup)"
+                                    :key="`${lineGroup.lineId}:${timeBucket.key}`">
+                                    <div class="timeline_header session-list-row session-list-row--flat">
+                                        <span class="session-list-row__body">
+                                            <span class="timeline_header-label">{{ timeBucket.label }}</span>
+                                        </span>
+                                    </div>
+                                    <div v-for="subitem in timeBucket.items" :key="subitem.id"
+                                        class="submenu_item_p session-chat-row" :data-session-id="subitem.id" :class="{
+                                            'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
+                                            'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
+                                            'session-chat-row--revealed': revealedSessionId === subitem.id,
+                                        }">
+                                        <div class="session-list-row session-list-row--flat">
+                                            <div class="session-list-row__body">
+                                                <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
+                                                    :running="Boolean(sessionActivityEntries[subitem.id])"
+                                                    :unread="Boolean(sessionUnread[subitem.id])"
+                                                    :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
+                                                    :menu-options="buildSessionMenuOptions(subitem)"
+                                                    @navigate="gotopage(subitem.path)"
+                                                    @toggle-select="toggleBatchSelect(subitem.id)"
+                                                    @menu-click="handleSessionMenuClick($event, subitem)"
+                                                    @rename-submit="renameSessionTitle(subitem, $event.title)"
+                                                    @hover-in="mouseenteBotDownr(subitem.id)" @hover-out="mouseleaveBotDown" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </template>
+                        </template>
+                        <template v-else>
                         <template v-for="group in filteredGroupedSessions" :key="group.key">
                             <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat">
                                 <span class="session-list-row__body">
@@ -222,6 +262,7 @@
                                     </div>
                                 </div>
                             </div>
+                        </template>
                         </template>
                         <div v-if="activeBucket?.loading && filteredGroupedSessions.length > 0"
                             class="session-list-loading session-list-row session-list-row--flat">
@@ -321,9 +362,11 @@ import {
     classifyDateBucket,
     configuredPlatforms,
     groupSessionsByDate,
+    groupSessionsByProductLine,
     originGroupKey,
     resolveSessionOrigin,
     type DateBucketKey,
+    type ProductLineGroup,
 } from './sessionGrouping';
 import {
     DEFAULT_SESSION_BUCKET_KEY,
@@ -337,6 +380,7 @@ import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAuthStore } from '@/stores/auth';
 import { brandConfig } from '@/brand';
 import { defaultLandingPath, isCustomerViewer } from '@/config/customerAccess';
+import { useProductLineStore } from '@/stores/productLine';
 import allstarLogoUrl from '@/assets/img/allstar-logo.png';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
 import { TOOLBOX_ITEMS, canAccessToolboxSection } from '@/config/toolbox';
@@ -613,7 +657,51 @@ const dateBucketLabels = computed<Record<DateBucketKey, string>>(() => ({
     earlier: t('time.earlier'),
 }));
 
+// 客户侧栏两级分组（AC-16）：产线组（配置顺序，只留非空）→ 组内 pinned/今天/昨天/更早。
+// 分页与来源过滤不变：只分组当前已加载桶的 items（客户态只有 web 桶）。
+// 行类型带 path（与管理员 7 桶的渲染行一致，SessionSidebarRow 需要）。
+type CustomerSessionRow = SessionForGrouping & { path: string; title: string };
+const customerLineGroups = computed<ProductLineGroup<CustomerSessionRow>[]>(() => {
+    if (!isCustomer.value) return [];
+    const bucket = activeBucket.value;
+    if (!bucket?.items.length) return [];
+    // 产线清单来自运行时品牌配置（C5）；store 在这里懒调用，管理员不实例化（C6）
+    const lines = useProductLineStore().lines;
+    const rows: CustomerSessionRow[] = bucket.items.map((item) => ({
+        ...item,
+        path: `chat/${item.id}`,
+        title: item.title || '',
+    }));
+    return groupSessionsByProductLine(rows, lines, new Date());
+});
+
+// 历史组是固定文案，不来自产线配置（A6）；产线组头直接用配置里的显示名
+const customerLineGroupLabel = (group: ProductLineGroup) => (group.isHistory ? t('time.history') : group.label);
+
+// 组内桶序 pinned→今天→昨天→更早，空桶不渲染
+const customerLineGroupBuckets = (group: ProductLineGroup<CustomerSessionRow>) =>
+    [
+        { key: 'pinned', label: t('time.pinned'), items: group.pinned },
+        { key: 'today', label: t('time.today'), items: group.today },
+        { key: 'yesterday', label: t('time.yesterday'), items: group.yesterday },
+        { key: 'earlier', label: t('time.earlier'), items: group.earlier },
+    ].filter((bucket) => bucket.items.length > 0);
+
+// 两级结构摊平成「组头段 + 桶段」，供空态/加载态判断与 fork 定位复用同一列表
+const customerSessionSegments = computed(() => {
+    const segments: Array<{ key: string; label: string; items: CustomerSessionRow[] }> = [];
+    for (const group of customerLineGroups.value) {
+        segments.push({ key: `line:${group.lineId}`, label: customerLineGroupLabel(group), items: [] });
+        for (const bucket of customerLineGroupBuckets(group)) {
+            segments.push({ key: `line:${group.lineId}:${bucket.key}`, label: bucket.label, items: bucket.items });
+        }
+    }
+    return segments;
+});
+
 const filteredGroupedSessions = computed(() => {
+    // 客户分支：两级分组的摊平段；管理员走下方原有 7 桶分组，逻辑不动（C6）
+    if (isCustomer.value) return customerSessionSegments.value;
     const bucket = activeBucket.value;
     if (!bucket?.items.length) return [];
     return groupSessionsByDate(
@@ -881,6 +969,8 @@ const mapSessionRow = (item: any) => ({
     description: item.description || '',
     user_id: item.user_id || '',
     parent_session_id: item.parent_session_id || '',
+    // 创建时落定的产线 id，白名单透传给侧栏分组（后端 omitempty，缺省按空串）
+    product_line: item.product_line || '',
 });
 
 const syncMenuStoreFromBuckets = () => {
@@ -903,6 +993,7 @@ const menuChildToSessionRow = (item: Record<string, unknown>): SessionForGroupin
         description: typeof item.description === 'string' ? item.description : '',
         user_id: typeof item.user_id === 'string' ? item.user_id : '',
         parent_session_id: typeof item.parent_session_id === 'string' ? item.parent_session_id : '',
+        product_line: typeof item.product_line === 'string' ? item.product_line : '',
     };
 };
 
@@ -1795,6 +1886,13 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
     .timeline_header-label {
         white-space: nowrap;
+    }
+
+    // 客户两级分组：产线组头比时间桶标题重一档，层级一眼可分（AC-16）
+    .timeline_header--line {
+        font-weight: 700;
+        color: var(--td-text-color-secondary);
+        margin-top: 14px;
     }
 
     // Stable filter control: always mounted and absolutely pinned to the list's

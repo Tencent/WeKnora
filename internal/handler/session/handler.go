@@ -220,6 +220,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	createdSession := &types.Session{
 		TenantID:         tenantID.(uint64),
 		Kind:             request.Kind,
+		ProductLine:      request.ProductLine,
 		Title:            request.Title,
 		Description:      types.SanitizeClientSessionDescription(request.Description, ""),
 		HostWorkspaceDir: hostDir,

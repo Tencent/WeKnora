@@ -8,8 +8,9 @@ import { useAuthStore } from '@/stores/auth'
 /**
  * 客户当前选的产线。
  *
- * 产线切换本期只影响界面（选中态、欢迎区、示例问题），不切向量库、不重建会话；
- * 这里刻意不调用 settingsStore.selectAgent，避免把产线状态和会话/知识库/文件选择绑在一起（AC-18 / C7）。
+ * store 只记录选中态（欢迎区、示例问题跟着变），不切向量库/检索（C7）；
+ * 会话页切线自动开新会话的逻辑放在 chat 视图层 watch（customer-model-lines AC-13），store 不加副作用。
+ * 这里刻意不调用 settingsStore.selectAgent，避免把产线状态和会话/知识库/文件选择绑在一起。
  */
 export const useProductLineStore = defineStore('productLine', () => {
   const authStore = useAuthStore()

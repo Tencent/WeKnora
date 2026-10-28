@@ -25,6 +25,8 @@ export interface SessionForGrouping {
   description?: string
   user_id?: string
   parent_session_id?: string
+  // 创建时落定的产线 id；后端 omitempty，缺键按空串处理（归历史组）
+  product_line?: string
   originalIndex?: number
 }
 
@@ -296,4 +298,112 @@ export function groupSessions<T extends SessionForGrouping>(
 /** Chat list rows show source badges when channels live in separate folders. */
 export function shouldShowSessionSourceBadge(_mode: SessionGroupMode): boolean {
   return false
+}
+
+// ---- 客户侧栏两级分组（customer-model-lines AC-16）----
+// 第一级 = 产线组（按配置顺序）+ 末尾「历史」组；第二级 = 今天/昨天/更早；置顶进所在组 pinned 桶。
+
+/** 客户侧栏第二级的三档时间桶（不含 pinned，pinned 由分组函数单独处理）。 */
+export type LineDateBucketKey = 'today' | 'yesterday' | 'earlier'
+
+/** 历史组固定 id：产线为空/未知的会话都归这里，排在所有产线组之后。 */
+export const HISTORY_LINE_GROUP_ID = '__history__'
+
+/** 分组入参只需要产线的 id 与显示名。 */
+export interface ProductLineLike {
+  id: string
+  name: string
+}
+
+/** 一个产线组：四个桶按 pinned→today→yesterday→earlier 渲染，均为空则整组不输出。 */
+export interface ProductLineGroup<T extends SessionForGrouping = SessionForGrouping> {
+  lineId: string
+  /** 产线显示名；历史组为空串，由调用方给 i18n 文案 */
+  label: string
+  isHistory: boolean
+  pinned: T[]
+  today: T[]
+  yesterday: T[]
+  earlier: T[]
+}
+
+/**
+ * 三档日期归类。语义与 classifyDateBucket 的同名档一致：
+ * 按本地时区的日界比较（今天 0 点 / 昨天 0 点），无效或更早的日期落 earlier。
+ */
+export function classifyLineDateBucket(
+  dateStr: string | undefined,
+  now: Date = new Date(),
+): LineDateBucketKey {
+  if (!dateStr) return 'earlier'
+  const date = new Date(dateStr)
+  // 无效日期的 getTime() 为 NaN，比较恒为 false，自然落 earlier（与现有函数行为一致）
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  if (dayStart >= todayStart) return 'today'
+  if (dayStart >= todayStart - 24 * 60 * 60 * 1000) return 'yesterday'
+  return 'earlier'
+}
+
+function lineGroupHasItems(group: ProductLineGroup): boolean {
+  return (
+    group.pinned.length > 0 ||
+    group.today.length > 0 ||
+    group.yesterday.length > 0 ||
+    group.earlier.length > 0
+  )
+}
+
+/**
+ * 客户侧栏两级分组的纯函数。
+ * - 产线组按 lines 传入顺序输出，只输出非空组；历史组固定追加在末尾（同样只输出非空）。
+ * - product_line 为空或不在 lines 清单里的会话都进历史组。
+ * - is_pinned 会话进所在组的 pinned 桶；桶内保持传入顺序（与 groupSessionsByDate 一致，顺序由接口分页保证）。
+ */
+export function groupSessionsByProductLine<T extends SessionForGrouping>(
+  sessions: T[],
+  lines: ReadonlyArray<ProductLineLike>,
+  now: Date = new Date(),
+): ProductLineGroup<T>[] {
+  const byLineId = new Map<string, ProductLineGroup<T>>()
+  for (const line of lines) {
+    if (byLineId.has(line.id)) continue
+    byLineId.set(line.id, {
+      lineId: line.id,
+      label: line.name,
+      isHistory: false,
+      pinned: [],
+      today: [],
+      yesterday: [],
+      earlier: [],
+    })
+  }
+
+  const history: ProductLineGroup<T> = {
+    lineId: HISTORY_LINE_GROUP_ID,
+    label: '',
+    isHistory: true,
+    pinned: [],
+    today: [],
+    yesterday: [],
+    earlier: [],
+  }
+
+  for (const session of sessions) {
+    // 后端 omitempty：缺键=空串=历史组；未知产线 id 也归历史组
+    const lineId = session.product_line ?? ''
+    const group = lineId && byLineId.has(lineId) ? byLineId.get(lineId)! : history
+    const bucket = session.is_pinned
+      ? 'pinned'
+      : classifyLineDateBucket(session.updated_at || session.created_at, now)
+    group[bucket].push(session)
+  }
+
+  const groups: ProductLineGroup<T>[] = []
+  for (const line of lines) {
+    const group = byLineId.get(line.id)
+    if (group && lineGroupHasItems(group)) groups.push(group)
+  }
+  if (lineGroupHasItems(history)) groups.push(history)
+  return groups
 }

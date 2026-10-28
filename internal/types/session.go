@@ -98,6 +98,10 @@ type Session struct {
 	// Kind is empty for ordinary chats and SessionKindAssistant for assistant
 	// conversations; it is set at creation and never updated.
 	Kind string `json:"kind" gorm:"column:kind;type:varchar(32);not null;default:''"`
+	// ProductLine 记录会话创建时所属的产线 id（来自前端 config.js 的产线清单）。
+	// 与 kind 一样只在创建时落定、此后不可改（PUT 白名单不含它）；fork 会继承。
+	// 空串 = 无产线标记，存量会话由此归入前端「历史」分组。
+	ProductLine string `json:"product_line,omitempty" gorm:"type:varchar(64);not null;default:''"`
 	// UserID is the owner scope for this session. WeKnora user UUIDs, API
 	// external-user principals, and embed visitor principals all use this column.
 	UserID string `json:"user_id,omitempty" gorm:"type:varchar(512);index"`

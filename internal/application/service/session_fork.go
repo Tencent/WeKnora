@@ -300,6 +300,7 @@ func (s *SessionForkService) Fork(
 		ID:               uuid.New().String(),
 		TenantID:         source.TenantID,
 		Kind:             source.Kind,
+		ProductLine:      source.ProductLine,
 		UserID:           source.UserID,
 		OwnerAuthSource:  source.OwnerAuthSource,
 		Title:            forkTitle(title, source.Title),
@@ -431,6 +432,7 @@ func (s *SessionForkService) forkOnSharedMachine(
 	newSession := &types.Session{
 		ID: newID, TenantID: source.TenantID, UserID: source.UserID,
 		OwnerAuthSource: source.OwnerAuthSource,
+		ProductLine:     source.ProductLine,
 		Title:           forkTitle(title, source.Title), Description: source.Description,
 		LastRequestState: source.LastRequestState,
 		SandboxConfigID:  source.SandboxConfigID, SandboxConfigTenantID: source.SandboxConfigTenantID,

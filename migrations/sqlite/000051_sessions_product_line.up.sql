@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN product_line VARCHAR(64) NOT NULL DEFAULT '';

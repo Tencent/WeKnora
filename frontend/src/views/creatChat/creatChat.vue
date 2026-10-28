@@ -97,6 +97,7 @@ import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
 import { useAuthStore } from '@/stores/auth';
 import { isCustomerViewer } from '@/config/customerAccess';
+import { useProductLineStore } from '@/stores/productLine';
 import CustomerTopBar from '@/components/customer/CustomerTopBar.vue';
 import CustomerWelcome from '@/components/customer/CustomerWelcome.vue';
 
@@ -285,10 +286,18 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
         allowed_tools: settingsStore.agentConfig.allowedTools
     };
 
+    // 客户懒建会话带当前产线 id（AC-12 发送端）：会话的产线在创建时落定，
+    // 侧栏分组就靠它；无当前产线则不带（后端按空处理，归「历史」组）。
+    // 管理员不走这个分支，请求体与原来完全一致（C6）。
+    if (isCustomer.value) {
+        const lineId = useProductLineStore().currentLineId;
+        if (lineId) sessionData.product_line = lineId;
+    }
+
     try {
         const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));
         if (res.data && res.data.id) {
-            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
+            await navigateToSession(res.data.id, res.data.product_line ?? '', value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
             console.error('[createChat] Failed to create session');
             MessagePlugin.error(t('createChat.messages.createFailed'));
@@ -299,12 +308,14 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     }
 }
 
-const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
+const navigateToSession = async (sessionId: string, productLine: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
     const now = new Date().toISOString();
     let obj = {
         title: t('createChat.newSessionTitle'),
         path: `chat/${sessionId}`,
         id: sessionId,
+        // 侧栏本地插入行要带产线（服务端回显值），否则新会话会先落「历史」组、刷新才归位（T04 走查 D1）
+        product_line: productLine,
         isMore: false,
         isNoTitle: true,
         created_at: now,
