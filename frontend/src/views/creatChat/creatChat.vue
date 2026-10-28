@@ -97,6 +97,7 @@ import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
 import { useAuthStore } from '@/stores/auth';
 import { isCustomerViewer } from '@/config/customerAccess';
+import { useProductLineStore } from '@/stores/productLine';
 import CustomerTopBar from '@/components/customer/CustomerTopBar.vue';
 import CustomerWelcome from '@/components/customer/CustomerWelcome.vue';
 
@@ -284,6 +285,14 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
         knowledge_ids: selectedFiles,  // 所有选中的普通知识/文件
         allowed_tools: settingsStore.agentConfig.allowedTools
     };
+
+    // 客户懒建会话带当前产线 id（AC-12 发送端）：会话的产线在创建时落定，
+    // 侧栏分组就靠它；无当前产线则不带（后端按空处理，归「历史」组）。
+    // 管理员不走这个分支，请求体与原来完全一致（C6）。
+    if (isCustomer.value) {
+        const lineId = useProductLineStore().currentLineId;
+        if (lineId) sessionData.product_line = lineId;
+    }
 
     try {
         const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));

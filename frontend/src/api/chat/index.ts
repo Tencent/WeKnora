@@ -15,6 +15,8 @@ export interface CreateSessionRequest {
   description?: string;
   project_dir?: string;
   kind?: SessionKind;
+  // 创建时落定的产线 id；不传 = 无标记（侧栏归「历史」组）
+  product_line?: string;
 }
 
 export async function createSessions(data: CreateSessionRequest = {}) {

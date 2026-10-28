@@ -255,7 +255,7 @@ import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vu
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
-import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
+import { getMessageList, getSession, forkSession, rewindSession, stopSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
 import { rewindSkipMessage } from './rewindNotice';
 import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally, rewindHistoryHasMore, keepMessagesThroughRewindPoint, rewindableMessageIds, rewindHttpConflictCode, rewindConflictI18nKey } from './rewindView';
@@ -287,6 +287,7 @@ import ChatHeader from '@/components/ChatHeader.vue';
 import CustomerTopBar from '@/components/customer/CustomerTopBar.vue';
 import { useAuthStore } from '@/stores/auth';
 import { isCustomerViewer } from '@/config/customerAccess';
+import { useProductLineStore } from '@/stores/productLine';
 import {
     notifySessionMutation,
     SESSION_MUTATION_EVENT,
@@ -1311,6 +1312,28 @@ const handleStopFailed = () => {
     isReplying.value = true;
     loading.value = true;
 };
+
+// ===== 客户态：会话详情页切产线 = 自动开新会话（customer-model-lines AC-13 / AC-14）=====
+// 懒创建产线 store（与 useCustomerAgent 同口径）：管理员不实例化，不留任何产线数据。
+const productLineStore = computed(() => (isCustomer.value ? useProductLineStore() : null));
+watch(() => productLineStore.value?.currentLineId, (lineId, prevLineId) => {
+    if (!isCustomer.value || props.embeddedMode) return;
+    // 首次观测（角色水合晚于挂载、store 才创建时 oldValue 为 undefined）只记基线，不跳转。
+    if (prevLineId === undefined || lineId === prevLineId) return;
+    // 生成中先按「停止」按钮同路径中止：前端立即停 + 后端停生成，不留写原会话的孤儿流（AC-14）。
+    if (loading.value || isReplying.value) {
+        handleStopGeneration();
+        const stoppingSessionId = String(session_id.value || '');
+        const stoppingMessageId = currentAssistantMessageId.value;
+        if (stoppingSessionId && stoppingMessageId) {
+            // 不 await：跳转不被停止请求卡住；失败只记录，不阻断切线。
+            stopSession(stoppingSessionId, stoppingMessageId).catch((error) => {
+                console.warn('[product-line] 停止原会话生成失败，继续切线:', error);
+            });
+        }
+    }
+    router.push('/platform/creatChat');
+});
 
 const dropSteerQueueItem = (steerId) => {
     if (!steerId) return;

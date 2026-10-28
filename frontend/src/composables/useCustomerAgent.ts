@@ -10,7 +10,7 @@ import { useSettingsStore } from '@/stores/settings'
  *
  * 只改 selectedAgentId，不调用 toggleAgent：
  * `builtin-quick-answer` 是快速问答智能体，请求里本来就该是 `agent_enabled:false`（T06 实测）。
- * 也不重建会话——产线切换本期只影响界面（AC-18 / C7）。
+ * 会话页切线自动开新会话由 chat 视图层负责（customer-model-lines AC-13）；这里不切向量库/检索（C7）。
  *
  * @param isEnabled 客户视角判定。传函数而不是布尔值，是为了角色水合晚于挂载时也能补上；
  *                  管理员传 false 时不会创建产线 store，也不会读写产线偏好。
