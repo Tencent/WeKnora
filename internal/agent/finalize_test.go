@@ -147,6 +147,34 @@ func finalSynthesisChunks(chunks ...types.StreamResponse) <-chan types.StreamRes
 	return ch
 }
 
+func TestStreamFinalAnswer_DisablesThinking(t *testing.T) {
+	for _, configured := range []string{"unset", "disabled", "enabled"} {
+		t.Run(configured, func(t *testing.T) {
+			model := &finalSynthesisChat{}
+			engine := newTestEngine(t, model, withMaxIterations(8))
+			if configured != "unset" {
+				thinking := configured == "enabled"
+				engine.config.Thinking = &thinking
+			}
+			model.synthesize = func(
+				_ context.Context, _ []chat.Message, opts *chat.ChatOptions,
+			) (<-chan types.StreamResponse, error) {
+				level, requested := opts.Reasoning()
+				require.True(t, requested, "final synthesis must override the provider default")
+				require.Equal(t, api.ReasoningOff, level)
+				return finalSynthesisChunks(types.StreamResponse{
+					ResponseType: types.ResponseTypeAnswer, Content: "Final summary.", FinishReason: "stop", Done: true,
+				}), nil
+			}
+			state := &types.AgentState{CurrentRound: 8}
+			_, err := engine.executeLoop(t.Context(), state, "Summarize", emptyMessages(), nil, "session", "message")
+			require.NoError(t, err)
+			require.Len(t, model.finals, 1)
+			require.Equal(t, "Final summary.", state.FinalAnswer)
+		})
+	}
+}
+
 func finalSynthesisInputTokens(e *AgentEngine, messages []chat.Message, opts *chat.ChatOptions) int {
 	return e.tokenEstimator.EstimateMessages(messages) + e.tokenEstimator.EstimateMessage(
 		&chat.Message{Role: "system", Content: opts.RuntimeNotice},

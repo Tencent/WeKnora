@@ -82,7 +82,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 				MaxCompletionTokens: budget,
 				PromptCacheKey:      sessionID,
 				ToolChoice:          "none",
-			}, // Thinking disabled for final answer synthesis
+				Thinking:            new(false), // A nil preference can enable the provider's default thinking mode.
+			},
 			func(chunk *types.StreamResponse, _ string) {
 				// Defensive filter: only emit answer content, skip thinking chunks
 				if chunk.ResponseType == types.ResponseTypeThinking {
