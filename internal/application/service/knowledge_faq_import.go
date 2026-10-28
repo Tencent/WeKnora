@@ -2281,7 +2281,10 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
-		return nil
+		if errors.Is(err, repository.ErrTenantNotFound) {
+			return fmt.Errorf("%w: FAQ task tenant no longer exists", asynq.SkipRetry)
+		}
+		return fmt.Errorf("failed to get FAQ import tenant: %w", err)
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 
