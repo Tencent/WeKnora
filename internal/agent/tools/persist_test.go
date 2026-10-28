@@ -3,6 +3,7 @@ package tools
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -389,5 +390,24 @@ func TestOperationDataChangeIsClientOnly(t *testing.T) {
 	}
 	if result.Data["data_change"] == nil {
 		t.Fatal("storage sanitization must not mutate the live result")
+	}
+}
+
+func TestCompactShellExecHeadlineKeepsMultiByteCharactersWhole(t *testing.T) {
+	// One ASCII byte plus 100 CJK characters: byte 240 falls inside the 80th
+	// character, so a plain byte cut leaves a broken rune at the end.
+	cmd := "x" + strings.Repeat("中", 100)
+	got := compactShellExecHeadline(map[string]interface{}{"command": cmd, "exit_code": 1})
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("headline %q is not valid UTF-8", got)
+	}
+	if !strings.HasSuffix(got, "...") || strings.Count(got, "中") != 79 {
+		t.Fatalf("headline = %q, want 79 whole characters then ...", got)
+	}
+
+	short := compactShellExecHeadline(map[string]interface{}{"command": "ls 中文", "exit_code": 0})
+	if short != "shell_exec exit=0 command=ls 中文" {
+		t.Fatalf("short headline = %q", short)
 	}
 }
