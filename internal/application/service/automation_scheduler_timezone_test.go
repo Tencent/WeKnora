@@ -107,7 +107,10 @@ func TestAutomationDueTaskStillClaimsUnderUTCClock(t *testing.T) {
 
 	runs := f.runs(t, a.ID)
 	require.Len(t, runs, 1)
-	require.Contains(t, []string{types.AutomationRunQueued, types.AutomationRunRunning}, runs[0].Status)
+	// tick starts an asynchronous executor. Wait for it to release its slot
+	// before the fixture closes SQLite and removes its WAL directory.
+	done := f.settleRun(t, runs[0].ID)
+	require.Equal(t, types.AutomationRunSucceeded, done.Status)
 	reloaded := f.reload(t, a.ID)
 	require.False(t, reloaded.Enabled)
 	require.Nil(t, reloaded.NextRunAt)
