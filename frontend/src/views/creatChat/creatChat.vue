@@ -297,7 +297,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     try {
         const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));
         if (res.data && res.data.id) {
-            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
+            await navigateToSession(res.data.id, res.data.product_line ?? '', value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
             console.error('[createChat] Failed to create session');
             MessagePlugin.error(t('createChat.messages.createFailed'));
@@ -308,12 +308,14 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     }
 }
 
-const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
+const navigateToSession = async (sessionId: string, productLine: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
     const now = new Date().toISOString();
     let obj = {
         title: t('createChat.newSessionTitle'),
         path: `chat/${sessionId}`,
         id: sessionId,
+        // 侧栏本地插入行要带产线（服务端回显值），否则新会话会先落「历史」组、刷新才归位（T04 走查 D1）
+        product_line: productLine,
         isMore: false,
         isNoTitle: true,
         created_at: now,
