@@ -3685,7 +3685,8 @@ export default {
     last30Days: '최근 30일',
     lastYear: '최근 1년',
     earlier: '이전',
-    pinned: '고정됨'
+    pinned: '고정됨',
+    history: '기록'
   },
   platform: {
     subtitle: '대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크',

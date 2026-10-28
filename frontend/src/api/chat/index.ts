@@ -8,6 +8,8 @@ export interface SessionSummary {
   title: string;
   created_at: string;
   updated_at: string;
+  // 后端 omitempty：缺键 = 无标记（客户侧栏归「历史」组）
+  product_line?: string;
 }
 
 export interface CreateSessionRequest {

@@ -5548,7 +5548,8 @@ export default {
       last30Days: 'Last 30 Days',
       lastYear: 'Last Year',
       earlier: 'Earlier',
-      pinned: 'Pinned'
+      pinned: 'Pinned',
+      history: 'History'
     },
     upload: {
       uploadDocument: 'Upload Document',

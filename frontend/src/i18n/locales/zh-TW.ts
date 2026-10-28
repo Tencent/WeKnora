@@ -3687,7 +3687,8 @@ export default {
     last30Days: '近30天',
     lastYear: '近1年',
     earlier: '更早',
-    pinned: '已置頂'
+    pinned: '已置頂',
+    history: '歷史'
   },
   platform: {
     subtitle: '大型語言模型驅動的企業級知識框架',
