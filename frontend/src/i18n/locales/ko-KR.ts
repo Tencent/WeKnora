@@ -6720,6 +6720,7 @@ export default {
     pleaseInputText: '먼저 샘플 텍스트를 입력하세요',
     extractSuccess: '엔티티 관계 추출 성공',
     extractFailed: '엔티티 관계 추출 실패',
+    relationsEmptyWarning: '엔티티는 추출되었지만 관계가 없습니다: 관계 유형이 태그와 정확히 일치하지 않으면 자동으로 삭제됩니다. 태그가 하나의 문자열이 아닌 개별 항목으로 추가되었는지 확인하세요',
     exampleLoaded: '예시가 로드되었습니다',
     exampleCleared: '예시가 지워졌습니다',
     checkingAvailability: '지식 그래프 사용 가능 여부를 확인하는 중…',
