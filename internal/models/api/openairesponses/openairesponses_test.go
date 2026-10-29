@@ -354,7 +354,8 @@ func TestChatIncompleteAndError(t *testing.T) {
 func TestChatIncompleteWithToolCallIsLength(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	payload := `{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":` +
-		`[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Par"}],` +
+		`[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather",` +
+		`"arguments":"{\"city\":\"Par"}],` +
 		`"usage":{"input_tokens":1,"output_tokens":2}}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(payload))
