@@ -23,8 +23,11 @@ func TestGoogleSearchClampsNumToTheAPILimit(t *testing.T) {
 		var got string
 		client := &http.Client{Transport: maxResultsTransport(func(r *http.Request) (*http.Response, error) {
 			got = r.URL.Query().Get("num")
-			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}},
-				Body: io.NopCloser(strings.NewReader(`{"items":[]}`))}, nil
+			return &http.Response{
+				StatusCode: 200,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"items":[]}`)),
+			}, nil
 		})}
 		srv, err := customsearch.NewService(context.Background(), option.WithAPIKey("k"), option.WithHTTPClient(client))
 		require.NoError(t, err)
