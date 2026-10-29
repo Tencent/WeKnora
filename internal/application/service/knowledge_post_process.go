@@ -323,11 +323,14 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				return errors.New("wiki post-process requires atomic finalizing handoff")
 			}
 			rebuildStartedAt := time.Time{}
-			if root := s.tracker().LookupSpanByName(ctx, payload.KnowledgeID, attempt, "knowledge_processing"); root != nil {
+			if root := s.tracker().LookupSpanByName(
+				ctx, payload.KnowledgeID, attempt, "knowledge_processing",
+			); root != nil {
 				rebuildStartedAt = root.StartedAt
 			}
 			pendingOp, buildErr := newWikiIngestPendingOp(
-				withAttempt(ctx, attempt), payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID, rebuildStartedAt,
+				withAttempt(ctx, attempt), payload.TenantID, payload.KnowledgeBaseID,
+				payload.KnowledgeID, rebuildStartedAt,
 			)
 			if buildErr != nil {
 				return buildErr

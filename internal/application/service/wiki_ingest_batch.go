@@ -2039,7 +2039,8 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// budget expired. Leave a visible Wiki issue for manual reconciliation.
 	hasGeneratedUpdate := false
 	for _, update := range updates {
-		if update.Type == types.WikiPageTypeEntity || update.Type == types.WikiPageTypeConcept || update.Type == "summary" {
+		if update.Type == types.WikiPageTypeEntity ||
+			update.Type == types.WikiPageTypeConcept || update.Type == "summary" {
 			hasGeneratedUpdate = true
 			break
 		}
@@ -2406,7 +2407,9 @@ func classifyWikiPageWrite(updateErr error) (deferred bool, err error) {
 	return false, updateErr
 }
 
-func (s *wikiIngestService) recordWikiManualEditConflict(ctx context.Context, page *types.WikiPage, updates []SlugUpdate) error {
+func (s *wikiIngestService) recordWikiManualEditConflict(
+	ctx context.Context, page *types.WikiPage, updates []SlugUpdate,
+) error {
 	issues, err := s.wikiService.ListIssues(ctx, page.KnowledgeBaseID, page.Slug, "pending")
 	if err != nil {
 		return fmt.Errorf("list manual edit conflicts: %w", err)
@@ -2425,7 +2428,8 @@ func (s *wikiIngestService) recordWikiManualEditConflict(ctx context.Context, pa
 	_, err = s.wikiService.CreateIssue(ctx, &types.WikiPageIssue{
 		TenantID: page.TenantID, KnowledgeBaseID: page.KnowledgeBaseID,
 		Slug: page.Slug, IssueType: "manual_edit_conflict",
-		Description:           "Wiki generation skipped this page because it was manually edited during document rebuilding. Review the source document and merge any new information manually.",
+		Description: "Wiki generation skipped this page because it was manually edited during " +
+			"document rebuilding. Review the source document and merge any new information manually.",
 		SuspectedKnowledgeIDs: knowledgeIDs, Status: "pending", ReportedBy: "wiki_ingest",
 	})
 	if err != nil {

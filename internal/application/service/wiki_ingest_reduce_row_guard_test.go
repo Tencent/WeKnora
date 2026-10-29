@@ -157,7 +157,9 @@ func TestReduceSlugUpdatesDefersConcurrentManualEdit(t *testing.T) {
 
 	manual := *page
 	manual.Content = "generated body\nmanual correction"
-	updatedManual, err := pageSvc.UpdatePage(types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual)
+	updatedManual, err := pageSvc.UpdatePage(
+		types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual,
+	)
 	require.NoError(t, err)
 	close(model.release)
 	got := <-resultCh
@@ -178,7 +180,9 @@ func TestReduceSlugUpdatesPreservesManualEditSavedBeforePageRead(t *testing.T) {
 	rebuildStartedAt := time.Now().Add(-time.Minute)
 	manual := *page
 	manual.Content = "generated body\nmanual correction"
-	updatedManual, err := pageSvc.UpdatePage(types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual)
+	updatedManual, err := pageSvc.UpdatePage(
+		types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual,
+	)
 	require.NoError(t, err)
 
 	updates := []SlugUpdate{{
@@ -216,7 +220,9 @@ func TestReduceSlugUpdatesCanRefreshManualEditFromBeforeRebuild(t *testing.T) {
 	svc := &wikiIngestService{wikiService: pageSvc, knowledgeSvc: liveKnowledgeStub{}}
 	manual := *page
 	manual.Content = "older manual correction"
-	updatedManual, err := pageSvc.UpdatePage(types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual)
+	updatedManual, err := pageSvc.UpdatePage(
+		types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual,
+	)
 	require.NoError(t, err)
 
 	updates := []SlugUpdate{{
