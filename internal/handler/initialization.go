@@ -752,9 +752,9 @@ func validateNodeExtractConfig(ctx context.Context, req *InitializationRequest) 
 	if !req.NodeExtract.Enabled {
 		return nil
 	}
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
+	if !types.GraphStoreEnabled() {
 		logger.Error(ctx, "Node Extractor configuration incomplete")
-		return errors.NewBadRequestError("请正确配置环境变量NEO4J_ENABLE")
+		return errors.NewBadRequestError("请配置图数据库（NEO4J_ENABLE=true 或 GRAPH_DATABASE_ENGINE=postgres）")
 	}
 	if req.NodeExtract.Text == "" || len(req.NodeExtract.Tags) == 0 {
 		logger.Error(ctx, "Node Extractor configuration incomplete")

@@ -179,8 +179,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewModelCatalogRepository))
-	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	must(container.Provide(neo4jRepo.NewGraphSearchRepository))
+	must(container.Provide(initRetrieveGraphRepository))
+	must(container.Provide(initGraphSearchRepository))
 	must(container.Provide(repository.NewGraphSearchEvidenceRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
@@ -1939,6 +1939,31 @@ func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) 
 func initOllamaService() (*ollama.OllamaService, error) {
 	// Get Ollama service from existing factory function
 	return ollama.GetOllamaService()
+}
+
+// initRetrieveGraphRepository selects the entity-graph backend. The PostgreSQL
+// store reuses the application database, so it is only usable when that
+// database is PostgreSQL; every other deployment keeps the Neo4j adapter
+// (which is a no-op when NEO4J_ENABLE is false).
+func initRetrieveGraphRepository(db *gorm.DB, driver neo4j.Driver) interfaces.RetrieveGraphRepository {
+	if types.GraphStoreUsesPostgres() {
+		logger.Infof(context.Background(), "[Container] graph store: PostgreSQL")
+		return postgresRepo.NewGraphStore(db)
+	}
+	if types.GraphStoreEngine() == types.GraphStoreEnginePostgres {
+		logger.Warnf(context.Background(),
+			"[Container] GRAPH_DATABASE_ENGINE=postgres requires DB_DRIVER=postgres; using Neo4j")
+	}
+	return neo4jRepo.NewNeo4jRepository(driver)
+}
+
+// initGraphSearchRepository mirrors the backend choice for the public graph
+// search API, which has its own interface.
+func initGraphSearchRepository(db *gorm.DB, driver neo4j.Driver) interfaces.GraphSearchRepository {
+	if types.GraphStoreUsesPostgres() {
+		return postgresRepo.NewGraphStore(db)
+	}
+	return neo4jRepo.NewGraphSearchRepository(driver)
 }
 
 func initNeo4jClient() (neo4j.Driver, error) {

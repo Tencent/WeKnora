@@ -2,9 +2,9 @@
 
 知识图谱在文档入库时提取实体与关系，并在问答时沿关联关系检索更多相关片段。它可与向量和关键词检索共同使用，为回答补充关系上下文。
 
-该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用，并需要部署 Neo4j。
+该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用。
 
-图谱存储使用 Neo4j，并依赖 APOC 插件。
+图谱存储支持两种后端：Neo4j（默认，依赖 APOC 插件）和 PostgreSQL（复用应用数据库，无需额外服务）。
 
 ## 开启配置
 
@@ -16,7 +16,8 @@
 
 | 名称 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `NEO4J_ENABLE` | string | 空（关闭） | 置为 `true` 启用图谱；`internal/container/container.go` 的 `initNeo4jClient` 与任务入队 / 检索管线都会检查它 |
+| `GRAPH_DATABASE_ENGINE` | string | `neo4j` | 图存储后端：`neo4j` 或 `postgres`；`postgres` 要求 `DB_DRIVER=postgres` |
+| `NEO4J_ENABLE` | string | 空（关闭） | 使用 Neo4j 后端时置为 `true` 启用图谱；`internal/container/container.go` 的 `initNeo4jClient` 与任务入队 / 检索管线都会检查它 |
 | `NEO4J_URI` | string | `bolt://neo4j:7687` | Neo4j 连接地址 |
 | `NEO4J_USERNAME` | string | `neo4j` | 用户名 |
 | `NEO4J_PASSWORD` | string | `password` | 密码 |
@@ -121,6 +122,20 @@ SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
 - `SearchNode` 的查询有两道上限，防止一个很短或很常见的实体名拉回整张图：
   - 只有至少有一条关系的实体才能作为展开起点，最多 200 个种子实体；排序为名称完全匹配优先，其次名称较短者，再按字母序；
   - 返回的（实体, 关系）行最多 2000 条，并沿用同样的排序，截断时保留排名靠前的种子的邻域。触达行数上限时记录 Warn 日志，提示结果已被截断。
+
+### 存储后端：PostgreSQL（可选）
+
+设置 `GRAPH_DATABASE_ENGINE=postgres` 且 `DB_DRIVER=postgres` 时，图谱写入与查询走
+`internal/application/repository/retriever/postgres/graph.go`，无需部署 Neo4j：
+
+- 迁移 `000135_postgres_graph_store` 创建 `graph_nodes`、`graph_node_chunks`、`graph_edges` 三张表；
+  节点按 `(knowledge_base_id, knowledge_id, name)` 唯一，一个文档一个实体实例。
+- 写入语义与 Neo4j 对齐：同名实体重复写入只累加 `chunks`（`graph_node_chunks` 用
+  `INSERT ... ON CONFLICT DO NOTHING` 原子去重），`attributes` 只在首次创建时写入；关系端点若不在节点列表中会被补建。
+- 查询语义与 Neo4j 对齐：`SearchNode` 只从"至少有一条关系"的实体展开，种子上限 200、行上限 2000，
+  名称完全匹配优先、其次较短名称；`SearchGraph` 保留无关系种子，种子上限 100、行上限 512，并通过
+  `candidate_seeds` / `candidate_relations` 报告截断；边方向按存储方向返回。
+- `GET /system` 报告 `"PostgreSQL"`；未启用任何后端时仍为 `"Not Enabled"`。
 
 ## 检索时的图谱增强（GraphRAG）
 

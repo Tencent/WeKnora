@@ -618,10 +618,13 @@ func (h *SystemHandler) getVectorStoreEngine() string {
 
 // getGraphDatabaseEngine returns the graph database engine name
 func (h *SystemHandler) getGraphDatabaseEngine() string {
-	if h.neo4jDriver == nil {
-		return "Not Enabled"
+	if h.neo4jDriver != nil {
+		return "Neo4j"
 	}
-	return "Neo4j"
+	if types.GraphStoreUsesPostgres() {
+		return "PostgreSQL"
+	}
+	return "Not Enabled"
 }
 
 // supportsRetrieverType checks if a driver supports a specific retriever type
