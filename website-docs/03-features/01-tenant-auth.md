@@ -107,6 +107,8 @@ func (c *AuthConfig) IsInviteOnly() bool {
 
 `DISABLE_REGISTRATION=true` 仍映射到原有的 `invite_only`。需要让受邀的新用户注册时，将全局设置改为 `invite_register`。禁止注册时，`POST /auth/register-by-invite` 也返回 403，与登录页行为一致。
 
+**全新部署例外**：当部署内一个账号都还没有时（`GET /auth/config` 的 `first_registration_open` 为 `true`），即便模式是 `invite_only` / `invite_register`，首位用户仍可自行注册。否则刚用 `DISABLE_REGISTRATION=true` 起步的部署会陷入死锁——没有账号能登录，`WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` 又只提升已存在的用户。首位账号落库后该例外立即关闭，行为回到上表（见 #1866）。
+
 这些档位控制密码注册。**OIDC 首次登录**仍由 IdP 的应用可见性、用户组等策略控制；管理员创建账号也不受此设置影响。
 
 #### 密码注册 / 登录 {#_2-2-密码注册-登录}
