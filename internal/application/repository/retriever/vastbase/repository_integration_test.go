@@ -92,7 +92,8 @@ func TestVastbaseEndToEnd(t *testing.T) {
 	if got := repo.EngineType(); got != types.VastbaseRetrieverEngineType {
 		t.Fatalf("engine type = %s", got)
 	}
-	if got := repo.Support(); len(got) != 2 || got[0] != types.VectorRetrieverType || got[1] != types.KeywordsRetrieverType {
+	if got := repo.Support(); len(got) != 2 || got[0] != types.VectorRetrieverType ||
+		got[1] != types.KeywordsRetrieverType {
 		t.Fatalf("support = %v", got)
 	}
 
@@ -110,7 +111,8 @@ func TestVastbaseEndToEnd(t *testing.T) {
 		t.Fatalf("row count = %d, want 200", count)
 	}
 	var idxCount int64
-	db.Raw("SELECT count(*) FROM pg_indexes WHERE tablename='embeddings' AND indexdef LIKE '%graph_index%'").Scan(&idxCount)
+	db.Raw("SELECT count(*) FROM pg_indexes WHERE tablename='embeddings' AND " +
+		"indexdef LIKE '%graph_index%'").Scan(&idxCount)
 	if idxCount != 1 {
 		t.Fatalf("graph_index count = %d, want 1", idxCount)
 	}
@@ -177,16 +179,26 @@ func TestVastbaseEndToEnd(t *testing.T) {
 	}
 
 	// --- Keyword channel: native BM25 full-text index ---
-	db.Raw("SELECT count(*) FROM pg_indexes WHERE tablename='embeddings' AND indexdef LIKE '%fulltext%'").Scan(&idxCount)
+	db.Raw("SELECT count(*) FROM pg_indexes WHERE tablename='embeddings' " +
+		"AND indexdef LIKE '%fulltext%'").Scan(&idxCount)
 	if idxCount != 1 {
 		t.Fatalf("fulltext index count = %d, want 1", idxCount)
 	}
 	// The default cn_tokenizer drops bare digits, so keyword fixtures use
 	// distinguishable natural-language tokens instead of the src-N content.
 	kinfos := []*types.IndexInfo{
-		{Content: "the quick brown fox jumps", SourceID: "kw-0", SourceType: 0, ChunkID: "chunk-kw-0", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true},
-		{Content: "the slow brown dog sleeps", SourceID: "kw-1", SourceType: 0, ChunkID: "chunk-kw-1", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true},
-		{Content: "a quick red cat runs", SourceID: "kw-2", SourceType: 0, ChunkID: "chunk-kw-2", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true},
+		{
+			Content: "the quick brown fox jumps", SourceID: "kw-0", SourceType: 0,
+			ChunkID: "chunk-kw-0", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true,
+		},
+		{
+			Content: "the slow brown dog sleeps", SourceID: "kw-1", SourceType: 0,
+			ChunkID: "chunk-kw-1", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true,
+		},
+		{
+			Content: "a quick red cat runs", SourceID: "kw-2", SourceType: 0,
+			ChunkID: "chunk-kw-2", KnowledgeID: "know-kw", KnowledgeBaseID: "kb-kw", IsEnabled: true,
+		},
 	}
 	kembs := make(map[string][]float32, len(kinfos))
 	for _, info := range kinfos {
@@ -300,7 +312,8 @@ func TestVastbaseEndToEnd(t *testing.T) {
 
 	// --- MoveKnowledgeIndices (KnowledgeIndexMover) ---
 	mover, ok := repoIface.(interface {
-		MoveKnowledgeIndices(ctx context.Context, sourceKB, targetKB, knowledgeID string, _ []string, _ int, _ string) error
+		MoveKnowledgeIndices(ctx context.Context, sourceKB, targetKB, knowledgeID string,
+			_ []string, _ int, _ string) error
 	})
 	if !ok {
 		t.Fatalf("repository does not implement KnowledgeIndexMover")
@@ -406,7 +419,7 @@ func TestVastbaseGraphIndexPerformance(t *testing.T) {
 		}
 		planLines = append(planLines, line)
 	}
-	rows.Close()
+	_ = rows.Close()
 	plan := strings.Join(planLines, "\n")
 	if !strings.Contains(plan, "ANN Index Scan") {
 		t.Fatalf("query plan does not use the Graph_Index:\n%s", plan)
