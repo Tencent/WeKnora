@@ -31,6 +31,56 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 工具人工审批通过后，如果 OAuth 尚未授权或已经失效，对话会继续给出 OAuth 授权入口；工具审批与第三方授权是两个独立步骤。无需浏览器的调用者可使用 JWT Bearer 断言换取自身主体的 token，前提是上游支持该授权方式，详见 [OAuth API](../04-api/02-api-agent-mcp.md)。
 
+### 示例：百智云浏览器的账户与资源管理
+
+[百智云浏览器（Baizhi Cloud Browser，也即 CapyBrowser）](https://baizhibrowser.cloud/)
+提供云浏览器账户校验、Session / Profile 管理等 MCP 工具。适用于希望在对话中查询和管理
+云浏览器资源的用户，需要自行开通服务并取得 API Key；云浏览器运行费用与模型费用分别计算。
+
+此连接由空间管理员配置。新服务可能被使用「全部 MCP 服务」的智能体发现；接入前先检查
+这些智能体的使用范围，将服务只分配给获准使用该百智账户的智能体。共享此连接不等于
+每位空间成员各有独立的百智账户，需要隔离时应分别配置获授权的账户和连接。
+
+在「工具箱 → MCP服务」新建服务，通过「从代码导入」粘贴：
+
+```json
+{
+  "mcpServers": {
+    "baizhi-cloud-browser": {
+      "type": "http",
+      "url": "https://capybrowser.app.baizhi.cloud/mcp",
+      "headers": {
+        "Authorization": "Bearer <YOUR_CAPY_API_KEY>"
+      }
+    }
+  }
+}
+```
+
+将 `<YOUR_CAPY_API_KEY>` 替换为你自己的 Key。导入后核对传输为 Streamable HTTP，认证为
+「API Key / Token」，请求头名称为 `Authorization`，密钥值为 `Bearer ` 加完整 Key。
+`Bearer` 后有一个空格；不要只填 `Bearer`，也不要重复添加前缀。此表单不会自动展开
+`${CAPY_API_KEY}` 等环境变量占位符。Key 会交给你部署的 WeKnora 后端，并在工具请求中
+发送到百智云服务；不要把填过真实 Key 的配置放进公开文档或共享聊天。
+
+保存后测试连接、同步工具，初次验证仅启用 `browser_auth_check`，暂时禁用其余工具。
+填写使用说明，例如「仅在用户要求管理百智云浏览器资源时使用；先校验凭据，创建运行前
+确认账户和费用，结束时停止本次创建的运行并核对释放状态」。在测试智能体中选中此服务，发送：
+
+> 只调用一次 browser_auth_check，仅报告校验成功或失败，不复述账户详情，不创建浏览器运行。
+
+发现工具或账户校验成功，仅表示连接可用。此 MCP 负责云资源管理；页面导航、点击等操作
+需要另接兼容的 CDP 客户端。它不会自动把 WeKnora 的 BrowserSkill 或本地 Chrome 连接到云端。
+若后续要创建运行，请先阅读[服务安装与生命周期说明](https://capybrowser.app.baizhi.cloud/docs/installation.md)，
+逐项启用所需工具，并给创建、停止等操作开启「调用需审批」。
+
+移除连接前，停止自己为本次任务创建的运行，并确认其状态为 `released`；停止失败时先保留
+运行标识并通过百智控制台处理。禁用工具、删除 MCP 服务或关闭聊天均不会自动释放云运行。
+仅做上述账户校验时无需创建或释放运行。
+
+相关接入材料由 [ctcbyzx](https://github.com/ctcbyzx/baizhi-cloud-browser) 维护；
+接入问题可到[反馈入口](https://github.com/ctcbyzx/baizhi-cloud-browser/issues)报告。
+
 ## 供外部客户端调用
 
 在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面给出 Cursor 可用的 `mcpServers` JSON、VS Code 专用的 `servers` JSON、Claude Code 的一行命令，以及 STDIO 备用配置。将 VS Code 选项卡中的 JSON 写入工作区的 `.vscode/mcp.json`；若已有配置，请将对应条目合并到现有 `servers` 对象中，保留其他服务。该配置使用 `type: "http"`、端点 URL 和 `Authorization` 请求头，无需桥接进程。Claude Desktop 需在自定义连接器中填写可访问的 HTTPS 地址，并在可用时选择「无需登录」和 Request headers；该请求头功能为有限开放的测试版，并非所有组织都可用。
