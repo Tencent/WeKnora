@@ -66,6 +66,22 @@ var (
 		WebBaseURL:    larkWebBaseURL,
 		Label:         "LarkDrive",
 	}
+
+	// RegionFeishuLingo is the Chinese mainland cloud, Lingo (词典) mode.
+	RegionFeishuLingo = Region{
+		ConnectorType: types.ConnectorTypeFeishuLingo,
+		OpenBaseURL:   feishuOpenBaseURL,
+		WebBaseURL:    feishuWebBaseURL,
+		Label:         "FeishuLingo",
+	}
+
+	// RegionLarkLingo is the international cloud, Lingo mode.
+	RegionLarkLingo = Region{
+		ConnectorType: types.ConnectorTypeLarkLingo,
+		OpenBaseURL:   larkOpenBaseURL,
+		WebBaseURL:    larkWebBaseURL,
+		Label:         "LarkLingo",
+	}
 )
 
 // WikiURL builds the user-facing link to a wiki space or node on this cloud.

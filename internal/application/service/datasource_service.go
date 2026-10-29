@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"reflect"
 	"slices"
@@ -624,7 +625,104 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 	return log, nil
 }
 
-// ProcessSync handles the actual sync operation (called by asynq task)
+// maxAdoptedDocumentBytes bounds how much of an existing document is read while
+// looking for a legacy external ID. Dictionary entries are small; the cap keeps
+// a malformed or binary document from consuming unbounded memory.
+const maxAdoptedDocumentBytes = 2 << 20
+
+// adoptExistingKnowledge binds documents that were imported before this data
+// source existed to the data source, keyed by the external ID the connector
+// recognises in their content. It is a one-time migration for users moving from
+// a standalone import script to a native data source: without it the first sync
+// would create a second copy of every document.
+//
+// Documents already owned by another data source or already bound are left
+// untouched. Per-document read/write failures are logged and skipped; only the
+// initial listing failure aborts the sync.
+func (s *DataSourceService) adoptExistingKnowledge(
+	ctx context.Context,
+	ds *types.DataSource,
+	adopter datasource.ExistingDocumentAdopter,
+	config *types.DataSourceConfig,
+) (int, error) {
+	if ds == nil || s.knowledgeService == nil {
+		return 0, nil
+	}
+	repo := s.knowledgeService.GetRepository()
+	documents, err := repo.ListKnowledgeByKnowledgeBaseID(ctx, ds.TenantID, ds.KnowledgeBaseID)
+	if err != nil {
+		return 0, fmt.Errorf("list knowledge for adoption: %w", err)
+	}
+
+	adopted, skipped := 0, 0
+	seen := make(map[string]string, len(documents))
+	for _, doc := range documents {
+		if doc == nil {
+			continue
+		}
+		metadata := doc.GetMetadata()
+		if metadata == nil {
+			metadata = make(map[string]string)
+		}
+		if owner := strings.TrimSpace(metadata["datasource_id"]); owner != "" && owner != ds.ID {
+			continue
+		}
+		if strings.TrimSpace(metadata["external_id"]) != "" {
+			continue
+		}
+
+		file, _, readErr := s.knowledgeService.GetKnowledgeFile(ctx, doc.ID)
+		if readErr != nil {
+			logger.Warnf(ctx, "[DataSource] adoption: read knowledge %s failed: %v", doc.ID, readErr)
+			skipped++
+			continue
+		}
+		content, readErr := io.ReadAll(io.LimitReader(file, maxAdoptedDocumentBytes))
+		_ = file.Close()
+		if readErr != nil {
+			logger.Warnf(ctx, "[DataSource] adoption: read knowledge %s content failed: %v", doc.ID, readErr)
+			skipped++
+			continue
+		}
+
+		externalID := strings.TrimSpace(adopter.ExternalIDFromDocument(ctx, config, doc.Title, content))
+		if externalID == "" {
+			continue
+		}
+		if other, exists := seen[externalID]; exists {
+			logger.Warnf(ctx,
+				"[DataSource] adoption: external_id=%s is already bound to knowledge %s; leaving %s unmapped",
+				externalID, other, doc.ID)
+			skipped++
+			continue
+		}
+
+		metadata["datasource_id"] = ds.ID
+		metadata["external_id"] = externalID
+		metadata["external_id_adopted"] = "true"
+		raw, marshalErr := json.Marshal(metadata)
+		if marshalErr != nil {
+			logger.Warnf(ctx, "[DataSource] adoption: marshal metadata for %s failed: %v", doc.ID, marshalErr)
+			skipped++
+			continue
+		}
+		if updateErr := repo.UpdateKnowledgeColumns(ctx, doc.ID, map[string]interface{}{
+			"metadata": types.JSON(raw),
+		}); updateErr != nil {
+			logger.Warnf(ctx, "[DataSource] adoption: update knowledge %s failed: %v", doc.ID, updateErr)
+			skipped++
+			continue
+		}
+		seen[externalID] = doc.ID
+		adopted++
+	}
+
+	logger.Infof(ctx, "[DataSource] adoption complete: ds=%s scanned=%d adopted=%d skipped=%d",
+		ds.ID, len(documents), adopted, skipped)
+	return adopted, nil
+}
+
+// ProcessSync handles the actual sync operation (called by asynq task).
 func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
 	var payload types.DataSourceSyncPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
@@ -705,6 +803,31 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
+	// One-time migration: documents imported before this data source existed
+	// carry no datasource_id/external_id metadata. Bind the ones the connector
+	// recognises so the first sync updates them instead of duplicating them.
+	if cursor, _ := ds.ParseSyncCursor(); cursor == nil || len(cursor.ConnectorCursor) == 0 {
+		if adopter, ok := connector.(datasource.ExistingDocumentAdopter); ok {
+			adopted, adoptErr := s.adoptExistingKnowledge(ctx, ds, adopter, config)
+			if adoptErr != nil {
+				logger.Errorf(ctx, "failed to adopt existing knowledge: %v", adoptErr)
+				syncLog.Status = types.SyncLogStatusFailed
+				syncLog.FinishedAt = timePtr(time.Now().UTC())
+				syncLog.ErrorMessage = fmt.Sprintf("Adopt existing knowledge failed: %v", adoptErr)
+				_ = s.syncLogRepo.Update(ctx, syncLog)
+				if !wasPaused {
+					ds.Status = types.DataSourceStatusError
+				}
+				ds.ErrorMessage = syncLog.ErrorMessage
+				_ = s.dsRepo.Update(ctx, ds)
+				return adoptErr
+			}
+			if adopted > 0 {
+				logger.Infof(ctx, "adopted %d existing documents into data source %s", adopted, ds.ID)
+			}
+		}
+	}
+
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.

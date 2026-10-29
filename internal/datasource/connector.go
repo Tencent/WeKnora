@@ -6,6 +6,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// ExistingDocumentAdopter is an optional connector capability used for one-time
+// migration. Some connectors import documents that were created before the data
+// source existed (for example by a standalone script using the knowledge API).
+// Those rows have no datasource_id/external_id metadata, so a normal sync would
+// create duplicates. The service calls ExternalIDFromDocument for each existing
+// document on the first sync and binds the ones this connector recognises.
+type ExistingDocumentAdopter interface {
+	// ExternalIDFromDocument returns the source external ID represented by an
+	// already-ingested document, or "" when the document is not from this source.
+	// content is the document's readable content as stored by WeKnora.
+	ExternalIDFromDocument(ctx context.Context, config *types.DataSourceConfig, title string, content []byte) string
+}
+
 // Connector is the interface that all external data source connectors must implement.
 // Each connector (Feishu, Notion, Confluence, etc.) provides an implementation of this interface.
 type Connector interface {
@@ -204,6 +217,22 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Description:  "Sync documents and files from a Lark Drive folder",
 		Priority:     0,
 		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
+	types.ConnectorTypeFeishuLingo: {
+		Type:         types.ConnectorTypeFeishuLingo,
+		Name:         "Feishu Lingo (飞书词典)",
+		Description:  "Sync dictionary terms from Feishu Lingo into a knowledge base folder",
+		Priority:     1,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
+	types.ConnectorTypeLarkLingo: {
+		Type:         types.ConnectorTypeLarkLingo,
+		Name:         "Lark Lingo",
+		Description:  "Sync dictionary terms from Lark Lingo into a knowledge base folder",
+		Priority:     1,
+		AuthType:     "api_key",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeNotion: {
