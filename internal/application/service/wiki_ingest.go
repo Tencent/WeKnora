@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"regexp"
 	"sort"
 	"strings"
@@ -389,17 +390,18 @@ type WikiPendingOp struct {
 // both of which are correctness-critical short-lived flags rather
 // than data the system should survive without.
 type wikiIngestService struct {
-	wikiService    interfaces.WikiPageService
-	kbService      interfaces.KnowledgeBaseService
-	knowledgeSvc   interfaces.KnowledgeService
-	knowledgeRepo  interfaces.KnowledgeRepository
-	chunkRepo      interfaces.ChunkRepository
-	modelService   interfaces.ModelService
-	task           interfaces.TaskEnqueuer
-	audit          interfaces.AuditLogService
-	pendingRepo    interfaces.TaskPendingOpsRepository
-	deadLetterRepo interfaces.TaskDeadLetterRepository
-	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	processingCache *processingcache.Runtime
+	wikiService     interfaces.WikiPageService
+	kbService       interfaces.KnowledgeBaseService
+	knowledgeSvc    interfaces.KnowledgeService
+	knowledgeRepo   interfaces.KnowledgeRepository
+	chunkRepo       interfaces.ChunkRepository
+	modelService    interfaces.ModelService
+	task            interfaces.TaskEnqueuer
+	audit           interfaces.AuditLogService
+	pendingRepo     interfaces.TaskPendingOpsRepository
+	deadLetterRepo  interfaces.TaskDeadLetterRepository
+	redisClient     *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
 	// batch design means we look up the parent attempt by knowledge
@@ -2470,6 +2472,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	// share no trigram signal and were never candidates for each other).
 	candidatePages := make(map[string]*types.WikiPageLite)
 	itemCandidates := make(map[string]map[string]bool)
+	candidateLookupFailed := false
 	probe := func(item extractedItem) {
 		queries := make([]string, 0, 1+len(item.Aliases))
 		if item.Name != "" {
@@ -2491,6 +2494,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 				dedupCandidateTopK)
 			if err != nil {
 				logger.Warnf(ctx, "wiki ingest: dedup FindSimilarPages(%q) failed: %v", q, err)
+				candidateLookupFailed = true
 				continue
 			}
 			for _, p := range pages {
@@ -2581,10 +2585,10 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		writeDedupCandidateGroup(&candBuf, item, itemType, pages)
 		groups++
 	}
-	for _, item := range entities {
+	for _, item := range sortedWikiCacheItems(entities) {
 		renderGroup(item, "entity")
 	}
-	for _, item := range concepts {
+	for _, item := range sortedWikiCacheItems(concepts) {
 		renderGroup(item, "concept")
 	}
 	if groups == 0 {
@@ -2592,7 +2596,11 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		return stabilize()
 	}
 
-	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
+	dedupCtx := ctx
+	if candidateLookupFailed {
+		dedupCtx = withProcessingCacheBypass(ctx)
+	}
+	dedupeJSON, err := s.generateWithTemplate(dedupCtx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
 		"Candidates": candBuf.String(),
 	})
 	if err != nil {
@@ -2760,9 +2768,10 @@ func (s *wikiIngestService) generateWithTemplateResult(
 
 	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
 	requestJSON, _ := json.Marshal(struct {
-		Messages []chat.Message    `json:"messages"`
-		Options  *chat.ChatOptions `json:"options"`
-	}{Messages: messages, Options: opts})
+		Messages                    []chat.Message    `json:"messages"`
+		Options                     *chat.ChatOptions `json:"options"`
+		ModelIdentity, Document, KB string
+	}{Messages: messages, Options: opts, ModelIdentity: processingModelIdentity(chatModel), Document: processingDocument(ctx), KB: wikiProcessingKB(ctx)})
 	requestKey := chat.BuildPromptCacheKey(
 		tenantID, chatModel.GetModelID(), "wiki_exact_request",
 		chat.FingerprintPromptPrefix(string(requestJSON)),
@@ -2885,10 +2894,14 @@ func (s *wikiIngestService) generateWithTemplateResult(
 		return wikiTemplateResult{Content: content, FinishReason: finishReason}, nil
 	}
 
-	// Missing tenant context is unexpected for production Wiki work. Fail safe
-	// by skipping cross-call coalescing instead of putting unrelated requests
+	uncachedExecute := execute
+	execute = func() (interface{}, error) {
+		return s.cachedWikiMapResult(ctx, chatModel, promptTpl, messages, opts, maskedData, uncachedExecute)
+	}
+
+	// Missing tenant context fails safe by skipping cross-call coalescing
 	// into a synthetic tenant-0 bucket.
-	if !tenantScoped {
+	if !tenantScoped || (s.processingCache.Enabled() && wikiMapCacheStage(promptTpl) != "" && processingModelIdentity(chatModel) == "") {
 		value, executeErr := execute()
 		if executeErr != nil {
 			return wikiTemplateResult{}, executeErr

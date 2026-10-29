@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"io"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 // OllamaChat 实现了基于 Ollama 的聊天
 type OllamaChat struct {
+	cacheIdentity string
 	modelName     string
 	modelID       string
 	ollamaService *ollama.OllamaService
@@ -26,7 +28,14 @@ type OllamaChat struct {
 
 // NewOllamaChat 创建 Ollama 聊天实例
 func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*OllamaChat, error) {
-	return &OllamaChat{
+	identity := ""
+	if ollamaService != nil && ollamaService.BaseURL() != "" {
+		identity = processingcache.Digest(struct {
+			Config   *ChatConfig
+			Endpoint string
+		}{config, ollamaService.BaseURL()})
+	}
+	return &OllamaChat{cacheIdentity: identity,
 		modelName:     config.ModelName,
 		modelID:       config.ModelID,
 		ollamaService: ollamaService,

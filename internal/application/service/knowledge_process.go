@@ -1358,7 +1358,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	})
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "document_summary", "")
-	summary, err := summaryModel.Chat(modelCtx, []chat.Message{
+	messages := []chat.Message{
 		{
 			Role:    "system",
 			Content: summaryPrompt,
@@ -1367,21 +1367,38 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 			Role:    "user",
 			Content: contentWithMetadata,
 		},
-	}, &chat.ChatOptions{
+	}
+	options := &chat.ChatOptions{
 		Temperature: 0.3,
 		MaxTokens:   maxTokens,
 		Thinking:    &thinking,
-	})
-	if err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
-		return nil, err
 	}
-	content, err := validateStructuredSummaryDocument(summary)
-	if err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned no usable content")
-		return nil, err
-	}
-	result, err := parseDocumentSummaryOutput(content)
+	result, err := cachedProcessingModelValue(modelCtx, s.processingCache, knowledge.TenantID, knowledge.ID,
+		"document.summary.v1", summaryModel, messages, options, nil,
+		func(v *documentSummaryResult) error {
+			if v == nil || strings.TrimSpace(v.Summary) == "" {
+				return errEmptySummaryOutput
+			}
+			return nil
+		},
+		func(ctx context.Context, messages []chat.Message) (*documentSummaryResult, error) {
+			summary, err := summaryModel.Chat(ctx, messages, options)
+			if err != nil {
+				return nil, err
+			}
+			content, err := validateStructuredSummaryDocument(summary)
+			if err != nil {
+				return nil, err
+			}
+			result, err := parseDocumentSummaryOutput(content)
+			if err != nil {
+				return nil, err
+			}
+			if err := completeProcessingResponse(summary); err != nil {
+				return result, errProcessingCacheAdmission
+			}
+			return result, nil
+		})
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned unusable content")
 		return nil, err
@@ -1460,10 +1477,13 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return nil
 	}
 	if payload.Refresh {
+		if payload.BypassCache {
+			ctx = withProcessingCacheBypass(ctx)
+		}
 		var err error
 		ctx, err = restoreSummaryRefreshTenantInfo(ctx, s.tenantRepo, payload.TenantID)
 		if err == nil {
-			_, err = s.RegenerateKnowledgeSummary(ctx, payload.KnowledgeID)
+			_, err = s.regenerateKnowledgeSummary(ctx, payload.KnowledgeID)
 		}
 		if err != nil {
 			if errors.Is(err, ErrSummaryRefreshStale) {
@@ -2150,7 +2170,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 		generationRevision := chunk.ContentRevision
 		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
+		questions, err := s.generateQuestionsWithContext(withProcessingDocument(ctx, knowledge.ID), chatModel, enrichContent(chunk), prevContent, nextContent,
 			knowledge.Title, questionCount, customInstructions)
 		if err != nil {
 			llmCallFailed++
@@ -2509,7 +2529,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 		generationRevision := chunk.ContentRevision
 		questions, gerr := s.generateQuestionsWithContext(
-			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+			withProcessingDocument(ctx, knowledge.ID), chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
 			customInstructions)
 		if gerr != nil {
 			llmCallFailed++
@@ -2642,21 +2662,40 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 
 	thinking := false
 	modelCtx := types.WithLLMCallMetadata(ctx, "question_generation", "")
-	response, err := chatModel.Chat(modelCtx, []chat.Message{
+	messages := []chat.Message{
 		{
 			Role:    "user",
 			Content: prompt,
 		},
-	}, &chat.ChatOptions{
+	}
+	options := &chat.ChatOptions{
 		Temperature: 0.7,
 		MaxTokens:   generateQuestionsMaxTokens(),
 		Thinking:    &thinking,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	return cachedProcessingModelValue(modelCtx, s.processingCache, tenantID, processingDocument(ctx),
+		"document.questions.v1", chatModel, messages, options, struct{ Count int }{questionCount},
+		func(v []string) error {
+			if v == nil {
+				return fmt.Errorf("null questions")
+			}
+			return nil
+		},
+		func(ctx context.Context, messages []chat.Message) ([]string, error) {
+			response, err := chatModel.Chat(ctx, messages, options)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate questions: %w", err)
+			}
+			if err := completeProcessingResponse(response); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(response.Content) == "" {
+				return []string{}, errProcessingCacheAdmission
+			}
 
-	return parseGeneratedQuestions(response.Content, questionCount), nil
+			return parseGeneratedQuestions(response.Content, questionCount), nil
+		})
 }
 
 // parseGeneratedQuestions drops inline <think> reasoning first: servers that
@@ -2723,6 +2762,7 @@ func generatedQuestionLines(content string) []string {
 func (s *knowledgeService) RegenerateChunkQuestions(
 	ctx context.Context, chunkID string,
 ) ([]types.GeneratedQuestion, error) {
+	ctx = withProcessingCacheBypass(ctx)
 	tenantID := types.MustTenantIDFromContext(ctx)
 	chunk, err := s.chunkRepo.GetChunkByID(ctx, tenantID, chunkID)
 	if err != nil {
@@ -2812,6 +2852,10 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 func (s *knowledgeService) RegenerateKnowledgeSummary(
 	ctx context.Context, knowledgeID string,
 ) (*types.Knowledge, error) {
+	return s.regenerateKnowledgeSummary(withProcessingCacheBypass(ctx), knowledgeID)
+}
+
+func (s *knowledgeService) regenerateKnowledgeSummary(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
@@ -4477,7 +4521,7 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
-	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	result, err := s.readDocumentWithCache(ctx, reader, req, knowledge)
 	// Parser resource limits are permanent document rejections, not transient reader failures.
 	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
 		result, err = &types.ReadResult{Error: err.Error()}, nil

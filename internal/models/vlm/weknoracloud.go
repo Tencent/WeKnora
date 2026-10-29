@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"io"
 	"net/http"
 	"strings"
@@ -26,6 +27,7 @@ const (
 
 // WeKnoraCloudVLM implements VLM via the WeKnoraCloud API.
 type WeKnoraCloudVLM struct {
+	cacheIdentity   string
 	modelName       string
 	remoteModelName string
 	modelID         string
@@ -55,7 +57,10 @@ func NewWeKnoraCloudVLM(config *Config) (*WeKnoraCloudVLM, error) {
 			}
 		}
 	}
-	return &WeKnoraCloudVLM{
+	return &WeKnoraCloudVLM{cacheIdentity: processingcache.Digest(struct {
+		Config                *Config
+		Endpoint, RemoteModel string
+	}{config, baseURL + weKnoraCloudVLMPath, remoteModelName}),
 		modelName:       config.ModelName,
 		remoteModelName: remoteModelName,
 		modelID:         config.ModelID,

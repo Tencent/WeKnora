@@ -12,6 +12,7 @@ import (
 	docclient "github.com/Tencent/WeKnora/docreader/client"
 	"github.com/Tencent/WeKnora/docreader/proto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -37,10 +38,11 @@ func getMaxFileSize() int {
 
 // GRPCDocumentReader implements DocumentReader over gRPC.
 type GRPCDocumentReader struct {
-	mu     sync.RWMutex
-	conn   *grpc.ClientConn
-	client proto.DocReaderClient
-	addr   string
+	mu            sync.RWMutex
+	conn          *grpc.ClientConn
+	client        proto.DocReaderClient
+	addr          string
+	cacheIdentity string
 }
 
 func NewGRPCDocumentReader(addr string) (*GRPCDocumentReader, error) {
@@ -79,7 +81,23 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 	p.conn = conn
 	p.client = proto.NewDocReaderClient(conn)
 	p.addr = addr
+	// Remote deployments do not expose a verifiable engine version over this
+	// protocol. Operators opt in with a deployment version and bump it on any
+	// parser/model/config change. Without one, preprocessing remains uncached.
+	p.cacheIdentity = ""
+	if version := os.Getenv("DOCREADER_CACHE_VERSION"); version != "" {
+		p.cacheIdentity = processingcache.Digest(struct {
+			Endpoint, Version string
+			Auth              *docclient.AuthConfig
+		}{addr, version, authConfig})
+	}
 	return nil
+}
+
+func (p *GRPCDocumentReader) ProcessingCacheIdentity() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.cacheIdentity
 }
 
 func (p *GRPCDocumentReader) Reconnect(addr string) error {
@@ -91,6 +109,7 @@ func (p *GRPCDocumentReader) Reconnect(addr string) error {
 		p.conn = nil
 		p.client = nil
 		p.addr = ""
+		p.cacheIdentity = ""
 	}
 	return p.connect(addr)
 }

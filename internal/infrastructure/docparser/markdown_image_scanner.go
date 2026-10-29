@@ -66,6 +66,26 @@ func StripMarkdownImages(markdown string) string {
 	return b.String()
 }
 
+// MaskMarkdownImageDestinations retains image alt text and titles while removing
+// storage locations from text-only model inputs, including balanced parentheses.
+func MaskMarkdownImageDestinations(markdown, replacement string) string {
+	var b strings.Builder
+	last := 0
+	for _, span := range scanMarkdownImageTargets(markdown) {
+		raw := strings.TrimSpace(markdown[span.TargetStart:span.TargetEnd])
+		title := ""
+		if start, ok := parseMarkdownImageTitleSuffix(raw); ok {
+			title = " " + raw[start:]
+		}
+		b.WriteString(markdown[last:span.TargetStart])
+		b.WriteString(replacement)
+		b.WriteString(title)
+		last = span.TargetEnd
+	}
+	b.WriteString(markdown[last:])
+	return b.String()
+}
+
 func findMarkdownImageAltEnd(markdown string, start int) int {
 	for i := start; i+1 < len(markdown); i++ {
 		if markdown[i] == ']' && markdown[i+1] == '(' && !isEscaped(markdown, i) {

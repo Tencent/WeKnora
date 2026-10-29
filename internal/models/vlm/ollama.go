@@ -3,6 +3,7 @@ package vlm
 import (
 	"context"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -11,6 +12,7 @@ import (
 
 // OllamaVLM implements VLM via the local Ollama service.
 type OllamaVLM struct {
+	cacheIdentity string
 	modelName     string
 	modelID       string
 	ollamaService *ollama.OllamaService
@@ -21,7 +23,14 @@ func NewOllamaVLM(config *Config, ollamaService *ollama.OllamaService) (*OllamaV
 	if ollamaService == nil {
 		return nil, fmt.Errorf("ollama service is required for local VLM model")
 	}
-	return &OllamaVLM{
+	identity := ""
+	if ollamaService.BaseURL() != "" {
+		identity = processingcache.Digest(struct {
+			Config   *Config
+			Endpoint string
+		}{config, ollamaService.BaseURL()})
+	}
+	return &OllamaVLM{cacheIdentity: identity,
 		modelName:     config.ModelName,
 		modelID:       config.ModelID,
 		ollamaService: ollamaService,

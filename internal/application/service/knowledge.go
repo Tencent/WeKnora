@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"io"
 	"reflect"
 	"sort"
@@ -48,6 +49,7 @@ var (
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {
+	processingCache *processingcache.Runtime
 	config          *config.Config
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership

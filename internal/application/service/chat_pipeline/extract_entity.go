@@ -186,13 +186,13 @@ func NewExtractor(
 
 // Extract extracts entities from content
 func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphData, error) {
-	generator := NewQAPromptGenerator(e.formater, e.template)
+	messages, options := e.ProcessingRequest(ctx, content)
 
 	// logger.Debugf(ctx, "chat system: %s", generator.System(ctx))
 	// logger.Debugf(ctx, "chat user: %s", generator.User(ctx, content))
 
 	modelCtx := types.WithLLMCallMetadata(ctx, "entity_extraction", "")
-	chatResponse, err := e.chat.Chat(modelCtx, generator.Render(ctx, content), e.chatOpt)
+	chatResponse, err := e.chat.Chat(modelCtx, messages, options)
 	if err != nil {
 		logger.Errorf(ctx, "failed to chat: %v", err)
 		return nil, err
@@ -213,6 +213,14 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 	}
 	// e.RemoveUnknownRelation(ctx, graph)
 	return graph, nil
+}
+
+// ProcessingRequest exposes the exact rendered request for ingestion caching;
+// it shares the extractor's formatter, prompt and completion settings.
+func (e *Extractor) ProcessingRequest(ctx context.Context, content string) ([]chat.Message, *chat.ChatOptions) {
+	generator := NewQAPromptGenerator(e.formater, e.template)
+	options := *e.chatOpt
+	return generator.Render(ctx, content), &options
 }
 
 // RemoveUnknownRelation removes unknown relations from graph
