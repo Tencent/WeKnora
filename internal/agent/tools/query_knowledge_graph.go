@@ -19,6 +19,8 @@ type graphConfigSummary struct {
 	Relations []string
 }
 
+var errGraphQueryPanicked = errors.New("knowledge graph query failed with an internal error")
+
 var queryKnowledgeGraphTool = BaseTool{
 	name: ToolQueryKnowledgeGraph,
 	description: "Query the knowledge graph of graph-enabled knowledge bases to explore how entities relate " +
@@ -309,11 +311,22 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				kbResults[id] = res
 				mu.Unlock()
 			}()
+			// This worker calls the knowledge service and retrieval adapter
+			// directly. executeRecovered only covers Tool.Execute on the
+			// caller's goroutine, so a panic here would otherwise take down
+			// the whole process.
+			defer RecoverGoroutine(ctx, "query knowledge graph worker for "+id, func() {
+				res.err = errGraphQueryPanicked
+			})
 
 			// Get knowledge base to check graph configuration
 			kb, err := t.knowledgeService.GetKnowledgeBaseByIDOnly(ctx, id)
 			if err != nil {
 				res.err = fmt.Errorf("failed to get knowledge base: %v", err)
+				return
+			}
+			if kb == nil {
+				res.err = fmt.Errorf("knowledge base %s not found", id)
 				return
 			}
 			res.kb = kb
