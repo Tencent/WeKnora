@@ -10,6 +10,66 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSortByScoreDescBreaksTiesByChunkID(t *testing.T) {
+	a := &types.IndexWithScore{ChunkID: "a", Score: 1}
+	b := &types.IndexWithScore{ChunkID: "b", Score: 1}
+	require.Negative(t, sortByScoreDesc(a, b))
+	require.Positive(t, sortByScoreDesc(b, a))
+	require.Zero(t, sortByScoreDesc(a, a))
+}
+
+func TestBestRanksTiedScoresIgnoreInputOrder(t *testing.T) {
+	lists := [][]*types.IndexWithScore{{
+		{ChunkID: "c", Score: 1},
+		{ChunkID: "a", Score: 1},
+		{ChunkID: "b", Score: 1},
+		{ChunkID: "high", Score: 2},
+		{ChunkID: "a", Score: 0.5},
+	}}
+	want := map[string]int{"high": 1, "a": 2, "b": 3, "c": 4}
+	for range 20 {
+		require.Equal(t, want, bestRanks(lists))
+		slices.Reverse(lists[0])
+	}
+}
+
+func TestFuseOrDeduplicateTiedScoresAreRepeatable(t *testing.T) {
+	for _, mode := range []string{"vector", "keyword", "hybrid"} {
+		t.Run(mode, func(t *testing.T) {
+			makeHits := func(reverse bool) []*types.IndexWithScore {
+				hits := []*types.IndexWithScore{
+					{ChunkID: "c", Score: 1},
+					{ChunkID: "a", Score: 1},
+					{ChunkID: "b", Score: 1},
+				}
+				if reverse {
+					slices.Reverse(hits)
+				}
+				return hits
+			}
+			for i := range 20 {
+				var vector, keyword [][]*types.IndexWithScore
+				if mode != "keyword" {
+					vector = [][]*types.IndexWithScore{makeHits(i%2 == 0)}
+				}
+				if mode != "vector" {
+					keyword = [][]*types.IndexWithScore{makeHits(i%2 != 0)}
+				}
+				got := fuseOrDeduplicate(context.Background(), vector, keyword, nil)
+				require.Len(t, got, 3)
+				for rank, id := range []string{"a", "b", "c"} {
+					require.Equal(t, id, got[rank].ChunkID)
+					wantScore := 1.0
+					if mode == "hybrid" {
+						wantScore = 61.0 / float64(61+rank)
+					}
+					require.InDelta(t, wantScore, got[rank].Score, 1e-9)
+				}
+			}
+		})
+	}
+}
+
 func TestFuseOrDeduplicate_KeywordOnlyRescalesUnboundedBM25(t *testing.T) {
 	t.Parallel()
 
