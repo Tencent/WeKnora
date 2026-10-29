@@ -2450,6 +2450,15 @@ definitions:
     - ChunkTypeWikiPage
   github_com_Tencent_WeKnora_internal_types.ChunkingConfig:
     properties:
+      child_chunk_overlap:
+        description: |-
+          ChildChunkOverlap controls overlap between embedded child chunks. Nil
+          preserves the historical child-size/5 default; a pointer allows callers
+          to explicitly configure zero overlap.
+        maximum: 5000
+        minimum: 0
+        type: integer
+        x-agent: true
       child_chunk_size:
         description: |-
           ChildChunkSize is the size of child chunks used for embedding (default: 384).
@@ -11413,6 +11422,8 @@ definitions:
       documentSplitting:
         description: 文档分块配置
         properties:
+          childChunkOverlap:
+            type: integer
           childChunkSize:
             type: integer
           chunkOverlap:
@@ -12625,6 +12636,8 @@ definitions:
     type: object
   internal_handler.PreviewChunkingPayload:
     properties:
+      child_chunk_overlap:
+        type: integer
       child_chunk_size:
         type: integer
       chunk_overlap:

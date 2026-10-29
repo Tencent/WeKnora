@@ -233,7 +233,7 @@
                             />
                           </div>
                         </div>
-                        <div class="setting-row">
+                        <div v-if="!uiState.chunkingConfig.enableParentChild" class="setting-row">
                           <div class="setting-info">
                             <label>{{ t('knowledgeEditor.chunking.sizeLabel') }}</label>
                             <p class="desc">{{ t('knowledgeEditor.chunking.sizeDescription') }}</p>
@@ -251,8 +251,8 @@
                         </div>
                         <div class="setting-row">
                           <div class="setting-info">
-                            <label>{{ t('knowledgeEditor.chunking.overlapLabel') }}</label>
-                            <p class="desc">{{ t('knowledgeEditor.chunking.overlapDescription') }}</p>
+                            <label>{{ t(uiState.chunkingConfig.enableParentChild ? 'knowledgeEditor.chunking.parentChunkOverlapLabel' : 'knowledgeEditor.chunking.overlapLabel') }}</label>
+                            <p class="desc">{{ t(uiState.chunkingConfig.enableParentChild ? 'knowledgeEditor.chunking.parentChunkOverlapDescription' : 'knowledgeEditor.chunking.overlapDescription') }}</p>
                           </div>
                           <div class="setting-control">
                             <t-input-number
@@ -344,7 +344,23 @@
                             <label>{{ t('knowledgeEditor.chunking.childChunkSizeLabel') }}</label>
                           </div>
                           <div class="setting-control">
-                            <t-input-number v-model="uiState.chunkingConfig.childChunkSize" :min="64" :max="2048" :step="32" theme="normal" :style="{ width: '200px' }" />
+                            <t-input-number v-model="uiState.chunkingConfig.childChunkSize" :min="64" :max="2048" :step="32" theme="normal" :style="{ width: '200px' }" @change="handleChildChunkSizeChange" />
+                          </div>
+                        </div>
+                        <div v-if="uiState.chunkingConfig.enableParentChild" class="setting-row">
+                          <div class="setting-info">
+                            <label>{{ t('knowledgeEditor.chunking.childChunkOverlapLabel') }}</label>
+                            <p class="desc">{{ t('knowledgeEditor.chunking.childChunkOverlapDescription') }}</p>
+                          </div>
+                          <div class="setting-control">
+                            <t-input-number
+                              v-model="uiState.chunkingConfig.childChunkOverlap"
+                              :min="0"
+                              :max="Math.min(500, Math.floor(uiState.chunkingConfig.childChunkSize / 2))"
+                              :step="1"
+                              theme="normal"
+                              :style="{ width: '200px' }"
+                            />
                           </div>
                         </div>
                       </div>
@@ -729,6 +745,7 @@ interface ChunkingUIConfig {
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
+  childChunkOverlap: number
   strategy?: string
   tokenLimit?: number
   languages?: string[]
@@ -1224,6 +1241,10 @@ function goToSection(key: ConfigSectionKey) {
   })
 }
 
+function clampChildChunkOverlap(childSize: number, overlap: number): number {
+  return Math.max(0, Math.min(overlap, Math.min(500, Math.floor(childSize / 2))))
+}
+
 function createDefaultUIState(): UploadUIState {
   return {
     summaryEnabled: true,
@@ -1235,6 +1256,7 @@ function createDefaultUIState(): UploadUIState {
       enableParentChild: true,
       parentChunkSize: 4096,
       childChunkSize: 384,
+      childChunkOverlap: Math.floor(384 / 5),
       strategy: 'auto',
       tokenLimit: 0,
       languages: [],
@@ -1276,6 +1298,10 @@ function initFromKbInfo(kb: any) {
       enableParentChild: kb.chunking_config?.enable_parent_child ?? false,
       parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
       childChunkSize: kb.chunking_config?.child_chunk_size || 384,
+      childChunkOverlap: clampChildChunkOverlap(
+        kb.chunking_config?.child_chunk_size || 384,
+        kb.chunking_config?.child_chunk_overlap ?? Math.floor((kb.chunking_config?.child_chunk_size || 384) / 5),
+      ),
       strategy: kb.chunking_config?.strategy || 'auto',
       tokenLimit: kb.chunking_config?.token_limit || 0,
       languages: kb.chunking_config?.languages || [],
@@ -1337,6 +1363,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       enable_parent_child: chunking.enableParentChild,
       parent_chunk_size: chunking.parentChunkSize,
       child_chunk_size: chunking.childChunkSize,
+      child_chunk_overlap: chunking.childChunkOverlap,
       strategy: chunking.strategy,
       token_limit: chunking.tokenLimit,
       languages: chunking.languages,
@@ -1407,6 +1434,11 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
   return overrides
 }
 
+function handleChildChunkSizeChange() {
+  const config = uiState.value.chunkingConfig
+  config.childChunkOverlap = clampChildChunkOverlap(config.childChunkSize, config.childChunkOverlap)
+}
+
 function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   if (!o) return
   const s = uiState.value
@@ -1419,6 +1451,11 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (cc.enable_parent_child != null) s.chunkingConfig.enableParentChild = cc.enable_parent_child
     if (cc.parent_chunk_size != null) s.chunkingConfig.parentChunkSize = cc.parent_chunk_size
     if (cc.child_chunk_size != null) s.chunkingConfig.childChunkSize = cc.child_chunk_size
+    if (cc.child_chunk_overlap != null) s.chunkingConfig.childChunkOverlap = cc.child_chunk_overlap
+    s.chunkingConfig.childChunkOverlap = clampChildChunkOverlap(
+      s.chunkingConfig.childChunkSize,
+      s.chunkingConfig.childChunkOverlap,
+    )
     if (cc.strategy != null) s.chunkingConfig.strategy = cc.strategy
     if (cc.token_limit != null) s.chunkingConfig.tokenLimit = cc.token_limit
     if (cc.languages) s.chunkingConfig.languages = cc.languages

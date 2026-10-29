@@ -378,7 +378,7 @@ func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterCo
 // splitter, so parent-child chunks would silently lose heading alignment and
 // ContextHeader breadcrumbs regardless of the configured strategy.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
-	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize)
+	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize, cc.ChildChunkOverlap)
 }
 
 // deleteUnindexedChunks drops the chunks processChunks wrote for a knowledge
