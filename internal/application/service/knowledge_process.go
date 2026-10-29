@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -724,26 +725,33 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
 		// question-style queries and statement-style chunk content.
-		indexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
-		for _, chunk := range textChunks {
-			// chunk.EmbeddingContent prepends ContextHeader (heading breadcrumb)
-			// when the chunker populated it during Tier-1 splitting; falls back
-			// to plain Content otherwise. The document title sits outermost;
-			// custom metadata remains document-scoped model context.
-			indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         indexContent,
-				SourceID:        chunk.ID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
+		const indexWindowSize = 200
+		buildIndexWindow := func(chunks []*types.Chunk) []*types.IndexInfo {
+			infos := make([]*types.IndexInfo, 0, len(chunks))
+			for _, chunk := range chunks {
+				// chunk.EmbeddingContent prepends ContextHeader (heading breadcrumb)
+				// when the chunker populated it during Tier-1 splitting; falls back
+				// to plain Content otherwise. The document title sits outermost;
+				// custom metadata remains document-scoped model context.
+				indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
+				infos = append(infos, &types.IndexInfo{
+					Content:         indexContent,
+					SourceID:        chunk.ID,
+					SourceType:      types.ChunkSourceType,
+					ChunkID:         chunk.ID,
+					KnowledgeID:     knowledge.ID,
+					KnowledgeBaseID: knowledge.KnowledgeBaseID,
+					IsEnabled:       true,
+				})
+			}
+			return infos
 		}
 
-		// Calculate storage size required for embeddings
-		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
+		// Estimate the full quota before any index writes, but bound generated
+		// content and the estimator's placeholder vectors to one window at a time.
+		for batch := range slices.Chunk(textChunks, indexWindowSize) {
+			totalStorageSize += retrieveEngine.EstimateStorageSize(ctx, embeddingModel, buildIndexWindow(batch))
+		}
 		if tenantInfo.StorageQuota > 0 {
 			// Re-fetch tenant storage information
 			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
@@ -783,7 +791,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return abortRetryErr(ctx, knowledge.ID, status)
 		}
 
-		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+		for batch := range slices.Chunk(textChunks, indexWindowSize) {
+			if err = ctx.Err(); err != nil {
+				break
+			}
+			err = retrieveEngine.BatchIndex(ctx, embeddingModel, buildIndexWindow(batch))
+			if err != nil {
+				break
+			}
+		}
 		if err != nil {
 			// Embedding and vector-store errors are often transient. While the
 			// task has attempts left, leave the row processing and hand the
@@ -825,9 +841,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				code, "batch index failed", err)
 			return nil
 		}
-		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
+		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(textChunks))
 		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
-			"vectors_written": len(indexInfoList),
+			"vectors_written": len(textChunks),
 			"storage_bytes":   totalStorageSize,
 		})
 
