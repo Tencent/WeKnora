@@ -283,18 +283,21 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 		},
 	}
 
+	// Prefer the reply API. A replyToken is single-use and expires fast, so we
+	// degrade to push only when the reply API genuinely fails. A successful
+	// reply returns immediately — the push fallback must never also fire,
+	// otherwise the user receives the same answer twice.
 	if replyToken := incoming.Extra["replyToken"]; replyToken != "" {
-		// Prefer the reply API; on failure degrade to push below. A replyToken
-		// is single-use and expires fast, so a failed reply must not lose the
-		// final answer — push to the original chat/user is the double insurance.
-		if err := a.sendReply(ctx, replyToken, messages); err == nil {
+		err := a.sendReply(ctx, replyToken, messages)
+		if err == nil {
 			return nil
-		} else {
-			logger.Warnf(ctx, "[IM/Line] reply API failed, falling back to push: %v", err)
 		}
+		logger.Warnf(ctx, "[IM/Line] reply API failed, falling back to push: %v", err)
 	}
 
-	// Push fallback: replyToken expired/absent, or the reply API failed above.
+	// Push fallback: replyToken absent/expired, or the reply API failed above.
+	// resolveTarget maps group/room -> ChatID and DM -> UserID so push reaches
+	// the original conversation. This branch executes at most once.
 	target := resolveTarget(incoming)
 	if target == "" {
 		return fmt.Errorf("line: no target user or chat id for push reply")
@@ -356,23 +359,14 @@ func (a *Adapter) callAPI(ctx context.Context, url string, body interface{}) err
 		return fmt.Errorf("read line response body: %w", err)
 	}
 
-	// A non-2xx HTTP status is a definitive failure: report it with the raw
-	// body so the operator sees exactly why the API rejected the request.
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("line api %s failed: status=%d, body=%s", url, resp.StatusCode, string(respBody))
+	// A 2xx HTTP status (e.g. 200 OK with `{}`) is success.
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
 	}
 
-	var apiResp struct {
-		OK     bool            `json:"ok"`
-		Result json.RawMessage `json:"result"`
-	}
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return fmt.Errorf("decode line response: %w", err)
-	}
-	if !apiResp.OK {
-		return fmt.Errorf("line api %s failed: %s", url, string(apiResp.Result))
-	}
-	return nil
+	// A non-2xx HTTP status is a definitive failure: report it with the raw
+	// body so the operator sees exactly why the API rejected the request.
+	return fmt.Errorf("line api %s failed: status=%d, body=%s", url, resp.StatusCode, string(respBody))
 }
 
 // httpClient is a shared HTTP client with an SSRF guard and a bounded timeout
