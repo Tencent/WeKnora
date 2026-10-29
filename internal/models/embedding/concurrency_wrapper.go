@@ -27,17 +27,22 @@ type concurrencyEmbedder struct {
 	// limit is this model's configured per-model background cap; 0 falls back
 	// to the process-wide default (see limiter.GateN).
 	limit int
+	// rate is this model's request-rate budget, applied to interactive and
+	// background calls alike. Zero disables pacing.
+	rate limiter.RateLimit
 }
 
 func (w *concurrencyEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
+	limiter.WaitRate(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.rate)
 	return w.inner.Embed(ctx, text)
 }
 
 func (w *concurrencyEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
+	limiter.WaitRate(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.rate)
 	return w.inner.BatchEmbed(ctx, texts)
 }
 
@@ -65,6 +70,7 @@ func (w *concurrencyEmbedder) BatchEmbedImages(ctx context.Context, images []Ima
 	}
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
+	limiter.WaitRate(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.rate)
 	return inner.BatchEmbedImages(ctx, images)
 }
 
@@ -75,9 +81,9 @@ func (w *concurrencyEmbedder) GetModelID() string   { return w.inner.GetModelID(
 // wrapEmbeddingConcurrency installs the background concurrency governor directly
 // around the real embedder. Always applied; a cheap passthrough when no limiter
 // is installed or the call is interactive.
-func wrapEmbeddingConcurrency(e Embedder, limit int) Embedder {
+func wrapEmbeddingConcurrency(e Embedder, limit int, rps float64, burst int) Embedder {
 	if e == nil {
 		return e
 	}
-	return &concurrencyEmbedder{inner: e, limit: limit}
+	return &concurrencyEmbedder{inner: e, limit: limit, rate: limiter.RateLimit{RPS: rps, Burst: burst}}
 }

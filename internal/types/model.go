@@ -150,6 +150,19 @@ type ModelParameters struct {
 	// process-wide model.max_concurrency". Interactive user-facing calls are
 	// never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
 	MaxConcurrency int `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	// MaxRPS caps how many requests per second may START against this model.
+	// Concurrency and rate are separate provider limits: a fast-rejecting
+	// provider (429) frees concurrency slots immediately, so a concurrency cap
+	// alone cannot hold the request rate below an account-wide QPS quota.
+	// 0 (the default) disables rate limiting. The budget is enforced per
+	// process; with N replicas set MaxRPS to quota/N. Unlike MaxConcurrency,
+	// every call pays this wait, because the provider quota is spent by
+	// interactive and background traffic alike. Only chat / vlm / embedding
+	// honour this.
+	MaxRPS float64 `yaml:"max_rps,omitempty" json:"max_rps,omitempty"`
+	// MaxBurst is how many requests may start back-to-back before pacing
+	// applies. 0 with MaxRPS > 0 is treated as 1 (strict spacing).
+	MaxBurst int `yaml:"max_burst,omitempty" json:"max_burst,omitempty"`
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
