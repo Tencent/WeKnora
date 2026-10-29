@@ -44,7 +44,7 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 		// limit it hit: "invalid attachment upload" sends the caller looking for
 		// a missing field when the file was sent and refused.
 		if isUploadTooLarge(err) {
-			c.Error(apperrors.NewBadRequestError(fmt.Sprintf(
+			_ = c.Error(apperrors.NewBadRequestError(fmt.Sprintf(
 				"attachment exceeds the %d MB upload limit", secutils.GetMaxFileSizeMB())))
 			return
 		}
