@@ -146,7 +146,7 @@
 
       <!-- Step 2: Connection -->
       <div v-else-if="wizardStep === 1" class="im-step-body">
-        <section v-if="formData.platform !== 'wechat'" class="setting-drawer__section im-drawer__section">
+        <section v-if="formData.platform !== 'wechat' && formData.platform !== 'line'" class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionAccess') }}</h4>
 
           <div class="form-item">
@@ -861,6 +861,10 @@ function onPlatformChange(val: string | number | boolean) {
   // WeChat uses fixed mode/output
   if (val === 'wechat') {
     formData.value.mode = 'longpoll';
+    formData.value.output_mode = 'full';
+  } else if (val === 'line') {
+    // LINE is locked to webhook delivery + direct (non-streaming) output.
+    formData.value.mode = 'webhook';
     formData.value.output_mode = 'full';
   } else if (val === 'mattermost' || val === 'yunzhijia') {
     formData.value.mode = 'webhook';
