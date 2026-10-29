@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -282,12 +283,130 @@ func flexMessages(text string, enableFlex bool) []map[string]interface{} {
 	if enableFlex {
 		return []map[string]interface{}{flexMessage(text)}
 	}
+	// Non-Flex path: strip raw Markdown markers via polishPlainText so the
+	// chat window never shows bare **, ###, ``` and friends.
 	return []map[string]interface{}{
 		{
 			"type": "text",
-			"text": text,
+			"text": polishPlainText(text),
 		},
 	}
+}
+
+// polishPlainText converts a Markdown-flavoured RAG answer into clean,
+// phone-friendly plain text for LINE's non-Flex reply path. Inline bold,
+// headings, list markers, rules, and fenced code blocks are all normalised so
+// the raw **/#/``` markers never reach the chat window.
+func polishPlainText(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	var code []string
+	inCode := false
+
+	// emitCode flushes any open fenced code block; it is idempotent when the
+	// fence is not open so it is safe to call at both a closing fence and EOF.
+	emitCode := func() {
+		if !inCode {
+			return
+		}
+		inCode = false
+		if len(code) > 0 {
+			out = append(out, "[代碼區塊]")
+			for _, ln := range code {
+				out = append(out, strings.TrimSpace(ln))
+			}
+			out = append(out, "")
+			code = nil
+		}
+	}
+	// emitBlank appends a separator line while collapsing 3+ blanks to one.
+	emitBlank := func() {
+		if len(out) == 0 || out[len(out)-1] != "" {
+			out = append(out, "")
+		}
+	}
+
+	for _, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		switch {
+		case strings.HasPrefix(trimmed, "```"):
+			// Toggle the code-fence state; emit any block being closed.
+			if inCode {
+				emitCode()
+			} else {
+				inCode = true
+				code = nil
+			}
+		case inCode:
+			code = append(code, raw)
+		case trimmed == "":
+			emitBlank()
+		case isPolishedDivider(trimmed):
+			out = append(out, dividerRule())
+			emitBlank()
+		case isPolishedHeader(trimmed):
+			emitBlank()
+			out = append(out, "📌 "+polishHeaderBody(trimmed))
+			emitBlank()
+		case isPolishedListItem(trimmed):
+			body := strings.TrimPrefix(strings.TrimPrefix(trimmed, "- "), "* ")
+			out = append(out, "• "+polishInline(body))
+		default:
+			out = append(out, polishInline(trimmed))
+		}
+	}
+	emitCode()
+
+	return strings.Trim(strings.Join(out, "\n"), "\n")
+}
+
+// isPolishedDivider reports whether s is a standalone rule of only '-' or '*'.
+func isPolishedDivider(s string) bool {
+	if len(s) < 3 {
+		return false
+	}
+	for _, r := range s {
+		if r != '-' && r != '*' {
+			return false
+		}
+	}
+	return true
+}
+
+// dividerRule renders a phone-friendly horizontal rule.
+func dividerRule() string { return strings.Repeat("─", 20) }
+
+// isPolishedHeader reports whether s opens a Markdown heading (leading '#').
+func isPolishedHeader(s string) bool {
+	n := 0
+	for n < len(s) && s[n] == '#' {
+		n++
+	}
+	return n > 0 && n < len(s)
+}
+
+// polishHeaderBody strips leading '#' markers and inlines the title body.
+func polishHeaderBody(s string) string {
+	n := 0
+	for n < len(s) && s[n] == '#' {
+		n++
+	}
+	return polishInline(strings.TrimSpace(s[n:]))
+}
+
+// isPolishedListItem reports whether s opens an unordered list item (- or *).
+func isPolishedListItem(s string) bool {
+	return strings.HasPrefix(s, "- ") || strings.HasPrefix(s, "* ")
+}
+
+// boldRe matches a **span** so inline bold can be lifted into brackets.
+var boldRe = regexp.MustCompile(`\*\*(.+?)\*\*`)
+
+// polishInline normalises inline Markdown: **bold** lifts into 【brackets】
+// (LINE plain text has no per-span weight) and stray `code` backticks drop out.
+func polishInline(s string) string {
+	s = boldRe.ReplaceAllString(s, "【$1】")
+	return strings.ReplaceAll(s, "`", "")
 }
 
 // flexMessage constructs a single LINE flex message per the official messaging
