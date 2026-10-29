@@ -107,12 +107,19 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		ev := payload.Events[i]
 		if ev.Type != "message" || ev.Message == nil {
 			// Non-message events (follow/unfollow/left) are handled by the
-			// platform dashboard; return nil to skip without error.
+			// platform dashboard; keep scanning for a text message.
 			continue
 		}
 		if ev.Message.Type != "Text" {
 			// Text-only in this phase; other message kinds are skipped.
-			return nil, nil
+			continue
+		}
+		if ev.Source.Type == "group" || ev.Source.Type == "room" {
+			// Ignore group/room chatter unless the bot is @-mentioned, so the
+			// pipeline is not disturbed by everyday group conversation.
+			if !wasBotMentioned(ev.Message) {
+				continue
+			}
 		}
 		incoming := buildIncoming(ev, ev.Message)
 		incoming.Extra = map[string]string{
@@ -121,6 +128,40 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		return incoming, nil
 	}
 	return nil, nil
+}
+
+// wasBotMentioned reports whether a LINE message @-mentions the bot. It is true
+// when any mention target is the bot (type "bot" or flagged isSelf), or when the
+// message text begins with an "@..." mention as a fallback heuristic.
+func wasBotMentioned(msg *webhookMessage) bool {
+	if msg == nil {
+		return false
+	}
+	if msg.Mention != nil {
+		for _, m := range msg.Mention.Mentionees {
+			if m.Type == "bot" || m.IsSelf {
+				return true
+			}
+		}
+	}
+	return strings.HasPrefix(msg.Text, "@")
+}
+
+// stripBotMention removes a leading "@botname" token from the message text so
+// only the clean question reaches the answer pipeline. It is a no-op when the
+// text does not begin with an "@..." mention.
+func stripBotMention(text string) string {
+	s := strings.TrimSpace(text)
+	if !strings.HasPrefix(s, "@") {
+		return s
+	}
+	rest := s[1:]
+	if idx := strings.IndexAny(rest, " \t\r\n"); idx >= 0 {
+		rest = rest[idx:]
+	} else {
+		rest = ""
+	}
+	return strings.TrimSpace(rest)
 }
 
 // buildIncoming maps a single LINE message event to the unified model.
@@ -136,13 +177,21 @@ func buildIncoming(ev webhookEvent, msg *webhookMessage) *im.IncomingMessage {
 		chatID = ev.Source.RoomID
 	}
 
+	content := msg.Text
+	// For group/room chatter we only deliver messages that mention the bot
+	// (enforced in ParseCallback). Strip the leading "@botname" so only the
+	// clean question reaches the answer pipeline.
+	if chatType == im.ChatTypeGroup {
+		content = stripBotMention(content)
+	}
+
 	return &im.IncomingMessage{
 		Platform:  im.PlatformLine,
 		ChatType:  chatType,
 		UserID:    ev.Source.UserID,
 		ChatID:    chatID,
 		MessageID: msg.ID,
-		Content:   strings.TrimSpace(msg.Text),
+		Content:   strings.TrimSpace(content),
 	}
 }
 
@@ -173,11 +222,28 @@ func (a *Adapter) sendPush(ctx context.Context, target string, messages []map[st
 	return a.callAPI(ctx, "https://api.line.me/v2/bot/message/push", body)
 }
 
+// shouldEmitDirectReply reports whether the LINE adapter, which is locked to
+// direct (non-streaming) output, should send the given reply. Intermediate
+// streaming updates are dropped; the final reply or a plain reply is emitted.
+func shouldEmitDirectReply(reply *im.ReplyMessage) bool {
+	if reply == nil {
+		return false
+	}
+	return reply.IsFinal || !reply.IsStreaming
+}
+
 // SendReply sends a reply back to the LINE platform. When the incoming request
 // carried a reply token it is used; otherwise the call degrades to push.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	if incoming == nil {
 		return fmt.Errorf("line incoming message is required")
+	}
+
+	// LINE is locked to webhook + direct (non-streaming) output. Even if a
+	// streaming intermediate update is passed in, only the final answer is
+	// emitted.
+	if !shouldEmitDirectReply(reply) {
+		return nil
 	}
 
 	text := strings.TrimSpace(im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal))
@@ -294,4 +360,20 @@ type webhookMessage struct {
 	Type string `json:"type"`
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	// Mention is populated for group/room messages that contain @ mentions.
+	Mention *mention `json:"mention"`
+}
+
+// mention lists the @ targets referenced by a group/room message.
+type mention struct {
+	Mentionees []mentionee `json:"mentionees"`
+}
+
+// mentionee is a single @ mention target. Type is "bot" when the mention is the
+// bot itself; IsSelf is set by the LINE platform when the bot is a target.
+type mentionee struct {
+	Index  int    `json:"index"`
+	Type   string `json:"type"`
+	ID     string `json:"id"`
+	IsSelf bool   `json:"isSelf"`
 }
