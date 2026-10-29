@@ -30,7 +30,7 @@ func newTestContext(t *testing.T, body string) (*gin.Context, *httptest.Response
 // expected Base64 signature, and that VerifyCallback rejects tampering.
 func TestVerifySignatureHMAC(t *testing.T) {
 	secret := "secret-key-123"
-	adapter := NewWebhookAdapter("access-token", secret)
+	adapter := NewWebhookAdapter("access-token", secret, "")
 
 	body := []byte(`{"events":[{"type":"message"}]}`)
 	// Independently compute the expected signature (oracle for verifySignature).
@@ -66,7 +66,7 @@ func TestVerifySignatureHMAC(t *testing.T) {
 
 // TestParseCallbackTextMessage decodes a LINE text message into IncomingMessage.
 func TestParseCallbackTextMessage(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
 
 	const payload = `{
 		"destination": "U-destination",
@@ -111,7 +111,7 @@ func TestParseCallbackTextMessage(t *testing.T) {
 
 // TestParseCallbackChatMessage verifies group/room mapping to ChatTypeGroup.
 func TestParseCallbackChatMessage(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
 
 	const payload = `{
 		"events": [
@@ -142,7 +142,7 @@ func TestParseCallbackChatMessage(t *testing.T) {
 
 // TestParseCallbackEmptyEvents confirms a payload without events yields no message.
 func TestParseCallbackEmptyEvents(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
 
 	c, _ := newTestContext(t, `{"destination":"U-", "events":[]}`)
 	incoming, err := adapter.ParseCallback(c)
@@ -157,7 +157,7 @@ func TestParseCallbackEmptyEvents(t *testing.T) {
 // TestHandleURLVerificationNoEvents checks that a request without events is
 // treated as verification (HTTP 200, handled = true).
 func TestHandleURLVerificationNoEvents(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
 
 	c, w := newTestContext(t, `{"destination":"U-"}`)
 	handled := adapter.HandleURLVerification(c)
@@ -172,7 +172,7 @@ func TestHandleURLVerificationNoEvents(t *testing.T) {
 // TestHandleURLVerificationWithEvents ensures a real message event is NOT
 // reported as a verification request.
 func TestHandleURLVerificationWithEvents(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
 
 	const payload = `{"events":[{"type":"message","message":{"type":"Text","text":"hi"}}]}`
 	c, _ := newTestContext(t, payload)
@@ -186,7 +186,7 @@ func TestHandleURLVerificationWithEvents(t *testing.T) {
 // no bot @-mention is ignored (nil) so everyday group chatter does not disturb
 // the answer pipeline.
 func TestParseCallbackGroupNotMentionedSkipped(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
 
 	const payload = `{
 		"events": [
@@ -213,7 +213,7 @@ func TestParseCallbackGroupNotMentionedSkipped(t *testing.T) {
 // message has its leading @botname stripped so only the clean question reaches
 // the answer pipeline.
 func TestParseCallbackGroupMentionStripsBotName(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
 
 	const payload = `{
 		"events": [
@@ -287,7 +287,7 @@ func TestStripBotMention(t *testing.T) {
 
 // TestPlatform confirms the adapter reports the LINE platform.
 func TestPlatform(t *testing.T) {
-	adapter := NewWebhookAdapter("access-token", "secret")
+	adapter := NewWebhookAdapter("access-token", "secret", "/reset")
 	if adapter.Platform() != im.PlatformLine {
 		t.Errorf("Platform() = %q, want %q", adapter.Platform(), im.PlatformLine)
 	}
@@ -315,5 +315,89 @@ func TestNewFactoryRequiresCredentials(t *testing.T) {
 	}
 	if adapter == nil {
 		t.Fatal("expected non-nil adapter for valid credentials")
+	}
+}
+
+// TestIsReset confirms the reset-keyword matching rules: exact, trimmed,
+// case-insensitive, and a no-op when no keyword is configured.
+func TestIsReset(t *testing.T) {
+	cases := []struct {
+		name         string
+		resetKeyword string
+		content      string
+		want         bool
+	}{
+		{"no keyword configured", "", "/reset", false},
+		{"exact match", "/reset", "/reset", true},
+		{"case-insensitive", "/reset", "/RESET", true},
+		{"trims surrounding whitespace", "/reset", "  /reset  ", true},
+		{"trailing args is not a reset", "/reset", "/reset now", false},
+		{"different keyword", "/clear", "/reset", false},
+		{"plain text is not a reset", "/reset", "please reset me", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewWebhookAdapter("token", "secret", tc.resetKeyword)
+			if got := a.isReset(tc.content); got != tc.want {
+				t.Errorf("isReset(%q) with keyword=%q = %v, want %v", tc.content, tc.resetKeyword, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseCallbackResetKeyword confirms the adapter flags a matching reset
+// keyword so the service can route it through the session-clear path, and that
+// a normal message is left unflagged.
+func TestParseCallbackResetKeyword(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	const payload = `{
+		"destination": "U-destination",
+		"events": [
+			{
+				"type": "message",
+				"token": "rtk-reset",
+				"source": {"type": "user", "userId": "U-abcd123"},
+				"replyToken": "rtk-reset",
+				"message": {"type": "Text", "id": "msg-reset", "text": "  /reset "}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage, got nil")
+	}
+	if incoming.Extra["reset"] != "true" {
+		t.Errorf("reset flag = %q, want %q", incoming.Extra["reset"], "true")
+	}
+
+	// A normal message must NOT set the reset flag.
+	const other = `{
+		"destination": "U-destination",
+		"events": [
+			{
+				"type": "message",
+				"token": "rtk-chat",
+				"source": {"type": "user", "userId": "U-abcd123"},
+				"replyToken": "rtk-chat",
+				"message": {"type": "Text", "id": "msg-chat", "text": "hello there"}
+			}
+		]
+	}`
+	c2, _ := newTestContext(t, other)
+	incoming2, err := adapter.ParseCallback(c2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming2 == nil {
+		t.Fatal("expected IncomingMessage, got nil")
+	}
+	if incoming2.Extra["reset"] == "true" {
+		t.Errorf("reset flag must not be set for a normal message, got true")
 	}
 }
