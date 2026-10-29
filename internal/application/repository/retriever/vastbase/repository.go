@@ -135,7 +135,8 @@ func (r *vastbaseRepository) migrateSchema(ctx context.Context) error {
 		// chunk content. The index is maintained by the store itself, so
 		// chunk inserts/updates/deletes keep the keyword channel current
 		// without write-path hooks.
-		`CREATE INDEX IF NOT EXISTS idx_embeddings_content_bm25 ON embeddings USING fulltext(content) WITH (algorithms='BM25')`,
+		`CREATE INDEX IF NOT EXISTS idx_embeddings_content_bm25 ON embeddings ` +
+			`USING fulltext(content) WITH (algorithms='BM25')`,
 	}
 	for _, stmt := range statements {
 		if err := r.db.WithContext(ctx).Exec(stmt).Error; err != nil {
@@ -174,7 +175,8 @@ func (r *vastbaseRepository) ensureGraphIndex(ctx context.Context, dimension int
 	}
 	indexName := fmt.Sprintf("embeddings_graph_idx_cosine_%d", dimension)
 	stmt := fmt.Sprintf(
-		`CREATE INDEX IF NOT EXISTS %s ON embeddings USING graph_index((%s) halfvector_cosine_ops) WITH (%s) WHERE (dimension = %d)`,
+		`CREATE INDEX IF NOT EXISTS %s ON embeddings USING graph_index((%s) `+
+			`halfvector_cosine_ops) WITH (%s) WHERE (dimension = %d)`,
 		indexName, halfvectorCastExpr(dimension), withArgs, dimension,
 	)
 	logger.GetLogger(ctx).Infof("[Vastbase] Ensuring Graph_Index for dimension %d: %s", dimension, stmt)
@@ -208,7 +210,7 @@ func (r *vastbaseRepository) calculateIndexStorageSize(embeddingDB *vbVector) in
 	contentSizeBytes := int64(len(embeddingDB.Content))
 
 	// 2. Vector storage size (2 bytes per dimension for half-precision float)
-	var vectorSizeBytes int64 = 0
+	var vectorSizeBytes int64
 	if embeddingDB.Dimension > 0 {
 		vectorSizeBytes = int64(embeddingDB.Dimension * 2)
 	}
@@ -227,7 +229,7 @@ func (r *vastbaseRepository) calculateIndexStorageSize(embeddingDB *vbVector) in
 func (r *vastbaseRepository) EstimateStorageSize(
 	ctx context.Context, indexInfoList []*types.IndexInfo, additionalParams map[string]any,
 ) int64 {
-	var totalStorageSize int64 = 0
+	var totalStorageSize int64
 	for _, indexInfo := range indexInfoList {
 		embeddingDB := toDBVectorEmbedding(indexInfo, additionalParams)
 		totalStorageSize += r.calculateIndexStorageSize(embeddingDB)
@@ -240,7 +242,9 @@ func (r *vastbaseRepository) EstimateStorageSize(
 }
 
 // Save stores a single index entry
-func (r *vastbaseRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, additionalParams map[string]any) error {
+func (r *vastbaseRepository) Save(ctx context.Context, indexInfo *types.IndexInfo,
+	additionalParams map[string]any,
+) error {
 	logger.GetLogger(ctx).Debugf("[Vastbase] Saving index for source ID: %s", indexInfo.SourceID)
 	embeddingDB := toDBVectorEmbedding(indexInfo, additionalParams)
 	if err := r.ensureGraphIndex(ctx, embeddingDB.Dimension); err != nil {
@@ -325,7 +329,9 @@ func (r *vastbaseRepository) batchInsertOnConflict(ctx context.Context, rows []*
 }
 
 // DeleteByChunkIDList deletes indices by chunk IDs
-func (r *vastbaseRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
+func (r *vastbaseRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string,
+	_ int, _ string,
+) error {
 	logger.GetLogger(ctx).Infof("[Vastbase] Deleting indices by chunk IDs, count: %d", len(chunkIDList))
 	result := r.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Delete(&vbVector{})
 	if result.Error != nil {
@@ -337,7 +343,9 @@ func (r *vastbaseRepository) DeleteByChunkIDList(ctx context.Context, chunkIDLis
 }
 
 // DeleteBySourceIDList deletes indices by source IDs
-func (r *vastbaseRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error {
+func (r *vastbaseRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string,
+	_ int, _ string,
+) error {
 	if len(sourceIDList) == 0 {
 		return nil
 	}
@@ -352,7 +360,9 @@ func (r *vastbaseRepository) DeleteBySourceIDList(ctx context.Context, sourceIDL
 }
 
 // DeleteByKnowledgeIDList deletes indices by knowledge IDs
-func (r *vastbaseRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int, knowledgeType string) error {
+func (r *vastbaseRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string,
+	_ int, _ string,
+) error {
 	logger.GetLogger(ctx).Infof("[Vastbase] Deleting indices by knowledge IDs, count: %d", len(knowledgeIDList))
 	result := r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Delete(&vbVector{})
 	if result.Error != nil {
@@ -364,7 +374,9 @@ func (r *vastbaseRepository) DeleteByKnowledgeIDList(ctx context.Context, knowle
 }
 
 // Retrieve handles retrieval requests and routes to appropriate method
-func (r *vastbaseRepository) Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+func (r *vastbaseRepository) Retrieve(ctx context.Context,
+	params types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
 	logger.GetLogger(ctx).Debugf("[Vastbase] Processing retrieval request of type: %s", params.RetrieverType)
 	switch params.RetrieverType {
 	case types.VectorRetrieverType:
@@ -626,7 +638,7 @@ func (r *vastbaseRepository) KeywordRetrieve(ctx context.Context,
 		logger.GetLogger(ctx).Errorf("[Vastbase] Keyword retrieval failed: %v", err)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	embeddingDBList := make([]vbVectorWithScore, 0)
 	for rows.Next() {
@@ -702,7 +714,7 @@ func (r *vastbaseRepository) CopyIndices(ctx context.Context,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
 	dimension int,
-	knowledgeType string,
+	_ string,
 ) error {
 	logger.GetLogger(ctx).Infof(
 		"[Vastbase] Copying indices, source knowledge base: %s, target knowledge base: %s, mapping count: %d",
@@ -872,7 +884,8 @@ func (r *vastbaseRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, 
 			return result.Error
 		}
 		logger.GetLogger(ctx).
-			Infof("[Vastbase] Updated %d chunks to enabled, rows affected: %d", len(enabledChunkIDs), result.RowsAffected)
+			Infof("[Vastbase] Updated %d chunks to enabled, rows affected: %d",
+				len(enabledChunkIDs), result.RowsAffected)
 	}
 
 	// Batch update disabled chunks
@@ -885,7 +898,8 @@ func (r *vastbaseRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, 
 			return result.Error
 		}
 		logger.GetLogger(ctx).
-			Infof("[Vastbase] Updated %d chunks to disabled, rows affected: %d", len(disabledChunkIDs), result.RowsAffected)
+			Infof("[Vastbase] Updated %d chunks to disabled, rows affected: %d",
+				len(disabledChunkIDs), result.RowsAffected)
 	}
 
 	logger.GetLogger(ctx).Infof("[Vastbase] Successfully batch updated chunk enabled status")
@@ -917,7 +931,8 @@ func (r *vastbaseRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTag
 			return result.Error
 		}
 		logger.GetLogger(ctx).
-			Infof("[Vastbase] Updated %d chunks to tag_id=%s, rows affected: %d", len(chunkIDs), tagID, result.RowsAffected)
+			Infof("[Vastbase] Updated %d chunks to tag_id=%s, rows affected: %d",
+				len(chunkIDs), tagID, result.RowsAffected)
 	}
 
 	logger.GetLogger(ctx).Infof("[Vastbase] Successfully batch updated chunk tag ID")
