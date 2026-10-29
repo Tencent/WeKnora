@@ -525,6 +525,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 
 	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, wikiConfig)
+	batchCtx.RunStartedAt = taskStartedAt
+	batchCtx.RebuildStartedAtByKnowledgeID = make(map[string]time.Time, len(pendingOps))
+	for _, op := range pendingOps {
+		if op.Op == WikiOpIngest && !op.RebuildStartedAt.IsZero() {
+			batchCtx.RebuildStartedAtByKnowledgeID[op.KnowledgeID] = op.RebuildStartedAt
+		}
+	}
 
 	// 1. MAP PHASE (Parallel extraction and generation of updates)
 	var mapMu sync.Mutex
@@ -695,6 +702,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var allPagesAffected []string
 	var ingestPagesAffected []string
 	var retractPagesAffected []string
+	manualConflictSlugs := make(map[string]struct{})
 	// failedAdditionSlugs collects entity/concept slugs whose page
 	// generation LLM call failed (so the page was never written). The
 	// post-reduce cleanup step uses this set to strip dead [[slug]]
@@ -776,16 +784,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				return nil
 			}
 			if updateDeferred {
-				// The page kept its previous body because the rewrite dropped
-				// table rows that are still on it. Not an error and the page is
-				// not damaged, but this slug's contribution never landed, so the
-				// documents behind it must survive the trim phase and come back
-				// in a later batch — trimming them here would delete their
-				// pending row and lose the addition for good.
-				logger.Warnf(reduceCtx,
-					"wiki ingest: slug %s kept its previous content (rewrite dropped rows), deferring update",
-					slug)
+				// A row-loss guard or an optimistic lock refused the write.
+				// Preserve the contributing ops for a later batch.
+				logger.Warnf(reduceCtx, "wiki ingest: slug %s write refused; deferring update", slug)
 				collectUnapplied(updates)
+			}
+			if affectedType == "manual_conflict" {
+				logger.Warnf(reduceCtx, "wiki ingest: slug %s was manually edited during rebuild; page preserved", slug)
+				reduceMu.Lock()
+				manualConflictSlugs[slug] = struct{}{}
+				reduceMu.Unlock()
 			}
 			if reduceErr != nil {
 				// The page's read-modify-write failed, so this slug's update
@@ -933,6 +941,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 		writtenPages := make([]map[string]string, 0, len(r.Pages))
 		droppedPages := make([]map[string]string, 0)
+		conflictedPages := make([]map[string]string, 0)
 		for _, p := range r.Pages {
 			entry := map[string]string{
 				"slug":  p.Slug,
@@ -942,17 +951,25 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				droppedPages = append(droppedPages, entry)
 				continue
 			}
+			if _, conflict := manualConflictSlugs[p.Slug]; conflict {
+				conflictedPages = append(conflictedPages, entry)
+				continue
+			}
 			writtenPages = append(writtenPages, entry)
 		}
 		output := types.JSONMap{
 			"pages_written":         len(writtenPages),
 			"pages_dropped":         len(droppedPages),
+			"pages_conflicted":      len(conflictedPages),
 			"pages_total":           len(r.Pages),
 			"failed_slug_writes":    failedAdditionSlugCount,
 			"pages_written_preview": writtenPages,
 		}
 		if len(droppedPages) > 0 {
 			output["pages_dropped_preview"] = droppedPages
+		}
+		if len(conflictedPages) > 0 {
+			output["pages_conflicted_preview"] = conflictedPages
 		}
 		for k, v := range r.MapStats {
 			output[k] = v
@@ -1875,17 +1892,16 @@ func resolveSlugUpdateLanguage(ctx context.Context, updates []SlugUpdate) string
 
 // reduceSlugUpdates returns:
 //   - changed:          whether the wiki page was created or updated
-//   - affectedType:     "ingest" or "retract" — drives downstream bookkeeping
+//   - affectedType:     "ingest", "retract", or "manual_conflict" — the last
+//     means the page was preserved and a Wiki issue was recorded
 //   - additionFailed:   true iff the slug had entity/concept additions queued
 //     AND the WikiPageModifyUserPrompt LLM call failed, so no page exists/was
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page) and to drop the slug from
 //     the wiki log feed so users don't see a clickable entry that 404s.
-//   - updateDeferred:   true iff the page write was refused by the row guard
-//     (ErrWikiWriteDroppedTableRows): the page kept its previous body, so this
-//     slug's contribution never landed and its documents must be re-queued
-//     rather than trimmed. Distinct from err: a successful write that changes
-//     nothing user-visible also leaves `version` alone, and that one IS applied.
+//   - updateDeferred:   true iff a guarded page write was refused by the row
+//     guard or optimistic lock: its documents must be re-queued. A manual edit
+//     detected before generation is a terminal conflict instead.
 //   - err:              transport / repo error from the persisted upsert.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
@@ -1959,8 +1975,16 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			s.tracker().FailSpan(ctx, pageSpan, "REDUCE_FAILED", err.Error(), err)
 			return
 		}
+		if updateDeferred {
+			s.tracker().SkipSpan(ctx, pageSpan, "write_deferred")
+			return
+		}
 		if !changed {
-			s.tracker().SkipSpan(ctx, pageSpan, "no_change")
+			reason := "no_change"
+			if affectedType == "manual_conflict" {
+				reason = "manual_edit_during_rebuild"
+			}
+			s.tracker().SkipSpan(ctx, pageSpan, reason)
 			return
 		}
 		out := types.JSONMap{
@@ -1994,7 +2018,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		if !hasAdditions {
 			return false, "", false, false, nil
 		}
-
 		page = &types.WikiPage{
 			ID:              uuid.New().String(),
 			TenantID:        tenantID,
@@ -2009,6 +2032,32 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// the named return — subsequent assignments would mask it
 		// anyway, but be explicit.
 		err = nil
+	}
+	// A user edit made after this document rebuild started is authoritative
+	// even when the reducer reads the page after the edit. The current op is
+	// consumed; retrying it would generate the same conflict until its retry
+	// budget expired. Leave a visible Wiki issue for manual reconciliation.
+	hasGeneratedUpdate := false
+	for _, update := range updates {
+		if update.Type == types.WikiPageTypeEntity || update.Type == types.WikiPageTypeConcept || update.Type == "summary" {
+			hasGeneratedUpdate = true
+			break
+		}
+	}
+	if exists && hasGeneratedUpdate && batchCtx != nil && page.LastEditSource == types.WikiEditSourceUser {
+		startedAt := batchCtx.RunStartedAt
+		for _, update := range updates {
+			if at := batchCtx.RebuildStartedAtByKnowledgeID[update.KnowledgeID]; !at.IsZero() &&
+				(startedAt.IsZero() || at.Before(startedAt)) {
+				startedAt = at
+			}
+		}
+		if !startedAt.IsZero() && page.UpdatedAt.After(startedAt) {
+			if err := s.recordWikiManualEditConflict(ctx, page, updates); err != nil {
+				return false, "", false, false, err
+			}
+			return false, "manual_conflict", false, false, nil
+		}
 	}
 
 	affectedType = "ingest"
@@ -2050,6 +2099,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// the page version.
 			_, writeErr := s.wikiService.UpdatePage(ctx, page)
 			updateDeferred, err = classifyWikiPageWrite(writeErr)
+			if updateDeferred {
+				changed = false
+			}
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
@@ -2326,10 +2378,13 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// classified as deferred.
 			_, updateErr := s.wikiService.UpdatePage(writeCtx, page)
 			updateDeferred, err = classifyWikiPageWrite(updateErr)
+			if updateDeferred {
+				changed = false
+			}
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return true, affectedType, additionFailed, updateDeferred, err
+		return changed, affectedType, additionFailed, updateDeferred, err
 	}
 
 	return false, "", additionFailed, false, nil
@@ -2338,17 +2393,45 @@ func (s *wikiIngestService) reduceSlugUpdates(
 // classifyWikiPageWrite turns the result of one guarded UpdatePage call into
 // the reduce phase's (updateDeferred, err) pair.
 //
-// ErrWikiWriteDroppedTableRows means the row guard refused the write: the page
-// was not modified, but nothing failed, so the caller must keep this slug's
+// ErrWikiWriteDroppedTableRows or a version conflict means the page was not
+// modified, but nothing failed, so the caller must keep this slug's
 // contributing documents for a later batch (updateDeferred) instead of
 // reporting an error. Every other outcome — including a successful write that
 // only refreshed bookkeeping and therefore did not bump `version` — was
 // applied and is not deferred.
 func classifyWikiPageWrite(updateErr error) (deferred bool, err error) {
-	if errors.Is(updateErr, ErrWikiWriteDroppedTableRows) {
+	if errors.Is(updateErr, ErrWikiWriteDroppedTableRows) || errors.Is(updateErr, apprepo.ErrWikiPageConflict) {
 		return true, nil
 	}
 	return false, updateErr
+}
+
+func (s *wikiIngestService) recordWikiManualEditConflict(ctx context.Context, page *types.WikiPage, updates []SlugUpdate) error {
+	issues, err := s.wikiService.ListIssues(ctx, page.KnowledgeBaseID, page.Slug, "pending")
+	if err != nil {
+		return fmt.Errorf("list manual edit conflicts: %w", err)
+	}
+	for _, issue := range issues {
+		if issue.IssueType == "manual_edit_conflict" {
+			return nil
+		}
+	}
+	knowledgeIDs := make(types.StringArray, 0, len(updates))
+	for _, update := range updates {
+		if update.KnowledgeID != "" {
+			knowledgeIDs = appendUnique(knowledgeIDs, update.KnowledgeID)
+		}
+	}
+	_, err = s.wikiService.CreateIssue(ctx, &types.WikiPageIssue{
+		TenantID: page.TenantID, KnowledgeBaseID: page.KnowledgeBaseID,
+		Slug: page.Slug, IssueType: "manual_edit_conflict",
+		Description:           "Wiki generation skipped this page because it was manually edited during document rebuilding. Review the source document and merge any new information manually.",
+		SuspectedKnowledgeIDs: knowledgeIDs, Status: "pending", ReportedBy: "wiki_ingest",
+	})
+	if err != nil {
+		return fmt.Errorf("record manual edit conflict: %w", err)
+	}
+	return nil
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones
