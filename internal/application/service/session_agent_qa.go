@@ -543,6 +543,9 @@ func (s *sessionService) buildAgentConfig(
 		RetrieveKBOnlyWhenMentioned:   customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:                customAgent.Config.LLMCallTimeout,
 		MaxCompletionTokens:           customAgent.Config.MaxCompletionTokens,
+		MaxRunTokens:                  customAgent.Config.MaxRunTokens,
+		MaxRunSeconds:                 customAgent.Config.MaxRunSeconds,
+		MaxWriteActions:               customAgent.Config.MaxWriteActions,
 		RetainRetrievalHistory:        customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:           req.SharedAgentReadOnly,
 		AssistantAccess:               types.CapAccessLevel(req.AssistantAccess, customAgent.Config.AccessLevel),
@@ -552,6 +555,18 @@ func (s *sessionService) buildAgentConfig(
 		// Only read-only tools overlap (agenttools.CanRunConcurrently);
 		// anything else is a barrier that runs alone, in model order.
 		ParallelToolCalls: true,
+	}
+	// A request may tighten or relax the stored contract for this turn only.
+	// Zero means inherit, matching how every other optional request override
+	// behaves in this builder.
+	if req.MaxRunTokens > 0 {
+		agentConfig.MaxRunTokens = req.MaxRunTokens
+	}
+	if req.MaxRunSeconds > 0 {
+		agentConfig.MaxRunSeconds = req.MaxRunSeconds
+	}
+	if req.MaxWriteActions > 0 {
+		agentConfig.MaxWriteActions = req.MaxWriteActions
 	}
 	applyRequestReasoningEffort(req.ReasoningEffort, &agentConfig.Thinking, &agentConfig.ReasoningEffort)
 	// An unset MCP mode means "all" at runtime, but the share scope and the

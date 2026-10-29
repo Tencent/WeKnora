@@ -102,6 +102,9 @@ type AgentEngine struct {
 	// mode: whether the client renders prompt cards and can answer them.
 	mode     types.RunMode
 	progress turnProgress
+	// runBudget is the active turn contract, shared by the loop and tool
+	// execution so a parallel write fan-out cannot overspend it.
+	runBudget *runBudgetState
 	// Hold speculative parent prose until delegated work has been reviewed.
 	holdCollaborationAnswer bool
 }
@@ -386,6 +389,9 @@ func (e *AgentEngine) Execute(
 	logger.Infof(ctx, "[Agent] Starting execution: session=%s, message=%s, query_len=%d, context_msgs=%d",
 		sessionID, messageID, len(query), len(llmContext))
 	// Ensure tools are cleaned up after execution
+	budget := newRunBudgetState(BudgetFromAgentConfig(e.config), time.Now())
+	e.runBudget = budget
+	defer func() { e.runBudget = nil }()
 	defer e.toolRegistry.Cleanup(ctx)
 
 	common.PipelineInfo(ctx, "Agent", "execute_start", map[string]interface{}{
@@ -768,10 +774,28 @@ func (e *AgentEngine) executeLoop(
 		}
 	}
 
+	if e.runBudget == nil {
+		e.runBudget = newRunBudgetState(BudgetFromAgentConfig(e.config), startTime)
+	}
+	defer func() {
+		if e.config == nil || !BudgetFromAgentConfig(e.config).Active() {
+			return
+		}
+		r := e.budgetSnapshot(state.TurnUsage.TotalTokens)
+		if state.Budget != nil {
+			r.StopReason = state.Budget.StopReason
+		}
+		state.Budget = &r
+	}()
 	guards := &loopGuards{}
 loop:
 	for e.withinIterationBudget(state.CurrentRound) || e.allowSteerOverrun {
 		e.allowSteerOverrun = false
+		if reason := e.budgetStopReason(state.TurnUsage.TotalTokens); reason != "" {
+			state.Budget = ptrBudgetUsage(e.budgetSnapshot(state.TurnUsage.TotalTokens))
+			logger.Warnf(ctx, "[Agent] %s", budgetStopNotice(reason, *state.Budget))
+			break loop
+		}
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
 		case <-ctx.Done():
@@ -827,7 +851,11 @@ loop:
 		if e.collaboration != nil && e.collaboration.Child == nil && e.collaborationOwnsFailure(ctx) {
 			return state, fmt.Errorf("parent iteration budget exhausted; remaining delegated work was cancelled")
 		}
-		if err := e.handleMaxIterations(ctx, query, state, sessionID, messages); err != nil {
+		if state.Budget != nil && state.Budget.StopReason != "" {
+			if err := e.finishBudgetStop(ctx, state, sessionID); err != nil {
+				return state, err
+			}
+		} else if err := e.handleMaxIterations(ctx, query, state, sessionID, messages); err != nil {
 			return state, err
 		}
 	}
@@ -1100,6 +1128,21 @@ func (e *AgentEngine) runReActIteration(
 		guards.lastResponseContent = ""
 	}
 
+	// A token budget can be exhausted by the response just received. Stop
+	// before creating or executing this round's tools: the contract forbids
+	// spending more work after the limit, and the final answer below uses the
+	// evidence already collected.
+	if reason := e.budgetStopReason(state.TurnUsage.TotalTokens); reason != "" {
+		state.Budget = ptrBudgetUsage(e.budgetSnapshot(state.TurnUsage.TotalTokens))
+		step := types.AgentStep{
+			Iteration:        state.CurrentRound,
+			Thought:          response.Content,
+			ReasoningContent: response.ReasoningContent,
+			Timestamp:        time.Now(),
+		}
+		state.RoundSteps = append(state.RoundSteps, step)
+		return iterOutcomeBreak, nil
+	}
 	// Create agent step
 	step := types.AgentStep{
 		UserMessagesBefore:   state.PendingSteerMessages,

@@ -1617,6 +1617,9 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 	} else if config.MaxIterations > MAX_ITERATIONS {
 		return fmt.Errorf("max iterations too high: %d (max %d)", config.MaxIterations, MAX_ITERATIONS)
 	}
+	if config.MaxRunTokens < 0 || config.MaxRunSeconds < 0 || config.MaxWriteActions < 0 {
+		return fmt.Errorf("run contract limits cannot be negative")
+	}
 
 	return nil
 }

@@ -271,6 +271,43 @@ func (e *AgentEngine) handleMaxIterations(
 	return nil
 }
 
+// finishBudgetStop ends a RunContract-stopped turn without spending another
+// model call. The contract exists to cap total work, so synthesizing with the
+// model after the cap would reintroduce the exact spend it just stopped.
+// Existing tool evidence remains in AgentSteps and the notice is emitted as a
+// complete answer so clients never receive a dangling stream.
+func (e *AgentEngine) finishBudgetStop(ctx context.Context, state *types.AgentState, sessionID string) error {
+	if state == nil || state.Budget == nil || state.Budget.StopReason == "" {
+		return nil
+	}
+	notice := budgetStopNotice(state.Budget.StopReason, *state.Budget)
+	logger.Warnf(ctx, "[Agent] %s", notice)
+	common.PipelineWarn(ctx, "Agent", "run_budget_stop", map[string]interface{}{
+		"reason":      string(state.Budget.StopReason),
+		"tokens_used": state.Budget.Used.TotalTokens,
+		"time_used":   state.Budget.Used.WallTimeSec,
+		"writes_used": state.Budget.Used.WriteActions,
+	})
+	state.FinalAnswer = notice
+	e.emitBudgetStopAnswer(ctx, sessionID, notice)
+	state.IsComplete = true
+	return nil
+}
+
+// emitBudgetStopAnswer publishes the reason as one complete answer. The UI
+// must never be left with a Done marker for content it never received.
+func (e *AgentEngine) emitBudgetStopAnswer(ctx context.Context, sessionID, notice string) {
+	answerID := generateEventID("answer")
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{Content: notice},
+	})
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{Done: true},
+	})
+}
+
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.
 func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
@@ -302,6 +339,7 @@ func (e *AgentEngine) emitCompletionEvent(
 		KnowledgeRefs:   knowledgeRefsInterface,
 		AgentSteps:      steps,
 		Usage:           turnUsage(state),
+		Budget:          state.Budget,
 		TotalSteps:      len(state.RoundSteps),
 		TotalDurationMs: time.Since(startTime).Milliseconds(),
 		MessageID:       messageID, // Include message ID for proper message update
@@ -315,6 +353,9 @@ func (e *AgentEngine) emitCompletionEvent(
 	}
 	if state.Suspended != nil {
 		data.Suspended = state.Suspended
+	}
+	if state.Budget != nil {
+		data.StopReason = string(state.Budget.StopReason)
 	}
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        generateEventID("complete"),

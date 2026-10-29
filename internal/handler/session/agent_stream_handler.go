@@ -1083,6 +1083,12 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if data.ModelID != "" {
 		completeData["model_id"] = data.ModelID
 	}
+	if data.StopReason != "" {
+		completeData["stop_reason"] = data.StopReason
+	}
+	if budget, ok := data.Budget.(*types.RunBudgetUsage); ok && budget != nil {
+		completeData["budget"] = budget
+	}
 	if suspended != nil {
 		completeData["suspended"] = suspended
 	}

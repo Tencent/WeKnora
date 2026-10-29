@@ -74,6 +74,9 @@ type qaRequestContext struct {
 	questionOrigin        *types.QuestionOrigin
 	pageContext           *types.PageContext
 	assistantAccess       types.AssistantAccessLevel
+	maxRunTokens          int
+	maxRunSeconds         int
+	maxWriteActions       int
 	// resourceRewriter turns internal storage references in the outbound stream
 	// into directly loadable URLs when the caller asks for `resource_urls=public`.
 	// Disabled (a pass-through) in the default handle mode.
@@ -498,6 +501,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		reasoningEffort:       request.ReasoningEffort,
+		maxRunTokens:          request.MaxRunTokens,
+		maxRunSeconds:         request.MaxRunSeconds,
+		maxWriteActions:       request.MaxWriteActions,
 		webSearchEnabled:      request.WebSearchEnabled,
 		localBrowserEnabled:   request.LocalBrowserEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),

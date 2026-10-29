@@ -615,6 +615,28 @@ func (e *AgentEngine) runToolCallAnswered(
 
 	var result *types.ToolResult
 	var err error
+	// A run contract's write budget is reserved before the tool executes. The
+	// reservation is atomic, so parallel calls cannot all pass a "remaining
+	// writes" check and then overspend together. Unknown tools (including MCP)
+	// fail closed here: under a write budget, a call whose risk cannot be
+	// classified must not be assumed read-only.
+	if e.runBudget != nil && e.runBudget.limit.MaxWriteActions > 0 {
+		risk := agenttools.CallRisk(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+		if risk.Mutates() || !risk.Valid() {
+			ok, reason := e.runBudget.reserveWrite()
+			if !ok {
+				stateBudget := e.runBudget.snapshot(0)
+				return types.ToolCall{
+					ID: tc.ID, Name: tc.Function.Name, Args: args,
+					ProviderMetadata: tc.ProviderMetadata,
+					Result: &types.ToolResult{
+						Success: false,
+						Error:   budgetStopNotice(reason, stateBudget),
+					},
+				}
+			}
+		}
+	}
 	if len(tc.UnresolvedHandles) > 0 && !webFetchValidatesReferences(tc) {
 		// A temporary handle is not an application identity. Fail before tool
 		// execution so a hallucinated/stale kb://, doc://, chunk://, url://, iN or res:// token can
