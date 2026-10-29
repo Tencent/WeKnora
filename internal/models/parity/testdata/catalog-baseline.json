@@ -334,6 +334,7 @@
   "siliconflow/KnowledgeQA/zai-org/GLM-5.2": "acce2ad2d6d1987c4702c00418bac6e441d0194fd7e8c12c9abee0141ac0f743",
   "siliconflow/Rerank/BAAI/bge-reranker-v2-m3": "471d9660cd6219c98941f7aec09ef68a17a5191a2350bea872d235098e4a1c1e",
   "siliconflow/Rerank/Qwen/Qwen3-Reranker-8B": "712284e5eef89f522e30c96bba18d019d0c48703adb2dc0fc1239aa55d582d49",
+  "volcengine-speech/ASR/doubao-speech-recognition": "91bb57adecc9f78c2e5814151e584337c364568acc87f26001f07132ff20794b",
   "volcengine/Embedding/doubao-embedding-large-textsnapshot": "44d79d19f14506e75d7b9144907ffe70c3eb3110e07470362264022866ce104e",
   "volcengine/Embedding/doubao-embedding-textsnapshot": "e522020c10b4d3962869cd0bdfa42f845ca60cf2d1862f06ecb725d67386f32a",
   "volcengine/Embedding/doubao-embedding-vision-250615": "6e447d353627e2f90da5ce3bf6458f73c7caf796210ebdee28af0497b77bc66f",

@@ -50,6 +50,16 @@ func upstream(t *testing.T) (string, *form, *atomic.Int32) {
 		require.NoError(t, err)
 		if mediaType == "application/json" {
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&got.body))
+			// The volcengine one-sentence shape announces itself with the
+			// app credential object its header carries; every other
+			// JSON-body recogniser here speaks chat completions.
+			if _, ok := got.body["app"]; ok {
+				_, _ = w.Write([]byte(
+					`{"code":1000,"message":"Success","sequence":-1,` +
+						`"result":[{"text":" hello ","utterances":[{"definite":true,` +
+						`"start_time":0,"end_time":1500,"text":" hello "}]}]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":" hello "}}]}`))
 			return
 		}
@@ -193,6 +203,33 @@ func TestTranscriptionWireFormatPerVendor(t *testing.T) {
 			assert.Len(t, out.Segments, tc.wantSegments)
 		})
 	}
+}
+
+// TestVolcengineAUCWireFormat pins the one-sentence shape: the JSON header
+// (credentials inside, not in an auth hook) followed by the raw audio, under
+// the semicolon Bearer scheme no other vendor here uses.
+func TestVolcengineAUCWireFormat(t *testing.T) {
+	url, got, _ := upstream(t)
+	a, err := NewASR(&Config{
+		Source: types.ModelSourceRemote, Provider: "volcengine-speech", BaseURL: url,
+		ModelName: "doubao-speech-recognition", APIKey: "k",
+		ExtraConfig: map[string]string{"app_id": "app-9"},
+	})
+	require.NoError(t, err)
+	out, err := a.Transcribe(context.Background(), []byte("RIFF"), "meeting.wav")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/api/v1/auc", got.path)
+	assert.Equal(t, "Bearer; k", got.auth)
+	app, _ := got.body["app"].(map[string]any)
+	require.NotNil(t, app, "the request header carries an app object")
+	assert.Equal(t, "app-9", app["appid"])
+	assert.Equal(t, "k", app["token"])
+	assert.Equal(t, "volcengine_streaming_common", app["cluster"])
+	assert.EqualValues(t, 4, got.body["audio_size"], "the raw audio follows the JSON header")
+	assert.Equal(t, "hello", out.Text)
+	require.Len(t, out.Segments, 1)
+	assert.Equal(t, 1.5, out.Segments[0].End, "utterance milliseconds arrive as seconds")
 }
 
 // A file over the documented ceiling is refused before it is uploaded: the

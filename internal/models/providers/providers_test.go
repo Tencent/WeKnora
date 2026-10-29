@@ -17,7 +17,7 @@ import (
 // expectedIDs is every built-in vendor this package links.
 var expectedIDs = []string{
 	"generic", "weknoracloud", "huggingface_tei",
-	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
+	"aliyun", "zhipu", "volcengine", "volcengine-speech", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",
@@ -84,8 +84,8 @@ func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 30 {
-		t.Fatalf("expected 30 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 31 {
+		t.Fatalf("expected 31 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)
