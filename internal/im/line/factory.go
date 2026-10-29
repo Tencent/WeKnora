@@ -24,7 +24,11 @@ func NewFactory() im.AdapterFactory {
 			return nil, nil, fmt.Errorf("line credentials: channel_secret is required")
 		}
 
-		adapter := NewWebhookAdapter(channelAccessToken, channelSecret)
+		// resetKeyword is an optional, per-channel command that clears the
+		// session context (default: use empty so only "/clear" applies).
+		resetKeyword := im.GetString(creds, "reset_keyword")
+
+		adapter := NewWebhookAdapter(channelAccessToken, channelSecret, resetKeyword)
 		return adapter, nil, nil
 	}
 }

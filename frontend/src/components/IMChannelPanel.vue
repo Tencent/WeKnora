@@ -555,6 +555,12 @@
                 <t-input v-model="formData.credentials.channel_secret" type="password"
                   placeholder="LINE_CHANNEL_SECRET" />
               </div>
+              <!-- Optional custom reset keyword: clears the session context -->
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.lineResetKeyword') }}</label>
+                <t-input v-model="formData.credentials.reset_keyword" placeholder="/reset" />
+                <p class="form-desc">{{ $t('agentEditor.im.lineResetKeywordHint') }}</p>
+              </div>
             </template>
 
             <!-- WeChat credentials (QR code binding) -->
