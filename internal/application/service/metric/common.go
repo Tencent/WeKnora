@@ -49,13 +49,13 @@ func splitSentences(text string) []string {
 	return sentences
 }
 
-func splitIntoWords(sentences []string) []string {
-	// 正则匹配中英文段落（中文块、英文块、其他字符）
-	re := regexp.MustCompile(`([\p{Han}]+)|([a-zA-Z0-9_.,!?]+)|(\p{P})`)
+// 正则匹配中英文段落（中文块、英文块、其他字符）
+var wordTokenPattern = regexp.MustCompile(`([\p{Han}]+)|([a-zA-Z0-9_.,!?]+)|(\p{P})`)
 
+func splitIntoWords(sentences []string) []string {
 	var tokens []string
 	for _, text := range sentences {
-		matches := re.FindAllStringSubmatch(text, -1)
+		matches := wordTokenPattern.FindAllStringSubmatch(text, -1)
 
 		for _, groups := range matches {
 			chineseBlock := groups[1]

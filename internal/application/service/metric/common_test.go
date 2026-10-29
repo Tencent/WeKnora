@@ -40,3 +40,43 @@ func TestTextMetricsIncludeEverySentence(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitIntoWords(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		sentences []string
+		want      []string
+	}{
+		{"nil", nil, nil},
+		{"empty", []string{"", " \n\t"}, nil},
+		{"words", []string{"Hello world_123! 42,foo."}, []string{"Hello", "world_123!", "42,foo."}},
+		{"whitespace", []string{"go\tone", "two\nthree"}, []string{"go", "one", "two", "three"}},
+		{"punctuation", []string{"A:B;C，D"}, []string{"A", ":", "B", ";", "C", "，", "D"}},
+		{"mixed scripts", []string{"中A文!"}, []string{"中", "A", "文", "!"}},
+		{"symbols", []string{"abc 😀 def + xyz"}, []string{"abc", "def", "xyz"}},
+		{"sentence order", []string{"first", "second"}, []string{"first", "second"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, splitIntoWords(tc.sentences))
+		})
+	}
+}
+
+func BenchmarkSplitIntoWords(b *testing.B) {
+	for _, tc := range []struct {
+		name      string
+		sentences []string
+	}{
+		{"empty", nil},
+		{"English", []string{"The quick brown fox jumps over the lazy dog.", "Metric_123, test!"}},
+		{"Chinese", []string{"中A文!", "测试指标"}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				splitIntoWords(tc.sentences)
+			}
+		})
+	}
+}
