@@ -25389,6 +25389,32 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_im.RuntimeStatus": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "integer"
+                },
+                "available": {
+                    "type": "boolean"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "queue_limit": {
+                    "type": "integer"
+                },
+                "rejected": {
+                    "type": "integer"
+                },
+                "timed_out": {
+                    "type": "integer"
+                },
+                "workers": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile": {
             "type": "object",
             "properties": {
@@ -39783,6 +39809,150 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.OperationsBackup": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "completed_at": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "snapshot_count": {
+                    "type": "integer"
+                },
+                "stale": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.OperationsDisk": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "available_bytes": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "total_bytes": {
+                    "type": "integer"
+                },
+                "used_percent": {
+                    "type": "number"
+                }
+            }
+        },
+        "internal_handler.OperationsHost": {
+            "type": "object",
+            "properties": {
+                "cpu_count": {
+                    "type": "integer"
+                },
+                "load_1m": {
+                    "type": "number"
+                },
+                "memory_available_bytes": {
+                    "type": "integer"
+                },
+                "memory_total_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler.OperationsLog": {
+            "type": "object",
+            "properties": {
+                "bytes": {
+                    "type": "integer"
+                },
+                "health": {
+                    "type": "string"
+                },
+                "max_files": {
+                    "type": "string"
+                },
+                "max_size": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.OperationsService": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "string"
+                },
+                "available": {
+                    "type": "boolean"
+                },
+                "exit_status": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "string"
+                },
+                "running_required": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.OperationsStatus": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "backups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.OperationsBackup"
+                    }
+                },
+                "collected_at": {
+                    "type": "integer"
+                },
+                "disks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.OperationsDisk"
+                    }
+                },
+                "host": {
+                    "$ref": "#/definitions/internal_handler.OperationsHost"
+                },
+                "logs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.OperationsLog"
+                    }
+                },
+                "services": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.OperationsService"
+                    }
+                },
+                "stale": {
+                    "type": "boolean"
+                }
+            }
+        },
         "internal_handler.PageResponse": {
             "type": "object",
             "properties": {
@@ -40527,6 +40697,9 @@ const docTemplate = `{
                     "type": "boolean",
                     "x-agent": true
                 },
+                "im": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_im.RuntimeStatus"
+                },
                 "model_limiter_available": {
                     "type": "boolean",
                     "x-agent": true
@@ -40541,6 +40714,9 @@ const docTemplate = `{
                 "models_error": {
                     "type": "boolean",
                     "x-agent": true
+                },
+                "operations": {
+                    "$ref": "#/definitions/internal_handler.OperationsStatus"
                 },
                 "parse_concurrency": {
                     "description": "compatibility alias for upstream_concurrency",

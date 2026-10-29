@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
@@ -38,6 +39,7 @@ type runtimeKnowledgeCanceller interface {
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
+	imRuntime        func() im.RuntimeStatus
 	cfg              *config.Config
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader
@@ -1839,6 +1841,8 @@ type RuntimeWorkerPool struct {
 }
 
 type RuntimeQueuesResponse struct {
+	Operations            OperationsStatus           `json:"operations"`
+	IM                    *im.RuntimeStatus          `json:"im,omitempty"`
 	QueuesError           bool                       `json:"queues_error" extensions:"x-agent"`
 	WorkersError          bool                       `json:"workers_error" extensions:"x-agent"`
 	ModelsError           bool                       `json:"models_error" extensions:"x-agent"`
@@ -1968,6 +1972,11 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	modelStats, modelSupported, modelErr := modellimiter.RuntimeStats(ctx)
 	if modelErr != nil {
 		logger.Errorf(ctx, "get model concurrency stats failed: %v", modelErr)
+	}
+	resp.Operations = readOperationsStatus(os.Getenv("WEKNORA_OPERATIONS_STATUS_FILE"), time.Now())
+	if h.imRuntime != nil {
+		status := h.imRuntime()
+		resp.IM = &status
 	}
 	resp.ModelsError = modelErr != nil
 	resp.ModelLimiterAvailable = modelSupported

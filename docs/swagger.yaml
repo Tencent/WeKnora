@@ -1,5 +1,116 @@
 basePath: /api/v1
 definitions:
+  internal_handler.OperationsStatus:
+    properties:
+      available:
+        type: boolean
+      backups:
+        items:
+          $ref: '#/definitions/internal_handler.OperationsBackup'
+        type: array
+      collected_at:
+        type: integer
+      disks:
+        items:
+          $ref: '#/definitions/internal_handler.OperationsDisk'
+        type: array
+      host:
+        $ref: '#/definitions/internal_handler.OperationsHost'
+      logs:
+        items:
+          $ref: '#/definitions/internal_handler.OperationsLog'
+        type: array
+      services:
+        items:
+          $ref: '#/definitions/internal_handler.OperationsService'
+        type: array
+      stale:
+        type: boolean
+    type: object
+  internal_handler.OperationsService:
+    properties:
+      active:
+        type: string
+      available:
+        type: boolean
+      exit_status:
+        type: integer
+      name:
+        type: string
+      result:
+        type: string
+      running_required:
+        type: boolean
+    type: object
+  internal_handler.OperationsLog:
+    properties:
+      bytes:
+        type: integer
+      health:
+        type: string
+      max_files:
+        type: string
+      max_size:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+    type: object
+  internal_handler.OperationsHost:
+    properties:
+      cpu_count:
+        type: integer
+      load_1m:
+        type: number
+      memory_available_bytes:
+        type: integer
+      memory_total_bytes:
+        type: integer
+    type: object
+  internal_handler.OperationsDisk:
+    properties:
+      available:
+        type: boolean
+      available_bytes:
+        type: integer
+      name:
+        type: string
+      total_bytes:
+        type: integer
+      used_percent:
+        type: number
+    type: object
+  internal_handler.OperationsBackup:
+    properties:
+      available:
+        type: boolean
+      completed_at:
+        type: integer
+      name:
+        type: string
+      snapshot_count:
+        type: integer
+      stale:
+        type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_im.RuntimeStatus:
+    properties:
+      active:
+        type: integer
+      available:
+        type: boolean
+      pending:
+        type: integer
+      queue_limit:
+        type: integer
+      rejected:
+        type: integer
+      timed_out:
+        type: integer
+      workers:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_agent_tools.AgentToolCatalog:
     properties:
       default_tools:
@@ -12842,6 +12953,8 @@ definitions:
       available:
         type: boolean
         x-agent: true
+      im:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_im.RuntimeStatus'
       model_limiter_available:
         type: boolean
         x-agent: true
@@ -12853,6 +12966,8 @@ definitions:
       models_error:
         type: boolean
         x-agent: true
+      operations:
+        $ref: '#/definitions/internal_handler.OperationsStatus'
       parse_concurrency:
         description: compatibility alias for upstream_concurrency
         type: integer

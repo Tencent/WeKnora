@@ -779,6 +779,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
 	must(container.Invoke(registerIMService))
+	must(container.Invoke(func(s *imPkg.Service, h *handler.SystemHandler) { h.BindIMRuntime(s) }))
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewMCPEndpointHandler))
