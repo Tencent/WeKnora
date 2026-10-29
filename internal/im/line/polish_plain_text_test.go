@@ -62,6 +62,21 @@ func TestPolishPlainText(t *testing.T) {
 			in:   "## Title\n\n- item\n\ntext",
 			want: "📌 Title\n\n• item\n\ntext",
 		},
+		{
+			name: "markdown table to key-value list",
+			in:   "| 規格 | 描述 |\n| --- | --- |\n| 處理器 | Intel Xeon |\n| 記憶體 | 64GB DDR5 |",
+			want: "📊 【詳情】\n  • 規格：處理器\n    描述：Intel Xeon\n  • 規格：記憶體\n    描述：64GB DDR5",
+		},
+		{
+			name: "three column table",
+			in:   "| 產品 | 規格 | 價格 |\n| --- | --- | --- |\n| 手機 | 8GB | $20000 |",
+			want: "📊 【詳情】\n  • 產品：手機\n    規格：8GB\n    價格：$20000",
+		},
+		{
+			name: "escaped pipe in cell",
+			in:   "| 欄位 | 說明 |\n| --- | --- |\n| 運算 | 1 \\| 2 相加 |",
+			want: "📊 【詳情】\n  • 欄位：運算\n    說明：1 | 2 相加",
+		},
 	}
 
 	for _, tt := range tests {
