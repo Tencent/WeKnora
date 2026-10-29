@@ -4234,7 +4234,7 @@ export default {
       apiKeyOptional: 'API Key (опционально)',
       apiKeyPlaceholder: 'Введите API Key',
       customHeadersLabel: 'Пользовательские заголовки запроса (опционально)',
-      customHeadersDesc: 'Дополнительные HTTP-заголовки, добавляемые к запросам к удалённому API модели (например, для авторизации корпоративного шлюза или трассировки). Зарезервированные заголовки, такие как Authorization / Content-Type, игнорируются.',
+      customHeadersDesc: 'Дополнительные HTTP-заголовки, добавляемые к запросам к удалённому API модели (например, для авторизации корпоративного шлюза или трассировки). Зарезервированные заголовки, такие как Authorization / Content-Type, игнорируются. Значения поддерживают подстановки ${var}, разворачиваемые из текущего контекста запроса: user_id, user_name, user_email, tenant_id, tenant_name, session_id, request_id.',
       customHeadersAdd: 'Добавить заголовок',
       customHeadersKeyPlaceholder: 'Имя заголовка',
       customHeadersValuePlaceholder: 'Значение заголовка',

@@ -6323,7 +6323,13 @@ definitions:
           CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，
           用途类似 Python OpenAI SDK 的 extra_headers 参数，
           常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。
-          保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
+          保留字段（Authorization、api-key、Content-Type 等）会在运行期被忽略以避免破坏签名/鉴权流程。
+
+          请求头的取值支持 ${var} 动态占位符，在每次请求发出前按当前请求上下文展开，
+          因此同一份模型配置可以为不同调用方带上不同的身份信息，例如
+          "X-User-Name": "${user_name}"。可用变量见 api.HeaderVariableNames
+          （user_id / user_name / user_email / tenant_id / tenant_name / session_id / request_id）。
+          上下文里取不到值的变量展开为空字符串，不会把 "${user_name}" 原样发出去。
         type: object
       embedding_parameters:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EmbeddingParameters'

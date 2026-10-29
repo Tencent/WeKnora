@@ -5534,7 +5534,7 @@ export default {
         apiKeyOptional: 'API Key (optional)',
         apiKeyPlaceholder: 'Enter API Key',
         customHeadersLabel: 'Custom Request Headers (optional)',
-        customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',
+        customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored. Values support ${var} placeholders expanded from the current request context: user_id, user_name, user_email, tenant_id, tenant_name, session_id, request_id.',
         customHeadersAdd: 'Add Header',
         customHeadersKeyPlaceholder: 'Header name',
         customHeadersValuePlaceholder: 'Header value',

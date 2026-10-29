@@ -129,7 +129,17 @@ func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentT
 	}
 	// The helper skips reserved names so custom headers cannot clobber auth
 	// or content negotiation.
-	secutils.ApplyCustomHeaders(req, e.Headers)
+	//
+	// Header values may carry ${var} placeholders that expand to the current
+	// caller's identity (user name, workspace, session). The expansion
+	// happens per request, not when the model configuration is loaded, so one
+	// configured model can address every caller differently.
+	headers, unresolved := secutils.ResolveHeaderTemplates(e.Headers, HeaderVariables(ctx))
+	if len(unresolved) > 0 {
+		logger.Warnf(ctx, "[model-api] custom headers reference variables that are "+
+			"unavailable in this context %v; they expand to empty values", unresolved)
+	}
+	secutils.ApplyCustomHeaders(req, headers)
 	// Identity belongs to this call, not the shared model configuration or
 	// a per-request UUID. Derived contexts retain it across turns and retries.
 	req.Header.Set("User-Agent", "WeKnora")

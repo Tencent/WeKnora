@@ -5534,7 +5534,7 @@ export default {
         apiKeyOptional: 'APIキー（任意）',
         apiKeyPlaceholder: 'APIキーを入力してください',
         customHeadersLabel: 'カスタムリクエストヘッダー（任意）',
-        customHeadersDesc: 'リモートモデルAPIへのリクエストに追加するHTTPヘッダーです（企業ゲートウェイの認証やトレースなどに利用）。Authorization / Content-Typeなどの予約ヘッダーは無視されます。',
+        customHeadersDesc: 'リモートモデルAPIへのリクエストに追加するHTTPヘッダーです（企業ゲートウェイの認証やトレースなどに利用）。Authorization / Content-Typeなどの予約ヘッダーは無視されます。値には ${var} 形式のプレースホルダーが使用でき、現在のリクエストコンテキストから展開されます: user_id, user_name, user_email, tenant_id, tenant_name, session_id, request_id.',
         customHeadersAdd: 'ヘッダーを追加',
         customHeadersKeyPlaceholder: 'ヘッダー名',
         customHeadersValuePlaceholder: 'ヘッダーの値',

@@ -4236,7 +4236,7 @@ export default {
       apiKeyOptional: 'API Key（可选）',
       apiKeyPlaceholder: '输入 API Key',
       customHeadersLabel: '自定义请求头（可选）',
-      customHeadersDesc: '调用远程模型 API 时附加的 HTTP 请求头，常用于企业网关鉴权、链路追踪等场景；Authorization、Content-Type 等保留头会被自动忽略。',
+      customHeadersDesc: '调用远程模型 API 时附加的 HTTP 请求头，常用于企业网关鉴权、链路追踪等场景；Authorization、Content-Type 等保留头会被自动忽略。取值支持 ${var} 动态占位符，按当前请求上下文展开，可用变量：user_id、user_name、user_email、tenant_id、tenant_name、session_id、request_id。',
       customHeadersAdd: '添加请求头',
       customHeadersKeyPlaceholder: 'Header 名称',
       customHeadersValuePlaceholder: 'Header 值',

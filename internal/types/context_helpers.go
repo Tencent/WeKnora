@@ -55,6 +55,17 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// UserFromContext extracts the authenticated *User from ctx.
+//
+// Unlike UserIDFromContext this carries the display fields (username, email).
+// Only requests that resolved a real WeKnora account have one: an API key, an
+// IM bot or an embed visitor authenticates as a principal without a user row,
+// so readers must treat a missing user as "no display identity", not as an error.
+func UserFromContext(ctx context.Context) (*User, bool) {
+	v, ok := ctx.Value(UserContextKey).(*User)
+	return v, ok && v != nil
+}
+
 // WithWikiEditSource marks ctx so wiki page writes performed under it are
 // attributed to the given edit source (WikiEditSourceUser / Agent / Revert).
 // Writes without the mark are attributed to the ingest pipeline.
