@@ -536,6 +536,27 @@
               </div>
             </template>
 
+            <!-- LINE credentials -->
+            <template v-if="formData.platform === 'line'">
+              <div class="platform-link-hint">
+                <a href="https://store.line-measuring.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.lineConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.lineAccessToken') }}</label>
+                <t-input v-model="formData.credentials.channel_access_token" type="password"
+                  placeholder="LINE_CHANNEL_ACCESS_TOKEN" />
+              </div>
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.lineChannelSecret') }}</label>
+                <t-input v-model="formData.credentials.channel_secret" type="password"
+                  placeholder="LINE_CHANNEL_SECRET" />
+              </div>
+            </template>
+
             <!-- WeChat credentials (QR code binding) -->
             <template v-if="formData.platform === 'wechat'">
               <p class="form-desc">{{ $t('agentEditor.im.wechatHint') }}</p>
@@ -612,6 +633,7 @@ import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
 import qqbotLogo from '@/assets/img/im/qqbot.png';
 import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
+import lineLogo from '@/assets/img/im/line.svg';
 
 type IMPlatform = IMChannel['platform'];
 type IMLocale = NonNullable<IMChannel['locale']>;
@@ -627,6 +649,7 @@ const PLATFORM_LOGO: Record<string, string> = {
   wechat: wechatLogo,
   qqbot: qqbotLogo,
   yunzhijia: yunzhijiaLogo,
+  line: lineLogo,
 };
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
@@ -679,6 +702,7 @@ const platformOptions = computed(() => ([
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
   { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
   { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
+  { value: 'line' as IMPlatform, label: t('agentEditor.im.line'), logo: lineLogo },
 ]));
 
 const localeOptions = computed(() => ([
