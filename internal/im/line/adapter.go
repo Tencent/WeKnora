@@ -290,42 +290,45 @@ func flexMessages(text string, enableFlex bool) []map[string]interface{} {
 	}
 }
 
-// flexMessage constructs a single LINE Flex Message object. The bubble carries
-// the answer under a "RAG 回答" title with a WeKnora source tag, so the output
-// has structured layout. altText is the fallback rendered on clients that
-// cannot display the flex card.
+// flexMessage constructs a single LINE flex message per the official messaging
+// schema: contents is ONE BubbleContainer object (NOT an array). Only carousel
+// multi-flex wraps bubbles in an array.
 func flexMessage(text string) map[string]interface{} {
 	return map[string]interface{}{
 		"type":    "flex",
 		"altText": "RAG 回答",
-		"contents": []interface{}{
-			map[string]interface{}{
-				"type": "bubble",
-				"header": map[string]interface{}{
-					"type":   "box",
-					"layout": "vertical",
-					"contents": []interface{}{
-						map[string]interface{}{
-							"type":   "text",
-							"text":   "RAG 回答",
-							"weight": "bold",
-							"size":   "lg",
-						},
-					},
+		"contents": bubbleContainer(text),
+	}
+}
+
+// bubbleContainer returns a LINE BubbleContainer with a "RAG 回答" header and a
+// body carrying the answer plus a WeKnora source line.
+func bubbleContainer(text string) map[string]interface{} {
+	return map[string]interface{}{
+		"type": "bubble",
+		"header": map[string]interface{}{
+			"type":   "box",
+			"layout": "vertical",
+			"contents": []interface{}{
+				map[string]interface{}{
+					"type":   "text",
+					"text":   "RAG 回答",
+					"weight": "bold",
+					"size":   "lg",
 				},
-				"body": map[string]interface{}{
-					"type":    "box",
-					"layout":  "vertical",
-					"spacing": "md",
-					"contents": []interface{}{
-						map[string]interface{}{"type": "text", "text": text},
-						map[string]interface{}{
-							"type":  "text",
-							"text":  "WeKnora",
-							"size":  "xs",
-							"color": "#888888",
-						},
-					},
+			},
+		},
+		"body": map[string]interface{}{
+			"type":    "box",
+			"layout":  "vertical",
+			"spacing": "md",
+			"contents": []interface{}{
+				map[string]interface{}{"type": "text", "text": text, "wrap": true},
+				map[string]interface{}{
+					"type":  "text",
+					"text":  "WeKnora",
+					"size":  "xs",
+					"color": "#888888",
 				},
 			},
 		},
