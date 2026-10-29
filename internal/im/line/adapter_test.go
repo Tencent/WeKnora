@@ -401,3 +401,54 @@ func TestParseCallbackResetKeyword(t *testing.T) {
 		t.Errorf("reset flag must not be set for a normal message, got true")
 	}
 }
+
+// TestParseCallbackNumericTimestampLowercaseText is the regression test for the
+// two core parsing bugs: LINE's real payload sends the event timestamp as a JSON
+// number (1793261422841, not a quoted string) and the message type lowercase
+// ("text", not "Text"). Under the old struct/tag this failed to unmarshal and
+// this text message was silently skipped. It must now produce a message.
+func TestParseCallbackNumericTimestampLowercaseText(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	// Numeric timestamp (no quotes) + lowercase "text" — matches LINE's wire format.
+	const payload = `{
+		"destination": "U-destination",
+		"events": [
+			{
+				"type": "message",
+				"token": "tok-1",
+				"timestamp": 1793261422841,
+				"source": {"type": "user", "userId": "U-abcd123"},
+				"replyToken": "rtk-987",
+				"message": {"type": "text", "id": "msg-555", "text": "hello"}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("numeric timestamp / lowercase text caused unmarshal error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage for lowercase text payload, got nil")
+	}
+	if incoming.UserID != "U-abcd123" {
+		t.Errorf("UserID = %q, want U-abcd123", incoming.UserID)
+	}
+	if incoming.Content != "hello" {
+		t.Errorf("Content = %q, want %q", incoming.Content, "hello")
+	}
+}
+
+// TestHandleURLVerificationMalformedBodyNotVerification confirms that a body
+// which fails to parse is surfaced as NOT-handled (false) instead of being
+// swallowed and misreported as a webhook verification.
+func TestHandleURLVerificationMalformedBodyNotVerification(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	c, _ := newTestContext(t, `{ this is not valid json `)
+	if handled := adapter.HandleURLVerification(c); handled {
+		t.Fatal("expected HandleURLVerification = false for a malformed body")
+	}
+}

@@ -25,6 +25,7 @@ import (
 type Adapter struct {
 	channelAccessToken string
 	channelSecret      string
+	resetKeyword       string
 }
 
 // Compile-time check that Adapter satisfies the im.Adapter interface.
@@ -34,11 +35,27 @@ var _ im.Adapter = (*Adapter)(nil)
 //
 // channelAccessToken is the bot messaging token; channelSecret is the channel
 // secret used to verify incoming webhook signatures (x-line-signature).
-func NewWebhookAdapter(channelAccessToken, channelSecret string) *Adapter {
+//
+// resetKeyword is the per-channel command (e.g. "/reset", "/clear", "/new",
+// "/restart") that clears the current session context. When empty, no custom
+// keyword is matched and only the platform-level mechanism applies.
+func NewWebhookAdapter(channelAccessToken, channelSecret, resetKeyword string) *Adapter {
 	return &Adapter{
 		channelAccessToken: channelAccessToken,
 		channelSecret:      channelSecret,
+		resetKeyword:       strings.TrimSpace(resetKeyword),
 	}
+}
+
+// isReset reports whether content matches this channel's configured reset
+// keyword. Matching is exact after trimming and case-folding, so a keyword of
+// "/reset" only fires when the user sends exactly "/reset" (nothing more,
+// nothing less) — just like the other slash commands.
+func (a *Adapter) isReset(content string) bool {
+	if a.resetKeyword == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(content), a.resetKeyword)
 }
 
 func (a *Adapter) Platform() im.Platform {
@@ -110,8 +127,10 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			// platform dashboard; keep scanning for a text message.
 			continue
 		}
-		if ev.Message.Type != "Text" {
+		if strings.ToLower(ev.Message.Type) != "text" {
 			// Text-only in this phase; other message kinds are skipped.
+			// LINE sends the type lowercase ("text"); ToLower keeps it robust
+			// against case drift so real text messages are not silently dropped.
 			continue
 		}
 		if ev.Source.Type == "group" || ev.Source.Type == "room" {
@@ -124,6 +143,12 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		incoming := buildIncoming(ev, ev.Message)
 		incoming.Extra = map[string]string{
 			"replyToken": ev.ReplyToken,
+		}
+		// Reset keyword: flag it so the service routes this through the same
+		// session-clear action as "/clear". Matching is case-insensitive and
+		// exact (see isReset), so stray text never triggers a reset.
+		if a.isReset(incoming.Content) {
+			incoming.Extra["reset"] = "true"
 		}
 		return incoming, nil
 	}
@@ -282,9 +307,14 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	// A request without well-formed events is treated as a verification or
-	// health check rather than a message event.
+	// health check rather than a message event. A malformed payload is NOT a
+	// verification: return false so the error is surfaced by the caller
+	// instead of being swallowed as "handled".
 	payload, err := parseCallback(bodyBytes)
-	if err != nil || len(payload.Events) == 0 {
+	if err != nil {
+		return false
+	}
+	if len(payload.Events) == 0 {
 		c.JSON(http.StatusOK, gin.H{"handled": "line-webhook-verification"})
 		return true
 	}
@@ -341,7 +371,7 @@ type webhookPayload struct {
 type webhookEvent struct {
 	Type       string        `json:"type"`
 	Token      string        `json:"token"`
-	Timestamp  string        `json:"timestamp"`
+	Timestamp  int64         `json:"timestamp"`
 	Source     webhookSource `json:"source"`
 	ReplyToken string        `json:"replyToken"`
 	Message    *webhookMessage `json:"message"`

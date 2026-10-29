@@ -1812,6 +1812,15 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		}
 	}
 
+	// ── Reset keyword ──
+	// A channel (LINE reset_keyword) may flag the incoming message so its
+	// session context is cleared — the same side effect as "/clear" — and a
+	// confirmation returned. Placed before slash-command dispatch so a custom
+	// reset keyword is not mistaken for an unknown command.
+	if msg.Extra != nil && msg.Extra["reset"] == "true" {
+		return s.handleCommand(sessionCtx, NewResetCommand(), nil, msg, adapter, channel, channelSession, customAgent)
+	}
+
 	// ── Slash-command dispatch ──
 	// Commands are handled before the QA pipeline so they respond instantly.
 	if cmd, args, ok := s.cmdRegistry.Parse(msg.Content); ok {
