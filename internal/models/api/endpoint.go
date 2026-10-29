@@ -114,6 +114,17 @@ func (e Endpoint) NewRequest(ctx context.Context, url string, body any, stream b
 	return req, data, nil
 }
 
+// NewRawRequest prepares an authenticated POST whose body is sent exactly as
+// given, under an explicit content type. NewRequest marshals and therefore
+// validates JSON, which a vendor body that is not one JSON document cannot
+// survive: Volcano's one-sentence recognition posts a JSON header followed
+// by raw audio bytes as one application/json body.
+func (e Endpoint) NewRawRequest(
+	ctx context.Context, url, contentType string, body []byte,
+) (*http.Request, error) {
+	return e.newPost(ctx, url, body, contentType)
+}
+
 // newPost prepares an authenticated POST of an already-encoded body.
 func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentType string) (*http.Request, error) {
 	if err := secutils.ValidateURLForSSRF(url); err != nil {

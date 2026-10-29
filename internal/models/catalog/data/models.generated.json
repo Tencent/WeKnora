@@ -5896,6 +5896,14 @@
         "source": "https://www.volcengine.com/docs/84313/1254474"
       }
     ],
+    "volcengine-speech": [
+      {
+        "id": "doubao-speech-recognition",
+        "name": "Doubao Speech Recognition (one-sentence)",
+        "type": "ASR",
+        "source": "https://www.volcengine.com/docs/6561/80818"
+      }
+    ],
     "weknoracloud": [],
     "zhipu": [
       {

@@ -290,6 +290,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | 阿里云 DashScope | `aliyun` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 智谱 BigModel | `zhipu` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 火山引擎 | `volcengine` | ✓ | ✓ | ✓ | ✓ | |
+| 火山引擎语音 | `volcengine-speech` | | | | | ✓ |
 | 腾讯混元 | `hunyuan` | ✓ | ✓ | | | |
 | 硅基流动 | `siliconflow` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | MiniMax | `minimax` | ✓ | | | | ✓ |
@@ -556,7 +557,7 @@ builtin_models:
 
 | 层 | 位置 | 职责 |
 |----|------|------|
-| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`、`teirank`、`pineconerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`、`openaichataudio`。各自持有请求/响应结构与解析，不依赖厂商定义或模型目录 |
+| 协议层 | `internal/models/api/<protocol>` | 一个 wire 协议一个包。对话：`openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；重排：`cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`、`teirank`、`pineconerank`；向量：`openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；语音：`openaitranscriptions`、`openaichataudio`、`volcengineauc`。各自持有请求/响应结构与解析，不依赖厂商定义或模型目录 |
 | 厂商层 | `internal/models/providers/<id>.go` | 一个厂商一份定义，声明支持的模型类型、各类型默认地址、鉴权方式、额外字段、协议兼容默认值与特殊端点钩子；图标放 `providers/assets/`，在 `builtin.go` 的 `Builtins()` 显式列出 |
 | 目录层 | `internal/models/catalog` | 加载生成的模型目录 `catalog/data/models.generated.json`，按类型和模型名查询条目；不含厂商行为 |
 | 运行时 | `internal/models/runtime` | 组合厂商定义与目录、应用部署叠加（`overlay.go`），合并单个模型配置、选择协议、组装认证和端点，隔离旧字段推断 |
@@ -618,10 +619,10 @@ Anthropic 走 Messages 协议；Gemini 默认走原生 `generateContent`（`base
 1. **不再一律发 `response_format=verbose_json`**。只有文档写明支持的模型（OpenAI `whisper-1`）返回分段；需要分段的自建行可在 `spec.compat` 里写 `{"response_format": "verbose_json"}`。
 2. **上传前按厂商文档检查大小与格式**：OpenAI / 智谱 / OpenRouter 25 MB、Requesty 32 MB、SiliconFlow / MiniMax 50 MB；阿里云与小米按 base64 编码后的 `data:` URI 计 10 MB。智谱、小米只收 wav/mp3。
 3. **回复里没有 `text` 字段即报错**；静音音频返回空字符串 `text`，照常处理。
-4. **新增支持语音的厂商**：OpenAI 兼容形状（multipart 上传）的 openai、siliconflow、gpustack、generic、智谱（`glm-asr-2512`，单文件 ≤30 秒）、MiniMax（`asr-1.0`）、OpenRouter、Requesty、LiteLLM；经对话接口传音频的阿里云 `qwen3-asr-flash`、小米 `mimo-v2.5-asr`。阿里云的其他语音模型名会被拒绝并说明原因。
+4. **新增支持语音的厂商**：OpenAI 兼容形状（multipart 上传）的 openai、siliconflow、gpustack、generic、智谱（`glm-asr-2512`，单文件 ≤30 秒）、MiniMax（`asr-1.0`）、OpenRouter、Requesty、LiteLLM；经对话接口传音频的阿里云 `qwen3-asr-flash`、小米 `mimo-v2.5-asr`。阿里云的其他语音模型名会被拒绝并说明原因。火山引擎语音（`volcengine-speech`）走其一句话识别 HTTP 接口（JSON 头拼接二进制音频的私有报文，AppID + Access Token + Cluster 鉴权），单文件 ≤10 MB，仅支持 wav/mp3；实时流式识别仍不在接入范围。
 5. **知识库的「音频语言提示」会发给支持的厂商**（OpenAI / Requesty / OpenRouter / GPUStack / generic / MiniMax / 阿里云 / 小米）；智谱、SiliconFlow、LiteLLM 不支持该参数，不发。填 `auto` 等同留空。
 
-以下服务暂未接入语音转写：火山豆包语音、千帆、七牛、Novita、腾讯云 ASR、NVIDIA Riva、Gemini、Azure OpenAI（音频转写只在 v1 preview 接口中提供）。
+以下服务暂未接入语音转写：千帆、七牛、Novita、腾讯云 ASR、NVIDIA Riva、Gemini、Azure OpenAI（音频转写只在 v1 preview 接口中提供）。
 
 ### 模型调用链
 
