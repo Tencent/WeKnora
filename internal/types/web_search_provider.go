@@ -30,6 +30,7 @@ const (
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
 	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
+	WebSearchProviderTypeYou        WebSearchProviderType = "you"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -250,6 +251,16 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			SupportsProxy:          true,
 			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
 			DocsURL:                "https://keenable.ai/",
+		},
+		{
+			ID:                     "you",
+			Name:                   "You.com",
+			RequiresAPIKey:         false,
+			SupportsOptionalAPIKey: true,
+			SupportsProxy:          true,
+			Description: "You.com web search (keyless by default, 100 searches a day; " +
+				"an optional API key raises the limit)",
+			DocsURL: "https://you.com/platform/api-keys",
 		},
 		{
 			ID:             "metaso",
