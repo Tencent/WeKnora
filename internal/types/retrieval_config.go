@@ -3,6 +3,8 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"os"
+	"strings"
 )
 
 // RetrievalConfig holds the global retrieval/search configuration for a tenant.
@@ -89,27 +91,58 @@ func (c *RetrievalConfig) GetEffectiveRerankThreshold() float64 {
 	return c.RerankThreshold
 }
 
+// vastbaseDriverActive reports whether the deployment's RETRIEVE_DRIVER list
+// includes the vastbase driver. Vastbase serves the keyword channel from its
+// native BM25 fulltext index, which makes exact-key lookups (IDs, codes,
+// names) a first-class keyword use case: the matching chunk often ranks #1
+// on BM25 while ranking far down on vectors. The generic 60 / 0.7 / 0.3
+// fusion defaults dilute such single-channel bullseyes below the chat
+// context window, so unset fusion parameters default sharper under vastbase.
+func vastbaseDriverActive() bool {
+	for _, driver := range strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",") {
+		if strings.TrimSpace(driver) == "vastbase" {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultRRFK() int {
+	if vastbaseDriverActive() {
+		return 15
+	}
+	return 60
+}
+
+func defaultRRFWeights() (vector, keyword float64) {
+	if vastbaseDriverActive() {
+		return 0.5, 0.5
+	}
+	return 0.7, 0.3
+}
+
 // GetEffectiveRRFK returns the RRF smoothing constant with a fallback default.
 func (c *RetrievalConfig) GetEffectiveRRFK() int {
 	if c == nil || c.RRFK <= 0 {
-		return 60
+		return defaultRRFK()
 	}
 	return c.RRFK
 }
 
-// GetEffectiveRRFWeights returns vector / keyword weights with sensible defaults.
-// When neither weight is set explicitly, returns 0.7 / 0.3.
+// GetEffectiveRRFWeights returns vector / keyword weights with sensible
+// defaults. When neither weight is set explicitly, the deployment default
+// applies (0.7 / 0.3, or 0.5 / 0.5 under the vastbase driver).
 func (c *RetrievalConfig) GetEffectiveRRFWeights() (vector, keyword float64) {
 	if c == nil || (c.RRFVectorWeight == 0 && c.RRFKeywordWeight == 0) {
-		return 0.7, 0.3
+		return defaultRRFWeights()
 	}
 	v := c.RRFVectorWeight
 	k := c.RRFKeywordWeight
 	if v <= 0 {
-		v = 0.7
+		v, _ = defaultRRFWeights()
 	}
 	if k <= 0 {
-		k = 0.3
+		_, k = defaultRRFWeights()
 	}
 	return v, k
 }

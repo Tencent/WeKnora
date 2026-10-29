@@ -15,6 +15,10 @@ const (
 	DorisRetrieverEngineType           RetrieverEngineType = "doris"
 	SQLiteRetrieverEngineType          RetrieverEngineType = "sqlite"
 	TencentVectorDBRetrieverEngineType RetrieverEngineType = "tencent_vectordb"
+	// VastbaseRetrieverEngineType identifies the Vastbase G100 vector driver.
+	// Vastbase speaks the PostgreSQL wire protocol and provides native vector
+	// types (halfvector) with its own graph_index ANN index.
+	VastbaseRetrieverEngineType RetrieverEngineType = "vastbase"
 	// OpenSearchRetrieverEngineType identifies the OpenSearch k-NN driver
 	// introduced in Phase 3 (see issue tracker). The driver itself ships
 	// in a subsequent PR; this constant exists so that
