@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -13,6 +14,15 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
+
+// isUploadTooLarge reports whether a multipart error is the body cap firing
+// rather than a malformed or absent part. The parent handler package keeps the
+// same check for its own routes; session is a subpackage of it, so the two
+// cannot share the symbol without an import cycle.
+func isUploadTooLarge(err error) bool {
+	var tooLarge *http.MaxBytesError
+	return errors.As(err, &tooLarge)
+}
 
 // UploadTemporaryDocument accepts one multipart file and immediately returns
 // a session-scoped document ID. Parsing continues in the document worker.
@@ -29,6 +39,15 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
+		// A capped body fails the multipart parse, so an oversized upload
+		// arrives here rather than in any size check below. Report it as the
+		// limit it hit: "invalid attachment upload" sends the caller looking for
+		// a missing field when the file was sent and refused.
+		if isUploadTooLarge(err) {
+			c.Error(apperrors.NewBadRequestError(fmt.Sprintf(
+				"attachment exceeds the %d MB upload limit", secutils.GetMaxFileSizeMB())))
+			return
+		}
 		c.Error(apperrors.NewBadRequestError(fmt.Sprintf("invalid attachment upload: %v", err)))
 		return
 	}
