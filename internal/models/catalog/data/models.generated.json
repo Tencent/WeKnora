@@ -745,7 +745,8 @@
         "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/embedding",
         "compat": {
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_input_chars": 128000
         }
       },
       {
@@ -755,7 +756,8 @@
         "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/embedding",
         "compat": {
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_input_chars": 128000
         }
       },
       {
@@ -765,7 +767,8 @@
         "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/embedding",
         "compat": {
-          "max_batch_size": 10
+          "max_batch_size": 10,
+          "max_input_chars": 8192
         }
       },
       {
@@ -775,7 +778,8 @@
         "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/embedding",
         "compat": {
-          "max_batch_size": 10
+          "max_batch_size": 10,
+          "max_input_chars": 8192
         }
       },
       {
@@ -785,7 +789,8 @@
         "source": "https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai",
         "compat": {
           "dimensions_field": "",
-          "max_batch_size": 25
+          "max_batch_size": 25,
+          "max_input_chars": 2048
         }
       },
       {
@@ -795,7 +800,8 @@
         "source": "https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai",
         "compat": {
           "dimensions_field": "",
-          "max_batch_size": 25
+          "max_batch_size": 25,
+          "max_input_chars": 2048
         }
       },
       {
@@ -865,6 +871,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 20,
+          "max_input_chars": 1024,
           "max_image_batch_size": 8,
           "max_image_bytes": 3000000
         }
@@ -884,6 +891,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 20,
+          "max_input_chars": 32000,
           "max_image_batch_size": 10,
           "max_image_bytes": 10000000
         }
@@ -902,6 +910,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 20,
+          "max_input_chars": 32000,
           "max_image_batch_size": 10,
           "max_image_bytes": 10000000
         }
@@ -921,6 +930,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 1,
+          "max_input_chars": 32000,
           "max_image_batch_size": 1,
           "max_image_bytes": 5000000
         }
@@ -939,6 +949,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 1,
+          "max_input_chars": 32000,
           "max_image_batch_size": 1,
           "max_image_bytes": 5000000
         }
@@ -958,6 +969,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "",
           "max_batch_size": 20,
+          "max_input_chars": 512,
           "max_image_batch_size": 1,
           "max_image_bytes": 3000000
         }
@@ -976,6 +988,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "",
           "max_batch_size": 20,
+          "max_input_chars": 512,
           "max_image_batch_size": 1,
           "max_image_bytes": 3000000
         }
@@ -4824,7 +4837,8 @@
         "dimension": 1024,
         "source": "https://cloud.baidu.com/doc/qianfan/s/rmh4stp0j",
         "compat": {
-          "max_batch_size": 1
+          "max_batch_size": 1,
+          "max_input_chars": 8192
         }
       },
       {
@@ -5845,7 +5859,8 @@
         "compat": {
           "api": "openai-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 4
+          "max_batch_size": 4,
+          "max_input_chars": 4096
         }
       },
       {
@@ -5856,7 +5871,8 @@
         "compat": {
           "api": "openai-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 4
+          "max_batch_size": 4,
+          "max_input_chars": 4096
         }
       },
       {
@@ -6134,7 +6150,8 @@
         "dimension": 2048,
         "source": "https://docs.bigmodel.cn/api-reference/模型-api/文本嵌入",
         "compat": {
-          "max_batch_size": 64
+          "max_batch_size": 64,
+          "max_input_chars": 3072
         }
       },
       {
