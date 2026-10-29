@@ -27,7 +27,9 @@ func (s *stubKnowledgeBaseService) GetKnowledgeBaseByID(context.Context, string)
 	return s.kb, nil
 }
 
-func (s *stubKnowledgeBaseService) GetKnowledgeBaseByIDOnly(_ context.Context, id string) (*types.KnowledgeBase, error) {
+func (s *stubKnowledgeBaseService) GetKnowledgeBaseByIDOnly(
+	_ context.Context, id string,
+) (*types.KnowledgeBase, error) {
 	if s.getKBPanicIDs[id] {
 		panic("test: knowledge base lookup panicked")
 	}
@@ -227,7 +229,10 @@ func TestQueryKnowledgeGraph_WorkerPanicIsContained(t *testing.T) {
 			Enabled: true, Nodes: []*types.GraphNode{{Name: "Acme"}},
 		}},
 		getKBPanicIDs: map[string]bool{"kb-panics": true},
-		results:       []*types.SearchResult{{ID: "healthy-hit", KnowledgeID: "doc-healthy", Content: "healthy result", Score: 0.9}},
+		results: []*types.SearchResult{{
+			ID: "healthy-hit", KnowledgeID: "doc-healthy",
+			Content: "healthy result", Score: 0.9,
+		}},
 	})
 
 	args, err := json.Marshal(QueryKnowledgeGraphInput{
