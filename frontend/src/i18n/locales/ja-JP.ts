@@ -8140,6 +8140,7 @@ export default {
       wechat: 'WeChat',
       qqbot: 'QQBot',
       yunzhijia: 'Yunzhijia',
+      line: 'LINE',
       addChannel: 'チャネルを追加',
       channelsTitle: 'IMチャネル',
       disabled: '無効',
