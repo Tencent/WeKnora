@@ -41,7 +41,7 @@ type FirecrawlProvider struct {
 }
 
 // NewFirecrawlProvider creates a guarded, credential-scoped Firecrawl search client.
-func NewFirecrawlProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewFirecrawlProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if strings.TrimSpace(params.APIKey) == "" {
 		return nil, fmt.Errorf("API key is required for Firecrawl provider")
 	}
@@ -68,17 +68,12 @@ func NewFirecrawlProvider(params types.WebSearchProviderParameters) (interfaces.
 // Name returns the provider registry identifier.
 func (p *FirecrawlProvider) Name() string { return "firecrawl" }
 
-// Search applies the default region and result limit.
+// Search sends country and freshness (tbs) to the official Firecrawl endpoint; empty filters
+// use Firecrawl's defaults.
 func (p *FirecrawlProvider) Search(
-	ctx context.Context, query string, maxResults int, includeDate bool,
+	ctx context.Context, request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
-	return p.SearchWithFilters(ctx, query, maxResults, includeDate, types.WebSearchFilters{})
-}
-
-// SearchWithFilters sends country and freshness (tbs) to the official Firecrawl endpoint.
-func (p *FirecrawlProvider) SearchWithFilters(
-	ctx context.Context, query string, maxResults int, _ bool, filters types.WebSearchFilters,
-) ([]*types.WebSearchResult, error) {
+	query, maxResults, filters := request.Query, request.MaxResults, request.Filters
 	if err := filters.Validate(); err != nil {
 		return nil, err
 	}

@@ -531,9 +531,14 @@ class WeKnoraClient:
             # even when breaking early on a 'complete' event.
             with response:
                 response.raise_for_status()
+                first_line = True
                 for raw_line in response.iter_lines():
                     if isinstance(raw_line, bytes):
                         raw_line = raw_line.decode("utf-8")
+                    if first_line:
+                        # SSE ignores exactly one BOM at the start of the stream.
+                        raw_line = raw_line.removeprefix("\ufeff")
+                        first_line = False
                     if raw_line:
                         field, _, value = raw_line.partition(":")
                         if field == "data":
@@ -575,6 +580,8 @@ class WeKnoraClient:
                         )
                     elif response_type == "complete":
                         break
+                else:
+                    raise RequestException("SSE stream ended before complete event")
 
             return {
                 "answer": "".join(answer_chunks),
@@ -969,7 +976,7 @@ async def chat(
     For multi-step reasoning or tool-calling use agent_chat instead.
     """
     kb_ids = (
-        [client.resolve_kb_id(k) for k in knowledge_base_ids]
+        [await asyncio.to_thread(client.resolve_kb_id, k) for k in knowledge_base_ids]
         if knowledge_base_ids
         else None
     )
@@ -1001,9 +1008,9 @@ async def agent_chat(
     kb_selection_mode and knowledge_bases before calling. If kb_selection_mode is
     'none' or 'selected' with an empty list, always provide knowledge_base_ids.
     """
-    resolved_agent_id = client.resolve_agent_id(agent_id)
+    resolved_agent_id = await asyncio.to_thread(client.resolve_agent_id, agent_id)
     kb_ids = (
-        [client.resolve_kb_id(k) for k in knowledge_base_ids]
+        [await asyncio.to_thread(client.resolve_kb_id, k) for k in knowledge_base_ids]
         if knowledge_base_ids
         else None
     )
@@ -1012,7 +1019,7 @@ async def agent_chat(
     # instead of the cryptic backend error "no search targets available".
     if not kb_ids:
         try:
-            agent_info = client.get_agent(resolved_agent_id)
+            agent_info = await asyncio.to_thread(client.get_agent, resolved_agent_id)
             cfg = (agent_info.get("data") or agent_info).get("config") or {}
             mode = cfg.get("kb_selection_mode", "selected")
             built_in_kbs = cfg.get("knowledge_bases") or []
@@ -1021,8 +1028,10 @@ async def agent_chat(
             )
             if needs_kbs:
                 all_kbs = _normalize_kb_entries(
-                    client.list_knowledge_bases()
-                ) + _normalize_kb_entries(client.list_shared_knowledge_bases())
+                    await asyncio.to_thread(client.list_knowledge_bases)
+                ) + _normalize_kb_entries(
+                    await asyncio.to_thread(client.list_shared_knowledge_bases)
+                )
                 seen_ids: set[str] = set()
                 unique_kbs: list[Dict] = []
                 for kb in all_kbs:

@@ -292,11 +292,18 @@ func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {
 	require.Equal(t, RemoteExecRequest{
 		Command: "echo hi",
 		Shell:   true,
-		Env:     env,
+		Env: map[string]string{
+			"A":                    "B",
+			"WEKNORA_SESSION_ID":   "sess-1",
+			"WEKNORA_BROWSER_ROOT": "/var/lib/weknora/browser/session",
+		},
 		WorkDir: "/workspace/project",
 		User:    DefaultSandboxExecUser,
 		Timeout: time.Second,
 	}, last)
+	require.Equal(t, map[string]string{"A": "B"}, env, "caller map must not be mutated")
+	require.Equal(t, "/var/lib/weknora/browser/session", last.Env["WEKNORA_BROWSER_ROOT"])
+	require.NotEmpty(t, last.Env["WEKNORA_SESSION_ID"])
 }
 
 func TestExecShellCommandEmptyWorkDirUsesWorkspace(t *testing.T) {
@@ -1409,7 +1416,7 @@ func TestSessionExclusiveWaitsAndOwnerKeepsWorking(t *testing.T) {
 	require.ErrorContains(t, err, "busy", "everyone else waits for the exclusive window")
 }
 
-func TestExclusiveWindowIsAMachineMemberAndBlocksRebuild(t *testing.T) {
+func TestExclusiveWindowIsAMachineMemberAndKeepsSharedSandbox(t *testing.T) {
 	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
 	ctx := ownerCtx()
 	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
@@ -1423,7 +1430,7 @@ func TestExclusiveWindowIsAMachineMemberAndBlocksRebuild(t *testing.T) {
 	scope := admission.MachineScope(machineDigest(t, userSessionA))
 	n, err := h.admission.ActiveExcept(ctx, scope)
 	require.NoError(t, err)
-	require.Equal(t, 1, n, "rewind and directory delete must be visible to machine rebuild and reclaim")
+	require.Equal(t, 1, n, "rewind and directory delete must be visible to machine reclaim")
 
 	m, _ := userAssignmentFor(userSessionA).UserMachine()
 	_, err = h.mgr.InvalidateConfigSandboxesForMachines(ctx, "cfg-1", []allocation.UserMachine{m})
@@ -1431,7 +1438,7 @@ func TestExclusiveWindowIsAMachineMemberAndBlocksRebuild(t *testing.T) {
 	_, err = h.mgr.ExecShellCommand(ctx, userSessionB, "true", "", time.Second, nil)
 	require.NoError(t, err)
 	kept, _ := h.mgr.BoundSandboxID(ctx, userSessionB)
-	require.Equal(t, first, kept, "a stale rebuild must not delete the machine during the exclusive window")
+	require.Equal(t, first, kept, "image changes must preserve the shared machine during the exclusive window")
 	_, _, _, _, deletesAfter := h.client.counts()
 	require.Equal(t, deletesBefore, deletesAfter)
 
@@ -1504,7 +1511,7 @@ func TestUploadedScriptsStayInTheSessionDirectory(t *testing.T) {
 		h.client.writeFiles[len(h.client.writeFiles)-1].path)
 }
 
-func TestMultiReplicaAdmissionBlocksRebuildAcrossManagers(t *testing.T) {
+func TestMultiReplicaSharedMachineSurvivesDesktopDisconnect(t *testing.T) {
 	r1, r2, _ := multiReplicaPair(t, "",
 		userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
 	ctx := ownerCtx()
@@ -1522,13 +1529,13 @@ func TestMultiReplicaAdmissionBlocksRebuildAcrossManagers(t *testing.T) {
 	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
 	require.NoError(t, err)
 	kept, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
-	require.Equal(t, first, kept, "a desktop on another replica blocks the rebuild")
+	require.Equal(t, first, kept, "a skill image change keeps the machine while another replica uses its desktop")
 
 	release()
 	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
 	require.NoError(t, err)
-	rebuilt, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
-	require.NotEqual(t, first, rebuilt)
+	kept, _ = r1.mgr.BoundSandboxID(ctx, userSessionA)
+	require.Equal(t, first, kept, "disconnecting must not trigger a deferred rebuild")
 }
 
 func TestDeleteSessionWorkspacesWaitsForTheSessionAndRemovesOnlyIt(t *testing.T) {
@@ -1559,6 +1566,31 @@ func TestDeleteSessionWorkspacesWaitsForTheSessionAndRemovesOnlyIt(t *testing.T)
 	require.Contains(t, cmd, layout.GitDir)
 	require.NotContains(t, cmd, userSessionB)
 	require.Contains(t, cmd, "-L", "symlinked parents are refused, not followed")
+}
+
+func TestDeleteSessionWorkspacesAlsoRemovesTheBrowserRoot(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	m, ok := userAssignmentFor(userSessionA).UserMachine()
+	require.True(t, ok)
+
+	_, err = h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
+	require.NoError(t, err)
+
+	layout, err := UserWorkspaceLayout(userSessionA)
+	require.NoError(t, err)
+	script := lastExecRequest(t, h.client).Command
+	require.Contains(t, script, ShellQuote(layout.BrowserRoot))
+	require.Contains(t, script, ShellQuote(layout.GitDir), "existing targets stay")
+	require.Contains(t, script, "command -v wk-display")
+	releaseAt := strings.Index(script, "wk-display release "+ShellQuote(userSessionA))
+	removeAt := strings.Index(script, ShellQuote(layout.BrowserRoot))
+	require.GreaterOrEqual(t, releaseAt, 0)
+	require.Less(t, removeAt, releaseAt, "release runs after the browser directory is removed")
+	require.NotContains(t, script, "wk-display release "+ShellQuote(userSessionB),
+		"deleting A must not release B's seat")
 }
 
 func TestDeleteSessionWorkspacesCompletesOnlyWhenTheMachineIsProvablyGone(t *testing.T) {
@@ -1766,7 +1798,7 @@ func TestMultiReplicaRealRedisFirstAllocationCreatesOneMachine(t *testing.T) {
 	require.Equal(t, a, b)
 }
 
-func TestMultiReplicaRealRedisLeaseBlocksRebuildAndReclaim(t *testing.T) {
+func TestMultiReplicaRealRedisLeaseBlocksReclaimAndKeepsSharedSandbox(t *testing.T) {
 	r1, r2, _ := multiReplicaPair(t, integrationEnv(t, "WEKNORA_TEST_REDIS_ADDR"),
 		userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
 	ctx := ownerCtx()
@@ -1783,7 +1815,7 @@ func TestMultiReplicaRealRedisLeaseBlocksRebuildAndReclaim(t *testing.T) {
 	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
 	require.NoError(t, err)
 	kept, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
-	require.Equal(t, first, kept, "replica 2's terminal blocks replica 1's rebuild")
+	require.Equal(t, first, kept, "image changes must preserve the shared machine across replicas")
 
 	ok, err := r1.mgr.ReclaimUserMachine(ctx, m, func(context.Context) (bool, error) { return true, nil })
 	require.NoError(t, err)
@@ -1792,8 +1824,8 @@ func TestMultiReplicaRealRedisLeaseBlocksRebuildAndReclaim(t *testing.T) {
 	closePTY()
 	_, err = r1.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
 	require.NoError(t, err)
-	rebuilt, _ := r1.mgr.BoundSandboxID(ctx, userSessionA)
-	require.NotEqual(t, first, rebuilt)
+	kept, _ = r1.mgr.BoundSandboxID(ctx, userSessionA)
+	require.Equal(t, first, kept, "disconnecting must not trigger a deferred rebuild")
 }
 
 func TestMultiReplicaRealRedisLostLeaseStopsTheHolderAndFreesTheMachine(t *testing.T) {
@@ -1831,4 +1863,45 @@ func TestMultiReplicaRealRedisLostLeaseStopsTheHolderAndFreesTheMachine(t *testi
 	ok, err := r1.mgr.ReclaimUserMachine(ctx, m, func(context.Context) (bool, error) { return true, nil })
 	require.NoError(t, err)
 	require.True(t, ok, "with the holder gone the machine can be reclaimed")
+}
+
+func TestWithBrowserEnvOverridesCallerValues(t *testing.T) {
+	in := map[string]string{
+		"WEKNORA_SESSION_ID":   "spoofed",
+		"WEKNORA_BROWSER_ROOT": "/tmp/spoofed",
+		"KEEP":                 "1",
+	}
+	out := withBrowserEnv(in, "sid-1", RemoteWorkspaceLayout())
+	require.Equal(t, "sid-1", out["WEKNORA_SESSION_ID"])
+	require.Equal(t, "/var/lib/weknora/browser/session", out["WEKNORA_BROWSER_ROOT"])
+	require.Equal(t, "1", out["KEEP"])
+	require.Equal(t, "spoofed", in["WEKNORA_SESSION_ID"], "input map must not be mutated")
+}
+
+func TestWithBrowserEnvLeavesLayoutsWithoutBrowserRootAlone(t *testing.T) {
+	out := withBrowserEnv(map[string]string{"A": "b"}, "sid-1", WorkspaceLayout{})
+	require.Equal(t, map[string]string{"A": "b"}, out)
+}
+
+func TestUserSessionExecGetsItsOwnBrowserEnv(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionB, "true", "", time.Second, map[string]string{
+		"WEKNORA_SESSION_ID": userSessionA, // a model-supplied value must not win
+	})
+	require.NoError(t, err)
+	req := lastExecRequest(t, h.client)
+	require.Equal(t, userSessionB, req.Env["WEKNORA_SESSION_ID"])
+	require.Equal(t, "/var/lib/weknora/sessions/"+userSessionB+".browser", req.Env["WEKNORA_BROWSER_ROOT"])
+}
+
+func TestDesktopEnsureStyleExecCarriesTheSessionIdentity(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionB))
+	_, err := h.mgr.ExecShellCommandWithOptions(ownerCtx(), userSessionB, "true", ShellExecOptions{
+		Timeout: time.Second, SkipWorkspacePrep: true,
+	})
+	require.NoError(t, err)
+	req := lastExecRequest(t, h.client)
+	require.Equal(t, userSessionB, req.Env["WEKNORA_SESSION_ID"],
+		"ensure.sh reads it to choose this session's workspace")
 }

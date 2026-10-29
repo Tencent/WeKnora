@@ -75,6 +75,8 @@ Go 侧客户端在 `docreader/client/auth.go`（`LoadAuthConfigFromEnv` 读取�
 
 Go App 中 `internal/application/service/knowledge_process.go` 在文档入库流水线的 docreader stage 调用解析（超时由 `docreader_call_timeout` 配置控制，防止挂死的 docreader 长时间占用 worker）。注意：**md/markdown/txt/csv/json/图片/音频由 Go 侧 `SimpleFormatReader` 原生处理，不经过 docreader**（见 `internal/infrastructure/docparser/builtin_converter.go` 的 `simpleFormats`）。
 
+CSV 使用 Go `simple` 解析器时，转换后的 Markdown 上限为 **64 MiB**，与原始上传文件大小限制分别检查。解析器会在生成表格前核算全部行按最大列数补齐后的大小，以及单元格转义后的字节数；超过上限会明确失败，不返回截断内容，也不会自动重试同一份文件。可按行或列拆分 CSV 后重新上传。正常规模的长短行仍会补齐空单元格并保留全部字段。
+
 ```mermaid
 sequenceDiagram
     participant U as "用户 / 前端"
@@ -205,11 +207,11 @@ sequenceDiagram
 - **`xlsx_merge.py`**：`fill_merged_cells_xlsx` 解除合并单元格并把左上角主值**复制到覆盖区域的每个单元格**——openpyxl 只在左上角存值，pandas 会把其余读成 NaN，填充后按行分块的 RAG chunk 才能保留上下文。可选地**按显示格式物化百分比**（见下）。
 - **`xlsx_repair.py`**：修复常见 XLSX 打包问题——`sharedStrings.xml` 路径大小写/位置不规范时重命名归位；manifest 引用了 sharedStrings 但包内缺失且工作表只用 inline string 时，从 `[Content_Types].xml` 与 workbook rels 中剥掉引用，使 openpyxl 能读。
 
-**百分比格式**：Excel 的百分比是**显示格式而非存储值**——单元格实存 `0.61123366`，靠 `0.00%` 渲染成 `61.12%`，而 pandas/openpyxl 读的是原始值，格式被丢掉，于是 `61.12%` 变成 `0.6112`（**100 倍偏差**，财务报表类数据会直接把错数字喂给模型）。打开 `DOCREADER_XLSX_PERCENT_AS_TEXT`（或单次上传给 `parser_engine_overrides.xlsx_percent_as_text=true`，优先级高于环境变量）后，带百分比格式的数值单元格会被就地转成显示文本 `"61.12%"`（格式置 `General`），转换在**填合并单元格之前**完成——只有合并区域左上角带 `number_format`，被覆盖的格子是 `General`，先填合并会让第 2..n 行漏转。**只处理百分比**：货币/千分位只影响可读性（`1,234,567` 和 `1234567` 是同一个数），日期由 openpyxl 自动转 datetime。默认 **false**——开启后该单元格由数值变成字符串，会影响下游排序/计算，关闭时读取行为与升级前完全一致。
+**百分比格式**：Excel 可能存储数值 `0.61123366`，但显示为 `61.12%`。默认保留原始数值；如果需要让检索和模型看到报表上的显示形式，可开启 `DOCREADER_XLSX_PERCENT_AS_TEXT`，或在单次上传中设置优先级更高的 `parser_engine_overrides.xlsx_percent_as_text=true`。
 
-格式识别仅转换可可靠渲染的数字百分比模式（含颜色及正数/负数/零分段）。转义或引号中的 `%` 是字面量，不会触发乘 100；条件、填充和其他复杂自定义格式保留原始值，避免错误缩放。字面量百分号单元格也不会触发行提示推断。
+开启后，可识别的百分比单元格变为字符串 `"61.12%"`，因此下游排序与计算也会受到影响。仅处理能可靠识别的百分比格式；复杂自定义格式、转义或引号中的百分号不会被盲目缩放。
 
-同源文件偶尔有「一格忘了刷百分比格式」的单元格（如某财报 `D12` 折旧率 `0.0592` 格式为 `0.00_ ;[Red]\-0.00\ `）。把 `DOCREADER_XLSX_PCT_ROW_HINT_MIN` 设为 N（默认 **0=关闭**）后，同一行有 ≥N 个显式百分比格式单元格时，该行漏标的 `0<|v|<1` 数字也按百分比处理，每次命中打 INFO 日志可事后审计。
+`DOCREADER_XLSX_PCT_ROW_HINT_MIN` 默认 `0`，表示关闭推断。设为正整数 N 后，同一行至少 N 个单元格使用显式百分比格式时，其他符合条件的小数也可能按百分比处理。只有数据来源具有明确的同行格式约定时才建议开启，并抽查转换结果。
 
 XLSX 读取前统一走 `repair → fill_merged_cells` 预处理，并用 `header=None` + A/B/C 列字母作为稳定列名（xls 则先尝试首行做表头，遇 `Unnamed:` 列回退列字母）。百分比物化（若开启）发生在 `fill_merged_cells` 内部、填合并单元格之前。
 
@@ -314,7 +316,11 @@ docreader 侧的图片契约非常简单：每个解析器把图片以 `Document
 - unary `Read`：`_resolve_images()` 把全部图片 base64 解码为 `ImageRef.image_data` **内联字节**一次性返回（`image_dir_path` 恒为空——历史上"写共享卷目录"的模式已废弃，注释明确 *"The Go App is solely responsible for persisting images to the configured storage backend (local/minio/cos/tos)"*）；
 - streaming `ReadStream`：`_iter_image_refs()` 逐张 yield，边发边 `pop` 释放内存。
 
-Go 侧接手后（`internal/infrastructure/docparser/image_resolver.go`）：将 inline bytes 上传对象存储、把 markdown 中的 `images/...` 引用重写为存储 URL；随后 `internal/application/service/image_multimodal.go` 依据 metadata 的 `image_source_type` 决策——`scanned_pdf` 的整页图走 OCR（带专用 `ocr_prompt`），普通插图走 VLM caption。该服务有两条管线（处理轨迹里 `pipeline` 分别记为 `caption_ocr` / `observation_driven`）：历史管线（KB 未开启 `image_attrs_enabled`）对每张图各发一次描述、各发一次 OCR；属性观察管线（开启后）第一轮先用同一张图的「属性观察＋描述」结果确定属性（`contain.text` / `contain.data_visual`），再由代码纯函数 `DecideOCR` 按 KB 的 `image_actions` 决定该图是否值得再跑 OCR——`contain.text ∈ {sparse, none}` 且已确认观察、且 `data_visual == false` 的图默认只留描述、不花 OCR。两条管线的**图片理解都在 Go 侧**。知识库配置的图片解析自定义指令（`vlm_config.custom_instructions`）只追加到描述提示词（属性观察管线里即「属性观察＋描述」提示词），不进入 OCR 提示词，以免干扰 OCR 的输出约定（如无文字图片应回复 `No text content`）。
+Go 服务负责保存图片并执行知识库选定的图片处理流程。v0.9.0 将流程改为可配置管线，`image_processing_config.image_pipeline` 可选择 `default`（手动选择描述与 OCR 动作）或 `smartocr`（先观察图片，再按属性决定是否 OCR）。没有显式选择时，兼容旧的 `image_attrs_enabled` 配置。处理轨迹记录实际使用的管线及各步骤结果。
+
+手动管线的描述与 OCR 默认均开启，可分别关闭；智能 OCR 会结合观察到的文字密度、图表等属性决定是否继续识别。参数保存在对应管线的 `image_pipeline_params` 名称空间中，切换管线不应误用另一条管线的设置。图片解析自定义指令用于描述，不会直接追加到 OCR 提示词。
+
+知识库还可选择 OCR 图片预处理：`off`（默认关闭）、`auto`（根据观察结果决定是否矫正和裁边）、`always`（对可处理页面执行）。预处理在 Docreader 中进行，繁忙或失败时回退原图，处理轨迹会显示实际结果。部署参数与资源上限见[配置说明](../01-getting-started/04-configuration.md#image-preprocess)。
 
 各解析引擎输出中的内联 HTML `<table>`（常见于 MinerU、PaddleOCR-VL 与 VLM OCR）会在分块前统一转换为 Markdown 表格；含合并单元格等无法转换的表格保留 HTML，但每行单独成行，保证分块器能在行边界切分。**docreader 内没有任何 VLM 调用**；`models/read_config.py` 中的 `vlm_config`/`storage_config` 字段只是为了老构造函数签名兼容而保留的空壳（"Legacy config kept for backward compatibility"）。
 
@@ -401,7 +407,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `WEKNORA_DOCREADER_CALL_TIMEOUT` | Go duration | `30m` | 单次 docreader 调用超时，须小于文档处理超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | Go duration | `1000s` | 自建 PaddleOCR-VL 引擎的 HTTP 请求超时；空值、无效值或非正数使用默认值 |
 | `WEKNORA_MINERU_TIMEOUT` | Go duration | `1000s` | 自建 MinerU 引擎的单次解析超时（V1 API 覆盖上传到下载的整个任务，旧版覆盖 `/file_parse` 请求）；空值、无效值或非正数使用默认值 |
-| `WEKNORA_MINERU_CLOUD_TIMEOUT` | Go duration | `600s` | MinerU 云端（mineru.net）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
+| `WEKNORA_MINERU_CLOUD_TIMEOUT` | Go duration | `30m` | MinerU 云端（mineru.net）每个批次/分片轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
 | `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | Go duration | `600s` | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
 | `WEKNORA_WEKNORACLOUD_TIMEOUT` | Go duration | `20m` | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT`；空值、无效值或非正数使用默认值 |
 
@@ -528,3 +534,26 @@ V1 流程的几个细节：
 - **OCR / VLM**：docreader 内部零 OCR、零 VLM；扫描页与插图作为图片回传，OCR（PaddleOCR-VL）与 caption 由 Go App 完成。
 - **图片回传**：inline bytes（`ImageRef.image_data`），持久化到 local/minio/cos/tos 由 Go 负责。
 - **分块**：生产路径在 Go 侧 chunker；Python `TextSplitter`（512/80）仅为 sidecar 保留并与 Go 对齐。
+
+
+### MinerU Cloud 大 PDF 自动拆分
+
+Cloud 模式使用 qpdf 对 PDF 按顺序拆分，每片最多 100 页；超过 10 MiB 的分片继续按页二分，单页无法再拆分，因此单个超大页面仍可能触发供应商大小限制。合并结果保留原 PDF 页号及独立图片引用。不栅格化 PDF，不改变原文页序。
+
+Docker app 镜像包含 qpdf。独立部署和桌面应用必须在运行后端的机器安装 qpdf，并确保该进程的 PATH 可以找到它：
+
+- Debian / Ubuntu：`sudo apt-get update && sudo apt-get install -y qpdf`。
+- Fedora / RHEL：`sudo dnf install qpdf`。
+- macOS：`brew install qpdf`。
+- Windows：从 [qpdf 官方发布页](https://github.com/qpdf/qpdf/releases) 下载适合系统的 Windows 二进制 ZIP，解压，将其中 `bin` 目录加入用户 PATH，重新打开终端并重新启动桌面应用。
+
+运行 `qpdf --version` 验证安装。若后端通过 systemd 启动，检查服务进程的 PATH；修改服务环境后重启 app。qpdf 未安装时仍尝试原来的整文件 Cloud 解析；小文件可正常使用，大文件可能被 Cloud 页数/大小上限拒绝，并提示安装 qpdf。
+
+超时分为不同层级：
+
+- 每个上传 PUT 和结果 ZIP 下载的 HTTP 超时由 120 秒提高为 10 分钟；ZIP 下载现在使用调用者 context，可被上层取消。
+- `WEKNORA_MINERU_CLOUD_TIMEOUT` 的默认值由 600 秒提高为 30 分钟，每个批次/分片重新开始轮询期限。申请上传 URL 和单次状态查询的 HTTP 超时仍为 30 秒。
+- 这些局部期限不会延长整个文档的 context。`WEKNORA_DOCREADER_CALL_TIMEOUT` 默认 30 分钟，覆盖完整解析调用（包括全部分片、上传、轮询、下载）；`WEKNORA_DOCUMENT_PROCESS_TIMEOUT` 默认 2 小时，覆盖整个文档处理任务。实际运行始终受最早的上层期限限制。轮询截止检查发生在请求之间，因此单个进行中的请求可能跨过轮询期限，但仍受 HTTP 超时与调用者 context 限制。
+- 大书可按实际耗时配置 `WEKNORA_DOCREADER_CALL_TIMEOUT=4h`、`WEKNORA_DOCUMENT_PROCESS_TIMEOUT=6h`，保留每片 Cloud 轮询 30 分钟。不要把每片的 30 分钟误认为整个文档获得相同或累计的执行时间；修改 .env 后重新创建 app 容器。
+
+此功能不持久化云端 job ID 或完成结果。重试会重新提交分片，跨重启断点续传不属于此变更。

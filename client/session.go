@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -321,8 +320,7 @@ func (c *Client) KnowledgeQAStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return err
 	}
@@ -417,8 +415,7 @@ func (c *Client) ContinueStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newAPIError(resp.StatusCode, body)
+		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 	}
 
 	// Use bufio to read SSE data line by line
@@ -561,8 +558,7 @@ func (c *Client) SearchKnowledgeDetailed(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return nil, err
 	}

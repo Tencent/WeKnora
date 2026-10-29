@@ -364,6 +364,7 @@ func (s *agentService) CreateAgentEngine(
 	s.attachBackgroundWork(ctx, engine, toolRegistry, sessionID, assistantMessageID)
 	toolRegistry.BindSession(sessionID)
 	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
+	engine.SetDesktopEnabled(s.lookupSessionDesktopEnabled(ctx, sessionID, config))
 
 	return engine, nil
 }
@@ -798,6 +799,22 @@ func (s *agentService) lookupSessionWorkspaceLayout(
 	return sessionWorkspaceLayout(ctx, sessionID, mgr, err, s.hostSandbox, configID)
 }
 
+// lookupSessionDesktopEnabled reports whether the session's sandbox
+// configuration has the desktop switched on. A failed or empty resolution
+// means no desktop section in the prompt.
+func (s *agentService) lookupSessionDesktopEnabled(
+	ctx context.Context,
+	sessionID string,
+	config *types.AgentConfig,
+) bool {
+	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
+	if err != nil || mgr == nil {
+		return false
+	}
+	reporter, ok := mgr.(sandbox.SessionDesktopPromptReporter)
+	return ok && reporter.DesktopEnabledForPrompt()
+}
+
 // sessionWorkspaceLayout is the layout prompts and attachment staging share.
 // A Lite host session must never fall back to /workspace: that path is the
 // remote contract, and describing it after a pin/layout miss sends the model
@@ -1176,9 +1193,11 @@ func (s *agentService) registerSandboxShellTool(
 	}
 	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
 		resolver := s.userEnvResolver(ctx, config)
-		toolRegistry.RegisterTool(
-			tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config)),
-		)
+		shell := tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config))
+		if gate, ok := s.toolApprovalGate.(tools.HostApproval); ok {
+			shell = shell.WithHostApproval(gate)
+		}
+		toolRegistry.RegisterTool(shell)
 		logger.Infof(ctx, "Registered shell_exec tool")
 		s.registerShellExecAsync(ctx, toolRegistry, executor, resolver, config)
 	} else {
@@ -1317,9 +1336,19 @@ func (s *agentService) registerTools(
 	allowedTools = withoutString(allowedTools, tools.ToolWebSearch)
 	allowedTools = withoutString(allowedTools, tools.ToolWebFetch)
 	// If web search is enabled, add web_search to allowedTools
+	var webClient interfaces.WebClient
 	if config.WebSearchEnabled {
 		allowedTools = append(allowedTools, tools.ToolWebSearch)
 		allowedTools = append(allowedTools, tools.ToolWebFetch)
+		// The provider type selects the web_search schema and the web_fetch reader for this run.
+		if s.webSearchService != nil {
+			client, err := s.webSearchService.Resolve(ctx, config.WebSearchProviderID)
+			if err != nil {
+				logger.Warnf(ctx, "Web search provider %q unavailable: %v", config.WebSearchProviderID, err)
+			} else {
+				webClient = client
+			}
+		}
 	}
 
 	// Long-term memory search follows the memory switches, not the tool list.
@@ -1467,16 +1496,13 @@ func (s *agentService) registerTools(
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
 		case tools.ToolWebSearch:
-			toolToRegister = tools.NewWebSearchTool(
-				s.webSearchService,
-				config.WebSearchMaxResults,
-				config.WebSearchProviderID,
-			)
+			toolToRegister = tools.NewWebSearchTool(webClient, config.WebSearchMaxResults)
 			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
 
 		case tools.ToolWebFetch:
-			toolToRegister = tools.NewWebFetchTool()
-			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
+			toolToRegister = tools.NewWebFetchTool(webClient)
+			logger.Infof(ctx, "Registered web_fetch tool for session: %s, providerID: %s",
+				sessionID, config.WebSearchProviderID)
 
 		case tools.ToolDataAnalysis:
 			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).

@@ -18,7 +18,7 @@
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
-                    :embedded-mode="embeddedMode"
+                    :embedded-mode="embeddedMode" defer-tool-approvals
                     :can-fork="canFork"
                     :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
@@ -35,7 +35,7 @@
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
-                    :embedded-mode="embeddedMode"
+                    :embedded-mode="embeddedMode" defer-tool-approvals
                     :can-fork="canFork"
                     :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
@@ -80,10 +80,8 @@
                         </t-button>
                     </t-tooltip>
                 </t-popconfirm>
-                <t-button v-if="canAskAssistant" size="small" variant="outline" shape="round"
-                    :title="askAssistantTitle" @click.stop="emitAskAssistant">
-                    <ChatActionIcon name="compass" />
-                </t-button>
+                <AssistantActionsButton v-if="canAskAssistant" icon-only :label="askAssistantTitle"
+                    :actions="answerAssistantActions" @before-open="emitAskAssistant" />
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <ChatActionIcon name="copy" />
@@ -155,6 +153,7 @@ import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -179,6 +178,7 @@ import { useAssistantStore } from '@/stores/assistant';
 import {
     buildManualMarkdown,
     formatManualTitle,
+    collectManualPreferredKbIds,
 } from '@/utils/chatMessageShared';
 import { copyWithToast } from '@/utils/clipboard';
 import {
@@ -288,6 +288,14 @@ const emitAskAssistant = () => {
     const messageId = persistedAssistantId(props.session) || props.session?.id
     if (messageId) emit('ask-assistant', messageId)
 }
+const answerAssistantActions = computed(() => {
+    const source = JSON.stringify({ session_id: props.sessionId, message_id: persistedAssistantId(props.session) || props.session?.id })
+    return [
+        { key: 'document', label: t('assistant.actions.answerToDocument'), query: t('assistant.prompts.answerToDocument', { source }) },
+        { key: 'faq', label: t('assistant.actions.answerToFaq'), query: t('assistant.prompts.answerToFaq', { source }) },
+        { key: 'automation', label: t('assistant.actions.answerToAutomation'), query: t('assistant.prompts.answerToAutomation', { source }) },
+    ]
+})
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 
@@ -490,6 +498,7 @@ const handleAddToKnowledge = () => {
     ``
     uiStore.openManualEditor({
         mode: 'create',
+        preferredKbIds: collectManualPreferredKbIds(props.session?.knowledge_references),
         title: manualTitle,
         content: manualContent,
         status: 'draft',

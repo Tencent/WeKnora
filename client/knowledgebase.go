@@ -54,6 +54,8 @@ type ChunkingConfig struct {
 	ChunkSize    int      `json:"chunk_size"`    // Chunk size
 	ChunkOverlap int      `json:"chunk_overlap"` // Overlap size
 	Separators   []string `json:"separators"`    // Separators
+	// ParserEngineRules selects the parser engine for each group of file types.
+	ParserEngineRules []ParserEngineRule `json:"parser_engine_rules,omitempty"`
 }
 
 // IndexingStrategy selects which indexing pipelines are active.

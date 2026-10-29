@@ -212,9 +212,7 @@ func formatToolHint(name string, args map[string]any) string {
 	}
 	for _, v := range args {
 		if s, ok := v.(string); ok {
-			if len(s) > 40 {
-				s = s[:40] + "…"
-			}
+			s = truncateForLangfuse(s, 40)
 			return fmt.Sprintf(`%s("%s")`, displayName, s)
 		}
 	}

@@ -1,6 +1,7 @@
 import type { SpotlightGuideStep } from '@/types/spotlightGuide'
 
 export const GLOBAL_USER_GUIDE_KEY = 'weknora:new-user-guide-done:v1'
+export const ASSISTANT_ENTRY_GUIDE_KEY = 'weknora:assistant-entry-guide-done:v0.9.0'
 export const OPEN_NEW_USER_GUIDE_EVENT = 'weknora:open-new-user-guide'
 
 export function openNewUserGuide() {
@@ -147,5 +148,8 @@ export function markContextualGuideDone(tourId: ContextualGuideTourId) {
 }
 
 export function isGlobalUserGuideDone(): boolean {
+  // Page-specific tours wait until both the original tour and the new entry
+  // introduction finish, so upgrading users never get two spotlight overlays.
   return localStorage.getItem(GLOBAL_USER_GUIDE_KEY) === '1'
+    && localStorage.getItem(ASSISTANT_ENTRY_GUIDE_KEY) === '1'
 }

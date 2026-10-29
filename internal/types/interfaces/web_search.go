@@ -6,31 +6,34 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// WebSearchProvider defines the interface for web search providers
-type WebSearchProvider interface {
-	// Name returns the name of the provider
-	Name() string
-	// Search performs a web search
-	Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error)
+// WebSearcher runs one search against a provider.
+type WebSearcher interface {
+	Search(ctx context.Context, req types.WebSearchRequest) ([]*types.WebSearchResult, error)
 }
 
-// FilteredWebSearchProvider explicitly supports per-call region and freshness filters.
-// Providers without this capability must not silently discard requested filters.
-type FilteredWebSearchProvider interface {
-	SearchWithFilters(ctx context.Context, query string, maxResults int, includeDate bool,
-		filters types.WebSearchFilters) ([]*types.WebSearchResult, error)
+// WebFetcher reads one page.
+type WebFetcher interface {
+	Fetch(ctx context.Context, pageURL string) (*types.WebPage, error)
 }
 
-// WebSearchService defines the interface for web search services
+// WebClient is one stored provider bound to its registered clients and the tenant's policy.
+type WebClient interface {
+	WebSearcher
+	// Fetch uses the provider's own reader when it has one, and the local reader otherwise.
+	WebFetcher
+	Capabilities() types.WebSearchCapabilities
+}
+
+// WebSearchService resolves the web provider for a request.
 type WebSearchService interface {
-	// Search performs a web search using the provider entity identified by providerID.
-	// If providerID is empty, it falls back to the deprecated config.Provider field for backward compatibility.
-	Search(ctx context.Context, providerID string, config *types.WebSearchConfig, query string) ([]*types.WebSearchResult, error)
-	// CompressWithRAG performs RAG-based compression using a temporary, hidden knowledge base
-	// The temporary knowledge base is deleted after use. The UI will not list it due to repo filtering.
-	CompressWithRAG(ctx context.Context, sessionID string, tempKBID string, questions []string,
-		webSearchResults []*types.WebSearchResult, cfg *types.WebSearchConfig,
-		kbSvc KnowledgeBaseService, knowSvc KnowledgeService,
-		seenURLs map[string]bool, knowledgeIDs []string,
-	) (compressed []*types.WebSearchResult, kbID string, newSeen map[string]bool, newIDs []string, err error)
+	// Resolve loads providerID for the tenant in ctx once. An empty providerID is an error;
+	// callers select the tenant's default WebSearchProviderEntity before calling Resolve.
+	Resolve(ctx context.Context, providerID string) (WebClient, error)
+}
+
+// WebResultCompressor condenses web results through a temporary, hidden knowledge base.
+type WebResultCompressor interface {
+	// Compress updates state in place so later calls in the session reuse the knowledge base.
+	Compress(ctx context.Context, state *types.WebSearchCompressionState, questions []string,
+		results []*types.WebSearchResult, cfg *types.WebSearchConfig) ([]*types.WebSearchResult, error)
 }

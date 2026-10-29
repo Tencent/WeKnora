@@ -570,6 +570,11 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 	}
 
 	ftsQuery := sanitizeFTS5Query(params.Query)
+	// Punctuation and symbols can leave no searchable terms after tokenization.
+	// MATCH rejects an empty expression; let hybrid retrieval continue with vectors.
+	if ftsQuery == "" {
+		return nil, nil
+	}
 
 	sql := `
 		SELECT e.id, e.source_id, e.source_type, e.chunk_id,
@@ -887,6 +892,17 @@ func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereCla
 		parts = append(parts, whereClause{
 			clause: tableAlias + ".tag_id IN (" + placeholders(len(params.TagIDs)) + ")",
 			args:   toInterfaceSlice(params.TagIDs),
+		})
+	}
+	if len(params.ExcludeGeneratedQuestionKBIDs) > 0 {
+		parts = append(parts, whereClause{
+			clause: fmt.Sprintf(
+				"NOT (%s.knowledge_base_id IN (%s) AND %s)",
+				tableAlias,
+				placeholders(len(params.ExcludeGeneratedQuestionKBIDs)),
+				types.GeneratedQuestionRowPredicate(tableAlias),
+			),
+			args: toInterfaceSlice(params.ExcludeGeneratedQuestionKBIDs),
 		})
 	}
 	return parts

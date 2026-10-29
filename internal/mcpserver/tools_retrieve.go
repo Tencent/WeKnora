@@ -53,6 +53,11 @@ func searchKnowledgeTool() mcp.Tool {
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search; defaults to every "+
 				"knowledge base in scope")),
+		mcp.WithArray("knowledge_ids",
+			mcp.MinItems(1), mcp.MaxItems(maxSearchKnowledgeDocuments), mcp.WithStringItems(mcp.MinLength(1)),
+			mcp.Description("Optional list of 1 to 100 document ids from list_documents or search results. "+
+				"Restricts retrieval before ranking; every document must be in scope and belong to the selected "+
+				"knowledge bases. Omit to search whole knowledge bases; invalid or conflicting ids return an error.")),
 		readOnlyEndpointAnnotations(),
 	)
 }
@@ -156,7 +161,11 @@ func (s *Server) handleSearchKnowledge(ctx context.Context, req mcp.CallToolRequ
 	if err != nil || strings.TrimSpace(query) == "" {
 		return mcp.NewToolResultError("query is required"), nil
 	}
-	kbs, err := s.selectKnowledgeBases(ctx, ep, req.GetStringSlice("knowledge_base_ids", nil))
+	selectors, err := optionalKnowledgeBaseSelectors(req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	kbs, err := s.selectKnowledgeBases(ctx, ep, selectors)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -165,23 +174,28 @@ func (s *Server) handleSearchKnowledge(ctx context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultError(
 			"none of the selected knowledge bases supports semantic or keyword retrieval"), nil
 	}
-	return s.runSearchKnowledge(ctx, kbs, strings.TrimSpace(query),
-		req.GetString("mode", tools.SearchModeHybrid), req.GetInt("limit", 0))
+	targets := searchTargetsFor(kbs)
+	if _, supplied := req.GetArguments()["knowledge_ids"]; supplied {
+		ids, err := req.RequireStringSlice("knowledge_ids")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		targets, err = s.documentSearchTargets(ctx, kbs, ids)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+	}
+	return s.runSearchKnowledgeWithFilter(ctx, targets, strings.TrimSpace(query),
+		req.GetString("mode", tools.SearchModeHybrid), req.GetInt("limit", 0), nil)
 }
 
-// runSearchKnowledge executes the shared search_knowledge agent tool for
+// runSearchKnowledgeWithFilter executes the shared search_knowledge agent tool for
 // both the search_knowledge and grep_chunks endpoint tools.
-func (s *Server) runSearchKnowledge(
-	ctx context.Context, kbs []*types.KnowledgeBase, query, mode string, limit int,
-) (*mcp.CallToolResult, error) {
-	return s.runSearchKnowledgeWithFilter(ctx, kbs, query, mode, limit, nil)
-}
-
 func (s *Server) runSearchKnowledgeWithFilter(
-	ctx context.Context, kbs []*types.KnowledgeBase, query, mode string, limit int, pattern *regexp.Regexp,
+	ctx context.Context, targets types.SearchTargets, query, mode string, limit int, pattern *regexp.Regexp,
 ) (*mcp.CallToolResult, error) {
 	tool := tools.NewSearchKnowledgeTool(
-		s.kbService, s.knowledgeService, s.chunkService, searchTargetsFor(kbs), nil, s.cfg,
+		s.kbService, s.knowledgeService, s.chunkService, targets, nil, s.cfg,
 	)
 	if pattern != nil {
 		tool.WithPatternFilter(pattern)
@@ -189,7 +203,7 @@ func (s *Server) runSearchKnowledgeWithFilter(
 	callArgs := map[string]any{
 		"query":              query,
 		"mode":               mode,
-		"knowledge_base_ids": knowledgeBaseIDs(kbs),
+		"knowledge_base_ids": targets.GetAllKnowledgeBaseIDs(),
 	}
 	if limit > 0 {
 		callArgs["limit"] = limit
@@ -208,7 +222,11 @@ func (s *Server) handleGrepChunks(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil || strings.TrimSpace(query) == "" {
 		return mcp.NewToolResultError("query is required"), nil
 	}
-	kbs, err := s.selectKnowledgeBases(ctx, ep, req.GetStringSlice("knowledge_base_ids", nil))
+	selectors, err := optionalKnowledgeBaseSelectors(req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	kbs, err := s.selectKnowledgeBases(ctx, ep, selectors)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -223,7 +241,7 @@ func (s *Server) handleGrepChunks(ctx context.Context, req mcp.CallToolRequest) 
 			"word, identifier or phrase (for example \"timeout|deadline\" instead of \"^\\d+$\")"), nil
 	}
 	return s.runSearchKnowledgeWithFilter(
-		ctx, kbs, terms, tools.SearchModeKeyword, req.GetInt("limit", 0), pattern,
+		ctx, searchTargetsFor(kbs), terms, tools.SearchModeKeyword, req.GetInt("limit", 0), pattern,
 	)
 }
 

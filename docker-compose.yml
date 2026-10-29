@@ -41,6 +41,14 @@ services:
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
         - WITH_ANYDOC=${WITH_ANYDOC:-1}
+        # Build metadata shown on the system-info page. start_all.sh injects
+        # these from git and the VERSION file; with a plain `docker compose
+        # build` leave them unset (version falls back to the VERSION file,
+        # the rest to "unknown").
+        - VERSION_ARG=${VERSION_ARG:-}
+        - COMMIT_ID_ARG=${COMMIT_ID_ARG:-}
+        - BUILD_TIME_ARG=${BUILD_TIME_ARG:-}
+        - GO_VERSION_ARG=${GO_VERSION_ARG:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -135,6 +143,7 @@ services:
       - WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=${WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS:-false}
       # 新建空间默认存储配额（GB，默认 10）
       - WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB=${WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB:-10}
+      - WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_MB=${WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_MB:-0}
       # 空间邀请链接 TTL（Go duration，默认 168h=7 天）
       - WEKNORA_INVITATION_TTL=${WEKNORA_INVITATION_TTL:-168h}
       # 审计日志保留天数（0 禁用清理，默认 90）
@@ -275,6 +284,8 @@ services:
       - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-}
       # VLM 单次 HTTP 请求超时（秒，默认 180）
       - VLM_HTTP_TIMEOUT_SECONDS=${VLM_HTTP_TIMEOUT_SECONDS:-}
+      # VLM 单次请求的补全 token 预算（默认 5000）
+      - VLM_MAX_TOKENS=${VLM_MAX_TOKENS:-}
       # LLM 流原始转储（排查上下文问题；1 启用，默认目录 ~/.weknora/investigate/llm-stream）
       - WEKNORA_LLM_STREAM_RAW_DUMP=${WEKNORA_LLM_STREAM_RAW_DUMP:-}
       - WEKNORA_LLM_STREAM_RAW_DUMP_DIR=${WEKNORA_LLM_STREAM_RAW_DUMP_DIR:-}
@@ -336,7 +347,7 @@ services:
       - WEKNORA_PADDLEOCR_VL_TIMEOUT=${WEKNORA_PADDLEOCR_VL_TIMEOUT:-}
       # 自建 MinerU 单次解析超时（Go duration，默认 1000s）
       - WEKNORA_MINERU_TIMEOUT=${WEKNORA_MINERU_TIMEOUT:-}
-      # MinerU 云端轮询解析结果的最长时间（Go duration，默认 600s）
+      # MinerU 云端每个批次/分片轮询解析结果的最长时间（Go duration，默认 30m）
       - WEKNORA_MINERU_CLOUD_TIMEOUT=${WEKNORA_MINERU_CLOUD_TIMEOUT:-}
       # PaddleOCR-VL 云端轮询解析结果的最长时间（Go duration，默认 600s）
       - WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT=${WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT:-}

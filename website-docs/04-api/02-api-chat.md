@@ -4,6 +4,21 @@
 
 会话为“用户私有”资源，handler 内部强制归属校验；路由层为 Viewer+。API key：会话/聊天需 `chat` capability（或 full-access）；消息搜索需 `message_history`；知识检索需 `retrieve`。
 
+
+## 助手会话、权限与后台任务 {#assistant-runtime}
+
+会话的 `kind=assistant` 用于内置助手，助手会话历史与普通聊天分别管理。不要将普通会话 ID 传入助手恢复入口。自动化会话由系统创建并关联任务。
+
+助手聊天请求使用 `assistant_access`（`read_only` / `confirm` / `auto_write`），受空间助手上限约束；普通智能体不使用此请求字段，其配置通过 `config.access_level` 控制。审批答复使用 `POST /api/v1/agent/prompts/:prompt_id`；可用授权的查询与撤销使用 `/api/v1/agent/grants`。详见[执行权限](../03-features/28-agent-permissions.md)。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /api/v1/sessions/:id/background-work` | 查询会话后台任务 |
+| `GET /api/v1/sessions/:id/background-work/:work_id` | 查询任务状态与输出 |
+| `POST /api/v1/sessions/:session_id/background-work/:work_id/cancel` | 取消指定任务 |
+
+接口继续检查会话访问权限。`work_id` 是后台任务标识，不是终端进程 ID，也不是自动化运行 ID。
+
 ## 会话（/api/v1/sessions）
 
 ### POST /api/v1/sessions

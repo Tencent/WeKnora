@@ -35,7 +35,7 @@ type ExaProvider struct {
 }
 
 // NewExaProvider creates an Exa provider from tenant-specific parameters.
-func NewExaProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewExaProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	apiKey := strings.TrimSpace(params.APIKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key is required for Exa provider")
@@ -58,11 +58,10 @@ func (p *ExaProvider) Name() string { return "exa" }
 // Search performs a web search through Exa's official Search API.
 func (p *ExaProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
-	query = strings.TrimSpace(query)
+	maxResults, includeDate := request.MaxResults, request.IncludeDate
+	query := strings.TrimSpace(request.Query)
 	if query == "" {
 		return nil, fmt.Errorf("query is empty")
 	}

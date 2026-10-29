@@ -382,30 +382,38 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 
 ```go
 // internal/types/interfaces/web_search.go
-type WebSearchProvider interface {
-    // Name returns the name of the provider
-    Name() string
-    // Search performs a web search
-    Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error)
+type WebSearcher interface {
+    Search(ctx context.Context, req types.WebSearchRequest) ([]*types.WebSearchResult, error)
+}
+
+type WebFetcher interface {
+    Fetch(ctx context.Context, pageURL string) (*types.WebPage, error)
 }
 ```
 
-注册表是工厂映射（按需用租户参数实例化）：
+注册表按提供商类型登记工厂（按需用租户参数实例化）和能力声明：
 
 ```go
 // internal/infrastructure/web_search/registry.go
-type ProviderFactory func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+type SearchFactory func(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)
+type FetchFactory func(params types.WebSearchProviderParameters) (interfaces.WebFetcher, error)
 
-type Registry struct {
-    factories map[string]ProviderFactory
-    mu        sync.RWMutex
+type Spec struct {
+    Type    string
+    Filters bool          // 声明 Search 接受 country / freshness 过滤
+    Search  SearchFactory
+    Fetch   FetchFactory  // 可选；为空时使用本地读页，非空时引擎自身失败会回退本地读页
 }
 
-func (r *Registry) Register(id string, factory ProviderFactory)
-func (r *Registry) CreateProvider(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+func (r *Registry) Add(spec Spec)
+func (r *Registry) Capabilities(providerType string) (types.WebSearchCapabilities, error)
+func (r *Registry) NewSearcher(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)
+func (r *Registry) NewFetcher(providerType string, params types.WebSearchProviderParameters) (interfaces.WebFetcher, error)
 ```
 
-支持按地区、时效过滤的引擎可额外实现可选接口 `FilteredWebSearchProvider`（`SearchWithFilters`）；不支持过滤的引擎不得静默丢弃调用方请求的过滤条件。
+支持按地区、时效过滤的引擎从 `WebSearchRequest.Filters` 读取条件，并以 `Filters: true` 注册；`web_search` 工具据此给出带 `country` / `freshness` 的 schema。未声明 `Filters` 的引擎不会收到过滤条件：服务层会直接拒绝带过滤条件的请求，而不是静默丢弃。
+
+应用层通过 `WebSearchService.Resolve(ctx, providerID)` 取得绑定了租户策略（超时、黑名单、代理）的 `WebClient`，它同时实现 `WebSearcher`、`WebFetcher` 和 `Capabilities()`。
 
 ### 现有实现
 
@@ -414,15 +422,19 @@ func (r *Registry) CreateProvider(providerType string, params types.WebSearchPro
 ### 新增步骤
 
 1. 在 `internal/types/web_search_provider.go` 增加 `WebSearchProviderType` 常量；
-2. 在 `internal/infrastructure/web_search/` 新建 `mysearch.go`，实现 `WebSearchProvider` 并暴露工厂 `func NewMySearchProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)`；
+2. 在 `internal/infrastructure/web_search/` 新建 `mysearch.go`，实现 `WebSearcher` 并暴露工厂 `func NewMySearchProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)`；
 3. **注册点：`internal/container/container.go` 的 `registerWebSearchProviders()`**：
 
 ```go
 func registerWebSearchProviders(registry *infra_web_search.Registry) {
-    registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
-    registry.Register("google", infra_web_search.NewGoogleProvider)
-    // ... 在此追加：
-    registry.Register("mysearch", infra_web_search.NewMySearchProvider)
+    for _, spec := range []infra_web_search.Spec{
+        {Type: "duckduckgo", Search: infra_web_search.NewDuckDuckGoProvider},
+        {Type: "google", Search: infra_web_search.NewGoogleProvider},
+        // ... 在此追加：
+        {Type: "mysearch", Search: infra_web_search.NewMySearchProvider},
+    } {
+        registry.Add(spec)
+    }
 }
 ```
 

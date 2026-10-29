@@ -19,6 +19,7 @@ import {
 import { embedToast } from '@/utils/embedToast'
 import { buildQueryWithHostContext } from '@/utils/embedContext'
 import { fileToDataURI } from '@/utils/embedFile'
+import { historyHasMoreAfterAttempt } from '@/utils/historyPagination'
 import { useI18n } from 'vue-i18n'
 import { useChatStreamHandler, isPromptCard } from '@/composables/useChatStreamHandler'
 import { resumeSuspendedRunKey } from '@/utils/suspendedRun'
@@ -207,21 +208,35 @@ export function useEmbedChatSession(options: {
           // load of a brand-new session: leaving hasMoreHistory true here would
           // let a later scroll-to-top re-fetch with an empty cursor (= "latest"),
           // pulling back the just-sent messages and duplicating them.
-          hasMoreHistory.value = false
+          hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+            status: 'loaded',
+            itemCount: 0,
+            pageSize: limit.value,
+            cursorAdvanced: false,
+          })
           return
         }
         const nextCursor = String(batch[0].created_at)
-        if (isScrollType && created_at.value && nextCursor === created_at.value) {
-          hasMoreHistory.value = false
+        const cursorAdvanced = !(isScrollType && created_at.value && nextCursor === created_at.value)
+        hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+          status: 'loaded',
+          itemCount: batch.length,
+          pageSize: limit.value,
+          cursorAdvanced,
+        })
+        if (!cursorAdvanced) {
           return
         }
-        if (batch.length < limit.value) hasMoreHistory.value = false
         created_at.value = nextCursor
         await handleMsgList(batch, isScrollType, scrollHeight)
       })
       .catch((err) => {
         console.error('Failed to load messages:', err)
-        if (isScrollType) hasMoreHistory.value = false
+        if (isScrollType) {
+          hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+            status: 'failed',
+          })
+        }
       })
       .finally(() => {
         historyLoading.value = false
@@ -248,7 +263,12 @@ export function useEmbedChatSession(options: {
 
   const sendMsg = async (
     value: string,
-    opts: { webSearchEnabled?: boolean; imageFiles?: File[]; attachmentFiles?: File[] } = {},
+    opts: {
+      webSearchEnabled?: boolean
+      imageFiles?: File[]
+      attachmentFiles?: File[]
+      onPrepared?: () => void
+    } = {},
   ) => {
     stopStream()
     prepareForNewOutgoingMessage()
@@ -291,6 +311,7 @@ export function useEmbedChatSession(options: {
       channel: 'embed',
       created_at: new Date().toISOString(),
     })
+    opts.onPrepared?.()
     postEmbedMessageSent(options.channelId, options.sessionId.value, value)
     relayEmbedWebhookEvent(
       options.channelId,

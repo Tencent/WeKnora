@@ -2,6 +2,11 @@
 
 文档通过文件上传、URL 导入或手动创建进入系统。服务端保存内容并提交处理任务，依次完成解析、分块和索引，再按知识库配置生成摘要、问题、图谱及 Wiki。状态和进度随处理阶段更新，失败任务由重试与巡检机制恢复。
 
+
+## 图片处理管线
+
+图片保存后，按知识库配置选择 `default` 或 `smartocr` 管线，分别执行手动动作或观察后决策。OCR 预处理默认关闭，可按知识库开启；任务提交时保存本轮管线配置，后续修改不会把已经提交的任务切换到另一条管线。处理轨迹记录实际管线和步骤结果，详见[图片处理](../03-features/03-document-parsing.md#_4-图片处理与多模态分工)。
+
 ## 总体架构 {#_1-总体架构}
 
 WeKnora 的入库链路是一条**基于 Asynq（Redis）的分布式异步管道**。HTTP Handler 只负责落库与入队，所有耗时工作（解析、向量化、LLM 富化）都由独立的 Worker 池消费队列完成。
@@ -271,7 +276,7 @@ Worker 消费 `TypeDocumentProcess` 后按五个规范化阶段推进，每个�
 4. `resolveDocReader` 返回 `interfaces.DocReader`：
    - **builtin**：通过 gRPC（`docparser/grpc_parser.go`）或 HTTP（`http_parser.go`）调用 Python **docreader** 服务；
    - **simple**：Go 原生解析 md/txt/csv/json/图片/音频（`builtin_converter.go`，CSV→Markdown 表格、JSON→递归分割的代码块，图片/音频转占位引用）；
-   - **anydoc**：Go 进程内解析 docx/doc/pptx/ppt/xlsx/xls/odf/rtf/epub/csv/pdf（`anydoc_reader.go`），底层是通过 cgo 链接的 anydoc Rust 库。office 文档的嵌入图按文档模型插回 Markdown 原位；无文字层的扫描件 PDF 在 DocReader 可用时回退到 builtin 整页渲染。链接了 anydoc 时，未配置规则的复杂格式默认走 anydoc，但 PDF 默认仍走 builtin。仅在带 `anydoc` 构建标签的二进制中可用，其余构建里该引擎在引擎列表中显示为不可用；
+   - **anydoc**：Go 进程内解析 docx/doc/pptx/ppt/xlsx/xls/odf/rtf/epub/csv/pdf（`anydoc_reader.go`），底层是通过 cgo 链接的 anydoc Rust 库。office 文档的嵌入图按文档模型插回 Markdown 原位；无文字层的扫描件 PDF 在 DocReader 可用时回退到 builtin 整页渲染。启用图片提取时，包含 `ppt/media/*.emf` 或 `*.wmf` 的 PPTX 会交给 DocReader 的 MarkItDown 路径，复用其 ImageMagick 光栅化能力；未连接 DocReader 时明确报错。普通位图 PPTX 和设置 `anydoc_extract_images=false` 的文件仍走 anydoc；此检测不覆盖旧版二进制 PPT。链接了 anydoc 时，未配置规则的复杂格式默认走 anydoc，但 PDF 默认仍走 builtin。仅在带 `anydoc` 构建标签的二进制中可用，其余构建里该引擎在引擎列表中显示为不可用；
    - **weknoracloud / mineru / mineru_cloud / paddleocr_vl / paddleocr_vl_cloud**：HTTP 转换器（`engines.go` 注册，按 `mineru_endpoint`、`mineru_api_key`、`paddleocr_vl_endpoint` 等配置判定可用性；自建 `mineru` 会自动识别 MinerU 4.0 的 V1 API 与旧版 `/file_parse`，见[文档解析服务](../03-features/03-document-parsing.md#mineru-self-hosted)）。
 
 引擎目录集中在 `internal/infrastructure/docparser/engines.go`：每个引擎同时声明元数据（名称、描述、文件类型、可用性探针）与 `NewReader` 工厂，`docparser.NewReader` 按名字分发，未注册的名字（如只存在于 docreader 的 `markitdown`）落到 docreader 客户端。

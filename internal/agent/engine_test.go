@@ -520,6 +520,67 @@ func TestContextCompactionDoesNotRunEveryRound(t *testing.T) {
 		"a context that cannot shrink must not spend another summarization call")
 }
 
+// toolRound is one assistant tool call plus its result.
+func toolRound(id, name, output string) []chat.Message {
+	return []chat.Message{
+		{Role: "assistant", ToolCalls: []chat.ToolCall{{
+			ID:       id,
+			Type:     "function",
+			Function: chat.FunctionCall{Name: name, Arguments: `{"path":"/w/a.log"}`},
+		}}},
+		{Role: "tool", Name: name, ToolCallID: id, Content: output},
+	}
+}
+
+// The exhausted mark is tied to a message count on the premise that the count
+// only grows. A successful compaction breaks that premise: it rebuilds the
+// history as system + summary + keep-recent tail, which can land below where
+// the last failed compaction parked the mark. The mark must be cleared on
+// success, or every later compaction — including the overflow recovery that
+// retries an over-window request — is silently skipped until the loop appends
+// enough rounds to climb back above the stale count.
+func TestSuccessfulCompactionClearsTheExhaustedMark(t *testing.T) {
+	engine := newTestEngine(t, &summarizerChat{},
+		withMaxContextTokens(40000), withMaxCompletionTokens(4000))
+	ctx := context.Background()
+
+	// Round 1: the live turn carries one oversized tool result the cut point
+	// cannot reach, so the compaction frees almost nothing and marks the
+	// context exhausted at its message count.
+	exhausted := append([]chat.Message{
+		{Role: "system", Content: "you are an agent"},
+		{Role: "user", Content: "first question", TurnID: "turn-a"},
+		{Role: "assistant", Content: "first answer", TurnID: "turn-a"},
+		{Role: "user", Content: "read the export"},
+	}, toolRound("call-1", "read_file", strings.Repeat("row,value ", 12000))...)
+	_, ok := engine.runCompaction(ctx, exhausted, 1, compaction.ReasonThreshold)
+	require.False(t, ok)
+	mark := engine.compactionExhaustedAt
+	require.Equal(t, len(exhausted), mark)
+
+	// Round 2: the loop keeps producing oversized rounds. This time the cut
+	// lands on them, so the compaction succeeds — and rebuilds the history
+	// as system + summary + the newest round, below the mark.
+	recovering := append(append([]chat.Message(nil), exhausted...),
+		toolRound("call-2", "read_file", strings.Repeat("row,value ", 4000))...)
+	recovering = append(recovering,
+		toolRound("call-3", "read_file", strings.Repeat("row,value ", 4000))...)
+	compacted, ok := engine.runCompaction(ctx, recovering, 2, compaction.ReasonThreshold)
+	require.True(t, ok, "the regrown context must compact successfully")
+	require.LessOrEqual(t, len(compacted), mark,
+		"premise: the successful compaction rebuilt the history below the mark")
+
+	// Round 3: one more oversized round overflows again. The
+	// overflow-recovery compaction must actually run instead of being
+	// skipped by the stale mark.
+	overflowed := append(append([]chat.Message(nil), compacted...),
+		toolRound("call-4", "read_file", strings.Repeat("row,value ", 4000))...)
+	require.LessOrEqual(t, len(overflowed), mark,
+		"premise: the overflowing context sits below the stale mark")
+	_, ok = engine.runCompaction(ctx, overflowed, 3, compaction.ReasonOverflow)
+	require.True(t, ok, "a successful compaction must clear the exhausted mark")
+}
+
 // recordingCheckpointSink captures what the engine persists.
 type recordingCheckpointSink struct {
 	turnIDs []string
@@ -1162,7 +1223,7 @@ func TestStreamLLMIncompleteFinishIsAStreamError(t *testing.T) {
 func TestWebFetchUnknownReferenceIsAnItemError(t *testing.T) {
 	engine := newTestEngine(t, &mockChat{})
 	engine.toolRegistry = agenttools.NewToolRegistry()
-	engine.toolRegistry.RegisterTool(agenttools.NewWebFetchTool())
+	engine.toolRegistry.RegisterTool(agenttools.NewWebFetchTool(nil))
 	calls := []types.LLMToolCall{{
 		ID: "fetch",
 		Function: types.FunctionCall{

@@ -106,23 +106,37 @@
             <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
               <label class="form-label">{{ $t('knowledgeEditor.wiki.contentInstructionsLabel') }}</label>
               <p class="form-tip">{{ $t('knowledgeEditor.wiki.contentInstructionsTip') }}</p>
-              <t-textarea
-                v-model="formData.wikiConfig.contentInstructions"
-                :placeholder="$t('knowledgeEditor.wiki.contentInstructionsPlaceholder')"
-                :maxlength="4000"
-                :autosize="{ minRows: 3, maxRows: 8 }"
-              />
+              <div class="wiki-instructions-input">
+                <t-textarea
+                  v-model="formData.wikiConfig.contentInstructions"
+                  :placeholder="$t('knowledgeEditor.wiki.contentInstructionsPlaceholder')"
+                  :maxlength="4000"
+                  :autosize="{ minRows: 3, maxRows: 8 }"
+                />
+                <AssistantActionButton class="wiki-instructions-action"
+                  :label="$t(formData.wikiConfig.contentInstructions.trim() ? 'assistant.actions.refineRules' : 'assistant.actions.writePrompt')"
+                  :query="$t(formData.wikiConfig.contentInstructions.trim() ? 'assistant.prompts.refineWikiRules' : 'assistant.prompts.writeWikiRules', { field: $t('knowledgeEditor.wiki.contentInstructionsLabel') })"
+                  :selection="{ field: $t('knowledgeEditor.wiki.contentInstructionsLabel'), text: formData.wikiConfig.contentInstructions }"
+                  :disabled="saving || loading" />
+              </div>
             </div>
 
             <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
               <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionInstructionsLabel') }}</label>
               <p class="form-tip">{{ $t('knowledgeEditor.wiki.extractionInstructionsTip') }}</p>
-              <t-textarea
-                v-model="formData.wikiConfig.extractionInstructions"
-                :placeholder="$t('knowledgeEditor.wiki.extractionInstructionsPlaceholder')"
-                :maxlength="4000"
-                :autosize="{ minRows: 3, maxRows: 8 }"
-              />
+              <div class="wiki-instructions-input">
+                <t-textarea
+                  v-model="formData.wikiConfig.extractionInstructions"
+                  :placeholder="$t('knowledgeEditor.wiki.extractionInstructionsPlaceholder')"
+                  :maxlength="4000"
+                  :autosize="{ minRows: 3, maxRows: 8 }"
+                />
+                <AssistantActionButton class="wiki-instructions-action"
+                  :label="$t(formData.wikiConfig.extractionInstructions.trim() ? 'assistant.actions.refineRules' : 'assistant.actions.writePrompt')"
+                  :query="$t(formData.wikiConfig.extractionInstructions.trim() ? 'assistant.prompts.refineWikiRules' : 'assistant.prompts.writeWikiRules', { field: $t('knowledgeEditor.wiki.extractionInstructionsLabel') })"
+                  :selection="{ field: $t('knowledgeEditor.wiki.extractionInstructionsLabel'), text: formData.wikiConfig.extractionInstructions }"
+                  :disabled="saving || loading" />
+              </div>
             </div>
 
             <div class="form-item" data-guide="kb-create-name">
@@ -651,6 +665,7 @@ import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
 import ImagePipelineSettings from './ImagePipelineSettings.vue'
 import { useI18n } from 'vue-i18n'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 
 const uiStore = useUIStore()
 const authStore = useAuthStore()
@@ -892,11 +907,19 @@ const applyDefaultModelsIfEmpty = () => {
   if (!formData.value || editorMode.value !== 'create') return
   const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
   const embeddingModelId = selectInitialModelId(allModels.value, 'Embedding')
+  const vlmModelId = selectInitialModelId(allModels.value, 'VLLM')
+  const asrModelId = selectInitialModelId(allModels.value, 'ASR')
   if (!formData.value.modelConfig.llmModelId && chatModelId) {
     formData.value.modelConfig.llmModelId = chatModelId
   }
   if (!formData.value.modelConfig.embeddingModelId && embeddingModelId) {
     formData.value.modelConfig.embeddingModelId = embeddingModelId
+  }
+  if (!formData.value.multimodalConfig.vllmModelId && vlmModelId) {
+    formData.value.multimodalConfig.vllmModelId = vlmModelId
+  }
+  if (!formData.value.asrConfig.modelId && asrModelId) {
+    formData.value.asrConfig.modelId = asrModelId
   }
 }
 
@@ -1099,7 +1122,7 @@ const loadKBData = async (
         chunkSize: kb.chunking_config?.chunk_size || 512,
         // Fallback only used when the loaded KB has no chunk_overlap stored.
         // Aligned with chunker.DefaultChunkOverlap on the backend.
-        chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
+        chunkOverlap: kb.chunking_config?.chunk_overlap ?? 80,
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
         parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
         enableParentChild: kb.chunking_config?.enable_parent_child || false,
@@ -1967,11 +1990,26 @@ watch(
 watch(() => chatResources.allModels, (list) => {
   if (props.visible) {
     allModels.value = list || []
+    applyDefaultModelsIfEmpty()
   }
 })
 </script>
 
 <style scoped lang="less">
+.wiki-instructions-input {
+  position: relative;
+
+  .wiki-instructions-action {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+  }
+
+  :deep(.t-textarea__inner) {
+    padding-bottom: 44px;
+  }
+}
+
 // 图片属性面板（可观察属性 / OCR 触发条件 / 观察失败兜底）
 // 文案全部来自后端属性注册表（人话名 + 每个取值的含义），前端只做翻译覆盖，
 // 因此新增属性无需改这里。铺在所在设置区里、不套独立底色块（与整体风格一致）。

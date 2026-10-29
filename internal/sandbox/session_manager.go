@@ -64,6 +64,14 @@ const skillOutputEnvVar = "WEKNORA_SKILL_OUTPUT_DIR"
 // the same paths the skills framework uses.
 const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
 
+// Injected into every exec so the agent-browser wrapper can isolate one
+// session from the others on a shared machine. Set last: neither config nor
+// model-supplied env may redirect them.
+const (
+	sessionIDEnvVar   = "WEKNORA_SESSION_ID"
+	browserRootEnvVar = "WEKNORA_BROWSER_ROOT"
+)
+
 // SessionWorkspaceRoot is the writable workspace root inside remote sandboxes.
 // shell_exec work_dir must stay underneath this path.
 const SessionWorkspaceRoot = workspace.Root
@@ -395,10 +403,12 @@ func (m *SessionBoundManager) Execute(ctx context.Context, cfg *ExecuteConfig) (
 		return nil, err
 	}
 	if !sc.user {
-		return m.ephemeral.ExecuteOnHandle(ctx, handle, cfg)
+		sessCfg := *cfg
+		sessCfg.Env = withBrowserEnv(cfg.Env, sc.key.SessionID, sc.layout)
+		return m.ephemeral.ExecuteOnHandle(ctx, handle, &sessCfg)
 	}
 	userCfg := *cfg
-	userCfg.Env = withSessionEnv(cfg.Env, sc.layout)
+	userCfg.Env = withBrowserEnv(withSessionEnv(cfg.Env, sc.layout), sc.key.SessionID, sc.layout)
 	return m.ephemeral.ExecuteOnHandleIn(ctx, handle, &userCfg, sc.layout.Root, userScriptDir(sc.layout))
 }
 
@@ -1178,6 +1188,7 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 	if sc.user {
 		env = withSessionEnv(opts.Env, sc.layout)
 	}
+	env = withBrowserEnv(env, sc.key.SessionID, sc.layout)
 
 	start := time.Now()
 	execResult, execErr := m.client.Exec(ctx, handle, RemoteExecRequest{
@@ -1315,6 +1326,7 @@ func (m *SessionBoundManager) OpenSessionTerminal(
 		// owner; a client-supplied PID could attach another session's shell.
 		opts.AttachPID = 0
 	}
+	opts.Envs = withBrowserEnv(opts.Envs, sc.key.SessionID, sc.layout)
 	// The PTY outlives this call: admit it on a context detached from the
 	// HTTP request; heldTerminalSession releases it on Close.
 	opCtx, release, err := m.admitUser(context.WithoutCancel(ctx), sc, "pty")
@@ -1505,6 +1517,18 @@ func (m *SessionBoundManager) OpenSessionDesktop(
 }
 
 var _ SessionDesktopProvider = (*SessionBoundManager)(nil)
+
+// DesktopEnabledForPrompt is true when the sandbox configuration turns the
+// desktop on and the backend can serve it. Unlike SessionDesktopManager it
+// does consult Config.DesktopEnabled.
+func (m *SessionBoundManager) DesktopEnabledForPrompt() bool {
+	if m == nil || m.config == nil || !m.config.DesktopEnabled {
+		return false
+	}
+	return m.SessionDesktopManager() != nil
+}
+
+var _ SessionDesktopPromptReporter = (*SessionBoundManager)(nil)
 
 // Cleanup marks the manager closed. Session sandboxes are not force-deleted
 // here: their lifecycle is authoritative in the binding store and would
@@ -2328,12 +2352,17 @@ func (m *SessionBoundManager) DeleteSessionWorkspaces(
 		}
 	}
 	var targets []string
+	var releases []string
 	for _, id := range ready {
 		l, err := UserWorkspaceLayout(id)
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, ShellQuote(l.Root), ShellQuote(l.GitDir))
+		targets = append(targets, ShellQuote(l.Root), ShellQuote(l.GitDir), ShellQuote(l.BrowserRoot))
+		// Idle disconnect keeps the screen so the same session can resume.
+		// Delete is what drops it, so a removed session does not leave an X
+		// server on the shared machine. Missing wk-display is a no-op.
+		releases = append(releases, "wk-display release "+ShellQuote(id))
 	}
 	// Refuse a symlinked parent instead of following it: an agent on this
 	// machine runs as root and may have replaced one.
@@ -2343,7 +2372,10 @@ for p in /workspace /workspace/sessions /var/lib/weknora /var/lib/weknora/sessio
 done
 for t in ` + strings.Join(targets, " ") + `; do
   if [ -L "$t" ]; then rm -f -- "$t"; else rm -rf -- "$t"; fi
-done`
+done
+if command -v wk-display >/dev/null 2>&1; then
+  ` + strings.Join(releases, "\n  ") + `
+fi`
 	result, err := m.client.Exec(guarded, handle, RemoteExecRequest{
 		Shell: true, Command: script, User: "root", Timeout: sessionWorkspaceCleanupTimeout,
 	})
@@ -2392,6 +2424,48 @@ func withSessionEnv(env map[string]string, layout WorkspaceLayout) map[string]st
 	}
 	out[skillOutputEnvVar] = layout.OutputDir
 	out[sessionInputEnvVar] = layout.InputDir
+	return out
+}
+
+// sessionDisplayPrefix runs at the start of an agent shell command. The seat
+// number lives only inside the sandbox, so the model cannot be told it ahead
+// of time, and an unset DISPLAY makes X clients fail closed rather than open
+// the shared :0 screen. A seat is claimed only where screen intent exists:
+// agent-browser --headed, the Desktop tab connect (ensure.sh), or the model
+// running wk-display claim itself. This prefix never claims; it pins the
+// shell to the seat the session already holds and refreshes that seat's
+// idleness clock (mtime), so a session that nobody watches runs headless and
+// never pays for a screen. A missing wk-display (older image, local shell)
+// leaves the command untouched.
+const sessionDisplayPrefix = `if command -v wk-display >/dev/null 2>&1 && [ -n "${WEKNORA_SESSION_ID:-}" ]; then
+  _wk_seat=$(wk-display where "$WEKNORA_SESSION_ID" 2>/dev/null) || true
+  case "${_wk_seat:-}" in
+    ''|*[!0-9]*) unset DISPLAY WK_SEAT ;;
+    *) export DISPLAY=":$_wk_seat" WK_SEAT="$_wk_seat" ;;
+  esac
+  unset _wk_seat
+fi
+`
+
+// WithSessionDisplay pins the command to the screen this session holds.
+// The command itself still runs when the lookup fails.
+func WithSessionDisplay(command string) string {
+	return sessionDisplayPrefix + command
+}
+
+// withBrowserEnv overlays the session identity and browser state root. Unlike
+// withSessionEnv it applies in both modes: a session-mode machine has one
+// session, but the wrapper still requires the variables (it fails closed).
+func withBrowserEnv(env map[string]string, sessionID string, layout WorkspaceLayout) map[string]string {
+	if layout.BrowserRoot == "" || sessionID == "" {
+		return env
+	}
+	out := make(map[string]string, len(env)+2)
+	for k, v := range env {
+		out[k] = v
+	}
+	out[sessionIDEnvVar] = sessionID
+	out[browserRootEnvVar] = layout.BrowserRoot
 	return out
 }
 

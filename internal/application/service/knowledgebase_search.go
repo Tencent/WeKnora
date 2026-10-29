@@ -21,8 +21,8 @@ const maxRetrievalPoolSize = 500
 
 // GetQueryEmbedding computes the query embedding using the embedding model
 // associated with the given knowledge base. Callers can pre-compute and reuse
-// the result across multiple KBs that share the same embedding model to avoid
-// redundant embedding API calls.
+// the result across multiple KBs that share the same embedding model and
+// configured vector dimension to avoid redundant embedding API calls.
 func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID string, queryText string) ([]float32, error) {
 	kb, err := s.repo.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -77,8 +77,10 @@ func validateQueryEmbeddingDimension(model embedding.Embedder, actual int) error
 }
 
 // ResolveEmbeddingModelKeys resolves embedding model IDs to their actual model
-// identity key (name + endpoint). KBs using the same underlying model across
-// different tenants will share the same key, enabling optimal grouping.
+// identity key (name + endpoint + configured vector dimension). KBs using the
+// same underlying model and vector space across different tenants will share
+// the same key, enabling optimal grouping without reusing a query embedding
+// across incompatible index dimensions.
 func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kbs []*types.KnowledgeBase) map[string]string {
 	type modelRef struct {
 		ModelID  string
@@ -94,7 +96,9 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 		kbRefs[kb.ID] = ref
 	}
 
-	// Resolve each unique (modelID, tenantID) to a model identity key
+	// Resolve each unique (modelID, tenantID) to a model identity key. The
+	// configured dimension is part of the key because providers such as OpenAI
+	// support multiple output widths for one model name and endpoint.
 	resolvedKeys := make(map[modelRef]string, len(uniqueRefs))
 	for ref := range uniqueRefs {
 		tenantCtx := types.WithExecutionTenant(ctx, ref.TenantID)
@@ -104,7 +108,8 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 			resolvedKeys[ref] = ref.ModelID
 			continue
 		}
-		resolvedKeys[ref] = model.Name + "|" + model.Parameters.BaseURL
+		resolvedKeys[ref] = fmt.Sprintf("%s|%s|%d", model.Name, model.Parameters.BaseURL,
+			model.Parameters.EmbeddingParameters.Dimension)
 	}
 
 	result := make(map[string]string, len(kbs))
@@ -434,6 +439,15 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	// scope happens to include them (e.g. KBSelectionMode=all picking up a
 	// wiki-only KB).
 	var faqVectorKBIDs, docVectorKBIDs, docKeywordKBIDs []string
+	// Document KBs with question generation off must not spend TopK on
+	// historical question vectors. FAQ KBs are absent from this list: their
+	// similar-question rows use the same source-id shape.
+	var questionOffKBIDs []string
+	for _, kb := range groupKBs {
+		if types.QuestionGenerationDisabled(kb) {
+			questionOffKBIDs = append(questionOffKBIDs, kb.ID)
+		}
+	}
 	// The query is embedded with the primary's model, or with the first
 	// vector KB of the group when the primary has none (a wiki primary
 	// searched together with document KBs): asking the primary for its empty
@@ -473,15 +487,16 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 
 		appendVectorParams := func(kbIDs []string, knowledgeType string) {
 			retrieveParams = append(retrieveParams, types.RetrieveParams{
-				Query:            params.QueryText,
-				Embedding:        queryEmbedding,
-				KnowledgeBaseIDs: kbIDs,
-				TopK:             matchCount,
-				Threshold:        params.VectorThreshold,
-				RetrieverType:    types.VectorRetrieverType,
-				KnowledgeIDs:     params.KnowledgeIDs,
-				TagIDs:           params.TagIDs,
-				KnowledgeType:    knowledgeType,
+				Query:                         params.QueryText,
+				Embedding:                     queryEmbedding,
+				KnowledgeBaseIDs:              kbIDs,
+				TopK:                          matchCount,
+				Threshold:                     params.VectorThreshold,
+				RetrieverType:                 types.VectorRetrieverType,
+				KnowledgeIDs:                  params.KnowledgeIDs,
+				TagIDs:                        params.TagIDs,
+				KnowledgeType:                 knowledgeType,
+				ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(kbIDs, questionOffKBIDs),
 			})
 		}
 
@@ -503,18 +518,38 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		len(docKeywordKBIDs) > 0 {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
-			Query:            params.QueryText,
-			KnowledgeBaseIDs: docKeywordKBIDs,
-			TopK:             matchCount,
-			Threshold:        params.KeywordThreshold,
-			RetrieverType:    types.KeywordsRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
-			TagIDs:           params.TagIDs,
+			Query:                         params.QueryText,
+			KnowledgeBaseIDs:              docKeywordKBIDs,
+			TopK:                          matchCount,
+			Threshold:                     params.KeywordThreshold,
+			RetrieverType:                 types.KeywordsRetrieverType,
+			KnowledgeIDs:                  params.KnowledgeIDs,
+			TagIDs:                        params.TagIDs,
+			ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(docKeywordKBIDs, questionOffKBIDs),
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}
 
 	return retrieveParams, nil
+}
+
+// generatedQuestionKBIDs keeps the off-switch ids that this retrieval param
+// actually searches. An empty result leaves the SQL filter off.
+func generatedQuestionKBIDs(searched, disabled []string) []string {
+	if len(searched) == 0 || len(disabled) == 0 {
+		return nil
+	}
+	off := make(map[string]struct{}, len(disabled))
+	for _, id := range disabled {
+		off[id] = struct{}{}
+	}
+	var matched []string
+	for _, id := range searched {
+		if _, ok := off[id]; ok {
+			matched = append(matched, id)
+		}
+	}
+	return matched
 }
 
 // resolveQueryEmbedding returns the query embedding for a store group. It

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Web Browser
+Name[zh_CN]=网页浏览器
+Comment=Open the browser on this session's screen
+Exec=/usr/local/bin/wk-chrome %u
+Icon=web-browser
+Terminal=false
+StartupNotify=true
+Categories=Network;WebBrowser;

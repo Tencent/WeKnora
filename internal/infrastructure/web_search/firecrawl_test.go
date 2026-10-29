@@ -49,8 +49,9 @@ func TestFirecrawlSearchMapsOptionsAndTrimsResults(t *testing.T) {
 			 {"title":"Extra","url":"https://example.com/extra"}]}}`), nil
 		},
 	)}}
-	results, err := p.SearchWithFilters(t.Context(), "rust & go", 2, false,
-		types.WebSearchFilters{Country: "de", Freshness: "pw"})
+	results, err := p.Search(t.Context(), types.WebSearchRequest{
+		Query: "rust & go", MaxResults: 2, Filters: types.WebSearchFilters{Country: "de", Freshness: "pw"},
+	})
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	require.Equal(t, "Snippet", results[0].Snippet)
@@ -67,7 +68,7 @@ func TestFirecrawlCapsLongDescriptions(t *testing.T) {
 			return firecrawlOK(`{"success":true,"data":{"web":[` + row + `]}}`), nil
 		},
 	)}}
-	results, err := p.Search(t.Context(), "query", 1, false)
+	results, err := p.Search(t.Context(), types.WebSearchRequest{Query: "query", MaxResults: 1})
 	require.NoError(t, err)
 	require.Len(t, []rune(results[0].Snippet), maxFirecrawlSnippetRunes)
 }
@@ -86,7 +87,7 @@ func TestFirecrawlDefaultsLimitsAndErrors(t *testing.T) {
 			return &http.Response{StatusCode: 401, Body: io.NopCloser(strings.NewReader(body401))}, nil
 		})
 		p := &FirecrawlProvider{client: &http.Client{Transport: transport}}
-		_, err := p.Search(context.Background(), "query", tc.requested, false)
+		_, err := p.Search(context.Background(), types.WebSearchRequest{Query: "query", MaxResults: tc.requested})
 		require.ErrorContains(t, err, "HTTP 401 (invalid API key)")
 		require.NotContains(t, err.Error(), "secret")
 	}
@@ -105,12 +106,15 @@ func TestFirecrawlOmitsCountryForALLAndRejectsDateRanges(t *testing.T) {
 			return firecrawlOK(`{"success":true,"data":{"web":[]}}`), nil
 		},
 	)}}
-	_, err := p.SearchWithFilters(t.Context(), "query", 1, false, types.WebSearchFilters{Country: "ALL"})
+	_, err := p.Search(t.Context(), types.WebSearchRequest{
+		Query: "query", MaxResults: 1, Filters: types.WebSearchFilters{Country: "ALL"},
+	})
 	require.NoError(t, err)
 	require.NotContains(t, got, "country")
 	got = nil
-	_, err = p.SearchWithFilters(t.Context(), "query", 1, false,
-		types.WebSearchFilters{Freshness: "2026-01-05to2026-02-28"})
+	_, err = p.Search(t.Context(), types.WebSearchRequest{
+		Query: "query", MaxResults: 1, Filters: types.WebSearchFilters{Freshness: "2026-01-05to2026-02-28"},
+	})
 	require.ErrorContains(t, err, "date ranges are not supported")
 	require.Nil(t, got, "no request is sent for an unsupported filter")
 }
@@ -129,7 +133,7 @@ func TestFirecrawlIncludeContentAndUnsuccessfulResponse(t *testing.T) {
 		 {"title":"One","url":"https://example.com/one","description":"Snippet","markdown":"  # Page body  "},
 		 {"title":"Two","url":"https://example.com/two","markdown":"Body without description"}]}}`), nil
 	})
-	results, err := p.Search(t.Context(), "query", 3, false)
+	results, err := p.Search(t.Context(), types.WebSearchRequest{Query: "query", MaxResults: 3})
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	require.Equal(t, "# Page body", results[0].Content)
@@ -139,7 +143,7 @@ func TestFirecrawlIncludeContentAndUnsuccessfulResponse(t *testing.T) {
 	p.client.Transport = firecrawlTransport(func(*http.Request) (*http.Response, error) {
 		return firecrawlOK(`{"success":false,"error":"secret upstream diagnostics"}`), nil
 	})
-	_, err = p.Search(t.Context(), "query", 3, false)
+	_, err = p.Search(t.Context(), types.WebSearchRequest{Query: "query", MaxResults: 3})
 	require.ErrorContains(t, err, "did not succeed")
 	require.NotContains(t, err.Error(), "secret")
 }

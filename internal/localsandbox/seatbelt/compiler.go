@@ -83,6 +83,18 @@ func compileSeatbelt(p core.Policy) (seatbeltProgram, error) {
 			denies = append(denies, fmt.Sprintf(
 				`(deny file-write-unlink (require-all (literal (param %q)) (vnode-type DIRECTORY)))`,
 				subParam))
+			// require-not above only narrows this root's own allow. Another
+			// writable root that covers the carve-out would reopen it.
+			denies = append(denies,
+				fmt.Sprintf("(deny file-write* (subpath (param %q)))", subParam),
+				fmt.Sprintf("(deny file-write* (literal (param %q)))", subParam),
+			)
+		}
+		if root.ProtectGitDirs {
+			// The regex is a constant, so no path is inlined into the profile.
+			denies = append(denies, fmt.Sprintf(
+				`(deny file-write* (require-all (subpath (param %q)) (regex #"/\.[Gg][Ii][Tt](/|$)")))`,
+				rootParam))
 		}
 	}
 

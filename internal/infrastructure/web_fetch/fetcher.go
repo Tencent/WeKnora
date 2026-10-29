@@ -78,6 +78,8 @@ const (
 	ErrorBodyTooLarge       ErrorCode = "body_too_large"
 	ErrorUnsupportedContent ErrorCode = "unsupported_content"
 	ErrorSnapshotExpired    ErrorCode = "snapshot_expired"
+	// ErrorProviderAuth means the fetch provider rejected WeKnora's credentials, not the page.
+	ErrorProviderAuth ErrorCode = "provider_auth_failed"
 )
 
 // FetchError carries stable, machine-readable failure details.
@@ -210,7 +212,11 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 		}
 		if f.renderBrowser != nil {
 			browserURL := firstNonEmpty(httpResult.finalURL, rawURL)
-			if rendered, browserErr := f.fetchWithBrowser(requestCtx, browserURL); browserErr == nil {
+			rendered, browserErr := f.fetchWithBrowser(requestCtx, browserURL)
+			if err := timeoutFetchError(browserErr); err != nil {
+				return "", err
+			}
+			if browserErr == nil {
 				content, browserParseErr := f.extractContent(&httpFetchResult{
 					body: []byte(rendered), finalURL: browserURL, contentType: "text/html",
 				})
@@ -230,7 +236,11 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 	}
 
 	if f.renderBrowser != nil && canRenderAfterHTTPError(httpErr) {
-		if rendered, browserErr := f.fetchWithBrowser(requestCtx, rawURL); browserErr == nil {
+		rendered, browserErr := f.fetchWithBrowser(requestCtx, rawURL)
+		if err := timeoutFetchError(browserErr); err != nil {
+			return "", err
+		}
+		if browserErr == nil {
 			content, browserParseErr := f.extractContent(&httpFetchResult{
 				body: []byte(rendered), finalURL: rawURL, contentType: "text/html",
 			})
@@ -498,6 +508,20 @@ func classifyValidationError(err error) error {
 		return newFetchError(ErrorDNS, true, "DNS lookup failed: %v", err)
 	}
 	return newFetchError(ErrorSSRFRejected, false, "URL rejected: %v", err)
+}
+
+func timeoutFetchError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return newFetchError(ErrorTimeout, true, "fetch timed out: %v", err)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return newFetchError(ErrorTimeout, true, "fetch timed out: %v", err)
+	}
+	return nil
 }
 
 func classifyRequestError(err error) error {

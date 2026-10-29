@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -386,6 +389,13 @@ func (s *knowledgeService) deleteUnindexedChunks(ctx context.Context, knowledge 
 	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 		logger.Errorf(ctx, "Delete chunks failed: %v", err)
 	}
+}
+
+// supersededChunkPurger is intentionally narrower than ChunkRepository: only
+// persistent repositories that can prove a newer active replacement should
+// physically reclaim soft-deleted chunk history.
+type supersededChunkPurger interface {
+	PurgeSupersededChunksByKnowledgeID(context.Context, uint64, string) (int64, error)
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
@@ -857,6 +867,20 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return nil
 	}
 
+	// Reparse has now written the replacement chunks and, when enabled, their
+	// replacement indexes. Only at this successful point is it safe to reclaim
+	// old soft-deleted rows. Keep this optional at the interface boundary so
+	// existing non-SQL repositories and narrow test doubles retain their
+	// lifecycle behavior; the concrete SQL chunk repository implements it.
+	if purger, ok := s.chunkRepo.(supersededChunkPurger); ok {
+		purged, purgeErr := purger.PurgeSupersededChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID)
+		if purgeErr != nil {
+			logger.Warnf(ctx, "Failed to purge superseded chunks for knowledge %s: %v", knowledge.ID, purgeErr)
+		} else if purged > 0 {
+			logger.Infof(ctx, "Purged %d superseded chunks for knowledge %s", purged, knowledge.ID)
+		}
+	}
+
 	now := time.Now()
 	finalizeIndexedKnowledgeState(
 		knowledge,
@@ -1078,7 +1102,7 @@ func validateSummaryOutput(response *types.ChatResponse) (string, error) {
 	if response == nil {
 		return "", errEmptySummaryOutput
 	}
-	content := strings.TrimSpace(response.Content)
+	content := strings.TrimSpace(tools.StripThinkBlocks(response.Content))
 	if content == "" {
 		return "", errEmptySummaryOutput
 	}
@@ -1882,6 +1906,18 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			indexBatchAttempted,
 			indexBatchSucceeded,
 		)
+		if llmCallEmpty > 0 {
+			// Empty completions are counted, not logged, at the call site; a
+			// run where every chunk came back empty is indistinguishable from
+			// a healthy run in the application log. Reasoning-style models
+			// burning the whole budget on thinking are the known cause —
+			// point operators at the knob instead of leaving them to guess.
+			logger.Warnf(ctx,
+				"Question generation: %d of %d model calls returned empty completions "+
+					"(reasoning-style models can spend the completion budget on thinking even when disabled; "+
+					"raise %s to give the reply room)",
+				llmCallEmpty, llmCallAttempts, generateQuestionsMaxTokensEnv)
+		}
 		if qSpan != nil {
 			out := types.JSONMap{
 				"status":                 exitStatus,
@@ -2203,6 +2239,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	chunksInBatch := len(batchIDs)
 	chunksProcessed := 0
 	emptyChunks := 0
+	llmCallEmpty := 0
 	llmCallFailed := 0
 	generatedQuestionsTotal := 0
 	indexEntriesPrepared := 0
@@ -2231,11 +2268,23 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}()
 	defer func() {
 		logger.Infof(ctx,
-			"Question generation (batch) stats: knowledge=%s batch=%d chunks(in_batch=%d,processed=%d,empty=%d) llm_failed=%d retry=%d/%d status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
-			payload.KnowledgeID, payload.BatchIndex, chunksInBatch, chunksProcessed, emptyChunks, llmCallFailed,
-			retryCount, maxRetry, exitStatus, time.Since(taskStartedAt).Round(time.Millisecond),
+			"Question generation (batch) stats: knowledge=%s batch=%d "+
+				"chunks(in_batch=%d,processed=%d,empty=%d,llm_empty=%d) llm_failed=%d retry=%d/%d "+
+				"status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
+			payload.KnowledgeID, payload.BatchIndex, chunksInBatch, chunksProcessed, emptyChunks,
+			llmCallEmpty, llmCallFailed, retryCount, maxRetry, exitStatus,
+			time.Since(taskStartedAt).Round(time.Millisecond),
 			generatedQuestionsTotal, indexEntriesPrepared, indexBatchSucceeded,
 		)
+		if llmCallEmpty > 0 {
+			// See the matching warning in processQuestionGenerationForKnowledge:
+			// empty completions point at a completion budget spent on thinking.
+			logger.Warnf(ctx,
+				"Question generation (batch): %d model calls returned empty completions "+
+					"(reasoning-style models can spend the completion budget on thinking even when disabled; "+
+					"raise %s to give the reply room)",
+				llmCallEmpty, generateQuestionsMaxTokensEnv)
+		}
 		if qSpan != nil {
 			out := types.JSONMap{
 				"status":                 exitStatus,
@@ -2445,6 +2494,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			continue
 		}
 		if len(questions) == 0 {
+			llmCallEmpty++
 			continue
 		}
 		latestChunk, latestErr := s.chunkRepo.GetChunkByID(ctx, payload.TenantID, chunk.ID)
@@ -2507,6 +2557,29 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	return nil
 }
 
+const (
+	// generateQuestionsDefaultMaxTokens is the per-chunk completion budget for
+	// question generation. The reply itself is a handful of short lines, but
+	// reasoning-style models can spend a small budget on thinking even when
+	// thinking is disabled and come back with an empty completion (the same
+	// failure mode the description path grew KNOWLEDGE_BASE_PROFILE_MAX_TOKENS
+	// for, issue #4221) — so the default keeps headroom.
+	generateQuestionsDefaultMaxTokens = 2048
+	// generateQuestionsMaxTokensEnv lets operators raise (or lower) the budget
+	// without a rebuild; invalid or non-positive values fall back to the
+	// default so one bad variable cannot break question generation.
+	generateQuestionsMaxTokensEnv = "GENERATE_QUESTIONS_MAX_TOKENS"
+)
+
+func generateQuestionsMaxTokens() int {
+	if v := strings.TrimSpace(os.Getenv(generateQuestionsMaxTokensEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return generateQuestionsDefaultMaxTokens
+}
+
 // generateQuestionsWithContext generates questions for a chunk with surrounding context
 func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,
@@ -2553,15 +2626,21 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		},
 	}, &chat.ChatOptions{
 		Temperature: 0.7,
-		MaxTokens:   512,
+		MaxTokens:   generateQuestionsMaxTokens(),
 		Thinking:    &thinking,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}
 
-	// Parse response
-	lines := strings.Split(response.Content, "\n")
+	return parseGeneratedQuestions(response.Content, questionCount), nil
+}
+
+// parseGeneratedQuestions drops inline <think> reasoning first: servers that
+// ignore Thinking=false still emit it in content, and each reasoning line
+// would otherwise be indexed as a question.
+func parseGeneratedQuestions(content string, questionCount int) []string {
+	lines := strings.Split(tools.StripThinkBlocks(content), "\n")
 	questions := make([]string, 0, questionCount)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -2577,8 +2656,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 			}
 		}
 	}
-
-	return questions, nil
+	return questions
 }
 
 // RegenerateChunkQuestions synchronously refreshes Doc2Query-style auxiliary
@@ -4063,12 +4141,19 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	}
 	sanitizeReadResult(convertResult)
+	normalizeStarted := time.Now()
 	if convertResult != nil {
 		convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
 		if convertResult.MarkdownContent != "" {
 			convertResult.MarkdownContent = docparser.NormalizeHTMLTables(convertResult.MarkdownContent)
 		}
 	}
+	normalizedBytes := 0
+	if convertResult != nil {
+		normalizedBytes = len(convertResult.MarkdownContent)
+	}
+	logger.Infof(ctx, "Document text normalization completed in %s (knowledge=%s input_bytes=%d output_bytes=%d)",
+		time.Since(normalizeStarted), knowledge.ID, len(parsedMarkdown), normalizedBytes)
 
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
@@ -4141,6 +4226,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	chunkStarted := time.Now()
 
 	multimodalImages := imagesForMultimodal(storedImages)
 	processOpts := ProcessChunksOptions{
@@ -4194,6 +4280,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
+	logger.Infof(ctx, "Document chunking completed in %s (knowledge=%s input_bytes=%d chunks=%d)",
+		time.Since(chunkStarted), knowledge.ID, len(convertResult.MarkdownContent), len(chunks))
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
@@ -4329,7 +4417,7 @@ func (s *knowledgeService) convert(
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	// Parser resource limits are permanent document rejections, not transient reader failures.
-	if errors.Is(err, anydoc.ErrResourceLimit) {
+	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
 		result, err = &types.ReadResult{Error: err.Error()}, nil
 	}
 	if err != nil {

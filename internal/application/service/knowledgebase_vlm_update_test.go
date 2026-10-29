@@ -32,7 +32,21 @@ func newVLMUpdateService(repo *fakeKBRepo) *knowledgeBaseService {
 	return &knowledgeBaseService{repo: repo, modelService: &vlmUpdateModelService{models: map[string]*types.Model{
 		"vlm-1":  {ID: "vlm-1", Type: types.ModelTypeVLLM},
 		"chat-1": {ID: "chat-1", Type: types.ModelTypeKnowledgeQA},
+		"vision-chat": {
+			ID: "vision-chat", Type: types.ModelTypeKnowledgeQA,
+			Parameters: types.ModelParameters{SupportsVision: true},
+		},
 	}}}
+}
+
+func TestUpdateKnowledgeBaseAcceptsVisionCapableChatModel(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = &types.KnowledgeBase{ID: "kb-1", TenantID: 1}
+	kb, err := newVLMUpdateService(repo).UpdateKnowledgeBase(context.Background(), "kb-1", "n", "d", nil,
+		&types.VLMConfig{Enabled: true, ModelID: "vision-chat"})
+	require.NoError(t, err)
+	assert.Equal(t, "vision-chat", kb.VLMConfig.ModelID)
+	assert.True(t, kb.VLMConfig.Enabled)
 }
 
 // TestUpdateKnowledgeBaseAppliesVLMConfig guards issue #1723: the KB update

@@ -319,10 +319,8 @@ func (s *sessionService) selectChatModelID(
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to list models: %w", err)
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
-			return model.ID, tenantID, nil
-		}
+	if model := types.PickChatModel(models, ""); model != nil {
+		return model.ID, tenantID, nil
 	}
 	return "", 0, fmt.Errorf("no chat model ID available: no accessible knowledge base model or available models")
 }

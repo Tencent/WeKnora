@@ -22,7 +22,7 @@ type GoogleProvider struct {
 
 // NewGoogleProvider creates a new Google provider from parameters (no environment variables).
 // The API endpoint is the official Google Custom Search endpoint — not tenant-configurable.
-func NewGoogleProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewGoogleProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Google provider")
 	}
@@ -57,10 +57,9 @@ func (p *GoogleProvider) Name() string {
 // Search performs a web search using Google Custom Search Engine API
 func (p *GoogleProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults := request.Query, request.MaxResults
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}

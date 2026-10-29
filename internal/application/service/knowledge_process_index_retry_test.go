@@ -114,6 +114,7 @@ func TestProcessChunksRetriesBatchIndexFailureBeforeLastAttempt(t *testing.T) {
 	// Partial chunks and vectors are still removed; the retry rebuilds them.
 	require.Equal(t, 2, chunks.deletes)
 	require.Equal(t, 2, engine.indexDeletes)
+	require.Zero(t, chunks.purges, "a failed index must retain soft-deleted history for recovery")
 }
 
 func TestProcessChunksFailsKnowledgeOnLastBatchIndexAttempt(t *testing.T) {
@@ -136,4 +137,5 @@ func TestProcessChunksFailsKnowledgeOnLastBatchIndexAttempt(t *testing.T) {
 	require.Equal(t, "embedding endpoint unavailable", last.ErrorMessage)
 	require.Equal(t, 2, chunks.deletes)
 	require.Equal(t, 2, engine.indexDeletes)
+	require.Zero(t, chunks.purges, "a terminal index failure must retain soft-deleted history for recovery")
 }

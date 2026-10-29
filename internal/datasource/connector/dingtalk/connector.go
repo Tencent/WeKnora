@@ -1573,6 +1573,12 @@ func failedDocument(
 	document node,
 	err error,
 ) types.FetchedItem {
+	reasonCode := "dingtalk_document_failed"
+	reason := "DingTalk document could not be read; retry on the next sync"
+	if errors.Is(err, errDocumentTooLarge) {
+		reasonCode = "dingtalk_document_too_large"
+		reason = "DingTalk file exceeds the 64 MiB download limit; skipped for this sync. Compress or split the file."
+	}
 	return types.FetchedItem{
 		ExternalID:       document.ID,
 		Title:            document.title(),
@@ -1582,8 +1588,8 @@ func failedDocument(
 			"workspace_id":      workspaceID,
 			"node_id":           document.ID,
 			"error":             err.Error(),
-			"error_reason_code": "dingtalk_document_failed",
-			"error_reason":      "DingTalk document could not be read; retry on the next sync",
+			"error_reason_code": reasonCode,
+			"error_reason":      reason,
 		},
 	}
 }
