@@ -302,7 +302,8 @@ func flexMessage(text string) map[string]interface{} {
 }
 
 // bubbleContainer returns a LINE BubbleContainer with a "RAG 回答" header and a
-// body carrying the answer plus a WeKnora source line.
+// body whose answer renders as Markdown flex components followed by the
+// WeKnora source line.
 func bubbleContainer(text string) map[string]interface{} {
 	return map[string]interface{}{
 		"type": "bubble",
@@ -322,17 +323,176 @@ func bubbleContainer(text string) map[string]interface{} {
 			"type":    "box",
 			"layout":  "vertical",
 			"spacing": "md",
-			"contents": []interface{}{
-				map[string]interface{}{"type": "text", "text": text, "wrap": true},
-				map[string]interface{}{
-					"type":  "text",
-					"text":  "WeKnora",
-					"size":  "xs",
-					"color": "#888888",
-				},
-			},
+			"contents": append(markdownToFlexComponents(text), sourceTag()),
 		},
 	}
+}
+
+// sourceTag renders the trailing WeKnora attribution line on the card.
+func sourceTag() map[string]interface{} {
+	return map[string]interface{}{
+		"type":  "text",
+		"text":  "WeKnora",
+		"size":  "xs",
+		"color": "#888888",
+	}
+}
+
+// markdownToFlexComponents renders a Markdown string into an ordered slice of
+// LINE bubble-box components (headings, lists, fenced code, dividers, and
+// paragraphs). The result is spliced into the card body ahead of the source
+// tag so answers render as real rich text instead of one flat string.
+func markdownToFlexComponents(md string) []map[string]interface{} {
+	var comps []map[string]interface{}
+	var code []string
+	inCode := false
+
+	flushCode := func() {
+		if !inCode {
+			return
+		}
+		inCode = false
+		if len(code) > 0 {
+			comps = append(comps, codeBlockComponent(code))
+			code = nil
+		}
+	}
+
+	for _, raw := range strings.Split(md, "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if strings.HasPrefix(trimmed, "```") {
+			if inCode {
+				flushCode()
+			} else {
+				inCode = true
+			}
+			continue
+		}
+		if inCode {
+			code = append(code, raw)
+			continue
+		}
+		switch {
+		case trimmed == "":
+			// blank line: the box spacing already provides the gap.
+		case isDivider(trimmed):
+			comps = append(comps, separatorComponent())
+		case isHeader(trimmed):
+			comps = append(comps, headerComponent(trimmed))
+		case isListItem(trimmed):
+			comps = append(comps, listItemComponent(trimmed))
+		default:
+			comps = append(comps, paragraphComponent(raw))
+		}
+	}
+	flushCode()
+
+	return comps
+}
+
+// isHeader reports whether s opens a Markdown heading (#).
+func isHeader(s string) bool { return strings.HasPrefix(s, "#") }
+
+// headerComponent renders a Markdown heading (#/##/###) as a bold green title;
+// h1 is a touch larger, h2+ stay md per the LINE size ladder.
+func headerComponent(s string) map[string]interface{} {
+	level := 0
+	for level < len(s) && s[level] == '#' {
+		level++
+	}
+	size := "md"
+	if level == 1 {
+		size = "lg"
+	}
+	return map[string]interface{}{
+		"type":   "text",
+		"text":   strings.TrimSpace(s[level:]),
+		"weight": "bold",
+		"size":   size,
+		"color":  "#1DB446",
+		"margin": "md",
+	}
+}
+
+// isDivider reports whether s is a standalone horizontal rule (---).
+func isDivider(s string) bool {
+	if len(s) < 3 {
+		return false
+	}
+	for _, r := range s {
+		if r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// separatorComponent renders a LINE divider between sections.
+func separatorComponent() map[string]interface{} {
+	return map[string]interface{}{
+		"type":   "separator",
+		"margin": "md",
+	}
+}
+
+// isListItem reports whether s opens an unordered list item (- or *).
+func isListItem(s string) bool {
+	return strings.HasPrefix(s, "- ") || strings.HasPrefix(s, "* ")
+}
+
+// listItemComponent renders a list item as a bullet followed by wrapped text.
+func listItemComponent(s string) map[string]interface{} {
+	body := strings.TrimPrefix(strings.TrimPrefix(s, "- "), "* ")
+	return map[string]interface{}{
+		"type":     "box",
+		"layout":   "horizontal",
+		"spacing":  "sm",
+		"contents": []interface{}{
+			map[string]interface{}{"type": "text", "text": "•", "size": "sm", "color": "#1DB446"},
+			map[string]interface{}{"type": "text", "text": body, "wrap": true},
+		},
+	}
+}
+
+// codeBlockComponent renders a fenced code block on a soft gray card.
+func codeBlockComponent(lines []string) map[string]interface{} {
+	contents := make([]interface{}, len(lines))
+	for i, ln := range lines {
+		contents[i] = map[string]interface{}{
+			"type": "text",
+			"text": ln,
+			"wrap": true,
+		}
+	}
+	return map[string]interface{}{
+		"type":            "box",
+		"layout":          "vertical",
+		"backgroundColor": "#F4F4F5",
+		"paddingAll":      "sm",
+		"cornerRadius":    "sm",
+		"spacing":         "sm",
+		"contents":        contents,
+	}
+}
+
+// paragraphComponent renders a Markdown paragraph. Inline **bold** lifts the
+// whole line (LINE has no per-span weight) and `code` backticks are dropped
+// (no monospace support), keeping the wire payload flat.
+func paragraphComponent(raw string) map[string]interface{} {
+	text := strings.ReplaceAll(strings.TrimSpace(raw), "**", "")
+	text = strings.ReplaceAll(text, "`", "")
+	component := map[string]interface{}{
+		"type":   "text",
+		"text":   text,
+		"wrap":   true,
+		"size":   "sm",
+		"color":  "#333333",
+		"margin": "xs",
+	}
+	if strings.Contains(raw, "**") {
+		component["weight"] = "bold"
+	}
+	return component
 }
 
 // SendReply sends a reply back to the LINE platform. When the incoming request
