@@ -239,8 +239,10 @@ func (c *Client) decodeToolCalls(
 		if err := json.Unmarshal(raw, &tc); err != nil {
 			// Dropping the entry turns a round that wanted to call a tool into
 			// a plain answer, and the agent has no way to notice the action it
-			// was told to take went missing. Surface it instead.
-			return nil, nil, fmt.Errorf("decode tool call %d: %w", i, err)
+			// was told to take went missing. Surface it instead, tagged so the
+			// caller can tell the mangled frame from a rejected request.
+			return nil, nil, fmt.Errorf("decode tool call %d: %w: %w",
+				i, api.ErrCorruptStreamChunk, err)
 		}
 		idx := i
 		if indexes != nil {
@@ -433,8 +435,10 @@ func (c *Client) processStream(
 			// chunk we cannot decode is a hole in the answer: skipping it ends
 			// the stream on EOF, which reaches the caller as a *successful*
 			// truncated reply and gets persisted as the model's answer. An
-			// error at least surfaces the proxy that corrupted the stream.
-			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w", err))
+			// error at least surfaces the proxy that corrupted the stream, and
+			// the tag lets the caller classify it as worth one more attempt.
+			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w: %w",
+				api.ErrCorruptStreamChunk, err))
 			return
 		}
 		if env.Error != nil && env.Error.Message != "" {
