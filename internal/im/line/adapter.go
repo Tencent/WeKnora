@@ -26,6 +26,10 @@ type Adapter struct {
 	channelAccessToken string
 	channelSecret      string
 	resetKeyword       string
+	// enableFlexMessage opts the adapter into structured Flex Message output
+	// (structured layout with a title and source tag). When false, replies are
+	// emitted as plain text messages.
+	enableFlexMessage bool
 }
 
 // Compile-time check that Adapter satisfies the im.Adapter interface.
@@ -39,11 +43,25 @@ var _ im.Adapter = (*Adapter)(nil)
 // resetKeyword is the per-channel command (e.g. "/reset", "/clear", "/new",
 // "/restart") that clears the current session context. When empty, no custom
 // keyword is matched and only the platform-level mechanism applies.
+//
+// The structured Flex Message output stays disabled; use
+// NewWebhookAdapterWithFlex to opt into it.
 func NewWebhookAdapter(channelAccessToken, channelSecret, resetKeyword string) *Adapter {
+	return NewWebhookAdapterWithFlex(channelAccessToken, channelSecret, resetKeyword, false)
+}
+
+// NewWebhookAdapterWithFlex is like NewWebhookAdapter but enables structured
+// Flex Message output when enableFlexMessage is true. When false it emits plain
+// text messages, matching the default adapter behaviour.
+func NewWebhookAdapterWithFlex(
+	channelAccessToken, channelSecret, resetKeyword string,
+	enableFlexMessage bool,
+) *Adapter {
 	return &Adapter{
 		channelAccessToken: channelAccessToken,
 		channelSecret:      channelSecret,
 		resetKeyword:       strings.TrimSpace(resetKeyword),
+		enableFlexMessage:  enableFlexMessage,
 	}
 }
 
@@ -257,6 +275,63 @@ func shouldEmitDirectReply(reply *im.ReplyMessage) bool {
 	return reply.IsFinal || !reply.IsStreaming
 }
 
+// flexMessages builds the LINE message payload for a reply. When enableFlex is
+// true it returns a structured flex card carrying a title, the answer body, and
+// a source tag; otherwise it falls back to a plain text message.
+func flexMessages(text string, enableFlex bool) []map[string]interface{} {
+	if enableFlex {
+		return []map[string]interface{}{flexMessage(text)}
+	}
+	return []map[string]interface{}{
+		{
+			"type": "text",
+			"text": text,
+		},
+	}
+}
+
+// flexMessage constructs a single LINE Flex Message object. The bubble carries
+// the answer under a "RAG 回答" title with a WeKnora source tag, so the output
+// has structured layout. altText is the fallback rendered on clients that
+// cannot display the flex card.
+func flexMessage(text string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":    "flex",
+		"altText": "RAG 回答",
+		"contents": []interface{}{
+			map[string]interface{}{
+				"type": "bubble",
+				"header": map[string]interface{}{
+					"type":   "box",
+					"layout": "vertical",
+					"contents": []interface{}{
+						map[string]interface{}{
+							"type":   "text",
+							"text":   "RAG 回答",
+							"weight": "bold",
+							"size":   "lg",
+						},
+					},
+				},
+				"body": map[string]interface{}{
+					"type":    "box",
+					"layout":  "vertical",
+					"spacing": "md",
+					"contents": []interface{}{
+						map[string]interface{}{"type": "text", "text": text},
+						map[string]interface{}{
+							"type":  "text",
+							"text":  "WeKnora",
+							"size":  "xs",
+							"color": "#888888",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // SendReply sends a reply back to the LINE platform. When the incoming request
 // carried a reply token it is used; otherwise the call degrades to push.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
@@ -276,12 +351,9 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 		return nil
 	}
 
-	messages := []map[string]interface{}{
-		{
-			"type": "text",
-			"text": text,
-		},
-	}
+	// Emit a structured flex card when the channel opted in; otherwise fall
+	// back to a plain text message. The builder keeps the wire shape in one place.
+	messages := flexMessages(text, a.enableFlexMessage)
 
 	// Prefer the reply API. A replyToken is single-use and expires fast, so we
 	// degrade to push only when the reply API genuinely fails. A successful
