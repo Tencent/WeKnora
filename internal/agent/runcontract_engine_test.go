@@ -113,11 +113,13 @@ func TestRunContractTokenBudgetStopsWithoutAnotherModelCall(t *testing.T) {
 	require.Len(t, model.calls, 1)
 	require.Contains(t, state.FinalAnswer, "token budget")
 }
+
 func TestRunContractTimeBudgetStopsBeforeNextRound(t *testing.T) {
 	engine := newTestEngine(t, &mockChat{}, withRunBudget(RunBudget{MaxWallTimeSec: 1}))
 	engine.runBudget = newRunBudgetState(RunBudget{MaxWallTimeSec: 1}, time.Now().Add(-2*time.Second))
 	require.Equal(t, RunStopTimeBudget, engine.budgetStopReason(0))
 }
+
 func TestRunContractZeroValuesPreserveLegacyExecution(t *testing.T) {
 	tool := newCountingTool(agenttools.ToolWriteSandboxFile)
 	model := &mockChat{responses: []mockResponse{

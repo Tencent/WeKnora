@@ -13,17 +13,22 @@ import (
 type RunStopReason = types.RunStopReason
 
 const (
+	// RunStopTokenBudget mirrors the types constant for engine-local code.
 	RunStopTokenBudget RunStopReason = types.RunStopTokenBudget
-	RunStopTimeBudget  RunStopReason = types.RunStopTimeBudget
+	// RunStopTimeBudget mirrors the types constant for engine-local code.
+	RunStopTimeBudget RunStopReason = types.RunStopTimeBudget
+	// RunStopWriteBudget mirrors the types constant for engine-local code.
 	RunStopWriteBudget RunStopReason = types.RunStopWriteBudget
 )
 
-// RunBudget and RunBudgetUsage are aliases for the wire types.
-type (
-	RunBudget      = types.RunBudget
-	RunBudgetUsage = types.RunBudgetUsage
-	RunBudgetUsed  = types.RunBudgetUsed
-)
+// RunBudget is the wire type for one turn's limits.
+type RunBudget = types.RunBudget
+
+// RunBudgetUsage is the wire type for the completion report.
+type RunBudgetUsage = types.RunBudgetUsage
+
+// RunBudgetUsed is the wire type for cumulative usage.
+type RunBudgetUsed = types.RunBudgetUsed
 
 // runBudgetState is the concurrency-safe counter for one turn. Tool calls can
 // run in parallel, so writes reserve a slot atomically before executing.
@@ -55,7 +60,8 @@ func (s *runBudgetState) stopReasonNow(tokensUsed int) RunStopReason {
 		s.stopReason = RunStopTokenBudget
 		return s.stopReason
 	}
-	if s.limit.MaxWallTimeSec > 0 && time.Since(s.startedAt) >= time.Duration(s.limit.MaxWallTimeSec)*time.Second {
+	if s.limit.MaxWallTimeSec > 0 &&
+		time.Since(s.startedAt) >= time.Duration(s.limit.MaxWallTimeSec)*time.Second {
 		s.stopReason = RunStopTimeBudget
 		return s.stopReason
 	}
@@ -86,7 +92,6 @@ func (s *runBudgetState) reserveWrite() (bool, RunStopReason) {
 
 // snapshot reports limits and usage without mutating the stop reason.
 func (s *runBudgetState) snapshot(tokensUsed int) RunBudgetUsage {
-
 	if s == nil {
 		return RunBudgetUsage{}
 	}

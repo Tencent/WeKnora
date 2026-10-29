@@ -102,8 +102,11 @@ const UnlimitedMaxIterations = -1
 type RunStopReason string
 
 const (
+	// RunStopTokenBudget marks a turn stopped at its total token limit.
 	RunStopTokenBudget RunStopReason = "token_budget_exhausted"
-	RunStopTimeBudget  RunStopReason = "time_budget_exhausted"
+	// RunStopTimeBudget marks a turn stopped at its wall-clock limit.
+	RunStopTimeBudget RunStopReason = "time_budget_exhausted"
+	// RunStopWriteBudget marks a turn stopped at its mutating-action limit.
 	RunStopWriteBudget RunStopReason = "write_budget_exhausted"
 )
 
