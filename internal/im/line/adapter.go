@@ -284,15 +284,22 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 	}
 
 	if replyToken := incoming.Extra["replyToken"]; replyToken != "" {
-		return a.sendReply(ctx, replyToken, messages)
+		// Prefer the reply API; on failure degrade to push below. A replyToken
+		// is single-use and expires fast, so a failed reply must not lose the
+		// final answer — push to the original chat/user is the double insurance.
+		if err := a.sendReply(ctx, replyToken, messages); err == nil {
+			return nil
+		} else {
+			logger.Warnf(ctx, "[IM/Line] reply API failed, falling back to push: %v", err)
+		}
 	}
 
-	// replyToken expired or absent: degrade to push to the original sender.
+	// Push fallback: replyToken expired/absent, or the reply API failed above.
 	target := resolveTarget(incoming)
 	if target == "" {
 		return fmt.Errorf("line: no target user or chat id for push reply")
 	}
-	logger.Warnf(ctx, "[IM/Line] reply token unavailable, falling back to push to %s", target)
+	logger.Warnf(ctx, "[IM/Line] falling back to push to %s", target)
 	return a.sendPush(ctx, target, messages)
 }
 
@@ -341,11 +348,25 @@ func (a *Adapter) callAPI(ctx context.Context, url string, body interface{}) err
 	}
 	defer resp.Body.Close()
 
+	// Read the full body up front so LINE's error payload
+	// ({"message":..., "details":[...]}) is visible even on HTTP 4xx/5xx,
+	// rather than being swallowed by the ok/result decode.
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read line response body: %w", err)
+	}
+
+	// A non-2xx HTTP status is a definitive failure: report it with the raw
+	// body so the operator sees exactly why the API rejected the request.
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("line api %s failed: status=%d, body=%s", url, resp.StatusCode, string(respBody))
+	}
+
 	var apiResp struct {
 		OK     bool            `json:"ok"`
 		Result json.RawMessage `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return fmt.Errorf("decode line response: %w", err)
 	}
 	if !apiResp.OK {
