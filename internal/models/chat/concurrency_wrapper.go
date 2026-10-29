@@ -58,7 +58,10 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 		defer close(out)
 		defer release()
 		drain := func() {
-			for range ch {
+			for {
+				if _, open := <-ch; !open {
+					return
+				}
 			}
 		}
 		for {
