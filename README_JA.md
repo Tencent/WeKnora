@@ -166,7 +166,7 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 ## 最新アップデート
 
-### v0.9.0 <sub>· リリース予定 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
+### v0.9.0 <sub>· 2026-10-29 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
 
 - **[WeKnora アシスタント](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#assistant)**: WeKnora のバージョン更新、機能や設定について回答。表示中のページをもとに、現在のユーザーの権限でエージェント作成、タスクの定期実行、ナレッジ整理や設定変更を支援。
 - **[マルチエージェント連携](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#collaboration)**: タスクを分担し、進捗を確認して結果をまとめます。

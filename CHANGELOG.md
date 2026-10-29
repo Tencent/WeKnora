@@ -2,9 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.0] - Unreleased
+## [0.9.0] - 2026-10-29
 
-Changes since v0.8.3 through upstream main `256a3f296` (2026-10-27; 301 commits). [Website release notes](./website-docs/07-releases/v0.9.0.md) · [Full comparison](https://github.com/Tencent/WeKnora/compare/v0.8.3...256a3f2966866337f7dc3c5fcc10037f2ae18d52).
+Changes since v0.8.3. [Website release notes](./website-docs/07-releases/v0.9.0.md) · [Full comparison](https://github.com/Tencent/WeKnora/compare/v0.8.3...v0.9.0).
 
 ### New Features
 
@@ -17,10 +17,12 @@ Changes since v0.8.3 through upstream main `256a3f296` (2026-10-27; 301 commits)
 - **Image pipelines**: configurable manual and smart OCR pipelines, pipeline-specific parameters and validation, plus optional OCR preprocessing (#3746, #4381).
 - **Datasource integrations**: deeper Feishu/Lark block parsing, folder and embedded-object handling; optional DingTalk folder preservation; Confluence Server/Data Center PAT support (#3497, #4422, #4549).
 - **Retrieval and browsing**: RRF settings, a standalone JSON knowledge-graph search API, document-scoped MCP search and FAQ list expansion controls (#4300, #4395, #4463, #4566).
+- **Workspace defaults**: choose default chat, utility, embedding, rerank, vision and speech models, plus a default web-search provider, from Settings. Explicit resource choices take precedence; unavailable defaults fall back to usable models (#4822).
 
 ### Improvements
 
 - Improve assistant operation discovery, authorization, page links, task analysis, configuration guidance and interaction feedback.
+- Highlight the assistant entry beside the logo with a one-time introduction for existing users, and include it in new-user onboarding (#4836).
 - Support optional HTML main-content extraction and Excel percentage display text; preserve CSV cells and JSON literals, improve file parser fidelity and bound large-file processing (#4424, #4423, #4435, #4436).
 - Reuse resource handles for identical image bytes; improve model image resolution, scanned-page OCR for Wiki and image-processing traces (#4419, #4405, #4430).
 - Improve model streaming compatibility, reasoning/refusal handling, provider response bounds and SDK/CLI interoperability.
@@ -35,10 +37,15 @@ Changes since v0.8.3 through upstream main `256a3f296` (2026-10-27; 301 commits)
 - Fix failed quick-answer persistence, conversation export ordering, source-citation alignment and Unicode matching, attachment and task timeline behavior.
 - Bound web-search/provider/IM request bodies and archive expansion; avoid logging token fragments or bound slow-query parameters; strengthen resource scope checks.
 - Improve IM mention targeting, Wiki maintenance, parser failure/cancellation handling, deployment configuration and frontend status polling.
+- Show persistent approvals as waiting for a decision instead of a misleading countdown (#4824); preserve whitespace in Markdown documents created or updated by the assistant.
+- Recover valid DSML tool calls from OpenAI-compatible responses only for declared tools with valid arguments; preserve Ollama stream finish reasons and disable thinking during final-answer synthesis.
+- Reject MCP chat streams that end without a completion event and bound WeKnoraCloud vision response bodies.
+- Skip empty tokenized SQLite full-text queries so vector retrieval can continue; correct unsmoothed BLEU zero-precision handling and NDCG normalization against the full ideal ranking.
 
 ### Upgrade Notes
 
-- Back up the database, file storage, deployment settings and required sandbox files. Apply PostgreSQL migrations **000119–000133** or SQLite **000037–000050**.
+- Back up the database, file storage, deployment settings and required sandbox files. Apply PostgreSQL migrations **000119–000134** or SQLite **000037–000051**.
+- Workspace model defaults are stored in `tenants.default_settings` (PostgreSQL 000134 / SQLite 000051). Unset fields retain deployment fallback behavior; the utility model follows the chat default. Review the [default settings guide](./website-docs/03-features/06-models.md#workspace-defaults) after upgrading.
 - Existing Feishu/Lark sources are scheduled for resync. Review parsing mode and downstream workload; new sources default to blocks parsing while explicit export choices remain supported.
 - Migration 000125 (SQLite 000042) removes eligible empty image-derived chunks, not source documents or files.
 - Per-user sandbox reuse remains gated by `WEKNORA_SANDBOX_USER_ALLOCATION=enabled` and requires Redis. Upgrade every replica before enabling it; inspect active shared assignments before any downgrade.

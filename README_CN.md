@@ -166,7 +166,7 @@ docker compose up -d    # 用新镜像重建容器
 
 ## 最新更新
 
-### v0.9.0 <sub>· 待发布 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
+### v0.9.0 <sub>· 2026-10-29 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
 
 - **[WeKnora 助手](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#assistant)**: 解答 WeKnora 的版本、功能和配置问题，结合当前页面，以你的身份创建智能体、设置定时任务、整理知识和调整配置。
 - **[多智能体协作](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#collaboration)**: 将复杂任务分给多个智能体，追踪子任务进度并汇总结果。

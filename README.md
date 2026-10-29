@@ -166,7 +166,7 @@ All options, hardware requirements and deployment topologies: [Installation guid
 
 ## What's New
 
-### v0.9.0 <sub>· Unreleased · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
+### v0.9.0 <sub>· 2026-10-29 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
 
 - **[WeKnora assistant](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#assistant)**: Ask about WeKnora releases, features and configuration, then work from the current page: create agents, schedule tasks and manage knowledge, acting as you within your permissions.
 - **[Multi-agent collaboration](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#collaboration)**: Delegate independent subtasks, follow progress and bring the results together.

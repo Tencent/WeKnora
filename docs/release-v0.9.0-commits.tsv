@@ -300,3 +300,17 @@ f5b0553193772dc928831bc037ec3ef02835a9d0	2026-10-27	fix(models): preserve Respon
 04bd71e5a0088399f602cd7eac5e840e90b26fe4	2026-10-27	fix(agent): show matches in long file search lines (#4774)
 25cdf45209ab1ad9c9b0bacf0a517edac608a849	2026-10-27	fix(metric): normalize MAP by all relevant documents (#4771)
 256a3f2966866337f7dc3c5fcc10037f2ae18d52	2026-10-27	feat(lite): ask before host deletes and widen the sandbox on approval (#4076)
+c5de34d286f91cbfd916c770e620d1046ada9324	2026-10-28	fix(frontend): show persisted approvals as parked instead of countdown (#4824)
+dacb9c2643bdfe7b3f95e0d96e1584513b27f3a2	2026-10-28	feat: add workspace default settings for models and web search (#4822)
+c8c8406079154e3f88c775b94a2113a4c7825163	2026-10-28	Implement DSML tool call extraction and filtering in OpenAI completions
+bb73a15241bcc2a5f3cba75b8a223a6d20ece573	2026-10-28	fix(openaicompletions): validate recovered DSML tool calls
+3b306d9b081c52705a5859ad7df48c62a82e5192	2026-10-28	fix(agent): preserve manual markdown whitespace
+bad6d38390acc6d0716fba976af0a93ae884a747	2026-10-28	fix(mcp): reject chat streams without completion
+e288b66d6727cd715b3679fa541ab432be8299cc	2026-10-28	fix(vlm): bound WeKnoraCloud vision response bodies
+8277a259b882e9f65b4e6ddd1f0e0abe241052d9	2026-10-28	fix(agent): disable thinking during final answer synthesis
+1451b5df41637b3bfa058dbc58cf29a24a02c025	2026-10-28	fix(chat): carry Ollama's done_reason on the final stream chunk
+9d872b33dc93ad4ddd3bbb0745ccd58bf953500e	2026-10-28	style(chat): split a long test line
+500d2ff43f106495a0b2aee3b544f6ba001af60d	2026-10-28	fix(metric): preserve zero precision in unsmoothed BLEU
+c7e3ed396e7fc933386e2011e92417d2f2db4e61	2026-10-28	fix(metric): normalize NDCG against the full ideal ranking
+e8e0d2ed4bd660c46313884d2f2b3b243d7c318d	2026-10-28	fix(lite): skip empty tokenized FTS queries
+c73c06b4b0a95ecec5f3b180311a4451f29d5103	2026-10-29	feat: prepare v0.9.0 release with assistant onboarding (#4836)
