@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
+
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -23,7 +25,7 @@ import (
 
 // DataAnalysisTableName is the only table name the model needs to know when
 // querying a CSV/Excel document through data_analysis. Each document is loaded
-// into a physical DuckDB table named after its knowledge ID; that name is
+// into a physical DuckDB table owned by this tool instance; that name is
 // never shown to the model. Every query runs on a private connection where
 // "dataset" is a temporary view over the selected document, so the model
 // references the same fixed identifier for every document and the knowledge
@@ -188,6 +190,7 @@ type DataAnalysisTool struct {
 	tenantService        interfaces.TenantService
 	db                   *sql.DB
 	sessionID            string
+	tableNamespace       string
 	createdTables        []string        // Cleanup candidates, including failed CREATE attempts
 	loadedTables         map[string]bool // CREATE succeeded, even if a subsequent schema read failed
 	// localBaseDir is the LOCAL_STORAGE_BASE_DIR value captured at construction
@@ -230,6 +233,7 @@ func NewDataAnalysisTool(
 		tenantService:        tenantService,
 		db:                   db,
 		sessionID:            sessionID,
+		tableNamespace:       strings.ReplaceAll(uuid.NewString(), "-", ""),
 		// Capture LOCAL_STORAGE_BASE_DIR once at construction time so that every
 		// call to resolveFileServiceForKnowledge uses the same base path.  The
 		// env var is guaranteed to be set (or empty == "/data/files" fallback)
@@ -932,7 +936,10 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 }
 
 func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
-	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_")
+	// The DuckDB pool is shared by agent turns and background extraction.
+	// A document-only (or session-only) name lets overlapping runs collide
+	// during CREATE and lets one run's Cleanup drop another run's table.
+	return "k_" + t.tableNamespace + "_" + strings.ReplaceAll(knowledge.ID, "-", "_")
 }
 
 // Description builds the model-facing schema description. It names the table
