@@ -119,7 +119,7 @@ func TestParseCallbackChatMessage(t *testing.T) {
 				"type": "message",
 				"source": {"type": "group", "userId": "", "groupId": "G-42"},
 				"replyToken": "rtk-g",
-				"message": {"type": "Text", "id": "msg-g", "text": "ping"}
+			"message": {"type": "Text", "id": "msg-g", "text": "ping", "mention": {"mentionees": [{"index": 0, "type": "bot"}]}}
 			}
 		]
 	}`
@@ -179,6 +179,109 @@ func TestHandleURLVerificationWithEvents(t *testing.T) {
 	handled := adapter.HandleURLVerification(c)
 	if handled {
 		t.Fatal("expected HandleURLVerification = false when events present")
+	}
+}
+
+// TestParseCallbackGroupNotMentionedSkipped confirms that a group message with
+// no bot @-mention is ignored (nil) so everyday group chatter does not disturb
+// the answer pipeline.
+func TestParseCallbackGroupNotMentionedSkipped(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+
+	const payload = `{
+		"events": [
+			{
+				"type": "message",
+				"source": {"type": "group", "userId": "", "groupId": "G-42"},
+				"replyToken": "rtk-g",
+				"message": {"type": "Text", "id": "msg-g", "text": "hey everyone"}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming != nil {
+		t.Fatalf("expected nil message for un-mentioned group chat, got %+v", incoming)
+	}
+}
+
+// TestParseCallbackGroupMentionStripsBotName verifies that a @-mentioned group
+// message has its leading @botname stripped so only the clean question reaches
+// the answer pipeline.
+func TestParseCallbackGroupMentionStripsBotName(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123")
+
+	const payload = `{
+		"events": [
+			{
+				"type": "message",
+				"source": {"type": "group", "userId": "U-abc", "groupId": "G-42"},
+				"replyToken": "rtk-g",
+				"message": {"type": "Text", "id": "msg-g", "text": "@LINE_Bot can you help?", "mention": {"mentionees": [{"index": 0, "type": "bot", "id": "BOT"}]}}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage for mentioned group message, got nil")
+	}
+	if incoming.ChatType != im.ChatTypeGroup {
+		t.Errorf("ChatType = %q, want group", incoming.ChatType)
+	}
+	if got := incoming.Content; got != "can you help?" {
+		t.Errorf("Content = %q, want %q", got, "can you help?")
+	}
+}
+
+// TestShouldEmitDirectReply confirms the LINE adapter only emits the final
+// reply or a plain reply and drops intermediate streaming updates.
+func TestShouldEmitDirectReply(t *testing.T) {
+	cases := []struct {
+		name     string
+		reply    *im.ReplyMessage
+		wantEmit bool
+	}{
+		{"nil reply", nil, false},
+		{"final reply", &im.ReplyMessage{IsFinal: true}, true},
+		{"plain reply", &im.ReplyMessage{IsStreaming: false}, true},
+		{"streaming intermediate", &im.ReplyMessage{IsStreaming: true, IsFinal: false}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldEmitDirectReply(tc.reply); got != tc.wantEmit {
+				t.Errorf("shouldEmitDirectReply() = %v, want %v", got, tc.wantEmit)
+			}
+		})
+	}
+}
+
+// TestStripBotMention verifies leading @botname stripping.
+func TestStripBotMention(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no mention", "hello there", "hello there"},
+		{"leading mention", "@LINE_Bot can you help?", "can you help?"},
+		{"mention trailing spaces", "@LINE_Bot   ", ""},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripBotMention(tc.in); got != tc.want {
+				t.Errorf("stripBotMention(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
