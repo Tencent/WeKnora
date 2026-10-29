@@ -27,8 +27,13 @@ func NewFactory() im.AdapterFactory {
 		// resetKeyword is an optional, per-channel command that clears the
 		// session context (default: use empty so only "/clear" applies).
 		resetKeyword := im.GetString(creds, "reset_keyword")
+		// enable_flex_message opts the channel into structured Flex Message
+		// output; absent means plain text replies.
+		enableFlexMessage := im.GetBool(creds, "enable_flex_message")
 
-		adapter := NewWebhookAdapter(channelAccessToken, channelSecret, resetKeyword)
+		adapter := NewWebhookAdapterWithFlex(
+			channelAccessToken, channelSecret, resetKeyword, enableFlexMessage,
+		)
 		return adapter, nil, nil
 	}
 }
