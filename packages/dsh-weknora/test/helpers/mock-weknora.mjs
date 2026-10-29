@@ -142,6 +142,7 @@ function answerFor(query, results) {
  * @param options.streamTruncated - end the chat stream mid-answer, with no `complete`.
  * @param options.forbidPublicResourceUrls - reject `resource_urls=public` with the
  *   403 WeKnora returns for a knowledge-base-restricted API key.
+ * @param options.defaultResourceUrls - the deployment's mode when the caller omits the query.
  * @returns the base URL, the recorded requests, and a close function.
  */
 export async function startMockWeknora(options = {}) {
@@ -181,15 +182,17 @@ export async function startMockWeknora(options = {}) {
         return
       }
 
-      if (options.forbidPublicResourceUrls === true && url.searchParams.get('resource_urls') === 'public') {
+      const publicMode = (url.searchParams.get('resource_urls') ?? options.defaultResourceUrls) === 'public'
+
+      const resolvesResources = url.pathname === '/api/v1/knowledge-search'
+        || /^\/api\/v1\/(knowledge-chat|agent-chat)\//.test(url.pathname)
+      if (options.forbidPublicResourceUrls === true && publicMode && resolvesResources) {
         json(403, {
           success: false,
           error: { message: 'resource_urls=public is not available for a knowledge-base-restricted API key' },
         })
         return
       }
-
-      const publicMode = url.searchParams.get('resource_urls') === 'public'
 
       const forced = failures.get(url.pathname)
       if (forced !== undefined) {
