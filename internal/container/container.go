@@ -79,6 +79,7 @@ import (
 	imPkg "github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/im/dingtalk"
 	"github.com/Tencent/WeKnora/internal/im/feishu"
+	"github.com/Tencent/WeKnora/internal/im/line"
 	"github.com/Tencent/WeKnora/internal/im/mattermost"
 	"github.com/Tencent/WeKnora/internal/im/qqbot"
 	"github.com/Tencent/WeKnora/internal/im/slack"
@@ -2050,6 +2051,7 @@ func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceClea
 	imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
 	imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
 	imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
+	imService.RegisterAdapterFactory("line", line.NewFactory())
 
 	// Load and start all enabled channels from database
 	if err := imService.LoadAndStartChannels(); err != nil {
