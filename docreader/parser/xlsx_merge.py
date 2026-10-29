@@ -39,6 +39,116 @@ PERCENT_AS_TEXT_ENV = "DOCREADER_XLSX_PERCENT_AS_TEXT"
 ROW_HINT_MIN_ENV = "DOCREADER_XLSX_PCT_ROW_HINT_MIN"
 _DEFAULT_ROW_HINT_MIN = 0
 
+# ---- 合并区面积闸门（本补丁新增）----
+# openpyxl 在 load_workbook 阶段就按合并区面积创建/清理单元格：一个 4.9 KB 的
+# xlsx 只要声明 A1:P100000（1.6M 格），加载就要 ~15.6s / ~576MB；声明
+# A1:XFD1048576 会直接把 docreader 卡到不可用。闸门必须在交给 openpyxl
+# **之前**生效，所以先扫 sheet XML、把面积超限的 <mergeCell> 摘掉。
+MERGE_FILL_LIMIT_ENV = "DOCREADER_XLSX_MAX_MERGE_CELLS"
+_DEFAULT_MERGE_FILL_LIMIT = 200_000  # 单条合并区上限（格）
+MERGE_TOTAL_LIMIT_ENV = "DOCREADER_XLSX_MAX_MERGE_TOTAL_CELLS"
+_DEFAULT_MERGE_TOTAL_LIMIT = 2_000_000  # 单文件所有合并区面积之和上限（格）
+
+_MERGE_CELL_TAG = re.compile(r'<mergeCell\b[^>]*\bref="([A-Za-z]+\d+:[A-Za-z]+\d+)"[^>]*/>')
+_MERGE_CELLS_COUNT = re.compile(r'(<mergeCells\b[^>]*\bcount=")(\d+)(")')
+_SHEET_XML = re.compile(r"^xl/worksheets/[^/]+\.xml$")
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("XLSX pre-parse: 环境变量 %s=%r 不是整数，忽略，用默认值 %d", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("XLSX pre-parse: 环境变量 %s=%r 非正数，忽略，用默认值 %d", name, raw, default)
+        return default
+    return value
+
+
+def _merge_area(ref: str) -> int:
+    """合并区覆盖的单元格数；无法解析返回 0（交给 openpyxl 自己报错）。"""
+    from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
+
+    try:
+        first, last = ref.split(":")
+        col1, row1 = coordinate_from_string(first.strip().upper())
+        col2, row2 = coordinate_from_string(last.strip().upper())
+        return (column_index_from_string(col2) - column_index_from_string(col1) + 1) * (
+            row2 - row1 + 1
+        )
+    except Exception:
+        return 0
+
+
+def _guard_merge_ranges(content: bytes) -> bytes:
+    """摘掉面积超限的合并区声明，避免 openpyxl 在加载阶段被撑爆。
+
+    只改写 xl/worksheets/*.xml；没有超限声明时原样返回（正常文件零开销）。
+    """
+    per_limit = _env_positive_int(MERGE_FILL_LIMIT_ENV, _DEFAULT_MERGE_FILL_LIMIT)
+    total_limit = _env_positive_int(MERGE_TOTAL_LIMIT_ENV, _DEFAULT_MERGE_TOTAL_LIMIT)
+
+    src = zipfile.ZipFile(BytesIO(content))
+    rewritten: dict[str, bytes] = {}
+    dropped_ranges = 0
+    dropped_area = 0
+    budget = total_limit
+    try:
+        for item in src.infolist():
+            if not _SHEET_XML.match(item.filename):
+                continue
+            text = src.read(item.filename).decode("utf-8")
+            if "mergeCell" not in text:
+                continue
+            changed = False
+            pieces = []
+            cursor = 0
+            kept = 0
+            for match in _MERGE_CELL_TAG.finditer(text):
+                ref = match.group(1)
+                area = _merge_area(ref)
+                if area > per_limit or area > budget:
+                    dropped_ranges += 1
+                    dropped_area += area
+                    pieces.append(text[cursor:match.start()])
+                    cursor = match.end()
+                    changed = True
+                    continue
+                budget -= area
+                kept += 1
+            if changed:
+                pieces.append(text[cursor:])
+                new_text = "".join(pieces)
+                new_text = _MERGE_CELLS_COUNT.sub(
+                    lambda m: f"{m.group(1)}{kept}{m.group(3)}", new_text, count=1
+                )
+                rewritten[item.filename] = new_text.encode("utf-8")
+    finally:
+        src.close()
+
+    if not rewritten:
+        return content
+
+    out = BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        with zipfile.ZipFile(BytesIO(content)) as original:
+            for item in original.infolist():
+                data = rewritten.get(item.filename)
+                dst.writestr(item, data if data is not None else original.read(item.filename))
+    logger.warning(
+        "XLSX pre-parse: 摘掉 %d 个超限合并区（合计声明 %d 格；单条上限 %d，文件上限 %d）",
+        dropped_ranges,
+        dropped_area,
+        per_limit,
+        total_limit,
+    )
+    return out.getvalue()
+
+
 # Only materialize a known numeric percentage pattern. Excel literals, conditions,
 # scaling and arbitrary decorations require a full format renderer; leave those
 # values untouched rather than guessing that every '%' means multiply by 100.
@@ -185,12 +295,16 @@ def fill_merged_cells_xlsx(
     if not zipfile.is_zipfile(BytesIO(content)):
         return content
 
+    # 必须在 load_workbook 之前：openpyxl 加载时就会按合并区面积展开。
+    content = _guard_merge_ranges(content)
+
     from openpyxl import load_workbook
 
     wb = load_workbook(BytesIO(content), data_only=True)
     changed = False
     materialized_cells = 0
     hinted_cells = 0
+    skipped_ranges = 0
     row_hint_min = (
         _env_int(ROW_HINT_MIN_ENV, _DEFAULT_ROW_HINT_MIN) if percent_as_text else 0
     )
@@ -207,6 +321,19 @@ def fill_merged_cells_xlsx(
         if not ws.merged_cells.ranges:
             continue
         for merge_range in list(ws.merged_cells.ranges):
+            area = (merge_range.max_row - merge_range.min_row + 1) * (
+                merge_range.max_col - merge_range.min_col + 1
+            )
+            if area > _env_positive_int(MERGE_FILL_LIMIT_ENV, _DEFAULT_MERGE_FILL_LIMIT):
+                # 兜底：XML 闸门没能摘掉它（非常规写法），这里再挡一次。
+                skipped_ranges += 1
+                logger.warning(
+                    "XLSX pre-parse: %s!%s 合并区 %s 覆盖 %d 格，超过单条上限，跳过填充（保留左上角值）",
+                    ws.title,
+                    merge_range.coord,
+                    area,
+                )
+                continue
             master_value = ws.cell(merge_range.min_row, merge_range.min_col).value
             ws.unmerge_cells(str(merge_range))
             for row in range(merge_range.min_row, merge_range.max_row + 1):
