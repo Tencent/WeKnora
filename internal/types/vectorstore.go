@@ -258,6 +258,12 @@ type IndexConfig struct {
 	BucketsNum        int `yaml:"buckets_num" json:"buckets_num,omitempty"`                 // Doris: number of buckets per table (DISTRIBUTED BY HASH ... BUCKETS N)
 	ReplicationNum    int `yaml:"replication_num" json:"replication_num,omitempty"`         // Doris: replication_num PROPERTIES
 
+	// --- Qdrant storage fields ---
+	// These apply to the dimension-scoped collection prefix, so every knowledge
+	// base using the same embedding dimension shares the setting.
+	ScalarQuantizationEnabled bool `yaml:"scalar_quantization_enabled" json:"scalar_quantization_enabled,omitempty"` // Qdrant: enable scalar int8 (SQ8) quantization
+	VectorsOnDisk             bool `yaml:"vectors_on_disk" json:"vectors_on_disk,omitempty"`                         // Qdrant: store original vectors on disk
+
 	// --- OpenSearch k-NN HNSW fields ---
 	// All omitempty so other engines' serialized IndexConfig is unchanged.
 	// Zero / empty values fall back to the driver defaults in buildInternalCfg.
@@ -697,6 +703,8 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "weknora_embeddings"},
 				{Name: "shard_number", Type: "number", Required: false, Description: "Shard Number", Default: 1},
 				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
+				{Name: "scalar_quantization_enabled", Type: "boolean", Required: false, Description: "Enable SQ8 scalar quantization. Applies to all knowledge bases sharing {collection_prefix}_{dimension}; existing collections are updated online.", Default: false},
+				{Name: "vectors_on_disk", Type: "boolean", Required: false, Description: "Store original float32 vectors on disk. Applies to the shared dimension collection; existing collections are updated online.", Default: false},
 			},
 		},
 		{
@@ -907,6 +915,14 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			value = strings.ToLower(strings.TrimSpace(value))
 			useTLS = value != "false" && value != "0"
 		}
+		envFlagEnabled := func(key string) bool {
+			switch strings.ToLower(strings.TrimSpace(envLookup(key))) {
+			case "true", "1":
+				return true
+			default:
+				return false
+			}
+		}
 		return &VectorStore{
 			ID:         "__env_qdrant__",
 			Name:       "Qdrant",
@@ -918,7 +934,9 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 				UseTLS: useTLS,
 			},
 			IndexConfig: IndexConfig{
-				CollectionPrefix: envLookup("QDRANT_COLLECTION"),
+				CollectionPrefix:          envLookup("QDRANT_COLLECTION"),
+				ScalarQuantizationEnabled: envFlagEnabled("QDRANT_SCALAR_QUANTIZATION"),
+				VectorsOnDisk:             envFlagEnabled("QDRANT_VECTORS_ON_DISK"),
 			},
 		}
 	case "milvus":

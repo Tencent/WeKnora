@@ -183,7 +183,8 @@ flowchart LR
 | --- | --- | --- |
 | `RETRIEVE_DRIVER` | postgres | 检索引擎：`postgres` / `elasticsearch_v7` / `elasticsearch_v8` / `qdrant` / `milvus` / `weaviate` / `opensearch` / `doris` / `tencent_vectordb` / `sqlite`（Lite）；可逗号分隔多引擎并行 |
 | `ELASTICSEARCH_ADDR/USERNAME/PASSWORD/INDEX` | 空 | Elasticsearch |
-| `QDRANT_HOST/PORT/COLLECTION/API_KEY/USE_TLS` | qdrant / 6334 / weknora_embeddings / 空 / false | Qdrant |
+| `QDRANT_HOST/PORT/COLLECTION/API_KEY/USE_TLS` | qdrant / 6334 / weknora_embeddings / 空 / false | Qdrant 连接配置 |
+| `QDRANT_SCALAR_QUANTIZATION` / `QDRANT_VECTORS_ON_DISK` | false / false | Qdrant 存储优化。前者启用 SQ8（int8、quantile=0.99，量化向量常驻内存）；后者把原始 float32 向量放到磁盘并按需缓存。作用于 `{QDRANT_COLLECTION}_{dimension}` 共享集合，已有集合在线 PATCH，不重建 |
 | `MILVUS_ADDRESS/COLLECTION/METRIC_TYPE/...` | milvus:19530 / weknora_embeddings / IP | Milvus |
 | `OPENSEARCH_ADDR/USERNAME/PASSWORD/INDEX/INSECURE_SKIP_VERIFY` | 空 | OpenSearch |
 | `WEAVIATE_HOST/GRPC_ADDRESS/SCHEME/AUTH_ENABLED/API_KEY` | 空 | Weaviate |
