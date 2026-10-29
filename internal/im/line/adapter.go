@@ -326,8 +326,10 @@ func polishPlainText(text string) string {
 		}
 	}
 
-	for _, raw := range lines {
-		trimmed := strings.TrimSpace(raw)
+	// Index walk (not range) so a detected table block can consume its
+	// trailing data rows before the outer loop resumes.
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
 		switch {
 		case strings.HasPrefix(trimmed, "```"):
 			// Toggle the code-fence state; emit any block being closed.
@@ -338,7 +340,20 @@ func polishPlainText(text string) string {
 				code = nil
 			}
 		case inCode:
-			code = append(code, raw)
+			code = append(code, lines[i])
+		case looksLikeTable(lines, i):
+			// Consume the whole table block (header + separator + rows).
+			tableRows := []string{trimmed}
+			i++ // skip the header separator line
+			i++ // first data row
+			for i < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i]), "|") {
+				tableRows = append(tableRows, strings.TrimSpace(lines[i]))
+				i++
+			}
+			i-- // rewind; the post-increment reprocesses the post-table line
+			emitBlank()
+			out = append(out, polishTable(tableRows)...)
+			emitBlank()
 		case trimmed == "":
 			emitBlank()
 		case isPolishedDivider(trimmed):
@@ -358,6 +373,126 @@ func polishPlainText(text string) string {
 	emitCode()
 
 	return strings.Trim(strings.Join(out, "\n"), "\n")
+}
+
+// tableTitle is the fixed label emitted above every converted table.
+func tableTitle() string { return "📊 【詳情】" }
+
+// splitUnescaped splits s on unescaped pipe characters; a pipe preceded by a
+// backslash is kept verbatim so escaped cells survive intact.
+func splitUnescaped(s string) []string {
+	var parts []string
+	var buf strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && s[i+1] == '|' {
+			buf.WriteByte('|')
+			i++
+			continue
+		}
+		if s[i] == '|' {
+			parts = append(parts, buf.String())
+			buf.Reset()
+			continue
+		}
+		buf.WriteByte(s[i])
+	}
+	parts = append(parts, buf.String())
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+// significantCells trims the outer pipe-artifact empties while preserving any
+// genuine inner-empty cells (e.g. "| a |  | c |").
+func significantCells(s string) []string {
+	pieces := splitUnescaped(s)
+	start, end := 0, len(pieces)
+	if start < end && pieces[start] == "" {
+		start++
+	}
+	if start < end && pieces[end-1] == "" {
+		end--
+	}
+	return pieces[start:end]
+}
+
+// isTableSeparator reports whether s is a Markdown header separator such as
+// "|---|---|" or "| :-- | :--: |".
+func isTableSeparator(s string) bool {
+	cells := significantCells(s)
+	if len(cells) == 0 {
+		return false
+	}
+	for _, c := range cells {
+		if c == "" {
+			return false
+		}
+		for _, r := range c {
+			if r != '-' && r != ':' && r != ' ' {
+				return false
+			}
+		}
+		if !strings.Contains(c, "-") {
+			return false
+		}
+	}
+	return true
+}
+
+// looksLikeTable reports whether the block anchored at lines[i] is a full
+// Markdown table: a header row, a separator row, and at least one data row.
+func looksLikeTable(lines []string, i int) bool {
+	if i+2 >= len(lines) {
+		return false
+	}
+	if !strings.HasPrefix(strings.TrimSpace(lines[i]), "|") {
+		return false
+	}
+	if !isTableSeparator(lines[i+1]) {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(lines[i+2]), "|")
+}
+
+// polishTable converts a Markdown table block into a key-value list keyed by
+// the column headers: the first cell of each row becomes a "• col0: v0" bullet
+// and each following cell an indented "colN: vN" line.
+func polishTable(rows []string) []string {
+	header := significantCells(rows[0])
+	if len(header) == 0 {
+		return []string{}
+	}
+	out := []string{tableTitle()}
+	for _, r := range rows[1:] {
+		cells := significantCells(r)
+		allEmpty := true
+		for _, c := range cells {
+			if c != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
+		for idx := 0; idx < len(header); idx++ {
+			val := ""
+			if idx < len(cells) {
+				val = cells[idx]
+			}
+			if idx == 0 {
+				out = append(out, "  • "+header[idx]+"："+val)
+			} else {
+				out = append(out, "    "+header[idx]+"："+val)
+			}
+		}
+	}
+	if len(out) == 1 {
+		// Header-only table with no usable data rows: emit nothing.
+		return []string{}
+	}
+	return out
 }
 
 // isPolishedDivider reports whether s is a standalone rule of only '-' or '*'.
