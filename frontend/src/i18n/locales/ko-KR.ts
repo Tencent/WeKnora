@@ -1628,6 +1628,7 @@ export default {
       wechat: 'WeChat',
       qqbot: 'QQBot',
       yunzhijia: 'Yunzhijia',
+      line: 'LINE',
       addChannel: '채널 추가',
       channelsTitle: 'IM 채널',
       disabled: '비활성',
