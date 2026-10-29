@@ -92,6 +92,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -133,6 +134,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Core infrastructure configuration
 	logger.Debugf(ctx, "[Container] Registering core infrastructure...")
 	must(container.Provide(config.LoadConfig))
+	// The ASR cutter needs the deployment's segment ceiling and media binaries,
+	// which are configuration rather than model-row data. Resolving the config
+	// here also keeps a broken config failing at startup, as it did before,
+	// instead of on the first transcription.
+	must(container.Invoke(applyASRMediaSettings))
 	must(container.Provide(initLangfuse))
 	must(container.Provide(initDatabase))
 	must(container.Provide(initFileService))
@@ -903,6 +909,22 @@ func must(err error) {
 func initLangfuse() (*langfuse.Manager, error) {
 	cfg := langfuse.LoadConfigFromEnv()
 	return langfuse.Init(cfg)
+}
+
+// applyASRMediaSettings publishes the deployment's segment ceiling and media
+// binaries to the asr package, which consults them for every model row that
+// does not name its own. Called once, before any ASR instance is built; a zero
+// value keeps the built-in default (120 s, "ffmpeg"/"ffprobe" on the PATH), so
+// audio that fits in one request is transcribed exactly as before.
+func applyASRMediaSettings(cfg *config.Config) {
+	if cfg == nil || cfg.KnowledgeBase == nil {
+		return
+	}
+	asr.SetMediaDefaults(
+		cfg.KnowledgeBase.MaxAudioSegmentDuration,
+		cfg.KnowledgeBase.FFmpegPath,
+		cfg.KnowledgeBase.FFprobePath,
+	)
 }
 
 // defaultModelMaxConcurrency is the per-model cap on concurrent background
