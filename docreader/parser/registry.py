@@ -2,6 +2,7 @@ import logging
 from typing import Callable, Dict, List, Optional, Tuple, Type
 
 from docreader.parser.base_parser import BaseParser
+from docreader.parser.asciidoc_parser import AsciiDocParser
 from docreader.parser.doc_parser import DocParser
 from docreader.parser.docx2_parser import Docx2Parser
 from docreader.parser.epub_parser import EPUBParser
@@ -173,6 +174,8 @@ def _build_default_registry() -> ParserEngineRegistry:
             "htm": HTMLParser,
             "mhtml": MHTMLParser,
             "xmind": XMindParser,
+            "adoc": AsciiDocParser,
+            "asciidoc": AsciiDocParser,
             **_image_types,
         },
         description="内置解析引擎",
