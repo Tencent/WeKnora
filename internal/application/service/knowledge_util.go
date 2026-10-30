@@ -441,8 +441,28 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 	}
 
 	if configured != "" && configured != inferred {
-		logger.Warnf(ctx, "[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, using global fallback",
+		// The path's scheme disagrees with the configured default (e.g. an
+		// s3:// path while the KB/tenant default is "local"). The scheme is
+		// authoritative for where the bytes actually live: routing by the
+		// configured default here would hand an s3:// URI to the local driver,
+		// which cleans "s3://bucket/key" into "/data/files/s3:/bucket/key" and
+		// fails with ENOENT. Route through the inferred provider instead, as the
+		// function's contract states.
+		logger.Warnf(ctx, "[storage] FilePath provider mismatch: configured=%s inferred=%s filePath=%s, routing by path provider",
 			configured, inferred, filePath)
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+		if s.storageResolver != nil && tenant != nil {
+			if resolved, _, err := s.storageResolver.ResolveFileService(ctx, tenant, "", inferred, baseDir); err == nil && resolved != nil {
+				return resolved
+			}
+		}
+		if tenant != nil && tenant.StorageEngineConfig != nil {
+			if resolved, _, err := filesvc.NewFileServiceFromStorageConfig(inferred, tenant.StorageEngineConfig, baseDir); err == nil {
+				return resolved
+			}
+			logger.Warnf(ctx, "[storage] failed to build %s service from tenant config, falling back to default", inferred)
+		}
 		return s.fileSvc
 	}
 	return svc

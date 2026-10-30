@@ -519,6 +519,14 @@ func InferStorageFromFilePath(filePath string) string {
 	if p := ParseProviderScheme(filePath); p != "" {
 		return p
 	}
+	// Legacy single-slash scheme (provider:/bucket/key), produced by older
+	// builds that ran filepath.Clean over a provider URI and collapsed "//".
+	if _, inner, ok := ParseStorageBackendPath(filePath); ok {
+		filePath = inner
+	}
+	if p := legacySingleSlashProvider(filePath); p != "" {
+		return p
+	}
 	// Legacy formats
 	switch {
 	case strings.HasPrefix(filePath, "https://") && strings.Contains(filePath, ".cos."):
@@ -526,6 +534,18 @@ func InferStorageFromFilePath(filePath string) string {
 	default:
 		return ""
 	}
+}
+
+// legacySingleSlashProvider recognizes the single-slash provider scheme
+// ("s3:/bucket/key", "minio:/bucket/key", ...) that older builds produced by
+// running filepath.Clean over a "provider://..." URI. Returns "" otherwise.
+func legacySingleSlashProvider(filePath string) string {
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs", "dummy"} {
+		if strings.HasPrefix(filePath, provider+":/") && !strings.HasPrefix(filePath, provider+"://") {
+			return provider
+		}
+	}
+	return ""
 }
 
 // ParseProviderScheme extracts the provider from a provider:// scheme path.

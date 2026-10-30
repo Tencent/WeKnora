@@ -85,3 +85,49 @@ func TestNormalizePathForBase_StripsStorageBackendScope(t *testing.T) {
 		})
 	}
 }
+
+// TestForeignProviderScheme covers the provider-scheme guard: local:// and
+// bare/absolute paths are accepted, while s3/minio/cos/... schemes are flagged
+// so the local driver can reject them instead of collapsing "s3://" into
+// "s3:/" and failing with a misleading ENOENT.
+func TestForeignProviderScheme(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"s3 double slash", "s3://bucket/key", "s3"},
+		{"s3 single slash legacy", "s3:/bucket/key", "s3"},
+		{"minio", "minio://bucket/key", "minio"},
+		{"cos", "cos://bucket/key", "cos"},
+		{"local scheme accepted", "local://10000/doc/file.md", ""},
+		{"bare relative accepted", "10000/doc/file.md", ""},
+		{"absolute accepted", "/data/files/10000/doc/file.md", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, foreignProviderScheme(tc.in))
+		})
+	}
+}
+
+// TestLocalGetFile_RejectsForeignProviderScheme verifies the local driver
+// returns an explicit routing error for a non-local provider path, rather than
+// a misleading "no such file or directory" after path cleaning.
+func TestLocalGetFile_RejectsForeignProviderScheme(t *testing.T) {
+	svc := NewLocalFileService("/data/files", "").(*localFileService)
+
+	_, err := svc.GetFile(context.Background(), "s3://my-bucket/weknora/doc.xlsx")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-local s3://")
+}
+
+// TestLocalDeleteFile_RejectsForeignProviderScheme mirrors the GetFile guard on
+// the delete path.
+func TestLocalDeleteFile_RejectsForeignProviderScheme(t *testing.T) {
+	svc := NewLocalFileService("/data/files", "").(*localFileService)
+
+	err := svc.DeleteFile(context.Background(), "minio://bucket/weknora/doc.xlsx")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-local minio://")
+}
