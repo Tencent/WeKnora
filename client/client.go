@@ -26,7 +26,7 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
-	// streamTimeout is zero by default so long-lived SSE responses are not
+	// streamTimeout is zero by default so long-lived streams and downloads are not
 	// severed by the ordinary request timeout. An explicit WithTimeout option
 	// sets both timeouts, preserving the public option's all-request semantics.
 	streamTimeout time.Duration
@@ -40,7 +40,7 @@ type ClientOption func(*Client)
 
 // WithTimeout sets the timeout for ordinary and streaming HTTP requests.
 // Streaming requests have no timeout by default; callers that set this option
-// explicitly are asking for the same upper bound to apply to SSE streams.
+// explicitly are asking for the same upper bound to apply to streams and downloads.
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *Client) {
 		c.httpClient.Timeout = timeout
