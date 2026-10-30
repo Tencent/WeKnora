@@ -146,6 +146,17 @@ func (s *tenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error
 	return tenants, nil
 }
 
+// SetChatHistoryConfig persists the managed setting without writing a stale
+// snapshot of other tenant fields. Callers hold MessageService's history lock.
+func (s *tenantService) SetChatHistoryConfig(
+	ctx context.Context, tenantID uint64, cfg *types.ChatHistoryConfig,
+) error {
+	if tenantID == 0 || cfg == nil {
+		return errors.New("tenant ID and chat history configuration are required")
+	}
+	return s.repo.SetChatHistoryConfig(ctx, tenantID, cfg)
+}
+
 // UpdateTenant updates an existing tenant's information
 func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
 	if tenant.ID == 0 {

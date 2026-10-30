@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 // regThinkIndex matches <think>...</think> blocks for stripping from KB index content.
@@ -30,6 +31,7 @@ type messageService struct {
 	knowService    interfaces.KnowledgeService     // Service for knowledge operations (index/delete passages)
 	modelService   interfaces.ModelService         // Service for model operations (rerank model)
 	suggestionRepo interfaces.MessageSuggestionRepository
+	historyRedis   *redis.Client
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -40,6 +42,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	knowService interfaces.KnowledgeService,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
+	historyRedis *redis.Client,
 ) interfaces.MessageService {
 	return &messageService{
 		messageRepo:    messageRepo,
@@ -49,6 +52,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		knowService:    knowService,
 		modelService:   modelService,
 		suggestionRepo: suggestionRepo,
+		historyRedis:   historyRedis,
 	}
 }
 
@@ -394,27 +398,31 @@ func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string,
 		return
 	}
 
-	logger.Infof(ctx, "Indexing message to chat history KB %s, message ID: %s, session ID: %s", cfg.KnowledgeBaseID, messageID, sessionID)
-
-	// Build passage content: combine Q&A for better semantic search
-	var passages []string
-	passage := fmt.Sprintf("[Session: %s]\nQ: %s\nA: %s", sessionID, userQuery, assistantAnswer)
-	passages = append(passages, passage)
-
-	// Use async (non-sync) passage creation so it doesn't block the response
-	knowledge, err := s.knowService.CreateKnowledgeFromPassage(ctx, cfg.KnowledgeBaseID, passages, "")
+	// A turn may carry the configuration from before an administrator disabled
+	// or cleared indexing. Re-read it under the same lock as those mutations.
+	tenantID := types.MustTenantIDFromContext(ctx)
+	indexCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	err := s.withChatHistoryLock(indexCtx, tenantID, func(ctx context.Context) error {
+		tenant, err := s.chatHistoryTenant(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		cfg := tenant.ChatHistoryConfig
+		if !cfg.IsConfigured() {
+			return nil
+		}
+		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+		passage := fmt.Sprintf("[Session: %s]\nQ: %s\nA: %s", sessionID, userQuery, assistantAnswer)
+		knowledge, err := s.knowService.CreateKnowledgeFromPassage(ctx, cfg.KnowledgeBaseID, []string{passage}, "")
+		if err != nil {
+			return err
+		}
+		return s.messageRepo.UpdateMessageKnowledgeID(ctx, messageID, knowledge.ID)
+	})
 	if err != nil {
 		logger.Warnf(ctx, "Failed to index message to chat history KB: %v", err)
-		return
 	}
-
-	// Link the message to the knowledge entry
-	if err := s.messageRepo.UpdateMessageKnowledgeID(ctx, messageID, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to update message knowledge_id: %v", err)
-		return
-	}
-
-	logger.Infof(ctx, "Message indexed to chat history KB: knowledge_id=%s, message_id=%s", knowledge.ID, messageID)
 }
 
 // describeChatHistorySkip reports which chat-history precondition is missing,
@@ -482,11 +490,11 @@ func (s *messageService) GetChatHistoryKBStats(ctx context.Context) (*types.Chat
 
 	stats := &types.ChatHistoryKBStats{}
 	cfg := tenant.ChatHistoryConfig
-	if cfg == nil || !cfg.Enabled {
+	if cfg == nil {
 		return stats, nil
 	}
 
-	stats.Enabled = true
+	stats.Enabled = cfg.Enabled
 	stats.EmbeddingModelID = cfg.EmbeddingModelID
 	stats.KnowledgeBaseID = cfg.KnowledgeBaseID
 
@@ -494,18 +502,22 @@ func (s *messageService) GetChatHistoryKBStats(ctx context.Context) (*types.Chat
 		return stats, nil
 	}
 
-	// Fetch KB info and fill counts (KnowledgeCount is gorm:"-", needs FillKnowledgeBaseCounts)
+	// Count directly: FillKnowledgeBaseCounts is a best-effort UI helper and
+	// intentionally swallows database errors, which must not unlock this model.
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, cfg.KnowledgeBaseID)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to get chat history KB %s: %v", cfg.KnowledgeBaseID, err)
-		return stats, nil
+		return nil, fmt.Errorf("get chat history knowledge base: %w", err)
 	}
-	if err := s.kbService.FillKnowledgeBaseCounts(ctx, kb); err != nil {
-		logger.Warnf(ctx, "Failed to fill chat history KB counts %s: %v", cfg.KnowledgeBaseID, err)
+	if kb == nil || kb.TenantID != tenantID {
+		return nil, errors.New("chat history knowledge base does not belong to workspace")
+	}
+	count, err := s.knowService.GetRepository().CountAllKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID)
+	if err != nil {
+		return nil, fmt.Errorf("count chat history indexes: %w", err)
 	}
 	stats.KnowledgeBaseName = kb.Name
-	stats.IndexedMessageCount = kb.KnowledgeCount
-	stats.HasIndexedMessages = kb.KnowledgeCount > 0
+	stats.IndexedMessageCount = count
+	stats.HasIndexedMessages = count > 0
 
 	return stats, nil
 }

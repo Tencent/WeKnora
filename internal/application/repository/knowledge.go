@@ -815,6 +815,18 @@ func (r *knowledgeRepository) CountKnowledgeByKnowledgeBaseID(
 	return count, err
 }
 
+// CountAllKnowledgeByKnowledgeBaseID counts every non-soft-deleted row,
+// including deleting entries whose external index cleanup may have failed.
+func (r *knowledgeRepository) CountAllKnowledgeByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Count(&count).Error
+	return count, err
+}
+
 // CountKnowledgeByStatus counts the number of knowledge items with the specified parse status
 func (r *knowledgeRepository) CountKnowledgeByStatus(
 	ctx context.Context,
