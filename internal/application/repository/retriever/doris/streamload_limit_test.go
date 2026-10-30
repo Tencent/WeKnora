@@ -21,7 +21,7 @@ func streamLoadWithBody(t *testing.T, status int, body string) error {
 	repo, _, _, cleanup := newTestRepo(t)
 	defer cleanup()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
@@ -96,7 +96,7 @@ func TestStreamLoadOnceKeepsSmallResponsesIntact(t *testing.T) {
 	body, err := json.Marshal(success)
 	require.NoError(t, err)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	}))
@@ -109,7 +109,7 @@ func TestStreamLoadOnceKeepsSmallResponsesIntact(t *testing.T) {
 	failed := map[string]any{"Status": "Fail", "Message": "label exists"}
 	body, err = json.Marshal(failed)
 	require.NoError(t, err)
-	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	})
