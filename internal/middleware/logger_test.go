@@ -83,6 +83,16 @@ func TestSanitizeBody(t *testing.T) {
 			in:   `{"authorization_url":"https://idp.example/authorize?state=secret","authorization_attempt":"secret-state"}`,
 			want: `{"authorization_url":"***","authorization_attempt":"***"}`,
 		},
+		{
+			name: "inline image data URI",
+			in:   `{"query":"see chart","image":"data:image/png;base64,` + strings.Repeat("A", 80) + `"}`,
+			want: `{"query":"see chart","image":"data:image/png;base64,[redacted 80 chars]"}`,
+		},
+		{
+			name: "data URI inside a secret field is still masked",
+			in:   `{"apiKey":"data:image/png;base64,AAAA"}`,
+			want: `{"apiKey":"***"}`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -190,6 +200,27 @@ func TestReadRequestBodyLeavesRouteBodyCapDeciding(t *testing.T) {
 	var tooLarge *http.MaxBytesError
 	if !errors.As(err, &tooLarge) {
 		t.Fatalf("MaxBytesReader error = %v, want *http.MaxBytesError", err)
+	}
+}
+
+func TestReadRequestBodyRedactsDataURI(t *testing.T) {
+	payload := `{"image":"data:image/png;base64,` + strings.Repeat("A", maxBodySize) + `"}`
+
+	c, _ := newJSONContext(t, "/api/v1/knowledge-search", payload)
+	got := readRequestBody(c)
+
+	if strings.Contains(got, strings.Repeat("A", 32)) {
+		t.Fatalf("logged body still contains the base64 payload")
+	}
+	if !strings.Contains(got, "data:image/png;base64,[redacted ") {
+		t.Fatalf("readRequestBody() = %q, want a redacted data URI", got)
+	}
+	rest, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		t.Fatalf("handler read: %v", err)
+	}
+	if string(rest) != payload {
+		t.Fatalf("handler saw a redacted body; the request itself must stay intact")
 	}
 }
 
