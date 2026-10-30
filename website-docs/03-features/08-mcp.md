@@ -31,6 +31,33 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 工具人工审批通过后，如果 OAuth 尚未授权或已经失效，对话会继续给出 OAuth 授权入口；工具审批与第三方授权是两个独立步骤。无需浏览器的调用者可使用 JWT Bearer 断言换取自身主体的 token，前提是上游支持该授权方式，详见 [OAuth API](../04-api/02-api-agent-mcp.md)。
 
+### 示例：无需 API Key 的网页搜索与提取
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) 提供 `web_search`（搜索公开网页）和 `web_fetch`（提取网页内容）。匿名接入无需 Parallel 账号或 API Key，免费访问有速率限制。
+
+在「设置 → MCP 服务 → 添加服务」中展开代码导入，粘贴以下配置并解析：
+
+```json
+{
+  "mcpServers": {
+    "Parallel Search": {
+      "type": "http",
+      "url": "https://search.parallel.ai/mcp",
+      "headers": {
+        "User-Agent": "WeKnora"
+      },
+      "usage_instructions": "需要查询公开网页时使用 web_search，提供 objective 和 search_queries；需要读取网页时使用 web_fetch，提供 urls。回答中保留来源链接。"
+    }
+  }
+}
+```
+
+确认传输方式为 Streamable HTTP，认证方式为无认证。点击下一步保存连接，在工具列表中同步工具，确认出现 `web_search` 和 `web_fetch`，再保存使用说明。新建服务默认启用，使用「全部 MCP 服务」的智能体会自动包含它；若只想让指定智能体使用，请先检查各智能体的 MCP 服务范围。在目标智能体中选择该服务或所需工具后，可用「搜索 Parallel Search MCP 的官方文档，再读取文档说明匿名接入方式，并给出来源链接」检查搜索和提取结果。
+
+智能体可在对话中自行调用已选工具，调用时会把查询、请求的 URL、提供的目标或上下文及工具参数中的元数据发送给 Parallel。配置中的 `User-Agent: WeKnora` 用于标识调用项目，方便 Parallel 统计该项目的免费 MCP 总体使用量，不包含用户或设备标识。服务的数据处理规则见 [Parallel 隐私政策](https://parallel.ai/privacy-policy)。
+
+如需停用，在 MCP 服务列表中关闭该服务，或把智能体的 MCP 范围改为指定服务并排除此服务（也可关闭该智能体的 MCP 工具）。此示例只用于新建匿名连接；已有连接的凭据和其他搜索服务无需修改。
+
 ## 供外部客户端调用
 
 在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面给出 Cursor 可用的 `mcpServers` JSON、VS Code 专用的 `servers` JSON、Claude Code 的一行命令，以及 STDIO 备用配置。将 VS Code 选项卡中的 JSON 写入工作区的 `.vscode/mcp.json`；若已有配置，请将对应条目合并到现有 `servers` 对象中，保留其他服务。该配置使用 `type: "http"`、端点 URL 和 `Authorization` 请求头，无需桥接进程。Claude Desktop 需在自定义连接器中填写可访问的 HTTPS 地址，并在可用时选择「无需登录」和 Request headers；该请求头功能为有限开放的测试版，并非所有组织都可用。
