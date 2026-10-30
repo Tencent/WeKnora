@@ -103,7 +103,20 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	case "code":
 		rt := extractRichText(block.RawContent)
 		lang := extractString(block.RawContent, "language")
-		b.WriteString(fmt.Sprintf("```%s\n%s\n```\n\n", lang, renderRichText(rt)))
+		// A Markdown tutorial can itself contain backtick fences. Use a
+		// longer outer fence so imported code cannot become document structure.
+		code := renderRichText(rt)
+		fenceLength, run := 3, 0
+		for _, char := range code {
+			if char == '`' {
+				run++
+				fenceLength = max(fenceLength, run+1)
+			} else {
+				run = 0
+			}
+		}
+		fence := strings.Repeat("`", fenceLength)
+		fmt.Fprintf(b, "%s%s\n%s\n%s\n\n", fence, lang, code, fence)
 
 	case "quote", "meeting_notes":
 		rt := extractRichText(block.RawContent)
