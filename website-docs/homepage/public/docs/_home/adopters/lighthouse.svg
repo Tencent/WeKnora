@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 23.0.3, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="图层_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 width="48px" height="48px" viewBox="0 0 48 48" style="enable-background:new 0 0 48 48;" xml:space="preserve">
+<g>
+	<path style="fill-rule:evenodd;clip-rule:evenodd;fill:#0052d9;" d="M44.953,27c-1.471,10.16-10.248,18-20.852,18
+		c-11.63,0-21.092-9.421-21.092-21c0-11.579,9.462-21,21.092-21c10.604,0,19.382,7.84,20.851,18h2.047
+		C45.523,9.716,35.837,1,24.101,1C11.342,1,1,11.297,1,24s10.342,23,23.101,23C35.837,47,45.523,38.284,47,27H44.953z"/>
+
+		<rect x="28.673" y="13" transform="matrix(0.9762 -0.2169 0.2169 0.9762 -2.2445 7.5535)" style="fill-rule:evenodd;clip-rule:evenodd;fill:#0052d9;" width="9.22" height="2.001"/>
+
+		<rect x="32.283" y="14.39" transform="matrix(0.2169 -0.9762 0.9762 0.2169 7.5155 47.369)" style="fill-rule:evenodd;clip-rule:evenodd;fill:#0052d9;" width="2.001" height="9.22"/>
+	<path style="fill-rule:evenodd;clip-rule:evenodd;fill:#0052d9;" d="M14.983,37h-1.2v2h1h4h6h4h1v-2h-1.2l-1.8-18v-6h2l-7-7l-7,7h2
+		v6L14.983,37z M20.783,37v-2c0-0.551,0.449-1,1-1s1,0.449,1,1v2H20.783z M24.783,37v-2c0-1.657-1.343-3-3-3s-3,1.343-3,3v2h-1.79
+		l1.6-16h1.19h4h1.19l1.6,16H24.783z M22.283,19h-1v-1c0-0.276,0.224-0.5,0.5-0.5s0.5,0.224,0.5,0.5V19z M21.783,8.828L23.955,11
+		h-4.343L21.783,8.828z M18.783,13h6v6h-1v-1c0-1.105-0.895-2-2-2s-2,0.895-2,2v1h-1V13z"/>
+</g>
+</svg>
