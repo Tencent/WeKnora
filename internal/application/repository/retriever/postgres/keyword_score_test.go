@@ -154,6 +154,71 @@ func TestKeywordsRetrieveQueryFailurePreservesResolvedFunction(t *testing.T) {
 	require.Empty(t, results[0].Results)
 }
 
+// TestKeywordsRetrieveExcludingGeneratedQuestions verifies the generated-question
+// exclusion path issues a two-level query: the inner query applies the ParadeDB
+// score function and the outer query filters out generated-question rows by a
+// column-vs-column predicate. ParadeDB rejects that predicate in the same query
+// level as paradedb.score(), so the regression is caught by asserting the split.
+func TestKeywordsRetrieveExcludingGeneratedQuestions(t *testing.T) {
+	repo, mock := newKeywordTestRepository(t)
+	mock.ExpectQuery(regexp.QuoteMeta(keywordScoreFunctionSQL)).
+		WillReturnRows(sqlmock.NewRows([]string{"score_function"}).AddRow("paradedb.score"))
+
+	// Inner query: ParadeDB scan, score, and ORDER BY scoreFunction(id), no
+	// column-vs-column predicate. Outer query: NOT (...) exclusion.
+	query := regexp.QuoteMeta(
+		"SELECT paradedb.score(id) AS score, id, content, source_id, source_type,") +
+		`.*` + regexp.QuoteMeta("ORDER BY paradedb.score(id) DESC") +
+		`.*` + regexp.QuoteMeta("WHERE NOT (knowledge_base_id IN ($1) AND") +
+		`.*` + regexp.QuoteMeta("source_id <> chunk_id") +
+		`.*` + regexp.QuoteMeta("ORDER BY score DESC")
+
+	mock.ExpectQuery(query).
+		WithArgs("kb-1", "关键词测试", true, 100, "kb-1", 5).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "content", "source_id", "source_type", "chunk_id",
+			"knowledge_id", "knowledge_base_id", "tag_id", "score",
+		}).AddRow(1, "content", "chunk-1", 0, "chunk-1", "doc-1", "kb-1", "tag-1", 0.9))
+
+	results, err := repo.KeywordsRetrieve(context.Background(), types.RetrieveParams{
+		Query:                         "关键词测试",
+		TopK:                          5,
+		KnowledgeBaseIDs:              []string{"kb-1"},
+		ExcludeGeneratedQuestionKBIDs: []string{"kb-1"},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Len(t, results[0].Results, 1)
+	require.Equal(t, "chunk-1", results[0].Results[0].ChunkID)
+}
+
+// TestKeywordsRetrieveWithoutExclusionKeepsSingleLevelQuery guards the
+// non-exclusion path: it must keep the existing single-level GORM query so the
+// common case does not change shape.
+func TestKeywordsRetrieveWithoutExclusionKeepsSingleLevelQuery(t *testing.T) {
+	repo, mock := newKeywordTestRepository(t)
+	mock.ExpectQuery(regexp.QuoteMeta(keywordScoreFunctionSQL)).
+		WillReturnRows(sqlmock.NewRows([]string{"score_function"}).AddRow("paradedb.score"))
+
+	query := `SELECT ` + regexp.QuoteMeta("paradedb.score") + `\(id\) as score,.*` +
+		`FROM "embeddings" WHERE "knowledge_base_id" = \$1.*` +
+		`content \|\|\| \$2.*is_enabled IS NULL OR is_enabled = \$3.*` +
+		`ORDER BY "score" DESC LIMIT \$4`
+	mock.ExpectQuery(query).
+		WithArgs("kb-1", "关键词测试", true, 5).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "chunk_id", "score"}).AddRow(1, "chunk-1", 0.9))
+
+	results, err := repo.KeywordsRetrieve(context.Background(), types.RetrieveParams{
+		Query:            "关键词测试",
+		TopK:             5,
+		KnowledgeBaseIDs: []string{"kb-1"},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Len(t, results[0].Results, 1)
+	require.Equal(t, "chunk-1", results[0].Results[0].ChunkID)
+}
+
 func TestVectorRetrieveDoesNotRequireKeywordScoreFunction(t *testing.T) {
 	for _, keywordFailed := range []bool{false, true} {
 		name := "without_keyword_probe"
