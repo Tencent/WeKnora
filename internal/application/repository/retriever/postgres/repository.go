@@ -270,28 +270,35 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
 		Vars: []interface{}{true},
 	})
-	if exclusion := generatedQuestionExclusionClause(params.ExcludeGeneratedQuestionKBIDs); exclusion != nil {
-		conds = append(conds, exclusion)
-	}
-	conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
-		{Column: clause.Column{Name: "score"}, Desc: true},
-	}})
 
 	var embeddingDBList []pgVectorWithScore
-	err = g.db.WithContext(ctx).Clauses(conds...).
-		Select([]string{
-			scoreFunction + "(id) as score",
-			"id",
-			"content",
-			"source_id",
-			"source_type",
-			"chunk_id",
-			"knowledge_id",
-			"knowledge_base_id",
-			"tag_id",
-		}).
-		Limit(int(params.TopK)).
-		Find(&embeddingDBList).Error
+	if len(params.ExcludeGeneratedQuestionKBIDs) > 0 {
+		// ParadeDB rejects "column vs column" predicates in the same query
+		// level as paradedb.score()/pgsearch.score() ("must be evaluated by a
+		// ParadeDB scan"). The generated-question exclusion compares source_id
+		// to chunk_id, so it must run in an outer query that filters the
+		// already-scored candidates instead of the ParadeDB scan itself.
+		embeddingDBList, err = g.keywordRetrieveExcludingGeneratedQuestions(ctx, params, scoreFunction)
+	} else {
+		conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
+			{Column: clause.Column{Name: "score"}, Desc: true},
+		}})
+
+		err = g.db.WithContext(ctx).Clauses(conds...).
+			Select([]string{
+				scoreFunction + "(id) as score",
+				"id",
+				"content",
+				"source_id",
+				"source_type",
+				"chunk_id",
+				"knowledge_id",
+				"knowledge_base_id",
+				"tag_id",
+			}).
+			Limit(int(params.TopK)).
+			Find(&embeddingDBList).Error
+	}
 
 	if err == gorm.ErrRecordNotFound {
 		logger.GetLogger(ctx).Warnf("[Postgres] No records found for keywords query: %s", params.Query)
@@ -790,22 +797,113 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 	return nil
 }
 
-func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
-	if len(kbIDs) == 0 {
-		return nil
+// keywordRetrieveExcludingGeneratedQuestions runs the keyword query through a
+// two-level SELECT so that the generated-question exclusion predicate, which
+// compares two columns (source_id <> chunk_id), never appears in the same query
+// level as the ParadeDB score function.
+//
+// ParadeDB rejects a query whose score function shares a level with a
+// "column vs column" predicate: it cannot prove the score belongs to a ParadeDB
+// scan and fails with "must be evaluated by a ParadeDB scan". Scoring happens
+// in the inner query (only column-vs-constant filters), and the exclusion runs
+// in the outer query over the already-scored, top-N candidates.
+func (g *pgRepository) keywordRetrieveExcludingGeneratedQuestions(
+	ctx context.Context,
+	params types.RetrieveParams,
+	scoreFunction string,
+) ([]pgVectorWithScore, error) {
+	allVars := make([]interface{}, 0)
+	whereParts := make([]string, 0)
+
+	// Inner query filters must stay column-vs-constant so ParadeDB can push
+	// the score function into its scan. KnowledgeBaseIDs/KnowledgeIDs/TagIDs
+	// and is_enabled are all safe; the ||| operator drives the BM25 scan.
+	if len(params.KnowledgeBaseIDs) > 0 {
+		placeholders := make([]string, len(params.KnowledgeBaseIDs))
+		for i := range params.KnowledgeBaseIDs {
+			placeholders[i] = fmt.Sprintf("$%d", len(allVars)+1+i)
+			allVars = append(allVars, params.KnowledgeBaseIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("knowledge_base_id IN (%s)", strings.Join(placeholders, ", ")))
 	}
-	placeholders := make([]string, len(kbIDs))
-	vars := make([]interface{}, len(kbIDs))
-	for i, id := range kbIDs {
-		placeholders[i] = "?"
-		vars[i] = id
+	if len(params.KnowledgeIDs) > 0 {
+		placeholders := make([]string, len(params.KnowledgeIDs))
+		for i := range params.KnowledgeIDs {
+			placeholders[i] = fmt.Sprintf("$%d", len(allVars)+1+i)
+			allVars = append(allVars, params.KnowledgeIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("knowledge_id IN (%s)", strings.Join(placeholders, ", ")))
 	}
-	return clause.Expr{
-		SQL: fmt.Sprintf(
-			"NOT (knowledge_base_id IN (%s) AND %s)",
-			strings.Join(placeholders, ", "),
-			types.GeneratedQuestionRowPredicate(""),
-		),
-		Vars: vars,
+	if len(params.TagIDs) > 0 {
+		placeholders := make([]string, len(params.TagIDs))
+		for i := range params.TagIDs {
+			placeholders[i] = fmt.Sprintf("$%d", len(allVars)+1+i)
+			allVars = append(allVars, params.TagIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("tag_id IN (%s)", strings.Join(placeholders, ", ")))
 	}
+	// content ||| ? drives the BM25 scan.
+	whereParts = append(whereParts, fmt.Sprintf("content ||| $%d", len(allVars)+1))
+	allVars = append(allVars, params.Query)
+	// is_enabled = true or NULL (NULL means enabled for historical data).
+	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
+	allVars = append(allVars, true)
+
+	whereClause := ""
+	if len(whereParts) > 0 {
+		whereClause = "WHERE " + strings.Join(whereParts, " AND ")
+	}
+
+	// Expand the inner LIMIT so the outer exclusion still yields enough rows.
+	expandedTopK := params.TopK * 2
+	if expandedTopK < 100 {
+		expandedTopK = 100
+	}
+	if expandedTopK > 200 {
+		expandedTopK = 200
+	}
+	if expandedTopK < params.TopK {
+		expandedTopK = params.TopK
+	}
+
+	// Outer exclusion placeholders follow the inner LIMIT parameter.
+	excludeKBs := make([]string, len(params.ExcludeGeneratedQuestionKBIDs))
+	outerVars := make([]interface{}, 0, len(params.ExcludeGeneratedQuestionKBIDs)+1)
+	for i, id := range params.ExcludeGeneratedQuestionKBIDs {
+		excludeKBs[i] = fmt.Sprintf("$%d", i+1)
+		outerVars = append(outerVars, id)
+	}
+	innerLimitParam := len(allVars) + 1
+	finalLimitParam := len(outerVars) + 1
+
+	// Inner query: ParadeDB scan + score, no column-vs-column predicate.
+	// Outer query: generated-question exclusion + final TopK.
+	querySQL := fmt.Sprintf(`
+		SELECT id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id, score
+		FROM (
+			SELECT %[1]s(id) AS score, id, content, source_id, source_type,
+			       chunk_id, knowledge_id, knowledge_base_id, tag_id
+			FROM embeddings
+			%[2]s
+			ORDER BY %[1]s(id) DESC
+			LIMIT $%[3]d
+		) AS candidates
+		WHERE NOT (knowledge_base_id IN (%[4]s) AND %[5]s)
+		ORDER BY score DESC
+		LIMIT $%[6]d
+	`, scoreFunction, whereClause, innerLimitParam,
+		strings.Join(excludeKBs, ", "),
+		types.GeneratedQuestionRowPredicate(""),
+		finalLimitParam)
+
+	allVars = append(allVars, expandedTopK)
+	allVars = append(allVars, outerVars...)
+	allVars = append(allVars, params.TopK)
+
+	var embeddingDBList []pgVectorWithScore
+	if err := g.db.WithContext(ctx).Raw(querySQL, allVars...).Scan(&embeddingDBList).Error; err != nil {
+		logger.GetLogger(ctx).Errorf("[Postgres] Keywords retrieval failed: %v", err)
+		return nil, err
+	}
+	return embeddingDBList, nil
 }
