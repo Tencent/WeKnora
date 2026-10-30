@@ -43,6 +43,23 @@ func TestLocalGetFileURL_NoExternalURL(t *testing.T) {
 	assert.Equal(t, "local://1/abc/img.png", got)
 }
 
+// TestLocalGetFileRejectsNonLocalProviderSchemes ensures remote provider URIs
+// are not mistaken for paths under the local storage directory.
+func TestLocalGetFileRejectsNonLocalProviderSchemes(t *testing.T) {
+	svc := NewLocalFileService(t.TempDir(), "")
+	for _, filePath := range []string{
+		"s3://my-bucket/document.pdf",
+		"s3:/my-bucket/document.pdf",
+	} {
+		t.Run(filePath, func(t *testing.T) {
+			_, err := svc.GetFile(context.Background(), filePath)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "non-local provider scheme")
+			assert.Contains(t, err.Error(), "s3://my-bucket/document.pdf")
+		})
+	}
+}
+
 // TestNormalizePathForBase_StripsStorageBackendScope verifies that paths
 // carrying the storage://<backend-id>/ scope wrapper (written by
 // backend-scoped chains, e.g. "storage://uuid/local://10000/doc/file.md")
