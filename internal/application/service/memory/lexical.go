@@ -42,23 +42,21 @@ func tokenize(text string) []string {
 	return tokens
 }
 
-// bigrams pairs adjacent CJK ideographs. A single Chinese character matches far
-// too much on its own ("数" appears in 数据, 数量, 参数), so scoring counts
-// two-character sequences as well and weights them higher.
-func bigrams(tokens []string) []string {
-	var pairs []string
-	for i := 0; i+1 < len(tokens); i++ {
-		a, b := tokens[i], tokens[i+1]
-		if isSingleHan(a) && isSingleHan(b) {
-			pairs = append(pairs, a+b)
+// recallTokenSet uses word boundaries instead of character n-grams. Single
+// characters carry too little signal for automatic context injection.
+// tokenize remains unchanged for consolidation's separate overlap thresholds.
+func recallTokenSet(text string) map[string]struct{} {
+	tokens := make(map[string]struct{})
+	for _, word := range types.Jieba.Cut(strings.ToLower(text), true) {
+		for _, token := range strings.FieldsFunc(word, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		}) {
+			if len([]rune(token)) > 1 {
+				tokens[token] = struct{}{}
+			}
 		}
 	}
-	return pairs
-}
-
-func isSingleHan(token string) bool {
-	runes := []rune(token)
-	return len(runes) == 1 && unicode.Is(unicode.Han, runes[0])
+	return tokens
 }
 
 type scoredItem struct {
@@ -67,27 +65,11 @@ type scoredItem struct {
 }
 
 // scoreItems ranks situational items against the current query. Scoring is
-// deliberately simple: overlap of query tokens with the item, with bigram hits
-// weighted higher and importance used only to break ties.
+// deliberately simple: overlap of query words with the item, with importance
+// providing a small ranking boost.
 func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
-	queryTokens := tokenize(query)
+	queryTokens := recallTokenSet(query)
 	if len(queryTokens) == 0 || len(items) == 0 {
-		return nil
-	}
-
-	queryUnigrams := make(map[string]struct{}, len(queryTokens))
-	for _, token := range queryTokens {
-		// One-character latin tokens carry no signal and match everywhere.
-		if len([]rune(token)) < 2 && !isSingleHan(token) {
-			continue
-		}
-		queryUnigrams[token] = struct{}{}
-	}
-	queryBigrams := make(map[string]struct{})
-	for _, pair := range bigrams(queryTokens) {
-		queryBigrams[pair] = struct{}{}
-	}
-	if len(queryUnigrams) == 0 && len(queryBigrams) == 0 {
 		return nil
 	}
 
@@ -97,33 +79,23 @@ func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
 			continue
 		}
 		// Score against the topic as well as the statement, indexed separately
-		// so no bigram spans the boundary between them. The normalized key is
+		// so no word spans the boundary between them. The normalized key is
 		// deliberately not used: it is a sorted character soup built for
 		// collision detection, so its adjacency carries no meaning.
-		itemUnigrams := make(map[string]struct{})
-		itemBigrams := make(map[string]struct{})
+		itemTokens := make(map[string]struct{})
 		for _, text := range []string{item.Content, item.Topic} {
-			tokens := tokenize(text)
-			for _, token := range tokens {
-				itemUnigrams[token] = struct{}{}
-			}
-			for _, pair := range bigrams(tokens) {
-				itemBigrams[pair] = struct{}{}
+			for token := range recallTokenSet(text) {
+				itemTokens[token] = struct{}{}
 			}
 		}
-		if len(itemUnigrams) == 0 {
+		if len(itemTokens) == 0 {
 			continue
 		}
 
 		var hits float64
-		for token := range queryUnigrams {
-			if _, ok := itemUnigrams[token]; ok {
+		for token := range queryTokens {
+			if _, ok := itemTokens[token]; ok {
 				hits++
-			}
-		}
-		for pair := range queryBigrams {
-			if _, ok := itemBigrams[pair]; ok {
-				hits += 2
 			}
 		}
 		if hits == 0 {
@@ -131,10 +103,7 @@ func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
 		}
 		// Normalizing by query length keeps a long query from favouring long
 		// items purely because there was more to match against.
-		denominator := float64(len(queryUnigrams) + 2*len(queryBigrams))
-		if denominator == 0 {
-			continue
-		}
+		denominator := float64(len(queryTokens))
 		scored = append(scored, scoredItem{
 			item:  item,
 			score: hits/denominator + 0.01*float64(item.Importance),
