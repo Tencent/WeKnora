@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"math"
 	"slices"
@@ -83,14 +84,14 @@ func fuseOrDeduplicate(
 	return result
 }
 
-// sortByScoreDesc is a reusable sort comparator for IndexWithScore slices (descending by Score).
+// sortByScoreDesc orders hits by descending score, then chunk ID to keep tied ranks stable.
 func sortByScoreDesc(a, b *types.IndexWithScore) int {
 	if a.Score > b.Score {
 		return -1
 	} else if a.Score < b.Score {
 		return 1
 	}
-	return 0
+	return cmp.Compare(a.ChunkID, b.ChunkID)
 }
 
 // deduplicateByScore deduplicates retrieval results by chunk ID, keeping the highest score
