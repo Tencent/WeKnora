@@ -322,6 +322,29 @@ func (c *Connector) walk(
 				continue
 			}
 
+			// A TOC directory/group node can come back with the Yuque web
+			// app's HTML shell as its body instead of document Markdown
+			// (Tencent/WeKnora#4913). Indexing that shell verbatim chunks
+			// webpack loader scripts and CDN tags as knowledge, so skip it
+			// with a clear reason instead of emitting it as Markdown.
+			if isHTMLAppShell(detail.Body) {
+				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): body is an HTML app shell, not Markdown",
+					d.ID, d.Title)
+				out = append(out, types.FetchedItem{
+					ExternalID:       docIDStr,
+					Title:            d.Title,
+					SourceResourceID: bookIDStr,
+					Metadata: map[string]string{
+						"channel":     types.ChannelYuque,
+						"doc_id":      docIDStr,
+						"book_id":     bookIDStr,
+						"slug":        d.Slug,
+						"skip_reason": "html app shell in markdown body",
+					},
+				})
+				continue
+			}
+
 			// Book title for the leading path segment. The detail response
 			// already carries it, so this costs no extra API call. Captured
 			// once per book; falls back to the namespace, then to no prefix.
@@ -392,6 +415,31 @@ func buildDocURL(baseURL, namespace, slug string) string {
 		return baseURL
 	}
 	return baseURL + "/" + namespace + "/" + slug
+}
+
+// isHTMLAppShell reports whether a body that is supposed to be Markdown is
+// actually a full HTML document — the Yuque web app's shell (doctype/html
+// root element, script tags, service-worker registration) that a TOC
+// directory/group node can yield instead of document content
+// (Tencent/WeKnora#4913). Such a body must never be chunked and indexed as
+// Markdown: it pollutes retrieval with webpack loader scripts and CDN tags
+// and can even be cited in answers. The check is deliberately narrow — only
+// a document-start doctype/html tag counts — so Markdown that merely embeds
+// inline HTML (tables, comments) is unaffected.
+func isHTMLAppShell(body string) bool {
+	trimmed := strings.TrimLeft(body, " \t\n\r\ufeff")
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "<!doctype html") {
+		return true
+	}
+	if strings.HasPrefix(lower, "<html") {
+		rest := lower[len("<html"):]
+		return rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\n' || rest[0] == '\r' || rest[0] == '>' || rest[0] == '/'
+	}
+	return false
 }
 
 // FetchIncremental returns items changed (or deleted) since the prior cursor.
