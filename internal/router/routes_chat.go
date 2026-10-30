@@ -52,6 +52,9 @@ func RegisterSessionRoutes(
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
+		// Chat-box voice input: not session-bound so the new-chat page can dictate
+		// before a session exists. The agent's ASR switch gates it in the handler.
+		sessions.POST("/transcriptions", handler.TranscribeVoiceInput)
 		sessions.GET("/:id", handler.GetSession)
 		sessions.GET("", handler.GetSessionsByTenant)
 		sessions.PUT("/:id", handler.UpdateSession)

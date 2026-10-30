@@ -2301,6 +2301,14 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "authentication"):
 			available = false
 			message = fmt.Sprintf("认证失败，请检查API Key：%s", errMsg)
+		case strings.Contains(errMsg, "403") || strings.Contains(errMsg, "Forbidden"):
+			// Also what proxies and endpoint-security agents answer when they
+			// block the request, so the endpoint was never actually reached.
+			available = false
+			message = fmt.Sprintf("访问被拒绝，请检查API Key权限或网络代理/安全软件拦截：%s", errMsg)
+		case strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "context deadline exceeded"):
+			available = false
+			message = fmt.Sprintf("连接超时，请检查网络连接：%s", errMsg)
 		case strings.Contains(errMsg, "404") || strings.Contains(errMsg, "Not Found"):
 			available = false
 			message = fmt.Sprintf("API端点不存在，请检查Base URL：%s", errMsg)

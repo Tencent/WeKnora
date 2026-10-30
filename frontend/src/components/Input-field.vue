@@ -12,7 +12,7 @@ import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
-import { stopSession } from '@/api/chat';
+import { stopSession, transcribeVoice } from '@/api/chat';
 import type { SteerQueueItem } from '@/api/chat/steer';
 import { chatSubmitShortcut } from '@/utils/chatSubmitShortcut';
 import { useOrganizationStore } from '@/stores/organization';
@@ -59,6 +59,8 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 import { customAgentStreamMode } from '@/utils/agent-mode';
+import { isVoiceInputSupported, useVoiceInput, type VoiceInputError } from '@/composables/useVoiceInput';
+import { createHoldToTalk, voiceHotkeyLabel } from '@/utils/voiceHotkey';
 
 const route = useRoute();
 const router = useRouter();
@@ -477,6 +479,118 @@ const showWebSearchButton = computed(() => {
   );
 });
 const showImageUploadButton = computed(() => isImageUploadEnabledByAgent.value);
+
+// 语音输入：复用智能体的「音频上传 + ASR 模型」配置
+const voiceInputSupported = isVoiceInputSupported();
+const showVoiceButton = computed(() => {
+  if (props.embeddedMode || !voiceInputSupported || !hasAgentConfig.value) return false;
+  const config = currentAgentConfig.value;
+  return config?.audio_upload_enabled === true && !!config?.asr_model_id;
+});
+const voiceHotkeyText = voiceHotkeyLabel();
+// Where the transcript lands: the caret when recording started, else the end.
+let voiceInsertRange: { start: number; end: number } | null = null;
+
+const insertVoiceText = (text: string) => {
+  const current = query.value;
+  const range = voiceInsertRange ?? { start: current.length, end: current.length };
+  const start = Math.min(range.start, current.length);
+  const end = Math.min(Math.max(range.end, start), current.length);
+  const before = current.slice(0, start);
+  const after = current.slice(end);
+  const lead = before && !/\s$/.test(before) && !/^[\u3000-\u303f\uff00-\uffef]/.test(text) ? ' ' : '';
+  const inserted = lead + text;
+  query.value = before + inserted + after;
+  voiceInsertRange = null;
+  nextTick(() => {
+    const textarea = getTextareaEl();
+    if (!textarea) return;
+    textarea.focus({ preventScroll: true });
+    const caret = before.length + inserted.length;
+    textarea.setSelectionRange(caret, caret);
+  });
+};
+
+const voiceErrorMessages: Record<VoiceInputError, string> = {
+  unsupported: 'input.voiceUnsupported',
+  insecure: 'input.voiceInsecureContext',
+  permission: 'input.voicePermissionDenied',
+  device: 'input.voiceDeviceError',
+  decode: 'input.voiceDecodeError',
+  transcribe: 'input.voiceTranscribeFailed',
+  empty: 'input.voiceEmptyResult',
+  releasedEarly: 'input.voiceReleasedEarly',
+};
+
+const voiceInput = useVoiceInput({
+  target: () => showVoiceButton.value
+    ? {
+      agentId: selectedAgentId.value,
+      agentSourceTenantId: settingsStore.selectedAgentSourceTenantId ?? undefined,
+      locale: locale.value,
+    }
+    : null,
+  transcribe: async (wav, target) => {
+    const res = await transcribeVoice(wav, target.agentId, target.agentSourceTenantId, target.locale);
+    return res?.data?.text ?? '';
+  },
+  onText: insertVoiceText,
+  onError: (error, detail) => {
+    if (detail) console.warn('[voice input]', error, detail);
+    const message = t(voiceErrorMessages[error]);
+    if (error === 'empty' || error === 'releasedEarly') MessagePlugin.info(message);
+    else MessagePlugin.warning(message);
+  },
+});
+const voiceState = voiceInput.state;
+const voiceElapsedText = computed(() => {
+  const seconds = Math.floor(voiceInput.elapsedMs.value / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+});
+
+const startVoiceInput = () => {
+  if (!showVoiceButton.value || voiceState.value !== 'idle') return;
+  const textarea = getTextareaEl();
+  voiceInsertRange = textarea && document.activeElement === textarea
+    ? { start: textarea.selectionStart, end: textarea.selectionEnd }
+    : null;
+  void voiceInput.start();
+};
+const stopVoiceInput = () => voiceInput.stop();
+
+// The hotkey only targets this input: skip when it is hidden (another chat
+// view owns the page) or when focus sits in some other field or dialog.
+const voiceHotkeyAllowed = () => {
+  if (!showVoiceButton.value || voiceState.value !== 'idle') return false;
+  const textarea = getTextareaEl();
+  if (!textarea?.isConnected || textarea.offsetParent === null) return false;
+  const active = document.activeElement as HTMLElement | null;
+  if (active && active !== textarea && active !== document.body) {
+    if (active.closest('[role="dialog"], .t-dialog, .t-drawer')) return false;
+    if (active.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return false;
+  }
+  return !isComposing.value;
+};
+const voiceHold = createHoldToTalk({
+  enabled: voiceHotkeyAllowed,
+  onStart: startVoiceInput,
+  onStop: stopVoiceInput,
+});
+const onVoiceKeydown = (e: KeyboardEvent) => voiceHold.keydown(e);
+const onVoiceKeyup = (e: KeyboardEvent) => voiceHold.keyup(e);
+const onVoiceWindowBlur = () => voiceHold.release();
+const onVoiceVisibilityChange = () => {
+  if (document.visibilityState === 'hidden') voiceHold.release();
+};
+
+// Press-and-hold on the mic button mirrors the keyboard shortcut.
+const onVoiceButtonPointerDown = (e: PointerEvent) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId);
+  startVoiceInput();
+};
+const onVoiceButtonPointerUp = () => stopVoiceInput();
 
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
 const isModelLockedByAgent = computed(() => {
@@ -2024,6 +2138,12 @@ onMounted(() => {
     return;
   }
 
+  // Capture phase so Option+Space is cancelled before the textarea types U+00A0.
+  window.addEventListener('keydown', onVoiceKeydown, true);
+  window.addEventListener('keyup', onVoiceKeyup, true);
+  window.addEventListener('blur', onVoiceWindowBlur);
+  document.addEventListener('visibilitychange', onVoiceVisibilityChange);
+
   browserConnection.watchStatus();
 
   // 并行拉取；若 platform 已预取且缓存未过期则直接复用
@@ -2097,6 +2217,10 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onVoiceKeydown, true);
+  window.removeEventListener('keyup', onVoiceKeyup, true);
+  window.removeEventListener('blur', onVoiceWindowBlur);
+  document.removeEventListener('visibilitychange', onVoiceVisibilityChange);
   if (!props.embeddedMode) browserConnection.unwatchStatus();
   window.removeEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
   document.removeEventListener('click', closeAgentModeSelector);
@@ -3027,6 +3151,34 @@ defineExpose({
             </div>
           </t-tooltip>
 
+          <!-- 语音输入按钮（智能体启用音频上传并配置 ASR 模型时显示）：按住说话 -->
+          <t-tooltip v-if="showVoiceButton" placement="top" theme="light"
+            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <span v-if="voiceState === 'preparing'">{{ $t('input.voicePreparing') }}</span>
+              <span v-else-if="voiceState === 'recording'">{{ $t('input.voiceRecording') }}</span>
+              <span v-else-if="voiceState === 'transcribing'">{{ $t('input.voiceTranscribing') }}</span>
+              <span v-else>{{ $t('input.voiceTooltip', { shortcut: voiceHotkeyText }) }}</span>
+            </template>
+            <button type="button" class="control-btn voice-input-btn" :class="{
+              'is-preparing': voiceState === 'preparing',
+              'is-recording': voiceState === 'recording',
+              'is-transcribing': voiceState === 'transcribing',
+            }" :aria-label="$t('input.voiceTooltip', { shortcut: voiceHotkeyText })"
+              :aria-pressed="voiceState === 'preparing' || voiceState === 'recording'" :disabled="voiceState === 'transcribing'"
+              @click.stop @pointerdown="onVoiceButtonPointerDown" @pointerup="onVoiceButtonPointerUp"
+              @pointercancel="onVoiceButtonPointerUp" @lostpointercapture="onVoiceButtonPointerUp">
+              <t-loading v-if="voiceState === 'transcribing'" size="14px" />
+              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="control-icon">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0" />
+                <path d="M12 18v3" />
+              </svg>
+              <span v-if="voiceState === 'recording'" class="voice-elapsed">{{ voiceElapsedText }}</span>
+            </button>
+          </t-tooltip>
+
           <!-- @ 知识库/文件选择按钮 -->
           <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
@@ -3727,6 +3879,51 @@ const getImgSrc = (url: string) => {
     justify-content: center;
     line-height: 1;
   }
+}
+
+/* Voice input (hold to talk) */
+.voice-input-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  touch-action: none;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &.is-preparing {
+    background: var(--td-warning-color-light);
+    color: var(--td-warning-color);
+    cursor: progress;
+  }
+
+  &.is-recording {
+    background: var(--td-error-color-light);
+    color: var(--td-error-color);
+    animation: voice-input-pulse 1.2s ease-in-out infinite;
+  }
+
+  &.is-transcribing {
+    cursor: progress;
+  }
+
+  .voice-elapsed {
+    font-size: var(--app-text-2xs);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes voice-input-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--td-error-color-focus); }
+  50% { box-shadow: 0 0 0 4px var(--td-error-color-focus); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-input-btn.is-recording { animation: none; }
 }
 
 /* Attachment upload */

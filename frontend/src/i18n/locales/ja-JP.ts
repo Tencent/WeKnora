@@ -3371,6 +3371,18 @@ export default {
     kbDisabledByAgent: '現在のエージェントによりナレッジベースが無効になっています',
     modelLockedByAgent: '現在のエージェントによりモデル選択がロックされています',
     imageUploadDisabledByAgent: 'このエージェントでは画像アップロードが有効になっていません',
+    voiceTooltip: '押したまま話す（{shortcut}）',
+    voicePreparing: 'マイクを準備しています。ボタンが赤くなってから話してください',
+    voiceRecording: '録音中、離すと終了します',
+    voiceReleasedEarly: 'マイクの準備ができていません。ボタンが赤くなるまで押したまま話してください',
+    voiceTranscribing: '音声を認識しています…',
+    voiceUnsupported: 'このブラウザは録音に対応していません',
+    voiceInsecureContext: '音声入力には HTTPS または localhost でのアクセスが必要です',
+    voicePermissionDenied: 'マイクを使用できません。ブラウザでマイクの使用を許可してください',
+    voiceDeviceError: '利用可能なマイクが見つかりません',
+    voiceDecodeError: '録音の処理に失敗しました。もう一度お試しください',
+    voiceTranscribeFailed: '音声認識に失敗しました。エージェントの ASR モデル設定を確認してください',
+    voiceEmptyResult: '音声が認識されませんでした',
     goToAgentSettings: 'エージェント設定に移動'
   },
   createChat: {

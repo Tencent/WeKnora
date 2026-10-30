@@ -3371,6 +3371,18 @@ export default {
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
+    voiceTooltip: 'Hold to talk ({shortcut})',
+    voicePreparing: 'Opening microphone, start talking when the button turns red',
+    voiceRecording: 'Recording, release to finish',
+    voiceReleasedEarly: 'The microphone was not ready yet. Hold until the button turns red, then talk.',
+    voiceTranscribing: 'Transcribing…',
+    voiceUnsupported: 'This browser does not support audio recording',
+    voiceInsecureContext: 'Voice input requires HTTPS or localhost',
+    voicePermissionDenied: 'Microphone access was denied. Allow it in your browser settings.',
+    voiceDeviceError: 'No microphone available',
+    voiceDecodeError: 'Could not process the recording. Please try again.',
+    voiceTranscribeFailed: "Transcription failed. Check the agent's ASR model settings.",
+    voiceEmptyResult: 'No speech detected',
     goToAgentSettings: 'Go to agent settings'
   },
   createChat: {
