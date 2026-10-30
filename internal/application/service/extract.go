@@ -99,8 +99,8 @@ func NewChunkExtractTask(
 	attempt int,
 	chunkIndex int,
 ) (bool, error) {
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
-		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
+	if !types.GraphStoreEnabled() {
+		logger.Warn(ctx, "graph store is not enabled, skip chunk extract task")
 		return false, nil
 	}
 	taskPayload := types.ExtractChunkPayload{
