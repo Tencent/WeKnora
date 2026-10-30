@@ -107,6 +107,7 @@ func (s *fakeSharedBudgetSink) SettleBudget(_ context.Context, _ string, key str
 	s.actual[key] = used
 	return nil
 }
+
 func (s *fakeSharedBudgetSink) ExtendBudget(_ context.Context, _ string, key string, extra RunBudget) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -121,6 +122,7 @@ func (s *fakeSharedBudgetSink) ExtendBudget(_ context.Context, _ string, key str
 	s.limit.MaxTotalTokens += extra.MaxTotalTokens
 	return nil
 }
+
 func (s *fakeSharedBudgetSink) UsageBudget(context.Context, string) (RunBudgetUsage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

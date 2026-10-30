@@ -171,6 +171,7 @@ func (s *runBudgetState) clearStop() {
 	s.stopReason = ""
 	s.mu.Unlock()
 }
+
 func (s *runBudgetState) markStop(reason RunStopReason) RunStopReason {
 	if s == nil {
 		return reason
