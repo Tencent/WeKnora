@@ -186,6 +186,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	broker.RegisterKind(types.AgentPromptKindMCPOAuth, validateMCPOAuthResponse)
 	broker.RegisterKind(types.AgentPromptKindAskUser, types.ValidateAskUserResponse)
 	broker.RegisterKind(types.AgentPromptKindPageAction, types.ValidatePageActionResponse)
+	broker.RegisterKind(types.AgentPromptKindBudget, types.ValidateBudgetPauseResponse)
 	// Default fail-close: if the checker errors, require approval (safer for a
 	// HITL feature). Set WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true to revert.
 	failClose := !strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN")), "true")
@@ -713,6 +714,88 @@ func (g *Gate) ResolveForResume(ctx context.Context, req ResolveRequest) (hitl.R
 	})
 }
 
+// BudgetPauser is the engine-facing surface for a contract pause. It is
+// implemented by Gate and optional in tests/adapters that do not have a
+// broker; a nil pauser keeps the deterministic fail-closed stop behaviour.
+type BudgetPauser interface {
+	PauseForBudget(ctx context.Context, req types.BudgetPauseRequest) (types.BudgetPauseDecision, error)
+}
+
+var _ BudgetPauser = (*Gate)(nil)
+
+// PauseForBudget raises a budget prompt and either returns the owner's
+// decision or remembers the run for a later answer. The hostile case -- a run
+// nobody can answer -- never suspends: it returns an empty decision so the
+// engine can finish from existing evidence.
+func (g *Gate) PauseForBudget(ctx context.Context, req types.BudgetPauseRequest) (types.BudgetPauseDecision, error) {
+	if g == nil || g.broker == nil {
+		return types.BudgetPauseDecision{}, nil
+	}
+	if types.RunModeFromContext(ctx) == types.RunModeUnattended {
+		return types.BudgetPauseDecision{}, nil
+	}
+	request, err := json.Marshal(types.BudgetPausePromptRequest{
+		Reason:             string(req.Reason),
+		Limit:              req.Limit,
+		Used:               req.Used,
+		SuggestedExtension: req.SuggestedExtension,
+	})
+	if err != nil {
+		return types.BudgetPauseDecision{}, fmt.Errorf("encode budget pause: %w", err)
+	}
+	var suspend *hitl.SuspendSpec
+	if req.Snapshot != nil {
+		suspend = &hitl.SuspendSpec{Snapshot: req.Snapshot, SnapshotVersion: req.SnapshotVersion}
+	}
+	out, err := g.broker.Await(ctx, hitl.Spec{
+		Suspend: suspend,
+		Prompt: &types.AgentPrompt{
+			TenantID:           req.TenantID,
+			UserID:             req.UserID,
+			SessionID:          req.SessionID,
+			AssistantMessageID: req.AssistantMessageID,
+			RequestID:          req.RequestID,
+			Kind:               types.AgentPromptKindBudget,
+			Request:            types.JSON(request),
+		},
+		Timeout:       g.hotWait,
+		TimeoutReason: "budget decision timeout",
+		Emit: func(ctx context.Context, p *types.AgentPrompt) error {
+			return event.Emit(ctx, event.Event{
+				ID: p.ID + "-prompt-required", Type: event.EventAgentPromptRequired,
+				SessionID: req.SessionID, RequestID: req.RequestID,
+				Data: event.AgentPromptRequiredData{
+					PendingID: p.ID, Kind: types.AgentPromptKindBudget,
+					SessionID: req.SessionID, AssistantMessageID: req.AssistantMessageID,
+					Request: request, TimeoutSeconds: int(g.hotWait / time.Second),
+					HotWaitSeconds: int(g.hotWait / time.Second), Suspendable: p.Suspendable,
+					RequestedAtUnix: time.Now().Unix(), RequestID: req.RequestID,
+				},
+				Metadata: map[string]interface{}{"assistant_message_id": req.AssistantMessageID, "pending_id": p.ID},
+			})
+		},
+	})
+	if err != nil {
+		return types.BudgetPauseDecision{}, fmt.Errorf("budget pause: %w", err)
+	}
+	if out.Suspended {
+		return types.BudgetPauseDecision{Suspended: &types.PromptSuspension{
+			Detached: out.Detached, PromptID: out.Prompt.ID,
+			Kind: types.AgentPromptKindBudget, ExpiresAt: out.ExpiresAt,
+		}}, nil
+	}
+	if !out.Answered {
+		return types.BudgetPauseDecision{Reason: out.Reason}, nil
+	}
+	var decision types.BudgetPausePromptResponse
+	if err := json.Unmarshal(out.Prompt.Response, &decision); err != nil {
+		return types.BudgetPauseDecision{}, fmt.Errorf("decode budget pause: %w", err)
+	}
+	return types.BudgetPauseDecision{
+		PromptID: out.Prompt.ID, Action: decision.Action, Extension: decision.Extension,
+	}, nil
+}
+
 // AnswerableKinds are the prompt kinds a user may answer with a raw
 // response. MCP OAuth is absent: only the OAuth callback may report an
 // authorization, never the user's own claim.
@@ -720,6 +803,7 @@ var AnswerableKinds = map[string]bool{
 	types.AgentPromptKindAskUser:      true,
 	types.AgentPromptKindToolApproval: true,
 	types.AgentPromptKindPageAction:   true,
+	types.AgentPromptKindBudget:       true,
 }
 
 // ResolveResponse records a user's answer given as the kind's response

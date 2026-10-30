@@ -97,6 +97,51 @@ func AgentRoundMaxCompletionTokensFor(configured int, sandboxConfigID string) in
 // that omit the field keep their current behaviour.
 const UnlimitedMaxIterations = -1
 
+// RunStopReason says why a run stopped. The budget reasons are emitted only
+// when an explicit RunContract ended the turn.
+type RunStopReason string
+
+const (
+	// RunStopTokenBudget marks a turn stopped at its total token limit.
+	RunStopTokenBudget RunStopReason = "token_budget_exhausted"
+	// RunStopTimeBudget marks a turn stopped at its wall-clock limit.
+	RunStopTimeBudget RunStopReason = "time_budget_exhausted"
+	// RunStopWriteBudget marks a turn stopped at its mutating-action limit.
+	RunStopWriteBudget RunStopReason = "write_budget_exhausted"
+)
+
+// RunBudget is the effective per-turn contract. Zero values are uncapped, so
+// agents that never configured a contract keep their existing behaviour.
+type RunBudget struct {
+	MaxTotalTokens  int `json:"max_total_tokens,omitempty"`
+	MaxWallTimeSec  int `json:"max_wall_time_sec,omitempty"`
+	MaxWriteActions int `json:"max_write_actions,omitempty"`
+}
+
+// Active reports whether any dimension of the contract is capped.
+func (b RunBudget) Active() bool {
+	return b.MaxTotalTokens > 0 || b.MaxWallTimeSec > 0 || b.MaxWriteActions > 0
+}
+
+// RunBudgetUsed is what the turn actually consumed, with names that describe
+// the measurement rather than reusing the limit field names.
+type RunBudgetUsed struct {
+	TotalTokens  int `json:"total_tokens"`
+	WallTimeSec  int `json:"wall_time_sec"`
+	WriteActions int `json:"write_actions"`
+}
+
+// RunBudgetUsage is the machine-readable report on the completion event.
+// Use is cumulative for the turn. StopReason is empty for a normal stop.
+type RunBudgetUsage struct {
+	Limit      RunBudget     `json:"limit"`
+	Used       RunBudgetUsed `json:"used"`
+	StopReason RunStopReason `json:"stop_reason,omitempty"`
+	// Action records a user's decision to finish or cancel a run after it
+	// paused at this budget. Empty means the run has no post-pause decision.
+	Action string `json:"action,omitempty"`
+}
+
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
 // This includes all configuration parameters for agent execution
 type AgentConfig struct {
@@ -203,6 +248,14 @@ type AgentConfig struct {
 	// or zero when unknown. It caps the round budget and is resolved per run.
 	ModelMaxOutputTokens int `json:"-"`
 
+	// Run-token budget for one complete turn. Zero means uncapped. This is
+	// distinct from MaxCompletionTokens, which caps one LLM round.
+	MaxRunTokens int `json:"max_run_tokens,omitempty"`
+	// Wall-clock budget for one complete turn in seconds. Zero means uncapped.
+	MaxRunSeconds int `json:"max_run_seconds,omitempty"`
+	// Maximum mutating tool calls in one complete turn. Zero means uncapped.
+	MaxWriteActions int `json:"max_write_actions,omitempty"`
+
 	// Maximum character length for tool output (default: 16000).
 	// Outputs exceeding this limit are truncated with head + tail preservation.
 	MaxToolOutputChars int `json:"max_tool_output_chars,omitempty"`
@@ -241,6 +294,19 @@ type AgentConfig struct {
 	// skillInstallMode: the scope of a privilege must not be settable by
 	// anything a tenant can store or send.
 	skillInstallDir string
+}
+
+// RunBudget returns this agent's effective per-turn contract. Zero fields
+// are uncapped and preserve the historical behaviour.
+func (c *AgentConfig) RunBudget() RunBudget {
+	if c == nil {
+		return RunBudget{}
+	}
+	return RunBudget{
+		MaxTotalTokens:  c.MaxRunTokens,
+		MaxWallTimeSec:  c.MaxRunSeconds,
+		MaxWriteActions: c.MaxWriteActions,
+	}
 }
 
 // EnableSkillInstallMode grants install-mode shell execution to the built-in
@@ -387,8 +453,31 @@ type Cleanable interface {
 	Cleanup(ctx context.Context)
 }
 
+// EffectState describes whether a tool mutation may have taken effect. It is
+// persisted with the tool result so a later turn never blindly repeats a write.
+type EffectState string
+
+const (
+	// EffectUnspecified keeps legacy results on the inference path.
+	EffectUnspecified EffectState = ""
+	// EffectNone marks a read-only call with no mutation to qualify.
+	EffectNone EffectState = "none"
+	// EffectNotStarted means the mutation was rejected before execution.
+	EffectNotStarted EffectState = "not_started"
+	// EffectCommitted means the mutation completed.
+	EffectCommitted EffectState = "committed"
+	// EffectFailed means the mutation failed with a known retry outcome.
+	EffectFailed EffectState = "failed"
+	// EffectUnknown means the mutation may have occurred; observe before retry.
+	EffectUnknown EffectState = "unknown"
+)
+
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
+	// EffectState lets a resumed run distinguish a committed mutation, a
+	// definitely unexecuted call, and an uncertain transport failure. Empty is
+	// treated as committed for successful calls and failed otherwise.
+	EffectState EffectState `json:"effect_state,omitempty"`
 	// OutputFiles holds sandbox references for this live result only. History
 	// uses the final answer's persistent resource references instead.
 	// A non-nil empty slice means output inspection found no eligible changes;
@@ -579,6 +668,9 @@ type AgentState struct {
 	FinalAnswer          string                `json:"final_answer"`   // The final answer to the query
 	KnowledgeRefs        []*SearchResult       `json:"knowledge_refs"` // Collected knowledge references
 	TurnUsage            TokenUsage            `json:"turn_usage"`     // LLM usage accumulated across this turn
+	// Budget is the effective RunContract report for this turn. Nil means no
+	// contract was configured and no budget state was tracked.
+	Budget *RunBudgetUsage `json:"budget,omitempty"`
 	// Suspended is set when the run ended waiting on a user prompt.
 	// SuspendedStep is the interrupted round: its thought and the calls
 	// that finished before the blocked one, kept for display.

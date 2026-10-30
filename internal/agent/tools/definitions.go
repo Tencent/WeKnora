@@ -1,5 +1,12 @@
 package tools
 
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/Tencent/WeKnora/internal/agent/policy"
+)
+
 // maxFunctionNameLength is the maximum length for a tool/function name
 // imposed by the OpenAI API.
 const maxFunctionNameLength = 64
@@ -88,6 +95,47 @@ const (
 	ToolWikiReadIssue   = "wiki_read_issue"
 	ToolWikiUpdateIssue = "wiki_update_issue"
 )
+
+// BuiltinToolRisk returns the static policy risk of a built-in tool. A false
+// result means the caller must resolve the risk from the tool's dynamic
+// target (MCP and operation proxies) or treat it as unknown.
+func BuiltinToolRisk(name string) (policy.Risk, bool) {
+	switch name {
+	case ToolThinking, ToolTodoWrite, ToolAskUser,
+		ToolSearchKnowledge, ToolReadDocument, ToolListDocuments, ToolQueryKnowledgeGraph,
+		ToolSearchConversations, ToolSearchMemory, ToolDatabaseQuery, ToolDataSchema,
+		ToolWebSearch, ToolWebFetch, ToolReadFile, ToolListSandboxFiles,
+		ToolWorkWait, ToolWorkCancel,
+		ToolWikiReadPage, ToolWikiSearch, ToolWikiReadIssue,
+		ToolFindOperations, ToolDiscoverMCPTools, ToolReadPage, ToolSelectTab,
+		ToolSearchWeKnoraDocs, ToolReadWeKnoraDoc:
+		return policy.RiskProbe, true
+	case ToolDataAnalysis, ToolWriteSandboxFile, ToolEditSandboxFile,
+		ToolWriteSkillFile, ToolEditSkillFile,
+		ToolWikiWritePage, ToolWikiReplaceText, ToolWikiRenamePage,
+		ToolWikiFlagIssue, ToolWikiUpdateIssue,
+		ToolShellExec, ToolShellExecAsync:
+		return policy.RiskWrite, true
+	case ToolWikiDeletePage:
+		return policy.RiskDestructive, true
+	default:
+		return "", false
+	}
+}
+
+// CallRisk classifies a call before execution. A direct MCP tool carries its
+// declared risk; catalog/proxy calls fall back to the proxy's conservative
+// write classification. Unknown tools return an invalid risk so a write budget
+// fails closed rather than assuming a mutation is a read.
+func CallRisk(_ context.Context, name string, _ json.RawMessage) policy.Risk {
+	if risk, ok := BuiltinToolRisk(name); ok {
+		return risk
+	}
+	if name == ToolCallMCPTool {
+		return policy.RiskWrite
+	}
+	return ""
+}
 
 // Tool groups the agent editor sections its checkboxes by.
 const (

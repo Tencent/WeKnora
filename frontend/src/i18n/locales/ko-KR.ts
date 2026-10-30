@@ -1607,6 +1607,15 @@ export default {
       notConfigured: '미설정',
       goStorageSettings: '저장소 설정으로 이동'
     },
+    runBudget: {
+      label: '실행 예산',
+      desc: '하나의 전체 작업에서 누적할 수 있는 Token, 실제 실행 시간, 쓰기 시도 횟수의 상한입니다. 안전한 경계에서 일시 중지되며 예산을 추가해 계속하거나, 현재 결과로 종료하거나, 취소할 수 있습니다. 0은 무제한입니다.',
+      hint: '단일 모델 출력 제한이 아닙니다. 승인 대기 시간은 실행 시간에 포함되지 않습니다.',
+      tokens: 'Token',
+      seconds: '실행 시간(초)',
+      writes: '쓰기 시도',
+      uncapped: '무제한',
+    },
     llmCallTimeout: {
       label: 'LLM 호출 타임아웃',
       desc: '단일 LLM 호출의 최대 대기 시간(초)입니다. 이 시간을 초과하면 호출이 중단됩니다',
@@ -1934,7 +1943,30 @@ export default {
     }
   },
   agentStream: {
-    saveToKb: {
+    budget: {
+      title: '실행 예산에 도달했습니다',
+      extensionLabel: '추가',
+      tokens: '토큰',
+      time: '시간',
+      writes: '쓰기 시도',
+      tokensUnit: '토큰',
+      secondsUnit: '초',
+      actionsUnit: '회',
+      extend: '추가하고 계속',
+      finish: '현재 결과로 종료',
+      cancel: '작업 취소',
+      extended: '예산을 추가했습니다. 계속 실행 중입니다',
+      finished: '지금까지 수집한 결과로 종료했습니다',
+      canceled: '작업이 취소되었습니다',
+      submitted: '제출됨',
+      unansweredTag: '결정을 기다리는 중',
+      submitFailed: '예산 결정을 제출하지 못했습니다',
+      reasons: {
+        tokens: '현재 라운드는 완료했지만 실행이 토큰 예산에 도달했습니다. 완료된 도구 결과는 저장되어 있습니다.',
+        time: '현재 라운드는 완료했지만 실행이 시간 예산에 도달했습니다. 완료된 도구 결과는 저장되어 있습니다.',
+        writes: '다음 쓰기 작업 묶음을 시작하기 전에 쓰기 한도에 도달했으며 추가 쓰기는 시도되지 않았습니다.',
+      },
+    },    saveToKb: {
       emptyContent: '현재 응답이 비어 있어 지식베이스에 저장할 수 없습니다',
       editorOpened: '편집기가 열렸습니다. 지식베이스를 선택한 후 저장하세요'
     },

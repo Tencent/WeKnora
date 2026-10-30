@@ -1609,6 +1609,15 @@ export default {
       notConfigured: '未設定',
       goStorageSettings: '去存儲設定中設定'
     },
+    runBudget: {
+      label: '執行總預算',
+      desc: '一次完整任務允許累計消耗的總 Token、實際執行時間和寫入操作嘗試次數。任一上限達到後，任務會在安全邊界暫停，你可以追加預算繼續、依現有結果結束或取消。零表示不限制。',
+      hint: '預算是安全網，不是單輪模型輸出上限；等待核准的時間不會計入實際執行時間。',
+      tokens: 'Token',
+      seconds: '執行時間（秒）',
+      writes: '寫入操作嘗試',
+      uncapped: '不限制',
+    },
     llmCallTimeout: {
       label: 'LLM 呼叫超時',
       desc: '單次 LLM 呼叫的最大等待時間（秒），超過此時間後呼叫將被中止',
@@ -1936,7 +1945,30 @@ export default {
     }
   },
   agentStream: {
-    saveToKb: {
+    budget: {
+      title: '執行預算已達上限',
+      extensionLabel: '追加',
+      tokens: 'Token',
+      time: '時間',
+      writes: '寫入操作嘗試',
+      tokensUnit: 'token',
+      secondsUnit: '秒',
+      actionsUnit: '次',
+      extend: '追加並繼續',
+      finish: '依現有結果結束',
+      cancel: '取消任務',
+      extended: '已追加預算，任務繼續執行',
+      finished: '已依目前收集的結果結束',
+      canceled: '任務已取消',
+      submitted: '已提交',
+      unansweredTag: '等待你決定',
+      submitFailed: '提交預算決定失敗',
+      reasons: {
+        tokens: '目前輪次已完成，但執行達到 Token 預算。已完成的工具結果均已儲存。',
+        time: '目前輪次已完成，但執行達到時間預算。已完成的工具結果均已儲存。',
+        writes: '下一批寫入操作開始前已達寫入次數上限，本輪未啟動額外寫入。',
+      },
+    },    saveToKb: {
       emptyContent: '當前回答為空，無法儲存到知識庫',
       editorOpened: '已打開編輯器，請選擇知識庫後儲存'
     },

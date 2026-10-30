@@ -290,6 +290,9 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
+	if pauser, ok := s.toolApprovalGate.(approval.BudgetPauser); ok && pauser != nil {
+		engine.SetBudgetPauser(pauser)
+	}
 	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
 	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
 	engine.SetPinnedMentions(
@@ -1616,6 +1619,9 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 		config.MaxIterations = 5
 	} else if config.MaxIterations > MAX_ITERATIONS {
 		return fmt.Errorf("max iterations too high: %d (max %d)", config.MaxIterations, MAX_ITERATIONS)
+	}
+	if config.MaxRunTokens < 0 || config.MaxRunSeconds < 0 || config.MaxWriteActions < 0 {
+		return fmt.Errorf("run contract limits cannot be negative")
 	}
 
 	return nil

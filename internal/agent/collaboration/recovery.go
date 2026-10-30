@@ -66,6 +66,7 @@ func (r *Runtime) wakeParent(ctx context.Context, scope Scope) {
 	}
 	var wait *ParentWait
 	var closing bool
+	var runBudgetTurnID string
 	owner := uuid.NewString()
 	err := r.Store.Change(ctx, scope, func(g *Group) error {
 		wait = nil
@@ -101,6 +102,7 @@ func (r *Runtime) wakeParent(ctx context.Context, scope Scope) {
 			return nil
 		}
 		wait = g.ParentWait
+		runBudgetTurnID = g.RunBudgetTurnID
 		g.ParentOwner, g.ParentLease = owner, now.Add(r.Lease)
 		return nil
 	})
@@ -111,12 +113,8 @@ func (r *Runtime) wakeParent(ctx context.Context, scope Scope) {
 	go func() {
 		defer r.workers.Done()
 		b := &Binding{
-			Runtime:     r,
-			Scope:       scope,
-			ParentOwner: owner,
-			Closing:     closing,
-			WaitUntil:   wait.Until,
-			Seen:        wait.After,
+			Runtime: r, Scope: scope, ParentOwner: owner, Closing: closing,
+			RunBudgetTurnID: runBudgetTurnID, WaitUntil: wait.Until, Seen: wait.After,
 		}
 		runCtx, stop := b.Start(ctx)
 		defer stop()

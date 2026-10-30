@@ -90,8 +90,10 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
   const requestedAt = Number.isNaN(createdAt) ? undefined : Math.floor(createdAt / 1000)
   const response = p.response || {}
   const resolved = Boolean(p.status && !['pending', 'suspended'].includes(p.status))
+  const budget = p.kind === 'budget_pause' ? request : undefined
   const state = {
     resolved,
+    budget,
     timestamp: Number.isNaN(createdAt) ? undefined : createdAt,
     canceled: p.status === 'canceled',
     abandoned: ['expired', 'superseded'].includes(p.status),
@@ -113,6 +115,22 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
       answered: resolved && Boolean(p.response) && !response.declined,
       response,
       resolve_reason: response.declined ? 'declined' : state.resolve_reason,
+      timed_out: p.status === 'expired',
+    }]
+  }
+  if (p.kind === 'budget_pause') {
+    return [{
+      type: 'agent_prompt_required',
+      pending_id: p.id,
+      kind: p.kind,
+      request,
+      tool_call_id: p.tool_call_id,
+      requested_at: requestedAt,
+      suspendable: true,
+      expires_at: p.expires_at,
+      ...state,
+      answered: resolved && Boolean(p.response),
+      response,
       timed_out: p.status === 'expired',
     }]
   }
@@ -139,6 +157,8 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
 }
 
 /** The card of an ask_user call that finished, from the stored tool result. */
+// Tool-history variants that predate the run-budget field may omit the final
+// argument. Treat it as optional so old fixtures and persisted payloads replay.
 function askUserHistoryCard(toolCallId: string, data: ChatMessage): ChatMessage {
   return {
     type: 'agent_prompt_required',
@@ -483,6 +503,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     isFallback = false,
     agentDurationMs = 0,
     usage?: unknown,
+    runBudget?: unknown,
   ) => {
     const events: ChatMessage[] = []
 
@@ -565,11 +586,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       })
     }
 
-    if (isCompleted && (agentDurationMs > 0 || usage)) {
+    if (isCompleted && (agentDurationMs > 0 || usage || runBudget)) {
       events.push({
         type: 'agent_complete',
         total_duration_ms: agentDurationMs,
         usage,
+        budget: runBudget,
       })
     }
 
@@ -661,6 +683,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           Boolean(item.is_fallback),
           Number(item.agent_duration_ms) || 0,
           item.usage,
+          item.run_budget,
         )
         item.agentEventStream = willContinueStream ? restoredEvents : markRaw(restoredEvents)
         item.hideContent = true
@@ -1513,12 +1536,22 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         if (usage) {
           message.usage = usage
         }
+        const budgetReport = (dataPayload as any)?.budget
+        if (budgetReport) {
+          message.budget = budgetReport
+        }
+        const stopReason = String((dataPayload as any)?.stop_reason || '')
+        if (stopReason) {
+          message.stop_reason = stopReason
+        }
         if (message.agentEventStream && !isAwaitingInput(message)) {
           ;(message.agentEventStream as ChatMessage[]).push({
             type: 'agent_complete',
             total_duration_ms: dataPayload?.total_duration_ms || 0,
             total_steps: dataPayload?.total_steps || 0,
             usage,
+            budget: budgetReport,
+            stop_reason: stopReason,
           })
         }
         break
@@ -1747,6 +1780,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       if (Array.isArray(metadata?.artifacts)) existingMessage.artifacts = metadata.artifacts
       const usage = metadata?.usage || data.usage
       if (usage) existingMessage.usage = usage
+      if (metadata?.budget) existingMessage.budget = metadata.budget
+      if (metadata?.stop_reason) existingMessage.stop_reason = metadata.stop_reason
       existingMessage.artifactsCollecting = false
       existingMessage.thinking = false
       existingMessage.is_completed = true

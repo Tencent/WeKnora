@@ -282,6 +282,47 @@ func (s *AgentCollaboration) attach(
 		}
 	}
 	engine.SetCollaboration(b)
+	if b.Child == nil && b.Runtime != nil && b.Runtime.Store != nil && cfg.RunBudget().Active() {
+		account, err := b.Runtime.Store.RunBudgetAccount(ctx, b.Scope, messageID)
+		if err != nil {
+			return err
+		}
+		if account == nil {
+			usage := types.RunBudgetUsage{Limit: cfg.RunBudget()}
+			if err := b.Runtime.Store.SetCollaborationRunBudget(ctx, b.Scope, messageID, &usage); err != nil {
+				return err
+			}
+			account, err = b.Runtime.Store.RunBudgetAccount(ctx, b.Scope, messageID)
+			if err != nil {
+				return err
+			}
+		}
+		if account != nil {
+			b.RunBudgetTurnID = account.TurnID
+		}
+	}
+	if b.Runtime != nil && b.Runtime.Store != nil {
+		budgetTurnID := b.RunBudgetTurnID
+		if b.Child != nil {
+			budgetTurnID = b.Child.Run.RunBudgetTurnID
+		}
+		if budgetTurnID != "" {
+			account, err := b.Runtime.Store.RunBudgetAccount(ctx, b.Scope, budgetTurnID)
+			if err != nil {
+				return err
+			}
+			if account != nil {
+				ownerKey := b.Scope.ID
+				if b.Child != nil {
+					ownerKey = b.Child.Run.ID
+				}
+				engine.SetSharedRunBudget(&account.Usage)
+				engine.SetSharedRunBudgetSink(collaboration.StoreBudgetSink{
+					Store: b.Runtime.Store, Scope: b.Scope,
+				}, account.TurnID, ownerKey)
+			}
+		}
+	}
 	if s.artifactFiles != nil {
 		if source := s.artifactFiles(ctx, b, sessionID); source != nil {
 			if existing, err := registry.GetTool(tools.ToolReadFile); err == nil {
@@ -455,7 +496,9 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 		return result, err
 	}
 	w.Member.ConfigJSON = string(configJSON)
-	b := &collaboration.Binding{Runtime: s.Runtime, Scope: w.Scope, Child: &w}
+	b := &collaboration.Binding{
+		Runtime: s.Runtime, Scope: w.Scope, Child: &w, RunBudgetTurnID: w.Run.RunBudgetTurnID,
+	}
 	ctx = collaboration.WithBinding(ctx, b)
 	if err = s.Runtime.CheckOwner(ctx, w); err != nil {
 		return result, err
@@ -641,7 +684,7 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 				runErr = fmt.Errorf("agent executor panicked: %v", p)
 			}
 		}()
-		return s.sessions.AgentQA(
+		qaErr := s.sessions.AgentQA(
 			ctx,
 			&types.QARequest{
 				Resume:             resume,
@@ -659,6 +702,10 @@ func (s *AgentCollaboration) run(ctx context.Context, w collaboration.Work) (col
 			},
 			bus,
 		)
+		// Model calls are settled individually by the child engine's shared
+		// budget sink. Settling the whole answer usage again here would charge
+		// every child token twice.
+		return qaErr
 	}()
 
 	mu.Lock()

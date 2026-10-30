@@ -183,6 +183,27 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 	if result == nil {
 		return ""
 	}
+	output := compactToolOutputForHistory(toolName, result)
+	if result.EffectState == types.EffectUnspecified {
+		return output
+	}
+	prefix := ""
+	switch result.EffectState {
+	case types.EffectNone:
+		prefix = ""
+	case types.EffectNotStarted:
+		prefix = "[effect: not started] "
+	case types.EffectCommitted:
+		prefix = "[effect: committed] "
+	case types.EffectFailed:
+		prefix = "[effect: failed; safe to retry] "
+	case types.EffectUnknown:
+		prefix = "[effect: unknown; inspect state before retrying, do not replay blindly] "
+	}
+	return prefix + output
+}
+
+func compactToolOutputForHistory(toolName string, result *types.ToolResult) string {
 	if isSandboxContentTool(toolName) {
 		if rebuilt := compactSandboxHistory(result); rebuilt != "" {
 			if result.Success {

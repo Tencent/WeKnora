@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
@@ -102,6 +103,21 @@ type AgentEngine struct {
 	// mode: whether the client renders prompt cards and can answer them.
 	mode     types.RunMode
 	progress turnProgress
+	// runBudget is the active turn contract, shared by the loop and tool
+	// execution so a parallel write fan-out cannot overspend it.
+	runBudget *runBudgetState
+	// budgetPauser, when set, turns reaching the contract boundary into a
+	// resumable user decision. Nil keeps the deterministic fail-closed stop.
+	budgetPauser BudgetPauser
+	// budgetSink mirrors reservations and settlements into the collaboration's
+	// shared account. Nil keeps a standalone turn-local ledger.
+	budgetSink BudgetSink
+	// budgetTurnID is the account identity shared by the parent and children.
+	budgetTurnID string
+	// budgetOwnerKey prefixes this execution's idempotent account entries so
+	// parallel children do not overwrite each other's model/tool reservations.
+	budgetOwnerKey  string
+	budgetModelCall atomic.Int64
 	// Hold speculative parent prose until delegated work has been reviewed.
 	holdCollaborationAnswer bool
 }
@@ -111,6 +127,21 @@ type AgentEngine struct {
 // the answer; further injects stay queued for a follow-up turn instead of
 // stretching the same run indefinitely.
 const maxSteerOverruns = 1
+
+// BudgetPauser is the engine-facing budget prompt surface. Gate implements it;
+// a nil pauser keeps deterministic fail-closed stopping.
+type BudgetPauser interface {
+	PauseForBudget(ctx context.Context, req types.BudgetPauseRequest) (types.BudgetPauseDecision, error)
+}
+
+// BudgetSink is the durable collaboration account used by a parent and all
+// of its children. Reserve must be atomic across concurrent children.
+type BudgetSink interface {
+	ReserveBudget(ctx context.Context, turnID, key string, reserved types.RunBudgetUsed) error
+	SettleBudget(ctx context.Context, turnID, key string, actual types.RunBudgetUsed) error
+	ExtendBudget(ctx context.Context, turnID, extensionKey string, extension types.RunBudget) error
+	UsageBudget(ctx context.Context, turnID string) (types.RunBudgetUsage, error)
+}
 
 // ImageDescriberFunc generates a text description of an image.
 // Signature matches vlm.VLM.Predict so it can be injected without importing the vlm package.
@@ -385,7 +416,13 @@ func (e *AgentEngine) Execute(
 ) (*types.AgentState, error) {
 	logger.Infof(ctx, "[Agent] Starting execution: session=%s, message=%s, query_len=%d, context_msgs=%d",
 		sessionID, messageID, len(query), len(llmContext))
+	// Collaboration attach may have loaded a parent-owned cumulative account
+	// before Execute. Keep it; only standalone runs create a fresh ledger.
+	if e.runBudget == nil {
+		e.runBudget = newRunBudgetState(BudgetFromAgentConfig(e.config), time.Now())
+	}
 	// Ensure tools are cleaned up after execution
+	defer func() { e.runBudget = nil }()
 	defer e.toolRegistry.Cleanup(ctx)
 
 	common.PipelineInfo(ctx, "Agent", "execute_start", map[string]interface{}{
@@ -768,10 +805,35 @@ func (e *AgentEngine) executeLoop(
 		}
 	}
 
+	// Execute has already installed either the standalone budget or the
+	// collaboration-owned account. executeLoop must not replace it here.
+	defer func() {
+		if e.config == nil || !BudgetFromAgentConfig(e.config).Active() {
+			return
+		}
+		r := e.budgetSnapshot(state.TurnUsage.TotalTokens)
+		if state.Budget != nil {
+			r.StopReason = state.Budget.StopReason
+			r.Action = state.Budget.Action
+		}
+		state.Budget = &r
+	}()
 	guards := &loopGuards{}
 loop:
 	for e.withinIterationBudget(state.CurrentRound) || e.allowSteerOverrun {
 		e.allowSteerOverrun = false
+		if reason := e.budgetStopReason(state.TurnUsage.TotalTokens); reason != "" {
+			logger.Warnf(ctx, "[Agent] %s", budgetPauseNotice(reason, e.budgetSnapshot(state.TurnUsage.TotalTokens)))
+			switch e.handleBudgetBoundary(ctx, state, reason, sessionID, messageID) {
+			case budgetContinue:
+				// The owner extended the contract while the run was paused in
+				// memory; continue at this exact round boundary.
+			case budgetSuspended:
+				break loop
+			default:
+				break loop
+			}
+		}
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
 		case <-ctx.Done():
@@ -802,6 +864,16 @@ loop:
 		// manual finish calls throughout the many branches below.
 		outcome, iterErr := e.runReActIteration(ctx, state, &messages, tools,
 			sessionID, messageID, query, guards)
+		if errors.Is(iterErr, errTurnTokenBudgetInsufficient) {
+			switch e.handleBudgetBoundary(ctx, state, RunStopTokenBudget, sessionID, messageID) {
+			case budgetContinue:
+				continue loop
+			case budgetSuspended:
+				return state, nil
+			default:
+				return state, nil
+			}
+		}
 		if iterErr != nil {
 			return state, iterErr
 		}
@@ -827,7 +899,11 @@ loop:
 		if e.collaboration != nil && e.collaboration.Child == nil && e.collaborationOwnsFailure(ctx) {
 			return state, fmt.Errorf("parent iteration budget exhausted; remaining delegated work was cancelled")
 		}
-		if err := e.handleMaxIterations(ctx, query, state, sessionID, messages); err != nil {
+		if state.Budget != nil && state.Budget.StopReason != "" {
+			if err := e.finishBudgetStop(ctx, state, sessionID); err != nil {
+				return state, err
+			}
+		} else if err := e.handleMaxIterations(ctx, query, state, sessionID, messages); err != nil {
 			return state, err
 		}
 	}
@@ -1020,6 +1096,11 @@ func (e *AgentEngine) runReActIteration(
 			response.Usage.CacheReadTokens, response.Usage.CacheWriteTokens,
 			response.Usage.PromptCacheHitRate(), response.Usage.CacheStatus)
 	}
+	e.recordRoundBudgetUsage(
+		response,
+		e.estimateBudgetRequestTokens(*messagesPtr, tools, runtimeNotice),
+		state.CurrentRound,
+	)
 
 	// Every round in a row that the provider cut off at the completion cap.
 	// A truncated *answer* already ends the turn in analyzeResponse, so a run
@@ -1100,6 +1181,31 @@ func (e *AgentEngine) runReActIteration(
 		guards.lastResponseContent = ""
 	}
 
+	// A token budget can be exhausted by the response just received. Stop
+	// before creating or executing this round's tools: the contract forbids
+	// spending more work after the limit, and the final answer below uses the
+	// evidence already collected.
+	reason := e.runBudget.stopReasonNow(e.runBudget.tokensUsedSnapshot())
+	if reason != "" && len(response.ToolCalls) > 0 {
+		// Capture the whole response before any side effect. If the owner does
+		// not extend the budget, finish/cancel will execute none of these calls.
+		step := types.AgentStep{
+			UserMessagesBefore:   state.PendingSteerMessages,
+			BackgroundInjections: state.PendingBackground,
+			Iteration:            state.CurrentRound, Thought: response.Content,
+			ReasoningContent:   response.ReasoningContent,
+			ReasoningSignature: response.ReasoningSignature,
+			ReasoningMetadata:  response.ReasoningMetadata,
+			Timestamp:          time.Now(),
+		}
+		switch e.pauseBeforeToolBatch(ctx, state, step, response.ToolCalls, reason, sessionID, assistantMessageID) {
+		case budgetBatchSuspended, budgetBatchFinished:
+			return iterOutcomeBreak, nil
+		case budgetBatchContinue:
+			// The owner extended during the live wait. Continue into the
+			// normal batch path with the same captured response and ledger.
+		}
+	}
 	// Create agent step
 	step := types.AgentStep{
 		UserMessagesBefore:   state.PendingSteerMessages,
@@ -1376,6 +1482,33 @@ func (e *AgentEngine) runReActIteration(
 		})
 	}
 
+	// A mutating batch is charged atomically before any call in it runs. This
+	// keeps "one model response = one replay-safe unit": if the batch has more
+	// calls than the remaining write allowance, none of them run and the run
+	// pauses with the complete model response already captured.
+	if e.runBudget != nil && e.runBudget.limit.MaxWriteActions > 0 {
+		if cost := mutatingToolCallCount(ctx, response.ToolCalls); cost > 0 {
+			batchKey := fmt.Sprintf("writes:%d", round)
+			allowed, reason := e.reserveSharedWrites(ctx, batchKey, cost)
+			if !allowed {
+				switch e.pauseBeforeToolBatch(
+					ctx, state, step, response.ToolCalls, reason, sessionID, assistantMessageID,
+				) {
+				case budgetBatchContinue:
+					allowed, _ = e.reserveSharedWrites(ctx, batchKey, cost)
+					if !allowed {
+						_ = e.finishBudgetStop(ctx, state, sessionID)
+						return iterOutcomeBreak, nil
+					}
+				case budgetBatchSuspended, budgetBatchFinished:
+					return iterOutcomeBreak, nil
+				}
+			}
+			e.runBudget.beginWriteBatch()
+			defer e.runBudget.endWriteBatch()
+			defer e.settleSharedWrites(ctx, batchKey, cost)
+		}
+	}
 	// 3. Act: Execute tool calls
 	if !buttonsRan && e.runRoundTools(ctx, state, response, &step, sessionID, assistantMessageID) {
 		return iterOutcomeBreak, nil

@@ -909,6 +909,9 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
 			h.assistantMessage.Usage = usage
 		}
+		if budget, ok := data.Budget.(*types.RunBudgetUsage); ok && budget != nil {
+			h.assistantMessage.RunBudget = budget
+		}
 
 		// Check point /workspace before draining artifacts. Every tool has
 		// finished, and the turn's sandbox lease is still held, so the sandbox
@@ -1082,6 +1085,12 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	// The chat model that produced the usage, so a consumer can price it.
 	if data.ModelID != "" {
 		completeData["model_id"] = data.ModelID
+	}
+	if data.StopReason != "" {
+		completeData["stop_reason"] = data.StopReason
+	}
+	if budget, ok := data.Budget.(*types.RunBudgetUsage); ok && budget != nil {
+		completeData["budget"] = budget
 	}
 	if suspended != nil {
 		completeData["suspended"] = suspended

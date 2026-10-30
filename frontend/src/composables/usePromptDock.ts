@@ -26,7 +26,7 @@ function isDockable(e: PromptEvent): boolean {
   if (!DOCKED_TYPES.has(String(e?.type || '')) || e.resolved || !e.pending_id) return false
   // Lite host commands use the composer card, which shows the command and grant.
   if (e.type === 'tool_approval_required' && isHostApprovalEvent(e)) return false
-  if (e.type === 'agent_prompt_required' && e.kind !== 'ask_user') return false
+  if (e.type === 'agent_prompt_required' && !['ask_user', 'budget_pause'].includes(String(e.kind || ''))) return false
   if (submissions.has(e.pending_id)) return false
   if (e.suspended && e.expires_at) {
     const expires = Date.parse(String(e.expires_at))

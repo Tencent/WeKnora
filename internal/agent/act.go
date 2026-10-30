@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -615,11 +616,38 @@ func (e *AgentEngine) runToolCallAnswered(
 
 	var result *types.ToolResult
 	var err error
+	// Write slots for a complete model response are reserved atomically in
+	// runReActIteration before this function is called. This layer must not
+	// reserve again: doing so double-charged every mutating call and made a
+	// limit of N reject the Nth call. Keep the classification boundary here
+	// for direct/internal callers that invoke runToolCall without a batch.
+	if e.runBudget != nil && e.runBudget.limit.MaxWriteActions > 0 {
+		risk := agenttools.CallRisk(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+		mutating := risk.Mutates() || !risk.Valid()
+		if mutating && !e.runBudget.writeBatchActive() {
+			// A direct call outside a batch still has to pay exactly once.
+			ok, reason := e.runBudget.reserveWrite()
+			if !ok {
+				stateBudget := e.runBudget.snapshot(0)
+				return types.ToolCall{
+					ID: tc.ID, Name: tc.Function.Name, Args: args,
+					ProviderMetadata: tc.ProviderMetadata,
+					Result: &types.ToolResult{
+						Success:     false,
+						Error:       budgetPauseNotice(reason, stateBudget),
+						EffectState: types.EffectNotStarted,
+					},
+				}
+			}
+		}
+	}
+	var effectState types.EffectState
 	if len(tc.UnresolvedHandles) > 0 && !webFetchValidatesReferences(tc) {
 		// A temporary handle is not an application identity. Fail before tool
 		// execution so a hallucinated/stale kb://, doc://, chunk://, url://, iN or res:// token can
 		// never reach persistence, an external service, or a routing decision.
 		err = fmt.Errorf("tool arguments contain unresolved model handles: %v", tc.UnresolvedHandles)
+		effectState = types.EffectNotStarted
 	} else {
 		execCtx, toolCancel := context.WithTimeout(toolExecCtx, execTimeout)
 		result, err = e.toolRegistry.ExecuteTool(
@@ -630,9 +658,13 @@ func (e *AgentEngine) runToolCallAnswered(
 		if err == nil {
 			e.describeToolImages(toolCtx, result)
 		}
+		effectState = toolEffectState(ctx, tc, result, err)
 	}
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
+	if result != nil && result.EffectState == types.EffectUnspecified {
+		result.EffectState = effectState
+	}
 	toolCall := types.ToolCall{
 		Target:           target,
 		ID:               tc.ID,
@@ -646,8 +678,9 @@ func (e *AgentEngine) runToolCallAnswered(
 	if err != nil {
 		logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
 		toolCall.Result = &types.ToolResult{
-			Success: false,
-			Error:   err.Error(),
+			Success:     false,
+			Error:       err.Error(),
+			EffectState: effectState,
 		}
 	} else {
 		success := result != nil && result.Success
@@ -694,6 +727,42 @@ func (e *AgentEngine) runToolCallAnswered(
 	}
 
 	return toolCall
+}
+
+// toolEffectState records whether a mutating call may have changed external
+// state. A successful call is committed. An unknown MCP transport outcome is
+// never marked retry-safe. A read-only call is safe to observe again.
+func toolEffectState(
+	ctx context.Context, tc types.LLMToolCall, result *types.ToolResult, execErr error,
+) types.EffectState {
+	if result != nil && result.EffectState != types.EffectUnspecified {
+		return result.EffectState
+	}
+	risk := agenttools.CallRisk(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+	if !risk.Mutates() && risk.Valid() {
+		return types.EffectNone
+	}
+	if execErr != nil || result == nil {
+		return types.EffectUnknown
+	}
+	if result.Success {
+		return types.EffectCommitted
+	}
+	lower := strings.ToLower(result.Error)
+	if strings.Contains(lower, "outcome is unknown") || strings.Contains(lower, "uncertain") {
+		return types.EffectUnknown
+	}
+	// A tool may return a business error after partially committing. Only an
+	// explicit pre-execution rejection is retry-safe.
+	for _, marker := range []string{
+		"not executed", "before execution", "invalid parameter", "invalid argument",
+		"permission denied", "rejected by user", "does not allow",
+	} {
+		if strings.Contains(lower, marker) {
+			return types.EffectNotStarted
+		}
+	}
+	return types.EffectUnknown
 }
 
 // web_fetch validates each URL before any I/O. Unknown web references are item

@@ -38,6 +38,13 @@ type RunSnapshot struct {
 	Version                 int                     `json:"version"`
 	CollaborationWait       bool                    `json:"collaboration_wait,omitempty"`
 	BetweenRounds           bool                    `json:"between_rounds,omitempty"`
+	// PendingToolBatch means the model response and all its tool calls were
+	// captured before the first call ran. Resume starts at call 0.
+	PendingToolBatch bool `json:"pending_tool_batch,omitempty"`
+	// WriteBatchPaid records that the complete pending batch already owns its
+	// local and shared write reservation. Approval suspension happens after
+	// that reservation, so resume must not charge the same batch twice.
+	WriteBatchPaid bool `json:"write_batch_paid,omitempty"`
 	// Request is the caller's types.ResumableAgentRequest.
 	Request   json.RawMessage `json:"request,omitempty"`
 	Query     string          `json:"query"`
@@ -49,6 +56,9 @@ type RunSnapshot struct {
 	KnowledgeRefs  []*types.SearchResult `json:"knowledge_refs,omitempty"`
 	CurrentRound   int                   `json:"current_round"`
 	TurnUsage      types.TokenUsage      `json:"turn_usage"`
+	// Budget is the paused run's cumulative contract ledger. Nil preserves
+	// snapshots written before run contracts existed.
+	Budget *types.RunBudgetUsage `json:"budget,omitempty"`
 
 	PendingRound PendingRound `json:"pending_round"`
 }
@@ -286,8 +296,84 @@ func (e *AgentEngine) snapshot(blocked int) (*RunSnapshot, error) {
 		KnowledgeRefs:           append([]*types.SearchResult(nil), p.state.KnowledgeRefs...),
 		CurrentRound:            p.state.CurrentRound,
 		TurnUsage:               p.state.TurnUsage,
+		Budget:                  p.state.Budget,
+		WriteBatchPaid:          e.runBudget.writeBatchActive(),
 		PendingRound:            PendingRound{Step: step, Calls: calls, BlockedIndex: blocked},
 	}, nil
+}
+
+// betweenRoundSnapshot captures the durable state after a complete round,
+// including all tool results already appended to CompletedSteps and the
+// cumulative budget ledger. Unlike snapshot(), it does not require a blocked
+// call: a budget pause happens only after the round is safely finished.
+func (e *AgentEngine) betweenRoundSnapshot(state *types.AgentState) ([]byte, int, error) {
+	e.progress.mu.Lock()
+	defer e.progress.mu.Unlock()
+	p := &e.progress
+	if p.state == nil || state == nil {
+		return nil, 0, errors.New("no turn in progress")
+	}
+	snap := RunSnapshot{
+		CollaborationDeliveries: append([]CollaborationDelivery(nil), p.collaborationDeliveries...),
+		CollaborationCursor:     e.collaborationCursor(),
+		Version:                 RunSnapshotVersion,
+		BetweenRounds:           true,
+		MCPToolRefs:             e.toolRegistry.MCPExposureSnapshot(),
+		Request:                 e.suspendRequest,
+		Query:                   p.query,
+		ImageURLs:               append([]string(nil), p.imageURLs...),
+		UserMessages:            maps.Clone(p.userMessages),
+		CompletedSteps:          append([]types.AgentStep(nil), state.RoundSteps...),
+		KnowledgeRefs:           append([]*types.SearchResult(nil), state.KnowledgeRefs...),
+		CurrentRound:            state.CurrentRound,
+		TurnUsage:               state.TurnUsage,
+		Budget:                  state.Budget,
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return nil, 0, fmt.Errorf("encode run snapshot: %w", err)
+	}
+	return stripJSONNUL(data), RunSnapshotVersion, nil
+}
+
+// pendingToolBatchSnapshot captures a model response that has not executed any
+// tool yet. This is the safe unit for a token/contract pause: extending resumes
+// the exact batch; finishing or canceling performs no side effect.
+func (e *AgentEngine) pendingToolBatchSnapshot(
+	state *types.AgentState, step types.AgentStep, calls []types.LLMToolCall,
+) ([]byte, int, error) {
+	e.progress.mu.Lock()
+	defer e.progress.mu.Unlock()
+	p := &e.progress
+	if p.state == nil || state == nil || len(calls) == 0 {
+		return nil, 0, errors.New("no pending tool batch")
+	}
+	pending := make([]PendingCall, len(calls))
+	for i, tc := range calls {
+		pending[i] = PendingCall{
+			ID: agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i), Name: tc.Function.Name,
+			Arguments: tc.Function.Arguments, UnresolvedHandles: tc.UnresolvedHandles,
+			ProviderMetadata: tc.ProviderMetadata,
+		}
+	}
+	step.ToolCalls = nil
+	snap := RunSnapshot{
+		CollaborationDeliveries: append([]CollaborationDelivery(nil), p.collaborationDeliveries...),
+		CollaborationCursor:     e.collaborationCursor(), Version: RunSnapshotVersion,
+		MCPToolRefs: e.toolRegistry.MCPExposureSnapshot(), Request: e.suspendRequest,
+		Query: p.query, ImageURLs: append([]string(nil), p.imageURLs...),
+		UserMessages: maps.Clone(p.userMessages), CompletedSteps: append([]types.AgentStep(nil), state.RoundSteps...),
+		KnowledgeRefs: append([]*types.SearchResult(nil), state.KnowledgeRefs...),
+		CurrentRound:  state.CurrentRound, TurnUsage: state.TurnUsage, Budget: state.Budget,
+		WriteBatchPaid:   false,
+		PendingToolBatch: true,
+		PendingRound:     PendingRound{Step: step, Calls: pending, BlockedIndex: 0},
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return nil, 0, fmt.Errorf("encode pending tool snapshot: %w", err)
+	}
+	return stripJSONNUL(data), RunSnapshotVersion, nil
 }
 
 // suspensionOf reports whether a finished call is in fact waiting on a prompt.

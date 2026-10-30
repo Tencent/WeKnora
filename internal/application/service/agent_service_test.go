@@ -914,6 +914,17 @@ func TestValidateConfigMaxIterationsUnlimited(t *testing.T) {
 	require.Error(t, s.ValidateConfig(tooHigh))
 }
 
+func TestValidateConfigRejectsNegativeRunContractLimits(t *testing.T) {
+	s := &agentService{}
+	for _, cfg := range []*types.AgentConfig{
+		{MaxRunTokens: -1},
+		{MaxRunSeconds: -1},
+		{MaxWriteActions: -1},
+	} {
+		require.Error(t, s.ValidateConfig(cfg))
+	}
+}
+
 func TestValidInstallDirUsesTheHostVersionsRoot(t *testing.T) {
 	versions := "/Users/dev/.weknora/skills/.versions"
 	s := &agentService{hostSkillVersionsRoot: versions}

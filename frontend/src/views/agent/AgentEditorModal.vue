@@ -711,6 +711,32 @@
             </div>
           </div>
 
+          <!-- Run Contract: cumulative limits for one complete turn. Zero is uncapped. -->
+          <div v-if="isAgentMode" class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.runBudget.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.runBudget.desc') }}</p>
+              <p class="desc-hint">{{ $t('agentEditor.runBudget.hint') }}</p>
+            </div>
+            <div class="setting-control run-budget-controls">
+              <label class="run-budget-field">
+                <span>{{ $t('agentEditor.runBudget.tokens') }}</span>
+                <t-input-number v-model="formData.config.max_run_tokens" :min="0" :max="100000000"
+                  theme="column" clearable :placeholder="$t('agentEditor.runBudget.uncapped')" />
+              </label>
+              <label class="run-budget-field">
+                <span>{{ $t('agentEditor.runBudget.seconds') }}</span>
+                <t-input-number v-model="formData.config.max_run_seconds" :min="0" :max="86400"
+                  theme="column" clearable :placeholder="$t('agentEditor.runBudget.uncapped')" />
+              </label>
+              <label class="run-budget-field">
+                <span>{{ $t('agentEditor.runBudget.writes') }}</span>
+                <t-input-number v-model="formData.config.max_write_actions" :min="0" :max="10000"
+                  theme="column" clearable :placeholder="$t('agentEditor.runBudget.uncapped')" />
+              </label>
+            </div>
+          </div>
+
           <!-- LLM 调用超时（Agent 模式） -->
           <div v-if="isAgentMode" class="setting-row">
             <div class="setting-info">
@@ -2908,6 +2934,9 @@ const defaultFormData = {
     citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
+    max_run_tokens: 0,
+    max_run_seconds: 0,
+    max_write_actions: 0,
     llm_call_timeout: 120,  // 120 seconds
     allowed_tools: [] as string[],
     reflection_enabled: false,
@@ -5461,6 +5490,8 @@ const handleSave = async () => {
   }
 }
 
+.run-budget-controls { display: grid; gap: 10px; min-width: 240px; }
+.run-budget-field { display: grid; grid-template-columns: 1fr 150px; align-items: center; gap: 10px; color: var(--td-text-color-secondary); }
 .setting-control {
   flex: 1 1 58%;
   min-width: 0;

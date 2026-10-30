@@ -55,6 +55,10 @@ export interface CustomAgentConfig {
 
   // ===== Agent模式设置 =====
   max_iterations?: number;          // 最大迭代次数；-1 表示不限制
+  // 单次完整任务的三项累计预算；0 表示不限制。共享给父子任务。
+  max_run_tokens?: number;
+  max_run_seconds?: number;
+  max_write_actions?: number;
   llm_call_timeout?: number;        // LLM调用超时时间（秒）
   allowed_tools?: string[] | null;  // 允许的工具；null/未设置 = 后端默认工具，[] = 不使用内置工具
   reflection_enabled?: boolean;     // 是否启用反思
