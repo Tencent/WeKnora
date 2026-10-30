@@ -348,6 +348,9 @@ func TestDeleteByChunkIDList_SQLShape(t *testing.T) {
 	repo, mock, _, cleanup := newTestRepo(t)
 	defer cleanup()
 
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema\.tables WHERE TABLE_SCHEMA = \?`).
+		WithArgs("weknora").
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("weknora_embeddings_768"))
 	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_768.* WHERE chunk_id IN \(\?, \?\)`).
 		WithArgs("c1", "c2").
 		WillReturnResult(sqlmock.NewResult(0, 2))
