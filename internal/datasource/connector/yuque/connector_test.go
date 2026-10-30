@@ -300,6 +300,93 @@ func TestConnector_FetchAll_SkipsUnsupportedFormats(t *testing.T) {
 	}
 }
 
+func TestConnector_FetchAll_SkipsEmptyBodiesAndHTMLShells(t *testing.T) {
+	f := newFakeYuque()
+	defer f.Close()
+	f.handleJSON("/api/v2/repos/14/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 601, Type: "Doc", Status: "1", Title: "Empty", Slug: "empty", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		{ID: 602, Type: "Doc", Status: "1", Title: "Shell", Slug: "shell", ContentUpdatedAt: "2026-04-20T11:00:00Z"},
+		{ID: 603, Type: "Doc", Status: "1", Title: "Real", Slug: "real", ContentUpdatedAt: "2026-04-20T12:00:00Z"},
+	}})
+	emptyBody := " \n\t"
+	f.handleJSON("/api/v2/repos/docs/601", 200, v2DocDetailResponse{
+		Data: v2DocDetail{
+			ID: 601, Title: "Empty", Format: "markdown", Body: emptyBody, Status: "1",
+			ContentUpdatedAt: "2026-04-20T10:00:00Z",
+		},
+	})
+	shellBody := "<!doctype html>\n<html data-kumuhana=\"default\">" +
+		"<head><script src=\"/app.js\"></script></head></html>"
+	f.handleJSON("/api/v2/repos/docs/602", 200, v2DocDetailResponse{
+		Data: v2DocDetail{
+			ID: 602, Title: "Shell", Format: "markdown", Body: shellBody, Status: "1",
+			ContentUpdatedAt: "2026-04-20T11:00:00Z",
+		},
+	})
+	f.handleJSON("/api/v2/repos/docs/603", 200, v2DocDetailResponse{
+		Data: v2DocDetail{
+			ID: 603, Title: "Real", Format: "markdown", Body: "# real", Status: "1",
+			ContentUpdatedAt: "2026-04-20T12:00:00Z",
+		},
+	})
+
+	items, err := NewConnector().FetchAll(context.Background(), makeDSConfig(f, []string{"14"}), []string{"14"})
+	if err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("want 3 items (2 skips + 1 doc), got %d: %+v", len(items), items)
+	}
+	skipped := map[string]*types.FetchedItem{}
+	for i := range items {
+		if items[i].ExternalID == "601" || items[i].ExternalID == "602" {
+			skipped[items[i].ExternalID] = &items[i]
+		}
+	}
+	for _, id := range []string{"601", "602"} {
+		it := skipped[id]
+		if it == nil {
+			t.Fatalf("missing skip placeholder for %s", id)
+		}
+		// The URL must be empty: a placeholder with a URL falls through to the
+		// generic URL ingestion path, which downloads the Yuque SPA shell.
+		if it.URL != "" {
+			t.Errorf("item %s URL = %q, want empty so the sync cannot download the web page", id, it.URL)
+		}
+		if len(it.Content) != 0 {
+			t.Errorf("item %s Content = %q, want empty", id, it.Content)
+		}
+		if it.Metadata["skip_reason"] == "" {
+			t.Errorf("item %s should carry skip_reason, got %+v", id, it.Metadata)
+		}
+	}
+}
+
+func TestIsHTMLPageShell(t *testing.T) {
+	shells := []string{
+		"<!doctype html><html></html>",
+		"  \n<!DOCTYPE HTML>\n<html></html>",
+		"\ufeff<html data-kumuhana=\"default\"></html>",
+		"<html><head><script src=\"/app.js\"></script></head></html>",
+	}
+	for _, body := range shells {
+		if !isHTMLPageShell(body) {
+			t.Errorf("isHTMLPageShell(%q) = false, want true", body)
+		}
+	}
+	markdown := []string{
+		"# Title",
+		"<div>inline HTML is allowed in Markdown</div>",
+		"```html\n<!doctype html>\n```",
+		"<!-- a comment before prose -->\n\n# Title",
+	}
+	for _, body := range markdown {
+		if isHTMLPageShell(body) {
+			t.Errorf("isHTMLPageShell(%q) = true, want false", body)
+		}
+	}
+}
+
 func TestConnector_FetchAll_SkipsNonDocTypes(t *testing.T) {
 	f := newFakeYuque()
 	defer f.Close()
