@@ -6,6 +6,7 @@
       <span v-if="attention" class="child-agent-tab-dot waiting" :title="t('agentStream.collaboration.status.waiting')" />
       <slot name="parent">{{ t('agentStream.collaboration.mainConversation') }}</slot>
     </button>
+    <slot name="beside" />
     <div class="child-agent-tabs-scroll">
     <div v-for="(tab, index) in tabs" :key="tab.id" class="child-agent-tab-entry" :class="{ 'is-active': activeId === tab.id }">
       <button type="button" role="tab" class="child-agent-tab" :aria-selected="activeId === tab.id"

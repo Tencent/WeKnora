@@ -243,6 +243,47 @@ func TestList_CategoryPathFilterMatchesOnSQLite(t *testing.T) {
 	assert.Equal(t, "entity/in-people", got[0].Slug)
 }
 
+func TestList_QuerySearchesSQLiteTextFieldsAndEscapesWildcards(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	title := makeWikiPage("kb-search", "entity/title", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	title.Title = "SQLite Search Guide"
+	content := makeWikiPage("kb-search", "entity/content", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	content.Title = "Content page"
+	content.Content = "The important phrase is stored in CONTENT."
+	alias := makeWikiPage("kb-search", "entity/alias", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	alias.Title = "Alias page"
+	alias.Aliases = types.StringArray{"SQLiteAlias"}
+	wildcard := makeWikiPage("kb-search", "entity/wildcard", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	wildcard.Title = "literal_%_token"
+	for _, page := range []*types.WikiPage{title, content, alias, wildcard} {
+		require.NoError(t, repo.Create(ctx, page))
+	}
+
+	for _, tc := range []struct {
+		query string
+		slug  string
+	}{
+		{query: "search guide", slug: "entity/title"},
+		{query: "important phrase", slug: "entity/content"},
+		{query: "sqlitealias", slug: "entity/alias"},
+		{query: "literal_%", slug: "entity/wildcard"},
+	} {
+		pages, total, err := repo.List(ctx, &types.WikiPageListRequest{
+			KnowledgeBaseID: "kb-search",
+			Query:           tc.query,
+			Page:            1,
+			PageSize:        10,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), total, tc.query)
+		require.Len(t, pages, 1, tc.query)
+		assert.Equal(t, tc.slug, pages[0].Slug, tc.query)
+	}
+}
+
 // TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
 // child listing ordered by sort_order/name, find-by-name, page counting under
 // a folder, and that ListDistinctCategoryPaths reflects the folder paths.
@@ -948,4 +989,36 @@ func TestSearchAcross_SQLiteLikeEscapesWildcards(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pages, 1)
 	assert.Equal(t, literalUnderscore.ID, pages[0].ID)
+}
+
+func TestWikiTitleTrigramsWordBoundaries(t *testing.T) {
+	for _, tt := range []struct{ name, left, right string }{
+		{"punctuation", "a-b", "a b"},
+		{"word order", "a b", "b a"},
+		{"repeated whitespace", "a\t  b", "a b"},
+		{"unicode words", "甲-乙", "甲 乙"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, wikiTitleTrigrams(tt.left), wikiTitleTrigrams(tt.right))
+			assert.Equal(t, 1.0, wikiTrigramJaccard(wikiTitleTrigrams(tt.left), wikiTitleTrigrams(tt.right)))
+		})
+	}
+	assert.Empty(t, wikiTitleTrigrams("--- !!!"))
+	assert.Equal(t, map[string]struct{}{
+		"  f": {}, " fo": {}, "foo": {}, "oo ": {},
+		"  b": {}, " ba": {}, "bar": {}, "ar ": {},
+	}, wikiTitleTrigrams("foo|bar"))
+}
+
+func TestFindSimilarPagesSQLitePunctuationVariants(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	page := makeWikiPage("kb-a", "entity/a-b", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	page.Title = "A-B"
+	require.NoError(t, repo.Create(context.Background(), page))
+
+	pages, err := repo.FindSimilarPages(context.Background(), "kb-a", "A B", nil, 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	assert.Equal(t, page.Slug, pages[0].Slug)
 }

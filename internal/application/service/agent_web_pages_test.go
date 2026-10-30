@@ -117,8 +117,8 @@ func TestWebPageReaderRegistrationPreservesExistingReader(t *testing.T) {
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
 	svc := &agentService{db: db}
 	registry := tools.NewToolRegistry()
-	registry.RegisterTool(tools.NewWebFetchTool())
-	registry.RegisterTool(tools.NewWebSearchTool(nil, 5, ""))
+	registry.RegisterTool(tools.NewWebFetchTool(nil))
+	registry.RegisterTool(tools.NewWebSearchTool(nil, 5))
 	existing := tools.NewReadFileTool(nil)
 	registry.RegisterTool(existing)
 	svc.registerWebPageFiles(ctx, registry, &types.AgentConfig{WebSearchEnabled: true}, "session", "message")
@@ -127,12 +127,12 @@ func TestWebPageReaderRegistrationPreservesExistingReader(t *testing.T) {
 	require.Same(t, existing, actual)
 	require.Contains(t, actual.Description(), "web://")
 	withoutSandbox := tools.NewToolRegistry()
-	withoutSandbox.RegisterTool(tools.NewWebFetchTool())
+	withoutSandbox.RegisterTool(tools.NewWebFetchTool(nil))
 	svc.registerWebPageFiles(ctx, withoutSandbox, &types.AgentConfig{WebSearchEnabled: true}, "session", "message")
 	_, err = withoutSandbox.GetTool(tools.ToolReadFile)
 	require.NoError(t, err)
 	disabled := tools.NewToolRegistry()
-	disabled.RegisterTool(tools.NewWebFetchTool())
+	disabled.RegisterTool(tools.NewWebFetchTool(nil))
 	svc.registerWebPageFiles(ctx, disabled, &types.AgentConfig{}, "session", "message")
 	_, err = disabled.GetTool(tools.ToolReadFile)
 	require.Error(t, err)
@@ -144,7 +144,7 @@ func TestSharedAgentWebPagesUseSessionOwnerStorageScope(t *testing.T) {
 	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
 	ctx = types.WithSandboxTenantID(ctx, 7)
 	registry := tools.NewToolRegistry()
-	registry.RegisterTool(tools.NewWebFetchTool())
+	registry.RegisterTool(tools.NewWebFetchTool(nil))
 	var storageTenant uint64
 	resolver := &webPageStorageResolver{resolve: func(tenant *types.Tenant) {
 		storageTenant = tenant.ID

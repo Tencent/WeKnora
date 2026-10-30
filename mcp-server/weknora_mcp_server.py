@@ -531,9 +531,14 @@ class WeKnoraClient:
             # even when breaking early on a 'complete' event.
             with response:
                 response.raise_for_status()
+                first_line = True
                 for raw_line in response.iter_lines():
                     if isinstance(raw_line, bytes):
                         raw_line = raw_line.decode("utf-8")
+                    if first_line:
+                        # SSE ignores exactly one BOM at the start of the stream.
+                        raw_line = raw_line.removeprefix("\ufeff")
+                        first_line = False
                     if raw_line:
                         field, _, value = raw_line.partition(":")
                         if field == "data":
@@ -575,6 +580,8 @@ class WeKnoraClient:
                         )
                     elif response_type == "complete":
                         break
+                else:
+                    raise RequestException("SSE stream ended before complete event")
 
             return {
                 "answer": "".join(answer_chunks),

@@ -92,6 +92,7 @@ type AgentEngine struct {
 	// at the same two boundaries as steer. Nil disables them.
 	backgroundRun   BackgroundRun
 	workspaceLayout sandbox.WorkspaceLayout
+	desktopEnabled  bool
 	// suspendable lets a user prompt end the run so it can be resumed later;
 	// suspendRequest is saved with the run for that (see EnableSuspension).
 	suspendable    bool
@@ -196,6 +197,15 @@ func (e *AgentEngine) SetWorkspaceLayout(layout sandbox.WorkspaceLayout) {
 	e.workspaceLayout = layout
 }
 
+// SetDesktopEnabled tells the system prompt that the session's sandbox has a
+// graphical desktop the user can watch.
+func (e *AgentEngine) SetDesktopEnabled(enabled bool) {
+	if e == nil {
+		return
+	}
+	e.desktopEnabled = enabled
+}
+
 func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromptOptions {
 	opts := &BuildSystemPromptOptions{
 		Language:         types.LanguageNameFromContext(ctx),
@@ -204,6 +214,7 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 		MemoryPrompt:     e.memoryPrompt,
 		ProtocolPrompt:   e.modelContext.ProtocolPrompt(),
 		WorkspaceLayout:  e.workspaceLayout,
+		DesktopEnabled:   e.desktopEnabled,
 	}
 	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
 		opts.SkillsMetadata = e.skillsManager.GetAllMetadata()
@@ -544,9 +555,8 @@ func (e *AgentEngine) withinIterationBudget(round int) bool {
 }
 
 // loopGuards is the per-turn state the ReAct loop uses to notice it is not
-// making progress. All three counters exist because a model can keep the loop
-// spinning without ever finishing: empty answers, the same answer repeated,
-// and rounds cut off at the completion-token cap.
+// making progress. The counters cover empty answers, repeated answers,
+// completion-token cutoffs, and identical failed tool calls.
 type loopGuards struct {
 	// emptyRetries counts nudges sent after a stop with no content.
 	emptyRetries         int
@@ -563,6 +573,48 @@ type loopGuards struct {
 	// consecutiveLength counts rounds in a row that the provider cut off at
 	// the completion-token cap.
 	consecutiveLength int
+	// failedToolCallSignature and consecutiveFailedToolCalls track identical
+	// failed calls across rounds. A single guidance message is sent per streak.
+	failedToolCallSignature    string
+	consecutiveFailedToolCalls int
+	failedToolCallNudged       bool
+}
+
+// recordFailedToolCall tracks consecutive failures of the same model-facing
+// tool name and arguments. A successful or different call breaks the streak.
+func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, bool) {
+	if call.Result != nil && call.Result.Success {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	if call.Name == "" {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	args, err := json.Marshal(call.Args)
+	if err != nil {
+		g.resetFailedToolCallStreak()
+		return "", 0, false
+	}
+	signature := call.Name + "\x00" + string(args)
+	if signature != g.failedToolCallSignature {
+		g.failedToolCallSignature = signature
+		g.consecutiveFailedToolCalls = 1
+		g.failedToolCallNudged = false
+	} else {
+		g.consecutiveFailedToolCalls++
+	}
+	if g.consecutiveFailedToolCalls >= maxConsecutiveFailedToolCalls && !g.failedToolCallNudged {
+		g.failedToolCallNudged = true
+		return call.Name, g.consecutiveFailedToolCalls, true
+	}
+	return "", g.consecutiveFailedToolCalls, false
+}
+
+func (g *loopGuards) resetFailedToolCallStreak() {
+	g.failedToolCallSignature = ""
+	g.consecutiveFailedToolCalls = 0
+	g.failedToolCallNudged = false
 }
 
 // closeAnswerStream emits the Done:true marker for an answer that is actually
@@ -775,7 +827,9 @@ loop:
 		if e.collaboration != nil && e.collaboration.Child == nil && e.collaborationOwnsFailure(ctx) {
 			return state, fmt.Errorf("parent iteration budget exhausted; remaining delegated work was cancelled")
 		}
-		e.handleMaxIterations(ctx, query, state, sessionID, messages)
+		if err := e.handleMaxIterations(ctx, query, state, sessionID, messages); err != nil {
+			return state, err
+		}
 	}
 
 	return state, nil
@@ -1018,6 +1072,7 @@ func (e *AgentEngine) runReActIteration(
 	// round, which used to land in the else branch and reset the counter, so
 	// the guard could never fire on the one shape that needs it most (#3446).
 	if len(response.ToolCalls) == 0 {
+		guards.resetFailedToolCallStreak()
 		if guards.sawPlainRound && response.Content == guards.lastResponseContent {
 			guards.consecutiveSameContent++
 		} else {
@@ -1328,9 +1383,31 @@ func (e *AgentEngine) runReActIteration(
 	toolCallCount = len(step.ToolCalls)
 
 	// 4. Observe: Add tool results to messages and write to context
+	var (
+		failedToolName     string
+		failedToolAttempts int
+	)
+	for _, toolCall := range step.ToolCalls {
+		if name, attempts, shouldNudge := guards.recordFailedToolCall(toolCall); shouldNudge {
+			failedToolName = name
+			failedToolAttempts = attempts
+		}
+	}
+
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
 	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
+	if failedToolName != "" {
+		logger.Warnf(ctx, "[Agent][Round-%d] Repeated failed call to %q (%d attempts); "+
+			"asking the model to change strategy", round, failedToolName, failedToolAttempts)
+		guidance := fmt.Sprintf(
+			"The tool %q has failed %d consecutive times with identical arguments. "+
+				"Do not call it again with those arguments. Switch to a different tool "+
+				"or use another approach to complete the task.",
+			failedToolName, failedToolAttempts,
+		)
+		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: guidance})
+	}
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
@@ -1428,6 +1505,18 @@ const (
 	toolImageDescribeConcurrency = 4
 	toolImageDescribeTimeout     = 120 * time.Second
 )
+
+// DescribeDataURIImages turns user-uploaded data URIs into text with the
+// configured VLM. A chat model that cannot see images uses this instead of
+// dropping the upload. Uploads ask for a full read; tool results keep the
+// prompt that came with the tool call.
+func (e *AgentEngine) DescribeDataURIImages(ctx context.Context, imageDataURIs []string) []string {
+	prompts := make([]string, len(imageDataURIs))
+	for i := range prompts {
+		prompts[i] = toolImageFullPrompt
+	}
+	return e.describeImages(ctx, imageDataURIs, prompts)
+}
 
 // describeImages asks the configured VLM to describe tool result images, a
 // few at a time, each under its own timeout so a slow image cannot starve the

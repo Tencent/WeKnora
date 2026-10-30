@@ -80,7 +80,11 @@ func (op Operation) Build(params map[string]json.RawMessage) (Call, error) {
 			}
 			continue
 		}
-		value, err := decodeParam(p, raw)
+		// Manual knowledge content is a complete Markdown document; trimming its
+		// edges can change an indented first code block or a final hard break.
+		preserveContent := p.In == InBody && p.wireKey() == "content" &&
+			(op.ID == "knowledge.create_manual" || op.ID == "knowledge.update_manual")
+		value, err := decodeParam(p, raw, preserveContent)
 		if err != nil {
 			return Call{}, err
 		}
@@ -200,18 +204,20 @@ func isJSONNull(raw json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
-func decodeParam(p Param, raw json.RawMessage) (any, error) {
+func decodeParam(p Param, raw json.RawMessage, preserveContent bool) (any, error) {
 	switch p.Type {
 	case TypeString:
 		var s string
 		if err := json.Unmarshal(raw, &s); err != nil {
 			return nil, paramErr(p.Name, "must be a string")
 		}
-		s = strings.TrimSpace(s)
+		if !preserveContent {
+			s = strings.TrimSpace(s)
+		}
 		if err := validateString(p, s); err != nil {
 			return nil, err
 		}
-		if s == "" && p.Required && !p.AllowEmpty {
+		if strings.TrimSpace(s) == "" && p.Required && !p.AllowEmpty {
 			return nil, paramErr(p.Name, "must not be empty")
 		}
 		return s, nil

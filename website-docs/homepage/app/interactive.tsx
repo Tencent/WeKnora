@@ -5,7 +5,34 @@ import { Icon } from "./ui";
 import { getThemeSnapshot, subscribeToTheme, toggleTheme } from "./theme";
 import { siteNavigation, repositoryUrl, headerIcons, homeAssets } from "../../shared/header";
 import s from "./home.module.css";
-const videoUrl = "https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c";
+const productFilms = [
+  {
+    id: "v090",
+    label: "v0.9.0 发布",
+    title: "v0.9.0 工作助手",
+    summary: "WeKnora 助手、多智能体协作、自动化与执行权限",
+    duration: "02:45",
+    durationLabel: "2 分 45 秒",
+    quality: "1080P · 60 FPS",
+    audio: "英文配音与字幕",
+    source: "/docs/videos/weknora-v0.9.0-en.mp4",
+    original: "https://github.com/user-attachments/assets/de0e490a-e738-405e-bb3a-64b63edd7278",
+    poster: "/docs/videos/weknora-v0.9.0-poster.png",
+  },
+  {
+    id: "overview",
+    label: "产品全览",
+    title: "WeKnora 产品全览",
+    summary: "知识问答、Agent 推理与 Wiki 整理",
+    duration: "02:25",
+    durationLabel: "2 分 25 秒",
+    quality: "1080P",
+    audio: "英文旁白 / 中英字幕",
+    source: "https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c",
+    original: "https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c",
+    poster: `${homeAssets}/product/agent-chat.png`,
+  },
+];
 
 function HeaderIcon({ name }: { name: string }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={headerIcons[name]} /></svg>;
@@ -46,24 +73,38 @@ export function Header() {
 }
 export function ProductVideo() {
   const player = useRef<HTMLVideoElement>(null);
+  const [selected, setSelected] = useState(0);
   const [started, setStarted] = useState(false);
   const [failed, setFailed] = useState(false);
+  const film = productFilms[selected];
   function play() {
     setStarted(true);
     const video = player.current;
     if (video) {
-      video.src = videoUrl;
+      video.src = film.source;
       video.play().catch(() => { /* Keep native controls available when another playback gesture is required. */ });
       video.focus();
     }
   }
   return <figure id="demo" className={s.videoFigure}>
-    <div className={s.videoTop}><span>产品演示 <span className={s.videoDot}>/</span> PRODUCT FILM</span><span>02:25 <span className={s.videoDot}>/</span> 1080P</span></div>
-    <div className={s.videoStage}>
-      <video ref={player} controls={started} playsInline preload="none" poster={`${homeAssets}/product/agent-chat.png`} aria-label="WeKnora 产品介绍，英文旁白，中英字幕" aria-describedby="video-caption" tabIndex={started ? 0 : -1} onError={() => setFailed(true)} />
-      {!started && <button className={s.videoCover} onClick={play} aria-label="播放 WeKnora 产品介绍视频，2 分 25 秒"><span className={s.playCircle}><Icon name="play" /></span><span className={s.videoCoverTitle}>WeKnora 产品演示</span><span className={s.videoCoverHint}>播放产品介绍 · 2 分 25 秒</span></button>}
-      {failed && <div className={s.videoError} role="status"><p>视频暂时无法加载</p><a href={videoUrl} target="_blank" rel="noreferrer">在 GitHub 打开原视频 <Icon name="external" /></a></div>}
+    <div className={s.videoTop}>
+      <div className={s.videoChoices} role="group" aria-label="选择演示视频">
+        {productFilms.map((entry, index) => <button key={entry.id} type="button" aria-label={entry.title} aria-pressed={selected === index} aria-controls="product-video-stage" onClick={() => {
+          if (index === selected) return;
+          const video = player.current;
+          if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
+          setSelected(index);
+          setStarted(false);
+          setFailed(false);
+        }}>{entry.label}</button>)}
+      </div>
+      <span className={s.videoMeta}>{film.duration}<span className={s.videoQuality}> / {film.quality}</span></span>
     </div>
-    <figcaption id="video-caption" className={s.videoCaption}><span>知识问答、Agent 推理与 Wiki 整理</span><a href={videoUrl} target="_blank" rel="noreferrer">README 产品视频 · 英文旁白 / 中英字幕 <Icon name="external" /></a></figcaption>
+    <div id="product-video-stage" className={s.videoStage}>
+      <video key={film.id} ref={player} controls={started} playsInline preload="none" poster={film.poster} aria-label={`${film.title}，${film.audio}`} aria-describedby="video-caption" tabIndex={started ? 0 : -1} onError={() => setFailed(true)} />
+      {!started && <button className={s.videoCover} onClick={play} aria-label={`播放 ${film.title}视频，${film.durationLabel}`}><span className={s.playCircle}><Icon name="play" /></span><span className={s.videoCoverHint}>播放 · {film.durationLabel}</span></button>}
+      {failed && <div className={s.videoError} role="status"><p>视频暂时无法加载</p><a href={film.original} target="_blank" rel="noreferrer">在 GitHub 打开原视频 <Icon name="external" /></a></div>}
+    </div>
+    <figcaption id="video-caption" className={s.videoCaption}><span>{film.summary}</span><a href={film.original} target="_blank" rel="noreferrer">{film.audio} <Icon name="external" /></a></figcaption>
   </figure>;
 }

@@ -213,6 +213,8 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `OLLAMA_OPTIONAL` | true | Ollama 不可用时仅告警不阻断启动 |
 | `BATCH_EMBED_SIZE` | 空 | 批量 embedding 大小 |
 | `VLM_HTTP_TIMEOUT_SECONDS` | 180 | VLM 单次请求超时 |
+| `GENERATE_QUESTIONS_MAX_TOKENS` | 2048 | 文档问题生成的补全预算，推理模型需同时容纳隐藏思考 token |
+| `VLM_MAX_TOKENS` | 5000 | 远程 VLM 单次请求的补全 token 预算（含模型隐藏的思考 token，整页扫描件被截断时报 `finish_reason=length` 可调大） |
 | `BUILTIN_MODELS_CONFIG` | config/builtin_models.yaml | 内置模型声明文件路径（见下文） |
 | `MODELS_CONFIG` | config/models.json | 模型厂商目录的部署叠加文件路径（补充厂商、覆盖地址或模型参数），格式见[模型管理](../03-features/06-models.md) |
 | `WEKNORA_LLM_STREAM_RAW_DUMP` / `_DIR` | 空 | LLM 流原始转储（排障用） |
@@ -233,7 +235,8 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED` | true | 普通用户自建空间 |
 | `WEKNORA_TENANT_MAX_OWNED_PER_USER` | 空 | 自建空间上限 |
 | `WEKNORA_TENANT_AUTO_CREATE_API_KEY` | false | 建空间时自动下发 full_access API Key（兼容旧行为） |
-| `WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB` | 10 | 新空间默认存储配额 |
+| `WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB` | 10 | 新空间默认存储配额（GB，兼容原有配置） |
+| `WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_MB` | 0 | 正数优先于 GB；0 或负数沿用 GB。支持如 `50` MB 的默认配额 |
 | `WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED` | false | 复杂密码策略：大小写字母、数字、特殊字符；系统设置 auth.complex_password_enabled 优先 |
 | `WEKNORA_TENANT_AUTO_ACCEPT_INVITATION` | false | 邮箱邀请已有账号直接加入；系统设置 tenant.auto_accept_invitation 优先 |
 | `OIDC_AUTH_JWKS_URI` | 空 | id_token 验签公钥集；可经 discovery 补全，与 issuer/audience/有效期共同校验 |
@@ -262,11 +265,13 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 
 ### 镜像构建参数（从源码构建时）
 
-以下变量只在 `docker compose build` / `make docker-build-frontend` 构建 frontend 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
+以下变量只在 `docker compose build` / `make docker-build-frontend` 从源码构建 frontend / app 镜像时使用，拉取官方镜像部署时无需设置。其他构建参数（Go 代理、apt 镜像源等）见 `.env.example` A1 节。
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | `VITE_FRONTEND_COMMIT` | unknown | 写入「系统信息」页的前端短 commit。`make docker-build-frontend` 与 `start_all.sh --no-pull` 会从 git 自动填充；直接 `docker compose build` 时需自行导出 |
+| `VERSION_ARG` | 空（构建时回退读 `VERSION` 文件） | 写入「系统信息」页的应用版本号。`start_all.sh --no-pull` 会自动填充；直接 `docker compose build` 时可自行导出 |
+| `COMMIT_ID_ARG` / `BUILD_TIME_ARG` / `GO_VERSION_ARG` | 空（unknown） | 写入「系统信息」页的应用 commit / 构建时间 / Go 版本。`start_all.sh --no-pull` 会从 git 自动填充 |
 | `NPM_REGISTRY` | 空（默认源） | 构建阶段使用的 npm registry，国内可设 `https://registry.npmmirror.com` |
 | `NODE_MAX_OLD_SPACE_SIZE` | 4096 | Vite 构建的 Node 堆上限（MB），Docker Desktop 内存较小时可降到 2048 |
 
@@ -280,9 +285,25 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `DOCREADER_PDF_RENDER_DPI` / `DOCREADER_PDF_JPEG_QUALITY` / `DOCREADER_PDF_RENDER_MAX_EDGE` | 200 / 85 / 2000 | PDF 渲染 |
 | `DOCREADER_PDF_FORCE_SCANNED` / `DOCREADER_PDF_SCAN_IMAGE_RATIO` / `DOCREADER_PDF_SCAN_MIN_CHARS` | false / 代码默认 | 扫描件判定 |
 | `DOCREADER_ODL_HYBRID` / `DOCREADER_ODL_HYBRID_URL` / `DOCREADER_ODL_HYBRID_MODE` / `DOCREADER_ODL_HYBRID_FALLBACK` | off / http://odl-hybrid:5002 / auto / false | OpenDataLoader 混合解析 |
+| `DOCREADER_XLSX_PERCENT_AS_TEXT` / `DOCREADER_XLSX_PCT_ROW_HINT_MIN` | false / 0 | 可选百分比显示文本和同行推断；开启后可能把数值转为字符串，见[解析说明](../03-features/03-document-parsing.md) |
 | `DOCREADER_HTML_MAIN_CONTENT` | false | 上传的 HTML 文件只索引正文（与 URL 导入同一抽取策略；抽取不足时回退整页转换） |
 | 其余 `DOCREADER_PDF_*`（词距/边栏/隐藏文本/嵌入图/图表区等 20+ 项） | 见 `docker-compose.yml` docreader 段注释 | PDF 版式与抽取精调 |
 | `DOCREADER_EXTERNAL_HTTP_PROXY` / `_HTTPS_PROXY` | 空 | docreader 出站抓取代理 |
+
+### OCR 图片预处理 {#image-preprocess}
+
+这些变量限制 Docreader 预处理资源，不会自动开启知识库的预处理选项。
+
+| 名称 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DOCREADER_PREPROCESS_MAX_WORKERS` | 1 | 最大并发预处理数 |
+| `DOCREADER_PREPROCESS_TIMEOUT_SECONDS` | 30 | 单次预处理时限 |
+| `DOCREADER_PREPROCESS_THREADS` | 2 | 每个任务的工作线程数 |
+| `DOCREADER_PREPROCESS_MEMORY_MB` | 2048 | 进程内存限制，MiB |
+| `DOCREADER_PREPROCESS_MAX_PIXELS` | 16000000 | 输入像素上限 |
+| `DOCREADER_PREPROCESS_MAX_EDGE` / `DOCREADER_PREPROCESS_PROBE_EDGE` | 2000 / 2000 | 输出与探测图像的最大边长 |
+
+知识库按 `off` / `auto` / `always` 选择预处理方式。繁忙或处理失败时回退原图，见[文档解析](../03-features/03-document-parsing.md#_4-图片处理与多模态分工)。
 
 ### 描述生成与出站连接
 
@@ -296,6 +317,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | Sandbox 配置 | 设置页按空间维护 | 后端、凭据、模板、超时和私网访问策略按空间保存 |
+| `WEKNORA_SANDBOX_USER_ALLOCATION` | 未启用 | 设为 `enabled` 才开放按用户复用沙箱，需要 Redis；先升级全部副本，再开启并配置，见[分配方式](../03-features/22-skills-sandbox.md#user-sandbox) |
 | `WEKNORA_SANDBOX_DOCKER_ENABLED` | false | Docker 沙箱后端回退开关。系统管理员也可在「设置 → 系统设置 → 网络安全」打开（DB 优先，立即生效）。默认关闭，因为本机 `docker.sock` 等同宿主机 root |
 | `WEKNORA_AGENT_LLM_TIMEOUT` | 120s | Agent 单次 LLM 调用超时（Go duration 或纯数字秒） |
 | `WEKNORA_WEB_FETCH_TIMEOUT` | 3m | Agent `web_fetch` 单页抓取预算（Go duration 或纯数字秒）。HTTP 与 chromedp 共用这一预算，不叠加。空值、无效值或非正数使用默认值。工具包装层再多等 5 秒。快速回答管道仍为 15s，不使用此项 |
@@ -305,7 +327,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` / `WEKNORA_DOCREADER_CALL_TIMEOUT` | 2h / 30m | 文档处理任务与单次 RPC 超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | 1000s | 自建 PaddleOCR-VL HTTP 请求超时，支持正数 Go duration（如 `5400s`、`90m`）；空值、无效值或非正数使用默认值。外层超时需留余量，例如本项 `90m`、DocReader `100m`、文档任务 `2h` |
 | `WEKNORA_MINERU_TIMEOUT` | 1000s | 自建 MinerU 单次解析超时（V1 API 为整个解析任务，旧版为 `/file_parse` 请求），格式与默认值规则同上；超大 PDF 同样需要外层超时留余量 |
-| `WEKNORA_MINERU_CLOUD_TIMEOUT` | 600s | MinerU 云端（mineru.net）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_MINERU_CLOUD_TIMEOUT` | 30m | MinerU 云端（mineru.net）每个批次/分片轮询解析结果的最长时间，格式与默认值规则同上 |
 | `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间，格式与默认值规则同上 |
 | `WEKNORA_WEKNORACLOUD_TIMEOUT` | 20m | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，格式与默认值规则同上；应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT` |
 

@@ -220,11 +220,14 @@ func buildContentSignature(content string) string {
 // Two thresholds are used:
 //   - Substring containment: if the normalized short text is a literal substring
 //     of the normalized long text, the shorter chunk is removed.
-//   - Token overlap coefficient >= 0.85: if 85%+ of the smaller chunk's tokens
-//     appear in the larger chunk, the smaller one is redundant. Only applied
-//     when the two token sets are within maxOverlapSizeRatio of each other:
-//     near-duplicates are of similar size, while a long web page or parent
-//     chunk shares most words with any short chunk on its topic.
+//   - Token overlap coefficient >= 0.85, and only when the shorter text's
+//     tokens are almost a subset of the longer text's (shorter-only fraction
+//     at most maxShorterOnlyFraction). Overlap alone is not enough: shared
+//     boilerplate can clear 0.85 while each side still has its own
+//     requirement, number, or conclusion. Only applied when the two token
+//     sets are within maxOverlapSizeRatio of each other: near-duplicates are
+//     of similar size, while a long web page or parent chunk shares most
+//     words with any short chunk on its topic.
 //
 // Each text is tokenized once; tokenizing both sides of every pair ran jieba
 // O(n²) times over parent- and page-sized texts before the first token of
@@ -237,6 +240,11 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 	const (
 		overlapThreshold    = 0.85
 		maxOverlapSizeRatio = 3
+		// maxShorterOnlyFraction is the largest share of the shorter token set
+		// that may be missing from the longer set and still count as one fact.
+		// It sits far below the 0.15 residue the overlap coefficient allows, so
+		// boilerplate cannot hide a requirement, a number, or a conclusion.
+		maxShorterOnlyFraction = 0.02
 	)
 
 	if len(results) <= 1 {
@@ -292,6 +300,11 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 					searchutil.TokenOverlapRatio(shortTokens, longTokens) < overlapThreshold {
 					continue
 				}
+				// Drop only when the longer chunk actually carries the shorter
+				// one's tokens. A pair where each side has its own tokens is kept.
+				if shorterOnlyFraction(shortTokens, longTokens) > maxShorterOnlyFraction {
+					continue
+				}
 			}
 
 			victim := shortIdx
@@ -320,6 +333,21 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 		}
 	}
 	return out
+}
+
+// shorterOnlyFraction is the share of short's tokens that do not appear in long.
+// An empty short set is not evidence that long carries it.
+func shorterOnlyFraction(short, long map[string]struct{}) float64 {
+	if len(short) == 0 {
+		return 1
+	}
+	only := 0
+	for tok := range short {
+		if _, ok := long[tok]; !ok {
+			only++
+		}
+	}
+	return float64(only) / float64(len(short))
 }
 
 func logSearchScoreSample(ctx context.Context, action string, results []*types.SearchResult) {
@@ -639,7 +667,13 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 			"max_results": webConfig.MaxResults,
 		},
 	})
-	webResults, err := p.webSearchService.Search(webCtx, providerID, webConfig, chatManage.RewriteQuery)
+	var webResults []*types.WebSearchResult
+	client, err := p.webSearchService.Resolve(webCtx, providerID)
+	if err == nil {
+		webResults, err = client.Search(webCtx, types.WebSearchRequest{
+			Query: chatManage.RewriteQuery, MaxResults: webConfig.MaxResults, IncludeDate: webConfig.IncludeDate,
+		})
+	}
 	webSpan.Finish(map[string]interface{}{
 		"hit_count": len(webResults),
 	}, nil, err)
@@ -654,10 +688,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
 	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
 	// tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
-	// compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
-	// 	ctx, chatManage.SessionID, tempKBID, questions, webResults, webConfig,
-	// 	p.knowledgeBaseService, p.knowledgeService, seen, ids,
-	// )
+	// state := &types.WebSearchCompressionState{TempKBID: tempKBID, SeenURLs: seen, KnowledgeIDs: ids}
+	// compressed, err := p.webResultCompressor.Compress(ctx, state, questions, webResults, webConfig)
 	// if err != nil {
 	// 	pipelineWarn(ctx, "Search", "web_compress_error", map[string]interface{}{
 	// 		"error": err.Error(),
@@ -665,7 +697,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// } else {
 	// 	webResults = compressed
 	// 	// Persist temp KB state back into Redis using WebSearchStateRepository
-	// 	p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
+	// 	p.webSearchStateService.SaveWebSearchTempKBState(
+	// 		ctx, chatManage.SessionID, state.TempKBID, state.SeenURLs, state.KnowledgeIDs)
 	// }
 	res := searchutil.ConvertWebSearchResults(webResults)
 	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{

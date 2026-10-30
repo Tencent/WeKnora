@@ -30,6 +30,9 @@ type ChunkRepository interface {
 	ListChunksByID(ctx context.Context, tenantID uint64, ids []string) ([]*types.Chunk, error)
 	// ListChunksByIDOnly lists chunks by ids without tenant filter (for shared KB resolution).
 	ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
+	// ListChunkEvidenceByIDOnly loads only ID, KnowledgeBaseID, KnowledgeID and
+	// IsEnabled for live chunks, without a tenant filter for shared KB resolution.
+	ListChunkEvidenceByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
 	// ListChunksBySeqID lists chunks by seq_ids
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists the knowledge's text chunks. Despite the name

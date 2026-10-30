@@ -52,8 +52,8 @@ func newRerankModelService() *rerankModelService {
 			"chat-1": {ID: "chat-1", Type: types.ModelTypeKnowledgeQA},
 		},
 		availableModels: []*types.Model{
-			{ID: "chat-1", Type: types.ModelTypeKnowledgeQA},
-			{ID: "rr-auto", Type: types.ModelTypeRerank},
+			{ID: "chat-1", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
+			{ID: "rr-auto", Type: types.ModelTypeRerank, Status: types.ModelStatusActive},
 		},
 	}}
 }

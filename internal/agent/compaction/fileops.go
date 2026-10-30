@@ -43,13 +43,16 @@ type fileOps struct {
 
 func appendUnique(list []string, path string) []string {
 	path = strings.TrimSpace(path)
-	if path == "" || len(list) >= maxTrackedFilePaths {
+	if path == "" {
 		return list
 	}
 	for _, existing := range list {
 		if existing == path {
 			return list
 		}
+	}
+	if len(list) >= maxTrackedFilePaths {
+		list = list[len(list)-maxTrackedFilePaths+1:]
 	}
 	return append(list, path)
 }

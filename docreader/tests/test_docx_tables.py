@@ -212,5 +212,112 @@ class DocxTableContentTest(unittest.TestCase):
         self.assertEqual(table_to_gfm_markdown(_Empty()), "")
 
 
+
+def _xml(fragment):
+    """Parse a WordprocessingML fragment, declaring the w namespace on its root."""
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+
+    head, rest = fragment.split(">", 1)
+    return parse_xml(f"{head} {nsdecls('w')}>{rest}")
+
+
+def _insert_before_sectpr(doc, element):
+    body = doc.element.body
+    body.insert(len(body) - 1, element)
+
+
+class DocxContentControlAndRevisionTest(unittest.TestCase):
+    """Text Word shows inside content controls and tracked insertions is kept.
+
+    python-docx's Paragraph.text reads only w:r and w:hyperlink children, and
+    the body walk only handled direct w:p and w:tbl children, so the text of
+    a block or inline content control (w:sdt) and of a tracked insertion
+    (w:ins) was dropped from the parsed document.
+    """
+
+    def test_block_content_control_paragraphs_are_kept_in_order(self):
+        def build(doc):
+            doc.add_paragraph("Before the control")
+            _insert_before_sectpr(
+                doc,
+                _xml(
+                    "<w:sdt><w:sdtPr><w:alias w:val='Clause'/></w:sdtPr><w:sdtContent>"
+                    "<w:p><w:r><w:t>Inside the control</w:t></w:r></w:p>"
+                    "<w:sdt><w:sdtContent><w:p><w:r><w:t>Nested control</w:t></w:r></w:p>"
+                    "</w:sdtContent></w:sdt></w:sdtContent></w:sdt>"
+                ),
+            )
+            doc.add_paragraph("After the control")
+
+        document = _parse(_docx_bytes(build))
+        self.assertEqual(
+            "Before the control\n\nInside the control\n\nNested control\n\nAfter the control",
+            document.content,
+        )
+
+    def test_inline_controls_and_insertions_stay_in_their_paragraph(self):
+        def build(doc):
+            paragraph = doc.add_paragraph("Signed by ")
+            paragraph._p.append(
+                _xml("<w:sdt><w:sdtContent><w:r><w:t>Jane Doe</w:t></w:r></w:sdtContent></w:sdt>")
+            )
+            paragraph._p.append(
+                _xml("<w:ins w:id='1' w:author='a'><w:r><w:t xml:space='preserve'> on Monday</w:t></w:r></w:ins>")
+            )
+            paragraph._p.append(
+                _xml("<w:del w:id='2' w:author='a'><w:r><w:delText> on Friday</w:delText></w:r></w:del>")
+            )
+
+        document = _parse(_docx_bytes(build))
+        self.assertEqual("Signed by Jane Doe on Monday", document.content)
+
+    def test_toc_and_placeholder_controls_are_left_out(self):
+        """A table of contents repeats the headings with page numbers, and a
+        control still showing its placeholder holds no document text."""
+
+        def build(doc):
+            _insert_before_sectpr(
+                doc,
+                _xml(
+                    "<w:sdt><w:sdtPr><w:docPartObj>"
+                    "<w:docPartGallery w:val='Table of Contents'/><w:docPartUnique/>"
+                    "</w:docPartObj></w:sdtPr><w:sdtContent>"
+                    "<w:p><w:r><w:t>Contents</w:t></w:r></w:p>"
+                    "<w:p><w:r><w:t>Introduction 1</w:t></w:r></w:p>"
+                    "</w:sdtContent></w:sdt>"
+                ),
+            )
+            paragraph = doc.add_paragraph("Name: ")
+            paragraph._p.append(
+                _xml(
+                    "<w:sdt><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent>"
+                    "<w:r><w:t>Click or tap here to enter text.</w:t></w:r>"
+                    "</w:sdtContent></w:sdt>"
+                )
+            )
+            doc.add_paragraph("Introduction")
+
+        document = _parse(_docx_bytes(build))
+        self.assertEqual("Name:\n\nIntroduction", document.content)
+
+    def test_tables_in_a_control_and_cell_insertions_are_kept(self):
+        def build(doc):
+            doc.add_paragraph("Intro")
+            _insert_before_sectpr(
+                doc,
+                _xml(
+                    "<w:sdt><w:sdtContent><w:tbl><w:tblGrid><w:gridCol/><w:gridCol/></w:tblGrid>"
+                    "<w:tr><w:tc><w:p><w:r><w:t>Term</w:t></w:r></w:p></w:tc>"
+                    "<w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc></w:tr>"
+                    "<w:tr><w:tc><w:p><w:ins w:id='3' w:author='a'><w:r><w:t>Rate</w:t></w:r></w:ins></w:p></w:tc>"
+                    "<w:tc><w:sdt><w:sdtContent><w:p><w:r><w:t>5%</w:t></w:r></w:p></w:sdtContent></w:sdt></w:tc>"
+                    "</w:tr></w:tbl></w:sdtContent></w:sdt>"
+                ),
+            )
+
+        document = _parse(_docx_bytes(build))
+        self.assertIn("| Term | Value |\n| --- | --- |\n| Rate | 5% |", document.content)
+
 if __name__ == "__main__":
     unittest.main()

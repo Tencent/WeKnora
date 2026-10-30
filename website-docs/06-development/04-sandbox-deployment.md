@@ -6,7 +6,7 @@
 
 空间命名配置可选择 Docker、CubeSandbox、E2B，本文说明这三类后端的部署。Lite 桌面客户端另有依赖操作系统隔离能力的 `host` 后端，不属于服务端命名配置，构建要求见下文 [Lite 本机沙箱](#lite-本机沙箱)；旧 `local` 宿主机进程后端已移除。Docker 直接使用 Engine API；E2B 使用控制面 REST 与 envd 数据面；Cube 保留专用适配器处理模板和网络策略。
 
-标准镜像由 `docker/Dockerfile.sandbox` 定义，包含 Python 3.12、Node.js 20、Bash、jq 与 `/workspace`。命令和文件操作默认使用沙箱内 root；保留 UID 1000 的 `user` 供显式按账号执行。跨会话隔离由容器或远端沙箱提供，不能把工作目录约定解释为 root 的文件权限限制。
+标准镜像由 `docker/Dockerfile.sandbox` 定义，包含 Python 3.12、Node.js 20、Bash、jq 与 `/workspace`。命令和文件操作默认使用沙箱内 root；保留 UID 1000 的 `user` 供显式按账号执行。每会话分配时，跨会话隔离由容器或远端沙箱提供；开启按用户复用后，同一机器内的会话没有操作系统级隔离。不能把工作目录约定解释为 root 的文件权限限制。
 
 | 构建 target | 镜像标签后缀 | 用途 |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ Docker 后端默认关闭。系统管理员在「系统设置 → 网络安全�
 | 网络模式 | 仅 `bridge` 或 `none`；不接受 `host`、`container:` 或自定义网络名 |
 | OCI runtime | 可选择 daemon 已安装的 runtime，如 `runsc` |
 
-app 运行在容器里时，要挂载实际 Docker socket，或改连远端 daemon。socket 授予控制宿主机 Docker 的能力，只应交给可信 app。入口脚本在降权前根据 socket GID 配置 appuser 的组；不要通过 `chmod 666` 放开 socket。若 socket 为 `root:root` 且仅所有者可写，应先在宿主机配置合适的非 root 组权限。
+app 运行在容器里时，要挂载实际 Docker socket，或改连远端 daemon。socket 授予控制宿主机 Docker 的能力，只应交给可信 app。入口脚本在降权前根据 socket GID 配置 appuser 的组；不要依赖 compose `group_add`，也不要通过 `chmod 666` 放开 socket。Docker Desktop 可能把 socket 映射为 `root:root 0660`；入口脚本会先确认组读写位，再把 appuser 加入对应的补充组。若 socket 为 `root:root 0600` 等仅所有者可写模式，入口脚本不会修改其属主或权限，部署方应改用组可读写的 socket 或带 TLS 的远端 daemon。
 
 优先使用标准镜像。自定义镜像需满足适配器的 root、Bash、GNU `find -printf`、coreutils `timeout` 和可写工作区要求；会话文件检查点与回退还依赖 Git。HTTP 请求取消本身不会终止容器进程，适配器通过容器内 `timeout` 执行命令超时控制。
 
@@ -109,7 +109,7 @@ Docker 终端是一个 `TTY=true` 的 exec，Engine API 不支持重新附着，
 | Windows | 尚未实现，报告不可用，不会退化为无隔离执行 |
 | Linux | 不支持 |
 
-每条命令都是新的本机进程，没有会话级实例，因此不写入会话的沙箱绑定，也不做工作区检查点。用户通过系统目录选择框批准的项目目录保存在 `desktop-prefs.json` 的 `project_dirs`；会话只能绑定列表中的目录本身，不能绑定其子目录或手工输入的路径。`approval_mode` 当前只支持 `auto`（在工作区内自由读写、禁止联网），写入其他值会被拒绝。偏好文件位置见[桌面客户端](../05-clients/05-desktop.md#_5-偏好设置存储-cmd-desktop-prefs-go)。
+每条命令都是新的本机进程，没有会话级实例，因此不写入会话的沙箱绑定，也不做工作区检查点。用户通过系统目录选择框批准的项目目录保存在 `desktop-prefs.json` 的 `project_dirs`；会话只能绑定列表中的目录本身，不能绑定其子目录或手工输入的路径。`approval_mode` 当前只支持 `auto`，写入其他值会被拒绝。默认限制网络、工作区外写入和项目 `.git` 写入；v0.9.0 的本机审批可针对删除或额外访问范围请求用户确认，不等于开放一个全局无限制模式。偏好文件位置见[桌面客户端](../05-clients/05-desktop.md#_5-偏好设置存储-cmd-desktop-prefs-go)。
 
 ## 开发验证
 

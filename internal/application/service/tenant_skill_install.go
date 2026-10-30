@@ -2274,17 +2274,8 @@ func (s *TenantSkillService) resolveInstallerModel(
 	if err != nil {
 		return nil, fmt.Errorf("list models for installer: %w", err)
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA &&
-			model.Status == types.ModelStatusActive && model.IsDefault {
-			return s.models.GetChatModel(ctx, model.ID)
-		}
-	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA &&
-			model.Status == types.ModelStatusActive {
-			return s.models.GetChatModel(ctx, model.ID)
-		}
+	if model := types.PickChatModel(models, ""); model != nil {
+		return s.models.GetChatModel(ctx, model.ID)
 	}
 	return nil, fmt.Errorf("workspace %d has no active chat model for skill installer", tenantID)
 }
@@ -2539,8 +2530,8 @@ func (s *TenantSkillService) markConfigSandboxesStale(
 				configID, err)
 		} else if entity != nil && !entity.Config.RebuildsExistingOnSkillChange() {
 			logger.Infof(markCtx,
-				"[skill] config %s skill_rollout=%s; leaving live sandboxes on the previous image",
-				configID, types.SkillRolloutNewSession)
+				"[skill] config %s keeps existing sandboxes on the previous image after skill changes",
+				configID)
 			return
 		}
 	}

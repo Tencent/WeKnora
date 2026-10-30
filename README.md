@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="Website" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="Docs" src="https://img.shields.io/badge/docs-read-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="Release" src="https://img.shields.io/badge/release-v0.8.3-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="Release" src="https://img.shields.io/badge/release-v0.9.0-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -42,9 +42,9 @@
 
 [WeKnora](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework for enterprise document understanding, semantic retrieval and reasoning. It brings a team's documents together so they can be searched, reasoned over and kept up to date.
 
-https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
+https://github.com/user-attachments/assets/de0e490a-e738-405e-bb3a-64b63edd7278
 
-<p align="center"><sub>1:52 · 1080p · No narration, English on-screen text</sub></p>
+<p align="center"><sub>v0.9.0 · 2:45 · 1080p60 · English narration and subtitles</sub></p>
 
 Use RAG to look things up, the agent for multi-step tasks, and the wiki to organize knowledge. All three work on the same knowledge bases.
 
@@ -138,13 +138,13 @@ docker compose down     # Stop services
 If you already have WeKnora running and downloaded a newer release:
 
 ```bash
-# Set WEKNORA_VERSION in .env to the target release (e.g. 0.8.3), or keep latest
+# Set WEKNORA_VERSION in .env to the target release (e.g. 0.9.0), or keep latest
 docker compose pull     # Pull images matching WEKNORA_VERSION
 docker compose up -d    # Recreate containers with new images
 ```
 
 > [!NOTE]
-> `docker compose up -d` alone reuses locally cached images and may leave the UI version out of sync with the release you downloaded. Read the [upgrade notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes) before upgrading. Deployments older than v0.8.2 should also read the [v0.8.2 notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes).
+> `docker compose up -d` alone reuses locally cached images and may leave the UI version out of sync with the release you downloaded. Read the [upgrade notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes) before upgrading. Deployments older than v0.8.2 should also read the [v0.8.2 notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.2#upgrade-notes).
 
 ### Other ways to deploy
 
@@ -165,6 +165,16 @@ All options, hardware requirements and deployment topologies: [Installation guid
 > - regularly update to the latest version for security patches and improvements.
 
 ## What's New
+
+### v0.9.0 <sub>· 2026-10-29 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
+
+- **[WeKnora assistant](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#assistant)**: Ask about WeKnora releases, features and configuration, then work from the current page: create agents, schedule tasks and manage knowledge, acting as you within your permissions.
+- **[Multi-agent collaboration](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#collaboration)**: Delegate independent subtasks, follow progress and bring the results together.
+- **[Automations](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#automations)**: Run one-off or recurring tasks with execution history, results and approval notifications.
+- **[Execution permissions](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#permissions)**: Read-only, confirm-before-change and automatic-write modes, with scoped session and automation grants.
+- **[Sandboxes and background work](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#sandbox)**: Optional per-user sandbox reuse, managed background shell jobs and skill rollout controls.
+- **[Parsing, sync and retrieval](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#knowledge)**: Configurable image pipelines, OCR preprocessing, deeper Feishu/Lark sync, Confluence PAT and retrieval improvements.
+- **[Upgrade notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)**: Review database migrations, Feishu resync, the sandbox allocation gate and configuration changes.
 
 ### v0.8.3 <sub>· 2026-10-14 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
@@ -374,7 +384,7 @@ The full product documentation lives at **[weknora.weixin.qq.com/docs](https://w
 | [Configuration](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | Environment variables and models |
 | [Troubleshooting FAQ](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | Common problems and fixes |
 | [API reference](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API overview |
-| [Release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3) | What changed in each release |
+| [Release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0) | What changed in each release |
 
 ## Development
 

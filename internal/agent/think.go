@@ -508,6 +508,19 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		},
 	)
 	if err != nil {
+		// A failed attempt may already have streamed answer text. The retry
+		// starts a new answer event, so leaving this draft live would make the
+		// final message concatenate the failed attempt with the recovered one.
+		// A user cancellation is the exception: there is no retry, and the
+		// partial text is the only answer the user has.
+		if ctx.Err() == nil && answerStreamed {
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data:      event.AgentFinalAnswerData{Replace: true},
+			})
+		}
 		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
 		return nil, err
 	}
@@ -617,7 +630,7 @@ func (e *AgentEngine) callLLMWithRetry(
 		// into the summary envelope, where the next compaction cannot read it
 		// back out. The provider gets the sanitized view; the engine keeps the
 		// structured one.
-		compacted := e.forceCompaction(ctx, messages, round)
+		compacted := e.forceCompaction(ctx, *messagesPtr, round)
 		*messagesPtr = compacted
 		messages = agenttools.SanitizeMessages(compacted)
 		e.lastSentMsgCount = len(compacted)

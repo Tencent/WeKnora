@@ -31,7 +31,7 @@ type SerplyProvider struct {
 }
 
 // NewSerplyProvider creates a guarded, credential-scoped Serply search client.
-func NewSerplyProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewSerplyProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if strings.TrimSpace(params.APIKey) == "" {
 		return nil, fmt.Errorf("API key is required for Serply provider")
 	}
@@ -48,17 +48,12 @@ func NewSerplyProvider(params types.WebSearchProviderParameters) (interfaces.Web
 // Name returns the provider registry identifier.
 func (p *SerplyProvider) Name() string { return "serply" }
 
-// Search applies the default region and result limit.
+// Search sends country (gl) and freshness (tbs) to the official Serply endpoint; empty filters
+// use Google's defaults.
 func (p *SerplyProvider) Search(
-	ctx context.Context, query string, maxResults int, includeDate bool,
+	ctx context.Context, request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
-	return p.SearchWithFilters(ctx, query, maxResults, includeDate, types.WebSearchFilters{})
-}
-
-// SearchWithFilters sends country (gl) and freshness (tbs) to the official Serply endpoint.
-func (p *SerplyProvider) SearchWithFilters(
-	ctx context.Context, query string, maxResults int, _ bool, filters types.WebSearchFilters,
-) ([]*types.WebSearchResult, error) {
+	query, maxResults, filters := request.Query, request.MaxResults, request.Filters
 	if err := filters.Validate(); err != nil {
 		return nil, err
 	}

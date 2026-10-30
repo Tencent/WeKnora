@@ -200,6 +200,12 @@ definitions:
           because the provider could not be reached. The management page must say
           so instead of rendering a reassuring "0 sandboxes".
         type: boolean
+      user_sandbox_count:
+        description: |-
+          UserSandboxCount is how many of SandboxCount are shared user machines.
+          They carry no session id, so SessionIDs alone under-reports what a
+          credential change would affect.
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_application_service.SkillCatalogInstallView:
     properties:
@@ -1336,6 +1342,20 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
+      background_injections:
+        description: |-
+          BackgroundInjections are background-work messages delivered before this
+          model response, after the step's steered messages, in delivery order.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.BackgroundInjection'
+        type: array
+      background_seen_ids:
+        description: |-
+          BackgroundSeenIDs are finished background items whose results this
+          step's tool calls (work_wait, work_cancel) returned to the model.
+        items:
+          type: string
+        type: array
       intermediate_answer:
         description: |-
           IntermediateAnswer preserves a plain answer followed by a loop-end steer.
@@ -1466,6 +1486,41 @@ definitions:
     x-enum-varnames:
     - AnswerStrategyAll
     - AnswerStrategyRandom
+  github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem:
+    properties:
+      created_at:
+        type: string
+        x-agent: true
+      file_name:
+        type: string
+        x-agent: true
+      file_size:
+        type: integer
+        x-agent: true
+      file_type:
+        type: string
+        x-agent: true
+      handle:
+        type: string
+        x-agent: true
+      index:
+        type: integer
+        x-agent: true
+      message_id:
+        type: string
+        x-agent: true
+      session_id:
+        type: string
+        x-agent: true
+      session_title:
+        type: string
+        x-agent: true
+      source_path:
+        type: string
+      version_count:
+        type: integer
+        x-agent: true
+    type: object
   github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel:
     enum:
     - read_only
@@ -1490,6 +1545,14 @@ definitions:
           MaxAccessLevel is the highest level a member may pick; empty means
           AssistantAccessConfirm.
     type: object
+  github_com_Tencent_WeKnora_internal_types.AttrInject:
+    enum:
+    - always
+    - on_demand
+    type: string
+    x-enum-varnames:
+    - AttrInjectAlways
+    - AttrInjectOnDemand
   github_com_Tencent_WeKnora_internal_types.AttrSpec:
     properties:
       consumers:
@@ -1500,6 +1563,23 @@ definitions:
       description:
         description: one line explaining what the attribute measures
         type: string
+      inject:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AttrInject'
+        description: |-
+          Inject says whether this attribute is always part of the describe round's
+          standing questions, or only asked when something is going to act on it.
+          An empty value means AttrInjectAlways, so attributes registered before
+          this field existed keep their behaviour.
+      internal:
+        description: |-
+          Internal marks an attribute that steers this pipeline's own scheduling
+          rather than describing what the image holds. Such attributes are still
+          observed and persisted — the values are what justify a scheduling
+          decision after the fact — but they are kept out of the gallery's filter
+          surface, where they would only add noise: no operator wants to filter a
+          library by "how much margin is left around the text".
+        type: boolean
       label:
         description: human-readable name for the settings panel
         type: string
@@ -1759,6 +1839,11 @@ definitions:
           AccessLevel is how far runs may change data without asking, capped by
           the workspace's assistant ceiling.
         x-agent: true
+      active_run_status:
+        description: ActiveRunStatus is projected from live runs and is not persisted.
+        type: string
+        x-agent: true
+        x-agent-response: true
       approval_timeout_minutes:
         description: |-
           ApprovalTimeoutMinutes is how long a run waits for an approval before
@@ -2006,7 +2091,9 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.AutomationTrigger:
     properties:
       at:
-        description: At is when a once trigger fires.
+        description: |-
+          At is when a once trigger fires, RFC3339 or a wall-clock time in
+          Timezone, such as "2006-01-02T15:04:05" or "2006-01-02 15:04".
         type: string
         x-agent: true
       expr:
@@ -2023,6 +2110,15 @@ definitions:
         description: Type is cron or once.
         type: string
         x-agent: true
+    type: object
+  github_com_Tencent_WeKnora_internal_types.BackgroundInjection:
+    properties:
+      ack_ids:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.COSEngineConfig:
     properties:
@@ -4041,16 +4137,6 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ImageAttrCondition'
         type: array
-      on_unobserved:
-        description: |-
-          OnUnobserved is the OCR decision used when the observation does not
-          answer for one of the attributes the policy reads — the attribute is
-          absent because the model skipped the line, or because the value it wrote
-          was not one of the allowed ones. The default is true: an incomplete
-          observation keeps extracting, so a missed block of text costs one extra
-          call instead of being lost. Turn it off only with a model reliable enough
-          to answer every attribute line.
-        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.ImagePipelineID:
     enum:
@@ -4072,7 +4158,10 @@ definitions:
         description: |-
           ImageActions overrides the built-in attribute→work table (see
           DefaultImageActions). A nil value keeps the conservative default: run OCR
-          for block text, data visuals, and unobserved images.
+          for block text and data visuals. What to do about an image whose
+          attributes were NOT observed is deliberately not part of this table — it
+          is a scheduling decision, so it belongs to the pipeline that observes
+          (`ocr_on_unobserved` in that pipeline's slot).
       image_attrs_enabled:
         description: |-
           ImageAttrsEnabled turns the attribute-observed image pipeline on for this
@@ -7524,6 +7613,12 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.SandboxCheckpoint:
     properties:
+      background_active:
+        description: |-
+          BackgroundActive marks a commit taken while background work was live in
+          the session. The work may have been mid-write, so fork and rewind never
+          roll a workspace back to it.
+        type: boolean
       commit_sha:
         type: string
       committed_at:
@@ -7843,6 +7938,14 @@ definitions:
           that reopening the session can restore the original request context to
           the chat UI. Stored in the legacy sessions.agent_config JSONB column to
           avoid a new migration; the shape used today is `SessionLastRequestState`.
+      owner_auth_source:
+        description: |-
+          OwnerAuthSource records, server-side, how UserID was authenticated when
+          the session was created or its owner first bound (AuthSource*).
+          Per-user sandbox allocation reads it; client input never sets it
+          (CreateSession overwrites). Empty on rows created before the column
+          existed, which means "unknown".
+        type: string
       parent_session_id:
         description: |-
           ParentSessionID names the session this one was forked from. Empty for
@@ -7985,6 +8088,14 @@ definitions:
           that reopening the session can restore the original request context to
           the chat UI. Stored in the legacy sessions.agent_config JSONB column to
           avoid a new migration; the shape used today is `SessionLastRequestState`.
+      owner_auth_source:
+        description: |-
+          OwnerAuthSource records, server-side, how UserID was authenticated when
+          the session was created or its owner first bound (AuthSource*).
+          Per-user sandbox allocation reads it; client input never sets it
+          (CreateSession overwrites). Empty on rows created before the column
+          existed, which means "unknown".
+        type: string
       parent_session_id:
         description: |-
           ParentSessionID names the session this one was forked from. Empty for
@@ -8815,6 +8926,14 @@ definitions:
     - TenantRoleViewer
   github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig:
     properties:
+      allocation_mode:
+        description: |-
+          AllocationMode decides how a session that has not yet used a sandbox
+          of this config is placed: "session" (default) gives it a machine of its
+          own, "user" lets one verified owner's sessions share a machine. A
+          session never changes mode after its first use; see
+          internal/sandbox/allocation.
+        type: string
       allow_private_endpoints:
         description: |-
           AllowPrivateEndpoints permits this workspace config to reach RFC1918 or
@@ -8875,6 +8994,7 @@ definitions:
           SkillRolloutNextTurn rebuild on the next chat turn. SkillRolloutNewSession
           leaves those sandboxes on the previous image; only sessions that start
           afterwards boot the new snapshot.
+          User allocation always keeps existing shared machines, regardless of this setting.
         type: string
       terminal_idle_disconnect_sec:
         description: |-
@@ -8883,6 +9003,12 @@ definitions:
           connection so the sandbox can pause on its provider TTL. Terminal
           counts keystrokes and PTY output; desktop counts mouse and keyboard.
           0 uses the built-in default (15 minutes). Not an identity field.
+        type: integer
+      user_sandbox_empty_retention_days:
+        description: |-
+          UserSandboxEmptyRetentionDays is how long a user machine with no live
+          session is kept before the reclaim job deletes it. 0 means the default
+          (7); values above 90 are rejected.
         type: integer
       volume_mount:
         allOf:
@@ -9506,6 +9632,7 @@ definitions:
     - metaso
     - bocha
     - serply
+    - deepseek
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBrave
@@ -9522,6 +9649,7 @@ definitions:
     - WebSearchProviderTypeMetaso
     - WebSearchProviderTypeBocha
     - WebSearchProviderTypeSerply
+    - WebSearchProviderTypeDeepSeek
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       config_fields:
@@ -14286,6 +14414,24 @@ definitions:
     required:
     - message_id
     type: object
+  internal_handler_session.artifactLibraryResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem'
+        type: array
+      page:
+        type: integer
+        x-agent: true
+      page_size:
+        type: integer
+        x-agent: true
+      success:
+        type: boolean
+      total:
+        type: integer
+        x-agent: true
+    type: object
   internal_handler_session.batchDeleteRequest:
     properties:
       delete_all:
@@ -15071,32 +15217,49 @@ paths:
         in: query
         name: keyword
         type: string
+        x-agent: true
       - description: 逗号分隔的扩展名，如 .pdf,.pptx
         in: query
         name: file_types
         type: string
+        x-agent: true
       - description: 页码
         in: query
+        minimum: 1
         name: page
         type: integer
+        x-agent: true
+        x-agent-maximum: "10000"
       - description: 每页数量（最大 100）
         in: query
+        maximum: 100
+        minimum: 1
         name: page_size
         type: integer
+        x-agent: true
+        x-agent-maximum: "20"
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_handler_session.artifactLibraryResponse'
       security:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 列出我的产物
       tags:
       - 会话
+      x-agent:
+        id: artifact.list
+        risk: read
+      x-agent-hint: Files generated by agents across the user's conversations, newest
+        first. This is the Artifacts library, not the current chat's sandbox. keyword
+        matches file names; file_types is a comma-separated list of extensions such
+        as .pdf,.pptx,.md. Each item has file_name, created_at, session_title and
+        session_id. Do not use generated-file or sandbox tools to answer what is on
+        this page.
   /auth/auto-setup:
     post:
       consumes:
@@ -16013,6 +16176,36 @@ paths:
         risk: read
       x-agent-hint: Lists an automation's runs, newest first, with status, error and
         the start of the answer.
+  /automations/by-session/{session_id}:
+    get:
+      description: 返回这次会话所属的自动化，供会话页跳回
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 自动化
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Automation'
+              type: object
+        "404":
+          description: 不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 按会话查找自动化
+      tags:
+      - 自动化
   /automations/validate-trigger:
     post:
       consumes:
@@ -25635,6 +25828,74 @@ paths:
       summary: Follow an install's agent transcript
       tags:
       - SandboxConfig
+  /sandbox-configs/{id}/user-sandboxes:
+    get:
+      description: List the config's shared user machines with live session counts
+        and the empty-retention clock.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Shared user sandboxes
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List shared user sandboxes
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/user-sandboxes/{digest}/release:
+    post:
+      description: Delete one shared user machine now; each session gets a fresh machine
+        on next use. Refused while busy.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: User machine digest
+        in: path
+        name: digest
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Released
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: User sandbox is busy
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Release a shared user sandbox
+      tags:
+      - SandboxConfig
   /sessions:
     get:
       consumes:
@@ -27732,9 +27993,8 @@ paths:
   /system/admin/tenants/apply-default-storage-quota:
     post:
       description: |-
-        Reads the current value of `tenant.default_storage_quota_gb`
-        (3-tier resolver: DB > ENV > default) and writes that many
-        GiB into storage_quota for every row in tenants. Bypasses
+        Resolves the MB override or legacy GB default (DB > ENV > default per setting)
+        and writes the effective byte quota to every existing workspace. Bypasses
         the per-workspace PUT whitelist, which forbids storage_quota
         edits by Owners. SystemAdmin only.
         Idempotent — running twice with the same setting is a no-op.

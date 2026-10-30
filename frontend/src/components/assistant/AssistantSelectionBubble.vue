@@ -3,9 +3,7 @@
     <div v-if="position" ref="bubble" class="assistant-selection-bubble" data-assistant-ignore role="toolbar"
       :aria-label="t('assistant.bubble.label')" :style="{ left: `${position.left}px`, top: `${position.top}px` }"
       @mousedown.prevent>
-      <button type="button" class="assistant-selection-bubble__btn is-primary" @click="run('ask')">
-        <t-icon name="compass" />{{ t('assistant.bubble.ask') }}
-      </button>
+      <AssistantButton :label="t('assistant.bubble.ask')" @click="run('ask')" />
       <span class="assistant-selection-bubble__divider" aria-hidden="true" />
       <button v-for="action in QUICK_ACTIONS" :key="action" type="button" class="assistant-selection-bubble__btn"
         @click="run(action)">
@@ -19,6 +17,7 @@
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAssistantStore } from '@/stores/assistant'
+import AssistantButton from './AssistantButton.vue'
 import { selectedTextControl } from '@/utils/pageAwareness'
 
 const QUICK_ACTIONS = ['polish', 'rewrite', 'translate', 'continue'] as const
@@ -123,24 +122,31 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 28px;
+  height: 26px;
   padding: 0 8px;
   border: 0;
-  border-radius: var(--td-radius-medium);
+  border-radius: var(--app-radius-sm);
   background: transparent;
-  color: var(--td-text-color-primary);
+  color: var(--td-text-color-secondary);
   font: inherit;
   font-size: var(--app-text-sm);
   white-space: nowrap;
   cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
+    color: var(--td-brand-color);
   }
 
-  &.is-primary {
+  &:active {
+    background: var(--td-bg-color-container-active);
     color: var(--td-brand-color);
-    font-weight: 500;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
   }
 }
 

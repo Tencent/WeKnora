@@ -25,6 +25,12 @@
 
 配置决定智能体可访问的资料与工具，实际调用仍受当前用户或渠道的权限约束。
 
+## 助手、协作与执行权限
+
+v0.9.0 新增内置 [WeKnora 助手](26-weknora-assistant.md)，可查阅产品文档并在授权范围内处理知识库、配置和管理任务。需要重复执行的工作可创建[自动化](27-automations.md)。
+
+智能推理任务支持[多智能体协作](26-weknora-assistant.md#collaboration)，分别处理子任务并汇总结果。读取、写入和破坏性操作受[执行权限与审批](28-agent-permissions.md)控制；资源权限不会因为协作或授权而扩大。
+
 ## 创建与使用智能体
 
 1. 在「智能体」页新建智能体，选择快速问答或智能推理模式。
@@ -97,6 +103,7 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 | 基础 | `system_prompt` / `system_prompt_id` | 直接正文优先；自定义 Agent 的模板引用由 `ResolveCustomAgentPrompts` 在请求时解析 |
 | 基础 | `context_template` / `context_template_id` | 普通模式下检索片段的拼装模板 |
 | 模型 | `model_id`、`rerank_model_id`、`temperature`、`max_completion_tokens`、`thinking`、`reasoning_effort`、`citation_enabled` | temperature<0 → 0.7；max_completion_tokens=0 使用运行时默认：quick-answer 2048、smart-reasoning 4096、绑定沙箱的 smart-reasoning 24576；绑定沙箱时显式值低于 8192 按 8192 执行；`reasoning_effort` 取 `off`/`auto`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`，设置后优先于 `thinking`（`thinking: true` 等同 `auto`），模型不支持的档位在调用时自动就近调整；两者都未设时不开启思考；单次对话可用请求字段 `reasoning_effort` 临时覆盖；citation 未设时视为 true |
+| Agent | `access_level` | 普通智能体的执行权限：read_only / confirm / auto_write，未配置时默认 auto_write；助手另受空间上限约束 |
 | Agent | `max_iterations` | 默认 10，负数表示不限轮数（服务层上限 100） |
 | Agent | `llm_call_timeout` | 单次模型流式调用允许连续无输出的秒数，0 用默认 120s；总时长由模型传输层控制 |
 | Agent | `allowed_tools` | 工具白名单；未设置/null 回退 DefaultAllowedTools，显式 `[]` 不选内置工具 |
@@ -417,7 +424,7 @@ flowchart TD
 | `database_query` | `sql`\*（仅 SELECT） | 只读查询白名单表（`knowledge_bases`/`knowledges`/`chunks`），自动注入 tenant_id 过滤与 `deleted_at IS NULL`；SQL 参数在 UI/Langfuse 中脱敏 |
 | `data_schema` | `knowledge_id`\*（`dN`） | 读取 CSV/Excel 文件的 `table_summary` + `table_column` 类型分块，返回列信息与行数；并告知模型该文档在 `data_analysis` 中固定以表名 `dataset` 访问 |
 | `data_analysis` | `knowledge_id`\*、`sql`\* | 把 CSV/Excel 载入 DuckDB 后执行 SQL。文档由 `knowledge_id` 选定，SQL 中固定以表名 `dataset` 引用它（每次查询在独立连接上建临时视图映射到物理表，模型永远不需要在 SQL 里写文档 ID）；多 Sheet Excel 合并为一张表并暴露 `__sheet_name` 列；自动纠正列名大小写/空格差异；会话结束 Cleanup 时 DROP 所建表 |
-| `web_search` | `query`\*，可选 `count`（不超过配置上限，最多 20）、`country`（两位国家码或 `ALL`）、`freshness`（`pd`/`pw`/`pm`/`py`，Brave 另支持日期区间）、`content` | 联网搜索，直接返回提供商的标题、摘要和 `wN` 页面短 ID；按任务需要选择知识库或联网检索，Agent 搜索不再自动进行 RAG 压缩；`country`/`freshness` 仅 Brave 与 Serply 支持，其他提供商传入时报错；`content=true` 在 15 秒内并行抓取前 3 条结果、各取 5000 字符正文摘录 |
+| `web_search` | `query`\*，可选 `count`（不超过配置上限，最多 20）、`country`（两位国家码或 `ALL`）、`freshness`（`pd`/`pw`/`pm`/`py`，Brave 另支持日期区间）、`content` | 联网搜索，直接返回提供商的标题、摘要和 `wN` 页面短 ID；按任务需要选择知识库或联网检索，Agent 搜索不再自动进行 RAG 压缩；`country`/`freshness` 仅出现在 Brave 与 Serply 的 schema 中；`content=true` 在 15 秒内并行抓取前 3 条结果、各取 5000 字符正文摘录（DeepSeek 经其 Fetch API 读取） |
 | `web_fetch` | `items[]`\*（每项 `url`\*=`wN` 或 HTTP(S) URL，可选 `offset`、`limit`；`limit` 按字符计，默认且最多 8000，多项共享输出预算） | 并发抓取最多 8 个网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），直接返回 Markdown 或支持的文本正文；单页预算默认 3 分钟（`WEKNORA_WEB_FETCH_TIMEOUT`，HTTP 与 chromedp 共用）。按字符分页，使用 `next_offset` 续读；完整正文保存在 `full_output_path`（`web://` 地址，仅同一会话可读），可用 `read_file` 跨轮按行读取；逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码（如快照已过期的 `snapshot_expired`），部分失败不影响其它页面 |
 | `read_file` | `path`\*、`offset`（从 1 开始的行号）、`limit`（默认 2000 行）、`max_bytes`（上限 64 KiB，网页快照 50 KiB）；网页可带 `line_offset` | 读取工作区文本、skill:// 资源、web:// 网页快照及 attachment:// 会话附件，按结果续读；附件支持按需阅读、等待后台解析及指定图片读取，见[会话体验](18-chat-experience.md#使用临时附件提问) |
 | `shell_exec` | `command`\*；可选 `skill_name`、`work_dir`、`timeout_sec`、`stdin`（≤ 64 KiB）、`max_output_bytes`（默认 16 KiB，上限 64 KiB）、`max_stderr_bytes`（默认 8 KiB，上限 16 KiB）、`env` | 在当前会话沙箱运行命令，默认工作目录 `/workspace`；指定技能时解析技能目录和变量 |
@@ -596,27 +603,16 @@ sequenceDiagram
 
 ### 工具审批机制（Human-in-the-Loop） {#_6-工具审批机制-human-in-the-loop}
 
-MCP 工具审批由 `internal/agent/approval/gate.go` 实现。
+v0.9.0 统一了工具执行权限、审批提示与有范围的授权。`internal/agent/policy` 按 read、probe、write、destructive 风险判断允许、拒绝或询问；审批不再只适用于 MCP 工具。
 
-**审批范围**：审批门（`approval.MCPApproval`）**只接入 MCP 工具**——`MCPTool.Execute`（`internal/agent/tools/mcp_tool.go`）在真正调用 MCP 服务前询问 `gate.NeedsApproval(tenantID, serviceID, toolName)`；内置工具不走审批。哪些 MCP 工具需要审批由 `Checker`（DB 中的 `MCPToolApprovalService`，经 `approval.Adapter` 适配）按租户+服务+工具名判定。
+- **权限来源**：助手使用会话请求的 `assistant_access`，受空间助手上限限制；普通智能体使用自身配置的 `access_level`。
+- **持久化提示**：`agent_prompts` 保存人工问题与审批，`agent_run_suspensions` 保存可恢复的挂起状态。前端通过 `POST /api/v1/agent/prompts/:prompt_id` 答复，并验证调用者身份和任务归属。
+- **MCP 策略**：服务中的工具风险和逐次审批配置继续参与判断。标记为始终审批的操作不会被普通授权跳过；OAuth 授权仍是独立的交互步骤。
+- **授权范围**：`agent_grants` 区分会话授权与自动化授权，绑定相应的操作和资源，支持失效与撤销。授权不会替代角色和资源鉴权。
+- **等待与恢复**：审批等待不应消耗批准后的实际执行预算。刷新页面后可以继续处理持久化提示；执行中断且结果不确定时，不能自动重放外部写入。
+- **Lite 本机操作**：删除和扩大本机沙箱访问范围使用专门的审批卡片，显示命令、路径和影响；缺少审批通道时拒绝相关操作。
 
-**Fail-close 默认**：`NeedsApproval` 的检查器出错时默认**要求审批**（对 HITL 特性更安全）；可用环境变量 `WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true` 恢复旧的放行行为。
-
-**审批流程**（`RequestAndWait`）：
-
-1. 生成 `pendingID`（UUID），把 waiter 挂入内存 map；
-2. 通过 EventBus 发射 `EventToolApprovalRequired`（携带服务名、MCP 工具名、参数 JSON、超时秒数、tool_call_id 等），前端弹出审批卡片；
-3. 阻塞等待三者之一：用户 `Resolve`、超时（默认 **10 分钟**，`cfg.Agent.ToolApprovalTimeoutSeconds` 可配）、请求 ctx 取消；结果统一以 `EventToolApprovalResolved` 通知 UI；
-4. `Decision` 支持 `Approved`、`Reason`，以及 `ModifiedArgs`——用户可在批准时**修改工具参数**，MCPTool 会用修改后的参数重新解析执行；
-5. 拒绝/超时/取消都会作为工具失败结果返回给 LLM（而非中断整个 Agent）。
-
-**长等待与超时的配合**：普通工具执行有 60s 超时，但审批可能等更久。引擎在 `ToolExecContext.ApprovalCtx` 中传入**不含** per-tool 超时的轮级 ctx 供审批等待使用；批准后 MCPTool 再从 `ApprovalCtx` 派生一个全新的执行超时窗口，避免审批耗尽预算导致刚批准就超时。
-
-**跨实例支持**：waiter 存在发起等待的实例内存里；配置 Redis 后，`Resolve` 在本地未命中时通过 Pub/Sub 频道 `weknora:mcp_approval:resolve`（可加 `WEKNORA_REDIS_NAMESPACE` 后缀隔离多部署）广播到所有副本，由持有 waiter 的实例投递，并经带 nonce 的 per-pending 回复频道回 ack，使 HTTP 层能准确区分 `ok` / `not_found` / `tenant_mismatch` / `user_mismatch` / `already_resolved`。无 Redis 时退化为单进程语义（需要粘性会话）。
-
-**授权校验**：`Resolve` 时校验 tenant 匹配；waiter 注册了 `userID` 时调用者必须携带相同的非空 userID（空视为不匹配，fail-close），防止旁人替会话主人批准。
-
-**会话内 OAuth**：同一个 Gate 还提供 `RequestOAuthAndWait`——当 MCP 传输层返回"需要授权"错误时（而非查审批表），发射 `EventMCPOAuthRequired` 让用户在对话内完成 OAuth，等待上限取 Agent 配置的 `MCPAuthWaitTimeout`（`internal/agent/tools/mcp_oauth.go`），授权成功后自动重试工具调用。
+使用说明见[执行权限与审批](28-agent-permissions.md)，自动化的超时和通知规则见[自动化](27-automations.md)。旧 `tool-approvals` 接口与部分 Gate 兼容路径仍保留，不应据此把全部审批状态理解为只存在进程内存中的 MCP 等待。
 
 ### Agent 模式与普通 RAG 问答模式 {#_9-agent-模式与普通-rag-问答模式}
 

@@ -102,6 +102,8 @@ func TestValidateUserEnvNameReservedLayer(t *testing.T) {
 	require.Error(t, validateEnvNameNotReserved("WEKNORA_SKILL_OUTPUT_DIR"))
 	require.Error(t, validateEnvNameNotReserved("WEKNORA_SKILL_HISTORY_ROOT"))
 	require.Error(t, validateEnvNameNotReserved("WEKNORA_SESSION_INPUT_DIR"))
+	require.Error(t, validateEnvNameNotReserved("WEKNORA_SESSION_ID"))
+	require.Error(t, validateEnvNameNotReserved("WEKNORA_BROWSER_ROOT"))
 }
 
 // Every name skill environment preparation injects must be undeclarable. This is the lock that

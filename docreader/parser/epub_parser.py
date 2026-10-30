@@ -8,7 +8,7 @@ import logging
 import os
 import posixpath
 import tempfile
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 import uuid
 from typing import Dict
 
@@ -306,6 +306,14 @@ class EPUBParser(BaseParser):
         for img in soup.find_all("img"):
             src = (img.get("src") or "").strip()
             if not src:
+                continue
+            # Only archive-local references may use the basename fallback.
+            # A remote image can share its filename with an unrelated ZIP entry.
+            try:
+                reference = urlsplit(src)
+            except ValueError:
+                continue
+            if reference.scheme or reference.netloc:
                 continue
             # Only src is a URI reference. Strip its URI suffixes before decoding
             # once; archive paths from EbookLib and ZIP already contain literal

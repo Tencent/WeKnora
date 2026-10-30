@@ -210,6 +210,14 @@ type SessionDesktopProvider interface {
 	SessionDesktopManager() SessionDesktopManager
 }
 
+// SessionDesktopPromptReporter reports whether the agent should be told about
+// the desktop. It follows the sandbox configuration's own desktop switch and
+// also requires a runtime that can relay the desktop, so the prompt never
+// promises a screen the user cannot open.
+type SessionDesktopPromptReporter interface {
+	DesktopEnabledForPrompt() bool
+}
+
 // SessionTurnHolder marks one chat turn on a session's sandbox.
 type SessionTurnHolder interface {
 	// BeginSessionTurn opens one turn hold. Run the turn with the returned

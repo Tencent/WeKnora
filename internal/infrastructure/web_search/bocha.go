@@ -40,7 +40,8 @@ type BochaProvider struct {
 	summary   bool
 }
 
-func NewBochaProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+// NewBochaProvider creates a Bocha web-search client from saved parameters.
+func NewBochaProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if err := ValidateBochaParameters(params); err != nil {
 		return nil, err
 	}
@@ -81,8 +82,10 @@ func bochaSummary(extraConfig map[string]string) bool {
 
 func (p *BochaProvider) Name() string { return "bocha" }
 
-func (p *BochaProvider) Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error) {
-	query = strings.TrimSpace(query)
+// Search queries the Bocha API and converts its results to WeKnora's format.
+func (p *BochaProvider) Search(ctx context.Context, request types.WebSearchRequest) ([]*types.WebSearchResult, error) {
+	maxResults, includeDate := request.MaxResults, request.IncludeDate
+	query := strings.TrimSpace(request.Query)
 	if query == "" {
 		return nil, fmt.Errorf("query is empty")
 	}

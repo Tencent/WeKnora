@@ -20,14 +20,14 @@ WeKnora 使用版本化迁移维护数据库结构，PostgreSQL 与 SQLite 分�
 
 ```text
 migrations/
-├── versioned/     # PostgreSQL/ParadeDB 版本化迁移：000000-000118 共 119 版（238 个 .up/.down.sql 文件）
-├── sqlite/        # SQLite 迁移：000000_init（压平的全量 schema）+ 000001-000036 增量版本
+├── versioned/     # PostgreSQL/ParadeDB 版本化迁移：000000-000135 共 136 版（272 个 .up/.down.sql 文件）
+├── sqlite/        # SQLite 迁移：000000_init（压平的全量 schema）+ 000001-000052 增量版本
 ├── paradedb/      # ParadeDB 附加脚本：00-init-db.sql、01-migrate-to-paradedb.sql（存量库切换）
 └── mysql/         # 00-init-db.sql，遗留的一次性 MySQL 建表脚本（未接入代码）
 ```
 
-- PostgreSQL 的 `versioned/` 从 `000000_init` 到 `000118_mcp_oauth_timestamp_tz`；
-- `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后追加增量版本（当前到 `000036_messages_attachment_lookup`），同样由 golang-migrate 顺序执行；
+- PostgreSQL 的 `versioned/` 从 `000000_init` 到 `000135_im_follow_user_language`；
+- `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后追加增量版本（当前到 `000052_im_follow_user_language`），同样由 golang-migrate 顺序执行；
 - `uuid-ossp`、`vector`、`pg_trgm`、`pg_search` 等扩展由 `versioned/` 迁移自行创建（000000、000002）；BM25 索引使用中文 Lindera 分词器建在 `embeddings.content` 上；
 - `paradedb/00-init-db.sql` 除扩展外还含一份旧版建表语句，**没有被 compose 或代码引用**。不要把它挂成数据库 initdb 脚本：它先建出的旧表会让 `000000_init` 失败。
 
@@ -94,6 +94,19 @@ migrations/
 | 000116 | 将历史智能推理 Agent 的空 allowed_tools 数组写为显式默认工具列表 |
 | 000117 | messages.attachments 的有效用户消息 GIN 索引，用于附件引用保留查询 |
 | 000118 | MCP OAuth token/client 时间戳改为 timestamptz，旧字面值按 UTC 转换 |
+| 000119 | 持久化审批 `agent_prompts`、运行挂起 `agent_run_suspensions` 与消息关联 |
+| 000120–000121 | 租户助手配置、会话 kind |
+| 000122 | 安排飞书 / Lark 相关数据源重新同步 |
+| 000123 | resources 内容哈希索引 |
+| 000124 | `agent_collaborations`，持久化多智能体协作 |
+| 000125 | 清理符合条件的历史空图片分块 |
+| 000126–000127 | MCP 工具风险、`agent_grants` 授权 |
+| 000128 | 自动化任务、运行记录和站内通知 |
+| 000129 | 会话所有者认证来源 |
+| 000130 | 会话沙箱分配与用户共享机器 |
+| 000131–000133 | 自动化执行时长、模型覆盖、统一由助手执行 |
+| 000134 | `tenants.default_settings`（JSONB），保存空间默认模型 ID；未设置时保留部署默认回退行为 |
+| 000135 | IM 渠道回复语言模式与会话最近识别语言，用于按用户消息语言回复并在短消息时沿用会话语言 |
 
 SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 
@@ -120,8 +133,15 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | 000034 | 补齐 MCP usage_instructions 与 mcp_metadata（对应 000092） |
 | 000035 | Agent 显式默认工具（对应 000116） |
 | 000036 | 有效用户消息附件查询索引（对应 000117，SQLite 使用普通索引） |
+| 000037–000039 | 持久化审批、租户助手配置、会话 kind（对应 000119–000121） |
+| 000040 | 飞书 / Lark 重同步（对应 000122） |
+| 000041–000044 | 协作、空图片分块清理、MCP 风险与授权（对应 000124–000127） |
+| 000045–000047 | 自动化、会话认证来源、沙箱分配（对应 000128–000130） |
+| 000048–000050 | 自动化执行时长、模型覆盖、助手执行（对应 000131–000133） |
+| 000051 | `tenants.default_settings`（TEXT，存储 JSON；对应 000134） |
+| 000052 | IM 渠道回复语言模式与会话最近识别语言（对应 000135） |
 
-PostgreSQL 的 000099、000112、000115、000118 没有 SQLite 对应版本。
+PostgreSQL 的 000099、000112、000115、000118、000123 没有 SQLite 对应版本。
 
 基线 schema 与后续增量共同决定新建库和已有库的最终结果；不能只看新增迁移文件名判断 Lite 是否有某张表。
 
@@ -133,7 +153,7 @@ PostgreSQL 的 000099、000112、000115、000118 没有 SQLite 对应版本。
 
 | 表 | 用途 | 关键字段 |
 | --- | --- | --- |
-| `tenants` | 租户（工作空间），多租户体系根 | `id`（SERIAL，起始 10000）、`name`、`retriever_engines`（JSONB）、`status`、`storage_quota`/`storage_used`、`agent_config`/`context_config`/`conversation_config`/`web_search_config`/`credentials`/`api_principal_config`/`memory_config`（JSONB）、`default_storage_backend_id`。原 `api_key` 列已在 000065 迁入 `tenant_api_keys` 并删除 |
+| `tenants` | 租户（工作空间），多租户体系根 | `id`（SERIAL，起始 10000）、`name`、`retriever_engines`（JSONB）、`status`、`storage_quota`/`storage_used`、`agent_config`/`context_config`/`conversation_config`/`web_search_config`/`credentials`/`api_principal_config`/`memory_config`/`default_settings`（JSONB）、`default_storage_backend_id`。原 `api_key` 列已在 000065 迁入 `tenant_api_keys` 并删除 |
 | `users` | 登录用户 | `id`（UUID）、`username`（唯一）、`email`（唯一）、`password_hash`、`tenant_id`（FK→tenants，ON DELETE SET NULL）、`is_active`、`can_access_all_tenants`（跨空间访问）、`is_system_admin`（系统管理员，000053）、`preferences`（JSON） |
 | `auth_tokens` | 登录令牌 | `id`、`user_id`（FK→users，CASCADE）、`token`、`token_type`（access/refresh）、`expires_at`（TIMESTAMPTZ，000072 起）、`is_revoked` |
 | `tenant_members` | 租户级 RBAC 成员关系 | `user_id`+`tenant_id`（软删除下唯一）、`role`（owner/admin/contributor/viewer）、`status`、`invited_by`、`joined_at` |
@@ -245,8 +265,8 @@ subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向
 | --- | --- | --- |
 | `data_sources` | 外部数据源连接（飞书/Lark 知识库与云盘、Notion、Confluence、语雀、钉钉、IMA、RSS、GitLab，000029） | `id`、`tenant_id`、`knowledge_base_id`、`type`、`config`（JSONB 凭证）、`sync_schedule`（cron）、`sync_mode`（incremental/full）、`conflict_strategy`、`sync_deletions`、`last_sync_at`/`last_sync_cursor`/`last_sync_result` |
 | `sync_logs` | 每次同步的执行记录 | `data_source_id`（FK，CASCADE）、`status`、`started_at`/`finished_at`、`items_total/created/updated/deleted/skipped/failed`、`error_message` |
-| `im_channels` | IM 渠道接入配置（企业微信/飞书/Slack 等） | `tenant_id`、`platform`、`agent_id`、`knowledge_base_id`、`mode`（websocket/webhook；钉钉自 000096 起只用 websocket）、`output_mode`、`session_mode`、`bot_identity`、`credentials`、`locale`（固定回复语言，空串用部署默认值，000110） |
-| `im_channel_sessions` | IM 用户/线程 ↔ session 映射 | `im_channel_id`、`session_id`、`agent_id`、平台用户/会话标识 |
+| `im_channels` | IM 渠道接入配置（企业微信/飞书/Slack 等） | `tenant_id`、`platform`、`agent_id`、`knowledge_base_id`、`mode`（websocket/webhook；钉钉自 000096 起只用 websocket）、`output_mode`、`session_mode`、`bot_identity`、`credentials`、`locale`（固定回复语言，空串用部署默认值，000110）、`language_mode`（固定语言或跟随用户，000135） |
+| `im_channel_sessions` | IM 用户/线程 ↔ session 映射 | `im_channel_id`、`session_id`、`agent_id`、平台用户/会话标识、`last_detected_language`（会话最近识别语言，000135） |
 | `embed_channels` | 网页嵌入聊天组件渠道（000060） | `tenant_id`、`agent_id`、公开 token/域名配置 |
 | `web_search_providers` | 联网搜索引擎配置（000030） | `id`、`tenant_id`、`name`、`provider`（bing/google/tavily/searxng…）、`parameters`（JSONB API key）、`is_default` |
 

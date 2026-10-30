@@ -42,7 +42,9 @@ func TestMetasoProviderSearch(t *testing.T) {
 	defer server.Close()
 
 	metaso := &MetasoProvider{client: server.Client(), baseURL: server.URL, apiKey: "mk-test", scope: "scholar"}
-	results, err := metaso.Search(context.Background(), " WeKnora ", 2, true)
+	results, err := metaso.Search(context.Background(), types.WebSearchRequest{
+		Query: " WeKnora ", MaxResults: 2, IncludeDate: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +121,9 @@ func TestMetasoProviderScopeArrays(t *testing.T) {
 				client: server.Client(), baseURL: server.URL,
 				apiKey: "mk-test", scope: scope,
 			}
-			results, err := metaso.Search(context.Background(), "q", 5, true)
+			results, err := metaso.Search(context.Background(), types.WebSearchRequest{
+				Query: "q", MaxResults: 5, IncludeDate: true,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +156,7 @@ func TestMetasoProviderImageScopeHasNoLink(t *testing.T) {
 		client: server.Client(), baseURL: server.URL,
 		apiKey: "mk-test", scope: "image",
 	}
-	results, err := metaso.Search(context.Background(), "q", 5, false)
+	results, err := metaso.Search(context.Background(), types.WebSearchRequest{Query: "q", MaxResults: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +184,7 @@ func TestMetasoProviderToleratesNonStringURLFields(t *testing.T) {
 		client: server.Client(), baseURL: server.URL,
 		apiKey: "mk-test", scope: "webpage",
 	}
-	results, err := metaso.Search(context.Background(), "q", 5, false)
+	results, err := metaso.Search(context.Background(), types.WebSearchRequest{Query: "q", MaxResults: 5})
 	if err != nil {
 		t.Fatalf("non-string url fields must not fail the search: %v", err)
 	}
@@ -202,7 +206,7 @@ func TestMetasoProviderToleratesUnmodelledFields(t *testing.T) {
 		client: server.Client(), baseURL: server.URL,
 		apiKey: "mk-test", scope: "webpage",
 	}
-	results, err := metaso.Search(context.Background(), "q", 5, false)
+	results, err := metaso.Search(context.Background(), types.WebSearchRequest{Query: "q", MaxResults: 5})
 	if err != nil {
 		t.Fatalf("unmodelled fields must not fail the search: %v", err)
 	}
@@ -230,7 +234,7 @@ func TestMetasoProviderHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 	metaso := &MetasoProvider{client: server.Client(), baseURL: server.URL, apiKey: "bad", scope: defaultMetasoScope}
-	_, err := metaso.Search(context.Background(), "test", 1, false)
+	_, err := metaso.Search(context.Background(), types.WebSearchRequest{Query: "test", MaxResults: 1})
 	if err == nil || !strings.Contains(err.Error(), "invalid API key") {
 		t.Fatalf("error = %v", err)
 	}

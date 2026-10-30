@@ -30,7 +30,7 @@
 ARG TARGETPLATFORM
 
 # Stage 1: Get Node.js binaries
-FROM --platform=${TARGETPLATFORM:-linux/amd64} node:20-slim AS node-base
+FROM --platform=${TARGETPLATFORM:-linux/amd64} node:22-slim AS node-base
 
 FROM --platform=${TARGETPLATFORM:-linux/amd64} ghcr.io/astral-sh/uv:0.12.4 AS uv-base
 
@@ -198,6 +198,85 @@ RUN chmod 0755 /usr/local/bin/start-desktop.sh \
     && mkdir -p /root/.config/xfce4/xfconf/xfce-perchannel-xml \
     && cp /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml \
           /root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+
+# agent-browser: pinned CLI + Google Chrome from Google's apt repo, which
+# publishes native amd64 and arm64 debs at the same version. Debian chromium
+# is gone on purpose: Chrome adds the proprietary codecs (H.264/AAC), and the
+# change is invisible to every caller because chrome-wk execs whatever
+# WK_CHROME_REAL says. Never run "agent-browser install": it downloads
+# Chrome for Testing; chrome-wk pins the system browser instead.
+# The postinst rewrites the source list with its own arch-less line, so the
+# arch-pinned line is written again after the install.
+RUN install -d -m 0755 /etc/apt/keyrings \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google.asc \
+    && echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/google.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
+    && echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/google.asc] https://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
+    && npm install -g --prefix /opt/agent-browser agent-browser@0.39.1 \
+    && /opt/agent-browser/bin/agent-browser --version
+
+# Every browser in the image goes through the chrome-wk shim; this points it
+# at Chrome for session browsers and the GUI fallback.
+ENV WK_CHROME_REAL=/usr/bin/google-chrome
+
+# Chrome shortcut on the desktop background of every screen (the shared :0 and
+# every seat): xfdesktop shows launchers from root's Desktop folder, and
+# root's XFCE config is what the per-seat seeding copies. Exec goes through
+# wk-chrome so a human clicking the icon opens THIS session's agent browser
+# (same profile, synced by wk-browser-sync), falling back to chrome-wk
+# outside session context.
+COPY docker/desktop/google-chrome.desktop /root/Desktop/google-chrome.desktop
+# XFCE's bottom panel refers to this generic browser entry by filename.
+COPY docker/desktop/xfce4-web-browser.desktop /usr/share/applications/xfce4-web-browser.desktop
+RUN chmod 0755 /root/Desktop/google-chrome.desktop \
+    # Every GUI entry must reach wk-chrome, not the raw binary: the packaged
+    # Applications menu entry (all its Exec lines, incl. the incognito/new
+    # window actions) is rewritten, and it also becomes the default http/https
+    # handler so links clicked anywhere on a seat screen land in the session
+    # browser too. Prefix-only rewrite keeps each line's argument tail.
+    && mkdir -p /usr/local/share/applications \
+    && sed -i 's|^Exec=/usr/bin/google-chrome-stable|Exec=/usr/local/bin/wk-chrome|' \
+        /usr/share/applications/google-chrome.desktop \
+    && printf '[Default Applications]\nx-scheme-handler/http=google-chrome.desktop\nx-scheme-handler/https=google-chrome.desktop\n' \
+        > /usr/local/share/applications/defaults.list
+
+# Managed policy: silence the "unsupported command-line flag: --no-sandbox"
+# infobar. The sandbox shell is root, so every launch carries --no-sandbox and
+# the banner would sit above every page a human types into.
+# Hiding the banner
+# changes nothing about the security posture; the sandbox is already all-root
+# by design.
+# BrowserSignin 0: a web sign-in to Google otherwise also signs Chrome itself
+# in (Dice), which ties the Google session to that one browser; when another
+# session browser then presents the synced cookies, Google revokes the session
+# for every browser.
+COPY docker/desktop/chrome-managed-policies.json /etc/opt/chrome/policies/managed/weknora.json
+
+# The command name "agent-browser" is the isolation wrapper; the real binary
+# stays under /opt and is only called by absolute path.
+# wk-machine-id pins the device identity across rebuilds (called by chrome-wk).
+# wk-browser-sync shares login state between session browsers and restores it
+# at launch; wk-auth save is a one-shot capture through it. Node supplies
+# fetch/WebSocket.
+COPY docker/scripts/agent-browser-wrapper.sh docker/scripts/wk-display.sh /usr/local/lib/weknora/
+COPY docker/scripts/cdp-cookies.mjs docker/scripts/wk-browser-sync.mjs docker/scripts/wk-cookie-plan.mjs docker/scripts/wk-page-sync.mjs /usr/local/lib/weknora/
+COPY docker/scripts/wk-ua-governor.mjs docker/scripts/wk-fingerprint-profiles.mjs docker/scripts/wk-egress-timezone.mjs docker/scripts/wk-locale-match.mjs /usr/local/lib/weknora/
+RUN node -e 'if (typeof WebSocket !== "function" || typeof fetch !== "function") process.exit(1)'
+COPY docker/scripts/wk-auth.sh /usr/local/bin/wk-auth
+COPY docker/scripts/chrome-wk.sh /usr/local/bin/chrome-wk
+COPY docker/scripts/wk-machine-id.sh /usr/local/bin/wk-machine-id
+COPY docker/scripts/wk-browser-sync.sh /usr/local/bin/wk-browser-sync
+COPY docker/scripts/wk-chrome.sh /usr/local/bin/wk-chrome
+COPY docker/scripts/wk-ua-governor.sh /usr/local/bin/wk-ua-governor
+COPY docker/scripts/link-chrome-session.sh /usr/local/bin/link-chrome-session
+RUN chmod 0755 /usr/local/lib/weknora/agent-browser-wrapper.sh /usr/local/lib/weknora/wk-display.sh \
+        /usr/local/bin/wk-auth /usr/local/bin/chrome-wk \
+        /usr/local/bin/wk-machine-id /usr/local/bin/wk-browser-sync /usr/local/bin/wk-chrome \
+        /usr/local/bin/wk-ua-governor /usr/local/bin/link-chrome-session \
+    && ln -s /usr/local/lib/weknora/agent-browser-wrapper.sh /usr/local/bin/agent-browser \
+    && ln -s /usr/local/lib/weknora/wk-display.sh /usr/local/bin/wk-display \
+    && mkdir -p /var/lib/weknora/browser/auth && chmod 0700 /var/lib/weknora/browser
 
 # Stage 5: published desktop image (E2B / future Docker desktop).
 FROM desktop-runtime AS desktop

@@ -2,12 +2,14 @@ package chatpipeline
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"golang.org/x/sync/errgroup"
 )
 
 // PluginSearch implements search functionality for chat pipeline
@@ -48,84 +50,70 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// Use EntityKBIDs (knowledge bases with ExtractConfig enabled)
-	knowledgeBaseIDs := chatManage.EntityKBIDs
-	// Use EntityKnowledge (KnowledgeID -> KnowledgeBaseID mapping for graph-enabled files)
-	entityKnowledge := chatManage.EntityKnowledge
-
-	if len(knowledgeBaseIDs) == 0 && len(entityKnowledge) == 0 {
-		logger.Warnf(ctx, "No knowledge base IDs or knowledge IDs with ExtractConfig enabled for entity search")
+	// Graph-enabled KBs are a capability filter, not a replacement for the
+	// normalized document/tag scopes in SearchTargets.
+	enabledKBs := make(map[string]bool, len(chatManage.EntityKBIDs))
+	for _, kbID := range chatManage.EntityKBIDs {
+		enabledKBs[kbID] = true
+	}
+	namespaces := make(map[types.NameSpace]bool)
+	for _, target := range chatManage.SearchTargets {
+		if target == nil || target.KnowledgeBaseID == "" || !enabledKBs[target.KnowledgeBaseID] {
+			continue
+		}
+		switch target.Type {
+		case types.SearchTargetTypeKnowledgeBase:
+			namespaces[types.NameSpace{KnowledgeBase: target.KnowledgeBaseID}] = true
+		case types.SearchTargetTypeKnowledge:
+			for _, knowledgeID := range target.KnowledgeIDs {
+				if knowledgeID != "" {
+					namespaces[types.NameSpace{KnowledgeBase: target.KnowledgeBaseID, Knowledge: knowledgeID}] = true
+				}
+			}
+		}
+	}
+	if len(namespaces) == 0 {
+		logger.Debugf(ctx, "No graph-enabled search targets")
 		return next()
 	}
 
 	// Parallel search across multiple knowledge bases and individual files
-	var wg sync.WaitGroup
+	var group errgroup.Group
+	// A tag can resolve to many files; bound the graph-store fan-out.
+	group.SetLimit(4)
 	var mu sync.Mutex
 	var allNodes []*types.GraphNode
 	var allRelations []*types.GraphRelation
 
-	// If specific KnowledgeIDs are provided, search by individual files
-	if len(entityKnowledge) > 0 {
-		logger.Infof(ctx, "Searching entities across %d knowledge file(s)", len(entityKnowledge))
-		for knowledgeID, kbID := range entityKnowledge {
-			wg.Add(1)
-			go func(knowledgeBaseID, knowledgeID string) {
-				defer wg.Done()
-
-				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{
-					KnowledgeBase: knowledgeBaseID,
-					Knowledge:     knowledgeID,
-				}, entity)
-				if err != nil {
-					logger.Errorf(ctx, "Failed to search entity in Knowledge %s: %v", knowledgeID, err)
-					return
-				}
-
-				logger.Infof(
-					ctx,
-					"Knowledge %s entity search result count: %d nodes, %d relations",
-					knowledgeID,
-					len(graph.Node),
-					len(graph.Relation),
-				)
-
-				mu.Lock()
-				allNodes = append(allNodes, graph.Node...)
-				allRelations = append(allRelations, graph.Relation...)
-				mu.Unlock()
-			}(kbID, knowledgeID)
+	for namespace := range namespaces {
+		// A whole-KB query already includes its explicitly selected files.
+		if namespace.Knowledge != "" && namespaces[types.NameSpace{KnowledgeBase: namespace.KnowledgeBase}] {
+			continue
 		}
-	} else {
-		// Otherwise, search by knowledge base
-		logger.Infof(ctx, "Searching entities across %d knowledge base(s): %v", len(knowledgeBaseIDs), knowledgeBaseIDs)
-		for _, kbID := range knowledgeBaseIDs {
-			wg.Add(1)
-			go func(knowledgeBaseID string) {
-				defer wg.Done()
-
-				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: knowledgeBaseID}, entity)
-				if err != nil {
-					logger.Errorf(ctx, "Failed to search entity in KB %s: %v", knowledgeBaseID, err)
-					return
-				}
-
-				logger.Infof(
+		group.Go(func() error {
+			graph, err := p.graphRepo.SearchNode(ctx, namespace, entity)
+			if err != nil {
+				logger.Errorf(
 					ctx,
-					"KB %s entity search result count: %d nodes, %d relations",
-					knowledgeBaseID,
-					len(graph.Node),
-					len(graph.Relation),
+					"Failed to search entity in KB %s, knowledge %s: %v",
+					namespace.KnowledgeBase,
+					namespace.Knowledge,
+					err,
 				)
-
-				mu.Lock()
-				allNodes = append(allNodes, graph.Node...)
-				allRelations = append(allRelations, graph.Relation...)
-				mu.Unlock()
-			}(kbID)
-		}
+				return nil
+			}
+			if graph == nil {
+				return nil
+			}
+			mu.Lock()
+			allNodes = append(allNodes, graph.Node...)
+			allRelations = append(allRelations, graph.Relation...)
+			mu.Unlock()
+			return nil
+		})
 	}
 
-	wg.Wait()
+	_ = group.Wait()
 
 	// Merge graph data
 	chatManage.GraphResult = &types.GraphData{
@@ -141,15 +129,8 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	}
 	// Graph hits from an org-shared KB belong to the sharing workspace, so
 	// the lookups are not tenant scoped (as for parents, #3342). The graph
-	// namespaces are the KBs in this turn's scope; a chunk is only used when
-	// its row belongs to one of them.
-	allowedKBs := make(map[string]bool, len(knowledgeBaseIDs)+len(entityKnowledge))
-	for _, id := range knowledgeBaseIDs {
-		allowedKBs[id] = true
-	}
-	for _, kbID := range entityKnowledge {
-		allowedKBs[kbID] = true
-	}
+	// namespaces come from this turn's targets, but stored graph evidence may
+	// be stale. Recheck its current document and physical tag scope below.
 	listed, err := p.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list chunks, session_id: %s, error: %v", chatManage.SessionID, err)
@@ -158,7 +139,7 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	chunks := make([]*types.Chunk, 0, len(listed))
 	knowledgeIDs := []string{}
 	for _, chunk := range listed {
-		if chunk == nil || !allowedKBs[chunk.KnowledgeBaseID] {
+		if chunk == nil || !enabledKBs[chunk.KnowledgeBaseID] || !entityChunkInScope(chunk, chatManage.SearchTargets) {
 			continue
 		}
 		chunks = append(chunks, chunk)
@@ -199,6 +180,27 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		chatManage.SessionID,
 	)
 	return next()
+}
+
+func entityChunkInScope(chunk *types.Chunk, targets types.SearchTargets) bool {
+	for _, target := range targets {
+		if target == nil || target.KnowledgeBaseID != chunk.KnowledgeBaseID {
+			continue
+		}
+		switch target.Type {
+		case types.SearchTargetTypeKnowledgeBase:
+		case types.SearchTargetTypeKnowledge:
+			if !slices.Contains(target.KnowledgeIDs, chunk.KnowledgeID) {
+				continue
+			}
+		default:
+			continue
+		}
+		if len(target.TagIDs) == 0 || slices.Contains(target.TagIDs, chunk.TagID) {
+			return true
+		}
+	}
+	return false
 }
 
 // maxEntityChunks bounds the chunks graph entity search adds to a turn.

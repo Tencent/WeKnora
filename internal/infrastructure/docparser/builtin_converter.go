@@ -3,13 +3,17 @@ package docparser
 import (
 	"bytes"
 	"context"
-	"encoding/csv"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/unicode"
 )
 
 // simpleFormats lists file extensions that Go can handle without the Python service.
@@ -48,7 +52,7 @@ func IsSimpleFormat(fileType string) bool {
 type SimpleFormatReader struct{}
 
 // Read reads simple format files and returns markdown.
-func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+func (b *SimpleFormatReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	ft := strings.ToLower(strings.TrimPrefix(req.FileType, "."))
 	if ft == "" {
 		ft = strings.TrimPrefix(strings.ToLower(filepath.Ext(req.FileName)), ".")
@@ -56,11 +60,11 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
 
 	switch {
 	case ft == "md" || ft == "markdown":
-		return &types.ReadResult{MarkdownContent: string(req.FileContent)}, nil
+		return &types.ReadResult{MarkdownContent: string(decodeText(req.FileContent))}, nil
 	case ft == "txt" || ft == "text":
-		return &types.ReadResult{MarkdownContent: string(req.FileContent)}, nil
+		return &types.ReadResult{MarkdownContent: string(decodeText(req.FileContent))}, nil
 	case ft == "csv":
-		md, err := csvToMarkdown(req.FileContent)
+		md, err := csvToMarkdownContext(ctx, decodeText(req.FileContent), maxCSVMarkdownBytes)
 		if err != nil {
 			return nil, fmt.Errorf("csv conversion failed: %w", err)
 		}
@@ -86,17 +90,15 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 	if fileName == "" {
 		fileName = "image.png"
 	}
-	refPath := "images/" + fileName
-	// Encode spaces so the markdown URL is valid and matches the regex in ResolveAndStore.
-	safeRef := strings.ReplaceAll(refPath, " ", "%20")
+	markdown, refPath := originalImageMarkdown(fileName)
 	mime := http.DetectContentType(data)
 
 	return &types.ReadResult{
-		MarkdownContent: fmt.Sprintf("![%s](%s)", fileName, safeRef),
+		MarkdownContent: markdown,
 		ImageRefs: []types.ImageRef{
 			{
 				Filename:    fileName,
-				OriginalRef: safeRef,
+				OriginalRef: refPath,
 				MimeType:    mime,
 				ImageData:   data,
 				IsOriginal:  true,
@@ -104,6 +106,18 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 		},
 	}
 }
+
+// originalImageMarkdown keeps a filename from changing Markdown syntax. The
+// destination is also the exact lookup key used by ImageResolver.
+func originalImageMarkdown(fileName string) (markdown, refPath string) {
+	refPath = "images/" + url.PathEscape(fileName)
+	alt := markdownImageAltReplacer.Replace(fileName)
+	return fmt.Sprintf("![%s](%s)", alt, refPath), refPath
+}
+
+var markdownImageAltReplacer = strings.NewReplacer(
+	`\`, `\\`, "[", `\[`, "]", `\]`, "\r\n", " ", "\r", " ", "\n", " ",
+)
 
 // IsImageFormat returns true if the file type is a recognized image format.
 func IsImageFormat(fileType string) bool {
@@ -153,13 +167,12 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 	if fileName == "" {
 		fileName = "image." + ft
 	}
-	refPath := "images/" + fileName
+	imgLine, refPath := originalImageMarkdown(fileName)
 
-	if strings.Contains(mdContent, refPath) {
+	if strings.Contains(mdContent, "images/"+fileName) || strings.Contains(mdContent, refPath) {
 		return mdContent, imageRefs
 	}
 
-	imgLine := fmt.Sprintf("![%s](%s)", fileName, refPath)
 	if strings.TrimSpace(mdContent) == "" {
 		mdContent = imgLine
 	} else {
@@ -178,58 +191,40 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 	return mdContent, imageRefs
 }
 
-func csvToMarkdown(data []byte) (string, error) {
-	// Excel's "CSV UTF-8" export starts the file with a byte order mark.
-	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
-	reader := csv.NewReader(bytes.NewReader(data))
-	reader.LazyQuotes = true
-	reader.TrimLeadingSpace = true
-	// Rows may differ in length. The default, the first row's length, made
-	// one short or long row fail the whole file.
-	reader.FieldsPerRecord = -1
-
-	records, err := reader.ReadAll()
-	if err != nil {
-		return "", err
-	}
-	if len(records) == 0 {
-		return "", nil
-	}
-
-	// The table is as wide as the widest row, so no field is dropped, and
-	// shorter rows are padded with empty cells.
-	width := 0
-	for _, record := range records {
-		width = max(width, len(record))
-	}
-
-	var sb strings.Builder
-	writeRow := func(record []string) {
-		cells := make([]string, width)
-		for i, cell := range record {
-			cells[i] = csvCellReplacer.Replace(cell)
+// decodeText returns a text file as UTF-8. Windows tools often save text in
+// another encoding: UTF-16 with a byte order mark (Notepad's "Unicode"), or
+// the code page of a Chinese locale, GBK, which Excel also writes for "CSV
+// (Comma delimited)". Taken as UTF-8, such a file reached the index as
+// invalid bytes. The order follows decode_bytes in docreader/utils/endecode.py,
+// which docreader's Markdown parser reads text with: UTF-8, then GB18030 (a
+// superset of GBK and GB2312), then Latin-1, which decodes any byte. Before
+// Latin-1 comes Windows-1252, what Western Windows tools save as "ANSI": it
+// differs from Latin-1 only in bytes 0x80-0x9F, which Latin-1 reads as
+// control characters where Windows-1252 has the curly quotes, dashes and
+// euro sign. A UTF-8 file, byte order mark included, is returned unchanged.
+func decodeText(data []byte) []byte {
+	if bytes.HasPrefix(data, []byte{0xff, 0xfe}) || bytes.HasPrefix(data, []byte{0xfe, 0xff}) {
+		if text, err := unicode.UTF16(unicode.BigEndian, unicode.ExpectBOM).NewDecoder().Bytes(data); err == nil {
+			return text
 		}
-		sb.WriteString("| ")
-		sb.WriteString(strings.Join(cells, " | "))
-		sb.WriteString(" |\n")
 	}
-
-	// Header row
-	writeRow(records[0])
-
-	// Separator
-	sb.WriteString("|")
-	for range width {
-		sb.WriteString(" --- |")
+	if utf8.Valid(data) {
+		return data
 	}
-	sb.WriteString("\n")
-
-	// Data rows
-	for _, row := range records[1:] {
-		writeRow(row)
+	// The decoder writes U+FFFD for a byte sequence GB18030 does not define
+	// instead of failing, so that marks a file in some other encoding.
+	text, err := simplifiedchinese.GB18030.NewDecoder().Bytes(data)
+	if err == nil && !bytes.ContainsRune(text, utf8.RuneError) {
+		return text
 	}
-
-	return sb.String(), nil
+	// Windows-1252 leaves five bytes undefined and writes U+FFFD for them;
+	// Latin-1 then reads the file.
+	text, err = charmap.Windows1252.NewDecoder().Bytes(data)
+	if err == nil && !bytes.ContainsRune(text, utf8.RuneError) {
+		return text
+	}
+	text, _ = charmap.ISO8859_1.NewDecoder().Bytes(data)
+	return text
 }
 
 // csvCellReplacer escapes what would end a GFM table cell or row: a pipe, and

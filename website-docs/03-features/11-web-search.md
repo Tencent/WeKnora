@@ -9,21 +9,16 @@
 引擎在 `internal/container/container.go` 的 `registerWebSearchProviders` 中注册：
 
 ```go
-registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
-registry.Register("google", infra_web_search.NewGoogleProvider)
-registry.Register("bing", infra_web_search.NewBingProvider)
-registry.Register("tavily", infra_web_search.NewTavilyProvider)
-registry.Register("ollama", infra_web_search.NewOllamaProvider)
-registry.Register("baidu", infra_web_search.NewBaiduProvider)
-registry.Register("searxng", infra_web_search.NewSearxngProvider)
-registry.Register("keenable", infra_web_search.NewKeenableProvider)
-registry.Register("zhipu", infra_web_search.NewZhipuProvider)
-registry.Register("exa", infra_web_search.NewExaProvider)
-registry.Register("metaso", infra_web_search.NewMetasoProvider)
-registry.Register("bocha", infra_web_search.NewBochaProvider)
-registry.Register("brave", infra_web_search.NewBraveProvider)
-registry.Register("serply", infra_web_search.NewSerplyProvider)
+registry.Add(infra_web_search.Spec{Type: "duckduckgo", Search: infra_web_search.NewDuckDuckGoProvider})
+// ... google、bing、tavily、ollama、baidu、searxng、keenable、zhipu、exa、metaso、bocha 同上
+registry.Add(infra_web_search.Spec{Type: "brave", FilteredSearch: infra_web_search.NewBraveProvider})
+registry.Add(infra_web_search.Spec{Type: "serply", FilteredSearch: infra_web_search.NewSerplyProvider})
+registry.Add(infra_web_search.Spec{
+	Type: "deepseek", Search: infra_web_search.NewDeepSeekProvider, Fetch: infra_web_search.NewDeepSeekFetch,
+})
 ```
+
+提供商类型决定调用流程：`FilteredSearch` 注册的引擎让 `web_search` 带上 `country` / `freshness` 参数；注册了 `Fetch` 的引擎由自身 API 读页，其余引擎使用本地读页。
 
 | 引擎 | 源码文件 | 是否需要 API Key | 端点 | 备注 |
 |------|---------|-----------------|------|------|
@@ -41,8 +36,9 @@ registry.Register("serply", infra_web_search.NewSerplyProvider)
 | 博查 Bocha | `bocha.go` | 是 | `https://api.bochaai.com/v1/web-search` | extra_config.freshness、summary |
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
 | Serply | `serply.go` | 是 | `https://api.serply.io/v1/search` | Google 结果；支持按次传 country/freshness（仅 pd/pw/pm/py） |
+| DeepSeek | `deepseek.go` | 是 | `https://api.deepseek.com/v1/tools/search`、`/v1/tools/fetch` | 查询最多 128 字符；同时提供读页 API，`web_fetch` 与 `content=true` 改走 DeepSeek Fetch |
 
-当前共注册 14 个引擎。
+当前共注册 15 个引擎。
 
 | 提供商附加配置 | 值 |
 | --- | --- |
@@ -103,11 +99,11 @@ flowchart TD
 ```
 
 - `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。超出上限时截断到上限，并在模型可见的输出里附一句纠正提示，不会让整轮调用失败；小于 1 的取值返回参数错误。
-- `country` / `freshness` 通过 Brave 与 Serply 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。Serply 的 `country` 映射为 Google 的 `gl`（省略或 `ALL` 时不传 `gl`，由 Google 决定地区），`freshness` 只接受 `pd` / `pw` / `pm` / `py`。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
+- `country` / `freshness` 通过 Brave 与 Serply 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。Serply 的 `country` 映射为 Google 的 `gl`（省略或 `ALL` 时不传 `gl`，由 Google 决定地区），`freshness` 只接受 `pd` / `pw` / `pm` / `py`。其它提供商的 `web_search` schema 不包含这两个参数，工具说明会提示模型把地点和时间范围写进查询词；搜索服务层若收到这些过滤仍返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
 - `content` 默认关闭。设为 `true` 时，并行抓取前 3 条结果的正文（整批 15 秒预算，每页最多 5,000 字符摘录）；其余结果保留搜索摘要，需用 `web_fetch` 继续读页。抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照，短超时不会取消正在进行的共享抓取。
 - Brave 的相对 `age` 原样保留，避免把“2 days ago”伪造为精确发布日期。
 - 去除空查询、无效 URL、重复结果；最大结果数来自 Agent 配置，上限 20。
-- Agent 搜索不再调用 `CompressWithRAG`，不创建临时知识库，不依赖嵌入/重排模型或 Redis 临时状态。聊天快速回答管线的 RAG 压缩配置仍由原管线处理。
+- Agent 搜索不做 RAG 压缩（`WebResultCompressor`），不创建临时知识库，不依赖嵌入/重排模型或 Redis 临时状态。聊天快速回答管线的 RAG 压缩配置仍由原管线处理。
 - 模型输出包含标题、域名、可用日期与 wN 页面 ID。摘要与 provider content 标为未经页面验证的搜索证据；每段最多 1,500 字符，整批证据预算 16,000 字符。
 
 ### web_fetch
@@ -123,6 +119,7 @@ flowchart TD
 - HTML 先用 Readability 提取正文；成功时直接转换完整提取结果，失败时才回退到 main/article/body，避免二次选择内部 `.content` 节点丢失相邻段落。转为 Markdown 后，保留标题、段落、链接、表格和代码。相对链接以最终 HTTP URL 解析；嵌入资源不会自动下载。
 - 纯文本、Markdown、JSON/XML 直接读取，避免把 `<...>` 当 HTML 丢掉。二进制格式明确报告 `unsupported_content`。
 - HTTP 优先，现有 Chromium 动态页面兜底保留。网络请求继续经过共享 SSRF 校验、安全客户端与 DNS pinning。
+- 当前搜索引擎自带读页 API（目前为 DeepSeek）时，`web_fetch` 与 `web_search` 的 `content=true` 改由该 API 读取。URL 发出前同样经过 `utils.ValidateURLForSSRF`，内网地址不会转发给第三方；DeepSeek 拒绝 API Key 时返回 `provider_auth_failed`。引擎配置无法加载时退回本地读页。
 - 每批最多 8 项；相同规范 URL、offset、limit 去重。各项独立返回 `success` / `failed` / `skipped`，部分失败保留成功正文。
 - `offset` 是从 0 开始的 Unicode 字符偏移，`limit` 默认及上限均为 8,000。批次按输出预算分配正文空间，返回 `offset`、`returned_chars`、`content_length`、`truncated`；有剩余内容时返回 `next_offset`。
 - 使用同一 URL 与 `offset=next_offset` 续读。内存缓存最多 8 个页面快照，仅用于本次运行的字符续读；快照被淘汰后可通过返回的 `full_output_path` 继续读取同一份完整正文，不必重新抓网页。旧式字符续读在缓存失效时返回可重试的 `snapshot_expired`（从 offset 0 重抓，或改用 `read_file`），避免拼接不同版本页面。同一批里的续读会等首次抓取完成。
@@ -162,32 +159,46 @@ SearXNG 是自托管的元搜索引擎（聚合上游多个引擎），WeKnora �
 搜索能力由两层接口定义（`internal/types/interfaces/web_search.go`）：
 
 ```go
-// WebSearchProvider defines the interface for web search providers
-type WebSearchProvider interface {
-    Name() string
-    Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error)
+// 引擎驱动实现的端口
+type WebSearcher interface {
+    Search(ctx context.Context, req types.WebSearchRequest) ([]*types.WebSearchResult, error)
+}
+type WebFetcher interface {
+    Fetch(ctx context.Context, pageURL string) (*types.WebPage, error)
 }
 
-// WebSearchService defines the interface for web search services
+// 解析后的客户端：绑定一个已保存的 provider 和租户策略（超时、黑名单、代理）
+type WebClient interface {
+    WebSearcher
+    WebFetcher
+    Capabilities() types.WebSearchCapabilities
+}
+
 type WebSearchService interface {
-    Search(ctx context.Context, providerID string, config *types.WebSearchConfig, query string) ([]*types.WebSearchResult, error)
-    CompressWithRAG(ctx context.Context, sessionID string, tempKBID string, questions []string, ...) (...)
+    Resolve(ctx context.Context, providerID string) (WebClient, error)
 }
 ```
 
-`internal/infrastructure/web_search/registry.go` 维护 **provider 类型 -> 工厂函数** 的注册表，实例按租户参数在调用时创建：
+RAG 压缩独立为 `WebResultCompressor`，不属于搜索服务。
+
+`internal/infrastructure/web_search/registry.go` 维护 **provider 类型 -> Spec（工厂函数 + 能力声明）** 的注册表，实例按租户参数在调用时创建：
 
 ```go
-type ProviderFactory func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+type Spec struct {
+    Type    string
+    Filters bool          // 是否接受 country / freshness
+    Search  SearchFactory
+    Fetch   FetchFactory  // 可选；为空时使用本地读页
+}
 
-func (r *Registry) Register(id string, factory ProviderFactory)
-func (r *Registry) CreateProvider(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+func (r *Registry) Add(spec Spec)
+func (r *Registry) NewSearcher(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)
 ```
 
 ### 如何新增一个搜索引擎
 
-1. 在 `internal/infrastructure/web_search/` 新建 `<engine>.go`，实现 `interfaces.WebSearchProvider`（`Name()` + `Search()`），并提供工厂函数 `func New<Engine>Provider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)`；官方端点应硬编码为常量，HTTP 客户端用 `NewSearchHTTPClient(timeout, params.ProxyURL)` 构造。
+1. 在 `internal/infrastructure/web_search/` 新建 `<engine>.go`，实现 `interfaces.WebSearcher`，并提供工厂函数 `func New<Engine>Provider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)`；官方端点应硬编码为常量，HTTP 客户端用 `NewSearchHTTPClient(timeout, params.ProxyURL)` 构造。
 2. 在 `internal/types/web_search_provider.go` 增加 `WebSearchProviderType` 常量。
-3. 在 `internal/container/container.go` 的注册处追加 `registry.Register("<engine>", infra_web_search.New<Engine>Provider)`。
+3. 在 `internal/container/container.go` 的 `registerWebSearchProviders()` 中追加 `infra_web_search.Spec{Type: "<engine>", Search: infra_web_search.New<Engine>Provider}`；支持过滤条件时设 `Filters: true`，有自带读页 API 时设 `Fetch`。
 4. 如需密钥/额外参数校验，在 web search provider service 的参数校验分支中补充（参考 `ValidateSearxngBaseURL` 的共享校验模式），并为前端 `GET /web-search/providers` 目录补充展示信息。
 5. 参考 `searxng_test.go` / `zhipu_test.go` 用 `httptest` 模拟上游编写单测。

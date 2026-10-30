@@ -642,3 +642,17 @@ func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildSplitterConfigFromChunking_PreservesWikiOnlyZeroOverlap(t *testing.T) {
+	t.Parallel()
+
+	// Mirrors frontend WIKI_ONLY_CHUNKING_PRESET (chunkSize 2048, chunkOverlap 0).
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 2048, ChunkOverlap: 0},
+	}
+	eff := ResolveProcessConfig(kb, nil)
+	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+
+	require.Equal(t, 2048, cfg.ChunkSize)
+	require.Equal(t, 0, cfg.ChunkOverlap)
+}

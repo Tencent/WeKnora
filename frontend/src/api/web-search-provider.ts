@@ -1,11 +1,11 @@
-import { get, post, put, del } from '@/utils/request'
+import { get, post, put, patch, del } from '@/utils/request'
 
 // WebSearchProviderEntity represents a configured web search provider instance
 export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply'
+  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply' | 'deepseek'
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -37,6 +37,14 @@ export interface WebSearchProviderTypeInfo {
   description?: string
   docs_url?: string
   config_fields?: WebSearchProviderConfigField[]
+  clients?: WebSearchClients
+}
+
+// Readers registered for a provider type. search/fetch hold a provider type id,
+// or 'local' for WeKnora's built-in page reader.
+export interface WebSearchClients {
+  search: string
+  fetch: string
 }
 
 export interface WebSearchProviderConfigField {
@@ -69,6 +77,14 @@ export function getWebSearchProvider(id: string) {
 // Update an existing web search provider
 export function updateWebSearchProvider(id: string, data: Partial<WebSearchProviderEntity>) {
   return put(`/api/v1/web-search-providers/${id}`, data)
+}
+
+// Change display/default settings only; connection parameters are preserved
+export function patchWebSearchProvider(
+  id: string,
+  data: { name?: string; description?: string; is_default?: boolean },
+) {
+  return patch(`/api/v1/web-search-providers/${id}`, data)
 }
 
 // Delete a web search provider
