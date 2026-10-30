@@ -46,11 +46,12 @@ curl $BASE/api/v1/chunks/by-id/c-1 -H "Authorization: Bearer $TOKEN"
 
 约束与副作用：
 
-- 仅 `text` 类型分块可编辑，其它类型返回 400；
+- 可编辑 `text`、`image_ocr` 和 `image_caption`；`image_vector` 等其它类型仍不可直接编辑；
 - `expected_revision` 与当前 `content_revision` 不一致时返回 **409**（`Chunk was modified by another user; refresh and retry`）；
 - 不允许在编辑中引入源内容里没有的图片 URL；删除 Markdown 图片会同步停用对应的 OCR/caption 子分块；
 - 编辑成功后 `content_revision` +1，旧版本写入 `chunk_revisions` 表，`index_status` 依次经历 `processing` → `ready`；重建检索索引失败时行仍保存但 `index_status = failed`，可再次提交同样内容触发重试；
-- 子分块编辑会按偏移量回写父分块内容（父分块的 `source_content` 保持不可变）；
+- 文本子分块编辑会按偏移量回写父分块内容（父分块的 `source_content` 保持不可变）；图片 OCR／描述编辑不改写源文本，也不重新生成原始图片向量；
+- 图片编辑在同一事务中同步该文档内同图的 `image_info` 副本，画廊与检索使用修正后的文字。其它文档中的图片独立编辑；
 - 内容或启停状态变化会入队一次文档摘要刷新。
 
 响应：200 `{"success":true,"data":{Chunk},"summary_status":"pending","description":"..."}`
@@ -59,6 +60,10 @@ curl $BASE/api/v1/chunks/by-id/c-1 -H "Authorization: Bearer $TOKEN"
 curl -X PUT $BASE/api/v1/chunks/k-1/c-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"content":"修正后的内容","expected_revision":2}'
 ```
+
+在画廊打开图片详情后，有编辑权限的用户可在已有的「图片描述」或「图片文字」下选择「编辑」。保存会复用上述版本检查与索引同步流程；索引失败时可重试索引，版本冲突时需先重新读取。该入口用于纠正已有 OCR／描述，不会创建尚未生成的图片分块。
+
+![画廊中的图片描述编辑（示例图片与本地预览接口）](/screenshots/gallery-image-edit.png)
 
 ### GET /api/v1/chunks/:knowledge_id/:id/revisions
 
