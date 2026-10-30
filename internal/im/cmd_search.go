@@ -32,13 +32,13 @@ func newSearchCommand(sessionService interfaces.SessionService, kbService interf
 
 func (c *SearchCommand) Name() string { return "search" }
 func (c *SearchCommand) Description() string {
-	return "直接检索知识库原文（不经 AI 总结），例如：/search 退款政策"
+	return "直接檢索知識庫原文（未经 AI 总结），例如：/search 退款政策"
 }
 
 func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, args []string) (*CommandResult, error) {
 	if len(args) == 0 {
 		return &CommandResult{
-			Content: "请输入搜索内容，例如：`/search 退款政策`",
+			Content: "請輸入搜尋內容，例如：`/search 退款政策`",
 		}, nil
 	}
 
@@ -92,7 +92,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 
 	if len(results) == 0 {
 		return &CommandResult{
-			Content: fmt.Sprintf("未在知识库中找到与「%s」相关的内容。", query),
+			Content: fmt.Sprintf("未在知識庫中與「%s」相關的內容。", query),
 		}, nil
 	}
 
@@ -103,7 +103,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("🔍 **搜索「%s」** — 找到 %d 条结果\n\n", query, len(results)))
+	sb.WriteString(fmt.Sprintf("🔍 **搜尋「%s」** — 找到 %d 條結果\n\n", query, len(results)))
 
 	for i, r := range shown {
 		// Trim content to a readable length.
@@ -129,7 +129,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 	}
 
 	if len(results) > searchMaxResults {
-		sb.WriteString(fmt.Sprintf("_（仅显示前 %d 条，共 %d 条）_", searchMaxResults, len(results)))
+		sb.WriteString(fmt.Sprintf("_（僅顯示前 %d 條，共 %d 條）_", searchMaxResults, len(results)))
 	}
 
 	return &CommandResult{Content: sb.String()}, nil

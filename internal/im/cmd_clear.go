@@ -11,12 +11,12 @@ func newClearCommand() *ClearCommand { return &ClearCommand{} }
 
 func (c *ClearCommand) Name() string { return "clear" }
 func (c *ClearCommand) Description() string {
-	return "清空对话记忆，下次消息将开始全新会话"
+	return "清空對話記憶，下次消息將開始的全面會話"
 }
 
 func (c *ClearCommand) Execute(_ context.Context, _ *CommandContext, _ []string) (*CommandResult, error) {
 	return &CommandResult{
-		Content: "✅ 对话已清空，下次消息将开始全新会话。",
+		Content: "✅ 對話已清空，下次消息將開始的全面會話。",
 		Action:  ActionClear,
 	}, nil
 }
