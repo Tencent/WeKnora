@@ -138,6 +138,11 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"score":%v}`, i, probability(docs[i])))
 		}
 		return `{"data":[` + strings.Join(parts, ",") + `]}`
+	case body["queries"] != nil: // Pairwise scores retain input positions.
+		for _, doc := range texts(body["documents"]) {
+			parts = append(parts, fmt.Sprint(probability(doc)))
+		}
+		return `{"scores":[` + strings.Join(parts, ",") + `]}`
 	default: // Cohere
 		docs := texts(body["documents"])
 		score := probability
@@ -182,6 +187,13 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 		}
 		return body
 	}
+	pairwise := func(docs []string) map[string]any {
+		queries := make([]string, len(docs))
+		for i := range queries {
+			queries[i] = query
+		}
+		return map[string]any{"queries": anyStrings(queries), "documents": anyStrings(docs)}
+	}
 	const volcInstruction = "Whether the document answers the query or matches the content retrieval intent"
 
 	cases := []struct {
@@ -208,6 +220,32 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 		// the first to arrive.
 		wantBody map[string]any
 	}{
+		{
+			name: "deepinfra positional scores", provider: "deepinfra", model: "Qwen/Qwen3-Reranker-4B",
+			base:     "/v1/inference",
+			wantPath: "/v1/inference/Qwen/Qwen3-Reranker-4B", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: pairwise(three),
+		},
+		{
+			name: "deepinfra full endpoint", provider: "deepinfra", model: "Qwen/Qwen3-Reranker-4B",
+			base:     "/v1/inference/Qwen/Qwen3-Reranker-4B",
+			wantPath: "/v1/inference/Qwen/Qwen3-Reranker-4B", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: pairwise(three),
+		},
+		{
+			name: "deepinfra splits at 1024 pairs", provider: "deepinfra", model: "Qwen/Qwen3-Reranker-4B",
+			base: "/v1/inference",
+			docs: documents(1025), wantRequests: 2,
+			wantPath: "/v1/inference/Qwen/Qwen3-Reranker-4B", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: pairwise(documents(1024)),
+		},
+		{
+			name: "deepinfra duplicate documents", provider: "deepinfra", model: "Qwen/Qwen3-Reranker-4B",
+			base:     "/v1/inference",
+			docs:     []string{"same", "x", "same"},
+			wantPath: "/v1/inference/Qwen/Qwen3-Reranker-4B", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: pairwise([]string{"same", "x", "same"}),
+		},
 		{
 			name: "jina echoes documents", provider: "jina", model: "jina-reranker-v3", base: "/v1",
 			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
@@ -420,6 +458,47 @@ func TestOpenAIDoesNotOfferRerank(t *testing.T) {
 	v, ok := modelruntime.Get("openai")
 	require.True(t, ok)
 	assert.False(t, v.SupportsType(types.ModelTypeRerank))
+}
+
+func TestDeepInfraKeepsDuplicateDocumentPositions(t *testing.T) {
+	up := newUpstream(t)
+	docs := []string{"same", "x", "same"}
+	r, err := NewReranker(&RerankerConfig{
+		Source: types.ModelSourceRemote, Provider: "deepinfra", ModelName: "Qwen/Qwen3-Reranker-4B",
+		BaseURL: up.url + "/v1/inference", APIKey: "k",
+	})
+	require.NoError(t, err)
+	got, err := r.Rerank(context.Background(), "q", docs)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	assert.Equal(t, []int{0, 2, 1}, []int{got[0].Index, got[1].Index, got[2].Index})
+	assert.InDelta(t, 0.04, got[0].RelevanceScore, 1e-12, "probabilities must not receive sigmoid")
+}
+
+func TestDeepInfraRequestBudgetChargesEveryQuery(t *testing.T) {
+	up := newUpstream(t)
+	query := strings.Repeat("问", 40)
+	docs := []string{strings.Repeat("文", 30), strings.Repeat("字", 30)}
+	r, err := NewReranker(&RerankerConfig{
+		Source: types.ModelSourceRemote, Provider: "deepinfra", ModelName: "Qwen/Qwen3-Reranker-4B",
+		BaseURL: up.url + "/v1/inference", APIKey: "k",
+		Spec: &types.ModelSpecOverride{Compat: map[string]any{"max_request_chars": 100}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 60, MaxPassageRunes(r, query), "one passage still reserves one query")
+	got, err := r.Rerank(context.Background(), query, docs)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Len(t, up.requests, 2)
+	for _, request := range up.requests {
+		var runes int
+		for _, field := range []string{"queries", "documents"} {
+			for _, value := range request.body[field].([]any) {
+				runes += utf8.RuneCountInString(value.(string))
+			}
+		}
+		assert.LessOrEqual(t, runes, 100)
+	}
 }
 
 func TestPineconeCatalogLimitSplitsAt100Documents(t *testing.T) {
