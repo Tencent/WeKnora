@@ -40,8 +40,8 @@ const webSearchDescription = `Search the public web for current information, doc
 const (
 	webSearchPlainCountHint    = "Include the place and the time range in the query."
 	webSearchFilteredCountHint = "country is a two-letter code or ALL; omit " +
-		"it to use the provider default (Brave: US, Serply: Google default). freshness is pd, pw, pm, or py. " +
-		"Brave also accepts YYYY-MM-DDtoYYYY-MM-DD."
+		"it to use the provider default (Brave: US, Serply: Google default, Firecrawl: US). " +
+		"freshness is pd, pw, pm, or py. Brave also accepts YYYY-MM-DDtoYYYY-MM-DD."
 )
 
 // WebSearchInput is the web_search schema for providers that have no region or date parameters.
@@ -51,7 +51,7 @@ type WebSearchInput struct {
 	Content bool   `json:"content,omitempty" jsonschema:"Fetch page excerpts; default false"`
 }
 
-// WebSearchFilteredInput is the web_search schema for Brave and Serply.
+// WebSearchFilteredInput is the web_search schema for Brave, Serply and Firecrawl.
 type WebSearchFilteredInput struct {
 	Query     string `json:"query" jsonschema:"Search query string"`
 	Count     *int   `json:"count,omitempty" jsonschema:"Number of results to return (1 to the configured maximum)"`
@@ -66,7 +66,7 @@ type WebSearchTool struct {
 	provider   interfaces.WebClient // nil when the run has no usable provider
 	pages      *WebFetchTool
 	maxResults int
-	filtered   bool // Brave and Serply use WebSearchFilteredInput
+	filtered   bool // Brave, Serply and Firecrawl use WebSearchFilteredInput
 }
 
 // NewWebSearchTool creates a web_search tool for the provider resolved for this run.

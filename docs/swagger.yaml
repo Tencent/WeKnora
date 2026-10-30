@@ -9703,6 +9703,7 @@ definitions:
     - bocha
     - serply
     - deepseek
+    - firecrawl
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBrave
@@ -9720,6 +9721,7 @@ definitions:
     - WebSearchProviderTypeBocha
     - WebSearchProviderTypeSerply
     - WebSearchProviderTypeDeepSeek
+    - WebSearchProviderTypeFirecrawl
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       config_fields:

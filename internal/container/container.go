@@ -2042,6 +2042,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Add(infra_web_search.Spec{
 		Type: "deepseek", Search: infra_web_search.NewDeepSeekProvider, Fetch: infra_web_search.NewDeepSeekFetch,
 	})
+	registry.Add(infra_web_search.Spec{Type: "firecrawl", Filters: true, Search: infra_web_search.NewFirecrawlProvider})
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and
