@@ -488,29 +488,58 @@ func (p *PluginSearch) searchByTargets(
 			var queryEmbedding []float32
 			disableVector := chatManage.DisableVectorMatch
 			searchableTargets := targets
+			imageQuery := len(chatManage.QueryImage) > 0
 			if modelKey != "" && !disableVector {
 				emb, err := p.queryVector(ctx, targets[0].KnowledgeBaseID, queryText, chatManage.QueryImage)
 				if err != nil {
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
 					for _, target := range targets {
 						kb := kbMap[target.KnowledgeBaseID]
-						if !targetReportsEmbedFailure(kb) {
-							searchableTargets = append(searchableTargets, target)
+						// An image query embeds the picture, not the text. When that
+						// embedding fails there is no legitimate keyword fallback: a
+						// text search answers a different question than "match this
+						// image". Report the failure for every target instead of
+						// silently degrading the image into a text-only recall.
+						if imageQuery || targetReportsEmbedFailure(kb) {
+							recordError(fmt.Errorf("knowledge base %s has no keyword fallback: %w", target.KnowledgeBaseID, err))
 							continue
 						}
-						recordError(fmt.Errorf("knowledge base %s has no keyword fallback: %w", target.KnowledgeBaseID, err))
+						searchableTargets = append(searchableTargets, target)
 					}
 					pipelineWarn(ctx, "Search", "group_embed_degrade_keyword", map[string]interface{}{
 						"model_key":        modelKey,
 						"kb_id":            targets[0].KnowledgeBaseID,
+						"image_query":      imageQuery,
 						"error":            err.Error(),
 						"fallback_targets": len(searchableTargets),
 						"failed_targets":   len(targets) - len(searchableTargets),
 					})
-					disableVector = true
+					// An image query must never degrade to text-only recall, so its
+					// failed groups are dropped entirely rather than disabling the
+					// vector path for a text search.
+					if !imageQuery {
+						disableVector = true
+					}
 				} else {
 					queryEmbedding = emb
 				}
+			} else if imageQuery && modelKey == "" {
+				// An unresolved embedding-model key means the group cannot embed the
+				// query image at all. Treating it as a text query would silently
+				// answer a different question, so report the failure and drop the
+				// targets instead of falling through to a text-only HybridSearch.
+				for _, target := range targets {
+					recordError(fmt.Errorf("knowledge base %s cannot embed the query image: unresolved embedding model", target.KnowledgeBaseID))
+				}
+				pipelineWarn(ctx, "Search", "group_embed_degrade_keyword", map[string]interface{}{
+					"model_key":        modelKey,
+					"kb_id":            targets[0].KnowledgeBaseID,
+					"image_query":      true,
+					"error":            "unresolved embedding model",
+					"fallback_targets": 0,
+					"failed_targets":   len(targets),
+				})
+				searchableTargets = nil
 			}
 
 			// Separate full-KB targets (can be combined into one retrieval)

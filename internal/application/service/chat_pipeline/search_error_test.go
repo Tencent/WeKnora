@@ -375,6 +375,134 @@ func TestSearchEmbeddingFailureOnWikiOnlyTargetReportsNoResults(t *testing.T) {
 	}
 }
 
+// imageEmbeddingFailureKBService returns an image-capable service whose image
+// embedding always fails, while keyword search returns an ordinary hit. This
+// models a hybrid document KB whose image model is unavailable.
+type imageEmbeddingFailureKBService struct {
+	interfaces.KnowledgeBaseService
+	imageErr     error
+	hybridCalled bool
+	gotParams    *types.SearchParams
+	keywordHit   []*types.SearchResult
+}
+
+func (s *imageEmbeddingFailureKBService) GetKnowledgeBasesByIDsOnly(
+	context.Context, []string,
+) ([]*types.KnowledgeBase, error) {
+	return []*types.KnowledgeBase{{
+		ID:               "kb-1",
+		Type:             types.KnowledgeBaseTypeDocument,
+		EmbeddingModelID: "embedding-1",
+		IndexingStrategy: types.DefaultIndexingStrategy(),
+	}}, nil
+}
+
+func (s *imageEmbeddingFailureKBService) ResolveEmbeddingModelKeys(
+	context.Context, []*types.KnowledgeBase,
+) map[string]string {
+	return map[string]string{"kb-1": "doubao|https://ark.cn-beijing.volces.com/api/v3"}
+}
+
+func (s *imageEmbeddingFailureKBService) GetQueryEmbedding(
+	context.Context, string, string,
+) ([]float32, error) {
+	return []float32{1, 2, 3}, nil
+}
+
+func (s *imageEmbeddingFailureKBService) GetQueryImageEmbedding(
+	_ context.Context, _ string, _ []byte,
+) ([]float32, error) {
+	return nil, s.imageErr
+}
+
+func (s *imageEmbeddingFailureKBService) HybridSearch(
+	_ context.Context, _ string, params types.SearchParams,
+) ([]*types.SearchResult, error) {
+	s.hybridCalled = true
+	s.gotParams = &params
+	return s.keywordHit, nil
+}
+
+// An image embedding failure must be preserved as an error, never silently
+// degraded into a keyword-only text recall: the caller asked to match a
+// picture, and text keywords answer a different question.
+func TestSearchImageEmbeddingFailureIsNotSilentlyDegraded(t *testing.T) {
+	rootCause := errors.New("image endpoint unavailable")
+	svc := &imageEmbeddingFailureKBService{
+		imageErr:   rootCause,
+		keywordHit: []*types.SearchResult{{ID: "chunk-1", Content: "关键词命中", KnowledgeID: "k-1"}},
+	}
+	plugin := &PluginSearch{knowledgeBaseService: svc}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SearchTargets: types.SearchTargets{{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: "kb-1",
+			}},
+			EmbeddingTopK: 10,
+			QueryImage:    []byte{0x89, 'P', 'N', 'G'},
+		},
+		PipelineState: types.PipelineState{RewriteQuery: "根据图片检索"},
+	}
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_SEARCH, chatManage, func() *PluginError {
+		return nil
+	})
+	if err == nil || err.ErrorType != ErrSearch.ErrorType {
+		t.Fatalf("expected search_failed for an image embedding failure, got %#v", err)
+	}
+	if !errors.Is(err.Err, rootCause) {
+		t.Fatalf("expected the image embedding root cause to be preserved, got %v", err.Err)
+	}
+	if svc.hybridCalled {
+		t.Fatal("an image query must not run a text-only keyword search after the image embedding fails")
+	}
+}
+
+// An unresolved embedding-model key must not silently turn an image query
+// into a text query either.
+func TestSearchImageQueryWithUnresolvedModelKeyReportsError(t *testing.T) {
+	svc := &imageEmbeddingFailureKBService{
+		imageErr:   errors.New("unused"),
+		keywordHit: []*types.SearchResult{{ID: "chunk-1", Content: "关键词命中", KnowledgeID: "k-1"}},
+	}
+	// Override the model-key resolver to return an empty key (unresolved).
+	plugin := &PluginSearch{knowledgeBaseService: &unresolvedImageKeyKBService{imageEmbeddingFailureKBService: svc}}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SearchTargets: types.SearchTargets{{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: "kb-1",
+			}},
+			EmbeddingTopK: 10,
+			QueryImage:    []byte{0x89, 'P', 'N', 'G'},
+		},
+		PipelineState: types.PipelineState{RewriteQuery: "根据图片检索"},
+	}
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_SEARCH, chatManage, func() *PluginError {
+		return nil
+	})
+	if err == nil || err.ErrorType != ErrSearch.ErrorType {
+		t.Fatalf("expected search_failed for an unresolved image embedding key, got %#v", err)
+	}
+	if svc.hybridCalled {
+		t.Fatal("an image query with an unresolved model key must not run a text-only search")
+	}
+}
+
+// unresolvedImageKeyKBService returns empty model keys, so the image group
+// skips queryVector entirely — the exact "unknown grouping metadata" path.
+type unresolvedImageKeyKBService struct {
+	*imageEmbeddingFailureKBService
+}
+
+func (s *unresolvedImageKeyKBService) ResolveEmbeddingModelKeys(
+	context.Context, []*types.KnowledgeBase,
+) map[string]string {
+	return map[string]string{"kb-1": ""}
+}
+
 func TestSearchKeepsSuccessfulResultsWhenAnotherTargetFails(t *testing.T) {
 	rootCause := errors.New("one store unavailable")
 	plugin := &PluginSearch{knowledgeBaseService: &partialSearchKnowledgeBaseService{rootCause: rootCause}}
