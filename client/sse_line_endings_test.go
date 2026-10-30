@@ -67,8 +67,8 @@ func TestAgentSSEFragmentedMixedLineEndings(t *testing.T) {
 
 func TestAgentSSEBareCRDispatchesBeforeEOF(t *testing.T) {
 	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	stopped := errors.New("callback stopped stream")
 	done := make(chan error, 1)
 	go func() {
