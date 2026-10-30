@@ -8533,6 +8533,7 @@ export default {
         chat: 'Question answering',
         wiki: 'Wiki',
         ingest: 'Writes (enable with care)',
+        manage: 'Knowledge-base management (enable with care)',
       },
       tools: {
         list_knowledge_bases: 'List knowledge bases',
@@ -8558,6 +8559,8 @@ export default {
         update_document: 'Update document',
         update_documentDesc: 'Replace the content or title of a Markdown document',
         delete_document: 'Delete document',
+        update_knowledge_base: 'Update knowledge base',
+        update_knowledge_baseDesc: 'Change a knowledge base name, description and selected indexing settings',
         delete_documentDesc: 'Permanently delete a document and its index data',
       },
       sectionAsk: 'Ask settings',

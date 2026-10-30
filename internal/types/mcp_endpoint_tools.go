@@ -13,24 +13,26 @@ const (
 	MCPEndpointToolGroupChat     MCPEndpointToolGroup = "chat"
 	MCPEndpointToolGroupWiki     MCPEndpointToolGroup = "wiki"
 	MCPEndpointToolGroupIngest   MCPEndpointToolGroup = "ingest"
+	MCPEndpointToolGroupManage   MCPEndpointToolGroup = "manage"
 )
 
 // MCP endpoint tool names. These are the names external MCP clients see.
 // They intentionally differ from the agent-internal tool names where the
 // external contract is simpler (one query, server-side session handling).
 const (
-	MCPEndpointToolListKnowledgeBases = "list_knowledge_bases"
-	MCPEndpointToolSearchKnowledge    = "search_knowledge"
-	MCPEndpointToolGrepChunks         = "grep_chunks"
-	MCPEndpointToolListDocuments      = "list_documents"
-	MCPEndpointToolReadDocument       = "read_document"
-	MCPEndpointToolAsk                = "ask"
-	MCPEndpointToolWikiSearch         = "wiki_search"
-	MCPEndpointToolWikiReadPage       = "wiki_read_page"
-	MCPEndpointToolWikiIndex          = "wiki_index"
-	MCPEndpointToolAddDocument        = "add_document"
-	MCPEndpointToolUpdateDocument     = "update_document"
-	MCPEndpointToolDeleteDocument     = "delete_document"
+	MCPEndpointToolListKnowledgeBases  = "list_knowledge_bases"
+	MCPEndpointToolSearchKnowledge     = "search_knowledge"
+	MCPEndpointToolGrepChunks          = "grep_chunks"
+	MCPEndpointToolListDocuments       = "list_documents"
+	MCPEndpointToolReadDocument        = "read_document"
+	MCPEndpointToolAsk                 = "ask"
+	MCPEndpointToolWikiSearch          = "wiki_search"
+	MCPEndpointToolWikiReadPage        = "wiki_read_page"
+	MCPEndpointToolWikiIndex           = "wiki_index"
+	MCPEndpointToolAddDocument         = "add_document"
+	MCPEndpointToolUpdateDocument      = "update_document"
+	MCPEndpointToolDeleteDocument      = "delete_document"
+	MCPEndpointToolUpdateKnowledgeBase = "update_knowledge_base"
 )
 
 // MCPEndpointToolDefinition is the settings-facing description of one tool.
@@ -58,6 +60,7 @@ var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolAddDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolUpdateDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolDeleteDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
+	{Name: MCPEndpointToolUpdateKnowledgeBase, Group: MCPEndpointToolGroupManage, Destructive: true},
 }
 
 // MCPEndpointToolCatalog returns a copy of the ordered tool catalog.
@@ -74,6 +77,7 @@ func MCPEndpointToolGroups() []MCPEndpointToolGroup {
 		MCPEndpointToolGroupChat,
 		MCPEndpointToolGroupWiki,
 		MCPEndpointToolGroupIngest,
+		MCPEndpointToolGroupManage,
 	}
 }
 
@@ -138,6 +142,9 @@ func MCPEndpointCapabilitiesForTools(tools []string) []string {
 	}
 	if groups[MCPEndpointToolGroupIngest] {
 		caps = append(caps, string(APIKeyCapabilityIngest))
+	}
+	if groups[MCPEndpointToolGroupManage] {
+		caps = append(caps, string(APIKeyCapabilityManageKnowledgeBases))
 	}
 	return caps
 }
