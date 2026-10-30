@@ -4,11 +4,13 @@ import test from 'node:test'
 
 import {
   StreamAuthError,
+  clearAuthStorage,
   forceReloginRedirect,
   isStreamAuthError,
   refreshAccessTokenShared,
   resetAuthRefreshStateForTests,
   runStreamWithAuthRetry,
+  type TokenRefreshResult,
 } from './authRefresh.ts'
 
 type Store = Record<string, string>
@@ -125,6 +127,146 @@ async function settleRefreshes(promises: Promise<string>[]) {
     clearTimeout(timer)
   }
 }
+
+function deferredRefresh() {
+  let resolve!: (result: TokenRefreshResult) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<TokenRefreshResult>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function assertSessionChanged(result: PromiseSettledResult<string>) {
+  assert.equal(result.status, 'rejected')
+  if (result.status === 'rejected') {
+    assert.equal(result.reason.name, 'AuthSessionChangedError')
+  }
+}
+
+for (const outcome of ['success', 'failure'] as const) {
+  test(`stale refresh ${outcome} leaves a replacement session intact`, async () => {
+    const { store, location } = installBrowser()
+    store.weknora_token = 'A-expired'
+    store.weknora_refresh_token = 'A-refresh'
+    const old = deferredRefresh()
+    const settled = settleRefreshes([
+      refreshAccessTokenShared({ refresh: () => old.promise }),
+      refreshAccessTokenShared({ refresh: () => old.promise }),
+    ])
+    await Promise.resolve()
+
+    // Another tab replaces localStorage without calling this module's logout hook.
+    store.weknora_token = 'B-access'
+    store.weknora_refresh_token = 'B-refresh'
+    store.weknora_user = '{"id":"B"}'
+    if (outcome === 'success') {
+      old.resolve({ success: true, data: { token: 'A-new', refreshToken: 'A-new-refresh' } })
+    } else {
+      old.reject(new Error('old session revoked'))
+    }
+
+    for (const result of await settled) assertSessionChanged(result)
+    assert.equal(store.weknora_token, 'B-access')
+    assert.equal(store.weknora_refresh_token, 'B-refresh')
+    assert.equal(store.weknora_user, '{"id":"B"}')
+    assert.equal(location.href, 'http://localhost/chat')
+  })
+}
+
+test('replacement-session callers share their own refresh even after the old one finishes', async () => {
+  const { store } = installBrowser()
+  store.weknora_token = 'A-expired'
+  store.weknora_refresh_token = 'A-refresh'
+  const old = deferredRefresh()
+  const oldSettled = settleRefreshes([
+    refreshAccessTokenShared({ refresh: () => old.promise }),
+    refreshAccessTokenShared({ refresh: () => old.promise }),
+  ])
+  await Promise.resolve()
+
+  store.weknora_token = 'B-expired'
+  store.weknora_refresh_token = 'B-refresh'
+  const current = deferredRefresh()
+  let calls = 0
+  const refresh = async (refreshToken: string) => {
+    assert.equal(refreshToken, 'B-refresh')
+    calls += 1
+    return current.promise
+  }
+  const first = refreshAccessTokenShared({ refresh })
+  const second = refreshAccessTokenShared({ refresh })
+  await Promise.resolve()
+  old.resolve({ success: true, data: { token: 'A-new', refreshToken: 'A-new-refresh' } })
+  for (const result of await oldSettled) assertSessionChanged(result)
+
+  const third = refreshAccessTokenShared({ refresh })
+  current.resolve({ success: true, data: { token: 'B-new', refreshToken: 'B-new-refresh' } })
+  assert.deepEqual(await Promise.all([first, second, third]), ['B-new', 'B-new', 'B-new'])
+  assert.equal(calls, 1)
+  assert.equal(store.weknora_token, 'B-new')
+  assert.equal(store.weknora_refresh_token, 'B-new-refresh')
+})
+
+test('an old failure cannot clear a newer completed refresh', async () => {
+  const { store, location } = installBrowser()
+  store.weknora_refresh_token = 'A-refresh'
+  const old = deferredRefresh()
+  const oldSettled = settleRefreshes([refreshAccessTokenShared({ refresh: () => old.promise })])
+  await Promise.resolve()
+  store.weknora_refresh_token = 'B-refresh'
+  assert.equal(await refreshAccessTokenShared({
+    refresh: async () => ({ success: true, data: { token: 'B-new', refreshToken: 'B-new-refresh' } }),
+  }), 'B-new')
+  old.reject(new Error('A failed late'))
+  assertSessionChanged((await oldSettled)[0])
+  assert.equal(store.weknora_token, 'B-new')
+  assert.equal(store.weknora_refresh_token, 'B-new-refresh')
+  assert.equal(location.href, 'http://localhost/chat')
+})
+
+test('logout invalidates a refresh even if the same credentials are restored', async () => {
+  const { store, location } = installBrowser()
+  store.weknora_token = 'access'
+  store.weknora_refresh_token = 'refresh'
+  const old = deferredRefresh()
+  const settled = settleRefreshes([refreshAccessTokenShared({ refresh: () => old.promise })])
+  await Promise.resolve()
+  clearAuthStorage()
+  store.weknora_token = 'access'
+  store.weknora_refresh_token = 'refresh'
+  old.resolve({ success: true, data: { token: 'old-result', refreshToken: 'old-result-refresh' } })
+  assertSessionChanged((await settled)[0])
+  assert.equal(store.weknora_token, 'access')
+  assert.equal(location.href, 'http://localhost/chat')
+})
+
+test('a refresh cannot restore credentials after logout', async () => {
+  const { store } = installBrowser()
+  store.weknora_refresh_token = 'refresh'
+  const old = deferredRefresh()
+  const settled = settleRefreshes([refreshAccessTokenShared({ refresh: () => old.promise })])
+  await Promise.resolve()
+  clearAuthStorage()
+  old.resolve({ success: true, data: { token: 'old-result', refreshToken: 'old-result-refresh' } })
+  assertSessionChanged((await settled)[0])
+  assert.equal(store.weknora_token, undefined)
+  assert.equal(store.weknora_refresh_token, undefined)
+})
+
+test('changing only the access token also supersedes a pending refresh', async () => {
+  const { store } = installBrowser()
+  store.weknora_token = 'access'
+  store.weknora_refresh_token = 'refresh'
+  const old = deferredRefresh()
+  const settled = settleRefreshes([refreshAccessTokenShared({ refresh: () => old.promise })])
+  await Promise.resolve()
+  store.weknora_token = 'replacement-access'
+  old.resolve({ success: true, data: { token: 'old-result', refreshToken: 'old-result-refresh' } })
+  assertSessionChanged((await settled)[0])
+  assert.equal(store.weknora_token, 'replacement-access')
+})
 
 test('a storage read failure releases the refresh lock for a later call', async () => {
   const { store, location } = installBrowser()

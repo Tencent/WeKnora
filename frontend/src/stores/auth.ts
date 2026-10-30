@@ -12,6 +12,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useOrganizationStore } from '@/stores/organization'
 import { createSequencedRefresh } from '@/stores/sequencedRefresh'
+import { invalidateAuthRefresh } from '@/utils/authRefresh'
 
 /** 登出时丢弃 Pinia 内的空间级资源缓存，避免 SPA 重登复用上一账号数据。 */
 function clearSessionResourceCaches() {
@@ -443,6 +444,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const logout = () => {
+    invalidateAuthRefresh()
     // 清空状态
     user.value = null
     tenant.value = null
