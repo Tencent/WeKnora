@@ -224,22 +224,15 @@ func (p *DuckDuckGoProvider) searchAPI(
 
 // cleanDDGURL cleans the URL from DuckDuckGo HTML endpoint
 func cleanDDGURL(urlStr string) string {
-	if strings.HasPrefix(urlStr, "//duckduckgo.com/l/?uddg=") {
-		trimmed := strings.TrimPrefix(urlStr, "//duckduckgo.com/l/?uddg=")
-		if idx := strings.Index(trimmed, "&rut="); idx != -1 {
-			decodedStr, err := url.PathUnescape(trimmed[:idx])
-			if err == nil {
-				return decodedStr
-			}
-			return ""
-		}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil || parsedURL.Host != "duckduckgo.com" || parsedURL.Path != "/l/" ||
+		(parsedURL.Scheme != "" && parsedURL.Scheme != "https") {
+		return urlStr
 	}
-	if strings.HasPrefix(urlStr, "https://duckduckgo.com/l/?uddg=") {
-		if parsedURL, err := url.Parse(urlStr); err == nil {
-			if uddg := parsedURL.Query().Get("uddg"); uddg != "" {
-				return uddg
-			}
-		}
+	// uddg is a query parameter. Tracking fields are optional and unordered;
+	// decode the destination exactly once for both absolute and network-path URLs.
+	if target := parsedURL.Query().Get("uddg"); target != "" {
+		return target
 	}
 	return urlStr
 }
