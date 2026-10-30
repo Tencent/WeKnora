@@ -433,15 +433,17 @@ func TestParentRunBudgetIsIdempotentForSameTurn(t *testing.T) {
 	}
 	first := &agent.AgentEngine{}
 	require.NoError(t, s.attach(ctx, first, tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
-	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(),
-		cfg, "retry-session", "retry-message"))
+	// A retry reuses the same live owner binding rather than racing a second
+	// parent lease for the same conversation.
+	binding := collaboration.FromContext(ctx)
+	require.NotNil(t, binding, "attach must keep the acquired parent binding")
 	scope := collaboration.Scope{
 		TenantID: 7, UserID: "u", SessionID: "retry-session", ID: "retry-message",
 	}
 	require.NoError(t, s.Runtime.Store.ReserveBudget(ctx, scope, "retry-message", "parent/model",
 		types.RunBudgetUsed{TotalTokens: 1_500}))
-	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(),
-		cfg, "retry-session", "retry-message"))
+	require.NoError(t, s.attach(collaboration.WithBinding(ctx, binding), &agent.AgentEngine{},
+		tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
 	usage, err := s.Runtime.Store.SharedRunBudget(ctx, scope, "retry-message")
 	require.NoError(t, err)
 	require.Equal(t, 1_500, usage.Used.TotalTokens)
