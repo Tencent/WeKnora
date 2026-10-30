@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { ImageAsset } from '@/api/image-gallery'
 import { copyWithToast } from '@/utils/clipboard'
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown'
+import ImageEvidenceEditor from './ImageEvidenceEditor.vue'
 
 export interface GalleryAttrRow {
   key: string
@@ -21,6 +22,7 @@ const props = defineProps<{
   thumbUrls: Record<string, string>
   resolveSrc: (url: string) => Promise<string>
   attrRows: (img: ImageAsset) => GalleryAttrRow[]
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -29,6 +31,7 @@ const emit = defineEmits<{
   /** Step past the loaded edge; the gallery loads more images. */
   (e: 'load-more'): void
   (e: 'open-source', knowledgeId: string): void
+  (e: 'saved'): void
 }>()
 
 const NS = 'knowledgeEditor.wikiBrowser.gallery'
@@ -458,6 +461,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <div v-show="captionExpanded" :id="`${sectionId}-caption`">
               <div v-if="current.caption" class="igv-markdown" v-html="captionHtml" />
               <p v-else class="igv-text is-muted">{{ t(`${NS}.noCaption`) }}</p>
+              <ImageEvidenceEditor v-if="canEdit && current.caption" :image="current" field="caption" @saved="emit('saved')" />
             </div>
           </section>
 
@@ -482,6 +486,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <div v-show="ocrExpanded" :id="`${sectionId}-ocr`">
               <div v-if="current.ocr_text" class="igv-markdown" v-html="ocrHtml" />
               <p v-else class="igv-text is-muted">{{ t(`${NS}.noOcr`) }}</p>
+              <ImageEvidenceEditor v-if="canEdit && current.ocr_text" :image="current" field="ocr_text" @saved="emit('saved')" />
             </div>
           </section>
 
