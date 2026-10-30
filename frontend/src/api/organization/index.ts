@@ -261,7 +261,8 @@ export interface UserSearchResult {
 }
 
 /**
- * TenantInviteCandidate is one row in the search-tenants-for-invite picker.
+ * TenantInviteCandidate is one workspace result in the invite picker, matched
+ * either by a member name or an exact workspace ID.
  * The picker is tenant-centric; the representative_* fields describe the
  * user that caused the tenant to appear in the search (for display only).
  */
