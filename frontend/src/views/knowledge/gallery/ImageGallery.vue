@@ -232,6 +232,15 @@ const ATTR_NAMESPACE = 'knowledgeEditor.wikiBrowser.gallery.attr'
 
 const sanitizeKey = (id: string) => id.replace(/[:.]/g, '_')
 
+const IMAGE_SOURCE_PAGE_ATTR = 'source.page'
+const IMAGE_SOURCE_INDEX_ATTR = 'source.image_index'
+
+/** 解析器页码从 1 开始；旧数据或非法属性不展示页码。 */
+function imagePage(img: ImageAsset): number | null {
+  const page = img.attrs?.[IMAGE_SOURCE_PAGE_ATTR]
+  return typeof page === 'number' && Number.isSafeInteger(page) && page > 0 ? page : null
+}
+
 /** The pipeline's own wording for an attribute, keyed by its source-local name. */
 function pipelineKey(attr: GalleryResolvedAttr, suffix = ''): string {
   return `imageAttr.${(attr.name || '').replace(/[.\s]/g, '_')}${suffix}`
@@ -576,7 +585,12 @@ function onOpenSource(knowledgeId: string) {
 }
 
 function attrRows(img: ImageAsset): GalleryAttrRow[] {
-  return Object.entries(img.attrs || {}).map(([name, raw]) => {
+  // 原文序号仅供稳定排序；页码用用户可读的名称展示，避免泄露内部属性键。
+  return Object.entries(img.attrs || {}).filter(([name]) => name !== IMAGE_SOURCE_INDEX_ATTR
+    && (name !== IMAGE_SOURCE_PAGE_ATTR || imagePage(img) !== null)).map(([name, raw]) => {
+    if (name === IMAGE_SOURCE_PAGE_ATTR) {
+      return { key: name, label: t(`${NS}.attr.builtin_page`), value: String(imagePage(img)) }
+    }
     const attr = findAttrByRawName(name)
     return {
       key: name,
@@ -605,9 +619,9 @@ onBeforeUnmount(() => {
   releaseBlobs()
 })
 
-// Newest first unless the contract no longer offers it; picking by id keeps
-// the default independent of source registration order.
-const DEFAULT_SORT_ID = 'builtin:created_at'
+// 按字段 ID 选择页码升序；未开放页码排序时回退创建时间降序。
+const DEFAULT_SORT_ID = 'builtin:page'
+const LEGACY_DEFAULT_SORT_ID = 'builtin:created_at'
 
 let initToken = 0
 
@@ -622,6 +636,7 @@ async function initGallery() {
   error.value = ''
   keyword.value = ''
   sortBy.value = ''
+  sortOrder.value = 'desc'
   attrSelections.value = {}
   attrVerdicts.value = {}
   sourceDocIds.value = []
@@ -643,7 +658,11 @@ async function initGallery() {
     // default search still work.
   }
   if (!sortBy.value && sortAttrs.value.length) {
-    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id ?? sortAttrs.value[0].id
+    // 页码是画廊显式选择的默认排序；未开放该能力时保留创建时间降序。
+    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id
+      ?? sortAttrs.value.find((a) => a.id === LEGACY_DEFAULT_SORT_ID)?.id
+      ?? sortAttrs.value[0].id
+    sortOrder.value = sortBy.value === DEFAULT_SORT_ID ? 'asc' : 'desc'
   }
   await reload()
 }
@@ -919,6 +938,9 @@ watch(
                 <t-icon name="image-error" size="20px" />
                 <span>{{ t(`${NS}.imageLoadError`) }}</span>
               </div>
+              <span v-if="imagePage(img) !== null" class="ig-card__page">
+                {{ t(`${NS}.sourcePage`, { page: imagePage(img) }) }}
+              </span>
               <span v-if="!img.is_enabled" class="ig-card__badge">
                 {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
               </span>
@@ -1373,6 +1395,18 @@ watch(
     color: var(--td-text-color-placeholder);
     font-size: var(--app-text-sm);
     text-align: center;
+  }
+
+  &__page {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    font-size: var(--app-text-sm);
+    pointer-events: none;
   }
 
   &__badge {

@@ -236,6 +236,11 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 		if err := json.Unmarshal([]byte(row.AttrsJSON), &attrs); err != nil || attrs == nil {
 			attrs = map[string]any{}
 		}
+		// 统一返回数据库校验后的页码，使旧图回退与卡片展示、排序完全一致。
+		delete(attrs, types.ImageSourcePageAttr)
+		if row.SourcePage != nil {
+			attrs[types.ImageSourcePageAttr] = *row.SourcePage
+		}
 		assets = append(assets, types.ImageAsset{
 			ID:          row.ChunkID + "#" + strconv.Itoa(row.ImageIndex),
 			ChunkID:     row.ChunkID,

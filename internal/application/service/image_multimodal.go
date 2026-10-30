@@ -407,6 +407,9 @@ func (s *ImageMultimodalService) processImage(
 		return err
 	}
 
+	// 观察结果可能整体替换 Attrs；在管线完成后补来源位置，避免模型覆盖解析证据。
+	setImageSourceAttrs(&imageInfo, payload)
+
 	// Build child chunks for OCR and caption results
 	imageInfoJSON, _ := json.Marshal([]types.ImageInfo{imageInfo})
 	var newChunks []*types.Chunk
@@ -1144,4 +1147,33 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(
 	}
 	logger.Infof(ctx, "[ImageMultimodal] Enqueued post process task for %s", payload.KnowledgeID)
 	return nil
+}
+
+// setImageSourceAttrs 将解析器位置写到逐图属性；没有有效 PDF 定位时不伪造页码。
+func setImageSourceAttrs(imageInfo *types.ImageInfo, payload *types.ImageMultimodalPayload) {
+	// SmartOCR 的轨迹可能持有同一个 map。这里只增删顶层来源键，
+	// 先复制再修改，让来源位置只进入持久化记录，不改写模型观察快照。
+	attrs := make(map[string]any, len(imageInfo.Attrs.Attrs))
+	for key, value := range imageInfo.Attrs.Attrs {
+		attrs[key] = value
+	}
+	imageInfo.Attrs.Attrs = attrs
+	if imageInfo.Attrs.Schema == "" {
+		imageInfo.Attrs.Schema = types.ImageAttrSchemaVersion
+	}
+	delete(imageInfo.Attrs.Attrs, types.ImageSourcePageAttr)
+	delete(imageInfo.Attrs.Attrs, types.ImageSourceIndexAttr)
+	page := 0
+	for _, locator := range payload.SourceLocators {
+		if locator.Type == types.SourceLocatorPDF && locator.Page > 0 &&
+			int64(locator.Page) <= types.ImageSourceMaxOrdinal && (page == 0 || locator.Page < page) {
+			page = locator.Page
+		}
+	}
+	if page > 0 {
+		imageInfo.Attrs.Attrs[types.ImageSourcePageAttr] = page
+	}
+	if payload.ImageIndex >= 0 && int64(payload.ImageIndex) <= types.ImageSourceMaxOrdinal {
+		imageInfo.Attrs.Attrs[types.ImageSourceIndexAttr] = payload.ImageIndex
+	}
 }

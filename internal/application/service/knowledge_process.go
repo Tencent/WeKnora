@@ -4226,6 +4226,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			storedImages = append(storedImages, remoteImages...)
 		}
 
+		// 本地和远程图片分批收集，合并后恢复文档顺序供图片任务编号。
+		storedImages = docparser.SortImagesByPosition(convertResult.MarkdownContent, storedImages)
+
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 

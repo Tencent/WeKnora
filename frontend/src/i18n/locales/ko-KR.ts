@@ -5769,11 +5769,14 @@ export default {
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
+        sourcePage: '{page}페이지',
         attr: {
           builtin_caption: '설명',
           builtin_caption_description: '모델이 생성한 이미지 설명',
           builtin_ocr_text: 'OCR 텍스트',
           builtin_ocr_text_description: 'OCR 로 이미지에서 추출한 텍스트',
+          builtin_page: '문서 페이지',
+          builtin_page_description: '원본 문서별로 묶어 PDF 페이지순으로 정렬합니다. 페이지를 알 수 없는 이미지는 각 문서의 마지막에 표시됩니다.',
           builtin_created_at: '생성 시간',
           builtin_created_at_description: '소유 문서 조각이 생성된 시각',
           builtin_updated_at: '수정 시간',

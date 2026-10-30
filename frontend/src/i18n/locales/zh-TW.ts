@@ -5770,11 +5770,14 @@ export default {
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
+        sourcePage: '第 {page} 頁',
         attr: {
           builtin_caption: '描述',
           builtin_caption_description: '模型生成的圖片描述',
           builtin_ocr_text: 'OCR 文字',
           builtin_ocr_text_description: 'OCR 從圖片中提取的文字',
+          builtin_page: '文件頁碼',
+          builtin_page_description: '依來源文件分組，再依 PDF 頁碼排序；未知頁碼放在文件末尾。',
           builtin_created_at: '建立時間',
           builtin_created_at_description: '所屬文件片段的建立時間',
           builtin_updated_at: '更新時間',
