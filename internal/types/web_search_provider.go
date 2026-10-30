@@ -31,6 +31,7 @@ const (
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
 	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
 	WebSearchProviderTypeDeepSeek   WebSearchProviderType = "deepseek"
+	WebSearchProviderTypeYuanbao    WebSearchProviderType = "yuanbao"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -84,6 +85,8 @@ type WebSearchProviderParameters struct {
 	APIKey string `yaml:"api_key" json:"api_key,omitempty"`
 	// Google Custom Search Engine ID (only for Google provider)
 	EngineID string `yaml:"engine_id" json:"engine_id,omitempty"`
+	// Tencent Cloud SecretId is an account identifier; SecretKey uses encrypted APIKey.
+	SecretID string `yaml:"secret_id" json:"secret_id,omitempty"`
 	// Base URL for self-hosted search engines (e.g. SearXNG instance URL).
 	// Validated with utils.ValidateURLForSSRF; private hosts must be added to SSRF_WHITELIST.
 	BaseURL string `yaml:"base_url" json:"base_url,omitempty"`
@@ -141,6 +144,7 @@ type WebSearchProviderTypeInfo struct {
 	SupportsOptionalAPIKey bool `json:"supports_optional_api_key,omitempty"`
 	// Whether the provider requires an engine ID (e.g., Google CSE)
 	RequiresEngineID bool `json:"requires_engine_id" extensions:"x-agent"`
+	RequiresSecretID bool `json:"requires_secret_id,omitempty"`
 	// Whether the provider requires a user-supplied base URL (e.g., self-hosted SearXNG instance)
 	RequiresBaseURL bool `json:"requires_base_url" extensions:"x-agent"`
 	// Whether optional proxy_url in parameters is honored for outbound requests
@@ -384,6 +388,12 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			SupportsProxy:  true,
 			Description:    "DeepSeek Search and Fetch (requires API key)",
 			DocsURL:        "https://api-docs.deepseek.com/api/search",
+		},
+		{
+			ID: "yuanbao", Name: "Tencent Yuanbao Search", RequiresAPIKey: true,
+			RequiresSecretID: true, SupportsProxy: true,
+			Description: "Tencent Cloud Yuanbao SearchPro (API Key field stores SecretKey)",
+			DocsURL: "https://cloud.tencent.com/document/product/1806/121811",
 		},
 	}
 }
