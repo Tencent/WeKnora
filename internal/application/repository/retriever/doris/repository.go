@@ -254,6 +254,12 @@ func (r *dorisRepository) DeleteBySourceIDList(ctx context.Context,
 
 // deleteByField 是三个 Delete* 方法的统一实现：
 // DELETE FROM <table> WHERE <field> IN (?, ?, ...)。
+//
+// 表名不再由配置声明的 dimension 单独决定：维度来自模型配置，可能与
+// 实际写入时观测到的向量长度不一致（例如模型维度留空/被修改时
+// GetDimensions() 返回 0），导致删除打到 `<base>_0` 之类不存在的表而永久失败。
+// 这里改为枚举真实存在的 `<base>_<dim>` 分表逐表删除，单表失败不阻断，
+// 全部失败才报错——与 KeywordsRetrieve 的跨表策略一致。
 func (r *dorisRepository) deleteByField(ctx context.Context,
 	field string, ids []string, dimension int,
 ) error {
@@ -262,21 +268,42 @@ func (r *dorisRepository) deleteByField(ctx context.Context,
 		return nil
 	}
 
-	table := r.getTableName(dimension)
 	placeholders := make([]string, len(ids))
 	args := make([]any, len(ids))
 	for i, v := range ids {
 		placeholders[i] = "?"
 		args[i] = v
 	}
-	stmt := fmt.Sprintf("DELETE FROM `%s` WHERE %s IN (%s)",
-		table, field, strings.Join(placeholders, ", "))
 
-	if _, err := r.db.ExecContext(ctx, stmt, args...); err != nil {
-		log.Errorf("[Doris] Delete by %s failed: %v", field, err)
-		return fmt.Errorf("delete by %s: %w", field, err)
+	tables, listErr := r.listEmbeddingTables(ctx)
+	if listErr != nil {
+		// 枚举失败时退回旧的单表路径，避免因 information_schema 抖动反而删不掉。
+		log.Warnf("[Doris] list embedding tables failed (%v), falling back to dimension %d", listErr, dimension)
+		tables = []string{r.getTableName(dimension)}
 	}
-	log.Infof("[Doris] Deleted %d rows from %s by %s", len(ids), table, field)
+	if len(tables) == 0 {
+		// 没有任何分表：要么从未写入，要么枚举为空。保留旧语义（按配置维度尝试一次），
+		// 让调用方在真实无表时拿到一致的错误，而不是静默成功。
+		tables = []string{r.getTableName(dimension)}
+	}
+
+	var lastErr error
+	deleted := 0
+	for _, table := range tables {
+		stmt := fmt.Sprintf("DELETE FROM `%s` WHERE %s IN (%s)",
+			table, field, strings.Join(placeholders, ", "))
+		if _, err := r.db.ExecContext(ctx, stmt, args...); err != nil {
+			log.Warnf("[Doris] Delete by %s from %s failed: %v", field, table, err)
+			lastErr = err
+			continue
+		}
+		deleted++
+	}
+	if deleted == 0 && lastErr != nil {
+		log.Errorf("[Doris] Delete by %s failed across %d tables: %v", field, len(tables), lastErr)
+		return fmt.Errorf("delete by %s: %w", field, lastErr)
+	}
+	log.Infof("[Doris] Deleted by %s from %d/%d tables (%d ids)", field, deleted, len(tables), len(ids))
 	return nil
 }
 
