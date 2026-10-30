@@ -6,6 +6,34 @@ export function knowledgeSpansPayloadHasTrace(
   return !!(data.trace.span_id || (data.current_attempt ?? 0) > 0)
 }
 
+/** What a spans request was issued for: the knowledge and the attempt selected at the time. */
+export interface SpansRequestTarget {
+  seq: number
+  knowledgeId: string
+  attempt: number | undefined
+}
+
+/**
+ * Whether a spans response may still be applied to the component.
+ *
+ * Switching document or attempt issues a new request without waiting for the
+ * one in flight, so an older request can resolve after a newer one. Its result
+ * must be dropped: it would show the previous document's trace (or report its
+ * hasSpans to the parent) under the current one. Only the most recently issued
+ * request counts, and only while the selection it was issued for is still the
+ * selection on screen. An undefined issued attempt means "latest"; the
+ * response then fills in the attempt, so it does not have to match.
+ */
+export function isSpansResponseCurrent(
+  issued: SpansRequestTarget,
+  current: SpansRequestTarget,
+): boolean {
+  if (issued.seq !== current.seq) return false
+  if (issued.knowledgeId !== current.knowledgeId) return false
+  if (issued.attempt === undefined) return true
+  return issued.attempt === current.attempt
+}
+
 export interface KnowledgeTraceNode {
   span_id?: string
   parent_span_id?: string
