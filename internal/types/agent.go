@@ -137,6 +137,9 @@ type RunBudgetUsage struct {
 	Limit      RunBudget     `json:"limit"`
 	Used       RunBudgetUsed `json:"used"`
 	StopReason RunStopReason `json:"stop_reason,omitempty"`
+	// Action records a user's decision to finish or cancel a run after it
+	// paused at this budget. Empty means the run has no post-pause decision.
+	Action string `json:"action,omitempty"`
 }
 
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
@@ -450,8 +453,25 @@ type Cleanable interface {
 	Cleanup(ctx context.Context)
 }
 
+// EffectState describes whether a tool mutation may have taken effect. It is
+// persisted with the tool result so a later turn never blindly repeats a write.
+type EffectState string
+
+const (
+	EffectUnspecified EffectState = ""
+	EffectNone        EffectState = "none"
+	EffectNotStarted  EffectState = "not_started"
+	EffectCommitted   EffectState = "committed"
+	EffectFailed      EffectState = "failed"
+	EffectUnknown     EffectState = "unknown"
+)
+
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
+	// EffectState lets a resumed run distinguish a committed mutation, a
+	// definitely unexecuted call, and an uncertain transport failure. Empty is
+	// treated as committed for successful calls and failed otherwise.
+	EffectState EffectState `json:"effect_state,omitempty"`
 	// OutputFiles holds sandbox references for this live result only. History
 	// uses the final answer's persistent resource references instead.
 	// A non-nil empty slice means output inspection found no eligible changes;

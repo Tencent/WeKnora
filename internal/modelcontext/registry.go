@@ -305,6 +305,27 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 	if result == nil {
 		return ""
 	}
+	var effectNotice string
+	switch result.EffectState {
+	case types.EffectNone:
+		// Read-only call: no side effect to qualify.
+	case types.EffectNotStarted:
+		effectNotice = "[effect: not started] "
+	case types.EffectCommitted:
+		effectNotice = "[effect: committed] "
+	case types.EffectFailed:
+		effectNotice = "[effect: failed; safe to retry] "
+	case types.EffectUnknown:
+		effectNotice = "[effect: unknown; inspect state before retrying, do not replay blindly] "
+	}
+	base := r.modelToolResultForTool(toolName, result)
+	return effectNotice + base
+}
+
+func (r *Registry) modelToolResultForTool(toolName string, result *types.ToolResult) string {
+	if result == nil {
+		return ""
+	}
 	if r == nil || r.sources == nil {
 		if result.Success {
 			return result.Output + outputFilesPrompt(result)

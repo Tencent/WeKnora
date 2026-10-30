@@ -303,7 +303,18 @@ func (e *AgentEngine) streamThinkingToEventBus(
 			chat.Message{Role: "system", Content: runtimeNotice},
 		)
 	}
+	requestTokens := e.estimateBudgetRequestTokens(messages, tools, runtimeNotice)
 	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(budgetMessages))
+	// The turn budget is enforced before the request, not after the provider
+	// has already spent it. Reserve the estimated prompt and tool schemas and
+	// permit at most the remaining room for this response.
+	if e.runBudget != nil && e.runBudget.limit.MaxTotalTokens > 0 {
+		available := e.completionBudgetForRunTokens(requestTokens, budget)
+		if available < minTurnCompletionTokens {
+			return nil, errTurnTokenBudgetInsufficient
+		}
+		budget = available
+	}
 	logger.Debugf(ctx, "[Agent][Thinking] Iteration-%d: temp=%.2f, tools=%d, thinking=%v, max_tokens=%d",
 		iteration+1, e.config.Temperature, len(tools), e.config.Thinking, budget)
 
@@ -395,6 +406,10 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		})
 	}
 
+	sharedModelKey, reserved := e.reserveSharedModel(ctx, requestTokens+budget)
+	if !reserved {
+		return nil, errTurnTokenBudgetInsufficient
+	}
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
@@ -508,6 +523,11 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		},
 	)
 	if err != nil {
+		// A provider error may still carry measured usage. Settle whatever was
+		// reported; without usage the reservation remains the conservative cost.
+		if llmResult != nil && llmResult.Usage != nil {
+			e.settleSharedModel(ctx, sharedModelKey, contextTokensFromUsage(*llmResult.Usage))
+		}
 		// A failed attempt may already have streamed answer text. The retry
 		// starts a new answer event, so leaving this draft live would make the
 		// final message concatenate the failed attempt with the recovered one.
@@ -555,6 +575,11 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	if llmResult.Usage != nil {
 		resp.Usage = *llmResult.Usage
 	}
+	actual := contextTokensFromUsage(resp.Usage)
+	if actual <= 0 {
+		actual = requestTokens + e.estimateResponseTokens(resp) + budgetUsageSafetyTokens
+	}
+	e.settleSharedModel(ctx, sharedModelKey, actual)
 	return resp, nil
 }
 
@@ -681,6 +706,12 @@ func (e *AgentEngine) callLLMWithRetry(
 				break
 			}
 		}
+	}
+	if errors.Is(err, errTurnTokenBudgetInsufficient) {
+		e.runBudget.markStop(RunStopTokenBudget)
+		state.Budget = ptrBudgetUsage(e.budgetSnapshot(state.TurnUsage.TotalTokens))
+		logger.Warnf(ctx, "[Agent][Round-%d] %s", round, budgetPauseNotice(RunStopTokenBudget, *state.Budget))
+		return nil, errTurnTokenBudgetInsufficient
 	}
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: %v", round, err)

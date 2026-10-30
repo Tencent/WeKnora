@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -28,11 +29,20 @@ func (e *AgentEngine) Resume(
 	}
 	e.bindCollaborationInput(sessionID, messageID)
 	p := snap.PendingRound
+	budgetWait := answered != nil && answered.Kind == types.AgentPromptKindBudget
+	pendingToolBudget := snap.PendingToolBatch
+	writeBatchPaid := snap.WriteBatchPaid
 	wait := answered == nil && snap.CollaborationWait && e.collaboration != nil && e.collaboration.Child == nil
 	if answered == nil && !wait {
 		return nil, fmt.Errorf("resume needs an answered prompt or owned collaboration wait")
 	}
-	if !snap.BetweenRounds {
+	if budgetWait && !snap.BetweenRounds && !snap.PendingToolBatch {
+		return nil, fmt.Errorf("budget prompt requires a between-round or pending-tool snapshot")
+	}
+	if pendingToolBudget && len(snap.PendingRound.Calls) == 0 {
+		return nil, fmt.Errorf("pending tool batch is empty")
+	}
+	if !snap.BetweenRounds && !pendingToolBudget {
 		if p.BlockedIndex < 0 || p.BlockedIndex >= len(p.Calls) || len(p.Step.ToolCalls) != p.BlockedIndex {
 			return nil, fmt.Errorf("snapshot round is inconsistent: blocked %d of %d calls, %d done",
 				p.BlockedIndex, len(p.Calls), len(p.Step.ToolCalls))
@@ -44,8 +54,8 @@ func (e *AgentEngine) Resume(
 			return nil, fmt.Errorf("prompt %s answers call %s, run is blocked on %s",
 				answered.ID, answered.ToolCallID, p.Calls[p.BlockedIndex].ID)
 		}
-	} else if !wait {
-		return nil, fmt.Errorf("between-round resume requires collaboration ownership")
+	} else if !wait && !budgetWait && !pendingToolBudget {
+		return nil, fmt.Errorf("between-round resume requires collaboration ownership or a budget decision")
 	}
 	if e.collaboration != nil {
 		var stop func()
@@ -66,6 +76,35 @@ func (e *AgentEngine) Resume(
 		KnowledgeRefs: append([]*types.SearchResult{}, snap.KnowledgeRefs...),
 		CurrentRound:  snap.CurrentRound,
 		TurnUsage:     snap.TurnUsage,
+	}
+	if snap.Budget != nil {
+		budget := *snap.Budget
+		state.Budget = &budget
+		e.runBudget = restoreRunBudgetState(budget)
+	} else {
+		e.runBudget = newRunBudgetState(BudgetFromAgentConfig(e.config), time.Now())
+	}
+	if budgetWait {
+		var decision types.BudgetPausePromptResponse
+		if err := json.Unmarshal(answered.Response, &decision); err != nil {
+			return nil, fmt.Errorf("decode budget decision: %w", err)
+		}
+		switch decision.Action {
+		case "extend":
+			e.runBudget.extend(decision.Extension)
+			e.extendSharedBudget(ctx, types.BudgetPauseDecision{PromptID: answered.ID, Extension: decision.Extension})
+			state.Budget = ptrBudgetUsage(e.budgetSnapshot(state.TurnUsage.TotalTokens))
+		case "finish", "cancel":
+			state.Budget = ptrBudgetUsage(e.budgetSnapshot(state.TurnUsage.TotalTokens))
+			state.Budget.Action = decision.Action
+			finished, finishErr := e.finishPausedBudget(ctx, state, sessionID, messageID, decision.Action)
+			if finishErr == nil {
+				e.emitCompletionEvent(context.WithoutCancel(ctx), finished, sessionID, messageID, time.Now())
+			}
+			return finished, finishErr
+		default:
+			return nil, fmt.Errorf("unsupported budget decision %q", decision.Action)
+		}
 	}
 	systemPrompt := e.buildSystemPrompt(ctx)
 	e.beginTurn(snap.Query, snap.ImageURLs, state)
@@ -115,7 +154,62 @@ func (e *AgentEngine) Resume(
 			return nil, err
 		}
 	}
-	if !snap.BetweenRounds {
+	if pendingToolBudget {
+		// This snapshot holds a model response whose first tool has not run.
+		// Reserve the complete write batch again after an explicit extension.
+		// The budget pause is captured before local reservation, unlike an
+		// approval suspension, whose WriteBatchPaid flag prevents double charge.
+		calls := pendingCalls(p)
+		cost := mutatingToolCallCount(ctx, calls)
+		batchKey := fmt.Sprintf("writes:%d", state.CurrentRound)
+		if cost > 0 && !writeBatchPaid && e.runBudget != nil && e.runBudget.limit.MaxWriteActions > 0 {
+			allowed, reason := e.reserveSharedWrites(ctx, batchKey, cost)
+			if !allowed {
+				startTime := time.Now()
+				state.Budget = ptrBudgetUsage(e.budgetSnapshot(state.TurnUsage.TotalTokens))
+				state.Budget.StopReason = reason
+				switch e.pauseBeforeToolBatch(ctx, state, p.Step, calls, reason, sessionID, messageID) {
+				case budgetBatchContinue:
+					allowed, reason = e.reserveSharedWrites(ctx, batchKey, cost)
+					if !allowed {
+						return nil, fmt.Errorf("reserved write budget remained insufficient after extension: %s", reason)
+					}
+				case budgetBatchSuspended:
+					e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)
+					return state, nil
+				case budgetBatchFinished:
+					return state, nil
+				}
+			}
+			e.runBudget.beginWriteBatch()
+		}
+		if writeBatchPaid {
+			e.runBudget.beginWriteBatch()
+		}
+		step, suspended := e.finishPendingRound(ctx, p, nil, state.CurrentRound, sessionID, messageID)
+		if (cost > 0 || writeBatchPaid) && e.runBudget != nil && e.runBudget.limit.MaxWriteActions > 0 {
+			e.runBudget.endWriteBatch()
+		}
+		if cost > 0 && !writeBatchPaid && e.runBudget != nil && e.runBudget.limit.MaxWriteActions > 0 {
+			e.settleSharedWrites(ctx, batchKey, cost)
+		}
+		if suspended != nil {
+			startTime := time.Now()
+			logger.Infof(ctx, "[Agent][Round-%d] Suspended again waiting on prompt %s",
+				state.CurrentRound+1, suspended.PromptID)
+			state.Suspended = suspended
+			state.SuspendedStep = &step
+			if e.collaboration != nil {
+				e.collaboration.End(true)
+			}
+			e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)
+			return state, nil
+		}
+		state.RoundSteps = append(state.RoundSteps, step)
+		messages = e.appendToolResults(messages, step)
+		messages = e.appendToolImages(ctx, messages, step)
+		state.CurrentRound++
+	} else if !snap.BetweenRounds {
 		startTime := time.Now()
 		step, suspended := e.finishPendingRound(ctx, p, answered, state.CurrentRound, sessionID, messageID)
 		if suspended != nil {
@@ -204,4 +298,14 @@ func (e *AgentEngine) finishPendingRound(
 		e.emitToolOutcome(ctx, toolCall, iteration, sessionID)
 	}
 	return step, nil
+}
+
+func pendingCalls(p PendingRound) []types.LLMToolCall {
+	out := make([]types.LLMToolCall, len(p.Calls))
+	for i, c := range p.Calls {
+		out[i] = types.LLMToolCall{ID: c.ID, Type: "function", Function: types.FunctionCall{
+			Name: c.Name, Arguments: c.Arguments,
+		}, UnresolvedHandles: c.UnresolvedHandles, ProviderMetadata: c.ProviderMetadata}
+	}
+	return out
 }
