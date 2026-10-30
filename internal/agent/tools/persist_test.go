@@ -411,3 +411,43 @@ func TestCompactShellExecHeadlineKeepsMultiByteCharactersWhole(t *testing.T) {
 		t.Fatalf("short headline = %q", short)
 	}
 }
+
+func TestCompactHistoricalSandboxOutputKeepsMultiByteCharactersWhole(t *testing.T) {
+	// 1400 CJK characters are 4200 bytes, just over the 4096-byte budget, so the
+	// kept window has to be cut at both ends. Both offsets land inside a
+	// three-byte character, and a plain byte slice leaves invalid UTF-8 there.
+	output := strings.Repeat("中", 1400)
+
+	got := compactHistoricalSandboxOutput(output)
+
+	if !utf8.ValidString(got) {
+		t.Fatalf("compacted output is not valid UTF-8: %q", got)
+	}
+	if len(got) > historicalSandboxOutputChars {
+		t.Fatalf("compacted output is %d bytes, want at most %d", len(got), historicalSandboxOutputChars)
+	}
+	const marker = "\n...[historical tool output compacted]...\n"
+	if !strings.Contains(got, marker) {
+		t.Fatalf("compacted output lost its marker: %q", got)
+	}
+	body := strings.SplitN(got, marker, 2)
+	if len(body) != 2 {
+		t.Fatalf("compacted output = %q, want a head and a tail around the marker", got)
+	}
+	if !strings.HasPrefix(output, body[0]) {
+		t.Fatalf("head %q is not a prefix of the original output", body[0])
+	}
+	if !strings.HasSuffix(output, body[1]) {
+		t.Fatalf("tail %q is not a suffix of the original output", body[1])
+	}
+}
+
+func TestCompactHistoricalSandboxOutputKeepsShortMixedText(t *testing.T) {
+	// Inside the budget nothing is cut, so the multi-byte text must survive
+	// byte-for-byte.
+	output := "ls 中文目录\ncat 说明.md\n"
+
+	if got := compactHistoricalSandboxOutput(output); got != output {
+		t.Fatalf("compacted output = %q, want the original %q", got, output)
+	}
+}
