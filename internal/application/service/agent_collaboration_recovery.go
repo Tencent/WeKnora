@@ -462,7 +462,8 @@ func (s *AgentCollaboration) PendingPrompts(
 					p.SessionID != m.SessionID {
 					continue
 				}
-				if p.Kind != types.AgentPromptKindToolApproval && p.Kind != types.AgentPromptKindAskUser {
+				if p.Kind != types.AgentPromptKindToolApproval && p.Kind != types.AgentPromptKindAskUser &&
+					p.Kind != types.AgentPromptKindBudget {
 					continue
 				}
 				view := p.TimelineView()

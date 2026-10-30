@@ -12,14 +12,17 @@ import (
 type Binding struct {
 	ParentOwner string
 	// Closing only authorizes transcript finalization, never model/tool execution.
-	Closing    bool
-	Recovered  bool
-	Runtime    *Runtime
-	Scope      Scope
-	Child      *Work
-	Seen       int64
-	WaitCursor int64
-	WaitUntil  time.Time
+	Closing   bool
+	Recovered bool
+	Runtime   *Runtime
+	Scope     Scope
+	Child     *Work
+	// RunBudgetTurnID identifies the shared account for this parent turn and
+	// every child it delegates. Empty means no shared account.
+	RunBudgetTurnID string
+	Seen            int64
+	WaitCursor      int64
+	WaitUntil       time.Time
 	// HasInput probes durable steer without consuming it; the engine owns delivery.
 	HasInput func(context.Context) (bool, error)
 }

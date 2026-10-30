@@ -399,3 +399,48 @@ func TestWorkerAppliesAssistantCeilingOnlyUnderAssistantParent(t *testing.T) {
 		})
 	}
 }
+
+func TestParentRunBudgetInitializesAndChildrenJoinSameAccount(t *testing.T) {
+	s, _, _, ctx := collaborationService(t)
+	registry := tools.NewToolRegistry()
+	cfg := &types.AgentConfig{
+		MaxIterations: 3, AllowedTools: []string{tools.ToolWikiReadPage},
+		MaxRunTokens: 10_000, MaxRunSeconds: 120, MaxWriteActions: 3,
+	}
+	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, registry, cfg, "funded-session", "funded-message"))
+	scope := collaboration.Scope{
+		TenantID: 7, UserID: "u", SessionID: "funded-session", ID: "funded-message",
+	}
+	group, err := s.Runtime.Store.Read(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, "funded-message", group.RunBudgetTurnID)
+	require.NotNil(t, group.RunBudget)
+	require.Equal(t, 10_000, group.RunBudget.Limit.MaxTotalTokens)
+	_, err = s.Runtime.Spawn(ctx, scope, "budget-child", "budget_child", "a", "{}", "work")
+	require.NoError(t, err)
+	group, err = s.Runtime.Store.Read(ctx, scope)
+	require.NoError(t, err)
+	require.Len(t, group.Members, 1)
+	require.Equal(t, "funded-message", group.Members[0].Runs[0].RunBudgetTurnID,
+		"child executions must join the parent turn's account")
+}
+
+func TestParentRunBudgetIsIdempotentForSameTurn(t *testing.T) {
+	s, _, _, ctx := collaborationService(t)
+	cfg := &types.AgentConfig{
+		MaxIterations: 3, AllowedTools: []string{tools.ToolWikiReadPage},
+		MaxRunTokens: 10_000, MaxWriteActions: 2,
+	}
+	first := &agent.AgentEngine{}
+	require.NoError(t, s.attach(ctx, first, tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
+	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
+	scope := collaboration.Scope{
+		TenantID: 7, UserID: "u", SessionID: "retry-session", ID: "retry-message",
+	}
+	require.NoError(t, s.Runtime.Store.ReserveBudget(ctx, scope, "retry-message", "parent/model",
+		types.RunBudgetUsed{TotalTokens: 1_500}))
+	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
+	usage, err := s.Runtime.Store.SharedRunBudget(ctx, scope, "retry-message")
+	require.NoError(t, err)
+	require.Equal(t, 1_500, usage.Used.TotalTokens)
+}

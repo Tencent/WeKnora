@@ -347,6 +347,7 @@ func (s *sessionService) AgentQA(
 	}
 
 	engine.SetRunMode(req.Mode)
+
 	if req.RunNote != "" {
 		if noted, ok := engine.(interface{ SetRunNote(string) }); ok {
 			noted.SetRunNote(req.RunNote)

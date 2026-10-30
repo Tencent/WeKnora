@@ -290,6 +290,9 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
+	if pauser, ok := s.toolApprovalGate.(approval.BudgetPauser); ok && pauser != nil {
+		engine.SetBudgetPauser(pauser)
+	}
 	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
 	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
 	engine.SetPinnedMentions(
