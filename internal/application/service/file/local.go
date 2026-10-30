@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -111,6 +112,10 @@ func (s *localFileService) SaveFile(ctx context.Context,
 func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
 	logger.Infof(ctx, "Getting file: %s", filePath)
 
+	if p := foreignProviderScheme(filePath); p != "" {
+		return nil, fmt.Errorf("local file service cannot read %q (non-local %s:// path)", filePath, p)
+	}
+
 	candidate := s.normalizePathForBase(filePath)
 	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
 	if err != nil {
@@ -136,6 +141,10 @@ func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.Rea
 // 路径必须在 baseDir 下，防止路径遍历（如 ../../）
 func (s *localFileService) DeleteFile(ctx context.Context, filePath string) error {
 	logger.Infof(ctx, "Deleting file: %s", filePath)
+
+	if p := foreignProviderScheme(filePath); p != "" {
+		return fmt.Errorf("local file service cannot delete %q (non-local %s:// path)", filePath, p)
+	}
 
 	candidate := s.normalizePathForBase(filePath)
 	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
@@ -292,6 +301,18 @@ func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (str
 // normalization (filepath.Clean) may also collapse "storage://" into
 // "storage:/", so both forms are accepted.
 const storageScheme = "storage:"
+
+// foreignProviderScheme returns the provider name when filePath carries a
+// non-local provider scheme (s3://, minio://, cos://, ...), and "" otherwise.
+// The local driver must reject such paths explicitly instead of letting
+// filepath.Clean collapse "s3://bucket/key" into "s3:/bucket/key" and then
+// join it under baseDir — which fails with a misleading ENOENT.
+func foreignProviderScheme(filePath string) string {
+	if p := types.InferStorageFromFilePath(filePath); p != "" && p != "local" {
+		return p
+	}
+	return ""
+}
 
 // trimStorageScope strips a leading "storage://<backend-id>/" (or the cleaned
 // "storage:/<backend-id>/") scope wrapper and returns the inner provider path.
