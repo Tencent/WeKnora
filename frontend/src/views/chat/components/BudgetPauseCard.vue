@@ -72,7 +72,7 @@
 import { computed, inject, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import ChatTimelineIcon from './ChatTimelineIcon.vue'
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { resolveAgentPrompt } from '@/api/mcp-service'
 import { resolveEmbedAgentPrompt } from '@/api/embed'
 import { markPromptSubmitted, promptSubmission, usePromptDock } from '@/composables/usePromptDock'
