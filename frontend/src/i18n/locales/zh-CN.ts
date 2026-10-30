@@ -1584,6 +1584,15 @@ export default {
       notConfigured: '未配置',
       goStorageSettings: '去存储设置中配置'
     },
+    runBudget: {
+      label: '运行总预算',
+      desc: '一次完整任务允许累计消耗的总 Token、实际执行时间和写操作尝试次数。任一上限达到后，任务会在安全边界暂停，你可以追加预算继续、按已有结果结束或取消。零表示不限制。',
+      hint: '预算是安全网，不是单轮模型输出上限；长时间等待审批不会计入实际执行时间。',
+      tokens: 'Token',
+      seconds: '执行时间（秒）',
+      writes: '写操作尝试',
+      uncapped: '不限制',
+    },
     llmCallTimeout: {
       label: 'LLM 调用超时',
       desc: '单次 LLM 调用的最大等待时间（秒），超过此时间后调用将被中止',
@@ -1911,6 +1920,30 @@ export default {
     }
   },
   agentStream: {
+  budget: {
+    title: '运行预算已到上限',
+    extensionLabel: '追加',
+    tokens: 'Token',
+    time: '时间',
+    writes: '写操作尝试',
+    tokensUnit: 'token',
+    secondsUnit: '秒',
+    actionsUnit: '次',
+    extend: '追加并继续',
+    finish: '按现有结果结束',
+    cancel: '取消任务',
+    extended: '已追加预算，任务继续运行',
+    finished: '已按当前已收集的结果结束',
+    canceled: '任务已取消',
+    submitted: '已提交',
+    unansweredTag: '等待你决定',
+    submitFailed: '提交预算决定失败',
+    reasons: {
+      tokens: '当前轮次已经完成，但运行达到了 Token 预算。已完成的工具结果都已保存。',
+      time: '当前轮次已经完成，但运行达到了时间预算。已完成的工具结果都已保存。',
+      writes: '下一批写操作开始前已达到写操作上限，本轮没有启动额外的写操作。',
+    },
+  },
     saveToKb: {
       emptyContent: '当前回答为空，无法保存到知识库',
       editorOpened: '已打开编辑器，请选择知识库后保存'

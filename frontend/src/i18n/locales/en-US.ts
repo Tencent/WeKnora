@@ -7129,6 +7129,30 @@ export default {
     }
   },
   agentStream: {
+  budget: {
+    title: 'Run budget reached',
+    extensionLabel: 'Add',
+    tokens: 'Tokens',
+    time: 'Time',
+    writes: 'Write attempts',
+    tokensUnit: 'tokens',
+    secondsUnit: 'seconds',
+    actionsUnit: 'attempts',
+    extend: 'Extend and continue',
+    finish: 'Finish with current results',
+    cancel: 'Cancel task',
+    extended: 'Budget extended; the run is continuing',
+    finished: 'Finished with the results collected so far',
+    canceled: 'Task canceled',
+    submitted: 'Submitted',
+    unansweredTag: 'Waiting for your decision',
+    submitFailed: 'Failed to submit the budget decision',
+    reasons: {
+      tokens: 'The run reached its token budget after completing the current round. Completed tool results are saved.',
+      time: 'The run reached its time budget after completing the current round. Completed tool results are saved.',
+      writes: 'The run reached its limit for mutating tool calls before starting the next batch. No extra write was attempted.',
+    },
+  },
     askUser: {
       answerLabel: 'Your answer',
       title: 'Question for you',
@@ -8060,6 +8084,15 @@ export default {
       accessLevel: 'Access level',
       accessLevelDesc: 'Whether tools that change data (MCP tools, Wiki writes) run without asking. Read-only leaves them out; confirm asks you each time. MCP tools marked as requiring approval always ask.',
       unavailableService: 'Unavailable service'
+    },
+    runBudget: {
+      label: 'Run budget',
+      desc: 'Cumulative Token, active-time, and write-attempt limits for one complete task. At a safe boundary the run pauses so you can extend it, finish from existing evidence, or cancel. Zero means uncapped.',
+      hint: 'This is a safety net, not a per-round output cap. Time spent waiting for approval is excluded.',
+      tokens: 'Tokens',
+      seconds: 'Active time (sec)',
+      writes: 'Write attempts',
+      uncapped: 'Uncapped',
     },
     llmCallTimeout: {
       label: 'LLM Call Timeout',

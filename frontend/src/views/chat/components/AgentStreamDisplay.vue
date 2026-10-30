@@ -140,6 +140,16 @@
                   :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
               </div>
 
+              <!-- Run budget pause -->
+              <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'budget_pause'" class="tool-event">
+                <BudgetPauseCard :pending-id="event.pending_id" :request="event.request"
+                  :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                  :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                  :response="event.response" :resolve-reason="event.resolve_reason"
+                  :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
+              </div>
+
               <!-- MCP OAuth in-conversation authorization prompt -->
               <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
                 <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
@@ -431,6 +441,16 @@
                 :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
                 :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
                 :response="event.response" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
+            </div>
+
+            <!-- Run budget pause -->
+            <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'budget_pause'" class="tool-event">
+              <BudgetPauseCard :pending-id="event.pending_id" :request="event.request"
+                :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                :response="event.response" :resolve-reason="event.resolve_reason"
                 :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
             </div>
 
@@ -786,6 +806,7 @@ import OpenPageCard from './OpenPageCard.vue';
 import PageEditCard from './PageEditCard.vue';
 import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
+import BudgetPauseCard from './BudgetPauseCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';

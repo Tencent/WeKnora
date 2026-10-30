@@ -7129,7 +7129,30 @@ export default {
     }
   },
   agentStream: {
-    askUser: {
+    budget: {
+      title: '実行予算の上限に達しました',
+      extensionLabel: '追加',
+      tokens: 'トークン',
+      time: '時間',
+      writes: '書き込み試行',
+      tokensUnit: 'トークン',
+      secondsUnit: '秒',
+      actionsUnit: '回',
+      extend: '追加して続行',
+      finish: '現在の結果で終了',
+      cancel: 'タスクをキャンセル',
+      extended: '予算を追加しました。実行を続けています',
+      finished: 'これまでに収集した結果で終了しました',
+      canceled: 'タスクはキャンセルされました',
+      submitted: '送信済み',
+      unansweredTag: '判断をお待ちしています',
+      submitFailed: '予算の判断を送信できませんでした',
+      reasons: {
+        tokens: '現在のラウンドは完了しましたが、トークン予算に達しました。完了したツール結果は保存されています。',
+        time: '現在のラウンドは完了しましたが、時間予算に達しました。完了したツール結果は保存されています。',
+        writes: '次の書き込みバッチを開始する前に書き込み上限に達したため、追加の書き込みは実行されていません。',
+      },
+    },    askUser: {
       answerLabel: 'あなたの回答',
       title: 'あなたへの質問',
       selectPlaceholder: '選択してください',
@@ -8060,6 +8083,15 @@ export default {
       accessLevel: '実行権限の上限',
       accessLevelDesc: 'データを変更するツール（MCP ツール、Wiki への書き込み）を確認なしで実行できるかどうか。読み取り専用ではこれらのツールを提供せず、変更前に確認では毎回確認します。承認が必要と設定された MCP ツールは常に確認します。',
       unavailableService: '利用できないサービス'
+    },
+    runBudget: {
+      label: '実行予算',
+      desc: '1つのタスク全体で累積できる Token、実行時間、書き込み試行回数の上限です。安全な境界で一時停止し、予算を追加して続行するか、既存の結果で終了するか、キャンセルできます。0 は無制限です。',
+      hint: 'これは 1 回のモデル出力上限ではありません。承認待ちの時間は実行時間に含まれません。',
+      tokens: 'Token',
+      seconds: '実行時間（秒）',
+      writes: '書き込み試行',
+      uncapped: '無制限',
     },
     llmCallTimeout: {
       label: 'LLM呼び出しタイムアウト',
