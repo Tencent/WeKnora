@@ -368,7 +368,7 @@ CREATE INDEX IF NOT EXISTS idx_tenant_members_user
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id INTEGER NOT NULL,
-    actor_user_id VARCHAR(36) NOT NULL DEFAULT '',
+    actor_user_id VARCHAR(64) NOT NULL DEFAULT '',
     actor_role VARCHAR(32) NOT NULL DEFAULT '',
     action VARCHAR(64) NOT NULL,
     target_type VARCHAR(32) NOT NULL DEFAULT '',
