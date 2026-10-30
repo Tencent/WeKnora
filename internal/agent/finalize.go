@@ -334,7 +334,7 @@ func (e *AgentEngine) emitBudgetStopAnswer(ctx context.Context, sessionID, notic
 // already collected and writes an explicit accounting notice; cancel records
 // the canceled decision and completes without claiming the task succeeded.
 func (e *AgentEngine) finishPausedBudget(
-	ctx context.Context, state *types.AgentState, sessionID, messageID, action string,
+	ctx context.Context, state *types.AgentState, sessionID, _ string, action string,
 ) (*types.AgentState, error) {
 	if state == nil {
 		return nil, errors.New("finish paused budget: nil state")
@@ -344,7 +344,8 @@ func (e *AgentEngine) finishPausedBudget(
 		notice = "The task was canceled at your request after it paused at its run budget."
 	} else {
 		notice = budgetHardStopNotice(state.Budget.StopReason, *state.Budget) +
-			"\n\nYou chose to finish from the evidence collected so far. Any work not completed is listed in the steps above."
+			"\n\nYou chose to finish from the evidence collected so far. " +
+			"Any work not completed is listed in the steps above."
 	}
 	state.FinalAnswer = notice
 	state.IsComplete = true

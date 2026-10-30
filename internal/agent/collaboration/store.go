@@ -348,7 +348,8 @@ func (s *Store) ExtendBudget(
 			if g.RunBudget.Limit.MaxWallTimeSec > 0 {
 				g.RunBudget.Limit.MaxWallTimeSec += extension.MaxWallTimeSec
 			} else {
-				g.RunBudget.Limit.MaxWallTimeSec = int(time.Since(g.RunBudgetStartedAt)/time.Second) + extension.MaxWallTimeSec
+				elapsed := int(time.Since(g.RunBudgetStartedAt) / time.Second)
+				g.RunBudget.Limit.MaxWallTimeSec = elapsed + extension.MaxWallTimeSec
 			}
 		}
 		if extension.MaxWriteActions > 0 {
@@ -381,6 +382,7 @@ func (s StoreBudgetSink) ExcludeWallTime(
 	return s.Store.ExcludeWallTime(ctx, s.Scope, turnID, wait)
 }
 
+// ReserveBudget mirrors one atomic reservation into this sink's account.
 func (s StoreBudgetSink) ReserveBudget(
 	ctx context.Context, turnID, key string, reserved types.RunBudgetUsed,
 ) error {
@@ -390,6 +392,7 @@ func (s StoreBudgetSink) ReserveBudget(
 	return s.Store.ReserveBudget(ctx, s.Scope, turnID, key, reserved)
 }
 
+// SettleBudget mirrors one operation's actual usage into this sink's account.
 func (s StoreBudgetSink) SettleBudget(
 	ctx context.Context, turnID, key string, actual types.RunBudgetUsed,
 ) error {
@@ -426,7 +429,9 @@ func (s StoreBudgetSink) UsageBudget(ctx context.Context, turnID string) (types.
 // "<child>/<round>/model" or "<child>/<round>/tool/<call-id>". Reservations are
 // checked and written under the aggregate CAS, so parallel children cannot
 // jointly overspend.
-func (s *Store) ReserveBudget(ctx context.Context, scope Scope, turnID, key string, reserved types.RunBudgetUsed) error {
+func (s *Store) ReserveBudget(
+	ctx context.Context, scope Scope, turnID, key string, reserved types.RunBudgetUsed,
+) error {
 	if key == "" || turnID == "" {
 		return ErrScope
 	}
@@ -452,7 +457,9 @@ func (s *Store) ReserveBudget(ctx context.Context, scope Scope, turnID, key stri
 			g.BudgetReservations[key] = previous
 			return ErrRunBudgetExhausted
 		}
-		if g.RunBudget.Limit.MaxWallTimeSec > 0 && int(time.Since(g.RunBudgetStartedAt)/time.Second)+after.WallTimeSec > g.RunBudget.Limit.MaxWallTimeSec {
+		elapsed := int(time.Since(g.RunBudgetStartedAt) / time.Second)
+		if g.RunBudget.Limit.MaxWallTimeSec > 0 &&
+			elapsed+after.WallTimeSec > g.RunBudget.Limit.MaxWallTimeSec {
 			g.BudgetReservations[key] = previous
 			return ErrRunBudgetExhausted
 		}

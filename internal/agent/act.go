@@ -623,9 +623,8 @@ func (e *AgentEngine) runToolCallAnswered(
 	// for direct/internal callers that invoke runToolCall without a batch.
 	if e.runBudget != nil && e.runBudget.limit.MaxWriteActions > 0 {
 		risk := agenttools.CallRisk(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
-		if (risk.Mutates() || !risk.Valid()) && e.runBudget.writeBatchActive() {
-			// The batch reservation already paid for this call.
-		} else if risk.Mutates() || !risk.Valid() {
+		mutating := risk.Mutates() || !risk.Valid()
+		if mutating && !e.runBudget.writeBatchActive() {
 			// A direct call outside a batch still has to pay exactly once.
 			ok, reason := e.runBudget.reserveWrite()
 			if !ok {
@@ -642,7 +641,7 @@ func (e *AgentEngine) runToolCallAnswered(
 			}
 		}
 	}
-	effectState := types.EffectUnspecified
+	var effectState types.EffectState
 	if len(tc.UnresolvedHandles) > 0 && !webFetchValidatesReferences(tc) {
 		// A temporary handle is not an application identity. Fail before tool
 		// execution so a hallucinated/stale kb://, doc://, chunk://, url://, iN or res:// token can

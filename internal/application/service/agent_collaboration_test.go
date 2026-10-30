@@ -433,13 +433,15 @@ func TestParentRunBudgetIsIdempotentForSameTurn(t *testing.T) {
 	}
 	first := &agent.AgentEngine{}
 	require.NoError(t, s.attach(ctx, first, tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
-	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
+	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(),
+		cfg, "retry-session", "retry-message"))
 	scope := collaboration.Scope{
 		TenantID: 7, UserID: "u", SessionID: "retry-session", ID: "retry-message",
 	}
 	require.NoError(t, s.Runtime.Store.ReserveBudget(ctx, scope, "retry-message", "parent/model",
 		types.RunBudgetUsed{TotalTokens: 1_500}))
-	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(), cfg, "retry-session", "retry-message"))
+	require.NoError(t, s.attach(ctx, &agent.AgentEngine{}, tools.NewToolRegistry(),
+		cfg, "retry-session", "retry-message"))
 	usage, err := s.Runtime.Store.SharedRunBudget(ctx, scope, "retry-message")
 	require.NoError(t, err)
 	require.Equal(t, 1_500, usage.Used.TotalTokens)

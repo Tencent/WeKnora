@@ -458,12 +458,18 @@ type Cleanable interface {
 type EffectState string
 
 const (
+	// EffectUnspecified keeps legacy results on the inference path.
 	EffectUnspecified EffectState = ""
-	EffectNone        EffectState = "none"
-	EffectNotStarted  EffectState = "not_started"
-	EffectCommitted   EffectState = "committed"
-	EffectFailed      EffectState = "failed"
-	EffectUnknown     EffectState = "unknown"
+	// EffectNone marks a read-only call with no mutation to qualify.
+	EffectNone EffectState = "none"
+	// EffectNotStarted means the mutation was rejected before execution.
+	EffectNotStarted EffectState = "not_started"
+	// EffectCommitted means the mutation completed.
+	EffectCommitted EffectState = "committed"
+	// EffectFailed means the mutation failed with a known retry outcome.
+	EffectFailed EffectState = "failed"
+	// EffectUnknown means the mutation may have occurred; observe before retry.
+	EffectUnknown EffectState = "unknown"
 )
 
 // ToolResult represents the result of a tool execution

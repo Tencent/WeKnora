@@ -172,7 +172,9 @@ func (e *AgentEngine) Resume(
 				case budgetBatchContinue:
 					allowed, reason = e.reserveSharedWrites(ctx, batchKey, cost)
 					if !allowed {
-						return nil, fmt.Errorf("reserved write budget remained insufficient after extension: %s", reason)
+						return nil, fmt.Errorf(
+							"reserved write budget remained insufficient after extension: %s", reason,
+						)
 					}
 				case budgetBatchSuspended:
 					e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)

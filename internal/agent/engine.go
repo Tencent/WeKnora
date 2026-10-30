@@ -1185,7 +1185,8 @@ func (e *AgentEngine) runReActIteration(
 	// before creating or executing this round's tools: the contract forbids
 	// spending more work after the limit, and the final answer below uses the
 	// evidence already collected.
-	if reason := e.runBudget.stopReasonNow(e.runBudget.tokensUsedSnapshot()); reason != "" && len(response.ToolCalls) > 0 {
+	reason := e.runBudget.stopReasonNow(e.runBudget.tokensUsedSnapshot())
+	if reason != "" && len(response.ToolCalls) > 0 {
 		// Capture the whole response before any side effect. If the owner does
 		// not extend the budget, finish/cancel will execute none of these calls.
 		step := types.AgentStep{
@@ -1490,9 +1491,11 @@ func (e *AgentEngine) runReActIteration(
 			batchKey := fmt.Sprintf("writes:%d", round)
 			allowed, reason := e.reserveSharedWrites(ctx, batchKey, cost)
 			if !allowed {
-				switch e.pauseBeforeToolBatch(ctx, state, step, response.ToolCalls, reason, sessionID, assistantMessageID) {
+				switch e.pauseBeforeToolBatch(
+					ctx, state, step, response.ToolCalls, reason, sessionID, assistantMessageID,
+				) {
 				case budgetBatchContinue:
-					allowed, reason = e.reserveSharedWrites(ctx, batchKey, cost)
+					allowed, _ = e.reserveSharedWrites(ctx, batchKey, cost)
 					if !allowed {
 						_ = e.finishBudgetStop(ctx, state, sessionID)
 						return iterOutcomeBreak, nil

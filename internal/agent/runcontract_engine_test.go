@@ -448,7 +448,8 @@ func TestToolEffectStateClassifiesCommittedFailedAndUnknown(t *testing.T) {
 		context.Background(), write, &types.ToolResult{Success: false, Error: "process exited with status 1"}, nil,
 	))
 	require.Equal(t, types.EffectUnknown, toolEffectState(
-		context.Background(), write, &types.ToolResult{Success: false, Error: "MCP tool execution outcome is unknown"}, nil,
+		context.Background(), write,
+		&types.ToolResult{Success: false, Error: "MCP tool execution outcome is unknown"}, nil,
 	))
 	require.Equal(t, types.EffectUnknown, toolEffectState(
 		context.Background(), write, nil, errors.New("transport closed after dispatch"),

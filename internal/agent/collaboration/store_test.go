@@ -28,7 +28,10 @@ func TestSharedRunBudgetReservationIsAtomicAndBounded(t *testing.T) {
 	s, scope := budgetStore(t)
 	ctx := context.Background()
 	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-a/round-1", types.RunBudgetUsed{TotalTokens: 60}))
-	require.ErrorIs(t, s.ReserveBudget(ctx, scope, "turn", "child-b/round-1", types.RunBudgetUsed{TotalTokens: 50}), ErrRunBudgetExhausted)
+	require.ErrorIs(t,
+		s.ReserveBudget(ctx, scope, "turn", "child-b/round-1", types.RunBudgetUsed{TotalTokens: 50}),
+		ErrRunBudgetExhausted,
+	)
 	require.NoError(t, s.SettleBudget(ctx, scope, "turn", "child-a/round-1", types.RunBudgetUsed{TotalTokens: 60}))
 	usage, err := s.SharedRunBudget(ctx, scope, "turn")
 	require.NoError(t, err)
@@ -40,9 +43,12 @@ func TestSharedRunBudgetReservationIsAtomicAndBounded(t *testing.T) {
 func TestSharedRunBudgetMultipleChildrenAccumulate(t *testing.T) {
 	s, scope := budgetStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-a/round-1", types.RunBudgetUsed{TotalTokens: 30, WriteActions: 1}))
-	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-b/round-1", types.RunBudgetUsed{TotalTokens: 30, WriteActions: 1}))
-	require.NoError(t, s.SettleBudget(ctx, scope, "turn", "child-a/round-1", types.RunBudgetUsed{TotalTokens: 45, WriteActions: 1}))
+	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-a/round-1",
+		types.RunBudgetUsed{TotalTokens: 30, WriteActions: 1}))
+	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-b/round-1",
+		types.RunBudgetUsed{TotalTokens: 30, WriteActions: 1}))
+	require.NoError(t, s.SettleBudget(ctx, scope, "turn", "child-a/round-1",
+		types.RunBudgetUsed{TotalTokens: 45, WriteActions: 1}))
 	usage, err := s.SharedRunBudget(ctx, scope, "turn")
 	require.NoError(t, err)
 	require.Equal(t, 75, usage.Used.TotalTokens)
@@ -83,7 +89,8 @@ func TestSharedRunBudgetTurnIsolation(t *testing.T) {
 func TestSharedRunBudgetSameTurnInitIsIdempotent(t *testing.T) {
 	s, scope := budgetStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-a", types.RunBudgetUsed{TotalTokens: 40, WriteActions: 1}))
+	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-a",
+		types.RunBudgetUsed{TotalTokens: 40, WriteActions: 1}))
 	require.NoError(t, s.SetCollaborationRunBudget(ctx, scope, "turn", &types.RunBudgetUsage{
 		Limit: types.RunBudget{MaxTotalTokens: 100, MaxWriteActions: 2},
 	}))
@@ -97,7 +104,8 @@ func TestSharedRunBudgetRejectsWriteBeyondExactLimit(t *testing.T) {
 	s, scope := budgetStore(t)
 	ctx := context.Background()
 	require.NoError(t, s.ReserveBudget(ctx, scope, "turn", "child-a/batch", types.RunBudgetUsed{WriteActions: 2}))
-	require.ErrorIs(t, s.ReserveBudget(ctx, scope, "turn", "child-b/batch", types.RunBudgetUsed{WriteActions: 1}), ErrRunBudgetExhausted)
+	require.ErrorIs(t, s.ReserveBudget(ctx, scope, "turn", "child-b/batch",
+		types.RunBudgetUsed{WriteActions: 1}), ErrRunBudgetExhausted)
 	usage, err := s.SharedRunBudget(ctx, scope, "turn")
 	require.NoError(t, err)
 	require.Equal(t, 2, usage.Used.WriteActions)

@@ -19,13 +19,21 @@ import (
 type RunStopReason = types.RunStopReason
 
 const (
+	// RunStopTokenBudget is the token contract boundary.
 	RunStopTokenBudget RunStopReason = types.RunStopTokenBudget
-	RunStopTimeBudget  RunStopReason = types.RunStopTimeBudget
+	// RunStopTimeBudget is the active-time contract boundary.
+	RunStopTimeBudget RunStopReason = types.RunStopTimeBudget
+	// RunStopWriteBudget is the mutating-attempt contract boundary.
 	RunStopWriteBudget RunStopReason = types.RunStopWriteBudget
 )
 
+// RunBudget is this package's alias for the public contract shape.
 type RunBudget = types.RunBudget
+
+// RunBudgetUsage is this package's alias for a contract report.
 type RunBudgetUsage = types.RunBudgetUsage
+
+// RunBudgetUsed is this package's alias for cumulative usage.
 type RunBudgetUsed = types.RunBudgetUsed
 
 const (
@@ -69,10 +77,6 @@ func restoreRunBudgetState(usage RunBudgetUsage) *runBudgetState {
 		// An extension is an explicit decision to continue. A stale stop
 		// reason must not survive the resume.
 	}
-}
-
-func (s *runBudgetState) active() bool {
-	return s != nil && s.limit.Active()
 }
 
 // extend adds room from the paused usage. The wire contract describes the
@@ -261,18 +265,6 @@ func (s *runBudgetState) reserveWrites(count int) (bool, RunStopReason) {
 	return true, ""
 }
 
-// releaseWrites rolls back a local reservation when the shared collaboration
-// account rejected the same batch. The caller pauses (or stops) before any
-// tool in the batch runs.
-func (s *runBudgetState) releaseWrites(count int) {
-	if s == nil || count <= 0 {
-		return
-	}
-	s.mu.Lock()
-	s.writesUsed = max(0, s.writesUsed-count)
-	s.mu.Unlock()
-}
-
 // reserveWrite atomically spends one mutating-tool attempt. It returns false
 // when the action would exceed the limit; the caller must not execute the tool.
 func (s *runBudgetState) reserveWrite() (bool, RunStopReason) {
@@ -457,7 +449,10 @@ func (e *AgentEngine) settleSharedWrites(ctx context.Context, key string, count 
 	if e == nil || e.budgetSink == nil || e.budgetTurnID == "" || key == "" || count <= 0 {
 		return
 	}
-	if err := e.budgetSink.SettleBudget(ctx, e.budgetTurnID, e.budgetKey(key), types.RunBudgetUsed{WriteActions: count}); err != nil {
+	err := e.budgetSink.SettleBudget(
+		ctx, e.budgetTurnID, e.budgetKey(key), types.RunBudgetUsed{WriteActions: count},
+	)
+	if err != nil {
 		logger.Warnf(ctx, "[Agent] Settle shared write budget: %v", err)
 	}
 }
@@ -482,7 +477,11 @@ func (e *AgentEngine) SharedRunBudget(state *types.AgentState) types.RunBudgetUs
 	}
 	return e.budgetSnapshot(state.TurnUsage.TotalTokens)
 }
-func (e *AgentEngine) SetBudgetPauser(p BudgetPauser) { e.budgetPauser = p }
+
+// SetBudgetPauser installs the human decision adapter for contract pauses.
+func (e *AgentEngine) SetBudgetPauser(p BudgetPauser) {
+	e.budgetPauser = p
+}
 
 func (e *AgentEngine) collaborationExcludeWallTime(ctx context.Context, wait time.Duration) error {
 	if e == nil || e.budgetSink == nil || e.budgetTurnID == "" || wait <= 0 {
@@ -762,6 +761,7 @@ func (e *AgentEngine) budgetSnapshot(tokensUsed int) RunBudgetUsage {
 	return e.runBudget.snapshot(tokensUsed)
 }
 
+// BudgetFromAgentConfig returns the effective contract configured on an agent.
 func BudgetFromAgentConfig(cfg *types.AgentConfig) RunBudget {
 	return cfg.RunBudget()
 }
