@@ -258,6 +258,53 @@ test('Seafile requires a selection before the strategy step', async () => {
   } finally { f.close() }
 })
 
+test('Nextcloud declares an app password and requires an explicit root selection', async () => {
+  const f = await fixture({ create: true, resources: [
+    { external_id: '/', name: 'Nextcloud', type: 'directory', has_children: true },
+    { external_id: '/docs', name: 'docs', type: 'directory', parent_id: '/', has_children: true },
+  ] })
+  try {
+    const def = f.vm.connectorDefs.find((def: any) => def.type === 'nextcloud')
+    assert.ok(def?.available)
+    assert.equal(def.fields.find((field: any) => field.key === 'app_password')?.secret, true)
+    assert.deepEqual([...def.fields].map((field: any) => field.key), ['base_url', 'username', 'app_password'])
+    f.vm.selectType(def)
+    f.vm.form.config.credentials = {
+      base_url: 'https://nextcloud.example.com/cloud', username: 'alice', app_password: 'app-password-for-tests',
+    }
+    f.vm.form.config.settings = { include_extensions: '.pdf, .md', exclude_extensions: '.html' }
+    f.vm.step = 2
+    await f.vm.loadResources()
+    await f.vm.nextStep()
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual(f.warnings, ['datasource.nextcloud.selectionRequired'])
+    await f.vm.ensureChildrenLoaded('/')
+    f.vm.toggleResource('/docs')
+    await f.vm.nextStep()
+    assert.equal(f.vm.step, 3)
+    assert.deepEqual([...f.vm.selectedResourceIds], ['/docs'])
+    assert.equal(f.vm.form.config.settings.include_extensions, '.pdf, .md')
+    assert.equal(f.vm.form.config.credentials.include_extensions, undefined)
+  } finally { f.close() }
+})
+
+test('unchecking a Nextcloud root clears saved descendants missing from the lazy tree', async () => {
+  const f = await fixture({ type: 'nextcloud', resources: [
+    { external_id: '/', name: 'Nextcloud', type: 'directory', has_children: true },
+  ], dataSource: {
+    id: 'source-one', name: 'Nextcloud', type: 'nextcloud',
+    credentials: { credentials: { configured: true } },
+    config: { resource_ids: ['/docs/vanished.pdf'], settings: {} },
+  } })
+  try {
+    f.vm.step = 2
+    await f.vm.loadResources()
+    f.vm.toggleResource('/')
+    f.vm.toggleResource('/')
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+  } finally { f.close() }
+})
+
 test('a vanished saved Seafile selection is cleared by unchecking its library', async () => {
   const f = await fixture({ resources: seafileResources, dataSource: {
     id: 'source-one', name: 'Seafile', type: 'seafile',

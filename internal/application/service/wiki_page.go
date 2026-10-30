@@ -111,7 +111,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	}
 
 	// Update inbound links on target pages
-	s.updateInLinks(ctx, page.KnowledgeBaseID, page.Slug, page.OutLinks)
+	s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
 
 	return page, nil
 }
@@ -282,10 +282,8 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		}
 	}
 
-	// Update inbound links: remove old, add new. If content didn't change,
-	// oldOutLinks == existing.OutLinks and these calls are effectively no-ops.
-	s.removeInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, oldOutLinks)
-	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
+	// 只删除已消失的边；未变链接仍做幂等补齐，避免旧数据缺失反链时失去修复机会。
+	s.syncInLinks(ctx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
 
 	return existing, nil
 }
@@ -318,8 +316,7 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 		return fmt.Errorf("update auto-linked content: %w", err)
 	}
 
-	s.removeInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, oldOutLinks)
-	s.updateInLinks(ctx, existing.KnowledgeBaseID, existing.Slug, existing.OutLinks)
+	s.syncInLinks(ctx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
 
 	return nil
 }
@@ -496,7 +493,7 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 	}
 
 	// Remove inbound link references from pages this page links to
-	s.removeInLinks(ctx, kbID, slug, page.OutLinks)
+	s.removeInLinks(ctx, page.TenantID, kbID, slug, page.OutLinks)
 
 	// Delete the page
 	if err := s.repo.Delete(ctx, kbID, slug); err != nil {
@@ -1107,10 +1104,15 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 		return err
 	}
 
-	// Build slug-to-page map
+	// 保存重建前的边和正文快照，写入时检查是否出现并发修改。
 	pageMap := make(map[string]*types.WikiPage)
+	previous := make(map[string]*types.WikiPage, len(pages))
 	for _, p := range pages {
 		pageMap[p.Slug] = p
+		snapshot := *p
+		snapshot.InLinks = append(types.StringArray(nil), p.InLinks...)
+		snapshot.OutLinks = append(types.StringArray(nil), p.OutLinks...)
+		previous[p.ID] = &snapshot
 	}
 
 	// Clear all inbound links first
@@ -1128,15 +1130,16 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 		}
 	}
 
-	// Save all pages (link rebuild is metadata-only, no version bump).
-	// The rebuild stays best-effort — one unwritable page must not discard the
-	// pages that can be written — but the failures are accumulated and
-	// reported, so callers never see a successful rebuild for a half-written
-	// link graph.
+	// 图边没有变化时不写库，也不刷新时间。发生变化的页面只更新链接字段；
+	// 快照冲突与其他写入错误一起汇总，继续处理其余页面，避免覆盖并发的新边。
 	var failures []error
 	for _, p := range pages {
+		before := previous[p.ID]
+		if wikiLinkSetsEqual(before.InLinks, p.InLinks) && wikiLinkSetsEqual(before.OutLinks, p.OutLinks) {
+			continue
+		}
 		p.UpdatedAt = time.Now()
-		if err := s.repo.UpdateMeta(ctx, p); err != nil {
+		if err := s.repo.UpdateLinks(ctx, before, p); err != nil {
 			logger.Warnf(ctx, "wiki: failed to update links for page %s: %v", p.Slug, err)
 			failures = append(failures, fmt.Errorf("%s: %w", p.Slug, err))
 		}
@@ -1532,39 +1535,62 @@ func (s *wikiPageService) RepairContentLinks(
 	return newContent, changed, nil
 }
 
-// updateInLinks adds the source slug to the in_links of target pages
-func (s *wikiPageService) updateInLinks(ctx context.Context, kbID string, sourceSlug string, targets types.StringArray) {
-	for _, targetSlug := range targets {
-		targetPage, err := s.repo.GetBySlug(ctx, kbID, targetSlug)
-		if err != nil {
-			continue // target page may not exist yet
+// syncInLinks 只移除新正文中消失的边；对仍存在的边做幂等添加以修复缺失反链。
+func (s *wikiPageService) syncInLinks(
+	ctx context.Context, tenantID uint64, kbID, sourceSlug string, oldTargets, newTargets types.StringArray,
+) {
+	retained := make(map[string]struct{}, len(newTargets))
+	for _, target := range newTargets {
+		retained[target] = struct{}{}
+	}
+	var removed types.StringArray
+	for _, target := range oldTargets {
+		if _, exists := retained[target]; !exists {
+			removed = append(removed, target)
 		}
-		if !containsString(targetPage.InLinks, sourceSlug) {
-			targetPage.InLinks = append(targetPage.InLinks, sourceSlug)
-			targetPage.UpdatedAt = time.Now()
-			if err := s.repo.UpdateMeta(ctx, targetPage); err != nil {
-				logger.Warnf(ctx, "wiki: failed to update in_links for %s: %v", targetSlug, err)
-			}
+	}
+	s.removeInLinks(ctx, tenantID, kbID, sourceSlug, removed)
+	s.updateInLinks(ctx, tenantID, kbID, sourceSlug, newTargets)
+}
+
+// updateInLinks 由数据库原子补齐反链，已存在的边不会写库；其他来源的并发修改不被覆盖。
+func (s *wikiPageService) updateInLinks(
+	ctx context.Context, tenantID uint64, kbID, sourceSlug string, targets types.StringArray,
+) {
+	for _, targetSlug := range targets {
+		if err := s.repo.AddInLink(ctx, tenantID, kbID, targetSlug, sourceSlug); err != nil {
+			logger.Warnf(ctx, "wiki: failed to update in_links for %s: %v", targetSlug, err)
 		}
 	}
 }
 
-// removeInLinks removes the source slug from the in_links of target pages
-func (s *wikiPageService) removeInLinks(ctx context.Context, kbID string, sourceSlug string, targets types.StringArray) {
+// removeInLinks 只删除指定来源的反链，保留同一目标上其他来源的并发增删。
+func (s *wikiPageService) removeInLinks(
+	ctx context.Context, tenantID uint64, kbID, sourceSlug string, targets types.StringArray,
+) {
 	for _, targetSlug := range targets {
-		targetPage, err := s.repo.GetBySlug(ctx, kbID, targetSlug)
-		if err != nil {
-			continue
-		}
-		newInLinks := removeString(targetPage.InLinks, sourceSlug)
-		if len(newInLinks) != len(targetPage.InLinks) {
-			targetPage.InLinks = newInLinks
-			targetPage.UpdatedAt = time.Now()
-			if err := s.repo.UpdateMeta(ctx, targetPage); err != nil {
-				logger.Warnf(ctx, "wiki: failed to update in_links for %s: %v", targetSlug, err)
-			}
+		if err := s.repo.RemoveInLink(ctx, tenantID, kbID, targetSlug, sourceSlug); err != nil {
+			logger.Warnf(ctx, "wiki: failed to update in_links for %s: %v", targetSlug, err)
 		}
 	}
+}
+
+// wikiLinkSetsEqual 忽略无语义的顺序差异，避免仅因遍历顺序不同而重写链接。
+func wikiLinkSetsEqual(left, right types.StringArray) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, link := range left {
+		counts[link]++
+	}
+	for _, link := range right {
+		if counts[link] == 0 {
+			return false
+		}
+		counts[link]--
+	}
+	return true
 }
 
 // deleteChunkForPage removes the synced chunk for a wiki page. Chunk sync is

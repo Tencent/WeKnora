@@ -113,6 +113,13 @@ type TaskPendingOpsDrainer interface {
 	) ([]string, error)
 }
 
+// TaskPendingOpsDiscarder removes obsolete work that owns no finalizing slot.
+// Like the drainer, it preserves every document held by a live batch. Empty
+// tuple or operation fields must be rejected by the implementation.
+type TaskPendingOpsDiscarder interface {
+	DiscardUnclaimed(ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time) error
+}
+
 // TaskPendingOpsKnowledgeBaseGuard atomically persists a KB-scoped operation
 // only while its knowledge base is still active. Implementations must
 // serialize the active-KB check with soft deletion so a detached worker cannot

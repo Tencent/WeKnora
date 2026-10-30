@@ -69,6 +69,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
+	nextcloudConnector "github.com/Tencent/WeKnora/internal/datasource/connector/nextcloud"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	seafileConnector "github.com/Tencent/WeKnora/internal/datasource/connector/seafile"
@@ -1144,6 +1145,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqlDB.SetMaxOpenConns(1)
 	} else {
 		sqlDB.SetMaxIdleConns(10)
+		applyDBMaxOpenConns(context.Background(), sqlDB)
 	}
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
@@ -2115,6 +2117,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(seafileConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register seafile connector: %w", err))
+	}
+	if err := registry.Register(nextcloudConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register nextcloud connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

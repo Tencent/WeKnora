@@ -1199,7 +1199,7 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 
 func usesSourceIdentityDuplicateCheck(channel string) bool {
 	switch channel {
-	case types.ConnectorTypeGitLab, types.ChannelConfluence, types.ChannelSeafile:
+	case types.ConnectorTypeGitLab, types.ChannelConfluence, types.ChannelSeafile, types.ChannelNextcloud:
 		return true
 	default:
 		return false

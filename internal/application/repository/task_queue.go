@@ -445,6 +445,25 @@ func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
 	return keys, nil
 }
 
+// DiscardUnclaimed removes obsolete operations without releasing subtask slots.
+// A late unclaimed sibling of a live document stays with its running batch.
+func (r *taskPendingOpsRepository) DiscardUnclaimed(
+	ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
+) error {
+	if taskType == "" || scope == "" || scopeID == "" || op == "" {
+		return errors.New("task pending ops: task_type, scope, scope_id and op are required")
+	}
+	freshKeys := r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Select("dedup_key").
+		Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+		Where("claimed_at IS NOT NULL AND claimed_at >= ?", staleBefore)
+	return r.db.WithContext(ctx).
+		Where("task_type = ? AND scope = ? AND scope_id = ? AND op = ?", taskType, scope, scopeID, op).
+		Where("claimed_at IS NULL OR claimed_at < ?", staleBefore).
+		Where("dedup_key NOT IN (?)", freshKeys).
+		Delete(&types.TaskPendingOp{}).Error
+}
+
 // IncrFailCount atomically bumps fail_count for one row and returns the
 // new value. We use UPDATE ... RETURNING so the read+write happens in
 // one round trip and races between concurrent IncrFailCount callers

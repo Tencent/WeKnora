@@ -890,6 +890,8 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 			KeywordThreshold:     rc.GetEffectiveKeywordThreshold(),
 			DisableVectorMatch:   opts.DisableVectorMatch,
 			DisableKeywordsMatch: opts.DisableKeywordsMatch,
+			QueryImage:           opts.QueryImage,
+			QueryImageMediaType:  opts.QueryImageMediaType,
 			RerankModelID:        rerankModelID,
 			RerankTopK:           rc.GetEffectiveRerankTopK(),
 			RerankThreshold:      rc.GetEffectiveRerankThreshold(),
@@ -945,6 +947,7 @@ func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.Kno
 	if opts.KeywordThreshold != nil {
 		chatManage.KeywordThreshold = *opts.KeywordThreshold
 	}
+	chatManage.ParentSlotAggregation = opts.ParentSlotAggregation
 	// The final FILTER_TOP_K stage cuts to RerankTopK whether or not the
 	// rerank stage runs, so it is the result count. Recall must be at least
 	// as deep for the count to be reachable.

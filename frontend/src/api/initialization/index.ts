@@ -158,6 +158,7 @@ export interface KBModelConfigRequest {
         customInstructions?: string
     }
     questionGeneration?: {
+        modelId?: string
         enabled: boolean
         questionCount: number
         customInstructions?: string

@@ -286,6 +286,8 @@ type GetSystemInfoResponse struct {
 	CommitID            string `json:"commit_id,omitempty" extensions:"x-agent"`
 	BuildTime           string `json:"build_time,omitempty" extensions:"x-agent"`
 	GoVersion           string `json:"go_version,omitempty" extensions:"x-agent"`
+	DocReaderVersion    string `json:"docreader_version,omitempty" extensions:"x-agent"`
+	DocReaderCommitID   string `json:"docreader_commit_id,omitempty" extensions:"x-agent"`
 	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty" extensions:"x-agent"`
 	VectorStoreEngine   string `json:"vector_store_engine,omitempty" extensions:"x-agent"`
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty" extensions:"x-agent"`
@@ -320,7 +322,7 @@ var (
 // @Produce      json
 // @Success      200  {object}  DataResponse{data=GetSystemInfoResponse}  "系统信息"
 // @x-agent {"id":"system.get_info","risk":"read"}
-// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
+// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Docreader build information is omitted when its service is unavailable or does not support GetInfo. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -361,12 +363,27 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		uptimeSec = int64(runtime.ServerUptime().Seconds())
 	}
 
+	var docReaderVersion, docReaderCommitID string
+	if reader, ok := h.documentReader.(interface {
+		GetVersionInfo(context.Context) (string, string, error)
+	}); ok {
+		// A disconnected or older docreader must not fail system/info.
+		versionCtx, cancel := context.WithTimeout(ctx, time.Second)
+		version, commitID, err := reader.GetVersionInfo(versionCtx)
+		cancel()
+		if err == nil {
+			docReaderVersion, docReaderCommitID = version, commitID
+		}
+	}
+
 	response := GetSystemInfoResponse{
 		Version:             Version,
 		Edition:             Edition,
 		CommitID:            CommitID,
 		BuildTime:           BuildTime,
 		GoVersion:           GoVersion,
+		DocReaderVersion:    docReaderVersion,
+		DocReaderCommitID:   docReaderCommitID,
 		KeywordIndexEngine:  keywordIndexEngine,
 		VectorStoreEngine:   vectorStoreEngine,
 		GraphDatabaseEngine: graphDatabaseEngine,

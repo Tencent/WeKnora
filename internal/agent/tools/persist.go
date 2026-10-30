@@ -275,7 +275,8 @@ func compactShellExecHeadline(data map[string]interface{}) string {
 	}
 	const maxCmd = 240
 	if len(cmd) > maxCmd {
-		cmd = cmd[:maxCmd] + "..."
+		// Cut at maxCmd bytes, dropping a multi-byte character the cut splits.
+		cmd = strings.ToValidUTF8(cmd[:maxCmd], "") + "..."
 	}
 	return fmt.Sprintf("shell_exec exit=%d command=%s", exit, cmd)
 }

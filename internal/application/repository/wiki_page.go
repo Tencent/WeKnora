@@ -291,19 +291,13 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 	return nil
 }
 
-// UpdateMeta updates bookkeeping / provenance fields WITHOUT incrementing the
-// version number. "Content" for versioning purposes is the user-visible page
-// body (title/content/summary/page_type/status); everything else — links,
-// source refs, chunk refs, page_metadata — is considered bookkeeping and is
-// refreshed here so the version counter only advances on real edits.
-//
-// Used by link maintenance, re-ingest (same-content case), and status changes.
+// UpdateMeta 保存来源、状态和目录等元数据，不修改反链或版本。
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
+	// 反链由专用原子操作维护，避免这份元数据快照覆盖并发添加的链接。
 	result := r.db.WithContext(ctx).
 		Model(page).
 		Where("id = ?", page.ID).
 		Updates(map[string]interface{}{
-			"in_links":      page.InLinks,
 			"out_links":     page.OutLinks,
 			"aliases":       page.Aliases,
 			"status":        page.Status,

@@ -40,6 +40,7 @@ type ModelUsageBinding string
 const (
 	ModelUsageBindingEmbeddingModel       ModelUsageBinding = "embedding_model"
 	ModelUsageBindingSummaryModel         ModelUsageBinding = "summary_model"
+	ModelUsageBindingQuestionModel        ModelUsageBinding = "question_model"
 	ModelUsageBindingImageProcessingModel ModelUsageBinding = "image_processing_model"
 	ModelUsageBindingVLMModel             ModelUsageBinding = "vlm_model"
 	ModelUsageBindingASRModel             ModelUsageBinding = "asr_model"

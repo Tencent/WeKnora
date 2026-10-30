@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,4 +196,42 @@ func TestSystemInformationOperationUsesActualResponse(t *testing.T) {
 	blob, err := json.Marshal(out)
 	require.NoError(t, err)
 	assert.NotContains(t, string(blob), "db_migration_error")
+}
+
+type versionInfoReader struct {
+	interfaces.DocumentReader
+	version  string
+	commitID string
+	err      error
+}
+
+func (r versionInfoReader) GetVersionInfo(context.Context) (string, string, error) {
+	return r.version, r.commitID, r.err
+}
+
+func TestSystemInfoDocReaderVersionIsOptional(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		reader versionInfoReader
+		want   bool
+	}{
+		{name: "connected", reader: versionInfoReader{version: "0.8.3", commitID: "abcdef0"}, want: true},
+		{name: "unavailable", reader: versionInfoReader{err: errors.New("docreader unavailable")}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &SystemHandler{documentReader: tt.reader}
+			r := gin.New()
+			r.GET("/api/v1/system/info", h.GetSystemInfo)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/system/info", nil))
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			if tt.want {
+				assert.Contains(t, w.Body.String(), `"docreader_version":"0.8.3"`)
+				assert.Contains(t, w.Body.String(), `"docreader_commit_id":"abcdef0"`)
+			} else {
+				assert.NotContains(t, w.Body.String(), `"docreader_version"`)
+				assert.NotContains(t, w.Body.String(), `"docreader_commit_id"`)
+			}
+		})
+	}
 }

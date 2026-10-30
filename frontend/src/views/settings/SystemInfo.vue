@@ -90,6 +90,22 @@
         </div>
       </div>
 
+      <!-- Version reported by the connected docreader instance -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('system.docreaderVersionLabel') }}</label>
+          <p class="desc">{{ $t('system.docreaderVersionDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <span class="info-value">
+            {{ systemInfo?.docreader_version || $t('system.unknown') }}
+            <span v-if="systemInfo?.docreader_commit_id && systemInfo.docreader_commit_id !== 'unknown'" class="commit-info">
+              ({{ systemInfo.docreader_commit_id }})
+            </span>
+          </span>
+        </div>
+      </div>
+
       <!-- Service started at -->
       <div v-if="systemInfo?.started_at" class="setting-row">
         <div class="setting-info">

@@ -109,7 +109,7 @@ func (c *LongConnClient) getUpdates(ctx context.Context) ([]telegramUpdate, erro
 		Description string           `json:"description"`
 		Result      []telegramUpdate `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &apiResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	if !apiResp.OK {

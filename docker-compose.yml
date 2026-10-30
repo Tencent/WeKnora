@@ -48,7 +48,6 @@ services:
         - VERSION_ARG=${VERSION_ARG:-}
         - COMMIT_ID_ARG=${COMMIT_ID_ARG:-}
         - BUILD_TIME_ARG=${BUILD_TIME_ARG:-}
-        - GO_VERSION_ARG=${GO_VERSION_ARG:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -155,6 +154,7 @@ services:
       - DB_USER=${DB_USER:-}
       - DB_PASSWORD=${DB_PASSWORD:-}
       - DB_NAME=${DB_NAME:-}
+      - DB_MAX_OPEN_CONNS=${DB_MAX_OPEN_CONNS:-}
       # SQLite 驱动时使用（DB_DRIVER=sqlite）；postgres 驱动忽略
       # - DB_PATH=${DB_PATH:-}
       # ========== Langfuse (optional observability) ==========
@@ -363,6 +363,8 @@ services:
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       # web_fetch 单页抓取预算（Go duration 或纯数字秒，默认 3m；HTTP 与 chromedp 共用，不叠加）
       - WEKNORA_WEB_FETCH_TIMEOUT=${WEKNORA_WEB_FETCH_TIMEOUT:-}
+      # Built-in MCP ask deadline (Go duration or bare seconds; defaults to 4m).
+      - WEKNORA_MCP_ASK_TIMEOUT=${WEKNORA_MCP_ASK_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
       # MCP 工具人工审批失败时是否放行（true 放行 / 默认 fail-close 拒绝）
       - WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=${WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN:-}
@@ -386,6 +388,7 @@ services:
       - WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL=${WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL:-}
       # ========== OIDC 认证（可选，OIDC_AUTH_ENABLE=true 启用，详见 .env.example）==========
       - OIDC_AUTH_ENABLE=${OIDC_AUTH_ENABLE:-false}
+      - OIDC_AUTH_PKCE_ENABLED=${OIDC_AUTH_PKCE_ENABLED:-false}
       - OIDC_AUTH_ISSUER_URL=${OIDC_AUTH_ISSUER_URL:-}
       - OIDC_AUTH_DISCOVERY_URL=${OIDC_AUTH_DISCOVERY_URL:-}
       - OIDC_AUTH_PROVIDER_DISPLAY_NAME=${OIDC_AUTH_PROVIDER_DISPLAY_NAME:-}
@@ -430,6 +433,8 @@ services:
 
   docreader:
     image: wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}
+    # start_all.sh supplies these when building from source; direct Compose
+    # builds can set them explicitly to identify the resulting image.
     build:
       context: .
       dockerfile: docker/Dockerfile.docreader
@@ -437,6 +442,8 @@ services:
         - APT_MIRROR=${APT_MIRROR:-}
         - PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST:-}
         - PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=${PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST:-}
+        - VERSION_ARG=${DOCREADER_VERSION:-unknown}
+        - COMMIT_ID_ARG=${DOCREADER_COMMIT_ID:-unknown}
     container_name: WeKnora-docreader
     # docreader gRPC ships without auth/TLS and is only consumed by the app
     # container over the WeKnora-network (DOCREADER_ADDR defaults to

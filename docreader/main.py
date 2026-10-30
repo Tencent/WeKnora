@@ -26,6 +26,7 @@ from docreader.proto.docreader_pb2 import (
     ImageRef,
     ReadStreamMeta,
     ReadStreamResponse,
+    GetInfoResponse,
     ListEnginesResponse,
     ParserEngineInfo,
 )
@@ -184,6 +185,13 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def close(self):
         self._preprocess_runner.close()
         self._preprocess_executor.shutdown(wait=True, cancel_futures=True)
+
+    def GetInfo(self, request, context):
+        """Return metadata embedded in the image that runs this instance."""
+        return GetInfoResponse(
+            version=os.getenv("DOCREADER_VERSION", "unknown"),
+            commit_id=os.getenv("DOCREADER_COMMIT_ID", "unknown"),
+        )
 
     def _parse_request(self, request: ReadRequest):
         """Run the parser for a ReadRequest, returning (result, source_desc).

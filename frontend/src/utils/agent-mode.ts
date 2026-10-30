@@ -19,6 +19,26 @@ export function isAgentStreamAgentId(
   return isAgentEnabled
 }
 
+/**
+ * Stream mode a selected custom agent's config requires, or null when the id
+ * already decides the mode (both builtins) or its config is unavailable.
+ *
+ * `agent_mode` is editable in the agent editor and is what the backend uses to
+ * pick the pipeline, so it has to win over `isAgentEnabled`, which only records
+ * the mode at the moment the agent was selected. Without this, changing an
+ * agent from quick-answer to smart-reasoning keeps sending /knowledge-chat
+ * until the user reselects the agent (#4803).
+ */
+export function customAgentStreamMode(
+  agentId: string | null | undefined,
+  config: { agent_mode?: string } | null | undefined,
+): boolean | null {
+  const id = agentId || BUILTIN_QUICK_ANSWER_ID
+  if (id === BUILTIN_QUICK_ANSWER_ID || id === BUILTIN_SMART_REASONING_ID) return null
+  if (!config) return null
+  return config.agent_mode === 'smart-reasoning'
+}
+
 /** Reconcile builtin agent id with isAgentEnabled after localStorage reload. */
 export function reconcileBuiltinAgentMode(settings: {
   selectedAgentId?: string

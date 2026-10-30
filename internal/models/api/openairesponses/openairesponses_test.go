@@ -351,6 +351,63 @@ func TestChatIncompleteAndError(t *testing.T) {
 	}
 }
 
+func TestChatIncompleteWithToolCallIsLength(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	payload := `{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":` +
+		`[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather",` +
+		`"arguments":"{\"city\":\"Par"}],` +
+		`"usage":{"input_tokens":1,"output_tokens":2}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server, false)
+	resp, err := c.Chat(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if resp.FinishReason != "length" {
+		t.Errorf("finish = %q, want length for a cut-off tool call", resp.FinishReason)
+	}
+}
+
+func TestChatStreamIncompleteWithToolCallIsLength(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	toolCallEvents := []string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call",` +
+			`"id":"fc_1","call_id":"call_1","name":"get_weather","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"city\":\"Par"}`,
+	}
+	for name, terminal := range map[string]string{
+		"max_output_tokens": `{"type":"response.incomplete","response":{"status":"incomplete",` +
+			`"incomplete_details":{"reason":"max_output_tokens"},"output":[]}}`,
+		"no details": `{"type":"response.incomplete","response":{"status":"incomplete","output":[]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := sseBody(append(append([]string{}, toolCallEvents...), terminal)...)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+
+			c := newTestClient(t, server, false)
+			ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+			if err != nil {
+				t.Fatalf("ChatStream: %v", err)
+			}
+			var final types.StreamResponse
+			for ev := range ch {
+				final = ev
+			}
+			if final.FinishReason != "length" {
+				t.Errorf("final finish = %q, want length for a cut-off tool call", final.FinishReason)
+			}
+		})
+	}
+}
+
 func sseBody(events ...string) string {
 	var b strings.Builder
 	for _, ev := range events {

@@ -772,6 +772,16 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'api_token', labelKey: 'datasource.seafile.apiToken', placeholder: '', secret: true, hintKey: 'datasource.seafile.apiTokenHint' },
     ],
   },
+  {
+    type: 'nextcloud', available: true,
+    docUrl: 'https://docs.nextcloud.com/server/stable/user_manual/en/files/access_webdav.html',
+    permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.nextcloud.baseUrl', placeholder: 'https://nextcloud.example.com', hintKey: 'datasource.nextcloud.baseUrlHint' },
+      { key: 'username', labelKey: 'datasource.nextcloud.username', placeholder: 'alice' },
+      { key: 'app_password', labelKey: 'datasource.nextcloud.appPassword', placeholder: '', secret: true, hintKey: 'datasource.nextcloud.appPasswordHint' },
+    ],
+  },
 ])
 
 
@@ -1239,11 +1249,11 @@ function toggleResource(id: string) {
     checkResource(id, cover)
   } else {
     uncheckResource(id, cover)
-    // Unchecking also drops saved Seafile selections below this node that
+    // Unchecking also drops saved path selections below this node that
     // the tree no longer lists; otherwise they could never be cleared.
-    if (seafile) {
+    if (seafile || form.value.type === 'nextcloud') {
       for (const sel of [...cover]) {
-        if (seafileWithin(sel, id)) cover.delete(sel)
+        if (seafile ? seafileWithin(sel, id) : id === '/' || sel === id || sel.startsWith(id + '/')) cover.delete(sel)
       }
     }
   }
@@ -1308,6 +1318,10 @@ async function nextStep() {
   // Seafile has no "whole account" scope: the backend rejects an empty selection.
   if (step.value === 2 && isSeafileConnector(form.value.type) && selectedResourceIds.value.length === 0) {
     MessagePlugin.warning(t('datasource.seafile.selectionRequired'))
+    return
+  }
+  if (step.value === 2 && form.value.type === 'nextcloud' && selectedResourceIds.value.length === 0) {
+    MessagePlugin.warning(t('datasource.nextcloud.selectionRequired'))
     return
   }
   step.value++
@@ -1871,6 +1885,18 @@ const drawerConfirmText = computed(() => {
         </template>
       </section>
     </template>
+
+    <section v-if="step === 1 && form.type === 'nextcloud'" class="setting-drawer__section">
+      <div class="form-item">
+        <label class="form-label">{{ t('datasource.nextcloud.includeExtensions') }}</label>
+        <t-input v-model="form.config.settings.include_extensions" placeholder=".pdf, .md" />
+      </div>
+      <div class="form-item">
+        <label class="form-label">{{ t('datasource.nextcloud.excludeExtensions') }}</label>
+        <t-input v-model="form.config.settings.exclude_extensions" placeholder=".html" />
+      </div>
+      <p class="form-desc">{{ t('datasource.nextcloud.extensionsHint') }}</p>
+    </section>
 
     <!-- Step 2: Select resources -->
     <section v-if="step === 2" class="setting-drawer__section ds-resource-section">

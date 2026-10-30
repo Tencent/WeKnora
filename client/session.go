@@ -297,6 +297,7 @@ type StreamResponse struct {
 
 // KnowledgeQAStream knowledge Q&A streaming API.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) KnowledgeQAStream(
 	ctx context.Context,
 	sessionID string,
@@ -387,12 +388,16 @@ func (c *Client) KnowledgeQAStream(
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
+	if err := incompleteSSEDataError(dataBuffer); err != nil {
+		return err
+	}
 	debugLogger.Debug("knowledge_qa_stream_completed", "message_count", messageCount)
 	return nil
 }
 
 // ContinueStream continues to receive an active stream for a session.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) ContinueStream(
 	ctx context.Context,
 	sessionID string,
@@ -464,7 +469,7 @@ func (c *Client) ContinueStream(
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
-	return nil
+	return incompleteSSEDataError(dataBuffer)
 }
 
 // StopSession stops the generation for a specific assistant message under a session.

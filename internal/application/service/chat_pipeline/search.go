@@ -388,6 +388,31 @@ func targetReportsEmbedFailure(kb *types.KnowledgeBase) bool {
 	return kb.IsVectorEnabled()
 }
 
+// imageQueryEmbedder is the optional capability of a knowledge base service
+// that can embed a query image. It is asserted rather than added to
+// interfaces.KnowledgeBaseService so adapters and test doubles that only serve
+// text queries keep compiling.
+type imageQueryEmbedder interface {
+	GetQueryImageEmbedding(ctx context.Context, kbID string, img []byte) ([]float32, error)
+}
+
+// queryVector embeds the query for vector recall. A query image takes the
+// image vector space the index stored image_vector chunks in; text otherwise.
+// An image the model cannot embed is an error, never a silent text fallback:
+// the caller asked to match a picture, and a text query answers something else.
+func (p *PluginSearch) queryVector(
+	ctx context.Context, kbID, queryText string, queryImage []byte,
+) ([]float32, error) {
+	if len(queryImage) == 0 {
+		return p.knowledgeBaseService.GetQueryEmbedding(ctx, kbID, queryText)
+	}
+	imageEmbedder, ok := p.knowledgeBaseService.(imageQueryEmbedder)
+	if !ok {
+		return nil, fmt.Errorf("this deployment cannot embed a query image")
+	}
+	return imageEmbedder.GetQueryImageEmbedding(ctx, kbID, queryImage)
+}
+
 // searchByTargets performs KB searches using pre-computed SearchTargets.
 // Targets sharing the same model name, endpoint and configured vector dimension
 // are grouped even across model IDs. Each group computes one query embedding
@@ -464,7 +489,7 @@ func (p *PluginSearch) searchByTargets(
 			disableVector := chatManage.DisableVectorMatch
 			searchableTargets := targets
 			if modelKey != "" && !disableVector {
-				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
+				emb, err := p.queryVector(ctx, targets[0].KnowledgeBaseID, queryText, chatManage.QueryImage)
 				if err != nil {
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
 					for _, target := range targets {

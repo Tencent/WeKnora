@@ -312,3 +312,45 @@ func TestUpdatePageWritesARewriteThatKeepsEveryRow(t *testing.T) {
 	require.Equal(t, rewritten.Content, updated.Content)
 	require.Equal(t, page.Version+1, updated.Version)
 }
+
+func TestUpdatePageGuardsTablesWithOptionalOuterPipes(t *testing.T) {
+	standard := "| Name | Value |\n| --- | --- |\n| Alice | 1 |\n| Bob | 2 |\n"
+	optional := "Name | Value\n--- | ---\nAlice | 1\nBob | 2\n"
+	cases := []struct {
+		name      string
+		existing  string
+		rewritten string
+		refused   bool
+	}{
+		{"remove outer pipes", standard, optional, false},
+		{"add outer pipes", optional, standard, false},
+		{
+			"update value and retain rows", optional,
+			"Name | Value\n--- | ---\nAlice | 1\nBob | 20\n\nUpdated value.\n", false,
+		},
+		{"drop one optional-pipe row", optional, "Name | Value\n--- | ---\nAlice | 1\n", true},
+		{"drop optional-pipe table", optional, "No table remains.", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, page := newWikiWriteGuardStore(t, tc.existing)
+			ctx := types.WithWikiEditSource(context.Background(), types.WikiEditSourceAgent)
+			rewritten := *page
+			rewritten.Content = tc.rewritten
+			updated, err := svc.UpdatePage(ctx, &rewritten)
+			stored, readErr := svc.GetPageBySlug(ctx, page.KnowledgeBaseID, page.Slug)
+			require.NoError(t, readErr)
+			if tc.refused {
+				require.ErrorIs(t, err, ErrWikiWriteDroppedTableRows)
+				require.Nil(t, updated)
+				require.Equal(t, page.Content, stored.Content)
+				require.Equal(t, page.Version, stored.Version)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.rewritten, stored.Content)
+			require.Equal(t, page.Version+1, stored.Version)
+			require.Equal(t, types.WikiEditSourceAgent, stored.LastEditSource)
+		})
+	}
+}

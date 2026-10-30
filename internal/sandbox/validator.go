@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ScriptValidator validates scripts and arguments for security
@@ -475,18 +477,26 @@ func compilePatterns(patterns []string) []*regexp.Regexp {
 
 // extractContext extracts context around a match
 func extractContext(content, match string) string {
-	idx := strings.Index(strings.ToLower(content), strings.ToLower(match))
-	if idx == -1 {
+	idx, matchEnd, ok := indexLower(content, match)
+	if !ok {
 		return ""
 	}
 
+	// Widen by about 20 bytes on each side, moving outwards to rune
+	// boundaries so a multibyte character is never cut in half.
 	start := idx - 20
 	if start < 0 {
 		start = 0
 	}
-	end := idx + len(match) + 20
+	for start > 0 && !utf8.RuneStart(content[start]) {
+		start--
+	}
+	end := matchEnd + 20
 	if end > len(content) {
 		end = len(content)
+	}
+	for end < len(content) && !utf8.RuneStart(content[end]) {
+		end++
 	}
 
 	context := content[start:end]
@@ -500,10 +510,43 @@ func extractContext(content, match string) string {
 	return context
 }
 
-// truncate truncates a string to max length
+// truncate truncates a string to at most maxLen bytes, backing up to a
+// rune boundary so a multibyte character is never split.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
+// indexLower finds match in content the way strings.Index(strings.ToLower(content),
+// strings.ToLower(match)) does, but returns byte offsets into content itself.
+// Lowercasing can change a character's UTF-8 length (for example "İ" is two
+// bytes and its lowercase "i" one), so offsets into the lowercased copy cannot
+// be used to slice content directly.
+func indexLower(content, match string) (start, end int, ok bool) {
+	var lower strings.Builder
+	lower.Grow(len(content))
+	// offsets[i] is the byte offset in content of the character that produced
+	// byte i of the lowercased text.
+	offsets := make([]int, 0, len(content)+1)
+	for i, r := range content {
+		n := lower.Len()
+		lower.WriteRune(unicode.ToLower(r))
+		for ; n < lower.Len(); n++ {
+			offsets = append(offsets, i)
+		}
+	}
+	offsets = append(offsets, len(content))
+
+	lowerMatch := strings.ToLower(match)
+	idx := strings.Index(lower.String(), lowerMatch)
+	if idx < 0 {
+		return 0, 0, false
+	}
+	return offsets[idx], offsets[idx+len(lowerMatch)], true
 }
