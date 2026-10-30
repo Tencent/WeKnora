@@ -1432,6 +1432,24 @@ func TestFileOpAgainstStoppedContainerRebinds(t *testing.T) {
 	}
 }
 
+// The idle sweep can leave a container that inspect still reports while
+// exec dies before the command starts (#4905).
+func TestFileOpOCIRuntimeFailureRebinds(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execExit = 128
+	engine.execStderr = ""
+	engine.execStdout = "OCI runtime exec failed: exec failed: unable to start"
+	engine.inspect["stopped-1"] = container.InspectResponse{
+		ID:    "stopped-1",
+		State: &container.State{Status: "running"},
+	}
+	docker := newTestDockerClient(t, engine)
+	err := docker.MakeDir(context.Background(), testHandle("stopped-1"), "/workspace/input/e22906334b22")
+	require.True(t, IsRemoteNotFound(err), "got %+v", err)
+	require.True(t, CanReplaceRemoteBinding(err), "got %+v", err)
+	require.Contains(t, err.Error(), "vanished")
+}
+
 // A non-zero exec in a container that is still running, or only paused, is
 // the command's own failure. Rebinding would throw away a sandbox that can
 // still be used.
