@@ -7,6 +7,7 @@ import { copyWithToast } from '@/utils/clipboard'
 import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledgeDetails } from '@/api/knowledge-base/index'
 import {
   groupPostprocessGraphSpans,
+  isSpansResponseCurrent,
   knowledgeSpansPayloadHasTrace,
   postprocessElapsedMs,
   summarizePostprocessTasks,
@@ -152,11 +153,18 @@ const attemptStatuses = reactive<Map<number, string>>(new Map())
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let nowTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
-// Drops overlapping fetches. Does NOT gate the polling decision —
+// Drops overlapping polls. Does NOT gate the polling decision —
 // the tick callback owns scheduling. If fetchInFlight is stuck (e.g.
 // network black hole), the worst case is one stuck request blocking
 // retries until axios timeout (30s); the loop itself stays alive.
+// A selection change (document, attempt, retry) passes `force` and fetches
+// anyway; the superseded request's response is then dropped by
+// isSpansResponseCurrent, and only the latest request clears this flag.
 let fetchInFlight = false
+// Incremented for every spans request. A response is applied only if its
+// seq is still the latest and the knowledge/attempt it was issued for is
+// still selected.
+let spansRequestSeq = 0
 
 const stages = computed<SpanNode[]>(() => {
   const trace = data.value?.trace
@@ -360,15 +368,29 @@ function shouldPollNow(): boolean {
   return isPolling(data.value.parse_status)
 }
 
-async function fetchSpans(opts: { manual?: boolean } = {}) {
+async function fetchSpans(opts: { manual?: boolean; force?: boolean } = {}) {
   if (!props.knowledgeId) return
-  if (fetchInFlight) return
+  if (fetchInFlight && !opts.force) return
   fetchInFlight = true
+  const issued = {
+    seq: ++spansRequestSeq,
+    knowledgeId: props.knowledgeId,
+    attempt: selectedAttempt.value,
+  }
+  const isCurrent = () => isSpansResponseCurrent(issued, {
+    seq: spansRequestSeq,
+    knowledgeId: props.knowledgeId,
+    attempt: selectedAttempt.value,
+  })
   if (opts.manual) refreshing.value = true
   if (!data.value) loading.value = true
   let attemptOk = false
   try {
-    const res: any = await getKnowledgeSpans(props.knowledgeId, selectedAttempt.value)
+    const res: any = await getKnowledgeSpans(issued.knowledgeId, issued.attempt)
+    // A newer request was issued, or the user moved to another document or
+    // attempt, while this one was in flight. Its result belongs to a
+    // selection that is no longer on screen.
+    if (!isCurrent()) return
     if (res?.success && res.data) {
       data.value = res.data as SpansResponse
       attemptOk = true
@@ -415,35 +437,44 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       emit('update:hasSpans', false)
     }
   } catch (e) {
+    if (!isCurrent()) return
     // Surface the error in the console — silent failures here is
     // exactly what hid the polling-stalled bug from us before.
     console.warn('[KnowledgeTimeline] fetchSpans failed', e)
     emit('update:hasSpans', false)
   } finally {
-    // Track every attempt, not just successful ones — otherwise a
-    // failing endpoint would leave "更新于 X 秒前" frozen forever while
-    // the spinner spins. Pair with failedAttempts to render a "fetch
-    // failed" hint when consecutive errors pile up.
-    lastFetchedAt.value = Date.now()
-    lastFetchOk.value = attemptOk
-    if (attemptOk) {
-      failedAttempts.value = 0
-    } else {
-      failedAttempts.value += 1
+    // Superseded requests leave the shared state to the request that
+    // replaced it; clearing fetchInFlight here would let polls overlap it.
+    if (issued.seq === spansRequestSeq) {
+      // Track every attempt, not just successful ones — otherwise a
+      // failing endpoint would leave "更新于 X 秒前" frozen forever while
+      // the spinner spins. Pair with failedAttempts to render a "fetch
+      // failed" hint when consecutive errors pile up.
+      lastFetchedAt.value = Date.now()
+      lastFetchOk.value = attemptOk
+      if (attemptOk) {
+        failedAttempts.value = 0
+      } else {
+        failedAttempts.value += 1
+      }
+      loading.value = false
+      refreshing.value = false
+      fetchInFlight = false
     }
-    loading.value = false
-    refreshing.value = false
-    fetchInFlight = false
   }
 }
 
 function ensureAttemptStatuses() {
   const latest = data.value?.latest_attempt || 0
   if (latest <= 1) return
+  const knowledgeId = props.knowledgeId
   for (let n = 1; n <= latest; n++) {
     if (attemptStatuses.has(n)) continue
-    getKnowledgeSpans(props.knowledgeId, n)
+    getKnowledgeSpans(knowledgeId, n)
       .then((res: any) => {
+        // attemptStatuses is cleared on document switch; a late status
+        // for the previous document must not land in the new one's tabs.
+        if (knowledgeId !== props.knowledgeId) return
         if (res?.success && res.data?.trace) {
           attemptStatuses.set(n, resolveTimelineHeaderStatus({
             parseStatus: res.data.parse_status,
@@ -489,7 +520,7 @@ async function onRetry() {
     attemptStatuses.clear()
     selectedSpanId.value = null
     autoSelectPending.value = true
-    await fetchSpans()
+    await fetchSpans({ force: true })
   } catch {
     // ignore
   }
@@ -550,7 +581,7 @@ function onAttemptChange(n: number) {
   // rule re-evaluates cleanly against the new attempt's tree.
   userToggledRows.value = new Set()
   expandedRows.value = new Set(['__root__'])
-  fetchSpans()
+  fetchSpans({ force: true })
 }
 
 watch(
@@ -565,7 +596,9 @@ watch(
     autoSelectPending.value = true
     attemptStatuses.clear()
     userToggledRows.value = new Set()
-    fetchSpans()
+    // The previous document's request may still be in flight; fetch
+    // anyway so the new document is never left without data.
+    fetchSpans({ force: true })
     fetchProcessOverrides()
   },
 )
@@ -578,8 +611,10 @@ function onKeydown(ev: KeyboardEvent) {
 
 async function fetchProcessOverrides() {
   if (props.compact || !props.knowledgeId) return
+  const knowledgeId = props.knowledgeId
   try {
-    const res: any = await getKnowledgeDetails(props.knowledgeId)
+    const res: any = await getKnowledgeDetails(knowledgeId)
+    if (knowledgeId !== props.knowledgeId) return
     if (res?.success && res.data) {
       processOverrides.value = res.data.metadata?.process_overrides ?? null
       currentKnowledgeFileType.value = normalizeFileType(
@@ -587,6 +622,7 @@ async function fetchProcessOverrides() {
       )
     }
   } catch {
+    if (knowledgeId !== props.knowledgeId) return
     processOverrides.value = null
     currentKnowledgeFileType.value = ''
   }

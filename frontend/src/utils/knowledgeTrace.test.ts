@@ -3,10 +3,52 @@ import test from 'node:test'
 
 import {
   groupPostprocessGraphSpans,
+  isSpansResponseCurrent,
   postprocessElapsedMs,
   summarizePostprocessTasks,
   type KnowledgeTraceNode,
 } from './knowledgeTrace.ts'
+
+test('a spans response for the previous document is dropped after switching', () => {
+  // Document A's request is in flight when the user opens document B, which
+  // issues request 2. A's late response must not render under B.
+  const issuedForA = { seq: 1, knowledgeId: 'doc-a', attempt: undefined }
+  const nowOnB = { seq: 2, knowledgeId: 'doc-b', attempt: undefined }
+
+  assert.equal(isSpansResponseCurrent(issuedForA, nowOnB), false)
+})
+
+test('the latest spans request is applied even though an older one was still in flight', () => {
+  const issuedForB = { seq: 2, knowledgeId: 'doc-b', attempt: undefined }
+  const nowOnB = { seq: 2, knowledgeId: 'doc-b', attempt: undefined }
+
+  assert.equal(isSpansResponseCurrent(issuedForB, nowOnB), true)
+})
+
+test('a latest-attempt request stays current after its own response fills in the attempt', () => {
+  // The first fetch for a document sends attempt=undefined ("latest") and
+  // the component then records the attempt the server returned.
+  const issued = { seq: 3, knowledgeId: 'doc-b', attempt: undefined }
+  const afterResponse = { seq: 3, knowledgeId: 'doc-b', attempt: 2 }
+
+  assert.equal(isSpansResponseCurrent(issued, afterResponse), true)
+})
+
+test('a spans response for a previously selected attempt is dropped', () => {
+  const issuedForAttempt1 = { seq: 4, knowledgeId: 'doc-b', attempt: 1 }
+  const nowOnAttempt2 = { seq: 4, knowledgeId: 'doc-b', attempt: 2 }
+
+  assert.equal(isSpansResponseCurrent(issuedForAttempt1, nowOnAttempt2), false)
+})
+
+test('a superseded spans request is dropped even when the selection is unchanged', () => {
+  // A retry re-issues the same document and attempt; only the newer
+  // response reflects the re-parse.
+  const older = { seq: 5, knowledgeId: 'doc-b', attempt: undefined }
+  const current = { seq: 6, knowledgeId: 'doc-b', attempt: undefined }
+
+  assert.equal(isSpansResponseCurrent(older, current), false)
+})
 
 test('postprocess duration follows asynchronous workers instead of enqueue completion', () => {
   const stage: KnowledgeTraceNode = {
