@@ -50,20 +50,36 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 	// Hold the slot until the stream fully drains, then release. If the
 	// consumer abandons the stream (stops reading out) we would otherwise
 	// block forever on the send and never release the slot; select on
-	// ctx.Done() so a cancelled call frees its slot promptly, and drain the
-	// inner channel in the background so the upstream producer can exit.
+	// ctx.Done() on both receive and send so cancellation also frees the slot
+	// while upstream is idle. Drain the inner channel in the background so the
+	// upstream producer can exit.
 	out := make(chan types.StreamResponse)
 	go func() {
 		defer close(out)
 		defer release()
-		for resp := range ch {
+		drain := func() {
+			for {
+				if _, open := <-ch; !open {
+					return
+				}
+			}
+		}
+		for {
+			var resp types.StreamResponse
+			select {
+			case <-ctx.Done():
+				go drain()
+				return
+			case next, ok := <-ch:
+				if !ok {
+					return
+				}
+				resp = next
+			}
 			select {
 			case out <- resp:
 			case <-ctx.Done():
-				go func() {
-					for range ch {
-					}
-				}()
+				go drain()
 				return
 			}
 		}
