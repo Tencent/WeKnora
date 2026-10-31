@@ -93,6 +93,13 @@ type TaskPendingOpsClaimableCounter interface {
 	ClaimableCount(ctx context.Context, taskType, scope, scopeID string, staleBefore time.Time) (int64, error)
 }
 
+// TaskPendingOpsKnowledgeClaimer preserves ClaimBatch's whole-key exclusion
+// when an operator requests one document instead of the next automatic batch.
+type TaskPendingOpsKnowledgeClaimer interface {
+	ClaimKnowledge(ctx context.Context, taskType, scope, scopeID, knowledgeID string,
+		staleBefore time.Time) ([]*types.TaskPendingOp, error)
+}
+
 // TaskPendingOpsScopeCleaner is an optional extension for callers that need
 // to discard every durable pending operation owned by a deleted scope. It is
 // intentionally separate from TaskPendingOpsRepository so alternate queue
