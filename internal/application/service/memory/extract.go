@@ -289,6 +289,7 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 		return nil
 	}
 
+	scope = scope.WithGeneration(subject.ExtractionState.Generation)
 	// A lease serializes duplicate tasks, while the durable session queue
 	// stays intact until each segment has actually been applied.
 	leaseID := uuid.NewString()
@@ -324,7 +325,7 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 	processed := 0
 	var retryErr error
 	for _, session := range batch.Sessions {
-		segments, more, err := s.collectSessionSegments(ctx, session)
+		segments, more, err := s.collectSessionSegments(ctx, session, subject.ExtractCursor)
 		if err != nil {
 			return err
 		}
@@ -461,7 +462,9 @@ type transcriptSegment struct {
 // collectSessionSegments reads a bounded page using a session-local cursor.
 // Every row, including assistant-only pages, belongs to a checkpoint. A gap
 // is flushed before admitting the next message so it cannot advance over it.
-func (s *Service) collectSessionSegments(ctx context.Context, session types.MemoryExtractionSession) ([]transcriptSegment, bool, error) {
+func (s *Service) collectSessionSegments(
+	ctx context.Context, session types.MemoryExtractionSession, cutoff *time.Time,
+) ([]transcriptSegment, bool, error) {
 	messages, err := s.messageRepo.ListMessagesBySessionAfterCursor(ctx, session.SessionID, session.Cursor, extractMaxMessagesPerRun+1)
 	if err != nil {
 		return nil, false, fmt.Errorf("load session messages: %w", err)
@@ -493,6 +496,11 @@ func (s *Service) collectSessionSegments(ctx context.Context, session types.Memo
 		}
 		current.end, current.endID = message.CreatedAt, message.ID
 		hasRows = true
+		// A time-only clear cutoff includes all IDs at that timestamp. Still
+		// checkpoint these rows so a page of tied timestamps can drain normally.
+		if cutoff != nil && !message.CreatedAt.After(*cutoff) {
+			continue
+		}
 		if !isUser {
 			continue
 		}
@@ -508,7 +516,7 @@ func (s *Service) collectSessionSegments(ctx context.Context, session types.Memo
 			continue
 		}
 		if i == 0 {
-			segments[i].context = s.priorContext(ctx, session.SessionID, segments[i].lines)
+			segments[i].context = s.priorContext(ctx, session.SessionID, segments[i].lines, cutoff)
 		} else {
 			segments[i].context = tailContents(segments[i-1].lines, extractContextLines)
 		}
@@ -524,7 +532,7 @@ func (s *Service) collectSessionSegments(ctx context.Context, session types.Memo
 // extracted from, so it cannot re-produce memories from messages the watermark
 // has already passed.
 func (s *Service) priorContext(
-	ctx context.Context, sessionID string, lines []transcriptLine,
+	ctx context.Context, sessionID string, lines []transcriptLine, cutoff *time.Time,
 ) []string {
 	if len(lines) == 0 {
 		return nil
@@ -539,6 +547,9 @@ func (s *Service) priorContext(
 	var previous []transcriptLine
 	for _, message := range before {
 		if message == nil || message.Role != "user" {
+			continue
+		}
+		if cutoff != nil && !message.CreatedAt.After(*cutoff) {
 			continue
 		}
 		content := strings.TrimSpace(message.Content)

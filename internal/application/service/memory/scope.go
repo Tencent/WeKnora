@@ -17,6 +17,19 @@ import (
 // bug rather than an empty state.
 var ErrNoMemoryScope = errors.New("memory: no principal in context")
 
+// captureGeneration runs before reading inputs, never after a model call.
+// Keeping an existing fence is essential: recapturing would revive stale work.
+func (s *Service) captureGeneration(ctx context.Context, scope interfaces.MemoryScope) (interfaces.MemoryScope, error) {
+	if scope.Generation != nil {
+		return scope, nil
+	}
+	subject, err := s.repo.EnsureSubject(ctx, scope)
+	if err != nil {
+		return scope, err
+	}
+	return scope.WithGeneration(subject.ExtractionState.Generation), nil
+}
+
 // ResolveScope derives the memory space from the request context alone.
 //
 // Deriving rather than accepting a scope is the whole isolation model: there
