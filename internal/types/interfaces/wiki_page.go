@@ -27,6 +27,10 @@ type WikiPageService interface {
 	// ref changes driven by internal reconciliation.
 	UpdatePageMeta(ctx context.Context, page *types.WikiPage) error
 
+	// PublishDraftPage 仅把指定租户、知识库及页面身份对应的草稿发布，不覆盖元数据或增加版本。
+	// 身份不存在时返回未找到；存活页面已非草稿时直接成功，不重复写入。
+	PublishDraftPage(ctx context.Context, tenantID uint64, kbID, pageID, slug string) error
+
 	// UpdateAutoLinkedContent persists content changes that come from
 	// machine-only link decoration — cross-link injection and dead-link
 	// cleanup — without bumping `version`. Out-links are re-parsed from the
@@ -269,6 +273,16 @@ type WikiPageRepository interface {
 
 	// UpdateLinks 仅保存链接重建结果；页面身份、旧链接、正文或版本不匹配时返回冲突。
 	UpdateLinks(ctx context.Context, previous, page *types.WikiPage) error
+
+	// PublishDraftPage 仅把指定租户、知识库及页面身份对应的草稿发布，不覆盖元数据或增加版本。
+	// 身份不存在时返回未找到；存活页面已非草稿时直接成功，不重复写入。
+	PublishDraftPage(ctx context.Context, tenantID uint64, kbID, pageID, slug string) error
+
+	// ReconcileWikiPageProgressInLink 在单目标事务内重检源/目标身份，按当前源出链维护该来源的反链。
+	// 只修改目标的 in_links，保留其他元数据及其他来源；页面已删除或换 ID 时返回未找到。
+	ReconcileWikiPageProgressInLink(
+		ctx context.Context, tenantID uint64, kbID, sourceID, sourceSlug, targetID, targetSlug string,
+	) error
 
 	// UpdateAutoLinkedContent rewrites `content`, `out_links` and
 	// `updated_at` in place while leaving `version` untouched. Intended for

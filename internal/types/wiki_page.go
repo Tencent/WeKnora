@@ -257,6 +257,8 @@ type WikiPage struct {
 	// sync from background jobs) leave it untouched so it can be used as a
 	// real "the page was edited" signal.
 	Version int `json:"version" gorm:"default:1" extensions:"x-agent"`
+	// ProgressSnapshot 绑定进度写入前的完整读取状态，不落库、不对外暴露，也不改变版本语义。
+	ProgressSnapshot string `json:"-" gorm:"-"`
 	// LastEditSource records who authored the CURRENT version: pipeline |
 	// agent | user | revert. Empty for legacy rows (treated as pipeline).
 	// When the version is superseded this value travels into the revision
