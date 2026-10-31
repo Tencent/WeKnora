@@ -238,7 +238,10 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             try:
                 result, source_desc = self._parse_request(request)
 
-                if not result or not result.content:
+                if not result or (
+                    not result.content
+                    and result.metadata.get("pdf_native_only") != "requires_ocr"
+                ):
                     error_msg = f"Failed to parse: {source_desc}"
                     logger.error(error_msg)
                     return ReadResponse(error=error_msg)
@@ -326,7 +329,10 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             # full bytes field while the client drains page images.
             del request
 
-            if not result or not result.content:
+            if not result or (
+                not result.content
+                and result.metadata.get("pdf_native_only") != "requires_ocr"
+            ):
                 error_msg = f"Failed to parse: {source_desc}"
                 logger.error(error_msg)
                 parsed_stream.close()

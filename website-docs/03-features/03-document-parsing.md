@@ -557,3 +557,17 @@ Docker app 镜像包含 qpdf。独立部署和桌面应用必须在运行后端�
 - 大书可按实际耗时配置 `WEKNORA_DOCREADER_CALL_TIMEOUT=4h`、`WEKNORA_DOCUMENT_PROCESS_TIMEOUT=6h`，保留每片 Cloud 轮询 30 分钟。不要把每片的 30 分钟误认为整个文档获得相同或累计的执行时间；修改 .env 后重新创建 app 容器。
 
 此功能不持久化云端 job ID 或完成结果。重试会重新提交分片，跨重启断点续传不属于此变更。
+
+
+### 自建 PaddleOCR-VL 的原生 PDF 快路径
+
+`paddleocr_vl` 支持可选的 `paddleocr_vl_pdf_mode`：
+
+- `ocr`（默认，含未设置时）：整份文件仍由 Paddle `/layout-parsing` 处理，保留现有行为。
+- `auto`：先由已连接的 DocReader 检查 PDF。仅在所有页面均为原生页且有可用输出时，复用 builtin 的版面文本、表格、嵌入图片／矢量图和来源坐标，不调用 Paddle。只要有扫描页（包括带隐藏 OCR 文字的整页图片），整份 PDF 仍交给 Paddle，不拼接两种引擎的逐页输出。
+
+可通过工作空间解析器配置 API 设置 `paddleocr_vl_pdf_mode: "auto"`；也可在上传的 `parser_engine_overrides` 中设置，上传值优先。此选项尚无独立 UI 控件，仅适用于自建 `paddleocr_vl`，不改变云端引擎。`pdf_force_scanned: "true"` 会保持 OCR；DocReader 的全局强制扫描设置同样会拒绝快路径。
+
+快路径需要配套更新的 DocReader；未连接、旧版本、探测失败、空白或加密文件均回退原 Paddle 链路。取消请求时直接结束，不启动第二次解析。混合文件仍有一次探测开销，尚未实现仅对扫描页调用 Paddle。
+
+`auto` 的原生输出遵循 builtin 的表格／图片提取规则，不保证与 Paddle 的跨页表格合并、印章或图表识别结果完全相同。需要这些 Paddle 版面能力，或原生文字层质量不佳时，使用 `ocr`。文档插图仍通过原有图片处理流水线处理；跳过整页 OCR 不代表跳过插图处理。

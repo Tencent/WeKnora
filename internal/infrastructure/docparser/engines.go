@@ -264,7 +264,9 @@ func (e *paddleOCRVLEngine) CheckAvailable(_ bool, overrides map[string]string) 
 }
 
 func (e *paddleOCRVLEngine) NewReader(_ context.Context, deps ReaderDeps) (interfaces.DocReader, error) {
-	return NewPaddleOCRVLReader(deps.Overrides), nil
+	reader := NewPaddleOCRVLReader(deps.Overrides)
+	reader.nativeReader = deps.Remote
+	return reader, nil
 }
 
 // ---------------------------------------------------------------------------

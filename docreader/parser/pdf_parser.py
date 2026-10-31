@@ -2187,6 +2187,9 @@ class PDFParser(BaseParser):
     def __init__(self, file_name: str = "", file_type=None, **kwargs):
         # Capture per-upload override before BaseParser consumes kwargs.
         raw = kwargs.pop("pdf_force_scanned", None)
+        self._native_only = str(kwargs.pop("pdf_native_only", "false")).strip().lower() in {
+            "1", "true", "yes", "y", "on",
+        }
         super().__init__(file_name=file_name, file_type=file_type, **kwargs)
         # Priority: per-upload override > global env > default (False).
         if raw is not None:
@@ -2197,6 +2200,8 @@ class PDFParser(BaseParser):
             self._force_scanned = FORCE_SCANNED_PDF
 
     def parse_into_text(self, content: bytes) -> Document:
+        if self._native_only:
+            return self._parse_native_only(content)
         # Force-scanned short-circuit: render every page as an image.
         if self._force_scanned:
             logger.info(
@@ -2231,6 +2236,9 @@ class PDFParser(BaseParser):
 
     def parse_stream(self, content: bytes) -> ParsedDocumentStream:
         """Prepare PDF metadata, then render scanned pages only as consumed."""
+        if self._native_only:
+            document = self._parse_native_only(content)
+            return ParsedDocumentStream(document=document, image_count=len(document.images))
         if self._force_scanned:
             stream = PDFScannedParser(
                 file_name=self.file_name, file_type=self.file_type
@@ -2287,6 +2295,29 @@ class PDFParser(BaseParser):
             ),
             _cleanup=lambda: _unlink_pdf_temp_file(pdf_path),
         )
+
+    @staticmethod
+    def _requires_ocr() -> Document:
+        # Internal probe response: never expose partial native text or image
+        # references for a document that must go through Paddle as a whole.
+        return Document(content="", metadata={"pdf_native_only": "requires_ocr"})
+
+    def _parse_native_only(self, content: bytes) -> Document:
+        """Reuse native layout/figures, but never render scans for an OCR probe."""
+        if self._force_scanned:
+            return self._requires_ocr()
+        try:
+            with _PDFIUM_LOCK:
+                document, scanned_indices = self._route_locked(
+                    content, include_scanned_images=False
+                )
+            if scanned_indices or not document.content.strip():
+                return self._requires_ocr()
+            document.metadata["pdf_native_only"] = "accepted"
+            return document
+        except Exception:
+            logger.exception("PDF native-only probe failed for %s", self.file_name)
+            return self._requires_ocr()
 
     def _route(self, content: bytes) -> Document:
         # Serialize all pdfium work: see _PDFIUM_LOCK. Holding it for the whole
@@ -2380,6 +2411,9 @@ class PDFParser(BaseParser):
 
             texts = _strip_repeating_lines(texts, classes)
             scanned_indices = [i for i, c in enumerate(classes) if c == "scanned"]
+
+            if self._native_only and scanned_indices:
+                return self._requires_ocr(), scanned_indices
 
             # Pass 2: render only the scanned pages (heavy work, rate-limited).
             # ReadStream defers this work until after its metadata frame and

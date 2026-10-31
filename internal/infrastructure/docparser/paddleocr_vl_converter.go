@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -26,15 +28,18 @@ const defaultPaddleOCRVLTimeout = 1000 * time.Second // large scanned PDFs can t
 // Flow: POST {endpoint}/layout-parsing with base64 file → synchronous JSON
 // response containing per-page markdown + inline base64 images.
 type PaddleOCRVLReader struct {
-	endpoint string
-	timeout  time.Duration
-	useSeal  bool
-	useChart bool
+	endpoint     string
+	timeout      time.Duration
+	useSeal      bool
+	useChart     bool
+	pdfMode      string
+	nativeReader interfaces.DocReader
 }
 
 // NewPaddleOCRVLReader creates a reader from ParserEngineOverrides.
 func NewPaddleOCRVLReader(overrides map[string]string) *PaddleOCRVLReader {
 	return &PaddleOCRVLReader{
+		pdfMode:  overrides["paddleocr_vl_pdf_mode"],
 		timeout:  requestTimeoutFromEnv("WEKNORA_PADDLEOCR_VL_TIMEOUT", defaultPaddleOCRVLTimeout),
 		endpoint: strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
 		useSeal:  parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
@@ -53,6 +58,31 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	content := req.FileContent
 	if len(content) == 0 {
 		return &types.ReadResult{Error: "no file content provided"}, nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if c.useNativePDF(req) {
+		probe := *req
+		probe.ParserEngine = BuiltinEngineName
+		probe.ParserEngineOverrides = maps.Clone(req.ParserEngineOverrides)
+		if probe.ParserEngineOverrides == nil {
+			probe.ParserEngineOverrides = map[string]string{}
+		}
+		probe.ParserEngineOverrides["pdf_native_only"] = "true"
+		result, err := c.nativeReader.Read(ctx, &probe)
+		// Cancellation must not start another expensive parse. Other probe failures
+		// retain the configured Paddle behavior (including an older DocReader).
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err == nil && result != nil && result.Error == "" &&
+			result.Metadata["pdf_native_only"] == "accepted" &&
+			result.Metadata["image_source_type"] == "pdf_text_layer" &&
+			strings.TrimSpace(result.MarkdownContent) != "" {
+			return result, nil
+		}
 	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL] Parsing file=%s size=%d via %s",
@@ -80,6 +110,23 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 		ImageRefs:       imageRefs,
 		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, layoutUnits, req.FileType),
 	}, nil
+}
+
+// useNativePDF enables only the explicitly requested, document-level fast path.
+// Images and forced OCR retain Paddle's layout/table recognition unchanged.
+func (c *PaddleOCRVLReader) useNativePDF(req *types.ReadRequest) bool {
+	mode := c.pdfMode
+	if value, ok := req.ParserEngineOverrides["paddleocr_vl_pdf_mode"]; ok {
+		mode = value
+	}
+	if mode != "auto" || fileTypeCode(req) != 0 || c.nativeReader == nil ||
+		parseBoolOr(req.ParserEngineOverrides["pdf_force_scanned"], false) {
+		return false
+	}
+	if connected, ok := c.nativeReader.(interface{ IsConnected() bool }); ok {
+		return connected.IsConnected()
+	}
+	return true
 }
 
 // paddleOCRVLRecognitionParams returns the recognition / page-restructuring
