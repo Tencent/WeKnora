@@ -102,6 +102,7 @@ func (s *Service) reviewStore(
 		}
 		return result
 	}
+	scope = scope.WithGeneration(subject.ExtractionState.Generation)
 	// Two clocks, because the two callers are rate limited for different
 	// reasons and must not silence each other. The daily pass is maintenance
 	// nobody asked for, so it waits a day. A review someone pressed a button
@@ -152,8 +153,7 @@ func (s *Service) reviewStore(
 	result.Reviewed = len(items)
 	result.Demoted = s.demoteStaleTasks(ctx, scope, items)
 	if force || len(items) >= consolidateMinItems {
-		result.Merged, result.Candidates, result.Skipped =
-			s.mergeRedundant(ctx, scope, cfg, modelID, items, force)
+		result.Merged, result.Candidates, result.Skipped = s.mergeRedundant(ctx, scope, cfg, modelID, items, force)
 	} else {
 		result.Skipped = types.MemoryConsolidationSkipTooFewItems
 	}

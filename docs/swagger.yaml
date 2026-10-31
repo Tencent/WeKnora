@@ -1,5 +1,51 @@
 basePath: /api/v1
 definitions:
+  github_com_Tencent_WeKnora_internal_types.MemorySubjectSummary:
+    properties:
+      active_count:
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      item_count:
+        type: integer
+      last_activity_at:
+        type: string
+      pending_count:
+        type: integer
+      principal_type:
+        type: string
+      subject_id:
+        type: string
+    type: object
+  internal_handler.AdminMemorySettingsRequest:
+    properties:
+      enabled:
+        example: false
+        type: boolean
+    required:
+    - enabled
+    type: object
+  internal_handler.ListMemorySubjectsResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MemorySubjectSummary'
+        type: array
+      success:
+        example: true
+        type: boolean
+      total:
+        type: integer
+    type: object
+  internal_handler.MemoryAdminErrorResponse:
+    properties:
+      error: {}
+      success:
+        example: false
+        type: boolean
+    type: object
   github_com_Tencent_WeKnora_internal_agent_tools.AgentToolCatalog:
     properties:
       default_tools:
@@ -14547,6 +14593,263 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /admin/memory/subjects:
+    get:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；返回主体 UUID、开关、分类计数与最近活动时间，不返回记忆正文
+      parameters:
+      - default: 50
+        description: 每页条数，默认 50，最大 200
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: 非负偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ListMemorySubjectsResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 列出租户记忆主体
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/items:
+    delete:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；支持清空已关闭记忆的主体，不阻止未来新消息产生记忆
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ClearResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 清空指定主体的记忆
+      tags:
+      - 记忆管理
+    get:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；subject_id 是主体 UUID，并非 principal storage
+        ID
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 状态过滤
+        enum:
+        - active
+        - superseded
+        - archived
+        - pending
+        in: query
+        name: status
+        type: string
+      - default: 50
+        description: 每页条数，默认 50，最大 200
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: 非负偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ListItemsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 查看指定主体的记忆
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/items/{id}/confirm:
+    post:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；确认 pending 条目，已生效条目可幂等重试，其他状态冲突返回 409
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 记忆条目 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryItem'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 确认指定主体的待审核记忆
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/items/{id}/reject:
+    post:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；只有 pending 条目可否决，状态冲突返回 409
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 记忆条目 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 否决指定主体的待审核记忆
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/settings:
+    put:
+      consumes:
+      - application/json
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；enabled 必须显式传入布尔值，允许 false
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 记忆开关
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AdminMemorySettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 更新指定主体的记忆设置
+      tags:
+      - 记忆管理
   /agent-chat/{session_id}:
     post:
       consumes:

@@ -8,8 +8,21 @@ import (
 	"time"
 )
 
-var ErrMemoryConflict = errors.New("memory changed; reload before applying this proposal")
-var ErrMemoryExtractionLeaseLost = errors.New("memory extraction lease lost")
+var (
+	// ErrMemoryConflict indicates memory changed before a proposal could be applied.
+	ErrMemoryConflict = errors.New("memory changed; reload before applying this proposal")
+	// ErrMemoryExtractionLeaseLost rejects a worker that no longer owns its lease.
+	ErrMemoryExtractionLeaseLost = errors.New("memory extraction lease lost")
+)
+
+// ErrMemoryPreviouslyForgotten blocks a write whose content or source was rejected.
+var ErrMemoryPreviouslyForgotten = errors.New("memory: previously forgotten by the user")
+
+// MemoryRejectedMessageWindow bounds source-message suppression after a rejection.
+const MemoryRejectedMessageWindow = time.Hour
+
+// ErrMemoryGenerationChanged discards work whose inputs predate a clear.
+var ErrMemoryGenerationChanged = fmt.Errorf("memory was cleared: %w", ErrMemoryConflict)
 
 // MemoryMessageCursor breaks timestamp ties using the message primary key.
 type MemoryMessageCursor struct {
@@ -41,9 +54,10 @@ type MemoryExtractionSession struct {
 // TableName selects the indexed session progress table.
 func (MemoryExtractionSession) TableName() string { return "memory_extraction_sessions" }
 
-// MemoryExtractionState contains only the subject-wide worker lease.
+// MemoryExtractionState contains the subject-wide worker lease and clear fence.
 // Cursors and queued work live in MemoryExtractionSession.
 type MemoryExtractionState struct {
+	Generation string    `json:"generation,omitempty"`
 	LeaseID    string    `json:"lease_id,omitempty"`
 	LeaseUntil time.Time `json:"lease_until,omitempty"`
 }

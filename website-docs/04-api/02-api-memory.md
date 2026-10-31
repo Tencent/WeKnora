@@ -95,4 +95,42 @@ curl "$BASE/api/v1/memory/export" -H "Authorization: Bearer $TOKEN" \
 curl -X POST "$BASE/api/v1/memory/consolidate" -H "Authorization: Bearer $TOKEN"
 ```
 
-参数无效、内容为敏感信息或记忆未开启时返回 400；找不到当前身份的条目返回 404；确认冲突返回 409；认证/权限不满足返回 401/403。接口没有管理员读取他人记忆的 subject 参数。实现：`internal/handler/memory.go`、`internal/router/routes_memory.go`。
+参数无效、内容为敏感信息或记忆未开启时返回 400；找不到当前身份的条目返回 404；确认冲突返回 409；认证/权限不满足返回 401/403。个人接口不接受 subject 参数。实现：`internal/handler/memory.go`、`internal/router/routes_memory.go`。
+
+## 管理无账号身份的记忆
+
+以下接口使用当前工作空间 Admin/Owner 的 Bearer 登录凭证，API Key 不可访问；即使租户 RBAC 的灰度开关关闭，管理员角色校验也保持生效。管理员只能管理当前调用者所在工作空间的身份，不能通过请求参数切换租户。空间或身份关闭记忆时，管理员仍可查看、清空和调整开关。
+
+路径中的 `subject_id` 是列表返回的记忆空间 UUID（`id`），不是 `web_user:...`、`im_user:...` 等 `subject_id` 存储标识。条目 ID 也必须属于该 UUID 对应的身份；不存在与其他工作空间的 UUID/条目均返回 404。
+
+| 方法 | 路径 | 请求 / 响应 |
+| --- | --- | --- |
+| GET | `/admin/memory/subjects` | 可选 limit、offset；`{success,data:[MemorySubjectSummary],total}` |
+| GET | `/admin/memory/subjects/:subject_id/items` | 可选 status、limit、offset；`{success,data:[MemoryItem],total}`，支持查看 pending |
+| POST | `/admin/memory/subjects/:subject_id/items/:id/confirm` | 200 `{success,data:MemoryItem}`；失效或到期的推断返回 409 |
+| POST | `/admin/memory/subjects/:subject_id/items/:id/reject` | 200 `{"success":true}`，拒绝 pending 推断 |
+| DELETE | `/admin/memory/subjects/:subject_id/items` | 200 `{success,removed}`，清空该身份的记忆及派生资料 |
+| PUT | `/admin/memory/subjects/:subject_id/settings` | `{"enabled":false}`，enabled 必填；200 `{"success":true}` |
+
+分页和 status 取值沿用个人条目接口。`MemorySubjectSummary` 包含 `id`、`subject_id`、`principal_type`、`enabled`、`item_count`、`active_count`、`pending_count`、`last_activity_at`。计数从当前条目计算；列表不返回记忆正文、常驻画像块、后台任务队列或提取状态。
+
+```bash
+curl "$BASE/api/v1/admin/memory/subjects?limit=50" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 将 SUBJECT_UUID 替换为上一步返回的 id。
+curl "$BASE/api/v1/admin/memory/subjects/$SUBJECT_UUID/items?status=pending" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -X PUT "$BASE/api/v1/admin/memory/subjects/$SUBJECT_UUID/settings" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"enabled":false}'
+```
+
+管理员查看指定身份的条目以及成功的确认、拒绝、清空、开关变更会写入现有审计日志，事件名以 `memory.` 开头；日志记录操作者、目标 UUID 和操作元数据，不复制记忆内容。审计存储失败会记录服务日志，不使已完成的操作失败。
+
+`max_items` 分别限制每个身份的 active 和 pending 条数（默认各 200，配置最大 2000）。写入新的推断时，在同一身份事务内将超限的最旧 pending 归档，不因 pending 超限淘汰 active 事实。降低配置后，存量 pending 在下一次写入时收敛到上限；没有新增定时清理器。
+
+清空在同一主体事务中删除记忆及派生资料、切换写入代次，并将提取历史水位推进到清空时刻。已经开始的记忆提取、整理和画像重建不能以旧代次写回；同一会话后续的新消息也不会重新提取清空前的历史，或将这些历史作为提取模型的前文。已有较新的游标保持单调前进。
+
+清空保留身份及其 enabled 设置，不删除聊天消息，也不撤回已经发送给模型或客户端的内容。清空后开始的新记忆操作仍可正常写入；需要持续停止自动提取时，先将该身份 enabled 设为 false，再执行清空。渠道或智能体级提取策略继承不在这些接口的范围内。
