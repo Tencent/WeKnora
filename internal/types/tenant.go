@@ -345,6 +345,7 @@ type ParserEngineConfig struct {
 
 	// PaddleOCR-VL self-hosted pipeline service (full /layout-parsing API).
 	PaddleOCRVLEndpoint            string `json:"paddleocr_vl_endpoint,omitempty"` // e.g. http://paddleocr-vl:8080
+	PaddleOCRVLPDFMode             string `json:"paddleocr_vl_pdf_mode,omitempty"` // auto (opt-in) or ocr (default)
 	PaddleOCRVLUseSealRecognition  *bool  `json:"paddleocr_vl_use_seal_recognition,omitempty"`
 	PaddleOCRVLUseChartRecognition *bool  `json:"paddleocr_vl_use_chart_recognition,omitempty"`
 
@@ -470,6 +471,9 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.PaddleOCRVLEndpoint != "" {
 		m["paddleocr_vl_endpoint"] = c.PaddleOCRVLEndpoint
+	}
+	if c.PaddleOCRVLPDFMode != "" {
+		m["paddleocr_vl_pdf_mode"] = c.PaddleOCRVLPDFMode
 	}
 	if c.PaddleOCRVLUseSealRecognition != nil {
 		m["paddleocr_vl_use_seal_recognition"] = fmt.Sprintf("%v", *c.PaddleOCRVLUseSealRecognition)
