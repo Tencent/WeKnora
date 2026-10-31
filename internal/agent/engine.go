@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -556,7 +558,8 @@ func (e *AgentEngine) withinIterationBudget(round int) bool {
 
 // loopGuards is the per-turn state the ReAct loop uses to notice it is not
 // making progress. The counters cover empty answers, repeated answers,
-// completion-token cutoffs, and identical failed tool calls.
+// completion-token cutoffs, identical failed tool calls, and tool rounds that
+// repeat the same calls and results.
 type loopGuards struct {
 	// emptyRetries counts nudges sent after a stop with no content.
 	emptyRetries         int
@@ -578,6 +581,10 @@ type loopGuards struct {
 	failedToolCallSignature    string
 	consecutiveFailedToolCalls int
 	failedToolCallNudged       bool
+	// lastToolRound fingerprints the previous tool round (calls and results)
+	// and repeatedToolRounds counts how many rounds in a row matched it.
+	lastToolRound      string
+	repeatedToolRounds int
 }
 
 // recordFailedToolCall tracks consecutive failures of the same model-facing
@@ -615,6 +622,75 @@ func (g *loopGuards) resetFailedToolCallStreak() {
 	g.failedToolCallSignature = ""
 	g.consecutiveFailedToolCalls = 0
 	g.failedToolCallNudged = false
+}
+
+// toolRoundSignature fingerprints a tool round by each call's name and
+// arguments and everything in its result that can reach the model: output,
+// error, structured data, images or their descriptions, and output files.
+// Two rounds with the same signature asked for the same thing and learned
+// nothing new.
+func toolRoundSignature(calls []types.ToolCall) string {
+	type entry struct {
+		Name    string                 `json:"n"`
+		Args    map[string]interface{} `json:"a"`
+		Success bool                   `json:"s"`
+		Output  string                 `json:"o"`
+		Error   string                 `json:"e"`
+		Data    map[string]interface{} `json:"d,omitempty"`
+		Images  []string               `json:"i,omitempty"`
+		// ImageDescriptions, ImageDetail and ImageFocus reach a model that
+		// cannot view Images, in place of the images themselves.
+		ImageDescriptions []string `json:"id,omitempty"`
+		ImageDetail       string   `json:"idt,omitempty"`
+		ImageFocus        string   `json:"ifc,omitempty"`
+		// No omitempty: nil (not inspected) and empty (inspected, none found)
+		// render differently to the model.
+		OutputFiles []string `json:"f"`
+	}
+	entries := make([]entry, 0, len(calls))
+	for _, tc := range calls {
+		en := entry{Name: tc.Name, Args: tc.Args}
+		if r := tc.Result; r != nil {
+			en.Success, en.Output, en.Error = r.Success, r.Output, r.Error
+			en.Data, en.Images, en.OutputFiles = r.Data, r.Images, r.OutputFiles
+			en.ImageDescriptions, en.ImageDetail, en.ImageFocus = r.ImageDescriptions, r.ImageDetail, r.ImageFocus
+		}
+		entries = append(entries, en)
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return ""
+	}
+	// Images are base64 data URIs; keep only a digest between rounds.
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// trackRepeatedToolRound records a finished tool round and returns how many
+// rounds in a row have now produced the same signature. A round that cannot
+// be fingerprinted breaks the streak.
+func (g *loopGuards) trackRepeatedToolRound(calls []types.ToolCall) int {
+	// wait_agent's progress reaches the model outside its result: the runtime
+	// injects child messages separately, and a timeout returns the same flags
+	// every time while children keep running. Its waiting is bounded by the
+	// collaboration runtime, so a round that waits never counts as a repeat.
+	for _, tc := range calls {
+		if tc.Name == "wait_agent" {
+			g.lastToolRound, g.repeatedToolRounds = "", 0
+			return 0
+		}
+	}
+	signature := toolRoundSignature(calls)
+	if signature == "" || len(calls) == 0 {
+		g.lastToolRound, g.repeatedToolRounds = "", 0
+		return 0
+	}
+	if signature == g.lastToolRound {
+		g.repeatedToolRounds++
+	} else {
+		g.lastToolRound, g.repeatedToolRounds = signature, 1
+	}
+	return g.repeatedToolRounds
 }
 
 // closeAnswerStream emits the Done:true marker for an answer that is actually
@@ -1073,6 +1149,7 @@ func (e *AgentEngine) runReActIteration(
 	// the guard could never fire on the one shape that needs it most (#3446).
 	if len(response.ToolCalls) == 0 {
 		guards.resetFailedToolCallStreak()
+		guards.lastToolRound, guards.repeatedToolRounds = "", 0
 		if guards.sawPlainRound && response.Content == guards.lastResponseContent {
 			guards.consecutiveSameContent++
 		} else {
@@ -1408,6 +1485,29 @@ func (e *AgentEngine) runReActIteration(
 		)
 		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: guidance})
 	}
+
+	// Detect stuck tool loops: rounds that re-run the same calls and get the
+	// same results back. The plain-round guard above resets on every tool
+	// round, so without this a successful but fruitless call repeats until
+	// MaxIterations, which never comes when iterations are unlimited.
+	if repeats := guards.trackRepeatedToolRound(step.ToolCalls); repeats >= maxRepeatedToolRounds {
+		logger.Warnf(ctx,
+			"[Agent][Round-%d] Detected stuck tool loop: same calls and results repeated %d times, stopping",
+			round, repeats)
+		if e.collaborationOwnsFailure(ctx) {
+			return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated tool calls without progress")
+		}
+		// The round's text was a preamble to more tool work, so say why the
+		// turn stopped instead of the generic fallback.
+		e.finishStalledTurn(ctx, state, sessionID, &types.ChatResponse{Content: repeatedToolRoundsStoppedAnswer}, false)
+		return iterOutcomeBreak, nil
+	} else if repeats == repeatedToolRoundNoticeAt && failedToolName == "" {
+		// A failed identical call already got its own guidance above.
+		logger.Warnf(ctx, "[Agent][Round-%d] Same tool calls and results repeated %d times, notifying model",
+			round, repeats)
+		guards.pendingRuntimeNotice = repeatedToolRoundNotice
+	}
+
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
