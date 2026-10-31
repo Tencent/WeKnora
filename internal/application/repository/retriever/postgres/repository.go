@@ -209,6 +209,9 @@ func (g *pgRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDL
 
 // Retrieve handles retrieval requests and routes to appropriate method
 func (g *pgRepository) Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	logger.GetLogger(ctx).Debugf("[Postgres] Processing retrieval request of type: %s", params.RetrieverType)
 	switch params.RetrieverType {
 	case types.KeywordsRetrieverType:

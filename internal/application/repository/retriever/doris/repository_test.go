@@ -740,8 +740,10 @@ func TestRetrieve_DispatchesByType(t *testing.T) {
 	defer cleanup()
 
 	// invalid retriever type -> error，不会触发任何 SQL
+	// 带 scope，确保命中的是分发错误而不是 fail-closed 的 scope 守卫。
 	_, err := repo.Retrieve(context.Background(), types.RetrieveParams{
-		RetrieverType: "unknown",
+		RetrieverType:    "unknown",
+		KnowledgeBaseIDs: []string{"kb-1"},
 	})
 	require.Error(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())
