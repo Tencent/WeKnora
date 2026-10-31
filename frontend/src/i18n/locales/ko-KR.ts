@@ -4832,6 +4832,10 @@ export default {
           title: '처리 대기 중인 실패 작업 {count}개',
           description: '아래 표의 빨간색 \'최종 실패\' 숫자를 눌러 원인을 확인한 뒤, 수정 후 수동으로 재시도하세요.'
         },
+        history: { title: '보존된 큐 기록', description: '과거 실패 보관 {archived}건 · 보존된 완료 기록 {completed}건입니다. 현재 작업이 아닙니다.' },
+        reparse: {
+          title: '재파싱 일괄 작업', description: '추적 그룹은 고정된 구성원을 보존합니다. 현재 문서 업무 상태는 독립적으로 새로고침되므로 후속 재파싱으로 그룹 수가 바뀔 수 있습니다.', kbFilter: '지식 베이스 ID로 필터', empty: '추적된 재파싱 일괄 작업이 없습니다', loadError: '재파싱 일괄 작업을 불러오지 못했습니다', frozenTotal: '{count}개 기록', previous: '이전', next: '다음', allStates: '모든 상태', stateFilter: '구성원 상태로 필터', membersTitle: '일괄 구성원 · {name}', membersDescription: "등록 시 구성원은 고정되며 진행률은 문서의 현재 파싱 상태를 따릅니다. 완료 비율은 완료 문서 / 전체 구성원이며 실패와 취소는 완료에 포함되지 않습니다. 요약 상태는 별도로 집계됩니다. 이후 재구축은 현재 진행률을 변경합니다.", membersEmpty: '이 상태에 맞는 구성원이 없습니다', membersLoadError: '일괄 구성원을 불러오지 못했습니다', modes: { managed: "관리 제출", tracking_only: "추적만" }, columns: { batch: '일괄 작업', knowledgeBase: '지식 베이스', mode: '모드', completed: '완료 / 전체', successRatio: "완료 비율", currentState: '현재 상태' }, members: { columns: { document: '문서', batchState: '일괄 상태', parseState: '파싱 상태', summaryState: '요약 상태', error: '제출 오류' } }, summary: { none: "요약 없음", completed: "완료", unknown: "알 수 없음", pending: '대기', processing: '처리 중', failed: '실패' }, states: { waiting_start: '시작 대기', queued: '대기열', processing: '처리 중', finalizing: '마무리 중', completed: '완료', failed: '실패', cancelled: '취소됨', missing: '없음', submission_failed: '제출 실패', unknown: '알 수 없음' }
+        },
         status: {
           working: '처리 중',
           waiting: '대기 중',
@@ -4846,8 +4850,9 @@ export default {
           pending: '대기',
           scheduled: '예약',
           retry: '재시도',
-          archived: '실패',
-          completed: '완료',
+          todaySuccess: '오늘 성공',
+          todayFailedAttempts: '오늘 실패 시도',
+          archived: '과거 실패 보관', completed: '보존된 완료 기록',
           latency: '최장 대기',
           status: '상태'
         },
@@ -4855,8 +4860,12 @@ export default {
           title: '실행 개요',
           active: '실행 중',
           pending: '대기 중',
+          scheduled: '예약',
           retry: '재시도 중',
-          archived: '최종 실패'
+          todaySuccess: '오늘 성공',
+          todayFailedAttempts: '오늘 실패 시도',
+          dailyFormula: '오늘 성공 = max(오늘 processed − 오늘 failed, 0). 재시도를 포함한 당일 작업 실행 횟수이며 완료 문서 수가 아닙니다. 매일 초기화됩니다.',
+          archived: '과거 실패 보관'
         },
         pools: {
           core: '핵심 파싱',

@@ -627,6 +627,23 @@ func TestKnowledgeBatchWriteRoutesDeclareIngestCapability(t *testing.T) {
 	}
 }
 
+func TestReparseBatchReadRoutesDeclareRetrieveCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, g)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/knowledge/reparse-batches"},
+		{http.MethodGet, "/api/v1/knowledge/reparse-batches/:batch_id"},
+		{http.MethodGet, "/api/v1/knowledge/reparse-batches/:batch_id/items"},
+	} {
+		policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+		if !policy.RequireFullAccess || !policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+			t.Fatalf("%s %s policy does not require retrieve capability: %#v", tc.method, tc.path, policy)
+		}
+	}
+}
+
 func TestKBCloneProgressRouteRequiresRetrieveOrManageKbsCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
