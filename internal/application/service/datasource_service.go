@@ -1123,7 +1123,12 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 		return err
 	}
 	h.result.Total++
+	failedBefore := h.result.Failed
 	nonBlocking, err := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	if item.RetryOnFailure && h.result.Failed > failedBefore {
+		h.ingestErr = fmt.Errorf("streamed item %q was not accepted; retry synchronization", item.ExternalID)
+		return h.ingestErr
+	}
 	if nonBlocking || errors.Is(err, ErrInvalidFileType) {
 		h.nonBlockingFailures++
 		return nil
