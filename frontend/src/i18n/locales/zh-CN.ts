@@ -1086,6 +1086,7 @@ export default {
         chat: '问答',
         wiki: 'Wiki',
         ingest: '写入（谨慎开启）',
+        manage: '知识库管理（谨慎开启）',
       },
       tools: {
         list_knowledge_bases: '列出知识库',
@@ -1111,6 +1112,8 @@ export default {
         update_document: '更新文档',
         update_documentDesc: '替换 Markdown 文档的内容或标题',
         delete_document: '删除文档',
+        update_knowledge_base: '修改知识库配置',
+        update_knowledge_baseDesc: '修改指定知识库的名称、描述及部分索引配置',
         delete_documentDesc: '永久删除文档及其索引数据',
       },
       sectionAsk: '问答设置',

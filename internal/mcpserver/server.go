@@ -132,7 +132,7 @@ const serverInstructions = "WeKnora knowledge workspace. Start with list_knowled
 	"then use search_knowledge for semantic questions, grep_chunks for exact keywords, read_document to read " +
 	"a whole document, and ask to get a synthesized answer with citations. Wiki tools browse the generated " +
 	"wiki when a knowledge base has one. Write tools (add/update/delete_document) exist only on endpoints " +
-	"that enabled them."
+	"that enabled them. Knowledge-base settings can be changed only when update_knowledge_base is enabled."
 
 // endpointFromContext returns the endpoint authenticated for this call.
 func endpointFromContext(ctx context.Context) (*types.MCPEndpoint, error) {
@@ -218,6 +218,7 @@ func (s *Server) toolCatalog() []server.ServerTool {
 		{Tool: addDocumentTool(), Handler: s.handleAddDocument},
 		{Tool: updateDocumentTool(), Handler: s.handleUpdateDocument},
 		{Tool: deleteDocumentTool(), Handler: s.handleDeleteDocument},
+		{Tool: updateKnowledgeBaseTool(), Handler: s.handleUpdateKnowledgeBase},
 	}
 }
 
