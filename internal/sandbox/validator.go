@@ -510,12 +510,17 @@ func extractContext(content, match string) string {
 	return context
 }
 
-// truncate truncates a string to max length
+// truncate truncates a string to at most maxLen bytes, backing up to a
+// rune boundary so a multibyte character is never split.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // indexLower finds match in content the way strings.Index(strings.ToLower(content),

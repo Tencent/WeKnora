@@ -414,3 +414,40 @@ func TestExtractContext_KeepsMatchAndValidUTF8(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateArgsAndStdin_ContextIsValidUTF8(t *testing.T) {
+	v := NewScriptValidator()
+
+	// 50 bytes into this argument falls inside a three-byte character.
+	arg := "ab;" + strings.Repeat("中", 30)
+	argRes := v.ValidateArgs([]string{arg})
+	if argRes.Valid {
+		t.Fatalf("expected arg %q to be rejected", arg)
+	}
+	for _, e := range argRes.Errors {
+		if !utf8.ValidString(e.Context) {
+			t.Errorf("%s context is not valid UTF-8: %q", e.Type, e.Context)
+		}
+	}
+
+	// 100 bytes into this stdin falls inside a three-byte character.
+	stdin := "x $(id) " + strings.Repeat("中", 40)
+	res := v.ValidateStdin(stdin)
+	if res.Valid {
+		t.Fatalf("expected stdin %q to be rejected", stdin)
+	}
+	for _, e := range res.Errors {
+		if !utf8.ValidString(e.Context) {
+			t.Errorf("%s context is not valid UTF-8: %q", e.Type, e.Context)
+		}
+	}
+}
+
+func TestTruncate_RuneBoundary(t *testing.T) {
+	if got := truncate("ab"+strings.Repeat("中", 5), 6); got != "ab中..." {
+		t.Errorf("truncate = %q, want %q", got, "ab中...")
+	}
+	if got := truncate("hello", 10); got != "hello" {
+		t.Errorf("truncate = %q, want %q", got, "hello")
+	}
+}
