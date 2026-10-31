@@ -29,6 +29,10 @@ type concurrencyChat struct {
 	// limit is this model's configured per-model background cap; 0 falls back
 	// to the process-wide default (see limiter.GateN).
 	limit int
+	// rate is this model's request-rate budget. Unlike the concurrency cap it
+	// applies to interactive calls too: the provider quota is spent by every
+	// request. Zero disables pacing.
+	rate limiter.RateLimit
 }
 
 func (w *concurrencyChat) GetModelName() string { return w.inner.GetModelName() }
@@ -37,11 +41,15 @@ func (w *concurrencyChat) GetModelID() string   { return w.inner.GetModelID() }
 func (w *concurrencyChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
+	limiter.WaitRate(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.rate)
 	return w.inner.Chat(ctx, messages, opts)
 }
 
 func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
+	// The token is spent when the stream starts, not when it drains, so a long
+	// stream does not hold the budget and a burst of short ones still paces.
+	limiter.WaitRate(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.rate)
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
 	if err != nil || ch == nil {
 		release()
@@ -74,9 +82,9 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 // wrapChatConcurrency installs the background concurrency governor as the
 // outermost Chat decorator. It is always applied; when no limiter is installed
 // or the call is interactive, the wrapper is a cheap passthrough.
-func wrapChatConcurrency(c Chat, limit int, err error) (Chat, error) {
+func wrapChatConcurrency(c Chat, limit int, rps float64, burst int, err error) (Chat, error) {
 	if err != nil || c == nil {
 		return c, err
 	}
-	return &concurrencyChat{inner: c, limit: limit}, nil
+	return &concurrencyChat{inner: c, limit: limit, rate: limiter.RateLimit{RPS: rps, Burst: burst}}, nil
 }

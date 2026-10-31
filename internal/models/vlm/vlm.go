@@ -57,6 +57,10 @@ type Config struct {
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
 	// back to the process-wide default (see limiter.GateN).
 	MaxConcurrency int
+	// MaxRPS / MaxBurst pace every call to the provider's request-rate quota;
+	// 0 disables pacing.
+	MaxRPS   float64
+	MaxBurst int
 	// Spec carries per-row catalog overrides (protocol, compat, levels). VLM
 	// calls now go through the chat factory, so the override has to travel
 	// with them — otherwise /models reports capabilities computed WITH the
@@ -94,6 +98,8 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 		InterfaceType:  ifType,
 		Provider:       m.Parameters.Provider,
 		MaxConcurrency: m.Parameters.MaxConcurrency,
+		MaxRPS:         m.Parameters.MaxRPS,
+		MaxBurst:       m.Parameters.MaxBurst,
 		Spec:           m.Parameters.Spec,
 		Extra:          stringMapToAnyMap(m.Parameters.ExtraConfig),
 		CustomHeaders:  m.Parameters.CustomHeaders,
@@ -125,7 +131,7 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	v, err = wrapVLMLangfuse(v, nil)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapVLMConcurrency(v, config.MaxConcurrency, err)
+	return wrapVLMConcurrency(v, config.MaxConcurrency, config.MaxRPS, config.MaxBurst, err)
 }
 
 func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {

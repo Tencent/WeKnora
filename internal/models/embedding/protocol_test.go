@@ -83,7 +83,7 @@ func newPooledEmbedder(t *testing.T, handler http.HandlerFunc) Embedder {
 		BaseURL: server.URL + "/v1", ModelName: "m", ModelID: "pooled",
 	}, NewBatchEmbedder(pool), nil)
 	require.NoError(t, err)
-	return wrapEmbeddingConcurrency(raw, 1)
+	return wrapEmbeddingConcurrency(raw, 1, 0, 0)
 }
 
 func TestPoolBatchesAndPreservesOrder(t *testing.T) {

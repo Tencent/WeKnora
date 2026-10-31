@@ -1867,6 +1867,7 @@ type RuntimeQueuesResponse struct {
 	Queues                []types.QueueStat          `json:"queues" extensions:"x-agent"`
 	ModelLimiterAvailable bool                       `json:"model_limiter_available" extensions:"x-agent"`
 	Models                []modellimiter.RuntimeStat `json:"models" extensions:"x-agent"`
+	ModelRates            []modellimiter.RateStat    `json:"model_rates" extensions:"x-agent"`
 	Timestamp             int64                      `json:"timestamp" extensions:"x-agent"`
 }
 
@@ -1989,6 +1990,7 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	resp.ModelsError = modelErr != nil
 	resp.ModelLimiterAvailable = modelSupported
 	resp.Models = modelStats
+	resp.ModelRates = modellimiter.RateStats()
 
 	c.JSON(http.StatusOK, resp)
 }

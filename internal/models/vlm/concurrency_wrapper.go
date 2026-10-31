@@ -16,6 +16,9 @@ type concurrencyVLM struct {
 	// limit is this model's configured per-model background cap; 0 falls back
 	// to the process-wide default (see limiter.GateN).
 	limit int
+	// rate is this model's request-rate budget, applied to interactive and
+	// background calls alike. Zero disables pacing.
+	rate limiter.RateLimit
 }
 
 func (w *concurrencyVLM) GetModelName() string { return w.inner.GetModelName() }
@@ -33,15 +36,16 @@ func (w *concurrencyVLM) PredictWithOptions(
 ) (string, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
+	limiter.WaitRate(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.rate)
 	return w.inner.PredictWithOptions(ctx, imgBytes, prompt, opts)
 }
 
 // wrapVLMConcurrency installs the background concurrency governor as the
 // outermost VLM decorator. Always applied; a cheap passthrough when no limiter
 // is installed or the call is interactive.
-func wrapVLMConcurrency(v VLM, limit int, err error) (VLM, error) {
+func wrapVLMConcurrency(v VLM, limit int, rps float64, burst int, err error) (VLM, error) {
 	if err != nil || v == nil {
 		return v, err
 	}
-	return &concurrencyVLM{inner: v, limit: limit}, nil
+	return &concurrencyVLM{inner: v, limit: limit, rate: limiter.RateLimit{RPS: rps, Burst: burst}}, nil
 }
