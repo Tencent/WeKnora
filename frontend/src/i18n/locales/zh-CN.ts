@@ -5734,6 +5734,7 @@ export default {
         emptyHint: '文档中的图片在解析完成后会出现在这里',
         emptyFiltered: '没有符合条件的图片',
         imageLoadError: '图片加载失败',
+        unsupportedFormat: '{format} 格式，浏览器不支持预览',
         noCaption: '暂无描述',
         noOcr: '未识别到文字',
         caption: '图片描述',

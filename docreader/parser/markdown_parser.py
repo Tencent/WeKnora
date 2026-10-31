@@ -21,6 +21,7 @@ from typing import Dict, List, Match, Optional, Tuple
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
+from docreader.parser.embedded_image import normalize_embedded_image
 from docreader.utils import endecode
 
 # Get logger object
@@ -306,11 +307,13 @@ class MarkdownImageUtil:
 
     def __init__(self):
         # Pattern to match base64 embedded images
-        # Captures: (1) alt text, (2) image format, (3) base64 data
+        # Captures: (1) alt text, (2) MIME type, (3) base64 data.
+        # Office can expose OLE/Visio objects as application/octet-stream in
+        # image markup. Consume those too so they cannot become image refs.
         # Alt text uses .*? (non-greedy) to allow literal ] (e.g. Windows paths).
         # MIME subtype uses [^;]+ to handle types with hyphens like x-emf.
         self.b64_pattern = re.compile(
-            r"!\[(.*?)\]\(data:image/([^;]+);base64,([^\)]+)\)"
+            r"!\[(.*?)\]\(data:([^;]+);base64,([^\)]+)\)", re.IGNORECASE
         )
         # Pattern to match regular image syntax (alt text allows ])
         self.image_pattern = re.compile(r"!\[(.*?)\]\(([^)]+)\)")
@@ -399,14 +402,20 @@ class MarkdownImageUtil:
         def repl(match: Match[str]) -> str:
             """Replacement function for each base64 image match."""
             title = match.group(1)  # Alt text
-            img_ext = match.group(2)  # Image format (png, jpg, etc.)
+            mime_type = match.group(2)
             img_b64 = match.group(3)  # Base64 encoded data
 
             # Decode base64 string to bytes
             image_byte = endecode.encode_image(img_b64, errors="ignore")
             if not image_byte:
-                logger.error(f"Failed to decode base64 image skip it: {img_b64}")
+                logger.warning("Failed to decode embedded image (%s)", mime_type)
                 return title  # Return just the alt text if decode fails
+
+            normalized = normalize_embedded_image(image_byte, mime_type)
+            if normalized is None:
+                logger.warning("Skipping unsupported embedded image (%s)", mime_type)
+                return title
+            image_byte, img_ext = normalized
 
             # Generate unique filename with original extension
             image_path = f"{uuid.uuid4()}.{img_ext}"

@@ -34,11 +34,6 @@ def load_from_xml_v2(baseURI, rels_item_xml):
 _SerializedRelationships.load_from_xml = load_from_xml_v2
 
 from docx import Document
-from docx.image.exceptions import (
-    InvalidImageStreamError,
-    UnexpectedEndOfFileError,
-    UnrecognizedImageError,
-)
 from docx.oxml.ns import qn
 from docx.table import Table
 from docx.text.run import Run
@@ -47,6 +42,7 @@ from PIL import Image
 from docreader.config import CONFIG
 from docreader.models.document import Document as DocumentModel
 from docreader.parser.base_parser import BaseParser
+from docreader.parser.embedded_image import normalize_embedded_image
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
@@ -443,21 +439,11 @@ class Docx:
             related_part = document.part.related_parts[embed]
             logger.info(f"Found embedded image with ID: {embed}")
 
-            try:
-                image_blob = related_part.image.blob
-            except UnrecognizedImageError:
-                logger.warning("Unrecognized image format. Skipping image.")
+            normalized = normalize_embedded_image(related_part.blob, related_part.content_type)
+            if normalized is None:
+                logger.warning("Unsupported embedded image. Skipping image.")
                 return None
-            except UnexpectedEndOfFileError:
-                logger.warning(
-                    "EOF was unexpectedly encountered while reading an image stream. Skipping image."
-                )
-                return None
-            except InvalidImageStreamError:
-                logger.warning(
-                    "The recognized image stream appears to be corrupted. Skipping image."
-                )
-                return None
+            image_blob, _ = normalized
 
             try:
                 logger.info("Converting image blob to PIL Image")
@@ -1592,7 +1578,11 @@ def _extract_image_in_process(
 
             # Attempt to get image data
             try:
-                image_blob = related_part.image.blob
+                normalized = normalize_embedded_image(related_part.blob, related_part.content_type)
+                if normalized is None:
+                    logger.warning("Unsupported embedded image. Skipping image.")
+                    return None
+                image_blob, _ = normalized
                 logger.info(
                     f"[PID:{os.getpid()}] Successfully extracted image blob, size: {len(image_blob)} bytes"
                 )

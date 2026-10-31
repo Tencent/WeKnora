@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
 import type { ImageAsset, ImageListParams, ImageListResult } from '@/api/image-gallery'
+import { unsupportedGalleryFormat } from './galleryImageFormat.ts'
 
 // Exercise the component's actual loading and viewer logic with deferred API
 // responses so races and retries are deterministic, without a live backend.
@@ -13,7 +14,7 @@ const source = readFileSync(new URL('./ImageGallery.vue', import.meta.url), 'utf
 const compiled = ts.transpileModule(`${source}\nexport {
   items, page, total, loading, error, keyword, hasMore, viewerIndex, viewerOpen,
   reload, loadMore, openViewer, onViewerLoadMore, initGallery,
-  resolveImageSrc, thumbUrls,
+  resolveImageSrc, thumbUrls, imageError,
 }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
 function setup(proxyImages = false) {
@@ -40,8 +41,9 @@ function setup(proxyImages = false) {
       fetchGalleryConfig: async () => ({ attributes: [], attribute_sources: [], mode: 'all', status: {} }),
     },
     '@/api/auth': { updateMyPreferences: async () => {} },
+    './galleryImageFormat': { unsupportedGalleryFormat },
     './galleryImageSrc': {
-      galleryImageRequest: (url: string, kb: string) => proxyImages && url.startsWith('local://')
+      galleryImageRequest: (url: string, kb: string) => proxyImages && (url.startsWith('local://') || url.startsWith('resource://'))
         ? { url: `/kb/${kb}/${url}`, headers: { Authorization: 'test-token' } }
         : null,
     },
@@ -71,7 +73,7 @@ function setup(proxyImages = false) {
     total, page: calls[index].params.page!, pageSize: 24,
   })
   const ids = () => Array.from(state.items.value, (img: ImageAsset) => img.id)
-  const respondImage = (index: number) => imageCalls[index].resolve({ ok: true, blob: async () => new Blob(['image']) })
+  const respondImage = (index: number, mime = '') => imageCalls[index].resolve({ ok: true, blob: async () => new Blob(['image'], { type: mime }) })
   const unmount = () => unmountHooks.forEach(hook => hook())
   return { state, calls, props, respond, ids, imageCalls, respondImage, created, revoked, unmount }
 }
@@ -92,6 +94,24 @@ test('scroll appends unique images, serializes requests, and stops at the total'
   assert.deepEqual(ids(), ['a', 'b', 'c'])
   assert.equal(state.hasMore.value, false)
   assert.equal(await state.loadMore(), false)
+})
+
+test('opaque resource errors show the served Office format', async () => {
+  const { state, respondImage } = setup(true)
+  const image = { url: 'resource://opaque-id' } as ImageAsset
+  const pending = state.resolveImageSrc(image.url)
+  respondImage(0, 'image/emf')
+  await pending
+  assert.equal(state.imageError(image), 'knowledgeEditor.wikiBrowser.gallery.unsupportedFormat')
+})
+
+test('PNG responses override an old metafile extension when reporting errors', async () => {
+  const { state, respondImage } = setup(true)
+  const image = { url: 'local://diagram.emf' } as ImageAsset
+  const pending = state.resolveImageSrc(image.url)
+  respondImage(0, 'image/png')
+  await pending
+  assert.equal(state.imageError(image), 'knowledgeEditor.wikiBrowser.gallery.imageLoadError')
 })
 
 test('append failures retain cards and retry the same page', async () => {

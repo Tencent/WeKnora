@@ -3930,6 +3930,7 @@ export default {
         emptyHint: 'ドキュメント内の画像は解析完了後にここに表示されます',
         emptyFiltered: '条件に一致する画像はありません',
         imageLoadError: '画像の読み込みに失敗しました',
+        unsupportedFormat: '{format} 形式はブラウザーでプレビューできません',
         noCaption: '説明なし',
         noOcr: '文字は認識されませんでした',
         caption: '画像の説明',

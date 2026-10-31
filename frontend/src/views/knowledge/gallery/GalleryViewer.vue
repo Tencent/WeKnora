@@ -20,6 +20,7 @@ const props = defineProps<{
   loading: boolean
   thumbUrls: Record<string, string>
   resolveSrc: (url: string) => Promise<string>
+  imageError: (img: ImageAsset) => string
   attrRows: (img: ImageAsset) => GalleryAttrRow[]
 }>()
 
@@ -408,7 +409,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           />
           <div v-if="failed" class="igv-state">
             <t-icon name="image-error" size="32px" />
-            <span>{{ t(`${NS}.imageLoadError`) }}</span>
+            <span>{{ current ? imageError(current) : t(`${NS}.imageLoadError`) }}</span>
           </div>
           <t-loading v-else-if="!loaded || loading" class="igv-state" size="medium" />
 

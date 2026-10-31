@@ -60,6 +60,8 @@
 
 画廊展示已有图片资源，不要求开启图片向量检索。
 
+Word 文档中的 EMF/WMF 图片（包括嵌入对象的预览图）会尝试转换为 PNG，再进入图片识别和展示流程。转换依赖解析服务中的 ImageMagick 或 LibreOffice；默认 Docker 镜像包含 LibreOffice。无法渲染的嵌入对象保留在原始文档中，不作为图片进入画廊；已有文档需要重新解析才能应用此处理。
+
 <Screenshot src="/screenshots/kb-image-gallery.png" caption="知识库画廊：图片瀑布流与来源文档筛选" hint="展示画廊页签、搜索和来源文档筛选弹层，放入含照片、图表的多份文档；另一张详情可展示 OCR、描述与来源链接。" />
 
 <Screenshot src="/screenshots/kb-image-gallery-detail.png" caption="画廊详情：查看原图、图片描述、识别文字与来源文档" />
