@@ -27,7 +27,7 @@ func TestSearchNodeIntegration(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, driver.Close(context.Background())) })
 	require.NoError(t, driver.VerifyConnectivity(ctx))
-	repo := NewNeo4jRepository(driver).(*Neo4jRepository)
+	repo := NewNeo4jRepository(driver, EngineNeo4j).(*Neo4jRepository)
 	namespace := types.NameSpace{KnowledgeBase: fmt.Sprintf("graph_regression_%d", time.Now().UnixNano())}
 	label := repo.Label(namespace)
 	t.Cleanup(func() {
@@ -47,7 +47,7 @@ func TestSearchNodeIntegration(t *testing.T) {
 	`, nil, neo4j.EagerResultTransformer)
 	require.NoError(t, err)
 	t.Run("deduplicate before the row cap", func(t *testing.T) {
-		query, params := graphSearchCypher(label, []string{"Acme", "Shanghai"})
+		query, params := graphSearchCypher(EngineNeo4j, label, []string{"Acme", "Shanghai"})
 		params["maxRows"] = 5 // Four stored edges; duplicate endpoint matches must not fill this fifth slot.
 		result, queryErr := neo4j.ExecuteQuery(ctx, driver, query, params, neo4j.EagerResultTransformer)
 		require.NoError(t, queryErr)
