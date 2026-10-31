@@ -4794,6 +4794,104 @@
         "context_window": 4096,
         "source": "https://docs.cohere.com/docs/models#rerank"
       }
+    ],
+    "runcrate": [
+      {
+        "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "name": "DeepSeek V4.1 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "zai-org/GLM-5.3",
+        "name": "GLM-5.3",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1048576,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "zai-org/GLM-5.3-Flash",
+        "name": "GLM-5.3 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3.8-Flash",
+        "name": "Qwen3.8 Flash",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "openai/gpt-oss-120b",
+        "name": "gpt-oss 120B",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 131072,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "moonshotai/Kimi-K2.6",
+        "name": "Kimi K2.6",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 262144,
+        "max_output_tokens": 16384,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3-Embedding-8B",
+        "name": "Qwen3 Embedding 8B",
+        "type": "Embedding",
+        "dimension": 4096,
+        "context_window": 32768,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3-Embedding-4B",
+        "name": "Qwen3 Embedding 4B",
+        "type": "Embedding",
+        "dimension": 2560,
+        "context_window": 32768,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3-Embedding-0.6B",
+        "name": "Qwen3 Embedding 0.6B",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32768,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "BAAI/bge-m3",
+        "name": "BGE-M3",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 8192,
+        "source": "https://api.runcrate.ai/v1/models"
+      }
     ]
   }
 }
