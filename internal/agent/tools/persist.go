@@ -3,7 +3,9 @@ package tools
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -230,7 +232,16 @@ func compactHistoricalSandboxOutput(output string) string {
 	kept := historicalSandboxOutputChars - len(marker)
 	head := kept / 4
 	tail := kept - head
-	return output[:head] + marker + output[len(output)-tail:]
+	// Both offsets are bytes, and shell output routinely carries multi-byte text
+	// (CJK file names, localised logs). Move each boundary to a rune start before
+	// slicing: half a rune at either edge leaves invalid UTF-8 in the history
+	// that is replayed to the model and persisted with the message.
+	prefix := common.TruncateUTF8Bytes(output, head)
+	suffix := output[len(output)-tail:]
+	for len(suffix) > 0 && !utf8.RuneStart(suffix[0]) {
+		suffix = suffix[1:]
+	}
+	return prefix + marker + suffix
 }
 
 func compactSandboxStreamFields(data map[string]interface{}) {
