@@ -90,7 +90,19 @@
           </t-button>
         </Teleport>
         <Teleport v-if="headerActionsTarget && showHeaderUninstall" :to="headerActionsTarget" defer>
+          <t-button
+            v-if="managedSkill?.plugin"
+            class="skill-header-uninstall"
+            theme="danger"
+            variant="text"
+            size="small"
+            disabled
+            :title="$t('settings.plugins.managedByHint')"
+          >
+            {{ hostCopy('settings.skills.manageUninstall', 'manageUninstall') }}
+          </t-button>
           <t-popconfirm
+            v-else
             theme="warning"
             attach="body"
             :content="hostCopy('settings.skills.manageUninstallConfirm', 'manageUninstallConfirm', { name: managedSkill?.name || '' })"
@@ -565,8 +577,18 @@
                       <t-icon name="refresh" size="14px" />
                     </button>
                   </t-tooltip>
+                  <button
+                    v-if="!isBusy(skill) && skill.plugin"
+                    type="button"
+                    class="skill-card__icon-btn skill-card__icon-btn--danger"
+                    disabled
+                    :title="$t('settings.plugins.managedByHint')"
+                    :aria-label="hostCopy('settings.skills.manageUninstall', 'manageUninstall')"
+                  >
+                    <t-icon name="delete" size="14px" />
+                  </button>
                   <t-popconfirm
-                    v-if="!isBusy(skill)"
+                    v-else-if="!isBusy(skill)"
                     theme="warning"
                     attach="body"
                     :content="deleteHint"
@@ -1427,7 +1449,7 @@ async function stopSkill(skill: ConfigSkill) {
 }
 
 async function removeSkill(skill: ConfigSkill) {
-  if (!props.record || isBusy(skill) || deletingId.value) return
+  if (skill.plugin || !props.record || isBusy(skill) || deletingId.value) return
   const generation = panelGeneration
   deletingId.value = skill.id
   uninstallingId.value = skill.id

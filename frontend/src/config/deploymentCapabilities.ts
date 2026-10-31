@@ -72,6 +72,9 @@ export const SETTINGS_SECTION_CAPABILITY: Partial<Record<string, DeploymentCapab
   // nowhere to inject them, so the page would only ever show its empty state.
   envvars: 'settings.sandbox',
   mcp: 'settings.mcp',
+  // Plugins without skills still work on a deployment with no sandbox, so
+  // only the MCP gate applies; sandbox-requiring plugins are refused on install.
+  plugins: 'settings.mcp',
 }
 
 /**

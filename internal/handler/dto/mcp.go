@@ -47,6 +47,8 @@ type MCPServiceResponse struct {
 	// Catalog is the persisted tool-directory summary for list cards.
 	// Omitted when this principal has never synchronized the service.
 	Catalog *MCPCatalogSummary `json:"catalog,omitempty"`
+	// Plugin attribution info when managed by a plugin
+	Plugin *types.PluginInfoForResource `json:"plugin,omitempty"`
 }
 
 // MCPCatalogSummary is the list-card view of a saved MCP directory.

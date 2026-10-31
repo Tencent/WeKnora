@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -21,6 +22,10 @@ import (
 // when the callback recycles cached connections.
 const oauthConnectionCleanupTimeout = 5 * time.Second
 
+// oauthToolSyncTimeout bounds the tools/list that runs once a token is stored,
+// so the directory is available before anyone opens the service detail.
+const oauthToolSyncTimeout = 30 * time.Second
+
 // MCPOAuthHandler exposes the per-user MCP OAuth2 authorization-code flow:
 // kicking off authorization (discovery + dynamic client registration + PKCE),
 // receiving the provider redirect, reporting authorization status, and
@@ -30,6 +35,7 @@ type MCPOAuthHandler struct {
 	mcpManager *mcp.MCPManager
 	svc        interfaces.MCPServiceService
 	gate       *approval.Gate
+	plugins    *service.PluginService
 }
 
 // NewMCPOAuthHandler constructs the handler.
@@ -38,8 +44,36 @@ func NewMCPOAuthHandler(
 	mcpManager *mcp.MCPManager,
 	svc interfaces.MCPServiceService,
 	gate *approval.Gate,
+	plugins *service.PluginService,
 ) *MCPOAuthHandler {
-	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate}
+	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate, plugins: plugins}
+}
+
+func (h *MCPOAuthHandler) notePluginOAuth(ctx context.Context, tenantID uint64, serviceID string) {
+	if h == nil || h.plugins == nil || tenantID == 0 || serviceID == "" {
+		return
+	}
+	h.plugins.NoteMCPAuthorized(ctx, tenantID, serviceID)
+}
+
+// syncAuthorizedTools lists the service directory for the user who just
+// authorized. A failure leaves the token in place; the detail page can retry.
+func (h *MCPOAuthHandler) syncAuthorizedTools(
+	ctx context.Context, tenantID uint64, serviceID string, principal types.Principal,
+) {
+	if h == nil || h.svc == nil || tenantID == 0 || serviceID == "" || !principal.Valid() {
+		return
+	}
+	meta, ok := h.svc.(interfaces.MCPMetadataService)
+	if !ok || meta == nil {
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthToolSyncTimeout)
+	defer cancel()
+	syncCtx = types.WithPrincipal(syncCtx, principal)
+	if _, err := meta.RefreshMCPMetadata(syncCtx, tenantID, serviceID); err != nil {
+		logger.Warnf(ctx, "MCP tool sync after authorization failed: service=%s err=%v", serviceID, err)
+	}
 }
 
 func mcpOAuthPrincipalsFromContext(ctx *gin.Context) (tokenPrincipal types.Principal, gateUserID string) {
@@ -218,6 +252,8 @@ func (h *MCPOAuthHandler) AssertionGrant(c *gin.Context) {
 		_ = h.mcpManager.CloseClientsAfterAuthorization(cleanupCtx, tenantID, serviceID, principal)
 		cancel()
 	}
+	h.notePluginOAuth(context.WithoutCancel(ctx), tenantID, serviceID)
+	h.syncAuthorizedTools(ctx, tenantID, serviceID, principal)
 
 	status, err := h.oauth.AuthorizationStatus(ctx, tenantID, principal, serviceID)
 	if err != nil {
@@ -279,6 +315,8 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		)
 		cancel()
 	}
+	h.notePluginOAuth(context.WithoutCancel(ctx), result.TenantID, result.ServiceID)
+	h.syncAuthorizedTools(ctx, result.TenantID, result.ServiceID, result.Principal)
 	c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_result=success")
 }
 
@@ -362,6 +400,7 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 	if h.mcpManager != nil {
 		_ = h.mcpManager.CloseClientForPrincipal(serviceID, principal)
 	}
+	h.notePluginOAuth(context.WithoutCancel(ctx), tenantID, serviceID)
 	c.Status(http.StatusNoContent)
 }
 

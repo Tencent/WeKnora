@@ -12,6 +12,7 @@ import { getCurrentUser, userInfoFromApi } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
+import { notifyOpenerOfMcpOAuthReturn } from '@/utils/mcpOAuthPopup'
 import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
 
 // TDesign locale configs
@@ -241,6 +242,7 @@ const showPendingTenantSwitchToast = () => {
 }
 
 onMounted(() => {
+  notifyOpenerOfMcpOAuthReturn()
   handleGlobalOIDCCallback()
   showPendingTenantSwitchToast()
 

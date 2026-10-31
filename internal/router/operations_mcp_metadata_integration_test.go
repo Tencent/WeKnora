@@ -61,7 +61,7 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	repo := repository.NewMCPServiceRepository(db)
 	manager := mcp.NewMCPManager(nil)
 	t.Cleanup(manager.Shutdown)
-	svc := service.NewMCPServiceService(repo, manager, nil)
+	svc := service.NewMCPServiceService(repo, manager, nil, nil)
 
 	var requests, executions atomic.Int32
 	var fail atomic.Bool
@@ -128,7 +128,7 @@ func TestAssistantMCPDirectoryEndToEnd(t *testing.T) {
 	})
 	RegisterMCPServiceRoutes(
 		router.Group("/api/v1"),
-		handler.NewMCPServiceHandler(svc, nil, nil, nil, nil),
+		handler.NewMCPServiceHandler(svc, nil, nil, nil, nil, nil, nil),
 		&handler.MCPCredentialsHandler{},
 		&handler.MCPOAuthHandler{},
 		guards,

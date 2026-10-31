@@ -6,10 +6,10 @@
           <ResourceIcon type="toolbox" :size="24" />
           {{ t('toolbox.title') }}
         </h2>
-        <t-button v-if="selectedItem && 'action' in selectedItem" variant="text" theme="default" size="small"
+        <t-button v-if="sectionAction" variant="text" theme="default" size="small"
           class="toolbox-action" style="--wails-draggable: no-drag" @click="panel?.openAdd?.()">
-          <template #icon><t-icon :name="selectedItem.icon" size="16px" /></template>
-          {{ t(selectedItem.action) }}
+          <template #icon><t-icon :name="sectionAction.icon" size="16px" /></template>
+          {{ t(sectionAction.action) }}
         </t-button>
       </div>
       <p class="toolbox-subtitle" style="--wails-draggable: drag">
@@ -43,7 +43,8 @@
 
       <section v-if="selectedItem" class="toolbox-main" role="tabpanel">
         <div class="toolbox-panel">
-          <SkillSettings v-if="selectedItem.key === 'skills'" ref="panel" :key="sandboxId"
+          <PluginSettings v-if="selectedItem.key === 'plugins'" ref="panel" @count="counts.plugins = $event" />
+          <SkillSettings v-else-if="selectedItem.key === 'skills'" ref="panel" :key="sandboxId"
             :initial-sandbox-id="sandboxId" @count="counts.skills = $event" />
           <McpSettings v-else-if="selectedItem.key === 'mcp'" ref="panel" @count="counts.mcp = $event" />
           <BrowserConnectionSettings v-else-if="selectedItem.key === 'browserconnection'" />
@@ -64,6 +65,8 @@ import { useBrowserConnectionStore } from '@/stores/browserConnection'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { listSkillCatalog } from '@/api/skill'
 import { listMCPServices } from '@/api/mcp-service'
+import { listPluginMarketplaces } from '@/api/plugin'
+import { installedPluginCount } from '@/utils/pluginMarketplace'
 import {
   TOOLBOX_ITEMS,
   canAccessToolboxSection,
@@ -73,6 +76,7 @@ import {
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import PluginSettings from '@/views/settings/PluginSettings.vue'
 import SkillSettings from '@/views/settings/SkillSettings.vue'
 import McpSettings from '@/views/settings/McpSettings.vue'
 import BrowserConnectionSettings from '@/views/settings/BrowserConnectionSettings.vue'
@@ -94,6 +98,12 @@ const visibleItems = computed(() => TOOLBOX_ITEMS.filter((item) => canAccessTool
   isSupported: (capability) => capabilities.isSupported(capability),
 })))
 const selectedItem = computed(() => visibleItems.value.find((item) => item.key === requestedSection.value))
+const sectionAction = computed(() => {
+  const item = selectedItem.value
+  if (!item || !('action' in item)) return null
+  if ('actionMinRole' in item && !authStore.canAccessAllTenants && !authStore.hasRole(item.actionMinRole)) return null
+  return item
+})
 
 const browserStatus = computed(() => {
   if (!browserConnection.loaded || !browserConnection.enabled) return ''
@@ -115,8 +125,13 @@ watch([selectedItem, visibleItems], () => {
 
 // Tab badges for tools that are not open; the open panel keeps its own badge current.
 const summaries: Record<ToolboxSection, () => Promise<void>> = {
-  skills: async () => { counts.skills = (await listSkillCatalog())?.data?.length ?? 0 },
-  mcp: async () => { counts.mcp = (await listMCPServices()).length },
+  plugins: async () => { counts.plugins = installedPluginCount((await listPluginMarketplaces())?.data || []) },
+  skills: async () => {
+    counts.skills = ((await listSkillCatalog())?.data || []).filter((item) => !item.plugin).length
+  },
+  mcp: async () => {
+    counts.mcp = (await listMCPServices()).filter((service) => !service.plugin).length
+  },
   browserconnection: async () => { if (!browserConnection.loaded) await browserConnection.refresh() },
 }
 watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) => {

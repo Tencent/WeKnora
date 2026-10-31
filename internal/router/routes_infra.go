@@ -300,8 +300,40 @@ func RegisterStorageBackendRoutes(r *gin.RouterGroup, h *handler.StorageBackendH
 	}
 }
 
-// RegisterDataSourceRoutes 注册数据源相关的路由
-//
+// RegisterPluginRoutes registers plugin marketplaces and plugin management routes.
+func RegisterPluginRoutes(
+	r *gin.RouterGroup,
+	handler *handler.PluginHandler,
+	g *rbacGuards,
+) {
+	if handler == nil {
+		return
+	}
+
+	// Importing or deleting a marketplace is workspace infrastructure (Admin+).
+	// Every member, including viewers, can see that marketplace and choose
+	// which plugins to install, uninstall, retarget, or re-detect.
+	marketplaces := r.Group("/plugin-marketplaces")
+	{
+		marketplaces.GET("", g.Viewer(), handler.ListMarketplaces)
+		marketplaces.POST("", g.Admin(), handler.AddMarketplace)
+		marketplaces.GET("/:id", g.Viewer(), handler.GetMarketplace)
+		marketplaces.DELETE("/:id", g.Admin(), handler.DeleteMarketplace)
+
+		marketplaces.GET("/:id/plugins/:name", g.Viewer(), handler.PreflightPlugin)
+		marketplaces.POST("/:id/plugins/:name/install", g.Viewer(), handler.InstallPlugin)
+		marketplaces.POST("/:id/plugins/:name/probe", g.Viewer(), handler.ProbePlugin)
+		marketplaces.PUT("/:id/plugins/:name/sandboxes", g.Viewer(), handler.UpdatePluginSandboxes)
+		marketplaces.DELETE("/:id/plugins/:name", g.Viewer(), handler.UninstallPlugin)
+		marketplaces.GET("/:id/plugins/:name/detail", g.Viewer(), handler.GetPluginDetail)
+	}
+
+	plugins := r.Group("/plugins")
+	{
+		plugins.GET("", g.Viewer(), handler.ListInstalledPlugins)
+	}
+}
+
 // Data sources hold external service credentials (Feishu/Notion/Yuque)
 // and trigger sync jobs that mutate KB content tenant-wide. Reads are
 // Viewer+; everything else (CRUD, validation, sync control, credential

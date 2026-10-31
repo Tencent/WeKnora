@@ -39,6 +39,9 @@ type MCPServiceHandler struct {
 	scheduledPrompt func(context.Context, *types.AgentPrompt) bool
 	// grants are the callers' remembered agent approvals.
 	grants interfaces.AgentGrantRepository
+	// pluginLookup marks services a plugin install owns. Nil leaves the
+	// listing unmarked.
+	pluginLookup interfaces.PluginOwnershipLookup
 }
 
 // RunResumer continues an agent run that ended suspended on prompt, now
@@ -55,13 +58,17 @@ func (h *MCPServiceHandler) SetScheduledPromptRouter(f func(context.Context, *ty
 	h.scheduledPrompt = f
 }
 
-// NewMCPServiceHandler creates a new MCP service handler
+// NewMCPServiceHandler creates a new MCP service handler. grants and
+// pluginLookup may be nil; without them the grant routes and plugin badges
+// stay empty.
 func NewMCPServiceHandler(
 	mcpServiceService interfaces.MCPServiceService,
 	mcpToolApprovalService interfaces.MCPToolApprovalService,
 	toolApprovalGate *approval.Gate,
 	modelService interfaces.ModelService,
 	agents access.SharedAgentLookup,
+	grants interfaces.AgentGrantRepository,
+	pluginLookup interfaces.PluginOwnershipLookup,
 ) *MCPServiceHandler {
 	return &MCPServiceHandler{
 		mcpServiceService:      mcpServiceService,
@@ -69,6 +76,8 @@ func NewMCPServiceHandler(
 		toolApprovalGate:       toolApprovalGate,
 		modelService:           modelService,
 		agents:                 agents,
+		grants:                 grants,
+		pluginLookup:           pluginLookup,
 	}
 }
 
@@ -87,15 +96,31 @@ func (h *MCPServiceHandler) mcpServiceResponses(
 		return resp
 	}
 	dto.AttachMCPCatalogs(resp, services, summaries)
+
+	if h.pluginLookup != nil {
+		pluginAttributions, _ := h.pluginLookup.ListPluginResourcesByKind(
+			ctx,
+			tenantID,
+			types.PluginResourceKindMCPService,
+		)
+		if pluginAttributions != nil {
+			for _, r := range resp {
+				if r != nil && pluginAttributions[r.ID] != nil {
+					r.Plugin = pluginAttributions[r.ID]
+				}
+			}
+		}
+	}
+
 	return resp
 }
 
 // MCPServiceAuthRequest is auth_config when creating an MCP service.
 type MCPServiceAuthRequest struct {
 	// auth_type 留空表示无认证；bearer 发送 token，api_key 按 api_key_header 发送密钥
-	AuthType string `json:"auth_type" enums:"api_key,bearer,oauth" extensions:"x-agent"`
+	AuthType string `json:"auth_type"      enums:"api_key,bearer,oauth" extensions:"x-agent"`
 	// api_key 认证使用的请求头，默认 X-API-Key
-	APIKeyHeader  string            `json:"api_key_header" extensions:"x-agent"`
+	APIKeyHeader  string            `json:"api_key_header"                              extensions:"x-agent"`
 	APIKey        string            `json:"api_key"`
 	Token         string            `json:"token"`
 	CustomHeaders map[string]string `json:"custom_headers"`
@@ -106,15 +131,15 @@ type MCPServiceAuthRequest struct {
 // CreateMCPServiceRequest is the body of POST /mcp-services.
 type CreateMCPServiceRequest struct {
 	// 服务名称，空间内唯一
-	Name        string `json:"name" binding:"required" extensions:"x-agent"`
+	Name        string `json:"name"               binding:"required" extensions:"x-agent"`
 	Description string `json:"description"`
 	// 告诉智能体何时、如何使用该服务
-	UsageInstructions string `json:"usage_instructions" extensions:"x-agent,x-agent-max-bytes=48000"`
+	UsageInstructions string `json:"usage_instructions"                    extensions:"x-agent,x-agent-max-bytes=48000"`
 	Enabled           *bool  `json:"enabled"`
 	// 传输方式
-	TransportType string `json:"transport_type" binding:"required" enums:"sse,http-streamable" extensions:"x-agent"`
+	TransportType string `json:"transport_type"     binding:"required" extensions:"x-agent"                         enums:"sse,http-streamable"`
 	// 服务地址（http 或 https）
-	URL            string                   `json:"url" binding:"required" extensions:"x-agent"`
+	URL            string                   `json:"url"                binding:"required" extensions:"x-agent"`
 	Headers        map[string]string        `json:"headers"`
 	AuthConfig     *MCPServiceAuthRequest   `json:"auth_config"`
 	AdvancedConfig *types.MCPAdvancedConfig `json:"advanced_config"`
@@ -124,16 +149,16 @@ type CreateMCPServiceRequest struct {
 // fields present change.
 type UpdateMCPServiceRequest struct {
 	// 新的服务名称
-	Name        *string `json:"name" extensions:"x-agent"`
+	Name        *string `json:"name"               extensions:"x-agent"`
 	Description *string `json:"description"`
 	// 新的使用说明，1 到 16000 个字符
 	UsageInstructions *string `json:"usage_instructions" extensions:"x-agent,x-agent-max-bytes=48000"`
 	// 启用或停用该服务
-	Enabled *bool `json:"enabled" extensions:"x-agent"`
+	Enabled *bool `json:"enabled"            extensions:"x-agent"`
 	// 新的传输方式
-	TransportType *string `json:"transport_type" enums:"sse,http-streamable" extensions:"x-agent"`
+	TransportType *string `json:"transport_type"     extensions:"x-agent"                         enums:"sse,http-streamable"`
 	// 新的服务地址（http 或 https）
-	URL            *string                      `json:"url" extensions:"x-agent"`
+	URL            *string                      `json:"url"                extensions:"x-agent"`
 	Headers        map[string]string            `json:"headers"`
 	AuthConfig     *MCPServiceAuthUpdateRequest `json:"auth_config"`
 	AdvancedConfig *types.MCPAdvancedConfig     `json:"advanced_config"`
@@ -142,7 +167,7 @@ type UpdateMCPServiceRequest struct {
 // MCPServiceAuthUpdateRequest is auth_config in an MCP service update. Secrets
 // are not read here; they go through /credentials.
 type MCPServiceAuthUpdateRequest struct {
-	AuthType              string            `json:"auth_type" enums:"api_key,bearer,oauth"`
+	AuthType              string            `json:"auth_type"                enums:"api_key,bearer,oauth"`
 	APIKeyHeader          string            `json:"api_key_header"`
 	CustomHeaders         map[string]string `json:"custom_headers"`
 	Scopes                []string          `json:"scopes"`
@@ -627,6 +652,11 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 
 	if err := h.mcpServiceService.DeleteMCPService(ctx, tenantID, serviceID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+			return
+		}
 		c.Error(errors.NewInternalServerError("Failed to delete MCP service: " + err.Error()))
 		return
 	}
@@ -857,7 +887,7 @@ func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 }
 
 type resolveToolApprovalBody struct {
-	Decision     string          `json:"decision" binding:"required"` // approve | reject
+	Decision     string          `json:"decision"         binding:"required"` // approve | reject
 	ModifiedArgs json.RawMessage `json:"modified_args"`
 	Reason       string          `json:"reason"`
 	// AllowInSession, on approve, also allows later calls of the same kind
@@ -1007,7 +1037,7 @@ func (h *MCPServiceHandler) finishResolve(c *gin.Context, pendingID string, res 
 }
 
 type resolveAgentPromptBody struct {
-	Kind     string          `json:"kind" binding:"required"`
+	Kind     string          `json:"kind"     binding:"required"`
 	Response json.RawMessage `json:"response" binding:"required"`
 }
 

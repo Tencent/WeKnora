@@ -91,6 +91,20 @@ async function fixture(initial: SkillCatalogItem[], host = false) {
 
 const ids = (vm: any) => Array.from(vm.filteredCatalog, (row: any) => row.id)
 
+test('plugin-owned skills stay out of the management list', async () => {
+  const owned = item('from-plugin', ['ready'])
+  owned.plugin = { plugin_install_id: 'i', plugin_name: 'calcom', marketplace_id: 'm' }
+  const f = await fixture([item('report'), owned])
+  try {
+    assert.deepEqual(ids(f.vm), ['report'])
+    assert.deepEqual(Array.from(f.vm.manageableCatalog, (row: any) => row.id), ['report'])
+    f.vm.query = 'plugin'
+    assert.deepEqual(ids(f.vm), [])
+    f.vm.query = ''
+    assert.equal(f.vm.catalog.length, 2)
+  } finally { f.close() }
+})
+
 test('skill search matches names and descriptions without changing order or row identity', async () => {
   const data = [item('财务 Report', ['ready']), item('未安装'), item('mixed', ['ready', 'failed'])]
   data[2]!.description = '财务 REPORT'

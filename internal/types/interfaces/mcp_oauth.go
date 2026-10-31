@@ -43,6 +43,9 @@ type MCPOAuthRepository interface {
 	// DeleteTokenForPrincipal removes the per-principal token for a service.
 	DeleteTokenForPrincipal(ctx context.Context, tenantID uint64, principal types.Principal, serviceID string) error
 
+	// DeleteTokensByService removes every principal's token for a service.
+	DeleteTokensByService(ctx context.Context, tenantID uint64, serviceID string) error
+
 	// TryAcquireTokenRefreshLease atomically claims the right to use a refresh
 	// token. This prevents concurrent instances from presenting the same
 	// rotating refresh token to the authorization server.

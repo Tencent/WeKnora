@@ -81,6 +81,17 @@ func (r *fakeOAuthRepo) DeleteTokenForPrincipal(
 	return nil
 }
 
+func (r *fakeOAuthRepo) DeleteTokensByService(
+	_ context.Context, tenantID uint64, serviceID string,
+) error {
+	for key, token := range r.tokens {
+		if token != nil && token.TenantID == tenantID && token.ServiceID == serviceID {
+			delete(r.tokens, key)
+		}
+	}
+	return nil
+}
+
 func (r *fakeOAuthRepo) TryAcquireTokenRefreshLease(
 	_ context.Context,
 	tenantID uint64,

@@ -21,6 +21,9 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   // Install writes a root shell into the sandbox image every session of
   // that config boots. Same Admin+ bar as the sandbox editor itself.
   skills: 'admin',
+  // Every member of the workspace can see its marketplaces and choose which
+  // plugins to install. Adding or deleting a marketplace stays Admin+.
+  plugins: 'viewer',
   mcp: 'admin',
   system: 'viewer',
   userprofile: 'viewer',

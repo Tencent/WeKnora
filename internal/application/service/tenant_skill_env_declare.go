@@ -199,6 +199,9 @@ func bundleMentionsEnvName(bundle *SkillBundle, name string) bool {
 	return false
 }
 
+// SkillEnvVarSourcePlugin marks variables pre-declared in a plugin's plugin.json manifest.
+const SkillEnvVarSourcePlugin = "plugin"
+
 // mergeEnvDeclaration folds a fresh declaration onto the stored one.
 //
 // The declaration itself — which variables exist, what they are for, whether
@@ -207,16 +210,36 @@ func bundleMentionsEnvName(bundle *SkillBundle, name string) bool {
 // reads would ask users forever for something nothing consumes. The admin's
 // value is carried across by name, because that is a credential a person
 // typed and re-installing a skill is not a request to delete it.
+//
+// Exception: entries tagged with Source == SkillEnvVarSourcePlugin ("plugin")
+// are preserved even when the installer agent did not re-declare them, because
+// plugin variables were declared by human contract in plugin.json.
 func mergeEnvDeclaration(previous, declared types.SkillEnvVars) types.SkillEnvVars {
-	if len(declared) == 0 {
-		return nil
-	}
-	out := make(types.SkillEnvVars, 0, len(declared))
+	declaredNames := make(map[string]bool, len(declared))
+	out := make(types.SkillEnvVars, 0, len(declared)+len(previous))
+
 	for _, entry := range declared {
-		if old, ok := previous.Get(entry.Name); ok && old.Value != "" {
-			entry.Value = old.Value
+		declaredNames[entry.Name] = true
+		if old, ok := previous.Get(entry.Name); ok {
+			if old.Value != "" {
+				entry.Value = old.Value
+			}
+			if old.Source == SkillEnvVarSourcePlugin {
+				entry.Source = SkillEnvVarSourcePlugin
+			}
 		}
 		out = append(out, entry)
+	}
+
+	// Retain plugin pre-declared variables that installer agent did not emit
+	for _, old := range previous {
+		if old.Source == SkillEnvVarSourcePlugin && !declaredNames[old.Name] {
+			out = append(out, old)
+		}
+	}
+
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

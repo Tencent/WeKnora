@@ -10,14 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
-
-// WithGrants lets the handler list and revoke the caller's agent grants.
-func (h *MCPServiceHandler) WithGrants(grants interfaces.AgentGrantRepository) *MCPServiceHandler {
-	h.grants = grants
-	return h
-}
 
 // grantOwner is the caller as grants record it.
 func grantOwner(c *gin.Context) (uint64, string, bool) {

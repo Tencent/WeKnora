@@ -19,7 +19,7 @@ const compiled = ts.transpileModule(script, { compilerOptions: { module: ts.Modu
 
 async function fixture(
   update: () => Promise<void> = async () => {}, admin = true,
-  options: { query?: Record<string, string>; draft?: unknown } = {},
+  options: { query?: Record<string, string>; draft?: unknown; services?: unknown[] } = {},
 ) {
   const calls: Array<{ id: string; data: unknown }> = []
   const errors: string[] = []
@@ -66,7 +66,7 @@ async function fixture(
         },
       }
       if (name === '@/api/mcp-service') return {
-        listMCPServices: async () => { lists++; return [service] },
+        listMCPServices: async () => { lists++; return options.services || [service] },
         updateMCPService: async (id: string, data: unknown) => { calls.push({ id, data }); await update() },
       }
       return { default: {} }
@@ -253,6 +253,28 @@ test('an assistant draft opens a filled-in new service without credentials', asy
   try {
     assert.equal(viewer.vm.dialogVisible, false, 'viewers cannot add services')
   } finally { viewer.close() }
+})
+
+test('plugin-owned MCP services stay out of the management list', async () => {
+  const plugin = {
+    id: 'plug', name: 'from plugin', enabled: true, is_builtin: false,
+    plugin: { plugin_install_id: 'i', plugin_name: 'calcom', marketplace_id: 'm' },
+  }
+  const f = await fixture(undefined, true, {
+    services: [
+      { id: 'one', name: 'Logs', enabled: true, is_builtin: false },
+      plugin,
+    ],
+  })
+  try {
+    assert.deepEqual(f.vm.listedServices.map((row: { id: string }) => row.id), ['one'])
+    assert.deepEqual(f.vm.filteredServices.map((row: { id: string }) => row.id), ['one'])
+    f.vm.query = 'plugin'
+    assert.equal(f.vm.filteredServices.length, 0)
+    f.vm.query = ''
+    f.vm.handleDelete(plugin)
+    assert.equal(f.deletes.length, 0, 'a plugin service cannot be deleted from this page')
+  } finally { f.close() }
 })
 
 test('a service link opens that service and drops the query', async () => {

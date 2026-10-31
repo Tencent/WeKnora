@@ -61,6 +61,9 @@ type MCPServiceService interface {
 	// DeleteMCPService deletes an MCP service
 	DeleteMCPService(ctx context.Context, tenantID uint64, id string) error
 
+	// DeleteMCPServiceUnguarded deletes an MCP service bypassing the plugin guard (for plugin uninstall)
+	DeleteMCPServiceUnguarded(ctx context.Context, tenantID uint64, id string) error
+
 	// TestMCPService tests the connection to an MCP service and returns available tools/resources
 	TestMCPService(ctx context.Context, tenantID uint64, id string) (*types.MCPTestResult, error)
 

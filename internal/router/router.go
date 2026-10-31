@@ -96,6 +96,7 @@ type RouterParams struct {
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
 	AutomationHandler            *handler.AutomationHandler
+	PluginHandler                *handler.PluginHandler
 	HostSandbox                  service.HostSandboxManager
 	OperationDispatcher          *operations.HandlerDispatcher
 }
@@ -332,6 +333,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
 		RegisterAutomationRoutes(v1, params.AutomationHandler, rbacGuards)
+		RegisterPluginRoutes(v1, params.PluginHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route

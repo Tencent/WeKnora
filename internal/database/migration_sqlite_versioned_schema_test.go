@@ -47,6 +47,9 @@ var versionedSQLiteTables = []string{
 	"notifications",
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
+	"plugin_marketplaces",
+	"plugin_packages",
+	"plugin_tenant_bindings",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the

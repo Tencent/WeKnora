@@ -25,6 +25,7 @@ type SkillEnvVar struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Required    bool   `json:"required,omitempty"`
+	Source      string `json:"source,omitempty"`
 	// Value is the workspace-wide admin value. It is AES-GCM encrypted at rest
 	// by SkillEnvVars.Value and decrypted by SkillEnvVars.Scan. json:"-" makes
 	// it unserialisable by construction: the column round-trip goes through
@@ -40,6 +41,7 @@ type skillEnvVarRow struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Required    bool   `json:"required,omitempty"`
+	Source      string `json:"source,omitempty"`
 	Value       string `json:"value,omitempty"`
 }
 
@@ -74,6 +76,7 @@ func (v SkillEnvVars) Value() (driver.Value, error) {
 			Name:        entry.Name,
 			Description: entry.Description,
 			Required:    entry.Required,
+			Source:      entry.Source,
 			Value:       encrypted,
 		}
 	}
@@ -114,6 +117,7 @@ func (v *SkillEnvVars) Scan(value interface{}) error {
 			Name:        row.Name,
 			Description: row.Description,
 			Required:    row.Required,
+			Source:      row.Source,
 			Value:       decryptEnvValue("skill_env_vars", row.Name, row.Value),
 		}
 	}

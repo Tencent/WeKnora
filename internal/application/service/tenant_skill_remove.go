@@ -19,9 +19,25 @@ import (
 // the files really do leave the image, via a new snapshot taken after the
 // directory is gone. Removal therefore shares the install's per-config lock —
 // both grow a new snapshot from the current one, and interleaving them would
-// discard whichever wrote the pointer first.
+// discard whichever wrote the pointer first. A skill a plugin owns is refused;
+// uninstall uses RemoveSkillUnguarded.
 func (s *TenantSkillService) RemoveSkill(
 	ctx context.Context, tenantID uint64, configID, skillID string,
+) error {
+	return s.removeSkill(ctx, tenantID, configID, skillID, true)
+}
+
+// RemoveSkillUnguarded is RemoveSkill without the plugin-ownership check.
+// Plugin uninstall and sandbox changes call it; the plugin page is what
+// decides the skill goes.
+func (s *TenantSkillService) RemoveSkillUnguarded(
+	ctx context.Context, tenantID uint64, configID, skillID string,
+) error {
+	return s.removeSkill(ctx, tenantID, configID, skillID, false)
+}
+
+func (s *TenantSkillService) removeSkill(
+	ctx context.Context, tenantID uint64, configID, skillID string, guardPlugin bool,
 ) error {
 	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
 	if err != nil {
@@ -29,6 +45,11 @@ func (s *TenantSkillService) RemoveSkill(
 	}
 	if skill == nil {
 		return apperrors.NewNotFoundError("skill not found")
+	}
+	if guardPlugin {
+		if err := s.refusePluginOwnedCatalog(ctx, tenantID, skill.CatalogID); err != nil {
+			return err
+		}
 	}
 
 	now := s.now()
@@ -414,8 +435,10 @@ func (s *TenantSkillService) finishRemoval(
 	// Read before the delete: past it the only record of what this row named is
 	// gone, and a pinned archive would be left behind with nothing to reclaim it.
 	var pinned []string
+	catalogID := ""
 	if row, err := s.skills.GetSkill(ctx, tenantID, configID, skillID); err == nil && row != nil {
 		pinned = installBundleRefs(row)
+		catalogID = row.CatalogID
 	}
 	if err := s.retrySkillBookkeeping(ctx, func() error {
 		return s.skills.DeleteSkill(ctx, tenantID, configID, skillID)
@@ -423,6 +446,8 @@ func (s *TenantSkillService) finishRemoval(
 		return fmt.Errorf("skill %s no longer exists in the image but its row remains: %w",
 			skillID, err)
 	}
+	s.deleteDiscardedCatalogIfIdle(ctx, tenantID, catalogID)
+	s.notifySkillState(ctx, tenantID, catalogID)
 	// The definition's archive survives this; only an object no catalog and no
 	// other install names is reclaimed.
 	for _, ref := range pinned {

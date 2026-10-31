@@ -164,8 +164,11 @@ document.addEventListener('click',function(e){
 },true);
 
 var origOpen=window.open;
-window.open=function(url){
-  if(url&&(typeof url==='string')&&(url.indexOf('http://')===0||url.indexOf('https://')===0)){
+window.open=function(url, target, features){
+  // A sized popup (MCP OAuth) stays inside the app. Other http links go to
+  // the system browser.
+  var popup = typeof features === 'string' && features.indexOf('width=') !== -1;
+  if(!popup && url && (typeof url === 'string') && (url.indexOf('http://')===0 || url.indexOf('https://')===0)){
     if(window.runtime&&window.runtime.BrowserOpenURL){
       window.runtime.BrowserOpenURL(url);
       return null;

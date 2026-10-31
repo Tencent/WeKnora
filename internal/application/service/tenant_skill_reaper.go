@@ -172,10 +172,13 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 				continue
 			}
 			pinned := installBundleRefs(row)
+			catalogID := row.CatalogID
 			if err := s.skills.DeleteSkill(ctx, row.TenantID, row.SandboxConfigID, row.ID); err != nil {
 				logger.Warnf(ctx, "[skill] drop abandoned removal %s failed: %v", row.ID, err)
 				continue
 			}
+			s.deleteDiscardedCatalogIfIdle(ctx, row.TenantID, catalogID)
+			s.notifySkillState(ctx, row.TenantID, catalogID)
 			// The row was the last thing naming an archive it owned outright,
 			// so the sweep that drops it is what makes those bytes reachable
 			// by nothing. A definition's own object has other names and stays.

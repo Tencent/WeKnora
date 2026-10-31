@@ -289,6 +289,70 @@ func TestMergeEnvDeclarationWithoutADeclarationStoresNothing(t *testing.T) {
 	require.Nil(t, mergeEnvDeclaration(types.SkillEnvVars{{Name: "OLD", Value: "v"}}, nil))
 }
 
+func TestMergeEnvDeclarationPreservesPluginSourceVars(t *testing.T) {
+	// Case 1: Agent declared the variable that plugin pre-seeded
+	prev1 := types.SkillEnvVars{
+		{
+			Name:        "PLUGIN_VAR",
+			Description: "plugin desc",
+			Required:    true,
+			Source:      SkillEnvVarSourcePlugin,
+			Value:       "secret-1",
+		},
+	}
+	decl1 := types.SkillEnvVars{
+		{Name: "PLUGIN_VAR", Description: "agent desc", Required: true},
+	}
+	res1 := mergeEnvDeclaration(prev1, decl1)
+	require.Equal(t, types.SkillEnvVars{
+		{
+			Name:        "PLUGIN_VAR",
+			Description: "agent desc",
+			Required:    true,
+			Source:      SkillEnvVarSourcePlugin,
+			Value:       "secret-1",
+		},
+	}, res1)
+
+	// Case 2: Agent did not declare the plugin pre-seeded variable
+	prev2 := types.SkillEnvVars{
+		{
+			Name:        "PLUGIN_VAR",
+			Description: "plugin desc",
+			Required:    true,
+			Source:      SkillEnvVarSourcePlugin,
+			Value:       "secret-1",
+		},
+		{Name: "OLD_AGENT_VAR", Value: "agent-val"},
+	}
+	decl2 := types.SkillEnvVars{
+		{Name: "NEW_AGENT_VAR", Description: "new"},
+	}
+	res2 := mergeEnvDeclaration(prev2, decl2)
+	require.Equal(t, types.SkillEnvVars{
+		{Name: "NEW_AGENT_VAR", Description: "new"},
+		{
+			Name:        "PLUGIN_VAR",
+			Description: "plugin desc",
+			Required:    true,
+			Source:      SkillEnvVarSourcePlugin,
+			Value:       "secret-1",
+		},
+	}, res2, "plugin var retained even when agent did not declare it; old agent var dropped")
+
+	// Case 3: Ordinary skill upgrade cleans up deprecated variables
+	prev3 := types.SkillEnvVars{
+		{Name: "DEPRECATED_VAR", Value: "old-val"},
+	}
+	decl3 := types.SkillEnvVars{
+		{Name: "ACTIVE_VAR"},
+	}
+	res3 := mergeEnvDeclaration(prev3, decl3)
+	require.Equal(t, types.SkillEnvVars{
+		{Name: "ACTIVE_VAR"},
+	}, res3)
+}
+
 func TestValidateUserEnvNameAcceptsAndRejects(t *testing.T) {
 	require.NoError(t, validateUserEnvName("TAVILY_API_KEY"))
 	require.NoError(t, validateUserEnvName("_PRIVATE"))

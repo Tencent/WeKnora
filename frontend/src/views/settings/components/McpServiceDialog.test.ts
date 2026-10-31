@@ -7,6 +7,7 @@ import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, h, nextTick, reactive, ref } from 'vue'
+import * as mcpOAuthPopup from '../../../utils/mcpOAuthPopup'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./McpServiceDialog.vue', import.meta.url))
@@ -45,6 +46,7 @@ function fixture(generate: () => Promise<string> = async () => 'Query logs by mo
         },
         ...oauthApi,
       }
+      if (name === '@/utils/mcpOAuthPopup') return mcpOAuthPopup
       return { default: {} }
     },
     URL, console,
@@ -371,8 +373,9 @@ test('transient poll errors cannot report an existing token as a new authorizati
     assert.deepEqual(f.successes, [])
     f.popups[0]!.closed = true
     await poll(f)
-    assert.equal(f.timers.size, 0)
-    assert.equal(f.vm.oauthAuthorizing, false)
+    assert.equal(f.timers.size, 1, 'closing the popup does not cancel the poll')
+    assert.equal(f.vm.oauthAuthorizing, true)
+    assert.equal(f.vm.oauthAuthorized, true)
     assert.deepEqual(f.successes, [])
   } finally { f.close() }
 })
