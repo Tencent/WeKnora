@@ -39,6 +39,9 @@ func NewTenantService(
 
 // CreateTenant creates a new tenant
 func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
+	if err := types.ValidateTenantOSSAuth(tenant.StorageEngineConfig); err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Start creating tenant")
 
 	if tenant.Name == "" {
@@ -148,6 +151,9 @@ func (s *tenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error
 
 // UpdateTenant updates an existing tenant's information
 func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
+	if err := types.ValidateTenantOSSAuth(tenant.StorageEngineConfig); err != nil {
+		return nil, err
+	}
 	if tenant.ID == 0 {
 		logger.Error(ctx, "Workspace ID cannot be 0")
 		return nil, errors.New("tenant ID cannot be 0")

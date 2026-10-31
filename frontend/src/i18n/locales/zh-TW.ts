@@ -7839,6 +7839,7 @@ export default {
       requestFailed: '請求失敗'
     },
     storageBackend: {
+      ossRoleEnvOnlyHelp: 'ECS RAM 角色認證僅支援由部署環境變數設定的唯讀儲存實例。手動新增的 OSS 實例需填寫 AK/SK。',
       description: '管理檔案與圖片使用的存儲實例；同一種類型可以設定多個實例。',
       empty: '尚未設定存儲實例',
       defaultTag: '預設',

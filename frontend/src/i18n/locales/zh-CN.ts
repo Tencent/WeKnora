@@ -7839,6 +7839,7 @@ export default {
       requestFailed: '请求失败'
     },
     storageBackend: {
+      ossRoleEnvOnlyHelp: 'ECS RAM 角色认证仅支持部署环境变量配置的只读存储实例。手动添加的 OSS 实例需填写 AK/SK。',
       description: '管理文件与图片使用的存储实例；同一种类型可以配置多个实例。',
       empty: '尚未配置存储实例',
       defaultTag: '默认',
