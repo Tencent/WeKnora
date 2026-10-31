@@ -119,6 +119,9 @@ func (r *wikiPageRepository) UpdateWithRevision(
 	ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+			return err
+		}
 		if rev != nil {
 			// An already-present (page_id, version) pair means a concurrent
 			// writer snapshotted the same version first; its copy is
@@ -293,8 +296,21 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 
 // UpdateMeta 保存来源、状态和目录等元数据，不修改反链或版本。
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+				return err
+			}
+			return updateWikiPageMeta(tx, page)
+		})
+	}
+	return updateWikiPageMeta(r.db.WithContext(ctx), page)
+}
+
+// updateWikiPageMeta 保留主线的窄字段写入；普通保存与快照保护的保存都不覆盖反链。
+func updateWikiPageMeta(db *gorm.DB, page *types.WikiPage) error {
 	// 反链由专用原子操作维护，避免这份元数据快照覆盖并发添加的链接。
-	result := r.db.WithContext(ctx).
+	result := db.
 		Model(page).
 		Where("id = ?", page.ID).
 		Updates(map[string]interface{}{
