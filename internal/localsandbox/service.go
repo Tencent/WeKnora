@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -535,7 +536,13 @@ func previewCommand(command string) string {
 	if len(command) <= commandLogLimit {
 		return command
 	}
-	return command[:commandLogLimit] + "…"
+	// Back up to a rune start so a multibyte character (a CJK file name or
+	// argument) is not split into invalid UTF-8 in the log line.
+	cut := commandLogLimit
+	for cut > 0 && !utf8.RuneStart(command[cut]) {
+		cut--
+	}
+	return command[:cut] + "…"
 }
 
 func drain(proc Process) (string, string) {

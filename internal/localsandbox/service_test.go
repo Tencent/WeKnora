@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 )
@@ -444,6 +445,15 @@ func TestPreviewCommandMasksInlineAssignments(t *testing.T) {
 	require.Contains(t, got, "TOKEN=***")
 	require.Contains(t, got, "FOO=***")
 	require.Contains(t, got, "--model cogview-4")
+}
+
+func TestPreviewCommandCutsOnRuneBoundary(t *testing.T) {
+	// "文" is three bytes, so byte 240 falls one byte into the 80th rune
+	// after the 2-byte "a " prefix.
+	command := "a " + strings.Repeat("文", 100)
+	got := previewCommand(command)
+	require.True(t, utf8.ValidString(got), "preview is not valid UTF-8: %q", got)
+	require.Equal(t, "a "+strings.Repeat("文", 79)+"…", got)
 }
 
 // Two sessions on the same project share one directory. Overlapping Run
