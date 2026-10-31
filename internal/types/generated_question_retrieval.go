@@ -52,6 +52,27 @@ func GeneratedQuestionRowPredicate(alias string) string {
 	)
 }
 
+// GeneratedQuestionRowPredicateParadeDB is the keyword-search form of
+// GeneratedQuestionRowPredicate. ParadeDB's BM25 scan rejects ORDER BY
+// paradedb.score() when the filter compares two columns, which both
+// source_id <> chunk_id and substr(source_id, ...) = chunk_id || '-' do.
+// starts_with keeps the same prefix test. SQLite has no starts_with and
+// keeps GeneratedQuestionRowPredicate.
+func GeneratedQuestionRowPredicateParadeDB(alias string) string {
+	col := func(name string) string {
+		if alias == "" {
+			return name
+		}
+		return alias + "." + name
+	}
+	return fmt.Sprintf(
+		"%s = %d AND %s <> '' AND starts_with(%s, %s || '-')",
+		col("source_type"), int(ChunkSourceType),
+		col("chunk_id"),
+		col("source_id"), col("chunk_id"),
+	)
+}
+
 // SearchResultKnowledgeBaseIDs returns the distinct knowledge base IDs on results.
 func SearchResultKnowledgeBaseIDs(results []*SearchResult) []string {
 	seen := make(map[string]struct{}, len(results))
