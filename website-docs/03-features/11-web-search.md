@@ -10,7 +10,7 @@
 
 ```go
 registry.Add(infra_web_search.Spec{Type: "duckduckgo", Search: infra_web_search.NewDuckDuckGoProvider})
-// ... google、bing、tavily、ollama、baidu、searxng、keenable、zhipu、exa、metaso、bocha 同上
+// ... google、bing、tavily、ollama、baidu、searxng、keenable、zhipu、exa、metaso、bocha、yuanbao 同上
 registry.Add(infra_web_search.Spec{Type: "brave", FilteredSearch: infra_web_search.NewBraveProvider})
 registry.Add(infra_web_search.Spec{Type: "serply", FilteredSearch: infra_web_search.NewSerplyProvider})
 registry.Add(infra_web_search.Spec{
@@ -37,8 +37,9 @@ registry.Add(infra_web_search.Spec{
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
 | Serply | `serply.go` | 是 | `https://api.serply.io/v1/search` | Google 结果；支持按次传 country/freshness（仅 pd/pw/pm/py） |
 | DeepSeek | `deepseek.go` | 是 | `https://api.deepseek.com/v1/tools/search`、`/v1/tools/fetch` | 查询最多 128 字符；同时提供读页 API，`web_fetch` 与 `content=true` 改走 DeepSeek Fetch |
+| 腾讯元宝搜索 | `yuanbao.go` | 是（SecretKey，另需 SecretId） | `https://wsa.tencentcloudapi.com` | SearchPro 接口；SecretKey 写入加密的 `api_key` 字段，兼容极速版，仅按查询词搜索 |
 
-当前共注册 15 个引擎。
+当前共注册 16 个引擎。
 
 | 提供商附加配置 | 值 |
 | --- | --- |
@@ -59,6 +60,7 @@ registry.Add(infra_web_search.Spec{
 |------|------|--------|------|
 | `api_key` | string | 空 | 搜索服务密钥，AES-GCM 加密落库；仅通过 `/credentials` 子资源修改，响应中从不返回 |
 | `engine_id` | string | 空 | 仅 Google Custom Search 需要 |
+| `secret_id` | string | 空 | 仅腾讯元宝搜索需要；SecretId 是账号标识，SecretKey 存于加密的 `api_key` 字段 |
 | `base_url` | string | 空 | 仅 SearXNG：自托管实例地址；经 `utils.ValidateURLForSSRF` 校验，内网地址须加入 `SSRF_WHITELIST` |
 | `proxy_url` | string | 空 | 可选出站 HTTP/HTTPS 代理（仅隧道流量，不替换 API 端点），同样过 SSRF 校验 |
 | `extra_config` | map[string]string | nil | 提供商特定参数，如 Metaso scope、Exa include_text、Bocha freshness/summary |

@@ -29,6 +29,7 @@ type WebSearchProviderResponse struct {
 // where to send the request, not how to authenticate) and remain visible.
 type WebSearchProviderParametersDTO struct {
 	EngineID    string            `json:"engine_id,omitempty"`
+	SecretID    string            `json:"secret_id,omitempty"`
 	BaseURL     string            `json:"base_url,omitempty"`
 	ProxyURL    string            `json:"proxy_url,omitempty"`
 	ExtraConfig map[string]string `json:"extra_config,omitempty"`
@@ -41,11 +42,13 @@ func NewWebSearchProviderResponse(ctx context.Context, e *types.WebSearchProvide
 	}
 	params := WebSearchProviderParametersDTO{
 		EngineID:    e.Parameters.EngineID,
+		SecretID:    e.Parameters.SecretID,
 		BaseURL:     e.Parameters.BaseURL,
 		ProxyURL:    e.Parameters.ProxyURL,
 		ExtraConfig: e.Parameters.ExtraConfig,
 	}
 	if !CanViewIntegrationSecrets(ctx) {
+		params.SecretID = ""
 		params.ProxyURL = ""
 		params.ExtraConfig = nil
 	}

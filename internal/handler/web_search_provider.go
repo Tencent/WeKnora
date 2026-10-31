@@ -234,6 +234,9 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 	}
 	mergedParams := req.Parameters
 	mergedParams.APIKey = existing.Parameters.APIKey
+	if mergedParams.SecretID == "" {
+		mergedParams.SecretID = existing.Parameters.SecretID
+	}
 	// Preserve ExtraConfig when the request omits it (nil); otherwise a
 	// partial PUT would silently drop tenant-configured extras.
 	if mergedParams.ExtraConfig == nil {

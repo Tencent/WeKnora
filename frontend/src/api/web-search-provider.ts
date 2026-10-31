@@ -5,7 +5,7 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply' | 'deepseek'
+  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply' | 'deepseek' | 'yuanbao'
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -13,6 +13,7 @@ export interface WebSearchProviderEntity {
     // POST can still include it.
     api_key?: string
     engine_id?: string
+    secret_id?: string
     base_url?: string
     proxy_url?: string
     extra_config?: Record<string, string>
@@ -32,6 +33,7 @@ export interface WebSearchProviderTypeInfo {
   // Keyless-by-default providers that still accept an optional key (e.g. Keenable).
   supports_optional_api_key?: boolean
   requires_engine_id?: boolean
+  requires_secret_id?: boolean
   requires_base_url?: boolean
   supports_proxy?: boolean
   description?: string

@@ -227,7 +227,7 @@
 
         <!-- Section 2 — 连接配置（base url / api key / engine id），仅当任意字段需要时渲染 -->
         <section
-          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url || selectedProviderType?.config_fields?.length"
+          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_secret_id || selectedProviderType?.requires_base_url || selectedProviderType?.config_fields?.length"
           class="setting-drawer__section"
         >
           <h4 class="setting-drawer__section-title">{{ t('webSearchSettings.credentialsSection', '连接配置') }}</h4>
@@ -249,7 +249,7 @@
             <label class="form-label" :class="{ required: selectedProviderType?.requires_api_key }">
               {{ selectedProviderType?.supports_optional_api_key && !selectedProviderType?.requires_api_key
                 ? t('webSearchSettings.apiKeyOptionalLabel', 'API Key（可选）')
-                : t('webSearchSettings.apiKeyLabel') }}
+                : providerForm.provider === 'yuanbao' ? 'SecretKey' : t('webSearchSettings.apiKeyLabel') }}
             </label>
             <CredentialResource
               v-if="editingProvider?.id"
@@ -265,6 +265,11 @@
             >
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
+          </div>
+
+          <div v-if="selectedProviderType?.requires_secret_id" class="form-item">
+            <label class="form-label required">SecretId</label>
+            <t-input v-model="providerForm.parameters.secret_id" placeholder="Tencent Cloud SecretId" />
           </div>
 
           <div v-if="selectedProviderType?.requires_engine_id" class="form-item">
@@ -384,6 +389,7 @@ const providerForm = ref<{
   parameters: {
     api_key?: string
     engine_id?: string
+    secret_id?: string
     base_url?: string
     proxy_url?: string
     extra_config: Record<string, string>
@@ -407,6 +413,7 @@ watch(
     providerForm.value.provider,
     providerForm.value.parameters?.api_key,
     providerForm.value.parameters?.engine_id,
+    providerForm.value.parameters?.secret_id,
     providerForm.value.parameters?.base_url,
     JSON.stringify(providerForm.value.parameters?.extra_config || {}),
   ],
@@ -422,10 +429,12 @@ const selectedClients = computed(() => selectedProviderType.value?.clients)
 
 // Create-mode placeholder (edit mode replaces the input with
 // <CredentialResource>, which has its own placeholder).
-const apiKeyPlaceholder = computed(() => t('webSearchSettings.apiKeyPlaceholder'))
+const apiKeyPlaceholder = computed(() => providerForm.value.provider === 'yuanbao'
+  ? 'Tencent Cloud SecretKey'
+  : t('webSearchSettings.apiKeyPlaceholder'))
 
 const credentialFields = computed<CredentialFieldDef<WebSearchCredentialField>[]>(() => [
-  { key: 'api_key', label: t('webSearchSettings.apiKeyLabel') as string },
+  { key: 'api_key', label: providerForm.value.provider === 'yuanbao' ? 'SecretKey' : t('webSearchSettings.apiKeyLabel') as string },
 ])
 
 const credentialApi = computed<CredentialResourceApi<WebSearchCredentialField>>(() => {
@@ -480,6 +489,7 @@ const canTestConnection = computed(() => {
   if (editingProvider.value) return true
   if (pt.requires_api_key && !providerForm.value.parameters.api_key) return false
   if (pt.requires_engine_id && !providerForm.value.parameters.engine_id) return false
+  if (pt.requires_secret_id && !providerForm.value.parameters.secret_id) return false
   if (pt.requires_base_url && !providerForm.value.parameters.base_url) return false
   if (pt.config_fields?.some(field => field.required && !providerForm.value.parameters.extra_config?.[field.key])) return false
   return true
@@ -589,6 +599,7 @@ const editProvider = (entity: WebSearchProviderEntity) => {
       // server is ignored so that "non-empty means user typed it" holds.
       api_key: '',
       engine_id: entity.parameters?.engine_id || '',
+      secret_id: entity.parameters?.secret_id || '',
       base_url: entity.parameters?.base_url || '',
       proxy_url: entity.parameters?.proxy_url || '',
       extra_config: {
@@ -617,6 +628,7 @@ const saveProvider = async () => {
     // (a dedicated PUT /credentials call) before this save runs.
     const paramsOut: WebSearchProviderEntity['parameters'] = {
       engine_id: providerForm.value.parameters.engine_id,
+      secret_id: providerForm.value.parameters.secret_id,
       base_url: providerForm.value.parameters.base_url,
       proxy_url: providerForm.value.parameters.proxy_url,
     }
