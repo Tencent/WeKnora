@@ -143,31 +143,54 @@ func TestWikiPageSnapshotWrite(t *testing.T) {
 				require.Equal(t, attempt.SourceRefs, stored.SourceRefs)
 				require.EqualValues(t, 1, countWikiRevisions(t, db, page.ID))
 			})
-			t.Run("metadata preserves concurrent backlinks", func(t *testing.T) {
-				page := createWikiSnapshotPage(t, db)
-				ctx := types.WithWikiPageWriteSnapshot(context.Background(), page)
-				attempt, _ := types.WikiPageWriteSnapshotFromContext(ctx)
-				attempt.SourceRefs = append(attempt.SourceRefs, "my-source")
-				incoming := types.StringArray{"concurrent-incoming"}
-				require.NoError(t, db.Model(&types.WikiPage{}).Where("id = ?", page.ID).
-					Updates(map[string]any{"in_links": incoming, "updated_at": time.Now()}).Error)
-				require.NoError(t, repo.UpdateMeta(ctx, attempt))
-				stored, err := repo.GetByID(context.Background(), page.ID)
-				require.NoError(t, err)
-				require.Equal(t, page.Version, stored.Version)
-				require.Equal(t, incoming, stored.InLinks)
-				require.Equal(t, attempt.SourceRefs, stored.SourceRefs)
-				require.Zero(t, countWikiRevisions(t, db, page.ID))
-			})
-			t.Run("unguarded metadata keeps existing contract", func(t *testing.T) {
+			for _, contentWrite := range []bool{false, true} {
+				method := "metadata"
+				if contentWrite {
+					method = "revision"
+				}
+				t.Run(method+" preserves concurrent backlinks", func(t *testing.T) {
+					page := createWikiSnapshotPage(t, db)
+					ctx := types.WithWikiPageWriteSnapshot(context.Background(), page)
+					attempt, _ := types.WikiPageWriteSnapshotFromContext(ctx)
+					attempt.SourceRefs = append(attempt.SourceRefs, "my-source")
+					// 通过主线原子接口交错增删入链；入链变化不能制造源页写冲突。
+					require.NoError(t, repo.AddInLink(
+						ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, "concurrent-incoming",
+					))
+					require.NoError(t, repo.RemoveInLink(
+						ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, "incoming-original",
+					))
+					wantVersion, wantRevisions := page.Version, int64(0)
+					if contentWrite {
+						attempt.Content = "merged body"
+						require.NoError(t, repo.UpdateWithRevision(
+							ctx, attempt, makeWikiRevision(page, page.Version, types.WikiEditSourcePipeline),
+						))
+						wantVersion++
+						wantRevisions = 1
+					} else {
+						require.NoError(t, repo.UpdateMeta(ctx, attempt))
+					}
+					stored, err := repo.GetByID(context.Background(), page.ID)
+					require.NoError(t, err)
+					require.Equal(t, wantVersion, stored.Version)
+					require.Equal(t, types.StringArray{"concurrent-incoming"}, stored.InLinks)
+					require.Equal(t, attempt.SourceRefs, stored.SourceRefs)
+					require.Equal(t, wantRevisions, countWikiRevisions(t, db, page.ID))
+				})
+			}
+			t.Run("unguarded metadata preserves atomic backlinks", func(t *testing.T) {
 				page := createWikiSnapshotPage(t, db)
 				page.SourceRefs = types.StringArray{"replacement"}
-				page.InLinks = types.StringArray{"replacement-incoming"}
+				page.InLinks = types.StringArray{"stale-incoming"}
+				require.NoError(t, repo.AddInLink(
+					context.Background(), page.TenantID, page.KnowledgeBaseID, page.Slug, "concurrent-incoming",
+				))
 				require.NoError(t, repo.UpdateMeta(context.Background(), page))
 				stored, err := repo.GetByID(context.Background(), page.ID)
 				require.NoError(t, err)
 				require.Equal(t, page.SourceRefs, stored.SourceRefs)
-				require.Equal(t, page.InLinks, stored.InLinks)
+				require.ElementsMatch(t, []string{"incoming-original", "concurrent-incoming"}, []string(stored.InLinks))
 				require.Equal(t, page.Version, stored.Version)
 			})
 			t.Run("deleted page", func(t *testing.T) {

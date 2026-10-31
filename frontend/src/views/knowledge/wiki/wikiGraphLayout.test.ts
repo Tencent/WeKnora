@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   selectGraphAnchors, buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, initialGraphViewport, graphPointBounds, graphClusterOutline,
+  GRAPH_DETAIL_MAX, graphDetailSlugs, graphDetailLevelForSlug,
   type ForceNode, type GraphLink, type LayoutInput,
 } from './wikiGraphLayout.ts'
 
@@ -339,4 +340,58 @@ test('entity preference breaks a close ranking without displacing a substantiall
   // Two equally connected pages: the entity is the more useful overview anchor.
   const pair = [{ slug: 'a-concept', link_count: 1, page_type: 'concept' }, { slug: 'z-entity', link_count: 1, page_type: 'entity' }]
   assert.deepEqual(buildGraphLayout(pair, [{ source: pair[0]!.slug, target: pair[1]!.slug }], 1200, 800).clusters[0]!.anchors, ['z-entity'])
+})
+
+test('detail levels follow spanning-tree depth and keep an unlinked page on the shelf', () => {
+  const inputs = [
+    { slug: 'n0', link_count: 1 }, { slug: 'n1', link_count: 2 },
+    { slug: 'n2', link_count: 2 }, { slug: 'n3', link_count: 1 },
+    { slug: 'orphan', link_count: 0 },
+  ]
+  const edges = [
+    { source: 'n0', target: 'n1' }, { source: 'n1', target: 'n2' }, { source: 'n2', target: 'n3' },
+  ]
+  const layout = buildGraphLayout(inputs, edges, 1200, 800)
+  const cluster = layout.clusters[0]!
+  const rep = cluster.representative
+  assert.equal(layout.placements.get(rep)!.depth, 0)
+  const child = edges.flatMap(edge => edge.source === rep ? [edge.target] : edge.target === rep ? [edge.source] : [])[0]
+  assert.equal(layout.placements.get(child!)!.depth, 1)
+  const depth2 = [...layout.placements].find(([, placement]) => placement.depth === 2)![0]
+  assert.equal(layout.placements.get('orphan')!.stationary, true)
+  assert.equal(layout.placements.get('orphan')!.depth, undefined)
+
+  const levels = [0, 1, 2, 3].map(level => graphDetailSlugs(layout.clusters, layout.placements, level))
+  const anchors = new Set([rep, ...cluster.anchors])
+  assert.deepEqual([...levels[0]!].sort(), [...anchors].sort())
+  assert.ok(!levels[0]!.has(depth2))
+  assert.ok(!levels[0]!.has('orphan'))
+  assert.ok(levels[2]!.has(depth2))
+  assert.ok(!levels[2]!.has('orphan'))
+  assert.deepEqual([...levels[3]!].sort(), [...layout.placements.keys()].sort())
+  for (let i = 0; i < levels.length - 1; i++) {
+    for (const slug of levels[i]!) assert.ok(levels[i + 1]!.has(slug))
+  }
+  assert.equal(graphDetailLevelForSlug(layout.clusters, layout.placements, depth2), 2)
+  assert.equal(graphDetailLevelForSlug(layout.clusters, layout.placements, 'orphan'), GRAPH_DETAIL_MAX)
+  assert.equal(graphDetailLevelForSlug(layout.clusters, layout.placements, rep), 0)
+})
+
+test('detail level clamps and a star stays at its landmarks until the level rises', () => {
+  const leaves = Array.from({ length: 30 }, (_, i) => `leaf${String(i).padStart(2, '0')}`)
+  const inputs = [{ slug: 'hub', link_count: leaves.length }, ...leaves.map(slug => ({ slug, link_count: 1 }))]
+  const edges = leaves.map(slug => ({ source: 'hub', target: slug }))
+  const layout = buildGraphLayout(inputs, edges, 1200, 800)
+  const cluster = layout.clusters[0]!
+  const level0 = graphDetailSlugs(layout.clusters, layout.placements, 0)
+  assert.deepEqual([...level0].sort(), [...new Set([cluster.representative, ...cluster.anchors])].sort())
+  assert.ok(leaves.some(slug => !level0.has(slug)))
+  assert.deepEqual(
+    [...graphDetailSlugs(layout.clusters, layout.placements, -4)].sort(),
+    [...level0].sort(),
+  )
+  assert.deepEqual(
+    [...graphDetailSlugs(layout.clusters, layout.placements, GRAPH_DETAIL_MAX + 2)].sort(),
+    [...layout.placements.keys()].sort(),
+  )
 })

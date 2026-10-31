@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -153,12 +152,16 @@ func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		respBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http list-engines status %d: %s", resp.StatusCode, string(respBytes))
+		preview := readErrorPreview(resp.Body)
+		return nil, fmt.Errorf("http list-engines status %d: %s", resp.StatusCode, preview)
 	}
 
+	bodyBytes, err := readCapped(resp.Body, maxJSONResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("http list-engines response: %w", err)
+	}
 	var out httpListEnginesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(bodyBytes, &out); err != nil {
 		return nil, fmt.Errorf("http decode list-engines response: %w", err)
 	}
 
@@ -236,11 +239,15 @@ func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, string(bodyBytes))
+		preview := readErrorPreview(resp.Body)
+		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, preview)
+	}
+	bodyBytes, err := readCapped(resp.Body, maxResultResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("http read response: %w", err)
 	}
 	var out httpReadResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(bodyBytes, &out); err != nil {
 		return nil, fmt.Errorf("http decode read response: %w", err)
 	}
 	return fromHTTPReadResponse(&out), nil

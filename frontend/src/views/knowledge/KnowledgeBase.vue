@@ -737,6 +737,7 @@ const sourceOptions = computed(() => [
   { label: t('knowledgeBase.channelConfluence'), value: 'confluence' },
   { label: t('knowledgeBase.channelGitLab'), value: 'gitlab' },
   { label: t('knowledgeBase.channelSeafile'), value: 'seafile' },
+  { label: t('knowledgeBase.channelNextcloud'), value: 'nextcloud' },
   { label: t('knowledgeBase.channelIma'), value: 'ima' },
   { label: t('knowledgeBase.channelWechat'), value: 'wechat' },
   { label: t('knowledgeBase.channelWecom'), value: 'wecom' },

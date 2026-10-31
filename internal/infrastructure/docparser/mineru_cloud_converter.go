@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -141,12 +140,16 @@ func (c *MinerUCloudReader) applyUploadURLs(ctx context.Context, fileName, ext s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", "", fmt.Errorf("API status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		return "", "", fmt.Errorf("API status %d: %s", resp.StatusCode, preview)
 	}
 
+	respBody, err := readCapped(resp.Body, maxJSONResponseBytes)
+	if err != nil {
+		return "", "", fmt.Errorf("read response body: %w", err)
+	}
 	var result batchApplyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", "", fmt.Errorf("decode response: %w", err)
 	}
 	if result.Code != 0 {
@@ -277,7 +280,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, maxResultResponseBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read poll response body: %w", err)
 	}

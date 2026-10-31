@@ -139,3 +139,74 @@ func TestWikiPageSnapshotServiceDoesNotGuardBacklinkTargets(t *testing.T) {
 	require.Equal(t, types.StringArray{source.Slug}, stored.InLinks, "源页快照不得阻断目标页反链维护")
 	require.Equal(t, target.Content, stored.Content)
 }
+
+// wikiSnapshotLinkRecorder 记录真正调用的原子接口，检查源页快照没有传给目标页。
+type wikiSnapshotLinkRecorder struct {
+	interfaces.WikiPageRepository
+	added, removed map[string]int
+	guardedCalls   int
+}
+
+func (r *wikiSnapshotLinkRecorder) AddInLink(
+	ctx context.Context, tenantID uint64, kbID, target, source string,
+) error {
+	r.added[target]++
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		r.guardedCalls++
+	}
+	return r.WikiPageRepository.AddInLink(ctx, tenantID, kbID, target, source)
+}
+
+func (r *wikiSnapshotLinkRecorder) RemoveInLink(
+	ctx context.Context, tenantID uint64, kbID, target, source string,
+) error {
+	r.removed[target]++
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		r.guardedCalls++
+	}
+	return r.WikiPageRepository.RemoveInLink(ctx, tenantID, kbID, target, source)
+}
+
+// 带快照的保存仍按主线差集删边、添加新边，并补齐保留边缺失的反链。
+func TestWikiPageSnapshotServiceKeepsIncrementalBacklinkMaintenance(t *testing.T) {
+	svc, source, _ := newWikiSnapshotService(t)
+	ctx := context.Background()
+	for _, slug := range []string{"entity/old", "entity/kept", "entity/new"} {
+		_, err := svc.CreatePage(ctx, &types.WikiPage{
+			TenantID: source.TenantID, KnowledgeBaseID: source.KnowledgeBaseID,
+			Slug: slug, Title: slug, PageType: types.WikiPageTypeEntity, Content: "Target body",
+		})
+		require.NoError(t, err)
+	}
+	source.Content = "Original body [[entity/old]] [[entity/kept]]"
+	var err error
+	source, err = svc.UpdatePage(ctx, source)
+	require.NoError(t, err)
+	repo := svc.repo
+	require.NoError(t, repo.RemoveInLink(ctx, source.TenantID, source.KnowledgeBaseID, "entity/kept", source.Slug))
+	for _, slug := range []string{"entity/old", "entity/kept", "entity/new"} {
+		require.NoError(t, repo.AddInLink(ctx, source.TenantID, source.KnowledgeBaseID, slug, "another-source"))
+	}
+	recorder := &wikiSnapshotLinkRecorder{
+		WikiPageRepository: repo, added: map[string]int{}, removed: map[string]int{},
+	}
+	svc.repo = recorder
+	guarded := types.WithWikiPageWriteSnapshot(ctx, source)
+	source.Content = "Updated body [[entity/kept]] [[entity/new]]"
+	_, err = svc.UpdatePage(guarded, source)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{"entity/old": 1}, recorder.removed)
+	require.Equal(t, map[string]int{"entity/kept": 1, "entity/new": 1}, recorder.added)
+	require.Zero(t, recorder.guardedCalls, "目标页原子反链不能继承源页面快照")
+	for _, slug := range []string{"entity/old", "entity/kept", "entity/new"} {
+		target, err := repo.GetBySlug(ctx, source.KnowledgeBaseID, slug)
+		require.NoError(t, err)
+		want := []string{"another-source"}
+		if slug != "entity/old" {
+			want = append(want, source.Slug)
+		}
+		require.ElementsMatch(t, want, []string(target.InLinks), slug)
+		require.Equal(t, "Target body", target.Content)
+		require.Equal(t, 1, target.Version, "原子反链不制造内容版本")
+	}
+}

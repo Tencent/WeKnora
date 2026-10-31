@@ -827,7 +827,26 @@ type UpdateKnowledgeBaseRequest struct {
 	// VLMConfig updates the knowledge base's multimodal (vision) config.
 	// Optional: nil means "no change", mirroring how CreateKnowledgeBase
 	// accepts a top-level vlm_config.
-	VLMConfig *types.VLMConfig `json:"vlm_config"`
+	VLMConfig             *types.VLMConfig `json:"vlm_config"`
+	questionModelProvided bool
+}
+
+// UnmarshalJSON retains whether an older client supplied the question-model binding.
+func (r *UpdateKnowledgeBaseRequest) UnmarshalJSON(data []byte) error {
+	type plain UpdateKnowledgeBaseRequest
+	if err := json.Unmarshal(data, (*plain)(r)); err != nil {
+		return err
+	}
+	var payload struct {
+		Config struct {
+			Questions map[string]json.RawMessage `json:"question_generation_config"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	_, r.questionModelProvided = payload.Config.Questions["model_id"]
+	return nil
 }
 
 // UpdateKnowledgeBase godoc
@@ -868,6 +887,10 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
+	}
+	if !req.questionModelProvided && req.Config != nil && req.Config.QuestionGenerationConfig != nil &&
+		currentKB.QuestionGenerationConfig != nil {
+		req.Config.QuestionGenerationConfig.ModelID = currentKB.QuestionGenerationConfig.ModelID
 	}
 	if err := validateKnowledgeBaseSettingsUpdate(c, currentKB, req.Config, req.VLMConfig); err != nil {
 		_ = c.Error(err)
@@ -918,7 +941,8 @@ func validateKnowledgeBaseSettingsUpdate(
 	c *gin.Context, kb *types.KnowledgeBase, cfg *types.KnowledgeBaseConfig, vlm *types.VLMConfig,
 ) error {
 	settings := vlm != nil || cfg != nil && (cfg.EmbeddingModelID != nil || cfg.SummaryModelID != nil ||
-		cfg.StorageBackendID != nil || cfg.ASRConfig != nil)
+		cfg.StorageBackendID != nil || cfg.ASRConfig != nil ||
+		questionModelBindingChanged(kb, cfg.QuestionGenerationConfig))
 	if !settings {
 		return nil
 	}
@@ -931,6 +955,17 @@ func validateKnowledgeBaseSettingsUpdate(
 		return apperrors.NewForbiddenError("只有知识库所属空间可以修改存储配置")
 	}
 	return nil
+}
+
+func questionModelBindingChanged(kb *types.KnowledgeBase, next *types.QuestionGenerationConfig) bool {
+	if next == nil {
+		return false
+	}
+	previous := ""
+	if kb.QuestionGenerationConfig != nil {
+		previous = kb.QuestionGenerationConfig.ModelID
+	}
+	return strings.TrimSpace(next.ModelID) != strings.TrimSpace(previous)
 }
 
 // PatchKnowledgeBaseRequest changes the settings it carries. A field left

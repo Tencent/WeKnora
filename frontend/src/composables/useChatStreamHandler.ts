@@ -1,6 +1,7 @@
 import { emitAssistantDataChange } from '@/utils/assistantDataChange'
 import { approvalEventFromRecord, clearComposerApproval, showComposerApproval } from '@/views/chat/components/hostApproval'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
+import { parseThinkBlocks } from '@/utils/thinkBlocks'
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
@@ -701,23 +702,16 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       restoreQuickAnswerFlags(item)
 
       if (item.content) {
-        const content = String(item.content)
-        const thinkCloseTag = '</think>'
-        if (!content.includes('<think>') && !content.includes(thinkCloseTag)) {
+        const parsed = parseThinkBlocks(String(item.content))
+        if (parsed.found) {
+          item.showThink = Boolean(parsed.think) || parsed.open
+          item.thinking = parsed.open
+          item.thinkContent = parsed.think
+          item.content = parsed.answer.trim()
+        } else {
           item.thinkContent = ''
           item.showThink = false
           item.thinking = false
-        } else if (content.includes(thinkCloseTag)) {
-          item.showThink = true
-          item.thinking = false
-          const index = content.trim().lastIndexOf(thinkCloseTag)
-          item.thinkContent = content.trim().substring(0, index).replace('<think>', '').trim()
-          item.content = content.trim().substring(index + thinkCloseTag.length)
-        } else if (content.includes('<think>')) {
-          item.showThink = true
-          item.thinking = true
-          item.thinkContent = content.replace('<think>', '').trim()
-          item.content = ''
         }
       }
 
@@ -1782,18 +1776,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     if ((data.data as ChatMessage | undefined)?.is_fallback) obj.is_fallback = true
 
-    const thinkCloseTag = '</think>'
-    if (fullContent.value.includes('<think>') && !fullContent.value.includes(thinkCloseTag)) {
-      obj.thinking = true
-      obj.showThink = true
-      obj.content = ''
-      obj.thinkContent = fullContent.value.replace('<think>', '').trim()
-    } else if (fullContent.value.includes('<think>') && fullContent.value.includes(thinkCloseTag)) {
-      obj.thinking = false
-      obj.showThink = true
-      const index = fullContent.value.lastIndexOf(thinkCloseTag)
-      obj.thinkContent = fullContent.value.substring(0, index).replace('<think>', '').trim()
-      obj.content = fullContent.value.substring(index + thinkCloseTag.length).trim()
+    const parsed = parseThinkBlocks(fullContent.value)
+    if (parsed.found) {
+      obj.thinking = parsed.open
+      obj.showThink = Boolean(parsed.think) || parsed.open
+      obj.thinkContent = parsed.think
+      obj.content = parsed.answer.trim()
     } else {
       obj.content = fullContent.value
     }

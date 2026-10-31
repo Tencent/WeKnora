@@ -11,6 +11,47 @@ import (
 	"strings"
 )
 
+// listExcelSheetsFromWorkbook only reads the workbook directory, without
+// loading cell values or requiring the DuckDB spatial extension.
+func listExcelSheetsFromWorkbook(ctx context.Context, filename string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	book, err := zip.OpenReader(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = book.Close() }()
+	r, err := book.Open("xl/workbook.xml")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = r.Close() }()
+	var workbook struct {
+		XMLName xml.Name `xml:"workbook"`
+		Sheets  []struct {
+			Name string `xml:"name,attr"`
+		} `xml:"sheets>sheet"`
+	}
+	if err := xml.NewDecoder(r).Decode(&workbook); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(workbook.Sheets))
+	for _, sheet := range workbook.Sheets {
+		if strings.TrimSpace(sheet.Name) == "" {
+			return nil, fmt.Errorf("workbook contains an unnamed worksheet")
+		}
+		names = append(names, sheet.Name)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("workbook contains no worksheets")
+	}
+	return names, nil
+}
+
 // filterEmptyExcelSheets checks cell content rather than DuckDB's inferred row
 // count: header-only sheets and uncached formulas must keep their columns.
 func filterEmptyExcelSheets(ctx context.Context, filename string, names []string) ([]string, error) {

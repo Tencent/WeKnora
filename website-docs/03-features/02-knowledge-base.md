@@ -207,11 +207,13 @@ graph TB
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `model_id` | string | - | 图片理解使用的 VLM 模型 ID（参与模型用量追踪） |
-| `image_attrs_enabled` | bool | false | 图片属性观察管线开关。关闭（默认）＝历史行为：每张图片各发一次描述请求、各发一次 OCR 请求，不做属性观察；开启后第一轮「属性观察＋描述」，再由代码纯函数按观察结果决定该图是否值得再跑一轮 OCR |
+| `image_pipeline` | string | 兼容旧配置 | 显式选择 `default`（手动）或 `smartocr`（智能 OCR），优先于旧开关 |
+| `image_pipeline_params` | object | 各管线默认值 | 对应管线的参数，例如 `default.caption_enabled`、`default.ocr_enabled`；参数模式见 `GET /api/v1/image-pipelines` |
+| `image_attrs_enabled` | bool | false | 兼容字段；没有显式管线时，false 选择手动管线，true 选择智能 OCR |
 | `image_actions` | object | 见下 | OCR 触发条件：`{ ocr: { on: ImageAttrCondition[], on_unobserved: bool } }`。`on` 为「属性=值」触发条件列表；`on_unobserved` 为属性未被模型观察时的保守兜底（默认 true＝仍 OCR） |
 | `image_vector_enabled` | bool | false | 图片向量开关。开启且知识库的向量模型能处理图片（模型「图片输入」能力）时，生成图片描述之后再用向量模型直接对图片编码、存一条图片向量，检索时一并召回；见下文「图片向量」 |
 
-开启 `image_attrs_enabled` 后，模型**不再对图片分类**，只逐项「观察」属性并产出描述。本期激活两个观察项（完整注册表见 `GET /api/v1/image-attrs/schema`，只读、需 Viewer 权限；该注册表是全局的，不随知识库变化）：
+选择 `smartocr` 后，模型逐项观察属性并产出描述。OCR 决策主要使用以下观察项；开启自动预处理时还会观察版面属性（完整注册表见 `GET /api/v1/image-attrs/schema`，只读、需 Viewer 权限；该注册表是全局的，不随知识库变化）：
 
 | 属性 | 取值 | 含义 |
 | --- | --- | --- |
@@ -226,15 +228,15 @@ OCR 决策是代码纯函数 `DecideOCR`（`internal/application/service/image_a
 
 模型答非所问或属性缺失时按 `on_unobserved` 策略处理，默认继续 OCR；若将其设为 `false`，未观察到属性的图片也会跳过 OCR。完整的负值观察结果可能使 OCR 被跳过，因此仍需抽查模型判断与文字提取结果。注意**属性缺键是正常结果**：观察失败时不会写入保守默认值（schema 版本 `attrs/2`），因此 `image_attrs` 可能为空对象，读取方需区分「未观察到」与「观察到了负值」。
 
-管线与观察结果记录在每张图的处理轨迹子 span 上，便于核对与排查：input `pipeline` = `observation_driven`（本开关开启）或 `caption_ocr`（关闭，历史行为）；output `attr_policy`（本轮 OCR 决策）、`image_attrs`（观察到的属性）、`ocr_skipped`（`attr_policy`＝被策略跳过 / `disabled`＝OCR 总开关关闭）、`observation_failed`（未形成有效观察）、`chunks_created`。
+管线与观察结果记录在图片处理轨迹中。当前管线标识为 `default` / `smartocr`，不是旧版的 `caption_ocr` / `observation_driven`。轨迹可查看观察、描述、预处理、OCR 的实际结果以及跳过或失败原因。
 
+OCR 预处理默认关闭。可在管线中选择自动判断或对可处理页面始终执行，预处理失败或繁忙时使用原图。修改配置仅影响后续解析，已有图片需重新解析才会更新。
 OCR 会在入库前拒绝空响应、只有分隔符的内容，以及占据输出主体的长串重复内容；正常短标签、数字和表格仍可保留。OpenAI 兼容 VLM 返回 `finish_reason=length` 时，非空的截断输出也按失败处理。普通图片提示词按可见文字转录，截图中的按钮和标签逐行输出，仅真实表格使用 Markdown 表格；扫描 PDF 使用专用文档布局提示词。
 
-每次执行 OCR 都有独立的 `multimodal.image[i].ocr` 处理子 span；Langfuse 中对应 `image.ocr`，包含模型调用和输出校验。失败时记录 `ocr_status=failed`、`ocr_error_code`（`OCR_INVALID_OUTPUT` / `OCR_TRUNCATED` / `OCR_REQUEST_FAILED`）和错误原因，不创建或索引该次 OCR 分块。正常的图片描述仍可保留，整张图的 output 用 `outcome=partial_failure` 表明部分失败，不因无效 OCR 重试整个图片任务。明确回答没有文字时记为 `ocr_status=no_text`，与异常区分；正常提取记为 `succeeded`。已有异常分块不会被自动清除，需要重新解析相应文档。
-
+OCR 的模型调用和输出校验分别记录处理状态。失败、截断或异常重复内容不会作为有效 OCR 分块索引；图片描述等成功结果仍可保留，因此需要区分整图失败与部分步骤失败。对已有异常内容，应检查处理轨迹后重新解析相应文档。
 可通过 `WEKNORA_OCR_TEST_FIXTURE` 指定本地 JSON 文件（`{"model": <模型配置>, "image_paths": [<本地图片路径>]}`），运行 `go test ./internal/application/service -run '^TestLiveImageOCRValidation$' -v -count=1` 验证实际模型。私有端点需配置 `SSRF_WHITELIST`。该测试使用内存分块仓库，不写业务数据库；带凭证的配置和原图应放在版本控制之外。
 
-单次上传 / 重新解析可在请求体的 `process_config`（`KnowledgeProcessOverrides`）里按文档覆盖 `image_attrs_enabled` 与 `image_actions`；未传的项沿用知识库设置。`image_actions` 按 action key 合并（`on` 整体替换）。接口字段见[知识库 API](../04-api/02-api-knowledge.md)，管线细节见[文档解析](03-document-parsing.md)。
+单次上传 / 重新解析可在请求体的 `process_config`（`KnowledgeProcessOverrides`）里按文档覆盖 `image_pipeline`、`image_pipeline_params`、`image_attrs_enabled` 与 `image_actions`；未传的项沿用知识库设置。`image_actions` 按 action key 合并（`on` 整体替换）。接口字段见[知识库 API](../04-api/02-api-knowledge.md)，管线细节见[文档解析](03-document-parsing.md)。
 
 **图片向量（`image_vector_enabled`）**：默认关闭，升级后已有知识库也保持关闭（库里存的配置没有这个键，读出来就是 false），需要在知识库设置「图像处理配置 → 图片向量检索」里（开启多模态后出现）或通过 API 显式开启。只有**开关打开且向量模型能处理图片**时才生效，两者缺一则入库不生成图片向量、检索也不召回图片向量。之所以不随模型能力自动开启：能处理图片的向量模型常常只是被用来编码文本，自动开启会给这些知识库凭空增加每张图片一次的向量调用，并改变检索行为——开启后文档向量检索的候选池放大 1.5 倍，图片命中按 `min(VectorThreshold, 0.1)` 的单独阈值过滤。
 
@@ -244,7 +246,7 @@ OCR 会在入库前拒绝空响应、只有分隔符的内容，以及占据输�
 - 多知识库联合检索时按知识库各自的开关判断，未开启的知识库不召回图片向量；
 - 检索引擎无法按来源类型过滤，不召回的图片行（未开启知识库的图片向量命中，以及关键词检索命中的任何图片行）只能在结果返回后丢弃。为免它们占满候选池、把文本挤出去，文档向量池或关键词池打满且含这类图片行时，会把 TopK 翻倍重新检索，直到凑够不需丢弃的候选（文本命中，以及开启了图片向量的知识库的图片命中）、索引耗尽或到达 500 条候选上限（以默认的 50 条池计，每个池最多多 4 次查询）。因此含图片行的 store 组可能多出几次检索查询；排在文本前面的图片行超过约 500 条时，文本命中仍可能被漏掉。补检失败或只部分返回时保留上一轮的完整结果。
 
-**QuestionGenerationConfig（问题生成）**：`enabled`；`question_count` 每分块生成问题数（默认 3，上限 10）；`custom_instructions` 目标受众 / 风格说明。
+**QuestionGenerationConfig（问题生成）**：`enabled`；`question_count` 每分块生成问题数（默认 3，上限 10）；`custom_instructions` 目标受众 / 风格说明；`model_id` 可独立选择当前空间可用的对话模型，留空时沿用摘要模型。单次上传和重新解析可覆盖问题模型，旧覆盖配置未指定模型时继承知识库设置。停用问题生成会保留模型选择；清空选择恢复摘要模型。模型引用列表包含此绑定，解除引用后才能删除模型。
 
 **ExtractConfig（知识图谱）**：`enabled`、`text`、`tags`、`nodes []*GraphNode{name, chunks, attributes}`、`relations []*GraphRelation{node1, node2, type}`、`custom_instructions`（领域提取指导）。
 

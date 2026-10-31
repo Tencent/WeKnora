@@ -81,6 +81,12 @@
               </p>
             </div>
 
+            <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+              <label class="form-label" for="wiki-auto-generate">{{ $t('knowledgeEditor.wiki.autoGenerateLabel') }}</label>
+              <p class="form-tip">{{ $t('knowledgeEditor.wiki.autoGenerateTip') }}</p>
+              <t-switch id="wiki-auto-generate" v-model="formData.wikiConfig.autoGenerate" />
+            </div>
+
             <!-- Wiki 提取粒度 (仅当 Wiki 启用时显示) -->
             <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
               <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionGranularityLabel') }}</label>
@@ -907,11 +913,19 @@ const applyDefaultModelsIfEmpty = () => {
   if (!formData.value || editorMode.value !== 'create') return
   const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
   const embeddingModelId = selectInitialModelId(allModels.value, 'Embedding')
+  const vlmModelId = selectInitialModelId(allModels.value, 'VLLM')
+  const asrModelId = selectInitialModelId(allModels.value, 'ASR')
   if (!formData.value.modelConfig.llmModelId && chatModelId) {
     formData.value.modelConfig.llmModelId = chatModelId
   }
   if (!formData.value.modelConfig.embeddingModelId && embeddingModelId) {
     formData.value.modelConfig.embeddingModelId = embeddingModelId
+  }
+  if (!formData.value.multimodalConfig.vllmModelId && vlmModelId) {
+    formData.value.multimodalConfig.vllmModelId = vlmModelId
+  }
+  if (!formData.value.asrConfig.modelId && asrModelId) {
+    formData.value.asrConfig.modelId = asrModelId
   }
 }
 
@@ -1007,6 +1021,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       customInstructions: ''
     },
     questionGenerationConfig: {
+      modelId: '',
       enabled: true,
       questionCount: 3,
       customInstructions: ''
@@ -1023,6 +1038,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       customInstructions: ''
     },
     wikiConfig: {
+      autoGenerate: true,
       synthesisModelId: '',
       maxPagesPerIngest: 0,
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
@@ -1174,6 +1190,7 @@ const loadKBData = async (
         customInstructions: kb.extract_config?.custom_instructions || ''
       },
       questionGenerationConfig: {
+        modelId: kb.question_generation_config?.model_id || '',
         enabled: kb.question_generation_config?.enabled || false,
         questionCount: kb.question_generation_config?.question_count || 3,
         customInstructions: kb.question_generation_config?.custom_instructions || ''
@@ -1192,6 +1209,7 @@ const loadKBData = async (
         customInstructions: kb.profile_config?.custom_instructions || ''
       },
       wikiConfig: {
+        autoGenerate: kb.wiki_config?.auto_generate ?? true,
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
         maxPagesPerIngest: kb.wiki_config?.max_pages_per_ingest || 0,
         extractionGranularity: (
@@ -1620,12 +1638,14 @@ const buildSubmitData = () => {
   // 添加问题生成配置
   if (formData.value.questionGenerationConfig?.enabled) {
     data.question_generation_config = {
+      model_id: formData.value.questionGenerationConfig?.modelId || '',
       enabled: true,
       question_count: formData.value.questionGenerationConfig.questionCount || 3,
       custom_instructions: formData.value.questionGenerationConfig.customInstructions || ''
     }
   } else {
     data.question_generation_config = {
+      model_id: formData.value.questionGenerationConfig?.modelId || '',
       enabled: false,
       question_count: 3,
       custom_instructions: formData.value.questionGenerationConfig?.customInstructions || ''
@@ -1656,6 +1676,7 @@ const buildSubmitData = () => {
   // wiki_config only holds wiki-specific tunables.
   if (formData.value.type !== 'faq') {
     data.wiki_config = {
+      auto_generate: formData.value.wikiConfig?.autoGenerate ?? true,
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
@@ -1761,6 +1782,7 @@ const doSubmit = async () => {
       }
       if (formData.value.wikiConfig && formData.value.type !== 'faq') {
         updateConfig.wiki_config = {
+          auto_generate: formData.value.wikiConfig.autoGenerate ?? true,
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
@@ -1826,6 +1848,7 @@ const doSubmit = async () => {
           customInstructions: data.extract_config?.custom_instructions || ''
         },
         questionGeneration: {
+          modelId: data.question_generation_config?.model_id || '',
           enabled: data.question_generation_config?.enabled || false,
           questionCount: data.question_generation_config?.question_count || 3,
           customInstructions: data.question_generation_config?.custom_instructions || ''
@@ -1982,6 +2005,7 @@ watch(
 watch(() => chatResources.allModels, (list) => {
   if (props.visible) {
     allModels.value = list || []
+    applyDefaultModelsIfEmpty()
   }
 })
 </script>

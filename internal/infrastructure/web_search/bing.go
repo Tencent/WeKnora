@@ -49,7 +49,7 @@ type BingProvider struct {
 }
 
 // NewBingProvider creates a new Bing provider from parameters (no environment variables).
-func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Bing provider")
 	}
@@ -72,10 +72,9 @@ func (p *BingProvider) Name() string {
 // Search performs a web search using Bing Search API
 func (p *BingProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}

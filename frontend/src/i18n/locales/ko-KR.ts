@@ -1216,6 +1216,17 @@ export default {
       paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
       addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',
     },
+    nextcloud: {
+      baseUrl: 'Nextcloud URL',
+      baseUrlHint: 'https://nextcloud.example.com/cloud 같은 설치 주소를 입력하세요. /remote.php/dav는 포함하지 않습니다. 사설 배포는 기존 SSRF_WHITELIST를 설정하세요.',
+      username: '사용자 이름',
+      appPassword: '앱 비밀번호',
+      appPasswordHint: '개인 설정 → 보안 → 장치 및 세션에서 앱 비밀번호를 만들고 생성된 사용자 이름과 앱 비밀번호를 사용하세요.',
+      selectionRequired: '폴더 또는 파일을 하나 이상 선택하세요',
+      includeExtensions: '포함할 확장자 (선택)',
+      excludeExtensions: '제외할 확장자 (선택)',
+      extensionsHint: '.pdf, .md처럼 쉼표로 구분하세요. 포함 항목이 비어 있으면 지원하는 모든 형식을 동기화합니다. 제외가 우선하며 필터 변경은 삭제 대조 범위에도 영향을 줍니다.',
+    },
     seafile: {
       baseUrl: 'Seafile URL', apiToken: 'API 토큰',
       apiTokenHint: 'Seafile의 \'설정 → Web API 토큰\'에서 생성하세요. 계정에 선택한 라이브러리의 읽기 권한만 있으면 되며 토큰은 파일 다운로드 요청에 전송되지 않습니다.',
@@ -1235,6 +1246,10 @@ export default {
     guideStep1_notion: 'Notion에서 동기화하려는 페이지나 데이터베이스를 엽니다',
     guideStep2_notion: '오른쪽 상단의 \'···\' 메뉴를 클릭하고 \'Connect to\' 또는 \'Add connections\'를 선택합니다',
     guideStep3_notion: 'Integration 앱을 검색하여 선택한 후, 돌아와서 다시 시도를 클릭하세요',
+    noResourcesDesc_nextcloud: '접근 가능한 폴더 또는 지원하는 파일이 없습니다',
+    guideStep1_nextcloud: 'Nextcloud에 로그인하여 선택한 폴더의 읽기 권한을 확인하세요',
+    guideStep2_nextcloud: '개인 설정 → 보안 → 장치 및 세션에서 앱 비밀번호를 만드세요',
+    guideStep3_nextcloud: '여기서 인증 정보를 교체한 후 리소스를 다시 불러오세요',
     noResourcesDesc_seafile: '이 토큰으로 접근할 수 있는 라이브러리가 없거나 모두 암호화 라이브러리입니다(암호화 라이브러리는 동기화할 수 없음)',
     guideStep1_seafile: 'Seafile에 로그인하여 계정이 암호화되지 않은 라이브러리를 하나 이상 읽을 수 있는지 확인하세요',
     guideStep2_seafile: '\'설정 → Web API 토큰\'에서 토큰을 생성하거나 다시 생성하세요',
@@ -1386,6 +1401,7 @@ export default {
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
       gitlab: 'GitLab 프로젝트의 파일 동기화',
+      nextcloud: 'WebDAV로 Nextcloud 폴더와 파일 동기화',
       seafile: 'Seafile 라이브러리의 폴더와 파일 동기화'
     },
     connector: {
@@ -1400,6 +1416,7 @@ export default {
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
       gitlab: 'GitLab',
+      nextcloud: 'Nextcloud',
       seafile: 'Seafile'
     },
     logDetail: {
@@ -1466,6 +1483,14 @@ export default {
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
       ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요',
+      nextcloud_permission_denied: 'Nextcloud 파일 접근이 거부되었습니다. 계정 권한을 확인하세요.',
+      nextcloud_not_found: '목록 조회 후 Nextcloud 파일이 사라졌습니다. 다음 동기화에서 재시도합니다.',
+      nextcloud_file_too_large: 'Nextcloud 파일이 MAX_FILE_SIZE_MB 제한을 초과합니다.',
+      nextcloud_empty_file: 'Nextcloud 파일이 비어 있어 건너뛰었습니다.',
+      nextcloud_source_changed: '다운로드 중 Nextcloud 파일이 변경되었습니다. 다음 동기화에서 재시도합니다.',
+      nextcloud_invalid_response: 'Nextcloud WebDAV 응답이 잘못되었거나 불완전합니다.',
+      nextcloud_ssrf_blocked: 'SSRF 정책이 Nextcloud 요청을 차단했습니다. SSRF_WHITELIST를 확인하세요.',
+      nextcloud_fetch_failed: 'Nextcloud 파일을 가져오지 못했습니다. 다음 동기화에서 재시도합니다.',
       seafile_permission_denied: 'Seafile 파일에 접근할 수 없습니다. 토큰 소유자의 라이브러리 권한을 확인하세요.',
       seafile_not_found: 'Seafile 파일이 존재하지 않거나 이동되었습니다. 다음 동기화에서 다시 시도합니다.',
       seafile_file_too_large: 'Seafile 파일이 크기 제한을 초과합니다. MAX_FILE_SIZE_MB를 늘리거나 파일을 줄이세요.',
@@ -3704,6 +3729,7 @@ export default {
       bindings: {
         embedding_model: 'Embedding 모델',
         summary_model: '요약 모델',
+          question_model: '질문 생성 모델',
         image_processing_model: '이미지 처리 모델',
         vlm_model: '비전 모델',
         asr_model: '음성 인식 모델',
@@ -4360,6 +4386,8 @@ export default {
     buildTimeDescription: '시스템이 빌드된 시간',
     goVersionLabel: 'Go 버전',
     goVersionDescription: '백엔드에서 사용하는 Go 언어 버전',
+    docreaderVersionLabel: 'Docreader 버전',
+    docreaderVersionDescription: '현재 문서 분석 서비스(weknora-docreader)의 빌드 버전',
     startedAtLabel: '서비스 시작 시각',
     startedAtDescription: '현재 백엔드 프로세스가 마지막으로 시작된 시각',
     uptimeLabel: '가동 시간',
@@ -5313,6 +5341,9 @@ export default {
         placeholder: '예: 판매 주문 테이블이며 금액 단위와 내부 상태 코드를 설명…'
       },
       questionGeneration: {
+        modelLabel: '질문 생성 모델',
+        modelDescription: '비워 두면 지식 베이스 요약 모델을 사용합니다.',
+        modelPlaceholder: '질문 생성 모델 선택',
         label: 'AI 질문 생성',
         description: '문서 파싱 시 대규모 모델을 호출하여 각 청크에 대한 관련 질문을 생성하여 검색 재현율을 향상시킵니다. 활성화하면 문서 파싱 시간이 증가합니다.',
         countLabel: '생성 질문 수',
@@ -5815,6 +5846,9 @@ export default {
       cardOverviewPrimary: '{returned} / {total} 개 노드',
       cardOverviewHintTruncated: '노드를 더블클릭하여 서브그래프에 집중',
       cardOverviewHintFull: '지식 베이스의 모든 노드 표시 중',
+      cardOverviewDetailHint: '상위 계층만 표시 중입니다. 상세도를 올리면 더 많은 페이지가 나타납니다',
+      graphDetailLevel: '상세도',
+      graphDetailHint: '높일수록 연결된 페이지가 더 보입니다',
       cardRelatedNodes: '관련 노드 {count}개',
       helpButtonTitle: '도움말',
       helpTitle: '캔버스 작업',
@@ -5890,6 +5924,8 @@ export default {
       synthesisModelLabel: '합성 모델',
       synthesisModelPlaceholder: 'Wiki 생성에 사용할 LLM 모델을 선택하세요',
       synthesisModelTip: '설정하지 않으면 요약 모델로 대체됩니다',
+      autoGenerateLabel: 'Wiki 페이지 자동 생성',
+      autoGenerateTip: '사용하지 않아도 Wiki 페이지를 탐색하고 수동으로 편집할 수 있지만, 문서 처리 중 LLM으로 페이지를 생성하거나 업데이트하지 않습니다',
       extractionGranularityLabel: '추출 세분화 수준',
       contentInstructionsLabel: 'Wiki 콘텐츠 생성 지침',
       contentInstructionsTip: '요약, 페이지 및 인덱스의 강조점과 문체를 지정합니다. 인용 및 병합 규칙은 시스템에서 유지합니다.',
@@ -6096,6 +6132,16 @@ export default {
     }
   },
   embedPublish: {
+    history: "대화 기록",
+    historyHint: "최근 대화 30개가 이 브라우저에만 저장됩니다. 기록을 지워도 서버 메시지는 삭제되지 않습니다.",
+    historyEmpty: "저장된 대화 없음",
+    historyUntitled: "제목 없는 대화",
+    historyClear: "로컬 기록 지우기",
+    historyClearConfirm: "기록을 지우고 새 대화를 시작할까요? 서버 메시지는 유지됩니다.",
+    historyRetry: "다시 시도",
+    historyLoadFailed: "대화를 열 수 없습니다. 다시 시도해 주세요.",
+    historyUnavailable: "사용할 수 없는 대화이므로 로컬 기록에서 삭제했습니다.",
+
     create: '새 임베드 채널',
     channelsTitle: '임베드 채널',
     disabled: '비활성화',
@@ -6338,6 +6384,18 @@ export default {
     kbDisabledByAgent: '현재 에이전트가 지식베이스 기능을 비활성화했습니다.',
     modelLockedByAgent: '현재 에이전트는 모델 구성을 잠갔습니다.',
     imageUploadDisabledByAgent: '현재 에이전트에서 이미지 업로드가 활성화되지 않았습니다',
+    voiceTooltip: '길게 눌러 말하기 ({shortcut})',
+    voicePreparing: '마이크를 준비하는 중입니다. 버튼이 빨간색이 되면 말하세요',
+    voiceRecording: '녹음 중, 손을 떼면 종료됩니다',
+    voiceReleasedEarly: '마이크가 아직 준비되지 않았습니다. 버튼이 빨간색이 될 때까지 누른 채 말하세요',
+    voiceTranscribing: '음성을 인식하는 중…',
+    voiceUnsupported: '현재 브라우저는 녹음을 지원하지 않습니다',
+    voiceInsecureContext: '음성 입력은 HTTPS 또는 localhost에서만 사용할 수 있습니다',
+    voicePermissionDenied: '마이크를 사용할 수 없습니다. 브라우저에서 마이크 권한을 허용하세요',
+    voiceDeviceError: '사용 가능한 마이크가 없습니다',
+    voiceDecodeError: '녹음 처리에 실패했습니다. 다시 시도하세요',
+    voiceTranscribeFailed: '음성 인식에 실패했습니다. 에이전트의 ASR 모델 설정을 확인하세요',
+    voiceEmptyResult: '인식된 음성이 없습니다',
     goToAgentSettings: '에이전트 설정으로 이동',
     messages: {
       enterContent: '먼저 내용을 입력해주세요!',
@@ -6487,6 +6545,28 @@ export default {
   },
   file: {
     upload: '파일 업로드'
+  },
+  mentionBrowser: {
+    browse: "폴더별 탐색",
+    path: "폴더 경로",
+    root: "루트",
+    searchFolder: "이 폴더 검색",
+    searchKb: "지식베이스 검색",
+    subtree: "하위 폴더도 검색합니다.",
+    wholeKb: "전체 지식베이스가 선택되어 있습니다. 파일을 선택해도 범위가 좁아지지 않습니다.",
+    tags: "기존 태그가 선택한 파일을 계속 필터링합니다.",
+    folderCount: "하위 폴더 포함 문서 {count}개",
+    selected: "선택됨",
+    deleting: "삭제 중",
+    unsupported: "이 에이전트에서 지원하지 않는 형식",
+    forbidden: "이 콘텐츠에 접근할 권한이 없습니다.",
+    missing: "폴더가 더 이상 유효하지 않습니다. 돌아가서 다시 선택하세요.",
+    error: "폴더를 불러오지 못했습니다. 다시 시도하세요.",
+    retry: "다시 시도",
+    empty: "이 보기에 파일이 없습니다.",
+    previous: "이전",
+    next: "다음",
+    page: "{page}페이지 · 문서 {total}개",
   },
   mentionDetail: {
     readOnlyFromAgent: '이 대화에서는 읽기 전용이며 지식베이스 목록에는 표시되지 않습니다.',
@@ -6953,6 +7033,68 @@ export default {
     clearSuccess: '내 값을 삭제했습니다.',
     updatedAt: '{time}에 설정함'
   },
+  defaultSettings: {
+    loadFailed: '기본 설정을 불러오지 못했습니다. 편집하기 전에 다시 시도하세요.',
+    title: '기본 설정',
+    description: '이 워크스페이스의 각 기능이 기본으로 사용하는 모델과 검색 엔진을 한곳에서 관리합니다.',
+    introTitle: '리소스에서 따로 지정하지 않으면 여기의 기본값을 사용합니다',
+    introDescription: '에이전트, 지식베이스, 대화에서 직접 선택한 모델이 우선합니다. 선택하지 않았으면 여기의 워크스페이스 기본값을, 그것도 없으면 배포에 내장된 기본 모델을 사용합니다.',
+    readOnly: '워크스페이스 관리자만 변경할 수 있습니다. 현재 적용 중인 기본값은 확인할 수 있습니다.',
+    modelGroup: '모델',
+    webSearchGroup: '웹 검색',
+    unsetPlaceholder: '설정 안 함(시스템 기본값)',
+    followChatPlaceholder: '설정 안 함(기본 대화 모델 따름)',
+    slots: {
+      chat: {
+        label: '기본 대화 모델',
+        description: '새 에이전트와 Q&A에서 사용하며, 백그라운드 작업의 대체 모델로도 쓰입니다.',
+        none: '사용 가능한 대화 모델이 없어 Q&A와 백그라운드 생성을 사용할 수 없습니다.',
+      },
+      utility: {
+        label: '경량 생성 모델',
+        description: '세션 제목, MCP 사용 안내, 기억 추출 같은 짧은 텍스트 작업에 사용합니다. 더 빠르고 저렴한 모델을 권장합니다.',
+        none: '사용 가능한 대화 모델이 없어 제목과 안내를 생성할 수 없습니다.',
+      },
+      embedding: {
+        label: '기본 Embedding 모델',
+        description: '새 지식베이스를 만들 때 기본으로 선택됩니다. 기존 지식베이스에는 영향이 없습니다.',
+        none: '사용 가능한 Embedding 모델이 없어 지식베이스를 만들 수 없습니다.',
+      },
+      rerank: {
+        label: '기본 Rerank 모델',
+        description: '자체 재정렬 모델이 없는 검색과 내장 에이전트에서 사용합니다.',
+        none: '사용 가능한 Rerank 모델이 없어 검색 결과가 검색 순서대로 반환됩니다.',
+      },
+      vlm: {
+        label: '기본 비전 모델',
+        description: '이미지 이해와 멀티모달 파싱의 기본 선택입니다.',
+        none: '사용 가능한 비전 모델이 없어 이미지 이해를 사용할 수 없습니다.',
+      },
+      asr: {
+        label: '기본 음성 인식 모델',
+        description: '오디오·비디오 전사의 기본 선택입니다.',
+        none: '사용 가능한 음성 인식 모델이 없어 전사를 사용할 수 없습니다.',
+      },
+    },
+    hints: {
+      workspace: '워크스페이스 설정을 사용 중입니다.',
+      system: '설정 안 됨. 현재 시스템 기본값 사용 중: {name}',
+      auto: '설정 안 됨. 현재 첫 번째 사용 가능 모델 사용 중: {name}',
+      followChat: '설정 안 됨. 기본 대화 모델을 따릅니다: {name}',
+      staleFallback: '선택한 모델이 삭제되었거나 사용할 수 없습니다. 현재 대체 모델: {name}',
+      staleNone: '선택한 모델이 삭제되었거나 사용할 수 없으며, 대체할 모델도 없습니다.',
+    },
+    webSearch: {
+      label: '기본 검색 엔진',
+      description: '자체 검색 엔진이 없는 에이전트에서 웹 검색을 켜면 사용합니다.',
+      unset: '기본 검색 엔진이 없습니다. 자체 검색 엔진이 없는 에이전트는 웹 검색을 할 수 없습니다.',
+      placeholder: '검색 엔진 선택',
+    },
+    toasts: {
+      saveSuccess: '기본 설정을 저장했습니다',
+      saveFailed: '저장 실패: {message}',
+    },
+  },
   memoryWorkspaceSettings: {
     title: '장기 기억',
     description: '구성원이 말한 개인 정보, 선호, 사실, 진행 중인 일을 어시스턴트가 대화를 넘어 기억하도록 합니다.',
@@ -7072,6 +7214,14 @@ export default {
     baseUrlLabel: '인스턴스 URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'API 키를 입력하세요',
+    clients: {
+      label: '검색 및 페이지 읽기',
+      search: '검색',
+      fetch: '페이지 읽기',
+      viaApi: '{name} API',
+      local: '내장 페이지 리더',
+      help: '검색 결과는 이 프로바이더에서 가져오며, 에이전트는 위의 방식으로 페이지 본문을 읽습니다.'
+    },
     toasts: {
       providerCreated: '검색 엔진 프로바이더가 생성되었습니다',
       providerUpdated: '검색 엔진 프로바이더가 업데이트되었습니다',
@@ -7787,6 +7937,9 @@ export default {
       mineruTierAdvanced: 'advanced (VLM, 최고 품질, 가장 느림)',
       mineruTierHint: 'MinerU 4.0 이상에서만 적용되며, 사용 가능한 티어는 서버의 --tier 설정에 따라 다릅니다.',
       mineruLegacySection: '레거시 옵션 (MinerU 3.x 이하)',
+      mineruEffortLabel: '하이브리드 파싱 수준',
+      mineruEffortDefault: '서버 기본값 (medium)',
+      mineruEffortHint: 'high는 이전 하이브리드 백엔드에서 이미지와 차트 분석을 활성화하지만 처리 시간이 늘어납니다.',
       mineruLegacySectionHint: 'MinerU 4.0에서 아래 요청 파라미터가 제거되어 4.0 이상 서버에서는 무시됩니다. VLM 서버는 MinerU 쪽에서 설정하세요.',
       paddleocrVlEndpointPlaceholder: '예: http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'PaddleOCR-VL 전체 서비스(pipeline) 주소를 입력하세요. /layout-parsing 접미사는 불필요합니다',
@@ -8458,6 +8611,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelNextcloud: 'Nextcloud',
     channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
@@ -8922,6 +9076,11 @@ export default {
       }
     }
   },
+  assistantEntryGuide: {
+    stepOf: 'v0.9.0의 새로운 기능',
+    skip: '알겠습니다',
+    interactHint: '강조된 아이콘을 클릭해 어시스턴트를 열어 보세요.',
+  },
   newUserGuide: {
     stepOf: '{current} / {total}',
     skip: '건너뛰기',
@@ -8930,6 +9089,10 @@ export default {
     done: '완료',
     reopen: '사용 가이드',
     steps: {
+      assistant: {
+        title: 'WeKnora 어시스턴트를 만나보세요',
+        desc: 'WeKnora의 버전, 기능, 설정에 대해 질문할 수 있습니다. 현재 페이지를 바탕으로 사용자의 권한 내에서 에이전트를 만들고, 작업을 예약하고, 지식을 정리할 수도 있습니다.'
+      },
       done: {
         title: '준비 완료',
         desc: '핵심 기능을 모두 익혔습니다. 이제 나만의 지식 어시스턴트를 만들어 보세요! 메뉴 상단 닉네임 옆 도움말 버튼에서 언제든 가이드를 다시 볼 수 있습니다.'

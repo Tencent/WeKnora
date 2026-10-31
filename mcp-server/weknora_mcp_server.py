@@ -580,6 +580,8 @@ class WeKnoraClient:
                         )
                     elif response_type == "complete":
                         break
+                else:
+                    raise RequestException("SSE stream ended before complete event")
 
             return {
                 "answer": "".join(answer_chunks),

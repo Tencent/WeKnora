@@ -51,6 +51,10 @@ var reservedEnvNames = map[string]bool{
 	"PYTHONPATH":      true,
 	"PYTHONHOME":      true,
 	"NODE_OPTIONS":    true,
+	// Reserved for the sandbox itself: the agent-browser wrapper reads them
+	// to isolate one session from its siblings on a shared machine.
+	"WEKNORA_SESSION_ID":   true,
+	"WEKNORA_BROWSER_ROOT": true,
 }
 
 func init() {

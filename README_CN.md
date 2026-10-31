@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="官方网站" src="https://img.shields.io/badge/官网-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="产品文档" src="https://img.shields.io/badge/文档-阅读-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="版本" src="https://img.shields.io/badge/release-v0.8.3-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="版本" src="https://img.shields.io/badge/release-v0.9.0-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -42,9 +42,9 @@
 
 **[WeKnora（维娜拉）](https://weknora.weixin.qq.com)** 是一款开源的、基于大语言模型（LLM）的知识管理框架，面向企业级文档理解、语义检索与智能推理场景。它把团队分散的文档汇集起来，用于检索、推理，并随资料更新持续维护。
 
-https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
+https://github.com/user-attachments/assets/de0e490a-e738-405e-bb3a-64b63edd7278
 
-<p align="center"><sub>1 分 52 秒 · 1080p · 无旁白，英文画面文字</sub></p>
+<p align="center"><sub>v0.9.0 · 2 分 45 秒 · 1080p60 · 英文配音与字幕</sub></p>
 
 查询资料用 RAG，处理多步任务用 Agent，整理知识用 Wiki。三种能力共享同一知识库。
 
@@ -138,13 +138,13 @@ docker compose down     # 停止服务
 若已有部署并下载了更新的 release：
 
 ```bash
-# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.8.3），或保持 latest
+# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.9.0），或保持 latest
 docker compose pull     # 拉取与 WEKNORA_VERSION 匹配的镜像
 docker compose up -d    # 用新镜像重建容器
 ```
 
 > [!NOTE]
-> 仅执行 `docker compose up -d` 会复用本地缓存镜像，可能导致 Web UI 显示版本与下载的 release 不一致。升级前请先阅读[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)。
+> 仅执行 `docker compose up -d` 会复用本地缓存镜像，可能导致 Web UI 显示版本与下载的 release 不一致。升级前请先阅读[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)。
 
 ### 其他部署方式
 
@@ -165,6 +165,16 @@ docker compose up -d    # 用新镜像重建容器
 > - 定期更新到最新版本以获取安全补丁和改进。
 
 ## 最新更新
+
+### v0.9.0 <sub>· 2026-10-29 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
+
+- **[WeKnora 助手](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#assistant)**: 解答 WeKnora 的版本、功能和配置问题，结合当前页面，以你的身份创建智能体、设置定时任务、整理知识和调整配置。
+- **[多智能体协作](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#collaboration)**: 将复杂任务分给多个智能体，追踪子任务进度并汇总结果。
+- **[自动化](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#automations)**: 支持一次性与周期计划，查看执行记录、结果和待审批通知。
+- **[执行权限与审批](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#permissions)**: 只读、修改前确认、自动执行三级权限，支持有范围的会话授权与自动化授权。
+- **[沙箱与后台任务](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#sandbox)**: 按用户复用沙箱的可选部署方式、后台 Shell 与技能更新策略。
+- **[解析、同步与检索](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#knowledge)**: 可配置图像管线、OCR 预处理、飞书 / Lark 深度同步、Confluence PAT 与检索改进。
+- **[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)**: 核对数据库迁移、飞书重同步、沙箱复用开关和新的配置项。
 
 ### v0.8.3 <sub>· 2026-10-14 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
@@ -374,7 +384,7 @@ weknora chat "总结一下设计文档"
 | [配置说明](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 环境变量与模型配置 |
 | [常见问题排查](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | 常见问题与解决办法 |
 | [API 文档](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API 总览 |
-| [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3) | 各版本变更详解 |
+| [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0) | 各版本变更详解 |
 
 ## 开发指南
 

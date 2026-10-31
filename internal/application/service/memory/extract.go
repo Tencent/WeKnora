@@ -824,12 +824,9 @@ func (s *Service) extractionModelID(
 	return s.workspaceChatModelID(ctx)
 }
 
-// workspaceChatModelID picks a usable QA model for this workspace.
-//
-// The choice is logged because it is a guess: without an explicitly configured
-// extraction model there is no record of which model the workspace wants used
-// for background work, and silently picking one is only acceptable if it is
-// visible afterwards.
+// workspaceChatModelID prefers the workspace utility model, then the default
+// chat model, then the first active chat model. Log the choice because the
+// queued turn did not specify which model answered it.
 func (s *Service) workspaceChatModelID(ctx context.Context) string {
 	if s.modelService == nil {
 		return ""
@@ -839,13 +836,7 @@ func (s *Service) workspaceChatModelID(ctx context.Context) string {
 		logger.Warnf(ctx, "memory: list models for extraction fallback failed: %v", err)
 		return ""
 	}
-	for _, model := range models {
-		if model == nil || model.Type != types.ModelTypeKnowledgeQA {
-			continue
-		}
-		if model.Status != "" && model.Status != types.ModelStatusActive {
-			continue
-		}
+	if model := types.PickUtilityModel(models); model != nil {
 		logger.Infof(ctx, "memory: no extraction model configured, using workspace model %s", model.ID)
 		return model.ID
 	}

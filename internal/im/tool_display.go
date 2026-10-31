@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // IMToolStep tracks one tool invocation for IM display (mirrors Web agent stream events).
@@ -72,7 +74,8 @@ func formatMCPToolName(rawName string) string {
 		if p == "" {
 			continue
 		}
-		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		first, size := utf8.DecodeRuneInString(p)
+		parts[i] = string(unicode.ToUpper(first)) + p[size:]
 	}
 	return strings.Join(parts, " ")
 }

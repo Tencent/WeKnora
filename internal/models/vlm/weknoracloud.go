@@ -9,13 +9,20 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
 )
 
-const weKnoraCloudVLMPath = "/api/v1/chat/completions"
+const (
+	weKnoraCloudVLMPath = "/api/v1/chat/completions"
+	// maxWeKnoraCloudVLMErrorPreviewBytes bounds how much of a failed response
+	// is echoed into the returned error and the caller's logs.
+	maxWeKnoraCloudVLMErrorPreviewBytes = 4 << 10
+)
 
 // WeKnoraCloudVLM implements VLM via the WeKnoraCloud API.
 type WeKnoraCloudVLM struct {
@@ -165,12 +172,9 @@ func (v *WeKnoraCloudVLM) PredictWithOptions(
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
+	respBytes, err := readWeKnoraCloudVLMResponse(resp)
 	if err != nil {
-		return "", fmt.Errorf("weknoracloud VLM: read response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("weknoracloud VLM: status %d: %s", resp.StatusCode, string(respBytes))
+		return "", err
 	}
 
 	var vlmResp weKnoraCloudVLMResponse
@@ -184,6 +188,34 @@ func (v *WeKnoraCloudVLM) PredictWithOptions(
 	content := vlmResp.Choices[0].Message.Content
 	logger.Infof(ctx, "[VLM] WeKnoraCloud response received, len=%d", len(content))
 	return content, nil
+}
+
+// readWeKnoraCloudVLMResponse reads a completed VLM call. The success body is
+// the model's answer, so it goes through the same cap as every other
+// non-streaming provider reply instead of being buffered whole. A failed body
+// is a vendor error message that callers put in an error and a log line, so
+// only a bounded preview is kept.
+func readWeKnoraCloudVLMResponse(resp *http.Response) ([]byte, error) {
+	if resp.StatusCode != http.StatusOK {
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, maxWeKnoraCloudVLMErrorPreviewBytes))
+		return nil, fmt.Errorf("weknoracloud VLM: status %d: %s",
+			resp.StatusCode, trimPartialUTF8(string(preview)))
+	}
+	data, err := api.ReadResponseCapped(resp.Body, api.MaxResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("weknoracloud VLM: read response: %w", err)
+	}
+	return data, nil
+}
+
+// trimPartialUTF8 drops a trailing incomplete rune. A preview stops on a byte
+// count, so a multi-byte error body can end mid-rune; carrying that into an
+// error string would put invalid UTF-8 into logs and API responses.
+func trimPartialUTF8(s string) string {
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func (v *WeKnoraCloudVLM) effectiveModelName() string {

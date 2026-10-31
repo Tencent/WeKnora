@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="公式サイト" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="ドキュメント" src="https://img.shields.io/badge/docs-中国語-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="リリース" src="https://img.shields.io/badge/release-v0.8.3-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="リリース" src="https://img.shields.io/badge/release-v0.9.0-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="ライセンス" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -42,9 +42,9 @@
 
 **[WeKnora（ウィーノラ）](https://weknora.weixin.qq.com)** は、大規模言語モデル（LLM）をベースとしたオープンソースのナレッジフレームワークで、エンタープライズ向けの文書理解、セマンティック検索、推論に対応します。チームに散在する文書を集約し、検索・推論に使えるようにし、資料の更新に合わせて維持します。
 
-https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
+https://github.com/user-attachments/assets/de0e490a-e738-405e-bb3a-64b63edd7278
 
-<p align="center"><sub>1 分 52 秒 · 1080p · ナレーションなし・英語の画面テキスト</sub></p>
+<p align="center"><sub>v0.9.0 · 2 分 45 秒 · 1080p60 · 英語ナレーション・字幕付き</sub></p>
 
 資料の検索には RAG、マルチステップのタスクには Agent、ナレッジの整理には Wiki。3 つの機能は同じナレッジベースを共有します。
 
@@ -138,13 +138,13 @@ docker compose down     # サービスを停止
 既存のデプロイがあり、新しい release をダウンロードした場合：
 
 ```bash
-# .env の WEKNORA_VERSION を対象バージョン（例: 0.8.3）に設定、または latest のまま
+# .env の WEKNORA_VERSION を対象バージョン（例: 0.9.0）に設定、または latest のまま
 docker compose pull     # WEKNORA_VERSION に一致するイメージを取得
 docker compose up -d    # 新しいイメージでコンテナを再作成
 ```
 
 > [!NOTE]
-> `docker compose up -d` のみではローカルキャッシュのイメージが再利用され、Web UI の表示バージョンがダウンロードした release と一致しない場合があります。アップグレードする前に[アップグレードの注意事項](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3#upgrade-notes)を確認してください。
+> `docker compose up -d` のみではローカルキャッシュのイメージが再利用され、Web UI の表示バージョンがダウンロードした release と一致しない場合があります。アップグレードする前に[アップグレードの注意事項](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)を確認してください。
 
 ### その他のデプロイ方法
 
@@ -165,6 +165,16 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 > - セキュリティパッチと改善のため、定期的に最新バージョンに更新する
 
 ## 最新アップデート
+
+### v0.9.0 <sub>· 2026-10-29 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
+
+- **[WeKnora アシスタント](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#assistant)**: WeKnora のバージョン更新、機能や設定について回答。表示中のページをもとに、現在のユーザーの権限でエージェント作成、タスクの定期実行、ナレッジ整理や設定変更を支援。
+- **[マルチエージェント連携](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#collaboration)**: タスクを分担し、進捗を確認して結果をまとめます。
+- **[自動化](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#automations)**: 一回限り・定期実行の計画、実行履歴、結果と承認通知。
+- **[実行権限と承認](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#permissions)**: 読み取り専用、変更前に確認、自動実行の三段階と範囲を限定した許可。
+- **[サンドボックスとバックグラウンド処理](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#sandbox)**: ユーザー単位の再利用、バックグラウンド Shell、スキル更新方式。
+- **[解析・同期・検索](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#knowledge)**: 画像処理パイプライン、OCR 前処理、Feishu/Lark 同期、Confluence PAT と検索の改善。
+- **[アップグレード案内](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)**: DB 移行、Feishu 再同期、サンドボックス再利用スイッチと設定変更を確認してください。
 
 ### v0.8.3 <sub>· 2026-10-14 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3)</sub>
 
@@ -374,7 +384,7 @@ weknora chat "設計ドキュメントを要約して"
 | [設定](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 環境変数とモデル設定 |
 | [トラブルシューティング](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | よくある問題と解決方法 |
 | [API ドキュメント](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API の概要 |
-| [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.8.3) | 各バージョンの変更点 |
+| [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0) | 各バージョンの変更点 |
 
 ## 開発ガイド
 

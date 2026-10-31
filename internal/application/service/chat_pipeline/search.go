@@ -388,6 +388,31 @@ func targetReportsEmbedFailure(kb *types.KnowledgeBase) bool {
 	return kb.IsVectorEnabled()
 }
 
+// imageQueryEmbedder is the optional capability of a knowledge base service
+// that can embed a query image. It is asserted rather than added to
+// interfaces.KnowledgeBaseService so adapters and test doubles that only serve
+// text queries keep compiling.
+type imageQueryEmbedder interface {
+	GetQueryImageEmbedding(ctx context.Context, kbID string, img []byte) ([]float32, error)
+}
+
+// queryVector embeds the query for vector recall. A query image takes the
+// image vector space the index stored image_vector chunks in; text otherwise.
+// An image the model cannot embed is an error, never a silent text fallback:
+// the caller asked to match a picture, and a text query answers something else.
+func (p *PluginSearch) queryVector(
+	ctx context.Context, kbID, queryText string, queryImage []byte,
+) ([]float32, error) {
+	if len(queryImage) == 0 {
+		return p.knowledgeBaseService.GetQueryEmbedding(ctx, kbID, queryText)
+	}
+	imageEmbedder, ok := p.knowledgeBaseService.(imageQueryEmbedder)
+	if !ok {
+		return nil, fmt.Errorf("this deployment cannot embed a query image")
+	}
+	return imageEmbedder.GetQueryImageEmbedding(ctx, kbID, queryImage)
+}
+
 // searchByTargets performs KB searches using pre-computed SearchTargets.
 // Targets sharing the same model name, endpoint and configured vector dimension
 // are grouped even across model IDs. Each group computes one query embedding
@@ -464,7 +489,7 @@ func (p *PluginSearch) searchByTargets(
 			disableVector := chatManage.DisableVectorMatch
 			searchableTargets := targets
 			if modelKey != "" && !disableVector {
-				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
+				emb, err := p.queryVector(ctx, targets[0].KnowledgeBaseID, queryText, chatManage.QueryImage)
 				if err != nil {
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
 					for _, target := range targets {
@@ -667,7 +692,13 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 			"max_results": webConfig.MaxResults,
 		},
 	})
-	webResults, err := p.webSearchService.Search(webCtx, providerID, webConfig, chatManage.RewriteQuery)
+	var webResults []*types.WebSearchResult
+	client, err := p.webSearchService.Resolve(webCtx, providerID)
+	if err == nil {
+		webResults, err = client.Search(webCtx, types.WebSearchRequest{
+			Query: chatManage.RewriteQuery, MaxResults: webConfig.MaxResults, IncludeDate: webConfig.IncludeDate,
+		})
+	}
 	webSpan.Finish(map[string]interface{}{
 		"hit_count": len(webResults),
 	}, nil, err)
@@ -682,10 +713,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
 	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
 	// tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
-	// compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
-	// 	ctx, chatManage.SessionID, tempKBID, questions, webResults, webConfig,
-	// 	p.knowledgeBaseService, p.knowledgeService, seen, ids,
-	// )
+	// state := &types.WebSearchCompressionState{TempKBID: tempKBID, SeenURLs: seen, KnowledgeIDs: ids}
+	// compressed, err := p.webResultCompressor.Compress(ctx, state, questions, webResults, webConfig)
 	// if err != nil {
 	// 	pipelineWarn(ctx, "Search", "web_compress_error", map[string]interface{}{
 	// 		"error": err.Error(),
@@ -693,7 +722,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// } else {
 	// 	webResults = compressed
 	// 	// Persist temp KB state back into Redis using WebSearchStateRepository
-	// 	p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
+	// 	p.webSearchStateService.SaveWebSearchTempKBState(
+	// 		ctx, chatManage.SessionID, state.TempKBID, state.SeenURLs, state.KnowledgeIDs)
 	// }
 	res := searchutil.ConvertWebSearchResults(webResults)
 	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{

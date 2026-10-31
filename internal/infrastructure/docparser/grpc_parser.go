@@ -93,6 +93,22 @@ func (p *GRPCDocumentReader) IsConnected() bool {
 	return p.conn != nil
 }
 
+// GetVersionInfo queries the running docreader rather than assuming its image
+// matches the app build. Older docreaders return Unimplemented to the caller.
+func (p *GRPCDocumentReader) GetVersionInfo(ctx context.Context) (string, string, error) {
+	p.mu.RLock()
+	client := p.client
+	p.mu.RUnlock()
+	if client == nil {
+		return "", "", errNotConnected
+	}
+	info, err := client.GetInfo(ctx, &proto.GetInfoRequest{})
+	if err != nil {
+		return "", "", err
+	}
+	return info.GetVersion(), info.GetCommitId(), nil
+}
+
 func (p *GRPCDocumentReader) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

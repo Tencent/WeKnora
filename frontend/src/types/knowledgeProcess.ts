@@ -36,6 +36,7 @@ export interface ASRConfigOverride {
 }
 
 export interface QuestionGenerationConfigOverride {
+  model_id?: string
   enabled?: boolean
   question_count?: number
   custom_instructions?: string

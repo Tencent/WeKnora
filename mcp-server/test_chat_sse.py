@@ -51,6 +51,8 @@ class ChatSSETest(unittest.TestCase):
                 b"",
                 b'data: {"response_type":"answer","content":"valid frame"}',
                 b"",
+                b'data: {"response_type":"complete"}',
+                b"",
             ]
         )
         self.assertEqual(result["answer"], "valid frame")
@@ -69,6 +71,8 @@ class ChatSSETest(unittest.TestCase):
                 'data:{"response_type":"answer",',
                 ": another heartbeat",
                 'data: "content":"hello"}',
+                "",
+                'data: {"response_type":"complete"}',
                 "",
             ]
         )
@@ -100,11 +104,19 @@ class ChatSSETest(unittest.TestCase):
         self.assertEqual(result["answer"], "done")
         self.response.__exit__.assert_called_once()
 
-    def test_discards_unterminated_event_at_eof(self):
-        result = self.consume(
-            [b'data: {"response_type":"answer","content":"unfinished"}']
-        )
-        self.assertEqual(result["answer"], "")
+    def test_eof_before_complete_fails_in_both_chat_paths(self):
+        cases = [
+            [],
+            [b'data: {"response_type":"answer","content":"partial"}', b""],
+            [b'data: {"response_type":"answer","content":"unfinished"}'],
+            [b'data: {"response_type":"complete"}'],
+        ]
+        for agent in (False, True):
+            for lines in cases:
+                with self.subTest(agent=agent, lines=lines):
+                    with self.assertRaisesRegex(requests.RequestException, "before complete"):
+                        self.consume(lines, agent=agent)
+                    self.response.__exit__.assert_called_once()
 
     def test_crlf_multiline_frame_with_fragmented_utf8(self):
         wire = (
@@ -135,7 +147,10 @@ class ChatSSETest(unittest.TestCase):
         with mock.patch.object(
             srv, "MAX_SSE_EVENT_BYTES", len(payload.encode()) + 1, create=True
         ):
-            result = self.consume(["data: " + payload, ""] * 3)
+            result = self.consume(
+                ["data: " + payload, ""] * 3
+                + ['data: {"response_type":"complete"}', ""]
+            )
         self.assertEqual(result["answer"], "hello" * 3)
 
     def check_http_error_closes_in_both_chat_paths(self, status):

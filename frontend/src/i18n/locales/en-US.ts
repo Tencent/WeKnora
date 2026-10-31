@@ -609,6 +609,11 @@ export default {
       references: 'References'
     }
   },
+  assistantEntryGuide: {
+    stepOf: 'NEW IN v0.9.0',
+    skip: 'Got it',
+    interactHint: 'Click the highlighted entry to open the assistant.',
+  },
   newUserGuide: {
     stepOf: '{current} / {total}',
     skip: 'Skip',
@@ -617,6 +622,10 @@ export default {
     done: 'Done',
     reopen: 'Product tour',
     steps: {
+      assistant: {
+        title: 'Meet the WeKnora Assistant',
+        desc: 'Ask about WeKnora versions, features and setup. Using the current page as context, the assistant can create agents, schedule tasks and organize knowledge on your behalf, within your permissions.'
+      },
       welcome: {
         title: 'Welcome to WeKnora',
         desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.'
@@ -1042,6 +1051,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelNextcloud: 'Nextcloud',
     channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
@@ -2366,6 +2376,9 @@ export default {
       mineruTierAdvanced: 'advanced (VLM, highest quality, slowest)',
       mineruTierHint: 'Only applies to MinerU 4.0+; available tiers depend on the server --tier flag.',
       mineruLegacySection: 'Legacy options (MinerU 3.x and earlier)',
+      mineruEffortLabel: 'Hybrid parsing effort',
+      mineruEffortDefault: 'Server default (medium)',
+      mineruEffortHint: 'High enables image and chart analysis on legacy hybrid backends, but takes longer.',
       mineruLegacySectionHint: 'MinerU 4.0 removed these request parameters, so they are ignored by 4.0+ servers; configure the VLM server on the MinerU side instead.',
       paddleocrVlEndpointPlaceholder: 'e.g. http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'Base URL of the full PaddleOCR-VL pipeline service; no /layout-parsing suffix needed',
@@ -2519,6 +2532,14 @@ export default {
     baseUrlLabel: 'Instance URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'Enter API key',
+    clients: {
+      label: 'Search & page reading',
+      search: 'Search',
+      fetch: 'Page reading',
+      viaApi: '{name} API',
+      local: 'Built-in page reader',
+      help: 'Search results come from this provider; agents read page content with the reader above.'
+    },
     toasts: {
       providerCreated: 'Search provider created',
       providerUpdated: 'Search provider updated',
@@ -2762,6 +2783,68 @@ export default {
     clearConfirm: 'Remove your own value for {name}? The workspace value, if there is one, applies again afterwards.',
     clearSuccess: 'Your value was removed.',
     updatedAt: 'You set this on {time}'
+  },
+  defaultSettings: {
+    loadFailed: 'Could not load defaults. Retry before editing.',
+    title: 'Defaults',
+    description: 'Manage the models and search engine this workspace uses by default, in one place.',
+    introTitle: 'Used whenever a resource does not pick its own',
+    introDescription: 'A model chosen on an agent, knowledge base or conversation always wins. Otherwise the workspace default here applies, and if none is set, the deployment\'s built-in default is used.',
+    readOnly: 'Only workspace admins can change these. You can see which defaults are in effect.',
+    modelGroup: 'Models',
+    webSearchGroup: 'Web search',
+    unsetPlaceholder: 'Not set (system default)',
+    followChatPlaceholder: 'Not set (follow default chat model)',
+    slots: {
+      chat: {
+        label: 'Default chat model',
+        description: 'Used by new agents and Q&A, and as the fallback for background tasks.',
+        none: 'No chat model is available, so Q&A and background generation will not work.',
+      },
+      utility: {
+        label: 'Lightweight generation model',
+        description: 'Used for short tasks such as session titles, MCP usage instructions and memory extraction. A faster, cheaper model works well.',
+        none: 'No chat model is available, so titles and instructions cannot be generated.',
+      },
+      embedding: {
+        label: 'Default embedding model',
+        description: 'Preselected for new knowledge bases. Existing knowledge bases are unchanged.',
+        none: 'No embedding model is available, so knowledge bases cannot be created.',
+      },
+      rerank: {
+        label: 'Default rerank model',
+        description: 'Used by searches and built-in agents that have no rerank model of their own.',
+        none: 'No rerank model is available, so search results keep their retrieval order.',
+      },
+      vlm: {
+        label: 'Default vision model',
+        description: 'Default choice for image understanding and multimodal parsing.',
+        none: 'No vision model is available, so image understanding is unavailable.',
+      },
+      asr: {
+        label: 'Default speech recognition model',
+        description: 'Default choice for audio and video transcription.',
+        none: 'No speech recognition model is available, so transcription is unavailable.',
+      },
+    },
+    hints: {
+      workspace: 'Using the workspace setting.',
+      system: 'Not set. Currently using the system default: {name}',
+      auto: 'Not set. Currently using the first available model: {name}',
+      followChat: 'Not set. Following the default chat model: {name}',
+      staleFallback: 'The selected model was deleted or is unavailable. Currently falling back to: {name}',
+      staleNone: 'The selected model was deleted or is unavailable, and there is nothing to fall back to.',
+    },
+    webSearch: {
+      label: 'Default search engine',
+      description: 'Used when web search is on for an agent that has no search engine of its own.',
+      unset: 'No default search engine. Agents without their own search engine cannot search the web.',
+      placeholder: 'Select a search engine',
+    },
+    toasts: {
+      saveSuccess: 'Defaults saved',
+      saveFailed: 'Save failed: {message}',
+    },
   },
   memoryWorkspaceSettings: {
     title: 'Long-term memory',
@@ -3064,6 +3147,28 @@ export default {
     expand: 'Expand',
     collapse: 'Collapse'
   },
+  mentionBrowser: {
+    browse: "Browse by folder",
+    path: "Folder path",
+    root: "Root",
+    searchFolder: "Search this folder",
+    searchKb: "Search knowledge bases",
+    subtree: "Search includes subfolders.",
+    wholeKb: "The whole knowledge base is still selected; picking a file does not narrow that scope.",
+    tags: "Existing tags still filter the selected files.",
+    folderCount: "{count} documents including subfolders",
+    selected: "Already selected",
+    deleting: "Being deleted",
+    unsupported: "Unsupported by this agent",
+    forbidden: "You no longer have access to this content.",
+    missing: "This folder is no longer available. Go back and select it again.",
+    error: "Could not load this folder. Please retry.",
+    retry: "Retry",
+    empty: "No files in this view.",
+    previous: "Previous",
+    next: "Next",
+    page: "Page {page} · {total} documents",
+  },
   mentionDetail: {
     readOnlyFromAgent: 'Read-only in this conversation; not shown in Knowledge Base list',
     faqCount: '{count} Q&A entries',
@@ -3266,6 +3371,18 @@ export default {
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
+    voiceTooltip: 'Hold to talk ({shortcut})',
+    voicePreparing: 'Opening microphone, start talking when the button turns red',
+    voiceRecording: 'Recording, release to finish',
+    voiceReleasedEarly: 'The microphone was not ready yet. Hold until the button turns red, then talk.',
+    voiceTranscribing: 'Transcribing…',
+    voiceUnsupported: 'This browser does not support audio recording',
+    voiceInsecureContext: 'Voice input requires HTTPS or localhost',
+    voicePermissionDenied: 'Microphone access was denied. Allow it in your browser settings.',
+    voiceDeviceError: 'No microphone available',
+    voiceDecodeError: 'Could not process the recording. Please try again.',
+    voiceTranscribeFailed: "Transcription failed. Check the agent's ASR model settings.",
+    voiceEmptyResult: 'No speech detected',
     goToAgentSettings: 'Go to agent settings'
   },
   createChat: {
@@ -3348,6 +3465,16 @@ export default {
     },
   },
   embedPublish: {
+    history: "Chat history",
+    historyHint: "The latest 30 chats are saved in this browser only. Clearing history does not delete server messages.",
+    historyEmpty: "No saved chats",
+    historyUntitled: "Untitled chat",
+    historyClear: "Clear local history",
+    historyClearConfirm: "Clear this browser’s history and start a new chat? Server messages will be kept.",
+    historyRetry: "Retry",
+    historyLoadFailed: "Could not open the chat. Please try again.",
+    historyUnavailable: "This chat is no longer available and was removed from local history.",
+
     create: 'New embed channel',
     channelsTitle: 'Embed channels',
     disabled: 'Disabled',
@@ -3671,6 +3798,8 @@ export default {
       synthesisModelLabel: 'Wiki Synthesis Model',
       synthesisModelPlaceholder: 'Select the LLM model for Wiki generation',
       synthesisModelTip: 'Falls back to the summary model if not set',
+      autoGenerateLabel: 'Automatically generate Wiki pages',
+      autoGenerateTip: 'When disabled, Wiki pages remain available for browsing and manual editing, but document processing will not call the LLM to generate or update pages',
       extractionGranularityLabel: 'Extraction Granularity',
       contentInstructionsLabel: 'Wiki Content Instructions',
       contentInstructionsTip: 'Control emphasis and tone for summaries, pages, and the index. Citation, merge, and factuality rules remain system-owned. Reprocess existing content to apply changes.',
@@ -3914,6 +4043,9 @@ export default {
       cardOverviewPrimary: '{returned} / {total} nodes',
       cardOverviewHintTruncated: 'Double-click any node to focus on its subgraph',
       cardOverviewHintFull: 'Showing every node in the knowledge base',
+      cardOverviewDetailHint: 'Showing the top of the hierarchy. Raise detail to see more pages.',
+      graphDetailLevel: 'Detail',
+      graphDetailHint: 'Higher levels show more linked pages',
       cardRelatedNodes: '{count} related nodes',
       helpButtonTitle: 'Help',
       helpTitle: 'Canvas actions',
@@ -4232,6 +4364,9 @@ export default {
       title: 'Advanced Settings',
       description: 'Configure question generation and other advanced features',
       questionGeneration: {
+        modelLabel: 'Question Generation Model',
+        modelDescription: 'Leave empty to use the knowledge-base summary model.',
+        modelPlaceholder: 'Select a question generation model',
         label: 'AI Question Generation',
         description: 'Generate related questions for each chunk using LLM during document parsing to improve retrieval recall. Enabling this will increase document parsing time.',
         countLabel: 'Question Count',
@@ -4674,6 +4809,8 @@ export default {
     buildTimeDescription: 'Time when the system was built',
     goVersionLabel: 'Go Version',
     goVersionDescription: 'Go language version used by the backend',
+    docreaderVersionLabel: 'Docreader Version',
+    docreaderVersionDescription: 'Build version of the current document parsing service (weknora-docreader)',
     startedAtLabel: 'Service started at',
     startedAtDescription: 'When the current backend process last started',
     uptimeLabel: 'Uptime',
@@ -5811,6 +5948,7 @@ export default {
         bindings: {
           embedding_model: 'Embedding model',
           summary_model: 'Summary model',
+          question_model: 'Question generation model',
           image_processing_model: 'Image processing model',
           vlm_model: 'Vision model',
           asr_model: 'Speech recognition model',
@@ -8149,6 +8287,17 @@ export default {
       paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole project',
       addProject: 'Add project', projectRequired: 'Add at least one GitLab project',
     },
+    nextcloud: {
+      baseUrl: 'Nextcloud URL',
+      baseUrlHint: 'Installation URL, for example https://nextcloud.example.com/cloud, without /remote.php/dav. Private deployments must use the existing SSRF_WHITELIST.',
+      username: 'Username',
+      appPassword: 'App password',
+      appPasswordHint: 'Create an app password under Personal settings → Security → Devices & sessions. Use the generated username and app password.',
+      selectionRequired: 'Select at least one folder or file',
+      includeExtensions: 'Include extensions (optional)',
+      excludeExtensions: 'Exclude extensions (optional)',
+      extensionsHint: 'Comma-separated extensions, for example .pdf, .md. Empty includes all supported formats; exclusions take priority. Changing filters also changes the deletion scope.',
+    },
     seafile: {
       baseUrl: 'Seafile URL', apiToken: 'API token',
       apiTokenHint: 'Generate it under "Settings → Web API token" in Seafile; the account only needs read access to the libraries you select, and the token is never sent with file downloads.',
@@ -8168,6 +8317,10 @@ export default {
     guideStep1_notion: 'Open the page or database you want to sync in Notion',
     guideStep2_notion: 'Click the "···" menu at the top right, select "Connect to" or "Add connections"',
     guideStep3_notion: 'Search and select your Integration app, then come back and click Retry',
+    noResourcesDesc_nextcloud: 'No accessible folders or supported files were found',
+    guideStep1_nextcloud: 'Sign in to Nextcloud and verify read access to the selected folders',
+    guideStep2_nextcloud: 'Create an app password under Personal settings → Security → Devices & sessions',
+    guideStep3_nextcloud: 'Replace the credentials here, then retry loading resources',
     noResourcesDesc_seafile: 'The token can reach no libraries, or every library is encrypted (encrypted libraries cannot be synced)',
     guideStep1_seafile: 'Sign in to Seafile and confirm the account can read at least one unencrypted library',
     guideStep2_seafile: 'Generate or regenerate the token under "Settings → Web API token"',
@@ -8231,6 +8384,7 @@ export default {
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
       gitlab: 'GitLab',
+      nextcloud: 'Nextcloud',
       seafile: 'Seafile'
     },
     connectorDesc: {
@@ -8245,6 +8399,7 @@ export default {
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
       gitlab: 'Sync files from GitLab projects',
+      nextcloud: 'Sync folders and files from Nextcloud over WebDAV',
       seafile: 'Sync folders and files from Seafile libraries'
     },
     drive: {
@@ -8390,6 +8545,14 @@ export default {
       deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',
       deletion_failed: 'Deletion failed; see server logs',
       ingest_failed: 'Ingest failed; see server logs',
+      nextcloud_permission_denied: 'Access to the Nextcloud file was denied; check account permissions.',
+      nextcloud_not_found: 'The Nextcloud file disappeared after listing; the next sync retries it.',
+      nextcloud_file_too_large: 'The Nextcloud file exceeds MAX_FILE_SIZE_MB.',
+      nextcloud_empty_file: 'The Nextcloud file is empty and was skipped.',
+      nextcloud_source_changed: 'The Nextcloud file changed during download; the next sync retries it.',
+      nextcloud_invalid_response: 'Nextcloud returned an invalid or incomplete WebDAV response.',
+      nextcloud_ssrf_blocked: 'The Nextcloud request was blocked by the SSRF policy; check SSRF_WHITELIST.',
+      nextcloud_fetch_failed: 'Failed to fetch the file from Nextcloud; the next sync retries it.',
       seafile_permission_denied: 'Access to the Seafile file was denied; check the library permissions of the token owner.',
       seafile_not_found: 'The Seafile file no longer exists or was moved; the next sync retries it.',
       seafile_file_too_large: 'The Seafile file exceeds the size limit; raise MAX_FILE_SIZE_MB or shrink the file.',

@@ -609,6 +609,11 @@ export default {
       references: '出典'
     }
   },
+  assistantEntryGuide: {
+    stepOf: 'v0.9.0 の新機能',
+    skip: 'わかりました',
+    interactHint: '強調表示された入口をクリックしてアシスタントを開いてみましょう。',
+  },
   newUserGuide: {
     stepOf: '{current} / {total}',
     skip: 'スキップ',
@@ -617,6 +622,10 @@ export default {
     done: '完了',
     reopen: 'プロダクトツアー',
     steps: {
+      assistant: {
+        title: 'WeKnora アシスタントのご紹介',
+        desc: 'WeKnora のバージョン、機能、設定について質問できます。現在のページをもとに、あなたの権限でエージェントの作成、定期タスクの設定、ナレッジの整理も行えます。'
+      },
       welcome: {
         title: 'WeKnoraへようこそ',
         desc: '数ステップでナレッジベース、チャット、エージェントの使い方をご紹介します。「次へ」をクリックして開始してください。'
@@ -1042,6 +1051,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelNextcloud: 'Nextcloud',
     channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: 'アップロード',
@@ -2366,6 +2376,9 @@ export default {
       mineruTierAdvanced: 'advanced（VLM・最高品質・最も低速）',
       mineruTierHint: 'MinerU 4.0 以降でのみ有効です。利用可能なティアはサーバーの --tier 設定によります。',
       mineruLegacySection: '旧バージョン向け設定（MinerU 3.x 以前）',
+      mineruEffortLabel: 'ハイブリッド解析の精度',
+      mineruEffortDefault: 'サーバーの既定値（medium）',
+      mineruEffortHint: 'high は旧版ハイブリッド解析で画像と図表の分析を有効にしますが、処理時間が長くなります。',
       mineruLegacySectionHint: 'MinerU 4.0 ではこれらのリクエストパラメータが廃止されたため、4.0 以降のサーバーでは無視されます。VLM サーバーは MinerU 側で設定してください。',
       paddleocrVlEndpointPlaceholder: '例: http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'PaddleOCR-VLパイプラインサービスのベースURLです。末尾に/layout-parsingを付ける必要はありません',
@@ -2519,6 +2532,14 @@ export default {
     baseUrlLabel: 'インスタンスURL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'APIキーを入力',
+    clients: {
+      label: '検索とページ読み取り',
+      search: '検索',
+      fetch: 'ページ読み取り',
+      viaApi: '{name} API',
+      local: '内蔵ページリーダー',
+      help: '検索結果はこのプロバイダから取得し、エージェントは上記の方法でページ本文を読み取ります。'
+    },
     toasts: {
       providerCreated: '検索プロバイダを作成しました',
       providerUpdated: '検索プロバイダを更新しました',
@@ -2762,6 +2783,68 @@ export default {
     clearConfirm: '{name}に設定した自分の値を削除しますか？ワークスペースの値がある場合は、以後そちらが適用されます。',
     clearSuccess: '自分の値を削除しました。',
     updatedAt: '{time}に設定しました'
+  },
+  defaultSettings: {
+    loadFailed: 'デフォルト設定を読み込めませんでした。再試行してから編集してください。',
+    title: 'デフォルト設定',
+    description: 'このワークスペースの各機能が既定で使うモデルと検索エンジンをまとめて管理します。',
+    introTitle: 'リソース側で指定がない場合に使われます',
+    introDescription: 'エージェント、ナレッジベース、会話で明示的に選んだモデルが優先されます。未選択の場合はここのワークスペース既定値、それも未設定ならデプロイ組み込みの既定モデルが使われます。',
+    readOnly: '変更できるのはワークスペース管理者のみです。現在有効な既定値は確認できます。',
+    modelGroup: 'モデル',
+    webSearchGroup: 'ウェブ検索',
+    unsetPlaceholder: '未設定（システム既定）',
+    followChatPlaceholder: '未設定（既定のチャットモデルに従う）',
+    slots: {
+      chat: {
+        label: '既定のチャットモデル',
+        description: '新規エージェントと Q&A で使われ、バックグラウンド処理の代替モデルにもなります。',
+        none: '利用可能なチャットモデルがないため、Q&A とバックグラウンド生成は使えません。',
+      },
+      utility: {
+        label: '軽量生成モデル',
+        description: 'セッションタイトル、MCP 利用説明、記憶抽出などの短いテキスト生成に使います。高速で安価なモデルがおすすめです。',
+        none: '利用可能なチャットモデルがないため、タイトルや説明を生成できません。',
+      },
+      embedding: {
+        label: '既定の Embedding モデル',
+        description: '新規ナレッジベース作成時に既定で選ばれます。既存のナレッジベースには影響しません。',
+        none: '利用可能な Embedding モデルがないため、ナレッジベースを作成できません。',
+      },
+      rerank: {
+        label: '既定の Rerank モデル',
+        description: '独自のリランクモデルを持たない検索と組み込みエージェントで使われます。',
+        none: '利用可能な Rerank モデルがないため、検索結果は取得順のまま返されます。',
+      },
+      vlm: {
+        label: '既定のビジョンモデル',
+        description: '画像理解とマルチモーダル解析の既定の選択です。',
+        none: '利用可能なビジョンモデルがないため、画像理解は使えません。',
+      },
+      asr: {
+        label: '既定の音声認識モデル',
+        description: '音声・動画の文字起こしの既定の選択です。',
+        none: '利用可能な音声認識モデルがないため、文字起こしは使えません。',
+      },
+    },
+    hints: {
+      workspace: 'ワークスペースの設定を使用中です。',
+      system: '未設定。現在はシステム既定を使用中：{name}',
+      auto: '未設定。現在は最初に利用可能なモデルを使用中：{name}',
+      followChat: '未設定。既定のチャットモデルに従います：{name}',
+      staleFallback: '選択したモデルは削除されたか利用できません。現在の代替：{name}',
+      staleNone: '選択したモデルは削除されたか利用できず、代替できるモデルもありません。',
+    },
+    webSearch: {
+      label: '既定の検索エンジン',
+      description: '独自の検索エンジンを持たないエージェントでウェブ検索が有効なときに使われます。',
+      unset: '既定の検索エンジンが未設定です。独自の検索エンジンを持たないエージェントはウェブ検索できません。',
+      placeholder: '検索エンジンを選択',
+    },
+    toasts: {
+      saveSuccess: 'デフォルト設定を保存しました',
+      saveFailed: '保存に失敗しました：{message}',
+    },
   },
   memoryWorkspaceSettings: {
     title: '長期メモリ',
@@ -3064,6 +3147,28 @@ export default {
     expand: '展開',
     collapse: '折りたたむ'
   },
+  mentionBrowser: {
+    browse: "フォルダーで参照",
+    path: "フォルダーパス",
+    root: "ルート",
+    searchFolder: "このフォルダーを検索",
+    searchKb: "ナレッジベースを検索",
+    subtree: "サブフォルダーも検索します。",
+    wholeKb: "ナレッジベース全体が選択されています。ファイルの選択で範囲は狭まりません。",
+    tags: "既存のタグで選択したファイルが絞り込まれます。",
+    folderCount: "サブフォルダーを含め {count} 件",
+    selected: "選択済み",
+    deleting: "削除中",
+    unsupported: "このエージェントでは未対応の形式",
+    forbidden: "この内容へのアクセス権がありません。",
+    missing: "フォルダーが無効です。戻って選択し直してください。",
+    error: "読み込みに失敗しました。再試行してください。",
+    retry: "再試行",
+    empty: "この表示にファイルはありません。",
+    previous: "前へ",
+    next: "次へ",
+    page: "{page} ページ · {total} 件",
+  },
   mentionDetail: {
     readOnlyFromAgent: 'この会話内でのみ読み取り専用。ナレッジベース一覧には表示されません',
     faqCount: 'Q&A{count}件',
@@ -3266,6 +3371,18 @@ export default {
     kbDisabledByAgent: '現在のエージェントによりナレッジベースが無効になっています',
     modelLockedByAgent: '現在のエージェントによりモデル選択がロックされています',
     imageUploadDisabledByAgent: 'このエージェントでは画像アップロードが有効になっていません',
+    voiceTooltip: '押したまま話す（{shortcut}）',
+    voicePreparing: 'マイクを準備しています。ボタンが赤くなってから話してください',
+    voiceRecording: '録音中、離すと終了します',
+    voiceReleasedEarly: 'マイクの準備ができていません。ボタンが赤くなるまで押したまま話してください',
+    voiceTranscribing: '音声を認識しています…',
+    voiceUnsupported: 'このブラウザは録音に対応していません',
+    voiceInsecureContext: '音声入力には HTTPS または localhost でのアクセスが必要です',
+    voicePermissionDenied: 'マイクを使用できません。ブラウザでマイクの使用を許可してください',
+    voiceDeviceError: '利用可能なマイクが見つかりません',
+    voiceDecodeError: '録音の処理に失敗しました。もう一度お試しください',
+    voiceTranscribeFailed: '音声認識に失敗しました。エージェントの ASR モデル設定を確認してください',
+    voiceEmptyResult: '音声が認識されませんでした',
     goToAgentSettings: 'エージェント設定に移動'
   },
   createChat: {
@@ -3348,6 +3465,16 @@ export default {
     },
   },
   embedPublish: {
+    history: "チャット履歴",
+    historyHint: "最新 30 件をこのブラウザーに保存します。履歴を消去してもサーバーのメッセージは削除されません。",
+    historyEmpty: "保存済みのチャットはありません",
+    historyUntitled: "無題のチャット",
+    historyClear: "ローカル履歴を消去",
+    historyClearConfirm: "履歴を消去して新しいチャットを開始しますか？サーバーのメッセージは保持されます。",
+    historyRetry: "再試行",
+    historyLoadFailed: "チャットを開けませんでした。もう一度お試しください。",
+    historyUnavailable: "このチャットは利用できないため、ローカル履歴から削除しました。",
+
     create: '埋め込みチャネルを作成',
     channelsTitle: '埋め込みチャネル',
     disabled: '無効',
@@ -3671,6 +3798,8 @@ export default {
       synthesisModelLabel: 'Wiki生成モデル',
       synthesisModelPlaceholder: 'Wiki生成に使用するLLMモデルを選択',
       synthesisModelTip: '未設定の場合は要約モデルが使用されます',
+      autoGenerateLabel: 'Wikiページを自動生成',
+      autoGenerateTip: '無効にしてもWikiページの閲覧と手動編集は利用できますが、ドキュメント処理でLLMによるページの生成や更新は行われません',
       extractionGranularityLabel: '抽出の粒度',
       contentInstructionsLabel: 'Wiki本文の生成指示',
       contentInstructionsTip: '要約・ページ・インデックスの重点やトーンを制御します。引用、統合、事実性のルールはシステム側で固定されます。変更を反映するには既存コンテンツを再処理してください。',
@@ -3914,6 +4043,9 @@ export default {
       cardOverviewPrimary: '{returned} / {total}ノード',
       cardOverviewHintTruncated: 'ノードをダブルクリックすると、そのサブグラフに焦点を当てます',
       cardOverviewHintFull: 'ナレッジベース内のすべてのノードを表示しています',
+      cardOverviewDetailHint: '階層の上位だけを表示しています。詳細度を上げるとさらに表示されます',
+      graphDetailLevel: '詳細度',
+      graphDetailHint: '上げるほどリンクされたページが増えます',
       cardRelatedNodes: '関連ノード{count}個',
       helpButtonTitle: 'ヘルプ',
       helpTitle: 'キャンバスの操作',
@@ -4232,6 +4364,9 @@ export default {
       title: '詳細設定',
       description: '質問生成やその他の高度な機能を設定します',
       questionGeneration: {
+        modelLabel: '質問生成モデル',
+        modelDescription: '未選択の場合はナレッジベースの要約モデルを使用します。',
+        modelPlaceholder: '質問生成モデルを選択',
         label: 'AI質問生成',
         description: 'ドキュメント解析時にLLMで各チャンクの関連質問を生成し、検索のリコールを向上させます。有効にするとドキュメントの解析時間が長くなります。',
         countLabel: '質問数',
@@ -4674,6 +4809,8 @@ export default {
     buildTimeDescription: 'システムがビルドされた日時',
     goVersionLabel: 'Goバージョン',
     goVersionDescription: 'バックエンドが使用しているGo言語のバージョン',
+    docreaderVersionLabel: 'Docreaderバージョン',
+    docreaderVersionDescription: '現在の文書解析サービス（weknora-docreader）のビルドバージョン',
     startedAtLabel: 'サービス起動日時',
     startedAtDescription: '現在のバックエンドプロセスが最後に起動した日時',
     uptimeLabel: '稼働時間',
@@ -5811,6 +5948,7 @@ export default {
         bindings: {
           embedding_model: '埋め込みモデル',
           summary_model: '要約モデル',
+          question_model: '質問生成モデル',
           image_processing_model: '画像処理モデル',
           vlm_model: '視覚モデル',
           asr_model: '音声認識モデル',
@@ -8149,6 +8287,17 @@ export default {
       paths: 'ディレクトリ', pathsPlaceholder: '1行に1つのディレクトリを入力します。空欄の場合はプロジェクト全体を同期します',
       addProject: 'プロジェクトを追加', projectRequired: 'GitLabプロジェクトを1つ以上追加してください',
     },
+    nextcloud: {
+      baseUrl: 'Nextcloud URL',
+      baseUrlHint: 'https://nextcloud.example.com/cloud のようなインストール先を指定します。/remote.php/dav は含めません。プライベート環境では既存の SSRF_WHITELIST を設定してください。',
+      username: 'ユーザー名',
+      appPassword: 'アプリパスワード',
+      appPasswordHint: '「個人設定 → セキュリティ → デバイスとセッション」で作成したユーザー名とアプリパスワードを使用します。',
+      selectionRequired: 'フォルダーまたはファイルを1つ以上選択してください',
+      includeExtensions: '含める拡張子（任意）',
+      excludeExtensions: '除外する拡張子（任意）',
+      extensionsHint: '.pdf, .md のようにカンマで区切ります。含める拡張子が空なら対応する全形式が対象です。除外が優先され、変更は削除の照合範囲にも影響します。',
+    },
     seafile: {
       baseUrl: 'Seafile URL', apiToken: 'APIトークン',
       apiTokenHint: 'Seafileの「設定 → Web APIトークン」で生成します。アカウントに選択したライブラリの読み取り権限があれば十分で、トークンはファイルのダウンロード要求には送信されません。',
@@ -8168,6 +8317,10 @@ export default {
     guideStep1_notion: '同期したいページまたはデータベースをNotionで開きます',
     guideStep2_notion: '右上の「···」メニューをクリックし、「Connect to」または「Add connections」を選択します',
     guideStep3_notion: '作成したIntegrationアプリを検索して選択し、戻って「再試行」をクリックします',
+    noResourcesDesc_nextcloud: 'アクセス可能なフォルダーや対応ファイルがありません',
+    guideStep1_nextcloud: 'Nextcloud にログインし、対象フォルダーの読み取り権限を確認します',
+    guideStep2_nextcloud: '「個人設定 → セキュリティ → デバイスとセッション」でアプリパスワードを作成します',
+    guideStep3_nextcloud: 'ここで認証情報を置き換え、リソースを再読み込みします',
     noResourcesDesc_seafile: 'このトークンでアクセスできるライブラリがないか、すべて暗号化ライブラリです（暗号化ライブラリは同期できません）',
     guideStep1_seafile: 'Seafileにサインインし、アカウントが暗号化されていないライブラリを1つ以上読めることを確認します',
     guideStep2_seafile: '「設定 → Web APIトークン」でトークンを生成または再生成します',
@@ -8231,6 +8384,7 @@ export default {
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
       gitlab: 'GitLab',
+      nextcloud: 'Nextcloud',
       seafile: 'Seafile'
     },
     connectorDesc: {
@@ -8245,6 +8399,7 @@ export default {
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
       gitlab: 'GitLabプロジェクトからファイルを同期します',
+      nextcloud: 'WebDAV 経由で Nextcloud のフォルダーとファイルを同期',
       seafile: 'Seafileライブラリのフォルダとファイルを同期します'
     },
     drive: {
@@ -8390,6 +8545,14 @@ export default {
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',
       deletion_failed: '削除に失敗しました。サーバログを確認してください',
       ingest_failed: '取り込みに失敗しました。サーバログを確認してください',
+      nextcloud_permission_denied: 'Nextcloud ファイルへのアクセスが拒否されました。権限を確認してください。',
+      nextcloud_not_found: '一覧取得後に Nextcloud ファイルが消失しました。次回再試行します。',
+      nextcloud_file_too_large: 'Nextcloud ファイルが MAX_FILE_SIZE_MB を超えています。',
+      nextcloud_empty_file: 'Nextcloud ファイルが空のためスキップしました。',
+      nextcloud_source_changed: 'ダウンロード中に Nextcloud ファイルが変更されました。次回再試行します。',
+      nextcloud_invalid_response: 'Nextcloud の WebDAV 応答が無効または不完全です。',
+      nextcloud_ssrf_blocked: 'SSRF ポリシーが Nextcloud リクエストを拒否しました。SSRF_WHITELIST を確認してください。',
+      nextcloud_fetch_failed: 'Nextcloud ファイルの取得に失敗しました。次回再試行します。',
       seafile_permission_denied: 'Seafileファイルへのアクセスが拒否されました。トークン所有者のライブラリ権限を確認してください。',
       seafile_not_found: 'Seafileファイルが存在しないか移動されました。次回の同期で再試行します。',
       seafile_file_too_large: 'Seafileファイルがサイズ上限を超えています。MAX_FILE_SIZE_MBを引き上げるかファイルを小さくしてください。',

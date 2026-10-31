@@ -294,47 +294,40 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 	return nil
 }
 
-// UpdateMeta updates bookkeeping / provenance fields WITHOUT incrementing the
-// version number. "Content" for versioning purposes is the user-visible page
-// body (title/content/summary/page_type/status); everything else — links,
-// source refs, chunk refs, page_metadata — is considered bookkeeping and is
-// refreshed here so the version counter only advances on real edits.
-//
-// Used by link maintenance, re-ingest (same-content case), and status changes.
+// UpdateMeta 保存来源、状态和目录等元数据，不修改反链或版本。
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
 	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
 		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
 				return err
 			}
-			// 入链可能在模型生成期间被其他页面更新，本页贡献保存不覆盖它。
-			return updateWikiPageMeta(tx, page, false)
+			return updateWikiPageMeta(tx, page)
 		})
 	}
-	return updateWikiPageMeta(r.db.WithContext(ctx), page, true)
+	return updateWikiPageMeta(r.db.WithContext(ctx), page)
 }
 
-// updateWikiPageMeta 保留普通元数据写的兼容语义；受快照保护的贡献写不包含入链。
-func updateWikiPageMeta(db *gorm.DB, page *types.WikiPage, includeInLinks bool) error {
-	updates := map[string]interface{}{
-		"out_links":     page.OutLinks,
-		"aliases":       page.Aliases,
-		"status":        page.Status,
-		"source_refs":   page.SourceRefs,
-		"chunk_refs":    page.ChunkRefs,
-		"page_metadata": page.PageMetadata,
-		"parent_slug":   page.ParentSlug,
-		"folder_id":     page.FolderID,
-		"category_path": page.CategoryPath,
-		"wiki_path":     page.WikiPath,
-		"depth":         page.Depth,
-		"sort_order":    page.SortOrder,
-		"updated_at":    page.UpdatedAt,
-	}
-	if includeInLinks {
-		updates["in_links"] = page.InLinks
-	}
-	result := db.Model(page).Where("id = ?", page.ID).Updates(updates)
+// updateWikiPageMeta 保留主线的窄字段写入；普通保存与快照保护的保存都不覆盖反链。
+func updateWikiPageMeta(db *gorm.DB, page *types.WikiPage) error {
+	// 反链由专用原子操作维护，避免这份元数据快照覆盖并发添加的链接。
+	result := db.
+		Model(page).
+		Where("id = ?", page.ID).
+		Updates(map[string]interface{}{
+			"out_links":     page.OutLinks,
+			"aliases":       page.Aliases,
+			"status":        page.Status,
+			"source_refs":   page.SourceRefs,
+			"chunk_refs":    page.ChunkRefs,
+			"page_metadata": page.PageMetadata,
+			"parent_slug":   page.ParentSlug,
+			"folder_id":     page.FolderID,
+			"category_path": page.CategoryPath,
+			"wiki_path":     page.WikiPath,
+			"depth":         page.Depth,
+			"sort_order":    page.SortOrder,
+			"updated_at":    page.UpdatedAt,
+		})
 	if result.Error != nil {
 		return result.Error
 	}
