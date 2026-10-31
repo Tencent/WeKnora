@@ -196,6 +196,7 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 		Metadata:         metadataJSON,
 	}
 
+	processOverrides = compactProcessOverrides(kb, processOverrides)
 	if processOverrides != nil {
 		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
 			logger.Errorf(ctx, "Failed to set process overrides: %v", err)
@@ -672,6 +673,7 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 	if err != nil {
 		return nil, err
 	}
+	processOverrides = compactProcessOverrides(kb, processOverrides)
 	if processOverrides != nil {
 		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
 			logger.Errorf(ctx, "Failed to set process overrides: %v", err)

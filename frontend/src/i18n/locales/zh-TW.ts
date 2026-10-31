@@ -8474,8 +8474,9 @@ export default {
     confirmManual: '確認發布並解析',
     titleReparse: '重新解析確認',
     confirmReparse: '確認並重新解析',
+    resetToKnowledgeBase: '恢復為知識庫目前設定',
     reparseSource: '待重新解析文件',
-    reparseHint: '將沿用上次解析的設定，可在此調整',
+    reparseHint: '未改動的項目跟隨知識庫目前設定。上次單獨改過的項目會保留，可恢復為知識庫設定。',
     manualCharCount: '{count} 個字符',
     pdfForceScanned: {
       label: '按掃描件解析 PDF',
