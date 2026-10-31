@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
@@ -128,6 +130,127 @@ func TestReduceSlugUpdatesSurfacesAGenuineWriteError(t *testing.T) {
 	require.False(t, deferred)
 }
 
+func TestReduceSlugUpdatesDefersConcurrentManualEdit(t *testing.T) {
+	pageSvc, page := newWikiWriteGuardStore(t, "generated body")
+	svc := &wikiIngestService{wikiService: pageSvc, knowledgeSvc: liveKnowledgeStub{}}
+	model := &blockingTemplateChatModel{started: make(chan struct{}), release: make(chan struct{})}
+	batchCtx := &WikiBatchContext{
+		SlugTitleMany: func(context.Context, []string) map[string]string { return nil },
+	}
+	updates := []SlugUpdate{{
+		Slug: page.Slug, Type: types.WikiPageTypeEntity,
+		KnowledgeID: "k-row-guard", DocTitle: "Source", SourceRef: "k-row-guard|Source",
+		Item: extractedItem{Name: "Source", Description: "new evidence"},
+	}}
+	type result struct {
+		changed  bool
+		deferred bool
+		err      error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		changed, _, _, deferred, err := svc.reduceSlugUpdates(
+			context.Background(), model, page.KnowledgeBaseID, page.Slug, updates, page.TenantID, batchCtx, nil)
+		resultCh <- result{changed: changed, deferred: deferred, err: err}
+	}()
+	<-model.started
+
+	manual := *page
+	manual.Content = "generated body\nmanual correction"
+	updatedManual, err := pageSvc.UpdatePage(
+		types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual,
+	)
+	require.NoError(t, err)
+	close(model.release)
+	got := <-resultCh
+	require.NoError(t, got.err)
+	require.False(t, got.changed)
+	require.True(t, got.deferred)
+
+	stored, err := pageSvc.GetPageBySlug(context.Background(), page.KnowledgeBaseID, page.Slug)
+	require.NoError(t, err)
+	require.Equal(t, updatedManual.Content, stored.Content)
+	require.Equal(t, updatedManual.Version, stored.Version)
+	require.Empty(t, stored.SourceRefs)
+}
+
+func TestReduceSlugUpdatesPreservesManualEditSavedBeforePageRead(t *testing.T) {
+	pageSvc, page := newWikiWriteGuardStore(t, "generated body")
+	svc := &wikiIngestService{wikiService: pageSvc, knowledgeSvc: liveKnowledgeStub{}}
+	rebuildStartedAt := time.Now().Add(-time.Minute)
+	manual := *page
+	manual.Content = "generated body\nmanual correction"
+	updatedManual, err := pageSvc.UpdatePage(
+		types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual,
+	)
+	require.NoError(t, err)
+
+	updates := []SlugUpdate{{
+		Slug: page.Slug, Type: types.WikiPageTypeEntity,
+		KnowledgeID: "k-row-guard", DocTitle: "Source", SourceRef: "k-row-guard|Source",
+		Item: extractedItem{Name: "Source", Description: "new evidence"},
+	}}
+	batchCtx := &WikiBatchContext{
+		RunStartedAt:                  time.Now(),
+		RebuildStartedAtByKnowledgeID: map[string]time.Time{"k-row-guard": rebuildStartedAt},
+		SlugTitleMany:                 func(context.Context, []string) map[string]string { return nil },
+	}
+	for i := 0; i < 2; i++ { // Same rebuild's retry must not create another issue.
+		changed, reason, _, deferred, err := svc.reduceSlugUpdates(context.Background(),
+			&templateCaptureChatModel{response: "regenerated body"}, page.KnowledgeBaseID,
+			page.Slug, updates, page.TenantID, batchCtx, nil)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, "manual_conflict", reason)
+		require.False(t, deferred)
+	}
+	stored, err := pageSvc.GetPageBySlug(context.Background(), page.KnowledgeBaseID, page.Slug)
+	require.NoError(t, err)
+	require.Equal(t, updatedManual.Content, stored.Content)
+	require.Equal(t, updatedManual.Version, stored.Version)
+	issues, err := pageSvc.ListIssues(context.Background(), page.KnowledgeBaseID, page.Slug, "pending")
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "manual_edit_conflict", issues[0].IssueType)
+	require.Equal(t, types.StringArray{"k-row-guard"}, issues[0].SuspectedKnowledgeIDs)
+}
+
+func TestReduceSlugUpdatesCanRefreshManualEditFromBeforeRebuild(t *testing.T) {
+	pageSvc, page := newWikiWriteGuardStore(t, "generated body")
+	svc := &wikiIngestService{wikiService: pageSvc, knowledgeSvc: liveKnowledgeStub{}}
+	manual := *page
+	manual.Content = "older manual correction"
+	updatedManual, err := pageSvc.UpdatePage(
+		types.WithWikiEditSource(context.Background(), types.WikiEditSourceUser), &manual,
+	)
+	require.NoError(t, err)
+
+	updates := []SlugUpdate{{
+		Slug: page.Slug, Type: types.WikiPageTypeEntity,
+		KnowledgeID: "k-row-guard", DocTitle: "Source", SourceRef: "k-row-guard|Source",
+		Item: extractedItem{Name: "Source", Description: "new evidence"},
+	}}
+	startedAt := updatedManual.UpdatedAt.Add(time.Second)
+	batchCtx := &WikiBatchContext{
+		RunStartedAt:                  startedAt,
+		RebuildStartedAtByKnowledgeID: map[string]time.Time{"k-row-guard": startedAt},
+		SlugTitleMany:                 func(context.Context, []string) map[string]string { return nil },
+	}
+	changed, reason, _, deferred, err := svc.reduceSlugUpdates(context.Background(),
+		&templateCaptureChatModel{response: "refreshed body"}, page.KnowledgeBaseID,
+		page.Slug, updates, page.TenantID, batchCtx, nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "ingest", reason)
+	require.False(t, deferred)
+	stored, err := pageSvc.GetPageBySlug(context.Background(), page.KnowledgeBaseID, page.Slug)
+	require.NoError(t, err)
+	require.Equal(t, "refreshed body", stored.Content)
+	issues, err := pageSvc.ListIssues(context.Background(), page.KnowledgeBaseID, page.Slug, "pending")
+	require.NoError(t, err)
+	require.Empty(t, issues)
+}
+
 type failingPageWriteStub struct {
 	interfaces.WikiPageService
 	page *types.WikiPage
@@ -155,6 +278,7 @@ func TestClassifyWikiPageWrite(t *testing.T) {
 	}{
 		{"applied write", nil, false, nil},
 		{"bare refusal", ErrWikiWriteDroppedTableRows, true, nil},
+		{"concurrent edit", repository.ErrWikiPageConflict, true, nil},
 		{
 			"wrapped refusal",
 			fmt.Errorf("update wiki page: %w", ErrWikiWriteDroppedTableRows),

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -33,6 +34,15 @@ func TestNewWikiIngestPendingOpRecordsAttempt(t *testing.T) {
 			assert.Equal(t, test.want, op.Attempt)
 		})
 	}
+}
+
+func TestNewWikiIngestPendingOpRecordsRebuildStart(t *testing.T) {
+	startedAt := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	pendingOp, err := newWikiIngestPendingOp(context.Background(), 7, "kb-1", "knowledge-1", startedAt)
+	require.NoError(t, err)
+	var op WikiPendingOp
+	require.NoError(t, json.Unmarshal(pendingOp.Payload, &op))
+	require.Equal(t, startedAt, op.RebuildStartedAt)
 }
 
 // An op from a superseded attempt must not drain: reparse zeroed that

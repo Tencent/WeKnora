@@ -131,6 +131,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
+	if page.Version > 0 && page.Version != existing.Version {
+		return nil, repository.ErrWikiPageConflict
+	}
 	stripWikiPageInlineChunkCitations(page)
 
 	// ── Truncation choke point ────────────────
@@ -304,6 +307,9 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
 	if err != nil {
 		return fmt.Errorf("get existing page: %w", err)
+	}
+	if page.Version > 0 && page.Version != existing.Version {
+		return repository.ErrWikiPageConflict
 	}
 
 	oldOutLinks := existing.OutLinks

@@ -276,7 +276,7 @@ func (r *wikiPageRepository) DeleteRevisionsByPage(ctx context.Context, pageID s
 func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error {
 	result := r.db.WithContext(ctx).
 		Model(page).
-		Where("id = ?", page.ID).
+		Where("id = ? AND version = ?", page.ID, page.Version).
 		Updates(map[string]interface{}{
 			"content":    page.Content,
 			"out_links":  page.OutLinks,
@@ -286,7 +286,7 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ErrWikiPageNotFound
+		return r.wikiPageWriteConflict(ctx, page.ID)
 	}
 	return nil
 }
@@ -296,7 +296,7 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 	// 反链由专用原子操作维护，避免这份元数据快照覆盖并发添加的链接。
 	result := r.db.WithContext(ctx).
 		Model(page).
-		Where("id = ?", page.ID).
+		Where("id = ? AND version = ?", page.ID, page.Version).
 		Updates(map[string]interface{}{
 			"out_links":     page.OutLinks,
 			"aliases":       page.Aliases,
@@ -316,9 +316,20 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ErrWikiPageNotFound
+		return r.wikiPageWriteConflict(ctx, page.ID)
 	}
 	return nil
+}
+
+func (r *wikiPageRepository) wikiPageWriteConflict(ctx context.Context, pageID string) error {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&types.WikiPage{}).Where("id = ?", pageID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrWikiPageNotFound
+	}
+	return ErrWikiPageConflict
 }
 
 // GetByID retrieves a wiki page by its unique ID

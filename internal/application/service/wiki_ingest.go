@@ -352,6 +352,9 @@ const (
 type WikiPendingOp struct {
 	Op          string `json:"op"`
 	KnowledgeID string `json:"knowledge_id"`
+	// RebuildStartedAt is retained across wiki retries so an edit made
+	// during the source document's rebuild remains protected.
+	RebuildStartedAt time.Time `json:"rebuild_started_at,omitempty"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Attempt is the parse attempt whose finalizing counter owns this op's
@@ -585,13 +588,19 @@ func newWikiIngestPendingOp(
 	ctx context.Context,
 	tenantID uint64,
 	kbID, knowledgeID string,
+	rebuildStartedAt ...time.Time,
 ) (*types.TaskPendingOp, error) {
 	lang := types.LanguageFromContextOrDefault(ctx)
+	startedAt := time.Now()
+	if len(rebuildStartedAt) > 0 && !rebuildStartedAt[0].IsZero() {
+		startedAt = rebuildStartedAt[0]
+	}
 	op := WikiPendingOp{
-		Op:          WikiOpIngest,
-		KnowledgeID: knowledgeID,
-		Language:    lang,
-		Attempt:     attemptFromCtx(ctx),
+		Op:               WikiOpIngest,
+		KnowledgeID:      knowledgeID,
+		Language:         lang,
+		Attempt:          attemptFromCtx(ctx),
+		RebuildStartedAt: startedAt,
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
@@ -1435,6 +1444,13 @@ type docIngestResult struct {
 // free; the cache is per-batch and goroutine-local-via-mutex (sync.Map
 // would also work but mutex keeps the surface small).
 type WikiBatchContext struct {
+	// RunStartedAt is the start of the ingest run that owns this context.
+	// Reduce uses it to protect a manual edit made after the background job
+	// started, even when the page is read after that edit (before the model
+	// call begins).
+	RunStartedAt                  time.Time
+	RebuildStartedAtByKnowledgeID map[string]time.Time
+
 	// SlugTitle resolves a slug to its current title (or "" if missing).
 	// Backed by ListBySlugs; cache is populated as callers ask, so we
 	// only pay for the slugs we actually look at.
