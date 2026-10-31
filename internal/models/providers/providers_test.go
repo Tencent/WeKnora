@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/anthropicmessages"
+	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -684,6 +685,72 @@ func TestClaude55Models(t *testing.T) {
 			body := build(t, model, api.ReasoningOff)
 			if fmt.Sprint(body["thinking"]) != fmt.Sprint(wantOff) {
 				t.Errorf("anthropic/%s thinking off sent %v, want %v", model, body["thinking"], wantOff)
+			}
+		}
+	}
+}
+
+// OpenRouter serves the Claude 5.5 family under anthropic/<name>-5.5. Without
+// entries they fall back to the anthropic/* rule: no context window, output
+// limit or price, and thinking off is hidden even for Haiku 5.5, which
+// accepts it.
+func TestOpenRouterClaude55Models(t *testing.T) {
+	build := func(t *testing.T, model string, effort api.ReasoningEffort) map[string]any {
+		t.Helper()
+		r := resolve(t, "openrouter", model)
+		c := openaicompletions.New(openaicompletions.Config{
+			Endpoint:       api.Endpoint{Model: r.RemoteModel},
+			Settings:       r.OpenAICompletions,
+			ThinkingLevels: r.ThinkingLevels,
+			Reasoning:      r.Spec.Reasoning,
+		})
+		body, err := c.BuildRequestBody(
+			[]api.Message{{Role: "user", Content: "Hi"}},
+			&api.Options{ReasoningEffort: effort},
+			false,
+		)
+		if err != nil {
+			t.Fatalf("build %s: %v", model, err)
+		}
+		return body
+	}
+
+	// OpenRouter answers 400 "Reasoning is mandatory for this endpoint and
+	// cannot be disabled." to reasoning.enabled=false on Opus 5.5 and
+	// Sonnet 5.5; Haiku 5.5 accepts it.
+	offSupported := map[string]bool{
+		"anthropic/claude-opus-5.5":   false,
+		"anthropic/claude-sonnet-5.5": false,
+		"anthropic/claude-haiku-5.5":  true,
+	}
+	for model, wantOff := range offSupported {
+		r := resolve(t, "openrouter", model)
+		if !r.Cataloged {
+			t.Fatalf("openrouter/%s should be in the catalog", model)
+		}
+		caps := r.Capabilities()
+		if caps.ContextWindow != 1000000 || caps.MaxOutputTokens != 128000 {
+			t.Errorf("openrouter/%s context/output = %d/%d, want 1000000/128000",
+				model, caps.ContextWindow, caps.MaxOutputTokens)
+		}
+		if r.Spec.Cost == nil {
+			t.Errorf("openrouter/%s should carry a price", model)
+		}
+		if r.OpenAICompletions.CacheControlFormat != "anthropic" {
+			t.Errorf("openrouter/%s should use anthropic cache_control", model)
+		}
+		if got := r.ThinkingLevels.Supports(api.ReasoningOff); got != wantOff {
+			t.Errorf("openrouter/%s supports thinking off = %v, want %v", model, got, wantOff)
+		}
+
+		low := build(t, model, api.ReasoningLow)
+		if fmt.Sprint(low["reasoning"]) != fmt.Sprint(map[string]any{"effort": "low"}) {
+			t.Errorf("openrouter/%s low effort sent %v", model, low["reasoning"])
+		}
+		if wantOff {
+			off := build(t, model, api.ReasoningOff)
+			if fmt.Sprint(off["reasoning"]) != fmt.Sprint(map[string]any{"enabled": false}) {
+				t.Errorf("openrouter/%s thinking off sent %v", model, off["reasoning"])
 			}
 		}
 	}

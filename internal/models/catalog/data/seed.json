@@ -3311,6 +3311,60 @@
         "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
       },
       {
+        "id": "anthropic/claude-opus-5.5",
+        "name": "Claude Opus 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 4,
+          "output": 20,
+          "cache_read": 0.2,
+          "cache_write": 5
+        },
+        "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+      },
+      {
+        "id": "anthropic/claude-sonnet-5.5",
+        "name": "Claude Sonnet 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 2,
+          "output": 10,
+          "cache_read": 0.1,
+          "cache_write": 2.5
+        },
+        "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+      },
+      {
+        "id": "anthropic/claude-haiku-5.5",
+        "name": "Claude Haiku 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 0.1,
+          "output": 0.5,
+          "cache_read": 0.01,
+          "cache_write": 0.125
+        },
+        "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+      },
+      {
         "id": "anthropic/claude-opus-5",
         "name": "Claude Opus 5",
         "reasoning": true,
