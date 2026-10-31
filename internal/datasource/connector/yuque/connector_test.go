@@ -300,6 +300,80 @@ func TestConnector_FetchAll_SkipsUnsupportedFormats(t *testing.T) {
 	}
 }
 
+func TestConnector_FetchAll_SkipsHTMLAppShellBody(t *testing.T) {
+	f := newFakeYuque()
+	defer f.Close()
+	f.handleJSON("/api/v2/repos/14/docs", 200, v2DocListResponse{Data: []v2Doc{
+		{ID: 601, Type: "Doc", Status: "1", Title: "应用专题", Slug: "app-topic", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+		{ID: 602, Type: "Doc", Status: "1", Title: "OK Doc", Slug: "ok", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+	}})
+	// Regression test for Tencent/WeKnora#4913: a TOC directory/group node
+	// whose detail body is the Yuque web app's HTML shell must never be
+	// ingested as Markdown content.
+	f.handleJSON("/api/v2/repos/docs/601", 200, v2DocDetailResponse{
+		Data: v2DocDetail{ID: 601, Title: "应用专题", Format: "markdown", Body: "<!doctype html>\n<html data-kumuhana=\"default\"><head><script src=\"/os/chair-script/skylark/\"></script></head><body>app shell</body></html>", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+	})
+	f.handleJSON("/api/v2/repos/docs/602", 200, v2DocDetailResponse{
+		Data: v2DocDetail{ID: 602, Title: "OK Doc", Format: "lake", Body: "# ok", Status: "1", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
+	})
+
+	items, err := NewConnector().FetchAll(context.Background(), makeDSConfig(f, []string{"14"}), []string{"14"})
+	if err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("want 2 items (placeholder + ok), got %d", len(items))
+	}
+	var shellPlaceholder, okItem *types.FetchedItem
+	for i := range items {
+		if items[i].ExternalID == "601" {
+			shellPlaceholder = &items[i]
+		}
+		if items[i].ExternalID == "602" {
+			okItem = &items[i]
+		}
+	}
+	if shellPlaceholder == nil || okItem == nil {
+		t.Fatal("missing one of the items")
+	}
+	if shellPlaceholder.Metadata["skip_reason"] == "" {
+		t.Errorf("shell doc should have skip_reason metadata, got %+v", shellPlaceholder.Metadata)
+	}
+	if len(shellPlaceholder.Content) != 0 {
+		t.Errorf("shell placeholder should have empty Content, got %q", shellPlaceholder.Content)
+	}
+	if string(okItem.Content) != "# ok" {
+		t.Errorf("lake doc Content = %q, want %q", string(okItem.Content), "# ok")
+	}
+}
+
+func TestIsHTMLAppShell(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"doctype lower", "<!doctype html>\n<html><body>x</body></html>", true},
+		{"doctype upper", "<!DOCTYPE HTML>\n<html><body>x</body></html>", true},
+		{"leading whitespace", "  \n <!doctype html><html></html>", true},
+		{"leading BOM", "\ufeff<!doctype html><html></html>", true},
+		{"html tag with attrs", `<html data-kumuhana="default"><body>shell</body></html>`, true},
+		{"html tag bare", "<html><body>x</body></html>", true},
+		{"plain markdown", "# Hello\n\nSome text.", false},
+		{"markdown with inline html table", "# T\n\n<table><tr><td>x</td></tr></table>", false},
+		{"markdown starting with html comment", "<!-- note -->\n# Hello", false},
+		{"empty", "", false},
+		{"whitespace only", "  \n ", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isHTMLAppShell(tc.body); got != tc.want {
+				t.Errorf("isHTMLAppShell(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestConnector_FetchAll_SkipsNonDocTypes(t *testing.T) {
 	f := newFakeYuque()
 	defer f.Close()
