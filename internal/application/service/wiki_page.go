@@ -110,8 +110,11 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, fmt.Errorf("create wiki page: %w", err)
 	}
 
-	// Update inbound links on target pages
-	s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
+	// 持久进度路径已原子记录正文成功，反链交给可恢复的收尾，避免中断后重做模型调用。
+	if types.WikiPageProgressCommitFromContext(ctx) == nil {
+		// Update inbound links on target pages
+		s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
+	}
 
 	return page, nil
 }
@@ -130,6 +133,12 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
+	}
+	// 生成过程使用的是最初读取的页面，重读不能把旧结果伪装成基于最新状态的写入。
+	// 元数据变化不递增可见版本，因此持久进度还必须核对完整写入快照。
+	if types.WikiPageProgressCommitFromContext(ctx) != nil &&
+		(page.ProgressSnapshot == "" || page.ProgressSnapshot != existing.ProgressSnapshot) {
+		return nil, fmt.Errorf("update wiki page from stale snapshot: %w", repository.ErrWikiPageConflict)
 	}
 	stripWikiPageInlineChunkCitations(page)
 
@@ -273,13 +282,18 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		}
 		// Bound per-page history; best-effort — a failed prune only means
 		// slightly more storage until the next content change.
-		s.pruneRevisions(ctx, existing.ID, existing.Version)
+		s.pruneRevisions(types.WithoutWikiPageProgressCommit(ctx), existing.ID, existing.Version)
 	} else {
 		// No user-visible change — persist bookkeeping fields but preserve
 		// the version so downstream consumers can rely on it.
 		if err := s.repo.UpdateMeta(ctx, existing); err != nil {
 			return nil, fmt.Errorf("update wiki page meta: %w", err)
 		}
+	}
+
+	// 主页面提交与完成回执已经落库；反链失败不能再触发正文重复生成。
+	if types.WikiPageProgressCommitFromContext(ctx) != nil {
+		return existing, nil
 	}
 
 	// 只删除已消失的边；未变链接仍做幂等补齐，避免旧数据缺失反链时失去修复机会。
@@ -293,6 +307,14 @@ func (s *wikiPageService) UpdatePageMeta(ctx context.Context, page *types.WikiPa
 	normalizeWikiHierarchy(page)
 	page.UpdatedAt = time.Now()
 	return s.repo.UpdateMeta(ctx, page)
+}
+
+// PublishDraftPage 只发布指定身份的当前草稿，不回写调用方读到的贡献或关系快照。
+// 已发布或归档页面保持原状；页面被删除或替换、数据库失败和取消仍交给调用方处理。
+func (s *wikiPageService) PublishDraftPage(
+	ctx context.Context, tenantID uint64, kbID, pageID, slug string,
+) error {
+	return s.repo.PublishDraftPage(ctx, tenantID, kbID, pageID, slug)
 }
 
 // UpdateAutoLinkedContent persists content produced by machine-only link

@@ -465,7 +465,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var pendingOps []WikiPendingOp
 	var peekedIDs []int64
 	var loadErr error
-	if s.redisClient != nil {
+	var progress *wikiProgressBatch
+	if s.progressRepo != nil {
+		pendingOps, peekedIDs, progress, loadErr = s.claimWikiProgressBatch(ctx, payload, batchSize)
+	} else if s.redisClient != nil {
 		pendingOps, peekedIDs, loadErr = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
 	} else {
 		pendingOps, peekedIDs, loadErr = s.peekPendingList(ctx, payload.KnowledgeBaseID, batchSize)
@@ -514,14 +517,20 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// the timeout path. Lite mode peeks without claiming, so there is nothing
 	// to release.
 	claimsSettled := false
-	if s.redisClient != nil && len(peekedIDs) > 0 {
+	if (s.redisClient != nil || progress != nil) && len(peekedIDs) > 0 {
 		defer func() {
 			if claimsSettled {
 				return
 			}
 			releaseCtx, releaseCancel := wikiIngestCleanupContext(ctx)
 			defer releaseCancel()
-			if err := s.pendingRepo.ReleaseByIDs(releaseCtx, peekedIDs); err != nil {
+			var releaseErr error
+			if progress != nil {
+				releaseErr = progress.release(releaseCtx)
+			} else {
+				releaseErr = s.pendingRepo.ReleaseByIDs(releaseCtx, peekedIDs)
+			}
+			if err := releaseErr; err != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to release %d claims on abnormal exit for KB %s: %v", len(peekedIDs), payload.KnowledgeBaseID, err)
 				return
 			}
@@ -539,6 +548,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 
 	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, wikiConfig)
+	if progress != nil {
+		if err := progress.seedIdentities(batchCtx); err != nil {
+			return err
+		}
+	}
 
 	// 1. MAP PHASE (Parallel extraction and generation of updates)
 	var mapMu sync.Mutex
@@ -559,6 +573,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	for _, op := range pendingOps {
 		op := op
 		eg.Go(func() error {
+			// 计划已落库就复用其规范 slug 和 Map 输出，不重复调用提取模型。
+			if progress != nil && progress.restored(op) {
+				mapMu.Lock()
+				if op.Op == WikiOpRetract {
+					retractOps++
+					retractHandled++
+				} else {
+					ingestOps++
+					ingestSucceeded++
+				}
+				mapMu.Unlock()
+				return nil
+			}
 			if op.Op == WikiOpRetract {
 				// Resolve the authoritative page set at run-time. The caller
 				// (knowledgeService.cleanupWikiOnKnowledgeDelete) captures
@@ -681,7 +708,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// "finalizing" until the housekeeping sweep marks it
 				// failed. The matching +1 was seeded by
 				// KnowledgePostProcess.SetFinalizing.
-				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID, op.Attempt)
+				if progress == nil {
+					s.finalizeWikiSubtask(mapCtx, op.KnowledgeID, op.Attempt)
+				}
 			}
 			return nil
 		})
@@ -701,12 +730,34 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	batchCtx.PlannedFolderID = s.resolvePlannedFolders(ctx, kb,
 		s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang))
 
+	// 冻结新计划后合并恢复记录；已保存的成功页只补收尾，不再参与 Reduce。
+	var resumedPages []string
+	if progress != nil {
+		var progressErr error
+		slugUpdates, docResults, resumedPages, progressErr = progress.prepare(
+			ctx, s, pendingOps, failedOps, docResults, slugUpdates, retractFolderIDs, batchCtx,
+		)
+		if progressErr != nil {
+			return fmt.Errorf("wiki ingest: prepare progress: %w", progressErr)
+		}
+		for _, state := range progress.states {
+			if state == nil || state.Plan == nil {
+				continue
+			}
+			plan, decodeErr := decodeWikiDurablePlan(state)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			retractFolderIDs = append(retractFolderIDs, plan.Folders...)
+		}
+	}
+
 	// 2. REDUCE PHASE (Parallel upserting grouped by Slug)
 	egReduce, reduceCtx := errgroup.WithContext(ctx)
 	egReduce.SetLimit(reduceParallel) // Reduce phase limit (LLM + DB concurrent connections, configurable)
 
 	var reduceMu sync.Mutex
-	var allPagesAffected []string
+	allPagesAffected := append([]string(nil), resumedPages...)
 	var ingestPagesAffected []string
 	var retractPagesAffected []string
 	// failedAdditionSlugs collects entity/concept slugs whose page
@@ -770,8 +821,23 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						reduceErr = fmt.Errorf("wiki reduce panicked for slug %s: %v", slug, r)
 					}
 				}()
-				changed, affectedType, additionFailed, updateDeferred, reduceErr = s.reduceSlugUpdates(
-					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
+				reduce := func(callCtx context.Context, pending []SlugUpdate) (bool, string, bool, bool, error) {
+					return s.reduceSlugUpdates(
+						callCtx, chatModel, payload.KnowledgeBaseID, slug, pending,
+						payload.TenantID, batchCtx, kidToWikiSpan,
+					)
+				}
+				if progress != nil {
+					changed, affectedType, additionFailed, updateDeferred, reduceErr = progress.reduce(
+						reduceCtx, s, slug, updates, reduce,
+					)
+				} else {
+					changed, affectedType, additionFailed, updateDeferred, reduceErr = reduce(reduceCtx, updates)
+				}
+				// 持久化路径的模型错误在下方分类；不能误当成锁获取失败而丢掉限流退避。
+				if progress != nil {
+					return nil
+				}
 				return reduceErr
 			})
 			if lockErr != nil {
@@ -825,6 +891,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				reduceMu.Unlock()
 			}
 			if additionFailed {
+				if progress != nil {
+					collectUnapplied(updates)
+				}
 				reduceMu.Lock()
 				failedAdditionSlugs[slug] = struct{}{}
 				reduceMu.Unlock()
@@ -843,10 +912,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// saw extracted, but reduce may have failed to materialize some of
 	// those slugs into actual pages. Rewrite those dead links to plain
 	// text so the summary doesn't contain unresolvable references.
-	if len(failedAdditionSlugs) > 0 && len(docResults) > 0 {
+	// 持久计划中的实体失败仍会续跑，不永久剥掉已成功摘要里的暂未就绪链接。
+	if progress == nil && len(failedAdditionSlugs) > 0 && len(docResults) > 0 {
 		s.sanitizeDeadSummaryLinks(tailCtx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs, batchCtx)
 	}
 
+	var checkpointedPageIDs map[string]string
+	if progress != nil {
+		var identityErr error
+		allPagesAffected, checkpointedPageIDs, identityErr = progress.affectedIdentities(tailCtx, s, allPagesAffected)
+		if identityErr != nil {
+			return fmt.Errorf("wiki ingest: validate applied identities: %w", identityErr)
+		}
+	}
 	totalPagesAffected = len(allPagesAffected)
 
 	// Project one bounded summary into the knowledge-base activity feed.
@@ -870,7 +948,15 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// written, not after the debounce window. This is a cheap status flip.
 	if len(allPagesAffected) > 0 {
 		logger.Infof(ctx, "wiki ingest: publishing draft pages")
-		s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+		var publishErr error
+		if progress != nil {
+			publishErr = s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected, checkpointedPageIDs)
+		} else {
+			publishErr = s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+		}
+		if publishErr != nil && progress != nil {
+			return fmt.Errorf("wiki ingest: publish checkpointed pages: %w", publishErr)
+		}
 	}
 
 	// Defer KB-global convergence (index-intro rebuild + dead-link cleanup +
@@ -888,6 +974,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			continue
 		}
 		for _, p := range dr.Pages {
+			if progress != nil && checkpointedPageIDs[p.Slug] == "" {
+				continue
+			}
 			if p.Slug == "" || p.Title == "" {
 				continue
 			}
@@ -911,7 +1000,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				})
 			}
 		}
-		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		if finalizeErr := s.enqueueFinalize(
+			tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs,
+		); finalizeErr != nil && progress != nil {
+			return fmt.Errorf("wiki ingest: persist checkpointed tail: %w", finalizeErr)
+		}
 	}
 
 	// Close postprocess.wiki spans for every successfully-mapped doc.
@@ -939,7 +1032,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// error): those are re-queued below, so keep their finalizing slot
 		// held — the retry (or the dead-letter drain in requeueFailedOps)
 		// releases it once the op reaches a real terminal state.
-		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied {
+		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied && progress == nil {
 			s.finalizeWikiSubtask(ctx, r.KnowledgeID, opAttempts[r.KnowledgeID])
 		}
 		if r.WikiSpan == nil {
@@ -1020,7 +1113,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		trimIDs = append(trimIDs, id)
 	}
 	settleCtx, settleCancel := wikiIngestCleanupContext(ctx)
-	trimErr := s.trimPendingList(settleCtx, trimIDs)
+	var trimErr error
+	if progress != nil {
+		trimErr = progress.settle(settleCtx, s, trimIDs)
+	} else {
+		trimErr = s.trimPendingList(settleCtx, trimIDs)
+	}
 
 	// Process failed ops: increment fail_count and dead-letter once
 	// the cap is hit. Must come AFTER trim so successful siblings are
@@ -1028,7 +1126,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// re-pick them up.
 	var requeueErr error
 	if len(failedOps) > 0 {
-		requeueErr = s.requeueFailedOps(settleCtx, payload, failedOps)
+		if progress != nil {
+			requeueErr = progress.retry(settleCtx, s, payload, failedOps)
+		} else {
+			requeueErr = s.requeueFailedOps(settleCtx, payload, failedOps)
+		}
 	}
 	settleCancel()
 	if err := errors.Join(trimErr, requeueErr); err != nil {
@@ -2001,6 +2103,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}()
 
 	page, err = s.wikiService.GetPageBySlug(ctx, kbID, slug)
+	if types.WikiPageProgressCommitFromContext(ctx) != nil &&
+		err != nil && !errors.Is(err, apprepo.ErrWikiPageNotFound) {
+		return false, "", false, false, err
+	}
 	exists := (err == nil && page != nil)
 
 	if !exists {
@@ -2274,6 +2380,14 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"InstructionScope":        "wiki_content",
 		})
 
+		// 持久回执不能把模型失败或空输出当作已完成，否则重启后将永远跳过此页。
+		if types.WikiPageProgressCommitFromContext(ctx) != nil &&
+			(err != nil || strings.TrimSpace(updatedContent) == "") {
+			if err == nil {
+				err = errors.New("wiki page model returned empty content")
+			}
+			return false, affectedType, len(additions) > 0, false, err
+		}
 		if err == nil && updatedContent != "" {
 			// Translate request-local handles (ref-N) the model copied from the
 			// encoded context back to their real slugs BEFORE the content is

@@ -350,7 +350,10 @@ FOR UPDATE SKIP LOCKED`
 		}
 		if err := tx.Model(&types.TaskPendingOp{}).
 			Where("id IN ?", ids).
-			Update("claimed_at", now).Error; err != nil {
+			Updates(map[string]interface{}{
+				"claimed_at":  now,
+				"claim_epoch": gorm.Expr("claim_epoch + 1"),
+			}).Error; err != nil {
 			return err
 		}
 		return tx.Where("id IN ?", ids).Order("id ASC").Find(&claimed).Error
