@@ -121,3 +121,54 @@ func TestOIDCStart_ServiceErrorReturnsNonRedirect(t *testing.T) {
 		t.Fatalf("status = 302, want non-redirect on service error")
 	}
 }
+
+func TestOIDCStart_BuildsCallbackURLWithSubpath(t *testing.T) {
+	t.Setenv("FRONTEND_BASE_URL", "")
+
+	var captured string
+
+	us := &stubOIDCStartUserService{
+		getOIDCAuthorizationURL: func(
+			_ context.Context,
+			redirectURI string,
+		) (*types.OIDCAuthURLResponse, error) {
+			captured = redirectURI
+
+			return &types.OIDCAuthURLResponse{
+				Success:          true,
+				AuthorizationURL: "https://idp.example.com/authorize",
+				Nonce:            "nonce123",
+			}, nil
+		},
+	}
+
+	h := NewAuthHandler(
+		&config.Config{
+			FrontendBaseURL: "https://example.com/weknora",
+		},
+		us, nil, nil, nil,
+	)
+
+	r := newOIDCStartTestRouter(h)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/auth/oidc/start",
+		nil,
+	)
+	req.Host = "internal.example.com"
+	req.Header.Set("X-Forwarded-Proto", "https")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	const want = "https://example.com/weknora/api/v1/auth/oidc/callback"
+
+	if captured != want {
+		t.Errorf("callback URL = %q, want %q", captured, want)
+	}
+
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d, want 302", w.Code)
+	}
+}
