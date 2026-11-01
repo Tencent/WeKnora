@@ -72,3 +72,49 @@ func TestDSMLMalformedKeptVisible(t *testing.T) {
 		t.Fatalf("rest=%q calls=%v", rest, calls)
 	}
 }
+
+// deepseek-flash repeats the bar on both sides and shortens the envelope tag
+// to calls, so the single-bar sample above never matched what it emits.
+const dsmlDoubledSample = "先查一下。\n<｜｜DSML｜｜ calls>\n" +
+	"<｜｜DSML｜｜invoke name=\"confirm\">\n" +
+	"<｜｜DSML｜｜parameter name=\"arguments\" string=\"false\">{\"deviceId\": 15}</｜｜DSML｜｜parameter>\n" +
+	"</｜｜DSML｜｜invoke>\n" +
+	"</｜｜DSML｜｜ calls>"
+
+var dsmlDoubledOptions = &api.Options{Tools: []api.Tool{{
+	Type: "function", Function: api.FunctionDef{Name: "confirm"},
+}}}
+
+func TestExtractDSMLToolCallsDoubledBars(t *testing.T) {
+	rest, calls := extractDSMLToolCalls(dsmlDoubledSample, dsmlDoubledOptions)
+	if rest != "先查一下。\n" {
+		t.Fatalf("rest = %q", rest)
+	}
+	if len(calls) != 1 || calls[0].Function.Name != "confirm" {
+		t.Fatalf("calls = %+v", calls)
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(calls[0].Function.Arguments), &args); err != nil {
+		t.Fatal(err)
+	}
+	// The leaked call carries its arguments as one JSON parameter, so they stay
+	// nested under the parameter name.
+	if nested, ok := args["arguments"].(map[string]any); !ok || nested["deviceId"] != float64(15) {
+		t.Fatalf("args = %v", args)
+	}
+}
+
+func TestDSMLFilterStreamedDoubledBars(t *testing.T) {
+	f := dsmlFilter{options: dsmlDoubledOptions}
+	shown := ""
+	for i := range len(dsmlDoubledSample) {
+		shown += f.Feed(dsmlDoubledSample[i : i+1])
+	}
+	rest, calls := f.Flush(true)
+	if shown != "先查一下。\n" || rest != "" {
+		t.Fatalf("shown = %q rest = %q", shown, rest)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d", len(calls))
+	}
+}
