@@ -4612,6 +4612,16 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	overrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, overrides)
 
+	// Mixed PDFs contain both page renders and native figures. Older parsers
+	// provide only the document-wide source, which remains the fallback.
+	var imageSourceTypes map[string]string
+	if raw := metadata["image_source_types"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &imageSourceTypes); err != nil {
+			logger.Warnf(ctx, "Invalid image source metadata for knowledge %s: %v", knowledge.ID, err)
+			imageSourceTypes = nil
+		}
+	}
+
 	enqueued := 0
 	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
@@ -4619,6 +4629,10 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		chunkID := imageChunkOwner(img.ServingURL, chunks)
 		if chunkID == "" {
 			logger.Warnf(ctx, "Image has no owning text chunk: knowledge=%s image=%s", knowledge.ID, img.ServingURL)
+		}
+		imageSourceType := metadata["image_source_type"]
+		if source := imageSourceTypes[img.OriginalRef]; source != "" {
+			imageSourceType = source
 		}
 
 		payload := types.ImageMultimodalPayload{
@@ -4632,7 +4646,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ImageAttrsEnabled:   eff.ImageAttrsEnabled,
 			ImageActions:        eff.ImageActions,
 			Language:            lang,
-			ImageSourceType:     metadata["image_source_type"],
+			ImageSourceType:     imageSourceType,
 			Attempt:             attempt,
 			ImageIndex:          idx,
 			SourceLocators:      img.SourceLocators,
