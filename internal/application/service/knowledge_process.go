@@ -4543,6 +4543,13 @@ func (s *knowledgeService) resolveDocReader(
 		logger.Warnf(ctx, "[resolveDocReader] engine=%q fileType=%q unusable: %v", engine, fileType, err)
 		return nil
 	}
+	// Fail fast: if the reader requires an external service (builtin/docreader)
+	// but the service is unreachable, return nil so the caller can report a
+	// clear error instead of hanging on a 30-minute gRPC timeout.
+	if engine == "builtin" && s.documentReader != nil && !s.documentReader.IsConnected() {
+		logger.Warnf(ctx, "[resolveDocReader] engine=%q fileType=%q docreader unavailable", engine, fileType)
+		return nil
+	}
 	return reader
 }
 

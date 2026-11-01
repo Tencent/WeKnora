@@ -87,10 +87,22 @@ func (p *GRPCDocumentReader) Reconnect(addr string) error {
 	return p.connect(addr)
 }
 
+// IsConnected verifies the gRPC connection is alive by making a lightweight
+// GetInfo call.  A stale connection object (dialled but no server listening)
+// returns false, so callers — the "Test Connection" API endpoint, engine
+// availability checks, and document-processing guards — can distinguish
+// "service was never started" from "service is reachable".
 func (p *GRPCDocumentReader) IsConnected() bool {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.conn != nil
+	client := p.client
+	p.mu.RUnlock()
+	if client == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := client.GetInfo(ctx, &proto.GetInfoRequest{})
+	return err == nil
 }
 
 // GetVersionInfo queries the running docreader rather than assuming its image
