@@ -4900,13 +4900,13 @@ func runKnowledgeListReparseSubmissions(
 	)
 }
 
-// cutLogPreview keeps at most max bytes of s for a log line, backing off to a
+// cutLogPreview keeps at most limit bytes of s for a log line, backing off to a
 // rune start so Chinese document text is never cut inside a character.
-func cutLogPreview(s string, max int) string {
-	if len(s) <= max {
+func cutLogPreview(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	cut := max
+	cut := limit
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
