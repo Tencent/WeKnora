@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -278,6 +279,40 @@ func TestTruncateShellStreamIncludesMarkerWithinLimit(t *testing.T) {
 	require.True(t, truncated)
 	assert.LessOrEqual(t, len(output), 100)
 	assert.Contains(t, output, "truncated")
+}
+
+// CJK output is the norm for WeKnora sandboxes, and shell_exec is exempt from
+// the registry's rune-safe re-truncation (OutputLimitChars). The byte cuts in
+// truncateShellStream must drop a split multi-byte character whole instead of
+// shipping invalid UTF-8, which JSON would mangle into U+FFFD in the model
+// context and the persisted transcript.
+func TestTruncateShellStreamKeepsMultiByteCharactersWhole(t *testing.T) {
+	s := "头" + strings.Repeat("中", 10000) + "尾"
+	for limit := 300; limit < 900; limit++ {
+		output, truncated := truncateShellStream(s, limit)
+
+		require.True(t, truncated, "limit %d", limit)
+		require.True(t, utf8.ValidString(output), "limit %d produced invalid UTF-8", limit)
+		assert.LessOrEqual(t, len(output), limit, "limit %d", limit)
+
+		start := strings.Index(output, "\n...[truncated ")
+		require.NotEqual(t, -1, start, "limit %d lost the truncation marker", limit)
+		end := strings.LastIndex(output, "]...\n") + len("]...\n")
+		head, tail := output[:start], output[end:]
+		assert.True(t, strings.HasPrefix(s, head), "limit %d head is not a whole-character prefix", limit)
+		assert.True(t, strings.HasSuffix(s, tail), "limit %d tail is not a whole-character suffix", limit)
+	}
+}
+
+func TestTruncateShellStreamTinyLimitKeepsMultiByteCharactersWhole(t *testing.T) {
+	// The marker alone exceeds the budget: the whole output is a byte-cut tail.
+	s := strings.Repeat("中", 100)
+	output, truncated := truncateShellStream(s, 10)
+
+	require.True(t, truncated)
+	require.True(t, utf8.ValidString(output))
+	assert.LessOrEqual(t, len(output), 10)
+	assert.True(t, strings.HasSuffix(s, output), "tail cut must keep whole runes: %q", output)
 }
 
 type recordedCapture struct {

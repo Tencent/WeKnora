@@ -230,7 +230,10 @@ func compactHistoricalSandboxOutput(output string) string {
 	kept := historicalSandboxOutputChars - len(marker)
 	head := kept / 4
 	tail := kept - head
-	return output[:head] + marker + output[len(output)-tail:]
+	// Cut at the byte offsets, dropping a multi-byte character a cut splits:
+	// invalid UTF-8 reaches history replay as U+FFFD.
+	return strings.ToValidUTF8(output[:head], "") + marker +
+		strings.ToValidUTF8(output[len(output)-tail:], "")
 }
 
 func compactSandboxStreamFields(data map[string]interface{}) {
