@@ -206,7 +206,7 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	// Parse the response
 	var response KnowledgeResponse
 	if resp.StatusCode == http.StatusConflict {
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		if err := decodeResponseBody(resp.Body, &response); err != nil {
 			return nil, fmt.Errorf("failed to parse response: %w", err)
 		}
 		return &response.Data, ErrDuplicateFile
@@ -258,7 +258,7 @@ func (c *Client) CreateKnowledgeFromURL(
 
 	var response KnowledgeResponse
 	if resp.StatusCode == http.StatusConflict {
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		if err := decodeResponseBody(resp.Body, &response); err != nil {
 			return nil, fmt.Errorf("failed to parse response: %w", err)
 		}
 		return &response.Data, ErrDuplicateURL
