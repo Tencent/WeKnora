@@ -52,6 +52,8 @@ export function useVoiceInput(options: {
   let releasedWhilePreparing = false;
   let discard = false;
   let disposed = false;
+  // Invalidates decode/ASR completions after cancellation or a newer capture.
+  let generation = 0;
 
   const streamIsLive = () => !!stream?.getAudioTracks().some(track => track.readyState === 'live');
 
@@ -75,6 +77,8 @@ export function useVoiceInput(options: {
   };
 
   const transcribe = async (recording: Blob, durationMs: number) => {
+    const currentGeneration = generation;
+    const isCurrent = () => !disposed && generation === currentGeneration;
     const target = options.target();
     if (durationMs < MIN_CLIP_MS || !target) {
       state.value = 'idle';
@@ -85,10 +89,12 @@ export function useVoiceInput(options: {
     try {
       clip = await toWav(recording);
     } catch (err) {
+      if (!isCurrent()) return;
       state.value = 'idle';
       options.onError('decode', err);
       return;
     }
+    if (!isCurrent()) return;
     console.debug('[voice input] speech check', clip.stats);
     if (!clip.speech) {
       state.value = 'idle';
@@ -97,12 +103,13 @@ export function useVoiceInput(options: {
     }
     try {
       const text = (await options.transcribe(clip.wav, target)).trim();
+      if (!isCurrent()) return;
       if (text) options.onText(text);
       else options.onError('empty');
     } catch (err) {
-      options.onError('transcribe', err);
+      if (isCurrent()) options.onError('transcribe', err);
     } finally {
-      state.value = 'idle';
+      if (isCurrent()) state.value = 'idle';
     }
   };
 
@@ -122,7 +129,7 @@ export function useVoiceInput(options: {
   };
 
   const start = async () => {
-    if (state.value !== 'idle') return;
+    if (disposed || state.value !== 'idle') return;
     if (typeof window !== 'undefined' && !window.isSecureContext) {
       options.onError('insecure');
       return;
@@ -133,6 +140,7 @@ export function useVoiceInput(options: {
     }
     if (releaseTimer) clearTimeout(releaseTimer);
     releaseTimer = null;
+    ++generation;
     state.value = 'preparing';
     elapsedMs.value = 0;
     releasedWhilePreparing = false;
@@ -203,6 +211,11 @@ export function useVoiceInput(options: {
   };
 
   const cancel = () => {
+    ++generation;
+    if (state.value === 'transcribing') {
+      state.value = 'idle';
+      return;
+    }
     if (state.value !== 'preparing' && state.value !== 'recording') return;
     discard = true;
     clearRecordingTimers();
