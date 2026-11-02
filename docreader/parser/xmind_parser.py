@@ -178,12 +178,15 @@ def _render_topic(topic: _Topic, depth: int) -> tuple[list[str], int, int]:
         lines.append(f"{'  ' * depth}- {topic.title}")
         topic_count = 1
         child_depth += 1
-        if topic.note:
-            for note_line in topic.note.splitlines():
-                normalized = note_line.strip()
-                quote = f"> {normalized}" if normalized else ">"
-                lines.append(f"{'  ' * child_depth}{quote}")
-            note_count = 1
+
+    # A blank title does not make a topic's note empty. Keep the same
+    # promoted depth used for its children, without inventing a topic title.
+    if topic.note:
+        for note_line in topic.note.splitlines():
+            normalized = note_line.strip()
+            quote = f"> {normalized}" if normalized else ">"
+            lines.append(f"{'  ' * child_depth}{quote}")
+        note_count = 1
 
     for child in topic.children:
         child_lines, child_topics, child_notes = _render_topic(child, child_depth)

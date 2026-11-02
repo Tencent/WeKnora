@@ -34,6 +34,86 @@ def _mark_entry_encrypted(payload: bytes) -> bytes:
     return bytes(marked)
 
 
+class XMindParserUntitledNotesTests(unittest.TestCase):
+    def test_preserves_notes_without_topic_titles(self):
+        for title in (None, "", " \t "):
+            for nested in (False, True):
+                with self.subTest(title=title, nested=nested):
+                    topic = {
+                        "id": "note-topic",
+                        "notes": {"plain": {"content": "First line\n\nLast line"}},
+                        "children": {"attached": [{"id": "child", "title": "Child"}]},
+                    }
+                    if title is not None:
+                        topic["title"] = title
+                    root = (
+                        {
+                            "id": "root", "title": "Root",
+                            "children": {"attached": [topic]},
+                        }
+                        if nested else topic
+                    )
+                    title_xml = "" if title is None else f"<title>{title}</title>"
+                    topic_xml = (
+                        f'<topic id="note-topic">{title_xml}'
+                        "<notes><plain>First line\n\nLast line</plain></notes>"
+                        '<children><topics type="attached">'
+                        '<topic id="child"><title>Child</title></topic>'
+                        "</topics></children></topic>"
+                    )
+                    root_xml = (
+                        '<topic id="root"><title>Root</title><children><topics type="attached">'
+                        + topic_xml + "</topics></children></topic>"
+                        if nested else topic_xml
+                    )
+                    archives = (
+                        _modern_xmind_bytes([
+                            {"id": "sheet", "title": "Outline", "rootTopic": root}
+                        ]),
+                        _classic_xmind_bytes(
+                            '<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0">'
+                            '<sheet id="sheet"><title>Outline</title>' + root_xml
+                            + "</sheet></xmap-content>"
+                        ),
+                    )
+                    indent = "  " if nested else ""
+                    expected = "# Outline\n\n" + ("- Root\n" if nested else "")
+                    expected += (
+                        f"{indent}> First line\n{indent}>\n"
+                        f"{indent}> Last line\n{indent}- Child"
+                    )
+                    for content_format, archive in zip(("json", "xml"), archives):
+                        with self.subTest(content_format=content_format):
+                            document = XMindParser(file_name="notes.xmind").parse(archive)
+                            self.assertEqual(expected, document.content)
+                            self.assertEqual(1, document.metadata["note_count"])
+                            self.assertEqual(
+                                2 if nested else 1, document.metadata["topic_count"]
+                            )
+                            self.assertEqual(1, document.metadata["sheet_count"])
+
+    def test_note_only_sheet_is_renderable(self):
+        for archive in (
+            _modern_xmind_bytes([{
+                "id": "sheet", "title": "Notes",
+                "rootTopic": {
+                    "id": "root",
+                    "notes": {"plain": {"content": "Keep this evidence"}},
+                },
+            }]),
+            _classic_xmind_bytes(
+                '<xmap-content><sheet><title>Notes</title><topic>'
+                '<notes><plain>Keep this evidence</plain></notes>'
+                '</topic></sheet></xmap-content>'
+            ),
+        ):
+            document = XMindParser(file_name="notes.xmind").parse(archive)
+            self.assertEqual("# Notes\n\n> Keep this evidence", document.content)
+            self.assertEqual(0, document.metadata["topic_count"])
+            self.assertEqual(1, document.metadata["note_count"])
+            self.assertEqual(1, document.metadata["sheet_count"])
+
+
 class XMindParserModernTests(unittest.TestCase):
     def test_preserves_all_json_topic_groups_matching_classic_archive(self):
         # The official XMind topic schema defines attached, detached, summary,
