@@ -252,6 +252,12 @@ func renderMediaBlock(b *strings.Builder, block notionBlock, attachments *[]atta
 	}
 }
 
+// Markdown rows must stay on one physical line. Match CRLF first so it
+// produces a single break, and keep literal pipes inside their source cell.
+var tableCellReplacer = strings.NewReplacer(
+	"\r\n", "<br>", "\r", "<br>", "\n", "<br>", "|", "\\|",
+)
+
 // renderTable converts a table block (with table_row children) to Markdown.
 func renderTable(b *strings.Builder, block notionBlock) {
 	if len(block.Children) == 0 {
@@ -262,7 +268,7 @@ func renderTable(b *strings.Builder, block notionBlock) {
 		cells := extractTableCells(row.RawContent)
 		var parts []string
 		for _, cell := range cells {
-			parts = append(parts, strings.ReplaceAll(renderRichText(cell), "|", "\\|"))
+			parts = append(parts, tableCellReplacer.Replace(renderRichText(cell)))
 		}
 		b.WriteString("| " + strings.Join(parts, " | ") + " |\n")
 
