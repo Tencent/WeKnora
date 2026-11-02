@@ -206,3 +206,22 @@ func TestCompileSeatbeltAllowsAskModeWithNoWritableRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, prog.Profile, "WRITABLE_ROOT")
 }
+
+func TestCompileSeatbeltOpensAWritableFileByLiteral(t *testing.T) {
+	p := seatbeltPolicy()
+	p.WritableFiles = []string{"/Users/dev/Desktop/a.txt"}
+	prog, err := compileSeatbelt(p)
+	require.NoError(t, err)
+
+	require.Contains(t, prog.Params, "-DWRITABLE_FILE_0=/Users/dev/Desktop/a.txt")
+	write := `(allow file-write* (literal (param "WRITABLE_FILE_0")))`
+	read := `(allow file-read* (literal (param "WRITABLE_FILE_0")))`
+	require.Contains(t, prog.Profile, write)
+	require.Contains(t, prog.Profile, read)
+	require.Greater(t, strings.Index(prog.Profile, read),
+		strings.Index(prog.Profile, `(deny file-read* (subpath (param "PRIVATE_ROOT_0")))`),
+		"the read must be reopened after the private deny")
+	require.Less(t, strings.Index(prog.Profile, write),
+		strings.Index(prog.Profile, `(deny file-read* (subpath (param "DENY_READ_0")))`),
+		"credential denies still win")
+}

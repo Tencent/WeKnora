@@ -210,6 +210,120 @@ func DeleteSegments(command, homeDir string) []CommandSegment {
 	}}
 }
 
+// scriptRunners run their first operand as a program.
+var scriptRunners = map[string]bool{
+	"ash": true, "bash": true, "dash": true, "ksh": true, "sh": true, "zsh": true,
+	"node": true, "nodejs": true, "ruby": true, "perl": true, "php": true, "lua": true, "tclsh": true,
+	"rscript": true, "deno": true, "bun": true, "tsx": true, "ts-node": true, "source": true, ".": true,
+}
+
+// ScriptPaths returns the script files command runs, with ~ and $HOME
+// expanded and relative paths as written. It is a best effort so an approver
+// can read them; a program one of them starts in turn is not followed.
+func ScriptPaths(command, homeDir string) []string {
+	return scriptPathsAt(command, homeDir, 0)
+}
+
+func scriptPathsAt(command, homeDir string, depth int) []string {
+	if depth > 6 {
+		return nil
+	}
+	var out []string
+	for _, segment := range commandSeparators.Split(command, -1) {
+		words := shellWords(segment)
+		if script, ok := segmentScript(words); ok {
+			out = append(out, scriptPathsAt(script, homeDir, depth+1)...)
+			continue
+		}
+		i := programIndex(words)
+		if i >= len(words) {
+			continue
+		}
+		if target, ok := expandHome(segmentScriptPath(words[i], words[i+1:]), homeDir); ok && target != "" {
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+func segmentScriptPath(program string, args []string) string {
+	name := strings.ToLower(programName(program))
+	if !scriptRunners[name] && !strings.HasPrefix(name, "python") && !strings.HasPrefix(name, "pypy") {
+		if strings.Contains(program, "/") {
+			return program
+		}
+		return ""
+	}
+	for _, arg := range args {
+		switch {
+		case arg == "--eval" || arg == "--print" || strings.HasPrefix(arg, "-c") || strings.HasPrefix(arg, "-e") ||
+			strings.HasPrefix(arg, "-m") || strings.HasPrefix(arg, "-p") || (name == "php" && arg == "-r"):
+			return ""
+		case strings.HasPrefix(arg, "-"), (name == "deno" || name == "bun") && arg == "run":
+		default:
+			return arg
+		}
+	}
+	return ""
+}
+
+// DeleteLocation is one path a visible delete writes. Directory means the
+// command walks Path (find, or git -C), so a grant has to open Path itself.
+// An rm operand is not a directory walk: unlinking it writes the parent.
+type DeleteLocation struct {
+	Path      string
+	Directory bool
+}
+
+// DeleteLocations returns the paths a visible delete writes. Hidden deletes
+// (bash -c, substitutions) have none: the sandbox boundary stays put and the
+// approval cannot name a directory. Relative paths stay relative.
+func DeleteLocations(command, homeDir string) []DeleteLocation {
+	if hidesDelete(command) {
+		return nil
+	}
+	var out []DeleteLocation
+	for _, segment := range commandSeparators.Split(command, -1) {
+		words := shellWords(segment)
+		i := programIndex(words)
+		if i >= len(words) {
+			continue
+		}
+		args := words[i+1:]
+		switch programName(words[i]) {
+		case "rm", "rmdir", "unlink":
+			for _, arg := range deleteOperands(args) {
+				if target, ok := expandHome(arg, homeDir); ok {
+					out = append(out, DeleteLocation{Path: target})
+				}
+			}
+		case "find":
+			if len(findActions(args)) == 0 {
+				continue
+			}
+			for _, root := range findRoots(args) {
+				if target, ok := expandHome(root, homeDir); ok {
+					out = append(out, DeleteLocation{Path: target, Directory: true})
+				}
+			}
+		case "git":
+			sub, _ := gitSubcommandArgs(args)
+			if sub != "rm" && sub != "clean" {
+				continue
+			}
+			for j := 0; j+1 < len(args); j++ {
+				if args[j] != "-C" {
+					continue
+				}
+				if target, ok := expandHome(args[j+1], homeDir); ok {
+					out = append(out, DeleteLocation{Path: target, Directory: true})
+				}
+			}
+		}
+	}
+	return out
+}
+
 // DeleteTargets returns the operands of visible rm, rmdir and unlink commands,
 // with ~ and $HOME expanded. Relative operands stay relative to the command's
 // cwd and globs stay as written. Operands built from other variables or
@@ -584,10 +698,49 @@ func mentionsDangerousDelete(command, homeDir string) bool {
 	flat := strings.NewReplacer("'", " ", `"`, " ", "`", " ", `\`, " ").Replace(command)
 	words := strings.Fields(flat)
 	for i := 0; i < len(words); i++ {
-		if programName(words[i]) != "rm" {
-			continue
+		args := words[i+1:]
+		switch programName(words[i]) {
+		case "rm":
+			if recursiveOnHome(args, homeDir) {
+				return true
+			}
+		case "find":
+			if findDeletesRootOrHome(args, homeDir) {
+				return true
+			}
+		case "git":
+			if gitCleanRootOrHome(args, homeDir) {
+				return true
+			}
 		}
-		if recursiveOnHome(words[i+1:], homeDir) {
+	}
+	return false
+}
+
+// findDeletesRootOrHome reports a find that both deletes and starts at /
+// or the home directory. find ~/Desktop -delete is not that: it has a
+// narrower root the sandbox can ask about.
+func findDeletesRootOrHome(args []string, homeDir string) bool {
+	if len(findActions(args)) == 0 {
+		return false
+	}
+	for _, root := range findRoots(args) {
+		if isRootOrHome(root, homeDir) {
+			return true
+		}
+	}
+	return false
+}
+
+// gitCleanRootOrHome reports git clean pointed at / or the home directory
+// with -C. A clean of the cwd is the workspace, not the home directory.
+func gitCleanRootOrHome(args []string, homeDir string) bool {
+	sub, _ := gitSubcommandArgs(args)
+	if sub != "clean" {
+		return false
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-C" && isRootOrHome(args[i+1], homeDir) {
 			return true
 		}
 	}
@@ -638,9 +791,12 @@ func classifySegment(words []string, homeDir string) (deletes, dangerous bool) {
 		return true, false
 	case "git":
 		sub, _ := gitSubcommandArgs(args)
-		return sub == "rm" || sub == "clean", false
+		return sub == "rm" || sub == "clean", gitCleanRootOrHome(args, homeDir)
 	case "find":
-		return len(findActions(args)) > 0, false
+		if len(findActions(args)) == 0 {
+			return false, false
+		}
+		return true, findDeletesRootOrHome(args, homeDir)
 	}
 	return false, false
 }
