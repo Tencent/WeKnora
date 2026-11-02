@@ -219,11 +219,13 @@ curl -X DELETE $BASE/api/v1/system/admin/settings/default_storage_quota -H "Auth
 
 用途：asynq 队列深度与并发状态（Lite 模式返回 `available:false`；平台 key 需 `system_runtime_read|manage`）。
 
-响应：200 `{"available",upstream_concurrency,parse_concurrency,wiki_concurrency,pools,queues,model_limiter_available,models,timestamp}`
+响应：200 `{"available",upstream_concurrency,parse_concurrency,wiki_concurrency,pools,queues,model_limiter_available,models,im,operations,timestamp}`
 
 ```bash
 curl $BASE/api/v1/system/admin/runtime/queues -H "Authorization: Bearer $TOKEN"
 ```
+
+`im` 返回当前实例的即时问答槽位与排队数；未启用队列时 `im.available:false`。`operations` 为可选主机采集数据，包含容量、备份时效、日志容量和服务状态。未配置或无有效样本时 `operations.available:false`，超过 10 分钟的样本返回 `operations.stale:true`。两者独立于 asynq 的 `available` 状态。采集器和只读挂载配置见 [运行概览配置](../../scripts/monitoring/README.md)。
 
 ### GET /api/v1/system/admin/runtime/queues/:queue/tasks
 
