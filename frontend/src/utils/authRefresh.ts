@@ -6,6 +6,8 @@
  * axios interceptor; both planes call {@link refreshAccessTokenShared}.
  */
 
+import { getApiBaseUrl } from './api-base'
+
 const AUTH_STORAGE_KEYS = [
   'weknora_token',
   'weknora_refresh_token',
@@ -58,14 +60,15 @@ export function isStreamAuthError(err: unknown): boolean {
 
 export function isEmbedPage(): boolean {
   if (typeof window === 'undefined') return false
-  return window.location.pathname.startsWith('/embed/')
+  return window.location.pathname.startsWith(`${getApiBaseUrl()}/embed/`)
 }
 
 export function redirectToLogin() {
   if (typeof window === 'undefined') return
-  if (window.location.pathname === '/login') return
+  const loginPath = `${getApiBaseUrl()}/login`
+  if (window.location.pathname === loginPath) return
   if (isEmbedPage()) return
-  window.location.href = '/login'
+  window.location.href = loginPath
 }
 
 export function clearAuthStorage() {
