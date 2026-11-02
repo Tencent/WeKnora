@@ -3093,7 +3093,7 @@ func (s *knowledgeService) reparseKnowledge(
 			payloadBytes,
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, existing)
@@ -3147,7 +3147,7 @@ func (s *knowledgeService) reparseKnowledge(
 			payloadBytes,
 			documentProcessTaskOptions(s.config)...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, existing)
@@ -3198,7 +3198,7 @@ func (s *knowledgeService) reparseKnowledge(
 			payloadBytes,
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, existing)
@@ -3328,6 +3328,7 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	// Best-effort dequeue. Failures here don't block the cancel — the
 	// downstream tasks will still self-abort at their entry guards.
 	s.dequeueKnowledgeTasks(ctx, knowledgeID)
+	s.scrubDocumentPendingProcess(ctx, existing.KnowledgeBaseID, knowledgeID, "cancel")
 	// Wiki ingest lives in its own per-KB pending queue (task_pending_ops)
 	// rather than asynq, so dequeueKnowledgeTasks above can't see it.
 	// Mirror the deletion path's scrub so a cancelled knowledge doesn't
@@ -3750,8 +3751,25 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	return s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true)
 }
 
-// ProcessDocument handles Asynq document processing tasks
-func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) error {
+// ProcessDocument settles the durable per-KB admission row around the actual
+// document worker. Direct legacy tasks have PendingOpID == 0 and are unchanged.
+func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) (err error) {
+	var payload types.DocumentProcessPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return s.processDocument(ctx, t)
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			s.settleDocumentPendingOp(ctx, &payload, fmt.Errorf("document process panic: %v", recovered))
+			panic(recovered)
+		}
+		s.settleDocumentPendingOp(ctx, &payload, err)
+	}()
+	return s.processDocument(ctx, t)
+}
+
+// processDocument contains the existing document processing pipeline.
+func (s *knowledgeService) processDocument(ctx context.Context, t *asynq.Task) error {
 	var payload types.DocumentProcessPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal document process task payload: %v", err)

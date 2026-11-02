@@ -274,7 +274,7 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 		payloadBytes,
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocumentProcessTask(ctx, task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -482,7 +482,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		payloadBytes,
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocumentProcessTask(ctx, task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -729,7 +729,7 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		payloadBytes,
 		documentProcessTaskOptions(s.config)...,
 	)
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocumentProcessTask(ctx, task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -1007,7 +1007,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			payloadBytes,
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, knowledge)
