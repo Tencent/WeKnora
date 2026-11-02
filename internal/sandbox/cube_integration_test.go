@@ -579,3 +579,58 @@ func newIntegrationManager(t *testing.T) *SessionBoundManager {
 func integrationTenantContext(parent context.Context) context.Context {
 	return context.WithValue(parent, types.TenantIDContextKey, uint64(1))
 }
+
+// TestIntegrationCubeTemplateBuildCarriesMirror rebuilds the standard
+// template through a live Cube with WEKNORA_IMAGE_REGISTRY_MIRROR pointing
+// at a local registry that serves wechatopenai/weknora-sandbox:main-cube.
+//
+// It carries a second gate beyond the build tag so the rest of the
+// integration suite keeps its shape: set CUBE_MIRROR_E2E to the registry
+// host (e.g. 127.0.0.1:5000 after pushing the main-cube image to a
+// registry:2 container). An existing standard template is rebuilt in place
+// — the same path a deployment takes when a mirror is introduced later.
+func TestIntegrationCubeTemplateBuildCarriesMirror(t *testing.T) {
+	mirror := strings.TrimSpace(os.Getenv("CUBE_MIRROR_E2E"))
+	if mirror == "" {
+		t.Skip("set CUBE_MIRROR_E2E=<registry hosting wechatopenai/weknora-sandbox:main-cube> to run")
+	}
+	t.Setenv(StandardImageMirrorEnv, mirror)
+
+	cfg := integrationConfig(t)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	template, err := client.ReplaceStandardTemplate(ctx)
+	if err != nil {
+		t.Fatalf("ReplaceStandardTemplate: %v", err)
+	}
+	wantImage := mirror + "/wechatopenai/weknora-sandbox:main-cube"
+	if template.Image != wantImage {
+		t.Fatalf("template image = %q, want %q", template.Image, wantImage)
+	}
+
+	// Cube gates the build on the envd health probe, so READY is only
+	// reachable when the cluster pulled the mirrored image and booted envd
+	// from it.
+	for deadline := time.Now().Add(8 * time.Minute); time.Now().Before(deadline); time.Sleep(5 * time.Second) {
+		templates, err := client.ListTemplates(ctx)
+		if err != nil {
+			t.Fatalf("ListTemplates: %v", err)
+		}
+		for _, tpl := range templates {
+			if tpl.ID != template.ID {
+				continue
+			}
+			if IsTemplateReady(tpl.Status) {
+				return
+			}
+			t.Logf("template %s status: %s", tpl.ID, tpl.Status)
+		}
+	}
+	t.Fatalf("template %s never reached ready — the mirrored pull or the envd probe failed", template.ID)
+}
