@@ -239,95 +239,129 @@ func (c *OllamaChat) ChatStream(
 	go func() {
 		defer close(streamChan)
 
-		var thinking api.ThinkingEmitter
-		err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
-			// 发送思考内容（支持 Qwen3、DeepSeek 等推理模型）
-			if resp.Message.Thinking != "" {
-				thinking.Emit(streamChan, resp.Message.Thinking)
+		c.streamChat(ctx, chatReq, streamChan)
+	}()
+
+	return streamChan, nil
+}
+
+// streamChat owns the HTTP reader until streaming finishes or the consumer cancels.
+func (c *OllamaChat) streamChat(
+	ctx context.Context, chatReq *ollamaapi.ChatRequest, streamChan chan<- types.StreamResponse,
+) {
+	// A canceled consumer no longer drains this unbuffered channel. Every
+	// send (including reasoning and errors) must release the HTTP reader.
+	emit := func(resp types.StreamResponse) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		select {
+		case streamChan <- resp:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	thinking := api.NewStreamAssembler(ctx, c.modelName)
+	err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
+		// 发送思考内容（支持 Qwen3、DeepSeek 等推理模型）
+		if resp.Message.Thinking != "" {
+			thinking.Emit(streamChan, resp.Message.Thinking)
+			if thinking.Aborted() {
+				return ctx.Err()
+			}
+		}
+
+		if resp.Message.Content != "" {
+			// 思考阶段结束后，发送思考完成事件
+			thinking.Finish(streamChan)
+			if thinking.Aborted() {
+				return ctx.Err()
+			}
+			if !emit(types.StreamResponse{
+				ResponseType: types.ResponseTypeAnswer,
+				Content:      resp.Message.Content,
+				Done:         false,
+			}) {
+				return ctx.Err()
+			}
+		}
+
+		if len(resp.Message.ToolCalls) > 0 {
+			if !emit(types.StreamResponse{
+				ResponseType: types.ResponseTypeToolCall,
+				ToolCalls:    c.toolCallTo(resp.Message.ToolCalls),
+				Done:         false,
+			}) {
+				return ctx.Err()
 			}
 
-			if resp.Message.Content != "" {
-				// 思考阶段结束后，发送思考完成事件
-				thinking.Finish(streamChan)
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeAnswer,
-					Content:      resp.Message.Content,
-					Done:         false,
+			// Ollama returns tool calls as complete objects (not incremental deltas).
+			// Log this so we can trace non-streaming thought delivery.
+			for _, tc := range resp.Message.ToolCalls {
+				if tc.Function.Name == "thinking" {
+					argsBytes, _ := json.Marshal(tc.Function.Arguments)
+					logger.Warnf(ctx, "[Ollama Stream] Tool %q arrived non-incrementally (%d bytes args), "+
+						"thought will not be token-streamed to frontend",
+						tc.Function.Name, len(argsBytes))
 				}
 			}
 
-			if len(resp.Message.ToolCalls) > 0 {
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeToolCall,
-					ToolCalls:    c.toolCallTo(resp.Message.ToolCalls),
-					Done:         false,
-				}
-
-				// Ollama returns tool calls as complete objects (not incremental deltas).
-				// Log this so we can trace non-streaming thought delivery.
-				for _, tc := range resp.Message.ToolCalls {
-					if tc.Function.Name == "thinking" {
-						argsBytes, _ := json.Marshal(tc.Function.Arguments)
-						logger.Warnf(ctx, "[Ollama Stream] Tool %q arrived non-incrementally (%d bytes args), "+
-							"thought will not be token-streamed to frontend",
-							tc.Function.Name, len(argsBytes))
-					}
-				}
-
-				for _, tc := range resp.Message.ToolCalls {
-					argsMap := tc.Function.Arguments.ToMap()
-					switch tc.Function.Name {
-					case "thinking":
-						if thought, ok := argsMap["thought"].(string); ok && thought != "" {
-							streamChan <- types.StreamResponse{
-								ResponseType: types.ResponseTypeThinking,
-								Content:      thought,
-								Done:         false,
-								Data: map[string]interface{}{
-									"source":       "thinking_tool",
-									"tool_call_id": tooli2s(tc.Function.Index),
-								},
-							}
+			for _, tc := range resp.Message.ToolCalls {
+				argsMap := tc.Function.Arguments.ToMap()
+				switch tc.Function.Name {
+				case "thinking":
+					if thought, ok := argsMap["thought"].(string); ok && thought != "" {
+						if !emit(types.StreamResponse{
+							ResponseType: types.ResponseTypeThinking,
+							Content:      thought,
+							Done:         false,
+							Data: map[string]interface{}{
+								"source":       "thinking_tool",
+								"tool_call_id": tooli2s(tc.Function.Index),
+							},
+						}) {
+							return ctx.Err()
 						}
 					}
 				}
 			}
+		}
 
-			if resp.Done {
-				var usage *types.TokenUsage
-				if resp.PromptEvalCount > 0 || resp.EvalCount > 0 {
-					usage = &types.TokenUsage{
-						PromptTokens:     resp.PromptEvalCount,
-						CompletionTokens: resp.EvalCount,
-						TotalTokens:      resp.PromptEvalCount + resp.EvalCount,
-					}
-					usage.MarkPromptCacheUnsupported()
+		if resp.Done {
+			var usage *types.TokenUsage
+			if resp.PromptEvalCount > 0 || resp.EvalCount > 0 {
+				usage = &types.TokenUsage{
+					PromptTokens:     resp.PromptEvalCount,
+					CompletionTokens: resp.EvalCount,
+					TotalTokens:      resp.PromptEvalCount + resp.EvalCount,
 				}
-				api.LogUsage(ctx, c.modelName, usage)
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeAnswer,
-					Done:         true,
-					Usage:        usage,
-					// 与非流式分支一致：透传 done_reason，否则 num_predict 打满
-					// 的截断在流式里看起来像正常结束。
-					FinishReason: resp.DoneReason,
-				}
+				usage.MarkPromptCacheUnsupported()
 			}
-
-			return nil
-		})
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("流式聊天请求失败: %v", err)
-			// 发送错误响应
-			streamChan <- types.StreamResponse{
-				ResponseType: types.ResponseTypeError,
-				Content:      err.Error(),
+			api.LogUsage(ctx, c.modelName, usage)
+			if !emit(types.StreamResponse{
+				ResponseType: types.ResponseTypeAnswer,
 				Done:         true,
+				Usage:        usage,
+				// 与非流式分支一致：透传 done_reason，否则 num_predict 打满
+				// 的截断在流式里看起来像正常结束。
+				FinishReason: resp.DoneReason,
+			}) {
+				return ctx.Err()
 			}
 		}
-	}()
 
-	return streamChan, nil
+		return nil
+	})
+	if err != nil {
+		logger.GetLogger(ctx).Errorf("流式聊天请求失败: %v", err)
+		// 发送错误响应
+		emit(types.StreamResponse{
+			ResponseType: types.ResponseTypeError,
+			Content:      err.Error(),
+			Done:         true,
+		})
+	}
 }
 
 // 确保模型可用
