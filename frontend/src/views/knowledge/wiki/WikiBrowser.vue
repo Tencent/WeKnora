@@ -4934,8 +4934,8 @@ function applyHighlight(
   hoverSlug?: string
 ) {
   refreshGraphLabels()
-  const neighbors = adjacency.get(slug) || new Set()
-  const hoverNeighbors = hoverSlug ? (adjacency.get(hoverSlug) || new Set()) : new Set()
+  const neighbors = adjacency.get(slug) || new Set<string>()
+  const hoverNeighbors: Set<string> = hoverSlug ? (adjacency.get(hoverSlug) || new Set<string>()) : new Set<string>()
   const previous: GraphHighlightSnapshot | null = graphHighlightState
   const next = new Map<string, GraphHighlightState>()
   const nextRings = new Map<string, 'shown' | 'hidden'>()
