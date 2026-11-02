@@ -18,3 +18,9 @@ cli/acceptance/testdata/**/*.json text eol=lf
 
 # Unified diffs use a space to mark empty context lines.
 patches/browserskill/*.patch whitespace=-blank-at-eol
+
+*.mod text eol=lf
+*.sum text eol=lf
+*.tsv text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

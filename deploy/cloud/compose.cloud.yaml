@@ -1,0 +1,18 @@
+services:
+  frontend:
+    ports: !override
+      - "80:80"
+    mem_limit: 128m
+  app:
+    ports: !override
+      - "127.0.0.1:8080:8080"
+    mem_limit: 1100m
+    environment:
+      - GOMEMLIMIT=800MiB
+      - GOMAXPROCS=2
+  docreader:
+    mem_limit: 1000m
+  postgres:
+    mem_limit: 850m
+  redis:
+    mem_limit: 128m
