@@ -375,6 +375,46 @@ func TestShellExecDoesNotCaptureWithoutAnExplicitSkillName(t *testing.T) {
 
 // A stored value belongs to whoever entered it. Capture may fill a blank, so a
 // name that resolved is never handed to the write path.
+// Stored skill credentials are injected into the process only. The approval
+// the review model sees keeps the env the model passed, and nothing else.
+func TestShellExecApprovalOmitsStoredSkillCredentials(t *testing.T) {
+	executor := &approvalEnvExecutor{layout: hostLayout()}
+	resolver := stubEnvResolver{resolved: map[string]string{"API_KEY": "stored-secret"}}
+	tool := NewShellExecTool(executor, resolver).
+		WithSkillEnvironment(shellTestSkillEnvironment(t)).
+		WithHostApprovals(HostApprovals{})
+
+	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
+		`{"command":"python3 x.py","skill_name":"pdf-tools","env":{"LANG":"en"}}`,
+	))
+
+	require.NoError(t, err)
+	require.True(t, result.Success, "%+v", result)
+	require.Equal(t, map[string]string{"LANG": "en"}, executor.approvalEnv)
+	require.Equal(t, "stored-secret", executor.env["API_KEY"])
+}
+
+type approvalEnvExecutor struct {
+	fakeShellExecutor
+	layout      sandbox.WorkspaceLayout
+	approvalEnv map[string]string
+}
+
+func (e *approvalEnvExecutor) SessionWorkspaceLayout(
+	context.Context, string,
+) (sandbox.WorkspaceLayout, error) {
+	return e.layout, nil
+}
+
+func (e *approvalEnvExecutor) ExecShellCommand(
+	ctx context.Context, sessionID, command, workDir string, timeout time.Duration, env map[string]string,
+) (*sandbox.ExecuteResult, error) {
+	if port, ok := sandbox.CommandApprovalFrom(ctx); ok {
+		e.approvalEnv = port.Env
+	}
+	return e.fakeShellExecutor.ExecShellCommand(ctx, sessionID, command, workDir, timeout, env)
+}
+
 func TestShellExecDoesNotCaptureAlreadyResolvedNames(t *testing.T) {
 	recorder := &recordedCapture{}
 	resolver := stubEnvResolver{resolved: map[string]string{"USER_TOKEN": "stored"}}
