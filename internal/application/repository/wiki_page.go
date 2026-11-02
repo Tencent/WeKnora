@@ -321,18 +321,27 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 }
 
 // PublishDraftPage 只发布身份仍匹配的草稿，不能把调用方的旧元数据快照写回。
-// 已发布或归档的存活页不再更新；删除、替换或不属于指定范围时返回未找到。
+// 已发布或归档的存活页不再更新；回执版本过期时跳过，删除、替换或范围不符时返回未找到。
 func (r *wikiPageRepository) PublishDraftPage(
 	ctx context.Context, tenantID uint64, kbID, pageID, slug string,
 ) error {
+	publication, guarded := types.WikiPagePublicationFromContext(ctx)
+	if guarded && (publication.TenantID != tenantID || publication.KnowledgeBaseID != kbID ||
+		publication.PageID != pageID || publication.Slug != slug || publication.PageVersion <= 0) {
+		return errors.New("invalid wiki page publication: identity or receipt version does not match")
+	}
 	identity := "tenant_id = ? AND knowledge_base_id = ? AND id = ? AND slug = ?"
-	result := r.db.WithContext(ctx).Model(&types.WikiPage{}).
+	query := r.db.WithContext(ctx).Model(&types.WikiPage{}).
 		Where(identity, tenantID, kbID, pageID, slug).
-		Where("status = ?", types.WikiPageStatusDraft).
-		Updates(map[string]interface{}{
-			"status":     types.WikiPageStatusPublished,
-			"updated_at": time.Now(),
-		})
+		Where("status = ?", types.WikiPageStatusDraft)
+	if guarded {
+		// 版本由已提交回执授权；必须与状态在同一条 SQL 中比较，不能发布读取后保存的新草稿。
+		query = query.Where("version = ?", publication.PageVersion)
+	}
+	result := query.Updates(map[string]interface{}{
+		"status":     types.WikiPageStatusPublished,
+		"updated_at": time.Now(),
+	})
 	if result.Error != nil {
 		return result.Error
 	}

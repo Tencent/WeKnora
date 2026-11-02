@@ -689,7 +689,9 @@ func (r *taskPendingOpsRepository) SettleWikiIngestClaim(
 		}
 		if shouldFinalize {
 			// scope 条件随查询传入现有结算助手，避免仅凭全局文档 ID 跨归属扣计数。
-			scoped := tx.Where("tenant_id = ? AND knowledge_base_id = ?", claim.TenantID, claim.KnowledgeBaseID)
+			// 两条 UPDATE 各自复制语句，保留归属限制，避免扣减条件污染状态晋升。
+			scoped := tx.Where("tenant_id = ? AND knowledge_base_id = ?", claim.TenantID, claim.KnowledgeBaseID).
+				Session(&gorm.Session{})
 			if _, err := finalizeSubtask(scoped, claim.KnowledgeID); err != nil {
 				return err
 			}

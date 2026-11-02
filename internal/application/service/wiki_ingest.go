@@ -807,8 +807,25 @@ func (s *wikiIngestService) enqueueFinalize(
 	changes []wikiFinalizeChange,
 	folderIDs []string,
 ) error {
+	accepted, err := s.enqueueFinalizeRows(ctx, payload, affectedSlugs, freshTitleBySlug, changes, folderIDs)
+	if accepted {
+		err = errors.Join(err, s.scheduleFinalize(ctx, payload))
+	}
+	return err
+}
+
+// enqueueFinalizeRows 只持久交接整理工作；逐文档结算时不提前启动全局整理，
+// 避免其他文档仍在生成页面时清理它们的链接。触发器由批次退出路径统一发送。
+func (s *wikiIngestService) enqueueFinalizeRows(
+	ctx context.Context,
+	payload WikiIngestPayload,
+	affectedSlugs []string,
+	freshTitleBySlug map[string]string,
+	changes []wikiFinalizeChange,
+	folderIDs []string,
+) (bool, error) {
 	if s.pendingRepo == nil {
-		return nil
+		return false, nil
 	}
 	acceptedAny := false
 	var enqueueErrors []error
@@ -872,10 +889,7 @@ func (s *wikiIngestService) enqueueFinalize(
 			}
 		}
 	}
-	if acceptedAny {
-		enqueueErrors = append(enqueueErrors, s.scheduleFinalize(ctx, payload))
-	}
-	return errors.Join(enqueueErrors...)
+	return acceptedAny, errors.Join(enqueueErrors...)
 }
 
 func uniqueWikiFolderIDs(values []string) []string {

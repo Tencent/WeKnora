@@ -36,10 +36,12 @@ type wikiDurableDocument struct {
 
 // wikiProgressBatch 仅属于本轮领取，不放进跨批共享的 service 状态。
 type wikiProgressBatch struct {
-	repo      interfaces.WikiIngestProgressRepository
-	claims    map[int64]types.WikiProgressClaim
-	canonical map[string]WikiPendingOp
-	states    map[int64]*types.WikiIngestPlanState
+	repo         interfaces.WikiIngestProgressRepository
+	claims       map[int64]types.WikiProgressClaim
+	canonical    map[string]WikiPendingOp
+	states       map[int64]*types.WikiIngestPlanState
+	settlement   *wikiDocumentSettlement
+	publications wikiProgressPublisher
 }
 
 // claimWikiProgressBatch 在 Lite 模式也使用持久领取，旧进程晚返回时由代次拒绝写入。
@@ -144,6 +146,9 @@ func (s *wikiIngestService) claimWikiProgressBatch(
 func (b *wikiProgressBatch) release(ctx context.Context) error {
 	claims := make([]types.WikiProgressClaim, 0, len(b.claims))
 	for _, c := range b.claims {
+		if b.settlement != nil && b.settlement.isSettled(c.PendingOpID) {
+			continue
+		}
 		claims = append(claims, c)
 	}
 	return b.repo.ReleaseWikiIngestClaims(ctx, claims)
@@ -399,10 +404,13 @@ func (b *wikiProgressBatch) reduce(
 	return changed, kind, false, false, nil
 }
 
-// settle 在原批次结尾消费任务，计数释放与删除队列同事务，避免崩溃后重复扣减。
+// settle 消费批尾尚未结算的任务；计数释放与删除队列同事务，避免重复扣减。
 func (b *wikiProgressBatch) settle(ctx context.Context, s *wikiIngestService, ids []int64) error {
 	var errs []error
 	for _, id := range ids {
+		if b.settlement != nil && b.settlement.isSettled(id) {
+			continue
+		}
 		claim := b.claims[id]
 		op, canonical := b.canonical[claim.KnowledgeID]
 		canonical = canonical && op.dbID == id
@@ -425,6 +433,9 @@ func (b *wikiProgressBatch) retry(
 ) error {
 	var errs []error
 	for _, op := range ops {
+		if b.settlement != nil && b.settlement.isSettled(op.dbID) {
+			continue
+		}
 		claim := b.claims[op.dbID]
 		count, err := b.repo.IncrWikiIngestFailCount(ctx, claim)
 		if errors.Is(err, types.ErrWikiProgressClaimLost) {
@@ -465,17 +476,41 @@ func (b *wikiProgressBatch) retry(
 	return errors.Join(errs...)
 }
 
-// affectedIdentities 只允许本回执写入的页面参与发布，避免同 slug 删除重建后误发布新草稿。
+// affectedIdentities 按回执身份筛选统计页面；发布权限另由回执版本约束。
 func (b *wikiProgressBatch) affectedIdentities(
 	ctx context.Context,
 	s *wikiIngestService,
 	slugs []string,
 ) ([]string, map[string]string, error) {
+	return b.pageIdentities(ctx, s, slugs, false)
+}
+
+// unsettledIdentities 筛选未结算贡献涉及的页面身份，供批尾交接；发布前仍须校验回执版本。
+func (b *wikiProgressBatch) unsettledIdentities(
+	ctx context.Context, s *wikiIngestService, slugs []string,
+) ([]string, map[string]string, error) {
+	return b.pageIdentities(ctx, s, slugs, true)
+}
+
+// pageIdentities 在 pendingOnly 时排除已结算文档；完整快照仅用于批次统计。
+func (b *wikiProgressBatch) pageIdentities(
+	ctx context.Context, s *wikiIngestService, slugs []string, pendingOnly bool,
+) ([]string, map[string]string, error) {
 	expected := make(map[string]map[string]bool)
 	for _, op := range b.canonical {
-		state, err := b.repo.LoadWikiIngestPlan(ctx, b.claims[op.dbID])
-		if err != nil {
-			return nil, nil, err
+		if pendingOnly && b.settlement.isSettled(op.dbID) {
+			continue
+		}
+		var state *types.WikiIngestPlanState
+		if b.settlement != nil {
+			state, _ = b.settlement.settledState(op.dbID)
+		}
+		if state == nil {
+			var err error
+			state, err = b.repo.LoadWikiIngestPlan(ctx, b.claims[op.dbID])
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		for _, page := range state.Pages {
 			if !page.Applied || !page.Changed {

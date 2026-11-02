@@ -380,6 +380,23 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "get_kb_failed"
 		return fmt.Errorf("wiki ingest: get KB: %w", err)
 	}
+	// 早结算只交接持久行；正常、取消和异常返回都统一调度一次全局整理。
+	// 若发送触发器失败，空 ingest 的重试也会重新检查队列，不能因文档已消费而漏掉整理。
+	if s.progressRepo != nil && s.pendingRepo != nil {
+		defer func() {
+			finalizeCtx, cancel := wikiIngestCleanupContext(ctx)
+			defer cancel()
+			count, err := s.pendingRepo.PendingCount(
+				finalizeCtx, wikiFinalizeTaskType, wikiTaskScope, payload.KnowledgeBaseID,
+			)
+			if err == nil && count > 0 {
+				err = s.scheduleFinalize(finalizeCtx, payload)
+			}
+			if err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("wiki ingest: schedule persisted finalize: %w", err))
+			}
+		}()
+	}
 	if !kb.IsWikiEnabled() {
 		exitStatus = "kb_not_wiki_enabled"
 		return s.releaseIngestForUnavailableWiki(ctx, kb.ID, "wiki disabled")
@@ -752,6 +769,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 	}
 
+	var settlementErrors []error
+	if progress != nil {
+		progress.settlement = newWikiDocumentSettlement(progress, s, payload, docResults, slugUpdates)
+		// 重启后已完成的文档不必等待同批其他文档再次进入 Reduce。
+		if err := progress.settlement.settleReady(ctx); err != nil {
+			settlementErrors = append(settlementErrors, err)
+			logger.Warnf(ctx, "wiki ingest: preserve ready document for task retry: %v", err)
+		}
+	}
+
 	// 2. REDUCE PHASE (Parallel upserting grouped by Slug)
 	egReduce, reduceCtx := errgroup.WithContext(ctx)
 	egReduce.SetLimit(reduceParallel) // Reduce phase limit (LLM + DB concurrent connections, configurable)
@@ -898,6 +925,15 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				failedAdditionSlugs[slug] = struct{}{}
 				reduceMu.Unlock()
 			}
+			if progress != nil && reduceErr == nil && !additionFailed && !updateDeferred {
+				// 必须等整组贡献及反链返回后再唤醒文档，避免删除其他 worker 尚在读取的计划。
+				if err := progress.settlement.completeSlug(reduceCtx, slug); err != nil {
+					reduceMu.Lock()
+					settlementErrors = append(settlementErrors, err)
+					reduceMu.Unlock()
+					logger.Warnf(ctx, "wiki ingest: preserve document after slug %s for task retry: %v", slug, err)
+				}
+			}
 			return nil
 		})
 	}
@@ -905,6 +941,17 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	tailCtx, tailCancel := wikiIngestCleanupContext(ctx)
 	defer tailCancel()
+
+	if progress != nil {
+		// 其他文档仍可完成，但本轮发生的发布或结算错误必须返回给任务重试。
+		// 不能在批尾自动重试后吞掉错误，否则原本待恢复的回执和计数会被提前消费。
+		if err := errors.Join(settlementErrors...); err != nil {
+			return fmt.Errorf("wiki ingest: preserve failed document settlement: %w", err)
+		}
+		if err := progress.settlement.settleReady(tailCtx); err != nil {
+			return fmt.Errorf("wiki ingest: settle ready documents: %w", err)
+		}
+	}
 
 	// Sanitize the doc summary pages produced by this batch BEFORE we
 	// rebuild the index. The summary LLM (run during
@@ -927,6 +974,15 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	totalPagesAffected = len(allPagesAffected)
 
+	publishSlugs := allPagesAffected
+	if progress != nil {
+		var identityErr error
+		publishSlugs, _, identityErr = progress.unsettledIdentities(tailCtx, s, allPagesAffected)
+		if identityErr != nil {
+			return fmt.Errorf("wiki ingest: validate pending publication identities: %w", identityErr)
+		}
+	}
+
 	// Project one bounded summary into the knowledge-base activity feed.
 	// Detailed per-document Wiki log rows duplicated that feed and were never
 	// consumed by retrieval, so the activity record is now written directly.
@@ -946,13 +1002,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// Publish freshly-generated pages immediately (NOT deferred to finalize):
 	// users should see a document's wiki pages as soon as their content is
 	// written, not after the debounce window. This is a cheap status flip.
-	if len(allPagesAffected) > 0 {
+	if len(publishSlugs) > 0 {
 		logger.Infof(ctx, "wiki ingest: publishing draft pages")
 		var publishErr error
 		if progress != nil {
-			publishErr = s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected, checkpointedPageIDs)
+			publishErr = progress.publishUnsettledPages(tailCtx, s, publishSlugs)
 		} else {
-			publishErr = s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, allPagesAffected)
+			publishErr = s.publishDraftPages(tailCtx, payload.KnowledgeBaseID, publishSlugs)
 		}
 		if publishErr != nil && progress != nil {
 			return fmt.Errorf("wiki ingest: publish checkpointed pages: %w", publishErr)
@@ -986,9 +1042,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			freshTitleBySlug[p.Slug] = p.Title
 		}
 	}
-	if len(allPagesAffected) > 0 || len(docResults) > 0 || retractHandled > 0 || len(retractFolderIDs) > 0 {
+	finalizeSlugs := publishSlugs
+	if len(finalizeSlugs) > 0 || len(docResults) > 0 || retractHandled > 0 || len(retractFolderIDs) > 0 {
 		changes := make([]wikiFinalizeChange, 0, len(docResults)+len(pendingOps))
 		for _, r := range docResults {
+			if progress != nil && progress.settlement.isHandedOff(progress.canonical[r.KnowledgeID].dbID) {
+				continue
+			}
 			changes = append(changes, wikiFinalizeChange{
 				Action: wikiFinalizeAdded, DocTitle: r.DocTitle, DocSummary: r.Summary,
 			})
@@ -1000,10 +1060,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				})
 			}
 		}
-		if finalizeErr := s.enqueueFinalize(
-			tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs,
-		); finalizeErr != nil && progress != nil {
-			return fmt.Errorf("wiki ingest: persist checkpointed tail: %w", finalizeErr)
+		if progress != nil {
+			if _, finalizeErr := s.enqueueFinalizeRows(
+				tailCtx, payload, finalizeSlugs, freshTitleBySlug, changes, retractFolderIDs,
+			); finalizeErr != nil {
+				return fmt.Errorf("wiki ingest: persist checkpointed tail: %w", finalizeErr)
+			}
+		} else {
+			_ = s.enqueueFinalize(tailCtx, payload, finalizeSlugs, freshTitleBySlug, changes, retractFolderIDs)
 		}
 	}
 
@@ -1015,10 +1079,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// trace viewer can show how many of the doc's extracted pages
 	// actually landed (vs. dropped because reduce-phase generation
 	// failed).
-	failedAdditionSlugCount := len(failedAdditionSlugs)
 	spanCtx, spanCancel := wikiIngestCleanupContext(ctx)
 	for _, r := range docResults {
 		if r == nil {
+			continue
+		}
+		if progress != nil && progress.settlement.isSettled(progress.canonical[r.KnowledgeID].dbID) {
 			continue
 		}
 		// A successfully-mapped doc is terminal for its wiki op, so
@@ -1035,36 +1101,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied && progress == nil {
 			s.finalizeWikiSubtask(ctx, r.KnowledgeID, opAttempts[r.KnowledgeID])
 		}
-		if r.WikiSpan == nil {
-			continue
-		}
-		writtenPages := make([]map[string]string, 0, len(r.Pages))
-		droppedPages := make([]map[string]string, 0)
-		for _, p := range r.Pages {
-			entry := map[string]string{
-				"slug":  p.Slug,
-				"title": previewText(p.Title, 80),
-			}
-			if _, bad := failedAdditionSlugs[p.Slug]; bad {
-				droppedPages = append(droppedPages, entry)
-				continue
-			}
-			writtenPages = append(writtenPages, entry)
-		}
-		output := types.JSONMap{
-			"pages_written":         len(writtenPages),
-			"pages_dropped":         len(droppedPages),
-			"pages_total":           len(r.Pages),
-			"failed_slug_writes":    failedAdditionSlugCount,
-			"pages_written_preview": writtenPages,
-		}
-		if len(droppedPages) > 0 {
-			output["pages_dropped_preview"] = droppedPages
-		}
-		for k, v := range r.MapStats {
-			output[k] = v
-		}
-		s.tracker().EndSpan(spanCtx, r.WikiSpan, output)
+		s.endWikiDocumentSpan(spanCtx, r, failedAdditionSlugs)
 	}
 	spanCancel()
 	// Failed-map docs already had FailSpan called inside
@@ -2514,4 +2551,42 @@ func mergeChunkRefs(current types.StringArray, additions []SlugUpdate) types.Str
 		}
 	}
 	return out
+}
+
+// endWikiDocumentSpan 在文档真正结算后结束追踪；批尾不得再次覆盖已结束的成功结果。
+func (s *wikiIngestService) endWikiDocumentSpan(
+	ctx context.Context, r *docIngestResult, failedAdditionSlugs map[string]struct{},
+) {
+	if r == nil || r.WikiSpan == nil {
+		return
+	}
+	writtenPages := make([]map[string]string, 0, len(r.Pages))
+	droppedPages := make([]map[string]string, 0)
+	for _, p := range r.Pages {
+		entry := map[string]string{
+			"slug":  p.Slug,
+			"title": previewText(p.Title, 80),
+		}
+		if _, bad := failedAdditionSlugs[p.Slug]; bad {
+			droppedPages = append(droppedPages, entry)
+			continue
+		}
+		writtenPages = append(writtenPages, entry)
+	}
+	output := types.JSONMap{
+		"pages_written":         len(writtenPages),
+		"pages_dropped":         len(droppedPages),
+		"pages_total":           len(r.Pages),
+		"failed_slug_writes":    len(failedAdditionSlugs),
+		"pages_written_preview": writtenPages,
+	}
+	if len(droppedPages) > 0 {
+		output["pages_dropped_preview"] = droppedPages
+	}
+	for k, v := range r.MapStats {
+		output[k] = v
+	}
+	spanCtx, cancel := wikiIngestCleanupContext(ctx)
+	defer cancel()
+	s.tracker().EndSpan(spanCtx, r.WikiSpan, output)
 }
