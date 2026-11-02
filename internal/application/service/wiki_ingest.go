@@ -316,7 +316,10 @@ type WikiIngestPayload struct {
 	types.TracingContext
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Language        string `json:"language,omitempty"`
+	// KnowledgeID restricts an operator trigger to one existing durable key.
+	// Automatic triggers leave it empty and keep their normal batch selection.
+	KnowledgeID string `json:"knowledge_id,omitempty"`
+	Language    string `json:"language,omitempty"`
 }
 
 // WikiRetractPayload is the asynq task payload for wiki content retraction
@@ -895,9 +898,8 @@ func uniqueWikiFolderIDs(values []string) []string {
 // scheduleFinalize enqueues a debounced, coalesced KB-global finalize trigger.
 // asynq.TaskID ("wiki-finalize-<kbID>") makes concurrent schedules within the
 // debounce window collapse into one pending task; the conflict error is the
-// expected coalescing signal, not a failure. In Lite mode the sync executor
-// ignores TaskID, so finalize simply runs once per batch (acceptable at the
-// small scale Lite mode targets).
+// expected coalescing signal, not a failure. Lite mode reserves stable IDs
+// in-process for the lifetime of each delayed or running task.
 func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIngestPayload) {
 	langfuse.InjectTracing(ctx, &payload)
 	b, _ := json.Marshal(payload)

@@ -38,6 +38,7 @@ type runtimeKnowledgeCanceller interface {
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
+	documentProgress *service.DocumentProgressService
 	cfg              *config.Config
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader
@@ -83,8 +84,10 @@ func NewSystemHandler(cfg *config.Config,
 	knowledgeSvc interfaces.KnowledgeService,
 	storageBackendRepo interfaces.StorageBackendRepository,
 	sandboxConfigSvc *service.TenantSandboxConfigService,
+	documentProgress *service.DocumentProgressService,
 ) *SystemHandler {
 	return &SystemHandler{
+		documentProgress:   documentProgress,
 		cfg:                cfg,
 		neo4jDriver:        neo4jDriver,
 		documentReader:     documentReader,
