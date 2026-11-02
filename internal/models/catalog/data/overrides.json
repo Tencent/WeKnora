@@ -1616,6 +1616,41 @@
         }
       },
       {
+        "id": "anthropic/claude-opus-5.5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "anthropic/claude-sonnet-5.5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "anthropic/claude-haiku-5.5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
         "id": "anthropic/claude-opus-5",
         "compat": {
           "cache_control_format": "anthropic"
