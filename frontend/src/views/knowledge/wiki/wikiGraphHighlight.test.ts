@@ -43,7 +43,7 @@ class ElementFixture {
 }
 
 function graph(size = 80) {
-  const nodes = Array.from({ length: size }, (_, i) => ({ slug: `n${i}`, type: 'concept', linkCount: 1 }))
+  const nodes = Array.from({ length: size }, (_, i) => ({ slug: `n${i}`, type: 'concept', linkCount: 1, x: 0, y: 0 }))
   const graphRoot = new ElementFixture()
   const nodeGroup = new ElementFixture()
   nodeGroup.parentElement = graphRoot

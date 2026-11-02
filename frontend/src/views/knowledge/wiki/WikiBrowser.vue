@@ -4948,7 +4948,7 @@ function applyHighlight(
     ?? nodeEls[0]?.g.parentElement?.parentElement) as SVGGElement | null
   graphRoot?.classList.add('is-highlighting')
   graphRoot?.classList.remove('is-group-focused')
-  const nodeElsBySlug = new Map(nodeEls.map(node => [node.node.slug, node]))
+  const nodeElsBySlug = new Map<string, typeof nodeEls[number]>(nodeEls.map(node => [node.node.slug, node]))
   const contextSlugs = new Set([...next].filter(([, state]) => state !== 'dimmed').map(([slug]) => slug))
   if (previous) {
     for (const [slug, state] of previous.nodes) {
