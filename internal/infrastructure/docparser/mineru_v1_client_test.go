@@ -501,3 +501,15 @@ func TestMinerUV1APIError_LongNonJSONBodyStaysValidUTF8(t *testing.T) {
 	assert.True(t, strings.HasSuffix(err.msg, "..."))
 	assert.LessOrEqual(t, len(err.msg), 500+len("..."))
 }
+
+func TestMinerUV1MimeTypeSpreadsheets(t *testing.T) {
+	cases := map[string]string{
+		"book.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"BOOK.XLS":  "application/vnd.ms-excel",
+	}
+	for name, want := range cases {
+		if got := minerUV1MimeType(name); got != want {
+			t.Errorf("minerUV1MimeType(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

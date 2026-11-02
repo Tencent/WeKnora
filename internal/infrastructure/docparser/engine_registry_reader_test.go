@@ -110,3 +110,23 @@ func TestListAllEnginesIncludesAnydoc(t *testing.T) {
 	}
 	t.Fatal("anydoc engine not found in the engine list")
 }
+
+// A knowledge base rule that pins xls/xlsx to the self-hosted MinerU engine
+// must build the MinerU reader instead of falling through to the docreader.
+func TestNewReaderRoutesSpreadsheetsToMinerU(t *testing.T) {
+	deps := ReaderDeps{
+		Remote:    &stubRemote{},
+		Overrides: map[string]string{"mineru_endpoint": "http://mineru.example:8000"},
+	}
+	for _, fileType := range []string{"xlsx", "xls"} {
+		t.Run(fileType, func(t *testing.T) {
+			reader, err := NewReader(context.Background(), MinerUEngineName, fileType, false, deps)
+			if err != nil {
+				t.Fatalf("NewReader: %v", err)
+			}
+			if _, ok := reader.(*MinerUReader); !ok {
+				t.Fatalf("reader = %T, want *MinerUReader", reader)
+			}
+		})
+	}
+}

@@ -89,3 +89,35 @@ func TestPreferAnydocSkipsPDF(t *testing.T) {
 		}
 	}
 }
+
+// Self-hosted MinerU parses spreadsheets natively (xls/xlsx are in its
+// OFFICE_EXTENSIONS and run through the local flash tier), so the engine must
+// advertise them. The parser settings UI only offers an engine for a file type
+// when the engine lists it (#4099).
+func TestMinerUEngineAdvertisesSpreadsheets(t *testing.T) {
+	var found bool
+	for _, engine := range ListAllEngines(true, nil, nil) {
+		if engine.Name != MinerUEngineName {
+			continue
+		}
+		found = true
+		fileTypes := make(map[string]bool, len(engine.FileTypes))
+		for _, fileType := range engine.FileTypes {
+			fileTypes[fileType] = true
+		}
+		for _, want := range []string{"xls", "xlsx"} {
+			if !fileTypes[want] {
+				t.Errorf("mineru engine file types do not include %q: %v", want, engine.FileTypes)
+			}
+		}
+		// Formats it already served must stay.
+		for _, keep := range []string{"pdf", "docx", "pptx"} {
+			if !fileTypes[keep] {
+				t.Errorf("mineru engine dropped %q: %v", keep, engine.FileTypes)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("mineru engine not found")
+	}
+}
