@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -103,7 +104,7 @@ func WithTenantID(tenantID uint64) ClientOption {
 // NewClient creates a new client instance
 func NewClient(baseURL string, options ...ClientOption) *Client {
 	client := &Client{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
