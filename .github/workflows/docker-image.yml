@@ -217,6 +217,7 @@ jobs:
           cache-to: type=gha,scope=build-sandbox-desktop-cube,mode=max
 
   build-app:
+    if: github.repository == 'Tencent/WeKnora'
     strategy:
       matrix:
         include:
