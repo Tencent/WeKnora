@@ -51,7 +51,23 @@ const browserToolParameters = `{
         "wait_ms",
         "window_resize",
         "emulate",
-        "request_help"
+        "request_help",
+        "drag",
+        "screenshot_full_page",
+        "extract",
+        "debug",
+        "dialog_status",
+        "dialog_accept",
+        "dialog_dismiss",
+        "operation_await",
+        "operation_cancel",
+        "wait_for_element",
+        "record_start",
+        "record_stop",
+        "record_await",
+        "upload",
+        "download",
+        "video"
       ]
     },
     "keep_open": {
@@ -361,7 +377,115 @@ const browserToolParameters = `{
     },
     "title": {
       "type": "string"
-    }
+    },
+    "dialog_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "text": {
+      "type": "string"
+    },
+    "operation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": ["visible", "hidden", "attached", "detached"]
+    },
+    "poll_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "ref": {"type": "string"},
+        "selector": {"type": "string"},
+        "offset": {
+          "type": "object",
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "ref": {"type": "string"},
+        "selector": {"type": "string"},
+        "offset": {
+          "type": "object",
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+        }
+      }
+    },
+    "delta": {
+      "type": "object",
+      "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["press_move_release", "click_move_click", "input", "drop"]
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "discover", "table", "list",
+        "performance", "aggregate", "duplicates", "capabilities", "activity", "wait",
+        "pin", "unpin", "start", "stop", "status", "requests", "request",
+        "operations", "operation", "console", "pages", "export", "rules",
+        "rule_add", "rule_enable", "rule_disable", "rule_remove", "replay",
+        "read", "discard", "exported"
+      ]
+    },
+    "run_id": {"type": "string"},
+    "id": {"type": "string"},
+    "name": {"type": "string"},
+    "part": {"type": "string"},
+    "offset": {"type": "integer", "minimum": 0},
+    "max_chars": {"type": "integer", "minimum": 1},
+    "pointer": {"type": "string"},
+    "rule": {"type": "object"},
+    "replay": {"type": "object"},
+    "budget": {"type": "integer", "minimum": 4096, "maximum": 262144},
+    "slow_ms": {"type": "integer", "minimum": 0, "maximum": 60000},
+    "window_ms": {"type": "integer", "minimum": 100, "maximum": 10000},
+    "include_controlled": {"type": "boolean"},
+    "resource_type": {"type": "string"},
+    "status": {"type": "integer", "minimum": 100, "maximum": 599},
+    "kind": {"type": "string"},
+    "fields": {"type": "array", "items": {}},
+    "command_id": {"type": "string"},
+    "max_rows": {"type": "integer", "minimum": 1},
+    "max_columns": {"type": "integer", "minimum": 1},
+    "item_selector": {"type": "string"},
+    "target_id": {"type": "string"},
+    "purpose": {"type": "string"},
+    "max_page_tokens": {"type": "integer", "minimum": 1},
+    "redact_values": {"type": "boolean"},
+    "trace_version": {"type": "integer", "enum": [2, 3]},
+    "supports_tab_switch_steps": {"type": "boolean"},
+    "recording_id": {"type": "string"},
+    "capability": {"type": "string"},
+    "request_id": {"type": "string"},
+    "browser": {"type": "string"},
+    "max_duration_ms": {"type": "integer", "minimum": 1},
+    "quality": {"type": "string", "enum": ["standard", "clear"]},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "transfer_id": {"type": "string"},
+          "name": {"type": "string"},
+          "staged_path": {"type": "string"}
+        },
+        "required": ["transfer_id", "name"]
+      }
+    },
+    "browser_relative_dir": {"type": "string"},
+    "max_byte_size": {"type": "integer", "minimum": 1},
+    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 60000}
   },
   "required": [
     "method"
@@ -492,6 +616,70 @@ var browserArgumentRules = map[string]browserArgumentRule{
 	"request_help": {
 		fields:   []string{"prompt", "tab_id", "targets", "timeout_ms", "title"},
 		required: []string{"prompt"},
+	},
+	"drag": {
+		fields:   []string{"button", "delta", "duration_ms", "hold_ms", "mode", "modifiers", "source", "tab_id", "target", "timeout_ms"},
+		required: []string{"source"},
+	},
+	"screenshot_full_page": {
+		fields:   []string{"tab_id"},
+		required: []string{},
+	},
+	"extract": {
+		fields:   []string{"action", "fields", "item_selector", "max_bytes", "max_columns", "max_rows", "ref", "selector", "tab_id", "target_id", "timeout_ms"},
+		required: []string{"action"},
+	},
+	"debug": {
+		fields:   []string{"action", "budget", "command_id", "fields", "id", "include_controlled", "kind", "limit", "max_chars", "method", "name", "offset", "part", "pointer", "replay", "resource_type", "rule", "run_id", "since", "slow_ms", "state", "status", "tab_id", "timeout_ms", "url", "wait_ms", "window_ms"},
+		required: []string{"action"},
+	},
+	"dialog_status": {
+		fields:   []string{"tab_id"},
+		required: []string{},
+	},
+	"dialog_accept": {
+		fields:   []string{"dialog_id", "tab_id", "text"},
+		required: []string{"dialog_id"},
+	},
+	"dialog_dismiss": {
+		fields:   []string{"dialog_id", "tab_id"},
+		required: []string{"dialog_id"},
+	},
+	"operation_await": {
+		fields:   []string{"operation_id", "tab_id", "wait_ms"},
+		required: []string{"operation_id"},
+	},
+	"operation_cancel": {
+		fields:   []string{"operation_id", "tab_id"},
+		required: []string{"operation_id"},
+	},
+	"wait_for_element": {
+		fields:   []string{"poll_ms", "ref", "selector", "state", "tab_id", "timeout_ms"},
+		required: []string{"state"},
+	},
+	"record_start": {
+		fields:   []string{"max_page_tokens", "purpose", "redact_values", "supports_tab_switch_steps", "tab_id", "trace_version", "url"},
+		required: []string{},
+	},
+	"record_stop": {
+		fields:   []string{},
+		required: []string{},
+	},
+	"record_await": {
+		fields:   []string{"timeout_ms"},
+		required: []string{},
+	},
+	"upload": {
+		fields:   []string{"files", "mode", "ref", "selector", "tab_id", "timeout_ms"},
+		required: []string{"files"},
+	},
+	"download": {
+		fields:   []string{"browser_relative_dir", "max_byte_size", "ref", "selector", "tab_id", "timeout_ms"},
+		required: []string{},
+	},
+	"video": {
+		fields:   []string{"action", "browser", "capability", "max_duration_ms", "offset", "quality", "recording_id", "request_id", "tab_id", "timeout_ms"},
+		required: []string{"action"},
 	},
 }
 

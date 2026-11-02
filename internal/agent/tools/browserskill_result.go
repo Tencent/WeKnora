@@ -140,7 +140,7 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 // RPC success and page-operation success are different contracts. Inspect only
 // known result envelopes; arbitrary page text containing 'error' is still data.
 func (t *BrowserSkillTool) interpretResult(method string, raw json.RawMessage) *types.ToolResult {
-	if method == "screenshot" {
+	if method == "screenshot" || method == "screenshot_full_page" {
 		result := browserScreenshotResult(raw)
 		if !result.Success {
 			t.failed.Store(true)

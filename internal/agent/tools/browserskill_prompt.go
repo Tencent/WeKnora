@@ -19,8 +19,8 @@ func browserDescription(instructions []string) string {
 }
 
 // The local_browser operating contract is maintained here, not in editable agent
-// templates or the upstream CLI skill. Uses the paired CLI/extension 0.3.1
-// source baseline, remote ownership contract and WeKnora task controls.
+// templates or the upstream CLI skill. Uses the BrowserSkill 0.4.1 protocol,
+// remote ownership contract and WeKnora task controls.
 const browserToolDescription = `Control the user's connected Chrome through local_browser; no shell, installation or CLI
 session commands are needed. Sessions are server-managed. Pass fields beside method, and only
 the fields of that method, for example {"method":"navigate","url":"https://example.com"}.
@@ -58,6 +58,22 @@ wait_ms(duration_ms, tab_id?)
 window_resize(width, height)
 emulate(off | overrides, tab_id?)
 request_help(prompt, tab_id?, title?, targets?, timeout_ms?)
+drag(source, target?, delta?, mode?, button?, modifiers?, hold_ms?, duration_ms?, tab_id?, timeout_ms?)
+screenshot_full_page(tab_id?)
+extract(action, ref?, selector?, target_id?, item_selector?, fields?, max_rows?, max_columns?, max_bytes?, tab_id?, timeout_ms?)
+debug(action, tab_id?, run_id?, id?, name?, since?, limit?, part?, offset?, max_chars?, pointer?, rule?, replay?, budget?, slow_ms?, window_ms?, include_controlled?, url?, method?, resource_type?, status?, state?, kind?, fields?, wait_ms?, command_id?, timeout_ms?)
+dialog_status(tab_id?)
+dialog_accept(dialog_id, text?, tab_id?)
+dialog_dismiss(dialog_id, tab_id?)
+operation_await(operation_id, wait_ms?, tab_id?)
+operation_cancel(operation_id, tab_id?)
+wait_for_element(state, ref?, selector?, tab_id?, timeout_ms?, poll_ms?)
+record_start(url?, purpose?, max_page_tokens?, redact_values?, trace_version?, supports_tab_switch_steps?, tab_id?)
+record_stop()
+record_await(timeout_ms?)
+upload(files, ref?, selector?, mode?, tab_id?, timeout_ms?)
+download(ref?, selector?, tab_id?, timeout_ms?, browser_relative_dir?, max_byte_size?)
+video(action, tab_id?, max_duration_ms?, quality?, request_id?, browser?, recording_id?, capability?, offset?, timeout_ms?)
 click, fill, hover, scroll_to, focus, and select take exactly one of ref or selector.
 press, wheel, and blur take at most one. emulate takes either off or overrides.
 
@@ -83,6 +99,13 @@ Workflow:
 - Use expect for the business fact that must hold after an action, for example
   [{"target":"@e1","field":"text","equals":"OK"}]. This compares a DOM target; it is not a
   substitute for observing the page when the outcome is ambiguous.
+- Use dialog_status before accepting/dismissing a native dialog; never repeat the action that
+  opened it. Use wait_for_element instead of script polling. upload/download/video use the
+  browser host's file channel: download returns a transfer id, not file bytes; do not claim
+  file contents until a transfer reader is available.
+- Native dialogs must be handled with dialog_status/dialog_accept/dialog_dismiss; never repeat
+  the action that opened the dialog. Use extract for loaded tables/lists and wait_for_element
+  instead of polling with scripts.
 - Refresh stale refs before one retry. Inspect invisible targets and uncertain action effects
   before acting again. After two attempts without progress, change approach or report the blocker.
 

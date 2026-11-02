@@ -134,6 +134,10 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 	t.used.Store(true)
 	targeted := browserTargetedAction(method, params)
 	needsCooperation := browserActionNeedsCooperation(method)
+	if method == "video" {
+		action, _ := params["action"].(string)
+		needsCooperation = action == "start"
+	}
 	// A first navigation bootstraps shared control only when this conversation
 	// has no browser task yet. An existing task already has a fixed policy and
 	// requires the context from cooperate sync before navigating.
@@ -279,12 +283,25 @@ func browserControlPolicy(protocol string) string {
 // action with an explicit ref/selector, not a visual coordinate action.
 func browserTargetedAction(method string, params map[string]any) bool {
 	switch method {
-	case "click", "fill", "press", "select", "hover", "focus", "blur", "scroll_to", "wheel":
+	case "click", "fill", "press", "select", "hover", "focus", "blur", "scroll_to", "wheel",
+		"upload", "download":
+		_, ref := params["ref"]
+		_, selector := params["selector"]
+		return ref || selector
+	case "drag":
+		return dragTargetHasLocator(params["source"]) || dragTargetHasLocator(params["target"])
 	default:
 		return false
 	}
-	_, ref := params["ref"]
-	_, selector := params["selector"]
+}
+
+func dragTargetHasLocator(value any) bool {
+	target, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ref := target["ref"]
+	_, selector := target["selector"]
 	return ref || selector
 }
 
@@ -293,7 +310,8 @@ func browserActionInvalidatesContext(method string) bool {
 	case "navigate", "navigate_back", "navigate_forward", "reload",
 		"tab_create", "tab_select", "tab_close", "tab_borrow", "tab_return",
 		"emulate", "window_resize", "evaluate", "wait_ms", "wait_for_navigation",
-		"request_help":
+		"request_help", "drag", "upload", "download", "dialog_accept", "record_start",
+		"record_stop", "video":
 		return true
 	default:
 		return false
@@ -305,7 +323,9 @@ func browserActionInvalidatesContext(method string) bool {
 // management stay outside the single-use context.
 func browserActionNeedsCooperation(method string) bool {
 	switch method {
-	case "observe", "snapshot", "get_html", "screenshot", "console", "network",
+	case "observe", "snapshot", "get_html", "screenshot", "screenshot_full_page",
+		"console", "network", "extract", "debug", "dialog_status", "dialog_dismiss",
+		"operation_await", "operation_cancel", "wait_for_element", "record_stop", "record_await",
 		"tab_list", "wait_for_navigation", "request_help",
 		"tab_create", "tab_borrow", "tab_select", "tab_return":
 		return false
