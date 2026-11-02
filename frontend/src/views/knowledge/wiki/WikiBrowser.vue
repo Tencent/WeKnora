@@ -3842,11 +3842,12 @@ let graphAnimFrame = 0
 let refreshGraphLabels = () => {}
 let graphEdgeMarkersVisible = true
 type GraphHighlightState = 'primary' | 'neighbor' | 'dimmed'
-let graphHighlightState: {
+type GraphHighlightSnapshot = {
   nodes: Map<string, GraphHighlightState>
   rings: Map<string, 'shown' | 'hidden'>
   edges: Map<SVGLineElement, string>
-} | null = null
+}
+let graphHighlightState: GraphHighlightSnapshot | null = null
 let graphGroupMembersDirty = false
 let disposeGraphPanZoom = () => {}
 // Shared timer for debouncing node mouseleave -> mouseenter transitions.
@@ -4928,7 +4929,7 @@ function applyHighlight(
   refreshGraphLabels()
   const neighbors = adjacency.get(slug) || new Set()
   const hoverNeighbors = hoverSlug ? (adjacency.get(hoverSlug) || new Set()) : new Set()
-  const previous = graphHighlightState
+  const previous: GraphHighlightSnapshot | null = graphHighlightState
   const next = new Map<string, GraphHighlightState>()
   const nextRings = new Map<string, 'shown' | 'hidden'>()
   const nextEdges = new Map<SVGLineElement, string>()
@@ -5036,7 +5037,7 @@ function clearHighlight(
   }
 
   refreshGraphLabels()
-  const previous = graphHighlightState
+  const previous: GraphHighlightSnapshot | null = graphHighlightState
   const graphRoot = (edgeEls[0]?.line.parentElement?.parentElement
     ?? nodeEls[0]?.g.parentElement?.parentElement) as SVGGElement | null
   const shouldGroupFocus = graphFocusedSlugs.size > 0
