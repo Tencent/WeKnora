@@ -54,12 +54,13 @@ func NewAdapter(channelSecret, channelAccessToken string) *Adapter {
 	}
 }
 
+// Platform returns the LINE platform identifier.
 func (a *Adapter) Platform() im.Platform {
 	return im.PlatformLine
 }
 
-// HandleURLVerification: LINE has no challenge handshake, so the normal
-// callback path handles every request.
+// HandleURLVerification reports false: LINE has no challenge handshake, so the
+// normal callback path handles every request.
 func (a *Adapter) HandleURLVerification(*gin.Context) bool {
 	return false
 }
@@ -230,7 +231,7 @@ func (a *Adapter) post(ctx context.Context, path string, payload any) error {
 	if err != nil {
 		return fmt.Errorf("call LINE API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
