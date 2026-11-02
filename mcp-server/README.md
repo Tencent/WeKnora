@@ -124,6 +124,7 @@ python test_module.py
 - `get_knowledge_base` - 获取知识库详情
 - `delete_knowledge_base` - 删除知识库
 - `hybrid_search` - 混合搜索
+- `list_tags` - 列出知识库下的标签（支持 keyword 搜索与分页）
 
 ### 知识管理
 - `create_knowledge_from_file` - 从本地文件创建知识
@@ -146,12 +147,15 @@ python test_module.py
 - `delete_session` - 删除会话
 
 ### 聊天功能
-- `chat` - 发送聊天消息
-- `agent_chat` - 调用智能体完成多步检索与工具调用
+- `chat` - 发送聊天消息（可传 `tag_ids` 限定检索范围）
+- `agent_chat` - 调用智能体完成多步检索与工具调用（可传 `tag_ids` 限定检索范围）
 
 两种聊天工具均按 SSE 空行边界组装事件，支持一个事件包含多行 `data:`。
 连接结束时尚未遇到空行的事件会被丢弃；单个事件的数据缓冲上限为 8 MiB，
 超过上限会返回错误并关闭响应连接。
+
+`tag_ids` 来自 `list_tags`，用于把检索限定在带指定标签的文档上；标签 ID 归属
+单个知识库，因此传 `tag_ids` 时需同时给出且仅给出一个 `knowledge_base_id`。
 
 ### 块管理
 - `list_chunks` - 列出知识块
