@@ -93,10 +93,18 @@ func SliceMap[T any, Y any](li []T, fn func(T) Y) []Y {
 	return res
 }
 
+// Hit counts how many elements of li appear in set. Each distinct element
+// is counted only at its first occurrence, so duplicated retrieved IDs do
+// not inflate precision/recall beyond full credit.
 func Hit[T comparable](li []T, set map[T]struct{}) int {
 	count := 0
+	counted := make(map[T]struct{}, len(set))
 	for _, v := range li {
 		if _, exist := set[v]; exist {
+			if _, seen := counted[v]; seen {
+				continue
+			}
+			counted[v] = struct{}{}
 			count++
 		}
 	}

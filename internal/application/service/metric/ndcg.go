@@ -44,9 +44,19 @@ func (n *NDCGMetric) Compute(metricInput *types.MetricInput) float64 {
 		}
 	}
 
-	// Calculate DCG (Discounted Cumulative Gain)
+	// Calculate DCG (Discounted Cumulative Gain). Each relevant document
+	// contributes gain only at its first retrieved occurrence; duplicates
+	// keep their original rank slots but add no further gain.
 	var dcg float64
+	countedRelevant := make(map[int]struct{}, len(gtSets))
 	for i, docID := range ids {
+		if _, exist := gtSets[docID]; !exist {
+			continue
+		}
+		if _, seen := countedRelevant[docID]; seen {
+			continue
+		}
+		countedRelevant[docID] = struct{}{}
 		dcg += (math.Pow(2, float64(relevanceScores[docID])) - 1) / math.Log2(float64(i+2))
 	}
 
