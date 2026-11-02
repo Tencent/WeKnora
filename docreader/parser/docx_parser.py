@@ -137,12 +137,15 @@ def _block_children(container: Any):
 
 
 def _cell_text(cell: Any) -> str:
-    """A table cell's paragraph text, content controls and insertions included."""
-    return "\n".join(
-        _paragraph_text(element)
-        for element, _ in _block_children(cell._tc)
-        if element.tag == _W_P
-    )
+    """Keep cell paragraphs and nested table text in document order."""
+    parts: List[str] = []
+    for element, _ in _block_children(cell._tc):
+        if element.tag == _W_P:
+            parts.append(_paragraph_text(element))
+        elif element.tag == _W_TBL:
+            for row in Table(element, cell).rows:
+                parts.append(" ".join(_cell_text(nested) for nested in row.cells))
+    return "\n".join(parts)
 
 
 def _gfm_cell_text(text: Optional[str]) -> str:

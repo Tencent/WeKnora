@@ -319,5 +319,48 @@ class DocxContentControlAndRevisionTest(unittest.TestCase):
         document = _parse(_docx_bytes(build))
         self.assertIn("| Term | Value |\n| --- | --- |\n| Rate | 5% |", document.content)
 
+
+class DocxNestedTableTextTest(unittest.TestCase):
+    def test_nested_table_text_survives_fallback_parser(self):
+        def build(doc):
+            outer = doc.add_table(rows=2, cols=2)
+            outer.cell(0, 0).text = "Details"
+            outer.cell(0, 1).text = "Status"
+            cell = outer.cell(1, 0)
+            cell.text = "Before nested table"
+            nested = cell.add_table(rows=2, cols=2)
+            nested.cell(0, 0).text = "Nested header"
+            nested.cell(0, 1).text = "Nested value"
+            nested.cell(1, 0).text = "Nested row"
+            nested.cell(1, 1).text = "Deep before"
+            deep = nested.cell(1, 1).add_table(rows=1, cols=1)
+            deep.cell(0, 0).text = "Deep evidence | retained"
+            nested.cell(1, 1).add_paragraph("Deep after")
+            cell.add_paragraph("After nested table")
+            outer.cell(1, 1).text = "Ready"
+            doc.add_paragraph("After outer table")
+
+        document = _parse(_docx_bytes(build))
+        expected = (
+            "Before nested table Nested header Nested value Nested row "
+            "Deep before Deep evidence \\| retained Deep after After nested table"
+        )
+        self.assertIn("| " + expected + " | Ready |", document.content)
+        self.assertIn("| Details | Status |", document.content)
+        self.assertIn("After outer table", document.content)
+        self.assertEqual(document.content.count("Deep evidence"), 1)
+
+    def test_empty_nested_table_keeps_other_cell_text(self):
+        def build(doc):
+            table = doc.add_table(rows=1, cols=1)
+            cell = table.cell(0, 0)
+            cell.text = "Before"
+            cell.add_table(rows=1, cols=1)
+            cell.add_paragraph("After")
+
+        document = _parse(_docx_bytes(build))
+        self.assertIn("| Before After |", document.content)
+
+
 if __name__ == "__main__":
     unittest.main()
