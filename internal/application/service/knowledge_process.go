@@ -2652,7 +2652,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 // ignore Thinking=false still emit it in content, and each reasoning line
 // would otherwise be indexed as a question.
 func parseGeneratedQuestions(content string, questionCount int) []string {
-	lines := strings.Split(tools.StripThinkBlocks(content), "\n")
+	lines := generatedQuestionLines(strings.TrimSpace(tools.StripThinkBlocks(content)))
 	questions := make([]string, 0, questionCount)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -2669,6 +2669,41 @@ func parseGeneratedQuestions(content string, questionCount int) []string {
 		}
 	}
 	return questions
+}
+
+// generatedQuestionLines accepts plain lists and JSON question completions.
+// Structured metadata must not become indexed questions or chat starters.
+func generatedQuestionLines(content string) []string {
+	if header, body, ok := strings.Cut(content, "\n"); ok &&
+		(strings.TrimSpace(header) == "```" || strings.EqualFold(strings.TrimSpace(header), "```json")) {
+		content = strings.TrimSpace(strings.TrimSuffix(body, "```"))
+	}
+	if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
+		var value any
+		if err := json.Unmarshal([]byte(content), &value); err == nil {
+			if object, ok := value.(map[string]any); ok {
+				value = object["questions"]
+			}
+			items, ok := value.([]any)
+			if !ok {
+				return nil
+			}
+			lines := make([]string, 0, len(items))
+			for _, item := range items {
+				if question, ok := item.(string); ok {
+					lines = append(lines, question)
+				}
+			}
+			return lines
+		}
+		// Do not turn incomplete JSON into individual question lines. Preserve
+		// ordinary text such as "[RAG] How ..." and "{name} is used for ...".
+		rest := strings.TrimSpace(content[1:])
+		if rest == "" || strings.ContainsRune(`"{}[]`, rune(rest[0])) {
+			return nil
+		}
+	}
+	return strings.Split(content, "\n")
 }
 
 // RegenerateChunkQuestions synchronously refreshes Doc2Query-style auxiliary
