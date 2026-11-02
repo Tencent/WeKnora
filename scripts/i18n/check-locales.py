@@ -12,7 +12,7 @@ proper nouns) are legitimate there.
 Requires: pip install opencc
 
 Usage:
-  python3 scripts/i18n/check-locales.py [--root .]
+  python3 scripts/i18n/check-locales.py [--root REPO_ROOT]
 
 Exit code 1 when violations are found.
 """
@@ -67,7 +67,15 @@ def is_cjk(ch: str) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default=".", help="repository root")
+    # Derive the repo root from this script's location so the check works
+    # regardless of the caller's working directory (the CI step runs from
+    # frontend/, where a literal "." would resolve to frontend/frontend/...).
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    ap.add_argument(
+        "--root",
+        default=str(repo_root),
+        help="repository root (defaults to the repo containing this script)",
+    )
     args = ap.parse_args()
 
     locales = Path(args.root) / "frontend/src/i18n/locales"
