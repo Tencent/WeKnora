@@ -272,9 +272,11 @@ const previewFileType = computed(() => {
 // Every fetch takes a ticket; a response whose ticket is stale (the filters
 // changed while it was in flight) is dropped.
 let ticket = 0
+let deletionRevision = 0
 
 async function fetchPage(nextPage: number) {
   const mine = ++ticket
+  const revision = deletionRevision
   loading.value = true
   loadError.value = false
   try {
@@ -285,6 +287,12 @@ async function fetchPage(nextPage: number) {
       pageSize: PAGE_SIZE,
     })
     if (mine !== ticket) return
+    // A successful delete invalidates the response snapshot and may shift the
+    // offset of the next page. Refetch without discarding the loaded scrollback.
+    if (revision !== deletionRevision) {
+      await fetchPage(nextPage === 1 ? 1 : Math.floor(items.value.length / PAGE_SIZE) + 1)
+      return
+    }
     const rows = Array.isArray(res?.data) ? res.data : []
     // Deleting a row shifts every later row one page-offset earlier, so an
     // appended page can overlap what is already shown. Drop the repeats rather
@@ -420,6 +428,7 @@ async function performDelete(item: ArtifactLibraryItem) {
   deleting[key] = true
   try {
     await deleteArtifactLibraryItem(item)
+    deletionRevision++
     // Splice the row out instead of reloading: this is an infinite list, and a
     // reload would throw away everything the user has scrolled past.
     const at = items.value.findIndex((row) => itemKey(row) === key)
