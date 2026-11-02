@@ -104,8 +104,9 @@ Workflow:
   browser host's file channel: download returns a transfer id, not file bytes; do not claim
   file contents until a transfer reader is available.
 - Native dialogs must be handled with dialog_status/dialog_accept/dialog_dismiss; never repeat
-  the action that opened the dialog. Use extract for loaded tables/lists and wait_for_element
-  instead of polling with scripts.
+  the action that opened the dialog. Use extract with action:discover first to list containers
+  (each gets a target_id), then action:table or action:list with that target_id or a selector.
+  Use wait_for_element instead of polling with scripts.
 - Refresh stale refs before one retry. Inspect invisible targets and uncertain action effects
   before acting again. After two attempts without progress, change approach or report the blocker.
 
