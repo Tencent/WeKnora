@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
@@ -41,7 +44,11 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+// FolderPath is likewise owned by explicit folder mutations. Background jobs
+// commonly save a struct loaded before a rename; they must not undo that move.
+var omitFieldsOnUpdate = []string{
+	"ID", "DeletedAt", "PendingSubtasksCount", "FolderPath", "TenantID", "KnowledgeBaseID", "FilePath",
+}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -56,8 +63,9 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
-	err := r.db.WithContext(ctx).Create(knowledge).Error
-	return err
+	return r.withKnowledgeFolderMutation(ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, func(tx *gorm.DB) error {
+		return tx.Create(knowledge).Error
+	})
 }
 
 // GetKnowledgeByID gets knowledge
@@ -253,9 +261,8 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	return knowledges, total, nil
 }
 
-// ListKnowledgeFolderCounts aggregates how many knowledge entries live directly
-// in each folder of a knowledge base. Rows mid-deletion are excluded so the
-// sidebar tree counts match the document list.
+// ListKnowledgeFolderCounts aggregates visible documents and appends explicit
+// zero-count directories. Rows mid-deletion are excluded from document counts.
 func (r *knowledgeRepository) ListKnowledgeFolderCounts(
 	ctx context.Context,
 	tenantID uint64,
@@ -271,7 +278,7 @@ func (r *knowledgeRepository) ListKnowledgeFolderCounts(
 		Find(&counts).Error; err != nil {
 		return nil, err
 	}
-	return counts, nil
+	return r.appendExplicitKnowledgeFolders(ctx, tenantID, kbID, counts)
 }
 
 // UpdateKnowledgeFolderPath files the given knowledge entries under folderPath.
@@ -288,14 +295,57 @@ func (r *knowledgeRepository) UpdateKnowledgeFolderPath(
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	result := r.db.WithContext(ctx).
-		Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND id IN (?)", tenantID, kbID, ids).
-		Updates(map[string]interface{}{"folder_path": folderPath, "updated_at": time.Now()})
-	if result.Error != nil {
-		return 0, result.Error
+	unique := make([]string, 0, len(ids))
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id == "" {
+			return 0, ErrKnowledgeFolderChanged
+		}
+		if !seen[id] {
+			unique = append(unique, id)
+			seen[id] = true
+		}
 	}
-	return result.RowsAffected, nil
+	if _, present := types.KnowledgeFolderAnchorFromContext(ctx); !present {
+		ctx = types.WithKnowledgeFolderAnchor(ctx, folderPath)
+	}
+	var affected int64
+	err := r.withKnowledgeFolderMutation(ctx, tenantID, kbID, func(tx *gorm.DB) error {
+		if _, err := snapshotKnowledgeFolderPath(ctx, tx, tenantID, kbID, folderPath); err != nil {
+			return err
+		}
+		var rows []*types.Knowledge
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND id IN (?) AND parse_status <> ?",
+				tenantID, kbID, unique, types.ParseStatusDeleting).
+			Order("id").Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) != len(unique) {
+			return ErrKnowledgeFolderChanged
+		}
+		for _, row := range rows {
+			if err := access.RejectMovingKnowledge(row); err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&types.Knowledge{}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND id IN (?) AND parse_status <> ?",
+				tenantID, kbID, unique, types.ParseStatusDeleting).
+			Updates(map[string]interface{}{"folder_path": folderPath, "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != int64(len(unique)) {
+			return ErrKnowledgeFolderChanged
+		}
+		affected = result.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
 }
 
 // RenameKnowledgeFolderPath rewrites folder_path for a folder and every folder
@@ -308,34 +358,45 @@ func (r *knowledgeRepository) RenameKnowledgeFolderPath(
 	from string,
 	to string,
 ) (int64, error) {
-	if from == "" {
-		return 0, errors.New("source folder path is required")
-	}
-
-	// The rewrite is done row by row rather than with SQL string functions so it
-	// behaves identically on PostgreSQL and SQLite.
-	var rows []*types.Knowledge
-	if err := r.db.WithContext(ctx).
-		Select("id", "folder_path").
-		Where("tenant_id = ? AND knowledge_base_id = ? AND (folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
-			tenantID, kbID, from, escapeLikeKeyword(from)+"/%", likeEscapeChar).
-		Find(&rows).Error; err != nil {
+	if err := validateKnowledgeFolderRewrite(from); err != nil {
 		return 0, err
 	}
-	if len(rows) == 0 {
+	if err := validateKnowledgeFolderRewrite(to); err != nil {
+		return 0, err
+	}
+	if from == to {
 		return 0, nil
 	}
-
-	// Group by destination so each distinct rewrite is a single UPDATE.
-	byTarget := map[string][]string{}
-	for _, row := range rows {
-		suffix := strings.TrimPrefix(row.FolderPath, from)
-		byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)] = append(
-			byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)], row.ID)
+	if strings.HasPrefix(to, from+"/") {
+		return 0, ErrKnowledgeFolderInvalidPath
 	}
-
 	var affected int64
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.withKnowledgeFolderMutation(ctx, tenantID, kbID, func(tx *gorm.DB) error {
+		// Both snapshots must be read after acquiring the same KB lock. A move
+		// that committed while we waited must not be overwritten using stale IDs.
+		var rows []*types.Knowledge
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND knowledge_base_id = ? AND (folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
+				tenantID, kbID, from, escapeLikeKeyword(from)+"/%", likeEscapeChar).
+			Order("id").Find(&rows).Error; err != nil {
+			return err
+		}
+		// Group exact, validated destinations. Normalizing here would truncate
+		// deep/long descendants and silently merge distinct paths.
+		byTarget := map[string][]string{}
+		for _, row := range rows {
+			if err := access.RejectMovingKnowledge(row); err != nil {
+				return err
+			}
+			target := to + strings.TrimPrefix(row.FolderPath, from)
+			if err := validateKnowledgeFolderRewrite(target); err != nil {
+				return fmt.Errorf("%w: descendant would exceed folder limits", err)
+			}
+			byTarget[target] = append(byTarget[target], row.ID)
+		}
+		if err := renameExplicitKnowledgeFolders(tx, tenantID, kbID, from, to); err != nil {
+			return err
+		}
 		for target, targetIDs := range byTarget {
 			result := tx.Model(&types.Knowledge{}).
 				Where("tenant_id = ? AND knowledge_base_id = ? AND id IN (?)", tenantID, kbID, targetIDs).
@@ -355,28 +416,79 @@ func (r *knowledgeRepository) RenameKnowledgeFolderPath(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
-	omit := omitFieldsOnUpdate
-	// Legacy/unit-test schemas created before custom_metadata should continue
-	// to support unrelated updates when the caller did not provide the field.
-	if knowledge.CustomMetadata == nil {
-		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
-	}
-	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
-	return err
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return updateKnowledgeIfCurrent(tx, knowledge)
+	})
 }
 
-// UpdateKnowledgeBatch updates knowledge items in batch
+// Generic saves are updates of an already-loaded source, never upserts. SQL
+// predicates close the read/check/write gap against replacement or transfer.
+func updateKnowledgeIfCurrent(tx *gorm.DB, knowledge *types.Knowledge) error {
+	if knowledge == nil || knowledge.ID == "" || knowledge.TenantID == 0 || knowledge.KnowledgeBaseID == "" {
+		return ErrKnowledgeFolderChanged
+	}
+	var current types.Knowledge
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND COALESCE(file_path, '') = ?",
+			knowledge.ID, knowledge.TenantID, knowledge.KnowledgeBaseID, knowledge.FilePath).
+		Take(&current).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrKnowledgeFolderChanged
+		}
+		return err
+	}
+	if err := access.RejectMovingKnowledge(&current); err != nil {
+		return err
+	}
+	currentToken, err := knowledgeReparseToken(current.Metadata)
+	if err != nil {
+		return err
+	}
+	loadedToken, err := knowledgeReparseToken(knowledge.Metadata)
+	if err != nil {
+		return err
+	}
+	if currentToken != loadedToken {
+		return ErrKnowledgeFolderChanged
+	}
+	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
+	omit := omitFieldsOnUpdate
+	if knowledge.CustomMetadata == nil {
+		omit = append(append([]string{}, omit...), "custom_metadata")
+	}
+	result := tx.Model(&types.Knowledge{}).
+		Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND COALESCE(file_path, '') = ?",
+			knowledge.ID, knowledge.TenantID, knowledge.KnowledgeBaseID, knowledge.FilePath).
+		Select("*").Omit(omit...).Updates(knowledge)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrKnowledgeFolderChanged
+	}
+	return nil
+}
+
+// UpdateKnowledgeBatch applies the same ownership check atomically to all rows.
 func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error {
 	if len(knowledgeList) == 0 {
 		return nil
 	}
-	for _, knowledge := range knowledgeList {
-		if knowledge != nil {
-			knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
+	ordered := append([]*types.Knowledge(nil), knowledgeList...)
+	for _, row := range ordered {
+		if row == nil {
+			return ErrKnowledgeFolderChanged
 		}
 	}
-	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, knowledge := range ordered {
+			if err := updateKnowledgeIfCurrent(tx, knowledge); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // DeleteKnowledge deletes knowledge

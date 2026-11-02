@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -48,7 +49,17 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	fileName := file.Filename
 	folderPath := ""
 	if customFileName != "" {
-		folderPath, fileName = types.SplitKnowledgeRelativePath(customFileName)
+		normalizedName := strings.ReplaceAll(customFileName, "\\", "/")
+		if split := strings.LastIndex(normalizedName, "/"); split >= 0 {
+			var pathErr error
+			folderPath, pathErr = normalizeRenameFolderPath(normalizedName[:split])
+			if pathErr != nil {
+				return nil, pathErr
+			}
+			fileName = strings.TrimSpace(normalizedName[split+1:])
+		} else {
+			fileName = strings.TrimSpace(normalizedName)
+		}
 		if fileName == "" {
 			fileName = file.Filename
 		}
@@ -93,6 +104,18 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	// a failed row for asynchronous parse errors). Replacement entry points
 	// validate JSON before retiring the previous source.
 
+	// Capture the directory before hashing/storage I/O. A datasource replacement
+	// preserves the previous local placement and validates that row at commit.
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	var folderSnapshot *types.KnowledgeFolderPathSnapshot
+	_, anchored := types.KnowledgeFolderAnchorFromContext(ctx)
+	if replacement == nil && (folderPath != "" || anchored) {
+		folderSnapshot, err = s.repo.SnapshotKnowledgeFolderPath(ctx, tenantID, kbID, folderPath)
+		if err != nil {
+			return nil, knowledgeFolderError(err)
+		}
+	}
+
 	// Calculate file hash for deduplication
 	logger.Info(ctx, "Calculating file hash")
 	hash, err := calculateFileHash(file)
@@ -102,7 +125,6 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	}
 
 	// Check if file already exists
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
 	checkParams := &types.KnowledgeCheckParams{
 		Type:     "file",
@@ -143,7 +165,13 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	// Convert metadata to JSON format if provided
 	var metadataJSON types.JSON
 	if metadata != nil {
-		metadataBytes, err := json.Marshal(metadata)
+		safeMetadata := make(map[string]string, len(metadata))
+		for key, value := range metadata {
+			if key != types.KnowledgeReparseMetadataKey {
+				safeMetadata[key] = value
+			}
+		}
+		metadataBytes, err := json.Marshal(safeMetadata)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal metadata: %v", err)
 			return nil, err
@@ -215,15 +243,30 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 
 	// Save knowledge record to database after the file is safely stored.
 	logger.Info(ctx, "Saving knowledge record to database")
-	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement); err != nil {
+	if folderSnapshot != nil {
+		err = s.repo.CreateKnowledgeWithFolderSnapshot(ctx, knowledge, folderSnapshot)
+	} else {
+		err = s.persistKnowledgeForCreation(ctx, knowledge, replacement)
+	}
+	if err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
-		if replacement == nil || !replacement.keepFile {
-			if deleteErr := fileSvc.DeleteFile(context.WithoutCancel(ctx), filePath); deleteErr != nil {
+		cleanupCtx := context.WithoutCancel(ctx)
+		deleteStaged := replacement != nil && !replacement.keepFile
+		if replacement == nil {
+			// An ambiguous INSERT/COMMIT may still reference this object. Only
+			// a rejected folder precondition proves this write never inserted.
+			_, readErr := s.repo.GetKnowledgeByID(cleanupCtx, tenantID, knowledge.ID)
+			knownRejected := errors.Is(err, repository.ErrKnowledgeFolderChanged) ||
+				errors.Is(err, repository.ErrKnowledgeFolderInvalidPath)
+			deleteStaged = knownRejected && errors.Is(readErr, repository.ErrKnowledgeNotFound)
+		}
+		if deleteStaged {
+			if deleteErr := fileSvc.DeleteFile(cleanupCtx, filePath); deleteErr != nil {
 				logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v",
 					filePath, deleteErr)
 			}
 		}
-		return nil, err
+		return nil, knowledgeFolderError(err)
 	}
 	// Set tag relations
 	if err := s.attachCreationTags(ctx, knowledge, tagIDs, replacement); err != nil {

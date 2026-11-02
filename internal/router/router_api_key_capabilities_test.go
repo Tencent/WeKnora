@@ -738,3 +738,32 @@ func policyHasCapability(policy middleware.APIKeyRoutePolicy, cap types.APIKeyCa
 	}
 	return false
 }
+
+func TestDocumentFolderRoutesSeparateReadAndWriteCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	engine := gin.New()
+	RegisterKnowledgeRoutes(engine.Group("/api/v1"), &handler.KnowledgeHandler{}, g)
+	g.assertAPIKeyPoliciesMatchRoutes(engine)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		want   types.APIKeyCapability
+	}{
+		{http.MethodGet, "/api/v1/knowledge-bases/:id/knowledge/folders", types.APIKeyCapabilityRetrieve},
+		{http.MethodPost, "/api/v1/knowledge-bases/:id/knowledge/folders", types.APIKeyCapabilityIngest},
+		{http.MethodPut, "/api/v1/knowledge-bases/:id/knowledge/folders", types.APIKeyCapabilityIngest},
+		{http.MethodDelete, "/api/v1/knowledge-bases/:id/knowledge/folders/empty", types.APIKeyCapabilityIngest},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess || !policyHasCapability(policy, tc.want) {
+				t.Fatalf("folder route must require full access or %s: %#v", tc.want, policy)
+			}
+			if tc.method != http.MethodGet && policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+				t.Fatal("read-only retrieve capability must not grant folder mutations")
+			}
+		})
+	}
+}

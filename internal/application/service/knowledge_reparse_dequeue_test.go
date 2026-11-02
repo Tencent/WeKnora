@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -52,10 +53,12 @@ func newReparseHarness(t *testing.T, status string) *replaceFileHarness {
 // draining, stranding the row in "finalizing".
 func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 	tests := []struct {
-		name      string
-		setup     func(h *replaceFileHarness)
-		overrides *types.KnowledgeProcessOverrides
-		wantErr   string
+		name        string
+		setup       func(h *replaceFileHarness)
+		overrides   *types.KnowledgeProcessOverrides
+		wantErr     string
+		startStatus string
+		endStatus   string
 	}{
 		{
 			name: "override validation fails",
@@ -65,19 +68,20 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 				h.repo.row.FileType = "png"
 			},
 			overrides: &types.KnowledgeProcessOverrides{},
-			wantErr:   "VLM",
+			wantErr:   "VLM", startStatus: types.ParseStatusFinalizing, endStatus: types.ParseStatusFinalizing,
 		},
 		{
 			name: "resource cleanup fails",
 			setup: func(h *replaceFileHarness) {
 				h.svc.chunkRepo = failingCleanupChunkRepo{err: errors.New("database unavailable")}
 			},
-			wantErr: "database unavailable",
+			wantErr: "database unavailable", startStatus: types.ParseStatusCompleted,
+			endStatus: types.ParseStatusFailed,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			h := newReparseHarness(t, types.ParseStatusFinalizing)
+			h := newReparseHarness(t, test.startStatus)
 			test.setup(h)
 
 			_, err := h.svc.ReparseKnowledge(h.ctx, h.original.ID, test.overrides)
@@ -85,14 +89,14 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 			require.ErrorContains(t, err, test.wantErr)
 			assert.Empty(t, h.events, "no dequeue, no new attempt, no wiki scrub")
 			assert.Zero(t, h.svc.spanTracker.(*attemptTracker).opened)
-			assert.Equal(t, types.ParseStatusFinalizing, h.repo.row.ParseStatus)
+			assert.Equal(t, test.endStatus, h.repo.row.ParseStatus)
 			assert.Empty(t, h.tasks.payloads)
 		})
 	}
 }
 
-// A reparse over a run that may still own queued tasks drops them before it
-// announces the new attempt; a finished run has nothing to drop.
+// Active runs reject a new reparse without cancelling their work. Finished
+// runs can claim a new attempt and enqueue it.
 func TestReparseKnowledgeDequeuesOnlyInFlightRuns(t *testing.T) {
 	scrub := "scrub:" + WikiOpIngest + ":knowledge-1"
 	tests := []struct {
@@ -110,7 +114,16 @@ func TestReparseKnowledgeDequeuesOnlyInFlightRuns(t *testing.T) {
 			h := newReparseHarness(t, test.status)
 
 			_, err := h.svc.ReparseKnowledge(h.ctx, h.original.ID, nil)
-
+			if test.status == types.ParseStatusPending ||
+				test.status == types.ParseStatusProcessing ||
+				test.status == types.ParseStatusFinalizing {
+				var appErr *apperrors.AppError
+				require.ErrorAs(t, err, &appErr)
+				require.Equal(t, 409, appErr.HTTPCode)
+				require.Empty(t, h.events, "busy admission must not cancel or clean another attempt")
+				require.Empty(t, h.tasks.payloads)
+				return
+			}
 			require.NoError(t, err)
 			assert.Equal(t, test.want, h.events)
 			require.Len(t, h.tasks.payloads, 1)
@@ -120,21 +133,18 @@ func TestReparseKnowledgeDequeuesOnlyInFlightRuns(t *testing.T) {
 	}
 }
 
-// ReplaceKnowledgeFile already dropped the queued tasks before swapping the
-// file, so its reparse must not scan the queues a second time.
-func TestReplaceKnowledgeFileDequeuesInFlightParseOnce(t *testing.T) {
+// Replacement cannot take ownership of an active parse or cancel its tasks.
+func TestReplaceKnowledgeFileRejectsInFlightParseBeforeDequeue(t *testing.T) {
 	h := newReparseHarness(t, types.ParseStatusProcessing)
-
 	_, err := h.replace(t, "# new body", "notes/a.md", nil)
-
-	require.NoError(t, err)
-	dequeues := 0
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, 409, appErr.HTTPCode)
 	for _, event := range h.events {
-		if event == "dequeue:knowledge-1" {
-			dequeues++
-		}
+		assert.NotEqual(t, "dequeue:knowledge-1", event)
 	}
-	assert.Equal(t, 1, dequeues)
+	assert.Equal(t, types.ParseStatusProcessing, h.repo.row.ParseStatus)
+	assert.Empty(t, h.tasks.payloads)
 }
 
 // An ingest op left by an earlier wiki-enabled run would drain a slot of the

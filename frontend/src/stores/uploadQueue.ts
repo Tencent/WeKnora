@@ -22,6 +22,8 @@ export interface UploadBatch {
   kbName: string
   /** Destination folder, '' for the knowledge base root. */
   targetFolder: string
+  /** Undefined is legacy; explicit empty string anchors the root. Never rebind on retry. */
+  existingFolderAnchor?: string
   tagIds?: string[]
   processConfig?: KnowledgeProcessOverrides
 }

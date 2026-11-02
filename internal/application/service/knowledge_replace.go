@@ -3,10 +3,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -22,17 +25,18 @@ import (
 // Object storage is not transactional, so the steps are ordered to keep the
 // row pointing at a file that exists:
 //  1. save the new file under a fresh storage path;
-//  2. dequeue any in-flight parse of the previous source;
-//  3. point the row at the new file and mark it pending in one UPDATE;
+//  2. conditionally point the same source version at the new file;
+//  3. dequeue any in-flight parse of the previous source;
 //  4. ReparseKnowledge cleans the old chunks/index/graph and enqueues parsing;
 //  5. only after that succeeds, delete the old file.
 //
-// If step 3 fails the new file is discarded, unless a re-read shows the write
-// committed despite the error — in that case reparse continues so the row is
-// not left completed against a new file. If step 4 fails the previous source
-// columns are restored (marked failed, since cleanup may already have removed
-// the old index) and the new file is discarded. A file is never deleted while
-// the row may still reference it.
+// A known CAS conflict at step 2 can discard this attempt's new file. An
+// uncertain write keeps it unless a re-read proves this attempt committed in
+// the same KB, in which case reparse continues. If step 4 fails the previous source
+// columns are restored conditionally (marked failed, since cleanup may already
+// have removed the old index), without changing the current folder. The new
+// file is discarded only after successful compensation confirms ownership;
+// otherwise it may be a newer replacement's rollback source and is retained.
 //
 // Identical content under the same name and folder is not re-parsed: changed
 // metadata is persisted and a DuplicateKnowledgeError carrying this knowledge
@@ -57,6 +61,11 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	if existing.ParseStatus == types.ParseStatusDeleting {
 		return nil, werrors.NewBadRequestError("knowledge is being deleted")
 	}
+	if existing.ParseStatus == types.ParseStatusPending ||
+		existing.ParseStatus == types.ParseStatusProcessing ||
+		existing.ParseStatus == types.ParseStatusFinalizing {
+		return nil, werrors.NewConflictError("文件正在处理中，请处理完成后再替换")
+	}
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
 	}
@@ -68,11 +77,11 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			customName = file.Filename
 		}
 		fileName = customName
-		// A path-qualified name relocates the knowledge. A bare filename
-		// keeps the existing folder so callers can pass file.Filename as
-		// customFileName without moving the document to the KB root.
-		if knowledgeCustomNameRelocates(customFileName) {
-			folderPath = customFolder
+		// Source replacement does not relocate documents. A same-folder
+		// qualified name is accepted for connector compatibility; a different
+		// path must use the explicit folder-move API first.
+		if knowledgeCustomNameRelocates(customFileName) && customFolder != existing.FolderPath {
+			return nil, werrors.NewBadRequestError("替换文件不能更改目录，请先使用目录移动功能")
 		}
 	}
 	safeFileName, ok := secutils.ValidateInput(fileName)
@@ -113,17 +122,19 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	}
 
 	if hash == existing.FileHash && safeFileName == existing.FileName && folderPath == existing.FolderPath {
-		current := existing.GetMetadata()
+		values := map[string]interface{}{}
+		currentMetadata := existing.GetMetadata()
 		for k, v := range metadata {
-			if current[k] != v {
-				if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "metadata", newMetadata); err != nil {
-					return nil, err
-				}
-				existing.Metadata = newMetadata
+			if currentMetadata[k] != v {
+				values["metadata"] = newMetadata
 				break
 			}
 		}
-		return existing, types.NewDuplicateFileError(existing)
+		current, err := s.repo.UpdateKnowledgeSourceIfCurrent(ctx, existing, values)
+		if err != nil {
+			return nil, knowledgeFolderError(err)
+		}
+		return current, types.NewDuplicateFileError(current)
 	}
 
 	fileSvc := s.resolveFileService(ctx, kb)
@@ -145,15 +156,9 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		previousMetadata = types.JSON("{}") // metadata is NOT NULL; an empty JSON writes NULL
 	}
 
-	// Drop queued parse tasks of the previous source before the row
-	// points at the new file. The new TypeDocumentProcess task is
-	// enqueued later by ReparseKnowledge.
-	s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
-
 	sourceColumns := map[string]interface{}{
 		"title":         title,
 		"file_name":     safeFileName,
-		"folder_path":   folderPath,
 		"file_type":     fileType,
 		"file_size":     file.Size,
 		"file_hash":     hash,
@@ -164,25 +169,45 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		"error_message": "",
 		"updated_at":    time.Now(),
 	}
-	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, sourceColumns); err != nil {
+	replacement, err := s.repo.UpdateKnowledgeSourceIfCurrent(ctx, existing, sourceColumns)
+	if err != nil {
 		current, readErr := s.repo.GetKnowledgeByID(cleanupCtx, existing.TenantID, existing.ID)
-		if readErr != nil || current == nil || current.FilePath != newPath {
+		if readErr != nil || current == nil || current.TenantID != existing.TenantID ||
+			current.KnowledgeBaseID != existing.KnowledgeBaseID ||
+			current.FilePath != newPath ||
+			current.FileHash != hash {
 			logger.Errorf(ctx, "Failed to point knowledge %s at its replacement file: %v", existing.ID, err)
-			s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
-			return nil, err
+			// A known CAS conflict is guaranteed not to have written this blob.
+			// For an uncertain DB/commit error, another replacement may already
+			// hold it as its rollback source even if the current row differs.
+			if errors.Is(err, repository.ErrKnowledgeFolderChanged) {
+				s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
+			} else {
+				logger.Warnf(ctx, "Keeping replacement file %s after uncertain source update", newPath)
+			}
+			return nil, knowledgeFolderError(err)
+		}
+		replacement = current
+		if movingErr := access.RejectMovingKnowledge(current); movingErr != nil {
+			return nil, movingErr
 		}
 		logger.Warnf(ctx, "Source update for knowledge %s reported an error after committing; continuing reparse: %v",
 			existing.ID, err)
 	}
 
-	reparsed, err := s.reparseKnowledge(ctx, existing.ID, nil, true)
+	// The reparse claim is bound to this replacement's source. It owns queue
+	// cancellation and cleanup; a failed claim must not touch another attempt.
+	reparsed, err := s.reparseKnowledgeSource(ctx, existing.ID, nil, false, replacement)
 	if err != nil {
 		logger.Errorf(ctx, "Reparse after replacing the file of knowledge %s failed, restoring source: %v",
 			existing.ID, err)
-		if rerr := s.repo.UpdateKnowledgeColumns(cleanupCtx, existing.ID, map[string]interface{}{
+		if reparsed == nil {
+			logger.Warnf(ctx, "Keeping replacement file %s after reparse admission conflict", newPath)
+			return nil, err
+		}
+		if _, rerr := s.repo.UpdateKnowledgeSourceIfCurrent(cleanupCtx, reparsed, map[string]interface{}{
 			"title":         existing.Title,
 			"file_name":     existing.FileName,
-			"folder_path":   existing.FolderPath,
 			"file_type":     existing.FileType,
 			"file_size":     existing.FileSize,
 			"file_hash":     existing.FileHash,
@@ -193,8 +218,12 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			"updated_at":    time.Now(),
 		}); rerr != nil {
 			logger.Errorf(ctx, "Failed to restore the source of knowledge %s: %v", existing.ID, rerr)
+			// A newer replacement can need newPath as its backup. The absence
+			// of a current row reference does not prove it is safe to delete.
+			logger.Warnf(ctx, "Keeping replacement file %s after failed compensation", newPath)
+		} else {
+			s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
 		}
-		s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
 		return nil, err
 	}
 
@@ -247,6 +276,9 @@ func mergeKnowledgeMetadata(current types.JSON, updates map[string]string) (type
 		merged = map[string]interface{}{}
 	}
 	for k, v := range updates {
+		if k == types.KnowledgeReparseMetadataKey {
+			continue
+		}
 		merged[k] = v
 	}
 	b, err := json.Marshal(merged)

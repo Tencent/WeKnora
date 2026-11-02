@@ -40,6 +40,9 @@ func (s *knowledgeService) persistKnowledgeForCreation(ctx context.Context, know
 		return err
 	}
 	knowledge.Metadata = metadata
+	// Datasource refreshes preserve local organization. The repository repeats
+	// this assignment inside the guarded source-row replacement transaction.
+	knowledge.FolderPath = replacement.previous.FolderPath
 	if err := s.repo.ReplaceKnowledge(ctx, replacement.previous, knowledge, replacement.tagIDs); err != nil {
 		// A commit can succeed while its acknowledgement is lost. Only discard
 		// the staged file when a read confirms the previous row is still live.

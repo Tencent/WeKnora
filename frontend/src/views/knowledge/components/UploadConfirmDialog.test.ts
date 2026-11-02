@@ -1,12 +1,38 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
+import * as Vue from 'vue'
+import { renderToString } from 'vue/server-renderer'
+import { compile } from '@vue/compiler-dom'
 
 const dialog = readFileSync(new URL('./UploadConfirmDialog.vue', import.meta.url), 'utf8')
 const editor = readFileSync(new URL('../KnowledgeBaseEditorModal.vue', import.meta.url), 'utf8')
 const host = readFileSync(new URL('../../../components/UploadConfirmHost.vue', import.meta.url), 'utf8')
 const knowledgeBase = readFileSync(new URL('../KnowledgeBase.vue', import.meta.url), 'utf8')
 const platform = readFileSync(new URL('../../platform/index.vue', import.meta.url), 'utf8')
+
+test('renders the original knowledge base name beside the destination after the page switches', async () => {
+  let routeKb = { id: 'kb-a', name: 'Knowledge A' }
+  const openedKb = routeKb
+  routeKb = { id: 'kb-b', name: 'Knowledge B' }
+  assert.match(host, /:kb-info="uploadConfirmStore\.kbInfo"/)
+  assert.match(knowledgeBase, /kbInfo: targetInfo/)
+  const store = readFileSync(new URL('../../../stores/uploadConfirm.ts', import.meta.url), 'utf8')
+  assert.match(store, /this\.kbInfo = options\.kbInfo/)
+  // Render the actual component's destination label block, with the real
+  // host/store binding checked above, rather than a second copy of its markup.
+  const block = dialog.match(/<div v-if="mode === 'file'" class="destination-knowledge-base">[\s\S]*?<\/div>/)?.[0]
+  assert.ok(block)
+  const render = new Function('Vue', compile(block, { prefixIdentifiers: true }).code)(Vue)
+  const html = await renderToString(Vue.createSSRApp({
+    props: ['kbInfo', 'mode'], render,
+    methods: { t: (key: string) => key === 'common.knowledgeBase' ? 'Knowledge base' : key },
+  }, { kbInfo: openedKb, mode: 'file' }))
+  assert.match(html, /Knowledge base/)
+  assert.match(html, /Knowledge A/)
+  assert.doesNotMatch(html, /Knowledge B/)
+  assert.equal(routeKb.id, 'kb-b')
+})
 
 test('selects multiple document tags and returns them with the confirmation result', () => {
   assert.match(host, /:tag-ids="uploadConfirmStore\.tagIds"/)
@@ -18,8 +44,8 @@ test('selects multiple document tags and returns them with the confirmation resu
 
 test('uses confirmed tags for file and URL imports instead of reading the list filter at upload time', () => {
   assert.match(knowledgeBase, /const tagIds = result\.tagIds \|\| \[\]/)
-  assert.match(knowledgeBase, /enqueueUploads\(files, \{[\s\S]*?\btagIds,[\s\S]*?\}\)/)
-  assert.match(knowledgeBase, /executeUrlImport\(url, processConfig, tagIds\)/)
+  assert.match(knowledgeBase, /enqueueUploads\(target, files, \{[\s\S]*?\btagIds,[\s\S]*?\}\)/)
+  assert.match(knowledgeBase, /executeUrlImport\(url, processConfig, tagIds, target\)/)
   assert.doesNotMatch(
     knowledgeBase,
     /const tagIdsToUpload = selectedTagIds\.value\.length > 0 \? \[\.\.\.selectedTagIds\.value\] : undefined/,

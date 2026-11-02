@@ -420,15 +420,17 @@ func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	if err != nil {
 		return err
 	}
-	if state, ok := old[KnowledgeTransferMetadataKey]; ok {
-		fields, err := jsonValue.Map()
-		if err != nil {
-			return err
-		}
-		fields[KnowledgeTransferMetadataKey] = state
-		jsonValue, err = json.Marshal(fields)
-		if err != nil {
-			return err
+	for _, reserved := range []string{KnowledgeTransferMetadataKey, KnowledgeReparseMetadataKey} {
+		if state, ok := old[reserved]; ok {
+			fields, err := jsonValue.Map()
+			if err != nil {
+				return err
+			}
+			fields[reserved] = state
+			jsonValue, err = json.Marshal(fields)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	k.Metadata = jsonValue

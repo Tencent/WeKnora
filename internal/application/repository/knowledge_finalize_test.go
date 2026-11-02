@@ -70,6 +70,11 @@ func setupKnowledgeTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.Exec(knowledgesTestDDL).Error)
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeFolder{}))
+	require.NoError(t, db.Exec(`CREATE TABLE knowledge_bases (
+		id TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL, deleted_at DATETIME)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO knowledge_bases(id, tenant_id)
+		VALUES ('kb', 1), ('other', 1), ('kb-tenant-2', 2), ('source', 7), ('target', 7)`).Error)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db
 }

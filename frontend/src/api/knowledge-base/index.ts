@@ -498,6 +498,7 @@ export function uploadKnowledgeFile(
     file: File
     tag_ids?: string[]
     fileName?: string
+    existing_folder_anchor?: string
     process_config?: KnowledgeProcessOverrides | string
     [key: string]: any
   } = { file: new File([], '') },
@@ -595,16 +596,28 @@ export function listKnowledgeFolders(kbId: string, options?: KnowledgeReadOption
   return get(withKnowledgeReadContext(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`, options), { signal: options?.signal });
 }
 
+/** Create an independently persisted empty child folder. */
+export function createKnowledgeFolder(kbId: string, data: { parent_path: string; name: string }): Promise<{ success: boolean; data: KnowledgeFolderNode }> {
+  return post(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/knowledge/folders`, data);
+}
+
+/** Remove an empty explicit directory; the server rejects files and descendants. */
+export function deleteEmptyKnowledgeFolder(kbId: string, path: string) {
+  return del(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/knowledge/folders/empty?${new URLSearchParams({ path })}`);
+}
+
 /**
- * Re-file documents under `folderPath` ('' = knowledge base top level). Folders
- * are derived from the stored paths, so a path that does not exist yet is
- * created by this call. Only the grouping changes; documents are not re-parsed.
+ * Re-file documents under `folderPath` ('' = knowledge base top level).
+ * An omitted anchor requires an existing destination. To create a new path,
+ * pass the existing ancestor chosen by the user (explicit '' permits root).
+ * Only the grouping changes; documents are not re-parsed.
  */
-export function moveKnowledgeToFolder(kbId: string, ids: string[], folderPath: string) {
+export function moveKnowledgeToFolder(kbId: string, ids: string[], folderPath: string, existingFolderAnchor?: string) {
   return post('/api/v1/knowledge/folder', {
     kb_id: kbId,
     knowledge_ids: ids,
     folder_path: folderPath,
+    existing_folder_anchor: existingFolderAnchor,
   });
 }
 

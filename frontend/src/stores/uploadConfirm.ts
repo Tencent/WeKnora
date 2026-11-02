@@ -33,6 +33,8 @@ export interface UploadConfirmResult {
    * the dialog.
    */
   targetFolder?: string
+  /** Existing ancestor frozen when the user picked or began creating the destination. */
+  existingFolderAnchor?: string
 }
 
 export interface OpenUploadConfirmOptions {

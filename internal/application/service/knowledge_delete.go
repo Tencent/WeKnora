@@ -782,14 +782,20 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	if payload.TenantID == 0 {
 		return fmt.Errorf("invalid delete task tenant: %w", asynq.SkipRetry)
 	}
+	if payload.ClearFolders && strings.TrimSpace(payload.KnowledgeBaseID) == "" {
+		return fmt.Errorf("missing clear-folders knowledge base: %w", asynq.SkipRetry)
+	}
 	ids, err := writeResourceIDs(payload.KnowledgeIDs)
 	if err != nil {
 		return fmt.Errorf("invalid delete task IDs: %w", asynq.SkipRetry)
 	}
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 	if len(ids) == 0 {
+		if payload.ClearFolders {
+			return s.repo.DeleteKnowledgeFolders(ctx, payload.TenantID, payload.KnowledgeBaseID)
+		}
 		return nil
 	}
-	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 	kbID := payload.KnowledgeBaseID
 	if kbID == "" {
 		// Pre-upgrade tasks were admitted by single-KB endpoints but omitted
@@ -822,6 +828,14 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 		return err
 	}
 
+	// Clear folders only after the admitted document snapshot was deleted.
+	// A failure is retryable in this same task; ordinary single/batch deletes
+	// leave explicitly created directories in place.
+	if payload.ClearFolders {
+		if err := s.repo.DeleteKnowledgeFolders(ctx, payload.TenantID, kbID); err != nil {
+			return err
+		}
+	}
 	logger.Infof(ctx, "Successfully deleted %d knowledge items", len(payload.KnowledgeIDs))
 	return nil
 }

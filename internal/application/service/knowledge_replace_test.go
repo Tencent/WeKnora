@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"mime/multipart"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -22,10 +25,12 @@ import (
 // that committed but reported an error).
 type replaceFileRepo struct {
 	interfaces.KnowledgeRepository
-	row             types.Knowledge
-	columnsCalls    int
-	failColumnsCall int
-	commitThenFail  bool
+	row                types.Knowledge
+	columnsCalls       int
+	failColumnsCall    int
+	commitThenFail     bool
+	beforeSourceUpdate func(int)
+	afterFailedCommit  func()
 }
 
 func (r *replaceFileRepo) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
@@ -34,7 +39,10 @@ func (r *replaceFileRepo) GetKnowledgeByID(context.Context, uint64, string) (*ty
 }
 
 func (r *replaceFileRepo) UpdateKnowledge(_ context.Context, knowledge *types.Knowledge) error {
+	folder, kb := r.row.FolderPath, r.row.KnowledgeBaseID
+	knowledge.UpdatedAt = time.Now().UTC()
 	r.row = *knowledge
+	r.row.FolderPath, r.row.KnowledgeBaseID = folder, kb
 	return nil
 }
 
@@ -53,6 +61,125 @@ func (r *replaceFileRepo) UpdateKnowledgeColumns(_ context.Context, _ string, va
 		r.apply(values)
 	}
 	return errors.New("database unavailable")
+}
+
+// Mirror the repository CAS contract, with hooks for service interleavings.
+func (r *replaceFileRepo) UpdateKnowledgeSourceIfCurrent(
+	ctx context.Context,
+	before *types.Knowledge,
+	values map[string]interface{},
+) (*types.Knowledge, error) {
+	if r.beforeSourceUpdate != nil {
+		r.beforeSourceUpdate(r.columnsCalls + 1)
+	}
+	if before.ID != r.row.ID || before.TenantID != r.row.TenantID || before.KnowledgeBaseID != r.row.KnowledgeBaseID ||
+		before.FilePath != r.row.FilePath ||
+		before.FileHash != r.row.FileHash ||
+		r.row.ParseStatus == types.ParseStatusDeleting {
+		return nil, repository.ErrKnowledgeFolderChanged
+	}
+	if err := access.RejectMovingKnowledge(&r.row); err != nil {
+		return nil, err
+	}
+	if status, ok := values["parse_status"].(string); ok {
+		if status == types.ParseStatusPending &&
+			(r.row.ParseStatus == types.ParseStatusPending ||
+				r.row.ParseStatus == types.ParseStatusProcessing ||
+				r.row.ParseStatus == types.ParseStatusFinalizing ||
+				r.row.ParseStatus != before.ParseStatus) {
+			return nil, repository.ErrKnowledgeFolderChanged
+		}
+		if status == types.ParseStatusFailed &&
+			(!r.row.UpdatedAt.Equal(before.UpdatedAt) ||
+				r.row.ParseStatus != before.ParseStatus) {
+			return nil, repository.ErrKnowledgeFolderChanged
+		}
+	}
+	if before.GetMetadata()[types.KnowledgeReparseMetadataKey] !=
+		r.row.GetMetadata()[types.KnowledgeReparseMetadataKey] {
+		return nil, repository.ErrKnowledgeFolderChanged
+	}
+	if metadata, ok := values["metadata"].(types.JSON); ok {
+		fields, _ := metadata.Map()
+		if fields == nil {
+			fields = map[string]interface{}{}
+		}
+		if token := r.row.GetMetadata()[types.KnowledgeReparseMetadataKey]; token != "" {
+			fields[types.KnowledgeReparseMetadataKey] = token
+		} else {
+			delete(fields, types.KnowledgeReparseMetadataKey)
+		}
+		encoded, _ := json.Marshal(fields)
+		values["metadata"] = types.JSON(encoded)
+	}
+	if _, ok := values["folder_path"]; ok {
+		return nil, errors.New("source update cannot move folders")
+	}
+	if err := r.UpdateKnowledgeColumns(ctx, before.ID, values); err != nil {
+		if r.commitThenFail && r.afterFailedCommit != nil {
+			r.afterFailedCommit()
+		}
+		return nil, err
+	}
+	row := r.row
+	return &row, nil
+}
+
+func (r *replaceFileRepo) ClaimKnowledgeForReparse(
+	_ context.Context,
+	before *types.Knowledge,
+	allowPending bool,
+) (*types.Knowledge, error) {
+	if before.ID != r.row.ID ||
+		before.TenantID != r.row.TenantID ||
+		before.KnowledgeBaseID != r.row.KnowledgeBaseID ||
+		before.FilePath != r.row.FilePath ||
+		before.FileHash != r.row.FileHash ||
+		!before.UpdatedAt.Equal(r.row.UpdatedAt) ||
+		before.ParseStatus != r.row.ParseStatus {
+		return nil, repository.ErrKnowledgeFolderChanged
+	}
+	switch before.ParseStatus {
+	case types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled:
+	case types.ParseStatusPending:
+		if !allowPending {
+			return nil, repository.ErrKnowledgeFolderChanged
+		}
+	default:
+		return nil, repository.ErrKnowledgeFolderChanged
+	}
+	r.row.ParseStatus = types.ParseStatusProcessing
+	r.row.EnableStatus = "disabled"
+	fields, _ := before.Metadata.Map()
+	if fields == nil {
+		fields = map[string]interface{}{}
+	}
+	fields[types.KnowledgeReparseMetadataKey] = fmt.Sprintf("claim-%d", time.Now().UnixNano())
+	encoded, _ := json.Marshal(fields)
+	r.row.Metadata = types.JSON(encoded)
+	r.row.UpdatedAt = time.Now().UTC()
+	row := r.row
+	return &row, nil
+}
+
+func (r *replaceFileRepo) FailKnowledgeReparseClaim(
+	_ context.Context,
+	claim *types.Knowledge,
+	message string,
+) (*types.Knowledge, error) {
+	if claim.ID != r.row.ID ||
+		claim.KnowledgeBaseID != r.row.KnowledgeBaseID ||
+		claim.FilePath != r.row.FilePath ||
+		claim.GetMetadata()[types.KnowledgeReparseMetadataKey] !=
+			r.row.GetMetadata()[types.KnowledgeReparseMetadataKey] ||
+		r.row.ParseStatus != types.ParseStatusProcessing {
+		return nil, repository.ErrKnowledgeFolderChanged
+	}
+	r.row.ParseStatus = types.ParseStatusFailed
+	r.row.ErrorMessage = message
+	r.row.UpdatedAt = time.Now().UTC()
+	row := r.row
+	return &row, nil
 }
 
 func (r *replaceFileRepo) apply(values map[string]interface{}) {
@@ -80,16 +207,19 @@ func (r *replaceFileRepo) apply(values map[string]interface{}) {
 			r.row.EnableStatus = value.(string)
 		case "error_message":
 			r.row.ErrorMessage = value.(string)
+		case "updated_at":
+			r.row.UpdatedAt = value.(time.Time)
 		}
 	}
 }
 
 type replaceFileStore struct {
 	interfaces.FileService
-	saveErr error
-	saved   int
-	deleted []string
-	events  *[]string
+	saveErr          error
+	saved            int
+	deleted          []string
+	events           *[]string
+	beforeSaveReturn func()
 }
 
 func (f *replaceFileStore) SaveFile(context.Context, *multipart.FileHeader, uint64, string) (string, error) {
@@ -98,6 +228,9 @@ func (f *replaceFileStore) SaveFile(context.Context, *multipart.FileHeader, uint
 	}
 	f.saved++
 	*f.events = append(*f.events, "save")
+	if f.beforeSaveReturn != nil {
+		f.beforeSaveReturn()
+	}
 	return "new/file.md", nil
 }
 
@@ -233,7 +366,7 @@ func TestReplaceKnowledgeFilePreservesIDAndReparsesNewContent(t *testing.T) {
 	h := newReplaceFileHarness(t)
 	content := "# new body"
 
-	got, err := h.replace(t, content, "notes/sub/b.md",
+	got, err := h.replace(t, content, "notes/b.md",
 		map[string]string{"source_updated_at": "2026-09-14T00:00:00Z"})
 
 	require.NoError(t, err)
@@ -244,7 +377,7 @@ func TestReplaceKnowledgeFilePreservesIDAndReparsesNewContent(t *testing.T) {
 	assert.Equal(t, int64(len(content)), row.FileSize)
 	assert.Equal(t, "b.md", row.FileName)
 	assert.Equal(t, "b.md", row.Title, "a title that mirrored the file name follows the rename")
-	assert.Equal(t, "notes/sub", row.FolderPath)
+	assert.Equal(t, "notes", row.FolderPath)
 	assert.Equal(t, types.ParseStatusPending, row.ParseStatus)
 
 	metadata, err := row.Metadata.Map()
@@ -288,7 +421,7 @@ func TestReplaceKnowledgeFileSaveFailureLeavesKnowledgeUntouched(t *testing.T) {
 	assert.Empty(t, h.tasks.payloads)
 }
 
-func TestReplaceKnowledgeFileSourceUpdateFailureDiscardsNewFile(t *testing.T) {
+func TestReplaceKnowledgeFileUncertainSourceUpdateRetainsNewFile(t *testing.T) {
 	h := newReplaceFileHarness(t)
 	h.repo.failColumnsCall = 1
 
@@ -296,7 +429,7 @@ func TestReplaceKnowledgeFileSourceUpdateFailureDiscardsNewFile(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, h.original, h.repo.row)
-	assert.Equal(t, []string{"new/file.md"}, h.store.deleted, "the old file must never be deleted")
+	assert.Empty(t, h.store.deleted, "an uncertain commit may have made this blob another replacement's backup")
 	assert.Empty(t, h.tasks.payloads)
 }
 
@@ -319,7 +452,7 @@ func TestReplaceKnowledgeFileReparseFailureRestoresPreviousSource(t *testing.T) 
 	h := newReplaceFileHarness(t)
 	h.tasks.err = errors.New("queue unavailable")
 
-	_, err := h.replace(t, "# new body", "notes/sub/b.md", map[string]string{"source_updated_at": "later"})
+	_, err := h.replace(t, "# new body", "notes/b.md", map[string]string{"source_updated_at": "later"})
 
 	require.Error(t, err)
 	row := h.repo.row
@@ -330,7 +463,13 @@ func TestReplaceKnowledgeFileReparseFailureRestoresPreviousSource(t *testing.T) 
 	assert.Equal(t, h.original.FileName, row.FileName)
 	assert.Equal(t, h.original.Title, row.Title)
 	assert.Equal(t, h.original.FolderPath, row.FolderPath)
-	assert.JSONEq(t, string(h.original.Metadata), string(row.Metadata))
+	fields, mapErr := row.Metadata.Map()
+	require.NoError(t, mapErr)
+	require.NotEmpty(t, fields[types.KnowledgeReparseMetadataKey], "server attempt survives source compensation")
+	delete(fields, types.KnowledgeReparseMetadataKey)
+	encoded, marshalErr := json.Marshal(fields)
+	require.NoError(t, marshalErr)
+	assert.JSONEq(t, string(h.original.Metadata), string(encoded))
 	assert.Equal(t, types.ParseStatusFailed, row.ParseStatus, "the old index may already be cleaned up")
 	assert.Equal(t, []string{"new/file.md"}, h.store.deleted)
 }
@@ -400,17 +539,18 @@ func TestReplaceKnowledgeFileIgnoresStorageQuota(t *testing.T) {
 	assert.Equal(t, types.ParseStatusPending, h.repo.row.ParseStatus)
 }
 
-func TestReplaceKnowledgeFileDequeuesInProgressParse(t *testing.T) {
-	h := newReplaceFileHarness(t)
-	h.repo.row.ParseStatus = types.ParseStatusProcessing
-
-	got, err := h.replace(t, "# new body", "notes/a.md", nil)
-
-	require.NoError(t, err)
-	require.Equal(t, h.original.ID, got.ID)
-	assert.Contains(t, h.events, "dequeue:knowledge-1")
-	assert.Equal(t, types.ParseStatusPending, h.repo.row.ParseStatus)
-	assert.Equal(t, "disabled", h.repo.row.EnableStatus)
+func TestReplaceKnowledgeFileRejectsInProgressParse(t *testing.T) {
+	for _, status := range []string{
+		types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing,
+	} {
+		h := newReplaceFileHarness(t)
+		h.repo.row.ParseStatus = status
+		_, err := h.replace(t, "# new body", "notes/a.md", nil)
+		var appErr *apperrors.AppError
+		require.ErrorAs(t, err, &appErr)
+		require.Equal(t, 409, appErr.HTTPCode)
+		require.Empty(t, h.events, "busy source must not save blobs or cancel another attempt")
+	}
 }
 
 func TestReplaceKnowledgeFileRejectsFAQKnowledgeBase(t *testing.T) {
@@ -443,4 +583,126 @@ func TestUpdateKnowledgeUnlessSourceReplacedSkipsStaleSave(t *testing.T) {
 	require.NoError(t, h.svc.updateKnowledgeUnlessSourceReplaced(h.ctx, &stale))
 	assert.Equal(t, "new/file.md", h.repo.row.FilePath)
 	assert.NotEqual(t, types.ParseStatusFailed, h.repo.row.ParseStatus)
+}
+
+func TestReplaceKnowledgeFileRejectsImplicitFolderMove(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	_, err := h.replace(t, "# new body", "elsewhere/b.md", nil)
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, 400, appErr.HTTPCode)
+	require.Zero(t, h.store.saved)
+	require.Zero(t, h.repo.columnsCalls)
+	require.Equal(t, h.original, h.repo.row)
+}
+
+func TestReplaceKnowledgeFilePreservesRenameDuringSave(t *testing.T) {
+	for _, name := range []string{"b.md", "notes/b.md"} {
+		t.Run(name, func(t *testing.T) {
+			h := newReplaceFileHarness(t)
+			h.store.beforeSaveReturn = func() { h.repo.row.FolderPath = "renamed/child" }
+			got, err := h.replace(t, "# new body", name, nil)
+			require.NoError(t, err)
+			require.Equal(t, "renamed/child", got.FolderPath)
+			require.Equal(t, "renamed/child", h.repo.row.FolderPath)
+			require.Equal(t, "new/file.md", h.repo.row.FilePath)
+		})
+	}
+}
+
+func TestReplaceKnowledgeFileCompensationPreservesLaterFolder(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.tasks.err = errors.New("queue unavailable")
+	h.repo.beforeSourceUpdate = func(call int) {
+		if call == 2 {
+			h.repo.row.FolderPath = "later/location"
+		}
+	}
+	_, err := h.replace(t, "# new body", "notes/b.md", nil)
+	require.Error(t, err)
+	require.Equal(t, "later/location", h.repo.row.FolderPath)
+	require.Equal(t, h.original.FilePath, h.repo.row.FilePath)
+	require.Equal(t, []string{"new/file.md"}, h.store.deleted)
+}
+
+func TestReplaceKnowledgeFileCompensationCannotOverwriteNewerSource(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.tasks.err = errors.New("queue unavailable")
+	h.repo.beforeSourceUpdate = func(call int) {
+		if call == 2 {
+			h.repo.row.FilePath = "later/file.md"
+			h.repo.row.FileHash = "later-hash"
+			h.repo.row.FolderPath = "later/location"
+		}
+	}
+	_, err := h.replace(t, "# new body", "b.md", nil)
+	require.Error(t, err)
+	require.Equal(t, "later/file.md", h.repo.row.FilePath)
+	require.Equal(t, "later-hash", h.repo.row.FileHash)
+	require.Equal(t, "later/location", h.repo.row.FolderPath)
+	require.Empty(t, h.store.deleted, "the newer replacement may need new/file.md to roll back")
+	// The newer replacement can subsequently roll back to this attempt's
+	// source. It must still exist, even though it was not the current row path
+	// when the older compensation failed.
+	later := h.repo.row
+	h.repo.beforeSourceUpdate = nil
+	_, restoreErr := h.repo.UpdateKnowledgeSourceIfCurrent(h.ctx, &later, map[string]interface{}{
+		"file_path": "new/file.md", "file_hash": md5Hex("# new body"),
+	})
+	require.NoError(t, restoreErr)
+	require.Equal(t, "new/file.md", h.repo.row.FilePath)
+	require.NotContains(t, h.store.deleted, "new/file.md")
+}
+
+func TestReplaceKnowledgeFileUncertainCommitRetainsNewerReplacementBackup(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.repo.failColumnsCall = 1
+	h.repo.commitThenFail = true
+	h.repo.afterFailedCommit = func() {
+		h.repo.row.FilePath = "later/file.md"
+		h.repo.row.FileHash = "later-hash"
+	}
+	_, err := h.replace(t, "# new body", "b.md", nil)
+	require.Error(t, err)
+	require.Equal(t, "later/file.md", h.repo.row.FilePath)
+	require.Empty(t, h.store.deleted, "uncertain commit may have made new/file.md the newer attempt's backup")
+	require.Empty(t, h.tasks.payloads)
+}
+
+func TestReplaceKnowledgeFileRejectsCrossKBChangeDuringSave(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.store.beforeSaveReturn = func() { h.repo.row.KnowledgeBaseID = "other-kb" }
+	_, err := h.replace(t, "# new body", "b.md", nil)
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, 409, appErr.HTTPCode)
+	require.Equal(t, "other-kb", h.repo.row.KnowledgeBaseID)
+	require.Equal(t, h.original.FilePath, h.repo.row.FilePath)
+	require.Equal(t, []string{"save", "delete:new/file.md"}, h.events)
+	require.Empty(t, h.tasks.payloads)
+}
+
+func TestReplaceKnowledgeFileUnknownCommitDoesNotContinueInNewKB(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.repo.failColumnsCall = 1
+	h.repo.commitThenFail = true
+	h.repo.afterFailedCommit = func() { h.repo.row.KnowledgeBaseID = "other-kb" }
+	_, err := h.replace(t, "# new body", "b.md", nil)
+	require.Error(t, err)
+	require.Equal(t, "other-kb", h.repo.row.KnowledgeBaseID)
+	require.Equal(t, "new/file.md", h.repo.row.FilePath)
+	require.Equal(t, []string{"save"}, h.events, "referenced blob retained; no new-KB tasks cancelled")
+	require.Empty(t, h.tasks.payloads)
+}
+
+func TestReplacementMetadataCannotSetReparseClaim(t *testing.T) {
+	metadata, err := mergeKnowledgeMetadata(
+		types.JSON(`{"_knowledge_reparse_claim":"server-token"}`),
+		map[string]string{types.KnowledgeReparseMetadataKey: "user-token", "user": "value"},
+	)
+	require.NoError(t, err)
+	fields, err := metadata.Map()
+	require.NoError(t, err)
+	require.Equal(t, "server-token", fields[types.KnowledgeReparseMetadataKey])
+	require.Equal(t, "value", fields["user"])
 }
