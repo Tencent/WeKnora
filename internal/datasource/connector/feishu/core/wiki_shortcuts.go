@@ -126,6 +126,11 @@ func (c *Client) resolveWikiShortcut(ctx context.Context, node WikiNode, cache m
 			return WikiNode{}, fmt.Errorf("wiki shortcut cycle at %s", node.NodeToken)
 		}
 		visited[key] = true
+		// 指向云盘文档的快捷方式没有原 Wiki 节点，飞书以空间 "0" 表示。
+		// 保留正文节点供后续获取；只有明确的叶子节点才结束子文档展开。
+		if node.OriginSpaceID == "0" && node.OriginNodeID == "" && !node.HasChild {
+			return node, nil
+		}
 		if node.OriginNodeID == "" || node.OriginSpaceID == "" {
 			return WikiNode{}, fmt.Errorf("wiki shortcut %s is missing its original node or space", node.NodeToken)
 		}
