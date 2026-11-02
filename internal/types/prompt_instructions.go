@@ -9,6 +9,10 @@ import (
 // These fields are intentionally much smaller than full prompt templates.
 const MaxCustomPromptInstructionsLength = 4000
 
+// MaxOCRPromptLength bounds the dedicated OCR prompt override. A recognition
+// instruction is a short model contract, not business guidance.
+const MaxOCRPromptLength = 2000
+
 // AppendCustomPromptInstructions appends user-authored business guidance to a
 // system-owned prompt. Stable output, safety and citation rules always win.
 func AppendCustomPromptInstructions(prompt, instructions, label string) string {
@@ -32,6 +36,7 @@ func NormalizeKnowledgeBasePromptInstructions(kb *KnowledgeBase) {
 	}
 	kb.ChunkingConfig.TableMetadataInstructions = strings.TrimSpace(kb.ChunkingConfig.TableMetadataInstructions)
 	kb.VLMConfig.CustomInstructions = strings.TrimSpace(kb.VLMConfig.CustomInstructions)
+	kb.VLMConfig.OCRPrompt = strings.TrimSpace(kb.VLMConfig.OCRPrompt)
 	if kb.WikiConfig != nil {
 		kb.WikiConfig.ContentInstructions = strings.TrimSpace(kb.WikiConfig.ContentInstructions)
 		kb.WikiConfig.ExtractionInstructions = strings.TrimSpace(kb.WikiConfig.ExtractionInstructions)
@@ -67,7 +72,13 @@ func ValidateKnowledgeBasePromptInstructions(kb *KnowledgeBase) error {
 	if kb.ExtractConfig != nil {
 		fields["graph extraction instructions"] = kb.ExtractConfig.CustomInstructions
 	}
-	return validatePromptInstructionFields(fields)
+	if err := validatePromptInstructionFields(fields); err != nil {
+		return err
+	}
+	if len([]rune(kb.VLMConfig.OCRPrompt)) > MaxOCRPromptLength {
+		return fmt.Errorf("ocr prompt exceeds %d characters", MaxOCRPromptLength)
+	}
+	return nil
 }
 
 // ValidateEffectiveProcessPromptInstructions checks length limits on the
@@ -79,7 +90,13 @@ func ValidateEffectiveProcessPromptInstructions(eff EffectiveProcessConfig) erro
 		"question generation instructions": eff.QuestionGenerationConfig.CustomInstructions,
 		"graph extraction instructions":    eff.ExtractConfig.CustomInstructions,
 	}
-	return validatePromptInstructionFields(fields)
+	if err := validatePromptInstructionFields(fields); err != nil {
+		return err
+	}
+	if len([]rune(eff.VLMConfig.OCRPrompt)) > MaxOCRPromptLength {
+		return fmt.Errorf("ocr prompt exceeds %d characters", MaxOCRPromptLength)
+	}
+	return nil
 }
 
 func validatePromptInstructionFields(fields map[string]string) error {
