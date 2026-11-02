@@ -354,7 +354,7 @@ multipart/form-data 字段：
 | `question_generation_config` | object | 知识库配置 | 问题生成 |
 | `graph_enabled` / `extract_config` | - | 知识库配置 | 图谱抽取 |
 
-响应：200 `{"success":true,"data":{Knowledge}}`；重复文件返回 409 且 `data` 为已存在的 Knowledge。正在删除或解析失败的同名文件不计为重复。
+响应：200 `{"success":true,"data":{Knowledge}}`；同一知识库、同一目录内，内容和文件类型均相同的文件视为重复，返回 409 且 `data` 为已存在的 Knowledge。文件名可不同；相同内容可上传到不同目录，根目录作为独立目录处理。正在删除或解析失败的文件可重新上传。按数据源条目身份去重的连接器继续使用数据源 ID 和外部条目 ID。
 
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/file \

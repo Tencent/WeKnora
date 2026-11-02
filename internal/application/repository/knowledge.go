@@ -443,6 +443,10 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 		if params.DataSourceID != "" && params.ExternalID != "" {
 			query = query.Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?",
 				params.DataSourceID, params.ExternalID)
+		} else {
+			// Uploads in different folders are distinct documents. Source items
+			// keep their identity-based check even when their folder changes.
+			query = query.Where("folder_path = ?", params.FolderPath)
 		}
 		// File content is only a duplicate within the same file type. This keeps
 		// same-content documents with distinct formats (for example, .md and
