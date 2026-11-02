@@ -2067,6 +2067,16 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 			return changed, affectedType, additionFailed, updateDeferred, err
 		}
+		// A version conflict caused by a user edit must stop the stale
+		// generation from being replayed against the user's newer page. Machine
+		// writes keep the normal bounded retry path below.
+		if current, readErr := s.wikiService.GetPageBySlug(ctx, kbID, slug); readErr == nil &&
+			current.LastEditSource == types.WikiEditSourceUser {
+			if conflictErr := s.recordWikiManualEditConflict(ctx, current, updates); conflictErr != nil {
+				return false, "", false, false, conflictErr
+			}
+			return false, "manual_conflict", false, true, nil
+		}
 		logger.Debugf(ctx, "wiki ingest: retrying conflicted page %s (attempt %d/%d)",
 			slug, attempt+1, wikiPageConflictMaxAttempts)
 		if waitErr := waitWikiPageConflictRetry(ctx, attempt); waitErr != nil {
@@ -2489,14 +2499,13 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 // classifyWikiPageWrite turns the result of one guarded UpdatePage call into
 // the reduce phase's (updateDeferred, err) pair.
 //
-// ErrWikiWriteDroppedTableRows or a version conflict means the page was not
-// modified, but nothing failed, so the caller must keep this slug's
-// contributing documents for a later batch (updateDeferred) instead of
-// reporting an error. Every other outcome — including a successful write that
-// only refreshed bookkeeping and therefore did not bump `version` — was
-// applied and is not deferred.
+// ErrWikiWriteDroppedTableRows means the page was not modified, but nothing
+// failed, so the caller must keep this slug's contributing documents for a
+// later batch (updateDeferred) instead of reporting an error. Version conflicts
+// are returned to reduceSlugUpdates so it can reload the page and retry, unless
+// the newer page is identified as a user edit.
 func classifyWikiPageWrite(updateErr error) (deferred bool, err error) {
-	if errors.Is(updateErr, ErrWikiWriteDroppedTableRows) || errors.Is(updateErr, apprepo.ErrWikiPageConflict) {
+	if errors.Is(updateErr, ErrWikiWriteDroppedTableRows) {
 		return true, nil
 	}
 	return false, updateErr

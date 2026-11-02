@@ -278,7 +278,7 @@ func TestClassifyWikiPageWrite(t *testing.T) {
 	}{
 		{"applied write", nil, false, nil},
 		{"bare refusal", ErrWikiWriteDroppedTableRows, true, nil},
-		{"concurrent edit", repository.ErrWikiPageConflict, true, nil},
+		{"concurrent edit", repository.ErrWikiPageConflict, false, repository.ErrWikiPageConflict},
 		{
 			"wrapped refusal",
 			fmt.Errorf("update wiki page: %w", ErrWikiWriteDroppedTableRows),
