@@ -128,6 +128,9 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		// ingest capability, matching their single-document siblings
 		// (k.DELETE("/:id"), k.POST("/:id/reparse"), k.PUT("/:id")).
 		kRead.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
+		kRead.GET("/reparse-batches", g.Viewer(), handler.ListReparseBatches)
+		kRead.GET("/reparse-batches/:batch_id", g.Viewer(), handler.GetReparseBatch)
+		kRead.GET("/reparse-batches/:batch_id/items", g.Viewer(), handler.ListReparseBatchMembers)
 		kRead.GET("/:id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledge)
 		kRead.GET("/:id/stages", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
 		kRead.GET("/:id/spans", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
@@ -155,6 +158,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		// can only touch KBs it is already permitted to write.
 		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
 		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
+		k.POST("/reparse-batches", g.Contributor(), handler.RegisterReparseBatch)
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
 		k.POST("/folder", g.Contributor(), handler.MoveKnowledgeToFolder)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)

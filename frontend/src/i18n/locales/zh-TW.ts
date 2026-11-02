@@ -4834,6 +4834,10 @@ export default {
           title: '{count} 個任務待處理',
           description: '點擊下方表中紅色「最終失敗」數字查看原因，修復後可手動重試。'
         },
+        history: { title: '保留的佇列歷史', description: '{archived} 筆歷史失敗封存 · {completed} 筆保留的完成記錄；它們是歷史記錄，不是目前工作。' },
+        reparse: {
+          title: '重新解析批次', description: '追蹤批次會保留固定成員。文件目前業務狀態會獨立更新，後續重新解析可能改變群組計數。', kbFilter: '依知識庫 ID 篩選', empty: '沒有已追蹤的重新解析批次', loadError: '載入重新解析批次失敗', frozenTotal: '{count} 筆記錄', previous: '上一頁', next: '下一頁', allStates: '全部狀態', stateFilter: '依成員狀態篩選', membersTitle: '批次成員 · {name}', membersDescription: "成員在登記時固定，進度跟隨文件目前解析狀態。完成比例為已完成文件數 / 總成員數，失敗與取消不計入完成；摘要狀態獨立統計。後續重建會改變目前進度。", membersEmpty: '沒有符合該狀態的成員', membersLoadError: '載入批次成員失敗', modes: { managed: "受管提交", tracking_only: "僅追蹤" }, columns: { batch: '批次', knowledgeBase: '知識庫', mode: '模式', completed: '完成 / 總數', successRatio: "完成比例", currentState: '目前狀態' }, members: { columns: { document: '文件', batchState: '批次狀態', parseState: '解析狀態', summaryState: '摘要狀態', error: '提交錯誤' } }, summary: { none: "無摘要", completed: "已完成", unknown: "未知", pending: '待處理', processing: '處理中', failed: '失敗' }, states: { waiting_start: '等待開始', queued: '已排隊', processing: '處理中', finalizing: '收尾中', completed: '已完成', failed: '失敗', cancelled: '已取消', missing: '缺失', submission_failed: '提交失敗', unknown: '未知' }
+        },
         status: {
           working: '處理中',
           waiting: '等待中',
@@ -4848,8 +4852,9 @@ export default {
           pending: '排隊',
           scheduled: '定時',
           retry: '重試',
-          archived: '最終失敗',
-          completed: '已完成',
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失敗嘗試',
+          archived: '歷史失敗封存', completed: '保留的完成記錄',
           latency: '最早等待',
           status: '狀態'
         },
@@ -4857,8 +4862,12 @@ export default {
           title: '運行概覽',
           active: '運行中',
           pending: '排隊中',
+          scheduled: '定時',
           retry: '重試中',
-          archived: '最終失敗'
+          todaySuccess: '今日成功',
+          todayFailedAttempts: '今日失敗嘗試',
+          dailyFormula: '今日成功 = max(今日 processed − 今日 failed, 0)。兩項皆為當日任務執行次數，包含重試，不是完成的文件數；每日重設。',
+          archived: '歷史失敗封存'
         },
         pools: {
           core: '核心解析',

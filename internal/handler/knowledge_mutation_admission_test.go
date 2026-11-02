@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,19 +10,72 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
 
 type mutationAdmissionKnowledge struct {
 	interfaces.KnowledgeService
-	rows       []*types.Knowledge
-	err        error
-	tagsCalled bool
-	writeGrant bool
+	rows         []*types.Knowledge
+	err          error
+	tagsCalled   bool
+	writeGrant   bool
+	unknownCalls int
+}
+
+// Keep the mutation-admission fixture on the durable submission contract so
+// successful handler tests do not silently exercise the removed in-memory
+// enqueue path.
+func (s *mutationAdmissionKnowledge) PrepareReparseSubmission(
+	_ context.Context, _ uint64, _ string, batchID string, _ []string,
+	_ *types.KnowledgeProcessOverrides, _ string,
+) (*types.ReparseBatchSubmission, bool, error) {
+	if batchID == "" {
+		batchID = "batch"
+	}
+	return &types.ReparseBatchSubmission{
+		ID: "receipt", BatchID: batchID, TaskID: "reparse-batch-receipt", State: "created",
+	}, false, nil
+}
+
+func (s *mutationAdmissionKnowledge) MarkReparseSubmissionQueued(context.Context, *types.ReparseBatchSubmission) error {
+	return nil
+}
+
+func (s *mutationAdmissionKnowledge) MarkReparseSubmissionEnqueueUnknown(
+	context.Context, *types.ReparseBatchSubmission,
+) error {
+	s.unknownCalls++
+	return nil
+}
+
+func (s *mutationAdmissionKnowledge) MarkReparseSubmissionProcessing(context.Context, string) error {
+	return nil
+}
+
+func (s *mutationAdmissionKnowledge) CompleteReparseSubmission(context.Context, string, bool) error {
+	return nil
+}
+
+func (s *mutationAdmissionKnowledge) FailReparseSubmissionScope(context.Context, string) error {
+	return nil
+}
+
+func (s *mutationAdmissionKnowledge) ClaimReparseMember(context.Context, string, string, string) (string, error) {
+	return "claimed", nil
+}
+
+var _ service.ReparseSubmissionService = (*mutationAdmissionKnowledge)(nil)
+
+type failingReparseEnqueuer struct{}
+
+func (failingReparseEnqueuer) Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error) {
+	return nil, goerrors.New("queue unavailable")
 }
 
 func (s *mutationAdmissionKnowledge) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
@@ -250,4 +304,17 @@ func TestBatchReparsePreservesAdminAndRBACRolloutPolicy(t *testing.T) {
 			require.NotNil(t, queue.task)
 		})
 	}
+}
+
+func TestBatchReparseEnqueueFailureReturnsVisibleNonAcceptance(t *testing.T) {
+	kg := &mutationAdmissionKnowledge{rows: []*types.Knowledge{admissionKnowledge(false)}}
+	h := &KnowledgeHandler{
+		cfg: transferHandlerConfig(), kbService: admissionKB("user"), kgService: kg,
+		asynqClient: failingReparseEnqueuer{},
+	}
+	r := documentHandlerRouter()
+	r.POST("/batch", h.BatchReparseKnowledge)
+	w := mutationRequest(r, http.MethodPost, "/batch", `{"kb_id":"kb","ids":["doc"]}`)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	require.Equal(t, 1, kg.unknownCalls)
 }

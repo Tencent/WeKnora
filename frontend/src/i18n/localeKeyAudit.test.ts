@@ -128,6 +128,15 @@ const RUNTIME_TASK_TYPE_KEYS = [
   'wikiFinalize',
 ] as const
 
+const RUNTIME_METRIC_LABEL_PATHS = [
+  'system.globalSettings.runtime.summary.scheduled',
+  'system.globalSettings.runtime.summary.todaySuccess',
+  'system.globalSettings.runtime.summary.todayFailedAttempts',
+  'system.globalSettings.runtime.summary.dailyFormula',
+  'system.globalSettings.runtime.columns.todaySuccess',
+  'system.globalSettings.runtime.columns.todayFailedAttempts',
+] as const
+
 test('registered audit action labels exist as flat keys in every locale', () => {
   const failures: string[] = []
 
@@ -270,6 +279,13 @@ test('runtime queue worker pool and queue labels exist in every locale', () => {
       if (!keys.has(`system.globalSettings.runtime.tasks.taskTypes.${taskType}`)) {
         failures.push(`${localeName}: missing system.globalSettings.runtime.tasks.taskTypes.${taskType}`)
       }
+    }
+  }
+
+  for (const path of RUNTIME_METRIC_LABEL_PATHS) {
+    for (const [localeName, bundle] of Object.entries(LOCALE_BUNDLES) as Array<[LocaleName, unknown]>) {
+      const label = getLocaleValueAtPath(bundle, path)
+      if (typeof label !== 'string' || !label) failures.push(`${localeName}: missing ${path}`)
     }
   }
 

@@ -4910,7 +4910,11 @@ export default {
           title: 'Runtime overview',
           active: 'Active',
           pending: 'Pending',
+          scheduled: 'Scheduled',
           retry: 'Retrying',
+          todaySuccess: 'Today successful',
+          todayFailedAttempts: "Today's failed attempts",
+          dailyFormula: 'Today successful = max(today processed − today failed, 0). Both are daily task executions, including retries, not completed documents; they reset daily.',
           archived: 'Failed (stopped)'
         },
         columns: {
@@ -4919,6 +4923,8 @@ export default {
           pending: 'Pending',
           scheduled: 'Scheduled',
           retry: 'Retry',
+          todaySuccess: 'Today successful',
+          todayFailedAttempts: "Today's failed attempts",
           archived: 'Failed',
           completed: 'Completed',
           latency: 'Oldest wait',
@@ -4935,6 +4941,35 @@ export default {
         failedNotice: {
           title: '{count} failed tasks need attention',
           description: 'Open a red Failed count in the table below to inspect causes, then retry after fixing the root issue.'
+        },
+        history: {
+          title: 'Retained queue history',
+          description: '{archived} historical failed archives · {completed} retained completed records. These are retained records, not current work.'
+        },
+        reparse: {
+          title: 'Reparse batches',
+          description: 'Tracked groups retain their fixed members. Current document business states are refreshed independently, so later reparses can change the group counts.',
+          kbFilter: 'Filter by knowledge base ID',
+          empty: 'No tracked reparse batches',
+          loadError: 'Failed to load reparse batches',
+          frozenTotal: '{count} records',
+          previous: 'Previous',
+          next: 'Next',
+          allStates: 'All states',
+          stateFilter: 'Filter member state',
+          membersTitle: 'Batch members · {name}',
+          membersDescription: 'Membership is frozen at registration; progress follows current document parsing state. Completion is completed documents / all members; failures and cancellations do not count as completed. Summary status is separate. A later rebuild changes current progress.',
+          membersEmpty: 'No members match this state',
+          membersLoadError: 'Failed to load batch members',
+          modes: { managed: 'Managed submission', tracking_only: 'Tracking only' },
+          columns: {
+            batch: 'Batch', knowledgeBase: 'Knowledge base', mode: 'Mode', completed: 'Completed / total', successRatio: 'Completion', currentState: 'Current state'
+          },
+          members: {
+            columns: { document: 'Document', batchState: 'Batch state', parseState: 'Parse state', summaryState: 'Summary state', error: 'Submission error' }
+          },
+          summary: { none: 'No summary', completed: 'Completed', unknown: 'Unknown', pending: 'Pending', processing: 'Processing', failed: 'Failed' },
+          states: { waiting_start: 'Waiting to start', queued: 'Queued', processing: 'Processing', finalizing: 'Finalizing', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', missing: 'Missing', submission_failed: 'Submission failed', unknown: 'Unknown' }
         },
         tasks: {
           title: 'Task details · {queue}',

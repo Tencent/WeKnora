@@ -90,11 +90,20 @@
             <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.retry') }}</span>
             <strong class="rq-metric-value">{{ totalRetry }}</strong>
           </div>
-          <div class="rq-metric" :class="{ 'rq-metric--danger': totalArchived > 0 }">
-            <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.archived') }}</span>
-            <strong class="rq-metric-value">{{ totalArchived }}</strong>
+          <div class="rq-metric">
+            <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.scheduled') }}</span>
+            <strong class="rq-metric-value">{{ totalScheduled }}</strong>
+          </div>
+          <div class="rq-metric rq-metric--success">
+            <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.todaySuccess') }}</span>
+            <strong class="rq-metric-value">{{ totalTodaySuccess }}</strong>
+          </div>
+          <div class="rq-metric" :class="{ 'rq-metric--danger': totalTodayFailedAttempts > 0 }">
+            <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.todayFailedAttempts') }}</span>
+            <strong class="rq-metric-value">{{ totalTodayFailedAttempts }}</strong>
           </div>
         </div>
+        <p class="rq-overview-formula">{{ t('system.globalSettings.runtime.summary.dailyFormula') }}</p>
       </section>
 
       <section class="rq-pools">
@@ -140,17 +149,23 @@
           </span>
         </div>
 
-        <div v-if="totalArchived > 0" class="rq-failed-notice" role="status">
+        <div v-if="totalArchived > 0 || totalRetainedCompleted > 0" class="rq-failed-notice" role="status">
           <span class="rq-failed-notice__icon" aria-hidden="true">
             <t-icon name="error-circle" />
           </span>
           <div class="rq-failed-notice__text">
             <p class="rq-failed-notice__title">
-              {{ t('system.globalSettings.runtime.failedNotice.title', { count: totalArchived }) }}
+              {{ t('system.globalSettings.runtime.history.title') }}
             </p>
             <p class="rq-failed-notice__desc">
-              {{ t('system.globalSettings.runtime.failedNotice.description') }}
+              {{ t('system.globalSettings.runtime.history.description', { archived: totalArchived, completed: totalRetainedCompleted }) }}
             </p>
+          </div>
+          <div class="rq-history-actions">
+            <template v-for="row in queues.filter((queue) => queue.archived > 0 || queue.completed > 0)" :key="row.name">
+              <t-button v-if="row.archived > 0" variant="text" size="small" theme="danger" @click="openRuntimeTasks(row, 'archived')">{{ queueLabel(row.name) }} · {{ t('system.globalSettings.runtime.columns.archived') }}: {{ row.archived }}</t-button>
+              <t-button v-if="row.completed > 0" variant="text" size="small" @click="openRuntimeTasks(row, 'completed')">{{ queueLabel(row.name) }} · {{ t('system.globalSettings.runtime.columns.completed') }}: {{ row.completed }}</t-button>
+            </template>
           </div>
         </div>
 
@@ -195,14 +210,11 @@
                   @click="openRuntimeTasks(row, 'pending')"
                 >{{ row.pending }}<t-icon name="chevron-right" /></t-button>
                 <span v-else class="rq-number">0</span>
-                <t-button
-                  v-if="row.scheduled > 0"
-                  variant="text"
-                  size="small"
-                  class="rq-scheduled-count"
-                  @click="openRuntimeTasks(row, 'scheduled')"
-                >+{{ row.scheduled }} {{ t('system.globalSettings.runtime.columns.scheduled') }}</t-button>
               </div>
+            </template>
+            <template #scheduled="{ row }">
+              <t-button v-if="row.scheduled > 0" variant="text" size="small" class="rq-task-count" @click="openRuntimeTasks(row, 'scheduled')">{{ row.scheduled }}<t-icon name="chevron-right" /></t-button>
+              <span v-else class="rq-number">0</span>
             </template>
             <template #retry="{ row }">
               <t-button
@@ -215,29 +227,11 @@
               >{{ row.retry }}<t-icon name="chevron-right" /></t-button>
               <span v-else class="rq-number">0</span>
             </template>
-            <template #archived="{ row }">
-              <t-button
-                v-if="row.archived > 0"
-                variant="text"
-                theme="danger"
-                size="small"
-                class="rq-task-count rq-failed-count"
-                :aria-label="t('system.globalSettings.runtime.tasks.openAria', { state: taskStateLabel('archived'), queue: queueLabel(row.name), count: row.archived })"
-                @click="openRuntimeTasks(row, 'archived')"
-              >
-                {{ row.archived }}<t-icon name="chevron-right" />
-              </t-button>
-              <span v-else class="rq-number">0</span>
+            <template #today_success="{ row }">
+              <span class="rq-number rq-number--success">{{ queueTodaySuccess(row) }}</span>
             </template>
-            <template #completed="{ row }">
-              <t-button
-                v-if="row.completed > 0"
-                variant="text"
-                size="small"
-                class="rq-task-count rq-task-count--completed"
-                @click="openRuntimeTasks(row, 'completed')"
-              >{{ row.completed }}<t-icon name="chevron-right" /></t-button>
-              <span v-else class="rq-number">0</span>
+            <template #today_failed_attempts="{ row }">
+              <span class="rq-number" :class="{ 'rq-number--danger': queueTodayFailedAttempts(row) > 0 }">{{ queueTodayFailedAttempts(row) }}</span>
             </template>
             <template #latency_ms="{ row }">
               <span class="rq-latency">{{ formatLatency(row.latency_ms) }}</span>
@@ -251,6 +245,58 @@
         </div>
       </section>
       </template>
+
+      <section class="rq-details rq-reparse-batches">
+        <div class="rq-details-header">
+          <div>
+            <h3 class="rq-section-title">{{ t('system.globalSettings.runtime.reparse.title') }}</h3>
+            <p>{{ t('system.globalSettings.runtime.reparse.description') }}</p>
+          </div>
+          <div class="rq-batch-filter">
+            <t-input v-model="batchKBFilter" :placeholder="t('system.globalSettings.runtime.reparse.kbFilter')" clearable @change="resetBatchPage" />
+            <t-button variant="text" size="small" :loading="batchesLoading" @click="reloadBatches">
+              <template #icon><t-icon name="refresh" /></template>{{ t('system.globalSettings.runtime.refresh') }}
+            </t-button>
+          </div>
+        </div>
+        <div v-if="batchesError" class="rq-failed-error-state" role="alert">
+          <span>{{ batchesError }}</span><t-button size="small" variant="outline" @click="reloadBatches">{{ t('system.globalSettings.runtime.retry') }}</t-button>
+        </div>
+        <div v-else-if="batchesLoading && batches.length === 0" class="rq-failed-loading"><t-loading size="small" /><span>{{ t('system.globalSettings.runtime.loading') }}</span></div>
+        <t-empty v-else-if="batches.length === 0" :description="t('system.globalSettings.runtime.reparse.empty')" />
+        <div v-else class="data-table-shell rq-table-shell">
+          <t-table row-key="id" :data="batches" :columns="batchColumns" size="medium" hover>
+            <template #name="{ row }"><t-button variant="text" size="small" @click="openBatch(row)">{{ row.name || row.id }}</t-button></template>
+            <template #mode="{ row }">{{ batchModeLabel(row.mode) }}</template>
+            <template #counts="{ row }"><span class="rq-batch-distribution">{{ batchLifecycleSummary(row) }}</span></template>
+            <template #ratio="{ row }"><span class="rq-number">{{ batchSuccessPercent(row) }}</span><small class="rq-queue-meta">{{ batchCompleted(row) }} / {{ row.total }}</small></template>
+            <template #summary="{ row }"><span class="rq-batch-distribution">{{ batchSummary(row) }}</span></template>
+          </t-table>
+        </div>
+        <div class="rq-batch-pagination">
+          <span>{{ t('system.globalSettings.runtime.reparse.frozenTotal', { count: batchTotal }) }}</span>
+          <div><t-button size="small" variant="outline" :disabled="batchPage <= 1 || batchesLoading" @click="setBatchPage(batchPage - 1)">{{ t('system.globalSettings.runtime.reparse.previous') }}</t-button><t-button size="small" variant="outline" :disabled="batchPage * BATCH_PAGE_SIZE >= batchTotal || batchesLoading" @click="setBatchPage(batchPage + 1)">{{ t('system.globalSettings.runtime.reparse.next') }}</t-button></div>
+        </div>
+
+        <div v-if="selectedBatch" class="rq-batch-detail">
+          <div class="rq-failed-section-head"><h4 class="setting-drawer__section-title">{{ t('system.globalSettings.runtime.reparse.membersTitle', { name: selectedBatch.name || selectedBatch.id }) }}</h4><t-button size="small" variant="text" @click="selectedBatch = null">{{ t('common.close') }}</t-button></div>
+          <p class="rq-batch-explanation">{{ t('system.globalSettings.runtime.reparse.membersDescription') }}</p>
+          <div class="rq-batch-filter"><t-select v-model="batchMemberState" clearable :placeholder="t('system.globalSettings.runtime.reparse.stateFilter')" :options="batchMemberStateOptions" @change="resetBatchMembers" /></div>
+          <div v-if="batchMembersError" class="rq-failed-error-state" role="alert"><span>{{ batchMembersError }}</span><t-button size="small" variant="outline" @click="reloadBatchMembers">{{ t('system.globalSettings.runtime.retry') }}</t-button></div>
+          <div v-else-if="batchMembersLoading" class="rq-failed-loading"><t-loading size="small" /><span>{{ t('system.globalSettings.runtime.loading') }}</span></div>
+          <t-empty v-else-if="batchMembers.length === 0" :description="t('system.globalSettings.runtime.reparse.membersEmpty')" />
+          <div v-else class="data-table-shell rq-table-shell">
+            <t-table row-key="knowledge_id" :data="batchMembers" :columns="batchMemberColumns" size="medium" hover>
+              <template #title="{ row }">{{ row.title || row.knowledge_id }}</template>
+              <template #state="{ row }">{{ batchStateLabel(row.state) }}</template>
+              <template #parse_status="{ row }">{{ row.parse_status || '—' }}</template>
+              <template #summary_status="{ row }">{{ row.summary_status || '—' }}</template>
+              <template #submission_error="{ row }">{{ row.submission_error || '—' }}</template>
+            </t-table>
+          </div>
+          <div class="rq-batch-pagination"><span>{{ t('system.globalSettings.runtime.reparse.frozenTotal', { count: batchMembersTotal }) }}</span><div><t-button size="small" variant="outline" :disabled="batchMemberPage <= 1 || batchMembersLoading" @click="setBatchMemberPage(batchMemberPage - 1)">{{ t('system.globalSettings.runtime.reparse.previous') }}</t-button><t-button size="small" variant="outline" :disabled="batchMemberPage * BATCH_MEMBER_PAGE_SIZE >= batchMembersTotal || batchMembersLoading" @click="setBatchMemberPage(batchMemberPage + 1)">{{ t('system.globalSettings.runtime.reparse.next') }}</t-button></div></div>
+        </div>
+      </section>
 
       <section class="rq-details rq-models">
         <div class="rq-details-header">
@@ -512,7 +558,10 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { mergeRuntimeTaskPage } from './runtimeTaskPagination'
+import { batchCompleted, batchSuccessRatio, queueCurrentState, queueRuntimeTotals, queueTodayFailedAttempts, queueTodaySuccess } from './runtimeQueueMetrics'
 import {
+  listReparseBatchMembers,
+  listReparseBatches,
   getRuntimeTasks,
   getRuntimeQueues,
   mutateRuntimeTask,
@@ -523,6 +572,9 @@ import {
   type RuntimeTaskAction,
   type RuntimeTaskState,
   type RuntimeWorkerPool,
+  type ReparseBatch,
+  type ReparseBatchMember,
+  type ReparseBatchMemberState,
 } from '@/api/system'
 
 const { t, te, locale } = useI18n()
@@ -552,8 +604,23 @@ const tasksSentinelRef = ref<HTMLElement | null>(null)
 const taskActionID = ref('')
 const taskAction = ref<RuntimeTaskAction | ''>('')
 const purging = ref(false)
+const batchKBFilter = ref('')
+const batches = ref<ReparseBatch[]>([])
+const batchesLoading = ref(false)
+const batchesError = ref('')
+const batchTotal = ref(0)
+const batchPage = ref(1)
+const selectedBatch = ref<ReparseBatch | null>(null)
+const batchMembers = ref<ReparseBatchMember[]>([])
+const batchMembersLoading = ref(false)
+const batchMembersError = ref('')
+const batchMembersTotal = ref(0)
+const batchMemberPage = ref(1)
+const batchMemberState = ref<ReparseBatchMemberState | undefined>()
 
 const TASK_PAGE_SIZE = 20
+const BATCH_PAGE_SIZE = 20
+const BATCH_MEMBER_PAGE_SIZE = 50
 const taskStates: RuntimeTaskState[] = ['active', 'pending', 'scheduled', 'retry', 'archived', 'completed']
 const runtimeTaskTypeKeys: Record<string, string> = {
   'document:process': 'documentProcess',
@@ -580,17 +647,42 @@ const runtimeTaskTypeKeys: Record<string, string> = {
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let tasksScrollObserver: IntersectionObserver | null = null
 let tasksRequestID = 0
+let batchesRequestID = 0
+let batchMembersRequestID = 0
+let batchesRefreshInFlight = false
+let disposed = false
+let batchesRefreshPending = false
+let batchMembersRefreshInFlight = false
+let batchMembersRefreshPending = false
 
 const columns = computed(() => [
   { colKey: 'name', title: t('system.globalSettings.runtime.columns.queue'), minWidth: 188 },
   { colKey: 'active', title: t('system.globalSettings.runtime.columns.active'), width: 74, align: 'center' as const },
   { colKey: 'pending', title: t('system.globalSettings.runtime.columns.pending'), width: 84, align: 'center' as const },
+  { colKey: 'scheduled', title: t('system.globalSettings.runtime.columns.scheduled'), width: 88, align: 'center' as const },
   { colKey: 'retry', title: t('system.globalSettings.runtime.columns.retry'), width: 68, align: 'center' as const },
-  { colKey: 'archived', title: t('system.globalSettings.runtime.columns.archived'), width: 96, align: 'center' as const },
-  { colKey: 'completed', title: t('system.globalSettings.runtime.columns.completed'), width: 84, align: 'center' as const },
+  { colKey: 'today_success', title: t('system.globalSettings.runtime.columns.todaySuccess'), width: 100, align: 'center' as const },
+  { colKey: 'today_failed_attempts', title: t('system.globalSettings.runtime.columns.todayFailedAttempts'), width: 118, align: 'center' as const },
   { colKey: 'latency_ms', title: t('system.globalSettings.runtime.columns.latency'), width: 104, align: 'center' as const },
   { colKey: 'status', title: t('system.globalSettings.runtime.columns.status'), width: 96 },
 ])
+const batchColumns = computed(() => [
+  { colKey: 'name', title: t('system.globalSettings.runtime.reparse.columns.batch'), minWidth: 200 },
+  { colKey: 'kb_id', title: t('system.globalSettings.runtime.reparse.columns.knowledgeBase'), minWidth: 150 },
+  { colKey: 'mode', title: t('system.globalSettings.runtime.reparse.columns.mode'), width: 118 },
+  { colKey: 'counts', title: t('system.globalSettings.runtime.reparse.members.columns.parseState'), minWidth: 180 },
+  { colKey: 'ratio', title: t('system.globalSettings.runtime.reparse.columns.successRatio'), width: 116, align: 'center' as const },
+  { colKey: 'summary', title: t('system.globalSettings.runtime.reparse.members.columns.summaryState'), minWidth: 180 },
+])
+const batchMemberColumns = computed(() => [
+  { colKey: 'title', title: t('system.globalSettings.runtime.reparse.members.columns.document'), minWidth: 200 },
+  { colKey: 'state', title: t('system.globalSettings.runtime.reparse.members.columns.batchState'), width: 150 },
+  { colKey: 'parse_status', title: t('system.globalSettings.runtime.reparse.members.columns.parseState'), width: 140 },
+  { colKey: 'summary_status', title: t('system.globalSettings.runtime.reparse.members.columns.summaryState'), width: 140 },
+  { colKey: 'submission_error', title: t('system.globalSettings.runtime.reparse.members.columns.error'), minWidth: 180 },
+])
+const batchMemberStateOptions = computed(() => ([undefined, 'waiting_start', 'queued', 'processing', 'finalizing', 'completed', 'failed', 'cancelled', 'missing', 'submission_failed', 'unknown'] as Array<ReparseBatchMemberState | undefined>)
+  .map((value) => ({ label: value ? batchStateLabel(value) : t('system.globalSettings.runtime.reparse.allStates'), value })))
 const modelColumns = computed(() => [
   { colKey: 'model_id', title: t('system.globalSettings.runtime.models.columns.model'), minWidth: 240 },
   { colKey: 'active', title: t('system.globalSettings.runtime.models.columns.active'), width: 86, align: 'center' as const },
@@ -610,10 +702,15 @@ function modelState(row: ModelRuntimeStat): { label: string; tone: string } {
   return { label: t('system.globalSettings.runtime.status.idle'), tone: 'idle' }
 }
 
-const totalActive = computed(() => queues.value.reduce((s, q) => s + q.active, 0))
-const totalPending = computed(() => queues.value.reduce((s, q) => s + q.pending, 0))
-const totalRetry = computed(() => queues.value.reduce((s, q) => s + q.retry, 0))
-const totalArchived = computed(() => queues.value.reduce((s, q) => s + q.archived, 0))
+const runtimeTotals = computed(() => queueRuntimeTotals(queues.value))
+const totalActive = computed(() => runtimeTotals.value.active)
+const totalPending = computed(() => runtimeTotals.value.pending)
+const totalScheduled = computed(() => runtimeTotals.value.scheduled)
+const totalRetry = computed(() => runtimeTotals.value.retry)
+const totalTodaySuccess = computed(() => runtimeTotals.value.todaySuccess)
+const totalTodayFailedAttempts = computed(() => runtimeTotals.value.todayFailedAttempts)
+const totalArchived = computed(() => runtimeTotals.value.archived)
+const totalRetainedCompleted = computed(() => runtimeTotals.value.retainedCompleted)
 const taskQueueLabel = computed(() => taskQueue.value ? queueLabel(taskQueue.value.name) : '')
 const taskStateGuide = computed(() => t(`system.globalSettings.runtime.tasks.guides.${taskState.value}`))
 
@@ -653,6 +750,36 @@ interface RuntimeTaskMeta {
 
 function taskStateLabel(state: RuntimeTaskState): string {
   return t(`system.globalSettings.runtime.tasks.states.${state}`)
+}
+
+function batchStateLabel(state: ReparseBatchMemberState): string {
+  return t(`system.globalSettings.runtime.reparse.states.${state}`)
+}
+
+function batchModeLabel(mode: ReparseBatch['mode']): string {
+  return t(`system.globalSettings.runtime.reparse.modes.${mode}`)
+}
+
+function batchSuccessPercent(batch: ReparseBatch): string {
+  const ratio = batchSuccessRatio(batch)
+  return ratio === null ? '—' : `${Number((ratio * 100).toFixed(2))}%`
+}
+
+function batchLifecycleSummary(batch: ReparseBatch): string {
+  return (Object.entries(batch.counts) as Array<[ReparseBatchMemberState, number]>)
+    .filter(([, value]) => value > 0)
+    .map(([state, value]) => `${batchStateLabel(state)}: ${value}`)
+    .join(' · ') || '—'
+}
+
+function batchSummary(batch: ReparseBatch): string {
+  const counts = batch.summary_counts
+  const labels: Record<string, string> = {
+    none: t('system.globalSettings.runtime.reparse.summary.none'), pending: t('system.globalSettings.runtime.reparse.summary.pending'), processing: t('system.globalSettings.runtime.reparse.summary.processing'),
+    completed: t('system.globalSettings.runtime.reparse.summary.completed'), failed: t('system.globalSettings.runtime.reparse.summary.failed'), unknown: t('system.globalSettings.runtime.reparse.summary.unknown'),
+  }
+  return [['none', counts.none], ['pending', counts.pending], ['processing', counts.processing], ['completed', counts.completed], ['failed', counts.failed], ['unknown', counts.unknown]]
+    .map(([state, value]) => `${labels[state]}: ${value || 0}`).join(' · ')
 }
 
 function taskStateCount(row: QueueStat | null, state: RuntimeTaskState): number {
@@ -754,22 +881,9 @@ function formatLatency(ms: number): string {
 }
 
 function queueState(row: QueueStat): { label: string; tone: string } {
-  if (row.paused) {
-    return { label: t('system.globalSettings.runtime.status.paused'), tone: 'paused' }
-  }
-  if (row.archived > 0) {
-    return { label: t('system.globalSettings.runtime.status.actionRequired'), tone: 'danger' }
-  }
-  if (row.retry > 0) {
-    return { label: t('system.globalSettings.runtime.status.retrying'), tone: 'attention' }
-  }
-  if (row.active > 0) {
-    return { label: t('system.globalSettings.runtime.status.working'), tone: 'working' }
-  }
-  if (row.pending > 0 || row.scheduled > 0) {
-    return { label: t('system.globalSettings.runtime.status.waiting'), tone: 'waiting' }
-  }
-  return { label: t('system.globalSettings.runtime.status.idle'), tone: 'idle' }
+  const state = queueCurrentState(row)
+  const tones = { paused: 'paused', retrying: 'attention', working: 'working', waiting: 'waiting', idle: 'idle' }
+  return { label: t(`system.globalSettings.runtime.status.${state}`), tone: tones[state] }
 }
 
 async function fetchRuntimeTasks(reset: boolean) {
@@ -897,6 +1011,121 @@ async function purgeArchivedTasks() {
   }
 }
 
+async function loadBatches() {
+  if (disposed) return
+  if (batchesRefreshInFlight) {
+    batchesRefreshPending = true
+    return
+  }
+  batchesRefreshInFlight = true
+  const requestID = ++batchesRequestID
+  batchesLoading.value = true
+  batchesError.value = ''
+  try {
+    const response = await listReparseBatches({
+      kb_id: batchKBFilter.value.trim() || undefined,
+      page: batchPage.value,
+      page_size: BATCH_PAGE_SIZE,
+    })
+    if (requestID !== batchesRequestID) return
+    batches.value = response.items || []
+    batchTotal.value = response.total || 0
+    if (selectedBatch.value) {
+      selectedBatch.value = batches.value.find((batch) => batch.id === selectedBatch.value?.id) ?? selectedBatch.value
+    }
+  } catch (err: any) {
+    if (requestID !== batchesRequestID) return
+    batchesError.value = err?.message || t('system.globalSettings.runtime.reparse.loadError')
+  } finally {
+    if (requestID === batchesRequestID) batchesLoading.value = false
+    batchesRefreshInFlight = false
+    if (batchesRefreshPending) {
+      batchesRefreshPending = false
+      void loadBatches()
+    }
+  }
+}
+
+function reloadBatches() {
+  void loadBatches()
+}
+
+function resetBatchPage() {
+  batchPage.value = 1
+  selectedBatch.value = null
+  batchMembers.value = []
+  batchMembersTotal.value = 0
+  batchMembersRequestID += 1
+  batchesRequestID += 1
+  void loadBatches()
+}
+
+function setBatchPage(page: number) {
+  batchPage.value = Math.max(1, page)
+  batchesRequestID += 1
+  void loadBatches()
+}
+
+function openBatch(batch: ReparseBatch) {
+  selectedBatch.value = batch
+  batchMemberPage.value = 1
+  batchMemberState.value = undefined
+  batchMembersRequestID += 1
+  void loadBatchMembers()
+}
+
+async function loadBatchMembers() {
+  if (disposed) return
+  const batch = selectedBatch.value
+  if (!batch) return
+  if (batchMembersRefreshInFlight) {
+    batchMembersRefreshPending = true
+    return
+  }
+  const requestedBatchID = batch.id
+  const requestedState = batchMemberState.value
+  const requestID = ++batchMembersRequestID
+  batchMembersRefreshInFlight = true
+  batchMembersLoading.value = true
+  batchMembersError.value = ''
+  try {
+    const response = await listReparseBatchMembers(requestedBatchID, {
+      page: batchMemberPage.value,
+      page_size: BATCH_MEMBER_PAGE_SIZE,
+      state: requestedState,
+    })
+    if (requestID !== batchMembersRequestID || selectedBatch.value?.id !== requestedBatchID || batchMemberState.value !== requestedState) return
+    batchMembers.value = response.items || []
+    batchMembersTotal.value = response.total || 0
+  } catch (err: any) {
+    if (requestID !== batchMembersRequestID) return
+    batchMembersError.value = err?.message || t('system.globalSettings.runtime.reparse.membersLoadError')
+  } finally {
+    if (requestID === batchMembersRequestID) batchMembersLoading.value = false
+    batchMembersRefreshInFlight = false
+    if (batchMembersRefreshPending) {
+      batchMembersRefreshPending = false
+      void loadBatchMembers()
+    }
+  }
+}
+
+function reloadBatchMembers() {
+  void loadBatchMembers()
+}
+
+function resetBatchMembers() {
+  batchMemberPage.value = 1
+  batchMembersRequestID += 1
+  void loadBatchMembers()
+}
+
+function setBatchMemberPage(page: number) {
+  batchMemberPage.value = Math.max(1, page)
+  batchMembersRequestID += 1
+  void loadBatchMembers()
+}
+
 async function load(showSpinner: boolean) {
   if (showSpinner) loading.value = true
   try {
@@ -929,7 +1158,11 @@ function startPolling() {
   if (!autoRefresh.value) return
   pollTimer = setInterval(() => {
     // Silent background refresh — no spinner so the table doesn't flash.
-    if (!loading.value) load(false)
+    if (!loading.value && document.visibilityState === 'visible') {
+      void load(false)
+      void loadBatches()
+      if (selectedBatch.value) void loadBatchMembers()
+    }
   }, POLL_INTERVAL_MS)
 }
 
@@ -944,6 +1177,14 @@ watch(autoRefresh, (on) => {
   if (on) startPolling()
   else stopPolling()
 })
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible' && autoRefresh.value) {
+    void load(false)
+    void loadBatches()
+    if (selectedBatch.value) void loadBatchMembers()
+  }
+}
 
 watch(taskDrawerVisible, async (open) => {
   if (!open) {
@@ -961,13 +1202,19 @@ watch(tasksHasMore, async () => {
 })
 
 onMounted(() => {
-  load(true)
+  void load(true)
+  void loadBatches()
   startPolling()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onUnmounted(() => {
+  disposed = true
   stopPolling()
   detachTasksScrollObserver()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  batchesRequestID += 1
+  batchMembersRequestID += 1
 })
 </script>
 
@@ -979,6 +1226,72 @@ onUnmounted(() => {
 .rq-models {
   margin-top: 40px;
   padding-top: 32px;
+}
+
+.rq-reparse-batches {
+  margin-top: 40px;
+  padding-top: 32px;
+}
+
+.rq-batch-filter,
+.rq-batch-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rq-batch-distribution {
+  display: block;
+  white-space: normal;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 1.6;
+}
+
+.rq-batch-filter {
+  min-width: min(100%, 320px);
+}
+
+.rq-batch-pagination {
+  justify-content: space-between;
+  margin-top: 12px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+
+  > div {
+    display: flex;
+    gap: 8px;
+  }
+}
+
+.rq-batch-detail {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-lg);
+  background: var(--td-bg-color-container);
+}
+
+.rq-history-actions {
+  display: flex;
+  flex: 0 1 360px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 10px;
+}
+
+.rq-overview-formula {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+}
+
+.rq-batch-explanation {
+  margin: 0 0 12px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
 }
 
 .rq-model-usage {
@@ -1596,6 +1909,12 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
+.rq-number--success,
+.rq-metric--success .rq-metric-value {
+  color: var(--td-success-color);
+  font-weight: 600;
+}
+
 .rq-task-count {
   min-width: 0;
   height: 28px;
@@ -1899,6 +2218,10 @@ onUnmounted(() => {
   .rq-pools-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .rq-batch-filter {
+    width: 100%;
   }
 
   .rq-loading-metrics {

@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -270,12 +272,21 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 	ctx context.Context, tenantID uint64, kbID string, ids []string, processConfig *types.KnowledgeProcessOverrides,
 ) (string, error) {
+	return h.enqueueKnowledgeListReparseBatch(ctx, tenantID, kbID, ids, processConfig, "", "")
+}
+
+func (h *KnowledgeHandler) enqueueKnowledgeListReparseBatch(
+	ctx context.Context, tenantID uint64, kbID string, ids []string,
+	processConfig *types.KnowledgeProcessOverrides, batchID, submissionID string,
+) (string, error) {
 	payload := types.KnowledgeListReparsePayload{
 		KnowledgeBaseID: kbID,
 		TenantID:        tenantID,
 		KnowledgeIDs:    ids,
 		ProcessConfig:   processConfig,
 		Initiator:       types.TaskInitiatorFromContext(ctx),
+		BatchID:         batchID,
+		SubmissionID:    submissionID,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -284,6 +295,14 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 	}
 	task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
 		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(time.Hour))
+	if submissionID != "" {
+		// The durable receipt uses the same deterministic task ID.  If Redis
+		// accepted a task but the response was lost, a replay sees the conflict
+		// and recovers the original queue handoff rather than adding another one.
+		task = asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
+			asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(time.Hour),
+			asynq.TaskID("reparse-batch-"+submissionID))
+	}
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("enqueue task: %w", err)
@@ -3325,6 +3344,106 @@ type batchReparseKnowledgeRequest struct {
 	// Documents to reparse.
 	IDs           []string                         `json:"ids" binding:"required" extensions:"x-agent=knowledge_ids"`
 	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	BatchID       string                           `json:"batch_id,omitempty"`
+}
+
+type registerReparseBatchRequest struct {
+	KBID           string   `json:"kb_id" binding:"required"`
+	IDs            []string `json:"ids" binding:"required"`
+	Mode           string   `json:"mode" binding:"required"`
+	Name           string   `json:"name,omitempty"`
+	ManifestSHA256 string   `json:"manifest_sha256,omitempty"`
+}
+
+// RegisterReparseBatch stores a frozen document selection without enqueueing.
+func (h *KnowledgeHandler) RegisterReparseBatch(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req registerReparseBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("invalid reparse batch request"))
+		return
+	}
+	if req.Mode != "managed" && req.Mode != "tracking_only" {
+		_ = c.Error(errors.NewBadRequestError("invalid reparse batch mode"))
+		return
+	}
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		if raw != strings.TrimSpace(raw) || strings.ContainsAny(raw, "\r\n") {
+			_ = c.Error(errors.NewBadRequestError("knowledge ids must not contain whitespace padding or line breaks"))
+			return
+		}
+		if raw != "" {
+			if _, ok := seen[raw]; !ok {
+				seen[raw] = struct{}{}
+				ids = append(ids, raw)
+			}
+		}
+	}
+	if len(ids) == 0 || len(ids) > 50000 {
+		_ = c.Error(errors.NewBadRequestError("reparse batch ids must contain 1 to 50000 entries"))
+		return
+	}
+	_, kbID, tenant, _, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, req.KBID)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, tenant)
+	if req.Mode == "managed" {
+		// Registration accepts a much larger selection than a dispatch request.
+		// Bound IN-clause parameters for SQLite as well as PostgreSQL.
+		for offset := 0; offset < len(ids); offset += 200 {
+			end := min(offset+200, len(ids))
+			rows, getErr := h.kgService.GetKnowledgeBatch(ctx, tenant, ids[offset:end])
+			if getErr != nil || len(rows) != end-offset {
+				_ = c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
+				return
+			}
+			for _, row := range rows {
+				if row == nil || row.TenantID != tenant || row.KnowledgeBaseID != kbID {
+					_ = c.Error(errors.NewBadRequestError("knowledge does not belong to knowledge base"))
+					return
+				}
+			}
+		}
+	}
+	batchSvc, ok := h.kgService.(service.ReparseBatchService)
+	if !ok {
+		_ = c.Error(errors.NewInternalServerError("reparse batch persistence is unavailable"))
+		return
+	}
+	manifest := canonicalReparseBatchManifest(ids)
+	if req.ManifestSHA256 != "" && !strings.EqualFold(req.ManifestSHA256, manifest) {
+		_ = c.Error(errors.NewBadRequestError("manifest_sha256 does not match ids"))
+		return
+	}
+	if req.Mode == "tracking_only" {
+		if existing, findErr := batchSvc.FindTrackingReparseBatch(ctx, tenant, kbID, manifest); findErr == nil {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": existing})
+			return
+		}
+	}
+	batch, createErr := batchSvc.CreateReparseBatch(ctx, tenant, kbID, req.Mode, req.Name, ids)
+	if createErr != nil {
+		// A concurrent import may have won the unique manifest insert.
+		if req.Mode == "tracking_only" {
+			if existing, findErr := batchSvc.FindTrackingReparseBatch(ctx, tenant, kbID, manifest); findErr == nil {
+				c.JSON(http.StatusOK, gin.H{"success": true, "data": existing})
+				return
+			}
+		}
+		_ = c.Error(errors.NewInternalServerError("failed to persist reparse batch"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": batch})
+}
+
+func canonicalReparseBatchManifest(ids []string) string {
+	copyIDs := append([]string(nil), ids...)
+	sort.Strings(copyIDs)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(copyIDs, "\n")+"\n")))
 }
 
 // BatchReparseKnowledge godoc
@@ -3348,7 +3467,7 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "failed to parse batch reparse knowledge request: %v", err)
-		c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
+		_ = c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
 		return
 	}
 
@@ -3367,22 +3486,22 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	}
 
 	if len(ids) == 0 {
-		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
+		_ = c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
 		return
 	}
 	const maxBatch = 200
 	if len(ids) > maxBatch {
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		_ = c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
 		return
 	}
 
 	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, req.KBID)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
+		_ = c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
 		return
 	}
 	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
@@ -3394,11 +3513,11 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", kbID, len(ids), err)
-		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+		_ = c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
 		return
 	}
 	if len(knowledgeList) != len(ids) {
-		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
+		_ = c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
 		return
 	}
 	for _, k := range knowledgeList {
@@ -3407,17 +3526,78 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 			return
 		}
 		if k.KnowledgeBaseID != kbID {
-			c.Error(errors.NewBadRequestError(
+			_ = c.Error(errors.NewBadRequestError(
 				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
 					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
 			return
 		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, kbID, ids, req.ProcessConfig)
+	submissionSvc, submissionCapable := h.kgService.(service.ReparseSubmissionService)
+	if !submissionCapable {
+		_ = c.Error(errors.NewInternalServerError("reparse batch persistence is unavailable"))
+		return
+	}
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(idempotencyKey) > 255 || strings.ContainsAny(idempotencyKey, "\r\n") {
+		_ = c.Error(errors.NewBadRequestError("invalid Idempotency-Key"))
+		return
+	}
+	receipt, replay, submitErr := submissionSvc.PrepareReparseSubmission(
+		ctx, effectiveTenantID, kbID, strings.TrimSpace(req.BatchID), ids,
+		req.ProcessConfig, idempotencyKey,
+	)
+	if submitErr != nil {
+		if goerrors.Is(submitErr, service.ErrInvalidReparseBatch) {
+			_ = c.Error(errors.NewBadRequestError("invalid managed reparse batch or member selection"))
+			return
+		}
+		if goerrors.Is(submitErr, service.ErrReparseSubmissionConflict) {
+			_ = c.Error(errors.NewConflictError("batch reparse conflicts with an existing submission"))
+			return
+		}
+		logger.Errorf(ctx, "prepare batch reparse submission: %v", submitErr)
+		_ = c.Error(errors.NewInternalServerError("failed to persist batch reparse submission"))
+		return
+	}
+	if replay {
+		if receipt.State == "created" || receipt.State == "enqueue_unknown" {
+			_ = c.Error(errors.NewServiceUnavailableError("batch reparse handoff requires review"))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true, "message": "Batch reparse task submitted",
+			"data": gin.H{
+				"task_id": receipt.TaskID, "reparse_count": len(ids), "batch_id": receipt.BatchID,
+			},
+		})
+		return
+	}
+
+	taskID, err := h.enqueueKnowledgeListReparseBatch(
+		ctx, effectiveTenantID, kbID, ids, req.ProcessConfig, receipt.BatchID, receipt.ID,
+	)
 	if err != nil {
+		// A lost Redis reply is not proof that the task was absent. Preserve the
+		// ambiguity for the GET status rather than retrying a destructive batch.
+		if goerrors.Is(err, asynq.ErrTaskIDConflict) || goerrors.Is(err, asynq.ErrDuplicateTask) {
+			_ = submissionSvc.MarkReparseSubmissionQueued(ctx, receipt)
+			c.JSON(http.StatusOK, gin.H{
+				"success": true, "message": "Batch reparse task submitted",
+				"data": gin.H{
+					"task_id": receipt.TaskID, "reparse_count": len(ids), "batch_id": receipt.BatchID,
+				},
+			})
+			return
+		}
+		_ = submissionSvc.MarkReparseSubmissionEnqueueUnknown(ctx, receipt)
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
-		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))
+		_ = c.Error(errors.NewServiceUnavailableError("batch reparse handoff status is unknown"))
+		return
+	}
+	if err := submissionSvc.MarkReparseSubmissionQueued(ctx, receipt); err != nil {
+		logger.Errorf(ctx, "mark batch reparse submission queued: %v", err)
+		_ = c.Error(errors.NewServiceUnavailableError("batch reparse handoff status is unknown"))
 		return
 	}
 
@@ -3430,6 +3610,7 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		"data": gin.H{
 			"task_id":       taskID,
 			"reparse_count": len(ids),
+			"batch_id":      receipt.BatchID,
 		},
 	})
 }
