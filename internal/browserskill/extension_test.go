@@ -10,6 +10,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRealExtension(t *testing.T) {
@@ -105,7 +108,7 @@ func TestRealExtension(t *testing.T) {
 			w,
 			`<!doctype html><title>BrowserSkill integration</title>
 <label>Name <input id="name"></label>
-<button
+<button id="save"
  onclick="document.querySelector('#result').textContent='你好 '+document.querySelector('#name').value">Save</button>
 <p id="result"></p>
 <a id="new-tab" href="/linked" target="_blank" rel="noopener">Open linked page</a>
@@ -114,13 +117,41 @@ func TestRealExtension(t *testing.T) {
 		)
 	}))
 	defer fixture.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	scope := Scope{1, "real-extension-test"}
 	call := func(
 		ctx context.Context, scope Scope, session, method string, params map[string]any,
 	) (json.RawMessage, error) {
 		started := time.Now()
+		// This fixture client reads a fresh sync before each guarded operation.
+		// Production callers must choose their action from the returned evidence;
+		// the gateway never manufactures or refreshes their receipts.
+		switch method {
+		case "navigate", "navigate_back", "navigate_forward", "reload", "click", "fill", "press",
+			"hover", "wheel", "scroll_to", "focus", "blur", "select", "evaluate", "tab_close":
+			if status := m.Status(scope, session); status.SessionID != "" && !status.Paused {
+				synced, err := m.Call(ctx, scope, session, "cooperate", map[string]any{
+					"action": "sync", "tab_id": params["tab_id"],
+				})
+				if err != nil {
+					return nil, err
+				}
+				var receipt struct {
+					Context     string `json:"context_id"`
+					Observation string `json:"observation_id"`
+				}
+				if err := json.Unmarshal(synced, &receipt); err != nil ||
+					receipt.Context == "" || receipt.Observation == "" {
+					return nil, fmt.Errorf("missing shared-control receipt: %s", synced)
+				}
+				params = maps.Clone(params)
+				if params == nil {
+					params = map[string]any{}
+				}
+				params["context_id"], params["observation_id"] = receipt.Context, receipt.Observation
+			}
+		}
 		result, err := m.Call(ctx, scope, session, method, params)
 		t.Logf("browser RPC %s: %s (error=%v)", method, time.Since(started).Round(time.Millisecond), err)
 		return result, err
@@ -221,8 +252,53 @@ func TestRealExtension(t *testing.T) {
 	if !strings.Contains(string(snap), "Save") {
 		t.Fatalf("page missing: %s", snap)
 	}
+	// Upgrading only the binary connects successfully but rejects existing
+	// interactions. Exercise the actual extension's control/observation contract.
+	_, err = m.Call(ctx, scope, "chat", "fill", map[string]any{"selector": "#name", "value": "blocked"})
+	var controlErr *RPCError
+	require.ErrorAs(t, err, &controlErr)
+	require.Contains(t, string(controlErr.Data), "cooperation_sync_required")
+	synced, err := m.Call(ctx, scope, "chat", "cooperate", map[string]any{"action": "sync"})
+	require.NoError(t, err)
+	var receipt struct {
+		Context     string `json:"context_id"`
+		Observation string `json:"observation_id"`
+		Policy      string `json:"control_policy"`
+	}
+	require.NoError(t, json.Unmarshal(synced, &receipt))
+	require.Equal(t, "target", receipt.Policy)
+	require.NotEmpty(t, receipt.Context)
+	require.NotEmpty(t, receipt.Observation)
+	require.Contains(t, string(synced), "Save")
+	_, err = m.Call(ctx, scope, "chat", "fill", map[string]any{
+		"selector": "#name", "value": "shared control", "context_id": receipt.Context,
+	})
+	require.NoError(t, err)
+	_, err = m.Call(ctx, scope, "chat", "snapshot", nil)
+	require.NoError(t, err)
+	click := map[string]any{
+		"selector": "#save", "context_id": receipt.Context,
+		"expect": []map[string]any{{"target": "#name", "field": "value", "equals": "different"}},
+	}
+	_, err = m.Call(ctx, scope, "chat", "click", click)
+	require.ErrorAs(t, err, &controlErr)
+	require.Contains(t, string(controlErr.Data), "precondition_failed")
+	click["expect"] = []map[string]any{{"target": "#name", "field": "value", "equals": "shared control"}}
+	_, err = m.Call(ctx, scope, "chat", "click", click)
+	require.NoError(t, err, "target context survives actions, reads and a rejected condition")
+	verified, err := m.Call(ctx, scope, "chat", "snapshot", nil)
+	require.NoError(t, err)
+	require.Contains(t, string(verified), "你好 shared control")
+	_, err = m.Call(ctx, scope, "chat", "evaluate", map[string]any{
+		"expression": "document.title", "context_id": receipt.Context,
+	})
+	require.ErrorAs(t, err, &controlErr)
+	require.Contains(t, string(controlErr.Data), "observation_required")
+	require.False(t, m.Status(scope, "chat").Paused, "coordination refusals still allow synchronization")
+	snap = verified // The first sync replaces pre-policy refs; crop with current refs.
 	var snapshot struct {
-		Text string `json:"text"`
+		Text  string `json:"text"`
+		TabID int    `json:"tab_id"`
 	}
 	if err = json.Unmarshal(snap, &snapshot); err != nil {
 		t.Fatal(err)
@@ -298,7 +374,7 @@ func TestRealExtension(t *testing.T) {
 	if _, err = call(ctx, scope, "chat", "fill", map[string]any{"selector": "#name", "value": "世界"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": "button"}); err != nil {
+	if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": "#save"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, err = call(ctx, scope, "chat", "snapshot", nil)
@@ -386,6 +462,8 @@ func TestRealExtension(t *testing.T) {
 		{"#popup", "/popup", true},
 	} {
 		t.Logf("navigation target %s (borrow=%t)", target.selector, target.borrow)
+		_, err = call(ctx, scope, "chat", "tab_select", map[string]any{"tab_id": snapshot.TabID})
+		require.NoError(t, err, "closing/returning a task tab requires explicitly selecting the next target")
 		if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": target.selector}); err != nil {
 			t.Fatal(err)
 		}
@@ -443,9 +521,8 @@ func TestRealExtension(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// A genuine user-created tab inside the task window remains unauthorized and
-	// cannot be borrowed in place (upstream PR #297). Once moved to a regular
-	// window it can be borrowed with an actual browser confirmation.
+	// An unrelated user-created tab is routed out of the Agent Window. It
+	// remains unauthorized until borrowed with actual browser confirmation.
 	_, _ = io.WriteString(input, "create-unowned-tab\n")
 	var userTab struct {
 		ID int `json:"tab_id"`
@@ -463,19 +540,6 @@ func TestRealExtension(t *testing.T) {
 			!strings.Contains(err.Error(), "permission_denied") {
 			t.Fatalf("unowned user tab accepted %s: %v", method, err)
 		}
-	}
-	if _, err = call(ctx, scope, "chat", "tab_borrow", map[string]any{"tab_id": userTab.ID}); err == nil ||
-		!strings.Contains(err.Error(), "invalid_params") {
-		t.Fatalf("unowned tab inside the Agent Window was borrowed in place: %v", err)
-	}
-	_, _ = fmt.Fprintf(input, "move-fixture-tab-out %d\n", userTab.ID)
-	select {
-	case line := <-hostLines:
-		if line != "fixture-tab-moved" {
-			t.Fatalf("move fixture tab: %s", line)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
 	}
 	borrowTab(userTab.ID)
 	if _, err = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": userTab.ID}); err != nil {
@@ -715,7 +779,7 @@ func TestRealExtension(t *testing.T) {
 	if err = m.Control(ctx, scope, "chat", "pause"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": "button"}); err == nil {
+	if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": "#save"}); err == nil {
 		t.Fatal("paused click accepted")
 	}
 	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
@@ -737,6 +801,9 @@ func TestRealExtension(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 	}
+	require.ErrorContains(t, m.Control(ctx, scope, "chat", "resume"), "BrowserSkill browser overlay")
+	require.True(t, m.Status(scope, "chat").Paused)
+	hostAck("resume-browser-control", "browser-control-resumed")
 	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
 		t.Fatal(err)
 	}
@@ -822,6 +889,10 @@ func TestRealExtension(t *testing.T) {
 	if err != nil || json.Unmarshal(lastPage, &lastTab) != nil || lastTab.ID == 0 {
 		t.Fatalf("last tab fixture: %s, %v", lastPage, err)
 	}
+	_, err = call(ctx, scope, "chat", "tab_close", map[string]any{"tab_id": lastTab.ID})
+	require.ErrorContains(t, err, "Before closing the last tab")
+	_, err = call(ctx, scope, "chat", "tab_create", map[string]any{"url": "about:blank", "active": false})
+	require.NoError(t, err)
 	if _, err = call(ctx, scope, "chat", "tab_close", map[string]any{"tab_id": lastTab.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -875,6 +946,24 @@ func TestRealExtension(t *testing.T) {
 	if err = m.FinishTurn(ctx, scope, "chat", false); err != nil {
 		t.Fatal(err)
 	}
+	checkCleanup()
+	// A moved controlled tab ends its upstream session. Resume must create a
+	// new session rather than getting stuck on the daemon's terminal tombstone.
+	require.NoError(t, m.Control(ctx, scope, "chat", "select"))
+	lastPage, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(lastPage, &lastTab))
+	movedSession := m.Status(scope, "chat").SessionID
+	hostAck(fmt.Sprintf("move-controlled-tab-out %d", lastTab.ID), "controlled-tab-moved")
+	require.Eventually(t, func() bool {
+		status := m.Status(scope, "chat")
+		return status.Paused && status.SessionID == ""
+	}, 5*time.Second, 10*time.Millisecond)
+	_, err = m.Call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL})
+	require.ErrorContains(t, err, "task_paused")
+	require.NoError(t, m.Control(ctx, scope, "chat", "resume"))
+	require.NotEqual(t, movedSession, m.Status(scope, "chat").SessionID)
+	require.NoError(t, m.FinishTurn(ctx, scope, "chat", false))
 	checkCleanup()
 	// Repeated successful turns preserve the original and returned user tabs,
 	// with no agent-created tabs left over. The next turn needs no Resume.
