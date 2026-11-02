@@ -193,7 +193,7 @@ func TestBrowserActionsUseFreshCooperationContext(t *testing.T) {
 func TestBrowserTargetContextReuseAndBootstrap(t *testing.T) {
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
 	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
-	manager := &browserLifecycleManager{protocol: "1.8", extension: "0.4.1"}
+	manager := &browserLifecycleManager{protocol: "1.8", extension: "0.4.0"}
 	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
 	tool.manager = manager
 
@@ -242,19 +242,18 @@ func TestBrowserTargetContextReuseAndBootstrap(t *testing.T) {
 	require.Equal(t, []string{"cooperate", "click"}, manager.methods)
 }
 
-func TestBrowserControlPolicyRequiresTargetCapableExtension(t *testing.T) {
-	require.Equal(t, "strict", browserControlPolicy("1.8", "0.4.0"))
-	require.Equal(t, "strict", browserControlPolicy("1.7", "0.4.0"))
-	require.Equal(t, "target", browserControlPolicy("1.8", "0.4.1"))
-	require.Equal(t, "target", browserControlPolicy("1.8", "0.5.0"))
-	require.Equal(t, "strict", browserControlPolicy("1.7", "0.4.1"))
-	require.Equal(t, "target", browserControlPolicy("1.8", ""))
+func TestBrowserControlPolicyUsesProtocol(t *testing.T) {
+	require.Equal(t, "target", browserControlPolicy("1.8"))
+	require.Equal(t, "target", browserControlPolicy("1.9"))
+	require.Equal(t, "target", browserControlPolicy("2.0"))
+	require.Equal(t, "strict", browserControlPolicy("1.7"))
+	require.Equal(t, "target", browserControlPolicy(""))
 }
 
 func TestBrowserStrictProtocolSyncsEveryAction(t *testing.T) {
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
 	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
-	manager := &browserLifecycleManager{protocol: "1.8", extension: "0.4.0"}
+	manager := &browserLifecycleManager{protocol: "1.7", extension: "0.4.0"}
 	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
 	tool.manager = manager
 

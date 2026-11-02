@@ -123,7 +123,7 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 				"task.",
 		}, nil
 	}
-	t.controlPolicy = browserControlPolicy(status.ProtocolVersion, status.ExtensionVersion)
+	t.controlPolicy = browserControlPolicy(status.ProtocolVersion)
 	// Prepare once per agent turn. Ending a task cannot be undone by a later
 	// call from the same turn; a new user turn can begin a new browser task.
 	t.prepare.Do(func() { t.prepareErr = t.manager.Control(ctx, t.scope, t.session, "select") })
@@ -252,14 +252,10 @@ func cooperationSyncRetryable(err error) bool {
 		strings.Contains(message, "sync again after it settles")
 }
 
-// browserControlPolicy uses target semantics only when both the extension and
-// the protocol support it. A 0.4.1 daemon with a 0.4.0 extension reports 1.8
-// but still enforces strict single-use control, so gate on both.
-func browserControlPolicy(protocol, extension string) string {
-	trimmedExtension := strings.TrimPrefix(strings.TrimSpace(extension), "v")
-	if trimmedExtension != "" && !semverAtLeast(trimmedExtension, 0, 4, 1) {
-		return "strict"
-	}
+// browserControlPolicy enables target semantics on protocol 1.8+. The
+// extension's reported version is informational: a 0.4.1 install can still
+// report 0.4.0 while shipping the 1.8 protocol.
+func browserControlPolicy(protocol string) string {
 	if protocol == "" {
 		return "target"
 	}
@@ -276,32 +272,6 @@ func browserControlPolicy(protocol, extension string) string {
 		return "target"
 	}
 	return "strict"
-}
-
-func semverAtLeast(version string, wantMajor, wantMinor, wantPatch int) bool {
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
-		return false
-	}
-	major, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return false
-	}
-	minor, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return false
-	}
-	patch := 0
-	if len(parts) > 2 {
-		patch, _ = strconv.Atoi(strings.SplitN(parts[2], "-", 2)[0])
-	}
-	if major != wantMajor {
-		return major > wantMajor
-	}
-	if minor != wantMinor {
-		return minor > wantMinor
-	}
-	return patch >= wantPatch
 }
 
 // browserTargetedAction matches the extension's TARGET_ACTIONS rule: a DOM
