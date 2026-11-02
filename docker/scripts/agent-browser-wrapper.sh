@@ -77,6 +77,7 @@ while [ $# -gt 0 ]; do
           close|quit|exit) CLOSE_SEEN=1; seen_cmd=1; SUBCMD="$1" ;;
           *) seen_cmd=1; SUBCMD="$1" ;;
         esac
+        [ "$seen_cmd" = 1 ] && SUBCMD="$1"
       fi
       CLEAN+=("$1"); shift ;;
   esac
@@ -85,6 +86,16 @@ done
 if [ "$SUBCMD" = connect ]; then
   echo "agent-browser: connect is disabled; the sandbox manages this session's browser" >&2
   exit 64
+fi
+# Best effort only: a script that reads a password input's value would put a
+# secret filled by browser_fill_secret into the model's context.
+if [ "$SUBCMD" = eval ]; then
+  script_lc="$(printf '%s' "${CLEAN[*]}" | tr '[:upper:]' '[:lower:]')"
+  case "$script_lc" in
+    *password*.value*|*.value*password*)
+      echo "agent-browser: reading password values is not allowed; check results with browser_fill_secret statuses" >&2
+      exit 64 ;;
+  esac
 fi
 
 mkdir -p "$BROWSER_ROOT/home" "$BROWSER_ROOT/profile"
@@ -229,11 +240,15 @@ explain_failure() {
   fi
 }
 
-# Serialize commands per session; activity defers receiver reloads.
-exec 7>"$BROWSER_ROOT/.command.lock"
-if ! flock -w "$LOCK_WAIT_S" 7; then
-  echo "agent-browser: another browser command of this session is still running (waited ${LOCK_WAIT_S}s); retry when it finishes" >&2
-  exit 70
+# Serialize commands per session; activity defers receiver reloads. The
+# secret-fill helper already holds this lock while it drives the browser.
+# The lock only orders commands, so honouring the flag opens no new access.
+if [ "${WK_AB_LOCK_HELD:-}" != 1 ]; then
+  exec 7>"$BROWSER_ROOT/.command.lock"
+  if ! flock -w "$LOCK_WAIT_S" 7; then
+    echo "agent-browser: another browser command of this session is still running (waited ${LOCK_WAIT_S}s); retry when it finishes" >&2
+    exit 70
+  fi
 fi
 touch "$BROWSER_ROOT/.busy"
 cleanup() { rm -f "$BROWSER_ROOT/.busy" "$BROWSER_ROOT/.launching"; }
