@@ -68,6 +68,7 @@ require (
 	github.com/volcengine/ve-tos-golang-sdk/v2 v2.9.4
 	github.com/volcengine/vikingdb-go-sdk v0.0.11
 	github.com/wailsapp/wails/v2 v2.12.0
+	github.com/yuin/goldmark v1.8.2
 	github.com/weaviate/weaviate v1.37.3
 	github.com/weaviate/weaviate-go-client/v5 v5.7.3
 	github.com/xuri/excelize/v2 v2.11.0

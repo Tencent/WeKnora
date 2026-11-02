@@ -56,6 +56,20 @@ func TestDataSourceConfig_ToJSON_PassthroughWhenNoKey(t *testing.T) {
 	assert.Contains(t, string(blob), "plain-token")
 }
 
+func TestNextcloudAppPasswordEncryption(t *testing.T) {
+	withAESKey(t, testAESKey32)
+	cfg := DataSourceConfig{Type: ConnectorTypeNextcloud, Credentials: map[string]any{
+		"base_url": "https://nextcloud.example.com", "username": "alice", "app_password": "app-password-for-tests",
+	}}
+	blob, err := cfg.ToJSON()
+	assert.NoError(t, err)
+	assert.NotContains(t, string(blob), "app-password-for-tests")
+	parsed, err := (&DataSource{Config: blob}).ParseConfig()
+	assert.NoError(t, err)
+	assert.Equal(t, "app-password-for-tests", parsed.Credentials["app_password"])
+	assert.Equal(t, "app-password-for-tests", cfg.Credentials["app_password"])
+}
+
 func TestDataSource_ParseConfig_Roundtrip(t *testing.T) {
 	withAESKey(t, testAESKey32)
 	original := &DataSourceConfig{

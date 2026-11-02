@@ -14,7 +14,7 @@ from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from typing import Dict
 
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, UnicodeDammit
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
@@ -122,11 +122,16 @@ class MHTMLParser(BaseParser):
                 if not payload and part is not explicit_root:
                     continue
                 payload = payload or b""
-                charset = part.get_content_charset() or "utf-8"
-                try:
-                    html_text = payload.decode(charset, errors="ignore")
-                except LookupError:
-                    html_text = payload.decode("utf-8", errors="ignore")
+                charset = part.get_content_charset()
+                if charset:
+                    try:
+                        html_text = payload.decode(charset, errors="ignore")
+                    except LookupError:
+                        html_text = payload.decode("utf-8", errors="ignore")
+                else:
+                    # Keep the bytes until HTML declarations and BOMs have
+                    # been inspected; decoding as UTF-8 first loses text.
+                    html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
                 html_parts.append(
                     {
                         "content": html_text,

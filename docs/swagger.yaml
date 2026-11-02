@@ -1,5 +1,51 @@
 basePath: /api/v1
 definitions:
+  github_com_Tencent_WeKnora_internal_types.MemorySubjectSummary:
+    properties:
+      active_count:
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      item_count:
+        type: integer
+      last_activity_at:
+        type: string
+      pending_count:
+        type: integer
+      principal_type:
+        type: string
+      subject_id:
+        type: string
+    type: object
+  internal_handler.AdminMemorySettingsRequest:
+    properties:
+      enabled:
+        example: false
+        type: boolean
+    required:
+    - enabled
+    type: object
+  internal_handler.ListMemorySubjectsResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MemorySubjectSummary'
+        type: array
+      success:
+        example: true
+        type: boolean
+      total:
+        type: integer
+    type: object
+  internal_handler.MemoryAdminErrorResponse:
+    properties:
+      error: {}
+      success:
+        example: false
+        type: boolean
+    type: object
   github_com_Tencent_WeKnora_internal_agent_tools.AgentToolCatalog:
     properties:
       default_tools:
@@ -165,6 +211,109 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.EnvVarView'
         type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentFailure:
+    properties:
+      fail_count:
+        type: integer
+      failed_at:
+        type: string
+      id:
+        type: integer
+      last_error:
+        type: string
+      task_type:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentProgress:
+    properties:
+      attempt:
+        type: integer
+      can_start:
+        type: boolean
+      failure_count:
+        type: integer
+      id:
+        type: string
+      ingestion_status:
+        type: string
+      knowledge_base_id:
+        type: string
+      knowledge_base_name:
+        type: string
+      parse_status:
+        type: string
+      stages:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentStageProgress'
+        type: array
+      tenant_id:
+        type: integer
+      title:
+        type: string
+      updated_at:
+        type: string
+      wiki_pending:
+        type: integer
+      wiki_retries:
+        type: integer
+      wiki_status:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentProgressDetail:
+    properties:
+      document:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgress'
+      failures:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentFailure'
+        type: array
+      has_more_failures:
+        type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentProgressResponse:
+    properties:
+      documents:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgress'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentStageProgress:
+    properties:
+      error_code:
+        type: string
+      finished_at:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartRequest:
+    properties:
+      count:
+        type: integer
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+      search:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult:
+    properties:
+      already_queued:
+        type: integer
+      requested:
+        type: integer
+      started:
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_application_service.EnvVarView:
     properties:
@@ -1342,6 +1491,13 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
+      approvals:
+        description: |-
+          Approvals is the user decision for tools in this step. It is stored with
+          the step so a reloaded transcript can show what was allowed or refused.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolApprovalRecord'
+        type: array
       background_injections:
         description: |-
           BackgroundInjections are background-work messages delivered before this
@@ -4059,6 +4215,29 @@ definitions:
       query:
         description: User query text
         type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.HostApprovalSnapshot:
+    properties:
+      allow_session:
+        type: boolean
+      command:
+        type: string
+      cwd:
+        type: string
+      denial_snippet:
+        type: string
+      first_attempt_ran:
+        type: boolean
+      grant_access:
+        type: string
+      grant_path:
+        type: string
+      reason:
+        type: string
+      session_rules:
+        items:
+          type: string
+        type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.ImageActionsConfig:
     properties:
@@ -7085,6 +7264,11 @@ definitions:
           indexed beside the chunk.
         type: boolean
         x-agent: question_generation_enabled
+      model_id:
+        description: ModelID selects a chat model for questions. Empty inherits the
+          summary model.
+        type: string
+        x-agent: question_model_id
       question_count:
         description: QuestionCount is how many questions to write per chunk, from
           1 to 10.
@@ -9051,6 +9235,41 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  github_com_Tencent_WeKnora_internal_types.ToolApprovalRecord:
+    properties:
+      approved:
+        type: boolean
+      args_json:
+        type: string
+      canceled:
+        type: boolean
+      description:
+        type: string
+      host:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.HostApprovalSnapshot'
+      kind:
+        type: string
+      mcp_tool_name:
+        type: string
+      pending_id:
+        type: string
+      reason:
+        type: string
+      requested_at:
+        type: integer
+      resolved:
+        type: boolean
+      scope:
+        type: string
+      service_name:
+        type: string
+      timed_out:
+        type: boolean
+      timeout_seconds:
+        type: integer
+      tool_call_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.ToolCall:
     properties:
       args:
@@ -9633,6 +9852,7 @@ definitions:
     - bocha
     - serply
     - deepseek
+    - searchapi
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBrave
@@ -9650,6 +9870,7 @@ definitions:
     - WebSearchProviderTypeBocha
     - WebSearchProviderTypeSerply
     - WebSearchProviderTypeDeepSeek
+    - WebSearchProviderTypeSearchAPI
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       config_fields:
@@ -9699,6 +9920,13 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
+      auto_generate:
+        default: true
+        description: |-
+          AutoGenerate disables background Wiki generation when false. Omitted means true.
+          Manual page APIs and Wiki retrieval remain available while Wiki is enabled.
+        type: boolean
+        x-agent: wiki_auto_generate
       content_instructions:
         description: ContentInstructions sets tone and emphasis for generated Wiki
           prose. Citations stay fixed.
@@ -11490,6 +11718,8 @@ definitions:
             type: string
           enabled:
             type: boolean
+          modelId:
+            type: string
           questionCount:
             type: integer
         type: object
@@ -14416,10 +14646,7 @@ definitions:
     type: object
   internal_handler_session.artifactLibraryResponse:
     properties:
-      data:
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem'
-        type: array
+      data: {}
       page:
         type: integer
         x-agent: true
@@ -14468,6 +14695,263 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /admin/memory/subjects:
+    get:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；返回主体 UUID、开关、分类计数与最近活动时间，不返回记忆正文
+      parameters:
+      - default: 50
+        description: 每页条数，默认 50，最大 200
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: 非负偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ListMemorySubjectsResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 列出租户记忆主体
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/items:
+    delete:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；支持清空已关闭记忆的主体，不阻止未来新消息产生记忆
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ClearResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 清空指定主体的记忆
+      tags:
+      - 记忆管理
+    get:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；subject_id 是主体 UUID，并非 principal storage
+        ID
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 状态过滤
+        enum:
+        - active
+        - superseded
+        - archived
+        - pending
+        in: query
+        name: status
+        type: string
+      - default: 50
+        description: 每页条数，默认 50，最大 200
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: 非负偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.ListItemsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 查看指定主体的记忆
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/items/{id}/confirm:
+    post:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；确认 pending 条目，已生效条目可幂等重试，其他状态冲突返回 409
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 记忆条目 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryItem'
+              type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 确认指定主体的待审核记忆
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/items/{id}/reject:
+    post:
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；只有 pending 条目可否决，状态冲突返回 409
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 记忆条目 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 否决指定主体的待审核记忆
+      tags:
+      - 记忆管理
+  /admin/memory/subjects/{subject_id}/settings:
+    put:
+      consumes:
+      - application/json
+      description: 仅允许 JWT 登录的租户管理员或所有者访问；enabled 必须显式传入布尔值，允许 false
+      parameters:
+      - description: 记忆主体 UUID
+        in: path
+        name: subject_id
+        required: true
+        type: string
+      - description: 记忆开关
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.AdminMemorySettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.MemoryAdminErrorResponse'
+      security:
+      - Bearer: []
+      summary: 更新指定主体的记忆设置
+      tags:
+      - 记忆管理
   /agent-chat/{session_id}:
     post:
       consumes:
@@ -15244,7 +15728,14 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_handler_session.artifactLibraryResponse'
+            allOf:
+            - $ref: '#/definitions/internal_handler_session.artifactLibraryResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem'
+                  type: array
+              type: object
       security:
       - Bearer: []
       - ApiKeyAuth: []
@@ -19955,6 +20446,46 @@ paths:
         target: knowledge_base.get
       x-agent-hint: Regenerates the AI summary of what the knowledge base covers,
         with one model call. A description the user wrote is kept.
+  /knowledge-bases/{id}/rebuild-index:
+    post:
+      description: |-
+        索引策略变更后，把知识库下全部文档提交重新解析。前端知识库设置弹窗
+        (KnowledgeBaseEditorModal) 在保存新策略后调用此接口，此前该路由在后端缺失，调用返回 404。
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务已提交
+          schema:
+            $ref: '#/definitions/internal_handler.DataResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识库不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 有文档正在迁移中
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 重建整个知识库的索引
+      tags:
+      - 知识管理
   /knowledge-bases/{id}/shares:
     get:
       description: 获取知识库的所有共享记录
@@ -26735,6 +27266,49 @@ paths:
       summary: 继续流式响应
       tags:
       - 问答
+  /sessions/transcriptions:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 使用当前智能体配置的 ASR 模型将一段录音转写为文本，用于填充对话输入框。智能体需开启音频上传并选择 ASR 模型。
+      parameters:
+      - description: 录音文件（推荐 16kHz 单声道 WAV）
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: 智能体ID
+        in: formData
+        name: agent_id
+        required: true
+        type: string
+      - description: 共享智能体所属空间ID
+        in: formData
+        name: agent_source_tenant_id
+        type: string
+      - description: 界面语言（如 zh-CN、ja-JP）；取主语言（zh、ja）作为识别语言提示
+        in: formData
+        name: locale
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: VoiceTranscriptionResponse'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 智能体未启用语音识别或文件无效
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 语音输入转写
+      tags:
+      - 会话
   /shared-agents:
     get:
       description: 返回所有共享给当前用户所在组织的智能体
@@ -27721,6 +28295,147 @@ paths:
             additionalProperties: true
             type: object
       summary: Revoke system administrator privileges from a user
+      tags:
+      - System Admin
+  /system/admin/runtime/documents:
+    get:
+      description: SystemAdmin metadata view with separate current attempts and historical
+        failures. No raw payloads.
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 25
+        description: Page size, at most 100
+        in: query
+        name: page_size
+        type: integer
+      - default: unfinished
+        description: Document filter
+        enum:
+        - all
+        - unfinished
+        - failed
+        - completed
+        in: query
+        name: status
+        type: string
+      - description: Knowledge-base ID
+        in: query
+        name: kb_id
+        type: string
+      - description: Title, filename or knowledge-base search, at most 200 characters
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgressResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - Bearer: []
+      summary: List document ingestion and durable Wiki progress
+      tags:
+      - System Admin
+  /system/admin/runtime/documents/wiki-start:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Schedules up to 100 eligible documents, oldest first, under existing worker claims and limits.
+        Ingestion and failure history are retained. Partial handoff errors include accepted counts.
+      parameters:
+      - description: One knowledge ID or a bounded count and optional filters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult'
+              type: object
+      security:
+      - Bearer: []
+      summary: Request immediate Wiki work for existing durable document operations
+      tags:
+      - System Admin
+  /system/admin/runtime/documents/{knowledge_id}:
+    get:
+      description: Returns up to 50 original failures with bounded error previews.
+        Excludes bodies and task payloads.
+      parameters:
+      - description: Knowledge ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgressDetail'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - Bearer: []
+      summary: Read a document's current stages and historical failures
       tags:
       - System Admin
   /system/admin/runtime/queues:

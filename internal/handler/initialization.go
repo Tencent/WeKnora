@@ -143,9 +143,10 @@ type KBModelConfigRequest struct {
 
 	// 问题生成配置
 	QuestionGeneration struct {
-		Enabled            bool   `json:"enabled"`
-		QuestionCount      int    `json:"questionCount"`
-		CustomInstructions string `json:"customInstructions"`
+		ModelID            *string `json:"modelId,omitempty"`
+		Enabled            bool    `json:"enabled"`
+		QuestionCount      int     `json:"questionCount"`
+		CustomInstructions string  `json:"customInstructions"`
 	} `json:"questionGeneration"`
 }
 
@@ -256,6 +257,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		return
 	}
 	ownWorkspace, err := kbSettingsAccess(c, kb)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+
+	questionModelID, err := h.resolveQuestionGenerationModel(
+		ctx, req.QuestionGeneration.ModelID, kb.QuestionGenerationConfig,
+	)
 	if err != nil {
 		_ = c.Error(err)
 		return
@@ -427,12 +436,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			questionCount = 10
 		}
 		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
+			ModelID:            questionModelID,
 			Enabled:            true,
 			QuestionCount:      questionCount,
 			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
 	} else {
 		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
+			ModelID:            questionModelID,
 			Enabled:            false,
 			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
@@ -1742,6 +1753,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		config["questionGeneration"] = map[string]interface{}{
 			"enabled":            kb.QuestionGenerationConfig.Enabled,
 			"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
+			"modelId":            kb.QuestionGenerationConfig.ModelID,
 			"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
 		}
 	} else {
@@ -2289,6 +2301,14 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "authentication"):
 			available = false
 			message = fmt.Sprintf("认证失败，请检查API Key：%s", errMsg)
+		case strings.Contains(errMsg, "403") || strings.Contains(errMsg, "Forbidden"):
+			// Also what proxies and endpoint-security agents answer when they
+			// block the request, so the endpoint was never actually reached.
+			available = false
+			message = fmt.Sprintf("访问被拒绝，请检查API Key权限或网络代理/安全软件拦截：%s", errMsg)
+		case strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "context deadline exceeded"):
+			available = false
+			message = fmt.Sprintf("连接超时，请检查网络连接：%s", errMsg)
 		case strings.Contains(errMsg, "404") || strings.Contains(errMsg, "Not Found"):
 			available = false
 			message = fmt.Sprintf("API端点不存在，请检查Base URL：%s", errMsg)

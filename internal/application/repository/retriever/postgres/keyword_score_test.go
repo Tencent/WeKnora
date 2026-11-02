@@ -25,7 +25,11 @@ func newKeywordTestRepository(t *testing.T) (*pgRepository, sqlmock.Sqlmock) {
 		Logger:               logger.Default.LogMode(logger.Silent),
 	})
 	require.NoError(t, err)
-	return NewPostgresRetrieveEngineRepository(gdb).(*pgRepository), mock
+	repo := NewPostgresRetrieveEngineRepository(gdb).(*pgRepository)
+	// These tests isolate score-function detection; HNSW scheduling has its
+	// own tests and must not add asynchronous SQL to this mock connection.
+	repo.autoIndex = false
+	return repo, mock
 }
 
 // Exercise the actual query path for both backends, including scope filters,

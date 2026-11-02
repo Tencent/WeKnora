@@ -206,7 +206,7 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	// Parse the response
 	var response KnowledgeResponse
 	if resp.StatusCode == http.StatusConflict {
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		if err := decodeResponseBody(resp.Body, &response); err != nil {
 			return nil, fmt.Errorf("failed to parse response: %w", err)
 		}
 		return &response.Data, ErrDuplicateFile
@@ -258,7 +258,7 @@ func (c *Client) CreateKnowledgeFromURL(
 
 	var response KnowledgeResponse
 	if resp.StatusCode == http.StatusConflict {
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		if err := decodeResponseBody(resp.Body, &response); err != nil {
 			return nil, fmt.Errorf("failed to parse response: %w", err)
 		}
 		return &response.Data, ErrDuplicateURL
@@ -527,7 +527,8 @@ func (c *Client) DownloadKnowledgeFile(ctx context.Context, knowledgeID string, 
 // OpenKnowledgeFile starts a download for the given knowledge entry and
 // returns the server-suggested filename (parsed from Content-Disposition;
 // empty when the server didn't send one) and a streaming reader for the
-// body. Callers MUST Close the returned reader.
+// body. Callers MUST Close the returned reader. The default ordinary-request
+// timeout does not cut off the transfer; WithTimeout and context deadlines apply.
 //
 // Used by `weknora doc download` so the CLI can inspect the filename
 // before opening the destination file — avoids streaming the full body
@@ -535,7 +536,7 @@ func (c *Client) DownloadKnowledgeFile(ctx context.Context, knowledgeID string, 
 // (overwrite without --force, missing --out for unnamed downloads, etc.).
 func (c *Client) OpenKnowledgeFile(ctx context.Context, knowledgeID string) (string, io.ReadCloser, error) {
 	path := fmt.Sprintf("/api/v1/knowledge/%s/download", knowledgeID)
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	resp, err := c.doRequestStream(ctx, http.MethodGet, path, nil, nil)
 	if err != nil {
 		return "", nil, err
 	}

@@ -72,7 +72,12 @@ func (b *Broker) Reap(ctx context.Context, now time.Time, hooks RunHooks) (int, 
 				continue
 			}
 		}
-		state := b.runState(ctx, row)
+		state, err := b.runState(ctx, row)
+		if err != nil {
+			// The next sweep retries the read; closing the run now would
+			// skip the hooks that finish its assistant message.
+			continue
+		}
 		if state == nil {
 			// An in-memory waiter consumed it; nothing to resume or close.
 			continue
@@ -91,7 +96,13 @@ func (b *Broker) Reap(ctx context.Context, now time.Time, hooks RunHooks) (int, 
 		return reaped, err
 	}
 	for _, row := range expired {
-		if b.closeRun(ctx, row, b.runState(ctx, row),
+		state, err := b.runState(ctx, row)
+		if err != nil {
+			// The row is re-listed next sweep, so expiring it on a failed
+			// state read only delays by one sweep.
+			continue
+		}
+		if b.closeRun(ctx, row, state,
 			[]string{types.AgentPromptSuspended}, types.AgentPromptExpired, ReasonPromptExpired, hooks) {
 			reaped++
 		}
@@ -109,7 +120,14 @@ func (b *Broker) SupersedeSession(ctx context.Context, sessionID string, hooks R
 	}
 	n := 0
 	for _, row := range rows {
-		if b.closeRun(ctx, row, b.runState(ctx, row),
+		state, err := b.runState(ctx, row)
+		if err != nil {
+			// Deferring the supersede keeps the prompt answerable and lets
+			// the reaper expire it later, instead of closing it while the
+			// hook that completes its run cannot run.
+			continue
+		}
+		if b.closeRun(ctx, row, state,
 			[]string{types.AgentPromptSuspended}, types.AgentPromptSuperseded, ReasonPromptSupersede, hooks) {
 			n++
 		}
@@ -117,26 +135,34 @@ func (b *Broker) SupersedeSession(ctx context.Context, sessionID string, hooks R
 	return n, nil
 }
 
-// runState returns the saved state of row's run, or nil when there is none
-// or it belongs to another prompt.
-func (b *Broker) runState(ctx context.Context, row *types.AgentPrompt) *types.AgentRunSuspension {
+// runState returns the saved state of row's run, or (nil, nil) when there is
+// none or it belongs to another prompt. A failed read returns an error: the
+// caller must defer the row to the next sweep rather than treat the run as
+// stateless and take it over on a guess.
+func (b *Broker) runState(ctx context.Context, row *types.AgentPrompt) (*types.AgentRunSuspension, error) {
 	if !row.Suspendable || row.AssistantMessageID == "" {
-		return nil
+		return nil, nil
 	}
 	saved, err := b.suspensions.Get(ctx, row.AssistantMessageID)
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("read run state of prompt %s: %v", row.ID, err)
-		return nil
+		return nil, err
 	}
 	if saved == nil || saved.PromptID != row.ID {
-		return nil
+		return nil, nil
 	}
-	return saved
+	return saved, nil
 }
 
 func (b *Broker) reapPending(ctx context.Context, now time.Time, row *types.AgentPrompt, hooks RunHooks) bool {
 	log := logger.GetLogger(ctx)
-	state := b.runState(ctx, row)
+	state, err := b.runState(ctx, row)
+	if err != nil {
+		// A failed read says nothing about the run: expiring the prompt now
+		// would destroy a run that may still be resumable. The lapsed lease
+		// re-lists the row for the next sweep.
+		return false
+	}
 	if state == nil {
 		reason := ReasonOwnerStopped
 		ok, err := b.store.Transition(ctx, row.ID, types.AgentPromptTransition{
