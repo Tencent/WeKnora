@@ -57,6 +57,7 @@ type Status struct {
 	Selected         bool   `json:"selected"`
 	Connected        bool   `json:"connected"`
 	ExtensionVersion string `json:"extension_version,omitempty"`
+	ProtocolVersion  string `json:"protocol_version,omitempty"`
 	Paused           bool   `json:"paused"`
 	SessionID        string `json:"task_id,omitempty"`
 }
@@ -88,6 +89,7 @@ type device struct {
 	runtime          *daemon
 	browserID        string
 	extensionVersion string
+	protocolVersion  string
 	upstream         *websocket.Conn
 	conn             *websocket.Conn
 	ready            bool
@@ -167,6 +169,7 @@ func (m *Manager) Status(s Scope, session string) Status {
 	result.Connected = d.conn != nil && d.ready && time.Now().Before(d.expires)
 	if result.Connected {
 		result.ExtensionVersion = d.extensionVersion
+		result.ProtocolVersion = d.protocolVersion
 	}
 	if t := d.tasks[session]; t != nil {
 		result.Selected = t.selected
@@ -471,7 +474,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	up.SetReadLimit(maxFrame)
 	// Complete and verify the first handshake before publishing readiness.
 	// This keeps identity assignment out of the generic frame forwarding path.
-	reply, extensionVersion, err := relayHandshake(conn, up, browserID)
+	reply, extensionVersion, protocolVersion, err := relayHandshake(conn, up, browserID)
 	if err != nil {
 		return
 	}
@@ -482,6 +485,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	d.ready = true
 	d.extensionVersion = extensionVersion
+	d.protocolVersion = protocolVersion
 	d.mu.Unlock()
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if conn.WriteMessage(websocket.TextMessage, reply) != nil {
@@ -557,7 +561,7 @@ func (m *Manager) attach(
 	return up, conn, nil
 }
 
-func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, string, error) {
+func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, string, string, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	_ = conn.SetReadDeadline(deadline)
 	_ = up.SetReadDeadline(deadline)
@@ -568,27 +572,27 @@ func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, string,
 	}()
 	typ, data, err := conn.ReadMessage()
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	var frame map[string]json.RawMessage
 	if typ != websocket.TextMessage || json.Unmarshal(data, &frame) != nil {
-		return nil, "", errors.New("invalid browser handshake")
+		return nil, "", "", errors.New("invalid browser handshake")
 	}
 	var method, id string
 	var params map[string]json.RawMessage
 	if json.Unmarshal(frame["method"], &method) != nil || method != "system.handshake" ||
 		json.Unmarshal(frame["id"], &id) != nil || id == "" ||
 		json.Unmarshal(frame["params"], &params) != nil || params == nil {
-		return nil, "", errors.New("expected browser handshake")
+		return nil, "", "", errors.New("expected browser handshake")
 	}
 	params["instance_id"], _ = json.Marshal(browserID)
 	frame["params"], _ = json.Marshal(params)
 	if err := up.WriteJSON(frame); err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	typ, reply, err := up.ReadMessage()
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	var response struct {
 		ID     string `json:"id"`
@@ -600,14 +604,14 @@ func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, string,
 	if typ != websocket.TextMessage || json.Unmarshal(reply, &response) != nil ||
 		response.ID != id || response.Result.Protocol == "" ||
 		(len(response.Error) != 0 && string(response.Error) != "null") {
-		return nil, "", errors.New("BrowserSkill handshake failed")
+		return nil, "", "", errors.New("BrowserSkill handshake failed")
 	}
 	// This is the extension's version, not browser.version or protocol_version.
 	var version string
 	if json.Unmarshal(params["version"], &version) != nil || len(version) > 64 {
 		version = ""
 	}
-	return reply, strings.TrimSpace(version), nil
+	return reply, strings.TrimSpace(version), strings.TrimSpace(response.Result.Protocol), nil
 }
 
 func validExtensionOrigin(origin string) bool {
@@ -814,37 +818,54 @@ func numericID(v any) (float64, bool) {
 }
 
 var methods = map[string]bool{
-	"snapshot":            true,
-	"observe":             true,
-	"navigate":            true,
-	"navigate_back":       true,
-	"navigate_forward":    true,
-	"reload":              true,
-	"click":               true,
-	"fill":                true,
-	"press":               true,
-	"hover":               true,
-	"wheel":               true,
-	"scroll_to":           true,
-	"select":              true,
-	"tab_list":            true,
-	"tab_create":          true,
-	"tab_select":          true,
-	"tab_close":           true,
-	"tab_borrow":          true,
-	"tab_return":          true,
-	"get_html":            true,
-	"evaluate":            true,
-	"screenshot":          true,
-	"focus":               true,
-	"blur":                true,
-	"console":             true,
-	"network":             true,
-	"wait_for_navigation": true,
-	"wait_ms":             true,
-	"window_resize":       true,
-	"emulate":             true,
-	"request_help":        true,
+	"snapshot":             true,
+	"observe":              true,
+	"navigate":             true,
+	"navigate_back":        true,
+	"navigate_forward":     true,
+	"reload":               true,
+	"click":                true,
+	"fill":                 true,
+	"press":                true,
+	"hover":                true,
+	"wheel":                true,
+	"scroll_to":            true,
+	"select":               true,
+	"tab_list":             true,
+	"tab_create":           true,
+	"tab_select":           true,
+	"tab_close":            true,
+	"tab_borrow":           true,
+	"tab_return":           true,
+	"get_html":             true,
+	"evaluate":             true,
+	"screenshot":           true,
+	"focus":                true,
+	"blur":                 true,
+	"console":              true,
+	"network":              true,
+	"wait_for_navigation":  true,
+	"wait_ms":              true,
+	"window_resize":        true,
+	"emulate":              true,
+	"request_help":         true,
+	"drag":                 true,
+	"screenshot_full_page": true,
+	"extract":              true,
+	"debug":                true,
+	"dialog_status":        true,
+	"dialog_accept":        true,
+	"dialog_dismiss":       true,
+	"operation_await":      true,
+	"operation_cancel":     true,
+	"wait_for_element":     true,
+	"record_start":         true,
+	"record_stop":          true,
+	"record_await":         true,
+	"upload":               true,
+	"download":             true,
+	"video":                true,
+	"cooperate":            true,
 }
 
 // Call serializes authorized automation commands within a conversation task.

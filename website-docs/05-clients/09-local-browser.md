@@ -4,13 +4,13 @@ WeKnora 通过 BrowserSkill daemon 和 [BrowserSkill](https://github.com/Tencent
 
 ## 安装扩展
 
-扩展需要 **0.3.1 及以上**版本，任选一种方式安装：
+扩展需要 **0.4.1 及以上**版本，任选一种方式安装：
 
 - Chrome：[Chrome 应用商店](https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi)
 - Edge：[Edge 加载项](https://microsoftedge.microsoft.com/addons/detail/browserskill/emacgiaaaiojkkpkddmmdfhmokgmnikg)
 - 配套 ZIP：无法访问商店时，在「浏览器连接」页的「手动安装（备用）」下载。解压后在 `chrome://extensions`（Edge 为 `edge://extensions`）开启「开发者模式」，选择「加载已解压的扩展程序」。
 
-已连接的扩展版本低于 0.3.1 时，「浏览器连接」页会提示升级。
+已连接的扩展版本低于 0.4.1 时，「浏览器连接」页会提示升级。
 
 ## 配对与使用
 
@@ -18,6 +18,8 @@ WeKnora 通过 BrowserSkill daemon 和 [BrowserSkill](https://github.com/Tencent
 2. 复制页面生成的一次性配对链接，在扩展「连接设置 → 远程连接」粘贴并保存。
 3. 在智能推理输入框开启「本机浏览器」，再提交任务。配对成功不代表每轮自动启用。
 4. 首次调用创建独立任务窗口；对话预览可定位页面、暂停、继续或结束当前浏览器任务。
+
+扩展 0.4.1 起支持 protocol 1.8 的 `target` / `strict` 控制策略。WeKnora 对 1.8 及以上协议使用 `target`，同一页面内复用控制上下文，页面、标签或人工介入变化后重新同步；旧扩展继续使用 `strict` 的一次性观察。结构化提取需先调用 `extract` 的 `discover`，再用返回的 `target_id` 读取表格或列表。
 
 <Screenshot
   src="/screenshots/browser-connection.png"
@@ -56,7 +58,7 @@ WeKnora 通过 BrowserSkill daemon 和 [BrowserSkill](https://github.com/Tencent
 
 ```dotenv
 BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk
-BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.1.zip
+BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.4.1.zip
 BROWSERSKILL_MAX_CONNECTIONS=32
 ```
 
@@ -68,7 +70,7 @@ BROWSERSKILL_PUBLIC_URL=wss://weknora.example.com/api/v1/local-browser/extension
 
 本机可用 localhost WS，远端要求浏览器信任的 WSS 证书。内网可以使用受信任的企业 CA。显式设置 `BROWSERSKILL_BINARY=` 可关闭能力；修改 Docker 环境变量后使用 `docker compose up -d app frontend` 重建容器。
 
-配套扩展和 daemon 必须一同升级，扩展需要 0.3.1 及以上（Chrome 应用商店、Edge 加载项或配套 ZIP 均可）。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
+配套扩展和 daemon 必须一同升级，扩展需要 0.4.1 及以上（Chrome 应用商店、Edge 加载项或配套 ZIP 均可）。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
 
 ## 多副本与入口代理
 
@@ -96,7 +98,7 @@ Kubernetes 可使用 Pod IP 组成直连地址。不要用各副本独立的 SQL
 | 现象 | 检查方向 |
 | --- | --- |
 | 无配套扩展下载或能力不可用 | daemon 与扩展文件路径、可执行权限、目标架构和 app 镜像版本 |
-| 提示扩展版本过低 | 从 Chrome 应用商店、Edge 加载项或配套 ZIP 升级到 0.3.1 及以上，覆盖原解压目录后重新加载 |
+| 提示扩展版本过低 | 从 Chrome 应用商店、Edge 加载项或配套 ZIP 升级到 0.4.1 及以上，覆盖原解压目录后重新加载 |
 | 授权成功但 WSS 失败 | 公网地址/端口、受信任证书、外层代理 WebSocket Upgrade |
 | 设备连接正常但任务不执行 | 本轮开关、任务是否暂停、是否等待标签借用或人工帮助 |
 | 没有人工帮助提示 | 执行记录是否调用 `request_help`；扩展是否禁用了人工帮助 |

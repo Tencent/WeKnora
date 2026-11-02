@@ -51,7 +51,23 @@ const browserToolParameters = `{
         "wait_ms",
         "window_resize",
         "emulate",
-        "request_help"
+        "request_help",
+        "drag",
+        "screenshot_full_page",
+        "extract",
+        "debug",
+        "dialog_status",
+        "dialog_accept",
+        "dialog_dismiss",
+        "operation_await",
+        "operation_cancel",
+        "wait_for_element",
+        "record_start",
+        "record_stop",
+        "record_await",
+        "upload",
+        "download",
+        "video"
       ]
     },
     "keep_open": {
@@ -129,6 +145,30 @@ const browserToolParameters = `{
       "type": "string",
       "minLength": 1,
       "description": "CSS selector, alternative to ref."
+    },
+    "expect": {
+      "type": "array",
+      "description": "Optional target-policy assertions, such as ` +
+	`[{\"target\":\"@e1\",\"field\":\"text\",\"equals\":\"OK\"}]. ` +
+	`Use for business facts that must hold after the action.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "field": {
+            "type": "string",
+            "enum": ["text", "value", "checked", "count", "attribute", "url"]
+          },
+          "equals": {},
+          "attribute": {
+            "type": "string"
+          }
+        },
+        "required": ["target", "field"]
+      }
     },
     "clear_before": {
       "type": "boolean"
@@ -339,7 +379,115 @@ const browserToolParameters = `{
     },
     "title": {
       "type": "string"
-    }
+    },
+    "dialog_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "text": {
+      "type": "string"
+    },
+    "operation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": ["visible", "hidden", "attached", "detached"]
+    },
+    "poll_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "ref": {"type": "string"},
+        "selector": {"type": "string"},
+        "offset": {
+          "type": "object",
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "properties": {
+        "ref": {"type": "string"},
+        "selector": {"type": "string"},
+        "offset": {
+          "type": "object",
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+        }
+      }
+    },
+    "delta": {
+      "type": "object",
+      "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["press_move_release", "click_move_click", "input", "drop"]
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "discover", "table", "list",
+        "performance", "aggregate", "duplicates", "capabilities", "activity", "wait",
+        "pin", "unpin", "start", "stop", "status", "requests", "request",
+        "operations", "operation", "console", "pages", "export", "rules",
+        "rule_add", "rule_enable", "rule_disable", "rule_remove", "replay",
+        "read", "discard", "exported"
+      ]
+    },
+    "run_id": {"type": "string"},
+    "id": {"type": "string"},
+    "name": {"type": "string"},
+    "part": {"type": "string"},
+    "offset": {"type": "integer", "minimum": 0},
+    "max_chars": {"type": "integer", "minimum": 1},
+    "pointer": {"type": "string"},
+    "rule": {"type": "object"},
+    "replay": {"type": "object"},
+    "budget": {"type": "integer", "minimum": 4096, "maximum": 262144},
+    "slow_ms": {"type": "integer", "minimum": 0, "maximum": 60000},
+    "window_ms": {"type": "integer", "minimum": 100, "maximum": 10000},
+    "include_controlled": {"type": "boolean"},
+    "resource_type": {"type": "string"},
+    "status": {"type": "integer", "minimum": 100, "maximum": 599},
+    "kind": {"type": "string"},
+    "fields": {"type": "array", "items": {}},
+    "command_id": {"type": "string"},
+    "max_rows": {"type": "integer", "minimum": 1},
+    "max_columns": {"type": "integer", "minimum": 1},
+    "item_selector": {"type": "string"},
+    "target_id": {"type": "string"},
+    "purpose": {"type": "string"},
+    "max_page_tokens": {"type": "integer", "minimum": 1},
+    "redact_values": {"type": "boolean"},
+    "trace_version": {"type": "integer", "enum": [2, 3]},
+    "supports_tab_switch_steps": {"type": "boolean"},
+    "recording_id": {"type": "string"},
+    "capability": {"type": "string"},
+    "request_id": {"type": "string"},
+    "browser": {"type": "string"},
+    "max_duration_ms": {"type": "integer", "minimum": 1},
+    "quality": {"type": "string", "enum": ["standard", "clear"]},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "transfer_id": {"type": "string"},
+          "name": {"type": "string"},
+          "staged_path": {"type": "string"}
+        },
+        "required": ["transfer_id", "name"]
+      }
+    },
+    "browser_relative_dir": {"type": "string"},
+    "max_byte_size": {"type": "integer", "minimum": 1},
+    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 60000}
   },
   "required": [
     "method"
@@ -376,39 +524,39 @@ var browserArgumentRules = map[string]browserArgumentRule{
 		required: []string{},
 	},
 	"click": {
-		fields:   []string{"button", "click_count", "modifiers", "ref", "selector", "tab_id", "timeout_ms"},
+		fields:   []string{"expect", "button", "click_count", "modifiers", "ref", "selector", "tab_id", "timeout_ms"},
 		required: []string{},
 	},
 	"fill": {
-		fields:   []string{"clear_before", "ref", "selector", "tab_id", "timeout_ms", "value"},
+		fields:   []string{"expect", "clear_before", "ref", "selector", "tab_id", "timeout_ms", "value"},
 		required: []string{"value"},
 	},
 	"press": {
-		fields:   []string{"hold_ms", "key", "modifiers", "ref", "selector", "tab_id", "timeout_ms"},
+		fields:   []string{"expect", "hold_ms", "key", "modifiers", "ref", "selector", "tab_id", "timeout_ms"},
 		required: []string{"key"},
 	},
 	"hover": {
-		fields:   []string{"modifiers", "ref", "selector", "settle_ms", "tab_id", "timeout_ms"},
+		fields:   []string{"expect", "modifiers", "ref", "selector", "settle_ms", "tab_id", "timeout_ms"},
 		required: []string{},
 	},
 	"wheel": {
-		fields:   []string{"delta_x", "delta_y", "modifiers", "ref", "selector", "tab_id", "timeout_ms"},
+		fields:   []string{"expect", "delta_x", "delta_y", "modifiers", "ref", "selector", "tab_id", "timeout_ms"},
 		required: []string{},
 	},
 	"scroll_to": {
-		fields:   []string{"ref", "selector", "tab_id", "timeout_ms"},
+		fields:   []string{"expect", "ref", "selector", "tab_id", "timeout_ms"},
 		required: []string{},
 	},
 	"focus": {
-		fields:   []string{"ref", "selector", "tab_id", "timeout_ms"},
+		fields:   []string{"expect", "ref", "selector", "tab_id", "timeout_ms"},
 		required: []string{},
 	},
 	"blur": {
-		fields:   []string{"ref", "selector", "tab_id", "timeout_ms"},
+		fields:   []string{"expect", "ref", "selector", "tab_id", "timeout_ms"},
 		required: []string{},
 	},
 	"select": {
-		fields:   []string{"ref", "selector", "tab_id", "timeout_ms", "values"},
+		fields:   []string{"expect", "ref", "selector", "tab_id", "timeout_ms", "values"},
 		required: []string{"values"},
 	},
 	"tab_list": {
@@ -456,7 +604,7 @@ var browserArgumentRules = map[string]browserArgumentRule{
 		required: []string{},
 	},
 	"wait_ms": {
-		fields:   []string{"duration_ms"},
+		fields:   []string{"duration_ms", "tab_id"},
 		required: []string{"duration_ms"},
 	},
 	"window_resize": {
@@ -470,6 +618,88 @@ var browserArgumentRules = map[string]browserArgumentRule{
 	"request_help": {
 		fields:   []string{"prompt", "tab_id", "targets", "timeout_ms", "title"},
 		required: []string{"prompt"},
+	},
+	"drag": {
+		fields: []string{
+			"button", "delta", "duration_ms", "hold_ms", "mode",
+			"modifiers", "source", "tab_id", "target", "timeout_ms",
+		},
+		required: []string{"source"},
+	},
+	"screenshot_full_page": {
+		fields:   []string{"tab_id"},
+		required: []string{},
+	},
+	"extract": {
+		fields: []string{
+			"action", "fields", "item_selector", "max_bytes", "max_columns",
+			"max_rows", "ref", "selector", "tab_id", "target_id", "timeout_ms",
+		},
+		required: []string{"action"},
+	},
+	"debug": {
+		fields: []string{
+			"action", "budget", "command_id", "fields", "id", "include_controlled",
+			"kind", "limit", "max_chars", "method", "name", "offset", "part",
+			"pointer", "replay", "resource_type", "rule", "run_id", "since",
+			"slow_ms", "state", "status", "tab_id", "timeout_ms", "url",
+			"wait_ms", "window_ms",
+		},
+		required: []string{"action"},
+	},
+	"dialog_status": {
+		fields:   []string{"tab_id"},
+		required: []string{},
+	},
+	"dialog_accept": {
+		fields:   []string{"dialog_id", "tab_id", "text"},
+		required: []string{"dialog_id"},
+	},
+	"dialog_dismiss": {
+		fields:   []string{"dialog_id", "tab_id"},
+		required: []string{"dialog_id"},
+	},
+	"operation_await": {
+		fields:   []string{"operation_id", "tab_id", "wait_ms"},
+		required: []string{"operation_id"},
+	},
+	"operation_cancel": {
+		fields:   []string{"operation_id", "tab_id"},
+		required: []string{"operation_id"},
+	},
+	"wait_for_element": {
+		fields:   []string{"poll_ms", "ref", "selector", "state", "tab_id", "timeout_ms"},
+		required: []string{"state"},
+	},
+	"record_start": {
+		fields: []string{
+			"max_page_tokens", "purpose", "redact_values",
+			"supports_tab_switch_steps", "tab_id", "trace_version", "url",
+		},
+		required: []string{},
+	},
+	"record_stop": {
+		fields:   []string{},
+		required: []string{},
+	},
+	"record_await": {
+		fields:   []string{"timeout_ms"},
+		required: []string{},
+	},
+	"upload": {
+		fields:   []string{"files", "mode", "ref", "selector", "tab_id", "timeout_ms"},
+		required: []string{"files"},
+	},
+	"download": {
+		fields:   []string{"browser_relative_dir", "max_byte_size", "ref", "selector", "tab_id", "timeout_ms"},
+		required: []string{},
+	},
+	"video": {
+		fields: []string{
+			"action", "browser", "capability", "max_duration_ms", "offset",
+			"quality", "recording_id", "request_id", "tab_id", "timeout_ms",
+		},
+		required: []string{"action"},
 	},
 }
 
@@ -490,6 +720,58 @@ var browserInputSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
 
 // ValidateArguments enforces the flat schema and the selected operation's
 // required fields before opening a browser or executing any page action.
+// inferBrowserMethod recovers the method when a model omits it but supplies a
+// field that belongs to exactly one operation. Ambiguous shapes still fail.
+func inferBrowserMethod(input map[string]any) (string, bool) {
+	for _, candidate := range []struct {
+		method string
+		fields []string
+	}{
+		{"evaluate", []string{"expression"}},
+		{"wait_ms", []string{"duration_ms"}},
+		{"request_help", []string{"prompt"}},
+		{"navigate", []string{"url"}},
+		{"wheel", []string{"delta_x", "delta_y"}},
+		{"window_resize", []string{"width", "height"}},
+		{"select", []string{"values"}},
+		{"press", []string{"key"}},
+		{"fill", []string{"value"}},
+		{"emulate", []string{"off", "overrides"}},
+		{"tab_list", []string{"scope"}},
+		{"reload", []string{"hard"}},
+		{"observe", []string{"debug_surfaces", "max_text_chars", "probe_hover"}},
+	} {
+		for _, field := range candidate.fields {
+			if _, ok := input[field]; ok {
+				return candidate.method, true
+			}
+		}
+	}
+	return "", false
+}
+
+// normalizeBrowserArguments rewrites an unambiguous missing method so the
+// registry validator and Execute see the same canonical arguments.
+func normalizeBrowserArguments(args json.RawMessage) json.RawMessage {
+	var input map[string]any
+	if json.Unmarshal(args, &input) != nil {
+		return args
+	}
+	if method, ok := input["method"].(string); ok && method != "" {
+		return args
+	}
+	method, ok := inferBrowserMethod(input)
+	if !ok {
+		return args
+	}
+	input["method"] = method
+	normalized, err := json.Marshal(input)
+	if err != nil {
+		return args
+	}
+	return normalized
+}
+
 func (t *BrowserSkillTool) ValidateArguments(args json.RawMessage) error {
 	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(args))
 	if err != nil {
@@ -505,7 +787,11 @@ func (t *BrowserSkillTool) ValidateArguments(args json.RawMessage) error {
 	}
 	method, ok := input["method"].(string)
 	if !ok || method == "" {
-		return fmt.Errorf("method is required and must be a string")
+		var inferred bool
+		method, inferred = inferBrowserMethod(input)
+		if !inferred {
+			return fmt.Errorf("method is required and must be a string")
+		}
 	}
 	rule, ok := browserArgumentRules[method]
 	if !ok {
@@ -568,6 +854,8 @@ func browserCallParams(method string, input map[string]any) map[string]any {
 		out[name] = value
 	}
 	switch method {
+	case "wait_ms":
+		delete(out, "tab_id")
 	case "observe", "snapshot":
 		chars, ok := out["max_text_chars"]
 		if !ok {
@@ -585,7 +873,15 @@ func browserCallParams(method string, input map[string]any) map[string]any {
 func observationTokensFromTextChars(value any) int {
 	chars := int(toFloat64(value))
 	if chars < 1 {
-		return 1
+		chars = 1
 	}
-	return (chars + 3) / 4
+	tokens := (chars + 3) / 4
+	// BrowserSkill rejects very small snapshots with "max_tokens is too small"
+	// instead of truncating. Keep the model's character budget as a floor, but
+	// never send a budget that cannot fit the observation header plus one row.
+	const minObservationTokens = 512
+	if tokens < minObservationTokens {
+		return minObservationTokens
+	}
+	return tokens
 }

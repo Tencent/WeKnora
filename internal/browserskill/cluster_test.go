@@ -85,6 +85,7 @@ func TestRequestsRouteToBrowserOwnerAcrossReplicas(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, status.Connected)
 	require.Equal(t, "0.3.0", status.ExtensionVersion)
+	require.Equal(t, "1.3", status.ProtocolVersion)
 	account, err := follower.Account(ctx, scope)
 	require.NoError(t, err)
 	require.Equal(t, "0.3.0", account.ExtensionVersion, "account version follows the remote connection owner")

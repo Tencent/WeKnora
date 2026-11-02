@@ -179,6 +179,7 @@ func (m *Manager) Account(ctx context.Context, s Scope) (AccountStatus, error) {
 		}
 		result.Connected = status.Connected
 		result.ExtensionVersion = status.ExtensionVersion
+		result.ProtocolVersion = status.ProtocolVersion
 	}
 	return result, nil
 }
@@ -203,6 +204,7 @@ func (m *Manager) GetStatus(ctx context.Context, s Scope, session string) (Statu
 			record.Owner != m.nodeID {
 			status.Connected = false
 			status.ExtensionVersion = ""
+			status.ProtocolVersion = ""
 			status.SessionID = ""
 			status.Paused = status.Selected
 		}

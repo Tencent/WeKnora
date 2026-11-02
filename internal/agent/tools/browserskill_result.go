@@ -56,6 +56,30 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 			"Do not retry tab_select/read/close or call request_help before borrowing succeeds. " +
 			"For an ordinary website lookup that does not need this tab's state, navigate in the task's own tab."
 	}
+	if strings.Contains(strings.ToLower(err.Message), "max_tokens is too small") ||
+		data.Reason == "observation_budget_too_small" {
+		return "The observation budget is below BrowserSkill's minimum. Increase max_text_chars; " +
+			"the read itself is safe, and the adapter raises very small budgets to its floor."
+	}
+	if data.Reason == "control_context_invalid" {
+		return "The shared page context expired. Observe again or repeat the intended action with a fresh " +
+			"context; do not replay a mutation blindly if it may have taken effect."
+	}
+	if data.Reason == "observation_required" {
+		return "This action needs a fresh observation. Observe again and use the new observation; " +
+			"do not reuse an observation id."
+	}
+	if data.Reason == "target_unavailable" {
+		return "The target is no longer available. Observe the current page and choose a fresh target; " +
+			"do not guess a ref."
+	}
+	if data.Reason == "control_held" {
+		return "The user currently holds shared control. Wait for them to release it, or ask them to " +
+			"continue in the conversation preview; do not fight for control."
+	}
+	if data.Reason == "user_aborted" {
+		return "The user aborted the action. Stop and wait for explicit continuation; do not retry automatically."
+	}
 	if err.Code == "user_aborted" || err.Code == "cancelled" || err.Code == "task_paused" || err.Code == "timeout" {
 		return "Stop browser actions. Ask the user to complete any manual step and click Continue operation " +
 			"in the conversation browser preview, then continue in the same conversation. " +
@@ -116,7 +140,7 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 // RPC success and page-operation success are different contracts. Inspect only
 // known result envelopes; arbitrary page text containing 'error' is still data.
 func (t *BrowserSkillTool) interpretResult(method string, raw json.RawMessage) *types.ToolResult {
-	if method == "screenshot" {
+	if method == "screenshot" || method == "screenshot_full_page" {
 		result := browserScreenshotResult(raw)
 		if !result.Success {
 			t.failed.Store(true)

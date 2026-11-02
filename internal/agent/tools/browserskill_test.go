@@ -69,6 +69,9 @@ func TestBrowserWaitRequiresDocumentedDuration(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
 	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	require.NoError(t, tool.ValidateArguments(
+		json.RawMessage(`{"method":"wait_ms","duration_ms":1000,"tab_id":3}`),
+	))
 	for _, raw := range []string{
 		`{"method":"wait_ms"}`, `{"method":"wait_ms","ms":1000}`,
 		`{"method":"wait_ms","duration_ms":-1}`, `{"method":"wait_ms","duration_ms":0.5}`,
@@ -126,12 +129,18 @@ type browserLifecycleManager struct {
 	callErr    error
 	response   json.RawMessage
 	calls      int
+	methods    []string
 	retained   []bool
 	cleanupErr error
+	protocol   string
+	extension  string
+	sessionID  string
 }
 
 func (m *browserLifecycleManager) GetStatus(context.Context, browserskill.Scope, string) (browserskill.Status, error) {
-	return browserskill.Status{Connected: true}, nil
+	return browserskill.Status{
+		Connected: true, ProtocolVersion: m.protocol, ExtensionVersion: m.extension, SessionID: m.sessionID,
+	}, nil
 }
 
 func (m *browserLifecycleManager) Control(context.Context, browserskill.Scope, string, string) error {
@@ -141,6 +150,10 @@ func (m *browserLifecycleManager) Control(context.Context, browserskill.Scope, s
 func (m *browserLifecycleManager) Call(
 	_ context.Context, _ browserskill.Scope, _ string, method string, params map[string]any,
 ) (json.RawMessage, error) {
+	m.methods = append(m.methods, method)
+	if method == "cooperate" {
+		return json.RawMessage(`{"context_id":"test-context","observation_id":"test-observation"}`), nil
+	}
 	m.params = params
 	m.calls++
 	if m.response != nil {
@@ -156,6 +169,121 @@ func (m *browserLifecycleManager) FinishTurn(ctx context.Context, _ browserskill
 	m.cleanupErr = ctx.Err()
 	m.retained = append(m.retained, keep)
 	return nil
+}
+
+func TestBrowserActionsUseFreshCooperationContext(t *testing.T) {
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+	manager := &browserLifecycleManager{}
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	tool.manager = manager
+
+	result, err := tool.Execute(ctx, json.RawMessage(`{"method":"click","ref":"e1"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"cooperate", "click"}, manager.methods)
+	require.Equal(t, "test-context", manager.params["context_id"])
+
+	manager.methods = nil
+	result, err = tool.Execute(ctx, json.RawMessage(`{"method":"observe"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"observe"}, manager.methods)
+}
+
+func TestBrowserNavigateSyncsWhenTaskAlreadyExists(t *testing.T) {
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+	manager := &browserLifecycleManager{protocol: "1.8", sessionID: "existing-task"}
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	tool.manager = manager
+
+	result, err := tool.Execute(ctx, json.RawMessage(`{"method":"navigate","url":"https://example.com"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"cooperate", "navigate"}, manager.methods)
+	require.Equal(t, "test-context", manager.params["context_id"])
+}
+
+func TestBrowserTargetContextReuseAndBootstrap(t *testing.T) {
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+	manager := &browserLifecycleManager{protocol: "1.8", extension: "0.4.0"}
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	tool.manager = manager
+
+	// The first navigation bootstraps control; syncing the blank tab would race it.
+	result, err := tool.Execute(ctx, json.RawMessage(`{"method":"navigate","url":"https://example.com"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"navigate"}, manager.methods)
+
+	manager.methods = nil
+	result, err = tool.Execute(ctx, json.RawMessage(`{"method":"click","ref":"e1"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"cooperate", "click"}, manager.methods)
+	require.Equal(t, "test-context", manager.params["context_id"])
+	_, hasObservation := manager.params["observation_id"]
+	require.False(t, hasObservation, "targeted DOM actions use context, not a single-use observation")
+
+	// A targeted DOM action reuses the context; it must not sync again.
+	manager.methods = nil
+	result, err = tool.Execute(ctx, json.RawMessage(`{"method":"fill","ref":"e2","value":"x"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"fill"}, manager.methods)
+	require.Equal(t, "test-context", manager.params["context_id"])
+
+	// Passive reads do not consume or invalidate a target context.
+	manager.methods = nil
+	result, err = tool.Execute(ctx, json.RawMessage(`{"method":"observe"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"observe"}, manager.methods)
+
+	// A script is untargeted: it needs a fresh observation and invalidates the context.
+	manager.methods = nil
+	result, err = tool.Execute(ctx, json.RawMessage(`{"method":"wait_ms","duration_ms":10}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"cooperate", "wait_ms"}, manager.methods)
+	require.Equal(t, "test-observation", manager.params["observation_id"])
+
+	manager.methods = nil
+	result, err = tool.Execute(ctx, json.RawMessage(`{"method":"click","ref":"e3"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"cooperate", "click"}, manager.methods)
+}
+
+func TestBrowserControlPolicyUsesProtocol(t *testing.T) {
+	require.Equal(t, "target", browserControlPolicy("1.8"))
+	require.Equal(t, "target", browserControlPolicy("1.9"))
+	require.Equal(t, "target", browserControlPolicy("2.0"))
+	require.Equal(t, "strict", browserControlPolicy("1.7"))
+	require.Equal(t, "target", browserControlPolicy(""))
+}
+
+func TestBrowserStrictProtocolSyncsEveryAction(t *testing.T) {
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+	manager := &browserLifecycleManager{protocol: "1.7", extension: "0.4.0"}
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	tool.manager = manager
+
+	for _, raw := range []string{
+		`{"method":"click","ref":"e1","expect":[{"target":"@e1","field":"text","equals":"OK"}]}`,
+		`{"method":"click","ref":"e2"}`,
+	} {
+		manager.methods = nil
+		result, err := tool.Execute(ctx, json.RawMessage(raw))
+		require.NoError(t, err)
+		require.True(t, result.Success)
+		require.Equal(t, []string{"cooperate", "click"}, manager.methods)
+		_, hasExpect := manager.params["expect"]
+		require.False(t, hasExpect, "0.4.0 strict peers do not accept target-only expect")
+	}
 }
 
 func TestBrowserTurnRetention(t *testing.T) {
