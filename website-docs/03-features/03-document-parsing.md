@@ -557,3 +557,12 @@ Docker app 镜像包含 qpdf。独立部署和桌面应用必须在运行后端�
 - 大书可按实际耗时配置 `WEKNORA_DOCREADER_CALL_TIMEOUT=4h`、`WEKNORA_DOCUMENT_PROCESS_TIMEOUT=6h`，保留每片 Cloud 轮询 30 分钟。不要把每片的 30 分钟误认为整个文档获得相同或累计的执行时间；修改 .env 后重新创建 app 容器。
 
 此功能不持久化云端 job ID 或完成结果。重试会重新提交分片，跨重启断点续传不属于此变更。
+
+
+### 文件大小与 gRPC 消息预算
+
+App 的 `MAX_FILE_SIZE_MB` 与 DocReader 的 `DOCREADER_GRPC_MAX_FILE_SIZE_MB`（未设置时使用 `MAX_FILE_SIZE_MB`，默认 50 MiB）仍限制原始文件字节数。App／Go SDK 客户端与 DocReader 服务端的 gRPC 消息预算额外保留 1 MiB，用于 protobuf 字段、文件名、解析器参数和响应封装；否则恰好达到文件上限的合法文件也会触发 `ResourceExhausted`。
+
+超出原始文件上限仍会在 App／Go SDK 发送前或 DocReader 解析前失败；超出消息预算的元数据和单个响应帧仍由 gRPC 拒绝。此边界行为需要配套升级 App 和 DocReader，并保持两端文件上限配置一致。流式结果与旧版 unary 回退均使用该预算。
+
+这项修正不改变对象存储文件回读方式、不增加远程文件 URL 协议，也不解决所有大文件并发内存压力。解析后正文或单张图片远大于消息预算时仍可能失败，不能把文件上限当成无限结果大小。
