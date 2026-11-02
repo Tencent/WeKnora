@@ -2062,10 +2062,16 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// knowledge no longer exists so we don't resurrect a ghost source_ref.
 	// Retract updates are kept — they actively remove refs, which is what we
 	// want when the doc is gone.
-	updates, err = s.filterLiveUpdates(ctx, kbID, updates)
+	liveUpdates, err := s.filterLiveUpdates(ctx, kbID, updates)
 	if err != nil {
 		return false, "", false, false, err
 	}
+	// 持久回执绑定的是原始贡献集合；过滤后不能用剩余贡献完成全部回执，
+	// 也不能把全过滤误记为成功 no-op，须保留原任务供后续恢复。
+	if types.WikiPageProgressCommitFromContext(ctx) != nil && len(liveUpdates) != len(updates) {
+		return false, "", false, false, errors.New("wiki page progress sources changed before reduce")
+	}
+	updates = liveUpdates
 	if len(updates) == 0 {
 		return false, "", false, false, nil
 	}
