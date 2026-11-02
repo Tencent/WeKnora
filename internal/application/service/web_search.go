@@ -101,7 +101,7 @@ func (c *webClient) Search(ctx context.Context, req types.WebSearchRequest) ([]*
 	if req.Filters != (types.WebSearchFilters{}) {
 		if !c.capabilities.Filters {
 			return nil, fmt.Errorf("provider %s does not support country/freshness filters; "+
-				"omit them or select Brave or Serply", c.providerType)
+				"omit them or select Brave, Serply or Firecrawl", c.providerType)
 		}
 		if err := req.Filters.Validate(); err != nil {
 			return nil, err
