@@ -226,3 +226,18 @@ type SessionTurnHolder interface {
 	// registration is lost. end closes exactly this hold; call it once.
 	BeginSessionTurn(ctx context.Context, sessionID string) (turnCtx context.Context, end func(), err error)
 }
+
+// SessionSecureBrowser fills credential values into the browser of the
+// sandbox bound to a session, and reads which page that browser shows. Only
+// remote backends with the desktop image offer it.
+type SessionSecureBrowser interface {
+	CurrentPage(ctx context.Context, sessionID string) (BrowserPage, error)
+	FillSecret(ctx context.Context, sessionID string, req SecretFillRequest) (*SecretFillResult, error)
+}
+
+// SessionSecureBrowserProvider is implemented by managers that MAY offer a
+// SessionSecureBrowser. The accessor returns nil when they cannot.
+type SessionSecureBrowserProvider interface {
+	SessionSecureBrowser() SessionSecureBrowser
+}
+

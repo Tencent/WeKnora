@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -399,11 +400,66 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		if parsed > 0 {
 			return fmt.Sprintf("Parsed %d attachment(s)", parsed)
 		}
+	case "secure_form":
+		return compactSecureFormSummary(data)
+	case "browser_fill_secret":
+		return compactFillSecretSummary(data)
 	}
 	if displayType := stringField(data, "display_type"); displayType != "" {
 		return fmt.Sprintf("Tool completed (%s; payload omitted from history)", displayType)
 	}
 	return "Tool completed (payload omitted from history)"
+}
+
+// compactSecureFormSummary rebuilds what request_secure_form told the model.
+// Data holds only the handle, field names, username and flags, never values.
+func compactSecureFormSummary(data map[string]interface{}) string {
+	if answered, _ := data["answered"].(bool); !answered {
+		reason := stringField(data, "reason")
+		if reason == "" {
+			reason = "no answer"
+		}
+		return fmt.Sprintf("The user did not provide credentials (%s).", reason)
+	}
+	handle := stringField(data, "handle")
+	if handle == "" {
+		return "The user provided credentials (the handle is not kept in history)."
+	}
+	var fields []string
+	if list, ok := data["fields"].([]interface{}); ok {
+		for _, f := range list {
+			if s, ok := f.(string); ok {
+				fields = append(fields, s)
+			}
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The user provided credentials. handle: %s  fields: %s", handle, strings.Join(fields, ", "))
+	if u := stringField(data, "username"); u != "" {
+		fmt.Fprintf(&b, "  username: %s", u)
+	}
+	b.WriteString("\nThe handle may have been used or expired; call request_secure_form again if a fill reports handle_expired.")
+	return b.String()
+}
+
+// compactFillSecretSummary rebuilds the per-field statuses of browser_fill_secret.
+func compactFillSecretSummary(data map[string]interface{}) string {
+	statuses, _ := data["fields"].(map[string]interface{})
+	if len(statuses) == 0 {
+		return "browser_fill_secret finished (statuses are not kept in history)."
+	}
+	names := make([]string, 0, len(statuses))
+	for name := range statuses {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Fill results for %s:", stringField(data, "handle"))
+	for _, name := range names {
+		s, _ := statuses[name].(string)
+		fmt.Fprintf(&b, "\n- %s: %s", name, s)
+	}
+	return b.String()
 }
 
 func stringField(data map[string]interface{}, key string) string {

@@ -137,6 +137,9 @@ type agentService struct {
 	// *ShellJobService is the production value. && binds tighter than ||, so
 	// the availability check groups RemoteAvailable and LocalAvailable.
 	shellJobs shellJobSource
+
+	// secretHandles backs browser_fill_secret; nil without Redis.
+	secretHandles tools.SecretHandles
 }
 
 // shellJobSource is the part of *ShellJobService the agent asks about
@@ -268,6 +271,7 @@ func (s *agentService) CreateAgentEngine(
 	// capability independently of the existing SkillsEnabled execution gate.
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
+	s.registerSecureFormTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
 	attachmentReader := s.registerAttachmentReader(ctx, toolRegistry, config, sessionID)
 	// Advertise cached service summaries independently of @mentions. Concrete
@@ -1541,7 +1545,7 @@ func (s *agentService) registerTools(
 
 		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
-			tools.ToolEditSandboxFile:
+			tools.ToolEditSandboxFile, tools.ToolRequestSecureForm, tools.ToolBrowserFillSecret:
 			// Bound to the resolved sandbox manager in registerSandboxFileTools
 			// / registerSandboxShellIfAllowed / initializeSkillsManager.
 			// Listing them here would warn "Unknown tool: shell_exec" on every

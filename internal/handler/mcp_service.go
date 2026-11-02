@@ -39,6 +39,7 @@ type MCPServiceHandler struct {
 	scheduledPrompt func(context.Context, *types.AgentPrompt) bool
 	// grants are the callers' remembered agent approvals.
 	grants interfaces.AgentGrantRepository
+	secureForms secureFormSubmitter
 }
 
 // RunResumer continues an agent run that ended suspended on prompt, now
