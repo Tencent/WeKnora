@@ -134,9 +134,10 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 	t.used.Store(true)
 	targeted := browserTargetedAction(method, params)
 	needsCooperation := browserActionNeedsCooperation(method)
-	// A first navigation bootstraps shared control. Syncing before it would
-	// observe the empty tab and can race the navigation itself.
-	bootstrap := browserBootstrapAction(method) && !t.contextReady
+	// A first navigation bootstraps shared control only when this conversation
+	// has no browser task yet. An existing task already has a fixed policy and
+	// requires the context from cooperate sync before navigating.
+	bootstrap := browserBootstrapAction(method) && !t.contextReady && status.SessionID == ""
 	if needsCooperation && !bootstrap {
 		if t.controlPolicy == "strict" || !targeted || !t.contextReady {
 			if syncErr := t.ensureCooperation(ctx); syncErr != nil {

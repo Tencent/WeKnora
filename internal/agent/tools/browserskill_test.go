@@ -134,11 +134,12 @@ type browserLifecycleManager struct {
 	cleanupErr error
 	protocol   string
 	extension  string
+	sessionID  string
 }
 
 func (m *browserLifecycleManager) GetStatus(context.Context, browserskill.Scope, string) (browserskill.Status, error) {
 	return browserskill.Status{
-		Connected: true, ProtocolVersion: m.protocol, ExtensionVersion: m.extension,
+		Connected: true, ProtocolVersion: m.protocol, ExtensionVersion: m.extension, SessionID: m.sessionID,
 	}, nil
 }
 
@@ -188,6 +189,20 @@ func TestBrowserActionsUseFreshCooperationContext(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Success)
 	require.Equal(t, []string{"observe"}, manager.methods)
+}
+
+func TestBrowserNavigateSyncsWhenTaskAlreadyExists(t *testing.T) {
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+	manager := &browserLifecycleManager{protocol: "1.8", sessionID: "existing-task"}
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	tool.manager = manager
+
+	result, err := tool.Execute(ctx, json.RawMessage(`{"method":"navigate","url":"https://example.com"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, []string{"cooperate", "navigate"}, manager.methods)
+	require.Equal(t, "test-context", manager.params["context_id"])
 }
 
 func TestBrowserTargetContextReuseAndBootstrap(t *testing.T) {
