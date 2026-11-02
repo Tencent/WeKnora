@@ -45,6 +45,9 @@ func TestProcessSyncIngestFailureRetainsRetryCursor(t *testing.T) {
 			cursor, parseErr = h.ds.ParseSyncCursor()
 			require.NoError(t, parseErr)
 			assert.Equal(t, 3, ingestAckOffset(cursor))
+			// Reopen the log so this exercises the advanced cursor, not the
+			// terminal-status replay guard.
+			h.syncLogRepo.logs[h.syncLogID].Status = types.SyncLogStatusRunning
 			require.NoError(t, h.svc.ProcessSync(context.Background(), h.task))
 			assert.Zero(t, h.syncLogRepo.logs[h.syncLogID].ItemsTotal)
 		})

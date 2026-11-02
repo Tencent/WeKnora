@@ -656,6 +656,17 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		logger.Errorf(ctx, "failed to get sync log: %v", err)
 		return nil
 	}
+	// An asynq retry (or redelivery) can arrive after the round already reached
+	// a terminal state. Do not replay it: success/partial are finished, and
+	// canceled was stopped on purpose. failed must fall through because the
+	// retry resumes from the persisted cursor, and running is the in-flight or
+	// crashed attempt that the retry has to pick up.
+	switch syncLog.Status {
+	case types.SyncLogStatusSuccess, types.SyncLogStatusPartial, types.SyncLogStatusCanceled:
+		logger.Infof(ctx, "sync log already finished, skipping replay: ds=%s syncLog=%s status=%s",
+			payload.DataSourceID, payload.SyncLogID, syncLog.Status)
+		return nil
+	}
 
 	kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
 	if kbErr != nil {
