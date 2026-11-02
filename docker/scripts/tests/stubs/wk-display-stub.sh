@@ -35,6 +35,10 @@ case "$cmd" in
   release)
     exit 0
     ;;
+  watched)
+    [ -e "$DIR/watched" ]
+    exit $?
+    ;;
   *)
     echo "usage" >&2
     exit 64
