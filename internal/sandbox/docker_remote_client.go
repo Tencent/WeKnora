@@ -157,6 +157,11 @@ func dockerSettingsFromConfig(cfg *Config) (dockerRuntimeSettings, error) {
 	if image == "" {
 		return dockerRuntimeSettings{}, errors.New("sandbox: docker backend requires an image")
 	}
+	// A config that still carries the Docker Hub form of the standard image
+	// (typed by an admin, or saved before a mirror was introduced) must reach
+	// the daemon through the mirror too; references with their own registry
+	// host pass through inside ApplyStandardImageMirror.
+	image = ApplyStandardImageMirror(image)
 	settings := dockerRuntimeSettings{
 		Image:       image,
 		CPULimit:    cfg.DockerCPULimit,
