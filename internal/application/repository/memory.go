@@ -262,7 +262,7 @@ func (r *memoryRepository) FindActiveByKey(
 }
 
 func (r *memoryRepository) UpdateItemContent(
-	ctx context.Context, scope interfaces.MemoryScope, id, content, normalizedKey string, importance int,
+	ctx context.Context, scope interfaces.MemoryScope, id, content, normalizedKey string, importance int, origin string,
 ) error {
 	return r.withSubject(ctx, scope, func(tx *gorm.DB, _ *types.MemorySubject) error {
 		var current types.MemoryItem
@@ -281,10 +281,14 @@ func (r *memoryRepository) UpdateItemContent(
 				return err
 			}
 		}
-		return tx.Model(&current).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"content": content, "normalized_key": normalizedKey, "importance": importance,
-			"origin": types.MemoryOriginManual, "updated_at": time.Now(),
-		}).Error
+			"updated_at": time.Now(),
+		}
+		if origin != "" {
+			updates["origin"] = origin
+		}
+		return tx.Model(&current).Updates(updates).Error
 	})
 }
 
