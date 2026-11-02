@@ -48,6 +48,7 @@ func TestAccountReportsConnectedExtensionVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, account.Connected)
 	require.Equal(t, "0.3.0", account.ExtensionVersion)
+	require.Equal(t, "1.3", account.ProtocolVersion)
 
 	require.NoError(t, fixture.ws.Close())
 	require.Eventually(t, func() bool { return !m.Status(scope, "").Connected }, time.Second, 10*time.Millisecond)
@@ -55,6 +56,7 @@ func TestAccountReportsConnectedExtensionVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, account.Device, "authorization survives a transient disconnection")
 	require.Empty(t, account.ExtensionVersion, "do not display a stale version as the connected extension")
+	require.Empty(t, account.ProtocolVersion, "do not display a stale protocol as the connected extension")
 }
 
 func TestConcurrentCommandsShareAutomaticSessionCreation(t *testing.T) {

@@ -37,7 +37,23 @@ func TestBrowserFlatSchemaCoversEveryMethod(t *testing.T) {
 		"evaluate": `{"expression":"document.title"}`, "console": `{}`, "network": `{}`,
 		"wait_for_navigation": `{}`, "wait_ms": `{"duration_ms":0}`,
 		"window_resize": `{"width":800,"height":600}`, "emulate": `{"off":true}`,
-		"request_help": `{"prompt":"Please sign in"}`,
+		"request_help":         `{"prompt":"Please sign in"}`,
+		"drag":                 `{"source":{"ref":"e1"},"target":{"ref":"e2"}}`,
+		"screenshot_full_page": `{}`,
+		"extract":              `{"action":"table"}`,
+		"debug":                `{"action":"status"}`,
+		"dialog_status":        `{}`,
+		"dialog_accept":        `{"dialog_id":"d1"}`,
+		"dialog_dismiss":       `{"dialog_id":"d1"}`,
+		"operation_await":      `{"operation_id":"o1"}`,
+		"operation_cancel":     `{"operation_id":"o1"}`,
+		"wait_for_element":     `{"state":"visible"}`,
+		"record_start":         `{}`,
+		"record_stop":          `{}`,
+		"record_await":         `{}`,
+		"upload":               `{"files":[{"transfer_id":"t1","name":"a.txt"}]}`,
+		"download":             `{}`,
+		"video":                `{"action":"status"}`,
 	}
 	require.Len(t, valid, len(method.Enum))
 	require.Len(t, browserArgumentRules, len(method.Enum))
@@ -56,6 +72,14 @@ func TestBrowserFlatSchemaCoversEveryMethod(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBrowserInfersUnambiguousMissingMethod(t *testing.T) {
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	raw := normalizeBrowserArguments(json.RawMessage(`{"expression":"document.title","tab_id":3}`))
+	require.JSONEq(t, `{"expression":"document.title","tab_id":3,"method":"evaluate"}`, string(raw))
+	require.NoError(t, tool.ValidateArguments(raw))
+	require.Error(t, tool.ValidateArguments(json.RawMessage(`{}`)))
 }
 
 func TestBrowserFlatArgumentsRejectBeforeDispatch(t *testing.T) {
@@ -98,8 +122,20 @@ func TestBrowserFlatArgumentsRejectBeforeDispatch(t *testing.T) {
 
 func TestBrowserDescriptionSignaturesMatchRules(t *testing.T) {
 	seen := map[string]bool{}
-	for _, line := range strings.Split(browserToolDescription, "\n") {
-		line = strings.TrimSpace(line)
+	lines := strings.Split(browserToolDescription, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		open := strings.IndexByte(line, '(')
+		if open <= 0 {
+			continue
+		}
+		if _, ok := browserArgumentRules[line[:open]]; !ok {
+			continue
+		}
+		for !strings.HasSuffix(line, ")") && i+1 < len(lines) {
+			i++
+			line += " " + strings.TrimSpace(lines[i])
+		}
 		name, params, ok := parseBrowserSignature(line)
 		if !ok {
 			continue
@@ -149,13 +185,23 @@ func parseBrowserSignature(line string) (string, browserSignatureParams, bool) {
 	return name, params, true
 }
 
+func TestBrowserExpectPassesThrough(t *testing.T) {
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	raw := json.RawMessage(`{"method":"click","ref":"e1","expect":[{"target":"@e1","field":"text","equals":"OK"}]}`)
+	require.NoError(t, tool.ValidateArguments(raw))
+	var input map[string]any
+	require.NoError(t, json.Unmarshal(raw, &input))
+	params := browserCallParams("click", input)
+	require.Equal(t, []any{map[string]any{"target": "@e1", "field": "text", "equals": "OK"}}, params["expect"])
+}
+
 func TestBrowserTextCapMapsOntoProtocol(t *testing.T) {
 	page := browserCallParams("observe", map[string]any{
 		"method": "observe", "keep_open": true, "max_text_chars": float64(3000), "tab_id": float64(2),
 	})
 	require.Equal(t, map[string]any{"max_tokens": 750, "tab_id": float64(2)}, page)
-	require.Equal(t, 1, browserCallParams("snapshot", map[string]any{"max_text_chars": float64(1)})["max_tokens"])
-	require.Equal(t, 2, browserCallParams("snapshot", map[string]any{"max_text_chars": float64(5)})["max_tokens"])
+	require.Equal(t, 512, browserCallParams("snapshot", map[string]any{"max_text_chars": float64(1)})["max_tokens"])
+	require.Equal(t, 512, browserCallParams("snapshot", map[string]any{"max_text_chars": float64(5)})["max_tokens"])
 	logs := browserCallParams("console", map[string]any{"max_text_chars": float64(3000), "limit": float64(20)})
 	require.Equal(t, map[string]any{"max_text_chars": float64(3000), "limit": float64(20)}, logs)
 }

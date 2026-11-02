@@ -1,13 +1,11 @@
 # BrowserSkill upstream integration
 
-The extension and daemon are based on the official `ext-v0.3.1` tag, commit
-`da6bf4eed2dd7256567e152df8c903c87f6598c3` (including the upstream PRs #291,
-#296, #297 and #318 that WeKnora previously pinned from `main`). Both report
-version `0.3.1`; the exact source baseline is recorded in
-`scripts/browserskill-release.json`. The daemon is built with
-`cargo build --locked --release -p bsk` from the same commit because upstream
-has not published a matching CLI 0.3.1 binary. The store builds of extension
-0.3.1 match this baseline. Native builds
+The extension and daemon are based on the official `ext-v0.4.1` tag, commit
+`b8f2d4f0fa35c8c7c866229e1cf3b3329ae39de5`. Both report version `0.4.1`; the
+exact source baseline is recorded in `scripts/browserskill-release.json`. The
+daemon is built with `cargo build --locked --release -p bsk` from the same
+commit, so the app image does not depend on a prebuilt CLI artifact. The store
+builds of extension 0.4.1 match this baseline. Native builds
 require Rust/Cargo and a C compiler (plus CMake on Linux). Docker builds on the
 target architecture.
 
@@ -68,8 +66,20 @@ error except `unknown_method` to a transient preview failure. Extensions built
 before PR #296 answer `unknown_method`;
 WeKnora then disables preview polling and reports the extension as outdated.
 
-## Behavior of the 0.3.1 extension
+## Behavior of the 0.4.1 extension
 
+- Protocol 1.8 adds explicit `control_policy` negotiation. WeKnora selects
+  `target` for protocol 1.8 or newer and `strict` for older extensions. Target
+  sessions reuse one shared-control context for DOM actions until the page,
+  tab or human intervention changes; strict sessions keep the single-use
+  observation contract.
+- `tool.extract` discovers containers and reads loaded tables/lists by
+  `target_id` or selector. Run `action: discover` first; discovery handles
+  expire after five minutes and after navigation.
+- The RPC surface also covers drag, full-page screenshots, console/network
+  debugging, native dialogs, pending operations, element waits, recording and
+  video, upload/download and window emulation. Remote upload/download remain
+  unsupported, as defined upstream.
 - Remote tasks use official dedicated Agent Windows. No `tabGroups` permission.
 - Popup attribution follows upstream PR #297: only a main-frame navigation
   target from a controlled source during native click/key input, within the
@@ -92,7 +102,7 @@ WeKnora then disables preview polling and reports the extension as outdated.
 - Human help follows the upstream focus/confirmation behavior.
 - Remote upload/download remain unsupported, as defined upstream.
 
-Users need extension 0.3.1 or later, from the Chrome Web Store, Edge Add-ons or
+Users need extension 0.4.1 or later, from the Chrome Web Store, Edge Add-ons or
 the bundled ZIP. Upgrade unpacked installs by replacing the existing extension
 directory and reloading it after ending active tasks. Keeping the extension ID preserves the
 migrated credentials; installing under a new ID requires pairing again.
