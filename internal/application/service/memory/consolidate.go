@@ -253,6 +253,7 @@ func (s *Service) mergeRedundant(
 	}
 
 	declined := 0
+	stale := 0
 	for _, cluster := range clusters {
 		statement, unavailable := s.callConsolidationModel(ctx, modelID, cluster)
 		if unavailable {
@@ -265,6 +266,14 @@ func (s *Service) mergeRedundant(
 		statement = types.SanitizeMemoryContent(statement)
 		if statement == "" {
 			declined++
+			continue
+		}
+		// The model compared the candidates as they looked before the call. A
+		// correction saved meanwhile is newer than its conclusion; do not let
+		// the stale statement supersede it.
+		if !s.clusterStillCurrent(ctx, scope, cluster) {
+			stale++
+			logger.Warnf(ctx, "memory: skipping consolidation cluster because a candidate changed during inference")
 			continue
 		}
 		primary := cluster[0]
@@ -296,10 +305,36 @@ func (s *Service) mergeRedundant(
 		}
 		merged++
 	}
+	if merged == 0 && stale > 0 {
+		return 0, candidates, types.MemoryConsolidationSkipStaleCandidates
+	}
 	if merged == 0 && declined > 0 {
 		return 0, candidates, types.MemoryConsolidationSkipModelDeclined
 	}
 	return merged, candidates, ""
+}
+
+// clusterStillCurrent re-reads every candidate after the model call. A
+// candidate edited or superseded while the review was in flight makes the
+// group's result stale, so the whole group is left untouched.
+func (s *Service) clusterStillCurrent(
+	ctx context.Context, scope interfaces.MemoryScope, cluster []*types.MemoryItem,
+) bool {
+	for _, item := range cluster {
+		if item == nil {
+			continue
+		}
+		current, err := s.repo.GetItem(ctx, scope, item.ID)
+		if err != nil {
+			logger.Warnf(ctx, "memory: re-read consolidation candidate %s failed: %v", item.ID, err)
+			return false
+		}
+		if current == nil || current.Status != types.MemoryStatusActive ||
+			current.Content != item.Content || current.Topic != item.Topic {
+			return false
+		}
+	}
+	return true
 }
 
 // mergeCandidates groups memories that might be saying the same thing.
