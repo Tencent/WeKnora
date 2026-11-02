@@ -2579,8 +2579,7 @@ export default {
     },
     hostApproval: {
       titleDelete: '刪除檔案前需要你確認',
-      titleDangerous: '危險操作確認',
-      titleDenied: '命令被沙盒攔截，需要存取以下目錄',
+      titleDenied: 'WeKnora 想要存取以下目錄',
       titleGeneric: '需要你確認',
       command: '命令',
       cwd: '目錄',
@@ -2598,7 +2597,25 @@ export default {
       rejectedTag: '已拒絕',
       submitted: '已提交',
       submitFailed: '提交失敗',
-      userRejected: '使用者拒絕'
+      userRejected: '使用者拒絕',
+      titleFileWrite: '寫入工作區外的檔案',
+      fileOnly: '只授權這一個檔案',
+      writeMode: '方式',
+      writeModeOverwrite: '覆寫',
+      writeModeAppend: '附加',
+      writeModeEdit: '編輯',
+      writeBytes: '{bytes} 位元組',
+      preview: '內容',
+      previewTruncated: '只顯示前 64 KB',
+      env: '環境變數',
+      skillName: '技能',
+      stdin: '標準輸入',
+      script: '命令執行的腳本'
+    },
+    hostReview: {
+      reviewing: '自動審批中…',
+      approved: '已自動批准：{reason}',
+      denied: '自動審批已拒絕：{reason}'
     }
   },
   kbSettings: {
@@ -6482,6 +6499,13 @@ export default {
       toggleOn: '開啟網路搜尋',
       toggleOff: '關閉網路搜尋',
       notConfigured: '未設定網路搜尋引擎'
+    },
+    hostApprovalMode: {
+      ask: '請求批准',
+      askHint: '刪除和工作區外的寫入都要你確認',
+      auto: '替我審批',
+      autoHint: '由模型代你判斷，不打擾你',
+      switchFailed: '切換審批模式失敗'
     }
   },
   manualEditor: {
@@ -8069,6 +8093,10 @@ export default {
       dataExtensions: '資料與擴展',
       systemAdministration: '系統管理',
       platform: '平台'
+    },
+    hostApprovalDefault: {
+      title: '預設執行權限審批',
+      description: '智慧體要刪除檔案，或寫入工作區以外時，用這裡決定是每次詢問你，還是由模型替你審批。新工作階段按這個開始；目前工作階段可在輸入框左側切換。'
     }
   },
   agent: {
