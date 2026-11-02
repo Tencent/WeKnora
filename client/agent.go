@@ -126,6 +126,7 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 // processAgentSSEStream processes the SSE stream and invokes callback for each event
 func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCallback) error {
 	scanner := bufio.NewScanner(reader)
+	scanner.Split(newSSELineSplitter())
 	// Default 64KiB per-line cap truncates large SSE data lines (the
 	// references event bundles chunk contents that can reach hundreds of
 	// KiB). Raise the cap so those lines parse instead of erroring with
