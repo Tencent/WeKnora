@@ -291,6 +291,54 @@ func readErrorBody(r io.Reader) []byte {
 	return body
 }
 
+// maxResponseBodyBytes caps how much of a successful response body the SDK
+// decodes.
+//
+// A non-error status still lets the server — or a proxy in front of it — decide
+// how many bytes the SDK buffers and unmarshals: every helper decodes through
+// parseResponse, so an oversized envelope would be held in memory before
+// json.Decoder saw the end of it. 16 MiB matches the cap the Feishu and
+// DingTalk connectors apply to their own JSON responses and sits far above any
+// listing page the server returns, while keeping one request bounded.
+const maxResponseBodyBytes int64 = 16 << 20
+
+// errResponseBodyTooLarge reports a successful response the SDK refused to
+// decode because its body exceeded maxResponseBodyBytes.
+var errResponseBodyTooLarge = fmt.Errorf("response body exceeds the %d MiB limit", maxResponseBodyBytes>>20)
+
+// countingReader counts the bytes a decoder pulls, so decodeResponseBody can
+// tell "body too large" apart from "body is malformed JSON".
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// decodeResponseBody decodes a successful response envelope, refusing to read
+// past maxResponseBodyBytes.
+//
+// The body is streamed through the counting reader rather than read into a
+// buffer: the cap exists to bound memory, so buffering up to the cap first
+// would defeat it for ordinary responses.
+func decodeResponseBody(r io.Reader, target interface{}) error {
+	limited := &countingReader{r: io.LimitReader(r, maxResponseBodyBytes+1)}
+	if err := json.NewDecoder(limited).Decode(target); err != nil {
+		if limited.n > maxResponseBodyBytes {
+			return errResponseBodyTooLarge
+		}
+		return err
+	}
+	if limited.n > maxResponseBodyBytes {
+		return errResponseBodyTooLarge
+	}
+	return nil
+}
+
 // extractServerCode pulls the server's structured error code from a JSON error
 // body ({"code":1003,...}). Returns 0 when the body isn't JSON or carries no code.
 func extractServerCode(body []byte) int {
@@ -315,5 +363,5 @@ func parseResponse(resp *http.Response, target interface{}) error {
 		return nil
 	}
 
-	return json.NewDecoder(resp.Body).Decode(target)
+	return decodeResponseBody(resp.Body, target)
 }
