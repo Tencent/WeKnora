@@ -175,6 +175,28 @@ func TestStreamFinalAnswer_DisablesThinking(t *testing.T) {
 	}
 }
 
+func TestStreamFinalAnswer_ReplacesLeakedDSML(t *testing.T) {
+	const leaked = "<｜｜DSML｜｜ calls>\n" +
+		"<｜｜DSML｜｜ invoke name=\"read_file\">\n" +
+		"<｜｜DSML｜｜ parameter name=\"path\" string=\"true\">/tmp/p.png</｜｜DSML｜｜ parameter>\n" +
+		"</｜｜DSML｜｜ invoke>\n" +
+		"</｜｜DSML｜｜ calls>"
+	model := &finalSynthesisChat{}
+	model.synthesize = func(
+		_ context.Context, _ []chat.Message, _ *chat.ChatOptions,
+	) (<-chan types.StreamResponse, error) {
+		return finalSynthesisChunks(types.StreamResponse{
+			ResponseType: types.ResponseTypeAnswer, Content: leaked, FinishReason: "stop", Done: true,
+		}), nil
+	}
+	engine := newTestEngine(t, model, withMaxIterations(1))
+	state := &types.AgentState{CurrentRound: 1}
+	require.NoError(t, engine.streamFinalAnswerToEventBus(
+		t.Context(), "Read the evidence.", state, "session", emptyMessages()))
+	require.NotContains(t, state.FinalAnswer, "DSML")
+	require.Contains(t, state.FinalAnswer, "工具调用上限")
+}
+
 func finalSynthesisInputTokens(e *AgentEngine, messages []chat.Message, opts *chat.ChatOptions) int {
 	return e.tokenEstimator.EstimateMessages(messages) + e.tokenEstimator.EstimateMessage(
 		&chat.Message{Role: "system", Content: opts.RuntimeNotice},

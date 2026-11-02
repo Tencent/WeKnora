@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -45,7 +46,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		"claims on the evidence actually obtained; distinguish completed work from " +
 		"remaining work and explain any missing evidence. Use the user's requested " +
 		"language and format. Do not claim that an unperformed action " +
-		"succeeded.\"}</runtime_event>"
+		"succeeded. Tools are disabled for this response: do not emit tool calls, " +
+		"DSML, XML, or function-call markup.\"}</runtime_event>"
 	if e.finalAnswerNeedsCompaction(messages, runtimeNotice) {
 		messages, _ = e.compactFinalAnswerContext(ctx, messages, state.CurrentRound+1,
 			runtimeNotice, compaction.ReasonThreshold)
@@ -172,13 +174,33 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		return err
 	}
 	_, tail := splitter.Flush()
-	_ = e.eventBus.Emit(ctx, event.Event{
-		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
-		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true},
-	})
-
-	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
+
+	// Final synthesis runs with tools disabled (ToolChoice=none), so a model
+	// that still emits its native tool-call protocol cannot have that markup
+	// recovered by the OpenAI adapter. Never persist or leave it on screen:
+	// replace the already-streamed attempt with an honest partial answer and
+	// let the user continue the run.
+	if hasLeakedToolMarkup(fullAnswer) {
+		logger.Warnf(ctx, "[Agent][FinalAnswer] model leaked tool-call markup during tool-free synthesis; "+
+			"replacing it with a partial-answer notice")
+		_ = e.eventBus.Emit(ctx, event.Event{
+			ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{Replace: true},
+		})
+		fullAnswer = "已达到本次运行的工具调用上限，最后的工具步骤没有执行。" +
+			"请点击“继续”或重新发送，让助理接着完成剩余工作。"
+		_ = e.eventBus.Emit(ctx, event.Event{
+			ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{Content: fullAnswer, Done: true},
+		})
+	} else {
+		_ = e.eventBus.Emit(ctx, event.Event{
+			ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true},
+		})
+	}
+
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,
@@ -194,6 +216,19 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	}
 	state.FinalAnswer = fullAnswer
 	return nil
+}
+
+// hasLeakedToolMarkup reports whether a tool-free final answer still carries
+// DeepSeek's DSML protocol blocks. The OpenAI adapter only recovers DSML when
+// tools are enabled, so final synthesis must not trust the model to obey
+// ToolChoice=none.
+func hasLeakedToolMarkup(s string) bool {
+	for _, marker := range []string{"<｜DSML", "<|DSML", "<｜｜DSML", "<||DSML"} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // Measure the same handle-encoded conversation sent by streamLLMToEventBus,
