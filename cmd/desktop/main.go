@@ -30,7 +30,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/handler"
-	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/stream"
@@ -240,18 +239,14 @@ func main() {
 	}
 	runtime.LogStartupEnv(context.Background())
 
+	// Install prefs readers before BuildContainer. The host sandbox is created
+	// during that call and keeps the loader functions it was given; decorating
+	// the container afterwards does not rebuild it.
+	container.SetHostApprovalModeLoader(LoadApprovalMode)
+	container.SetHostProjectDirsLoader(LoadProjectDirs)
+
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
-	if err := c.Decorate(func(container.HostApprovalModeLoader) container.HostApprovalModeLoader {
-		return LoadApprovalMode
-	}); err != nil {
-		panic(fmt.Sprintf("wire desktop approval mode: %v", err))
-	}
-	if err := c.Decorate(func(session.HostProjectDirsLoader) session.HostProjectDirsLoader {
-		return LoadProjectDirs
-	}); err != nil {
-		panic(fmt.Sprintf("wire desktop project dirs: %v", err))
-	}
 
 	// Initialize the WeKnora App struct
 	app := NewApp()

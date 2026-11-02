@@ -127,6 +127,17 @@ func TestHostModeLookupNilLoaderMeansAsk(t *testing.T) {
 	require.Nil(t, hostModeLookup(nil))
 }
 
+func TestHostModeLookupSeesModeInstalledAfterTheSandboxIsBuilt(t *testing.T) {
+	lookup := hostModeLookup(provideHostApprovalModeLoader())
+	require.NotNil(t, lookup)
+	require.Equal(t, localsandbox.ModeAsk, lookup.ModeForSession(context.Background(), "session-1"))
+
+	SetHostApprovalModeLoader(func() string { return "auto" })
+	t.Cleanup(func() { SetHostApprovalModeLoader(nil) })
+
+	require.Equal(t, localsandbox.ModeAuto, lookup.ModeForSession(context.Background(), "session-1"))
+}
+
 func TestHostLookupsComeFromProvidedLoaders(t *testing.T) {
 	c := dig.New()
 	require.NoError(t, c.Provide(func() *gorm.DB { return nil }))
