@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,5 +52,56 @@ func TestProcessSyncReplayGuardBySyncLogStatus(t *testing.T) {
 				assert.Zero(t, ingestAckOffset(cursor), "cursor must not advance")
 			})
 		}
+	}
+}
+
+// When the data source was deleted before a redelivery of an already finished
+// round arrives, the finished sync log must be left untouched. Only a round
+// that had not finished is still flipped to canceled.
+func TestProcessSyncDeletedDataSourceKeepsFinishedSyncLog(t *testing.T) {
+	cases := []struct {
+		status    string
+		cancelled bool
+	}{
+		{types.SyncLogStatusSuccess, false},
+		{types.SyncLogStatusPartial, false},
+		{types.SyncLogStatusCanceled, false},
+		{types.SyncLogStatusRunning, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.status, func(t *testing.T) {
+			finishedAt := time.Now().UTC().Add(-time.Hour)
+			syncLog := &types.SyncLog{
+				ID:           "log-deleted-ds",
+				DataSourceID: "ds-deleted",
+				TenantID:     1,
+				Status:       tc.status,
+				FinishedAt:   &finishedAt,
+				ErrorMessage: "original message",
+			}
+			syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+			svc := &DataSourceService{
+				dsRepo:      newKBDeleteDSRepo("kb-1"),
+				syncLogRepo: syncLogRepo,
+			}
+			payload, err := json.Marshal(types.DataSourceSyncPayload{
+				DataSourceID: syncLog.DataSourceID,
+				TenantID:     syncLog.TenantID,
+				SyncLogID:    syncLog.ID,
+			})
+			require.NoError(t, err)
+
+			require.NoError(t, svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload)))
+
+			got := syncLogRepo.logs[syncLog.ID]
+			if tc.cancelled {
+				assert.Equal(t, types.SyncLogStatusCanceled, got.Status)
+				assert.Equal(t, "data source has been deleted", got.ErrorMessage)
+				return
+			}
+			assert.Equal(t, tc.status, got.Status, "finished status must not be rewritten")
+			assert.Equal(t, "original message", got.ErrorMessage)
+			assert.Equal(t, &finishedAt, got.FinishedAt)
+		})
 	}
 }
