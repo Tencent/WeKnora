@@ -192,6 +192,20 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 	return s.clarifyReadArtifactVersions(ctx, sessionID, messages), nil
 }
 
+// GetRecentUserMessages returns a session's latest user messages, oldest first.
+func (s *messageService) GetRecentUserMessages(
+	ctx context.Context, sessionID string, limit int,
+) ([]*types.Message, error) {
+	tenantID, ok := sessionTenantIDForLookup(ctx)
+	if !ok {
+		return nil, errors.New("workspace ID not found in context")
+	}
+	if _, err := loadSessionForRead(ctx, s.sessionRepo, tenantID, sessionUserIDForLookup(ctx), sessionID); err != nil {
+		return nil, err
+	}
+	return s.messageRepo.GetRecentUserMessages(ctx, sessionID, limit)
+}
+
 // GetMessagesBySessionBeforeTime retrieves messages sent before a specific time
 func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 	sessionID string, beforeTime time.Time, limit int,
