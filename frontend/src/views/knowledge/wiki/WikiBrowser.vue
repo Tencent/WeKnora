@@ -4957,14 +4957,17 @@ function applyHighlight(
   graphRoot?.classList.add('is-highlighting')
   graphRoot?.classList.remove('is-group-focused')
   const nodeElsBySlug = new Map<string, GraphNodeElement>(nodeEls.map(node => [node.node.slug, node]))
-  const contextSlugs = new Set([...next].filter(([, state]) => state !== 'dimmed').map(([slug]) => slug))
+  const contextSlugs = new Set<string>()
+  next.forEach((state, slug) => {
+    if (state !== 'dimmed') contextSlugs.add(slug)
+  })
   if (previous) {
-    for (const [slug, state] of previous.nodes) {
+    previous.nodes.forEach((state, slug) => {
       if (state !== 'dimmed' && !contextSlugs.has(slug)) {
         const element = nodeElsBySlug.get(slug)
         if (element?.g.classList.contains('is-highlight-context')) element.g.classList.remove('is-highlight-context')
       }
-    }
+    })
   }
   for (const slug of contextSlugs) {
     const element = nodeElsBySlug.get(slug)
@@ -4989,16 +4992,16 @@ function applyHighlight(
     nextRings.set(node.slug, ringState)
   }
   if (previous) {
-    for (const [slug, ringState] of previous.rings) {
+    previous.rings.forEach((ringState, slug) => {
       if (ringState === 'shown' && nextRings.get(slug) !== 'shown') nodeElsBySlug.get(slug)?.activeRing.style.setProperty('opacity', '0')
-    }
+    })
   }
-  for (const [slug, ringState] of nextRings) {
+  nextRings.forEach((ringState, slug) => {
     const element = nodeElsBySlug.get(slug)
     if (ringState === 'shown' && element && previous?.rings.get(slug) !== 'shown') {
       element.activeRing.style.setProperty('opacity', '1')
     }
-  }
+  })
   const nodeMap = new Map(nodeEls.map(node => [node.node.slug, node.node]))
   const hlColorBySlug = new Map(nodeEls.map(node => [node.node.slug, nodeColorMap[node.node.type] || '#0052d9']))
   for (const e of edgeEls) {
@@ -5056,15 +5059,15 @@ function clearHighlight(
   graphRoot?.classList.toggle('is-group-focused', shouldGroupFocus)
   const getRadius = (n: GNode) => graphNodeRadius(n.linkCount)
   if (previous) {
-    for (const [slug, state] of previous.nodes) {
-      if (state === 'dimmed') continue
+    previous.nodes.forEach((state, slug) => {
+      if (state === 'dimmed') return
       const element = nodeElsBySlug.get(slug)
-      if (!element) continue
+      if (!element) return
       element.g.classList.remove('is-highlight-context')
       const r = String(getRadius(element.node))
       element.circle.setAttribute('r', r)
       element.circle.setAttribute('stroke-width', '1.5')
-    }
+    })
   }
 
   if (previous) {
