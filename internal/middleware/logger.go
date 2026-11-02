@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/url"
 	"regexp"
@@ -59,9 +60,24 @@ var sensitiveFieldRegex = regexp.MustCompile(
 		`authorization[_-]?url|authorization[_-]?attempt|assertion)")\s*:\s*"[^"]*"`,
 )
 
-// sanitizeBody 清理敏感信息
+// dataURIRegex matches an inline data URI whose payload is base64. Request logs
+// are capped at 10KB, and an image upload still fills that cap with file bytes.
+var dataURIRegex = regexp.MustCompile(`(?i)\bdata:[^\s"'<>]{0,128};base64,[A-Za-z0-9+/=\r\n]*`)
+
+// sanitizeBody 清理敏感信息，并把 data URI 的 base64 载荷换成长度标记。
 func sanitizeBody(body string) string {
-	return sensitiveFieldRegex.ReplaceAllString(body, `$1:"***"`)
+	redacted := dataURIRegex.ReplaceAllStringFunc(body, redactDataURI)
+	return sensitiveFieldRegex.ReplaceAllString(redacted, `$1:"***"`)
+}
+
+func redactDataURI(match string) string {
+	marker := ";base64,"
+	idx := strings.Index(strings.ToLower(match), marker)
+	if idx < 0 {
+		return "data:[redacted]"
+	}
+	payloadLen := len(match) - idx - len(marker)
+	return fmt.Sprintf("%s;base64,[redacted %d chars]", match[:idx], payloadLen)
 }
 
 var sensitiveQueryFields = map[string]struct{}{
