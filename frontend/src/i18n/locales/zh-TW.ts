@@ -1655,6 +1655,8 @@ export default {
       wechat: '微信',
       qqbot: 'QQBot',
       yunzhijia: '雲之家',
+      line: 'LINE',
+      lineConsole: 'LINE 開發者主控台',
       addChannel: '新增通路',
       channelsTitle: 'IM 通路',
       disabled: '已停用',
