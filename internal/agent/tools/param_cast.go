@@ -87,8 +87,9 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	switch targetType {
 	case "array":
 		if s, ok := val.(string); ok {
-			// Try JSON parsing first (handles "[{...}]" → []interface{})
-			var parsed []interface{}
+			// Unwrap serialized arrays without decoding their elements through
+			// float64, which would round IDs and precise nested numeric values.
+			var parsed []json.RawMessage
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				return parsed, true
 			}
