@@ -38,7 +38,7 @@ type MCPServiceHandler struct {
 	// scheduledPrompt queues automation-owned continuations without starting a chat run.
 	scheduledPrompt func(context.Context, *types.AgentPrompt) bool
 	// grants are the callers' remembered agent approvals.
-	grants interfaces.AgentGrantRepository
+	grants      interfaces.AgentGrantRepository
 	secureForms secureFormSubmitter
 }
 

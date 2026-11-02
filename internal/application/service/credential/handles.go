@@ -121,7 +121,9 @@ func (s *HandleStore) Create(ctx context.Context, h NewHandle) (string, error) {
 	return handle, nil
 }
 
-func (s *HandleStore) load(ctx context.Context, tenantID uint64, userID, sessionID, handle string) (*handleRecord, error) {
+func (s *HandleStore) load(
+	ctx context.Context, tenantID uint64, userID, sessionID, handle string,
+) (*handleRecord, error) {
 	if !types.ValidSecretHandle(handle) || sessionID == "" {
 		return nil, types.ErrSecretHandleNotFound
 	}

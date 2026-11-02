@@ -8,13 +8,18 @@ import (
 )
 
 const (
-	CredentialKindLogin        = "login"
-	CredentialVaultMaxItems    = 500
+	// CredentialKindLogin is a saved site username and password.
+	CredentialKindLogin = "login"
+	// CredentialVaultMaxItems is how many logins one owner may keep.
+	CredentialVaultMaxItems = 500
+	// CredentialVaultMaxTitleLen is the longest title a login may have.
 	CredentialVaultMaxTitleLen = 100
 )
 
 var (
+	// ErrCredentialConflict means this owner already saved that site and username.
 	ErrCredentialConflict = errors.New("a saved credential for this site and username already exists")
+	// ErrCredentialNotFound means the owner has no row with that id.
 	ErrCredentialNotFound = errors.New("saved credential not found")
 )
 

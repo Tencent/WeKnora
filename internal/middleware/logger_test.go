@@ -282,4 +282,3 @@ func TestSkipsBodyLoggingForSecretRoutes(t *testing.T) {
 		}
 	}
 }
-

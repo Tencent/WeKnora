@@ -1,3 +1,4 @@
+// Tests that a password never appears in tool output, logs, or Redis.
 package credential
 
 import (
@@ -30,7 +31,9 @@ func (b *recordingBrowser) CurrentPage(context.Context, string) (sandbox.Browser
 	return sandbox.BrowserPage{URL: "https://a.com/login"}, nil
 }
 
-func (b *recordingBrowser) FillSecret(_ context.Context, _ string, req sandbox.SecretFillRequest) (*sandbox.SecretFillResult, error) {
+func (b *recordingBrowser) FillSecret(
+	_ context.Context, _ string, req sandbox.SecretFillRequest,
+) (*sandbox.SecretFillResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	cp := req
@@ -69,16 +72,20 @@ func TestSecretNeverLeavesTheFillPath(t *testing.T) {
 		promptID = id
 		mu.Unlock()
 		go func() {
-			_, err := submitter.Submit(context.Background(), alice, SubmitRequest{PromptID: id, Action: ActionSubmit,
-				Choice: ChoiceSave, Values: map[string]string{"username": "alice", "password": canary}})
+			_, err := submitter.Submit(context.Background(), alice, SubmitRequest{
+				PromptID: id, Action: ActionSubmit,
+				Choice: ChoiceSave, Values: map[string]string{"username": "alice", "password": canary},
+			})
 			submitErr <- err
 		}()
 		return nil
 	})
 
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, alice.TenantID)
-	meta := &tools.ToolExecContext{Mode: types.RunModeAttended, EventBus: bus, SessionID: "s1",
-		AssistantMessageID: "m1", ToolCallID: "tc1", UserID: alice.UserID}
+	meta := &tools.ToolExecContext{
+		Mode: types.RunModeAttended, EventBus: bus, SessionID: "s1",
+		AssistantMessageID: "m1", ToolCallID: "tc1", UserID: alice.UserID,
+	}
 	ctx = tools.WithToolExecContext(ctx, meta)
 
 	ask := tools.NewRequestSecureFormTool(gate, browser)
@@ -102,7 +109,10 @@ func TestSecretNeverLeavesTheFillPath(t *testing.T) {
 
 	askData, _ := json.Marshal(askRes.Data)
 	fillData, _ := json.Marshal(fillRes.Data)
-	blobs := []string{askRes.Output, string(askData), fillRes.Output, string(fillData), string(askArgs), string(fillArgs)}
+	blobs := []string{
+		askRes.Output, string(askData), fillRes.Output, string(fillData),
+		string(askArgs), string(fillArgs),
+	}
 	mu.Lock()
 	blobs = append(blobs, events...)
 	id := promptID

@@ -240,4 +240,3 @@ type SessionSecureBrowser interface {
 type SessionSecureBrowserProvider interface {
 	SessionSecureBrowser() SessionSecureBrowser
 }
-

@@ -17,7 +17,8 @@ const maxCredentialVaultBody = 16 << 10
 type credentialVault interface {
 	List(ctx context.Context, owner credential.Owner, site string) ([]*types.CredentialVaultItem, error)
 	Create(ctx context.Context, owner credential.Owner, in credential.LoginInput) (*types.CredentialVaultItem, error)
-	Update(ctx context.Context, owner credential.Owner, id string, p credential.LoginPatch) (*types.CredentialVaultItem, error)
+	Update(ctx context.Context, owner credential.Owner, id string,
+		p credential.LoginPatch) (*types.CredentialVaultItem, error)
 	Delete(ctx context.Context, owner credential.Owner, id string) error
 }
 

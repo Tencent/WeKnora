@@ -1,4 +1,3 @@
-// internal/agent/tools/browser_fill_secret.go
 package tools
 
 import (
@@ -21,9 +20,13 @@ type SecretHandles interface {
 	Complete(ctx context.Context, tenantID uint64, userID, sessionID, handle, vaultItemID string) error
 }
 
-const browserFillSecretDescription = `Fill the values behind a credential handle from request_secure_form into inputs of the page open in the sandbox browser.
+const browserFillSecretDescription = `Fill the values behind a credential handle from
+request_secure_form into inputs of the page open in the sandbox browser.
 
-targets maps each field name of the handle to the ref of its input from your latest snapshot, e.g. {"username":"@e2","password":"@e3"}. Values are only filled on the domains the user approved, and password values only into password inputs. The page is not submitted.
+targets maps each field name of the handle to the ref of its input from your
+latest snapshot, e.g. {"username":"@e2","password":"@e3"}. Values are only filled
+on the domains the user approved, and password values only into password inputs.
+The page is not submitted.
 
 Each field reports filled, or why not:
 - ref_not_found / not_editable: take a fresh snapshot and retry with the right ref;
@@ -87,8 +90,10 @@ func (t *BrowserFillSecretTool) Execute(ctx context.Context, args json.RawMessag
 	for name, ref := range in.Targets {
 		ref = strings.TrimSpace(ref)
 		if !secretRefPattern.MatchString(ref) {
-			return &types.ToolResult{Success: false,
-				Error: fmt.Sprintf("target %q: %q is not a snapshot ref such as @e3", name, ref)}, nil
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("target %q: %q is not a snapshot ref such as @e3", name, ref),
+			}, nil
 		}
 		targets[name] = "@" + strings.TrimPrefix(ref, "@")
 	}
@@ -101,11 +106,15 @@ func (t *BrowserFillSecretTool) Execute(ctx context.Context, args json.RawMessag
 	secret, err := t.handles.Resolve(ctx, tenantID, meta.UserID, meta.SessionID, in.Handle)
 	switch {
 	case errors.Is(err, types.ErrSecretHandleNotFound):
-		return fillOutcome(in.Handle, sortedKeys(targets), uniformStatus(targets, types.SecretFillHandleExpired)), nil
+		expired := uniformStatus(targets, types.SecretFillHandleExpired)
+		return fillOutcome(in.Handle, sortedKeys(targets), expired), nil
 	case errors.Is(err, types.ErrCredentialUnavailable):
-		return fillOutcome(in.Handle, sortedKeys(targets), uniformStatus(targets, types.SecretFillCredentialUnavailable)), nil
+		gone := uniformStatus(targets, types.SecretFillCredentialUnavailable)
+		return fillOutcome(in.Handle, sortedKeys(targets), gone), nil
 	case err != nil:
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Reading the credential handle failed: %v", err)}, nil
+		return &types.ToolResult{
+			Success: false, Error: fmt.Sprintf("Reading the credential handle failed: %v", err),
+		}, nil
 	}
 
 	known := make(map[string]bool, len(secret.Fields))
@@ -130,7 +139,9 @@ func (t *BrowserFillSecretTool) Execute(ctx context.Context, args json.RawMessag
 	var order []string
 	for _, f := range secret.Fields {
 		if ref, ok := targets[f.Name]; ok {
-			req.Fields = append(req.Fields, sandbox.SecretFillField{Name: f.Name, Ref: ref, Type: f.Type, Value: f.Value})
+			req.Fields = append(req.Fields, sandbox.SecretFillField{
+				Name: f.Name, Ref: ref, Type: f.Type, Value: f.Value,
+			})
 			order = append(order, f.Name)
 		}
 	}
@@ -153,7 +164,9 @@ func (t *BrowserFillSecretTool) Execute(ctx context.Context, args json.RawMessag
 		statuses[name] = s
 	}
 	if allFilled(names, statuses) {
-		if err := t.handles.Complete(ctx, tenantID, meta.UserID, meta.SessionID, in.Handle, secret.VaultItemID); err != nil {
+		err := t.handles.Complete(
+			ctx, tenantID, meta.UserID, meta.SessionID, in.Handle, secret.VaultItemID)
+		if err != nil {
 			logger.Warnf(ctx, "[Tool][FillSecret] complete handle %s: %v", in.Handle, err)
 		}
 	}
@@ -187,15 +200,20 @@ func sortedKeys(m map[string]string) []string {
 }
 
 var fillHints = map[string]string{
-	types.SecretFillRefNotFound:           "Take a fresh snapshot and retry with the current refs.",
-	types.SecretFillNotEditable:           "Take a fresh snapshot and retry with the ref of the input itself.",
-	types.SecretFillHostMismatch:          "The browser is not on a domain the user approved; nothing more was filled.",
-	types.SecretFillInsecureOrigin:        "The page is not https; values are not filled there.",
-	types.SecretFillNotPasswordField:      "Password values only go into password inputs; pick the password input's ref.",
-	types.SecretFillPageChanged:           "The page loaded another document while filling; nothing more was filled. Take a fresh snapshot and retry.",
-	types.SecretFillVerifyFailed:          "The input did not keep the value; take a fresh snapshot and retry.",
-	types.SecretFillHandleExpired:         "The handle expired or was used up; call request_secure_form again.",
-	types.SecretFillCredentialUnavailable: "The saved credential is gone or unreadable; call request_secure_form again.",
+	types.SecretFillRefNotFound: "Take a fresh snapshot and retry with the current refs.",
+	types.SecretFillNotEditable: "Take a fresh snapshot and retry with the ref of the input itself.",
+	types.SecretFillHostMismatch: "The browser is not on a domain the user approved; " +
+		"nothing more was filled.",
+	types.SecretFillInsecureOrigin: "The page is not https; values are not filled there.",
+	types.SecretFillNotPasswordField: "Password values only go into password inputs; " +
+		"pick the password input's ref.",
+	types.SecretFillPageChanged: "The page loaded another document while filling; " +
+		"nothing more was filled. Take a fresh snapshot and retry.",
+	types.SecretFillVerifyFailed: "The input did not keep the value; take a fresh snapshot and retry.",
+	types.SecretFillHandleExpired: "The handle expired or was used up; " +
+		"call request_secure_form again.",
+	types.SecretFillCredentialUnavailable: "The saved credential is gone or unreadable; " +
+		"call request_secure_form again.",
 }
 
 func fillOutcome(handle string, order []string, statuses map[string]string) *types.ToolResult {

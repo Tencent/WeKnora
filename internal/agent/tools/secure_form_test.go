@@ -1,4 +1,3 @@
-// internal/agent/tools/secure_form_test.go
 package tools
 
 import (
@@ -22,12 +21,16 @@ type fakeSecureFormAsker struct {
 	resumed []*types.AgentPrompt
 }
 
-func (f *fakeSecureFormAsker) RequestSecureForm(_ context.Context, req approval.SecureFormRequest) (approval.SecureFormAnswer, error) {
+func (f *fakeSecureFormAsker) RequestSecureForm(
+	_ context.Context, req approval.SecureFormRequest,
+) (approval.SecureFormAnswer, error) {
 	f.asked = append(f.asked, req)
 	return f.answer, nil
 }
 
-func (f *fakeSecureFormAsker) ResumeSecureForm(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.SecureFormAnswer {
+func (f *fakeSecureFormAsker) ResumeSecureForm(
+	_ context.Context, p *types.AgentPrompt, _ *event.EventBus,
+) approval.SecureFormAnswer {
 	f.resumed = append(f.resumed, p)
 	return f.answer
 }
@@ -44,7 +47,9 @@ func (f *fakeSecureBrowser) CurrentPage(context.Context, string) (sandbox.Browse
 	return f.page, f.pageErr
 }
 
-func (f *fakeSecureBrowser) FillSecret(_ context.Context, _ string, req sandbox.SecretFillRequest) (*sandbox.SecretFillResult, error) {
+func (f *fakeSecureBrowser) FillSecret(
+	_ context.Context, _ string, req sandbox.SecretFillRequest,
+) (*sandbox.SecretFillResult, error) {
 	f.fills = append(f.fills, req)
 	return f.result, f.fillErr
 }
@@ -53,8 +58,10 @@ const loginArgs = `{"title":"登录 Google","kind":"login","site":"accounts.goog
 	"observed_origin":"https://evil.example"}`
 
 func attendedMeta() *ToolExecContext {
-	return &ToolExecContext{Mode: types.RunModeAttended, EventBus: event.NewEventBus(), SessionID: "s1",
-		AssistantMessageID: "m1", ToolCallID: "tc1", UserID: "web_user:u1"}
+	return &ToolExecContext{
+		Mode: types.RunModeAttended, EventBus: event.NewEventBus(), SessionID: "s1",
+		AssistantMessageID: "m1", ToolCallID: "tc1", UserID: "web_user:u1",
+	}
 }
 
 func TestRequestSecureForm_NotInteractive(t *testing.T) {
@@ -76,11 +83,16 @@ func TestRequestSecureForm_InvalidArgs(t *testing.T) {
 }
 
 func TestRequestSecureForm_OverwritesObservedOrigin(t *testing.T) {
-	asker := &fakeSecureFormAsker{answer: approval.SecureFormAnswer{PromptID: "p1", Answered: true,
-		Response: types.SecureFormPromptResponse{Handle: "cred_1", Fields: []string{"username", "password"},
-			Username: "alice@example.com", Saved: true}}}
+	asker := &fakeSecureFormAsker{answer: approval.SecureFormAnswer{
+		PromptID: "p1", Answered: true,
+		Response: types.SecureFormPromptResponse{
+			Handle: "cred_1", Fields: []string{"username", "password"},
+			Username: "alice@example.com", Saved: true,
+		},
+	}}
 	browser := &fakeSecureBrowser{page: sandbox.BrowserPage{URL: "https://accounts.google.com/v3/signin?x=1"}}
-	res, err := NewRequestSecureFormTool(asker, browser).Execute(askCtx(attendedMeta()), json.RawMessage(loginArgs))
+	res, err := NewRequestSecureFormTool(asker, browser).Execute(
+		askCtx(attendedMeta()), json.RawMessage(loginArgs))
 	require.NoError(t, err)
 	require.True(t, res.Success)
 	require.Len(t, asker.asked, 1)
@@ -93,9 +105,12 @@ func TestRequestSecureForm_OverwritesObservedOrigin(t *testing.T) {
 }
 
 func TestRequestSecureForm_ProbeFailureStillAsks(t *testing.T) {
-	asker := &fakeSecureFormAsker{answer: approval.SecureFormAnswer{PromptID: "p1", Reason: "the user declined to provide credentials"}}
+	asker := &fakeSecureFormAsker{answer: approval.SecureFormAnswer{
+		PromptID: "p1", Reason: "the user declined to provide credentials",
+	}}
 	browser := &fakeSecureBrowser{pageErr: errors.New("no browser")}
-	res, err := NewRequestSecureFormTool(asker, browser).Execute(askCtx(attendedMeta()), json.RawMessage(loginArgs))
+	res, err := NewRequestSecureFormTool(asker, browser).Execute(
+		askCtx(attendedMeta()), json.RawMessage(loginArgs))
 	require.NoError(t, err)
 	require.Len(t, asker.asked, 1)
 	assert.Equal(t, "", asker.asked[0].Form.ObservedOrigin)
@@ -105,14 +120,17 @@ func TestRequestSecureForm_ProbeFailureStillAsks(t *testing.T) {
 func TestRequestSecureForm_Suspends(t *testing.T) {
 	suspension := &types.PromptSuspension{PromptID: "p1", Kind: types.AgentPromptKindSecureForm}
 	asker := &fakeSecureFormAsker{answer: approval.SecureFormAnswer{PromptID: "p1", Suspended: suspension}}
-	res, err := NewRequestSecureFormTool(asker, &fakeSecureBrowser{}).Execute(askCtx(attendedMeta()), json.RawMessage(loginArgs))
+	res, err := NewRequestSecureFormTool(asker, &fakeSecureBrowser{}).Execute(
+		askCtx(attendedMeta()), json.RawMessage(loginArgs))
 	require.NoError(t, err)
 	assert.Same(t, suspension, res.Suspend)
 }
 
 func TestRequestSecureForm_Resumed(t *testing.T) {
-	asker := &fakeSecureFormAsker{answer: approval.SecureFormAnswer{PromptID: "p1", Answered: true,
-		Response: types.SecureFormPromptResponse{Handle: "cred_2", Fields: []string{"password"}}}}
+	asker := &fakeSecureFormAsker{answer: approval.SecureFormAnswer{
+		PromptID: "p1", Answered: true,
+		Response: types.SecureFormPromptResponse{Handle: "cred_2", Fields: []string{"password"}},
+	}}
 	meta := attendedMeta()
 	meta.Answered = &types.AgentPrompt{ID: "p1", Kind: types.AgentPromptKindSecureForm}
 	browser := &fakeSecureBrowser{}

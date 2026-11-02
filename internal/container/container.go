@@ -388,7 +388,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
 	must(container.Provide(credential.NewVault))
 	must(container.Provide(credential.NewHandleStore))
-	must(container.Provide(func(g *approval.Gate, v *credential.Vault, h *credential.HandleStore) *credential.Submitter {
+	must(container.Provide(func(
+		g *approval.Gate, v *credential.Vault, h *credential.HandleStore,
+	) *credential.Submitter {
 		return credential.NewSubmitter(g, v, h)
 	}))
 	must(container.Provide(func(cleaner interfaces.ResourceCleaner, db *gorm.DB) (*browserskill.Manager, error) {

@@ -1,4 +1,3 @@
-// internal/sandbox/secret_fill.go
 package sandbox
 
 import (

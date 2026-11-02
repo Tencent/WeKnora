@@ -20,7 +20,9 @@ func (s *agentService) SetSecretHandles(h tools.SecretHandles) {
 // offer the secure credential form: a signed-in user acting in person, on a
 // remote sandbox whose desktop is on, for an agent entitled to the sandbox
 // shell. Anything else gets nil.
-func secureFormBrowser(ctx context.Context, mgr sandbox.Manager, config *types.AgentConfig) sandbox.SessionSecureBrowser {
+func secureFormBrowser(
+	ctx context.Context, mgr sandbox.Manager, config *types.AgentConfig,
+) sandbox.SessionSecureBrowser {
 	p, ok := types.PrincipalFromContext(ctx)
 	if !ok || p.Type != types.PrincipalWebUser || p.ActingVia != "" {
 		return nil

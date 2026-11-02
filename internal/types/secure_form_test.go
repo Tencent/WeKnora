@@ -67,7 +67,8 @@ func TestCheckSameSite(t *testing.T) {
 }
 
 func TestIntersectDomains(t *testing.T) {
-	assert.Equal(t, []string{"github.com"}, IntersectDomains([]string{"github.com", "x.com"}, []string{"evil.com", "github.com"}))
+	assert.Equal(t, []string{"github.com"},
+		IntersectDomains([]string{"github.com", "x.com"}, []string{"evil.com", "github.com"}))
 	assert.Empty(t, IntersectDomains([]string{"a.com"}, []string{"b.com"}))
 }
 
@@ -104,11 +105,17 @@ func TestSecureFormValidateRejects(t *testing.T) {
 		{Title: "t", Kind: "login", Site: "a.com", Parts: []string{"pin"}},
 		{Title: "t", Kind: "login", Site: "a.com", Parts: []string{"password", "password"}},
 		{Title: "t", Site: "a.com"},
-		{Title: "t", Site: "a.com", Parts: []string{"password"}, Extra: []SecureFormExtraField{{Name: "otp", Type: "text"}}},
+		{
+			Title: "t", Site: "a.com", Parts: []string{"password"},
+			Extra: []SecureFormExtraField{{Name: "otp", Type: "text"}},
+		},
 		{Title: "t", Kind: "login", Site: "a.com", Extra: []SecureFormExtraField{{Name: "password", Type: "text"}}},
 		{Title: "t", Kind: "login", Site: "a.com", Extra: []SecureFormExtraField{{Name: "Bad Name", Type: "text"}}},
 		{Title: "t", Kind: "login", Site: "a.com", Extra: []SecureFormExtraField{{Name: "x", Type: "select"}}},
-		{Title: "t", Kind: "login", Site: "a.com", Parts: []string{"password"}, Prefill: &SecureFormPrefill{Username: "u"}},
+		{
+			Title: "t", Kind: "login", Site: "a.com", Parts: []string{"password"},
+			Prefill: &SecureFormPrefill{Username: "u"},
+		},
 	}
 	for i, c := range cases {
 		c := c
@@ -120,8 +127,10 @@ func TestSecureFormValidateRejects(t *testing.T) {
 }
 
 func TestValidateSecureFormResponse(t *testing.T) {
-	req, _ := json.Marshal(SecureFormPromptRequest{Title: "t", Kind: "login", Site: "a.com",
-		Domains: []string{"a.com"}, Parts: []string{"username", "password"}})
+	req, _ := json.Marshal(SecureFormPromptRequest{
+		Title: "t", Kind: "login", Site: "a.com",
+		Domains: []string{"a.com"}, Parts: []string{"username", "password"},
+	})
 	assert.NoError(t, ValidateSecureFormResponse(req, json.RawMessage(
 		`{"handle":"cred_3","fields":["username","password"],"username":"alice","saved":true}`)))
 	assert.NoError(t, ValidateSecureFormResponse(req, json.RawMessage(`{"declined":true}`)))
@@ -130,7 +139,8 @@ func TestValidateSecureFormResponse(t *testing.T) {
 	assert.Error(t, ValidateSecureFormResponse(req, json.RawMessage(`{"handle":"x","fields":["password"]}`)))
 	assert.Error(t, ValidateSecureFormResponse(req, json.RawMessage(`{"handle":"cred_1","fields":["pin"]}`)))
 	assert.Error(t, ValidateSecureFormResponse(req, json.RawMessage(`{"declined":true,"handle":"cred_1"}`)))
-	err := ValidateSecureFormResponse(req, json.RawMessage(`{"handle":"cred_1","fields":["password"],"secret":"hunter2"}`))
+	err := ValidateSecureFormResponse(req, json.RawMessage(
+		`{"handle":"cred_1","fields":["password"],"secret":"hunter2"}`))
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "hunter2")
 

@@ -37,8 +37,9 @@ func loginSecret() *types.ResolvedSecret {
 
 func TestBrowserFillSecret_AllFilledCompletesHandle(t *testing.T) {
 	handles := &fakeSecretHandles{secret: loginSecret()}
-	browser := &fakeSecureBrowser{result: &sandbox.SecretFillResult{Fields: map[string]string{
-		"username": "filled", "password": "filled"}}}
+	browser := &fakeSecureBrowser{result: &sandbox.SecretFillResult{
+		Fields: map[string]string{"username": "filled", "password": "filled"},
+	}}
 	res, err := NewBrowserFillSecretTool(handles, browser).Execute(askCtx(attendedMeta()),
 		json.RawMessage(`{"handle":"cred_1","targets":{"username":"@e2","password":"e3"}}`))
 	require.NoError(t, err)
@@ -56,7 +57,8 @@ func TestBrowserFillSecret_AllFilledCompletesHandle(t *testing.T) {
 func TestBrowserFillSecret_PartialKeepsHandle(t *testing.T) {
 	handles := &fakeSecretHandles{secret: loginSecret()}
 	browser := &fakeSecureBrowser{result: &sandbox.SecretFillResult{Fields: map[string]string{
-		"username": "filled", "password": "ref_not_found"}}}
+		"username": "filled", "password": "ref_not_found",
+	}}}
 	res, err := NewBrowserFillSecretTool(handles, browser).Execute(askCtx(attendedMeta()),
 		json.RawMessage(`{"handle":"cred_1","targets":{"username":"@e2","password":"@e9"}}`))
 	require.NoError(t, err)

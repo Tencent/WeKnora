@@ -14,8 +14,10 @@ import (
 func TestVaultCreateAndOpen(t *testing.T) {
 	v, db := newTestVault(t)
 	ctx := context.Background()
-	item, err := v.Create(ctx, alice, LoginInput{Site: "GitHub.com", Domains: []string{"api.github.com"},
-		Username: " alice ", Password: "s3cret-Δ"})
+	item, err := v.Create(ctx, alice, LoginInput{
+		Site: "GitHub.com", Domains: []string{"api.github.com"},
+		Username: " alice ", Password: "s3cret-Δ",
+	})
 	require.NoError(t, err)
 	assert.Equal(t, "github.com", item.Site)
 	assert.Equal(t, "github.com", item.Title, "title defaults to the site")
@@ -82,7 +84,9 @@ func TestVaultUpsertReplacesPasswordButKeepsDomains(t *testing.T) {
 	ctx := context.Background()
 	first, err := v.Upsert(ctx, alice, LoginInput{Site: "a.com", Username: "u", Password: "old"})
 	require.NoError(t, err)
-	second, err := v.Upsert(ctx, alice, LoginInput{Site: "a.com", Domains: []string{"sso.a.com"}, Username: "u", Password: "new"})
+	second, err := v.Upsert(ctx, alice, LoginInput{
+		Site: "a.com", Domains: []string{"sso.a.com"}, Username: "u", Password: "new",
+	})
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, second.ID)
 	assert.Equal(t, types.StringArray{"a.com"}, second.Domains, "a card never widens a saved login")

@@ -19,8 +19,9 @@ type fakeDesktopManager struct {
 	browser sandbox.SessionSecureBrowser
 }
 
-func (f *fakeDesktopManager) GetType() sandbox.SandboxType                  { return f.kind }
-func (f *fakeDesktopManager) DesktopEnabledForPrompt() bool                 { return f.desktop }
+func (f *fakeDesktopManager) GetType() sandbox.SandboxType  { return f.kind }
+func (f *fakeDesktopManager) DesktopEnabledForPrompt() bool { return f.desktop }
+
 func (f *fakeDesktopManager) SessionSecureBrowser() sandbox.SessionSecureBrowser { return f.browser }
 
 type stubSecureBrowser struct{ sandbox.SessionSecureBrowser }
@@ -39,8 +40,8 @@ func TestSecureFormBrowserEligibility(t *testing.T) {
 	assert.Nil(t, secureFormBrowser(webUserCtx(), nil, skills))
 	assert.Nil(t, secureFormBrowser(webUserCtx(),
 		&fakeDesktopManager{kind: sandbox.SandboxTypeCube, desktop: false, browser: browser}, skills), "desktop off")
-	assert.Nil(t, secureFormBrowser(webUserCtx(),
-		&fakeDesktopManager{kind: sandbox.SandboxTypeHost, desktop: true, browser: browser}, skills), "Lite host sandbox")
+	host := &fakeDesktopManager{kind: sandbox.SandboxTypeHost, desktop: true, browser: browser}
+	assert.Nil(t, secureFormBrowser(webUserCtx(), host, skills), "Lite host sandbox")
 
 	embed := types.WithPrincipal(context.Background(), types.Principal{Type: types.PrincipalEmbedVisitor, ID: "1:c:v"})
 	assert.Nil(t, secureFormBrowser(embed, ready, skills), "embed visitors own no vault")

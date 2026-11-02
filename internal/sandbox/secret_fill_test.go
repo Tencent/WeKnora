@@ -100,8 +100,10 @@ func TestFillSecretRemovesKeyOnFailure(t *testing.T) {
 		}
 		return &RemoteExecResult{}, nil
 	}
-	_, err := mgr.FillSecret(ctx, "sess-live", SecretFillRequest{Domains: []string{"a.com"},
-		Fields: []SecretFillField{{Name: "password", Ref: "@e1", Type: "password", Value: "x"}}})
+	_, err := mgr.FillSecret(ctx, "sess-live", SecretFillRequest{
+		Domains: []string{"a.com"},
+		Fields:  []SecretFillField{{Name: "password", Ref: "@e1", Type: "password", Value: "x"}},
+	})
 	require.Error(t, err)
 	reqs := helperRequests(inner)
 	require.Len(t, reqs, 1)
@@ -113,28 +115,32 @@ func TestFillSecretRemovesKeyOnFailure(t *testing.T) {
 func TestFillSecretReportsMissingHelper(t *testing.T) {
 	ctx := terminalTestContext()
 	mgr, client := newSessionManagerDesktopTestHarness(t)
-	client.fakeRemoteClient.execHook = func(r RemoteExecRequest) (*RemoteExecResult, error) {
+	client.execHook = func(r RemoteExecRequest) (*RemoteExecResult, error) {
 		if r.Command == secretFillBinary {
 			return &RemoteExecResult{ExitCode: 127}, nil
 		}
 		return &RemoteExecResult{}, nil
 	}
-	_, err := mgr.FillSecret(ctx, "sess-live", SecretFillRequest{Domains: []string{"a.com"},
-		Fields: []SecretFillField{{Name: "otp", Ref: "@e1", Type: "one_time_code", Value: "1"}}})
+	_, err := mgr.FillSecret(ctx, "sess-live", SecretFillRequest{
+		Domains: []string{"a.com"},
+		Fields:  []SecretFillField{{Name: "otp", Ref: "@e1", Type: "one_time_code", Value: "1"}},
+	})
 	assert.ErrorIs(t, err, ErrSecretFillHelperMissing)
 }
 
 func TestFillSecretHelperError(t *testing.T) {
 	ctx := terminalTestContext()
 	mgr, client := newSessionManagerDesktopTestHarness(t)
-	client.fakeRemoteClient.execHook = func(r RemoteExecRequest) (*RemoteExecResult, error) {
+	client.execHook = func(r RemoteExecRequest) (*RemoteExecResult, error) {
 		if r.Command == secretFillBinary {
 			return &RemoteExecResult{Stdout: `{"error":"no_browser"}`}, nil
 		}
 		return &RemoteExecResult{}, nil
 	}
-	_, err := mgr.FillSecret(ctx, "sess-live", SecretFillRequest{Domains: []string{"a.com"},
-		Fields: []SecretFillField{{Name: "otp", Ref: "@e1", Type: "one_time_code", Value: "1"}}})
+	_, err := mgr.FillSecret(ctx, "sess-live", SecretFillRequest{
+		Domains: []string{"a.com"},
+		Fields:  []SecretFillField{{Name: "otp", Ref: "@e1", Type: "one_time_code", Value: "1"}},
+	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "browser is not running")
 }
@@ -143,7 +149,7 @@ func TestCurrentPage(t *testing.T) {
 	ctx := terminalTestContext()
 	mgr, client := newSessionManagerDesktopTestHarness(t)
 	out := `{"url":"https://accounts.google.com/signin"}`
-	client.fakeRemoteClient.execHook = func(r RemoteExecRequest) (*RemoteExecResult, error) {
+	client.execHook = func(r RemoteExecRequest) (*RemoteExecResult, error) {
 		if r.Command == secretFillBinary {
 			assert.Equal(t, []string{"--probe"}, r.Args)
 			return &RemoteExecResult{Stdout: out}, nil
@@ -158,9 +164,9 @@ func TestCurrentPage(t *testing.T) {
 	page, err = mgr.CurrentPage(ctx, "sess-live")
 	require.NoError(t, err)
 	assert.Equal(t, "", page.URL)
-	client.fakeRemoteClient.mu.Lock()
-	defer client.fakeRemoteClient.mu.Unlock()
-	assert.Empty(t, client.fakeRemoteClient.writeFiles, "the probe stages no key")
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	assert.Empty(t, client.writeFiles, "the probe stages no key")
 }
 
 func TestSessionSecureBrowserCapability(t *testing.T) {

@@ -71,11 +71,13 @@ func TestHandleStoreVaultSource(t *testing.T) {
 	ctx := context.Background()
 	item, err := vault.Create(ctx, alice, LoginInput{Site: "a.com", Username: "alice", Password: "vault-pw"})
 	require.NoError(t, err)
-	h, err := store.Create(ctx, NewHandle{Owner: alice, SessionID: "s1", Domains: []string{"a.com"},
-		VaultItemID: item.ID, Fields: []types.SecretField{
+	h, err := store.Create(ctx, NewHandle{
+		Owner: alice, SessionID: "s1", Domains: []string{"a.com"}, VaultItemID: item.ID,
+		Fields: []types.SecretField{
 			{Name: "username", Type: types.SecretFieldText, Value: "alice"},
 			{Name: "password", Type: types.SecretFieldPassword},
-		}})
+		},
+	})
 	require.NoError(t, err)
 	got, err := store.Resolve(ctx, alice.TenantID, alice.UserID, "s1", h)
 	require.NoError(t, err)
@@ -87,8 +89,10 @@ func TestHandleStoreVaultSource(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, touched.LastUsedAt)
 
-	h2, err := store.Create(ctx, NewHandle{Owner: alice, SessionID: "s1", Domains: []string{"a.com"},
-		VaultItemID: item.ID, Fields: []types.SecretField{{Name: "password", Type: types.SecretFieldPassword}}})
+	h2, err := store.Create(ctx, NewHandle{
+		Owner: alice, SessionID: "s1", Domains: []string{"a.com"},
+		VaultItemID: item.ID, Fields: []types.SecretField{{Name: "password", Type: types.SecretFieldPassword}},
+	})
 	require.NoError(t, err)
 	require.NoError(t, vault.Delete(ctx, alice, item.ID))
 	_, err = store.Resolve(ctx, alice.TenantID, alice.UserID, "s1", h2)

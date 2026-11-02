@@ -18,8 +18,10 @@ func secureFormRequest(bus *event.EventBus) SecureFormRequest {
 	return SecureFormRequest{
 		TenantID: 1, UserID: "web_user:u1", SessionID: "s1", AssistantMessageID: "m1", ToolCallID: "tc1",
 		EventBus: bus,
-		Form: types.SecureFormPromptRequest{Title: "登录", Kind: "login", Site: "a.com",
-			Domains: []string{"a.com"}, Parts: []string{"username", "password"}},
+		Form: types.SecureFormPromptRequest{
+			Title: "登录", Kind: "login", Site: "a.com",
+			Domains: []string{"a.com"}, Parts: []string{"username", "password"},
+		},
 	}
 }
 
@@ -44,9 +46,11 @@ func TestGate_SecureFormAnsweredLive(t *testing.T) {
 			})
 			rejected <- err
 			// A raw answer with values never reaches the row.
-			_, err = resolveSecureForm(g, data.PendingID, `{"handle":"cred_1","fields":["password"],"values":{"password":"hunter2"}}`)
+			rawValues := `{"handle":"cred_1","fields":["password"],"values":{"password":"hunter2"}}`
+			_, err = resolveSecureForm(g, data.PendingID, rawValues)
 			rejected <- err
-			_, _ = resolveSecureForm(g, data.PendingID, `{"handle":"cred_1","fields":["username","password"],"username":"alice"}`)
+			okBody := `{"handle":"cred_1","fields":["username","password"],"username":"alice"}`
+			_, _ = resolveSecureForm(g, data.PendingID, okBody)
 		}()
 		return nil
 	})

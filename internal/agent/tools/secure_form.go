@@ -1,4 +1,3 @@
-// internal/agent/tools/secure_form.go
 package tools
 
 import (
@@ -14,28 +13,58 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-const requestSecureFormDescription = `Ask the user for login credentials or one-time codes through a secure card, for the page open in the sandbox browser.
+const requestSecureFormDescription = `Ask the user for login credentials or one-time
+codes through a secure card, for the page open in the sandbox browser.
 
-Use it whenever the sandbox browser reaches a login, password, verification-code or similar secret prompt. Never ask for passwords or codes in the chat, and never type them yourself.
+Use it whenever the sandbox browser reaches a login, password, verification-code
+or similar secret prompt. Never ask for passwords or codes in the chat, and never
+type them yourself.
 
-The values never reach you: you get a handle such as cred_1. Take a fresh "agent-browser snapshot -i", then call browser_fill_secret with the handle and the refs of the inputs. Submitting the form (clicking "Sign in") is still your job.
+The values never reach you: you get a handle such as cred_1. Take a fresh
+"agent-browser snapshot -i", then call browser_fill_secret with the handle and
+the refs of the inputs. Submitting the form (clicking "Sign in") is still your job.
 
 - site: the host of the page now open in the browser, e.g. accounts.google.com.
-- domains: other hosts of the same site the login needs (at most 5), e.g. login.example.com for example.com; they must share the site's registrable domain. Values are only ever filled into these.
-- kind "login" with parts ["username","password"] (or one of them) for an account login; extra for other inputs such as a one-time code.
+- domains: other hosts of the same site the login needs (at most 5), e.g.
+  login.example.com for example.com; they must share the site's registrable
+  domain. Values are only ever filled into these.
+- kind "login" with parts ["username","password"] (or one of them) for an
+  account login; extra for other inputs such as a one-time code.
 - allow_save: false when the user should not be offered to save the login.
 
-The user may decline or not answer; then you are told so and must continue without the credentials.`
+The user may decline or not answer; then you are told so and must continue
+without the credentials.`
 
 var requestSecureFormSchema = json.RawMessage(fmt.Sprintf(`{
   "type": "object",
   "properties": {
-    "title": {"type": "string", "maxLength": %[1]d, "description": "Card title in the user's language, e.g. \"Sign in to GitHub\""},
-    "kind": {"type": "string", "enum": ["login"], "description": "\"login\" for an account login; omit for extra fields only"},
+    "title": {
+      "type": "string",
+      "maxLength": %[1]d,
+      "description": "Card title in the user's language, e.g. \"Sign in to GitHub\""
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["login"],
+      "description": "\"login\" for an account login; omit for extra fields only"
+    },
     "site": {"type": "string", "description": "Host of the page now open in the sandbox browser"},
-    "domains": {"type": "array", "maxItems": %[2]d, "items": {"type": "string"}, "description": "Other hosts under the site's registrable domain the values may be filled into"},
-    "parts": {"type": "array", "items": {"type": "string", "enum": ["username", "password"]}, "description": "Login parts to ask for; default both"},
-    "prefill": {"type": "object", "properties": {"username": {"type": "string"}}, "description": "Non-secret values shown pre-filled"},
+    "domains": {
+      "type": "array",
+      "maxItems": %[2]d,
+      "items": {"type": "string"},
+      "description": "Other hosts under the site's registrable domain"
+    },
+    "parts": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["username", "password"]},
+      "description": "Login parts to ask for; default both"
+    },
+    "prefill": {
+      "type": "object",
+      "properties": {"username": {"type": "string"}},
+      "description": "Non-secret values shown pre-filled"
+    },
     "extra": {
       "type": "array", "maxItems": %[3]d,
       "items": {
@@ -62,7 +91,9 @@ type RequestSecureFormTool struct {
 }
 
 // NewRequestSecureFormTool builds the request_secure_form tool.
-func NewRequestSecureFormTool(asker approval.SecureFormAsker, browser sandbox.SessionSecureBrowser) *RequestSecureFormTool {
+func NewRequestSecureFormTool(
+	asker approval.SecureFormAsker, browser sandbox.SessionSecureBrowser,
+) *RequestSecureFormTool {
 	return &RequestSecureFormTool{
 		BaseTool: NewBaseTool(ToolRequestSecureForm, requestSecureFormDescription, requestSecureFormSchema),
 		asker:    asker,
@@ -123,11 +154,15 @@ func (t *RequestSecureFormTool) Execute(ctx context.Context, args json.RawMessag
 			SnapshotVersion:    snapshotVersion,
 		})
 		if err != nil {
-			return &types.ToolResult{Success: false, Error: fmt.Sprintf("Showing the credential form failed: %v", err)}, nil
+			return &types.ToolResult{
+				Success: false, Error: fmt.Sprintf("Showing the credential form failed: %v", err),
+			}, nil
 		}
 	}
 	if answer.Suspended != nil {
-		return &types.ToolResult{Success: false, Error: "waiting for the user to submit credentials", Suspend: answer.Suspended}, nil
+		return &types.ToolResult{
+			Success: false, Error: "waiting for the user to submit credentials", Suspend: answer.Suspended,
+		}, nil
 	}
 
 	data := map[string]interface{}{

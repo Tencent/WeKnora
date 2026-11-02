@@ -25,7 +25,9 @@ type fakeSubmitter struct {
 	err    error
 }
 
-func (f *fakeSubmitter) Submit(_ context.Context, owner credential.Owner, req credential.SubmitRequest) (credential.SubmitResult, error) {
+func (f *fakeSubmitter) Submit(
+	_ context.Context, owner credential.Owner, req credential.SubmitRequest,
+) (credential.SubmitResult, error) {
 	f.owner, f.got = owner, req
 	if req.Values != nil {
 		f.got.Values = make(map[string]string, len(req.Values))

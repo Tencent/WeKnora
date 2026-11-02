@@ -33,13 +33,17 @@ func (f *fakePromptGate) ResolveSecureForm(_ context.Context, req hitl.ResolveRe
 
 func loginPrompt(t *testing.T, id string, owner Owner, extra ...types.SecureFormExtraField) *types.AgentPrompt {
 	t.Helper()
-	form := types.SecureFormPromptRequest{Title: "登录", Kind: "login", Site: "a.com",
-		Domains: []string{"a.com", "sso.a.com"}, Extra: extra}
+	form := types.SecureFormPromptRequest{
+		Title: "登录", Kind: "login", Site: "a.com",
+		Domains: []string{"a.com", "sso.a.com"}, Extra: extra,
+	}
 	require.NoError(t, form.Validate())
 	raw, err := json.Marshal(form)
 	require.NoError(t, err)
-	return &types.AgentPrompt{ID: id, TenantID: owner.TenantID, UserID: owner.UserID, SessionID: "s1",
-		Kind: types.AgentPromptKindSecureForm, Status: types.AgentPromptPending, Request: types.JSON(raw)}
+	return &types.AgentPrompt{
+		ID: id, TenantID: owner.TenantID, UserID: owner.UserID, SessionID: "s1",
+		Kind: types.AgentPromptKindSecureForm, Status: types.AgentPromptPending, Request: types.JSON(raw),
+	}
 }
 
 func newTestSubmitter(t *testing.T, prompts ...*types.AgentPrompt) (*Submitter, *fakePromptGate, *HandleStore, *Vault) {
@@ -63,8 +67,12 @@ func lastResponse(t *testing.T, g *fakePromptGate) types.SecureFormPromptRespons
 func TestSubmitUseOnce(t *testing.T) {
 	otp := types.SecureFormExtraField{Name: "otp", Type: types.SecretFieldOneTimeCode}
 	s, gate, handles, _ := newTestSubmitter(t, loginPrompt(t, "p1", alice, otp))
-	_, err := s.Submit(context.Background(), alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit,
-		Choice: ChoiceUseOnce, Values: map[string]string{"username": " alice ", "password": "sentinel-pw", "otp": "123456"}})
+	_, err := s.Submit(context.Background(), alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit,
+		Choice: ChoiceUseOnce, Values: map[string]string{
+			"username": " alice ", "password": "sentinel-pw", "otp": "123456",
+		},
+	})
 	require.NoError(t, err)
 	r := lastResponse(t, gate)
 	assert.Equal(t, []string{"username", "password", "otp"}, r.Fields)
@@ -83,18 +91,24 @@ func TestSubmitUseOnce(t *testing.T) {
 func TestSubmitRejectsBadValues(t *testing.T) {
 	s, gate, _, _ := newTestSubmitter(t, loginPrompt(t, "p1", alice))
 	ctx := context.Background()
-	_, err := s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceUseOnce,
-		Values: map[string]string{"username": "u", "password": "p", "pin": "sentinel-pin"}})
+	_, err := s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit, Choice: ChoiceUseOnce,
+		Values: map[string]string{"username": "u", "password": "p", "pin": "sentinel-pin"},
+	})
 	assert.Equal(t, http.StatusBadRequest, httpStatus(t, err))
 	assert.Contains(t, err.Error(), "pin")
 	requireNoSecret(t, "sentinel-pin", err.Error())
 
-	_, err = s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceUseOnce,
-		Values: map[string]string{"username": "u"}})
+	_, err = s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit, Choice: ChoiceUseOnce,
+		Values: map[string]string{"username": "u"},
+	})
 	assert.Equal(t, http.StatusBadRequest, httpStatus(t, err), "password is required")
 
-	_, err = s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceUseOnce,
-		Values: map[string]string{"username": "u", "password": string(make([]byte, 4097))}})
+	_, err = s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit, Choice: ChoiceUseOnce,
+		Values: map[string]string{"username": "u", "password": string(make([]byte, 4097))},
+	})
 	assert.Equal(t, http.StatusBadRequest, httpStatus(t, err))
 	assert.Empty(t, gate.resolved)
 }
@@ -102,8 +116,10 @@ func TestSubmitRejectsBadValues(t *testing.T) {
 func TestSubmitSaveThenSaved(t *testing.T) {
 	s, gate, handles, vault := newTestSubmitter(t, loginPrompt(t, "p1", alice), loginPrompt(t, "p2", alice))
 	ctx := context.Background()
-	_, err := s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSave,
-		Values: map[string]string{"username": "alice", "password": "vault-pw"}})
+	_, err := s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSave,
+		Values: map[string]string{"username": "alice", "password": "vault-pw"},
+	})
 	require.NoError(t, err)
 	r := lastResponse(t, gate)
 	assert.True(t, r.Saved)
@@ -111,8 +127,10 @@ func TestSubmitSaveThenSaved(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 
-	_, err = s.Submit(ctx, alice, SubmitRequest{PromptID: "p2", Action: ActionSubmit, Choice: ChoiceSaved,
-		VaultItemID: items[0].ID})
+	_, err = s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p2", Action: ActionSubmit, Choice: ChoiceSaved,
+		VaultItemID: items[0].ID,
+	})
 	require.NoError(t, err)
 	r = lastResponse(t, gate)
 	assert.Equal(t, "alice", r.Username)
@@ -127,9 +145,11 @@ func TestSubmitSavedChecksSiteAndDomains(t *testing.T) {
 	ctx := context.Background()
 	other, err := vault.Create(ctx, alice, LoginInput{Site: "b.com", Username: "x", Password: "p"})
 	require.NoError(t, err)
-	_, err = s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSaved, VaultItemID: other.ID})
+	saved := SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSaved, VaultItemID: other.ID}
+	_, err = s.Submit(ctx, alice, saved)
 	assert.Equal(t, http.StatusBadRequest, httpStatus(t, err))
-	_, err = s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSaved, VaultItemID: "nope"})
+	saved.VaultItemID = "nope"
+	_, err = s.Submit(ctx, alice, saved)
 	assert.Equal(t, http.StatusNotFound, httpStatus(t, err))
 }
 
@@ -138,13 +158,17 @@ func TestSubmitDomainsAreTheIntersectionForSaved(t *testing.T) {
 	form := types.SecureFormPromptRequest{Title: "登录", Kind: "login", Site: "a.com", Domains: []string{"sso.a.com"}}
 	require.NoError(t, form.Validate())
 	raw, _ := json.Marshal(form)
-	p := &types.AgentPrompt{ID: "p1", TenantID: 1, UserID: alice.UserID, SessionID: "s1",
-		Kind: types.AgentPromptKindSecureForm, Status: types.AgentPromptPending, Request: types.JSON(raw)}
+	p := &types.AgentPrompt{
+		ID: "p1", TenantID: 1, UserID: alice.UserID, SessionID: "s1",
+		Kind: types.AgentPromptKindSecureForm, Status: types.AgentPromptPending, Request: types.JSON(raw),
+	}
 	s, gate, handles, vault := newTestSubmitter(t, p)
 	ctx := context.Background()
 	item, err := vault.Create(ctx, alice, LoginInput{Site: "a.com", Username: "x", Password: "p"})
 	require.NoError(t, err)
-	_, err = s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSaved, VaultItemID: item.ID})
+	_, err = s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSaved, VaultItemID: item.ID,
+	})
 	require.NoError(t, err)
 	got, err := handles.Resolve(ctx, alice.TenantID, alice.UserID, "s1", lastResponse(t, gate).Handle)
 	require.NoError(t, err)
@@ -156,8 +180,10 @@ func TestSubmitSaveOverExistingKeepsItsDomains(t *testing.T) {
 	ctx := context.Background()
 	item, err := vault.Create(ctx, alice, LoginInput{Site: "a.com", Username: "alice", Password: "old"})
 	require.NoError(t, err)
-	_, err = s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSave,
-		Values: map[string]string{"username": "alice", "password": "new"}})
+	_, err = s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSave,
+		Values: map[string]string{"username": "alice", "password": "new"},
+	})
 	require.NoError(t, err)
 
 	stored, err := vault.Get(ctx, alice, item.ID)
@@ -193,8 +219,10 @@ func TestSubmitResolveRaceDiscardsHandleButKeepsSavedLogin(t *testing.T) {
 	s, gate, handles, vault := newTestSubmitter(t, loginPrompt(t, "p1", alice))
 	gate.failWith = hitl.ErrAlreadyResolved
 	ctx := context.Background()
-	res, err := s.Submit(ctx, alice, SubmitRequest{PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSave,
-		Values: map[string]string{"username": "alice", "password": "pw"}})
+	res, err := s.Submit(ctx, alice, SubmitRequest{
+		PromptID: "p1", Action: ActionSubmit, Choice: ChoiceSave,
+		Values: map[string]string{"username": "alice", "password": "pw"},
+	})
 	require.ErrorIs(t, err, hitl.ErrAlreadyResolved)
 	assert.True(t, res.SavedButClosed)
 	items, err := vault.List(ctx, alice, "a.com")

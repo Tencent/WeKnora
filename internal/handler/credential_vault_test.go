@@ -23,15 +23,21 @@ type fakeVault struct {
 }
 
 func (f *fakeVault) List(context.Context, credential.Owner, string) ([]*types.CredentialVaultItem, error) {
-	return []*types.CredentialVaultItem{{ID: "i1", Site: "a.com", Username: "u", SecretCiphertext: "enc:v1:sentinel"}}, nil
+	return []*types.CredentialVaultItem{{
+		ID: "i1", Site: "a.com", Username: "u", SecretCiphertext: "enc:v1:sentinel",
+	}}, nil
 }
 
-func (f *fakeVault) Create(_ context.Context, _ credential.Owner, in credential.LoginInput) (*types.CredentialVaultItem, error) {
+func (f *fakeVault) Create(
+	_ context.Context, _ credential.Owner, in credential.LoginInput,
+) (*types.CredentialVaultItem, error) {
 	f.created = in
 	return &types.CredentialVaultItem{ID: "i2", Site: in.Site, SecretCiphertext: "enc:v1:sentinel"}, nil
 }
 
-func (f *fakeVault) Update(_ context.Context, _ credential.Owner, id string, p credential.LoginPatch) (*types.CredentialVaultItem, error) {
+func (f *fakeVault) Update(
+	_ context.Context, _ credential.Owner, id string, p credential.LoginPatch,
+) (*types.CredentialVaultItem, error) {
 	f.patched = p
 	return &types.CredentialVaultItem{ID: id}, nil
 }
@@ -64,7 +70,8 @@ func TestCredentialVaultHandler(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"available":true`)
 	assert.NotContains(t, w.Body.String(), "sentinel", "ciphertext never leaves the server")
 
-	w = postJSON(r, "/me/credential-vault", `{"site":"a.com","domains":["a.com"],"username":"u","password":"pw-sentinel"}`)
+	w = postJSON(r, "/me/credential-vault",
+		`{"site":"a.com","domains":["a.com"],"username":"u","password":"pw-sentinel"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, "pw-sentinel", v.created.Password)
 	assert.NotContains(t, w.Body.String(), "sentinel")

@@ -18,12 +18,17 @@ type PromptGate interface {
 }
 
 const (
-	ActionSubmit  = "submit"
+	// ActionSubmit records the card's values.
+	ActionSubmit = "submit"
+	// ActionDecline records a refusal.
 	ActionDecline = "decline"
 
+	// ChoiceUseOnce fills without writing the vault.
 	ChoiceUseOnce = "use_once"
-	ChoiceSave    = "save"
-	ChoiceSaved   = "saved"
+	// ChoiceSave writes the login then fills.
+	ChoiceSave = "save"
+	// ChoiceSaved fills from a vault row the owner already has.
+	ChoiceSaved = "saved"
 )
 
 // SubmitRequest is what the card posts.

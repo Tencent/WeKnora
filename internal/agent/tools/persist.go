@@ -438,7 +438,8 @@ func compactSecureFormSummary(data map[string]interface{}) string {
 	if u := stringField(data, "username"); u != "" {
 		fmt.Fprintf(&b, "  username: %s", u)
 	}
-	b.WriteString("\nThe handle may have been used or expired; call request_secure_form again if a fill reports handle_expired.")
+	b.WriteString("\nThe handle may have been used or expired; call request_secure_form " +
+		"again if a fill reports handle_expired.")
 	return b.String()
 }
 

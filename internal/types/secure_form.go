@@ -30,8 +30,11 @@ const (
 )
 
 const (
-	SecureFormKindLogin     = "login"
+	// SecureFormKindLogin asks for a site username and/or password.
+	SecureFormKindLogin = "login"
+	// SecureFormFieldUsername is the login username field.
 	SecureFormFieldUsername = "username"
+	// SecureFormFieldPassword is the login password field.
 	SecureFormFieldPassword = "password"
 )
 
@@ -66,7 +69,8 @@ var (
 	// deleted or can no longer be decrypted.
 	ErrCredentialUnavailable = errors.New("saved credential is unavailable")
 
-	errInvalidHost = errors.New("must be a host name such as accounts.google.com, without scheme, path, port wildcard or credentials")
+	errInvalidHost = errors.New(
+		"must be a host name such as accounts.google.com, without scheme, path, port wildcard or credentials")
 )
 
 var (

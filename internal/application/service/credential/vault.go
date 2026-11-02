@@ -120,7 +120,8 @@ func normalizeTitle(title, site string) (string, error) {
 		t = site
 	}
 	if utf8.RuneCountInString(t) > types.CredentialVaultMaxTitleLen {
-		return "", apperrors.NewBadRequestError(fmt.Sprintf("title exceeds %d characters", types.CredentialVaultMaxTitleLen))
+		return "", apperrors.NewBadRequestError(
+			fmt.Sprintf("title exceeds %d characters", types.CredentialVaultMaxTitleLen))
 	}
 	return t, nil
 }
@@ -128,7 +129,8 @@ func normalizeTitle(title, site string) (string, error) {
 func normalizeUsername(username string) (string, error) {
 	u := strings.TrimSpace(username)
 	if utf8.RuneCountInString(u) > types.SecureFormMaxUsernameLen {
-		return "", apperrors.NewBadRequestError(fmt.Sprintf("username exceeds %d characters", types.SecureFormMaxUsernameLen))
+		return "", apperrors.NewBadRequestError(
+			fmt.Sprintf("username exceeds %d characters", types.SecureFormMaxUsernameLen))
 	}
 	return u, nil
 }
