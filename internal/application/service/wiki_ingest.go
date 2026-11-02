@@ -316,7 +316,10 @@ type WikiIngestPayload struct {
 	types.TracingContext
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Language        string `json:"language,omitempty"`
+	// KnowledgeID restricts an operator trigger to one existing durable key.
+	// Automatic triggers leave it empty and keep their normal batch selection.
+	KnowledgeID string `json:"knowledge_id,omitempty"`
+	Language    string `json:"language,omitempty"`
 }
 
 // WikiRetractPayload is the asynq task payload for wiki content retraction
@@ -909,12 +912,8 @@ func uniqueWikiFolderIDs(values []string) []string {
 	return out
 }
 
-// scheduleFinalize enqueues a debounced, coalesced KB-global finalize trigger.
-// asynq.TaskID ("wiki-finalize-<kbID>") makes concurrent schedules within the
-// debounce window collapse into one pending task; the conflict error is the
-// expected coalescing signal, not a failure. In Lite mode the sync executor
-// ignores TaskID, so finalize simply runs once per batch (acceptable at the
-// small scale Lite mode targets).
+// scheduleFinalize 合并知识库级收尾任务；Lite 模式也在延迟和运行期间保留稳定任务 ID。
+// 已有任务视为成功合并，其他入队错误交给持久化恢复路径处理。
 func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIngestPayload) error {
 	langfuse.InjectTracing(ctx, &payload)
 	b, _ := json.Marshal(payload)
@@ -2876,7 +2875,16 @@ func (s *wikiIngestService) generateWithTemplateResult(
 				break
 			}
 
-			rewrite.WriteString(response.Content)
+			fragment := response.Content
+			if canContinue && round > 0 {
+				fragment = trimWikiContinuationOverlap(rewrite.String(), fragment)
+			}
+			rewrite.WriteString(fragment)
+			if canContinue {
+				if err := validateWikiRewrite(rewrite.String(), maskedData); err != nil {
+					return wikiTemplateResult{}, err
+				}
+			}
 
 			if !canContinue || !isLengthStopFinishReason(finishReason) || round >= wikiPageModifyMaxContinuations {
 				break

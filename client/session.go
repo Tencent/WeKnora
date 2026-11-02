@@ -330,6 +330,7 @@ func (c *Client) KnowledgeQAStream(
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(newSSELineSplitter())
 	// Default 64KiB per-line cap truncates large SSE data lines (the
 	// references event bundles chunk contents that can reach hundreds of
 	// KiB). Raise the cap so those lines parse instead of erroring with
@@ -425,6 +426,7 @@ func (c *Client) ContinueStream(
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(newSSELineSplitter())
 	// See KnowledgeQAStream: raise the per-line cap so large SSE data lines
 	// (references event) parse instead of erroring with "token too long".
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -436,7 +438,8 @@ func (c *Client) ContinueStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if data := completeSSEData(dataBuffer); data != "" && eventType == "message" {
+			// An absent or empty event field defaults to "message" in SSE.
+			if data := completeSSEData(dataBuffer); data != "" && (eventType == "" || eventType == "message") {
 				var streamResponse StreamResponse
 				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
@@ -454,9 +457,10 @@ func (c *Client) ContinueStream(
 			continue
 		}
 
-		// Process lines with event: prefix
-		if strings.HasPrefix(line, "event:") {
-			eventType = strings.TrimPrefix(line[6:], " ") // Remove "event:" prefix
+		// Process the event field, including an empty colonless field.
+		if line == "event" || strings.HasPrefix(line, "event:") {
+			_, value, _ := strings.Cut(line, ":") // A colonless field has an empty value.
+			eventType = strings.TrimPrefix(value, " ")
 		}
 
 		// Process lines with data: prefix

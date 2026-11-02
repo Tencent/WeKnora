@@ -826,7 +826,7 @@ func TestWikiProgressMigrationUpgradeDowngradeAndCascade(t *testing.T) {
 		require.NoError(t, db.Exec("ALTER TABLE task_pending_ops DROP COLUMN claim_epoch").Error)
 		dialect, name := "sqlite", "000052_wiki_ingest_progress"
 		if db.Name() == "postgres" {
-			dialect, name = "versioned", "000135_wiki_ingest_progress"
+			dialect, name = "versioned", "000136_wiki_ingest_progress"
 		}
 		up, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", dialect, name+".up.sql"))
 		require.NoError(t, err)

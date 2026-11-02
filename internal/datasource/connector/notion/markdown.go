@@ -103,7 +103,20 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	case "code":
 		rt := extractRichText(block.RawContent)
 		lang := extractString(block.RawContent, "language")
-		b.WriteString(fmt.Sprintf("```%s\n%s\n```\n\n", lang, renderRichText(rt)))
+		// A Markdown tutorial can itself contain backtick fences. Use a
+		// longer outer fence so imported code cannot become document structure.
+		code := renderRichText(rt)
+		fenceLength, run := 3, 0
+		for _, char := range code {
+			if char == '`' {
+				run++
+				fenceLength = max(fenceLength, run+1)
+			} else {
+				run = 0
+			}
+		}
+		fence := strings.Repeat("`", fenceLength)
+		fmt.Fprintf(b, "%s%s\n%s\n%s\n\n", fence, lang, code, fence)
 
 	case "quote", "meeting_notes":
 		rt := extractRichText(block.RawContent)
@@ -252,6 +265,12 @@ func renderMediaBlock(b *strings.Builder, block notionBlock, attachments *[]atta
 	}
 }
 
+// Markdown rows must stay on one physical line. Match CRLF first so it
+// produces a single break, and keep literal pipes inside their source cell.
+var tableCellReplacer = strings.NewReplacer(
+	"\r\n", "<br>", "\r", "<br>", "\n", "<br>", "|", "\\|",
+)
+
 // renderTable converts a table block (with table_row children) to Markdown.
 func renderTable(b *strings.Builder, block notionBlock) {
 	if len(block.Children) == 0 {
@@ -262,7 +281,7 @@ func renderTable(b *strings.Builder, block notionBlock) {
 		cells := extractTableCells(row.RawContent)
 		var parts []string
 		for _, cell := range cells {
-			parts = append(parts, strings.ReplaceAll(renderRichText(cell), "|", "\\|"))
+			parts = append(parts, tableCellReplacer.Replace(renderRichText(cell)))
 		}
 		b.WriteString("| " + strings.Join(parts, " | ") + " |\n")
 

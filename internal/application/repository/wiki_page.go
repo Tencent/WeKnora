@@ -134,6 +134,11 @@ func (r *wikiPageRepository) UpdateWithRevision(
 	ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision,
 ) error {
 	write := func(tx *gorm.DB) error {
+		// 进度路径已先锁定回执和页面；在同一事务内再核对本次模型读取的快照。
+		// 普通写入仍由外层短事务保护，不能让快照检查与正文保存分离。
+		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+			return err
+		}
 		if rev != nil {
 			// An already-present (page_id, version) pair means a concurrent
 			// writer snapshotted the same version first; its copy is
@@ -312,10 +317,18 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 
 // UpdateMeta 保存来源、状态和目录等元数据，不修改反链或版本。
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
+	write := func(tx *gorm.DB) error {
+		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+			return err
+		}
+		return updateWikiPageMetaRow(tx, page)
+	}
 	if types.WikiPageProgressCommitFromContext(ctx) != nil {
-		return r.withWikiPageProgressWrite(ctx, page, false, func(tx *gorm.DB) error {
-			return updateWikiPageMetaRow(tx, page)
-		})
+		// 只复用持久进度的事务，不另起事务或改变回执、页面的锁顺序。
+		return r.withWikiPageProgressWrite(ctx, page, false, write)
+	}
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		return r.db.WithContext(ctx).Transaction(write)
 	}
 	return updateWikiPageMetaRow(r.db.WithContext(ctx), page)
 }

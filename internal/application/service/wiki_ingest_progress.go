@@ -53,10 +53,24 @@ func (s *wikiIngestService) claimWikiProgressBatch(
 	if limit <= 0 {
 		limit = wikiMaxDocsPerBatch
 	}
-	rows, err := s.pendingRepo.ClaimBatch(
-		ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID, limit,
-		time.Now().Add(-wikiClaimStaleAfter),
-	)
+	var rows []*types.TaskPendingOp
+	var err error
+	if payload.KnowledgeID != "" {
+		// 指定文档仍走同一套持久计划恢复，只限制领取范围；不能退回普通批次。
+		claimer, ok := s.pendingRepo.(interfaces.TaskPendingOpsKnowledgeClaimer)
+		if !ok {
+			return nil, nil, nil, errors.New("wiki ingest: selected document claims are unavailable")
+		}
+		rows, err = claimer.ClaimKnowledge(
+			ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID, payload.KnowledgeID,
+			time.Now().Add(-wikiClaimStaleAfter),
+		)
+	} else {
+		rows, err = s.pendingRepo.ClaimBatch(
+			ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID, limit,
+			time.Now().Add(-wikiClaimStaleAfter),
+		)
+	}
 	if err != nil {
 		return nil, nil, nil, err
 	}

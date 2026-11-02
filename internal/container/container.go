@@ -698,6 +698,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewEvaluationHandler))
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
+	must(container.Provide(service.NewDocumentProgressService))
 	must(container.Provide(handler.NewSystemHandler))
 	// Dig resolves exact types; adapt the registered service to the handler's
 	// narrower SharedAgentLookup interface at the composition boundary.
@@ -2042,6 +2043,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Add(infra_web_search.Spec{
 		Type: "deepseek", Search: infra_web_search.NewDeepSeekProvider, Fetch: infra_web_search.NewDeepSeekFetch,
 	})
+	registry.Add(infra_web_search.Spec{Type: "searchapi", Filters: true, Search: infra_web_search.NewSearchAPIProvider})
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and

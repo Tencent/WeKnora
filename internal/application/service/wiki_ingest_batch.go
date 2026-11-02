@@ -315,6 +315,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "invalid_payload"
 		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
 	}
+	if !validWikiStartKnowledgeID(payload.KnowledgeID) {
+		exitStatus = "invalid_payload"
+		return errors.New("wiki ingest: invalid selected knowledge ID")
+	}
 
 	defer func() {
 		if p := recover(); p != nil {
@@ -477,14 +481,25 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	defer releaseSlot()
 
-	// Standard mode claims rows (marks claimed_at, disjoint across concurrent
-	// batches); Lite mode peeks under its in-process lock.
+	// 持久进度在两种部署模式下都先领取，再恢复计划；指定文档只限制领取范围。
+	// 未启用持久进度时保留主线行为：指定文档按整组领取，普通 Lite 批次只窥视队列。
 	var pendingOps []WikiPendingOp
 	var peekedIDs []int64
 	var loadErr error
 	var progress *wikiProgressBatch
 	if s.progressRepo != nil {
 		pendingOps, peekedIDs, progress, loadErr = s.claimWikiProgressBatch(ctx, payload, batchSize)
+	} else if payload.KnowledgeID != "" {
+		claimer, ok := s.pendingRepo.(interfaces.TaskPendingOpsKnowledgeClaimer)
+		if !ok {
+			return errors.New("wiki ingest: selected document claims are unavailable")
+		}
+		rows, err := claimer.ClaimKnowledge(ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID,
+			payload.KnowledgeID, time.Now().Add(-wikiClaimStaleAfter))
+		loadErr = err
+		if err == nil {
+			pendingOps, peekedIDs = s.decodePendingRows(ctx, rows)
+		}
 	} else if s.redisClient != nil {
 		pendingOps, peekedIDs, loadErr = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
 	} else {
@@ -524,17 +539,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 	}
 
-	// Crash/abort safety net (standard/claim mode only). If this batch exits
-	// abnormally — panic, ctx timeout, or an early error return — BEFORE it
-	// settles its claimed rows (trim + requeueFailedOps), release the claims
-	// so the next trigger can re-claim within seconds instead of waiting out
-	// wikiClaimStaleAfter (~90m). On the normal path claimsSettled flips true
-	// once the rows reach their terminal state, making this a no-op. Uses a
-	// bounded detached cleanup context because ctx may already be cancelled on
-	// the timeout path. Lite mode peeks without claiming, so there is nothing
-	// to release.
+	// 异常退出时释放本轮领取；持久进度按代次清理，不能释放后来接手的新 worker。
+	// 清理使用有界的独立上下文，普通非持久化 Lite 批次没有领取记录。
 	claimsSettled := false
-	if (s.redisClient != nil || progress != nil) && len(peekedIDs) > 0 {
+	if (s.redisClient != nil || progress != nil || payload.KnowledgeID != "") && len(peekedIDs) > 0 {
 		defer func() {
 			if claimsSettled {
 				return
@@ -861,11 +869,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				} else {
 					changed, affectedType, additionFailed, updateDeferred, reduceErr = reduce(reduceCtx, updates)
 				}
-				// 持久化路径的模型错误在下方分类；不能误当成锁获取失败而丢掉限流退避。
-				if progress != nil {
-					return nil
-				}
-				return reduceErr
+				// 归并失败统一交给下方分类；不能当成锁失败而丢掉失败记录和恢复机会。
+				return nil
 			})
 			if lockErr != nil {
 				collectUnapplied(updates)
@@ -1189,6 +1194,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		logger.Warnf(ctx, "wiki ingest: KB %s hit upstream rate limiting, backing off follow-up to %s", payload.KnowledgeBaseID, followUpDelay)
 	}
 	followCtx, followCancel := wikiIngestCleanupContext(ctx)
+	// Follow-up fan-out returns to the ordinary backlog after this selected
+	// document has settled; it must not keep re-arming the consumed key.
+	payload.KnowledgeID = ""
 	followUpScheduled = s.scheduleFollowUp(followCtx, payload, followUpDelay, batchSize, maxInflight, rateLimited)
 	followCancel()
 	return nil
@@ -2120,12 +2128,15 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		if pageSpan == nil {
 			return
 		}
+		// 取消后仍以有界清理上下文记录终态，避免页面 span 留在 running。
+		spanCtx, spanCancel := wikiIngestCleanupContext(ctx)
+		defer spanCancel()
 		if err != nil {
-			s.tracker().FailSpan(ctx, pageSpan, "REDUCE_FAILED", err.Error(), err)
+			s.tracker().FailSpan(spanCtx, pageSpan, "REDUCE_FAILED", err.Error(), err)
 			return
 		}
 		if !changed {
-			s.tracker().SkipSpan(ctx, pageSpan, "no_change")
+			s.tracker().SkipSpan(spanCtx, pageSpan, "no_change")
 			return
 		}
 		out := types.JSONMap{
@@ -2142,10 +2153,58 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			out["chunk_refs"] = len(page.ChunkRefs)
 			out["aliases"] = []string(page.Aliases)
 		}
-		s.tracker().EndSpan(ctx, pageSpan, out)
+		s.tracker().EndSpan(spanCtx, pageSpan, out)
 	}()
 
-	page, err = s.wikiService.GetPageBySlug(ctx, kbID, slug)
+	for attempt := 1; ; attempt++ {
+		if ctx.Err() != nil {
+			return false, "", false, false, ctx.Err()
+		}
+		if attempt > 1 {
+			// 重试重新读取来源存活状态；不重新执行整篇 Map。
+			liveUpdates, err = s.filterLiveUpdates(ctx, kbID, updates)
+			if err != nil {
+				return false, "", false, false, err
+			}
+			// 重试仍绑定原回执的贡献集合，过滤后不能结算被移除的来源。
+			if types.WikiPageProgressCommitFromContext(ctx) != nil && len(liveUpdates) != len(updates) {
+				return false, "", false, false, errWikiPageSourceChanged
+			}
+			updates = liveUpdates
+			if len(updates) == 0 {
+				return false, "", false, false, nil
+			}
+			batchCtx = s.wikiPageRetryContext(kbID, batchCtx)
+		}
+		changed, affectedType, additionFailed, updateDeferred, err = s.reduceSlugUpdatesOnce(
+			ctx, chatModel, kbID, slug, updates, tenantID, batchCtx, &page)
+		if !errors.Is(err, apprepo.ErrWikiPageConflict) || attempt >= wikiPageConflictMaxAttempts {
+			// 未落库的生成结果不能记入成功页面集合。
+			if err != nil {
+				changed = false
+			}
+			return changed, affectedType, additionFailed, updateDeferred, err
+		}
+		logger.Debugf(ctx, "wiki ingest: retrying conflicted page %s (attempt %d/%d)",
+			slug, attempt+1, wikiPageConflictMaxAttempts)
+		if waitErr := waitWikiPageConflictRetry(ctx, attempt); waitErr != nil {
+			return false, "", false, false, waitErr
+		}
+	}
+}
+
+// reduceSlugUpdatesOnce 只计算当前页；保存必须仍对应本次读取的快照。
+// pageResult 供外层唯一的页面 span 记录最终结果，不承载跨尝试的可变状态。
+func (s *wikiIngestService) reduceSlugUpdatesOnce(
+	ctx context.Context, chatModel chat.Chat, kbID, slug string, updates []SlugUpdate,
+	tenantID uint64, batchCtx *WikiBatchContext, pageResult **types.WikiPage,
+) (changed bool, affectedType string, additionFailed bool, updateDeferred bool, err error) {
+	readCtx := context.WithValue(ctx, wikiPageRawReadKey{}, true)
+	page, err := s.wikiService.GetPageBySlug(readCtx, kbID, slug)
+	if ctx.Err() != nil {
+		return false, "", false, false, ctx.Err()
+	}
+	// 持久化路径不能把读取失败当成新页，否则会保存错误的完成回执。
 	if types.WikiPageProgressCommitFromContext(ctx) != nil &&
 		err != nil && !errors.Is(err, apprepo.ErrWikiPageNotFound) {
 		return false, "", false, false, err
@@ -2180,6 +2239,12 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		err = nil
 	}
 
+	*pageResult = page
+	if exists {
+		// 模型生成期间不持锁，真正写入时由仓储再次原子核对。
+		ctx = types.WithWikiPageWriteSnapshot(ctx, page)
+	}
+
 	affectedType = "ingest"
 
 	var summaryUpdate *SlugUpdate
@@ -2211,6 +2276,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		page.ChunkRefs = types.StringArray{}
 		changed = true
 
+		if err = s.checkWikiPageRetrySources(ctx, kbID, updates); err != nil {
+			return false, "", false, false, err
+		}
 		if exists {
 			// A summary rewrite can drop table rows too, and the refusal has
 			// the same meaning here: the page kept its previous body, so this
@@ -2423,6 +2491,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"InstructionScope":        "wiki_content",
 		})
 
+		if ctx.Err() != nil {
+			return false, "", false, false, ctx.Err()
+		}
+
 		// 持久回执不能把模型失败或空输出当作已完成，否则重启后将永远跳过此页。
 		if types.WikiPageProgressCommitFromContext(ctx) != nil &&
 			(err != nil || strings.TrimSpace(updatedContent) == "") {
@@ -2456,10 +2528,8 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			if len(additions) > 0 {
 				additionFailed = true
 			}
-			// Don't propagate the LLM error to the named return: it has
-			// already been logged, and the eg.Go caller would otherwise
-			// log it a second time as "reduce failed for slug".
-			err = nil
+			// Preserve the error so the owning documents are retried rather than
+			// marked complete while their page contribution is missing.
 		}
 	}
 
@@ -2475,6 +2545,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	if changed {
+		if err = s.checkWikiPageRetrySources(ctx, kbID, updates); err != nil {
+			return false, "", false, false, err
+		}
 		// Refresh chunk refs in-place on the page so they persist alongside
 		// the rest of the row. Retract-only updates (no additions) preserve
 		// the existing refs; addition rounds append the newly-cited chunks
@@ -2509,7 +2582,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
-	return false, "", additionFailed, false, nil
+	return false, "", additionFailed, false, err
 }
 
 // classifyWikiPageWrite turns the result of one guarded UpdatePage call into

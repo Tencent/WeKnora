@@ -43,6 +43,10 @@ func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
 	page.Summary = stripWikiInlineChunkCitations(page.Summary)
 }
 
+// wikiPageRawReadKey 仅供归并写入读取原始存储值；展示读取仍移除旧引用标记。
+// 快照必须与数据库原值一致，不能用展示层规范化后的正文作保存前提。
+type wikiPageRawReadKey struct{}
+
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
 	repo            interfaces.WikiPageRepository
@@ -133,6 +137,12 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
+	}
+	// 先拒绝过期模型结果，避免把并发修改误判成行数保护失败。
+	// 仓储会在短事务内再次核对，覆盖这里检查之后的写入竞态。
+	if snapshot, ok := types.WikiPageWriteSnapshotFromContext(ctx); ok &&
+		!types.WikiPageWriteSnapshotMatches(snapshot, existing) {
+		return nil, repository.ErrWikiPageConflict
 	}
 	// 生成过程使用的是最初读取的页面，重读不能把旧结果伪装成基于最新状态的写入。
 	// 元数据变化不递增可见版本，因此持久进度还必须核对完整写入快照。
@@ -297,7 +307,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	}
 
 	// 只删除已消失的边；未变链接仍做幂等补齐，避免旧数据缺失反链时失去修复机会。
-	s.syncInLinks(ctx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
+	// 快照只约束源页保存，不应误用于反链维护涉及的其他页面。
+	linkCtx := types.WithWikiPageWriteSnapshot(ctx, nil)
+	s.syncInLinks(linkCtx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
 
 	return existing, nil
 }
@@ -460,7 +472,9 @@ func (s *wikiPageService) GetPageBySlug(ctx context.Context, kbID string, slug s
 	if err != nil {
 		return nil, err
 	}
-	stripWikiPageInlineChunkCitations(page)
+	if raw, _ := ctx.Value(wikiPageRawReadKey{}).(bool); !raw {
+		stripWikiPageInlineChunkCitations(page)
+	}
 	return page, nil
 }
 

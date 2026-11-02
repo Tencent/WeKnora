@@ -1178,7 +1178,9 @@ func truncateShellStream(s string, limit int) (string, bool) {
 	// on the retained size, so compute it once, then recalculate the final split.
 	marker := fmt.Sprintf("\n...[truncated %d bytes]...\n", len(s)-limit)
 	if len(marker) >= limit {
-		return s[len(s)-limit:], true
+		// Cut at the byte offset, dropping a multi-byte character the cut
+		// splits: invalid UTF-8 reaches the model as U+FFFD.
+		return strings.ToValidUTF8(s[len(s)-limit:], ""), true
 	}
 	kept := limit - len(marker)
 	head := kept / 4
@@ -1191,8 +1193,10 @@ func truncateShellStream(s string, limit int) (string, bool) {
 	}
 	var b strings.Builder
 	b.Grow(limit)
-	b.WriteString(s[:head])
+	// The head and tail cuts land on fixed byte offsets; drop a multi-byte
+	// character a cut splits instead of shipping invalid UTF-8 to the model.
+	b.WriteString(strings.ToValidUTF8(s[:head], ""))
 	b.WriteString(marker)
-	b.WriteString(s[len(s)-tail:])
+	b.WriteString(strings.ToValidUTF8(s[len(s)-tail:], ""))
 	return b.String(), true
 }
