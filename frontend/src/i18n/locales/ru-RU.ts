@@ -5509,7 +5509,7 @@ export default {
       appendMode: 'Добавить',
       replaceMode: 'Заменить существующие записи',
       fileLabel: 'Выберите файл',
-      fileTip: 'Поддерживаются JSON / CSV / Excel. Заголовки CSV/Excel: 标签(必填), 问题(必填), 相似问题(选填-多个用##分隔), 反例问题(选填-多个用##分隔), 机器人回答(必填-多个用##分隔), 是否全部回复(选填-默认FALSE), 是否停用(选填-默认FALSE), 是否禁止被推荐(选填-默认False 可被推荐). Также поддерживаются старый заголовок «分类» и формат: standard_question, answers, similar_questions, negative_questions',
+      fileTip: 'Поддерживаются JSON / CSV / Excel. Заголовки CSV/Excel: Tag (обязательно), Question (обязательно), Similar Questions (необязательно, разделяйте ##), Negative Questions (необязательно, разделяйте ##), Bot Answers (обязательно, разделяйте ##), Reply All (необязательно, по умолчанию FALSE), Disabled (необязательно, по умолчанию FALSE), Exclude from Recommendations (необязательно, по умолчанию FALSE). Также поддерживаются старый заголовок "Category" и формат: standard_question, answers, similar_questions, negative_questions.',
       clickToUpload: 'Нажмите для загрузки файла',
       dragDropTip: 'или перетащите файл сюда',
       importButton: 'Импортировать FAQ',
