@@ -72,7 +72,7 @@ func rollbackGitLabServer(t *testing.T) *httptest.Server {
 				{"old_path":"added.md","new_path":"added.md","deleted_file":true}
 			]}`)
 		case "/api/v4/projects/1/repository/files/README.md/raw":
-			assert.Equal(t, "main", r.URL.Query().Get("ref"))
+			assert.Equal(t, "ancestor", r.URL.Query().Get("ref"))
 			_, _ = fmt.Fprint(w, "# original README")
 		default:
 			http.NotFound(w, r)
