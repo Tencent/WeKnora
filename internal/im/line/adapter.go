@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,8 +38,11 @@ var apiBaseURL = "https://api.line.me"
 // maxTextLength is the LINE text message limit (5,000 characters).
 const maxTextLength = 5000
 
-// Compile-time check.
-var _ im.Adapter = (*Adapter)(nil)
+// Compile-time checks.
+var (
+	_ im.Adapter        = (*Adapter)(nil)
+	_ im.FileDownloader = (*Adapter)(nil)
+)
 
 // Adapter implements im.Adapter for LINE Official Accounts (Messaging API).
 type Adapter struct {
@@ -115,9 +119,11 @@ type eventSource struct {
 }
 
 type eventMessage struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	Text string `json:"text"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	FileName string `json:"fileName,omitempty"`
+	FileSize int64  `json:"fileSize,omitempty"`
 }
 
 // ParseCallback converts a LINE webhook into an IncomingMessage.
@@ -138,20 +144,13 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		if ev.Type != "message" {
 			continue
 		}
-		if ev.Message.Type != "text" {
-			logger.Infof(context.Background(),
-				"[LINE] ignoring unsupported message type %q", ev.Message.Type)
-			continue
-		}
 
 		msg := &im.IncomingMessage{
-			Platform:    im.PlatformLine,
-			MessageType: im.MessageTypeText,
-			UserID:      ev.Source.UserID,
-			Content:     ev.Message.Text,
-			MessageID:   ev.Message.ID, // dedup key: the IM service drops repeats within 5 min
-			ReplyToken:  ev.ReplyToken,
-			ChatType:    im.ChatTypeDirect,
+			Platform:   im.PlatformLine,
+			UserID:     ev.Source.UserID,
+			MessageID:  ev.Message.ID, // dedup key: the IM service drops repeats within 5 min
+			ReplyToken: ev.ReplyToken,
+			ChatType:   im.ChatTypeDirect,
 		}
 
 		switch ev.Source.Type {
@@ -161,6 +160,25 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		case "room":
 			msg.ChatType = im.ChatTypeGroup
 			msg.ChatID = ev.Source.RoomID
+		}
+
+		switch ev.Message.Type {
+		case "text":
+			msg.MessageType = im.MessageTypeText
+			msg.Content = ev.Message.Text
+		case "image":
+			msg.MessageType = im.MessageTypeImage
+			// LINE image messages have no file name; Content API still works by id.
+			msg.FileKey = ev.Message.ID
+		case "file":
+			msg.MessageType = im.MessageTypeFile
+			msg.FileKey = ev.Message.ID
+			msg.FileName = ev.Message.FileName
+			msg.FileSize = ev.Message.FileSize
+		default:
+			logger.Infof(context.Background(),
+				"[LINE] ignoring unsupported message type %q", ev.Message.Type)
+			continue
 		}
 
 		return msg, nil
@@ -239,4 +257,60 @@ func (a *Adapter) post(ctx context.Context, path string, payload any) error {
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	return fmt.Errorf("LINE API %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respBody)))
+}
+
+// contentAPIBaseURL is the LINE Content API host. Attachments live on a
+// different host from the Messaging API. Overridable in tests.
+var contentAPIBaseURL = "https://api-data.line.me"
+
+// DownloadFile fetches an image or file attachment via the LINE Content API.
+// LINE returns the raw bytes directly, so there is no URL exchange step.
+func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
+	if msg.FileKey == "" {
+		return nil, "", fmt.Errorf("LINE: message id is required to download content")
+	}
+
+	endpoint := fmt.Sprintf("%s/v2/bot/message/%s/content", contentAPIBaseURL, url.PathEscape(msg.FileKey))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("build content request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+a.channelAccessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("download LINE content: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, "", fmt.Errorf("LINE content API returned %d: %s",
+			resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	name := msg.FileName
+	if name == "" {
+		// LINE image messages carry no file name; the content type is the only hint.
+		name = msg.FileKey + extensionFromContentType(resp.Header.Get("Content-Type"))
+	}
+	return resp.Body, name, nil
+}
+
+// extensionFromContentType maps a response content type to a file extension.
+func extensionFromContentType(contentType string) string {
+	ct := strings.ToLower(contentType)
+	switch {
+	case strings.Contains(ct, "jpeg"):
+		return ".jpg"
+	case strings.Contains(ct, "png"):
+		return ".png"
+	case strings.Contains(ct, "gif"):
+		return ".gif"
+	case strings.Contains(ct, "webp"):
+		return ".webp"
+	case strings.Contains(ct, "pdf"):
+		return ".pdf"
+	default:
+		return ""
+	}
 }
