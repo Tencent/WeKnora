@@ -32,6 +32,7 @@ import {
   findInText,
   sourceQuoteText,
   type SourceLocateRequest,
+  type SourceLocator,
 } from '@/utils/sourceLocator';
 import {
   buildTextIndex,
@@ -41,6 +42,7 @@ import {
   rangeForOffsets,
   scrollRectIntoContainer,
 } from '@/utils/sourceLocatorDom';
+import { matchSpreadsheetSourceRows, spreadsheetScopeCovered } from '@/utils/spreadsheetSource';
 import { renderEpubPreview } from '@/utils/epubPreview';
 
 
@@ -724,27 +726,58 @@ function sheetRows(table: Element): Map<number, Element> {
 function locateExcel(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
-  const locators = request.locators.filter((l) => l.type === 'sheet' && l.mapping === 'exact' && !l.partial && l.row_start);
+  const locators = request.locators.filter((l) => l.type === 'sheet' && l.mapping === 'exact');
   const targets: Element[] = [];
+  const verified: SourceLocator[] = [];
+  let missed = false;
   for (const loc of locators) {
     const byName = loc.sheet ? excelSheetNames.indexOf(loc.sheet) : -1;
-    if (byName < 0) continue;
+    if (byName < 0) {
+      missed = true;
+      continue;
+    }
     const sheetIdx = byName;
-    const table = box.querySelector(`#user-content-sheet-${sheetIdx}`) || box.querySelector(`#sheet-${sheetIdx}`);
-    if (!table) continue;
+    const table =
+      box.querySelector(`#user-content-sheet-${sheetIdx}`) ||
+      box.querySelector(`#sheet-${sheetIdx}`);
+    if (!table) {
+      missed = true;
+      continue;
+    }
     const rows = sheetRows(table);
-    const last = Math.min(loc.row_end || loc.row_start || 0, (loc.row_start || 0) + 200);
-    for (let r = loc.row_start as number; r <= last; r++) {
-      const tr = rows.get(r);
+    const sourceRows = [...rows]
+      .filter(
+        ([number]) =>
+          number >= (loc.row_start || 0) && number <= (loc.row_end ?? loc.row_start ?? 0),
+      )
+      .map(([number, row]) => ({ number, text: buildTextIndex(row).text }));
+    const matched = matchSpreadsheetSourceRows(loc, sourceRows);
+    if (!matched.length) {
+      missed = true;
+      continue;
+    }
+    verified.push(loc);
+    // Bound the number of marks, counting only rows covered by the quote.
+    if (matched.length > 201) missed = true;
+    for (const row of matched.slice(0, 201)) {
+      const tr = rows.get(row.number);
       if (tr && !targets.includes(tr)) targets.push(tr);
     }
   }
   if (targets.length) {
     commitMarks([], targets);
     reveal(box, targets[0]);
-    return { found: true, precise: false, granularity: 'block' };
+    const complete = !missed && spreadsheetScopeCovered(request, verified);
+    return {
+      found: true,
+      precise: false,
+      granularity: 'block',
+      ...(!complete ? { reason: 'partial' } : {}),
+    };
   }
-  return locateQuote(box, box, evidenceQuotes(request));
+  // Known sheet mappings must not fall back to identical text in another
+  // sheet. Historical citations without structural evidence still use text.
+  return locators.length ? NOT_FOUND : locateQuote(box, box, evidenceQuotes(request));
 }
 
 function locateEpub(request: SourceLocateRequest): SourceLocateResult {
