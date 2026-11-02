@@ -23,6 +23,21 @@ import (
 
 type MCPInput = map[string]any
 
+// decodeMCPInput retains JSON numbers until the transport serializes them.
+// Decoding through float64 would change large IDs and precise decimal values
+// after schema validation or human approval.
+func decodeMCPInput(args json.RawMessage) (MCPInput, error) {
+	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(args))
+	if err != nil {
+		return nil, err
+	}
+	input, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("MCP arguments must be an object")
+	}
+	return input, nil
+}
+
 // MCPTool wraps an MCP service tool to implement the Tool interface
 type MCPTool struct {
 	service    *types.MCPService
@@ -161,8 +176,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	}
 
 	// Parse args from json.RawMessage
-	var input MCPInput
-	if err := json.Unmarshal(args, &input); err != nil {
+	input, err := decodeMCPInput(args)
+	if err != nil {
 		logger.Errorf(ctx, "[Tool][MCPTool] Failed to parse args: %v", err)
 		return &types.ToolResult{
 			Success: false,
@@ -282,8 +297,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						}, nil
 					}
 					// Approved replacements must not retain keys from the old object.
-					input = nil
-					if err := json.Unmarshal(args, &input); err != nil {
+					input, err = decodeMCPInput(args)
+					if err != nil {
 						return &types.ToolResult{
 							Success: false,
 							Error:   fmt.Sprintf("Invalid modified_args after approval: %v", err),
