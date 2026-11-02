@@ -1008,14 +1008,23 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 			backendID = strings.TrimSpace(*kb.StorageBackendID)
 		}
 	}
+	// The file lives in the storage backend of the tenant that owns the
+	// knowledge, which is not necessarily the tenant making the request: a
+	// knowledge base shared across tenants is authorized upstream and loaded
+	// through GetKnowledgeByIDOnly. Backend resolution is tenant-scoped, so
+	// resolving with the viewer tenant misses the owner's backend and falls
+	// back to a file service that cannot open the file.
+	ownerTenantID := knowledge.TenantID
+	if kb != nil && kb.TenantID != 0 {
+		ownerTenantID = kb.TenantID
+	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant == nil {
-		tenantID := uint64(0)
-		if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
-			tenantID = tid
-		}
-		if tenantID == 0 && kb != nil {
-			tenantID = knowledge.TenantID
+	if tenant == nil || (ownerTenantID != 0 && tenant.ID != ownerTenantID) {
+		tenantID := ownerTenantID
+		if tenantID == 0 {
+			if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+				tenantID = tid
+			}
 		}
 		if tenantID > 0 && t.tenantService != nil {
 			resolvedTenant, err := t.tenantService.GetTenantByID(ctx, tenantID)
