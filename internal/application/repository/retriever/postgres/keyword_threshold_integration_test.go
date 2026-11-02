@@ -53,15 +53,19 @@ func TestKeywordsRetrieveThresholdParadeDB(t *testing.T) {
 		"少女 春天 花园",
 		"少女 背景 描述 天空 山川 湖泊 公园 城市 音乐 交通 建筑",
 	} {
-		require.NoError(t, db.Exec(`INSERT INTO embeddings(content,source_id,source_type,chunk_id,knowledge_id,knowledge_base_id,is_enabled)
+		require.NoError(t, db.Exec(`INSERT INTO embeddings(
+		content,source_id,source_type,chunk_id,knowledge_id,knowledge_base_id,is_enabled)
 			VALUES (?, ?, 0, ?, 'doc', 'kb', true)`, text, fmt.Sprint(i), fmt.Sprint(i)).Error)
 	}
-	require.NoError(t, db.Exec(`INSERT INTO embeddings(content,source_id,source_type,chunk_id,knowledge_id,knowledge_base_id,is_enabled)
+	require.NoError(t, db.Exec(`INSERT INTO embeddings(
+		content,source_id,source_type,chunk_id,knowledge_id,knowledge_base_id,is_enabled)
 		SELECT '数据库 索引 网络 存储', n::text, 0, n::text, 'other', 'kb', true FROM generate_series(10,100) n`).Error)
 	// A disabled row and a better match outside the requested KB must not
 	// influence either the candidate set or its normalization denominator.
-	require.NoError(t, db.Exec(`INSERT INTO embeddings(content,source_id,source_type,chunk_id,knowledge_id,knowledge_base_id,is_enabled)
-		VALUES ('少女','disabled',0,'disabled','doc','kb',false), ('少女','foreign',0,'foreign','doc','foreign',true)`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO embeddings(
+		content,source_id,source_type,chunk_id,knowledge_id,knowledge_base_id,is_enabled)
+		VALUES ('少女','disabled',0,'disabled','doc','kb',false),
+		('少女','foreign',0,'foreign','doc','foreign',true)`).Error)
 	repo := &pgRepository{db: db}
 	params := types.RetrieveParams{Query: "少女", KnowledgeBaseIDs: []string{"kb"}, TopK: 10}
 	baseline, err := repo.KeywordsRetrieve(context.Background(), params)

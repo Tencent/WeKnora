@@ -38,7 +38,9 @@ func TestKeywordsRetrieveThreshold(t *testing.T) {
 					for i, score := range tc.scores {
 						rows.AddRow(i+1, fmt.Sprintf("chunk-%d", i), score)
 					}
-					mock.ExpectQuery(`SELECT `+regexp.QuoteMeta(scoreFunction)+`\(id\) as score.*FROM "embeddings".*content \|\|\|.*ORDER BY "score" DESC LIMIT`).
+					query := `SELECT ` + regexp.QuoteMeta(scoreFunction) +
+						`\(id\) as score.*FROM "embeddings".*content \|\|\|.*ORDER BY "score" DESC LIMIT`
+					mock.ExpectQuery(query).
 						WithArgs("kb-1", "少女", true, 10).WillReturnRows(rows)
 					got, err := repo.Retrieve(context.Background(), types.RetrieveParams{
 						Query: "少女", KnowledgeBaseIDs: []string{"kb-1"}, TopK: 10,
