@@ -146,7 +146,7 @@ func TestApprovalDoesNotReadAScriptOutsideTheWritableScope(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Empty(t, user.requests[0].Scripts)
-	require.False(t, user.requests[0].ScriptsIncomplete)
+	require.True(t, user.requests[0].ScriptsIncomplete)
 }
 
 // A command may write /tmp, but the guard cannot read it back to show it.

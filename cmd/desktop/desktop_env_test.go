@@ -30,7 +30,8 @@ func TestDesktopConfigRootPrefersThePackagedResources(t *testing.T) {
 func TestDesktopConfigRootFindsTheRepoFromADevBundle(t *testing.T) {
 	repo := t.TempDir()
 	writeConfig(t, repo)
-	exe := filepath.Join(repo, "cmd", "desktop", "build", "bin", "WeKnora Lite.app", "Contents", "MacOS", "WeKnora Lite")
+	exe := filepath.Join(repo, "cmd", "desktop", "build", "bin",
+		"WeKnora Lite.app", "Contents", "MacOS", "WeKnora Lite")
 
 	root, ok := desktopConfigRoot(exe)
 	require.True(t, ok)

@@ -35,7 +35,7 @@ func (s *Service) StartForSession(ctx context.Context, req RunRequest) (Process,
 		if refused.Notice == dangerousDeleteNotice {
 			return nil, fmt.Errorf("%w: %s", ErrAsyncCommandRefused, refused.Notice)
 		}
-		return nil, fmt.Errorf("%w: %s Run it with shell_exec, which can ask for approval.",
+		return nil, fmt.Errorf("%w: %s run it with shell_exec, which can ask for approval",
 			ErrAsyncCommandRefused, refused.Notice)
 	}
 	return s.Start(ctx, policy, req)

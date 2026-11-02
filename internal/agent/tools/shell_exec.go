@@ -1341,7 +1341,8 @@ func shellInlineScript(args []string) (string, bool) {
 		if arg == "--" {
 			return "", false
 		}
-		if arg == "-c" || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.ContainsRune(arg, 'c')) {
+		if arg == "-c" || (strings.HasPrefix(arg, "-") &&
+			!strings.HasPrefix(arg, "--") && strings.ContainsRune(arg, 'c')) {
 			if i+1 >= len(args) {
 				return "", false
 			}

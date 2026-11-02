@@ -85,10 +85,12 @@ func (r *Reviewer) review(ctx context.Context, turn Turn, req sandbox.CommandApp
 	// Only this turn can authorize. An empty current list would leave the
 	// model guessing from earlier messages or the untrusted action.
 	if turn.RequestID == "" || len(current) == 0 {
-		return Verdict{Reason: "auto review could not identify this turn's user messages; ask the user to switch to ask mode"}
+		return Verdict{Reason: "auto review could not identify this turn's user messages; " +
+			"ask the user to switch to ask mode"}
 	}
 	if currentTurnTooLong(current) {
-		return Verdict{Reason: "this turn's messages are too long to review automatically; ask the user to switch to ask mode"}
+		return Verdict{Reason: "this turn's messages are too long to review automatically; " +
+			"ask the user to switch to ask mode"}
 	}
 	prompt, err := buildUserPrompt(current, earlier, req)
 	if err != nil {

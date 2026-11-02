@@ -317,7 +317,9 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 			return append(append([]byte(nil), current...), chunk...), nil
 		}
 		var refusal string
-		ctx, refusal = authorizeHostWrite(ctx, t.sink, t.approvals, ToolWriteSandboxFile, sessionID, clean, mode, apply, "")
+		ctx, refusal = authorizeHostWrite(
+			ctx, t.sink, t.approvals, ToolWriteSandboxFile, sessionID, clean, mode, apply, "",
+		)
 		if refusal != "" {
 			return &types.ToolResult{Success: false, Error: refusal}, nil
 		}

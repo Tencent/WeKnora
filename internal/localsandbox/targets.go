@@ -104,13 +104,12 @@ func (s *Service) describeScripts(policy Policy, review, cwd string) ([]ScriptFa
 			target = filepath.Join(cwd, target)
 		}
 		target = filepath.Clean(target)
-		// The sandbox lets a command write /tmp, but the guard cannot read it.
-		if PathUnder(target, "/tmp") || PathUnder(target, "/private/tmp") {
+		resolved, err := guard.CheckWrite(target)
+		if err != nil {
 			incomplete = true
 			continue
 		}
-		resolved, err := guard.CheckWrite(target)
-		if err != nil || seen[resolved] {
+		if seen[resolved] {
 			continue
 		}
 		seen[resolved] = true

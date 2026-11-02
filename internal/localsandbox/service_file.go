@@ -151,7 +151,8 @@ func readForChange(guard *PathGuard, path, mode string) ([]byte, bool, error) {
 		return nil, true, nil
 	}
 	if info.Size() > maxFileChangeReadBytes {
-		return nil, true, fmt.Errorf("file too large to %s (%d bytes; max %d)", mode, info.Size(), maxFileChangeReadBytes)
+		return nil, true, fmt.Errorf("file too large to %s (%d bytes; max %d)",
+			mode, info.Size(), maxFileChangeReadBytes)
 	}
 	data, err := guard.ReadFile(path)
 	if err != nil {

@@ -67,7 +67,7 @@ type hostUserApprover struct {
 	tenantID uint64
 }
 
-func requestIDOf(meta *ToolExecContext, ctx context.Context) string {
+func requestIDOf(ctx context.Context, meta *ToolExecContext) string {
 	if meta != nil && meta.RequestID != "" {
 		return meta.RequestID
 	}
@@ -83,7 +83,7 @@ func (a hostUserApprover) ApproveCommand(
 		UserID:             a.meta.UserID,
 		SessionID:          req.SessionID,
 		AssistantMessageID: a.meta.AssistantMessageID,
-		RequestID:          requestIDOf(a.meta, ctx),
+		RequestID:          requestIDOf(ctx, a.meta),
 		ToolCallID:         a.meta.ToolCallID,
 		EventBus:           a.meta.EventBus,
 		Tool:               req.Tool,
@@ -119,7 +119,7 @@ func (a hostModelApprover) ApproveCommand(
 ) (sandbox.CommandApprovalDecision, error) {
 	pendingID := uuid.New().String()
 	host := hostPayload(req, "model")
-	requestID := requestIDOf(a.meta, ctx)
+	requestID := requestIDOf(ctx, a.meta)
 	a.emit(ctx, event.EventToolApprovalRequired, pendingID+"-approval-required", event.ToolApprovalRequiredData{
 		PendingID: pendingID, SessionID: req.SessionID, AssistantMessageID: a.meta.AssistantMessageID,
 		RegisteredToolName: req.Tool, ToolCallID: a.meta.ToolCallID, RequestID: requestID,
@@ -136,7 +136,7 @@ func (a hostModelApprover) ApproveCommand(
 // emit records the review; a failed emit only loses the timeline row.
 func (a hostModelApprover) emit(ctx context.Context, typ event.EventType, id string, data interface{}) {
 	_ = a.meta.EventBus.Emit(ctx, event.Event{
-		ID: id, Type: typ, SessionID: a.meta.SessionID, Data: data, RequestID: requestIDOf(a.meta, ctx),
+		ID: id, Type: typ, SessionID: a.meta.SessionID, Data: data, RequestID: requestIDOf(ctx, a.meta),
 		Metadata: map[string]interface{}{"assistant_message_id": a.meta.AssistantMessageID},
 	})
 }

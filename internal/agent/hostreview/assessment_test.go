@@ -21,8 +21,16 @@ func TestVerdictNeedsAllowLowRiskAndAuthorization(t *testing.T) {
 		{`{"risk_level":"low","user_authorization":"high","outcome":"deny","rationale":"no"}`, false},
 		{`noise {"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ok"} tail`, false},
 		{"tried {\"risk_level\":\"low\",\"user_authorization\":\"high\",\"outcome\":\"allow\"} but I deny", false},
-		{"```json\n{\"risk_level\":\"low\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"ok\"}\n```", true},
-		{"```json\n{\"risk_level\":\"low\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"ok\"}\n```\nbut I deny", false},
+		{
+			"```json\n" + `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ok"}` +
+				"\n```",
+			true,
+		},
+		{
+			"```json\n" + `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ok"}` +
+				"\n```\nbut I deny",
+			false,
+		},
 		{`not json`, false},
 		{``, false},
 		{`{"risk_level":"low","user_authorization":"high","rationale":"no outcome"}`, false},
