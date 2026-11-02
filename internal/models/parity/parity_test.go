@@ -440,6 +440,8 @@ func TestLegacyProviderDetection(t *testing.T) {
 		"https://open.bigmodel.cn/api/paas/v4":              "zhipu",
 		"https://openrouter.ai/api/v1":                      "openrouter",
 		"https://router.requesty.ai/v1":                     "requesty",
+		"https://opencode.ai/inference/openai/v1":           "opencode_zen",
+		"https://opencode.ai/inference/go/openai/v1":        "opencode_go",
 		"https://api.siliconflow.cn/v1":                     "siliconflow",
 		"https://api.jina.ai/v1":                            "jina",
 		"https://my-resource.openai.azure.com":              "azure_openai",

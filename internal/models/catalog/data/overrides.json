@@ -2122,6 +2122,134 @@
           "dimensions_field": ""
         }
       }
+    ],
+    "opencode_zen": [
+      {
+        "id": "gpt-6-astra",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-6-sol",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-6.1-sol",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-6-luna",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.5",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.5-pro",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.4",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.4-pro",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.4-mini",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.4-nano",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.3-codex",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.3-codex-spark",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.2",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.1",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5-nano",
+        "api": "openai-responses"
+      },
+      {
+        "id": "grok-4.7",
+        "api": "openai-responses"
+      },
+      {
+        "id": "grok-4.6",
+        "api": "openai-responses"
+      },
+      {
+        "id": "grok-4.5",
+        "api": "openai-responses"
+      },
+      {
+        "id": "grok-build-0.1",
+        "api": "openai-responses"
+      },
+      {
+        "id": "muse-wonder-1.0",
+        "api": "openai-responses"
+      },
+      {
+        "id": "muse-spark-1.3",
+        "api": "openai-responses"
+      },
+      {
+        "id": "muse-spark-1.2",
+        "api": "openai-responses"
+      }
+    ],
+    "opencode_go": [
+      {
+        "id": "grok-4.7",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-6-luna",
+        "api": "openai-responses"
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "api": "openai-responses"
+      },
+      {
+        "id": "muse-spark-1.3-contributor",
+        "api": "openai-responses"
+      },
+      {
+        "id": "muse-spark-1.2-contributor",
+        "api": "openai-responses"
+      }
     ]
   }
 }

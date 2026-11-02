@@ -281,7 +281,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 30 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -308,6 +308,8 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | OpenRouter | `openrouter` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
+| OpenCode Zen | `opencode_zen` | ✓ | | | | |
+| OpenCode Go | `opencode_go` | ✓ | | | | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -345,6 +347,17 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 [Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
 拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
 超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
+
+### OpenCode Zen / OpenCode Go
+
+[OpenCode Zen](https://opencode.ai/docs/zen/)（按量付费）和 [OpenCode Go](https://opencode.ai/docs/go/)（订阅制）是两个 OpenAI 兼容网关，使用 OpenCode Console 的 API Key（`Authorization: Bearer`），仅提供对话模型。新增对话模型时选择 **OpenCode Zen** 或 **OpenCode Go**，填写 API Key 和模型 ID 即可：
+
+| 厂商 | ID | 默认地址 |
+| --- | --- | --- |
+| OpenCode Zen | `opencode_zen` | `https://opencode.ai/inference/openai/v1` |
+| OpenCode Go | `opencode_go` | `https://opencode.ai/inference/go/openai/v1` |
+
+协议按 OpenCode 文档的端点表逐个模型确定：GPT、Grok、Muse 系列走 `/responses`，其余模型走 `/chat/completions`（输出上限字段为 `max_tokens`，与 generic 厂商一致）。只在 Anthropic / Google 原生路由上提供的模型（Claude、Gemini 等）不在这两个预设的目录里，可改用对应协议的厂商接入。两者同在 `opencode.ai` 域名下，按地址识别厂商时，路径含 `/inference/go/` 的地址识别为 Go，其余 `opencode.ai` 地址识别为 Zen。
 
 ## 设置空间默认模型 {#workspace-defaults}
 

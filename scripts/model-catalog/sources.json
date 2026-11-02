@@ -26,7 +26,9 @@
       "novita": "novita-ai",
       "nvidia": "nvidia",
       "openrouter": "openrouter",
-      "requesty": "requesty"
+      "requesty": "requesty",
+      "opencode_zen": "opencode",
+      "opencode_go": "opencode-go"
     }
   }
 }

@@ -4794,6 +4794,729 @@
         "context_window": 4096,
         "source": "https://docs.cohere.com/docs/models#rerank"
       }
+    ],
+    "opencode_zen": [
+      {
+        "id": "gpt-6-astra",
+        "name": "GPT 6 Astra",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-6-sol",
+        "name": "GPT 6 Sol",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-6.1-sol",
+        "name": "GPT 6.1 Sol",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-6-luna",
+        "name": "GPT 6 Luna",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "name": "GPT 5.6 Sol",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "name": "GPT 5.6 Terra",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "name": "GPT 5.6 Luna",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.5",
+        "name": "GPT 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.5-pro",
+        "name": "GPT 5.5 Pro",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.4",
+        "name": "GPT 5.4",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.4-pro",
+        "name": "GPT 5.4 Pro",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.4-mini",
+        "name": "GPT 5.4 Mini",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.4-nano",
+        "name": "GPT 5.4 Nano",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.3-codex",
+        "name": "GPT 5.3 Codex",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.3-codex-spark",
+        "name": "GPT 5.3 Codex Spark",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 128000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.2",
+        "name": "GPT 5.2",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5.1",
+        "name": "GPT 5.1",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5",
+        "name": "GPT 5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "gpt-5-nano",
+        "name": "GPT 5 Nano",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "grok-4.7",
+        "name": "Grok 4.7",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 500000,
+        "max_output_tokens": 500000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "grok-4.6",
+        "name": "Grok 4.6",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 500000,
+        "max_output_tokens": 500000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "grok-4.5",
+        "name": "Grok 4.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 500000,
+        "max_output_tokens": 500000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "grok-build-0.1",
+        "name": "Grok Build 0.1",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 256000,
+        "max_output_tokens": 256000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "muse-wonder-1.0",
+        "name": "Muse Wonder 1.0",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "muse-spark-1.3",
+        "name": "Muse Spark 1.3",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "muse-spark-1.2",
+        "name": "Muse Spark 1.2",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "qwen3.8-max",
+        "name": "Qwen3.8 Max",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 262144,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "deepseek-v4.1-flash",
+        "name": "DeepSeek V4.1 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "minimax-m3",
+        "name": "MiniMax M3",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 512000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "minimax-m2.7",
+        "name": "MiniMax M2.7",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 204800,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "glm-5.3-flash",
+        "name": "GLM 5.3 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "glm-5.3",
+        "name": "GLM 5.3",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "glm-5.2",
+        "name": "GLM 5.2",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "glm-5.1",
+        "name": "GLM 5.1",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 204800,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "kimi-k2.6",
+        "name": "Kimi K2.6",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 262144,
+        "max_output_tokens": 65536,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "name": "Kimi K2.7 Code",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 262144,
+        "max_output_tokens": 262144,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "kimi-k3",
+        "name": "Kimi K3",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/zen/"
+      },
+      {
+        "id": "mistral-large-4",
+        "name": "Mistral Large 4",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 524288,
+        "max_output_tokens": 262144,
+        "source": "https://opencode.ai/docs/zen/"
+      }
+    ],
+    "opencode_go": [
+      {
+        "id": "grok-4.7",
+        "name": "Grok 4.7",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 500000,
+        "max_output_tokens": 500000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "gpt-6-luna",
+        "name": "GPT 6 Luna",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "name": "GPT 5.6 Luna",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "glm-5.3-flash",
+        "name": "GLM-5.3-Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "glm-5.3",
+        "name": "GLM-5.3",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "glm-5.2",
+        "name": "GLM-5.2",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "kimi-k3.1-pro",
+        "name": "Kimi K3.1 Pro",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "kimi-k3",
+        "name": "Kimi K3",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "name": "Kimi K2.7 Code",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 262144,
+        "max_output_tokens": 262144,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "longcat-2.0",
+        "name": "LongCat-2.0",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "deepseek-v4.1-flash",
+        "name": "DeepSeek V4.1 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 384000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "mimo-v2.6-flash",
+        "name": "MiMo-V2.6-Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "mimo-v2.6-pro",
+        "name": "MiMo-V2.6-Pro",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "mimo-v2.5",
+        "name": "MiMo-V2.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "mimo-v2.5-pro",
+        "name": "MiMo-V2.5-Pro",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "minimax-m3.1-flash",
+        "name": "MiniMax M3.1 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 512000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "muse-spark-1.3-contributor",
+        "name": "Muse Spark 1.3 Contributor",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "muse-spark-1.2-contributor",
+        "name": "Muse Spark 1.2 Contributor",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "hy4-preview",
+        "name": "Hy4 preview",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1024000,
+        "max_output_tokens": 64000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "hy3",
+        "name": "Hy3",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 256000,
+        "max_output_tokens": 128000,
+        "source": "https://opencode.ai/docs/go/"
+      },
+      {
+        "id": "step-5-preview",
+        "name": "Step 5 Preview",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 65536,
+        "source": "https://opencode.ai/docs/go/"
+      }
     ]
   }
 }
