@@ -3827,6 +3827,13 @@ interface GNode {
   familiar: boolean
   labelWidth: number
 }
+interface GraphNodeElement {
+  g: SVGGElement
+  circle: SVGCircleElement
+  text: SVGTextElement
+  activeRing: SVGCircleElement
+  node: GNode
+}
 
 // Persistent graph state so it survives re-renders
 let graphNodes: GNode[] = []
@@ -4230,7 +4237,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   }
 
   // Create SVG elements for nodes
-  const nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[] = []
+  const nodeEls: GraphNodeElement[] = []
   for (const n of graphNodes) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
@@ -4617,7 +4624,7 @@ function setupDrag(
   g: SVGGElement, node: GNode,
   nodeMap: Map<string, GNode>,
   edgeEls: { line: SVGLineElement; source: string; target: string; bidir: boolean }[],
-  nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[],
+  nodeEls: GraphNodeElement[],
   nodeRadius: (n: GNode) => number,
 ) {
   let dragging = false
@@ -4922,7 +4929,7 @@ function applyGraphGroupClasses(
 function applyHighlight(
   slug: string,
   adjacency: Map<string, Set<string>>,
-  nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[],
+  nodeEls: GraphNodeElement[],
   edgeEls: { line: SVGLineElement; source: string; target: string; bidir: boolean }[],
   hoverSlug?: string
 ) {
@@ -4949,7 +4956,7 @@ function applyHighlight(
     ?? nodeEls[0]?.g.parentElement?.parentElement) as SVGGElement | null
   graphRoot?.classList.add('is-highlighting')
   graphRoot?.classList.remove('is-group-focused')
-  const nodeElsBySlug = new Map<string, typeof nodeEls[number]>(nodeEls.map(node => [node.node.slug, node]))
+  const nodeElsBySlug = new Map<string, GraphNodeElement>(nodeEls.map(node => [node.node.slug, node]))
   const contextSlugs = new Set([...next].filter(([, state]) => state !== 'dimmed').map(([slug]) => slug))
   if (previous) {
     for (const [slug, state] of previous.nodes) {
@@ -5027,10 +5034,10 @@ function setEdgeMarkers(e: { line: SVGLineElement; bidir: boolean }, suffix = ''
 }
 
 function clearHighlight(
-  nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[],
+  nodeEls: GraphNodeElement[],
   edgeEls: { line: SVGLineElement; source: string; target: string; bidir: boolean }[],
 ) {
-  const nodeElsBySlug = new Map(nodeEls.map(node => [node.node.slug, node]))
+  const nodeElsBySlug = new Map<string, GraphNodeElement>(nodeEls.map(node => [node.node.slug, node]))
   if (graphSelectedSlug.value) {
     applyHighlight(graphSelectedSlug.value, graphAdjacencyRef, nodeEls, edgeEls)
     return
