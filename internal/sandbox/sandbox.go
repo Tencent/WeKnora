@@ -458,7 +458,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Type:            SandboxTypeDisabled,
 		DefaultTimeout:  DefaultTimeout,
-		DockerImage:     DefaultDockerImage,
+		DockerImage:     StandardDockerImage(),
 		MaxMemory:       DefaultMemoryLimit,
 		MaxCPU:          DefaultCPULimit,
 		CubeSandboxTTL:  DefaultCubeSandboxTTL,
