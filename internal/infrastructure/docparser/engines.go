@@ -199,11 +199,13 @@ func (e *mineruEngine) Name() string { return MinerUEngineName }
 
 func (e *mineruEngine) Description() string { return "MinerU self-hosted service" }
 
-// FileTypes lists what a self-hosted MinerU can parse. Spreadsheets are native
-// Office inputs: xlsx since MinerU 3.1 and xls/xlsx in the 4.x V1 API, listed
-// the same way as pptx. mineru_cloud is intentionally left unchanged.
+// FileTypes lists what a self-hosted MinerU can parse. xlsx is a native Office
+// input since MinerU 3.1.0, listed the same way as pptx. xls is deliberately
+// not listed: only the 4.x docs name it, and this engine cannot detect the
+// server version, so an older server would fail at parse time. mineru_cloud is
+// intentionally left unchanged.
 func (e *mineruEngine) FileTypes(_ bool) []string {
-	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx", "xls", "xlsx"}
+	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx", "xlsx"}
 }
 
 func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
