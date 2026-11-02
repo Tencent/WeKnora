@@ -55,6 +55,9 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		rt := extractRichText(block.RawContent)
 		text := renderRichText(rt)
 		b.WriteString(indent + text + "\n\n")
+		if len(block.Children) > 0 {
+			renderBlocks(b, block.Children, depth, attachments)
+		}
 
 	case "heading_1", "heading_2", "heading_3", "heading_4":
 		level := int(block.Type[len(block.Type)-1] - '0')
@@ -91,6 +94,9 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 			checkbox = "[x]"
 		}
 		b.WriteString(fmt.Sprintf("%s- %s %s\n", indent, checkbox, renderRichText(rt)))
+		if len(block.Children) > 0 {
+			renderBlocks(b, block.Children, depth+1, attachments)
+		}
 
 	case "toggle":
 		rt := extractRichText(block.RawContent)
