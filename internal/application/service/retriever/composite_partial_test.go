@@ -44,9 +44,10 @@ func compositeWith(engine *cannedEngine) *CompositeRetrieveEngine {
 
 func keywordsParams(query string) []types.RetrieveParams {
 	return []types.RetrieveParams{{
-		Query:         query,
-		TopK:          10,
-		RetrieverType: types.KeywordsRetrieverType,
+		Query:            query,
+		KnowledgeBaseIDs: []string{"kb-1"},
+		TopK:             10,
+		RetrieverType:    types.KeywordsRetrieverType,
 	}}
 }
 
@@ -116,8 +117,8 @@ func TestCompositeRetrieveKeepsVectorResultsWhenKeywordSearchFails(t *testing.T)
 	}
 
 	results, err := compositeWith(engine).Retrieve(context.Background(), []types.RetrieveParams{
-		{Query: "q", TopK: 10, RetrieverType: types.VectorRetrieverType},
-		{Query: "q", TopK: 10, RetrieverType: types.KeywordsRetrieverType},
+		{Query: "q", KnowledgeBaseIDs: []string{"kb-1"}, TopK: 10, RetrieverType: types.VectorRetrieverType},
+		{Query: "q", KnowledgeBaseIDs: []string{"kb-1"}, TopK: 10, RetrieverType: types.KeywordsRetrieverType},
 	})
 
 	require.ErrorIs(t, err, cause)

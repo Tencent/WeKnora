@@ -724,6 +724,9 @@ func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (s
 func (m *milvusRepository) Retrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	log := logger.GetLogger(ctx)
 	log.Debugf("[Milvus] Processing retrieval request of type: %s", params.RetrieverType)
 
