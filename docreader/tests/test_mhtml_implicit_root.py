@@ -41,6 +41,25 @@ class MHTMLImplicitRootTest(unittest.TestCase):
         self.assertIn("Actual article", parse(archive()).content)
         self.assertNotIn("Frame content", parse(archive()).content)
 
+    def test_real_markdown_render_preserves_article_and_embedded_image(self):
+        msg = archive()
+        root = msg.get_payload()[0]
+        root.set_content('<h1>Actual article</h1><p>Root body</p><img src="figure.png" alt="Figure">', subtype="html")
+        root["Content-Location"] = "https://example.test/docs/page.html"
+        image = EmailMessage()
+        image.set_content(b"image fixture", maintype="image", subtype="png")
+        image["Content-Location"] = "https://example.test/docs/figure.png"
+        msg.attach(image)
+
+        # No mock: exercise MIME parsing, root selection, image alias lookup,
+        # BeautifulSoup and markdownify together.
+        result = MHTMLParser(file_name="page.mhtml").parse_into_text(msg.as_bytes())
+        self.assertIn("# Actual article", result.content)
+        self.assertIn("Root body", result.content)
+        self.assertIn("![Figure](images/figure.png)", result.content)
+        self.assertNotIn("Frame content", result.content)
+        self.assertEqual(result.metadata["image_count"], 1)
+
     def test_first_alternative_uses_html(self):
         self.assertIn("Actual article", parse(archive(root_kind="alternative")).content)
 
