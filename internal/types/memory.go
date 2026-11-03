@@ -1004,6 +1004,10 @@ const (
 	// MemoryConsolidationSkipModelDeclined: the model looked and said these
 	// records are different things after all.
 	MemoryConsolidationSkipModelDeclined = "model_declined"
+	// MemoryConsolidationSkipStaleCandidates: a candidate changed while the
+	// model was comparing the group, so the result no longer describes what is
+	// stored. It is discarded instead of superseding the newer edit.
+	MemoryConsolidationSkipStaleCandidates = "stale_candidates"
 	// MemoryConsolidationSkipTooSoon: this person asked for a review moments
 	// ago. Only a review someone requested can report this; the daily pass has
 	// its own, much longer interval and simply stays quiet.
