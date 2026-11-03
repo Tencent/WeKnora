@@ -337,6 +337,7 @@ multipart/form-data 字段：
 | `file` | file | 是 | 上传文件 |
 | `fileName` | string | 否 | 自定义文件名或包含目录的相对路径，如 `docs/spec/design.md`；目录部分用于归类，最后一段作为文件名 |
 | `metadata` | JSON 字符串 | 否 | 自定义元数据 |
+| `existing_folder_anchor` | string | 否 | 用户选择的已存在目标目录或其祖先；显式空字符串表示根。目录在上传期间失效返回 409，不静默改目标 |
 | `enable_multimodel` | bool | 否 | 多模态处理开关 |
 | `tag_ids` | string | 否 | 逗号分隔标签 ID |
 | `channel` | string | 否 | 摄取渠道 |
@@ -372,7 +373,7 @@ curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/knowledge/file" \
 
 上述请求将文档归类到 `docs/spec`，返回的 Knowledge 中 `folder_path` 为 `docs/spec`、`file_name` 为 `design.md`。`file=@./design.md` 指定本地文件，`fileName` 指定知识库中的归类路径。省略 `fileName` 或仅传文件名时，文档位于知识库根目录。
 
-文档知识库的目录由文档的 `folder_path` 推导，无需预先创建：上传到新路径后，目录及其中间层级会出现在目录树中。当前不支持独立创建、保留没有任何文档或子目录文档的空文件夹。Wiki 的创建目录接口管理的是 Wiki 目录，不用于文档知识库。
+文档知识库的目录由文档的 `folder_path` 推导，无需预先创建：上传到新路径后，目录及其中间层级会出现在目录树中。也可以通过下方 POST 文件夹接口先创建显式空目录；显式目录刷新或移走最后一份文档后仍保留。原有仅由文档路径推导的目录继续沿用旧行为。Wiki 的创建目录接口管理的是 Wiki 目录，不用于文档知识库。
 
 上传后可用本页的 `GET /api/v1/knowledge-bases/:id/knowledge/folders` 查看目录树。已有文档可通过 `POST /api/v1/knowledge/folder` 移到新路径，无需重新上传；该移动接口才使用 `folder_path` 请求字段。
 
@@ -470,7 +471,7 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/batch-download \
 
 用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，历史 `file_name` 中的路径已回填到该字段）。权限：Viewer+ + KBAccessRead。
 
-目录树由知识条目的 `folder_path` 汇总生成；没有直接文档但包含子目录文档的中间目录也会返回。目录下最后一份文档及所有子目录文档移走后，该目录不再出现在树中。
+目录树由知识条目的 `folder_path` 汇总生成；没有直接文档但包含子目录文档的中间目录也会返回。另外合并用户显式创建的空目录，文档计数仍为零；显式目录在移走最后一份文档后仍保留。没有显式记录的旧目录仍在最后一份文档及所有子目录文档移走后消失。
 
 响应：200。示例（仅有上述上传的 `docs/spec/design.md`）：
 
@@ -502,9 +503,37 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/batch-download \
 curl $BASE/api/v1/knowledge-bases/kb-1/knowledge/folders -H "Authorization: Bearer $TOKEN"
 ```
 
+### POST /api/v1/knowledge-bases/:id/knowledge/folders
+
+用途：创建并保留空目录，不创建占位文档、不重新解析或生成向量。权限：KB owner 或 Admin+ + KBAccessWrite；API key 需要 ingest 或 full-access，并受 KB 范围限制。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `parent_path` | string | 否 | 已存在的父路径；省略或空字符串表示根目录 |
+| `name` | string | 是 | 单段目录名称，最多 128 UTF-8 字节；完整路径最多 1024 字节、16 层 |
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/knowledge/folders" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"parent_path":"docs","name":"drafts"}'
+```
+
+成功为 201 `{"success":true,"data":{"path":"docs/drafts","name":"drafts","document_count":0,"total_count":0}}`。非法路径 400，父目录不存在 404，同级显式或派生目录重名 409；并发重名同样拒绝。名称不接受路径分隔符、空段、`.`、`..` 或控制字符，不静默截断。
+
+### DELETE /api/v1/knowledge-bases/:id/knowledge/folders/empty
+
+用途：仅删除一个空叶目录的显式记录。权限同创建。此接口不递归删除文档；目录存在文件或任何子目录时返回 409。
+
+```bash
+curl -X DELETE "$BASE/api/v1/knowledge-bases/kb-1/knowledge/folders/empty?path=docs%2Fdrafts" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+成功为 200 `{"success":true,"data":{"path":"docs/drafts"}}`；根目录或非法路径 400，不存在 404。删除不会修改文档、分块、向量或文件对象。
+
 ### PUT /api/v1/knowledge-bases/:id/knowledge/folders
 
-用途：重命名或移动文件夹，连同其所有子目录一起改路径。目标路径已存在时两个文件夹合并；不允许移动到自己的子目录下。权限：KB owner 或 Admin+ + KBAccessWrite。
+用途：重命名或移动文件夹，连同其所有子目录一起改路径。目标路径已存在时两个文件夹合并；不允许移动到自己的子目录下。显式目录及后代记录与文档路径在同一事务中更新，路径越界时整次拒绝，不截断。权限：KB owner 或 Admin+ + KBAccessWrite。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -762,14 +791,15 @@ curl -X POST $BASE/api/v1/knowledge/batch-delete -H "Authorization: Bearer $TOKE
 | --- | --- | --- | --- |
 | `kb_id` | string | 是 | 知识库 ID |
 | `knowledge_ids` | []string | 是 | 待移动的文档 |
-| `folder_path` | string | 否 | 相对于知识库根目录的目标文件夹路径，如 `docs/spec`；新路径无需预先创建，空字符串表示移回知识库根目录 |
+| `folder_path` | string | 否 | 相对于知识库根目录的目标路径，如 `docs/spec`；空字符串表示根目录 |
+| `existing_folder_anchor` | string | 否 | 目标目录或其已存在祖先；省略时目标必须已存在。显式空字符串允许在根下创建相对路径 |
 
 响应：200 `{"success":true}`
 
 ```bash
 curl -X POST $BASE/api/v1/knowledge/folder -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"kb_id":"kb-1","knowledge_ids":["k-1","k-2"],"folder_path":"设计文档"}'
+  -d '{"kb_id":"kb-1","knowledge_ids":["k-1","k-2"],"folder_path":"设计文档","existing_folder_anchor":""}'
 ```
 
 ### POST /api/v1/knowledge/move

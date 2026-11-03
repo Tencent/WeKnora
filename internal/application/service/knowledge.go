@@ -692,9 +692,9 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 	return types.NewPageResult(total, page, knowledges), nil
 }
 
-// ListKnowledgeFolderTree returns the folder hierarchy of a knowledge base with
-// per-folder document counts, derived from the folder_path stored on each
-// knowledge entry.
+// ListKnowledgeFolderTree combines explicitly created directories with the
+// hierarchy derived from knowledge paths. Explicit empty directories contribute
+// zero documents and survive when their last file moves away.
 func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
 	kbID string,
 ) (*types.KnowledgeFolderTree, error) {
@@ -707,17 +707,20 @@ func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
 }
 
 // MoveKnowledgeToFolder re-files knowledge entries under folderPath. Since
-// folders are derived from the stored paths, a folder that does not exist yet is
-// created by this call; a folder whose last entry moves away disappears.
+// a client-selected anchor can admit new relative levels. Without an anchor,
+// the destination must already exist. A stale or partly moved batch is rejected.
 func (s *knowledgeService) MoveKnowledgeToFolder(ctx context.Context,
 	kbID string, ids []string, folderPath string,
 ) (int64, error) {
 	if len(ids) == 0 {
 		return 0, werrors.NewBadRequestError("knowledge_ids cannot be empty")
 	}
-	normalized, err := normalizeTargetFolderPath(ctx, folderPath)
+	normalized, err := normalizeRenameFolderPath(folderPath)
 	if err != nil {
 		return 0, err
+	}
+	if folderPath != "" && normalized == "" {
+		return 0, werrors.NewBadRequestError("根目录必须使用空路径")
 	}
 	rows, err := loadKnowledgeWriteBatch(ctx, s.repo, s.kbService, ids)
 	if err != nil {
@@ -734,7 +737,7 @@ func (s *knowledgeService) MoveKnowledgeToFolder(ctx context.Context,
 	affected, err := s.repo.UpdateKnowledgeFolderPath(ctx, tenantID, kbID, ids, normalized)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to move knowledge to folder %q: %v", normalized, err)
-		return 0, err
+		return 0, knowledgeFolderError(err)
 	}
 	logger.Infof(ctx, "Moved %d knowledge entries to folder %q in kb %s", affected, normalized, kbID)
 	return affected, nil
@@ -746,11 +749,14 @@ func (s *knowledgeService) MoveKnowledgeToFolder(ctx context.Context,
 func (s *knowledgeService) RenameKnowledgeFolder(ctx context.Context,
 	kbID string, from string, to string,
 ) (int64, error) {
-	source := types.NormalizeKnowledgeFolderPath(from)
+	source, err := normalizeRenameFolderPath(from)
+	if err != nil {
+		return 0, err
+	}
 	if source == "" {
 		return 0, werrors.NewBadRequestError("源文件夹路径不能为空")
 	}
-	target, err := normalizeTargetFolderPath(ctx, to)
+	target, err := normalizeRenameFolderPath(to)
 	if err != nil {
 		return 0, err
 	}
@@ -780,7 +786,7 @@ func (s *knowledgeService) RenameKnowledgeFolder(ctx context.Context,
 	affected, err := s.repo.RenameKnowledgeFolderPath(ctx, tenantID, kbID, source, target)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to rename folder %q to %q: %v", source, target, err)
-		return 0, err
+		return 0, knowledgeFolderError(err)
 	}
 	logger.Infof(ctx, "Renamed folder %q to %q in kb %s, %d entries affected",
 		source, target, kbID, affected)

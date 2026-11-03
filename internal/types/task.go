@@ -449,6 +449,9 @@ type KnowledgeListDeletePayload struct {
 	KnowledgeIDs    []string      `json:"knowledge_ids"`
 	Initiator       TaskInitiator `json:"initiator,omitempty"`
 	KnowledgeBaseID string        `json:"knowledge_base_id,omitempty"`
+	// ClearFolders is set only by clearing an entire KB, never by an ordinary
+	// file delete. It also lets an empty KB enqueue removal of explicit folders.
+	ClearFolders bool `json:"clear_folders,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload

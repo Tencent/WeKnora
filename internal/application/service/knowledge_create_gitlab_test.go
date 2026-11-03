@@ -20,6 +20,7 @@ func (r *gitLabKnowledgeRepo) GetKnowledgeTags(context.Context, []string) (map[s
 
 func TestCreateKnowledgeFromFileGitLabPreservesSourcePaths(t *testing.T) {
 	db := setupKnowledgeSharedAccessDB(t)
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeFolder{}))
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
@@ -80,6 +81,7 @@ func TestCreateKnowledgeFromFileGitLabPreservesSourcePaths(t *testing.T) {
 
 func TestCreateKnowledgeFromFileConfluencePreservesCopiedPages(t *testing.T) {
 	db := setupKnowledgeSharedAccessDB(t)
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeFolder{}))
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })

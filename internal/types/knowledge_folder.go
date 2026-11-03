@@ -1,8 +1,11 @@
 package types
 
 import (
+	"fmt"
 	"sort"
 	"strings"
+	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -18,6 +21,55 @@ const (
 	// pathological segment cannot consume the whole path budget.
 	MaxKnowledgeFolderSegmentLength = 128
 )
+
+// KnowledgeFolder preserves a folder explicitly created by a user even when
+// no knowledge entry lives beneath it. Existing file-derived folders do not
+// need a row here. The path remains the folder's identity, scoped to its KB.
+type KnowledgeFolder struct {
+	TenantID        uint64    `json:"tenant_id" gorm:"primaryKey;autoIncrement:false"`
+	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"type:varchar(36);primaryKey"`
+	Path            string    `json:"path" gorm:"type:varchar(1024);primaryKey"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// TableName returns the database table for explicit knowledge folders.
+func (KnowledgeFolder) TableName() string { return "knowledge_folders" }
+
+// BuildKnowledgeFolderChildPath validates a new single-segment folder name and
+// appends it to a canonical parent path. Unlike upload-path normalization, a
+// create request must never silently drop levels or shorten the user's name.
+// Whether the parent exists is checked by the service inside the target KB.
+func BuildKnowledgeFolderChildPath(parentPath, name string) (string, error) {
+	if !utf8.ValidString(name) || strings.ContainsFunc(name, unicode.IsControl) {
+		return "", fmt.Errorf("文件夹名称包含非法字符")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		//nolint:revive,staticcheck // trailing dots name a forbidden path segment, not sentence punctuation
+		return "", fmt.Errorf("文件夹名称不能为空、. 或 ..")
+	}
+	if strings.ContainsAny(name, "/\\／∕⁄") || strings.HasSuffix(name, ".") {
+		return "", fmt.Errorf("文件夹名称不能包含路径分隔符或以句点结尾")
+	}
+	if len(name) > MaxKnowledgeFolderSegmentLength {
+		return "", fmt.Errorf("文件夹名称不能超过 %d 字节", MaxKnowledgeFolderSegmentLength)
+	}
+	if !utf8.ValidString(parentPath) || strings.ContainsFunc(parentPath, unicode.IsControl) ||
+		len(parentPath) > MaxKnowledgeFolderPathLength || NormalizeKnowledgeFolderPath(parentPath) != parentPath {
+		return "", fmt.Errorf("父文件夹路径无效")
+	}
+	path := name
+	if parentPath != "" {
+		path = parentPath + "/" + name
+	}
+	if strings.Count(path, "/")+1 > MaxKnowledgeFolderDepth {
+		return "", fmt.Errorf("文件夹层级不能超过 %d 层", MaxKnowledgeFolderDepth)
+	}
+	if len(path) > MaxKnowledgeFolderPathLength {
+		return "", fmt.Errorf("文件夹路径不能超过 %d 字节", MaxKnowledgeFolderPathLength)
+	}
+	return path, nil
+}
 
 // KnowledgeFolderScope selects how KnowledgeListFilter.FolderPath is applied.
 type KnowledgeFolderScope string

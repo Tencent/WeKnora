@@ -17,7 +17,7 @@ func (r *knowledgeRepository) ReplaceKnowledge(
 		before.TenantID != after.TenantID || before.KnowledgeBaseID != after.KnowledgeBaseID {
 		return fmt.Errorf("invalid knowledge replacement")
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.withKnowledgeFolderMutation(ctx, before.TenantID, before.KnowledgeBaseID, func(tx *gorm.DB) error {
 		// The primary-key lookup locks only the source row. Comparing the snapshot
 		// prevents a second sync from replacing a row another writer has retired
 		// or changed while this sync was preparing its replacement.
@@ -30,6 +30,9 @@ func (r *knowledgeRepository) ReplaceKnowledge(
 		if result.RowsAffected != 1 {
 			return fmt.Errorf("knowledge changed during replacement: %s", before.ID)
 		}
+		// A refresh changes the source, not the user's local folder. The CAS
+		// above rejects a concurrent move instead of restoring its old path.
+		after.FolderPath = before.FolderPath
 		repo := &knowledgeRepository{db: tx}
 		if err := repo.CreateKnowledge(ctx, after); err != nil {
 			return err

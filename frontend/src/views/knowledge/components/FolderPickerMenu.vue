@@ -60,6 +60,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { folderOptionFromPath, joinFolderPath, normalizeFolderPath, sortFolderOptions } from '../folderTree'
+import { createFolderDestinationAnchors } from '../folderDestinationAnchor'
 
 export type FolderOption = { path: string; name: string; depth: number }
 
@@ -84,21 +85,24 @@ type RenderRow = FolderRow | CreateRow
 const props = withDefaults(defineProps<{
   options: FolderOption[]
   currentPath?: string
+  pendingAnchors?: Record<string, string>
   showBack?: boolean
   allowReselect?: boolean
 }>(), {
   currentPath: '',
+  pendingAnchors: () => ({}),
   showBack: false,
   allowReselect: false,
 })
 
 const emit = defineEmits<{
   back: []
-  confirm: [folderPath: string]
-  create: [folderPath: string]
+  confirm: [folderPath: string, existingFolderAnchor: string]
+  create: [folderPath: string, existingFolderAnchor: string]
 }>()
 
 const { t } = useI18n()
+const folderAnchors = createFolderDestinationAnchors(props.pendingAnchors)
 
 const creatingUnder = ref<string | null>(null)
 const newFolderName = ref('')
@@ -192,7 +196,7 @@ function childCreateDepth(parentPath: string): number {
 const choose = (path: string) => {
   if (path === effectiveCurrentPath.value && !props.allowReselect) return
   selectedPath.value = path
-  emit('confirm', path)
+  emit('confirm', path, folderAnchors.pick(path).existingFolderAnchor)
 }
 
 const startCreatingUnder = (parentPath: string) => {
@@ -200,11 +204,13 @@ const startCreatingUnder = (parentPath: string) => {
     cancelCreating()
     return
   }
+  folderAnchors.begin(parentPath)
   creatingUnder.value = parentPath
   newFolderName.value = ''
 }
 
 const cancelCreating = () => {
+  folderAnchors.cancel()
   creatingUnder.value = null
   newFolderName.value = ''
 }
@@ -228,9 +234,10 @@ const commitNewFolder = async () => {
   if (!localCreatedPaths.value.includes(path)) {
     localCreatedPaths.value = [...localCreatedPaths.value, path]
   }
+  const destination = folderAnchors.created(path)
   creatingUnder.value = null
   newFolderName.value = ''
-  emit('create', path)
+  emit('create', path, destination.existingFolderAnchor)
   await scrollToFolder(path)
 }
 </script>

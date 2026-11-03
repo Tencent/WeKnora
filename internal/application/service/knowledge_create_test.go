@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -37,6 +38,30 @@ func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowl
 	copied := *knowledge
 	r.createdKnowledge = &copied
 	return r.createErr
+}
+
+func (r *createKnowledgeFileRepoStub) SnapshotKnowledgeFolderPath(
+	_ context.Context,
+	tenant uint64,
+	kb,
+	path string,
+) (*types.KnowledgeFolderPathSnapshot, error) {
+	return &types.KnowledgeFolderPathSnapshot{TenantID: tenant, KnowledgeBaseID: kb, Path: path}, nil
+}
+
+func (r *createKnowledgeFileRepoStub) CreateKnowledgeWithFolderSnapshot(
+	ctx context.Context,
+	k *types.Knowledge,
+	_ *types.KnowledgeFolderPathSnapshot,
+) error {
+	return r.CreateKnowledge(ctx, k)
+}
+
+func (r *createKnowledgeFileRepoStub) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
+	if r.createErr != nil {
+		return nil, repository.ErrKnowledgeNotFound
+	}
+	return r.createdKnowledge, nil
 }
 
 // GetKnowledgeTags is invoked by setAndAttachKnowledgeTags after create even
@@ -270,7 +295,7 @@ func TestCreateKnowledgeFromImageFallsBackWhenLegacyStorageConfigIsIncomplete(t 
 	require.Equal(t, 1, task.calls)
 }
 
-func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
+func TestCreateKnowledgeFromFileKeepsStoredFileWhenCommitOutcomeIsUnknown(t *testing.T) {
 	t.Parallel()
 
 	repo := &createKnowledgeFileRepoStub{createErr: errors.New("database unavailable")}
@@ -297,8 +322,7 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 	require.Nil(t, knowledge)
 	require.Equal(t, 1, fileSvc.saveCalls)
 	require.Equal(t, 1, repo.createCalls)
-	require.Equal(t, 1, fileSvc.deleteCalls)
-	require.Equal(t, "stored/"+fileSvc.savedWithKnowledgeID, fileSvc.deletedPath)
+	require.Zero(t, fileSvc.deleteCalls, "an unclassified commit error may have committed; retain the owned blob")
 }
 
 func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {

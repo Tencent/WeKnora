@@ -75,7 +75,7 @@ const emit = defineEmits<{
   (e: 'probe-trace', item: KnowledgeItem): void;
   (e: 'tags-changed', payload?: { deletedTagId?: string }): void;
   (e: 'open-folder', path: string): void;
-  (e: 'move-to-folder', item: KnowledgeItem, folderPath: string): void;
+  (e: 'move-to-folder', item: KnowledgeItem, folderPath: string, existingFolderAnchor: string): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
@@ -250,11 +250,11 @@ onBeforeUnmount(() => {
 // the "move to knowledge base" sub-menu next to it.
 const folderPickerItemId = ref<string | null>(null);
 
-const onFolderPicked = (item: KnowledgeItem, path: string) => {
+const onFolderPicked = (item: KnowledgeItem, path: string, existingFolderAnchor: string) => {
   folderPickerItemId.value = null;
   moreOpen.value = null;
   item.isMore = false;
-  emit('move-to-folder', item, path);
+  emit('move-to-folder', item, path, existingFolderAnchor);
 };
 
 const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
@@ -401,7 +401,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
                   :current-path="item.folder_path || ''"
                   show-back
                   @back="folderPickerItemId = null"
-                  @confirm="(path: string) => onFolderPicked(item, path)"
+                  @confirm="(path: string, anchor: string) => onFolderPicked(item, path, anchor)"
                 />
               </div>
 

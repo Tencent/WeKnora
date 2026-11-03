@@ -8477,6 +8477,12 @@ const docTemplate = `{
                         "description": "处理配置JSON（KnowledgeProcessOverrides）",
                         "name": "process_config",
                         "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "选择时已有的目标或祖先路径；显式空字符串表示根目录；省略时服务在请求中捕获最深现存祖先并允许创建其下新路径，祖先变化返回409。目标路径由fileName指定",
+                        "name": "existing_folder_anchor",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -8524,7 +8530,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数",
+                "description": "返回显式创建及文档路径形成的目录树，包含空文件夹、直接文档数与含子目录的总数",
                 "consumes": [
                     "application/json"
                 ],
@@ -8577,7 +8583,7 @@ const docTemplate = `{
                     "risk": "read",
                     "root": "data.folders"
                 },
-                "x-agent-hint": "Top-level document folders, up to 200. meta.root_document_count is documents with no folder and meta.total_document_count is every document. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
+                "x-agent-hint": "Top-level document folders, including explicitly created empty folders, up to 200. meta.root_document_count is documents with no folder and meta.total_document_count is every document. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
             },
             "put": {
                 "security": [
@@ -8657,6 +8663,198 @@ const docTemplate = `{
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Moves a document folder and everything under it to a new path; an existing path is merged into."
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "在知识库根目录或现有目录下创建空文件夹，无需上传或移动文档",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "新建知识库文件夹",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "新建请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateKnowledgeFolderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeFolderNode"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "名称或路径无效",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "父目录不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "同级文件夹已存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "创建失败",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "knowledge.create_folder",
+                    "label": "name",
+                    "risk": "write",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Creates an empty document folder under parent_path, or the knowledge base root when parent_path is empty."
+            }
+        },
+        "/knowledge-bases/{id}/knowledge/folders/empty": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "仅删除没有文档及子目录的文件夹，不删除文档",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "删除知识库空文件夹",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "x-agent": "folder_path",
+                        "description": "文件夹路径",
+                        "name": "path",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.DeleteKnowledgeFolderResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "路径无效",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "文件夹不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "文件夹非空",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "删除失败",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "x-agent": {
+                    "id": "knowledge.delete_folder",
+                    "label": "name",
+                    "risk": "destructive",
+                    "target": "knowledge_base.get"
+                },
+                "x-agent-hint": "Deletes only an empty document folder. A folder containing documents or descendants is rejected."
             }
         },
         "/knowledge-bases/{id}/knowledge/manual": {
@@ -9969,7 +10167,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档",
+                "description": "批量修改知识条目所属文件夹。未传 existing_folder_anchor 时目标须存在；传入已有祖先可在其下创建新路径，显式空值表示根目录。祖先变化返回409。仅调整归类，不会重新解析文档",
                 "consumes": [
                     "application/json"
                 ],
@@ -10029,7 +10227,7 @@ const docTemplate = `{
                     "risk": "write",
                     "target": "knowledge_base.get"
                 },
-                "x-agent-hint": "Files documents of one knowledge base under a folder path such as docs/spec, created on demand; an empty path moves them back to the top level. Nothing is reparsed."
+                "x-agent-hint": "Files documents under an existing folder, or creates a relative path when existing_folder_anchor names its existing ancestor. Explicit empty anchor permits creation from the root; omitted anchor requires the target to exist. Changed folders or documents return 409. Nothing is reparsed."
             }
         },
         "/knowledge/image/{id}/{chunk_id}": {
@@ -24860,6 +25058,34 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean",
                     "example": false
+                }
+            }
+        },
+        "internal_handler.CreateKnowledgeFolderRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "description": "Name is one folder-name segment under ParentPath, without slash separators; an existing sibling with the same name is rejected.",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "parent_path": {
+                    "description": "ParentPath is an existing canonical parent folder path; empty or omitted creates a child at the knowledge base root.",
+                    "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.DeleteKnowledgeFolderResponse": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "description": "Path is the canonical path of the deleted empty folder; no documents or descendant folders were deleted.",
+                    "type": "string",
+                    "x-agent": "folder_path"
                 }
             }
         },
@@ -40874,6 +41100,11 @@ const docTemplate = `{
                 "knowledge_ids"
             ],
             "properties": {
+                "existing_folder_anchor": {
+                    "description": "Existing ancestor selected before the move; an explicit empty string means the root, while omission requires the target folder to exist.",
+                    "type": "string",
+                    "x-agent": true
+                },
                 "folder_path": {
                     "description": "Target folder path; empty (allowed) means the knowledge base top level.",
                     "type": "string",

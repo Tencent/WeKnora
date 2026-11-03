@@ -1082,7 +1082,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	// Set tenant context for downstream services
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	defer func() {
-		// Wiki rows are independent of the vector engine. Run this on every
+		// Wiki rows and explicit directories are independent of the vector engine. Run this on every
 		// return path — including SkipRetry — with its own timeout so a slow
 		// Redis queue scan cannot starve the SQL deletes.
 		//
@@ -1093,6 +1093,9 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		// thousands of wiki rows after retries ran out (issue #4288).
 		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbWikiCleanupTimeout)
 		wikiErr := s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
+		if s.kgRepo != nil {
+			wikiErr = errors.Join(wikiErr, s.kgRepo.DeleteKnowledgeFolders(wikiCtx, tenantID, kbID))
+		}
 		cancelWiki()
 		if wikiErr != nil {
 			if retryCount, _ := asynq.GetRetryCount(ctx); retryCount >= kbDeleteTaskMaxRetry {

@@ -241,15 +241,17 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 }
 
 // enqueueKnowledgeListDelete enqueues an async batch-delete task for the
-// given knowledge IDs and returns the asynq task ID.
+// given knowledge IDs and returns the asynq task ID. Only a whole-KB clear
+// requests removal of explicit folder records, after document cleanup succeeds.
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
-	ctx context.Context, tenantID uint64, kbID string, ids []string,
+	ctx context.Context, tenantID uint64, kbID string, ids []string, clearFolders ...bool,
 ) (string, error) {
 	payload := types.KnowledgeListDeletePayload{
 		KnowledgeBaseID: kbID,
 		TenantID:        tenantID,
 		KnowledgeIDs:    ids,
 		Initiator:       types.TaskInitiatorFromContext(ctx),
+		ClearFolders:    len(clearFolders) > 0 && clearFolders[0],
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -304,6 +306,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
 // @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
+// @Param        existing_folder_anchor formData string false "选择时已有的目标或祖先路径；显式空字符串表示根目录；省略时服务在请求中捕获最深现存祖先并允许创建其下新路径，祖先变化返回409。目标路径由fileName指定"
 // @Success      200               {object}  handler.DataResponse{data=types.Knowledge}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
 // @Failure      409               {object}  map[string]interface{}  "文件重复"
@@ -359,6 +362,10 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	}
 
 	// Get custom filename if provided (for folder uploads with path)
+	// Presence matters: an explicit empty anchor means the root, not legacy omission.
+	if anchor, present := c.GetPostForm("existing_folder_anchor"); present {
+		ctx = types.WithKnowledgeFolderAnchor(ctx, anchor)
+	}
 	customFileName := c.PostForm("fileName")
 	customFileName = secutils.SanitizeForLog(customFileName)
 	displayFileName := file.Filename
@@ -1536,7 +1543,7 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 
 // ListKnowledgeFolders godoc
 // @Summary      获取知识库文件夹目录树
-// @Description  返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
+// @Description  返回显式创建及文档路径形成的目录树，包含空文件夹、直接文档数与含子目录的总数
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1546,7 +1553,7 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.list_folders","risk":"read","root":"data.folders","max_items":200}
-// @x-agent-hint "Top-level document folders, up to 200. meta.root_document_count is documents with no folder and meta.total_document_count is every document. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
+// @x-agent-hint "Top-level document folders, including explicitly created empty folders, up to 200. meta.root_document_count is documents with no folder and meta.total_document_count is every document. Sub-folders are not listed; filter knowledge.list by folder_path to look inside one."
 // @Router       /knowledge-bases/{id}/knowledge/folders [get]
 func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1575,6 +1582,109 @@ func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	})
 }
 
+// CreateKnowledgeFolderRequest creates one empty child of ParentPath.
+type CreateKnowledgeFolderRequest struct {
+	// ParentPath is an existing canonical parent folder path; empty or omitted creates a child at the knowledge
+	// base root.
+	ParentPath string `json:"parent_path" extensions:"x-agent"`
+	// Name is one folder-name segment under ParentPath, without slash separators; an existing sibling with the
+	// same name is rejected.
+	Name string `json:"name" binding:"required" extensions:"x-agent"`
+}
+
+// CreateKnowledgeFolder godoc
+// @Summary      新建知识库文件夹
+// @Description  在知识库根目录或现有目录下创建空文件夹，无需上传或移动文档
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                        true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        request  body      CreateKnowledgeFolderRequest  true  "新建请求"
+// @Success      201      {object}  handler.DataResponse{data=types.KnowledgeFolderNode}  "创建成功"
+// @Failure      400      {object}  errors.AppError  "名称或路径无效"
+// @Failure      403      {object}  errors.AppError  "权限不足"
+// @Failure      404      {object}  errors.AppError  "父目录不存在"
+// @Failure      409      {object}  errors.AppError  "同级文件夹已存在"
+// @Failure      500      {object}  errors.AppError  "创建失败"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.create_folder","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Creates an empty document folder under parent_path, or the knowledge base root when parent_path is empty."
+// @Router       /knowledge-bases/{id}/knowledge/folders [post]
+func (h *KnowledgeHandler) CreateKnowledgeFolder(c *gin.Context) {
+	var req CreateKnowledgeFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	kbID, effectiveTenantID, err := h.requireKnowledgeWriteAccess(c, c.Param("id"))
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+	folder, err := h.kgService.CreateKnowledgeFolder(ctx, kbID, req.ParentPath, req.Name)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError("Failed to create folder"))
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": folder})
+}
+
+// DeleteKnowledgeFolderResponse identifies the empty folder that was deleted.
+type DeleteKnowledgeFolderResponse struct {
+	// Path is the canonical path of the deleted empty folder; no documents or descendant folders were deleted.
+	Path string `json:"path" extensions:"x-agent=folder_path"`
+}
+
+// DeleteKnowledgeFolder godoc
+// @Summary      删除知识库空文件夹
+// @Description  仅删除没有文档及子目录的文件夹，不删除文档
+// @Tags         知识管理
+// @Produce      json
+// @Param        id    path   string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        path  query  string  true  "文件夹路径"  extensions(x-agent=folder_path)
+// @Success      200  {object}  handler.DataResponse{data=DeleteKnowledgeFolderResponse}  "删除成功"
+// @Failure      400  {object}  errors.AppError  "路径无效"
+// @Failure      403  {object}  errors.AppError  "权限不足"
+// @Failure      404  {object}  errors.AppError  "文件夹不存在"
+// @Failure      409  {object}  errors.AppError  "文件夹非空"
+// @Failure      500  {object}  errors.AppError  "删除失败"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.delete_folder","risk":"destructive","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Deletes only an empty document folder. A folder containing documents or descendants is rejected."
+// @Router       /knowledge-bases/{id}/knowledge/folders/empty [delete]
+func (h *KnowledgeHandler) DeleteKnowledgeFolder(c *gin.Context) {
+	path, ok := c.GetQuery("path")
+	if !ok || strings.TrimSpace(path) == "" {
+		_ = c.Error(errors.NewBadRequestError("Folder path is required"))
+		return
+	}
+	kbID, effectiveTenantID, err := h.requireKnowledgeWriteAccess(c, c.Param("id"))
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+	if err := h.kgService.DeleteKnowledgeFolder(ctx, kbID, path); err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError("Failed to delete folder"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": DeleteKnowledgeFolderResponse{Path: path}})
+}
+
 // MoveKnowledgeToFolderRequest is the body schema for POST /knowledge/folder.
 type MoveKnowledgeToFolderRequest struct {
 	// Knowledge base the documents belong to.
@@ -1583,11 +1693,14 @@ type MoveKnowledgeToFolderRequest struct {
 	IDs []string `json:"knowledge_ids" binding:"required" extensions:"x-agent"`
 	// Target folder path; empty (allowed) means the knowledge base top level.
 	FolderPath string `json:"folder_path" extensions:"x-agent"`
+	// Existing ancestor selected before the move; an explicit empty string means the root, while omission requires
+	// the target folder to exist.
+	ExistingFolderAnchor *string `json:"existing_folder_anchor,omitempty" extensions:"x-agent"`
 }
 
 // MoveKnowledgeToFolder godoc
 // @Summary      移动知识到文件夹
-// @Description  批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档
+// @Description  批量修改知识条目所属文件夹。未传 existing_folder_anchor 时目标须存在；传入已有祖先可在其下创建新路径，显式空值表示根目录。祖先变化返回409。仅调整归类，不会重新解析文档
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1598,7 +1711,7 @@ type MoveKnowledgeToFolderRequest struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.move_to_folder","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Files documents of one knowledge base under a folder path such as docs/spec, created on demand; an empty path moves them back to the top level. Nothing is reparsed."
+// @x-agent-hint "Files documents under an existing folder, or creates a relative path when existing_folder_anchor names its existing ancestor. Explicit empty anchor permits creation from the root; omitted anchor requires the target to exist. Changed folders or documents return 409. Nothing is reparsed."
 // @Router       /knowledge/folder [post]
 func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1634,6 +1747,9 @@ func (h *KnowledgeHandler) MoveKnowledgeToFolder(c *gin.Context) {
 		return
 	}
 
+	if req.ExistingFolderAnchor != nil {
+		ctx = types.WithKnowledgeFolderAnchor(ctx, *req.ExistingFolderAnchor)
+	}
 	affected, err := h.kgService.MoveKnowledgeToFolder(ctx, kbID, ids, req.FolderPath)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -1998,16 +2114,6 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		return
 	}
 
-	if len(knowledgeList) == 0 {
-		logger.Infof(ctx, "Knowledge base %s is already empty", secutils.SanitizeForLog(kbID))
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "Knowledge base is already empty",
-			"data":    gin.H{"deleted_count": 0},
-		})
-		return
-	}
-
 	knowledgeIDs := make([]string, 0, len(knowledgeList))
 	for _, knowledge := range knowledgeList {
 		if err := access.RejectMovingKnowledge(knowledge); err != nil {
@@ -2017,7 +2123,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, knowledgeIDs)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, knowledgeIDs, true)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue cleanup task"))

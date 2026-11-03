@@ -38,6 +38,7 @@ import {
   listKnowledgeFolders,
   moveKnowledgeToFolder,
   renameKnowledgeFolder,
+  deleteEmptyKnowledgeFolder,
   downKnowledgeDetails,
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
@@ -52,6 +53,9 @@ import AssistantActionsButton from '@/components/assistant/AssistantActionsButto
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
+import CreateDocumentFolderDialog from './components/CreateDocumentFolderDialog.vue';
+import type { CreatedDocumentFolder } from './folderCreateState';
+import { createEmptyFolderDeleteController, createEmptyFolderDeleteState } from './folderDeleteState';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import { useUploadTasksStore } from '@/stores/uploadTasks';
@@ -66,6 +70,7 @@ import {
 import { stalledMinutes, STALLED_POLL_INTERVAL_MS } from '@/utils/knowledgeProcessingStall';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
+import { confirmKnowledgeUpload, type KnowledgeUploadTarget } from './uploadConfirmationTarget';
 import {
   buildUploadFileName,
   canMoveFolderTo,
@@ -965,8 +970,12 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
 };
 
 const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
+const folderCreateVisible = ref(false);
+const folderCreateBusy = ref(false);
+let folderTreeRequestGeneration = 0;
 
 const loadFolderTree = async (kbIdValue: string) => {
+  const requestGeneration = ++folderTreeRequestGeneration;
   if (!kbIdValue || isFAQ.value) {
     folderTree.value = null;
     return;
@@ -974,19 +983,21 @@ const loadFolderTree = async (kbIdValue: string) => {
   folderTreeLoading.value = true;
   try {
     const res: any = await listKnowledgeFolders(kbIdValue);
-    if (!isCurrentKb(kbIdValue)) return;
+    if (!isCurrentKb(kbIdValue) || requestGeneration !== folderTreeRequestGeneration) return;
     folderTree.value = (res?.data as KnowledgeFolderTree) || null;
     // A folder can disappear (its last document was deleted or moved); fall
     // back to the root instead of leaving an empty, unreachable view.
     if (!folderExistsInTree(folderTree.value?.folders || [], selectedFolderPath.value)) {
       selectedFolderPath.value = ROOT_FOLDER_PATH;
     }
+    return true;
   } catch (error) {
-    if (!isCurrentKb(kbIdValue)) return;
+    if (!isCurrentKb(kbIdValue) || requestGeneration !== folderTreeRequestGeneration) return;
     console.error('Failed to load knowledge folders', error);
     folderTree.value = null;
+    return false;
   } finally {
-    if (isCurrentKb(kbIdValue)) {
+    if (isCurrentKb(kbIdValue) && requestGeneration === folderTreeRequestGeneration) {
       folderTreeLoading.value = false;
     }
   }
@@ -1003,10 +1014,10 @@ const handleFolderSelect = (path: string) => {
 
 // Flat folder list shared by every "move to folder" picker.
 const folderOptions = computed(() => {
-  const result: Array<{ path: string; name: string; depth: number }> = [];
+  const result: Array<{ path: string; name: string; depth: number; totalCount: number; hasChildren: boolean }> = [];
   const walk = (nodes: KnowledgeFolderTree['folders'], depth: number) => {
     nodes.forEach((node) => {
-      result.push({ path: node.path, name: node.name, depth });
+      result.push({ path: node.path, name: node.name, depth, totalCount: node.total_count, hasChildren: !!node.children?.length });
       walk(node.children || [], depth + 1);
     });
   };
@@ -1014,10 +1025,49 @@ const folderOptions = computed(() => {
   return result;
 });
 
-const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string) => {
+const handleFolderCreated = async ({ kbId: targetKbId, parentPath }: CreatedDocumentFolder) => {
+  if (!isCurrentKb(targetKbId) || selectedFolderPath.value !== parentPath) return;
+  resetPage();
+  const [, treeLoaded] = await Promise.all([loadKnowledgeFiles(targetKbId), loadFolderTree(targetKbId)]);
+  if (isCurrentKb(targetKbId) && selectedFolderPath.value === parentPath && treeLoaded === false) {
+    throw new Error('Folder created but directory refresh failed');
+  }
+};
+
+const folderDeleteState = reactive(createEmptyFolderDeleteState());
+const folderDeletion = createEmptyFolderDeleteController(folderDeleteState, {
+  currentContext: () => ({ kbId: kbId.value, canEdit: canEdit.value }),
+  folderForPath: path => folderOptions.value.find(folder => folder.path === path),
+  remove: deleteEmptyKnowledgeFolder,
+  onDeleted: async ({ kbId: targetKbId, path, parentPath }) => {
+    if (!isCurrentKb(targetKbId)) return;
+    if (selectedFolderPath.value === path) selectedFolderPath.value = parentPath;
+    resetPage();
+    const [, treeLoaded] = await Promise.all([loadKnowledgeFiles(targetKbId), loadFolderTree(targetKbId)]);
+    if (isCurrentKb(targetKbId) && treeLoaded === false) throw new Error('Folder deleted but directory refresh failed');
+  },
+});
+const handleFolderDelete = async (path: string) => {
+  const targetKbId = kbId.value;
+  const result = await folderDeletion.remove(path);
+  if (result === 'deleted') MessagePlugin.success(t('knowledgeBase.folderDelete.success'));
+  else if (result === 'refreshFailed') MessagePlugin.warning(t('knowledgeBase.folderDelete.refreshFailed'));
+  else if (result === 'failed') {
+    const messages = {
+      notEmpty: t('knowledgeBase.folderDelete.notEmpty'),
+      missing: t('knowledgeBase.folderDelete.missing'),
+      forbidden: t('knowledgeBase.folderDelete.forbidden'),
+      failed: t('knowledgeBase.folderDelete.failed'),
+    };
+    MessagePlugin.error(messages[folderDeleteState.error || 'failed']);
+    if (isCurrentKb(targetKbId) && ['notEmpty', 'missing'].includes(folderDeleteState.error || '')) void loadFolderTree(targetKbId);
+  }
+};
+
+const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string, existingFolderAnchor: string) => {
   if (!kbId.value || ids.length === 0) return;
   try {
-    await moveKnowledgeToFolder(kbId.value, ids, folderPath);
+    await moveKnowledgeToFolder(kbId.value, ids, folderPath, existingFolderAnchor);
     MessagePlugin.success(t('knowledgeBase.moveToFolder.success', { count: ids.length }));
     clearSelection();
     batchMode.value = false;
@@ -1036,13 +1086,7 @@ const handleFolderRename = async ({ from, to }: { from: string; to: string }) =>
     return;
   }
   try {
-    const res: any = await renameKnowledgeFolder(kbId.value, from, to);
-    const movedCount = res?.data?.moved_count ?? 0;
-    if (movedCount === 0) {
-      MessagePlugin.warning(t('knowledgeBase.folderTree.renameFailed'));
-      await loadFolderTree(kbId.value);
-      return;
-    }
+    await renameKnowledgeFolder(kbId.value, from, to);
     MessagePlugin.success(t('knowledgeBase.folderTree.renameSuccess'));
     // Follow the folder to its new path so the user stays where they were.
     if (selectedFolderPath.value === from) {
@@ -1849,21 +1893,23 @@ const uploadTasksStore = useUploadTasksStore();
 // Hands the batch to the global upload queue, which runs the transfers,
 // reports progress in its floating panel and refreshes this page as files land.
 const enqueueUploads = (
+  target: KnowledgeUploadTarget,
   files: File[],
   options: {
     processConfig?: KnowledgeProcessOverrides;
     tagIds?: string[];
     /** Destination folder confirmed in the upload dialog; '' is the root. */
     targetFolder?: string;
+    existingFolderAnchor?: string;
   } = {},
 ) => {
-  const targetKbId = kbId.value;
-  if (!targetKbId || files.length === 0) return;
+  if (!target.kbId || files.length === 0) return;
   const targetFolder = options.targetFolder || ROOT_FOLDER_PATH;
   uploadTasksStore.enqueue({
-    kbId: targetKbId,
-    kbName: kbInfo.value?.name || '',
+    kbId: target.kbId,
+    kbName: target.kbName,
     targetFolder,
+    existingFolderAnchor: options.existingFolderAnchor,
     tagIds: options.tagIds,
     processConfig: options.processConfig,
     uploads: files.map(file => ({ file, fileName: buildUploadFileName(file, targetFolder) })),
@@ -1872,10 +1918,11 @@ const enqueueUploads = (
 
 const executeUrlImport = async (
   url: string,
-  processConfig?: KnowledgeProcessOverrides,
-  tagIds?: string[],
+  processConfig: KnowledgeProcessOverrides | undefined,
+  tagIds: string[] | undefined,
+  target: KnowledgeUploadTarget,
 ) => {
-  const targetKbId = kbId.value;
+  const targetKbId = target.kbId;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
@@ -1891,6 +1938,8 @@ const executeUrlImport = async (
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
       detail: { kbId: targetKbId },
     }));
+    // Completion belongs to the original KB; do not notify the later page.
+    if (!isCurrentKb(targetKbId)) return;
     const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
     if (isSuccess) {
       MessagePlugin.success(t('knowledgeBase.urlImportSuccess'));
@@ -1907,6 +1956,7 @@ const executeUrlImport = async (
       MessagePlugin.error(errorMessage);
     }
   } catch (error: any) {
+    if (!isCurrentKb(targetKbId)) return;
     let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.urlImportFailed');
     if (error?.code === 'duplicate_url') {
       errorMessage = t('knowledgeBase.urlExists');
@@ -1915,7 +1965,7 @@ const executeUrlImport = async (
   }
 };
 
-const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
+const handleUploadConfirmResult = async (result: UploadConfirmResult, target: KnowledgeUploadTarget) => {
   if (result.mode === 'manual') {
     return;
   }
@@ -1926,25 +1976,28 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const tagIds = result.tagIds || [];
 
   if (files.length > 0) {
-    enqueueUploads(files, {
+    enqueueUploads(target, files, {
       processConfig,
       tagIds,
       targetFolder: result.targetFolder || ROOT_FOLDER_PATH,
+      existingFolderAnchor: result.existingFolderAnchor,
     });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig, tagIds);
+    await executeUrlImport(url, processConfig, tagIds, target);
   }
 };
 
 const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
-  if (!kbInfo.value) return;
+  const targetKbId = kbId.value;
+  const targetInfo = kbInfo.value;
+  if (!targetKbId || !targetInfo || targetInfo.id !== targetKbId) return;
   if (files.length === 0 && urls.length === 0) return;
   try {
-    const result = await uploadConfirmStore.open({
+    await confirmKnowledgeUpload({ kbId: targetKbId, kbName: targetInfo.name || '' }, () => uploadConfirmStore.open({
       mode: 'file',
-      kbInfo: kbInfo.value,
+      kbInfo: targetInfo,
       tagIds: [...selectedTagIds.value],
       files,
       urls,
@@ -1954,8 +2007,7 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
       // it and lets the user pick another folder (or the root) before confirming.
       targetFolder: selectedFolderPath.value,
       folderOptions: folderOptions.value,
-    });
-    await handleUploadConfirmResult(result);
+    }), handleUploadConfirmResult);
   } catch {
     // cancelled
   }
@@ -2538,7 +2590,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
-            @rename="handleFolderRename" />
+            :busy-path="folderDeleteState.pendingPath" @rename="handleFolderRename" @delete-empty="handleFolderDelete" />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">
@@ -2685,6 +2737,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     </t-tooltip>
                   </div>
                   <div v-if="canEdit" class="doc-filter-actions">
+                    <t-button variant="outline" size="small" class="doc-create-folder-btn" :disabled="folderCreateBusy || folderTreeLoading || !!folderDeleteState.pendingPath"
+                      @click="folderCreateVisible = true">
+                      <template #icon><t-icon name="folder-add" /></template>
+                      {{ t('knowledgeBase.folderCreate.title') }}
+                    </t-button>
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
@@ -2743,7 +2800,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     :show-folder-path="showDocumentFolderPath"
                     @open="(item: any) => openKnowledgeItem(item)"
                     @open-folder="handleFolderSelect"
-                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
+                    @move-to-folder="(item: any, path: string, anchor: string) => moveKnowledgeIntoFolder([item.id], path, anchor)"
                     @toggle-checkbox="onCardGridCheckboxChange"
                     @menu-visible-change="(visible: boolean, item: any) => onCardMoreVisibleChange(visible, item)"
                     @action="(action: any, item: any) => handleCardAction(action, item)"
@@ -2768,7 +2825,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     :move-submitting="moveSubmitting"
                     :show-folder-path="showDocumentFolderPath"
                     @open-folder="handleFolderSelect"
-                    @move-to-folder="(item: any, path: string) => moveKnowledgeIntoFolder([item.id], path)"
+                    @move-to-folder="(item: any, path: string, anchor: string) => moveKnowledgeIntoFolder([item.id], path, anchor)"
                     @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
                     @probe-trace="(item: any) => probeTraceAvailable(item)"
@@ -2802,7 +2859,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                   :show-move-to-folder="canEdit" :folder-options="folderOptions"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
                   @batch-tag="handleBatchTag" @download="handleBatchDownload" @select-loaded="toggleSelectAll(true)"
-                  @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)">
+                  @move-to-folder="(path: string, anchor: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path, anchor)">
                   <template #assistant>
                     <AssistantActionsButton v-if="selectedIds.size" :label="$t('assistant.actions.processSelected')"
                       :actions="selectedDocumentAssistantActions"
@@ -2834,6 +2891,10 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
+
+  <CreateDocumentFolderDialog v-model:visible="folderCreateVisible" :kb-id="kbId" :kb-name="kbInfo?.name"
+    :parent-path="selectedFolderPath" :can-edit="canEdit && !isFAQ" :folder-paths="folderOptions.map(folder => folder.path)"
+    :after-create="handleFolderCreated" @busy-change="folderCreateBusy = $event" />
 
   <!-- 批量打标签弹窗 -->
   <BatchTagDialog @tags-changed="onTagCatalogChanged" :visible="batchTagDialogVisible"
@@ -2997,6 +3058,8 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     > :not(.doc-search-input) { flex-shrink: 0; }
   }
   .doc-search-input { width: 220px; min-width: 100px; }
+  .doc-filter-actions { display: flex; align-items: center; gap: 8px; }
+  .doc-create-folder-btn { height: 32px; border-radius: var(--app-radius-md); white-space: nowrap; }
   :deep(.doc-search-input .t-input) {
     background: transparent;
     border-color: var(--td-component-stroke);
