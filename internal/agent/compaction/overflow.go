@@ -108,7 +108,9 @@ func ResponseHitContextLimit(
 
 func isLengthStop(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
-	case "length", "max_tokens", "max_output_tokens":
+	// model_context_window_exceeded is z.ai's length stop, matching
+	// isLengthFinishReason in the agent engine (#4589).
+	case "length", "max_tokens", "max_output_tokens", "model_context_window_exceeded":
 		return true
 	default:
 		return false

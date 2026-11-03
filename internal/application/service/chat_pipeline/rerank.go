@@ -104,6 +104,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	ctx = rerankCtx
 
 	logRerankInputScoreSample(ctx, chatManage.SearchResult)
+	p.skipDisabledGeneratedQuestions(ctx, chatManage.SearchResult)
 
 	opts := reranking.Options{
 		Threshold:        chatManage.RerankThreshold,
@@ -220,6 +221,26 @@ func buildRerankSpanOutput(res *reranking.Result, chatManage *types.ChatManage) 
 		out["model_scores_truncated"] = len(modelScores) - 50
 	}
 	return out
+}
+
+// skipDisabledGeneratedQuestions applies the live question-generation switch
+// to passages that were added after hybrid search, such as graph hits.
+func (p *PluginRerank) skipDisabledGeneratedQuestions(ctx context.Context, results []*types.SearchResult) {
+	if p.kbService == nil || len(results) == 0 {
+		return
+	}
+	ids := types.SearchResultKnowledgeBaseIDs(results)
+	if len(ids) == 0 {
+		return
+	}
+	kbs, err := p.kbService.GetKnowledgeBasesByIDsOnly(ctx, ids)
+	if err != nil {
+		pipelineWarn(ctx, "Rerank", "question_generation_lookup", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	types.ApplySkipGeneratedQuestions(results, types.QuestionGenerationOffIDs(kbs))
 }
 
 func logRerankInputScoreSample(ctx context.Context, results []*types.SearchResult) {

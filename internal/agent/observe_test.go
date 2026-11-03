@@ -505,6 +505,7 @@ func TestIsLengthFinishReason(t *testing.T) {
 	assert.True(t, isLengthFinishReason("length"))
 	assert.True(t, isLengthFinishReason("max_tokens"))
 	assert.True(t, isLengthFinishReason("MAX_OUTPUT_TOKENS"))
+	assert.True(t, isLengthFinishReason("model_context_window_exceeded"))
 	assert.False(t, isLengthFinishReason("stop"))
 	assert.False(t, isLengthFinishReason("tool_calls"))
 }

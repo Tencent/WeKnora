@@ -4,13 +4,13 @@ WeKnora 通过 BrowserSkill daemon 和 [BrowserSkill](https://github.com/Tencent
 
 ## 安装扩展
 
-扩展需要 **0.3.1 及以上**版本，任选一种方式安装：
+扩展需要 **0.4.1 及以上**版本，任选一种方式安装：
 
 - Chrome：[Chrome 应用商店](https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi)
 - Edge：[Edge 加载项](https://microsoftedge.microsoft.com/addons/detail/browserskill/emacgiaaaiojkkpkddmmdfhmokgmnikg)
 - 配套 ZIP：无法访问商店时，在「浏览器连接」页的「手动安装（备用）」下载。解压后在 `chrome://extensions`（Edge 为 `edge://extensions`）开启「开发者模式」，选择「加载已解压的扩展程序」。
 
-已连接的扩展版本低于 0.3.1 时，「浏览器连接」页会提示升级。
+已连接的扩展版本低于 0.4.1 时，「浏览器连接」页会提示升级。
 
 ## 配对与使用
 
@@ -38,6 +38,10 @@ WeKnora 通过 BrowserSkill daemon 和 [BrowserSkill](https://github.com/Tencent
 
 登录、验证码或授权步骤由 `request_help` 发起。按预览提示进入浏览器，完成后在浏览器帮助提示中确认；Agent 再观察页面并继续。仅在聊天中说“请登录”不会创建人工接管提示。帮助等待最多五分钟，超时或取消会保留现场并暂停。
 
+新版默认启用人机共享控制。Agent 在操作前同步页面，携带同步返回的控制上下文；人工输入或页面导航会使旧上下文失效，Agent 需要重新观察后决定下一步，不会自动重放原动作。用户参与过的页面在结束任务时保留。将受控标签拖出任务窗口会结束对应 BrowserSkill 会话并保留页面。
+
+如果在 BrowserSkill 浏览器浮层中暂停或停止，需要在浮层交还控制后，再在 WeKnora 对话预览点击继续。停止后浮层隐藏时，先点击一次 WeKnora 的继续即可重新显示浮层；任务会保持暂停，直到用户在浏览器恢复控制。
+
 暂停取消当前浏览器调用但不撤销配对；点击继续后，如果 Agent 本轮已结束，还需发送继续指令。异常或服务重启后的任务不会自动重放点击、提交等动作，应恢复后先检查页面。
 
 普通成功任务会自动结束；用户要求保留页面、人工帮助或异常中断时可保留现场。预览显示“已保留最后画面”表示当前不再轮询，不代表浏览器控制已释放。结束浏览器任务不等于停止整个对话。
@@ -56,7 +60,7 @@ WeKnora 通过 BrowserSkill daemon 和 [BrowserSkill](https://github.com/Tencent
 
 ```dotenv
 BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk
-BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.1.zip
+BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.4.1.zip
 BROWSERSKILL_MAX_CONNECTIONS=32
 ```
 
@@ -68,7 +72,9 @@ BROWSERSKILL_PUBLIC_URL=wss://weknora.example.com/api/v1/local-browser/extension
 
 本机可用 localhost WS，远端要求浏览器信任的 WSS 证书。内网可以使用受信任的企业 CA。显式设置 `BROWSERSKILL_BINARY=` 可关闭能力；修改 Docker 环境变量后使用 `docker compose up -d app frontend` 重建容器。
 
-配套扩展和 daemon 必须一同升级，扩展需要 0.3.1 及以上（Chrome 应用商店、Edge 加载项或配套 ZIP 均可）。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
+0.4.1 扩展最低要求 daemon 协议 1.6，旧 0.3.1 daemon 使用协议 1.3，因此无法连接。当前配套版本两端均使用协议 1.8。升级时先结束正在执行的浏览器任务，重建并重启 app，再更新 frontend 和扩展；仅替换磁盘上的 `bsk` 不会更新正在运行的 daemon。
+
+配套扩展和 daemon 必须一同升级，扩展需要 0.4.1 及以上（Chrome 应用商店、Edge 加载项或配套 ZIP 均可）。覆盖原解压目录并重新加载可保留扩展 ID，重新安装导致 ID 改变时需要重新配对。分发时保留 `BrowserSkill-LICENSE`。
 
 ## 多副本与入口代理
 
@@ -96,7 +102,8 @@ Kubernetes 可使用 Pod IP 组成直连地址。不要用各副本独立的 SQL
 | 现象 | 检查方向 |
 | --- | --- |
 | 无配套扩展下载或能力不可用 | daemon 与扩展文件路径、可执行权限、目标架构和 app 镜像版本 |
-| 提示扩展版本过低 | 从 Chrome 应用商店、Edge 加载项或配套 ZIP 升级到 0.3.1 及以上，覆盖原解压目录后重新加载 |
+| 提示扩展版本过低 | 从 Chrome 应用商店、Edge 加载项或配套 ZIP 升级到 0.4.1 及以上，覆盖原解压目录后重新加载 |
+| 扩展提示 CLI/daemon 过旧 | 重建并重启 WeKnora app，确认 `BROWSERSKILL_BINARY` 指向配套 0.4.1 daemon；远程连接使用的是服务端 daemon |
 | 授权成功但 WSS 失败 | 公网地址/端口、受信任证书、外层代理 WebSocket Upgrade |
 | 设备连接正常但任务不执行 | 本轮开关、任务是否暂停、是否等待标签借用或人工帮助 |
 | 没有人工帮助提示 | 执行记录是否调用 `request_help`；扩展是否禁用了人工帮助 |

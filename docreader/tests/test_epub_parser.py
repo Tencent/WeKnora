@@ -354,6 +354,61 @@ class EPUBParserTest(unittest.TestCase):
 
         self.assertEqual(document.content.count("Body of one."), 1)
 
+    def test_chapter_markdown_keeps_block_structure(self):
+        content = _epub_with_chapter_body(
+            "<p>It was night.</p><hr/><p>Morning came.</p>"
+            "<blockquote><p>A quoted line.</p></blockquote><p>After the quote.</p>"
+            "<ul><li>parent<ul><li>child</li></ul></li></ul>"
+            "<pre>def total(items):\n\n    return sum(items)\n</pre>"
+            "<table><tr><th>Name</th><th>Qty</th></tr>"
+            "<tr><td>Apple</td><td>3</td></tr></table>"
+            "<p>After the table.</p>"
+        )
+        for use_fallback in (False, True):
+            with self.subTest(use_fallback=use_fallback):
+                parser = EPUBParser(file_name="structured.epub", file_type="epub")
+                if use_fallback:
+                    with patch(
+                        "docreader.parser.epub_parser.epub.read_epub",
+                        side_effect=ValueError("exercise ZIP fallback"),
+                    ):
+                        document = parser.parse(content)
+                else:
+                    with patch.object(parser, "_parse_epub_fallback") as fallback:
+                        document = parser.parse(content)
+                    fallback.assert_not_called()
+
+                # Directly above "---", a paragraph becomes a setext heading.
+                self.assertIn("It was night.\n\n---\n\nMorning came.", document.content)
+                # Directly below a quote, a paragraph joins the quote.
+                self.assertIn("> A quoted line.\n\nAfter the quote.", document.content)
+                self.assertIn("* parent\n  + child", document.content)
+                self.assertIn(
+                    "```\ndef total(items):\n\n    return sum(items)\n```",
+                    document.content,
+                )
+                # Directly below a table, GFM reads a line as another row.
+                self.assertIn("| Apple | 3 |\n\nAfter the table.", document.content)
+
+
+def _epub_with_chapter_body(body: str) -> bytes:
+    """Write an EPUB with a single chapter whose body is ``body``."""
+    book = epub.EpubBook()
+    book.set_identifier("structured-epub")
+    book.set_title("Structured EPUB")
+    book.set_language("en")
+
+    chapter = epub.EpubHtml(title="Chapter", file_name="text/chapter.xhtml", lang="en")
+    chapter.content = f"<html><body><h1>Chapter</h1>{body}</body></html>"
+    book.add_item(chapter)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", chapter]
+
+    output = BytesIO()
+    epub.write_epub(output, book)
+    return output.getvalue()
+
 
 def _ordered_epub_bytes(
     manifest: list[str], spine: list[str], svg_cover_in_spine: bool = False

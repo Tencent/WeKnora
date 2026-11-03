@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -253,4 +255,120 @@ func TestProcessKBDeleteCleansWikiWhenVectorStoreUnavailable(t *testing.T) {
 
 	require.ErrorIs(t, err, retriever.ErrVectorStoreUnavailable)
 	assertWikiCleanup(t, wikiRepo, tenantID, kbID)
+}
+
+// blockingWikiRepo simulates the issue #4288 scenario: in-flight wiki workers
+// still hold row locks when the KB is deleted, so each delete blocks until the
+// simulated lock wait elapses or the caller's context deadline fires.
+type blockingWikiRepo struct {
+	interfaces.WikiPageRepository
+	blockFor time.Duration
+}
+
+func (r *blockingWikiRepo) wait(ctx context.Context) error {
+	timer := time.NewTimer(r.blockFor)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (r *blockingWikiRepo) DeleteByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	return r.wait(ctx)
+}
+
+func (r *blockingWikiRepo) DeleteFoldersByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	return r.wait(ctx)
+}
+
+func (r *blockingWikiRepo) DeleteRevisionsByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	return r.wait(ctx)
+}
+
+func (r *blockingWikiRepo) DeleteIssuesByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	return r.wait(ctx)
+}
+
+// TestProcessKBDeleteWikiCleanupSurvivesLockContention reproduces issue #4288:
+// when wiki deletes stall on row locks held by in-flight wiki workers, the
+// old 5s budget killed every attempt (deadline exceeded -> wiki orphans after
+// MaxRetry). With the dedicated longer budget a 6s lock wait must succeed.
+func TestProcessKBDeleteWikiCleanupSurvivesLockContention(t *testing.T) {
+	const kbID = "kb-lock-contention"
+	const tenantID uint64 = 1
+	wikiRepo := &blockingWikiRepo{blockFor: 6 * time.Second}
+	svc := &knowledgeBaseService{
+		kgRepo:          emptyKBKnowledgeRepo{},
+		taskInspector:   &recordingKBTaskInspector{},
+		taskPendingRepo: &recordingKBPendingRepo{},
+		wikiRepo:        wikiRepo,
+	}
+
+	err := svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, tenantID))
+
+	require.NoError(t, err, "wiki cleanup must survive a lock wait longer than the old 5s budget")
+}
+
+// deadlineCapturingWikiRepo records the context deadline ProcessKBDelete
+// hands to the wiki deletes, so the test can verify the dedicated budget.
+type deadlineCapturingWikiRepo struct {
+	interfaces.WikiPageRepository
+	mu        sync.Mutex
+	deadlines []time.Time
+}
+
+func (r *deadlineCapturingWikiRepo) record(ctx context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if dl, ok := ctx.Deadline(); ok {
+		r.deadlines = append(r.deadlines, dl)
+	}
+}
+
+func (r *deadlineCapturingWikiRepo) DeleteByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	r.record(ctx)
+	return nil
+}
+
+func (r *deadlineCapturingWikiRepo) DeleteFoldersByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	r.record(ctx)
+	return nil
+}
+
+func (r *deadlineCapturingWikiRepo) DeleteRevisionsByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	r.record(ctx)
+	return nil
+}
+
+func (r *deadlineCapturingWikiRepo) DeleteIssuesByKnowledgeBaseID(ctx context.Context, _ uint64, _ string) error {
+	r.record(ctx)
+	return nil
+}
+
+// TestProcessKBDeleteWikiCleanupHasDedicatedBudget verifies the wiki cleanup
+// runs under kbWikiCleanupTimeout, not the shared 5s kbTaskCleanupTimeout.
+// The remaining budget must be comfortably beyond one minute for every table.
+func TestProcessKBDeleteWikiCleanupHasDedicatedBudget(t *testing.T) {
+	const kbID = "kb-budget"
+	const tenantID uint64 = 1
+	wikiRepo := &deadlineCapturingWikiRepo{}
+	svc := &knowledgeBaseService{
+		kgRepo:          emptyKBKnowledgeRepo{},
+		taskInspector:   &recordingKBTaskInspector{},
+		taskPendingRepo: &recordingKBPendingRepo{},
+		wikiRepo:        wikiRepo,
+	}
+
+	require.NoError(t, svc.ProcessKBDelete(context.Background(), kbDeletePayload(t, kbID, tenantID)))
+
+	require.Len(t, wikiRepo.deadlines, 4, "all four wiki deletes must run under the dedicated budget")
+	for _, dl := range wikiRepo.deadlines {
+		remaining := time.Until(dl)
+		assert.Greater(t, remaining, time.Minute,
+			"wiki cleanup budget must exceed 1 minute (old shared budget was 5s), got %v", remaining)
+		assert.LessOrEqual(t, remaining, kbWikiCleanupTimeout)
+	}
 }

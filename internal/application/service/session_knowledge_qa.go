@@ -319,10 +319,8 @@ func (s *sessionService) selectChatModelID(
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to list models: %w", err)
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
-			return model.ID, tenantID, nil
-		}
+	if model := types.PickChatModel(models, ""); model != nil {
+		return model.ID, tenantID, nil
 	}
 	return "", 0, fmt.Errorf("no chat model ID available: no accessible knowledge base model or available models")
 }
@@ -892,6 +890,8 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 			KeywordThreshold:     rc.GetEffectiveKeywordThreshold(),
 			DisableVectorMatch:   opts.DisableVectorMatch,
 			DisableKeywordsMatch: opts.DisableKeywordsMatch,
+			QueryImage:           opts.QueryImage,
+			QueryImageMediaType:  opts.QueryImageMediaType,
 			RerankModelID:        rerankModelID,
 			RerankTopK:           rc.GetEffectiveRerankTopK(),
 			RerankThreshold:      rc.GetEffectiveRerankThreshold(),
@@ -947,6 +947,7 @@ func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.Kno
 	if opts.KeywordThreshold != nil {
 		chatManage.KeywordThreshold = *opts.KeywordThreshold
 	}
+	chatManage.ParentSlotAggregation = opts.ParentSlotAggregation
 	// The final FILTER_TOP_K stage cuts to RerankTopK whether or not the
 	// rerank stage runs, so it is the result count. Recall must be at least
 	// as deep for the count to be reachable.

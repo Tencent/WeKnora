@@ -108,6 +108,32 @@ func TestPoolBatchesAndPreservesOrder(t *testing.T) {
 	}
 }
 
+func TestPoolRejectsInvalidBatchSize(t *testing.T) {
+	for _, size := range []string{"0", "-1", "not-an-int"} {
+		t.Run(size, func(t *testing.T) {
+			t.Setenv("BATCH_EMBED_SIZE", size)
+			var mu sync.Mutex
+			requests := 0
+			embedder := newPooledEmbedder(t, func(w http.ResponseWriter, _ *http.Request) {
+				mu.Lock()
+				requests++
+				mu.Unlock()
+				_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[1]}]}`))
+			})
+			var got [][]float32
+			var err error
+			require.NotPanics(t, func() {
+				got, err = embedder.BatchEmbedWithPool(context.Background(), embedder, []string{"text"})
+			})
+			require.Error(t, err)
+			assert.Nil(t, got)
+			mu.Lock()
+			defer mu.Unlock()
+			assert.Zero(t, requests, "invalid configuration must not reach the provider")
+		})
+	}
+}
+
 func TestPoolHonoursConcurrencyLimit(t *testing.T) {
 	t.Setenv("BATCH_EMBED_SIZE", "1")
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 10)

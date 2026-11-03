@@ -9,11 +9,23 @@ import (
 )
 
 // MemoryScope is the resolved (workspace, principal) pair a memory operation
-// runs under. It is always derived from the request context so no caller can
-// address another user's memory by passing an id.
+// runs under. Personal APIs derive it from the request context; administrator
+// APIs resolve a subject UUID inside the authenticated caller's tenant after
+// enforcing the administrator role. Request data never selects the tenant.
 type MemoryScope struct {
 	TenantID  uint64
 	SubjectID string
+	// Generation fences results computed before a clear. nil is an unguarded
+	// operation; a pointer to "" captures the initial, pre-clear generation.
+	Generation *string
+}
+
+// WithGeneration captures a generation once, preserving a caller's older fence.
+func (s MemoryScope) WithGeneration(generation string) MemoryScope {
+	if s.Generation == nil {
+		s.Generation = &generation
+	}
+	return s
 }
 
 func (s MemoryScope) Valid() bool {
@@ -46,6 +58,18 @@ type MemoryVectorHit struct {
 // worker cannot accidentally operate on whatever the ambient context happens
 // to hold.
 type MemoryRepository interface {
+	// ListSubjects 分页返回租户内主体标识及不含记忆内容的统计信息。
+	ListSubjects(ctx context.Context, tenantID uint64, limit, offset int) ([]*types.MemorySubjectSummary, int64, error)
+	// GetSubjectByID 按租户和主体 UUID 查询，缺失或属于其他租户时返回 nil。
+	GetSubjectByID(ctx context.Context, tenantID uint64, id string) (*types.MemorySubject, error)
+	// ClearSubjectMemory 原子清除主体记忆和派生状态，并保留开关与历史提取游标。
+	ClearSubjectMemory(ctx context.Context, scope MemoryScope) (int64, error)
+	// RejectPendingItem 在主体事务内校验待确认状态、记录拒绝并删除记忆。
+	RejectPendingItem(ctx context.Context, scope MemoryScope, id string) error
+	// SaveItemWithPendingLimit 原子保存记忆及替换关系，并归档超限的最旧待确认记忆。
+	SaveItemWithPendingLimit(
+		ctx context.Context, scope MemoryScope, item *types.MemoryItem, replacesID string, pendingLimit int,
+	) error
 	// GetSubject returns the memory space, or (nil, nil) when it does not exist.
 	GetSubject(ctx context.Context, scope MemoryScope) (*types.MemorySubject, error)
 	// EnsureSubject returns the memory space, creating it on first use.
@@ -276,6 +300,18 @@ func (c RetrievalContext) Empty() bool {
 
 // MemoryService is the read/write API for long-term memory.
 type MemoryService interface {
+	// AdminListSubjects 分页列出租户主体及不含记忆内容的统计，仅限具有用户身份的管理员。
+	AdminListSubjects(ctx context.Context, limit, offset int) ([]*types.MemorySubjectSummary, int64, error)
+	// AdminListItems 按主体 UUID 查询记忆，不受记忆开关限制。
+	AdminListItems(ctx context.Context, subjectID, status string, limit, offset int) ([]*types.MemoryItem, int64, error)
+	// AdminConfirmItem 确认指定主体的待确认记忆。
+	AdminConfirmItem(ctx context.Context, subjectID, itemID string) (*types.MemoryItem, error)
+	// AdminRejectItem 拒绝指定主体的待确认记忆。
+	AdminRejectItem(ctx context.Context, subjectID, itemID string) error
+	// AdminClear 原子清除指定主体的记忆快照，保留开关和提取游标。
+	AdminClear(ctx context.Context, subjectID string) (int64, error)
+	// AdminSetEnabled 更新指定主体的记忆开关。
+	AdminSetEnabled(ctx context.Context, subjectID string, enabled bool) error
 	// Recall assembles the memory to inject for one turn. It performs no LLM
 	// calls and returns an empty recall (never an error) whenever memory is
 	// disabled at any level, so callers can use it unconditionally.

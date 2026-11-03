@@ -754,18 +754,21 @@ function normalizeSkillRollout(value?: string): 'next_turn' | 'new_session' {
 }
 
 const skillRollout = computed(() => normalizeSkillRollout(props.record?.config?.skill_rollout))
+const sharedSandbox = computed(() => props.record?.config?.allocation_mode === 'user')
 
-const uploadHint = computed(() =>
-  skillRollout.value === 'new_session'
+const uploadHint = computed(() => {
+  if (sharedSandbox.value) return t('settings.sandbox.skillUploadHintShared')
+  return skillRollout.value === 'new_session'
     ? t('settings.sandbox.skillUploadHintNewSession')
-    : t('settings.sandbox.skillUploadHint'),
-)
+    : t('settings.sandbox.skillUploadHint')
+})
 const installBusy = computed(() => uploading.value || installingFromSource.value)
-const deleteHint = computed(() =>
-  skillRollout.value === 'new_session'
+const deleteHint = computed(() => {
+  if (sharedSandbox.value) return t('settings.sandbox.skillDeleteHintShared')
+  return skillRollout.value === 'new_session'
     ? t('settings.sandbox.skillDeleteHintNewSession')
-    : t('settings.sandbox.skillDeleteHint'),
-)
+    : t('settings.sandbox.skillDeleteHint')
+})
 
 const STATUS_I18N: Record<string, string> = {
   installing: 'settings.sandbox.skillStatusInstalling',

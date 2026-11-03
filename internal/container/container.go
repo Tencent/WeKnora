@@ -39,6 +39,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -53,6 +54,7 @@ import (
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
+	"github.com/Tencent/WeKnora/internal/application/service/credential"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -69,6 +71,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
+	nextcloudConnector "github.com/Tencent/WeKnora/internal/datasource/connector/nextcloud"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	onedriveConnector "github.com/Tencent/WeKnora/internal/datasource/connector/onedrive"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
@@ -187,6 +190,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
 	must(container.Provide(repository.NewAgentGrantRepository))
+	must(container.Provide(repository.NewCredentialVaultRepository))
 	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -224,6 +228,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(newSandboxManager))
 	must(container.Provide(provideHostApprovalModeLoader))
 	must(container.Provide(provideHostProjectDirsLoader))
+	must(container.Provide(provideHostApprovalModes))
 	must(container.Provide(hostProjectLookup))
 	must(container.Provide(hostModeLookup))
 	must(container.Provide(provideHostSandboxManager))
@@ -385,6 +390,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
+	must(container.Provide(credential.NewVault))
+	must(container.Provide(credential.NewHandleStore))
+	must(container.Provide(func(
+		g *approval.Gate, v *credential.Vault, h *credential.HandleStore,
+	) *credential.Submitter {
+		return credential.NewSubmitter(g, v, h)
+	}))
 	must(container.Provide(func(cleaner interfaces.ResourceCleaner, db *gorm.DB) (*browserskill.Manager, error) {
 		manager := browserskill.NewManager(browserskill.NewStore(db))
 		if err := manager.ValidateConfiguration(); err != nil {
@@ -708,6 +720,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewEvaluationHandler))
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
+	must(container.Provide(service.NewDocumentProgressService))
 	must(container.Provide(handler.NewSystemHandler))
 	// Dig resolves exact types; adapt the registered service to the handler's
 	// narrower SharedAgentLookup interface at the composition boundary.
@@ -718,8 +731,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		models interfaces.ModelService,
 		agents interfaces.AgentShareService,
 		grants interfaces.AgentGrantRepository,
+		secureForms *credential.Submitter,
 	) *handler.MCPServiceHandler {
-		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents).WithGrants(grants)
+		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents).
+			WithGrants(grants).WithSecureForms(secureForms)
+	}))
+	must(container.Provide(handler.NewCredentialVaultHandler))
+	must(container.Invoke(func(agents interfaces.AgentService, handles *credential.HandleStore) {
+		if handles == nil {
+			return
+		}
+		if s, ok := agents.(interface{ SetSecretHandles(tools.SecretHandles) }); ok {
+			s.SetSecretHandles(handles)
+		}
 	}))
 	must(container.Invoke(func(
 		sessions *session.Handler, mcp *handler.MCPServiceHandler,
@@ -1155,6 +1179,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqlDB.SetMaxOpenConns(1)
 	} else {
 		sqlDB.SetMaxIdleConns(10)
+		applyDBMaxOpenConns(context.Background(), sqlDB)
 	}
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
@@ -2030,20 +2055,28 @@ func NewDuckDB() (*sql.DB, error) {
 // Each provider type is registered with its factory function that accepts parameters.
 // Provider instances are created on-demand when tenants configure them.
 func registerWebSearchProviders(registry *infra_web_search.Registry) {
-	registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
-	registry.Register("google", infra_web_search.NewGoogleProvider)
-	registry.Register("bing", infra_web_search.NewBingProvider)
-	registry.Register("tavily", infra_web_search.NewTavilyProvider)
-	registry.Register("ollama", infra_web_search.NewOllamaProvider)
-	registry.Register("baidu", infra_web_search.NewBaiduProvider)
-	registry.Register("searxng", infra_web_search.NewSearxngProvider)
-	registry.Register("keenable", infra_web_search.NewKeenableProvider)
-	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
-	registry.Register("exa", infra_web_search.NewExaProvider)
-	registry.Register("metaso", infra_web_search.NewMetasoProvider)
-	registry.Register("bocha", infra_web_search.NewBochaProvider)
-	registry.Register("brave", infra_web_search.NewBraveProvider)
-	registry.Register("serply", infra_web_search.NewSerplyProvider)
+	for _, spec := range []infra_web_search.Spec{
+		{Type: "duckduckgo", Search: infra_web_search.NewDuckDuckGoProvider},
+		{Type: "google", Search: infra_web_search.NewGoogleProvider},
+		{Type: "bing", Search: infra_web_search.NewBingProvider},
+		{Type: "tavily", Search: infra_web_search.NewTavilyProvider},
+		{Type: "ollama", Search: infra_web_search.NewOllamaProvider},
+		{Type: "baidu", Search: infra_web_search.NewBaiduProvider},
+		{Type: "searxng", Search: infra_web_search.NewSearxngProvider},
+		{Type: "keenable", Search: infra_web_search.NewKeenableProvider},
+		{Type: "zhipu", Search: infra_web_search.NewZhipuProvider},
+		{Type: "exa", Search: infra_web_search.NewExaProvider},
+		{Type: "metaso", Search: infra_web_search.NewMetasoProvider},
+		{Type: "bocha", Search: infra_web_search.NewBochaProvider},
+	} {
+		registry.Add(spec)
+	}
+	registry.Add(infra_web_search.Spec{Type: "brave", Filters: true, Search: infra_web_search.NewBraveProvider})
+	registry.Add(infra_web_search.Spec{Type: "serply", Filters: true, Search: infra_web_search.NewSerplyProvider})
+	registry.Add(infra_web_search.Spec{
+		Type: "deepseek", Search: infra_web_search.NewDeepSeekProvider, Fetch: infra_web_search.NewDeepSeekFetch,
+	})
+	registry.Add(infra_web_search.Spec{Type: "searchapi", Filters: true, Search: infra_web_search.NewSearchAPIProvider})
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and
@@ -2132,6 +2165,9 @@ func initConnectorRegistryWithOneDrive(
 	}
 	if err := registry.Register(onedriveConnector.NewSharePointConnector(items, oauth)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register sharepoint connector: %w", err))
+	}
+	if err := registry.Register(nextcloudConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register nextcloud connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

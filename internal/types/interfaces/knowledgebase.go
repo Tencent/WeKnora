@@ -104,12 +104,14 @@ type KnowledgeBaseService interface {
 
 	// GetQueryEmbedding computes the query embedding using the embedding model
 	// associated with the given knowledge base. This allows callers to pre-compute
-	// and reuse embeddings across multiple KBs that share the same model.
+	// and reuse embeddings across multiple KBs that share the same model and
+	// vector space.
 	GetQueryEmbedding(ctx context.Context, kbID string, queryText string) ([]float32, error)
 
 	// ResolveEmbeddingModelKeys resolves embedding model IDs to their actual
-	// model identity key (name + endpoint). KBs using the same underlying model
-	// across different tenants will share the same key, enabling optimal grouping.
+	// model identity key (name + endpoint + configured vector dimension). KBs
+	// using the same underlying model and vector space across different tenants
+	// will share the same key, enabling optimal grouping.
 	// Returns a map from KB ID to model identity key string.
 	ResolveEmbeddingModelKeys(ctx context.Context, kbs []*types.KnowledgeBase) map[string]string
 

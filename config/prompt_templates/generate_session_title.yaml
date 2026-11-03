@@ -5,10 +5,13 @@ templates:
     description: "Generate a concise session title from user's question"
     default: true
     content: |
-      Generate a short session title based on the user's question.
+      Summarize the user's first message into a very short sidebar session title.
 
       Requirements:
-      - 4-10 words
+      - Aim for 6-12 Chinese characters, or 3-5 words in other languages; never exceed 24 characters total
+      - Keep only the core topic and intent; omit greetings, filler, URLs and secondary details
+      - Preserve essential technical terms, but do not copy the whole question
+      - Example: a long question about submarine power cable lifetime and short-circuit current -> 海缆寿命与短路计算
       - Only extract the intent of the user's question, don't answer about it
       - Output only the title, no explanation needed
       - Plain text on a single line: no Markdown, tables, lists, headings, quotes or "Title:" prefix

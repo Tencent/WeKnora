@@ -11,7 +11,7 @@
             :placeholder="t('menu.search')" :aria-label="t('menu.search')" clearable>
             <template #prefix-icon><t-icon name="search" size="16px" /></template>
           </t-input>
-          <t-button variant="text" theme="default" size="small" class="automation-page__add" @click="openEditor(null)">
+          <t-button variant="text" theme="default" size="small" class="automation-page__add" @click="startCreate">
             <template #icon><t-icon name="add" size="16px" /></template>
             {{ t('automation.add') }}
           </t-button>
@@ -83,7 +83,7 @@
             </button>
           </div>
         </article>
-        <button type="button" class="automation-card automation-card--add" @click="openEditor(null)">
+        <button type="button" class="automation-card automation-card--add" @click="startCreate">
           <span class="automation-card--add__icon" aria-hidden="true"><t-icon name="add" /></span>
           <span class="automation-card--add__label">{{ t('automation.add') }}</span>
           <span class="automation-card--add__hint">{{ t('automation.addHint') }}</span>
@@ -91,6 +91,7 @@
       </div>
     </section>
 
+    <AssistantCreateDialog v-model:visible="assistantCreateVisible" kind="automation" @manual="openEditor(null)" />
     <AutomationEditor v-model:visible="editorVisible" :automation="editing" @saved="onSaved" />
     <AutomationDetail v-model:visible="detailVisible" :automation="detail"
       :focus-run-id="focusRunId" @changed="onSaved" @edit="openEditor" />
@@ -118,6 +119,7 @@ import AutomationDetail from './AutomationDetail.vue'
 import AutomationStatusTag from './AutomationStatusTag.vue'
 import ChatActionIcon from '@/components/ChatActionIcon.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
+import AssistantCreateDialog from '@/components/assistant/AssistantCreateDialog.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -128,6 +130,10 @@ const loading = ref(true)
 const query = ref('')
 const busy = ref(new Set<string>())
 const editorVisible = ref(false)
+const assistantCreateVisible = ref(false)
+function startCreate() {
+  assistantCreateVisible.value = true
+}
 const editing = ref<Automation | null>(null)
 const detailVisible = ref(false)
 const detail = ref<Automation | null>(null)

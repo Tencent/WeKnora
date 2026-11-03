@@ -106,7 +106,10 @@ func Parse(t types.AutomationTrigger) (*Schedule, error) {
 			return nil, err
 		}
 		s.once = at
-		s.trigger.At = at.Format(time.RFC3339)
+		// RFC3339Nano drops trailing zeros, so whole seconds stay whole and
+		// fractional seconds survive normalization; re-parsing the trigger
+		// yields the same planned instant.
+		s.trigger.At = at.Format(time.RFC3339Nano)
 	default:
 		return nil, invalid("unknown trigger type %q", t.Type)
 	}

@@ -100,9 +100,11 @@ curl -X DELETE $BASE/api/v1/tenants/1 -H "Authorization: Bearer $TOKEN"
 
 ## 空间 KV 配置
 
-`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`、`memory-config`、`assistant-config`。
+`:key` 为配置键而非空间 ID（空间取自认证上下文），可选值：`web-search-config`、`prompt-templates`、`parser-engine-config`、`storage-engine-config`、`chat-history-config`、`retrieval-config`、`memory-config`、`assistant-config`、`default-settings`。
 
 `assistant-config` 是 WeKnora 助手的空间设置：`display_name`（界面上的助手名称，最多 24 字，空表示默认名称）和 `max_access_level`（成员可选的最高权限等级：`read_only` 只读、`confirm` 修改前确认、`auto_write` 可恢复的修改直接执行，删除类仍需确认；默认 `confirm`）。成员在对话请求里用 `assistant_access` 选择自己的等级，服务端按空间上限截断。
+
+`default-settings` 是空间默认模型配置，字段与替换语义见[下方说明](#default-settings)。默认搜索引擎仍由网络搜索服务的 `is_default` 决定（`PATCH /api/v1/web-search-providers/:id`）。
 
 ### GET /api/v1/tenants/kv/:key
 
@@ -124,6 +126,33 @@ curl $BASE/api/v1/tenants/kv/retrieval-config -H "Authorization: Bearer $TOKEN"
 curl -X PUT $BASE/api/v1/tenants/kv/web-search-config -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"enabled":true}'
 ```
+
+### 空间默认模型：GET / PUT /api/v1/tenants/kv/default-settings {#default-settings}
+
+GET 需要 Viewer+，PUT 需要 Admin+；API key 还需 `manage_tenant_settings` 或 full-access。空间取自认证上下文。界面入口为[设置 → 默认设置](../03-features/06-models.md#workspace-defaults)。
+
+| 字段 | 类型 | 模型要求 |
+| --- | --- | --- |
+| `chat_model_id` | string | 对话模型 `KnowledgeQA` |
+| `utility_model_id` | string | 短文本辅助任务使用的 `KnowledgeQA`；空时跟随对话默认 |
+| `embedding_model_id` | string | 向量模型 `Embedding` |
+| `rerank_model_id` | string | 重排模型 `Rerank` |
+| `vlm_model_id` | string | `VLLM`，或启用视觉能力的 `KnowledgeQA` |
+| `asr_model_id` | string | 语音识别模型 `ASR` |
+
+PUT **替换整个对象**，应提交全部六项；遗漏的字段等同于空字符串。模型 ID 会去除首尾空白，新选择的非空 ID 必须在当前空间可用、已启用且能力匹配，否则返回 400。未改动的失效 ID 可以保留，便于逐项修复；清空字段则恢复回退行为。
+
+智能体、知识库或任务显式选择的模型优先于空间默认。未设置或已失效的空间默认会回退到部署默认，再选择第一个可用模型；`utility_model_id` 为空或失效时跟随对话默认。`GET /api/v1/models` 的 `default_for` 标注空间指定的用途（如 `KnowledgeQA`、`VLLM`、`Utility`）；`is_default` 只表示模型原生类型的默认标记，不能单靠它识别辅助任务或跨类型视觉默认。这里不会覆盖部署配置或已有资源保存的模型 ID。
+
+GET 返回 `{"success":true,"data":{...六项配置...}}`，尚未设置的值为空字符串。下面的 PUT 示例清空空间覆盖，恢复默认回退：
+
+```bash
+curl -X PUT "$BASE/api/v1/tenants/kv/default-settings" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"chat_model_id":"","utility_model_id":"","embedding_model_id":"","rerank_model_id":"","vlm_model_id":"","asr_model_id":""}'
+```
+
+PUT 成功返回 `{"success":true,"data":{...保存后的六项配置...},"message":"Default settings updated successfully"}`。实现：`internal/handler/tenant_default_settings.go`、`internal/types/default_settings.go`。
 
 ## API Key 与 API 主体
 

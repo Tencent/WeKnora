@@ -91,9 +91,21 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	var orgs []*types.Organization
 	q := r.db.WithContext(ctx).Where("searchable = ?", true)
 	if query != "" {
-		pattern := "%" + query + "%"
+		pattern := "%" + escapeLikeKeyword(query) + "%"
 		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
-		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		if r.db.Name() == "sqlite" {
+			q = q.Where(
+				"LOWER(name) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(description) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(CAST(id AS TEXT)) LIKE LOWER(?) ESCAPE ?",
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
+			)
+		} else {
+			q = q.Where(
+				"name ILIKE ? ESCAPE ? OR description ILIKE ? ESCAPE ? OR id::text ILIKE ? ESCAPE ?",
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
+			)
+		}
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {
@@ -357,13 +369,17 @@ func (r *organizationRepository) CountJoinRequests(ctx context.Context, orgID st
 
 // UpdateJoinRequestStatus updates the status of a join request
 func (r *organizationRepository) UpdateJoinRequestStatus(ctx context.Context, id string, status types.JoinRequestStatus, reviewedBy string, reviewMessage string) error {
+	reviewedAt := gorm.Expr("NOW()")
+	if r.db.Name() == "sqlite" {
+		reviewedAt = gorm.Expr("CURRENT_TIMESTAMP")
+	}
 	return r.db.WithContext(ctx).
 		Model(&types.OrganizationJoinRequest{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
 			"status":         status,
 			"reviewed_by":    reviewedBy,
-			"reviewed_at":    gorm.Expr("NOW()"),
+			"reviewed_at":    reviewedAt,
 			"review_message": reviewMessage,
 		}).Error
 }

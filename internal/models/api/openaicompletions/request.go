@@ -254,11 +254,7 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream boo
 	}
 	c.applyThinking(body, opts, stream)
 
-	for k, v := range s.ExtraBody {
-		if _, exists := body[k]; !exists {
-			body[k] = v
-		}
-	}
+	api.MergeExtraBody(body, s.ExtraBody, opts != nil && opts.Isolated)
 	// These names are mutually exclusive, including when extra_body supplies
 	// one or both. Keep the protocol's configured field; an explicit caller
 	// budget already takes precedence over extra_body above.
@@ -279,11 +275,12 @@ func (c *Client) applySampling(body map[string]any, opts *api.Options) {
 	if !s.SupportsTemperature {
 		return
 	}
-	if s.FixedTemperature != nil {
+	if opts.Isolated {
+		body["temperature"] = 0.0
+	} else if s.FixedTemperature != nil {
 		body["temperature"] = *s.FixedTemperature
 		return
-	}
-	if opts.Temperature > 0 {
+	} else if opts.Temperature > 0 {
 		body["temperature"] = opts.Temperature
 	}
 	if opts.TopP > 0 {

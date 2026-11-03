@@ -720,7 +720,7 @@
         <div v-else class="env-empty">{{ $t('settings.sandbox.noEnvVars') }}</div>
       </section>
 
-      <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
+      <section v-if="currentStepKey === 'runtime' && allocationMode === 'session'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillRollout') }}</h4>
         <p class="section-help section-help--under-title">{{ $t('settings.sandbox.skillRolloutHint') }}</p>
         <t-radio-group v-model="skillRollout" class="skill-rollout-group">

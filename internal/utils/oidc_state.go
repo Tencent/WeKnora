@@ -22,6 +22,7 @@ type OIDCStatePayload struct {
 	Nonce       string `json:"nonce"`
 	RedirectURI string `json:"redirect_uri,omitempty"`
 	IssuedAt    int64  `json:"iat"`
+	PKCEEnabled bool   `json:"pkce,omitempty"`
 }
 
 var (

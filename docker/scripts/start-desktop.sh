@@ -13,6 +13,23 @@ export LANG="${LANG:-C.UTF-8}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
 mkdir -p /run/desktop
 
+# Neutral cwd before any daemon spawns. This script runs from an Exec whose
+# cwd is a session's workspace (/workspace/sessions/<sid>); every daemon
+# spawned here inherits it, and deleting that session leaves websockify's
+# cwd pointing at a deleted directory — every later connection then dies
+# with "handler exception: [Errno 2] No such file or directory" and no HTTP
+# response at all (a bad handshake on the backend, for every session on the
+# machine, since websockify is shared). Same inheritance class as the fd 9
+# and stdio rules below.
+cd /
+
+# --proxy-only starts websockify and nothing on :0. Per-session screens are
+# Xvfb :N, brought up by wk-display; this process only routes tokens to them.
+proxy_only=0
+if [ "${1:-}" = "--proxy-only" ]; then
+  proxy_only=1
+fi
+
 # Readiness is a LISTEN check read out of /proc, never a connection. Dialling
 # 5900 spends an RFB client slot and dialling 6080 parks websockify in
 # readline(); a probe must not perturb the stack it measures. (This also
@@ -43,9 +60,18 @@ proc_alive() {
     return 1
 }
 
-# 1. Already ready: both listeners, not just websockify. 6080-only lets
-#    DialDesktop 101 while x11vnc is dead; the RFB hello never comes.
-if port_open 6080 && port_open 5900; then exit 0; fi
+# Full mode needs both listeners. 6080-only lets DialDesktop 101 while
+# x11vnc on :0 is dead. proxy-only has no :0; 6080 is the whole stack.
+desktop_ready() {
+  if [ "$proxy_only" -eq 1 ]; then
+    port_open 6080
+    return
+  fi
+  port_open 6080 && port_open 5900
+}
+
+# 1. Already ready.
+if desktop_ready; then exit 0; fi
 
 # 2. Serialise the whole start section. Concurrent triggers are normal
 #    (dual tabs, timeout retries, multi-replica). Every step below is
@@ -61,7 +87,7 @@ exec 9>/run/desktop/.lock
 flock 9
 
 # Recheck after waiting for the lock: a previous holder may have finished.
-if port_open 6080 && port_open 5900; then exit 0; fi
+if desktop_ready; then exit 0; fi
 
 # 3. Per-sandbox random secret (first start only). Used by websockify's
 #    BasicHTTPAuth handshake; never sent to the browser. Write .tmp then
@@ -91,6 +117,10 @@ spawn() {
     "$@" </dev/null >>"/run/desktop/$name.log" 2>&1 9>&- &
 }
 
+# 4-8b. The shared :0 desktop. Skipped in --proxy-only: that mode must not
+# start Xvfb, XFCE, x11vnc on 5900, or anything else on :0.
+if [ "$proxy_only" -eq 0 ]; then
+
 # 4. Xvfb
 proc_alive Xvfb || \
   spawn xvfb Xvfb :0 -ac -screen 0 1280x800x24 -nolisten tcp
@@ -98,14 +128,16 @@ proc_alive Xvfb || \
 # 4b. Wait until X actually accepts connections. Probe state, do not sleep a
 #     fixed delay: startxfce4 before X is listening exits with "cannot open
 #     display", later steps still run, and the failure looks like "6080 is up
-#     but the screen is black / no window manager".
+#     but the screen is black / no window manager". Every probe carries its
+#     own timeout: fd 9 (the start lock) is held here, and a wedged X server
+#     (accepts, never replies) would block an unbounded probe forever.
 i=0
 while [ $i -lt 40 ]; do
-  xdpyinfo -display :0 >/dev/null 2>&1 && break
+  timeout 2 xdpyinfo -display :0 >/dev/null 2>&1 && break
   i=$((i + 1))
   sleep 0.25
 done
-xdpyinfo -display :0 >/dev/null 2>&1 || exit 1
+timeout 2 xdpyinfo -display :0 >/dev/null 2>&1 || exit 1
 
 # 5. dbus + XFCE. Use xfce4-session, not startxfce4: the latter tries to
 #    launch its own X server and fails with "X server already running" once
@@ -117,8 +149,9 @@ proc_alive xfce4-session || {
   spawn xfce4-session xfce4-session
 }
 
-# 6. Disable screensaver / DPMS — clock jumps after resume lock or blank the screen.
-xset s off -dpms 2>/dev/null || true
+# 6. Disable screensaver / DPMS — clock jumps after resume lock or blank the
+#    screen. timeout: fd 9 is held; a wedged X server wedges the lock too.
+timeout 5 xset s off -dpms 2>/dev/null || true
 xfconf-query -c xfce4-session -p /startup/screensaver/enabled -n -t bool -s false 2>/dev/null || true
 
 # 7. x11vnc: localhost only; RFB security type None (auth is on websockify).
@@ -132,18 +165,40 @@ port_open 5900 || \
          -forever -shared -wait 50 -noxdamage -repeat -bg \
          </dev/null >>/run/desktop/x11vnc.log 2>&1 9>&-
 
+# Token 0 is the shared :0 screen. Seat tokens are written by wk-display.
+mkdir -p /run/desktop/tokens.d
+printf '0: 127.0.0.1:5900\n' > /run/desktop/tokens.d/0.tmp
+mv /run/desktop/tokens.d/0.tmp /run/desktop/tokens.d/0
+
+fi
+
 # 8. websockify: the only listener facing the world. Handshake requires
-#    Authorization: Basic. This is the only gate on Cube's host-port NAT
-#    path that bypasses CubeProxy. Port-guarded for the same reason as 7.
+#    Authorization: Basic. TokenFile picks the screen (?token=N -> 127.0.0.1:590N).
+#    There is no fixed target: a dial without a token is rejected, which is
+#    why this image must not run in front of a backend that omits the token
+#    query. Publish the backend first.
+mkdir -p /run/desktop/tokens.d
 port_open 6080 || \
   spawn websockify websockify --auth-plugin BasicHTTPAuth \
              --auth-source "weknora:$(cat /run/desktop/secret)" \
-             --heartbeat 30 6080 127.0.0.1:5900
+             --token-plugin TokenFile \
+             --token-source /run/desktop/tokens.d \
+             --heartbeat 30 6080
+
+# 8b. Browser sync: shares login cookies and localStorage between the session
+#     browsers and saves them for the next launch. A second copy exits via flock.
+[ -x /usr/local/bin/wk-browser-sync ] && \
+  spawn browsersync /usr/local/bin/wk-browser-sync
+
+# 8c. Fingerprint governor: one UA / hardware / time zone identity for every
+#     session browser. A second copy exits via flock.
+[ -x /usr/local/bin/wk-ua-governor ] && \
+  spawn uagovernor /usr/local/bin/wk-ua-governor
 
 # 9. Wait for ready (lock held so waiters queue instead of starting twice).
 i=0
 while [ $i -lt 60 ]; do
-  port_open 6080 && port_open 5900 && exit 0
+  if desktop_ready; then exit 0; fi
   i=$((i + 1))
   sleep 0.5
 done

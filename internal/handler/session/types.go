@@ -106,20 +106,34 @@ type AttachmentUpload struct {
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization
 type SearchKnowledgeRequest struct {
-	Query            string                 `json:"query"              binding:"required"` // Query text to search for
-	KnowledgeBaseID  string                 `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
-	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
-	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
-	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
+	// Query is the text query. It is required unless QueryImage is set: an
+	// image-only request searches by visual similarity.
+	Query string `json:"query"`
+	// KnowledgeBaseID is a single KB (for backward compatibility).
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// KnowledgeBaseIDs lists the KBs to search (multi-KB support).
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	// KnowledgeIDs narrows the search to specific knowledge (file) IDs.
+	KnowledgeIDs []string `json:"knowledge_ids"`
+	// TagIDs filters within a single KB.
+	TagIDs []string `json:"tag_ids"`
+	// MentionedItems carries optional scoped tag mentions.
+	MentionedItems []MentionedItemRequest `json:"mentioned_items"`
+	// QueryImage is a base64 (optionally a data URI) image used as the vector
+	// query instead of Query text. When both are set the image drives vector
+	// recall and the text drives keyword recall and rerank.
+	QueryImage string `json:"query_image,omitempty"`
 
 	// Optional overrides of the tenant retrieval config. Omitted fields keep it.
-	VectorThreshold      *float64             `json:"vector_threshold,omitempty"`       // Minimum vector similarity
-	KeywordThreshold     *float64             `json:"keyword_threshold,omitempty"`      // Minimum keyword score
-	MatchCount           int                  `json:"match_count,omitempty"`            // Number of results to return
-	DisableKeywordsMatch bool                 `json:"disable_keywords_match,omitempty"` // Vector recall only
-	DisableVectorMatch   bool                 `json:"disable_vector_match,omitempty"`   // Keyword recall only
-	Rerank               *types.RerankOptions `json:"rerank,omitempty"`                 // Rerank override
+	VectorThreshold      *float64 `json:"vector_threshold,omitempty"`       // Minimum vector similarity
+	KeywordThreshold     *float64 `json:"keyword_threshold,omitempty"`      // Minimum keyword score
+	MatchCount           int      `json:"match_count,omitempty"`            // Number of results to return
+	DisableKeywordsMatch bool     `json:"disable_keywords_match,omitempty"` // Vector recall only
+	DisableVectorMatch   bool     `json:"disable_vector_match,omitempty"`   // Keyword recall only
+	// ParentSlotAggregation gives one top-k slot to all hits sharing a parent
+	// chunk, returning the parent body with the matched child ids.
+	ParentSlotAggregation bool                 `json:"parent_slot_aggregation,omitempty"`
+	Rerank                *types.RerankOptions `json:"rerank,omitempty"` // Rerank override
 }
 
 // StopSessionRequest represents the stop session request

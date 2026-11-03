@@ -8,10 +8,8 @@
             </div>
             <div class="logo_actions">
                 <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
-                    <div class="header-icon-btn" :class="{ 'is-active': assistantStore.visible }"
-                        :aria-label="assistantName" @click="assistantStore.toggle()">
-                        <t-icon name="compass" size="18px" />
-                    </div>
+                    <AssistantButton data-guide="assistant-entry" icon-only :icon-size="18" :label="assistantName"
+                        :active="assistantStore.visible" @click="assistantStore.toggle()" />
                 </t-tooltip>
                 <t-tooltip placement="bottom">
                     <template #content>
@@ -84,14 +82,8 @@
                     </div>
                 </t-tooltip>
                 <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="right">
-                    <div class="menu_item menu_item--cmdk" :class="{ 'menu_item_active': assistantStore.visible }"
-                        :aria-label="assistantName" @click="assistantStore.toggle()">
-                        <div class="menu_item-box">
-                            <div class="menu_icon">
-                                <t-icon name="compass" size="18px" />
-                            </div>
-                        </div>
-                    </div>
+                    <AssistantButton data-guide="assistant-entry" class="assistant-sidebar-entry" icon-only :icon-size="18"
+                        :label="assistantName" :active="assistantStore.visible" @click="assistantStore.toggle()" />
                 </t-tooltip>
             </div>
             <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
@@ -291,6 +283,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
 import { useCommandPaletteStore } from '@/stores/commandPalette';
 import { useAssistantStore } from '@/stores/assistant';
+import AssistantButton from '@/components/assistant/AssistantButton.vue';
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
@@ -1839,6 +1832,13 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
+}
+
+.aside_box--collapsed .assistant-sidebar-entry {
+    display: flex;
+    width: 32px;
+    height: 32px;
+    margin: 0 auto 6px;
 }
 
 .header-icon-btn {

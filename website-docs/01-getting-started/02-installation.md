@@ -74,7 +74,7 @@ docker compose ps                 # 等所有服务变成 healthy/running
 > 如果数据库仍为 ParadeDB `v0.22.2-pg17`，先按 [ParadeDB 升级说明](06-paradedb-upgrade.md) 停止写入、备份、保留数据卷更换镜像并完成 `pg_search` 扩展升级，再恢复应用。仅替换镜像不会更新已有数据库的扩展 SQL；迁移 `000099` 会处理 WeKnora 库中符合条件的 `0.22.2–0.22.5`，其他数据库仍需单独检查。
 
 ```bash
-# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.8.3），或保持 latest
+# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.9.0），或保持 latest
 docker compose pull
 docker compose up -d
 ```
@@ -185,12 +185,12 @@ PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=https://your-playwright-mirror.example.com \
 | `scripts/build_images.sh` | 构建镜像并注入版本（git tag / commit / build time），支持跨架构 |
 | `scripts/build_frontend_dist.sh` | 宿主机构建前端静态产物 `frontend/dist`（Lite / 桌面打包等非 Docker 场景；UI 镜像改由 Dockerfile 多阶段构建） |
 | `scripts/migrate.sh` | golang-migrate 封装 |
-| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + docker.sock GID 补组 + gosu 降权） |
+| `scripts/docker-entrypoint.sh` | app 容器入口（属主修复 + 在不修改 socket 权限的前提下按可读写 GID 补组 + gosu 降权，兼容 Docker Desktop 的 `root:root 0660` 映射） |
 | `scripts/package-lite.sh` / `package-mac-app.sh` | Lite tarball / macOS .app 打包 |
 
 ## 六、Helm 部署（helm/）
 
-`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.8.3），要求 Kubernetes >= 1.25.0。
+`helm/Chart.yaml`：apiVersion v2，chart 名 `weknora`，appVersion 跟随版本（如 v0.9.0），要求 Kubernetes >= 1.25.0。
 
 Chart 内包含五个组件：`app`（`wechatopenai/weknora-app`）、`frontend`（`wechatopenai/weknora-ui`）、`docreader`、`postgresql`（ParadeDB 镜像，chart 默认 `paradedb/paradedb:v0.18.9-pg17`，与 Compose 的版本不同）、`redis`（`redis:7-alpine`），并可选启用 `minio` 与 `neo4j`。
 
@@ -282,6 +282,22 @@ cd docreader && uv sync --locked && bash scripts/generate_proto.sh && uv run -m 
 ```
 
 配置文件查找顺序（`internal/config/config.go` 的 `LoadConfig`）：当前目录 → `./config` → `$HOME/.appname` → `/etc/appname/`，文件名 `config.yaml`。
+
+### 标准版可选托管前端
+
+标准版默认仅提供 API，前端由独立服务提供。若希望由同一个标准版进程提供 Web UI，可显式设置 `WEKNORA_WEB_DIR`，指向已构建的前端目录；该目录必须包含 `index.html`。未设置该变量时保持默认行为，目录不存在或缺少 `index.html` 时也不会启用前端托管。
+
+以下命令从仓库根目录执行，要求已安装 Go 1.26、CGO 所需工具与依赖、Node.js 和 npm，并已提供标准版所需的数据库、Redis、存储、模型服务及所用解析服务等配置与依赖：
+
+```bash
+(cd frontend && npm ci && npm run build)
+make build-prod
+SERVER_HOST=127.0.0.1 WEKNORA_WEB_DIR="$PWD/frontend/dist" ./WeKnora
+```
+
+启动后通过 `http://127.0.0.1:8080` 访问（使用默认 `SERVER_PORT` 时）。`WEKNORA_WEB_DIR` 目录仅应包含前端构建产物，不要放入数据、配置或密钥；其中的文件会作为静态资源提供。已注册的后端路由（包括 `/mcp/` 端点）优先于静态文件和 SPA 回退，现有 API 的认证与授权规则保持不变。
+
+此选项可省去独立前端服务，不会替代数据库、Redis 等后端依赖。需要 SQLite + 内存队列的最小化无 Docker 部署时，请参考现有的 [Lite 运行时](#_7-1-lite-运行时-零外部依赖)。
 
 ## 常见部署拓扑
 

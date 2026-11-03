@@ -41,6 +41,21 @@ func (e *ConvertError) NeedsOCR() bool {
 	return e != nil && e.Kind == "needs_ocr"
 }
 
+// ResourceLimit reports a permanent parser budget rejection. Retrying the
+// same document cannot succeed.
+func (e *ConvertError) ResourceLimit() bool {
+	return e != nil && e.Kind == "resource_limit"
+}
+
+// LimitDetail is the converter's description of the exceeded budget, for
+// example "resource limit exceeded (max_xml_nodes): part exceeds 2000000 xml nodes".
+func (e *ConvertError) LimitDetail() string {
+	if e == nil {
+		return ""
+	}
+	return e.Detail
+}
+
 func (e *ConvertError) Error() string {
 	if e == nil {
 		return "<nil>"

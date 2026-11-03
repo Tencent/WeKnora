@@ -210,6 +210,14 @@ type SessionDesktopProvider interface {
 	SessionDesktopManager() SessionDesktopManager
 }
 
+// SessionDesktopPromptReporter reports whether the agent should be told about
+// the desktop. It follows the sandbox configuration's own desktop switch and
+// also requires a runtime that can relay the desktop, so the prompt never
+// promises a screen the user cannot open.
+type SessionDesktopPromptReporter interface {
+	DesktopEnabledForPrompt() bool
+}
+
 // SessionTurnHolder marks one chat turn on a session's sandbox.
 type SessionTurnHolder interface {
 	// BeginSessionTurn opens one turn hold. Run the turn with the returned
@@ -217,4 +225,18 @@ type SessionTurnHolder interface {
 	// so the turn's own tool calls do not wait for it, and it ends if the
 	// registration is lost. end closes exactly this hold; call it once.
 	BeginSessionTurn(ctx context.Context, sessionID string) (turnCtx context.Context, end func(), err error)
+}
+
+// SessionSecureBrowser fills credential values into the browser of the
+// sandbox bound to a session, and reads which page that browser shows. Only
+// remote backends with the desktop image offer it.
+type SessionSecureBrowser interface {
+	CurrentPage(ctx context.Context, sessionID string) (BrowserPage, error)
+	FillSecret(ctx context.Context, sessionID string, req SecretFillRequest) (*SecretFillResult, error)
+}
+
+// SessionSecureBrowserProvider is implemented by managers that MAY offer a
+// SessionSecureBrowser. The accessor returns nil when they cannot.
+type SessionSecureBrowserProvider interface {
+	SessionSecureBrowser() SessionSecureBrowser
 }

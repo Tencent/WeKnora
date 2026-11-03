@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   buildClaudeCodeCommand,
   buildHttpClientSnippet,
+  buildVsCodeClientSnippet,
   buildMcpEndpointUrl,
   buildStdioBridgeSnippet,
   groupTools,
@@ -54,4 +55,35 @@ test('groupTools keeps backend order and drops empty groups', () => {
   ])
   assert.deepEqual(grouped.map((g) => g.group), ['retrieve', 'chat', 'ingest'])
   assert.deepEqual(grouped[0].tools.map((t) => t.name), ['search_knowledge'])
+})
+
+
+test('stdio fallback pins the bridge and passes the bearer value through its env', () => {
+  const token = 'mcp_SYNTHETIC_TOKEN_001'
+  const config = JSON.parse(buildStdioBridgeSnippet('Docs', 'https://h/mcp/1', token)).mcpServers['weknora-docs']
+  assert.deepEqual(config.args, ['-y', 'mcp-remote@0.15.1', 'https://h/mcp/1', '--header', 'Authorization:${WEKNORA_MCP_AUTH}'])
+  assert.deepEqual(config.env, { WEKNORA_MCP_AUTH: `Bearer ${token}` })
+  assert.equal(JSON.stringify(config.args).includes(token), false)
+})
+
+test('stdio fallback keeps the placeholder in env when the one-time token is unavailable', () => {
+  const config = JSON.parse(buildStdioBridgeSnippet('Docs', 'https://h/mcp/1', '')).mcpServers['weknora-docs']
+  assert.deepEqual(config.env, { WEKNORA_MCP_AUTH: `Bearer ${MCP_TOKEN_PLACEHOLDER}` })
+  assert.equal(config.args.includes('Authorization:${WEKNORA_MCP_AUTH}'), true)
+  assert.equal(JSON.stringify(config.args).includes(MCP_TOKEN_PLACEHOLDER), false)
+})
+
+
+test('VS Code snippet is a ready workspace mcp.json with native HTTP and bearer auth', () => {
+  const config = JSON.parse(buildVsCodeClientSnippet('Docs', 'https://h/mcp/1', 'mcp_fixture'))
+  assert.deepEqual(config, {
+    servers: { 'weknora-docs': { type: 'http', url: 'https://h/mcp/1', headers: { Authorization: 'Bearer mcp_fixture' } } },
+  })
+})
+
+test('VS Code snippet uses the endpoint id and placeholder when name and token are unavailable', () => {
+  const config = JSON.parse(buildVsCodeClientSnippet('知识库', 'https://h/mcp/2', '', 'id-two'))
+  assert.deepEqual(config, {
+    servers: { 'weknora-idtwo': { type: 'http', url: 'https://h/mcp/2', headers: { Authorization: `Bearer ${MCP_TOKEN_PLACEHOLDER}` } } },
+  })
 })

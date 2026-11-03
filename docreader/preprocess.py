@@ -34,6 +34,9 @@ class PreprocessLimits:
     memory_mb: int = 2048
     max_pixels: int = 16_000_000
     max_edge: int = 2000
+    # Detection runs on a copy capped at probe_edge; the crop itself is taken
+    # from the original image and only capped at max_edge.
+    probe_edge: int = 2000
 
     def __post_init__(self):
         if any(value <= 0 for value in asdict(self).values()):

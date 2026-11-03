@@ -46,6 +46,69 @@ func TestMAPMetric_Compute(t *testing.T) {
 			expected: 0.0,
 		},
 		{
+			name: "only one of four relevant documents retrieved",
+			input: &types.MetricInput{
+				RetrievalGT:  [][]int{{1, 2, 3, 4}},
+				RetrievalIDs: []int{1},
+			},
+			expected: 0.25,
+		},
+		{
+			name: "incomplete recall with a nonrelevant result first",
+			input: &types.MetricInput{
+				RetrievalGT:  [][]int{{1, 2, 3}},
+				RetrievalIDs: []int{99, 1, 2},
+			},
+			expected: 7.0 / 18,
+		},
+		{
+			name: "duplicate retrieved documents count once",
+			input: &types.MetricInput{
+				RetrievalGT:  [][]int{{1, 2}},
+				RetrievalIDs: []int{1, 1, 2},
+			},
+			expected: 5.0 / 6,
+		},
+		{
+			name: "duplicate hits cannot inflate the normalized score",
+			input: &types.MetricInput{
+				RetrievalGT:  [][]int{{1}},
+				RetrievalIDs: []int{1, 1},
+			},
+			expected: 1.0,
+		},
+		{
+			name: "duplicate ground truth documents count once",
+			input: &types.MetricInput{
+				RetrievalGT:  [][]int{{1, 1, 2}},
+				RetrievalIDs: []int{1},
+			},
+			expected: 0.5,
+		},
+		{
+			name: "empty ground truth group",
+			input: &types.MetricInput{
+				RetrievalGT:  [][]int{{}},
+				RetrievalIDs: []int{1},
+			},
+			expected: 0.0,
+		},
+		{
+			name: "empty retrieved results",
+			input: &types.MetricInput{
+				RetrievalGT: [][]int{{1, 2}},
+			},
+			expected: 0.0,
+		},
+		{
+			name: "multiple queries with incomplete recall",
+			input: &types.MetricInput{
+				RetrievalGT:  [][]int{{1, 2}, {3, 4}},
+				RetrievalIDs: []int{1, 3},
+			},
+			expected: 0.375,
+		},
+		{
 			name: "multiple queries",
 			input: &types.MetricInput{
 				RetrievalGT: [][]int{

@@ -39,7 +39,7 @@ func TestListenersRunInOrderAndSurviveErrors(t *testing.T) {
 
 	s := interfaces.SessionRef{TenantID: 1, SessionID: "s"}
 	l.NotifyStop(context.Background(), s)
-	l.NotifyDelete(context.Background(), s)
+	require.ErrorContains(t, l.NotifyDelete(context.Background(), s), "a failed")
 
 	require.Equal(t, []string{"a:stop", "b:stop", "a:delete", "b:delete"}, log)
 	require.Len(t, warnings, 2)
@@ -61,7 +61,7 @@ func TestNotifyDeleteClearsSharedStateLast(t *testing.T) {
 		sawDuringListener = len(items)
 	}))
 
-	l.NotifyDelete(ctx, s)
+	require.NoError(t, l.NotifyDelete(ctx, s))
 
 	require.Equal(t, 1, sawDuringListener, "feature listeners must run before shared state is cleared")
 	items, err := registry.List(ctx, s)

@@ -124,3 +124,27 @@ func (m *destroyingSandboxManager) DestroySession(_ context.Context, sessionID s
 	m.destroyed = append(m.destroyed, sessionID)
 	return os.RemoveAll(m.workspace)
 }
+
+type releasingHostManager struct {
+	destroyingSandboxManager
+	released []string
+}
+
+func (m *releasingHostManager) ReleaseSessionState(_ context.Context, sessionID string) {
+	m.released = append(m.released, sessionID)
+}
+
+func TestDeleteSessionReleasesHostApprovals(t *testing.T) {
+	host := &releasingHostManager{destroyingSandboxManager: destroyingSandboxManager{
+		typ: sandbox.SandboxTypeHost, workspace: t.TempDir(),
+	}}
+	svc, db := newSessionServiceForHostDeleteTest(t, host, nil)
+	ctx := testSessionScopeContext(1, "u1")
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Session{
+		ID: "host-s2", TenantID: 1, UserID: "u1", Title: "chat",
+	}).Error)
+
+	require.NoError(t, svc.DeleteSession(ctx, "host-s2"))
+	require.Equal(t, []string{"host-s2"}, host.released)
+	require.Empty(t, host.destroyed)
+}

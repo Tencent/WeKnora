@@ -344,6 +344,28 @@ def warp(img, quad, pad=PAD):
     return rect, q
 
 
+def warp_ordered(img, quad, pad=0.0):
+    """Warp an ALREADY-ORDERED quad (TL, TR, BR, BL), with optional extra padding.
+
+    `preprocess`'s `quad_input` is already ordered and padded in the rotated
+    frame, so it must NOT go through `order_pts` again: on a rotated page the
+    sum/difference heuristic can pick a different corner and the crop comes back
+    twisted. This lets a caller detect on a smaller probe and still crop the
+    original bytes at their own resolution.
+    """
+    q = np.asarray(quad, "float32").reshape(4, 2)
+    if pad:
+        side = float(np.mean([np.linalg.norm(q[(i + 1) % 4] - q[i]) for i in range(4)]))
+        d = pad * side
+        q = q + np.array([[-d, -d], [d, -d], [d, d], [-d, d]], "float32")
+    wA, wB = np.linalg.norm(q[1] - q[0]), np.linalg.norm(q[2] - q[3])
+    hA, hB = np.linalg.norm(q[3] - q[0]), np.linalg.norm(q[2] - q[1])
+    Wt, Ht = int(max(wA, wB)), int(max(hA, hB))
+    dst = np.array([[0, 0], [Wt - 1, 0], [Wt - 1, Ht - 1], [0, Ht - 1]], "float32")
+    return cv2.warpPerspective(img, cv2.getPerspectiveTransform(q, dst), (Wt, Ht),
+                               borderValue=(255, 255, 255))
+
+
 def rec_score(img):
     """Mean recognition score with cls DISABLED (orientation-sensitive)."""
     try:

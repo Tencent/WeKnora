@@ -16,23 +16,36 @@ import (
 // MessageHandler is called when an IM message is received via long connection.
 type MessageHandler func(ctx context.Context, msg *im.IncomingMessage) error
 
+// botOpenIDProvider supplies this app's own Feishu/Lark bot open_id. It is
+// shared with the webhook path so both delivery modes use the same mention
+// matching rule.
+type botOpenIDProvider interface {
+	BotOpenID(ctx context.Context) (string, error)
+}
+
 // LongConnClient manages a Feishu/Lark WebSocket long connection.
 type LongConnClient struct {
-	region   Region
-	appID    string
-	wsClient *larkws.Client
+	region            Region
+	appID             string
+	wsClient          *larkws.Client
+	botOpenIDProvider botOpenIDProvider
 }
 
 // NewLongConnClient creates a long connection client on the given region's cloud.
 // apiBaseURL overrides the SDK's bootstrap domain (empty uses the region
 // default); set it to a reverse-proxy origin for private/internal deployments.
 // When a message arrives, it converts it to IncomingMessage and calls handler.
-func NewLongConnClient(region Region, appID, appSecret, apiBaseURL string, handler MessageHandler) *LongConnClient {
+func NewLongConnClient(
+	region Region, appID, appSecret, apiBaseURL string,
+	botOpenIDProvider botOpenIDProvider, handler MessageHandler,
+) *LongConnClient {
+	var client *LongConnClient
+
 	// Long connection mode does not require verificationToken or encryptKey;
 	// those are only used for webhook signature verification and decryption.
 	eventHandler := dispatcher.NewEventDispatcher("", "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			msg := convertEvent(region, event)
+			msg := convertEvent(region, client.botOpenID(ctx), event)
 			if msg == nil {
 				return nil
 			}
@@ -56,13 +69,35 @@ func NewLongConnClient(region Region, appID, appSecret, apiBaseURL string, handl
 		larkws.WithDomain(apiBaseURL),
 	)
 
-	return &LongConnClient{region: region, appID: appID, wsClient: wsClient}
+	client = &LongConnClient{
+		region:            region,
+		appID:             appID,
+		wsClient:          wsClient,
+		botOpenIDProvider: botOpenIDProvider,
+	}
+	return client
 }
 
 // Start begins the WebSocket long connection. It blocks until ctx is cancelled.
 func (c *LongConnClient) Start(ctx context.Context) error {
 	logger.Infof(ctx, "[IM] %s WebSocket connecting (app_id=%s)...", c.region.Label, c.appID)
 	return c.wsClient.Start(ctx)
+}
+
+// botOpenID resolves this app's own bot open_id through the shared provider.
+// An empty value makes convertEvent fail closed for group messages, which is
+// safer than answering a message addressed to another bot.
+func (c *LongConnClient) botOpenID(ctx context.Context) string {
+	if c.botOpenIDProvider == nil {
+		logger.Warnf(ctx, "[%s] bot open_id provider is not configured", c.region.Label)
+		return ""
+	}
+	openID, err := c.botOpenIDProvider.BotOpenID(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[%s] failed to resolve bot open_id; ignoring group message: %v", c.region.Label, err)
+		return ""
+	}
+	return openID
 }
 
 // Close tears down the WebSocket long connection.
@@ -108,7 +143,7 @@ func (l *feishuLoggerAdapter) Error(ctx context.Context, args ...interface{}) {
 
 // convertEvent converts a Feishu/Lark SDK event to a unified IncomingMessage.
 // Supports text, file, image and post messages. Returns nil for other types.
-func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingMessage {
+func convertEvent(region Region, botOpenID string, event *larkim.P2MessageReceiveV1) *im.IncomingMessage {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		logger.Warnf(context.Background(), "[%s][RX] event dropped: nil event/event/message", region.Label)
 		return nil
@@ -120,11 +155,12 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	// delivers (or doesn't). This is the single chokepoint for all message
 	// types — adding it here catches text/file/image/post uniformly.
 	logger.Infof(context.Background(),
-		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q",
+		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q "+
+			"thread_id=%q content=%q mentions=%v",
 		region.Label,
 		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
 		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
-		ptrStr(msg.ThreadId), ptrStr(msg.Content),
+		ptrStr(msg.ThreadId), ptrStr(msg.Content), describeMentions(msg.Mentions),
 	)
 
 	if msg.MessageType == nil {
@@ -132,6 +168,18 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	}
 
 	msgType := *msg.MessageType
+
+	// With the "receive all group messages" permission Feishu can deliver
+	// messages that are not aimed at this bot; without it, only @-mentions are
+	// delivered. Only handle a group message when this bot itself is explicitly
+	// @-mentioned. Feishu reports bot mentions as mentioned_type="bot", so we
+	// compare the mention open_id with this app's own bot open_id.
+	isGroup := msg.ChatType != nil && *msg.ChatType == "group"
+	if isGroup && !mentionsBot(botOpenID, msg.Mentions) {
+		logger.Infof(context.Background(),
+			"[%s][RX] ignoring group message without this bot mention: msg_id=%q", region.Label, ptrStr(msg.MessageId))
+		return nil
+	}
 
 	// Sender info
 	openID := ""
@@ -167,6 +215,45 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	default:
 		return nil
 	}
+}
+
+// mentionsBot reports whether a Feishu group event explicitly @-mentions this
+// app's own bot. Feishu marks all bot mentions as mentioned_type == "bot", so
+// the open_id is required to distinguish this bot from other bots.
+func mentionsBot(botOpenID string, mentions []*larkim.MentionEvent) bool {
+	if botOpenID == "" {
+		return false
+	}
+	for _, mention := range mentions {
+		if mention == nil {
+			continue
+		}
+		if mention.MentionedType != nil && *mention.MentionedType == "bot" {
+			if mention.Id != nil && mention.Id.OpenId != nil && *mention.Id.OpenId == botOpenID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// describeMentions renders mention metadata compactly for receive logs.
+func describeMentions(mentions []*larkim.MentionEvent) []string {
+	out := make([]string, 0, len(mentions))
+	for _, mention := range mentions {
+		if mention == nil {
+			continue
+		}
+		key := ptrStr(mention.Key)
+		mentionedType := ptrStr(mention.MentionedType)
+		name := ptrStr(mention.Name)
+		openID := ""
+		if mention.Id != nil && mention.Id.OpenId != nil {
+			openID = *mention.Id.OpenId
+		}
+		out = append(out, fmt.Sprintf("key=%s type=%s name=%s open_id=%s", key, mentionedType, name, openID))
+	}
+	return out
 }
 
 // convertTextEvent handles text message type.

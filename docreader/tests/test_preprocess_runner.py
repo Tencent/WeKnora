@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import grpc
+import numpy as np
 from PIL import Image
 
 from docreader.preprocess import MAX_IMAGE_BYTES, PreprocessLimits, PreprocessRunner
@@ -229,19 +230,53 @@ class ImageBudgetTest(unittest.TestCase):
         decode.assert_not_called()
         preprocess.assert_not_called()
 
-    def test_working_image_is_resized_before_ocr(self):
+    def test_crop_keeps_original_resolution_when_under_the_output_cap(self):
+        # A 4000x4000 page whose only content is a 500x500 block: detect on a
+        # 2000 probe, but crop the original, so the block stays 500x500.
         shapes = []
+        quad_probe = np.array([[0, 0], [250, 0], [250, 250], [0, 250]], "float32")
 
         def inspect(img):
-            shapes.append(img.shape)
-            return {"status": "ok", "rect": img, "n_boxes": 4, "n_kept": 4}
+            shapes.append(img.shape[:2])
+            return {"status": "ok", "rect": np.zeros((10, 10, 3), "uint8"),
+                    "quad_input": quad_probe, "n_boxes": 4, "n_kept": 4,
+                    "residual": 0.0, "flip": False}
 
         with patch("docreader.parser.image_preprocess.preprocess", side_effect=inspect):
-            response = process_image(self.image((400, 200)), PreprocessLimits(max_edge=100))
-        self.assertEqual(shapes, [(50, 100, 3)])
+            response = process_image(self.image((4000, 4000)),
+                                     PreprocessLimits(probe_edge=2000, max_edge=2000))
+        self.assertEqual(shapes, [(2000, 2000)])
         self.assertEqual(response.status, "ok")
         with Image.open(io.BytesIO(response.image)) as encoded:
-            self.assertEqual(encoded.size, (100, 50))
+            self.assertEqual(encoded.size, (500, 500))
+
+    def test_output_is_capped_after_cropping(self):
+        quad_probe = np.array([[0, 0], [200, 0], [200, 200], [0, 200]], "float32")
+
+        def inspect(img):
+            return {"status": "ok", "rect": np.zeros((10, 10, 3), "uint8"),
+                    "quad_input": quad_probe, "n_boxes": 4, "n_kept": 4,
+                    "residual": 0.0, "flip": False}
+
+        with patch("docreader.parser.image_preprocess.preprocess", side_effect=inspect):
+            response = process_image(self.image((400, 400)),
+                                     PreprocessLimits(probe_edge=200, max_edge=100))
+        self.assertEqual(response.status, "ok")
+        with Image.open(io.BytesIO(response.image)) as encoded:
+            self.assertEqual(encoded.size, (100, 100))
+
+    def test_small_input_uses_the_crop_directly(self):
+        rect = np.full((40, 30, 3), 200, "uint8")
+
+        def inspect(img):
+            return {"status": "ok", "rect": rect, "n_boxes": 4, "n_kept": 4,
+                    "residual": 0.0, "flip": False}
+
+        with patch("docreader.parser.image_preprocess.preprocess", side_effect=inspect):
+            response = process_image(self.image((200, 200)), PreprocessLimits(probe_edge=200))
+        self.assertEqual(response.status, "ok")
+        with Image.open(io.BytesIO(response.image)) as encoded:
+            self.assertEqual(encoded.size, (30, 40))
 
     def test_bad_image_and_declined_geometry_keep_original(self):
         self.assertTrue(process_image(b"not an image", PreprocessLimits()).fallback_needed)

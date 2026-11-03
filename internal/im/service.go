@@ -10,7 +10,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/textproto"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -3523,11 +3522,10 @@ func newInMemoryFileHeader(filename string, data []byte) *multipart.FileHeader {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
-	h.Set("Content-Type", "application/octet-stream")
-
-	part, err := writer.CreatePart(h)
+	// CreateFormFile escapes the filename for Content-Disposition. Building
+	// the header by string concatenation left quotes unescaped, so an
+	// attachment such as `Q4 "Final".md` parsed back as an unreadable header.
+	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		// Fallback: return a minimal FileHeader
 		return &multipart.FileHeader{Filename: filename, Size: int64(len(data))}

@@ -27,6 +27,11 @@ const (
 	// repositories, outside the work trees for the same reason GitDir is.
 	UserSessionsRoot = Root + "/sessions"
 	UserGitRoot      = "/var/lib/weknora/sessions"
+
+	// RemoteBrowserRoot is the agent-browser state root on a machine one
+	// session owns. Outside Root for the same reason GitDir is: Root is a
+	// git work tree committed with add -A.
+	RemoteBrowserRoot = "/var/lib/weknora/browser/session"
 )
 
 // Origin says what kind of workspace a layout describes. Isolation policy
@@ -74,6 +79,9 @@ type Layout struct {
 	// GitDir is the checkpoint repository for Root. Empty when the backend
 	// does not version the workspace (host).
 	GitDir string
+	// BrowserRoot holds the session's agent-browser home and profile. Never
+	// under Root. Exported to the sandbox as WEKNORA_BROWSER_ROOT.
+	BrowserRoot string
 	// WorkDirRoots limits shell work_dir on a shared machine. Empty means
 	// unrestricted for remote layouts; host layouts clamp to WriteRoots.
 	WorkDirRoots []string
@@ -99,6 +107,7 @@ func (l Layout) Normalized() Layout {
 	l.InputDir = cleanLayoutPath(l.InputDir)
 	l.OutputDir = cleanLayoutPath(l.OutputDir)
 	l.GitDir = cleanLayoutPath(l.GitDir)
+	l.BrowserRoot = cleanLayoutPath(l.BrowserRoot)
 	l.WriteRoots = cleanLayoutRoots(l.WriteRoots)
 	l.ReadRoots = cleanLayoutRoots(l.ReadRoots)
 	l.WorkDirRoots = cleanLayoutRoots(l.WorkDirRoots)
@@ -109,14 +118,15 @@ func (l Layout) Normalized() Layout {
 // Remote is the /workspace layout of a machine one session owns.
 func Remote() Layout {
 	return Layout{
-		Origin:     OriginRemote,
-		Root:       Root,
-		WriteRoots: []string{Root, OutputDir},
-		ReadRoots:  []string{OutputDir, InputDir, Root},
-		InputDir:   InputDir,
-		OutputDir:  OutputDir,
-		Hint:       Root,
-		GitDir:     GitDir,
+		Origin:      OriginRemote,
+		Root:        Root,
+		WriteRoots:  []string{Root, OutputDir},
+		ReadRoots:   []string{OutputDir, InputDir, Root},
+		InputDir:    InputDir,
+		OutputDir:   OutputDir,
+		Hint:        Root,
+		GitDir:      GitDir,
+		BrowserRoot: RemoteBrowserRoot,
 	}
 }
 
@@ -135,14 +145,15 @@ func UserSession(sessionID string) (Layout, error) {
 	input := path.Join(root, "input")
 	output := path.Join(root, "output")
 	return Layout{
-		Origin:     OriginRemoteShared,
-		Root:       root,
-		WriteRoots: []string{Root, OutputDir},
-		ReadRoots:  []string{output, input, root, SkillsImageRoot},
-		InputDir:   input,
-		OutputDir:  output,
-		Hint:       root,
-		GitDir:     path.Join(UserGitRoot, name+".git"),
+		Origin:      OriginRemoteShared,
+		Root:        root,
+		WriteRoots:  []string{Root, OutputDir},
+		ReadRoots:   []string{output, input, root, SkillsImageRoot},
+		InputDir:    input,
+		OutputDir:   output,
+		Hint:        root,
+		GitDir:      path.Join(UserGitRoot, name+".git"),
+		BrowserRoot: path.Join(UserGitRoot, sessionID+".browser"),
 	}, nil
 }
 

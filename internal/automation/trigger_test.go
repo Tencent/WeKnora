@@ -69,6 +69,23 @@ func TestOnceFiresOnce(t *testing.T) {
 	}
 }
 
+// Normalizing a once trigger must not move the planned instant: the At
+// written back re-parses to the same moment, fractional seconds included.
+func TestOnceNormalizationPreservesInstant(t *testing.T) {
+	at := time.Date(2026, 10, 20, 7, 1, 0, 794*int(time.Millisecond), time.UTC)
+	s, err := Parse(types.AutomationTrigger{Type: types.AutomationTriggerOnce, At: at.Format(time.RFC3339Nano)})
+	require.NoError(t, err)
+
+	normalized, err := time.Parse(time.RFC3339Nano, s.Trigger().At)
+	require.NoError(t, err)
+	require.Equal(t, at, normalized)
+
+	roundTrip, err := Parse(s.Trigger())
+	require.NoError(t, err)
+	from := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+	require.Equal(t, *s.Next(from), *roundTrip.Next(from))
+}
+
 func TestCheckInterval(t *testing.T) {
 	from := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	for expr, ok := range map[string]bool{

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -349,7 +350,14 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	// Back off to a rune boundary: a partial multi-byte rune is invalid UTF-8,
+	// and this preview reaches sync_logs / data_sources through the sync error
+	// message, which PostgreSQL rejects. Same rule as #4555.
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // ListWikiSpaces returns all wiki spaces accessible to the app.

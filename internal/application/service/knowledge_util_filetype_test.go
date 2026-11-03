@@ -2,6 +2,7 @@ package service
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -65,21 +66,27 @@ func TestIsSupportedImportExtension(t *testing.T) {
 // The set is pinned so moving it to internal/utils cannot silently change it.
 func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
 	want := []string{
-		"csv", "doc", "docx", "epub", "flac", "gif", "htm", "html", "jpeg", "jpg",
-		"json", "m4a", "markdown", "md", "mhtml", "mp3", "ogg", "pdf", "png", "ppt",
-		"pptx", "txt", "wav", "xls", "xlsx", "xmind",
+		"bmp", "csv", "doc", "docm", "docx", "epub", "flac", "gif", "htm", "html", "jpeg", "jpg",
+		"json", "m4a", "markdown", "md", "mhtml", "mp3", "odp", "ods", "odt", "ogg", "pdf", "png", "ppt",
+		"pptm", "pptx", "rtf", "tiff", "txt", "wav", "webp", "xls", "xlsm", "xlsx", "xmind",
 	}
 	exts := secutils.SupportedImportExtensions()
 	if !slices.Equal(exts, want) {
 		t.Fatalf("SupportedImportExtensions() = %v, want %v", exts, want)
 	}
 	for _, ext := range exts {
-		if !isValidFileType("file." + ext) {
-			t.Errorf("isValidFileType rejects supported extension %q", ext)
-		}
-		if err := validateImportFileType(ext); err != nil {
-			t.Errorf("validateImportFileType(%q) = %v, want nil", ext, err)
-		}
+		t.Run(ext, func(t *testing.T) {
+			for _, variant := range []string{ext, strings.ToUpper(ext)} {
+				if !isValidFileType("file." + variant) {
+					t.Errorf("isValidFileType rejects supported extension %q", variant)
+				}
+				for _, input := range []string{variant, " ." + variant + " "} {
+					if err := validateImportFileType(input); err != nil {
+						t.Errorf("validateImportFileType(%q) = %v, want nil", input, err)
+					}
+				}
+			}
+		})
 	}
 }
 

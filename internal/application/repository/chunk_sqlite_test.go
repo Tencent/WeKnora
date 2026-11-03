@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,7 +20,7 @@ func setupChunkTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.KnowledgeTag{}))
+	require.NoError(t, db.AutoMigrate(&types.Chunk{}, &types.ChunkRevision{}, &types.KnowledgeTag{}))
 	return db
 }
 
@@ -176,6 +177,89 @@ func TestKnowledgeTag_SQLite_SeqIDAutoAssigned(t *testing.T) {
 	assert.NotZero(t, tag1.SeqID)
 	assert.NotZero(t, tag2.SeqID)
 	assert.NotEqual(t, tag1.SeqID, tag2.SeqID)
+}
+
+func TestPurgeSupersededChunksByKnowledgeIDRemovesOnlyReplacedHistory(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db).(*chunkRepository)
+	ctx := context.Background()
+	const tenantID uint64 = 1
+	const knowledgeID = "knowledge-1"
+
+	deletedAt := time.Now().UTC().Add(-time.Minute)
+	old := &types.Chunk{
+		ID: "old", TenantID: tenantID, KnowledgeID: knowledgeID, KnowledgeBaseID: "kb-1",
+		ChunkIndex: 0, ChunkType: types.ChunkTypeText, Content: "old", IsEnabled: true,
+		CreatedAt: deletedAt.Add(-time.Minute), DeletedAt: gorm.DeletedAt{Time: deletedAt, Valid: true},
+	}
+	replacement := &types.Chunk{
+		ID: "replacement", TenantID: tenantID, KnowledgeID: knowledgeID, KnowledgeBaseID: "kb-1",
+		ChunkIndex: 0, ChunkType: types.ChunkTypeText, Content: "new", IsEnabled: true,
+		CreatedAt: deletedAt.Add(time.Minute),
+	}
+	// This is deliberately deleted but has no active replacement. It models a
+	// cancelled/failed parse or a user deletion and must stay recoverable.
+	keep := &types.Chunk{
+		ID: "keep", TenantID: tenantID, KnowledgeID: knowledgeID, KnowledgeBaseID: "kb-1",
+		ChunkIndex: 1, ChunkType: types.ChunkTypeText, Content: "keep", IsEnabled: true,
+		CreatedAt: deletedAt.Add(-time.Minute), DeletedAt: gorm.DeletedAt{Time: deletedAt, Valid: true},
+	}
+	require.NoError(t, db.Unscoped().Create([]*types.Chunk{old, replacement, keep}).Error)
+	require.NoError(t, db.Create(&types.ChunkRevision{
+		ID: "old-revision", TenantID: tenantID, KnowledgeID: knowledgeID, KnowledgeBaseID: "kb-1",
+		ChunkID: old.ID, Revision: 1, Content: "old", EditedAt: deletedAt,
+	}).Error)
+	require.NoError(t, db.Create(&types.ChunkRevision{
+		ID: "keep-revision", TenantID: tenantID, KnowledgeID: knowledgeID, KnowledgeBaseID: "kb-1",
+		ChunkID: keep.ID, Revision: 1, Content: "keep", EditedAt: deletedAt,
+	}).Error)
+
+	purged, err := repo.PurgeSupersededChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), purged)
+
+	var oldCount, keepCount, replacementCount, oldRevisions, keepRevisions int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).Where("id = ?", old.ID).Count(&oldCount).Error)
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).Where("id = ?", keep.ID).Count(&keepCount).Error)
+	require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", replacement.ID).Count(&replacementCount).Error)
+	require.NoError(t, db.Model(&types.ChunkRevision{}).Where("chunk_id = ?", old.ID).Count(&oldRevisions).Error)
+	require.NoError(t, db.Model(&types.ChunkRevision{}).Where("chunk_id = ?", keep.ID).Count(&keepRevisions).Error)
+	assert.Zero(t, oldCount, "the superseded chunk must be physically reclaimed")
+	assert.Equal(t, int64(1), keepCount, "unreplaced history must remain recoverable")
+	assert.Equal(t, int64(1), replacementCount)
+	assert.Zero(t, oldRevisions, "revisions of a purged chunk must not become orphaned")
+	assert.Equal(t, int64(1), keepRevisions)
+}
+
+func TestPurgeSupersededChunksByKnowledgeIDDoesNotPurgeEarlierActiveChunk(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db).(*chunkRepository)
+	ctx := context.Background()
+	const tenantID uint64 = 1
+	const knowledgeID = "knowledge-1"
+
+	// The live row predates the deletion, so it cannot be a replacement for it.
+	liveCreated := time.Now().UTC().Add(-2 * time.Minute)
+	deletedAt := time.Now().UTC().Add(-time.Minute)
+	old := &types.Chunk{
+		ID: "old", TenantID: tenantID, KnowledgeID: knowledgeID, KnowledgeBaseID: "kb-1",
+		ChunkIndex: 0, ChunkType: types.ChunkTypeText, Content: "old", IsEnabled: true,
+		CreatedAt: deletedAt.Add(-time.Minute), DeletedAt: gorm.DeletedAt{Time: deletedAt, Valid: true},
+	}
+	unrelatedLive := &types.Chunk{
+		ID: "live", TenantID: tenantID, KnowledgeID: knowledgeID, KnowledgeBaseID: "kb-1",
+		ChunkIndex: 0, ChunkType: types.ChunkTypeText, Content: "live", IsEnabled: true,
+		CreatedAt: liveCreated,
+	}
+	require.NoError(t, db.Unscoped().Create([]*types.Chunk{old, unrelatedLive}).Error)
+
+	purged, err := repo.PurgeSupersededChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+	require.NoError(t, err)
+	assert.Zero(t, purged)
+
+	var count int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).Where("id = ?", old.ID).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
 }
 
 func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {

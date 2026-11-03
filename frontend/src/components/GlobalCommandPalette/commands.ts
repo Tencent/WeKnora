@@ -12,7 +12,7 @@ export interface CmdkCommand {
   id: string
   /** Localized display label. */
   label: string
-  /** TDesign icon name rendered on the left. */
+  /** TDesign icon name, or "assistant" for the shared assistant icon. */
   icon: string
   /** Extra tokens used purely for fuzzy matching (aliases, synonyms). */
   keywords?: string[]
@@ -41,7 +41,7 @@ export function buildCommands(ctx: CommandContext): CmdkCommand[] {
     {
       id: 'open-assistant',
       label: t('commandPalette.quick.assistant', { name: assistantName(t) }),
-      icon: 'compass',
+      icon: 'assistant',
       keywords: ['assistant', 'help', 'weknora', 'kora', '助手', '帮助', 'ассистент', useAssistantStore().displayName].filter(Boolean),
       run: () => {
         close()

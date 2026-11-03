@@ -8,7 +8,7 @@ import logging
 import os
 import posixpath
 import tempfile
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 import uuid
 from typing import Dict
 
@@ -18,6 +18,7 @@ from ebooklib import epub
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
+from docreader.parser.mhtml_parser import MHTMLParser
 
 logger = logging.getLogger(__name__)
 
@@ -254,9 +255,10 @@ class EPUBParser(BaseParser):
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_path)
             markdown_text = md(str(soup), heading_style="ATX")
-            return "\n".join(
-                line.strip() for line in markdown_text.split("\n") if line.strip()
-            )
+            # Keep the blank lines and indentation that delimit Markdown blocks
+            # (paragraphs, quotes, lists, tables, fenced code) and only collapse
+            # runs of blank lines, as the MHTML and static HTML parsers do.
+            return MHTMLParser._normalize_markdown(markdown_text)
         except ImportError:
             logger.warning("markdownify not available, using HTML as-is")
             return f"```html\n{html_content}\n```"
@@ -304,6 +306,14 @@ class EPUBParser(BaseParser):
         for img in soup.find_all("img"):
             src = (img.get("src") or "").strip()
             if not src:
+                continue
+            # Only archive-local references may use the basename fallback.
+            # A remote image can share its filename with an unrelated ZIP entry.
+            try:
+                reference = urlsplit(src)
+            except ValueError:
+                continue
+            if reference.scheme or reference.netloc:
                 continue
             # Only src is a URI reference. Strip its URI suffixes before decoding
             # once; archive paths from EbookLib and ZIP already contain literal

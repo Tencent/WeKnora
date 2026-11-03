@@ -124,6 +124,8 @@ test('maps knowledge-base bindings to the configuration section that owns them',
   assert.equal(modelUsageKnowledgeBaseSection(['asr_model']), 'asr')
   assert.equal(modelUsageKnowledgeBaseSection(['future_binding']), 'models')
   assert.equal(modelUsageKnowledgeBaseSection(['summary_model', 'vlm_model']), 'models')
+  assert.equal(modelUsageKnowledgeBaseSection(['question_model']), 'advanced')
+  assert.equal(modelUsageBindingI18nKey('question_model'), 'modelSettings.usage.bindings.question_model')
 })
 
 test('maps agent bindings to the configuration section that owns them', () => {

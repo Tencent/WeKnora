@@ -73,6 +73,14 @@ async function fixture(fail = false) {
   return { state, requests, changes: () => changes, root, find, fire, settle, close: () => app.unmount() }
 }
 
+test('the trigger shrinks to the chip and the panel stays compact', () => {
+  assert.match(source, /class="knowledge-tag-trigger"/)
+  assert.match(source, /width: min\(232px/)
+  assert.match(source, /width: auto/)
+  assert.doesNotMatch(source, /(?<!max-)width: 100%/)
+  assert.doesNotMatch(source, /min\(300px/)
+})
+
 test('opening hydrates tags; refreshing the document preserves an open draft; cancel does not save', async t => {
   const f = await fixture(); t.after(f.close)
   const picker = f.find(el => el.type === 'picker')

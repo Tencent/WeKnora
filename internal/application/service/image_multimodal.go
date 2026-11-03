@@ -946,7 +946,33 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	// New-style: resolve model through ModelService
 	if vlmCfg.ModelID != "" {
 		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
-		return model, vlmCfg, err
+		if err == nil {
+			return model, vlmCfg, nil
+		}
+
+		// A shared KB is processed in its owner's tenant context, while a
+		// document uploaded by an editor may carry a model ID from the
+		// editor's tenant. If that document-level model cannot be resolved,
+		// retry with the KB owner's configured model instead.
+		kbVLMConfig := kb.VLMConfig
+		if vlmCfg.ModelID != kbVLMConfig.ModelID && kbVLMConfig.ModelID != "" && kbVLMConfig.IsEnabled() {
+			logger.Warnf(ctx,
+				"[ImageMultimodal] Failed to resolve document VLM model %s: %v;"+
+					" falling back to knowledge base VLM model %s",
+				vlmCfg.ModelID, err, kbVLMConfig.ModelID)
+			fallbackModel, fallbackErr := s.modelService.GetVLMModel(ctx, kbVLMConfig.ModelID)
+			if fallbackErr != nil {
+				logger.Warnf(ctx,
+					"[ImageMultimodal] Failed to resolve knowledge base fallback VLM model %s: %v",
+					kbVLMConfig.ModelID, fallbackErr)
+				return nil, vlmCfg, errors.Join(
+					fmt.Errorf("resolve document VLM model %s: %w", vlmCfg.ModelID, err),
+					fmt.Errorf("resolve knowledge base fallback VLM model %s: %w", kbVLMConfig.ModelID, fallbackErr),
+				)
+			}
+			return fallbackModel, kbVLMConfig, nil
+		}
+		return nil, vlmCfg, err
 	}
 
 	// Legacy: create VLM from inline config

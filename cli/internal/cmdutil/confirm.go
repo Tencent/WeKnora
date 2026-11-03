@@ -14,14 +14,16 @@ import (
 
 // BuildRetryArgv assembles the directly-executable retry argv for a
 // confirmation-gated command: head (e.g. []string{"weknora","kb","update",id})
-// followed by each *changed* flag named in allow (as "--name", "value") in
-// pflag's visit order, plus a trailing "-y".
+// followed by each *changed* flag named in allow in pflag's visit order,
+// plus a trailing "-y".
 //
 // Slice-typed flags (StringSlice / StringArray) expand to repeated
 // "--name", "value" pairs so the argv is re-executable by shells and agents.
-// Scalar flags use f.Value.String(). Flags not in allow are skipped (callers
-// still exclude secrets / stdin-only values such as --api-key-stdin).
-// Replaces the per-command build*RetryCmd helpers.
+// Other scalar flags use f.Value.String() as "--name", "value". Bool flags
+// take no separate value and so are emitted as the single token
+// "--name=value" (see the NoOptDefVal branch below). Flags not in allow are
+// skipped (callers still exclude secrets / stdin-only values such as
+// --api-key-stdin). Replaces the per-command build*RetryCmd helpers.
 func BuildRetryArgv(c *cobra.Command, head []string, allow ...string) []string {
 	allowed := make(map[string]struct{}, len(allow))
 	for _, a := range allow {
@@ -30,6 +32,17 @@ func BuildRetryArgv(c *cobra.Command, head []string, allow ...string) []string {
 	parts := append([]string{}, head...)
 	c.Flags().Visit(func(f *pflag.Flag) {
 		if _, ok := allowed[f.Name]; !ok {
+			return
+		}
+		// A flag with NoOptDefVal (pflag sets it on every bool) takes its value
+		// from the flag token itself, never from the next argv element. Emitting
+		// `--name value` therefore leaves that value as a stray positional, which
+		// a command with ExactArgs rejects - and for `--name=false` the flag then
+		// falls back to its NoOptDefVal "true", silently inverting what the
+		// caller asked for. The single-token `--name=value` form is the only one
+		// pflag reads back the way the flag was registered.
+		if f.NoOptDefVal != "" {
+			parts = append(parts, "--"+f.Name+"="+f.Value.String())
 			return
 		}
 		// Expand multi-value flags as repeated --flag value pairs so retry_argv

@@ -50,3 +50,12 @@ test('edit mode forwards image_processing_config in the update payload', () => {
   assert.ok(editBranch, 'expected to find the edit-mode update block')
   assert.match(editBranch, /if \(data\.image_processing_config\) \{\s*updateConfig\.image_processing_config = data\.image_processing_config\s*\}/)
 })
+
+test('Wiki auto-generation setting defaults on, loads from the KB, and is submitted', () => {
+  assert.match(source, /autoGenerate: true/)
+  assert.match(source, /autoGenerate: kb\.wiki_config\?\.auto_generate \?\? true/)
+  assert.match(source, /auto_generate: formData\.value\.wikiConfig\?\.autoGenerate \?\? true/)
+  assert.match(source, /auto_generate: formData\.value\.wikiConfig\.autoGenerate \?\? true/)
+  assert.match(source, /knowledgeEditor\.wiki\.autoGenerateLabel/)
+  assert.match(source, /knowledgeEditor\.wiki\.autoGenerateTip/)
+})

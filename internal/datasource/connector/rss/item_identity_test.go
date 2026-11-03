@@ -218,3 +218,40 @@ func TestIncrementalItemContentWithoutLink(t *testing.T) {
 	}
 	assertIdentityUnchanged(t, f, next)
 }
+
+func TestIncrementalItemIdentityRefreshRetriesAfterArticleFailure(t *testing.T) {
+	for _, tt := range []struct{ name, title, path string }{
+		{"title only", "Corrected title", "/original"},
+		{"link only", "Original title", "/moved"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newIdentityFeed(t)
+			original, cursor := f.sync(t, nil)
+			if len(original) != 1 {
+				t.Fatalf("expected 1 initial item, got %d", len(original))
+			}
+			fingerprint := storedItemFingerprint(t, f, cursor)
+			f.publish(tt.title, tt.path, "Mon, 02 Jan 2006 15:04:05 GMT")
+			f.articleStatus.Store(http.StatusServiceUnavailable)
+			for attempt := 0; attempt < 2; attempt++ {
+				items, next := f.sync(t, cursor)
+				if len(items) != 0 || storedItemFingerprint(t, f, next) != fingerprint {
+					t.Fatal("failed refresh must preserve the stored full article")
+				}
+				cursor = next
+			}
+			if f.fetches.Load() != 3 {
+				t.Fatal("every changed-feed refresh must retry the article")
+			}
+			f.articleStatus.Store(http.StatusOK)
+			updated, cursor := f.sync(t, cursor)
+			if len(updated) != 1 || updated[0].Title != tt.title || updated[0].URL != f.server.URL+tt.path {
+				t.Fatalf("recovery must apply the delayed identity update: %+v", updated)
+			}
+			if string(updated[0].Content) != string(original[0].Content) {
+				t.Fatal("recovered update must retain the complete article")
+			}
+			assertIdentityUnchanged(t, f, cursor)
+		})
+	}
+}
