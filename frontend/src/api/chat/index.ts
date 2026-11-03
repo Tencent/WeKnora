@@ -195,6 +195,21 @@ export async function downloadArtifact(
   );
 }
 
+// addArtifactToKnowledgeBase imports a generated artifact into a knowledge
+// base as a file, preserving its format. The backend resolves the artifact
+// bytes through the same access rules as the download endpoint.
+export async function addArtifactToKnowledgeBase(
+  session_id: string,
+  message_id: string,
+  index: number,
+  knowledge_base_id: string,
+) {
+  return post(
+    `/api/v1/sessions/${session_id}/messages/${message_id}/artifacts/${index}/knowledge`,
+    { knowledge_base_id },
+  );
+}
+
 // deleteMessageArtifact removes a generated file from the session. The stored
 // bytes are reclaimed, so this is not reversible; callers confirm first.
 //
