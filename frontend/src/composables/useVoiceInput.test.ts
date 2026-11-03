@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { mock } from 'node:test'
+import { createRenderer } from 'vue'
+import type { VoiceClip } from '../utils/wavEncoder.ts'
 
 import { useVoiceInput, VOICE_TAIL_MS, VOICE_WARM_MS, type VoiceInputError } from './useVoiceInput.ts'
 
@@ -29,7 +31,7 @@ class FakeMediaRecorder {
   }
 }
 
-function setup(opts: { getUserMedia?: () => Promise<unknown>; speech?: boolean } = {}) {
+function setup(opts: { getUserMedia?: () => Promise<unknown>; speech?: boolean; transcribe?: () => Promise<string>; toWav?: (blob: Blob) => Promise<VoiceClip> } = {}) {
   const tracks: FakeTrack[] = []
   let opens = 0
   const getUserMedia = opts.getUserMedia ?? (async () => {
@@ -52,13 +54,13 @@ function setup(opts: { getUserMedia?: () => Promise<unknown>; speech?: boolean }
     target: () => ({ agentId: 'agent-1', locale: 'zh-CN' }),
     transcribe: async (_wav, target) => {
       sent.push(target)
-      return ' 你好 '
+      return opts.transcribe ? opts.transcribe() : ' 你好 '
     },
-    toWav: async blob => ({
+    toWav: opts.toWav ?? (async blob => ({
       wav: blob,
       speech: opts.speech ?? true,
       stats: { speech: opts.speech ?? true, noiseFloor: 0, threshold: 0, peak: 0, voicedMs: 0 },
-    }),
+    })),
     onText: text => texts.push(text),
     onError: error => errors.push(error),
   })
@@ -163,3 +165,78 @@ test('getUserMedia errors map to permission and device', async () => {
 })
 
 test.after(() => mock.timers.reset())
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+async function record(t: any, voice: ReturnType<typeof useVoiceInput>) {
+  await voice.start()
+  t.mock.timers.tick(1000)
+  voice.stop()
+  t.mock.timers.tick(VOICE_TAIL_MS)
+  await flush()
+}
+
+for (const fail of [false, true]) {
+  test(`cancel suppresses a late transcription ${fail ? 'error' : 'result'} without resetting a newer recording`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] })
+    const pending = deferred<string>()
+    const { voice, texts, errors } = setup({ transcribe: () => pending.promise })
+    await record(t, voice)
+    assert.equal(voice.state.value, 'transcribing')
+    voice.cancel()
+    assert.equal(voice.state.value, 'idle')
+    await voice.start()
+    assert.equal(voice.state.value, 'recording')
+    if (fail) pending.reject(new Error('old request failed'))
+    else pending.resolve('old chat transcript')
+    await flush()
+    assert.deepEqual(texts, [])
+    assert.deepEqual(errors, [])
+    assert.equal(voice.state.value, 'recording')
+    voice.cancel()
+  })
+}
+
+for (const fail of [false, true]) {
+  test(`cancel during decoding suppresses a late ${fail ? 'decode error' : 'ASR request'}`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] })
+    const pending = deferred<VoiceClip>()
+    const { voice, sent, texts, errors } = setup({ toWav: () => pending.promise })
+    await record(t, voice)
+    voice.cancel()
+    if (fail) pending.reject(new Error('decode failed'))
+    else pending.resolve({ wav: new Blob(['wav']), speech: true, stats: { speech: true, noiseFloor: 0, threshold: 0, peak: 1, voicedMs: 1000 } })
+    await flush()
+    assert.deepEqual(sent, [])
+    assert.deepEqual(texts, [])
+    assert.deepEqual(errors, [])
+    assert.equal(voice.state.value, 'idle')
+  })
+}
+
+test('unmount suppresses pending transcription and releases the microphone', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] })
+  const pending = deferred<string>()
+  let f!: ReturnType<typeof setup>
+  const renderer = createRenderer<any, any>({
+    createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
+    insert() {}, remove() {}, setElementText() {}, setText() {}, patchProp() {},
+    parentNode: () => null, nextSibling: () => null,
+  })
+  const app = renderer.createApp({ setup() { f = setup({ transcribe: () => pending.promise }); return () => null } })
+  app.mount({})
+  await record(t, f.voice)
+  app.unmount()
+  pending.resolve('unmounted transcript')
+  await flush()
+  assert.deepEqual(f.texts, [])
+  assert.deepEqual(f.errors, [])
+  assert.equal(f.tracks[0].readyState, 'ended')
+  await f.voice.start()
+  assert.equal(FakeMediaRecorder.instances.length, 1, 'disposed input cannot restart capture')
+})

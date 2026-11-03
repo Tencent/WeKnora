@@ -692,6 +692,18 @@ const hostApprovalModeVisible = computed(() =>
   !props.embeddedMode && !!props.sessionId && deploymentCapabilities.isSupported('settings.sandbox.host'),
 );
 
+// A transcript belongs to the composer context in which it was recorded, not
+// whichever session/agent happens to be selected when ASR finishes.
+watch(() => [
+  props.sessionId, selectedAgentId.value, settingsStore.selectedAgentSourceTenantId,
+  mentionAuth.user?.id, mentionAuth.selectedTenantId, mentionAuth.tenant?.id,
+  showVoiceButton.value,
+], () => {
+  voiceInput.cancel();
+  voiceHold.release();
+  voiceInsertRange = null;
+}, { flush: 'sync' });
+
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
