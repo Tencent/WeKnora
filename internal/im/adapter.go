@@ -23,6 +23,7 @@ const (
 	PlatformWeChat     Platform = "wechat"
 	PlatformQQBot      Platform = "qqbot"
 	PlatformYunzhijia  Platform = "yunzhijia"
+	PlatformLine       Platform = "line"
 )
 
 // SessionMode determines how IM sessions are resolved.
@@ -62,6 +63,10 @@ type IncomingMessage struct {
 	Content string
 	// MessageID is the IM-platform message identifier (for dedup).
 	MessageID string
+	// ReplyToken is a short-lived reply handle, currently used by LINE.
+	// LINE reply tokens expire 30 seconds after the webhook event, so adapters
+	// fall back to the push API when the reply window has closed.
+	ReplyToken string
 	// FileKey is the platform file identifier (for file messages).
 	FileKey string
 	// FileName is the original file name (for file messages).
