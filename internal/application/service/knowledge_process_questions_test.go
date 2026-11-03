@@ -48,3 +48,59 @@ func TestParseGeneratedQuestions(t *testing.T) {
 		})
 	}
 }
+
+func TestKeepQuestionsGroundedInChunk(t *testing.T) {
+	const (
+		current = "瑶王五桶汤"
+		prev    = "东兰县水司令桶装水"
+		next    = "邱氏烧卤"
+	)
+	got := keepQuestionsGroundedInChunk([]string{
+		"东兰县水司令多少钱",
+		"五桶汤怎么做",
+		"这道菜怎么做",
+		"邱氏烧卤要多久",
+		"瑶王五桶汤和东兰县水司令有什么关系",
+	}, current, prev, next)
+	want := []string{
+		"五桶汤怎么做",
+		"这道菜怎么做",
+		"瑶王五桶汤和东兰县水司令有什么关系",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("questions = %#v, want %#v", got, want)
+	}
+}
+
+func TestKeepQuestionsGroundedInChunkKeepsParaphraseWithoutNeighbors(t *testing.T) {
+	got := keepQuestionsGroundedInChunk([]string{"How is this chunk indexed?"}, "chunk index", "", "")
+	want := []string{"How is this chunk indexed?"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("questions = %#v, want %#v", got, want)
+	}
+}
+
+func TestKeepQuestionsGroundedInChunkKeepsSharedASCIIToken(t *testing.T) {
+	got := keepQuestionsGroundedInChunk(
+		[]string{"Where is the refund policy stored?"},
+		"The refund policy applies to annual plans.",
+		"Shipping windows are listed separately.",
+		"",
+	)
+	want := []string{"Where is the refund policy stored?"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("questions = %#v, want %#v", got, want)
+	}
+}
+
+func TestKeepQuestionsGroundedInChunkDropsNeighborOnlyASCII(t *testing.T) {
+	got := keepQuestionsGroundedInChunk(
+		[]string{"When does shipping close?"},
+		"The refund policy applies to annual plans.",
+		"Shipping windows close at noon.",
+		"",
+	)
+	if len(got) != 0 {
+		t.Fatalf("questions = %#v, want none", got)
+	}
+}
