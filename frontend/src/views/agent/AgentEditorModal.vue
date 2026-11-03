@@ -123,6 +123,18 @@
             </div>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="agent-feishu-reply-title">{{ $t('agentEditor.feishuReplyTitle.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.feishuReplyTitle.desc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-input id="agent-feishu-reply-title" v-model="formData.config.feishu_reply_title"
+                :placeholder="formData.name || $t('agentEditor.feishuReplyTitle.placeholder')"
+                :maxlength="100" clearable />
+            </div>
+          </div>
+
           <!-- 描述 -->
           <div class="setting-row">
             <div class="setting-info">
@@ -2895,6 +2907,7 @@ const defaultFormData = {
   is_builtin: false,
   config: {
     // 基础设置
+    feishu_reply_title: 'WeKnora',
     agent_mode: 'smart-reasoning' as 'quick-answer' | 'smart-reasoning',
     system_prompt: '',
     context_template: '',
