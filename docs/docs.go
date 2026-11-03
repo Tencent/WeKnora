@@ -19,6 +19,405 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/memory/subjects": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "仅允许 JWT 登录的租户管理员或所有者访问；返回主体 UUID、开关、分类计数与最近活动时间，不返回记忆正文",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "记忆管理"
+                ],
+                "summary": "列出租户记忆主体",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数，默认 50，最大 200",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "非负偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ListMemorySubjectsResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/memory/subjects/{subject_id}/items": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "仅允许 JWT 登录的租户管理员或所有者访问；subject_id 是主体 UUID，并非 principal storage ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "记忆管理"
+                ],
+                "summary": "查看指定主体的记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆主体 UUID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "active",
+                            "superseded",
+                            "archived",
+                            "pending"
+                        ],
+                        "type": "string",
+                        "description": "状态过滤",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数，默认 50，最大 200",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "非负偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ListItemsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "仅允许 JWT 登录的租户管理员或所有者访问；支持清空已关闭记忆的主体，不阻止未来新消息产生记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "记忆管理"
+                ],
+                "summary": "清空指定主体的记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆主体 UUID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ClearResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/memory/subjects/{subject_id}/items/{id}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "仅允许 JWT 登录的租户管理员或所有者访问；确认 pending 条目，已生效条目可幂等重试，其他状态冲突返回 409",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "记忆管理"
+                ],
+                "summary": "确认指定主体的待审核记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆主体 UUID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "记忆条目 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryItem"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/memory/subjects/{subject_id}/items/{id}/reject": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "仅允许 JWT 登录的租户管理员或所有者访问；只有 pending 条目可否决，状态冲突返回 409",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "记忆管理"
+                ],
+                "summary": "否决指定主体的待审核记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆主体 UUID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "记忆条目 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SuccessResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/memory/subjects/{subject_id}/settings": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "仅允许 JWT 登录的租户管理员或所有者访问；enabled 必须显式传入布尔值，允许 false",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "记忆管理"
+                ],
+                "summary": "更新指定主体的记忆设置",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆主体 UUID",
+                        "name": "subject_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "记忆开关",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.AdminMemorySettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SuccessResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MemoryAdminErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/agent-chat/{session_id}": {
             "post": {
                 "security": [
@@ -1166,7 +1565,22 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_handler_session.artifactLibraryResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler_session.artifactLibraryResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 },
@@ -8627,6 +9041,67 @@ const docTemplate = `{
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Regenerates the AI summary of what the knowledge base covers, with one model call. A description the user wrote is kept."
+            }
+        },
+        "/knowledge-bases/{id}/rebuild-index": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "索引策略变更后，把知识库下全部文档提交重新解析。前端知识库设置弹窗\n(KnowledgeBaseEditorModal) 在保存新策略后调用此接口，此前该路由在后端缺失，调用返回 404。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "重建整个知识库的索引",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "任务已提交",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.DataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "知识库不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "有文档正在迁移中",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
             }
         },
         "/knowledge-bases/{id}/shares": {
@@ -17984,6 +18459,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/sessions/transcriptions": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "使用当前智能体配置的 ASR 模型将一段录音转写为文本，用于填充对话输入框。智能体需开启音频上传并选择 ASR 模型。",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "语音输入转写",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "录音文件（推荐 16kHz 单声道 WAV）",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "智能体ID",
+                        "name": "agent_id",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "共享智能体所属空间ID",
+                        "name": "agent_source_tenant_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "界面语言（如 zh-CN、ja-JP）；取主语言（zh、ja）作为识别语言提示",
+                        "name": "locale",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: VoiceTranscriptionResponse",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "智能体未启用语音识别或文件无效",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/sessions/{id}": {
             "get": {
                 "security": [
@@ -20543,6 +21085,235 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/system/admin/runtime/documents": {
+            "get": {
+                "description": "SystemAdmin metadata view with separate current attempts and historical failures. No raw payloads.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "List document ingestion and durable Wiki progress",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 25,
+                        "description": "Page size, at most 100",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "all",
+                            "unfinished",
+                            "failed",
+                            "completed"
+                        ],
+                        "type": "string",
+                        "default": "unfinished",
+                        "description": "Document filter",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Knowledge-base ID",
+                        "name": "kb_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Title, filename or knowledge-base search, at most 200 characters",
+                        "name": "search",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgressResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ]
+            }
+        },
+        "/system/admin/runtime/documents/wiki-start": {
+            "post": {
+                "description": "Schedules up to 100 eligible documents, oldest first, under existing worker claims and limits.\nIngestion and failure history are retained. Partial handoff errors include accepted counts.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Request immediate Wiki work for existing durable document operations",
+                "parameters": [
+                    {
+                        "description": "One knowledge ID or a bounded count and optional filters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ]
+            }
+        },
+        "/system/admin/runtime/documents/{knowledge_id}": {
+            "get": {
+                "description": "Returns up to 50 original failures with bounded error previews. Excludes bodies and task payloads.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Read a document's current stages and historical failures",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge ID",
+                        "name": "knowledge_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgressDetail"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ]
             }
         },
         "/system/admin/runtime/queues": {
@@ -24051,6 +24822,75 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "github_com_Tencent_WeKnora_internal_types.MemorySubjectSummary": {
+            "type": "object",
+            "properties": {
+                "active_count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "item_count": {
+                    "type": "integer"
+                },
+                "last_activity_at": {
+                    "type": "string"
+                },
+                "pending_count": {
+                    "type": "integer"
+                },
+                "principal_type": {
+                    "type": "string"
+                },
+                "subject_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.AdminMemorySettingsRequest": {
+            "type": "object",
+            "required": [
+                "enabled"
+            ],
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "internal_handler.ListMemorySubjectsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MemorySubjectSummary"
+                    }
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler.MemoryAdminErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {},
+                "success": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_agent_tools.AgentToolCatalog": {
             "type": "object",
             "properties": {
@@ -24283,6 +25123,164 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.EnvVarView"
                     }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.DocumentFailure": {
+            "type": "object",
+            "properties": {
+                "fail_count": {
+                    "type": "integer"
+                },
+                "failed_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "task_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.DocumentProgress": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "can_start": {
+                    "type": "boolean"
+                },
+                "failure_count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "ingestion_status": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_base_name": {
+                    "type": "string"
+                },
+                "parse_status": {
+                    "type": "string"
+                },
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentStageProgress"
+                    }
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "wiki_pending": {
+                    "type": "integer"
+                },
+                "wiki_retries": {
+                    "type": "integer"
+                },
+                "wiki_status": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.DocumentProgressDetail": {
+            "type": "object",
+            "properties": {
+                "document": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgress"
+                },
+                "failures": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentFailure"
+                    }
+                },
+                "has_more_failures": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.DocumentProgressResponse": {
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.DocumentProgress"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.DocumentStageProgress": {
+            "type": "object",
+            "properties": {
+                "error_code": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartRequest": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "search": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.DocumentWikiStartResult": {
+            "type": "object",
+            "properties": {
+                "already_queued": {
+                    "type": "integer"
+                },
+                "requested": {
+                    "type": "integer"
+                },
+                "started": {
+                    "type": "integer"
                 }
             }
         },
@@ -25923,6 +26921,13 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.AgentStep": {
             "type": "object",
             "properties": {
+                "approvals": {
+                    "description": "Approvals is the user decision for tools in this step. It is stored with\nthe step so a reloaded transcript can show what was allowed or refused.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolApprovalRecord"
+                    }
+                },
                 "background_injections": {
                     "description": "BackgroundInjections are background-work messages delivered before this\nmodel response, after the step's steered messages, in delivery order.",
                     "type": "array",
@@ -29266,6 +30271,41 @@ const docTemplate = `{
                 "query": {
                     "description": "User query text",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.HostApprovalSnapshot": {
+            "type": "object",
+            "properties": {
+                "allow_session": {
+                    "type": "boolean"
+                },
+                "command": {
+                    "type": "string"
+                },
+                "cwd": {
+                    "type": "string"
+                },
+                "denial_snippet": {
+                    "type": "string"
+                },
+                "first_attempt_ran": {
+                    "type": "boolean"
+                },
+                "grant_access": {
+                    "type": "string"
+                },
+                "grant_path": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "session_rules": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -33086,6 +34126,11 @@ const docTemplate = `{
                     "type": "boolean",
                     "x-agent": "question_generation_enabled"
                 },
+                "model_id": {
+                    "description": "ModelID selects a chat model for questions. Empty inherits the summary model.",
+                    "type": "string",
+                    "x-agent": "question_model_id"
+                },
                 "question_count": {
                     "description": "QuestionCount is how many questions to write per chunk, from 1 to 10.",
                     "type": "integer",
@@ -35512,6 +36557,59 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.ToolApprovalRecord": {
+            "type": "object",
+            "properties": {
+                "approved": {
+                    "type": "boolean"
+                },
+                "args_json": {
+                    "type": "string"
+                },
+                "canceled": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "host": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.HostApprovalSnapshot"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "mcp_tool_name": {
+                    "type": "string"
+                },
+                "pending_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "integer"
+                },
+                "resolved": {
+                    "type": "boolean"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "timed_out": {
+                    "type": "boolean"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                },
+                "tool_call_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.ToolCall": {
             "type": "object",
             "properties": {
@@ -36262,7 +37360,9 @@ const docTemplate = `{
                 "exa",
                 "metaso",
                 "bocha",
-                "serply"
+                "serply",
+                "deepseek",
+                "searchapi"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBrave",
@@ -36278,7 +37378,9 @@ const docTemplate = `{
                 "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso",
                 "WebSearchProviderTypeBocha",
-                "WebSearchProviderTypeSerply"
+                "WebSearchProviderTypeSerply",
+                "WebSearchProviderTypeDeepSeek",
+                "WebSearchProviderTypeSearchAPI"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo": {
@@ -36338,6 +37440,12 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.WikiConfig": {
             "type": "object",
             "properties": {
+                "auto_generate": {
+                    "description": "AutoGenerate disables background Wiki generation when false. Omitted means true.\nManual page APIs and Wiki retrieval remain available while Wiki is enabled.",
+                    "type": "boolean",
+                    "default": true,
+                    "x-agent": "wiki_auto_generate"
+                },
                 "content_instructions": {
                     "description": "ContentInstructions sets tone and emphasis for generated Wiki prose. Citations stay fixed.",
                     "type": "string",
@@ -38696,6 +39804,9 @@ const docTemplate = `{
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "modelId": {
+                            "type": "string"
                         },
                         "questionCount": {
                             "type": "integer"
@@ -42734,12 +43845,7 @@ const docTemplate = `{
         "internal_handler_session.artifactLibraryResponse": {
             "type": "object",
             "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ArtifactLibraryItem"
-                    }
-                },
+                "data": {},
                 "page": {
                     "type": "integer",
                     "x-agent": true

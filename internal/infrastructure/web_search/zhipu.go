@@ -49,7 +49,7 @@ type ZhipuProvider struct {
 }
 
 // NewZhipuProvider creates a Zhipu AI web search provider from persisted parameters.
-func NewZhipuProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewZhipuProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if err := ValidateZhipuParameters(params); err != nil {
 		return nil, err
 	}
@@ -102,10 +102,9 @@ func (p *ZhipuProvider) Name() string {
 // Search performs a web search using Zhipu AI's standalone Web Search API.
 func (p *ZhipuProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	preparedQuery := normalizeZhipuQuery(query)
 	if preparedQuery == "" {
 		return nil, fmt.Errorf("query is empty")

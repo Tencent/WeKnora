@@ -143,13 +143,16 @@ docker-build-app:
 		--build-arg VERSION_ARG="$$VERSION" \
 		--build-arg COMMIT_ID_ARG="$$COMMIT_ID" \
 		--build-arg BUILD_TIME_ARG="$$BUILD_TIME" \
-		--build-arg GO_VERSION_ARG="$$GO_VERSION" \
 		--build-arg WITH_ANYDOC=$${WITH_ANYDOC:-1} \
 		-f docker/Dockerfile.app -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 # Build docreader Docker image
 docker-build-docreader:
-	docker build --platform $(PLATFORM) -f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
+	@eval $$(./scripts/get_version.sh env); \
+	docker build --platform $(PLATFORM) \
+		--build-arg VERSION_ARG="$$VERSION" \
+		--build-arg COMMIT_ID_ARG="$$COMMIT_ID" \
+		-f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
 
 # Build frontend Docker image (multi-stage: npm runs inside the builder stage)
 docker-build-frontend:

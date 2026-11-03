@@ -200,9 +200,8 @@ type rawResponse struct {
 // finishReason maps the response status onto the Chat Completions
 // vocabulary the rest of the engine understands.
 func (r *rawResponse) finishReason(hasToolCalls bool) string {
-	if hasToolCalls {
-		return "tool_calls"
-	}
+	// An incomplete response is checked first: a tool call cut off by
+	// max_output_tokens carries truncated arguments and must not be run.
 	if r != nil && r.Status == "incomplete" && r.IncompleteDetails != nil {
 		switch r.IncompleteDetails.Reason {
 		case "max_output_tokens":
@@ -210,6 +209,9 @@ func (r *rawResponse) finishReason(hasToolCalls bool) string {
 		case "content_filter":
 			return "content_filter"
 		}
+	}
+	if hasToolCalls {
+		return "tool_calls"
 	}
 	return "stop"
 }
@@ -549,7 +551,7 @@ func (c *Client) completeStream(
 		}
 	}
 	finishReason := resp.finishReason(assembler.ToolCallCount() > 0)
-	if incomplete && finishReason == "stop" {
+	if incomplete && (finishReason == "stop" || finishReason == "tool_calls") {
 		finishReason = "length"
 	}
 	assembler.Process(ch, api.Delta{FinishReason: finishReason})

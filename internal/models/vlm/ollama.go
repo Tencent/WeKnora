@@ -68,13 +68,19 @@ func (v *OllamaVLM) PredictWithOptions(
 	}
 	logger.Infof(ctx, "[VLM] Calling Ollama API, model=%s, numImages=%d, totalImageSize=%d", v.modelName, len(images), totalImageSize)
 
-	var result string
+	var result, doneReason string
 	err := v.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 		result = resp.Message.Content
+		doneReason = resp.DoneReason
 		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("Ollama VLM request: %w", err)
+	}
+	if doneReason == "length" {
+		// Same contract as RemoteAPIVLM: a cut-off answer is incomplete and must
+		// not be indexed as successful OCR or caption text.
+		return "", fmt.Errorf("%w (done_reason=length)", ErrTruncatedCompletion)
 	}
 
 	logger.Infof(ctx, "[VLM] Ollama response received, len=%d", len(result))

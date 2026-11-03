@@ -31,6 +31,14 @@
       </div>
     </header>
 
+    <t-tabs v-model="activeView">
+      <t-tab-panel value="queues" :label="t('documentProgress.queueView')" />
+      <t-tab-panel value="documents" :label="t('documentProgress.title')" />
+    </t-tabs>
+    <DocumentProgress v-if="activeView === 'documents'" :refresh-token="updatedAt" />
+
+    <template v-if="activeView === 'queues'">
+
     <div v-if="loading && !loadedOnce" class="rq-loading" aria-live="polite">
       <div class="rq-loading-metrics">
         <t-skeleton
@@ -523,6 +531,7 @@
       @closeDoc="closeTaskDocument"
       @getDoc="loadTaskDocumentChunks"
     />
+    </template>
   </div>
 </template>
 
@@ -533,6 +542,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { getKnowledgeDetails, getKnowledgeDetailsCon } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils'
+import DocumentProgress from './DocumentProgress.vue'
 import { mergeRuntimeTaskPage } from './runtimeTaskPagination'
 import {
   getRuntimeTasks,
@@ -563,6 +573,7 @@ const loadedOnce = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
 const updatedAt = ref('')
+const activeView = ref('queues')
 const taskDrawerVisible = ref(false)
 const taskQueue = ref<QueueStat | null>(null)
 const taskState = ref<RuntimeTaskState>('archived')

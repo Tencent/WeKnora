@@ -2,7 +2,7 @@
   <!-- On the right edge, where the panel opens, clear of the upload progress
        card in the bottom-right corner. -->
   <AssistantButton v-if="assistant.entry === 'launcher' && !assistant.visible" class="assistant-launcher"
-    :label="name" :icon-size="18" @click="assistant.open()" />
+    data-guide="assistant-entry" :label="name" :icon-size="18" @click="assistant.open()" />
 </template>
 
 <script setup lang="ts">

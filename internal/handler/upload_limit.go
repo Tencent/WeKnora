@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // uploadEnvelopeSlack is the multipart framing allowed on top of the file
@@ -39,6 +41,36 @@ const knowledgeBaseJSONMaxBytes = 1 << 20
 // applies to a much broader audience than the knowledge-base lifecycle routes,
 // which need manage_kbs.
 const hybridSearchJSONMaxBytes = 1 << 20
+
+// faqJSONMaxBytes caps a FAQ batch upsert body.
+//
+// entries has no count limit of its own: UpsertEntries binds the payload,
+// validates it, and only then starts the import, so ShouldBindJSON buffers the
+// whole array first. A batch is the JSON equivalent of the CSV import, which is
+// bounded by GetMaxFileSize() (50 MiB by default), so the cap follows that
+// limit plus a MiB of JSON framing instead of inventing a second budget. It is
+// read per request, so an operator who raises MAX_FILE_SIZE_MB raises this too.
+func faqJSONMaxBytes() int64 {
+	return secutils.GetMaxFileSize() + uploadEnvelopeSlack
+}
+
+// embedChatJSONMaxBytes caps a visitor's embed chat body before the channel's
+// constraints are merged into it.
+//
+// The embed chat routes do not hand the visitor's body to the QA handler: they
+// read it whole, rewrite it as JSON and hand on the rewrite. The QA handler
+// caps its own read, but by then that read sees the rewrite, so the visitor's
+// bytes were already buffered here. That matters more than the authenticated
+// chat routes because the embed publish token is public and embed visitors have
+// no account at all: one anonymous request could set the process's memory
+// high-water mark.
+//
+// The largest legal body is the one the delegated handler accepts, which is
+// bounded by the inline attachment budget (five uploads, 100 MiB decoded, about
+// 134 MiB once base64-encoded). The cap is that encoded maximum plus 2 MiB of
+// JSON envelope, so a request the handler would accept is never refused here
+// and the per-attachment checks stay the authority on what may be decoded.
+const embedChatJSONMaxBytes = 100*1024*1024*4/3 + 2*1024*1024
 
 // limitUploadBody caps the request body before anything parses it.
 //

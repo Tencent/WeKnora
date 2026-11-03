@@ -104,7 +104,8 @@ type EditSandboxFileInput struct {
 type EditSandboxFileTool struct {
 	BaseTool
 	sessionBound
-	editor SandboxFileEditor
+	editor    SandboxFileEditor
+	approvals HostApprovals
 }
 
 // NewEditSandboxFileTool constructs the tool. `editor` MUST NOT be nil.
@@ -116,6 +117,14 @@ func NewEditSandboxFileTool(editor SandboxFileEditor) *EditSandboxFileTool {
 		},
 		editor: editor,
 	}
+}
+
+// WithHostApprovals lets edits outside the host workspace be approved.
+func (t *EditSandboxFileTool) WithHostApprovals(h HostApprovals) *EditSandboxFileTool {
+	if t != nil {
+		t.approvals = h
+	}
+	return t
 }
 
 // Description is built from the session sandbox layout so host paths never
@@ -141,8 +150,8 @@ func (t *EditSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
 }
 
 const hostEditSandboxFileDescription = "Apply exact text replacements to an existing text file in %s, " +
-	"or in a directory the user has already approved for this session. " +
-	"Paths outside that are refused; use shell_exec when the user should be asked to open a new directory.\n" +
+	"or in a directory already approved for this session. " +
+	"A file outside that can be edited once the change is approved; only that one file is opened.\n" +
 	"Read the relevant content first. Send edits as an array, even for one replacement. \n" +
 	"Every old_string matches the original file, must be unique unless replace_all=true, " +
 	"and must not overlap another edit. \n" +
@@ -194,12 +203,39 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	clean := resolveIn(layout, trimmed)
-	rootDir, ok := writableRootIn(layout, clean)
-	if !ok {
+	rootDir, inScope := writableRootIn(layout, clean)
+	if !inScope && !layout.IsHost() {
 		return &types.ToolResult{
 			Success: false,
 			Error:   writeScopeErrorIn(layout, input.Path),
 		}, nil
+	}
+	if !inScope {
+		rootDir = path.Dir(clean)
+		apply := func(current []byte, exists bool) ([]byte, error) {
+			if !exists {
+				return nil, fmt.Errorf("the file does not exist")
+			}
+			if len(current) > maxWriteSandboxBytes || isBinaryShellOutput(string(current)) {
+				return nil, fmt.Errorf("the file cannot be edited")
+			}
+			updated, _, err := applySandboxEdits(string(current), input.Edits)
+			if err != nil {
+				return nil, err
+			}
+			if len(updated) > maxWriteSandboxBytes || isBinaryShellOutput(updated) {
+				return nil, fmt.Errorf("the result cannot be written")
+			}
+			return []byte(updated), nil
+		}
+		var refusal string
+		ctx, refusal = authorizeHostWrite(
+			ctx, t.editor, t.approvals, ToolEditSandboxFile, sessionID, clean, "edit", apply,
+			sandboxEditsPreview(input.Edits),
+		)
+		if refusal != "" {
+			return &types.ToolResult{Success: false, Error: refusal}, nil
+		}
 	}
 
 	// This tool is read-modify-write, so it has to hold the path against

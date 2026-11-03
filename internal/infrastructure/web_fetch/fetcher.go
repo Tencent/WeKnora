@@ -78,6 +78,8 @@ const (
 	ErrorBodyTooLarge       ErrorCode = "body_too_large"
 	ErrorUnsupportedContent ErrorCode = "unsupported_content"
 	ErrorSnapshotExpired    ErrorCode = "snapshot_expired"
+	// ErrorProviderAuth means the fetch provider rejected WeKnora's credentials, not the page.
+	ErrorProviderAuth ErrorCode = "provider_auth_failed"
 )
 
 // FetchError carries stable, machine-readable failure details.

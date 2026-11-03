@@ -532,6 +532,12 @@ type HostApprovalSnapshot struct {
 	FirstAttemptRan bool     `json:"first_attempt_ran,omitempty"`
 	AllowSession    bool     `json:"allow_session"`
 	SessionRules    []string `json:"session_rules,omitempty"`
+	Reviewer        string   `json:"reviewer,omitempty"`
+	RiskLevel       string   `json:"risk_level,omitempty"`
+	Tool            string   `json:"tool,omitempty"`
+	FilePath        string   `json:"file_path,omitempty"`
+	WriteMode       string   `json:"write_mode,omitempty"`
+	WriteBytes      int      `json:"write_bytes,omitempty"`
 }
 
 // ToolApprovalRecord is one human approval attached to an agent step.
@@ -552,6 +558,7 @@ type ToolApprovalRecord struct {
 	TimedOut       bool                  `json:"timed_out,omitempty"`
 	Canceled       bool                  `json:"canceled,omitempty"`
 	Scope          string                `json:"scope,omitempty"`
+	RiskLevel      string                `json:"risk_level,omitempty"`
 }
 
 // GetObservations returns observations from all tool calls in this step
