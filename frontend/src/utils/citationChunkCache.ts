@@ -1,4 +1,4 @@
-export type CitationChunkCacheValue = { content: string; error?: string }
+export type CitationChunkCacheValue = { content: string; error?: string; retryable?: boolean; retryAfter?: number }
 
 const chunkCache = new Map<string, CitationChunkCacheValue>()
 
