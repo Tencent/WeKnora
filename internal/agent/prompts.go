@@ -424,8 +424,8 @@ func formatToolGuidanceWithDesktop(
 					"has already approved for this session. Commands start from ")
 				b.WriteString(root)
 				b.WriteString(" on every call unless work_dir names a subdirectory or an approved directory. " +
-					"shell_exec may try a path outside the workspace; the sandbox asks the user before opening it. " +
-					"Deletes ask even inside the workspace. Files persist on the user's machine.\n")
+					"shell_exec may try a path outside the workspace; it is approved before it is opened. " +
+					"Deletes may need approval. Files persist on the user's machine.\n")
 			}
 		} else if layout.IsSharedRemote() {
 			root := sandbox.PromptSafePath(layout.Root)

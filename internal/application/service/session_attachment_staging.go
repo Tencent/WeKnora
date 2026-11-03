@@ -544,7 +544,7 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 		if workspace != "" {
 			b.WriteString(" Edit files under " + escapeAttachmentXML(workspace) +
 				", or under a directory the user has already approved for this session. " +
-				"shell_exec may try a path outside that; the sandbox asks the user before opening it.")
+				"shell_exec may try a path outside that; it is approved before it is opened.")
 		}
 	} else {
 		remote := sandbox.RemoteWorkspaceLayout()

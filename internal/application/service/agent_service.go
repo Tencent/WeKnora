@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hostreview"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -269,8 +270,9 @@ func (s *agentService) CreateAgentEngine(
 	// Register the shell first: file discovery needs a separate tool only
 	// when no shell is available. File access still follows the sandbox
 	// capability independently of the existing SkillsEnabled execution gate.
-	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
-	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
+	hostApprovals := s.hostApprovals(chatModel)
+	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config, hostApprovals)
+	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config, hostApprovals)
 	s.registerSecureFormTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
 	attachmentReader := s.registerAttachmentReader(ctx, toolRegistry, config, sessionID)
@@ -528,6 +530,19 @@ func (s *agentService) resolveKBAndDocInfos(
 	return kbInfos, selectedDocs
 }
 
+// hostApprovals is what Lite host tools use to ask about local actions: the
+// gate for the user and a reviewer on this agent's own chat model for auto.
+func (s *agentService) hostApprovals(chatModel chat.Chat) tools.HostApprovals {
+	out := tools.HostApprovals{}
+	if gate, ok := s.toolApprovalGate.(tools.HostApproval); ok {
+		out.Gate = gate
+	}
+	if chatModel != nil && s.messageService != nil {
+		out.Reviewer = hostreview.New(chatModel, s.messageService)
+	}
+	return out
+}
+
 // registerSandboxFileTools registers list_sandbox_files / read_file /
 // write_sandbox_file / edit_sandbox_file.
 //
@@ -621,6 +636,7 @@ func (s *agentService) registerSandboxFileTools(
 	toolRegistry *tools.ToolRegistry,
 	sessionID string,
 	config *types.AgentConfig,
+	hostApprovals tools.HostApprovals,
 ) {
 	if config != nil && config.SkillInstallMode() {
 		logger.Infof(ctx, "Skipping session file tools in skill install mode")
@@ -645,8 +661,8 @@ func (s *agentService) registerSandboxFileTools(
 		toolRegistry.RegisterTool(tools.NewWriteSandboxFileTool(
 			store,
 			types.AgentRoundMaxCompletionTokensFor(config.MaxCompletionTokens, config.SandboxConfigID),
-		))
-		toolRegistry.RegisterTool(tools.NewEditSandboxFileTool(store))
+		).WithHostApprovals(hostApprovals))
+		toolRegistry.RegisterTool(tools.NewEditSandboxFileTool(store).WithHostApprovals(hostApprovals))
 		logger.Infof(ctx, "Registered sandbox file primitives (listing is a no-shell fallback)")
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; "+
@@ -727,6 +743,7 @@ func (s *agentService) registerSandboxShellIfAllowed(
 	toolRegistry *tools.ToolRegistry,
 	sessionID string,
 	config *types.AgentConfig,
+	hostApprovals tools.HostApprovals,
 ) {
 	if config == nil {
 		return
@@ -746,7 +763,7 @@ func (s *agentService) registerSandboxShellIfAllowed(
 		!config.SkillsEnabled && !config.SkillInstallMode() {
 		return
 	}
-	s.registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config)
+	s.registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config, hostApprovals)
 }
 
 // resolveOpts is every resolve option this run is entitled to. Only the
@@ -1174,6 +1191,7 @@ func (s *agentService) registerSandboxShellTool(
 	toolRegistry *tools.ToolRegistry,
 	sandboxMgr sandbox.Manager,
 	config *types.AgentConfig,
+	hostApprovals tools.HostApprovals,
 ) {
 	if config.SkillInstallMode() {
 		executor := sessionSandboxInstallShellExecutor(sandboxMgr)
@@ -1197,10 +1215,9 @@ func (s *agentService) registerSandboxShellTool(
 	}
 	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
 		resolver := s.userEnvResolver(ctx, config)
-		shell := tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config))
-		if gate, ok := s.toolApprovalGate.(tools.HostApproval); ok {
-			shell = shell.WithHostApproval(gate)
-		}
+		shell := tools.NewShellExecTool(executor, resolver).
+			WithEnvCapture(s.skillEnvCapture(config)).
+			WithHostApprovals(hostApprovals)
 		toolRegistry.RegisterTool(shell)
 		logger.Infof(ctx, "Registered shell_exec tool")
 		s.registerShellExecAsync(ctx, toolRegistry, executor, resolver, config)

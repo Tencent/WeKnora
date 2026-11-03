@@ -225,6 +225,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(newSandboxManager))
 	must(container.Provide(provideHostApprovalModeLoader))
 	must(container.Provide(provideHostProjectDirsLoader))
+	must(container.Provide(provideHostApprovalModes))
 	must(container.Provide(hostProjectLookup))
 	must(container.Provide(hostModeLookup))
 	must(container.Provide(provideHostSandboxManager))

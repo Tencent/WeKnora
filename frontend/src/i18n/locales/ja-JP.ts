@@ -2554,6 +2554,10 @@ export default {
       saveFailed: '保存に失敗しました',
       unknownError: '不明なエラー',
       requestFailed: 'リクエストに失敗しました'
+    },
+    hostApprovalDefault: {
+      title: '既定の実行権限の承認',
+      description: 'エージェントがファイルを削除するとき、またはワークスペースの外へ書き込むときに、毎回確認するかモデルに承認させるかを決めます。新しいチャットはここから始まり、今のチャットは入力欄の左で切り替えられます。'
     }
   },
   webSearchSettings: {
@@ -3463,7 +3467,14 @@ export default {
     voiceDecodeError: '録音の処理に失敗しました。もう一度お試しください',
     voiceTranscribeFailed: '音声認識に失敗しました。エージェントの ASR モデル設定を確認してください',
     voiceEmptyResult: '音声が認識されませんでした',
-    goToAgentSettings: 'エージェント設定に移動'
+    goToAgentSettings: 'エージェント設定に移動',
+    hostApprovalMode: {
+      ask: '承認を求める',
+      askHint: '削除とワークスペース外への書き込みは確認します',
+      auto: '代わりに承認',
+      autoHint: 'モデルが代わりに判断し、中断しません',
+      switchFailed: '承認モードを切り替えられませんでした'
+    }
   },
   createChat: {
     title: 'こんにちは、WeKnoraです。あなたのナレッジを、すぐそばに',
@@ -7411,8 +7422,7 @@ export default {
     },
     hostApproval: {
       titleDelete: 'ファイルを削除する前に確認してください',
-      titleDangerous: '危険な操作の確認',
-      titleDenied: 'サンドボックスがこのコマンドを拒否しました。次のディレクトリへのアクセスが必要です',
+      titleDenied: 'WeKnora が次のディレクトリへのアクセスを求めています',
       titleGeneric: '確認が必要です',
       command: 'コマンド',
       cwd: 'ディレクトリ',
@@ -7430,7 +7440,25 @@ export default {
       rejectedTag: '拒否済み',
       submitted: '送信しました',
       submitFailed: '送信に失敗しました',
-      userRejected: 'ユーザーが拒否しました'
+      userRejected: 'ユーザーが拒否しました',
+      titleFileWrite: 'ワークスペース外のファイルに書き込む',
+      fileOnly: 'このファイルだけを許可します',
+      writeMode: '方式',
+      writeModeOverwrite: '上書き',
+      writeModeAppend: '追記',
+      writeModeEdit: '編集',
+      writeBytes: '{bytes} バイト',
+      preview: '内容',
+      previewTruncated: '先頭 64 KB のみ表示',
+      env: '環境変数',
+      skillName: 'スキル',
+      stdin: '標準入力',
+      script: 'コマンドが実行するスクリプト'
+    },
+    hostReview: {
+      reviewing: '自動審査中…',
+      approved: '自動承認：{reason}',
+      denied: '自動審査で拒否：{reason}'
     },
     mcpOAuth: {
       waiting: '認可待ち · {target}',

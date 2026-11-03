@@ -186,7 +186,7 @@ func TestShellExecHostLayoutAllowsWorkDirUnderWriteRoots(t *testing.T) {
 func TestShellExecHostDescriptionUsesActualWorkspacePath(t *testing.T) {
 	tool := NewShellExecTool(&layoutShellExecutor{layout: hostLayout()}, nil)
 	require.Contains(t, tool.Description(), hostLayout().Root)
-	require.Contains(t, tool.Description(), "asks the user before opening it")
+	require.Contains(t, tool.Description(), "approved before it is opened")
 	require.NotContains(t, tool.Description(), sandbox.SessionWorkspaceRoot)
 	require.Contains(t, string(tool.Parameters()), hostLayout().Root)
 	require.NotContains(t, string(tool.Parameters()), sandbox.SessionWorkspaceRoot)
@@ -235,7 +235,8 @@ func TestWriteSandboxFileProviderLayoutRejectsOutsideRoots(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.Success)
 	require.Zero(t, sink.calls)
-	require.Contains(t, result.Error, hostLayout().Root)
+	require.Contains(t, result.Error, "/Users/dev/.ssh/config")
+	require.Contains(t, result.Error, "cannot approve it")
 	require.NotContains(t, result.Error, "the working directory")
 }
 
@@ -248,7 +249,7 @@ func TestWriteSandboxFileHostRejectsRemoteWorkspacePath(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.Success)
 	require.Zero(t, sink.calls)
-	require.Contains(t, result.Error, hostLayout().Root)
+	require.Contains(t, result.Error, "cannot approve it")
 	require.Contains(t, result.Error, "/workspace/sandbox-test.txt")
 	require.NotContains(t, result.Error, "the working directory")
 }

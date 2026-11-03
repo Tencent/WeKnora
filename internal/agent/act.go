@@ -594,6 +594,9 @@ func (e *AgentEngine) runToolCallAnswered(
 	})
 
 	principal, _ := types.PrincipalFromContext(ctx)
+	// Same ID stored on this turn's user messages; host auto-review uses it
+	// to tell current-turn authorization from earlier / forked history.
+	requestID, _ := types.RequestIDFromContext(toolCtx)
 	execTimeout := toolExecutionTimeout(tc.Function.Name, tc.Function.Arguments)
 	if tool, lookupErr := e.toolRegistry.GetTool(tc.Function.Name); lookupErr == nil {
 		if timed, ok := tool.(interface{ ExecutionTimeout() time.Duration }); ok {
@@ -603,6 +606,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
 		SessionID:          sessionID,
 		AssistantMessageID: assistantMessageID,
+		RequestID:          requestID,
 		EventBus:           e.eventBus,
 		ToolCallID:         tc.ID,
 		UserID:             principal.StorageID(),

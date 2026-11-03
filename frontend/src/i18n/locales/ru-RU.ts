@@ -2601,8 +2601,7 @@ export default {
     },
     hostApproval: {
       titleDelete: 'Подтвердите удаление файлов',
-      titleDangerous: 'Подтвердите опасную операцию',
-      titleDenied: 'Песочница заблокировала команду; нужен доступ к каталогу',
+      titleDenied: 'WeKnora хочет получить доступ к следующему каталогу',
       titleGeneric: 'Нужно ваше подтверждение',
       command: 'Команда',
       cwd: 'Каталог',
@@ -2620,7 +2619,25 @@ export default {
       rejectedTag: 'Отклонено',
       submitted: 'Отправлено',
       submitFailed: 'Не удалось отправить',
-      userRejected: 'Отклонено пользователем'
+      userRejected: 'Отклонено пользователем',
+      titleFileWrite: 'Запись файла вне рабочей области',
+      fileOnly: 'Разрешается только этот файл',
+      writeMode: 'Режим',
+      writeModeOverwrite: 'Перезапись',
+      writeModeAppend: 'Добавление',
+      writeModeEdit: 'Правка',
+      writeBytes: '{bytes} байт',
+      preview: 'Содержимое',
+      previewTruncated: 'Показаны первые 64 КБ',
+      env: 'Переменные окружения',
+      skillName: 'Навык',
+      stdin: 'Стандартный ввод',
+      script: 'Скрипт, который запускает команда'
+    },
+    hostReview: {
+      reviewing: 'Идёт автопроверка…',
+      approved: 'Одобрено автоматически: {reason}',
+      denied: 'Автопроверка отклонила: {reason}'
     }
   },
   kbSettings: {
@@ -6505,6 +6522,13 @@ export default {
       toggleOn: 'Включить веб-поиск',
       toggleOff: 'Выключить веб-поиск',
       notConfigured: 'Веб-поиск не настроен'
+    },
+    hostApprovalMode: {
+      ask: 'Спрашивать меня',
+      askHint: 'Удаление и запись вне рабочей области требуют вашего подтверждения',
+      auto: 'Одобрять за меня',
+      autoHint: 'Модель решает за вас, не отвлекая',
+      switchFailed: 'Не удалось сменить режим одобрения'
     }
   },
   manualEditor: {
@@ -8118,6 +8142,10 @@ export default {
       dataExtensions: 'Данные и расширения',
       systemAdministration: 'Системное администрирование',
       platform: 'Платформа'
+    },
+    hostApprovalDefault: {
+      title: 'Одобрение действий по умолчанию',
+      description: 'Когда агент удаляет файлы или пишет вне рабочей области, здесь выбирается: спрашивать вас каждый раз или пусть решает модель. Новые чаты начинают отсюда; в текущем чате режим меняется слева от поля ввода.'
     }
   },
   agent: {

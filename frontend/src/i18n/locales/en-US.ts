@@ -2554,6 +2554,10 @@ export default {
       saveFailed: 'Save failed',
       unknownError: 'Unknown error',
       requestFailed: 'Request failed'
+    },
+    hostApprovalDefault: {
+      title: 'Default execution approval',
+      description: 'When the agent deletes a file or writes outside the workspace, this chooses whether to ask you each time or let the model approve it. New chats start here; switch the current chat to the left of the input box.'
     }
   },
   webSearchSettings: {
@@ -3463,7 +3467,14 @@ export default {
     voiceDecodeError: 'Could not process the recording. Please try again.',
     voiceTranscribeFailed: "Transcription failed. Check the agent's ASR model settings.",
     voiceEmptyResult: 'No speech detected',
-    goToAgentSettings: 'Go to agent settings'
+    goToAgentSettings: 'Go to agent settings',
+    hostApprovalMode: {
+      ask: 'Ask me',
+      askHint: 'Asks you before deletes and writes outside the workspace',
+      auto: 'Approve for me',
+      autoHint: 'A model decides for you without interrupting',
+      switchFailed: 'Could not switch the approval mode'
+    }
   },
   createChat: {
     title: 'Hi, I am WeKnora — your knowledge, within reach',
@@ -7411,8 +7422,7 @@ export default {
     },
     hostApproval: {
       titleDelete: 'Confirm before deleting files',
-      titleDangerous: 'Confirm a dangerous operation',
-      titleDenied: 'The sandbox blocked this command; it needs access to',
+      titleDenied: 'WeKnora wants to access the following directory',
       titleGeneric: 'Needs your confirmation',
       command: 'Command',
       cwd: 'Directory',
@@ -7430,7 +7440,25 @@ export default {
       rejectedTag: 'Rejected',
       submitted: 'Submitted',
       submitFailed: 'Submission failed',
-      userRejected: 'Rejected by user'
+      userRejected: 'Rejected by user',
+      titleFileWrite: 'Write a file outside the workspace',
+      fileOnly: 'Only this file is opened',
+      writeMode: 'Mode',
+      writeModeOverwrite: 'Overwrite',
+      writeModeAppend: 'Append',
+      writeModeEdit: 'Edit',
+      writeBytes: '{bytes} bytes',
+      preview: 'Content',
+      previewTruncated: 'Showing the first 64 KB',
+      env: 'Environment variables',
+      skillName: 'Skill',
+      stdin: 'Standard input',
+      script: 'Script this command runs'
+    },
+    hostReview: {
+      reviewing: 'Auto review in progress…',
+      approved: 'Auto-approved: {reason}',
+      denied: 'Auto review denied: {reason}'
     },
     mcpOAuth: {
       waiting: 'Awaiting authorization · {target}',

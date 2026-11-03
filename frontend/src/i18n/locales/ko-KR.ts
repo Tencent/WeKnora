@@ -2601,8 +2601,7 @@ export default {
     },
     hostApproval: {
       titleDelete: '파일을 삭제하기 전에 확인이 필요합니다',
-      titleDangerous: '위험한 작업 확인',
-      titleDenied: '샌드박스가 이 명령을 차단했습니다. 다음 디렉터리에 대한 접근이 필요합니다',
+      titleDenied: 'WeKnora가 다음 디렉터리에 접근하려고 합니다',
       titleGeneric: '확인이 필요합니다',
       command: '명령',
       cwd: '디렉터리',
@@ -2620,7 +2619,25 @@ export default {
       rejectedTag: '거부됨',
       submitted: '제출됨',
       submitFailed: '제출 실패',
-      userRejected: '사용자가 거부함'
+      userRejected: '사용자가 거부함',
+      titleFileWrite: '작업 공간 밖 파일에 쓰기',
+      fileOnly: '이 파일만 허용합니다',
+      writeMode: '방식',
+      writeModeOverwrite: '덮어쓰기',
+      writeModeAppend: '추가',
+      writeModeEdit: '편집',
+      writeBytes: '{bytes}바이트',
+      preview: '내용',
+      previewTruncated: '처음 64KB만 표시',
+      env: '환경 변수',
+      skillName: '스킬',
+      stdin: '표준 입력',
+      script: '명령이 실행하는 스크립트'
+    },
+    hostReview: {
+      reviewing: '자동 검토 중…',
+      approved: '자동 승인됨: {reason}',
+      denied: '자동 검토에서 거부됨: {reason}'
     }
   },
   kbSettings: {
@@ -6505,6 +6522,13 @@ export default {
       toggleOn: '웹 검색 켜기',
       toggleOff: '웹 검색 끄기',
       notConfigured: '웹 검색 엔진이 구성되지 않았습니다'
+    },
+    hostApprovalMode: {
+      ask: '승인 요청',
+      askHint: '삭제와 작업 공간 밖 쓰기는 확인합니다',
+      auto: '대신 승인',
+      autoHint: '모델이 대신 판단하며 방해하지 않습니다',
+      switchFailed: '승인 모드를 전환하지 못했습니다'
     }
   },
   manualEditor: {
@@ -8118,6 +8142,10 @@ export default {
       dataExtensions: '데이터 및 확장',
       systemAdministration: '시스템 관리',
       platform: '플랫폼'
+    },
+    hostApprovalDefault: {
+      title: '기본 실행 권한 승인',
+      description: '에이전트가 파일을 삭제하거나 작업 영역 밖에 쓸 때, 매번 물어볼지 모델이 대신 승인할지를 정합니다. 새 대화는 여기서 시작하고, 현재 대화는 입력창 왼쪽에서 바꿀 수 있습니다.'
     }
   },
   agent: {
