@@ -18,7 +18,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// Match the HTTP upload envelope allowance: legal file bytes still need room
+// for protobuf field tags, filenames, parser overrides and response framing.
+const grpcMessageEnvelopeSlack = 1 << 20
+
 func getMaxMessageSize() int {
+	return getMaxFileSize() + grpcMessageEnvelopeSlack
+}
+
+func getMaxFileSize() int {
 	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
 		if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {
 			return size * 1024 * 1024
@@ -126,6 +134,12 @@ func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	p.mu.RUnlock()
 	if client == nil {
 		return nil, errNotConnected
+	}
+
+	maxFileSize := getMaxFileSize()
+	if len(req.FileContent) > maxFileSize {
+		return nil, status.Errorf(codes.ResourceExhausted,
+			"docreader file content size %d exceeds maximum %d", len(req.FileContent), maxFileSize)
 	}
 
 	protoReq := &proto.ReadRequest{

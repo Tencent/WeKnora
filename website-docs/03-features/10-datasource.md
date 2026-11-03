@@ -205,7 +205,7 @@ Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 P
   caption="Confluence Server/DC 数据源：使用个人访问令牌"
   hint="Server / Data Center 凭据表单：填写 PAT 后，用户名和密码可留空。截图使用本地模拟配置和示例令牌。" />
 
-- **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入附件和博客文章。
+- **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入博客文章；PDF/Office 附件可按下面的设置启用。
 - **内容**：取页面渲染后的 HTML 转为 Markdown（每页一个 `.md` 条目），正文为空时仅保留标题。条目 metadata 带 `space_key`、`space_name`、`page_id`，有作者时带 `creator`。
 - **增量**：按页面版本号比对，版本未变的页面跳过。实现了流式同步，每页入库后保存游标；全量同步的中途游标同时保留上次的页面基线，任务重试可续传，也能继续对账删除。
 - **删除保护**：所选空间不可访问、页面列表为空而上次有内容，或本次消失的页面不少于 20 个且占上次页面数 80% 以上时，整次同步报错，不执行删除。开启同步删除后，其余情况下消失的页面按删除处理。
@@ -214,6 +214,20 @@ Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 P
 ```json
 {"credentials":{"edition":"cloud","base_url":"https://team.atlassian.net","username":"me@example.com","api_token":"<token>"},"resource_ids":["<space-id>"]}
 ```
+
+**可选附件同步**：在数据源配置的 `settings` 中设置 `"sync_attachments": true`（默认关闭；目前通过数据源 API 配置，没有新增 UI 开关）。连接器使用 [Server/DC 附件列表](https://developer.atlassian.com/server/confluence/rest/v951/api-group-attachments/) 或 [Cloud v2 附件列表](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/#api-pages-id-attachments-get)，将 `.pdf`、`.doc`、`.docx`、`.ppt`、`.pptx`、`.xls`、`.xlsx` 文件分别作为知识条目交给现有文件入库/解析流水线。其它扩展名不在此同步范围；内联图片继续沿用页面图片处理。
+
+- 单附件上限为 20 MiB，既检查声明大小，也限制实际读取字节数。文件 metadata 保留来源页面标题/URL、附件 ID/版本与更新时间。下载沿用现有 Confluence 同源及上下文路径边界；跨域下载重定向会明确失败，不放宽凭据转发规则。依赖跨域 CDN 重定向的 Cloud 文件目前不支持下载。
+- 附件独立于页面正文版本检查。页面不变但附件更新时，只重新导入变更附件；稳定子项 ID 保持来源身份，复用已有文件替换逻辑。入库确认不代表异步解析已完成，解析进度仍在文档任务中查看。
+- 下载或入库失败时记录失败并中断本轮，保留该附件的旧文件及已确认的先前进度。修复失败原因后重试；全量同步的重试也会从已确认附件继续。大小超限等持续失败需要先处理源文件。已同步文件被改名为不支持的扩展名时会报告失败并保留旧文件，避免误判为删除。
+- 完整附件列表中消失的文件，以及被确认删除页面的已知附件，均通过原有 `sync_deletions` 开关处理。分页失败时不推断删除；删除失败时不确认游标，后续重试仍会看到待删除项。关闭附件同步不删除已有文件，并保留其状态供重新开启时对账；页面删除仍受原有删除检测和保护阈值约束。
+
+非机密设置示例（合并到现有 `settings`，保留其它配置）：
+
+```json
+{"settings":{"sync_attachments":true}}
+```
+
 
 #### Yuque 语雀（`connector/yuque/`）
 

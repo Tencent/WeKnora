@@ -132,9 +132,10 @@
           <div v-if="graphMode === 'overview'" class="legend-detail">
             <div class="legend-detail-label">
               <span>{{ $t('knowledgeEditor.wikiBrowser.graphDetailLevel') }}</span>
-              <span class="legend-detail-value">{{ graphDetailLevel }}</span>
+              <span class="legend-detail-value">{{ graphDetailLabel }}</span>
             </div>
-            <t-slider v-model="graphDetailLevel" :min="0" :max="GRAPH_DETAIL_MAX" :step="1" :show-tooltip="true" />
+            <t-slider v-model="graphDetailLevel" :min="0" :max="GRAPH_DETAIL_MAX" :step="1"
+              :marks="graphDetailMarks" :label="graphDetailLabel" />
             <div class="legend-detail-hint">{{ $t('knowledgeEditor.wikiBrowser.graphDetailHint') }}</div>
           </div>
           <template v-if="graphStatusCard">
@@ -1076,9 +1077,16 @@ const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept
 // "back to overview" and show the truncation hint.
 const graphMode = ref<'overview' | 'ego'>('overview')
 const graphCenter = ref<string>('')
-// Overview lands on landmarks. 0 is representative plus anchors; 3 draws the
-// whole fetched slice. Ego hides the control and keeps every returned node.
-const graphDetailLevel = ref(0)
+// Start with every fetched page. The user can reduce detail to landmarks or
+// their nearby pages. Ego hides the control and keeps every returned node.
+const graphDetailLevel = ref(GRAPH_DETAIL_MAX)
+const graphDetailMarks = computed<Record<number, string>>(() => ({
+  0: t('knowledgeEditor.wikiBrowser.graphDetailOverview'),
+  1: t('knowledgeEditor.wikiBrowser.graphDetailOneHop'),
+  2: t('knowledgeEditor.wikiBrowser.graphDetailTwoHops'),
+  [GRAPH_DETAIL_MAX]: t('knowledgeEditor.wikiBrowser.graphDetailAll'),
+}))
+const graphDetailLabel = computed(() => graphDetailMarks.value[graphDetailLevel.value])
 const graphDetailClusters = shallowRef<GraphCluster[]>([])
 const graphDetailPlacements = shallowRef(new Map<string, LayoutPlacement>())
 const GRAPH_OVERVIEW_LIMIT = 500
@@ -6764,6 +6772,9 @@ span.graph-focus-name {
   position: absolute;
   top: 16px;
   right: 16px;
+  width: 256px;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-sm);
@@ -6845,7 +6856,8 @@ span.graph-focus-name {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: 200px;
+  width: 100%;
+  min-width: 0;
 
   .legend-detail-label {
     display: flex;
@@ -6870,6 +6882,15 @@ span.graph-focus-name {
 
   :deep(.t-slider) {
     width: 100%;
+  }
+
+  :deep(.t-slider__container) {
+    margin-bottom: 24px;
+  }
+
+  :deep(.t-slider__mark-text) {
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -6913,7 +6934,7 @@ span.graph-focus-name {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 240px;
+  max-width: 100%;
   padding-top: 8px;
   border-top: 1px dashed var(--td-component-stroke);
   user-select: none;
@@ -6948,6 +6969,7 @@ span.graph-focus-name {
     font-size: var(--app-text-xs);
     line-height: 14px;
     color: var(--td-text-color-secondary);
+    overflow-wrap: anywhere;
   }
 }
 

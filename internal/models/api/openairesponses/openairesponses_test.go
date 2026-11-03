@@ -757,3 +757,37 @@ func TestChatStreamEOFBeforeCompletedIsIncomplete(t *testing.T) {
 		t.Fatalf("last event = %+v", last)
 	}
 }
+
+func TestIsolatedRequestSendsTemperatureZeroDespiteExtraBody(t *testing.T) {
+	c := newTestClient(t, nil, false)
+	c.cfg.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+	body, err := c.BuildRequestBody(
+		[]api.Message{{Role: "user", Content: "hi"}},
+		&api.Options{Isolated: true},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("BuildRequestBody: %v", err)
+	}
+	got := roundTrip(t, body)
+	if got["temperature"] != 0.0 {
+		t.Fatalf("temperature = %v, want 0", got["temperature"])
+	}
+}
+
+func TestIsolatedReasoningModelOmitsTemperature(t *testing.T) {
+	c := newTestClient(t, nil, true)
+	c.cfg.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+	body, err := c.BuildRequestBody(
+		[]api.Message{{Role: "user", Content: "hi"}},
+		&api.Options{Isolated: true},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("BuildRequestBody: %v", err)
+	}
+	got := roundTrip(t, body)
+	if _, ok := got["temperature"]; ok {
+		t.Fatalf("temperature = %v, want it omitted", got["temperature"])
+	}
+}

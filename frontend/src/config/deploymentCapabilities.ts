@@ -71,6 +71,8 @@ export const SETTINGS_SECTION_CAPABILITY: Partial<Record<string, DeploymentCapab
   // into a skill script's process. A deployment without sandbox support has
   // nowhere to inject them, so the page would only ever show its empty state.
   envvars: 'settings.sandbox',
+  // Saved logins are filled into the remote sandbox browser; Lite has none.
+  credentialvault: 'settings.sandbox.remote',
   mcp: 'settings.mcp',
 }
 

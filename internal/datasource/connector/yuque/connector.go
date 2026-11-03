@@ -307,18 +307,28 @@ func (c *Connector) walk(
 			if detail.Format != "" && detail.Format != "markdown" && detail.Format != "lake" {
 				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): unsupported format %q",
 					d.ID, d.Title, detail.Format)
-				out = append(out, types.FetchedItem{
-					ExternalID:       docIDStr,
-					Title:            d.Title,
-					SourceResourceID: bookIDStr,
-					Metadata: map[string]string{
-						"channel":     types.ChannelYuque,
-						"doc_id":      docIDStr,
-						"book_id":     bookIDStr,
-						"slug":        d.Slug,
-						"skip_reason": "unsupported format: " + detail.Format,
-					},
-				})
+				out = append(out, skippedDocItem(docIDStr, bookIDStr, d.Slug, d.Title,
+					"unsupported format: "+detail.Format))
+				continue
+			}
+
+			// A blank body is not a document. Never fall through to the URL
+			// path for it: the datasource service would download the Yuque web
+			// page, which is an SPA shell, and index that as content.
+			if strings.TrimSpace(detail.Body) == "" {
+				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): empty document body", d.ID, d.Title)
+				out = append(out, skippedDocItem(docIDStr, bookIDStr, d.Slug, d.Title,
+					"empty document body"))
+				continue
+			}
+			// The Yuque API occasionally returns the app shell instead of the
+			// document body (for example for a node the caller cannot export).
+			// Storing it as Markdown would index webpack scripts and analytics
+			// as knowledge, so skip it with an explicit reason.
+			if isHTMLPageShell(detail.Body) {
+				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): body is an HTML page shell", d.ID, d.Title)
+				out = append(out, skippedDocItem(docIDStr, bookIDStr, d.Slug, d.Title,
+					"document body is an HTML page shell"))
 				continue
 			}
 
@@ -383,6 +393,38 @@ func (c *Connector) walk(
 		return out, nil, nil
 	}
 	return out, newCursor, nil
+}
+
+// skippedDocItem builds a content-less placeholder for a document the
+// connector cannot ingest. The URL stays empty on purpose: the datasource
+// service treats an item with a URL as a URL document and downloads the page,
+// which for a Yuque book page is the SPA shell rather than the document body.
+func skippedDocItem(docIDStr, bookIDStr, slug, title, reason string) types.FetchedItem {
+	return types.FetchedItem{
+		ExternalID:       docIDStr,
+		Title:            title,
+		SourceResourceID: bookIDStr,
+		Metadata: map[string]string{
+			"channel":     types.ChannelYuque,
+			"doc_id":      docIDStr,
+			"book_id":     bookIDStr,
+			"slug":        slug,
+			"skip_reason": reason,
+		},
+	}
+}
+
+// isHTMLPageShell reports a body that is the Yuque web app's HTML shell rather
+// than Markdown. A Markdown document may legitimately contain HTML, but it does
+// not start with a document-type declaration or an <html> root element.
+func isHTMLPageShell(body string) bool {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(body), "\ufeff")
+	// Only the opening declarations matter; do not lowercase a whole document.
+	if len(trimmed) > 512 {
+		trimmed = trimmed[:512]
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html")
 }
 
 // buildDocURL constructs a browser URL for a Yuque doc.

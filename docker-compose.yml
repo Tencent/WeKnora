@@ -349,6 +349,8 @@ services:
       - WEKNORA_MINERU_TIMEOUT=${WEKNORA_MINERU_TIMEOUT:-}
       # MinerU 云端每个批次/分片轮询解析结果的最长时间（Go duration，默认 30m）
       - WEKNORA_MINERU_CLOUD_TIMEOUT=${WEKNORA_MINERU_CLOUD_TIMEOUT:-}
+      # MinerU Cloud / 自建 V1 结果 ZIP 中引用图片的解压总字节上限（默认 512 MiB）
+      - WEKNORA_MINERU_MAX_IMAGE_BYTES=${WEKNORA_MINERU_MAX_IMAGE_BYTES:-}
       # PaddleOCR-VL 云端轮询解析结果的最长时间（Go duration，默认 600s）
       - WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT=${WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT:-}
       # WeKnoraCloud 托管 docreader 轮询任务结果的最长时间（Go duration，默认 20m，应小于 DocReader RPC 超时）

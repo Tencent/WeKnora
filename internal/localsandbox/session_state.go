@@ -6,6 +6,8 @@ import (
 )
 
 type sessionState struct {
+	// mode overrides the default approval mode; empty means the default.
+	mode   ApprovalMode
 	grants []Grant
 	// rules are the delete rules approved for the session, by cwd.
 	rules map[string][]DeleteRule
@@ -32,6 +34,22 @@ func (s *sessionStates) stateLocked(id string) *sessionState {
 		s.byID[id] = st
 	}
 	return st
+}
+
+func (s *sessionStates) mode(id string) (ApprovalMode, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.byID[id]
+	if !ok || st.mode == "" {
+		return "", false
+	}
+	return st.mode, true
+}
+
+func (s *sessionStates) setMode(id string, mode ApprovalMode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stateLocked(id).mode = mode
 }
 
 func (s *sessionStates) grants(id string) []Grant {

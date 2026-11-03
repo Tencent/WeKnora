@@ -54,3 +54,28 @@ func TestWindowInterruptIsConsumedOnlyAtGateway(t *testing.T) {
 	require.False(t, m.observe(d, []byte(`{"event":"session.window_closed","payload":{"session_id":"task"}}`)))
 	require.Empty(t, current.id, "window-close still reaches the daemon to clean up its session")
 }
+
+func TestMovedTabEndsOnlyItsMatchingTaskAndReachesDaemon(t *testing.T) {
+	m := NewManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	current := &task{id: "task", selected: true, calls: map[uint64]context.CancelFunc{1: cancel}}
+	other := &task{id: "other", selected: true}
+	d := &device{tasks: map[string]*task{"chat": current, "another": other}}
+	for _, payload := range []string{
+		`{"session_id":"foreign","reason":"user_moved_tab","tab_id":1}`,
+		`{"session_id":"task","reason":"unknown","tab_id":1}`,
+		`{"session_id":"task","reason":"user_moved_tab"}`,
+	} {
+		require.False(t, m.observe(d, []byte(`{"event":"session.ended","payload":`+payload+`}`)))
+		require.False(t, current.paused)
+	}
+	require.False(t, m.observe(d, []byte(
+		`{"event":"session.ended","payload":{"session_id":"task","reason":"user_moved_tab","tab_id":1}}`)),
+		"the daemon must also receive the terminal event")
+	require.True(t, current.paused)
+	require.Empty(t, current.id, "explicit resume must start a new upstream session")
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.False(t, other.paused)
+	require.Equal(t, "other", other.id)
+}

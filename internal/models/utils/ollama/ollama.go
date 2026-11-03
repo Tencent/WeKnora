@@ -111,7 +111,7 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 	}
 
 	// If service is not available but set as optional, return false but no error
-	if !s.isAvailable && s.isOptional {
+	if !s.IsAvailable() && s.isOptional {
 		return false, nil
 	}
 
@@ -144,7 +144,7 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 	}
 
 	// If service is not available but set as optional, return nil without further operations
-	if !s.isAvailable && s.isOptional {
+	if !s.IsAvailable() && s.isOptional {
 		logger.GetLogger(ctx).Warnf("Ollama service unavailable, unable to pull model %s", modelName)
 		return nil
 	}

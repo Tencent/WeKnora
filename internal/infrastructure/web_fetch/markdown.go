@@ -24,9 +24,21 @@ func htmlToMarkdown(source, rawURL string) (string, error) {
 	if err != nil {
 		return "", newFetchError(ErrorHTMLParse, false, "HTML parse failed: %v", err)
 	}
+	// Read the first base[href] before article extraction removes the head.
+	// Relative bases are themselves resolved against the final response URL.
+	baseURL := pageURL
+	if href, exists := doc.Find("base[href]").First().Attr("href"); exists {
+		if ref, parseErr := url.Parse(strings.TrimSpace(href)); parseErr == nil {
+			resolved := pageURL.ResolveReference(ref)
+			if (resolved.Scheme == "http" || resolved.Scheme == "https") && resolved.Host != "" {
+				baseURL = resolved
+			}
+		}
+	}
+
 	title := strings.TrimSpace(doc.Find("title").First().Text())
 	extractedArticle := false
-	article, readErr := readability.FromReader(strings.NewReader(source), pageURL)
+	article, readErr := readability.FromReader(strings.NewReader(source), baseURL)
 	if readErr == nil && article.Node != nil {
 		var buf bytes.Buffer
 		if article.RenderHTML(&buf) == nil && strings.TrimSpace(buf.String()) != "" {
@@ -46,7 +58,7 @@ func htmlToMarkdown(source, rawURL string) (string, error) {
 		// nested .content element after successful extraction discards sibling sections.
 		doc.Find("script, style, noscript, nav, header, footer, aside").Remove()
 	}
-	// Resolve links against the final redirected URL; never fetch embedded resources.
+	// Use the same document base for extracted and fallback HTML; never fetch embedded resources.
 	doc.Find("a[href], img[src]").Each(func(_ int, node *goquery.Selection) {
 		attr := "href"
 		if goquery.NodeName(node) == "img" {
@@ -58,7 +70,7 @@ func htmlToMarkdown(source, rawURL string) (string, error) {
 			node.RemoveAttr(attr)
 			return
 		}
-		target = pageURL.ResolveReference(target)
+		target = baseURL.ResolveReference(target)
 		if target.Scheme != "http" && target.Scheme != "https" {
 			node.RemoveAttr(attr)
 			return

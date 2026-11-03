@@ -1,6 +1,6 @@
 ---
 name: agent-browser
-description: Use when the task needs a real web browser inside the sandbox - open a page, click, fill forms, take screenshots, extract or scrape data, test a web app, or use a site that needs a login. Drives the preinstalled agent-browser CLI; ask the user with ask_user whether to run visibly (headed) or invisibly (headless) before the first browser command. This is NOT the local_browser tool, which controls the user's own Chrome on their computer.
+description: Use when the task needs a real web browser inside the sandbox - open a page, click, fill forms, take screenshots, extract or scrape data, test a web app, or use a site that needs a login. Drives the preinstalled agent-browser CLI; the browser window shows on the user's Desktop tab. This is NOT the local_browser tool, which controls the user's own Chrome on their computer.
 ---
 
 # agent-browser (browser inside the sandbox)
@@ -27,7 +27,7 @@ For quick tasks the loop below is enough; read `core` before anything harder
 ## Basic loop
 
 ```sh
-agent-browser open https://example.com   # no --headed: runs headless
+agent-browser open https://example.com   # the window opens on the Desktop tab
 agent-browser snapshot -i          # interactive elements as @e1, @e2, ...
 agent-browser click @e2
 agent-browser fill @e3 "text to type"
@@ -40,13 +40,28 @@ go stale. `agent-browser --help` lists every other command.
 
 ## Screens
 
-Before the first browser command of a task, ask the user with `ask_user`
-whether to run visibly or invisibly. Visible means adding `--headed` to the
-launch (the browser window appears on their Desktop tab); invisible means
-leaving it off (headless). Apply the choice to the whole task; do not re-ask
-for every command. If the user does not care, headless. A captcha, 2FA code
-or password still needs the headed window: ask the user to type it there,
-never in the chat.
+The browser always opens as a visible window on the user's Desktop tab, so
+the user can watch it and take over. Do not ask the user whether to show it,
+and do not pass any flag to hide or show it. The user may click in the same
+window while you work: run `snapshot -i` again before acting if the page may
+have changed. Never ask for a password or code in the chat.
+
+## Logins and codes
+
+When a page asks for a username, password or one-time code and the
+`request_secure_form` tool is available:
+
+1. Call `request_secure_form` with the page's host as `site`.
+2. Run `agent-browser snapshot -i` again, then call `browser_fill_secret` with
+   the handle and the refs of the inputs.
+3. Click the sign-in button yourself; the tool never submits.
+
+Judge success by the statuses `browser_fill_secret` returns. Until you leave
+that page, do not take screenshots, do not click "show password", and do not
+read input values with `get value` or `eval`.
+
+Without `request_secure_form`, or for a captcha, ask the user to type it into
+the window on their Desktop tab.
 
 ## Rules
 

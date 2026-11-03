@@ -34,6 +34,8 @@
             :mcp-tool-name="prompt.mcp_tool_name || ''" :description="prompt.description"
             :delegated-task="prompt.delegated_task" :args-json="prompt.args_json" :grant-scope="prompt.grant_scope"
             :grant-lapsed="prompt.grant_lapsed" />
+          <SecureFormCard v-else-if="prompt.type === 'agent_prompt_required' && prompt.kind === 'secure_form'"
+            :ref="(el) => setCard(prompt, el)" variant="dock" v-bind="timing(prompt)" :request="prompt.request" />
           <AskUserCard v-else-if="prompt.type === 'agent_prompt_required'" :ref="(el) => setCard(prompt, el)"
             variant="dock" v-bind="{ ...timing(prompt), ...authProps }" :request="prompt.request" />
           <McpOAuthCard v-else :ref="(el) => setCard(prompt, el)" variant="dock" v-bind="authProps"
@@ -53,6 +55,7 @@ import { usePromptDock } from '@/composables/usePromptDock'
 import { isTextEntry } from '@/utils/promptKeys'
 import AskUserCard from './AskUserCard.vue'
 import McpOAuthCard from './McpOAuthCard.vue'
+import SecureFormCard from './SecureFormCard.vue'
 import ToolApprovalCard from './ToolApprovalCard.vue'
 
 const props = defineProps<{
@@ -104,6 +107,10 @@ const title = computed(() => {
   switch (active.value?.type) {
     case 'tool_approval_required': return t('agentStream.promptDock.approvalTitle')
     case 'mcp_oauth_required': return t('agentStream.promptDock.oauthTitle')
+    case 'agent_prompt_required':
+      return active.value?.kind === 'secure_form'
+        ? t('agentStream.promptDock.secureFormTitle')
+        : t('agentStream.askUser.title')
     default: return t('agentStream.askUser.title')
   }
 })
@@ -112,7 +119,7 @@ const icon = computed(() => {
   switch (active.value?.type) {
     case 'tool_approval_required': return 'secured'
     case 'mcp_oauth_required': return 'lock-on'
-    default: return 'help-circle'
+    default: return active.value?.kind === 'secure_form' ? 'lock-on' : 'help-circle'
   }
 })
 
