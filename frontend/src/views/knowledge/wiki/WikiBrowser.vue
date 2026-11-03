@@ -1193,6 +1193,7 @@ function focusGraphGroup(key: string) {
 function exitGraphFocus() {
   if (!graphFocusGroup.value) return
   graphFocusedSlugs.clear()
+  graphGroupMembersDirty = true
   graphFocusGroup.value = null
   const back = graphFocusReturnViewport
   graphFocusReturnViewport = null
@@ -1203,6 +1204,7 @@ function exitGraphFocus() {
 // Fit graph to view
 function fitGraphToView() {
   graphFocusedSlugs.clear()
+  graphGroupMembersDirty = true
   graphFocusGroup.value = null
   graphFocusReturnViewport = null
   if (!graphReady.value || !graphPanZoomRef || !graphRef.value || graphNodes.length === 0) return
@@ -3800,9 +3802,9 @@ async function doSearch() {
 function toggleArrows() {
   showArrows.value = !showArrows.value
   for (const e of graphEdgeElsRef) {
+    const highlighted = graphHighlightState?.edges.get(e.line)?.startsWith('hl:') ?? false
     if (showArrows.value) {
-      e.line.setAttribute('marker-end', 'url(#arrow-end)')
-      if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start)')
+      setEdgeMarkers(e, highlighted ? '-hl' : '')
     } else {
       e.line.removeAttribute('marker-end')
       e.line.removeAttribute('marker-start')
@@ -3833,6 +3835,13 @@ interface GNode {
   familiar: boolean
   labelWidth: number
 }
+interface GraphNodeElement {
+  g: SVGGElement
+  circle: SVGCircleElement
+  text: SVGTextElement
+  activeRing: SVGCircleElement
+  node: GNode
+}
 
 // Persistent graph state so it survives re-renders
 let graphNodes: GNode[] = []
@@ -3847,6 +3856,14 @@ let graphSvg: SVGSVGElement | null = null
 let graphAnimFrame = 0
 let refreshGraphLabels = () => {}
 let graphEdgeMarkersVisible = true
+type GraphHighlightState = 'primary' | 'neighbor' | 'dimmed'
+type GraphHighlightSnapshot = {
+  nodes: Map<string, GraphHighlightState>
+  rings: Map<string, 'shown' | 'hidden'>
+  edges: Map<SVGLineElement, string>
+}
+let graphHighlightState: GraphHighlightSnapshot | null = null
+let graphGroupMembersDirty = false
 let disposeGraphPanZoom = () => {}
 // Shared timer for debouncing node mouseleave -> mouseenter transitions.
 // Prevents flickering when the pointer quickly moves between adjacent nodes.
@@ -3901,6 +3918,10 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   graphGroups.value = []
   graphGroupFocusers = new Map()
   graphReady.value = false
+  graphGroupMembersDirty = false
+  // The old SVG elements are about to be discarded; never trust their cached
+  // highlight state when the rebuilt graph is first painted.
+  graphHighlightState = null
   if (!data || !data.nodes?.length) {
     container.innerHTML = ''
     graphNodes = []
@@ -3943,7 +3964,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Root group for pan/zoom transform
   const rootG = document.createElementNS('http://www.w3.org/2000/svg', 'g')
-  rootG.setAttribute('class', 'graph-root')
+  rootG.setAttribute('class', graphFocusedSlugs.size ? 'graph-root is-group-focused' : 'graph-root')
   svg.appendChild(rootG)
 
   // Edge group (below nodes)
@@ -3973,6 +3994,10 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     ? graph.edges.filter(edge => visibleSlugs.has(edge.source) && visibleSlugs.has(edge.target))
     : graph.edges
   const showClusterChrome = graphMode.value === 'overview' && graphDetailLevel.value >= GRAPH_DETAIL_MAX
+
+  rootG.style.setProperty('--graph-edge-color', graphEdgeColor)
+  rootG.style.setProperty('--graph-edge-width', graphEdgeWidth)
+  rootG.style.setProperty('--graph-edge-opacity', graphEdgeOpacity)
 
   // Build adjacency for highlight
   const adjacency = new Map<string, Set<string>>()
@@ -4039,6 +4064,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
         graphFocusGroup.value = { key: cluster.representative,
           name: graphLandmarkTitle(pageBySlug.get(cluster.anchors[0]!)!.title) }
         graphFocusedSlugs = new Set(cluster.slugs)
+        graphGroupMembersDirty = true
         graphSelectedSlug.value = null
         graphHighlightSlug.value = null
         graphDrawerVisible.value = false
@@ -4207,6 +4233,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     line.setAttribute('stroke', graphEdgeColor)
     line.setAttribute('stroke-width', graphEdgeWidth)
     line.setAttribute('stroke-opacity', graphEdgeOpacity)
+    if (showArrows.value) line.setAttribute('marker-end', 'url(#arrow-end)')
     line.setAttribute('stroke-linecap', 'round')
     if (showArrows.value) line.setAttribute('marker-end', 'url(#arrow-end)')
     line.style.transition = 'stroke 0.2s, stroke-width 0.2s, stroke-opacity 0.2s'
@@ -4218,11 +4245,12 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   }
 
   // Create SVG elements for nodes
-  const nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[] = []
+  const nodeEls: GraphNodeElement[] = []
   for (const n of graphNodes) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
     g.setAttribute('data-graph-node', n.slug)
+    if (graphFocusedSlugs.has(n.slug)) g.classList.add('is-group-member')
 
     const r = nodeRadius(n)
 
@@ -4496,43 +4524,32 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   const availableWidth = Math.max(160, width - (graphDrawerVisible.value ? 480 : Math.min(240, width * 0.25)))
   setupPanZoom(svg, rootG, previousViewport ?? initialGraphViewport(graphNodes, availableWidth, height, initialFocus))
 
+  applyGraphGroupClasses(rootG, nodeEls, edgeEls)
+
   // Links and repulsion determine the shape without a circular boundary.
   // Existing nodes stay still during incremental expansion, including pins.
   const retained = new Set(priorCoords.keys())
   let alpha = 1.0
   let frame = 0
+  const lastNodePositions = createGraphPositionWriter(nodeEls, edgeEls, nodeMap, nodeRadius)
+  const updateAnimatedPositions = (flush = false) => lastNodePositions.write(flush)
   function tick() {
     alpha *= 0.985
-    if (alpha < 0.02) { refreshGraphLabels(); graphAnimFrame = 0; return }
+    if (alpha < 0.02) {
+      updateAnimatedPositions(true)
+      refreshGraphLabels()
+      graphAnimFrame = 0
+      return
+    }
     stepGraphLayout(graphNodes, renderEdges, layout.placements, alpha, retained)
-
-    // Update SVG positions
-    for (const { g, node } of nodeEls) {
-      g.setAttribute('transform', `translate(${node.x},${node.y})`)
-    }
-    for (const e of edgeEls) {
-      const s = nodeMap.get(e.source)
-      const t = nodeMap.get(e.target)
-      if (s && t) {
-        setEdgePositions(e.line, s, t, nodeRadius)
-      }
-    }
+    updateAnimatedPositions()
 
     if (++frame % 6 === 0) refreshGraphLabels()
     graphAnimFrame = requestAnimationFrame(tick)
   }
 
   // Initial positions before first paint
-  for (const { g, node } of nodeEls) {
-    g.setAttribute('transform', `translate(${node.x},${node.y})`)
-  }
-  for (const e of edgeEls) {
-    const s = nodeMap.get(e.source)
-    const t = nodeMap.get(e.target)
-    if (s && t) {
-      setEdgePositions(e.line, s, t, nodeRadius)
-    }
-  }
+  updateAnimatedPositions(true)
 
   // Store node and edge refs for search and arrow toggle
   graphNodeElsRef = nodeEls
@@ -4556,6 +4573,39 @@ watch(graphDetailLevel, () => {
   if (graphMode.value !== 'overview') return
   renderGraph({ preserveLayout: true })
 }, { flush: 'sync' })
+
+function createGraphPositionWriter(
+  nodeEls: { g: SVGGElement; node: GNode }[],
+  edgeEls: { line: SVGLineElement; source: string; target: string }[],
+  nodeMap: Map<string, GNode>,
+  nodeRadius: (n: GNode) => number,
+  minMove = 0.25,
+) {
+  const lastNodePositions = new Map<string, { x: number; y: number }>()
+  const minMoveSq = minMove * minMove
+  return {
+    write(flush = false) {
+      const moved = new Set<string>()
+      for (const { g, node } of nodeEls) {
+        const previous = lastNodePositions.get(node.slug)
+        const dx = previous ? node.x - previous.x : Infinity
+        const dy = previous ? node.y - previous.y : Infinity
+        if (flush || !previous || dx * dx + dy * dy >= minMoveSq) {
+          g.setAttribute('transform', `translate(${node.x},${node.y})`)
+          lastNodePositions.set(node.slug, { x: node.x, y: node.y })
+          moved.add(node.slug)
+        }
+      }
+      if (!moved.size) return
+      for (const e of edgeEls) {
+        if (!flush && !moved.has(e.source) && !moved.has(e.target)) continue
+        const s = nodeMap.get(e.source)
+        const t = nodeMap.get(e.target)
+        if (s && t) setEdgePositions(e.line, s, t, nodeRadius)
+      }
+    },
+  }
+}
 
 // Set edge line positions, shortened to stop at node circle boundary so arrows are visible
 function setEdgePositions(line: SVGLineElement, s: GNode, t: GNode, nodeRadius: (n: GNode) => number) {
@@ -4582,7 +4632,7 @@ function setupDrag(
   g: SVGGElement, node: GNode,
   nodeMap: Map<string, GNode>,
   edgeEls: { line: SVGLineElement; source: string; target: string; bidir: boolean }[],
-  nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[],
+  nodeEls: GraphNodeElement[],
   nodeRadius: (n: GNode) => number,
 ) {
   let dragging = false
@@ -4871,66 +4921,116 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
 }
 
 // ─── Hover Highlight ───
+function applyGraphGroupClasses(
+  root: SVGGElement | null,
+  nodeEls: { g: SVGGElement; node: GNode }[],
+  edgeEls: { line: SVGLineElement; source: string; target: string }[],
+) {
+  const active = graphFocusedSlugs.size > 0
+  for (const { g, node } of nodeEls) g.classList.toggle('is-group-member', active && graphFocusedSlugs.has(node.slug))
+  for (const e of edgeEls) e.line.classList.toggle('is-group-edge', active && graphFocusedSlugs.has(e.source) && graphFocusedSlugs.has(e.target))
+  root?.classList.toggle('is-group-focused', active)
+  if (active) root?.classList.add('is-highlighting')
+  else root?.classList.remove('is-highlighting')
+}
+
 function applyHighlight(
   slug: string,
   adjacency: Map<string, Set<string>>,
-  nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[],
+  nodeEls: GraphNodeElement[],
   edgeEls: { line: SVGLineElement; source: string; target: string; bidir: boolean }[],
   hoverSlug?: string
 ) {
   refreshGraphLabels()
-  const neighbors = adjacency.get(slug) || new Set()
-  const hoverNeighbors = hoverSlug ? (adjacency.get(hoverSlug) || new Set()) : new Set()
+  const neighbors = adjacency.get(slug) || new Set<string>()
+  const hoverNeighbors: Set<string> = hoverSlug ? (adjacency.get(hoverSlug) || new Set<string>()) : new Set<string>()
+  const previous: GraphHighlightSnapshot | null = graphHighlightState
+  const next = new Map<string, GraphHighlightState>()
+  const nextRings = new Map<string, 'shown' | 'hidden'>()
+  const nextEdges = new Map<SVGLineElement, string>()
+  const addState = (id: string, nextState: GraphHighlightState) => next.set(id, nextState)
+
+  addState(slug, 'primary')
+  for (const neighbor of neighbors) addState(neighbor, 'neighbor')
+  if (hoverSlug) {
+    addState(hoverSlug, 'primary')
+    for (const neighbor of hoverNeighbors) addState(neighbor, 'neighbor')
+  }
 
   // Helper to get consistent radius
   const getRadius = (n: GNode) => graphNodeRadius(n.linkCount)
-
+  const desiredNodeState = (node: GNode) => next.get(node.slug) || 'dimmed'
+  const graphRoot = (edgeEls[0]?.line.parentElement?.parentElement
+    ?? nodeEls[0]?.g.parentElement?.parentElement) as SVGGElement | null
+  graphRoot?.classList.add('is-highlighting')
+  graphRoot?.classList.remove('is-group-focused')
+  const nodeElsBySlug = new Map<string, GraphNodeElement>(nodeEls.map(node => [node.node.slug, node]))
+  const contextSlugs = new Set<string>()
+  next.forEach((state, slug) => {
+    if (state !== 'dimmed') contextSlugs.add(slug)
+  })
+  if (previous) {
+    previous.nodes.forEach((state, slug) => {
+      if (state !== 'dimmed' && !contextSlugs.has(slug)) {
+        const element = nodeElsBySlug.get(slug)
+        if (element?.g.classList.contains('is-highlight-context')) element.g.classList.remove('is-highlight-context')
+      }
+    })
+  }
+  for (const slug of contextSlugs) {
+    const element = nodeElsBySlug.get(slug)
+    if (!element) continue
+    element.g.classList.add('is-highlight-context')
+  }
   for (const { g, circle, activeRing, node } of nodeEls) {
     const r = getRadius(node)
-    if (node.slug === slug) {
-      circle.setAttribute('r', String(r + 3))
-      circle.setAttribute('stroke-width', '2.5')
-      g.style.opacity = '1'
-    } else if (hoverSlug && node.slug === hoverSlug) {
-      circle.setAttribute('r', String(r + 3))
-      circle.setAttribute('stroke-width', '2.5')
-      g.style.opacity = '1'
-    } else if (neighbors.has(node.slug) || (hoverSlug && hoverNeighbors.has(node.slug))) {
+    const state = desiredNodeState(node)
+    next.set(node.slug, state)
+    if (state === 'primary') {
+      if (previous?.nodes.get(node.slug) !== 'primary') {
+        circle.setAttribute('r', String(r + 3))
+        circle.setAttribute('stroke-width', '2.5')
+      }
+    } else if (previous?.nodes.get(node.slug) === 'primary') {
       circle.setAttribute('r', String(r))
       circle.setAttribute('stroke-width', '1.5')
-      g.style.opacity = '1'
-    } else {
-      circle.setAttribute('r', String(r))
-      circle.setAttribute('stroke-width', '1.5')
-      g.style.opacity = '0.2'
     }
 
-    if (node.slug === graphSelectedSlug.value) {
-      activeRing.style.opacity = '1'
-    } else {
-      activeRing.style.opacity = '0'
-    }
+    const ringState = node.slug === graphSelectedSlug.value ? 'shown' : 'hidden'
+    nextRings.set(node.slug, ringState)
   }
+  if (previous) {
+    previous.rings.forEach((ringState, slug) => {
+      if (ringState === 'shown' && nextRings.get(slug) !== 'shown') nodeElsBySlug.get(slug)?.activeRing.style.setProperty('opacity', '0')
+    })
+  }
+  nextRings.forEach((ringState, slug) => {
+    const element = nodeElsBySlug.get(slug)
+    if (ringState === 'shown' && element && previous?.rings.get(slug) !== 'shown') {
+      element.activeRing.style.setProperty('opacity', '1')
+    }
+  })
+  const nodeMap = new Map(nodeEls.map(node => [node.node.slug, node.node]))
+  const hlColorBySlug = new Map(nodeEls.map(node => [node.node.slug, nodeColorMap[node.node.type] || '#0052d9']))
   for (const e of edgeEls) {
-    if (e.source === slug || e.target === slug || (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug))) {
-      e.line.setAttribute('stroke-opacity', '0.85')
-      e.line.setAttribute('stroke-width', '1.5')
-
-      // Determine which node is driving the highlight color
-      const focusSlug = (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug)) ? hoverSlug : slug
-      const hlColor = nodeColorMap[
-        nodeEls.find(n => n.node.slug === focusSlug)?.node.type || ''
-      ] || '#0052d9'
-
-      e.line.setAttribute('stroke', hlColor)
+    const sourceState = desiredNodeState(nodeMap.get(e.source)!)
+    const targetState = desiredNodeState(nodeMap.get(e.target)!)
+    const highlighted = sourceState !== 'dimmed' || targetState !== 'dimmed'
+    const driver = sourceState === 'primary' ? e.source : targetState === 'primary' ? e.target : ''
+    const edgeState = highlighted ? `hl:${driver}` : 'dimmed'
+    nextEdges.set(e.line, edgeState)
+    if (previous?.edges.get(e.line) === edgeState) continue
+    if (highlighted) {
+      if (!e.line.classList.contains('is-highlighted')) e.line.classList.add('is-highlighted')
+      e.line.style.setProperty('--graph-highlight-color', hlColorBySlug.get(driver) || '#0052d9')
       setEdgeMarkers(e, '-hl')
-    } else {
-      e.line.setAttribute('stroke', graphEdgeColor)
-      e.line.setAttribute('stroke-opacity', '0.08')
-      e.line.setAttribute('stroke-width', graphEdgeWidth)
+    } else if (previous?.edges.get(e.line)?.startsWith('hl:')) {
+      e.line.classList.remove('is-highlighted')
+      e.line.style.removeProperty('--graph-highlight-color')
       setEdgeMarkers(e)
     }
   }
+  graphHighlightState = { nodes: next, rings: nextRings, edges: nextEdges }
 }
 
 function setEdgeMarkers(e: { line: SVGLineElement; bidir: boolean }, suffix = '') {
@@ -4945,30 +5045,52 @@ function setEdgeMarkers(e: { line: SVGLineElement; bidir: boolean }, suffix = ''
 }
 
 function clearHighlight(
-  nodeEls: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[],
+  nodeEls: GraphNodeElement[],
   edgeEls: { line: SVGLineElement; source: string; target: string; bidir: boolean }[],
 ) {
+  const nodeElsBySlug = new Map<string, GraphNodeElement>(nodeEls.map(node => [node.node.slug, node]))
   if (graphSelectedSlug.value) {
     applyHighlight(graphSelectedSlug.value, graphAdjacencyRef, nodeEls, edgeEls)
     return
   }
 
   refreshGraphLabels()
+  const previous: GraphHighlightSnapshot | null = graphHighlightState
+  const graphRoot = (edgeEls[0]?.line.parentElement?.parentElement
+    ?? nodeEls[0]?.g.parentElement?.parentElement) as SVGGElement | null
+  const shouldGroupFocus = graphFocusedSlugs.size > 0
+  if (graphGroupMembersDirty) {
+    applyGraphGroupClasses(graphRoot, nodeEls, edgeEls)
+    graphGroupMembersDirty = false
+  }
+  graphRoot?.classList.toggle('is-highlighting', shouldGroupFocus)
+  graphRoot?.classList.toggle('is-group-focused', shouldGroupFocus)
   const getRadius = (n: GNode) => graphNodeRadius(n.linkCount)
+  if (previous) {
+    previous.nodes.forEach((state, slug) => {
+      if (state === 'dimmed') return
+      const element = nodeElsBySlug.get(slug)
+      if (!element) return
+      element.g.classList.remove('is-highlight-context')
+      const r = String(getRadius(element.node))
+      element.circle.setAttribute('r', r)
+      element.circle.setAttribute('stroke-width', '1.5')
+    })
+  }
 
-  for (const { g, circle, activeRing, node } of nodeEls) {
-    circle.setAttribute('r', String(getRadius(node)))
-    circle.setAttribute('stroke-width', '1.5')
-    g.style.opacity = graphFocusedSlugs.size && !graphFocusedSlugs.has(node.slug) ? '0.12' : '1'
-    activeRing.style.opacity = '0'
+  if (previous) {
+    for (const [slug, ringState] of previous.rings) {
+      if (ringState !== 'shown') continue
+      nodeElsBySlug.get(slug)?.activeRing.style.setProperty('opacity', '0')
+    }
   }
   for (const e of edgeEls) {
-    e.line.setAttribute('stroke', graphEdgeColor)
-    e.line.setAttribute('stroke-width', graphEdgeWidth)
-    const outsideFocus = graphFocusedSlugs.size && (!graphFocusedSlugs.has(e.source) || !graphFocusedSlugs.has(e.target))
-    e.line.setAttribute('stroke-opacity', outsideFocus ? '0.05' : graphEdgeOpacity)
+    if (!previous?.edges.get(e.line)?.startsWith('hl:')) continue
+    e.line.classList.remove('is-highlighted')
+    e.line.style.removeProperty('--graph-highlight-color')
     setEdgeMarkers(e)
   }
+  graphHighlightState = null
 }
 
 // graphSearchOptions drives the search select dropdown. When the input is
@@ -6565,6 +6687,42 @@ span.graph-focus-name {
 .wiki-graph-canvas :deep(.hide-edge-markers line) {
   marker-start: none;
   marker-end: none;
+}
+
+.wiki-graph-canvas :deep(.graph-root.is-highlighting > g > g[data-graph-node]) {
+  opacity: 0.2;
+
+  &.is-highlight-context {
+    opacity: 1;
+  }
+}
+
+.wiki-graph-canvas :deep(.graph-root.is-group-focused > g > g[data-graph-node]) {
+  opacity: 1;
+
+  &:not(.is-group-member) {
+    opacity: 0.12;
+  }
+}
+
+.wiki-graph-canvas :deep(.graph-root.is-group-focused line) {
+  stroke-opacity: 0.05;
+
+  &.is-group-edge {
+    stroke-opacity: var(--graph-edge-opacity, 0.42);
+  }
+}
+
+.wiki-graph-canvas :deep(.graph-root.is-highlighting line) {
+  stroke: var(--graph-edge-color);
+  stroke-width: var(--graph-edge-width);
+  stroke-opacity: 0.08;
+
+  &.is-highlighted {
+    stroke: var(--graph-highlight-color, #0052d9);
+    stroke-width: 1.5;
+    stroke-opacity: 0.85;
+  }
 }
 
 .wiki-graph-canvas :deep(.graph-cluster-caption) {
