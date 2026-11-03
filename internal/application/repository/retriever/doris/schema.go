@@ -3,6 +3,7 @@ package doris
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -79,6 +80,53 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 
 	r.initializedTables.Store(dimension, true)
 	return nil
+}
+
+// listDimensionTables returns only existing vector shards whose names exactly
+// match <tableBaseName>_<ASCII digits>. Old shards may outlive a model's
+// configured dimension, so cleanup must discover them rather than infer names.
+func (r *dorisRepository) listDimensionTables(ctx context.Context) (tables []string, err error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = ?`, r.database)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close dimension table rows: %w", closeErr)
+		}
+	}()
+
+	prefix := r.tableBaseName + "_"
+	tables = make([]string, 0)
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(tableName, prefix) {
+			continue
+		}
+		dimension := strings.TrimPrefix(tableName, prefix)
+		if dimension == "" {
+			continue
+		}
+		valid := true
+		for i := 0; i < len(dimension); i++ {
+			if dimension[i] < '0' || dimension[i] > '9' {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			tables = append(tables, tableName)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Strings(tables)
+	return tables, nil
 }
 
 // tableExists 通过 information_schema 判断表是否存在。
