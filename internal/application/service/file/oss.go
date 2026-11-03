@@ -3,16 +3,19 @@ package file
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
@@ -34,18 +37,85 @@ const ossScheme = "oss://"
 
 // newOSSClient creates an OSS client using the official Aliyun SDK v2.
 func newOSSClient(endpoint, region, accessKey, secretKey string) (*oss.Client, error) {
-	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+	return newOSSClientWithConfig(types.OSSEngineConfig{
+		Endpoint: endpoint, Region: region, AccessKey: accessKey, SecretKey: secretKey,
+	})
+}
+
+func newOSSClientWithConfig(config types.OSSEngineConfig) (*oss.Client, error) {
+	cfg, err := newOSSConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return oss.NewClient(cfg), nil
+}
+
+func newOSSConfig(config types.OSSEngineConfig) (*oss.Config, error) {
+	if err := config.ValidateAuth(); err != nil {
+		return nil, err
+	}
+	if err := utils.ValidateURLForSSRF(config.Endpoint); err != nil {
 		return nil, fmt.Errorf("unsafe OSS endpoint: %w", err)
 	}
-	creds := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
+	var creds credentials.CredentialsProvider
+	if config.AuthType == types.OSSAuthECSRAMRole {
+		roleProvider := credentials.NewEcsRoleCredentialsProvider(
+			credentials.EcsRamRole(config.RoleName),
+			func(options *credentials.EcsRoleCredentialsProviderOptions) {
+				options.Timeout = time.Second
+				options.Retries = 1
+			},
+		)
+		creds = credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
+			value, err := roleProvider.GetCredentials(ctx)
+			if err != nil {
+				logger.Warnf(ctx, "OSS ECS metadata credentials unavailable: category=%s",
+					ossMetadataErrorCategory(err))
+				// SDK metadata errors may include the response body and credentials.
+				return credentials.Credentials{}, errors.New(
+					"OSS ECS RAM role credentials unavailable: " +
+						"check the instance role and metadata service connectivity",
+				)
+			}
+			return value, nil
+		})
+	} else {
+		creds = credentials.NewStaticCredentialsProvider(config.AccessKey, config.SecretKey, "")
+	}
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(creds).
-		WithRegion(region).
-		WithEndpoint(endpoint).
+		WithRegion(config.Region).
+		WithEndpoint(config.Endpoint).
 		WithHttpClient(objectStorageHTTPClient())
 
-	return oss.NewClient(cfg), nil
+	return cfg, nil
+}
+
+// Classify SDK errors without logging response bodies, role names or credentials.
+func ossMetadataErrorCategory(err error) string {
+	var timeout interface{ Timeout() bool }
+	var syntax *json.SyntaxError
+	var fieldType *json.UnmarshalTypeError
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
+		return "timeout"
+	case errors.As(err, &syntax), errors.As(err, &fieldType):
+		return "invalid_json"
+	case strings.HasPrefix(err.Error(), "failed to fetch ecs role name, resp.StatusCode:"):
+		statusText := strings.TrimPrefix(err.Error(), "failed to fetch ecs role name, resp.StatusCode:")
+		status, parseErr := strconv.Atoi(statusText)
+		if parseErr == nil && status >= 100 && status <= 599 {
+			return fmt.Sprintf("http_status_%d", status)
+		}
+		return "http_status"
+	case err.Error() == "ecs role name is empty":
+		return "missing_role"
+	default:
+		return "metadata_response_or_connection"
+	}
 }
 
 // ossEnsureBucket checks if the bucket exists and creates it if missing.
@@ -83,10 +153,28 @@ func NewOssFileService(endpoint, region, accessKey, secretKey, bucketName, pathP
 
 // NewOssFileServiceWithTempBucket creates an Aliyun OSS file service with optional temp bucket.
 func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
-	client, err := newOSSClient(endpoint, region, accessKey, secretKey)
+	return NewOssFileServiceWithConfig(types.OSSEngineConfig{
+		Endpoint: endpoint, Region: region, AccessKey: accessKey, SecretKey: secretKey,
+		BucketName: bucketName, PathPrefix: pathPrefix, UseTempBucket: tempBucketName != "",
+		TempBucketName: tempBucketName, TempRegion: tempRegion,
+	})
+}
+
+// NewOssFileServiceWithConfig uses the same authentication for main and temp buckets.
+func NewOssFileServiceWithConfig(config types.OSSEngineConfig) (interfaces.FileService, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	bucketName, pathPrefix := config.BucketName, config.PathPrefix
+	tempBucketName, tempRegion := "", config.TempRegion
+	if config.UseTempBucket {
+		tempBucketName = config.TempBucketName
+	}
+	clientConfig, err := newOSSConfig(config)
 	if err != nil {
 		return nil, err
 	}
+	client := oss.NewClient(clientConfig)
 
 	if err := ossEnsureBucket(client, bucketName); err != nil {
 		return nil, err
@@ -95,12 +183,11 @@ func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 	var tempClient *oss.Client
 	if tempBucketName != "" {
 		if tempRegion == "" {
-			tempRegion = region
+			tempRegion = config.Region
 		}
-		tempClient, err = newOSSClient(endpoint, tempRegion, accessKey, secretKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize OSS temp client: %w", err)
-		}
+		// Reuse the provider so both buckets share cached, refreshable credentials.
+		tempConfig := *clientConfig
+		tempClient = oss.NewClient(tempConfig.WithRegion(tempRegion))
 		if err := ossEnsureBucket(tempClient, tempBucketName); err != nil {
 			return nil, err
 		}
@@ -122,7 +209,18 @@ func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 
 // CheckOssConnectivity tests OSS connectivity using the provided credentials.
 func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
-	client, err := newOSSClient(endpoint, region, accessKey, secretKey)
+	return CheckOssConnectivityWithConfig(ctx, types.OSSEngineConfig{
+		Endpoint: endpoint, Region: region, AccessKey: accessKey, SecretKey: secretKey, BucketName: bucketName,
+	})
+}
+
+// CheckOssConnectivityWithConfig probes a bucket without creating it.
+func CheckOssConnectivityWithConfig(ctx context.Context, config types.OSSEngineConfig) error {
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	bucketName := config.BucketName
+	client, err := newOSSClientWithConfig(config)
 	if err != nil {
 		return err
 	}
