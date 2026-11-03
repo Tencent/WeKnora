@@ -19,7 +19,7 @@ func browserDescription(instructions []string) string {
 }
 
 // The local_browser operating contract is maintained here, not in editable agent
-// templates or the upstream CLI skill. Uses the paired CLI/extension 0.3.1
+// templates or the upstream CLI skill. Uses the paired CLI/extension 0.4.1
 // source baseline, remote ownership contract and WeKnora task controls.
 const browserToolDescription = `Control the user's connected Chrome through local_browser; no shell, installation or CLI
 session commands are needed. Sessions are server-managed. Pass fields beside method, and only
@@ -27,36 +27,42 @@ the fields of that method, for example {"method":"navigate","url":"https://examp
 keep_open is optional on every call.
 
 Methods:
-observe(tab_id?, max_text_chars?, max_depth?, probe_hover?, debug_surfaces?)
+cooperate(action, control_policy?, max_text_chars?, tab_id?, timeout_ms?)
+observe(tab_id?, max_text_chars?, max_depth?, probe_hover?, debug_surfaces?, ` +
+	`context_id?, observation_id?, expect?, depends_on?)
 snapshot(tab_id?, max_text_chars?, max_depth?)
 screenshot(tab_id?, ref?)
-navigate(url, tab_id?, wait_until?, timeout_ms?)
-navigate_back(tab_id?, wait_until?, timeout_ms?)
-navigate_forward(tab_id?, wait_until?, timeout_ms?)
-reload(tab_id?, hard?, wait_until?, timeout_ms?)
-click(ref | selector, button?, click_count?, modifiers?, tab_id?, timeout_ms?)
-fill(ref | selector, value, clear_before?, tab_id?, timeout_ms?)
-press(key, ref?, selector?, hold_ms?, modifiers?, tab_id?, timeout_ms?)
-hover(ref | selector, settle_ms?, modifiers?, tab_id?, timeout_ms?)
-wheel(delta_x?, delta_y?, ref?, selector?, modifiers?, tab_id?, timeout_ms?)
-scroll_to(ref | selector, tab_id?, timeout_ms?)
-focus(ref | selector, tab_id?, timeout_ms?)
-blur(ref?, selector?, tab_id?, timeout_ms?)
-select(ref | selector, values, tab_id?, timeout_ms?)
+navigate(url, tab_id?, wait_until?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+navigate_back(tab_id?, wait_until?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+navigate_forward(tab_id?, wait_until?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+reload(tab_id?, hard?, wait_until?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+click(ref | selector, button?, click_count?, modifiers?, tab_id?, timeout_ms?, ` +
+	`context_id?, observation_id?, expect?, depends_on?)
+fill(ref | selector, value, clear_before?, tab_id?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+press(key, ref?, selector?, hold_ms?, modifiers?, tab_id?, timeout_ms?, ` +
+	`context_id?, observation_id?, expect?, depends_on?)
+hover(ref | selector, settle_ms?, modifiers?, tab_id?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+wheel(delta_x?, delta_y?, ref?, selector?, modifiers?, tab_id?, timeout_ms?, ` +
+	`context_id?, observation_id?, expect?, depends_on?)
+scroll_to(ref | selector, tab_id?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+focus(ref | selector, tab_id?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+blur(ref?, selector?, tab_id?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
+select(ref | selector, values, tab_id?, timeout_ms?, context_id?, observation_id?, expect?, depends_on?)
 tab_list(scope?)
 tab_create(url?, active?, index?)
 tab_select(tab_id)
-tab_close(tab_id)
+tab_close(tab_id, context_id?, observation_id?, expect?, depends_on?)
 tab_borrow(tab_id, confirm?)
 tab_return(tab_id)
 get_html(tab_id?, ref?, max_bytes?)
-evaluate(expression, tab_id?, await_promise?, return_by_value?, timeout_ms?)
+evaluate(expression, tab_id?, await_promise?, return_by_value?, timeout_ms?, ` +
+	`context_id?, observation_id?, expect?, depends_on?)
 console(tab_id?, limit?, max_text_chars?, since?, include_stack?)
 network(tab_id?, limit?, max_text_chars?, since?)
 wait_for_navigation(tab_id?, wait_until?, timeout_ms?)
 wait_ms(duration_ms)
-window_resize(width, height)
-emulate(off | overrides, tab_id?)
+window_resize(width, height, context_id?, observation_id?, expect?, depends_on?)
+emulate(off | overrides, tab_id?, context_id?, observation_id?, expect?, depends_on?)
 request_help(prompt, tab_id?, title?, targets?, timeout_ms?)
 click, fill, hover, scroll_to, focus, and select take exactly one of ref or selector.
 press, wheel, and blur take at most one. emulate takes either off or overrides.
@@ -65,12 +71,35 @@ Workflow:
 - Use a supplied URL or observed link. If no reliable entry is available, use the search
   preferences below with URL-encoded query terms. Read source pages before relying on claims;
   do not guess paths or repeatedly verify known redirects. Stop when evidence meets the request.
+- Shared control is automatic. Navigate the untouched initial blank tab, then call
+  cooperate with action:sync and inspect its observation/changes and human activity.
+  Sync defaults to target policy (control_policy:auto); it returns context_id and
+  observation_id. Pass the actual context_id explicitly on subsequent page actions.
+  DOM-targeted actions reuse it across completed actions and supplementary reads.
+  evaluate, navigation, viewport wheel, untargeted keys and other actions without a
+  DOM recipient also require the sync's single-use observation_id; sync and inspect
+  again before the next such action. observe with probe_hover is an action too.
+- Use expect for observed facts behind a decision, e.g.
+  [{"target":"#price","field":"text","equals":"$100"}]. text/value require strings,
+  checked/exists booleans, and attribute a named attribute plus a string or null.
+  Text is exact textContent including whitespace. A stable ref alone does not prove
+  the same record, price or button meaning. Never invent facts, contexts or receipts.
+- Human input and navigation revoke control. For cooperation_sync_required,
+  control_context_invalid, document_changed or observation invalidation, synchronize
+  and reconsider current evidence. If the person is operating/holding the page, call
+  cooperate action:wait, then sync only after ready:true; never replay an uncertain
+  action. Failed expect checks require reconsidering the changed fact, not waiting.
+  An explicit stop, user_aborted or WeKnora pause still requires user intervention.
+  If the BrowserSkill overlay was stopped/held, the user must first return control
+  with Resume in the browser, then Continue operation in the conversation preview.
+  Optional control_policy:strict on the first sync uses one action per context;
+  depends_on is available only with that policy. Policy stays fixed for the session.
 - Observe for page text and refs. After navigation, tab switches or significant DOM changes,
   observe before another ref interaction. Wait for each dependent action's result. Hover/submenu
   labels are not refs: reveal the menu, then observe. Occluded layers are not actionable.
 - Use screenshot for visual evidence (charts, canvas or layout); optional ref crops to a freshly
   observed element. Images require a vision-capable model or configured VLM; a user preview
-  alone is not model-visible evidence.
+  alone is not model-visible evidence. Passive observe/snapshot/screenshot do not replace sync.
 - Prefer refs for iframe/shadow-root targets; selectors search the main document. Use snapshot
   or get_html for missing structure. Reserve evaluate for a specific gap and return bounded
   serializable data. Follow the method list above and recovery hints in tool results.
@@ -109,6 +138,13 @@ Task tabs:
   Chrome shares the user's login cookies. Reuse an existing user tab only when its live
   page state is needed or the user asked to use that tab. A previous conversation's tab
   is not automatically controlled by this task, even if you originally created it.
+- Tab selection is pinned. After closing or returning the selected tab, list tabs
+  and explicitly tab_select an owned remaining tab (or tab_create) before syncing.
+  Human tab activation never retargets an agent operation.
+- Before closing the last Agent Window tab, tab_create an about:blank tab with
+  active:false, then sync with the original tab_id and inspect it before tab_close.
+  Tab creation/selection/borrowing/return invalidates control contexts; sync afterward.
+  Do not close the replacement blank tab; task completion cleans it up.
 - tab_list scope=user means not authorized for this task. Call tab_borrow before
   tab_select, reading, request_help or other operations on such a tab. Listing a tab
   does not authorize it. Follow extension confirmation and return borrowed tabs when done.
@@ -128,5 +164,6 @@ Task tabs:
   Return borrowed tabs instead of closing them. Window membership alone grants no access.
 - Successful turns close created tabs and return borrowed tabs. keep_open:true retains the
   task for a requested open page, deliverable or unfinished form. request_help retains it
-  automatically; clear keep_open after resolution if unnecessary. Retention applies per turn.
+  automatically; clear keep_open after resolution if unnecessary. Pages with human
+  participation are preserved by the extension at session stop. Retention applies per turn.
   Failed, paused or cancelled work retains pages.`
