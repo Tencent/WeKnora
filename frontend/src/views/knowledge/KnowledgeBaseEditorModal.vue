@@ -261,7 +261,7 @@
       </div>
 
       <!-- VectorStore 绑定 -->
-      <div v-show="currentSection === 'vectorStore'" class="section">
+      <div v-if="authStore.isSystemAdmin && currentSection === 'vectorStore'" class="section">
         <KBVectorStoreSettings
           v-if="formData"
           :mode="editorMode"
@@ -310,7 +310,7 @@
       </div>
 
       <!-- 解析引擎 -->
-      <div v-if="!isFAQ && formData && currentSection === 'parser'" class="section">
+      <div v-if="authStore.isSystemAdmin && !isFAQ && formData && currentSection === 'parser'" class="section">
         <KBParserSettings
           :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
           @update:parser-engine-rules="handleParserEngineRulesUpdate"
@@ -318,7 +318,7 @@
       </div>
 
       <!-- 存储引擎 -->
-      <div v-if="!isFAQ && formData && currentSection === 'storage'" class="section">
+      <div v-if="authStore.isSystemAdmin && !isFAQ && formData && currentSection === 'storage'" class="section">
         <KBStorageSettings
           :storage-backend-id="formData.storageBackendId"
           :storage-provider="formData.storageProvider"
@@ -851,7 +851,7 @@ const navItems = computed(() => {
   if (canViewActivity.value) {
     items.push({ key: 'activity', icon: 'history', label: t('knowledgeEditor.sidebar.activity') })
   }
-  return items
+  return authStore.isSystemAdmin ? items : items.filter(item => !['vectorStore', 'parser', 'storage'].includes(item.key))
 })
 
 // 左侧导航分组（与 AgentEditorModal 对齐）
@@ -1708,6 +1708,13 @@ const buildSubmitData = () => {
     }
   }
 
+  if (!authStore.isSystemAdmin) {
+    delete data.vector_store_id
+    delete data.storage_backend_id
+    delete data.storage_provider_config
+    delete data.storage_config
+    if (data.chunking_config) delete data.chunking_config.parser_engine_rules
+  }
   return data
 }
 

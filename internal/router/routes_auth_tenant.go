@@ -85,7 +85,7 @@ func RegisterTenantRoutes(
 		// PathTenantMatch group. Tenant-level surface: full-access keys may
 		// call it, and scoped keys need manage_tenant_settings.
 		g.apiKeyRoute(tenantRoutes, http.MethodGet, "/kv/:key", apiKeyManageTenantSettings(apiKeyFullAccess()), g.Viewer(), handler.GetTenantKV)
-		g.apiKeyRoute(tenantRoutes, http.MethodPut, "/kv/:key", apiKeyManageTenantSettings(apiKeyFullAccess()), g.Admin(), handler.UpdateTenantKV)
+		g.apiKeyRoute(tenantRoutes, http.MethodPut, "/kv/:key", apiKeyManageTenantSettings(apiKeyFullAccess()), g.SystemAdmin(), handler.UpdateTenantKV)
 
 		// Per-tenant endpoints share PathTenantMatch at the group level.
 		// Most /tenants/:id/* endpoints stay undeclared for API keys by
@@ -261,11 +261,11 @@ func RegisterSystemRoutes(
 		systemRoutes.With(apiKeyAny()).GET("/capabilities", g.Viewer(), handler.GetDeploymentCapabilities)
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
-		systemRoutes.POST("/parser-engines/check", g.Admin(), handler.CheckParserEngines)
-		systemRoutes.POST("/docreader/reconnect", g.Admin(), handler.ReconnectDocReader)
+		systemRoutes.POST("/parser-engines/check", g.SystemAdmin(), handler.CheckParserEngines)
+		systemRoutes.POST("/docreader/reconnect", g.SystemAdmin(), handler.ReconnectDocReader)
 		systemRoutes.GET("/storage-engine-status", g.Viewer(), handler.GetStorageEngineStatus)
-		systemRoutes.POST("/storage-engine-check", g.Admin(), handler.CheckStorageEngine)
-		systemRoutes.POST("/sandbox-check", g.Admin(), handler.CheckSandboxConfig)
+		systemRoutes.POST("/storage-engine-check", g.SystemAdmin(), handler.CheckStorageEngine)
+		systemRoutes.POST("/sandbox-check", g.SystemAdmin(), handler.CheckSandboxConfig)
 	}
 }
 

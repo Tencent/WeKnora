@@ -495,7 +495,16 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
+	// Infrastructure bindings are platform-controlled for ordinary users.
+ // Ignore client overrides and let service-side workspace defaults resolve them.
+ if !types.IsSystemAdminFromContext(ctx) {
+  req.VectorStoreID = nil
+  req.StorageBackendID = nil
+  req.StorageProviderConfig = nil
+  req.StorageConfig = types.StorageConfig{}
+  req.ChunkingConfig.ParserEngineRules = nil
+ }
+ req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		_ = c.Error(apperrors.NewBadRequestError("name cannot be empty"))
 		return

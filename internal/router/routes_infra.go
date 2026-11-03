@@ -27,24 +27,24 @@ func RegisterModelRoutes(
 		models.GET("/catalog/resolve", g.Viewer(), handler.ResolveModelCatalog)
 		models.POST("/catalog/resolve", g.Viewer(), handler.ResolveModelCatalog)
 		// 创建模型 — Admin+
-		models.POST("", g.Admin(), handler.CreateModel)
+		models.POST("", g.SystemAdmin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+
 		models.GET("", g.Viewer(), handler.ListModels)
 		// 调试已保存模型会发起真实上游调用并产生费用 — Admin+
-		models.POST("/:id/debug", g.Admin(), handler.DebugModel)
+		models.POST("/:id/debug", g.SystemAdmin(), handler.DebugModel)
 		// 复制模型配置（含已存凭证）— Admin+
-		models.POST("/:id/copy", g.Admin(), handler.CopyModel)
+		models.POST("/:id/copy", g.SystemAdmin(), handler.CopyModel)
 		// 获取单个模型 — Viewer+
 		models.GET("/:id", g.Viewer(), handler.GetModel)
 		// 更新模型 — Admin+；内置模型仍由服务层额外限定为 SystemAdmin。
-		models.PUT("/:id", g.AdminOrSystemAdmin(), handler.UpdateModel)
+		models.PUT("/:id", g.SystemAdmin(), handler.UpdateModel)
 		// 只改显示名称与描述 — 与 PUT 相同的权限
-		models.PATCH("/:id", g.AdminOrSystemAdmin(), handler.PatchModel)
+		models.PATCH("/:id", g.SystemAdmin(), handler.PatchModel)
 		// 删除模型 — Admin+
-		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
+		models.DELETE("/:id", g.SystemAdmin(), handler.DeleteModel)
 		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
-		models.PUT("/:id/credentials", g.AdminOrSystemAdmin(), credHandler.Put)
-		models.DELETE("/:id/credentials/:field", g.AdminOrSystemAdmin(), credHandler.DeleteField)
+		models.PUT("/:id/credentials", g.SystemAdmin(), credHandler.Put)
+		models.DELETE("/:id/credentials/:field", g.SystemAdmin(), credHandler.DeleteField)
 	}
 }
 
@@ -60,31 +60,31 @@ func RegisterSandboxConfigRoutes(
 	configs := g.apiKeyGroup(r.Group("/sandbox-configs"), apiKeyFullAccess())
 	{
 		configs.GET("", g.Viewer(), h.List)
-		configs.PUT("/workspace-policy", g.Admin(), h.SetWorkspacePolicy)
-		configs.POST("/templates/query", g.Admin(), h.QueryTemplates)
-		configs.POST("", g.Admin(), h.Create)
+		configs.PUT("/workspace-policy", g.SystemAdmin(), h.SetWorkspacePolicy)
+		configs.POST("/templates/query", g.SystemAdmin(), h.QueryTemplates)
+		configs.POST("", g.SystemAdmin(), h.Create)
 		configs.GET("/:id", g.Viewer(), h.Get)
-		configs.PUT("/:id", g.Admin(), h.Update)
-		configs.DELETE("/:id", g.Admin(), h.Delete)
-		configs.GET("/:id/sandboxes", g.Admin(), h.Inventory)
-		configs.GET("/:id/user-sandboxes", g.Admin(), h.ListUserSandboxes)
-		configs.POST("/:id/user-sandboxes/:digest/release", g.Admin(), h.ReleaseUserSandbox)
+		configs.PUT("/:id", g.SystemAdmin(), h.Update)
+		configs.DELETE("/:id", g.SystemAdmin(), h.Delete)
+		configs.GET("/:id/sandboxes", g.SystemAdmin(), h.Inventory)
+		configs.GET("/:id/user-sandboxes", g.SystemAdmin(), h.ListUserSandboxes)
+		configs.POST("/:id/user-sandboxes/:digest/release", g.SystemAdmin(), h.ReleaseUserSandbox)
 		// Skills are Admin+ throughout, reads included: an upload drives a
 		// root shell whose output is baked into the image every session of
 		// this config boots, and the listing names what that image carries.
-		configs.GET("/:id/skills", g.Admin(), skills.List)
-		configs.POST("/:id/skills", g.Admin(), skills.Upload)
-		configs.GET("/:id/skills/:skillId", g.Admin(), skills.Get)
-		configs.GET("/:id/skills/:skillId/files", g.Admin(), skills.ListFiles)
-		configs.GET("/:id/skills/:skillId/files/content", g.Admin(), skills.GetFile)
-		configs.POST("/:id/skills/:skillId/reinstall", g.Admin(), skills.Reinstall)
-		configs.GET("/:id/skills/:skillId/guidance", g.Admin(), skills.InstallGuidance)
-		configs.POST("/:id/skills/:skillId/guidance", g.Admin(), skills.SteerInstall)
-		configs.POST("/:id/skills/:skillId/stop", g.Admin(), skills.Stop)
-		configs.PATCH("/:id/skills/:skillId", g.Admin(), skills.Patch)
-		configs.DELETE("/:id/skills/:skillId", g.Admin(), skills.Delete)
-		configs.GET("/:id/skills/:skillId/install-events", g.Admin(), skills.InstallEvents)
-		configs.GET("/:id/skills/:skillId/transcript", g.Admin(), skills.InstallTranscript)
+		configs.GET("/:id/skills", g.SystemAdmin(), skills.List)
+		configs.POST("/:id/skills", g.SystemAdmin(), skills.Upload)
+		configs.GET("/:id/skills/:skillId", g.SystemAdmin(), skills.Get)
+		configs.GET("/:id/skills/:skillId/files", g.SystemAdmin(), skills.ListFiles)
+		configs.GET("/:id/skills/:skillId/files/content", g.SystemAdmin(), skills.GetFile)
+		configs.POST("/:id/skills/:skillId/reinstall", g.SystemAdmin(), skills.Reinstall)
+		configs.GET("/:id/skills/:skillId/guidance", g.SystemAdmin(), skills.InstallGuidance)
+		configs.POST("/:id/skills/:skillId/guidance", g.SystemAdmin(), skills.SteerInstall)
+		configs.POST("/:id/skills/:skillId/stop", g.SystemAdmin(), skills.Stop)
+		configs.PATCH("/:id/skills/:skillId", g.SystemAdmin(), skills.Patch)
+		configs.DELETE("/:id/skills/:skillId", g.SystemAdmin(), skills.Delete)
+		configs.GET("/:id/skills/:skillId/install-events", g.SystemAdmin(), skills.InstallEvents)
+		configs.GET("/:id/skills/:skillId/transcript", g.SystemAdmin(), skills.InstallTranscript)
 	}
 }
 
@@ -95,7 +95,7 @@ func RegisterSandboxConfigRoutes(
 func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHandler, g *rbacGuards) {
 	evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(apiKeyFullAccess()))
 	{
-		evaluationRoutes.POST("", g.Admin(), handler.Evaluation)
+		evaluationRoutes.POST("", g.SystemAdmin(), handler.Evaluation)
 		evaluationRoutes.GET("", g.Viewer(), handler.GetEvaluationResult)
 	}
 }
@@ -118,21 +118,21 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 	// 对 API key 均为空间级：full-access key 可用，scoped key 需要 manage_models。
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/status", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.CheckOllamaStatus)
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/models", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.ListOllamaModels)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/ollama/models/check", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.CheckOllamaModels)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/ollama/models/download", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.DownloadOllamaModel)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/ollama/models/check", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.CheckOllamaModels)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/ollama/models/download", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.DownloadOllamaModel)
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/download/progress/:taskId", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.GetDownloadProgress)
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/download/tasks", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.ListDownloadTasks)
 
 	// 远程API相关接口
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/remote/check", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.CheckRemoteModel)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/embedding/test", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.TestEmbeddingModel)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/rerank/check", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.CheckRerankModel)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/asr/check", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.CheckASRModel)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/multimodal/test", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.TestMultimodalFunction)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/remote/check", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.CheckRemoteModel)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/embedding/test", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.TestEmbeddingModel)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/rerank/check", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.CheckRerankModel)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/asr/check", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.CheckASRModel)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/multimodal/test", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.TestMultimodalFunction)
 
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/extract/text-relation", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.ExtractTextRelations)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/extract/fabri-tag", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.FabriTag)
-	g.apiKeyRoute(r, http.MethodPost, "/initialization/extract/fabri-text", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.FabriText)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/extract/text-relation", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.ExtractTextRelations)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/extract/fabri-tag", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.FabriTag)
+	g.apiKeyRoute(r, http.MethodPost, "/initialization/extract/fabri-text", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.FabriText)
 }
 
 // RegisterMCPServiceRoutes registers MCP service routes.
@@ -159,17 +159,17 @@ func RegisterMCPServiceRoutes(
 	mcpServices := g.apiKeyGroup(r.Group("/mcp-services"), apiKeyManageMCPServices(apiKeyFullAccess()))
 	{
 		// Create MCP service — Admin+
-		mcpServices.POST("", g.Admin(), handler.CreateMCPService)
+		mcpServices.POST("", g.SystemAdmin(), handler.CreateMCPService)
 		// List MCP services — Viewer+
 		mcpServices.GET("", g.Viewer(), handler.ListMCPServices)
 		// Get MCP service by ID — Viewer+
 		mcpServices.GET("/:id", g.Viewer(), handler.GetMCPService)
 		// Update MCP service — Admin+
-		mcpServices.PUT("/:id", g.Admin(), handler.UpdateMCPService)
+		mcpServices.PUT("/:id", g.SystemAdmin(), handler.UpdateMCPService)
 		// Delete MCP service — Admin+
-		mcpServices.DELETE("/:id", g.Admin(), handler.DeleteMCPService)
+		mcpServices.DELETE("/:id", g.SystemAdmin(), handler.DeleteMCPService)
 		// Test MCP service connection — Admin+ (probes external infra)
-		mcpServices.POST("/:id/test", g.Admin(), handler.TestMCPService)
+		mcpServices.POST("/:id/test", g.SystemAdmin(), handler.TestMCPService)
 		// Get MCP service tools — Viewer+
 		mcpServices.GET("/:id/tools", g.Viewer(), handler.GetMCPServiceTools)
 		mcpServices.GET("/:id/metadata", g.Viewer(), handler.GetMCPMetadata)
@@ -177,16 +177,16 @@ func RegisterMCPServiceRoutes(
 		// (Viewer+), or a tenant-wide snapshot for static auth (Admin+ in the
 		// handler). GET /tools remains Viewer+ and does not persist.
 		mcpServices.POST("/:id/metadata/refresh", g.Viewer(), handler.RefreshMCPMetadata)
-		mcpServices.POST("/:id/usage-instructions/generate", g.Admin(), handler.GenerateMCPUsageInstructions)
+		mcpServices.POST("/:id/usage-instructions/generate", g.SystemAdmin(), handler.GenerateMCPUsageInstructions)
 		// Get MCP service resources — Viewer+
 		mcpServices.GET("/:id/resources", g.Viewer(), handler.GetMCPServiceResources)
 		// Per-field credential subresource: secrets never travel via the main
 		// PUT body. See internal/handler/mcp_credentials.go for the contract. — Admin+
-		mcpServices.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		mcpServices.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		mcpServices.PUT("/:id/credentials", g.SystemAdmin(), credHandler.Put)
+		mcpServices.DELETE("/:id/credentials/:field", g.SystemAdmin(), credHandler.DeleteField)
 		// MCP tool human approval (issue #1173) — Viewer+ to read, Admin+ to set policy
 		mcpServices.GET("/:id/tool-approvals", g.Viewer(), handler.ListMCPToolApprovals)
-		mcpServices.PUT("/:id/tool-approvals/:tool_name", g.Admin(), handler.SetMCPToolApproval)
+		mcpServices.PUT("/:id/tool-approvals/:tool_name", g.SystemAdmin(), handler.SetMCPToolApproval)
 		// Per-user OAuth authorization. Viewer+ may authorize/inspect/revoke
 		// their own token, through the browser flow (authorize-url and the
 		// public callback registered above) or with an assertion.
@@ -245,19 +245,19 @@ func RegisterWebSearchProviderRoutes(
 		// List available provider types (metadata for UI forms) — Viewer+
 		providers.GET("/types", g.Viewer(), h.ListProviderTypes)
 		// Test with raw credentials (no persistence) — Admin+
-		providers.POST("/test", g.Admin(), h.TestProviderRaw)
+		providers.POST("/test", g.SystemAdmin(), h.TestProviderRaw)
 		// CRUD
-		providers.POST("", g.Admin(), h.CreateProvider)
+		providers.POST("", g.SystemAdmin(), h.CreateProvider)
 		providers.GET("", g.Viewer(), h.ListProviders)
 		providers.GET("/:id", g.Viewer(), h.GetProvider)
-		providers.PUT("/:id", g.Admin(), h.UpdateProvider)
-		providers.PATCH("/:id", g.Admin(), h.PatchProvider)
-		providers.DELETE("/:id", g.Admin(), h.DeleteProvider)
+		providers.PUT("/:id", g.SystemAdmin(), h.UpdateProvider)
+		providers.PATCH("/:id", g.SystemAdmin(), h.PatchProvider)
+		providers.DELETE("/:id", g.SystemAdmin(), h.DeleteProvider)
 		// Per-field credential subresource — Admin+
-		providers.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		providers.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		providers.PUT("/:id/credentials", g.SystemAdmin(), credHandler.Put)
+		providers.DELETE("/:id/credentials/:field", g.SystemAdmin(), credHandler.DeleteField)
 		// Test existing saved provider — Admin+
-		providers.POST("/:id/test", g.Admin(), h.TestProviderByID)
+		providers.POST("/:id/test", g.SystemAdmin(), h.TestProviderByID)
 	}
 }
 
@@ -272,15 +272,15 @@ func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler
 		// List available engine types (metadata for UI forms) — Viewer+
 		stores.GET("/types", g.Viewer(), h.ListStoreTypes)
 		// Test with raw credentials (no persistence) — Admin+
-		stores.POST("/test", g.Admin(), h.TestStoreRaw)
+		stores.POST("/test", g.SystemAdmin(), h.TestStoreRaw)
 		// CRUD
-		stores.POST("", g.Admin(), h.CreateStore)
+		stores.POST("", g.SystemAdmin(), h.CreateStore)
 		stores.GET("", g.Viewer(), h.ListStores)
 		stores.GET("/:id", g.Viewer(), h.GetStore)
-		stores.PUT("/:id", g.Admin(), h.UpdateStore)
-		stores.DELETE("/:id", g.Admin(), h.DeleteStore)
+		stores.PUT("/:id", g.SystemAdmin(), h.UpdateStore)
+		stores.DELETE("/:id", g.SystemAdmin(), h.DeleteStore)
 		// Test existing saved or env store — Admin+
-		stores.POST("/:id/test", g.Admin(), h.TestStoreByID)
+		stores.POST("/:id/test", g.SystemAdmin(), h.TestStoreByID)
 	}
 }
 
@@ -289,14 +289,14 @@ func RegisterStorageBackendRoutes(r *gin.RouterGroup, h *handler.StorageBackendH
 	backends := g.apiKeyGroup(r.Group("/storage-backends"), apiKeyManageStorageBackends(apiKeyFullAccess()))
 	{
 		backends.GET("/types", g.Viewer(), h.Types)
-		backends.POST("/test", g.Admin(), h.TestRaw)
-		backends.POST("", g.Admin(), h.Create)
+		backends.POST("/test", g.SystemAdmin(), h.TestRaw)
+		backends.POST("", g.SystemAdmin(), h.Create)
 		backends.GET("", g.Viewer(), h.List)
 		backends.GET("/:id", g.Viewer(), h.Get)
-		backends.PUT("/:id", g.Admin(), h.Update)
-		backends.DELETE("/:id", g.Admin(), h.Delete)
-		backends.POST("/:id/test", g.Admin(), h.TestByID)
-		backends.PUT("/:id/default", g.Admin(), h.SetDefault)
+		backends.PUT("/:id", g.SystemAdmin(), h.Update)
+		backends.DELETE("/:id", g.SystemAdmin(), h.Delete)
+		backends.POST("/:id/test", g.SystemAdmin(), h.TestByID)
+		backends.PUT("/:id/default", g.SystemAdmin(), h.SetDefault)
 	}
 }
 
@@ -319,31 +319,31 @@ func RegisterDataSourceRoutes(
 		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
 
 		// Validate credentials without persistence (for "Test Connection" button) — Admin+
-		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)
+		ds.POST("/validate-credentials", g.SystemAdmin(), handler.ValidateCredentials)
 
 		// CRUD operations
-		ds.POST("", g.Admin(), handler.CreateDataSource)
+		ds.POST("", g.SystemAdmin(), handler.CreateDataSource)
 		ds.GET("", g.Viewer(), handler.ListDataSources)
 		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
-		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
-		ds.PATCH("/:id/sync-settings", g.Admin(), handler.PatchSyncSettings)
-		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
+		ds.PUT("/:id", g.SystemAdmin(), handler.UpdateDataSource)
+		ds.PATCH("/:id/sync-settings", g.SystemAdmin(), handler.PatchSyncSettings)
+		ds.DELETE("/:id", g.SystemAdmin(), handler.DeleteDataSource)
 
 		// Credential subresource. Single logical field "credentials" because
 		// connector credentials are a per-connector atomic map (see
 		// internal/handler/datasource_credentials.go). — Admin+
-		ds.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		ds.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		ds.PUT("/:id/credentials", g.SystemAdmin(), credHandler.Put)
+		ds.DELETE("/:id/credentials/:field", g.SystemAdmin(), credHandler.DeleteField)
 
 		// Connection and resource management — Admin+
-		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)
-		ds.GET("/:id/resources", g.Admin(), handler.ListAvailableResources)
-		ds.POST("/:id/resource-ancestors", g.Admin(), handler.ResolveResourceAncestors)
+		ds.POST("/:id/validate", g.SystemAdmin(), handler.ValidateConnection)
+		ds.GET("/:id/resources", g.SystemAdmin(), handler.ListAvailableResources)
+		ds.POST("/:id/resource-ancestors", g.SystemAdmin(), handler.ResolveResourceAncestors)
 
 		// Sync management — Admin+
-		ds.POST("/:id/sync", g.Admin(), handler.ManualSync)
-		ds.POST("/:id/pause", g.Admin(), handler.PauseDataSource)
-		ds.POST("/:id/resume", g.Admin(), handler.ResumeDataSource)
+		ds.POST("/:id/sync", g.SystemAdmin(), handler.ManualSync)
+		ds.POST("/:id/pause", g.SystemAdmin(), handler.PauseDataSource)
+		ds.POST("/:id/resume", g.SystemAdmin(), handler.ResumeDataSource)
 
 		// Sync logs — Viewer+ (read-only audit trail)
 		ds.GET("/:id/logs", g.Viewer(), handler.GetSyncLogs)
@@ -356,6 +356,6 @@ func RegisterDataSourceRoutes(
 // management endpoints. SaveCredentials persists external SaaS keys
 // for the tenant (Admin+), Status is a low-risk readiness probe (Viewer+).
 func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler, g *rbacGuards) {
-	g.apiKeyRoute(r, http.MethodPost, "/weknoracloud/credentials", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.SaveCredentials)
+	g.apiKeyRoute(r, http.MethodPost, "/weknoracloud/credentials", apiKeyManageModels(apiKeyFullAccess()), g.SystemAdmin(), handler.SaveCredentials)
 	g.apiKeyRoute(r, http.MethodGet, "/models/weknoracloud/status", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.Status)
 }
