@@ -119,6 +119,12 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	if chatManage.FAQPriorityEnabled {
 		opts.FAQScoreBoost = chatManage.FAQScoreBoost
 	}
+	// The workspace retrieval config decides how much web hits weigh inside
+	// the composite; the default keeps the historic near-parity with local
+	// hits.
+	if tenant, _ := types.TenantInfoFromContext(ctx); tenant != nil {
+		opts.SourceWeight = tenant.RetrievalConfig.GetEffectiveWebSearchSourceWeight()
+	}
 	res := reranking.Rerank(ctx, rerankModel, chatManage.RewriteQuery, chatManage.SearchResult, opts)
 	*diag = res.Diagnostics
 	diag.ModelID = chatManage.RerankModelID

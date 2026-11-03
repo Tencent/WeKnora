@@ -769,7 +769,14 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// 	p.webSearchStateService.SaveWebSearchTempKBState(
 	// 		ctx, chatManage.SessionID, state.TempKBID, state.SeenURLs, state.KnowledgeIDs)
 	// }
-	res := searchutil.ConvertWebSearchResults(webResults)
+	// The workspace retrieval config decides how strongly fresh web hits
+	// rank against knowledge-base hits; the default keeps the historic
+	// behavior of web results outranking mediocre local hits.
+	baseScore := 0.0
+	if tenant != nil {
+		baseScore = tenant.RetrievalConfig.GetEffectiveWebSearchBaseScore()
+	}
+	res := searchutil.ConvertWebSearchResults(webResults, searchutil.WithBaseScore(baseScore))
 	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{
 		"hit_count": len(res),
 	})

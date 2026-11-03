@@ -81,6 +81,11 @@ type Options struct {
 	// out; the vector can. Callers pass the text vector threshold or more.
 	// Kept results ride outside TopK; see types.MetadataKeptBy.
 	ImageKeepScore float64
+	// SourceWeight is the weight web-search hits get inside the composite
+	// score, where knowledge-base hits weigh 1.0. Zero keeps the built-in
+	// default; below 1.0 penalizes web hits so the workspace's own documents
+	// rank ahead of SEO-generic pages.
+	SourceWeight float64
 }
 
 // Result is the outcome of a rerank run.
@@ -182,7 +187,7 @@ func Rerank(
 	scored := make([]*types.SearchResult, 0, len(passing))
 	scoredIdx := make([]int, 0, len(passing))
 	for _, rr := range passing {
-		scored = append(scored, scoredCopy(res.Candidates[rr.Index], rr.RelevanceScore, opts.FAQScoreBoost))
+		scored = append(scored, scoredCopy(res.Candidates[rr.Index], rr.RelevanceScore, opts.FAQScoreBoost, opts.SourceWeight))
 		scoredIdx = append(scoredIdx, candidateIdx[rr.Index])
 	}
 	order := make([]int, len(scored))
@@ -218,7 +223,7 @@ func Rerank(
 		res.Indices = append(res.Indices, sortedIdx[p])
 	}
 	for _, k := range keptImages(ctx, res.Candidates, valid, passing, scoredAsImage, opts) {
-		kept := scoredCopy(res.Candidates[k.Index], k.RelevanceScore, opts.FAQScoreBoost)
+		kept := scoredCopy(res.Candidates[k.Index], k.RelevanceScore, opts.FAQScoreBoost, opts.SourceWeight)
 		kept.Metadata[types.MetadataKeptBy] = types.KeptByImageVector
 		res.Results = append(res.Results, kept)
 		res.Indices = append(res.Indices, candidateIdx[k.Index])
@@ -337,8 +342,9 @@ func bestScore(scores []rerank.RankResult) (rerank.RankResult, bool) {
 const CompositeScoreKey = "composite_score"
 
 // scoredCopy returns a copy of r whose Score is the composite of the model
-// score and its retrieval score, recording both in Metadata.
-func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.SearchResult {
+// score and its retrieval score, recording both in Metadata. sourceWeight is
+// the resolved web source weight; see Options.SourceWeight.
+func scoredCopy(r *types.SearchResult, modelScore, faqBoost, sourceWeight float64) *types.SearchResult {
 	c := *r
 	c.Metadata = maps.Clone(r.Metadata)
 	if c.Metadata == nil {
@@ -347,7 +353,7 @@ func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.Sear
 	base := r.Score
 	c.Metadata["base_score"] = strconv.FormatFloat(base, 'f', 4, 64)
 	c.Metadata["model_score"] = strconv.FormatFloat(modelScore, 'f', 4, 64)
-	c.Score = CompositeScore(&c, modelScore, base)
+	c.Score = CompositeScore(&c, modelScore, base, sourceWeight)
 	c.Metadata[CompositeScoreKey] = strconv.FormatFloat(c.Score, 'f', 4, 64)
 	if faqBoost > 1.0 && c.ChunkType == string(types.ChunkTypeFAQ) {
 		c.Metadata["faq_boosted"] = "true"
@@ -358,13 +364,18 @@ func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.Sear
 }
 
 // CompositeScore blends the rerank model score with the retrieval score and a
-// source weight, clamped to [0, 1]. Graph hits carry no retrieval score (they
+// source weight, clamped to [0, 1]. webSourceWeight is the weight web-search
+// hits carry; callers resolve it from the workspace retrieval config, zero
+// meaning the built-in default. Graph hits carry no retrieval score (they
 // come from entity lookups, not similarity search), so the model score stands
 // in for it rather than a made-up constant.
-func CompositeScore(r *types.SearchResult, modelScore, baseScore float64) float64 {
+func CompositeScore(r *types.SearchResult, modelScore, baseScore, webSourceWeight float64) float64 {
+	if webSourceWeight <= 0 {
+		webSourceWeight = types.DefaultWebSearchSourceWeight
+	}
 	sourceWeight := 1.0
 	if strings.EqualFold(r.KnowledgeSource, "web_search") {
-		sourceWeight = 0.95
+		sourceWeight = webSourceWeight
 	}
 	if r.MatchType == types.MatchTypeGraph {
 		baseScore = modelScore
