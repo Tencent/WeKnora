@@ -570,3 +570,17 @@ App 的 `MAX_FILE_SIZE_MB` 与 DocReader 的 `DOCREADER_GRPC_MAX_FILE_SIZE_MB`�
 超出原始文件上限仍会在 App／Go SDK 发送前或 DocReader 解析前失败；超出消息预算的元数据和单个响应帧仍由 gRPC 拒绝。此边界行为需要配套升级 App 和 DocReader，并保持两端文件上限配置一致。流式结果与旧版 unary 回退均使用该预算。
 
 这项修正不改变对象存储文件回读方式、不增加远程文件 URL 协议，也不解决所有大文件并发内存压力。解析后正文或单张图片远大于消息预算时仍可能失败，不能把文件上限当成无限结果大小。
+
+
+### 自建 PaddleOCR-VL 的原生 PDF 快路径
+
+`paddleocr_vl` 支持可选的 `paddleocr_vl_pdf_mode`：
+
+- `ocr`（默认，含未设置时）：整份文件仍由 Paddle `/layout-parsing` 处理，保留现有行为。
+- `auto`：先由已连接的 DocReader 检查 PDF。仅在所有页面均为原生页且有可用输出时，复用 builtin 的版面文本、表格、嵌入图片／矢量图和来源坐标，不调用 Paddle。只要有扫描页（包括带隐藏 OCR 文字的整页图片），整份 PDF 仍交给 Paddle，不拼接两种引擎的逐页输出。
+
+可通过工作空间解析器配置 API 设置 `paddleocr_vl_pdf_mode: "auto"`；也可在上传的 `parser_engine_overrides` 中设置，上传值优先。此选项尚无独立 UI 控件，仅适用于自建 `paddleocr_vl`，不改变云端引擎。`pdf_force_scanned: "true"` 会保持 OCR；DocReader 的全局强制扫描设置同样会拒绝快路径。
+
+快路径需要配套更新的 DocReader；未连接、旧版本、探测失败、空白或加密文件均回退原 Paddle 链路。取消请求时直接结束，不启动第二次解析。混合文件仍有一次探测开销，尚未实现仅对扫描页调用 Paddle。
+
+`auto` 的原生输出遵循 builtin 的表格／图片提取规则，不保证与 Paddle 的跨页表格合并、印章或图表识别结果完全相同。需要这些 Paddle 版面能力，或原生文字层质量不佳时，使用 `ocr`。文档插图仍通过原有图片处理流水线处理；跳过整页 OCR 不代表跳过插图处理。
