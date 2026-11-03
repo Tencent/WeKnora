@@ -119,8 +119,12 @@ type MemoryRepository interface {
 	ListItems(ctx context.Context, scope MemoryScope, status string, limit, offset int) ([]*types.MemoryItem, int64, error)
 	// FindActiveByKey returns the active item occupying a topic key, if any.
 	FindActiveByKey(ctx context.Context, scope MemoryScope, normalizedKey string) (*types.MemoryItem, error)
-	// UpdateItemContent rewrites an item edited in the memory manager.
-	UpdateItemContent(ctx context.Context, scope MemoryScope, id, content, normalizedKey string, importance int) error
+	// UpdateItemContent rewrites an item and records the provenance of the new
+	// wording. User edits pass MemoryOriginManual; automatic maintenance passes
+	// the item's current origin so it is not misreported as user-authored.
+	UpdateItemContent(
+		ctx context.Context, scope MemoryScope, id, content, normalizedKey string, importance int, origin string,
+	) error
 	// SupersedeItem marks an outdated item as replaced by another one.
 	SupersedeItem(ctx context.Context, scope MemoryScope, id, supersededBy string) error
 	// DeleteItem physically removes one item. Forgetting means forgetting.
