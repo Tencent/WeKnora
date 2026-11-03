@@ -33,6 +33,8 @@ func WikiPageWriteSnapshotMatches(expected, current *WikiPage) bool {
 	}
 	left, right := cloneWikiPageWriteSnapshot(expected), cloneWikiPageWriteSnapshot(current)
 	for _, page := range []*WikiPage{left, right} {
+		// 进度快照是读取时填充的内存缓存，不是数据库字段；其约束由持久进度单独校验。
+		page.ProgressSnapshot = ""
 		page.InLinks = nil
 		page.PageMetadata = nil
 		page.CreatedAt = time.Time{}
