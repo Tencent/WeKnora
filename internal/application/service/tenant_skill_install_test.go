@@ -2137,6 +2137,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 		&transcriptStreams{},
 		&transcriptMessages{},
 		HostSandboxManager{},
+		nil,
 	)
 	fx.svc.now = func() time.Time { return time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC) }
 	return fx
