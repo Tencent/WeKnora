@@ -75,7 +75,7 @@ func TestConcurrencyEmbedderBackgroundGated(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 2)
 
 	f := newFakeEmbedder("emb-bg")
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, 0, 0, 0)
 
 	ctx := types.WithBackgroundTask(context.Background())
 	const n = 5
@@ -118,7 +118,7 @@ func TestConcurrencyEmbedderPerModelLimitOverridesDefault(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 10)
 
 	f := newFakeEmbedder("emb-permodel")
-	w := wrapEmbeddingConcurrency(f, 1)
+	w := wrapEmbeddingConcurrency(f, 1, 0, 0)
 
 	ctx := types.WithBackgroundTask(context.Background())
 	const n = 3
@@ -157,7 +157,7 @@ func TestConcurrencyEmbedderInteractiveNotGated(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
 
 	f := newFakeEmbedder("emb-interactive")
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, 0, 0, 0)
 
 	ctx := context.Background() // no background marker
 	const n = 3
@@ -198,7 +198,7 @@ func TestConcurrencyEmbedderPoolFanOutGated(t *testing.T) {
 
 	f := newFakeEmbedder("emb-pool")
 	f.pooler = NewBatchEmbedder(pool)
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, 0, 0, 0)
 
 	ctx := types.WithBackgroundTask(context.Background())
 	done := make(chan struct{})

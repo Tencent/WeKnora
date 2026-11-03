@@ -218,6 +218,8 @@ type ModelParametersDTO struct {
 	ContextWindow       int                       `json:"context_window,omitempty"`
 	MaxOutputTokens     int                       `json:"max_output_tokens,omitempty"`
 	MaxConcurrency      int                       `json:"max_concurrency,omitempty"`
+	MaxRPS              float64                   `json:"max_rps,omitempty"`
+	MaxBurst            int                       `json:"max_burst,omitempty"`
 	AppID               string                    `json:"app_id,omitempty"`
 	Spec                *types.ModelSpecOverride  `json:"spec,omitempty"`
 }
@@ -242,6 +244,8 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		ContextWindow:       m.Parameters.ContextWindow,
 		MaxOutputTokens:     m.Parameters.MaxOutputTokens,
 		MaxConcurrency:      m.Parameters.MaxConcurrency,
+		MaxRPS:              m.Parameters.MaxRPS,
+		MaxBurst:            m.Parameters.MaxBurst,
 		AppID:               m.Parameters.AppID,
 		Spec:                m.Parameters.Spec,
 	}
