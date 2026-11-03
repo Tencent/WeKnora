@@ -1131,7 +1131,10 @@ func (s *DataSourceService) completeItemLifecycle(
 	return fmt.Errorf("acknowledge data source item %q: %w", item.ExternalID, err)
 }
 
-func lifecycleItemCompleted(ds *types.DataSource, item *types.FetchedItem, result *types.SyncResult, created, updated, deleted, skipped int) bool {
+func lifecycleItemCompleted(
+	ds *types.DataSource, item *types.FetchedItem, result *types.SyncResult,
+	created, updated, deleted, skipped int,
+) bool {
 	if item.IsDeleted {
 		return ds.SyncDeletions && (result.Deleted > deleted || result.Skipped > skipped && item.ExternalID != "")
 	}
