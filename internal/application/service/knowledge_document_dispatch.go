@@ -191,7 +191,13 @@ func (s *knowledgeService) scrubDocumentPendingProcess(
 		knowledgeID,
 		documentDispatchOp,
 	); err != nil {
-		logger.Warnf(ctx, "document %s: failed to scrub pending process ops for knowledge %s: %v", reason, knowledgeID, err)
+		logger.Warnf(
+			ctx,
+			"document %s: failed to scrub pending process ops for knowledge %s: %v",
+			reason,
+			knowledgeID,
+			err,
+		)
 	}
 }
 
@@ -294,7 +300,11 @@ func documentPendingTaskIsFinalRetry(ctx context.Context) bool {
 	return retried >= maxRetry
 }
 
-func (s *knowledgeService) settleDocumentPendingOp(ctx context.Context, payload *types.DocumentProcessPayload, err error) {
+func (s *knowledgeService) settleDocumentPendingOp(
+	ctx context.Context,
+	payload *types.DocumentProcessPayload,
+	err error,
+) {
 	if payload == nil || payload.PendingOpID == 0 || s.taskPendingRepo == nil {
 		return
 	}

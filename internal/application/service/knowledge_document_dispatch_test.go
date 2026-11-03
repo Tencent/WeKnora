@@ -15,10 +15,9 @@ import (
 
 type documentDispatchPendingStub struct {
 	interfaces.TaskPendingOpsRepository
-	ops      []*types.TaskPendingOp
-	deleted  []int64
-	released []int64
-	pending  int64
+	ops     []*types.TaskPendingOp
+	deleted []int64
+	pending int64
 }
 
 func (s *documentDispatchPendingStub) ClaimBatch(context.Context, string, string, string, int, time.Time) ([]*types.TaskPendingOp, error) {
