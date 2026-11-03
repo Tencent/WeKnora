@@ -441,8 +441,30 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 	}
 
 	if configured != "" && configured != inferred {
-		logger.Warnf(ctx, "[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, using global fallback",
+		logger.Warnf(ctx, "[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, resolving inferred provider",
 			configured, inferred, filePath)
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+		if tenant != nil && s.storageResolver != nil {
+			resolved, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, tenant, "", inferred, baseDir)
+			if err == nil && resolved != nil && strings.EqualFold(strings.TrimSpace(resolvedProvider), inferred) {
+				return resolved
+			}
+			if err != nil {
+				logger.Warnf(ctx, "[storage] failed to resolve inferred provider %s from FilePath: %v", inferred, err)
+			} else if resolved != nil {
+				logger.Warnf(ctx, "[storage] resolver returned provider %s for FilePath provider %s", resolvedProvider, inferred)
+			}
+		}
+		if tenant != nil && tenant.StorageEngineConfig != nil {
+			resolved, _, err := filesvc.NewFileServiceFromStorageConfig(inferred, tenant.StorageEngineConfig, baseDir)
+			if err == nil && resolved != nil {
+				return resolved
+			}
+			if err != nil {
+				logger.Warnf(ctx, "[storage] failed to create inferred provider %s from tenant config: %v", inferred, err)
+			}
+		}
 		return s.fileSvc
 	}
 	return svc
