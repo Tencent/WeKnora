@@ -207,11 +207,21 @@ def _classify_page(image_area_ratio: float, text_len: int) -> str:
 def _page_image_area_ratio(page, raw) -> float:
     """Return the fraction of the page area covered by image objects.
 
-    Overlapping images can push the ratio above 1.0; callers only compare it
-    against a threshold so that is harmless.
+    Top-level image bounds are clipped to the page box. Bounds are summed,
+    so overlapping, clipped, transparent, or hidden objects may overestimate
+    visible image area. Nested Form image bounds retain the legacy estimate.
     """
-    width, height = page.get_size()
-    page_area = float(width) * float(height)
+    # Bounds are unrotated PDF coordinates; get_bbox() retains the CropBox
+    # origin and intersects it with the MediaBox, unlike rotated get_size().
+    try:
+        page_left, page_bottom, page_right, page_top = page.get_bbox()
+        page_area = float(page_right - page_left) * float(page_top - page_bottom)
+        has_page_box = True
+    except Exception:
+        # Keep the legacy estimate if PDFium cannot supply a page box.
+        width, height = page.get_size()
+        page_area = float(width) * float(height)
+        has_page_box = False
     if page_area <= 0:
         return 0.0
 
@@ -220,7 +230,14 @@ def _page_image_area_ratio(page, raw) -> float:
         try:
             if obj.type == raw.FPDF_PAGEOBJ_IMAGE:
                 left, bottom, right, top = obj.get_bounds()
-                image_area += abs((right - left) * (top - bottom))
+                # Form children use local coordinates, so keep their old
+                # estimate until their parent transforms are handled.
+                if obj.level or not has_page_box:
+                    image_area += abs((right - left) * (top - bottom))
+                else:
+                    visible_width = max(0.0, min(right, page_right) - max(left, page_left))
+                    visible_height = max(0.0, min(top, page_top) - max(bottom, page_bottom))
+                    image_area += visible_width * visible_height
         except Exception:
             continue
     return image_area / page_area
@@ -1911,6 +1928,10 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
         try:
             width, height = page.get_size()
             page_area = float(width) * float(height)
+            try:
+                page_box = page.get_bbox()
+            except Exception:
+                page_box = None
             if page_area <= 0:
                 continue
             for object_index, obj in enumerate(page.get_objects()):
@@ -1920,6 +1941,13 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
                     left, bottom, right, top = obj.get_bounds()
                 except Exception:
                     continue
+                # Form image bounds use local coordinates; only reject a
+                # top-level image that is entirely outside the page box.
+                if page_box is not None and obj.level == 0:
+                    page_left, page_bottom, page_right, page_top = page_box
+                    if (right <= page_left or left >= page_right or
+                        top <= page_bottom or bottom >= page_top):
+                        continue
                 area_ratio = abs((right - left) * (top - bottom)) / page_area
                 if area_ratio < EMBED_MIN_AREA_RATIO:
                     continue  # cheap skip before decoding (logos/decorations)
