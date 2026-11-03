@@ -1768,11 +1768,11 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		return
 	}
 	if cfg.WebSearchBaseScore < 0 || cfg.WebSearchBaseScore > 1 {
-		c.Error(errors.NewBadRequestError("web_search_base_score must be between 0 and 1"))
+		_ = c.Error(errors.NewBadRequestError("web_search_base_score must be between 0 and 1"))
 		return
 	}
 	if cfg.WebSearchSourceWeight < 0 || cfg.WebSearchSourceWeight > 1 {
-		c.Error(errors.NewBadRequestError("web_search_source_weight must be between 0 and 1"))
+		_ = c.Error(errors.NewBadRequestError("web_search_source_weight must be between 0 and 1"))
 		return
 	}
 

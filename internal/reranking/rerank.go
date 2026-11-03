@@ -187,7 +187,8 @@ func Rerank(
 	scored := make([]*types.SearchResult, 0, len(passing))
 	scoredIdx := make([]int, 0, len(passing))
 	for _, rr := range passing {
-		scored = append(scored, scoredCopy(res.Candidates[rr.Index], rr.RelevanceScore, opts.FAQScoreBoost, opts.SourceWeight))
+		scored = append(scored,
+			scoredCopy(res.Candidates[rr.Index], rr.RelevanceScore, opts.FAQScoreBoost, opts.SourceWeight))
 		scoredIdx = append(scoredIdx, candidateIdx[rr.Index])
 	}
 	order := make([]int, len(scored))
