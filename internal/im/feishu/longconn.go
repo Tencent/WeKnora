@@ -45,7 +45,7 @@ func NewLongConnClient(
 	// those are only used for webhook signature verification and decryption.
 	eventHandler := dispatcher.NewEventDispatcher("", "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			msg := convertEvent(region, client.botOpenID(ctx), event)
+			msg := client.convertIncoming(ctx, event)
 			if msg == nil {
 				return nil
 			}
@@ -144,6 +144,12 @@ func (l *feishuLoggerAdapter) Error(ctx context.Context, args ...interface{}) {
 // convertEvent converts a Feishu/Lark SDK event to a unified IncomingMessage.
 // Supports text, file, image and post messages. Returns nil for other types.
 func convertEvent(region Region, botOpenID string, event *larkim.P2MessageReceiveV1) *im.IncomingMessage {
+	return convertAllowedEvent(region, botOpenID, event, false)
+}
+
+func convertAllowedEvent(
+	region Region, botOpenID string, event *larkim.P2MessageReceiveV1, topicAllowed bool,
+) *im.IncomingMessage {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		logger.Warnf(context.Background(), "[%s][RX] event dropped: nil event/event/message", region.Label)
 		return nil
@@ -171,11 +177,10 @@ func convertEvent(region Region, botOpenID string, event *larkim.P2MessageReceiv
 
 	// With the "receive all group messages" permission Feishu can deliver
 	// messages that are not aimed at this bot; without it, only @-mentions are
-	// delivered. Only handle a group message when this bot itself is explicitly
-	// @-mentioned. Feishu reports bot mentions as mentioned_type="bot", so we
-	// compare the mention open_id with this app's own bot open_id.
-	isGroup := msg.ChatType != nil && *msg.ChatType == "group"
-	if isGroup && !mentionsBot(botOpenID, msg.Mentions) {
+	// delivered. Unmentioned messages need the adapter's explicit topic admission;
+	// otherwise retain the own-bot mention requirement.
+	isGroup := isGroupChat(ptrStr(msg.ChatType))
+	if isGroup && !topicAllowed && !mentionsBot(botOpenID, msg.Mentions) {
 		logger.Infof(context.Background(),
 			"[%s][RX] ignoring group message without this bot mention: msg_id=%q", region.Label, ptrStr(msg.MessageId))
 		return nil
@@ -190,7 +195,7 @@ func convertEvent(region Region, botOpenID string, event *larkim.P2MessageReceiv
 	// Chat type
 	chatType := im.ChatTypeDirect
 	chatID := ""
-	if msg.ChatType != nil && *msg.ChatType == "group" {
+	if isGroupChat(ptrStr(msg.ChatType)) {
 		chatType = im.ChatTypeGroup
 		if msg.ChatId != nil {
 			chatID = *msg.ChatId

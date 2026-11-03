@@ -158,6 +158,8 @@ type CustomAgentConfig struct {
 	// ===== Basic Settings =====
 	// Agent mode: "quick-answer" for RAG mode, "smart-reasoning" for ReAct agent mode
 	AgentMode string `yaml:"agent_mode" json:"agent_mode" extensions:"x-agent"`
+	// Opt in to replies on unmentioned top-level messages in Feishu/Lark topic groups.
+	FeishuGroupReplyRule bool `yaml:"feishu_group_reply_rule,omitempty" json:"feishu_group_reply_rule,omitempty"`
 	// AgentType is a preset category under smart-reasoning mode that pre-fills
 	// system prompt, allowed tools and recommended KB compatibility.
 	// Valid values: "rag-qa", "wiki-qa", "hybrid-rag-wiki", "custom".
