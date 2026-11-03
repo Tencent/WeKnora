@@ -1,9 +1,11 @@
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, computed } from 'vue'
 import { knowledgeSemanticSearch } from '@/api/knowledge-base'
 import { searchMessages, type MessageSearchGroupItem } from '@/api/chat-history'
 import { useOrganizationStore } from '@/stores/organization'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useMenuStore } from '@/stores/menu'
+
+const DEFAULT_SEARCH_DEBOUNCE_MS = 350
 
 export interface CmdkKb {
   id: string
@@ -74,10 +76,13 @@ export function useCmdkSearch(options: {
   chunkLimit?: number
   /** Debounce delay in ms. */
   debounceMs?: number
+  /** 对话关闭时立即作废搜索；组件可能仍然挂载，不能只依赖卸载清理。 */
+  enabled?: () => boolean
   /** 当前部署是否提供智能体路由；不提供时不发起预加载请求。 */
   agentsEnabled?: () => boolean
 }) {
-  const debounceMs = options.debounceMs ?? 350
+  const debounceMs = options.debounceMs ?? DEFAULT_SEARCH_DEBOUNCE_MS
+  let disposed = false
   const query = ref('')
   const loading = ref(false)
   const hasSearched = ref(false)
@@ -101,12 +106,13 @@ export function useCmdkSearch(options: {
   const menuStore = useMenuStore()
 
   const ensureKbs = async (): Promise<void> => {
-    if (kbsLoaded.value) return
+    if (disposed || kbsLoaded.value) return
     if (kbsLoadingPromise) return kbsLoadingPromise
     kbsLoadingPromise = (async () => {
       try {
         const chatResources = useChatResourcesStore()
         await chatResources.ensureKnowledgeBases()
+        if (disposed) return
         const own: CmdkKb[] = chatResources.rawKnowledgeBases.map((kb: any) => ({
           id: String(kb.id),
           name: kb.name || '',
@@ -124,7 +130,7 @@ export function useCmdkSearch(options: {
         knowledgeBases.value = [...own, ...sharedList]
         kbsLoaded.value = true
       } catch (e) {
-        console.error('[cmdk] failed to load knowledge bases', e)
+        if (!disposed) console.error('[cmdk] failed to load knowledge bases', e)
       } finally {
         kbsLoadingPromise = null
       }
@@ -151,13 +157,14 @@ export function useCmdkSearch(options: {
   // Agents (own + shared). Lazily loaded & cached; no backend search endpoint
   // exists so we always filter client-side.
   const ensureAgents = async (): Promise<void> => {
-    if (options.agentsEnabled?.() === false) return
+    if (disposed || options.agentsEnabled?.() === false) return
     if (agentsLoaded.value) return
     if (agentsLoadingPromise) return agentsLoadingPromise
     agentsLoadingPromise = (async () => {
       try {
         const chatResources = useChatResourcesStore()
         await chatResources.ensureAgents()
+        if (disposed) return
         const own: CmdkAgent[] = chatResources.agents.map((a: any) => ({
           id: String(a.id),
           name: a.name || '',
@@ -182,7 +189,7 @@ export function useCmdkSearch(options: {
         agents.value = [...own, ...sharedList]
         agentsLoaded.value = true
       } catch (e) {
-        console.error('[cmdk] failed to load agents', e)
+        if (!disposed) console.error('[cmdk] failed to load agents', e)
       } finally {
         agentsLoadingPromise = null
       }
@@ -241,19 +248,36 @@ export function useCmdkSearch(options: {
     hasSearched.value = false
   }
 
+  const searchEnabled = () => options.enabled?.() !== false
+  const isCurrentSearch = (seq: number) => !disposed && seq === requestSeq && searchEnabled()
+
+  // 在输入/范围变化时同步失效，防抖只延后新请求，不给旧响应留下回写窗口。
+  const invalidateSearch = () => {
+    requestSeq++
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    loading.value = false
+    clearResults()
+  }
+
   const runSearch = async (q: string, seq: number) => {
+    if (!isCurrentSearch(seq)) return
     loading.value = true
     hasSearched.value = true
 
     // Determine knowledge_base_ids for chunk search. A non-empty lockedKbIds
     // narrows the scope and also disables message search (out of scope).
-    const locked = options.lockedKbIds?.() || []
+    const locked = (options.lockedKbIds?.() || []).slice()
     const scoped = locked.length > 0
     let kbIds: string[]
     if (scoped) {
       kbIds = locked
     } else {
       await ensureKbs()
+      // 预加载期间可能改输、切范围或关闭；此时连检索请求也不应再发出。
+      if (!isCurrentSearch(seq)) return
       kbIds = knowledgeBases.value.map(k => k.id)
     }
 
@@ -261,7 +285,7 @@ export function useCmdkSearch(options: {
       ? knowledgeSemanticSearch({ query: q, knowledge_base_ids: kbIds })
           .then((res: any) => (res?.success && res.data ? res.data : []))
           .catch((e) => {
-            console.error('[cmdk] knowledge search failed', e)
+            if (isCurrentSearch(seq)) console.error('[cmdk] knowledge search failed', e)
             return []
           })
       : Promise.resolve([])
@@ -271,14 +295,14 @@ export function useCmdkSearch(options: {
       : searchMessages({ query: q, mode: 'hybrid', limit: 30 })
           .then((res: any) => (res?.success && res.data ? res.data : { items: [], total: 0 }))
           .catch((e) => {
-            console.error('[cmdk] message search failed', e)
+            if (isCurrentSearch(seq)) console.error('[cmdk] message search failed', e)
             return { items: [], total: 0 }
           })
 
     const [chunks, msgRes] = await Promise.all([knowledgePromise, messagesPromise])
 
     // Stale response guard.
-    if (seq !== requestSeq) return
+    if (!isCurrentSearch(seq)) return
 
     // Group chunks by knowledge_id.
     const fmap = new Map<string, CmdkFileGroup>()
@@ -334,19 +358,21 @@ export function useCmdkSearch(options: {
   const lockedSignature = () =>
     (options.lockedKbIds?.() || []).slice().sort().join(',')
 
-  watch([query, lockedSignature], ([val]) => {
-    if (debounceTimer) clearTimeout(debounceTimer)
-    const trimmed = (val as string).trim()
-    if (!trimmed) {
-      requestSeq++ // cancel in-flight
-      loading.value = false
-      clearResults()
-      return
-    }
+  watch([query, lockedSignature, searchEnabled], ([val]) => {
+    invalidateSearch()
+    const trimmed = val.trim()
+    if (!trimmed || !searchEnabled() || disposed) return
+    const seq = requestSeq
     debounceTimer = setTimeout(() => {
-      const seq = ++requestSeq
+      debounceTimer = null
       runSearch(trimmed, seq)
     }, debounceMs)
+  }, { flush: 'sync' })
+
+  // 同一轮事件中的关闭重开、A→B→A 也必须换代；卸载还需取消尚未发送的定时器。
+  onBeforeUnmount(() => {
+    disposed = true
+    invalidateSearch()
   })
 
   onMounted(() => {
