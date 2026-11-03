@@ -16,21 +16,23 @@ const testMirror = "registry.internal.example.com:5000"
 func TestApplyStandardImageMirror(t *testing.T) {
 	t.Setenv(StandardImageMirrorEnv, testMirror)
 
+	mirroredRepo := testMirror + "/wechatopenai/weknora-sandbox"
+	adminRef := "registry.corp:5000/wechatopenai/weknora-sandbox:v1"
 	cases := []struct {
 		name string
 		in   string
 		want string
 	}{
-		{"base default", DefaultDockerImage, testMirror + "/wechatopenai/weknora-sandbox:main"},
-		{"cube default keeps its tag", DefaultCubeTemplateImage, testMirror + "/wechatopenai/weknora-sandbox:main-cube"},
-		{"desktop default", DefaultDesktopDockerImage, testMirror + "/wechatopenai/weknora-sandbox:main-desktop"},
-		{"cube desktop default", DefaultCubeDesktopTemplateImage, testMirror + "/wechatopenai/weknora-sandbox:main-desktop-cube"},
-		{"pinned tag survives", "wechatopenai/weknora-sandbox:v0.9.0", testMirror + "/wechatopenai/weknora-sandbox:v0.9.0"},
-		{"explicit docker.io host", "docker.io/wechatopenai/weknora-sandbox:v0.9.0", testMirror + "/wechatopenai/weknora-sandbox:v0.9.0"},
-		{"digest survives", "wechatopenai/weknora-sandbox@sha256:abcd", testMirror + "/wechatopenai/weknora-sandbox@sha256:abcd"},
-		{"no tag", "wechatopenai/weknora-sandbox", testMirror + "/wechatopenai/weknora-sandbox"},
-		{"already mirrored is a foreign host, passthrough", testMirror + "/wechatopenai/weknora-sandbox:main", testMirror + "/wechatopenai/weknora-sandbox:main"},
-		{"admin private registry passes through", "registry.corp:5000/wechatopenai/weknora-sandbox:v1", "registry.corp:5000/wechatopenai/weknora-sandbox:v1"},
+		{"base default", DefaultDockerImage, mirroredRepo + ":main"},
+		{"cube default keeps its tag", DefaultCubeTemplateImage, mirroredRepo + ":main-cube"},
+		{"desktop default", DefaultDesktopDockerImage, mirroredRepo + ":main-desktop"},
+		{"cube desktop default", DefaultCubeDesktopTemplateImage, mirroredRepo + ":main-desktop-cube"},
+		{"pinned tag survives", "wechatopenai/weknora-sandbox:v0.9.0", mirroredRepo + ":v0.9.0"},
+		{"explicit docker.io host", "docker.io/wechatopenai/weknora-sandbox:v0.9.0", mirroredRepo + ":v0.9.0"},
+		{"digest survives", "wechatopenai/weknora-sandbox@sha256:abcd", mirroredRepo + "@sha256:abcd"},
+		{"no tag", "wechatopenai/weknora-sandbox", mirroredRepo},
+		{"already mirrored is a foreign host, passthrough", mirroredRepo + ":main", mirroredRepo + ":main"},
+		{"admin private registry passes through", adminRef, adminRef},
 		{"foreign repository passes through", "ghcr.io/foo/bar:1", "ghcr.io/foo/bar:1"},
 		{"bare official image passes through", "nginx:latest", "nginx:latest"},
 		{"localhost host passes through", "localhost/weknora-sandbox:main", "localhost/weknora-sandbox:main"},
