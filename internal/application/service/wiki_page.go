@@ -137,6 +137,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	}
 	// 先拒绝过期模型结果，避免把并发修改误判成行数保护失败。
 	// 仓储会在短事务内再次核对，覆盖这里检查之后的写入竞态。
+	if page.Version > 0 && page.Version != existing.Version {
+		return nil, repository.ErrWikiPageConflict
+	}
 	if snapshot, ok := types.WikiPageWriteSnapshotFromContext(ctx); ok &&
 		!types.WikiPageWriteSnapshotMatches(snapshot, existing) {
 		return nil, repository.ErrWikiPageConflict
@@ -316,6 +319,9 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
 	if err != nil {
 		return fmt.Errorf("get existing page: %w", err)
+	}
+	if page.Version > 0 && page.Version != existing.Version {
+		return repository.ErrWikiPageConflict
 	}
 
 	oldOutLinks := existing.OutLinks
