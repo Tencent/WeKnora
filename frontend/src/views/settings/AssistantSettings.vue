@@ -93,6 +93,17 @@
           </t-radio-group>
         </div>
       </div>
+
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ t('agent.editor.maxIterations') }}</label>
+          <p class="desc">{{ t('agentEditor.desc.maxIterations') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-input-number v-model="draft.max_iterations" :min="1" :max="MAX_ASSISTANT_MAX_ITERATIONS"
+            :disabled="!canEdit" theme="column" @blur="save" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -106,7 +117,9 @@ import { useAssistantStore, type AssistantEntry, type AssistantLayout } from '@/
 import {
   ASSISTANT_ACCESS_LEVELS,
   DEFAULT_ASSISTANT_ACCESS_LEVEL,
+  DEFAULT_ASSISTANT_MAX_ITERATIONS,
   MAX_ASSISTANT_DISPLAY_NAME_LENGTH,
+  MAX_ASSISTANT_MAX_ITERATIONS,
   capAssistantAccessLevel,
   isAssistantAccessLevel,
   updateTenantAssistantConfig,
@@ -129,20 +142,38 @@ const onAccessChange = (value: AssistantAccessLevel) => {
   if (withinCeiling(value)) assistant.setAccessLevel(value)
 }
 
-const draft = reactive<AssistantConfig>({ display_name: '', max_access_level: DEFAULT_ASSISTANT_ACCESS_LEVEL })
+const draft = reactive<AssistantConfig>({
+  display_name: '',
+  max_access_level: DEFAULT_ASSISTANT_ACCESS_LEVEL,
+  max_iterations: DEFAULT_ASSISTANT_MAX_ITERATIONS,
+})
+const configuredIterations = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_ASSISTANT_MAX_ITERATIONS
+  }
+  return Math.min(Math.max(Math.trunc(value), 1), MAX_ASSISTANT_MAX_ITERATIONS)
+}
 const syncDraft = () => {
   const config = assistant.workspaceConfig
   const level = config?.max_access_level
   draft.display_name = config?.display_name || ''
   draft.max_access_level = isAssistantAccessLevel(level) ? level : DEFAULT_ASSISTANT_ACCESS_LEVEL
+  draft.max_iterations = configuredIterations(config?.max_iterations)
 }
 watch(() => assistant.workspaceConfig, syncDraft)
 
 const save = async () => {
   if (!canEdit.value) return
-  const next: AssistantConfig = { display_name: draft.display_name.trim(), max_access_level: draft.max_access_level }
+  const maxIterations = configuredIterations(draft.max_iterations)
+  const next: AssistantConfig = {
+    display_name: draft.display_name.trim(),
+    max_access_level: draft.max_access_level,
+    max_iterations: maxIterations,
+  }
   const current = assistant.workspaceConfig
-  if (current && current.display_name === next.display_name && current.max_access_level === next.max_access_level) return
+  if (current && current.display_name === next.display_name &&
+    current.max_access_level === next.max_access_level &&
+    configuredIterations(current.max_iterations) === next.max_iterations) return
   const owner = workspaceOwner.value
   try {
     const res = await updateTenantAssistantConfig(next)
