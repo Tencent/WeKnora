@@ -22,6 +22,50 @@ func (s *assistantScopeKBService) ListKnowledgeBases(context.Context) ([]*types.
 	return bases, nil
 }
 
+func TestAssistantUsesWorkspaceMaxIterations(t *testing.T) {
+	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
+	for _, tc := range []struct {
+		name      string
+		agentID   string
+		config    *types.AssistantConfig
+		wantCap   int
+		wantAgent bool
+	}{
+		{
+			name: "workspace cap applies to the assistant", agentID: types.BuiltinWeKnoraAssistantID,
+			config: &types.AssistantConfig{MaxIterations: 12}, wantCap: 12, wantAgent: true,
+		},
+		{
+			name: "missing workspace config uses the default", agentID: types.BuiltinWeKnoraAssistantID,
+			wantCap: types.DefaultAssistantMaxIterations, wantAgent: true,
+		},
+		{
+			name: "an ordinary agent keeps its own limit", agentID: types.BuiltinQuickAnswerID,
+			config: &types.AssistantConfig{MaxIterations: 12}, wantAgent: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newTagTargetSessionService()
+			base := svc.knowledgeBaseService.(*tagTargetKnowledgeBaseService)
+			svc.knowledgeBaseService = &assistantScopeKBService{base}
+			agent := types.GetBuiltinAgent(tc.agentID, 100)
+			require.NotNil(t, agent)
+			agent.Config.WebSearchProviderID = "provider"
+			req := &types.QARequest{
+				Session: &types.Session{ID: "session", TenantID: 100}, CustomAgent: agent,
+			}
+			tenant := &types.Tenant{ID: 100, AssistantConfig: tc.config}
+			cfg, err := svc.buildAgentConfig(tagTargetContext(), req, tenant, 100)
+			require.NoError(t, err)
+			if tc.wantAgent {
+				require.Equal(t, tc.wantCap, cfg.MaxIterations)
+				return
+			}
+			require.Equal(t, agent.Config.MaxIterations, cfg.MaxIterations)
+		})
+	}
+}
+
 func TestAssistantPageContextDoesNotSelectKnowledgeScope(t *testing.T) {
 	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
 	for _, tc := range []struct {

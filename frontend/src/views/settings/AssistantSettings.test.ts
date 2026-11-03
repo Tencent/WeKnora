@@ -42,8 +42,8 @@ async function fixture() {
   const notifications: string[] = []
   let resolveSave!: (value: { data: AssistantConfig }) => void
   let rejectSave!: (error: Error) => void
-  const oldConfig: AssistantConfig = { display_name: 'A', max_access_level: 'auto_write' }
-  const newConfig: AssistantConfig = { display_name: 'B', max_access_level: 'read_only' }
+  const oldConfig: AssistantConfig = { display_name: 'A', max_access_level: 'auto_write', max_iterations: 20 }
+  const newConfig: AssistantConfig = { display_name: 'B', max_access_level: 'read_only', max_iterations: 20 }
   const api = evaluate(apiScript, {
     '@/utils/request': {
       get: async () => ({ data: auth.user.id === 'user-a' && auth.effectiveTenantId === 1 ? oldConfig : newConfig }),
@@ -109,7 +109,9 @@ for (const identity of ['workspace', 'user']) {
         assert.equal(f.state.draft.max_access_level, 'read_only')
         assert.deepEqual(f.notifications, [])
         const next = f.state.save()
-        assert.deepEqual(f.writes[1], { display_name: 'B unsaved', max_access_level: 'read_only' })
+        assert.deepEqual(f.writes[1], {
+          display_name: 'B unsaved', max_access_level: 'read_only', max_iterations: 20,
+        })
         f.resolveSave(f.writes[1])
         await next
       } finally { f.close() }
@@ -128,5 +130,18 @@ test('a save in the current workspace updates the store and draft', async () => 
     assert.equal(f.assistant.displayName, 'A edited')
     assert.equal(f.state.draft.display_name, 'A edited')
     assert.deepEqual(f.notifications, ['success'])
+  } finally { f.close() }
+})
+
+test('the assistant iteration limit is saved within the supported bounds', async () => {
+  const f = await fixture()
+  try {
+    f.state.draft.max_iterations = 500
+    const pending = f.state.save()
+    assert.equal(f.writes[0].max_iterations, 100)
+    f.resolveSave(f.writes[0])
+    await pending
+    await flush()
+    assert.equal(f.state.draft.max_iterations, 100)
   } finally { f.close() }
 })

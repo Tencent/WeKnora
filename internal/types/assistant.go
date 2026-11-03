@@ -24,6 +24,14 @@ const (
 // MaxAssistantDisplayNameRunes bounds the workspace's assistant name.
 const MaxAssistantDisplayNameRunes = 24
 
+// Assistant iteration bounds. The assistant is a ReAct loop with a broad tool
+// catalog, so an unbounded run can keep reading and acting until the user
+// stops it. The default is the same finite budget as the standard agent.
+const (
+	DefaultAssistantMaxIterations = 20
+	MaxAssistantMaxIterations     = 100
+)
+
 var assistantAccessRank = map[AssistantAccessLevel]int{
 	AssistantAccessReadOnly:  0,
 	AssistantAccessConfirm:   1,
@@ -45,6 +53,22 @@ type AssistantConfig struct {
 	// MaxAccessLevel is the highest level a member may pick; empty means
 	// AssistantAccessConfirm.
 	MaxAccessLevel AssistantAccessLevel `json:"max_access_level"`
+	// MaxIterations caps the assistant's ReAct rounds. Zero or a negative
+	// value uses DefaultAssistantMaxIterations; values above
+	// MaxAssistantMaxIterations are bounded to that ceiling.
+	MaxIterations int `json:"max_iterations"`
+}
+
+// EffectiveMaxIterations returns the configured finite cap, defaulting when
+// the workspace has not chosen one and bounding an oversized value.
+func (c *AssistantConfig) EffectiveMaxIterations() int {
+	if c == nil || c.MaxIterations <= 0 {
+		return DefaultAssistantMaxIterations
+	}
+	if c.MaxIterations > MaxAssistantMaxIterations {
+		return MaxAssistantMaxIterations
+	}
+	return c.MaxIterations
 }
 
 // Normalize trims the name and resets an unknown ceiling to the default.
@@ -53,6 +77,7 @@ func (c *AssistantConfig) Normalize() {
 	if !c.MaxAccessLevel.Valid() {
 		c.MaxAccessLevel = AssistantAccessConfirm
 	}
+	c.MaxIterations = c.EffectiveMaxIterations()
 }
 
 // EffectiveAccessLevel is the level a run gets for the requested one: the
