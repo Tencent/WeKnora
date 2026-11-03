@@ -54,6 +54,10 @@ func (f *fakeWikiPageService) SearchPages(_ context.Context, kbID, query string,
 	return f.searchResults[kbID], nil
 }
 
+func (f *fakeWikiPageService) SearchPagesLiteral(ctx context.Context, kbID, query string, limit int) ([]*types.WikiPage, error) {
+	return f.SearchPages(ctx, kbID, query, limit)
+}
+
 func (f *fakeWikiPageService) resetCalls() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -477,7 +481,7 @@ func TestWikiSearchKeepsRegexDefaultWithLiteralFallback(t *testing.T) {
 		}
 	}
 	got := service.searchQueries["kb-1"]
-	want := []string{`stardust|skyvault`, `C\+\+ v1\.2`, `a\.b`, `^entity/.*`}
+	want := []string{`stardust|skyvault`, `C++ v1.2`, `a.b`, `^entity/.*`}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("backend patterns = %v, want %v", got, want)
 	}

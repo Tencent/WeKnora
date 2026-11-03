@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -1457,6 +1458,16 @@ func (r *wikiPageRepository) Search(
 	ctx context.Context, kbID string, query string, limit int,
 ) ([]*types.WikiPage, error) {
 	return r.SearchAcross(ctx, []string{kbID}, query, limit)
+}
+
+// SearchLiteral preserves literal text across PostgreSQL regex and SQLite LIKE.
+func (r *wikiPageRepository) SearchLiteral(
+	ctx context.Context, kbID, query string, limit int,
+) ([]*types.WikiPage, error) {
+	if r.wikiDialect() != "sqlite" {
+		query = regexp.QuoteMeta(query)
+	}
+	return r.Search(ctx, kbID, query, limit)
 }
 
 func wikiSearchPredicate(column, op string, withEscape bool) string {
