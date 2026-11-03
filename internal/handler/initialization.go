@@ -380,6 +380,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if req.VLMConfig != nil {
 		kb.VLMConfig.DescriptionLanguage = strings.TrimSpace(req.VLMConfig.DescriptionLanguage)
 		kb.VLMConfig.CustomInstructions = strings.TrimSpace(req.VLMConfig.CustomInstructions)
+		kb.VLMConfig.OCRPrompt = strings.TrimSpace(req.VLMConfig.OCRPrompt)
 	}
 
 	// Storage backends resolve per workspace and belong to the owner's
@@ -1642,7 +1643,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	} else {
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
-	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" {
+	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" || kb.VLMConfig.OCRPrompt != "" {
 		if config["multimodal"] == nil {
 			config["multimodal"] = map[string]interface{}{
 				"enabled": hasMultimodal,
@@ -1654,6 +1655,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 		if kb.VLMConfig.CustomInstructions != "" {
 			multimodal["customInstructions"] = kb.VLMConfig.CustomInstructions
+		}
+		if kb.VLMConfig.OCRPrompt != "" {
+			multimodal["ocrPrompt"] = kb.VLMConfig.OCRPrompt
 		}
 	}
 
