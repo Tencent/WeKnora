@@ -20,7 +20,9 @@ type documentDispatchPendingStub struct {
 	pending int64
 }
 
-func (s *documentDispatchPendingStub) ClaimBatch(context.Context, string, string, string, int, time.Time) ([]*types.TaskPendingOp, error) {
+func (s *documentDispatchPendingStub) ClaimBatch(
+	context.Context, string, string, string, int, time.Time,
+) ([]*types.TaskPendingOp, error) {
 	return s.ops, nil
 }
 
