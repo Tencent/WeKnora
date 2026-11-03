@@ -2010,9 +2010,10 @@ def _strip_repeating_lines(texts: list, classes: list) -> list:
     """Remove running headers/footers that repeat across most text pages.
 
     Conservative: only the first/last non-empty line of each text page is a
-    candidate, the line must be short, and it must appear on at least 60% of the
-    text pages (and there must be enough pages to judge). Mirrors DeepDoc's
-    cross-page "garbage set" idea without risking removal of real content.
+    candidate, the line must be short, and it must appear in the same edge
+    position on at least 60% of the text pages. Only matching edge occurrences
+    are removed; identical lines in the body remain. The rule is still a
+    heuristic and may remove meaningful text at a page edge.
     """
     from collections import Counter
 
@@ -2023,14 +2024,16 @@ def _strip_repeating_lines(texts: list, classes: list) -> list:
     counter: Counter = Counter()
     for i in text_indices:
         lines = [ln.strip() for ln in texts[i].splitlines() if ln.strip()]
-        if not lines:
+        # A one-line page has no independent body to protect; preserve it.
+        if len(lines) < 2:
             continue
-        for edge in {lines[0], lines[-1]}:
+        for position, edge in (("first", lines[0]), ("last", lines[-1])):
             if len(edge) <= 80:
-                counter[edge] += 1
+                counter[(position, edge)] += 1
 
-    threshold = max(2, int(len(text_indices) * 0.6))
-    repeating = {line for line, count in counter.items() if count >= threshold}
+    # Require at least 60%, rounding up, rather than truncating to fewer pages.
+    threshold = max(2, (3 * len(text_indices) + 4) // 5)
+    repeating = {edge for edge, count in counter.items() if count >= threshold}
     if not repeating:
         return list(texts)
 
@@ -2039,8 +2042,22 @@ def _strip_repeating_lines(texts: list, classes: list) -> list:
         if classes[i] != "text":
             cleaned.append(text)
             continue
-        kept = [ln for ln in text.splitlines() if ln.strip() not in repeating]
-        cleaned.append("\n".join(kept))
+        lines = text.splitlines()
+        nonempty = [index for index, line in enumerate(lines) if line.strip()]
+        if len(nonempty) < 2:
+            cleaned.append(text)
+            continue
+        remove = set()
+        first, last = nonempty[0], nonempty[-1]
+        if ("first", lines[first].strip()) in repeating:
+            remove.add(first)
+        if ("last", lines[last].strip()) in repeating:
+            remove.add(last)
+        # Never erase every non-empty line of a short page.
+        if len(remove) == len(nonempty):
+            cleaned.append(text)
+            continue
+        cleaned.append("\n".join(line for index, line in enumerate(lines) if index not in remove))
     return cleaned
 
 
