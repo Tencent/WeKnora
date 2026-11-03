@@ -195,6 +195,9 @@ export function useCitationPopover(rootRef: Ref<HTMLElement | null>, options: Ci
   const openDrawerForCitation = (payload: ReferenceHighlightTarget) => {
     const refs = options?.getKnowledgeReferences?.() || []
     if (!referencesDrawer || !refs.length) return false
+    // A delayed hover or an in-flight load must not resurrect a popup after
+    // the user has opened the references drawer instead.
+    reset()
     referencesDrawer.open({
       references: refs,
       highlight: payload,

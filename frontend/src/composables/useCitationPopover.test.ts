@@ -169,8 +169,9 @@ for (const mode of ['chat', 'embed'] as const) {
     assert.equal(f.requests.length, 1)
     f.requests[0]!.pending.reject(Object.assign(new Error('not found'), { $httpStatus: 404 }))
     await flush()
+    f.tick(10000)
     f.fire('click', kb('missing')); f.fire('mouseover', kb('missing')); f.tick(80)
-    assert.equal(f.requests.length, 1, '404 does not cause repeated requests')
+    assert.equal(f.requests.length, 1, '404 stays cached past the transient cooldown')
   })
 
   test(`${mode}: hover retries a transient failure only after cooldown`, async t => {
@@ -247,6 +248,26 @@ for (const mode of ['chat', 'embed'] as const) {
     assert.equal(wiki.stopped, mode === 'embed')
     f.refs.value = []; f.fire('click', kb())
     assert.equal(f.requests.length, 1, 'empty reference lists fall back to the popup')
+  })
+
+  test(`${mode}: opening the drawer cancels pending and in-flight popovers`, async t => {
+    const f = fixture(mode, { drawer: true, refs: [{ id: 'chunk', knowledge_title: 'Document' }] }); t.after(f.close)
+    f.fire('mouseover', kb()); f.fire('click', kb()); f.tick(100)
+    assert.equal(f.drawerCalls.length, 1)
+    assert.equal(f.requests.length, 0, 'pending KB hover was cancelled')
+    assert.equal(f.state.float.value.visible, false)
+
+    f.fire('mouseover', web()); f.fire('click', web()); f.tick(100)
+    assert.equal(f.drawerCalls.length, 2)
+    assert.equal(f.state.float.value.visible, false, 'pending web hover was cancelled')
+
+    f.fire('mouseover', kb()); f.tick(80)
+    assert.equal(f.requests.length, 1)
+    f.fire('click', kb())
+    assert.equal(f.state.float.value.visible, false)
+    f.requests[0]!.pending.resolve('late content'); await flush()
+    assert.equal(f.state.float.value.visible, false)
+    assert.equal(f.state.float.value.content, '')
   })
 
   test(`${mode}: hover ID resolution and empty/error cache policies remain compatible`, async t => {
