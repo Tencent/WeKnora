@@ -589,3 +589,50 @@ func TestCreateChunks_PreservesExplicitEnabledState(t *testing.T) {
 		})
 	}
 }
+
+func TestListPagedChunksByKnowledgeID_FAQPagesAreStableWhenUpdatedAtTies(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	// A bulk import writes many entries with the same updated_at.
+	const n = 7
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		c := makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ)
+		c.ID = fmt.Sprintf("faq-%02d", i)
+		require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{c}))
+		ids = append(ids, c.ID)
+	}
+	require.NoError(t, db.Model(&types.Chunk{}).
+		Where("knowledge_id = ?", "faq-knowledge").
+		UpdateColumn("updated_at", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)).Error)
+
+	for _, tc := range []struct {
+		sortOrder string
+		want      func() []string
+	}{
+		{"", func() []string { // default: newest first, id DESC on ties
+			out := make([]string, 0, n)
+			for i := n - 1; i >= 0; i-- {
+				out = append(out, ids[i])
+			}
+			return out
+		}},
+		{"asc", func() []string { return ids }},
+	} {
+		var got []string
+		for page := 1; page <= 4; page++ {
+			chunks, total, err := repo.ListPagedChunksByKnowledgeID(
+				ctx, 1, "faq-knowledge", &types.Pagination{Page: page, PageSize: 2},
+				[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", tc.sortOrder, types.KnowledgeTypeFAQ, nil,
+			)
+			require.NoError(t, err)
+			require.Equal(t, int64(n), total)
+			for _, c := range chunks {
+				got = append(got, c.ID)
+			}
+		}
+		assert.Equal(t, tc.want(), got, "sortOrder=%q", tc.sortOrder)
+	}
+}
