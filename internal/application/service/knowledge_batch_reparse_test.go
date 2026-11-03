@@ -180,9 +180,18 @@ func TestReparseKnowledgePreservesOrChangesSummaryChoice(t *testing.T) {
 			require.Equal(t, []string{types.TypeManualProcess}, queue.taskTypes)
 			overrides, err := got.ProcessOverrides()
 			require.NoError(t, err)
-			require.NotNil(t, overrides.SummaryEnabled)
-			require.Equal(t, tc.want, *overrides.SummaryEnabled)
 			require.Equal(t, tc.want, ResolveProcessConfig(kb, overrides).SummaryEnabled)
+			if tc.want {
+				// Turning summary back on matches the knowledge base default,
+				// so the stored snapshot is cleared instead of pinning true.
+				if overrides != nil {
+					require.Nil(t, overrides.SummaryEnabled)
+				}
+				return
+			}
+			require.NotNil(t, overrides)
+			require.NotNil(t, overrides.SummaryEnabled)
+			require.False(t, *overrides.SummaryEnabled)
 		})
 	}
 }
