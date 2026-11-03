@@ -24,6 +24,22 @@
 
       <!-- Question Generation configuration -->
       <div v-if="localQuestionGeneration.enabled" class="subsection">
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.questionGeneration.modelLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.questionGeneration.modelDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <ModelSelector
+              model-type="KnowledgeQA"
+              :selected-model-id="localQuestionGeneration.modelId || ''"
+              :all-models="allModels"
+              clearable
+              :placeholder="$t('knowledgeEditor.advanced.questionGeneration.modelPlaceholder')"
+              @update:selected-model-id="(value: string) => { localQuestionGeneration.modelId = value; handleQuestionGenerationChange() }"
+            />
+          </div>
+        </div>
         <div class="setting-row">
           <div class="setting-info">
             <label>{{ $t('knowledgeEditor.advanced.questionGeneration.countLabel') }}</label>
@@ -183,6 +199,7 @@ import { ref, watch } from 'vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 
 interface QuestionGenerationConfig {
+  modelId?: string
   enabled: boolean
   questionCount: number
   customInstructions?: string

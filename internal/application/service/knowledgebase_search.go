@@ -8,6 +8,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -51,6 +52,58 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		return nil, err
 	}
 	return vector, nil
+}
+
+// GetQueryImageEmbedding computes the query embedding for an image using the
+// same multimodal model path the index used when it stored image_vector chunks,
+// so a query image is comparable with them. It returns an error when the KB's
+// embedding model has no image side: silently falling back to text recall would
+// answer a different question than the one asked.
+func (s *knowledgeBaseService) GetQueryImageEmbedding(
+	ctx context.Context, kbID string, img []byte,
+) ([]float32, error) {
+	if len(img) == 0 {
+		return nil, fmt.Errorf("query image is empty")
+	}
+	kb, err := s.repo.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	var embeddingModel embedding.Embedder
+	if kb.TenantID != types.MustTenantIDFromContext(ctx) {
+		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
+	} else {
+		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	}
+	if err != nil {
+		logger.Errorf(ctx, "GetQueryImageEmbedding: failed to get embedding model %s: %v", kb.EmbeddingModelID, err)
+		return nil, err
+	}
+	imageModel, ok := embedding.AsImageEmbedder(embeddingModel)
+	if !ok {
+		// A KB indexed without images has no image_vector rows to match; a
+		// text query is the only recall it supports.
+		return nil, fmt.Errorf(
+			"embedding model %s cannot embed images; enable image vectors for this knowledge base or search with text",
+			embeddingModel.GetModelName(),
+		)
+	}
+	prepared, err := imageprep.Prepare(img, imageModel.ImageLimits())
+	if err != nil {
+		return nil, fmt.Errorf("query image not embeddable: %w", err)
+	}
+	vectors, err := imageModel.BatchEmbedImages(types.WithEmbedQuery(ctx), []embedding.Image{prepared})
+	if err != nil {
+		return nil, err
+	}
+	if len(vectors) == 0 {
+		return nil, fmt.Errorf("embedding model returned no vector for the query image")
+	}
+	if err := validateQueryEmbeddingDimension(embeddingModel, len(vectors[0])); err != nil {
+		logger.Errorf(ctx, "GetQueryImageEmbedding: %v", err)
+		return nil, err
+	}
+	return vectors[0], nil
 }
 
 // validateQueryEmbeddingDimension catches provider/model configuration drift

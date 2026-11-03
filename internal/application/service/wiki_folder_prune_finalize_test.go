@@ -27,6 +27,7 @@ func (s *folderPruneWikiServiceStub) PruneEmptyFolderChains(
 
 type folderPruneKBServiceStub struct {
 	interfaces.KnowledgeBaseService
+	wikiConfig *types.WikiConfig
 }
 
 func (s *folderPruneKBServiceStub) GetKnowledgeBaseByIDOnly(
@@ -37,6 +38,7 @@ func (s *folderPruneKBServiceStub) GetKnowledgeBaseByIDOnly(
 		IndexingStrategy: types.IndexingStrategy{
 			WikiEnabled: true,
 		},
+		WikiConfig: s.wikiConfig,
 	}, nil
 }
 
@@ -119,4 +121,26 @@ func TestProcessWikiFinalizePrunesFolderAfterIngestDrains(t *testing.T) {
 	require.Equal(t, 1, wikiSvc.calls)
 	require.Equal(t, []string{"folder-a"}, wikiSvc.folderIDs)
 	require.Equal(t, []int64{11}, pendingRepo.deletedRowIDs)
+}
+
+func TestProcessWikiFinalizeDrainsManualOnlyLaneWithoutPruning(t *testing.T) {
+	task, row := makeFolderPruneFinalizeTask(t)
+	disabled := false
+	wikiSvc := &folderPruneWikiServiceStub{}
+	pendingRepo := &folderPrunePendingRepoStub{rows: []*types.TaskPendingOp{row}}
+	taskQueue := &folderPruneTaskStub{}
+	svc := &wikiIngestService{
+		wikiService: wikiSvc,
+		kbService: &folderPruneKBServiceStub{
+			wikiConfig: &types.WikiConfig{AutoGenerate: &disabled},
+		},
+		pendingRepo: pendingRepo,
+		task:        taskQueue,
+	}
+
+	require.NoError(t, svc.ProcessWikiFinalize(context.Background(), task))
+	require.Zero(t, wikiSvc.calls, "manual-only Wiki must not prune generated folders")
+	require.Equal(t, []int64{11}, pendingRepo.deletedRowIDs)
+	require.Zero(t, pendingRepo.finalizeCounts, "manual-only finalize must not inspect or reschedule the finalize lane")
+	require.Empty(t, taskQueue.enqueuedTypes)
 }

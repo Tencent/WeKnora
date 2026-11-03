@@ -1710,6 +1710,14 @@ const hasCollaborationTasks = computed(() => !props.ragMode && collaborationTask
 // Expanded events tracking (for tool calls and thinking events)
 const expandedEvents = ref<Set<string>>(new Set());
 
+// Defined here, before any computed that can run during setup: an initial
+// non-empty event stream makes the immediate watcher evaluate
+// canAttachReasoning, which reads this function. As a const declared below it,
+// it would be in its temporal dead zone and crash the whole timeline render.
+const isEventExpanded = (eventId: string): boolean => {
+  return expandedEvents.value.has(eventId);
+};
+
 // Track IDs of thinking events that are currently "active" (latest, not yet followed by non-thinking)
 const activeThinkingIds = ref<Set<string>>(new Set());
 // Reactive version number to force template re-evaluation when activeThinkingIds changes
@@ -2507,10 +2515,6 @@ const handleActionHeaderClick = (event: any) => {
 const handleActionCardClick = (event: any) => {
   if (!canOpenToolReferences(event)) return;
   openToolReferences(event);
-};
-
-const isEventExpanded = (eventId: string): boolean => {
-  return expandedEvents.value.has(eventId);
 };
 
 const isReferenceDrawerTool = (toolName?: string | null): boolean =>

@@ -746,6 +746,8 @@ func (c VLMConfig) IsEnabled() bool {
 // When enabled, the system will use LLM to generate questions for each chunk during document parsing
 // These generated questions will be indexed separately to improve recall
 type QuestionGenerationConfig struct {
+	// ModelID selects a chat model for questions. Empty inherits the summary model.
+	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty" extensions:"x-agent=question_model_id"`
 	// Enabled turns question generation on. Generated questions are indexed beside the chunk.
 	Enabled bool `yaml:"enabled"  json:"enabled" extensions:"x-agent=question_generation_enabled"`
 	// QuestionCount is how many questions to write per chunk, from 1 to 10.
@@ -989,6 +991,12 @@ func (kb *KnowledgeBase) IsWikiEnabled() bool {
 		return false
 	}
 	return kb.IndexingStrategy.WikiEnabled
+}
+
+// IsWikiAutoGenerateEnabled controls background generation independently of
+// access to existing pages and manual Wiki editing.
+func (kb *KnowledgeBase) IsWikiAutoGenerateEnabled() bool {
+	return kb.IsWikiEnabled() && kb.WikiConfig.IsAutoGenerateEnabled()
 }
 
 // IsVectorEnabled checks if vector (semantic) search is enabled.

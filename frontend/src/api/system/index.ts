@@ -30,6 +30,8 @@ export interface SystemInfo {
   commit_id?: string
   build_time?: string
   go_version?: string
+  docreader_version?: string
+  docreader_commit_id?: string
   keyword_index_engine?: string
   vector_store_engine?: string
   graph_database_engine?: string
@@ -122,6 +124,7 @@ export interface ParserEngineConfig {
   mineru_tier?: string // flash / basic / standard / advanced，空为服务端默认
   // 以下仅对 MinerU 3.x 及更早版本生效
   mineru_model?: string
+  mineru_effort?: 'medium' | 'high' | ''
   mineru_vlm_server_url?: string
   mineru_enable_formula?: boolean | null
   mineru_enable_table?: boolean | null

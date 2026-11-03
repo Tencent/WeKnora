@@ -358,6 +358,7 @@ type OIDCUserInfoMapping struct {
 
 type OIDCAuthConfig struct {
 	Enable                bool                 `yaml:"enable"                 json:"enable"`
+	PKCEEnabled           bool                 `yaml:"pkce_enabled"           json:"pkce_enabled"`
 	IssuerURL             string               `yaml:"issuer_url"             json:"issuer_url"`
 	DiscoveryURL          string               `yaml:"discovery_url"          json:"discovery_url"`
 	ProviderDisplayName   string               `yaml:"provider_display_name"  json:"provider_display_name"`
@@ -752,6 +753,9 @@ func applyOIDCEnvOverrides(cfg *Config) {
 
 	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_ENABLE")); value != "" {
 		cfg.OIDCAuth.Enable = strings.EqualFold(value, "true")
+	}
+	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_PKCE_ENABLED")); value != "" {
+		cfg.OIDCAuth.PKCEEnabled = strings.EqualFold(value, "true")
 	}
 	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_ISSUER_URL")); value != "" {
 		cfg.OIDCAuth.IssuerURL = value

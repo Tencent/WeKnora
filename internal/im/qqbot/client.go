@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/im"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -168,7 +169,7 @@ func (c *Client) doJSON(ctx context.Context, method, url string, body any, out a
 	if out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, out); err != nil {
 		return fmt.Errorf("decode qqbot response: %w", err)
 	}
 	return nil

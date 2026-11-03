@@ -2431,12 +2431,12 @@ func withSessionEnv(env map[string]string, layout WorkspaceLayout) map[string]st
 // number lives only inside the sandbox, so the model cannot be told it ahead
 // of time, and an unset DISPLAY makes X clients fail closed rather than open
 // the shared :0 screen. A seat is claimed only where screen intent exists:
-// agent-browser --headed, the Desktop tab connect (ensure.sh), or the model
-// running wk-display claim itself. This prefix never claims; it pins the
-// shell to the seat the session already holds and refreshes that seat's
-// idleness clock (mtime), so a session that nobody watches runs headless and
-// never pays for a screen. A missing wk-display (older image, local shell)
-// leaves the command untouched.
+// agent-browser starting a browser (headed unless asked otherwise), the
+// Desktop tab connect (ensure.sh), or the model running wk-display claim
+// itself. This prefix never claims; it pins the shell to the seat the session
+// already holds and refreshes that seat's idleness clock (mtime), so a
+// session that nobody watches never pays for a screen. A missing wk-display
+// (older image, local shell) leaves the command untouched.
 const sessionDisplayPrefix = `if command -v wk-display >/dev/null 2>&1 && [ -n "${WEKNORA_SESSION_ID:-}" ]; then
   _wk_seat=$(wk-display where "$WEKNORA_SESSION_ID" 2>/dev/null) || true
   case "${_wk_seat:-}" in

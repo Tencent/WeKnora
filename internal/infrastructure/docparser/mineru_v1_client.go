@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -213,9 +214,14 @@ func minerUV1ErrorMessage(body []byte) string {
 	return firstNonEmpty(env.Error.Message, env.Error.Code)
 }
 
+// truncateForLog cuts s to at most n bytes, backing up to a rune boundary
+// so a multibyte character in the body is never split.
 func truncateForLog(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "..."
 }

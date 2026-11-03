@@ -22,6 +22,8 @@ service DocReader {
   // caller's fallback (use the original bytes) is a normal outcome rather than
   // a failure to report.
   rpc PreprocessImage(PreprocessImageRequest) returns (PreprocessImageResponse) {}
+  // GetInfo reports the build identity of the running docreader instance.
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse) {}
 }
 
 // PreprocessImageRequest carries one photographed page.
@@ -125,4 +127,11 @@ message ParserEngineInfo {
 
 message ListEnginesResponse {
   repeated ParserEngineInfo engines = 1;
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  string version = 1;
+  string commit_id = 2;
 }

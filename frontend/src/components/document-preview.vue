@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
 import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
-import { previewKnowledgeFile } from '@/api/knowledge-base/index';
+import { getKnowledgeDetails, listKnowledgeFiles, previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
 import hljs from 'highlight.js';
@@ -13,6 +13,11 @@ import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
+import {
+  neutralizeRelativePreviewImages,
+  PREVIEW_IMAGE_PAGE_SIZE,
+  rewriteKnowledgeMarkdownImages,
+} from '@/utils/markdownPreviewImages';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
@@ -113,6 +118,13 @@ const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+let markdownImageGeneration = 0;
+let markdownImageUrls: string[] = [];
+
+function revokeMarkdownImageUrls() {
+  for (const url of markdownImageUrls) URL.revokeObjectURL(url);
+  markdownImageUrls = [];
+}
 
 const isFullscreen = ref(false);
 const previewRoot = ref<HTMLElement | null>(null);
@@ -344,10 +356,58 @@ async function renderMarkdown(blob: Blob) {
     return;
   }
 
-  markdownHtml.value = renderDocumentPreviewMarkdown(text, undefined, {
+  const generation = ++markdownImageGeneration;
+  revokeMarkdownImageUrls();
+  const previewOptions = {
     // 预览工具栏已经显示文件名；正文第一行的同名 H1 属于重复标题。
     titles: [props.fileName],
-  });
+  };
+  // Relative images stay on a data URI unless a sibling file replaces them.
+  // Painting the original href makes the browser request it from the page route.
+  let source = props.knowledgeId ? neutralizeRelativePreviewImages(text) : text;
+  if (props.knowledgeId) {
+    markdownHtml.value = renderDocumentPreviewMarkdown(source, undefined, previewOptions);
+    try {
+      const rewritten = await rewriteKnowledgeMarkdownImages(text, props.knowledgeId, {
+        getKnowledge: async (id) => {
+          const res = await getKnowledgeDetails(id);
+          const data = res?.data || res;
+          if (!data || typeof data !== 'object') return null;
+          return {
+            knowledgeBaseId: data.knowledge_base_id || '',
+            folderPath: data.folder_path || '',
+          };
+        },
+        listFiles: async (knowledgeBaseId, folderPath, page) => {
+          const res = await listKnowledgeFiles(knowledgeBaseId, {
+            page,
+            page_size: PREVIEW_IMAGE_PAGE_SIZE,
+            folder_path: folderPath,
+          });
+          const rows = Array.isArray(res?.data) ? res.data : [];
+          return {
+            total: Number(res?.total ?? rows.length),
+            rows: rows.map((row: { id?: string; file_name?: string; folder_path?: string }) => ({
+              id: String(row?.id || ''),
+              fileName: String(row?.file_name || ''),
+              folderPath: row?.folder_path || '',
+            })),
+          };
+        },
+        loadPreview: (id) => previewKnowledgeFile(id),
+      });
+      if (generation !== markdownImageGeneration) {
+        for (const url of rewritten.objectUrls) URL.revokeObjectURL(url);
+        return;
+      }
+      markdownImageUrls = rewritten.objectUrls;
+      source = neutralizeRelativePreviewImages(rewritten.markdown);
+    } catch (err) {
+      console.warn('Relative markdown images were left unresolved', err);
+    }
+  }
+  if (generation !== markdownImageGeneration) return;
+  markdownHtml.value = renderDocumentPreviewMarkdown(source, undefined, previewOptions);
 }
 
 function onImageLoad(e: Event) {
@@ -526,6 +586,8 @@ async function loadPreview() {
 }
 
 function cleanup() {
+  markdownImageGeneration += 1;
+  revokeMarkdownImageUrls();
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';

@@ -44,9 +44,8 @@ const (
 // Concurrency cap: g.SetLimit(defaultMultiStoreFanoutLimit) bounds
 // per-request fan-out concurrency. NOTE: this caps application-level
 // goroutine count but does NOT set MaxOpenConns on the shared gorm pool
-// (which currently defaults to unlimited for Postgres in
-// container.go:541). Operators should still configure SetMaxOpenConns
-// per their PG max_connections budget.
+// (unlimited for Postgres unless DB_MAX_OPEN_CONNS is set). Operators
+// should set DB_MAX_OPEN_CONNS per their PG max_connections budget.
 func (s *knowledgeBaseService) retrieveFromStores(
 	ctx context.Context,
 	groups []*storeGroup,
