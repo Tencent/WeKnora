@@ -520,7 +520,7 @@ const openDocs = () => {
 // 打开 GitHub
 const openGithub = () => {
   menuVisible.value = false
-  window.open('https://github.com/Tencent/WeKnora', '_blank')
+  window.open('/open-source.html', '_blank', 'noopener,noreferrer')
 }
 
 // 注销

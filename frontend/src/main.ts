@@ -60,3 +60,5 @@ async function bootstrap() {
 }
 
 bootstrap();
+
+import '@/assets/theme/mint-brand.css';

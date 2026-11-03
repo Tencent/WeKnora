@@ -1,0 +1,31 @@
+/* Independent product skin. Upstream license and notices remain intact. */
+:root:root:root {
+  --td-brand-color-1: #e7f8f4;
+  --td-brand-color-2: #91e1d3;
+  --td-brand-color-3: #24c7b3;
+  --td-brand-color-4: #0e9f90;
+  --td-brand-color-5: #087e74;
+  --td-brand-color-6: #07675f;
+  --td-brand-color-7: #07534d;
+  --td-brand-color-8: #06443f;
+  --td-brand-color-9: #053833;
+  --td-brand-color-10: #042e2a;
+  --td-brand-color-disabled: #a6dcd3;
+}
+:root:root[theme-mode="light"] {
+  --td-bg-color-page: #f3f8f6;
+  --td-bg-color-sidebar: #122c2a;
+}
+.aside_box { background: #122c2a !important; color: #e1efeb; }
+.aside_box .logo_box { background: #effaf5; border-radius: 12px; padding: 5px 10px; }
+.aside_box .logo { max-width: 168px; height: auto; }
+.aside_box a { color: #d0e6df; }
+.header-logo .logo-image { width: 220px; height: 48px; object-fit: contain; }.aside_box {
+  --td-text-color-primary: #e1efeb;
+  --td-text-color-secondary: #b4cec5;
+  --td-text-color-placeholder: #89aaa0;
+  --td-bg-color-container: #163732;
+  --td-bg-color-container-hover: #21453e;
+  --td-bg-color-secondarycontainer: #193b35;
+  --td-component-stroke: #31534a;
+}
