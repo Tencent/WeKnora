@@ -123,6 +123,17 @@
             </div>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="agent-feishu-group-reply-rule">{{ $t('agentEditor.feishuGroupReplyRule.label') }}</label>
+              <p class="desc">{{ $t('agentEditor.feishuGroupReplyRule.desc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-switch id="agent-feishu-group-reply-rule" v-model="formData.config.feishu_group_reply_rule"
+                :aria-label="$t('agentEditor.feishuGroupReplyRule.label')" />
+            </div>
+          </div>
+
           <!-- 描述 -->
           <div class="setting-row">
             <div class="setting-info">
@@ -2895,6 +2906,7 @@ const defaultFormData = {
   is_builtin: false,
   config: {
     // 基础设置
+    feishu_group_reply_rule: false,
     agent_mode: 'smart-reasoning' as 'quick-answer' | 'smart-reasoning',
     system_prompt: '',
     context_template: '',

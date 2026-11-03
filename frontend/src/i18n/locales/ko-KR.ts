@@ -1594,6 +1594,10 @@ export default {
     }
   },
   agentEditor: {
+    feishuGroupReplyRule: {
+      label: "Feishu / Lark 새 주제에 자동 답변",
+      desc: "주제의 첫 메시지에 답변합니다. 후속 메시지와 일반 그룹에서는 이 봇의 {'@'}멘션이 필요합니다. 모든 그룹 메시지 수신 및 그룹 정보 조회 권한이 필요합니다.",
+    },
     builtinHint: '내장 에이전트입니다. 이름과 설명은 수정할 수 없지만, 설정 매개변수는 조정할 수 있습니다.',
     fileTypes: {
       label: '지원 파일 유형',

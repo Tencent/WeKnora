@@ -28787,6 +28787,10 @@ const docTemplate = `{
                     "description": "FAQ score boost multiplier - FAQ results score multiplied by this factor",
                     "type": "number"
                 },
+                "feishu_group_reply_rule": {
+                    "description": "Opt in to replies on unmentioned top-level messages in Feishu/Lark topic groups.",
+                    "type": "boolean"
+                },
                 "history_turns": {
                     "description": "Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window",
                     "type": "integer"

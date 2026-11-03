@@ -7936,6 +7936,10 @@ export default {
     }
   },
   agentEditor: {
+    feishuGroupReplyRule: {
+      label: "Reply to new Feishu / Lark topics",
+      desc: "Reply automatically to the first message of a topic. Replies within a topic and ordinary groups still require an {'@'}mention of this bot. Requires access to all group messages and group information.",
+    },
     builtinHint: 'This is a built-in agent. Name and description cannot be modified, but configuration parameters can be adjusted.',
     navGroups: {
       basic: 'Basics',
