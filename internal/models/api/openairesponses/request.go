@@ -111,7 +111,7 @@ func userContent(msg api.Message) any {
 					parts = append(parts, inputPart{
 						Type:     "input_image",
 						ImageURL: api.ResolveImageURLForLLM(part.ImageURL.URL),
-						Detail:   orDefault(part.ImageURL.Detail, "auto"),
+						Detail:   part.ImageURL.Detail,
 					})
 				}
 			}
@@ -123,7 +123,6 @@ func userContent(msg api.Message) any {
 			parts = append(parts, inputPart{
 				Type:     "input_image",
 				ImageURL: api.ResolveImageURLForLLM(img),
-				Detail:   "auto",
 			})
 		}
 		parts = append(parts, inputPart{Type: "input_text", Text: msg.Content})
