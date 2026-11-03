@@ -1812,6 +1812,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		}
 	}
 
+	msg.ReplyCardTitle = customAgent.FeishuCardTitle()
+
 	// ── Slash-command dispatch ──
 	// Commands are handled before the QA pipeline so they respond instantly.
 	if cmd, args, ok := s.cmdRegistry.Parse(msg.Content); ok {

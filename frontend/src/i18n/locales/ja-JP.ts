@@ -7936,6 +7936,11 @@ export default {
     }
   },
   agentEditor: {
+    feishuReplyTitle: {
+      label: 'Feishu / Lark 返信カードのタイトル',
+      desc: '100文字まで。空欄にするとエージェント名を使用します。既存のエージェントは WeKnora を維持します。',
+      placeholder: 'エージェント名を使用',
+    },
     builtinHint: 'これは組み込みエージェントです。名前と説明は変更できませんが、設定パラメータは調整できます。',
     navGroups: {
       basic: '基本',

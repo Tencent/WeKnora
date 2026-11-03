@@ -34,6 +34,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
@@ -936,7 +937,10 @@ func cardSummaryPreview(content string) string {
 // buildStreamingCardJSON builds a Card JSON 2.0 with streaming_mode enabled.
 // The placeholder text follows the region so Lark users see English rather than
 // the Chinese wording Feishu users expect.
-func buildStreamingCardJSON(region Region) string {
+func buildStreamingCardJSON(region Region, title string) string {
+	if strings.TrimSpace(title) == "" {
+		title = types.DefaultFeishuReplyTitle
+	}
 	card := map[string]interface{}{
 		"schema": "2.0",
 		"config": map[string]interface{}{
@@ -945,7 +949,7 @@ func buildStreamingCardJSON(region Region) string {
 		},
 		"header": map[string]interface{}{
 			"template": "blue",
-			"title":    map[string]string{"tag": "plain_text", "content": "WeKnora"},
+			"title":    map[string]string{"tag": "plain_text", "content": title},
 		},
 		"body": map[string]interface{}{
 			"elements": []map[string]interface{}{
@@ -970,7 +974,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	}
 
 	// 1. Create card entity via CardKit API
-	cardJSON := buildStreamingCardJSON(a.region)
+	cardJSON := buildStreamingCardJSON(a.region, incoming.ReplyCardTitle)
 	cardID, err := a.cardkitCreate(ctx, accessToken, cardJSON)
 	if err != nil {
 		return "", fmt.Errorf("create card: %w", err)

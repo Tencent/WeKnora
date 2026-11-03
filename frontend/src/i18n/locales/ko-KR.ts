@@ -1594,6 +1594,11 @@ export default {
     }
   },
   agentEditor: {
+    feishuReplyTitle: {
+      label: 'Feishu / Lark 답변 카드 제목',
+      desc: '최대 100자. 비우면 에이전트 이름을 사용합니다. 기존 에이전트는 WeKnora를 유지합니다.',
+      placeholder: '에이전트 이름 사용',
+    },
     builtinHint: '내장 에이전트입니다. 이름과 설명은 수정할 수 없지만, 설정 매개변수는 조정할 수 있습니다.',
     fileTypes: {
       label: '지원 파일 유형',
