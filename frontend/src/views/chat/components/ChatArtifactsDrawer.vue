@@ -67,6 +67,7 @@
                 </div>
                 <div class="artifact-drawer-header-title" :title="previewItem.file_name">{{ previewItem.file_name }}</div>
                 <t-button
+                    v-if="allowAddToKnowledge !== false"
                     class="artifact-download"
                     variant="text"
                     shape="square"
@@ -152,6 +153,7 @@
                     </template>
                 </t-button>
                 <t-button
+                    v-if="allowAddToKnowledge !== false"
                     class="artifact-download"
                     variant="text"
                     shape="square"
@@ -235,6 +237,8 @@ const props = defineProps<{
      * where the user already picked the file.
      */
     previewIndex?: number | null
+    /** Embed visitors cannot write to workspace KBs; hide the shortcut. */
+    allowAddToKnowledge?: boolean
 }>()
 
 const emit = defineEmits<{

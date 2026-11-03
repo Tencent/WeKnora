@@ -77,6 +77,21 @@ func (h *Handler) AddMessageArtifactToKnowledge(c *gin.Context) {
 		return
 	}
 
+	// This action writes into a workspace resource. Public embed visitors, IM
+	// users and MCP endpoints have no account that can hold KB write permission
+	// on their behalf; only signed-in web users and API-key principals (which
+	// carry the ingest capability) may import. Without this gate an embed
+	// session could write to any same-tenant KB ResolveKB resolves.
+	if principal, ok := types.PrincipalFromContext(ctx); !ok ||
+		principal.Type == types.PrincipalEmbedSession ||
+		principal.Type == types.PrincipalEmbedVisitor ||
+		principal.Type == types.PrincipalIMUser ||
+		principal.Type == types.PrincipalMCPEndpoint ||
+		strings.HasPrefix(strings.TrimSpace(principal.ActingVia), "im:") {
+		c.Error(errors.NewForbiddenError("adding artifacts to a knowledge base requires a signed-in user"))
+		return
+	}
+
 	// Session ownership + tenant check (same gate as list/download). Returns
 	// 404 for unknown or non-owned sessions to avoid leaking existence.
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {

@@ -273,7 +273,7 @@ function renderCard(
 ): string {
   const safeName = escapeHTML(fileName);
   const safeHint = escapeHTML(hint);
-  const safeAddLabel = escapeHTML(addToKnowledge);
+  const safeAddLabel = escapeHTML(addToKnowledge || '');
   // 卡片必须是内联元素：marked 会把图片包在 <p> 里，块级元素会被 HTML 解析器
   // 提到段落外面，破坏正文结构。
   const interactive = variant === 'ready' && index !== null
@@ -282,7 +282,7 @@ function renderCard(
   const state = variant === 'ready' ? '' : ` artifact-ref-card--${variant}`;
   // The knowledge-base shortcut is a nested span (the card itself is a span
   // inside a paragraph), so it must stop propagation in the click handler.
-  const kbAction = variant === 'ready' && index !== null
+  const kbAction = variant === 'ready' && index !== null && !!addToKnowledge
     ? `<span class="artifact-ref-card__kb" data-artifact-kb-index="${index}" role="button" tabindex="0" title="${safeAddLabel}" aria-label="${safeAddLabel}">`
       + '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
       + '<path d="M6 4h12v17l-6-4-6 4z"/><path d="M12 8v6"/><path d="M9 11h6"/>'
