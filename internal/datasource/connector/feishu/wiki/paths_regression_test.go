@@ -2,12 +2,61 @@ package wiki
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWikiDriveShortcutsSyncBodyAndSkipUnchanged(t *testing.T) {
+	for _, selection := range []string{"space1", "space1:shortcut-a"} {
+		t.Run(selection, func(t *testing.T) {
+			var shortcuts []core.WikiNode
+			for _, suffix := range []string{"a", "b", "c"} {
+				shortcut := fileNode("shortcut-"+suffix, "document-"+suffix+".pdf", func(n *core.WikiNode) {
+					n.NodeType = "shortcut"
+					n.OriginSpaceID = "0" // 云盘文档没有原 Wiki 节点，正文仍必须正常下载。
+				})
+				shortcuts = append(shortcuts, shortcut)
+			}
+			var feishuConfig *core.Config
+			wantContent := "fake-file-content"
+			if selection == "space1" {
+				// 整空间同步覆盖现网的 docx 导出路径；单节点选择覆盖直接下载路径。
+				for index := range shortcuts {
+					shortcuts[index].ObjType = "docx"
+				}
+				server, config := fakeFeishu(shortcuts)
+				t.Cleanup(server.Close)
+				feishuConfig = config
+				wantContent = "fake-docx-content"
+			} else {
+				feishuConfig = newFakeWikiTree(t, shortcuts, nil).cfg
+			}
+			connector := NewConnector(core.RegionFeishu)
+			config := makeConfig(feishuConfig, []string{selection})
+			items, cursor, err := connector.FetchIncremental(context.Background(), config, nil)
+			require.NoError(t, err)
+			want := 3
+			if selection != "space1" {
+				want = 1
+			}
+			require.Len(t, items, want, "每个快捷方式应只产出正文，不附加失败条目")
+			for index, item := range items {
+				require.Empty(t, item.Metadata["error"])
+				require.Equal(t, fmt.Sprintf("shortcut-%c", 'a'+index), item.ExternalID)
+				require.Equal(t, wantContent, string(item.Content))
+			}
+			for range 2 {
+				items, cursor, err = connector.FetchIncremental(context.Background(), config, cursor)
+				require.NoError(t, err)
+				require.Empty(t, items, "连续无变更的增量同步不应重复出现失败或删除条目")
+			}
+		})
+	}
+}
 
 func TestWikiShortcutOutsideSelectionRemainsSyncable(t *testing.T) {
 	for _, resource := range []string{"space1", "space1:shortcut"} {
