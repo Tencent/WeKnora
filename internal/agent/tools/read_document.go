@@ -574,13 +574,48 @@ func (t *ReadDocumentTool) buildData(
 		"knowledge_base_id": knowledge.KnowledgeBaseID,
 		"knowledge_title":   strings.TrimSpace(knowledge.Title),
 		// Keep citation identities when chunks are omitted from SSE/history.
-		"chunk_ids":       chunkIDs,
-		"source_chunk_id": sourceChunkID,
-		"total_chunks":    total,
-		"fetched_chunks":  len(formatted),
-		"chunks":          formatted,
-		"document":        documentInfo(knowledge, total),
+		"resource_references": readDocumentResourceReferences(rows),
+		"chunk_ids":           chunkIDs,
+		"source_chunk_id":     sourceChunkID,
+		"total_chunks":        total,
+		"fetched_chunks":      len(formatted),
+		"chunks":              formatted,
+		"document":            documentInfo(knowledge, total),
 	}
+}
+
+// readDocumentResourceReferences retains only the canonical resources in the
+// returned passages. Chunk bodies and raw tool output are stripped for history,
+// but the message-file proxy still needs this evidence alongside the document
+// and KB identities. Current sharing and live resource bindings are checked
+// independently when the image is requested.
+func readDocumentResourceReferences(rows []readChunkRow) []map[string]interface{} {
+	var refs []map[string]interface{}
+	seen := make(map[string]bool)
+	add := func(reference string) {
+		handle, ok := types.ParseResourcePath(reference)
+		if !ok {
+			return
+		}
+		canonical := types.BuildResourcePath(handle)
+		if seen[canonical] {
+			return
+		}
+		seen[canonical] = true
+		refs = append(refs, map[string]interface{}{"url": canonical})
+	}
+	for _, row := range rows {
+		for _, ref := range types.ScanResourceReferences(row.chunk.Content) {
+			add(ref)
+		}
+		var images []types.ImageInfo
+		if json.Unmarshal([]byte(row.chunk.ImageInfo), &images) == nil {
+			for _, image := range images {
+				add(image.URL)
+			}
+		}
+	}
+	return refs
 }
 
 func (t *ReadDocumentTool) buildOutput(
