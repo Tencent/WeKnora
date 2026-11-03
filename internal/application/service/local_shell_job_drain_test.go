@@ -36,6 +36,7 @@ type drainingShellStarter struct{ root string }
 func (s drainingShellStarter) GuardForSession(
 	context.Context,
 	string,
+	...localsandbox.Grant,
 ) (*localsandbox.PathGuard, localsandbox.Workspace, error) {
 	return nil, localsandbox.Workspace{Root: s.root}, nil
 }

@@ -2127,6 +2127,8 @@ export default {
       listDocuments: '浏览文档列表',
       todoWrite: '计划管理',
       askUser: '向用户提问',
+      requestSecureForm: '请求登录凭据',
+      browserFillSecret: '填写登录凭据',
       knowledgeGraphExtract: '知识图谱抽取',
       thinking: '思考',
       attachmentParsing: '解析附件',
@@ -2478,9 +2480,31 @@ export default {
       unansweredTag: '未回答',
       submitFailed: '提交失败',
     },
+    secureForm: {
+      onlyFillInto: '只会填入：{domains}',
+      observedAt: '浏览器当前页面：{origin}',
+      originUnknown: '无法确认浏览器当前页面，请确认浏览器停在要登录的网站上再填写',
+      originMismatch: '浏览器当前页面（{origin}）与要登录的网站不一致，请确认后再填写',
+      originInsecure: '浏览器当前页面不是 HTTPS，凭据不会填入',
+      savedAccount: '已保存的账号',
+      useNew: '使用新的账号密码',
+      username: '账号',
+      password: '密码',
+      saveToVault: '保存到保险库',
+      useOnce: '仅用一次',
+      fill: '填写',
+      decline: '拒绝',
+      submittedHidden: '已提交（内容不显示）',
+      declined: '已拒绝',
+      timedOut: '超时未填写',
+      canceled: '已取消',
+      submitFailed: '提交失败',
+      savedButClosed: '凭据已保存到保险库，但这次请求已结束',
+    },
     promptDock: {
       approvalTitle: '需要你审核',
       oauthTitle: '需要你授权',
+      secureFormTitle: '需要你填写凭据',
       waiting: '等待你处理',
       handle: '去处理',
       pager: '{current} / {total}',
@@ -2579,8 +2603,7 @@ export default {
     },
     hostApproval: {
       titleDelete: '删除文件前需要你确认',
-      titleDangerous: '危险操作确认',
-      titleDenied: '命令被沙盒拦截，需要访问以下目录',
+      titleDenied: 'WeKnora 想要访问以下目录',
       titleGeneric: '需要你确认',
       command: '命令',
       cwd: '目录',
@@ -2598,7 +2621,25 @@ export default {
       rejectedTag: '已拒绝',
       submitted: '已提交',
       submitFailed: '提交失败',
-      userRejected: '用户拒绝'
+      userRejected: '用户拒绝',
+      titleFileWrite: '写入工作区外的文件',
+      fileOnly: '只授权这一个文件',
+      writeMode: '方式',
+      writeModeOverwrite: '覆盖',
+      writeModeAppend: '追加',
+      writeModeEdit: '编辑',
+      writeBytes: '{bytes} 字节',
+      preview: '内容',
+      previewTruncated: '只显示前 64 KB',
+      env: '环境变量',
+      skillName: '技能',
+      stdin: '标准输入',
+      script: '命令运行的脚本'
+    },
+    hostReview: {
+      reviewing: '自动审批中…',
+      approved: '已自动批准：{reason}',
+      denied: '自动审批已拒绝：{reason}'
     }
   },
   kbSettings: {
@@ -6482,6 +6523,13 @@ export default {
       toggleOn: '开启网络搜索',
       toggleOff: '关闭网络搜索',
       notConfigured: '未配置网络搜索引擎'
+    },
+    hostApprovalMode: {
+      ask: '请求批准',
+      askHint: '删除和工作区外的写入都要你确认',
+      auto: '替我审批',
+      autoHint: '由模型代你判断，不打扰你',
+      switchFailed: '切换审批模式失败'
     }
   },
   manualEditor: {
@@ -7029,6 +7077,32 @@ export default {
       cleared: '已删除 {count} 条记忆',
       saveFailed: '操作失败：{message}'
     }
+  },
+  credentialVault: {
+    title: '凭据保险库',
+    description: 'agent 在沙盒浏览器里登录网站时，可以直接使用这里保存的账号。密码加密保存，页面上不会再显示，只能重新设置。填写时密码会进入沙盒浏览器，agent 在同一沙盒中运行，请只对信任的 agent 和网站使用。',
+    unavailable: '服务端没有配置有效的 SYSTEM_AES_KEY，暂时无法保存凭据。',
+    loading: '加载中…',
+    loadFailed: '加载失败',
+    empty: '还没有保存的凭据。agent 请求登录时，你可以在卡片上选择"保存到保险库"。',
+    add: '添加凭据',
+    edit: '编辑',
+    delete: '删除',
+    deleteConfirm: '确定删除这条凭据吗？',
+    save: '保存',
+    saved: '已保存',
+    deleted: '已删除',
+    saveFailed: '保存失败',
+    titleLabel: '名称',
+    site: '站点',
+    domains: '允许填入的域名',
+    domainsHint: '用逗号分隔，最多 5 个，站点本身总是包含在内',
+    username: '账号',
+    password: '密码',
+    newPassword: '新密码',
+    passwordHint: '留空表示不修改',
+    lastUsed: '最近使用：{time}',
+    never: '从未使用',
   },
   envVarSettings: {
     title: '沙箱密钥',
@@ -8069,6 +8143,10 @@ export default {
       dataExtensions: '数据与扩展',
       systemAdministration: '系统管理',
       platform: '平台'
+    },
+    hostApprovalDefault: {
+      title: '默认执行权限审批',
+      description: '智能体要删除文件，或写入工作区以外时，用这里决定是每次问你，还是由模型替你审批。新会话按这个开始；当前会话可在输入框左侧切换。'
     }
   },
   agent: {

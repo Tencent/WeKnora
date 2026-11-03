@@ -24,7 +24,7 @@ func approvalFixture(t *testing.T, backend *fakeBackend) (*Service, string, stri
 		SessionRoot: filepath.Join(home, "Documents", "WeKnora"),
 	}, fixedProject(root))
 	builder := NewPolicyBuilder(home, filepath.Join(home, "AppData"))
-	return NewService(backend, resolver, builder, fixedMode(ModeAuto)), root, other
+	return NewService(backend, resolver, builder, fixedMode(ModeAsk)), root, other
 }
 
 func TestSessionStatesTrackApprovalsPerSession(t *testing.T) {

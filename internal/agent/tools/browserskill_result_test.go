@@ -61,6 +61,12 @@ func TestBrowserOperationResultsAndRecovery(t *testing.T) {
 
 func TestBrowserErrorRecoveryHints(t *testing.T) {
 	for _, tc := range []struct{ method, code, data, hint string }{
+		{"tab_close", "permission_denied", `{"reason":"last_tab_requires_placeholder"}`, "The close was not sent"},
+		{"click", "permission_denied", `{"reason":"cooperation_sync_required"}`, "action:sync"},
+		{"click", "permission_denied", `{"reason":"control_context_invalid"}`, "actual context_id"},
+		{"evaluate", "permission_denied", `{"reason":"observation_required"}`, "observation_id"},
+		{"click", "permission_denied", `{"reason":"human_intervention"}`, "action:wait"},
+		{"click", "permission_denied", `{"reason":"precondition_failed"}`, "Do not drop the expectation"},
 		{"click", "not_found", `{"reason":"ref_not_found"}`, "fresh ref"},
 		{"click", "permission_denied", `{"reason":"element_not_visible"}`, "active dialog/menu"},
 		{"fill", "cdp_failed", `{"reason":"fill_value_mismatch"}`, "remaining difference"},

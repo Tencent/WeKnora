@@ -6,14 +6,31 @@ import {
   buildHostResolveBody,
   canNarrowAccess,
   hostApprovalTitleKey,
+  hostEnvLines,
+  hostReviewLabelKey,
   isHostApprovalEvent,
+  isModelReview,
   sessionRuleLabels,
+  showsRerunNotice,
 } from './hostApproval'
+
+test('a pending card warns that approving re-runs a command that already ran', () => {
+  assert.equal(showsRerunNotice({ reason: 'sandbox_denied', first_attempt_ran: true }, false), true)
+  assert.equal(showsRerunNotice({ reason: 'sandbox_denied', first_attempt_ran: true }, true), false)
+  assert.equal(showsRerunNotice({ reason: 'delete' }, false), false)
+})
+
+test('a card lists the env a command runs with, in a stable order', () => {
+  assert.deepEqual(hostEnvLines({ reason: 'delete', env: { Z: '1', BASH_ENV: './x.sh' } }), [
+    'BASH_ENV=./x.sh',
+    'Z=1',
+  ])
+  assert.deepEqual(hostEnvLines({ reason: 'delete' }), [])
+})
 
 test('only a sandbox block may be narrowed to read-only; a delete needs write', () => {
   assert.equal(canNarrowAccess({ reason: 'sandbox_denied', grant_path: '/x', grant_access: 'write' }), true)
   assert.equal(canNarrowAccess({ reason: 'delete', grant_path: '/x', grant_access: 'write' }), false)
-  assert.equal(canNarrowAccess({ reason: 'dangerous', grant_path: '/x', grant_access: 'write' }), false)
   assert.equal(canNarrowAccess({ reason: 'sandbox_denied' }), false)
 })
 
@@ -45,7 +62,7 @@ test('only host_command events use the host card', () => {
 
 test('titles follow the approval reason', () => {
   assert.equal(hostApprovalTitleKey('delete'), 'agentStream.hostApproval.titleDelete')
-  assert.equal(hostApprovalTitleKey('dangerous'), 'agentStream.hostApproval.titleDangerous')
+  assert.equal(hostApprovalTitleKey('file_write'), 'agentStream.hostApproval.titleFileWrite')
   assert.equal(hostApprovalTitleKey('sandbox_denied'), 'agentStream.hostApproval.titleDenied')
   assert.equal(hostApprovalTitleKey('unknown'), 'agentStream.hostApproval.titleGeneric')
 })
@@ -86,4 +103,17 @@ test('reject carries only the reason', () => {
     decision: 'reject',
     reason: 'no',
   })
+})
+
+test('model reviews are recognised and never go to the composer', () => {
+  assert.equal(isModelReview({ host: { reason: 'delete', reviewer: 'model' } }), true)
+  assert.equal(isModelReview({ host: { reason: 'delete', reviewer: 'user' } }), false)
+  assert.equal(isModelReview({ host: { reason: 'delete' } }), false)
+  assert.equal(isModelReview({}), false)
+})
+
+test('a model review row says what happened', () => {
+  assert.equal(hostReviewLabelKey({ resolved: false }), 'agentStream.hostReview.reviewing')
+  assert.equal(hostReviewLabelKey({ resolved: true, approved: true }), 'agentStream.hostReview.approved')
+  assert.equal(hostReviewLabelKey({ resolved: true, approved: false }), 'agentStream.hostReview.denied')
 })

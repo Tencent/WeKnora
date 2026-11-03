@@ -303,6 +303,31 @@ t_desktop_click_and_agent_reach_the_same_daemon() {
   teardown
 }
 
+t_lock_held_skips_the_command_lock() {
+  setup_wrapper
+  mkdir -p "$WEKNORA_BROWSER_ROOT"
+  exec 9>"$WEKNORA_BROWSER_ROOT/.command.lock"
+  flock 9
+  WK_AB_LOCK_HELD=1 timeout 5 "$WRAP" focus @e1; rc=$?
+  exec 9>&-
+  assert_eq "runs while the secret-fill helper holds the lock" 0 "$rc"
+  assert_contains "the command reached the browser" "ARGS" "$(log)"
+  teardown
+}
+
+t_eval_reading_a_password_value_is_refused() {
+  setup_wrapper
+  "$WRAP" eval 'document.querySelector("input[type=Password]").value' 2>"$TMP/err"; rc=$?
+  assert_eq "refused with a usage error" 64 "$rc"
+  assert_contains "explains why" "browser_fill_secret" "$(cat "$TMP/err")"
+  assert_not_contains "never reached the browser" "ARGS eval" "$(log)"
+  "$WRAP" --headed eval 'document.querySelector("input[type=Password]").value' 2>/dev/null; rc=$?
+  assert_eq "refused even with leading flags" 64 "$rc"
+  "$WRAP" eval 'document.title'; rc=$?
+  assert_eq "other scripts still run" 0 "$rc"
+  teardown
+}
+
 t_fails_closed_without_session_env
 t_desktop_click_and_agent_reach_the_same_daemon
 t_pins_home_profile_session_and_executable
@@ -576,4 +601,6 @@ t_machine_daemons_leave_the_command_process_group
 t_navigation_to_a_running_browser_restarts_the_governor
 t_a_watched_browser_is_kept_alive
 t_an_unwatched_browser_gets_no_keepalive
+t_lock_held_skips_the_command_lock
+t_eval_reading_a_password_value_is_refused
 finish

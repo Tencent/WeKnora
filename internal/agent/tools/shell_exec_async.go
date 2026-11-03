@@ -249,6 +249,7 @@ func (t *ShellExecAsyncTool) Execute(ctx context.Context, args json.RawMessage) 
 	request := ShellJobSubmitRequest{
 		Command:        execCommand,
 		DisplayCommand: command,
+		ProgramStdin:   programStdin(command, input.Stdin),
 		WorkDir:        workDir,
 		Env:            env,
 		Description:    shellJobLabel(input.Description, command),

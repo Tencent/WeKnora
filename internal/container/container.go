@@ -39,6 +39,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -53,6 +54,7 @@ import (
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
+	"github.com/Tencent/WeKnora/internal/application/service/credential"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -187,6 +189,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
 	must(container.Provide(repository.NewAgentGrantRepository))
+	must(container.Provide(repository.NewCredentialVaultRepository))
 	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -222,6 +225,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(newSandboxManager))
 	must(container.Provide(provideHostApprovalModeLoader))
 	must(container.Provide(provideHostProjectDirsLoader))
+	must(container.Provide(provideHostApprovalModes))
 	must(container.Provide(hostProjectLookup))
 	must(container.Provide(hostModeLookup))
 	must(container.Provide(provideHostSandboxManager))
@@ -383,6 +387,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
+	must(container.Provide(credential.NewVault))
+	must(container.Provide(credential.NewHandleStore))
+	must(container.Provide(func(
+		g *approval.Gate, v *credential.Vault, h *credential.HandleStore,
+	) *credential.Submitter {
+		return credential.NewSubmitter(g, v, h)
+	}))
 	must(container.Provide(func(cleaner interfaces.ResourceCleaner, db *gorm.DB) (*browserskill.Manager, error) {
 		manager := browserskill.NewManager(browserskill.NewStore(db))
 		if err := manager.ValidateConfiguration(); err != nil {
@@ -709,8 +720,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		models interfaces.ModelService,
 		agents interfaces.AgentShareService,
 		grants interfaces.AgentGrantRepository,
+		secureForms *credential.Submitter,
 	) *handler.MCPServiceHandler {
-		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents).WithGrants(grants)
+		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents).
+			WithGrants(grants).WithSecureForms(secureForms)
+	}))
+	must(container.Provide(handler.NewCredentialVaultHandler))
+	must(container.Invoke(func(agents interfaces.AgentService, handles *credential.HandleStore) {
+		if handles == nil {
+			return
+		}
+		if s, ok := agents.(interface{ SetSecretHandles(tools.SecretHandles) }); ok {
+			s.SetSecretHandles(handles)
+		}
 	}))
 	must(container.Invoke(func(
 		sessions *session.Handler, mcp *handler.MCPServiceHandler,

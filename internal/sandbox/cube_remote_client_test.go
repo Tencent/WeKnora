@@ -714,8 +714,9 @@ func TestCubeDesktopTemplateSpecDoesNotNatWebsockify(t *testing.T) {
 	require.Equal(t, []uint16{CubeEnvdPort}, spec["exposedPorts"])
 	require.Equal(t, uint16(CubeEnvdPort), spec["probePort"])
 	require.Equal(t, CubeEnvdHealthPath, spec["probePath"])
-	// 1G (the standard value) is too small once XFCE is installed.
-	require.Equal(t, "8G", spec["writableLayerSize"])
+	// Cube has no volumes: every session's workspace and browser profile on
+	// the machine lives on the writable layer.
+	require.Equal(t, "64G", spec["writableLayerSize"])
 	require.Equal(t, true, spec["allowInternetAccess"])
 	require.Equal(t, []string{"/usr/bin/envd"}, spec["command"])
 	require.Equal(t, []string{"-port", "49983", "-isnotfc"}, spec["args"])

@@ -2554,6 +2554,10 @@ export default {
       saveFailed: 'Save failed',
       unknownError: 'Unknown error',
       requestFailed: 'Request failed'
+    },
+    hostApprovalDefault: {
+      title: 'Default execution approval',
+      description: 'When the agent deletes a file or writes outside the workspace, this chooses whether to ask you each time or let the model approve it. New chats start here; switch the current chat to the left of the input box.'
     }
   },
   webSearchSettings: {
@@ -2775,6 +2779,32 @@ export default {
       cleared: 'Deleted {count} memories',
       saveFailed: 'Operation failed: {message}'
     }
+  },
+  credentialVault: {
+    title: 'Credential vault',
+    description: 'When the agent signs in to a site in the sandbox browser, it can use the accounts saved here. Passwords are stored encrypted and never shown again; you can only replace them. A filled password enters the sandbox browser, where the agent also runs, so use saved logins only with agents and sites you trust.',
+    unavailable: 'The server has no valid SYSTEM_AES_KEY, so credentials cannot be saved.',
+    loading: 'Loading…',
+    loadFailed: 'Failed to load',
+    empty: 'No saved credentials yet. When the agent asks you to sign in, choose "Save to vault" on the card.',
+    add: 'Add credential',
+    edit: 'Edit',
+    delete: 'Delete',
+    deleteConfirm: 'Delete this credential?',
+    save: 'Save',
+    saved: 'Saved',
+    deleted: 'Deleted',
+    saveFailed: 'Failed to save',
+    titleLabel: 'Name',
+    site: 'Site',
+    domains: 'Allowed domains',
+    domainsHint: 'Comma-separated, at most 5; the site itself is always included',
+    username: 'Username',
+    password: 'Password',
+    newPassword: 'New password',
+    passwordHint: 'Leave empty to keep the current one',
+    lastUsed: 'Last used: {time}',
+    never: 'Never used',
   },
   envVarSettings: {
     title: 'Sandbox secrets',
@@ -3437,7 +3467,14 @@ export default {
     voiceDecodeError: 'Could not process the recording. Please try again.',
     voiceTranscribeFailed: "Transcription failed. Check the agent's ASR model settings.",
     voiceEmptyResult: 'No speech detected',
-    goToAgentSettings: 'Go to agent settings'
+    goToAgentSettings: 'Go to agent settings',
+    hostApprovalMode: {
+      ask: 'Ask me',
+      askHint: 'Asks you before deletes and writes outside the workspace',
+      auto: 'Approve for me',
+      autoHint: 'A model decides for you without interrupting',
+      switchFailed: 'Could not switch the approval mode'
+    }
   },
   createChat: {
     title: 'Hi, I am WeKnora — your knowledge, within reach',
@@ -7262,9 +7299,31 @@ export default {
       unansweredTag: 'Not answered',
       submitFailed: 'Failed to submit',
     },
+    secureForm: {
+      onlyFillInto: 'Only filled into: {domains}',
+      observedAt: 'Browser is on: {origin}',
+      originUnknown: 'Could not confirm the page the browser is on. Make sure it shows the site you are signing in to.',
+      originMismatch: 'The browser is on {origin}, not the site you are signing in to. Check before filling.',
+      originInsecure: 'The browser page is not HTTPS; credentials will not be filled there.',
+      savedAccount: 'Saved account',
+      useNew: 'Use a new username and password',
+      username: 'Username',
+      password: 'Password',
+      saveToVault: 'Save to vault',
+      useOnce: 'Use once',
+      fill: 'Fill in',
+      decline: 'Decline',
+      submittedHidden: 'Submitted (contents hidden)',
+      declined: 'Declined',
+      timedOut: 'Timed out',
+      canceled: 'Canceled',
+      submitFailed: 'Submission failed',
+      savedButClosed: 'The credential was saved to your vault, but this request has already ended',
+    },
     promptDock: {
       approvalTitle: 'Needs your review',
       oauthTitle: 'Needs your authorization',
+      secureFormTitle: 'Needs your credentials',
       waiting: 'Waiting for you',
       handle: 'Respond',
       pager: '{current} / {total}',
@@ -7363,8 +7422,7 @@ export default {
     },
     hostApproval: {
       titleDelete: 'Confirm before deleting files',
-      titleDangerous: 'Confirm a dangerous operation',
-      titleDenied: 'The sandbox blocked this command; it needs access to',
+      titleDenied: 'WeKnora wants to access the following directory',
       titleGeneric: 'Needs your confirmation',
       command: 'Command',
       cwd: 'Directory',
@@ -7382,7 +7440,25 @@ export default {
       rejectedTag: 'Rejected',
       submitted: 'Submitted',
       submitFailed: 'Submission failed',
-      userRejected: 'Rejected by user'
+      userRejected: 'Rejected by user',
+      titleFileWrite: 'Write a file outside the workspace',
+      fileOnly: 'Only this file is opened',
+      writeMode: 'Mode',
+      writeModeOverwrite: 'Overwrite',
+      writeModeAppend: 'Append',
+      writeModeEdit: 'Edit',
+      writeBytes: '{bytes} bytes',
+      preview: 'Content',
+      previewTruncated: 'Showing the first 64 KB',
+      env: 'Environment variables',
+      skillName: 'Skill',
+      stdin: 'Standard input',
+      script: 'Script this command runs'
+    },
+    hostReview: {
+      reviewing: 'Auto review in progress…',
+      approved: 'Auto-approved: {reason}',
+      denied: 'Auto review denied: {reason}'
     },
     mcpOAuth: {
       waiting: 'Awaiting authorization · {target}',
@@ -7417,6 +7493,8 @@ export default {
       listDocuments: 'List documents',
       todoWrite: 'Plan Management',
       askUser: 'Ask User',
+      requestSecureForm: 'Request credentials',
+      browserFillSecret: 'Fill credentials',
       knowledgeGraphExtract: 'Knowledge Graph Extraction',
       thinking: 'Thinking',
       attachmentParsing: 'Parsing Attachment',

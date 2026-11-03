@@ -44,8 +44,24 @@ The browser always opens as a visible window on the user's Desktop tab, so
 the user can watch it and take over. Do not ask the user whether to show it,
 and do not pass any flag to hide or show it. The user may click in the same
 window while you work: run `snapshot -i` again before acting if the page may
-have changed. A captcha, 2FA code or password is for the user to type in that
-window, never in the chat.
+have changed. Never ask for a password or code in the chat.
+
+## Logins and codes
+
+When a page asks for a username, password or one-time code and the
+`request_secure_form` tool is available:
+
+1. Call `request_secure_form` with the page's host as `site`.
+2. Run `agent-browser snapshot -i` again, then call `browser_fill_secret` with
+   the handle and the refs of the inputs.
+3. Click the sign-in button yourself; the tool never submits.
+
+Judge success by the statuses `browser_fill_secret` returns. Until you leave
+that page, do not take screenshots, do not click "show password", and do not
+read input values with `get value` or `eval`.
+
+Without `request_secure_form`, or for a captcha, ask the user to type it into
+the window on their Desktop tab.
 
 ## Rules
 

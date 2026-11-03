@@ -140,6 +140,15 @@
                   :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
               </div>
 
+              <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
+                <SecureFormCard :pending-id="event.pending_id" :request="event.request"
+                  :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                  :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                  :canceled="event.canceled" :abandoned="event.abandoned" />
+              </div>
+
               <!-- MCP OAuth in-conversation authorization prompt -->
               <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
                 <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
@@ -151,7 +160,9 @@
               </div>
 
               <div v-else-if="showInlineHostApproval(event)" class="tool-event">
-                <HostApprovalCard :pending-id="event.pending_id"
+                <HostReviewRecord v-if="isModelReview(event)" :host="event.host"
+                  :resolved="event.resolved" :approved="event.approved" :resolve-reason="event.resolve_reason" />
+                <HostApprovalCard v-else :pending-id="event.pending_id"
                   :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
                   :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
                   :resolved="event.resolved" :approved="event.approved"
@@ -434,6 +445,15 @@
                 :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
             </div>
 
+            <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
+              <SecureFormCard :pending-id="event.pending_id" :request="event.request"
+                :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                :canceled="event.canceled" :abandoned="event.abandoned" />
+            </div>
+
             <!-- MCP OAuth in-conversation authorization prompt -->
             <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
               <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
@@ -444,7 +464,9 @@
             </div>
 
             <div v-else-if="showInlineHostApproval(event)" class="tool-event">
-              <HostApprovalCard :pending-id="event.pending_id"
+              <HostReviewRecord v-if="isModelReview(event)" :host="event.host"
+                :resolved="event.resolved" :approved="event.approved" :resolve-reason="event.resolve_reason" />
+              <HostApprovalCard v-else :pending-id="event.pending_id"
                 :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
                 :resolved="event.resolved" :approved="event.approved"
@@ -786,10 +808,12 @@ import OpenPageCard from './OpenPageCard.vue';
 import PageEditCard from './PageEditCard.vue';
 import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
+import SecureFormCard from './SecureFormCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';
-import { isHostApprovalEvent } from './hostApproval';
+import HostReviewRecord from './HostReviewRecord.vue';
+import { isHostApprovalEvent, isModelReview } from './hostApproval';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -913,6 +937,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   wiki_update_issue: 'agentEditor.tools.wikiUpdateIssue',
   todo_write: 'agentStream.tools.todoWrite',
   ask_user: 'agentStream.tools.askUser',
+  request_secure_form: 'agentStream.tools.requestSecureForm',
+  browser_fill_secret: 'agentStream.tools.browserFillSecret',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
   attachment_parsing: 'agentStream.tools.attachmentParsing',
@@ -1250,10 +1276,10 @@ const embedAuthProps = computed(() => ({
 const approvalEvent = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) =>
   event?.type === 'tool_approval_required';
 
-// Pending host cards sit above the composer. A resolved approval stays in the
-// timeline so the turn still shows what was allowed or refused.
-const showInlineHostApproval = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) =>
-  approvalEvent(event) && isHostApprovalEvent(event) && !!event.resolved;
+// Pending host cards sit above the composer. A resolved approval, and every
+// model review (pending or not), stays in the timeline.
+const showInlineHostApproval = (event: { type?: string; kind?: string; host?: any; resolved?: boolean }) =>
+  approvalEvent(event) && isHostApprovalEvent(event) && (!!event.resolved || isModelReview(event));
 
 const showInlineToolApproval = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) => {
   if (!approvalEvent(event) || isHostApprovalEvent(event)) return false;

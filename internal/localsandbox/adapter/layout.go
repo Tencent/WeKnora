@@ -21,6 +21,11 @@ func LayoutFor(ws localsandbox.Workspace, grants ...localsandbox.Grant) sandbox.
 	writeRoots := []string{ws.Root}
 	readRoots := []string{ws.Root}
 	for _, g := range grants {
+		if g.File {
+			// A file grant is not a root: the tool layer asks the store,
+			// which checks the guard, for anything outside WriteRoots.
+			continue
+		}
 		if g.Access == localsandbox.AccessWrite {
 			writeRoots = append(writeRoots, g.Path)
 		}

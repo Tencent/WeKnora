@@ -120,14 +120,118 @@ func TestSeatbeltDeniesRecreatingProtectedDirectory(t *testing.T) {
 	require.NotEqual(t, 0, status.Code, out)
 }
 
-// A second writable root that covers the workspace must not reopen its .git.
-func TestSeatbeltCoveringRootKeepsGitReadOnly(t *testing.T) {
+func TestSeatbeltWritableFileOpensOnlyThatFile(t *testing.T) {
 	backend, p, base := darwinFixture(t)
-	p.WritableRoots = append(p.WritableRoots, core.WritableRoot{Path: base})
+	other := filepath.Join(base, "Other Project")
+	target := filepath.Join(other, "a.txt")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+	p.WritableFiles = []string{target}
+
+	status, out := runSandboxed(t, backend, p, `echo new > "`+target+`" && cat "`+target+`"`)
+	require.Equal(t, 0, status.Code, out)
+	require.Contains(t, out, "new")
+
+	status, out = runSandboxed(t, backend, p, `echo x > "`+filepath.Join(other, "b.txt")+`"`)
+	require.NotEqual(t, 0, status.Code, out)
+
+	// Atomic saves write a temp file beside the target, which needs the parent.
+	status, out = runSandboxed(t, backend, p,
+		`echo x > "`+filepath.Join(other, ".a.txt.tmp")+`" && mv "`+filepath.Join(other, ".a.txt.tmp")+`" "`+target+`"`)
+	require.NotEqual(t, 0, status.Code, out)
+}
+
+func TestSeatbeltProtectBareGitDirsDeniesHooksAndConfig(t *testing.T) {
+	backend, p, base := darwinFixture(t)
+	other := filepath.Join(base, "Other Project")
+	hooks := filepath.Join(other, "repo.git", "hooks")
+	require.NoError(t, os.MkdirAll(hooks, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(other, "repo.git", "objects"), 0o755))
+	p.WritableRoots = append(p.WritableRoots, core.WritableRoot{Path: other, ProtectBareGitDirs: true})
+
+	status, out := runSandboxed(t, backend, p, `echo x > "`+filepath.Join(hooks, "post-update")+`"`)
+	require.NotEqual(t, 0, status.Code, out)
+	status, out = runSandboxed(t, backend, p, `echo x > "`+filepath.Join(other, "repo.git", "config")+`"`)
+	require.NotEqual(t, 0, status.Code, out)
+	status, out = runSandboxed(t, backend, p, `echo x > "`+filepath.Join(other, "repo.git", "objects", "a")+`"`)
+	require.Equal(t, 0, status.Code, out)
+}
+
+// Prepare resolves WritableFiles before compile. A file that was ordinary at
+// approval must not become a write allow if it is swapped for a symlink to a
+// path rejectGrantPath would refuse. Failure stops at Prepare.
+func TestSeatbeltPrepareRefusesSymlinkReplacedGrant(t *testing.T) {
+	backend, p, base := darwinFixture(t)
+	other := filepath.Join(base, "Other Project")
+	granted := filepath.Join(other, "granted.txt")
+	require.NoError(t, os.WriteFile(granted, []byte("ok"), 0o644))
+	p.WritableFiles = []string{granted}
+
+	ctx := context.Background()
+	prep, err := backend.Prepare(ctx, p)
+	require.NoError(t, err)
+	require.NoError(t, prep.Close())
+
+	ordinary := filepath.Join(other, "ordinary.txt")
+	require.NoError(t, os.WriteFile(ordinary, []byte("plain"), 0o644))
+	require.NoError(t, os.Remove(granted))
+	require.NoError(t, os.Symlink(ordinary, granted))
+	prep, err = backend.Prepare(ctx, p)
+	require.NoError(t, err)
+	require.NoError(t, prep.Close())
+
+	gitFile := filepath.Join(other, ".git", "config")
+	require.NoError(t, os.MkdirAll(filepath.Dir(gitFile), 0o755))
+	require.NoError(t, os.WriteFile(gitFile, []byte("git"), 0o644))
+	libraryFile := filepath.Join(base, "Library", "Prefs.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(libraryFile), 0o755))
+	require.NoError(t, os.WriteFile(libraryFile, []byte("pref"), 0o644))
+
+	for _, target := range []string{"/etc/passwd", gitFile, libraryFile} {
+		require.NoError(t, os.Remove(granted))
+		require.NoError(t, os.Symlink(target, granted))
+		prep, err = backend.Prepare(ctx, p)
+		require.Error(t, err, target)
+		if prep != nil {
+			require.NoError(t, prep.Close())
+		}
+	}
+
+	// The project root itself is replaced by a symlink to the home. Resolving
+	// it must not compile a subpath write for the private root.
+	p.WritableFiles = nil
+	root := p.WritableRoots[0].Path
+	require.NoError(t, os.RemoveAll(root))
+	require.NoError(t, os.Symlink(base, root))
+	prep, err = backend.Prepare(ctx, p)
+	require.Error(t, err)
+	if prep != nil {
+		require.NoError(t, prep.Close())
+	}
+}
+
+// A second writable root that covers the workspace must not reopen its .git.
+// The covering root is not the home: granting the home is refused.
+func TestSeatbeltCoveringRootKeepsGitReadOnly(t *testing.T) {
+	backend, _, base := darwinFixture(t)
+	cover := filepath.Join(base, "cover")
+	project := filepath.Join(cover, "My Project")
+	require.NoError(t, os.MkdirAll(filepath.Join(project, ".git"), 0o755))
+	p := core.Policy{
+		WritableRoots: []core.WritableRoot{
+			{
+				Path:             project,
+				ReadOnlySubpaths: []string{filepath.Join(project, ".git")},
+			},
+			{Path: cover},
+		},
+		PrivateRoots: []string{base},
+		Network:      core.NetworkDenied,
+		Cwd:          project,
+	}
 
 	status, out := runSandboxed(t, backend, p, `echo x > ./.git/config`)
 	require.NotEqual(t, 0, status.Code, out)
-	require.NoFileExists(t, filepath.Join(p.Cwd, ".git", "config"))
+	require.NoFileExists(t, filepath.Join(project, ".git", "config"))
 
 	status, out = runSandboxed(t, backend, p, `echo x > ../beside.txt`)
 	require.Equal(t, 0, status.Code, out)
@@ -351,9 +455,9 @@ func TestSeatbeltKillAfterWaitDoesNotSignal(t *testing.T) {
 	require.False(t, killed, "Kill after Wait must be a no-op")
 }
 
-// When the workspace is the home directory, credential files sit inside the
-// writable root. subpath deny does not match a file, so without a literal
-// write deny `echo pwned > ~/.cargo/credentials.toml` succeeds.
+// A credential file inside a writable directory stays denied. The home itself
+// cannot be that directory. subpath deny does not match a file, so without a
+// literal write deny `echo pwned > credentials.toml` succeeds.
 func TestSeatbeltDeniesWritingCredentialFileInsideWritableHome(t *testing.T) {
 	backend, err := New()
 	require.NoError(t, err)
@@ -369,14 +473,14 @@ func TestSeatbeltDeniesWritingCredentialFileInsideWritableHome(t *testing.T) {
 
 	p := core.Policy{
 		WritableRoots: []core.WritableRoot{{
-			Path:             home,
-			ReadOnlySubpaths: []string{filepath.Join(home, ".git")},
+			Path:             cargo,
+			ReadOnlySubpaths: []string{filepath.Join(cargo, ".git")},
 		}},
 		ReadableRoots: []string{home, cargo},
 		PrivateRoots:  []string{home},
 		DenyRead:      []string{creds},
 		Network:       core.NetworkDenied,
-		Cwd:           home,
+		Cwd:           cargo,
 	}
 	require.NoError(t, p.Validate())
 
@@ -397,21 +501,24 @@ func TestSeatbeltDeniesWritingAppDataInsideWritableHome(t *testing.T) {
 
 	home, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
-	appData := filepath.Join(home, "Library", "App")
+	// ~/Library cannot be writable, and the home cannot either. The deny is
+	// checked inside a narrower root that still contains the app directory.
+	work := filepath.Join(home, "work")
+	appData := filepath.Join(work, "App")
 	require.NoError(t, os.MkdirAll(appData, 0o755))
 	prefs := filepath.Join(appData, "prefs.json")
 	require.NoError(t, os.WriteFile(prefs, []byte("keep"), 0o600))
 
 	p := core.Policy{
 		WritableRoots: []core.WritableRoot{{
-			Path:             home,
-			ReadOnlySubpaths: []string{filepath.Join(home, ".git")},
+			Path:             work,
+			ReadOnlySubpaths: []string{filepath.Join(work, ".git")},
 		}},
 		ReadableRoots: []string{home},
 		PrivateRoots:  []string{home},
 		DenyRead:      []string{appData},
 		Network:       core.NetworkDenied,
-		Cwd:           home,
+		Cwd:           work,
 	}
 	require.NoError(t, p.Validate())
 
@@ -547,4 +654,16 @@ func TestSeatbeltPreparedFingerprintMatchesPolicy(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = prep.Close() }()
 	require.Equal(t, p.Fingerprint(), prep.Fingerprint())
+}
+
+func TestSeatbeltSpawnRefusesACanceledContext(t *testing.T) {
+	backend, p, _ := darwinFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	prep, err := backend.Prepare(context.Background(), p)
+	require.NoError(t, err)
+	defer func() { _ = prep.Close() }()
+
+	_, err = backend.Spawn(ctx, prep, core.Command{Argv: []string{"/bin/echo", "x"}, Cwd: p.Cwd})
+	require.ErrorIs(t, err, context.Canceled)
 }

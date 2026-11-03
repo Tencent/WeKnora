@@ -2554,6 +2554,10 @@ export default {
       saveFailed: '保存に失敗しました',
       unknownError: '不明なエラー',
       requestFailed: 'リクエストに失敗しました'
+    },
+    hostApprovalDefault: {
+      title: '既定の実行権限の承認',
+      description: 'エージェントがファイルを削除するとき、またはワークスペースの外へ書き込むときに、毎回確認するかモデルに承認させるかを決めます。新しいチャットはここから始まり、今のチャットは入力欄の左で切り替えられます。'
     }
   },
   webSearchSettings: {
@@ -2775,6 +2779,32 @@ export default {
       cleared: 'メモリを{count}件削除しました',
       saveFailed: '操作に失敗しました: {message}'
     }
+  },
+  credentialVault: {
+    title: '認証情報の保管庫',
+    description: 'agent がサンドボックスのブラウザでサイトにログインするとき、ここに保存したアカウントを使えます。パスワードは暗号化して保存され、画面には再表示されません。再設定のみ可能です。入力したパスワードは agent も動作するサンドボックスのブラウザに入るため、信頼できる agent とサイトでのみ使ってください。',
+    unavailable: 'サーバーに有効な SYSTEM_AES_KEY が設定されていないため、認証情報を保存できません。',
+    loading: '読み込み中…',
+    loadFailed: '読み込みに失敗しました',
+    empty: '保存済みの認証情報はまだありません。agent からログインを求められたら、カードで「保管庫に保存」を選んでください。',
+    add: '認証情報を追加',
+    edit: '編集',
+    delete: '削除',
+    deleteConfirm: 'この認証情報を削除しますか？',
+    save: '保存',
+    saved: '保存しました',
+    deleted: '削除しました',
+    saveFailed: '保存に失敗しました',
+    titleLabel: '名前',
+    site: 'サイト',
+    domains: '入力を許可するドメイン',
+    domainsHint: 'カンマ区切りで最大 5 個。サイト自体は常に含まれます',
+    username: 'ユーザー名',
+    password: 'パスワード',
+    newPassword: '新しいパスワード',
+    passwordHint: '空欄のままにすると変更しません',
+    lastUsed: '最終使用：{time}',
+    never: '未使用',
   },
   envVarSettings: {
     title: 'サンドボックスのシークレット',
@@ -3437,7 +3467,14 @@ export default {
     voiceDecodeError: '録音の処理に失敗しました。もう一度お試しください',
     voiceTranscribeFailed: '音声認識に失敗しました。エージェントの ASR モデル設定を確認してください',
     voiceEmptyResult: '音声が認識されませんでした',
-    goToAgentSettings: 'エージェント設定に移動'
+    goToAgentSettings: 'エージェント設定に移動',
+    hostApprovalMode: {
+      ask: '承認を求める',
+      askHint: '削除とワークスペース外への書き込みは確認します',
+      auto: '代わりに承認',
+      autoHint: 'モデルが代わりに判断し、中断しません',
+      switchFailed: '承認モードを切り替えられませんでした'
+    }
   },
   createChat: {
     title: 'こんにちは、WeKnoraです。あなたのナレッジを、すぐそばに',
@@ -7262,9 +7299,31 @@ export default {
       unansweredTag: '未回答',
       submitFailed: '送信に失敗しました',
     },
+    secureForm: {
+      onlyFillInto: '入力先：{domains} のみ',
+      observedAt: 'ブラウザの現在のページ：{origin}',
+      originUnknown: 'ブラウザの現在のページを確認できません。ログインするサイトが表示されていることを確認してください',
+      originMismatch: 'ブラウザの現在のページ（{origin}）はログイン先のサイトと一致しません。確認してから入力してください',
+      originInsecure: 'ブラウザのページが HTTPS ではないため、認証情報は入力されません',
+      savedAccount: '保存済みアカウント',
+      useNew: '新しいユーザー名とパスワードを使う',
+      username: 'ユーザー名',
+      password: 'パスワード',
+      saveToVault: '保管庫に保存',
+      useOnce: '今回のみ使用',
+      fill: '入力',
+      decline: '拒否',
+      submittedHidden: '送信済み（内容は非表示）',
+      declined: '拒否しました',
+      timedOut: 'タイムアウト',
+      canceled: 'キャンセルされました',
+      submitFailed: '送信に失敗しました',
+      savedButClosed: '認証情報は保管庫に保存されましたが、このリクエストはすでに終了しています',
+    },
     promptDock: {
       approvalTitle: '承認が必要です',
       oauthTitle: '認可が必要です',
+      secureFormTitle: '認証情報の入力が必要です',
       waiting: 'あなたの対応待ち',
       handle: '対応する',
       pager: '{current} / {total}',
@@ -7363,8 +7422,7 @@ export default {
     },
     hostApproval: {
       titleDelete: 'ファイルを削除する前に確認してください',
-      titleDangerous: '危険な操作の確認',
-      titleDenied: 'サンドボックスがこのコマンドを拒否しました。次のディレクトリへのアクセスが必要です',
+      titleDenied: 'WeKnora が次のディレクトリへのアクセスを求めています',
       titleGeneric: '確認が必要です',
       command: 'コマンド',
       cwd: 'ディレクトリ',
@@ -7382,7 +7440,25 @@ export default {
       rejectedTag: '拒否済み',
       submitted: '送信しました',
       submitFailed: '送信に失敗しました',
-      userRejected: 'ユーザーが拒否しました'
+      userRejected: 'ユーザーが拒否しました',
+      titleFileWrite: 'ワークスペース外のファイルに書き込む',
+      fileOnly: 'このファイルだけを許可します',
+      writeMode: '方式',
+      writeModeOverwrite: '上書き',
+      writeModeAppend: '追記',
+      writeModeEdit: '編集',
+      writeBytes: '{bytes} バイト',
+      preview: '内容',
+      previewTruncated: '先頭 64 KB のみ表示',
+      env: '環境変数',
+      skillName: 'スキル',
+      stdin: '標準入力',
+      script: 'コマンドが実行するスクリプト'
+    },
+    hostReview: {
+      reviewing: '自動審査中…',
+      approved: '自動承認：{reason}',
+      denied: '自動審査で拒否：{reason}'
     },
     mcpOAuth: {
       waiting: '認可待ち · {target}',
@@ -7417,6 +7493,8 @@ export default {
       listDocuments: 'ドキュメント一覧',
       todoWrite: '計画管理',
       askUser: 'ユーザーに質問',
+      requestSecureForm: '認証情報をリクエスト',
+      browserFillSecret: '認証情報を入力',
       knowledgeGraphExtract: 'ナレッジグラフ抽出',
       thinking: '思考',
       attachmentParsing: '添付ファイルを解析',
