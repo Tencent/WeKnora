@@ -918,6 +918,9 @@ watch(visible, async (v) => {
   // starting now may join, so the shared slot is emptied on both edges.
   tempDsPromise = null
   if (!v) {
+    // Invalidate the old load and clear its spinner; its finally block belongs
+    // to the previous drawer session and must not change a reopened drawer.
+    loadingResources.value = false
     if (!isEdit.value && tempDsId.value) {
       try {
         await deleteDataSource(tempDsId.value)
