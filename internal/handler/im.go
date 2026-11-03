@@ -66,6 +66,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Mode            string     `json:"mode"`
 		OutputMode      string     `json:"output_mode"`
 		Locale          string     `json:"locale"`
+		LanguageMode    string     `json:"language_mode"`
 		SessionMode     string     `json:"session_mode"`
 		KnowledgeBaseID string     `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
@@ -85,18 +86,24 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	languageMode, err := im.NormalizeLanguageMode(req.LanguageMode)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	channel := &im.IMChannel{
-		TenantID:    tenantID,
-		AgentID:     agentID,
-		Platform:    req.Platform,
-		Name:        req.Name,
-		Mode:        req.Mode,
-		OutputMode:  req.OutputMode,
-		Locale:      locale,
-		SessionMode: req.SessionMode,
-		Credentials: req.Credentials,
-		Enabled:     true,
+		TenantID:     tenantID,
+		AgentID:      agentID,
+		Platform:     req.Platform,
+		Name:         req.Name,
+		Mode:         req.Mode,
+		OutputMode:   req.OutputMode,
+		Locale:       locale,
+		LanguageMode: languageMode,
+		SessionMode:  req.SessionMode,
+		Credentials:  req.Credentials,
+		Enabled:      true,
 	}
 	// The route guard passes an agent it cannot find in this workspace; both
 	// the agent and the file-saving KB must belong to the channel's workspace.
@@ -226,6 +233,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		Mode            *string    `json:"mode"`
 		OutputMode      *string    `json:"output_mode"`
 		Locale          *string    `json:"locale"`
+		LanguageMode    *string    `json:"language_mode"`
 		SessionMode     *string    `json:"session_mode"`
 		KnowledgeBaseID *string    `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
@@ -253,6 +261,14 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 			return
 		}
 		channel.Locale = locale
+	}
+	if req.LanguageMode != nil {
+		languageMode, err := im.NormalizeLanguageMode(*req.LanguageMode)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		channel.LanguageMode = languageMode
 	}
 	if req.SessionMode != nil {
 		channel.SessionMode = *req.SessionMode

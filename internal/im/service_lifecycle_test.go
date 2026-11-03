@@ -82,6 +82,7 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		mode TEXT NOT NULL DEFAULT 'websocket',
 		output_mode TEXT NOT NULL DEFAULT 'stream',
 		locale TEXT NOT NULL DEFAULT '',
+		language_mode TEXT NOT NULL DEFAULT 'fixed',
 		knowledge_base_id TEXT DEFAULT '',
 		bot_identity TEXT NOT NULL DEFAULT '',
 		session_mode TEXT NOT NULL DEFAULT 'user',
@@ -433,6 +434,11 @@ func TestSameChannelRuntimeConfigUsesSemanticCredentials(t *testing.T) {
 	fresh.Locale = "ja-JP"
 	if sameChannelRuntimeConfig(cached, &fresh) {
 		t.Fatal("changed locale did not trigger a rebuild")
+	}
+	fresh = *cached
+	fresh.LanguageMode = "follow_user"
+	if sameChannelRuntimeConfig(cached, &fresh) {
+		t.Fatal("changed language mode did not trigger a rebuild")
 	}
 }
 
