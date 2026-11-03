@@ -910,11 +910,12 @@ const addMemberRoleOptions = computed(() => [
   { label: t('organization.role.admin'), value: 'admin' },
 ])
 
-// 空间搜索结果选项。成员单位是空间，只按空间名搜索，因此直接展示空间名；
-// 空间名缺失时回退到空间 ID。
+// 按成员名称搜索时同时标出所属空间，避免把个人搜索结果误认为组织成员。
 const tenantSearchOptions = computed(() =>
   tenantSearchResults.value.map((c) => ({
-    label: c.tenant_name || `tenant#${c.tenant_id}`,
+    label: c.representative_username
+      ? `${c.representative_username} · ${c.tenant_name || `tenant#${c.tenant_id}`}`
+      : c.tenant_name || `tenant#${c.tenant_id}`,
     value: c.tenant_id,
   }))
 )
@@ -1552,10 +1553,9 @@ const handleSubmitUpgrade = async () => {
   }
 }
 
-// 添加成员：按完整空间 ID 查询。
+// 添加成员：按成员名称或完整空间 ID 查询。
 const TENANT_SEARCH_DEBOUNCE_MS = 300
 const TENANT_SEARCH_LIMIT = 10
-const TENANT_ID_PATTERN = /^[1-9]\d*$/
 let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
 let tenantSearchGeneration = 0
 let tenantSearchInput = ''
@@ -1583,7 +1583,7 @@ const handleTenantSearch = (query: string) => {
   if (workspaceID !== tenantSearchInput) return
   invalidateTenantSearch()
   const orgId = props.orgId
-  if (!TENANT_ID_PATTERN.test(workspaceID) || !orgId || !props.visible || !addMemberPopupVisible.value) {
+  if (!orgId || !props.visible || !addMemberPopupVisible.value) {
     return
   }
   const generation = tenantSearchGeneration
