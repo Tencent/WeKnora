@@ -4331,7 +4331,7 @@ export default {
       apiKeyOptional: 'API Key（可選）',
       apiKeyPlaceholder: '輸入 API Key',
       customHeadersLabel: '自定義請求頭（可選）',
-      customHeadersDesc: '呼叫遠程模型 API 時附加的 HTTP 請求頭，常用於企業閘道鑑權、鏈路追蹤等情境；Authorization、Content-Type 等保留頭會被自動忽略。',
+      customHeadersDesc: '呼叫遠程模型 API 時附加的 HTTP 請求頭，常用於企業閘道鑑權、鏈路追蹤等情境；Authorization、Content-Type 等保留頭會被自動忽略。取值支援 ${var} 動態佔位符，依當前請求上下文展開，可用變數：user_id、user_name、user_email、tenant_id、tenant_name、session_id、request_id。',
       customHeadersAdd: '新增請求頭',
       customHeadersKeyPlaceholder: 'Header 名稱',
       customHeadersValuePlaceholder: 'Header 值',
