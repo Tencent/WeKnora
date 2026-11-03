@@ -20,7 +20,10 @@ func TestProcessingCacheWiring(t *testing.T) {
 	if newProcessingCache(nil, nil) != nil || newProcessingCache(&gorm.DB{}, &config.Config{}) != nil {
 		t.Fatal("disabled configuration must preserve the original indexing path")
 	}
-	cache := newProcessingCache(&gorm.DB{}, &config.Config{ProcessingCache: &config.ProcessingCacheConfig{ReadEnabled: true}})
+	cache := newProcessingCache(
+		&gorm.DB{},
+		&config.Config{ProcessingCache: &config.ProcessingCacheConfig{ReadEnabled: true}},
+	)
 	if cache == nil {
 		t.Fatal("enabled cache not constructed")
 	}

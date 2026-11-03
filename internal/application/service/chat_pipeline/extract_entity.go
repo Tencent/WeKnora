@@ -198,6 +198,15 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 		return nil, err
 	}
 
+	return e.ParseResponse(ctx, chatResponse)
+}
+
+// ParseResponse shares the extractor's parsing and retry classification with
+// ingestion caches, which must not turn truncated prose into a final refusal.
+func (e *Extractor) ParseResponse(ctx context.Context, chatResponse *types.ChatResponse) (*types.GraphData, error) {
+	if chatResponse == nil {
+		return nil, fmt.Errorf("nil graph response")
+	}
 	graph, err := e.formater.ParseGraph(ctx, chatResponse.Content)
 	if err != nil {
 		if errors.Is(err, ErrModelDeclined) && !modelStoppedOnItsOwn(chatResponse.FinishReason) {

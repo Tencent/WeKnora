@@ -17,21 +17,38 @@ import (
 
 func setup(t *testing.T) (*Store, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=5000", t.Name())), &gorm.Config{SkipDefaultTransaction: true, Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := gorm.Open(
+		sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=5000", t.Name())),
+		&gorm.Config{SkipDefaultTransaction: true, Logger: logger.Default.LogMode(logger.Silent)},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := db.DB()
 	raw.SetMaxOpenConns(1)
-	t.Cleanup(func() { raw.Close() })
+	t.Cleanup(func() {
+		if err := raw.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if err = db.AutoMigrate(&Model{}); err != nil {
 		t.Fatal(err)
 	}
 	return New(db), db
 }
+
 func record(key string, expires time.Time) *processingcache.Record {
-	return &processingcache.Record{TenantID: 1, ScopeID: "doc", Stage: "embedding", Key: key, Payload: []byte("first"), Checksum: "checksum", ExpiresAt: expires}
+	return &processingcache.Record{
+		TenantID:  1,
+		ScopeID:   "doc",
+		Stage:     "embedding",
+		Key:       key,
+		Payload:   []byte("first"),
+		Checksum:  "checksum",
+		ExpiresAt: expires,
+	}
 }
+
 func TestWinnerAndIsolation(t *testing.T) {
 	s, _ := setup(t)
 	ctx := context.Background()
@@ -57,6 +74,7 @@ func TestWinnerAndIsolation(t *testing.T) {
 		}
 	}
 }
+
 func TestReplaceExpiredAndCompareDelete(t *testing.T) {
 	s, _ := setup(t)
 	ctx := context.Background()
@@ -80,15 +98,20 @@ func TestReplaceExpiredAndCompareDelete(t *testing.T) {
 	}
 	wrong := fresh
 	wrong.Checksum = "different"
-	s.Delete(ctx, &wrong)
+	if err := s.Delete(ctx, &wrong); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Get(ctx, 1, "doc", "embedding", "key"); err != nil {
 		t.Fatal(err)
 	}
-	s.Delete(ctx, &fresh)
+	if err := s.Delete(ctx, &fresh); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Get(ctx, 1, "doc", "embedding", "key"); !errors.Is(err, processingcache.ErrMiss) {
 		t.Fatal(err)
 	}
 }
+
 func TestBoundedCleanupAndScope(t *testing.T) {
 	s, _ := setup(t)
 	ctx := context.Background()
@@ -107,7 +130,9 @@ func TestBoundedCleanupAndScope(t *testing.T) {
 	}
 	other := record("other", time.Now().Add(time.Hour))
 	other.TenantID = 2
-	s.PutIfAbsent(ctx, other)
+	if _, err := s.PutIfAbsent(ctx, other); err != nil {
+		t.Fatal(err)
+	}
 	if err = s.DeleteScope(ctx, 1, "doc"); err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +140,7 @@ func TestBoundedCleanupAndScope(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestConcurrentWritersKeepOneWinner(t *testing.T) {
 	s, _ := setup(t)
 	ctx := context.Background()
@@ -156,18 +182,25 @@ func TestCleanupPreservesRefreshedCandidate(t *testing.T) {
 	s, db := setup(t)
 	ctx := context.Background()
 	old := record("key", time.Now().Add(-time.Hour))
-	s.PutIfAbsent(ctx, old)
+	if _, err := s.PutIfAbsent(ctx, old); err != nil {
+		t.Fatal(err)
+	}
 	// Refresh after cleanup SELECT and before conditional DELETE.
 	fired := false
-	db.Callback().Delete().Before("gorm:delete").Register("test:refresh", func(tx *gorm.DB) {
+	if err := db.Callback().Delete().Before("gorm:delete").Register("test:refresh", func(_ *gorm.DB) {
 		if fired {
 			return
 		}
 		fired = true
-		if err := db.Model(&Model{}).Where("tenant_id = ? AND scope_id = ? AND stage = ? AND cache_key = ?", 1, "doc", "embedding", "key").Update("expires_at", time.Now().Add(time.Hour)).Error; err != nil {
+		if err := db.Model(&Model{}).
+			Where("tenant_id = ? AND scope_id = ? AND stage = ? AND cache_key = ?", 1, "doc", "embedding", "key").
+			Update("expires_at", time.Now().Add(time.Hour)).
+			Error; err != nil {
 			t.Error(err)
 		}
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	n, err := s.DeleteExpired(ctx, time.Now(), 10)
 	if err != nil || n != 0 {
 		t.Fatalf("refreshed deleted: %d %v", n, err)
@@ -176,12 +209,21 @@ func TestCleanupPreservesRefreshedCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestPutTriggersBoundedOpportunisticCleanup(t *testing.T) {
 	s, db := setup(t)
 	ctx := context.Background()
 	old := record("expired", time.Now().Add(-time.Hour))
 	// Seed directly so the initial write is the cleanup trigger.
-	row := Model{TenantID: old.TenantID, ScopeID: old.ScopeID, Stage: old.Stage, CacheKey: old.Key, Payload: old.Payload, Checksum: old.Checksum, ExpiresAt: old.ExpiresAt}
+	row := Model{
+		TenantID:  old.TenantID,
+		ScopeID:   old.ScopeID,
+		Stage:     old.Stage,
+		CacheKey:  old.Key,
+		Payload:   old.Payload,
+		Checksum:  old.Checksum,
+		ExpiresAt: old.ExpiresAt,
+	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -223,17 +265,24 @@ func TestZeroExpiryIsNonExpiring(t *testing.T) {
 }
 
 func TestMigrationDocumentDeletionAndRollback(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:migration?mode=memory&cache=shared&_foreign_keys=on"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	db, err := gorm.Open(
+		sqlite.Open("file:migration?mode=memory&cache=shared&_foreign_keys=on"),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := db.DB()
 	raw.SetMaxOpenConns(1)
-	defer raw.Close()
+	defer func() {
+		if err := raw.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	if err = db.Exec("CREATE TABLE knowledges (id VARCHAR(36) PRIMARY KEY)").Error; err != nil {
 		t.Fatal(err)
 	}
-	up, err := os.ReadFile("../../../migrations/sqlite/000051_processing_cache.up.sql")
+	up, err := os.ReadFile("../../../migrations/sqlite/000053_processing_cache.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +307,7 @@ func TestMigrationDocumentDeletionAndRollback(t *testing.T) {
 	if _, err = s.PutIfAbsent(ctx, r); err == nil {
 		t.Fatal("late write recreated deleted document cache")
 	}
-	down, err := os.ReadFile("../../../migrations/sqlite/000051_processing_cache.down.sql")
+	down, err := os.ReadFile("../../../migrations/sqlite/000053_processing_cache.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

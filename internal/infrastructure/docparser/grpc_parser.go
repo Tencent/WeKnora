@@ -81,9 +81,9 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 	p.conn = conn
 	p.client = proto.NewDocReaderClient(conn)
 	p.addr = addr
-	// Remote deployments do not expose a verifiable engine version over this
-	// protocol. Operators opt in with a deployment version and bump it on any
-	// parser/model/config change. Without one, preprocessing remains uncached.
+	// GetVersionInfo reports the docreader build, but does not cover every
+	// parser/model/config change. Operators opt in with a deployment version
+	// and bump it when those inputs change. Without one, preprocessing is uncached.
 	p.cacheIdentity = ""
 	if version := os.Getenv("DOCREADER_CACHE_VERSION"); version != "" {
 		p.cacheIdentity = processingcache.Digest(struct {
@@ -94,6 +94,7 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 	return nil
 }
 
+// ProcessingCacheIdentity returns the configured deployment fingerprint.
 func (p *GRPCDocumentReader) ProcessingCacheIdentity() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

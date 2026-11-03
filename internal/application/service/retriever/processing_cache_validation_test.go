@@ -11,7 +11,13 @@ func TestProcessingCacheVectorPayloadValidation(t *testing.T) {
 			t.Errorf("accepted %s", payload)
 		}
 	}
-	for _, vector := range [][]float32{{float32(math.NaN())}, {float32(math.Inf(1))}, {float32(math.Inf(-1))}, nil, {1, 2}} {
+	for _, vector := range [][]float32{
+		{float32(math.NaN())},
+		{float32(math.Inf(1))},
+		{float32(math.Inf(-1))},
+		nil,
+		{1, 2},
+	} {
 		if err := validateVector(vector, 1); err == nil {
 			t.Errorf("accepted %v", vector)
 		}

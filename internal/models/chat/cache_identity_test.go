@@ -1,14 +1,21 @@
 package chat
 
 import (
+	"testing"
+
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
-	"testing"
 )
 
 func TestProcessingCacheIdentity(t *testing.T) {
-	cfg := &ChatConfig{Source: types.ModelSourceRemote, Provider: "openai", ModelName: "gpt-4o", APIKey: "secret", CustomHeaders: map[string]string{"X-Route": "a"}}
+	cfg := &ChatConfig{
+		Source:        types.ModelSourceRemote,
+		Provider:      "openai",
+		ModelName:     "gpt-4o",
+		APIKey:        "secret",
+		CustomHeaders: map[string]string{"X-Route": "a"},
+	}
 	build := func() string {
 		c, e := NewChat(cfg, nil)
 		if e != nil {
@@ -79,6 +86,7 @@ func TestProcessingCacheEffectiveOverlayIdentity(t *testing.T) {
 		}
 	}
 }
+
 func TestProcessingCacheLocalIdentity(t *testing.T) {
 	cfg := &ChatConfig{Source: types.ModelSourceLocal, ModelName: "local"}
 	t.Setenv("OLLAMA_BASE_URL", "http://ollama-a:11434")

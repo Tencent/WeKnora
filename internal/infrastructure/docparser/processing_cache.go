@@ -6,9 +6,9 @@ import (
 	"encoding/xml"
 	"fmt"
 	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
+	_ "image/gif"  // Register the decoder for cached image validation.
+	_ "image/jpeg" // Register the decoder for cached image validation.
+	_ "image/png"  // Register the decoder for cached image validation.
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +17,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	_ "golang.org/x/image/bmp"
-	_ "golang.org/x/image/tiff"
-	_ "golang.org/x/image/webp"
+	_ "golang.org/x/image/bmp"  // Register the decoder for cached image validation.
+	_ "golang.org/x/image/tiff" // Register the decoder for cached image validation.
+	_ "golang.org/x/image/webp" // Register the decoder for cached image validation.
 )
 
 // ParserCacheIdentity hashes effective reader configuration. Remote protocols do
@@ -44,7 +44,9 @@ func ParserCacheIdentity(reader interfaces.DocReader, req *types.ReadRequest) st
 		return processingcache.Digest([]any{"simple.reader.v1"})
 	case *AnydocReader:
 		fallback := ""
-		if req != nil && fileTypeOf(req) == "pdf" && r.fallback != nil {
+		if req != nil && r.fallback != nil &&
+			(fileTypeOf(req) == "pdf" ||
+				(fileTypeOf(req) == "pptx" && r.extractImages && pptxHasVectorMedia(req.FileContent))) {
 			fallback = ParserCacheIdentity(r.fallback, req)
 			if fallback == "" {
 				return ""
@@ -54,15 +56,55 @@ func ParserCacheIdentity(reader interfaces.DocReader, req *types.ReadRequest) st
 	case *HTTPDocumentReader:
 		return versioned("http", r.base())
 	case *MinerUReader:
-		return versioned("mineru", []any{r.endpoint, r.timeout, r.apiKey, r.tier, r.backend, r.vlmServerURL, r.formulaEnable, r.tableEnable, r.language, r.parseMethod})
+		return versioned(
+			"mineru",
+			[]any{
+				r.endpoint,
+				r.timeout,
+				r.apiKey,
+				r.tier,
+				r.backend,
+				r.vlmServerURL,
+				r.formulaEnable,
+				r.tableEnable,
+				r.language,
+				r.parseMethod,
+			},
+		)
 	case *MinerUCloudReader:
-		return versioned("mineru.cloud", []any{r.apiKey, r.baseURL, r.timeout, r.pollInterval, r.model, r.formulaEnable, r.tableEnable, r.ocrEnable, r.language})
+		return versioned(
+			"mineru.cloud",
+			[]any{
+				r.apiKey,
+				r.baseURL,
+				r.timeout,
+				r.pollInterval,
+				r.model,
+				r.formulaEnable,
+				r.tableEnable,
+				r.ocrEnable,
+				r.language,
+			},
+		)
 	case *PaddleOCRVLReader:
 		return versioned("paddleocr.vl", []any{r.endpoint, r.timeout, r.useSeal, r.useChart})
 	case *PaddleOCRVLCloudReader:
-		return versioned("paddleocr.vl.cloud", []any{r.token, r.baseURL, r.model, r.useSeal, r.useChart, r.timeout, r.pollInterval})
+		return versioned(
+			"paddleocr.vl.cloud",
+			[]any{r.token, r.baseURL, r.model, r.useSeal, r.useChart, r.timeout, r.pollInterval},
+		)
 	case *WeKnoraCloudSignedDocumentReader:
-		return versioned("weknora.cloud", []any{weKnoraCloudReaderBaseURL, r.appID, r.apiKey, r.initialPollInterval, r.maxPollInterval, r.pollTimeout})
+		return versioned(
+			"weknora.cloud",
+			[]any{
+				weKnoraCloudReaderBaseURL,
+				r.appID,
+				r.apiKey,
+				r.initialPollInterval,
+				r.maxPollInterval,
+				r.pollTimeout,
+			},
+		)
 	}
 	return ""
 }
@@ -85,7 +127,9 @@ func ValidateProcessingCacheArtifact(result *types.ReadResult) error {
 	}
 	refs := map[string]types.ImageRef{}
 	for _, ref := range result.ImageRefs {
-		if len(ref.ImageData) == 0 || ref.StorageKey != "" || ref.OriginalRef == "" || ephemeralParserReference(ref.OriginalRef) || filepath.Base(ref.Filename) != ref.Filename {
+		if len(ref.ImageData) == 0 || ref.StorageKey != "" || ref.OriginalRef == "" ||
+			ephemeralParserReference(ref.OriginalRef) ||
+			filepath.Base(ref.Filename) != ref.Filename {
 			return fmt.Errorf("nonportable parser image")
 		}
 		if err := validateParserImageBytes(ref.ImageData); err != nil {
@@ -132,9 +176,13 @@ func ValidateProcessingCacheArtifact(result *types.ReadResult) error {
 	}
 	return nil
 }
+
 func ephemeralParserReference(ref string) bool {
-	return filepath.IsAbs(ref) || strings.HasPrefix(ref, "/") || strings.Contains(ref, `:\`) || strings.Contains(ref, "://") || strings.HasPrefix(ref, `\\`)
+	return filepath.IsAbs(ref) || strings.HasPrefix(ref, "/") || strings.Contains(ref, `:\`) ||
+		strings.Contains(ref, "://") ||
+		strings.HasPrefix(ref, `\\`)
 }
+
 func validateParserImageBytes(data []byte) error {
 	if bytes.Contains(data, []byte("<svg")) {
 		var root struct{ XMLName xml.Name }

@@ -3,6 +3,7 @@ package vlm
 import (
 	"context"
 	"fmt"
+
 	"github.com/Tencent/WeKnora/internal/processingcache"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -30,7 +31,8 @@ func NewOllamaVLM(config *Config, ollamaService *ollama.OllamaService) (*OllamaV
 			Endpoint string
 		}{config, ollamaService.BaseURL()})
 	}
-	return &OllamaVLM{cacheIdentity: identity,
+	return &OllamaVLM{
+		cacheIdentity: identity,
 		modelName:     config.ModelName,
 		modelID:       config.ModelID,
 		ollamaService: ollamaService,
@@ -78,9 +80,11 @@ func (v *OllamaVLM) PredictWithOptions(
 	logger.Infof(ctx, "[VLM] Calling Ollama API, model=%s, numImages=%d, totalImageSize=%d", v.modelName, len(images), totalImageSize)
 
 	var result, doneReason string
+	var done bool
 	err := v.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 		result = resp.Message.Content
 		doneReason = resp.DoneReason
+		done = resp.Done
 		return nil
 	})
 	if err != nil {
@@ -90,6 +94,12 @@ func (v *OllamaVLM) PredictWithOptions(
 		// Same contract as RemoteAPIVLM: a cut-off answer is incomplete and must
 		// not be indexed as successful OCR or caption text.
 		return "", fmt.Errorf("%w (done_reason=length)", ErrTruncatedCompletion)
+	}
+	if err := validateCompletionReason(doneReason, opts != nil && opts.RequireComplete); err != nil {
+		return "", err
+	}
+	if opts != nil && opts.RequireComplete && !done {
+		return "", fmt.Errorf("ollama VLM response not complete")
 	}
 
 	logger.Infof(ctx, "[VLM] Ollama response received, len=%d", len(result))

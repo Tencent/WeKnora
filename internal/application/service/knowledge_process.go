@@ -2170,8 +2170,16 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 		generationRevision := chunk.ContentRevision
 		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(withProcessingDocument(ctx, knowledge.ID), chatModel, enrichContent(chunk), prevContent, nextContent,
-			knowledge.Title, questionCount, customInstructions)
+		questions, err := s.generateQuestionsWithContext(
+			withProcessingDocument(ctx, knowledge.ID),
+			chatModel,
+			enrichContent(chunk),
+			prevContent,
+			nextContent,
+			knowledge.Title,
+			questionCount,
+			customInstructions,
+		)
 		if err != nil {
 			llmCallFailed++
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
@@ -2529,8 +2537,18 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 		generationRevision := chunk.ContentRevision
 		questions, gerr := s.generateQuestionsWithContext(
-			withProcessingDocument(ctx, knowledge.ID), chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
-			customInstructions)
+			withProcessingDocument(
+				ctx,
+				knowledge.ID,
+			),
+			chatModel,
+			enrich(chunk),
+			prevContentAt(i),
+			nextContentAt(i),
+			knowledge.Title,
+			questionCount,
+			customInstructions,
+		)
 		if gerr != nil {
 			llmCallFailed++
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, gerr)
@@ -2687,14 +2705,18 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 			if err != nil {
 				return nil, fmt.Errorf("failed to generate questions: %w", err)
 			}
-			if err := completeProcessingResponse(response); err != nil {
-				return nil, err
+			if response == nil {
+				return nil, fmt.Errorf("nil processing response")
 			}
 			if strings.TrimSpace(response.Content) == "" {
 				return []string{}, errProcessingCacheAdmission
 			}
 
-			return parseGeneratedQuestions(response.Content, questionCount), nil
+			questions := parseGeneratedQuestions(response.Content, questionCount)
+			if completeProcessingResponse(response) != nil {
+				return questions, errProcessingCacheAdmission
+			}
+			return questions, nil
 		})
 }
 
@@ -2855,7 +2877,10 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	return s.regenerateKnowledgeSummary(withProcessingCacheBypass(ctx), knowledgeID)
 }
 
-func (s *knowledgeService) regenerateKnowledgeSummary(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
+func (s *knowledgeService) regenerateKnowledgeSummary(
+	ctx context.Context,
+	knowledgeID string,
+) (*types.Knowledge, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {

@@ -75,7 +75,13 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		vectors, err := v.embedTextWindow(ctx, embedder, []*types.IndexInfo{indexInfo}, []string{v.embeddingText(ctx, indexInfo.Content)}, true)
+		vectors, err := v.embedTextWindow(
+			ctx,
+			embedder,
+			[]*types.IndexInfo{indexInfo},
+			[]string{v.embeddingText(ctx, indexInfo.Content)},
+			true,
+		)
 		if err != nil {
 			return err
 		}

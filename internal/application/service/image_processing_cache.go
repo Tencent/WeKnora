@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
+	_ "image/gif"  // Register the decoder for cached image validation.
+	_ "image/jpeg" // Register the decoder for cached image validation.
+	_ "image/png"  // Register the decoder for cached image validation.
 	"strings"
 	"unicode/utf8"
 
@@ -29,18 +29,26 @@ func processingModelIdentity(model any) string {
 // Only complete action results enter the cache. A rejected cache candidate still
 // follows the action's original partial-output/diagnostic behavior on this run.
 func (r *runContext) cachedImagePrediction(ctx context.Context, prompt, key string, on bool) (string, error) {
+	identity := processingModelIdentity(r.model)
 	compute := func(ctx context.Context) (string, error) {
-		value, err := r.model.PredictWithOptions(ctx, [][]byte{r.imageBytes}, prompt, &vlm.PredictOptions{Thinking: &on})
+		value, err := r.model.PredictWithOptions(
+			ctx,
+			[][]byte{r.imageBytes},
+			prompt,
+			&vlm.PredictOptions{Thinking: &on, RequireComplete: r.processingCache.Enabled() && identity != ""},
+		)
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
 		return value, err
 	}
-	identity := processingModelIdentity(r.model)
 	if identity == "" || r.payload == nil || r.processingCache == nil {
 		return compute(ctx)
 	}
 	validateOutput := func(raw string) error {
+		if identity != processingModelIdentity(r.model) {
+			return fmt.Errorf("image model identity changed during call")
+		}
 		if !utf8.ValidString(raw) {
 			return errors.New("invalid image action text")
 		}
@@ -71,14 +79,23 @@ func (r *runContext) cachedImagePrediction(ctx context.Context, prompt, key stri
 	var original string
 	var computed bool
 	var computeErr error
-	out, err := processingcache.Value(ctx, r.processingCache, r.payload.TenantID, r.payload.KnowledgeID, "image.action.v1", struct {
-		Image, Prompt, Action, Model string
-		Thinking                     bool
-	}{processingcache.Digest(r.imageBytes), prompt, key, identity, on}, validate, func(ctx context.Context) (string, error) {
-		computed = true
-		original, computeErr = compute(ctx)
-		return original, computeErr
-	})
+	out, err := processingcache.Value(
+		ctx,
+		r.processingCache,
+		r.payload.TenantID,
+		r.payload.KnowledgeID,
+		"image.action.v1",
+		struct {
+			Image, Prompt, Action, Model string
+			Thinking                     bool
+		}{processingcache.Digest(r.imageBytes), prompt, key, identity, on},
+		validate,
+		func(ctx context.Context) (string, error) {
+			computed = true
+			original, computeErr = compute(ctx)
+			return original, computeErr
+		},
+	)
 	if err != nil && computed && computeErr == nil && ctx.Err() == nil {
 		return original, nil
 	}
@@ -128,11 +145,20 @@ func (r *runContext) cachedImagePreprocess(ctx context.Context) ([]byte, bool, e
 	var original imagePreprocessResult
 	var computed bool
 	var computeErr error
-	out, err := processingcache.Value(ctx, r.processingCache, r.payload.TenantID, r.payload.KnowledgeID, "image.preprocess.v1", struct{ Image, Engine string }{processingcache.Digest(r.imageBytes), identity}, validate, func(ctx context.Context) (imagePreprocessResult, error) {
-		computed = true
-		original, computeErr = compute(ctx)
-		return original, computeErr
-	})
+	out, err := processingcache.Value(
+		ctx,
+		r.processingCache,
+		r.payload.TenantID,
+		r.payload.KnowledgeID,
+		"image.preprocess.v1",
+		struct{ Image, Engine string }{processingcache.Digest(r.imageBytes), identity},
+		validate,
+		func(ctx context.Context) (imagePreprocessResult, error) {
+			computed = true
+			original, computeErr = compute(ctx)
+			return original, computeErr
+		},
+	)
 	if err != nil && computed && computeErr == nil && ctx.Err() == nil {
 		return original.Bytes, original.Fallback, nil
 	}

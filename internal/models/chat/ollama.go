@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/Tencent/WeKnora/internal/processingcache"
 	"io"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	ollamaapi "github.com/ollama/ollama/api"
@@ -35,7 +35,8 @@ func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*Ol
 			Endpoint string
 		}{config, ollamaService.BaseURL()})
 	}
-	return &OllamaChat{cacheIdentity: identity,
+	return &OllamaChat{
+		cacheIdentity: identity,
 		modelName:     config.ModelName,
 		modelID:       config.ModelID,
 		ollamaService: ollamaService,

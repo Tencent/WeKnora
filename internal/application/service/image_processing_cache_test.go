@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
-	"github.com/Tencent/WeKnora/internal/processingcache"
-	"github.com/Tencent/WeKnora/internal/types"
 	"image"
 	"image/png"
 	"sync"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/models/vlm"
+	"github.com/Tencent/WeKnora/internal/processingcache"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 type imageCacheStore struct {
@@ -35,6 +36,7 @@ func (s *imageCacheStore) Get(_ context.Context, t uint64, scope, stage, key str
 	}
 	return nil, processingcache.ErrMiss
 }
+
 func (s *imageCacheStore) PutIfAbsent(_ context.Context, r *processingcache.Record) (*processingcache.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -45,6 +47,7 @@ func (s *imageCacheStore) PutIfAbsent(_ context.Context, r *processingcache.Reco
 	s.rows[k] = copyImageCacheRecord(r)
 	return copyImageCacheRecord(r), nil
 }
+
 func (s *imageCacheStore) Delete(_ context.Context, r *processingcache.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -59,17 +62,64 @@ type imageCacheModel struct {
 	err             error
 }
 
+type imageBoundaryModel struct {
+	*imageCacheModel
+	rotate           bool
+	completeRequired bool
+}
+
+func (m *imageBoundaryModel) PredictWithOptions(
+	ctx context.Context,
+	images [][]byte,
+	prompt string,
+	opts *vlm.PredictOptions,
+) (string, error) {
+	m.completeRequired = opts != nil && opts.RequireComplete
+	value, err := m.imageCacheModel.PredictWithOptions(ctx, images, prompt, opts)
+	if m.rotate {
+		m.identity += "changed"
+	}
+	return value, err
+}
+
+func TestImageProcessingCacheRequiresCompletionAndStableIdentity(t *testing.T) {
+	store := &imageCacheStore{rows: map[string]*processingcache.Record{}}
+	model := &imageBoundaryModel{imageCacheModel: &imageCacheModel{identity: "model", reply: "caption"}, rotate: true}
+	r := &runContext{
+		processingCache: processingcache.New(store, processingcache.Options{ReadEnabled: true, WriteEnabled: true}),
+		payload:         &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "doc"},
+		model:           model,
+		imageBytes:      []byte("pixels"),
+	}
+	for i := 0; i < 2; i++ {
+		value, err := r.cachedImagePrediction(context.Background(), "prompt", "caption", false)
+		if err != nil || value != "caption" {
+			t.Fatalf("live output lost: %q %v", value, err)
+		}
+	}
+	if !model.completeRequired || len(store.rows) != 0 || model.calls != 2 {
+		t.Fatal("completion/identity admission contract failed")
+	}
+}
+
 func (m *imageCacheModel) ProcessingCacheIdentity() string { return m.identity }
 func (m *imageCacheModel) PredictWithOptions(context.Context, [][]byte, string, *vlm.PredictOptions) (string, error) {
 	m.calls++
 	return m.reply, m.err
 }
+
 func TestImageProcessingCacheActualInputs(t *testing.T) {
 	m := &imageCacheModel{identity: "model-v1", reply: "a caption"}
 	store := &imageCacheStore{rows: map[string]*processingcache.Record{}}
 	runtime := processingcache.New(store, processingcache.Options{ReadEnabled: true, WriteEnabled: true})
 	makeRun := func(url string) *runContext {
-		return &runContext{processingCache: runtime, payload: &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "doc", ImageURL: url}, model: m, imageBytes: []byte("same pixels"), out: types.JSONMap{}}
+		return &runContext{
+			processingCache: runtime,
+			payload:         &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "doc", ImageURL: url},
+			model:           m,
+			imageBytes:      []byte("same pixels"),
+			out:             types.JSONMap{},
+		}
 	}
 	a := makeRun("old")
 	b := makeRun("new")
@@ -82,16 +132,24 @@ func TestImageProcessingCacheActualInputs(t *testing.T) {
 		t.Fatalf("same bytes/new URL calls=%d", m.calls)
 	}
 	b.imageBytes = []byte("different pixels")
-	b.think(context.Background(), "caption prompt", "caption.thinking_enabled")
-	b.think(context.Background(), "changed prompt", "caption.thinking_enabled")
+	if _, err := b.think(context.Background(), "caption prompt", "caption.thinking_enabled"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.think(context.Background(), "changed prompt", "caption.thinking_enabled"); err != nil {
+		t.Fatal(err)
+	}
 	m.identity = "model-v2"
-	b.think(context.Background(), "changed prompt", "caption.thinking_enabled")
+	if _, err := b.think(context.Background(), "changed prompt", "caption.thinking_enabled"); err != nil {
+		t.Fatal(err)
+	}
 	if m.calls != 4 {
 		t.Fatalf("invalidation calls=%d", m.calls)
 	}
 	m.err = errors.New("network")
 	for i := 0; i < 2; i++ {
-		b.think(context.Background(), "failure", "caption.thinking_enabled")
+		if _, err := b.think(context.Background(), "failure", "caption.thinking_enabled"); !errors.Is(err, m.err) {
+			t.Fatalf("expected model error %v, got %v", m.err, err)
+		}
 	}
 	if m.calls != 6 {
 		t.Fatal("cached error")
@@ -99,7 +157,9 @@ func TestImageProcessingCacheActualInputs(t *testing.T) {
 	m.err = nil
 	m.reply = ""
 	for i := 0; i < 2; i++ {
-		b.think(context.Background(), "empty caption", "caption.thinking_enabled")
+		if _, err := b.think(context.Background(), "empty caption", "caption.thinking_enabled"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if m.calls != 8 {
 		t.Fatal("cached empty caption")
@@ -110,7 +170,14 @@ func TestImageProcessingCacheValidationAndCurrentBinding(t *testing.T) {
 	store := &imageCacheStore{rows: map[string]*processingcache.Record{}}
 	runtime := processingcache.New(store, processingcache.Options{ReadEnabled: true, WriteEnabled: true})
 	m := &imageCacheModel{identity: "model", reply: "No text content."}
-	r := &runContext{processingCache: runtime, payload: &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "doc", ImageURL: "old"}, model: m, imageBytes: []byte("pixels"), out: types.JSONMap{}, imageInfo: &types.ImageInfo{}}
+	r := &runContext{
+		processingCache: runtime,
+		payload:         &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "doc", ImageURL: "old"},
+		model:           m,
+		imageBytes:      []byte("pixels"),
+		out:             types.JSONMap{},
+		imageInfo:       &types.ImageInfo{},
+	}
 	for i := 0; i < 2; i++ {
 		if err := runOCRAction(context.Background(), r); err != nil {
 			t.Fatal(err)
@@ -121,25 +188,33 @@ func TestImageProcessingCacheValidationAndCurrentBinding(t *testing.T) {
 	}
 	m.reply = "recognized text"
 	r.imageBytes = []byte("new pixels")
-	runOCRAction(context.Background(), r)
+	if err := runOCRAction(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
 	r.payload.ImageURL = "current"
 	r.payload.ChunkID = "new UUID"
 	r.imageInfo = &types.ImageInfo{}
-	runOCRAction(context.Background(), r)
+	if err := runOCRAction(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
 	if m.calls != 2 || r.imageInfo.OCRText != "recognized text" || r.payload.ChunkID != "new UUID" {
 		t.Fatal("failed current binding")
 	}
 	m.reply = ""
 	r.imageBytes = []byte("invalid output")
 	for i := 0; i < 2; i++ {
-		runOCRAction(context.Background(), r)
+		if err := runOCRAction(context.Background(), r); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if m.calls != 4 {
 		t.Fatal("cached invalid OCR")
 	}
 	m.err = vlm.ErrTruncatedCompletion
 	for i := 0; i < 2; i++ {
-		r.think(context.Background(), "truncated", "ocr.thinking_enabled")
+		if _, err := r.think(context.Background(), "truncated", "ocr.thinking_enabled"); !errors.Is(err, m.err) {
+			t.Fatalf("expected model error %v, got %v", m.err, err)
+		}
 	}
 	if m.calls != 6 {
 		t.Fatal("cached truncated completion")
@@ -152,7 +227,9 @@ func TestImageProcessingCacheValidationAndCurrentBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := m.calls
-	r.think(context.Background(), "canceled", "caption.thinking_enabled")
+	if _, err := r.think(context.Background(), "canceled", "caption.thinking_enabled"); err != nil {
+		t.Fatal(err)
+	}
 	if m.calls != before+1 {
 		t.Fatal("canceled result persisted")
 	}
@@ -160,7 +237,9 @@ func TestImageProcessingCacheValidationAndCurrentBinding(t *testing.T) {
 		row.Payload = []byte("corrupt")
 	}
 	before = m.calls
-	r.think(context.Background(), "canceled", "caption.thinking_enabled")
+	if _, err := r.think(context.Background(), "canceled", "caption.thinking_enabled"); err != nil {
+		t.Fatal(err)
+	}
 	if m.calls != before+1 {
 		t.Fatal("did not repair corrupt payload")
 	}
@@ -175,7 +254,10 @@ func (p *identifiedPreprocessor) ProcessingCacheIdentity() string { return p.ide
 func TestImageProcessingCachePreprocess(t *testing.T) {
 	store := &imageCacheStore{rows: map[string]*processingcache.Record{}}
 	runtime := processingcache.New(store, processingcache.Options{ReadEnabled: true, WriteEnabled: true})
-	p := &identifiedPreprocessor{stubPreprocessor: &stubPreprocessor{rectified: testImageCachePNG(t)}, identity: "engine-v1"}
+	p := &identifiedPreprocessor{
+		stubPreprocessor: &stubPreprocessor{rectified: testImageCachePNG(t)},
+		identity:         "engine-v1",
+	}
 	r := preprocessRun(types.PreprocessModeAlways, p, types.ImageAttrs{})
 	r.processingCache = runtime
 	r.payload.TenantID = 1
@@ -190,14 +272,18 @@ func TestImageProcessingCachePreprocess(t *testing.T) {
 		t.Fatalf("clone/hit: %d %v", p.calls, err)
 	}
 	p.identity = "engine-v2"
-	r.cachedImagePreprocess(context.Background())
+	if _, _, err := r.cachedImagePreprocess(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if p.calls != 2 {
 		t.Fatal("engine version not keyed")
 	}
 	p.fallback = true
 	p.identity = "decline"
 	for i := 0; i < 2; i++ {
-		r.cachedImagePreprocess(context.Background())
+		if _, _, err := r.cachedImagePreprocess(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if p.calls != 4 {
 		t.Fatal("cached transient fallback")
@@ -206,12 +292,15 @@ func TestImageProcessingCachePreprocess(t *testing.T) {
 	p.rectified = []byte("invalid image")
 	p.identity = "invalid"
 	for i := 0; i < 2; i++ {
-		r.cachedImagePreprocess(context.Background())
+		if _, _, err := r.cachedImagePreprocess(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if p.calls != 6 {
 		t.Fatal("cached invalid image")
 	}
 }
+
 func testImageCachePNG(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -220,25 +309,39 @@ func testImageCachePNG(t *testing.T) []byte {
 	}
 	return buf.Bytes()
 }
+
 func TestImageProcessingCacheObservationAndThinking(t *testing.T) {
 	store := &imageCacheStore{rows: map[string]*processingcache.Record{}}
 	runtime := processingcache.New(store, processingcache.Options{ReadEnabled: true, WriteEnabled: true})
 	m := &imageCacheModel{identity: "model", reply: "CONTAIN.TEXT: block\nCONTAIN.DATA_VISUAL: false"}
-	r := &runContext{processingCache: runtime, payload: &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "doc"}, model: m, imageBytes: []byte("pixels"), out: types.JSONMap{}, params: map[string]any{}}
+	r := &runContext{
+		processingCache: runtime,
+		payload:         &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "doc"},
+		model:           m,
+		imageBytes:      []byte("pixels"),
+		out:             types.JSONMap{},
+		params:          map[string]any{},
+	}
 	for i := 0; i < 2; i++ {
-		r.think(context.Background(), "observe", "observation.thinking_enabled")
+		if _, err := r.think(context.Background(), "observe", "observation.thinking_enabled"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if m.calls != 1 {
 		t.Fatalf("observation calls=%d", m.calls)
 	}
 	r.params["observation.thinking_enabled"] = true
-	r.think(context.Background(), "observe", "observation.thinking_enabled")
+	if _, err := r.think(context.Background(), "observe", "observation.thinking_enabled"); err != nil {
+		t.Fatal(err)
+	}
 	if m.calls != 2 {
 		t.Fatal("thinking change not keyed")
 	}
 	m.reply = "CONTAIN.TEXT: block"
 	for i := 0; i < 2; i++ {
-		r.think(context.Background(), "partial", "observation.thinking_enabled")
+		if _, err := r.think(context.Background(), "partial", "observation.thinking_enabled"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if m.calls != 4 {
 		t.Fatal("cached partial observation")
@@ -246,7 +349,9 @@ func TestImageProcessingCacheObservationAndThinking(t *testing.T) {
 	m.identity = ""
 	m.reply = "caption"
 	for i := 0; i < 2; i++ {
-		r.think(context.Background(), "identity missing", "caption.thinking_enabled")
+		if _, err := r.think(context.Background(), "identity missing", "caption.thinking_enabled"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if m.calls != 6 {
 		t.Fatal("missing identity used cache")
@@ -265,6 +370,7 @@ func (p *changingIdentityPreprocessor) PreprocessImage(context.Context, []byte) 
 	p.identity = "reconnected-engine"
 	return p.image, false, nil
 }
+
 func TestImageProcessingCachePreprocessIdentityChangesDuringCall(t *testing.T) {
 	store := &imageCacheStore{rows: map[string]*processingcache.Record{}}
 	p := &changingIdentityPreprocessor{identity: "old-engine", image: testImageCachePNG(t)}
@@ -279,7 +385,9 @@ func TestImageProcessingCachePreprocessIdentityChangesDuringCall(t *testing.T) {
 	if len(store.rows) != 0 {
 		t.Fatal("persisted reconnected result under old identity")
 	}
-	r.cachedImagePreprocess(context.Background())
+	if _, _, err := r.cachedImagePreprocess(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if p.calls != 2 || len(store.rows) != 1 {
 		t.Fatal("current endpoint did not compute/store independently")
 	}

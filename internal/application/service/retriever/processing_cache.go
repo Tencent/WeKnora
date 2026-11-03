@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 
@@ -15,7 +16,31 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-var cachedEmbeddingImageAttribute = regexp.MustCompile(`(?i)(<(?:image|img)\b[^>]*?\b(?:url|src)\s*=\s*)(?:"[^"]*"|'[^']*')`)
+var (
+	cachedEmbeddingImageTag       = regexp.MustCompile(`(?i)<(?:image|img)(?:\s(?:[^"'<>]|"[^"]*"|'[^']*')*)?/?>`)
+	cachedEmbeddingImageAttribute = regexp.MustCompile(
+		`(\s+)([^\s"'<>/=]+)(\s*=\s*)("[^"]*"|'[^']*'|[^\s"'=` + "`" + `<>]+)`,
+	)
+)
+
+func maskEmbeddingImageDestinations(content string) string {
+	return cachedEmbeddingImageTag.ReplaceAllStringFunc(content, func(tag string) string {
+		// Match whole attributes so src= inside a title is never treated as a destination.
+		return cachedEmbeddingImageAttribute.ReplaceAllStringFunc(tag, func(attribute string) string {
+			parts := cachedEmbeddingImageAttribute.FindStringSubmatchIndex(attribute)
+			name := attribute[parts[4]:parts[5]]
+			if !strings.EqualFold(name, "src") && !strings.EqualFold(name, "url") {
+				return attribute
+			}
+			start, end := parts[8], parts[9]
+			if attribute[start] == '"' || attribute[start] == '\'' {
+				start++
+				end--
+			}
+			return attribute[:start] + "image" + attribute[end:]
+		})
+	})
+}
 
 // Text embeddings consume image descriptions, not storage locations. Normalize
 // the actual provider input as well as the key, retaining alt/caption/OCR text.
@@ -23,7 +48,7 @@ var cachedEmbeddingImageAttribute = regexp.MustCompile(`(?i)(<(?:image|img)\b[^>
 func (v *KeywordsVectorHybridRetrieveEngineService) embeddingText(ctx context.Context, content string) string {
 	if v.processingCache.Enabled() {
 		content = docparser.MaskMarkdownImageDestinations(content, "image")
-		content = cachedEmbeddingImageAttribute.ReplaceAllString(content, "${1}\"image\"")
+		content = maskEmbeddingImageDestinations(content)
 	}
 	return sanitizeForEmbedding(ctx, content)
 }
@@ -35,7 +60,13 @@ func (v *KeywordsVectorHybridRetrieveEngineService) SetProcessingCache(cache *pr
 
 // embedTextWindow caches only model outputs. Row identity is always supplied by
 // the current indexing operation, and windows retain the existing memory bound.
-func (v *KeywordsVectorHybridRetrieveEngineService) embedTextWindow(ctx context.Context, model embedding.Embedder, rows []*types.IndexInfo, texts []string, single bool) ([][]float32, error) {
+func (v *KeywordsVectorHybridRetrieveEngineService) embedTextWindow(
+	ctx context.Context,
+	model embedding.Embedder,
+	rows []*types.IndexInfo,
+	texts []string,
+	single bool,
+) ([][]float32, error) {
 	compute := func(ctx context.Context, texts []string) ([][]float32, error) {
 		if single {
 			vector, err := model.Embed(ctx, texts[0])
@@ -83,41 +114,64 @@ func (v *KeywordsVectorHybridRetrieveEngineService) embedTextWindow(ctx context.
 				return nil, err
 			}
 			if len(vectors) != len(positions) {
-				return nil, fmt.Errorf("embedding model returned %d embeddings for %d inputs", len(vectors), len(positions))
+				return nil, fmt.Errorf(
+					"embedding model returned %d embeddings for %d inputs",
+					len(vectors),
+					len(positions),
+				)
 			}
 			for i, pos := range positions {
 				out[pos] = vectors[i]
 			}
 			continue
 		}
-		payloads, stats, err := v.processingCache.BatchShared(ctx, tenant, scope, "text_embedding/v1", inputs, validate, func(ctx context.Context, missing []int) ([][]byte, error) {
-			missingTexts := make([]string, len(missing))
-			for i, pos := range missing {
-				missingTexts[i] = scopedTexts[pos]
-			}
-			vectors, err := compute(ctx, missingTexts)
-			if err != nil {
-				return nil, err
-			}
-			if len(vectors) != len(missing) {
-				return nil, fmt.Errorf("embedding model returned %d embeddings for %d inputs", len(vectors), len(missing))
-			}
-			payloads := make([][]byte, len(vectors))
-			for i, vector := range vectors {
-				if err := validateVector(vector, dimension); err != nil {
-					return nil, err
+		payloads, stats, err := v.processingCache.BatchShared(
+			ctx,
+			tenant,
+			scope,
+			"text_embedding/v1",
+			inputs,
+			validate,
+			func(ctx context.Context, missing []int) ([][]byte, error) {
+				missingTexts := make([]string, len(missing))
+				for i, pos := range missing {
+					missingTexts[i] = scopedTexts[pos]
 				}
-				payloads[i], err = json.Marshal(vector)
+				vectors, err := compute(ctx, missingTexts)
 				if err != nil {
 					return nil, err
 				}
-			}
-			return payloads, nil
-		})
+				if len(vectors) != len(missing) {
+					return nil, fmt.Errorf(
+						"embedding model returned %d embeddings for %d inputs",
+						len(vectors),
+						len(missing),
+					)
+				}
+				payloads := make([][]byte, len(vectors))
+				for i, vector := range vectors {
+					if err := validateVector(vector, dimension); err != nil {
+						return nil, err
+					}
+					payloads[i], err = json.Marshal(vector)
+					if err != nil {
+						return nil, err
+					}
+				}
+				return payloads, nil
+			},
+		)
 		if err != nil {
 			return nil, err
 		}
-		logger.Infof(ctx, "text embedding cache: hits=%d misses=%d bypass=%d deduplicated=%d", stats.Hits, stats.Misses, stats.Bypass, stats.Deduplicated)
+		logger.Infof(
+			ctx,
+			"text embedding cache: hits=%d misses=%d bypass=%d deduplicated=%d",
+			stats.Hits,
+			stats.Misses,
+			stats.Bypass,
+			stats.Deduplicated,
+		)
 		for i, pos := range positions {
 			vector, err := decodeCachedVector(payloads[i], dimension)
 			if err != nil {
@@ -128,6 +182,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) embedTextWindow(ctx context.
 	}
 	return out, nil
 }
+
 func validateVector(vector []float32, dimension int) error {
 	if dimension <= 0 || len(vector) != dimension {
 		return fmt.Errorf("embedding dimension %d, expected %d", len(vector), dimension)
@@ -139,6 +194,7 @@ func validateVector(vector []float32, dimension int) error {
 	}
 	return nil
 }
+
 func decodeCachedVector(payload []byte, dimension int) ([]float32, error) {
 	var values []*float32
 	if err := json.Unmarshal(payload, &values); err != nil {

@@ -2,13 +2,14 @@ package container
 
 import (
 	"context"
+	"testing"
+
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
 	"go.uber.org/dig"
 	"gorm.io/gorm"
-	"testing"
 )
 
 type processingCacheHandlerSpy struct{ cache *processingcache.Runtime }
@@ -22,7 +23,10 @@ func TestWireProcessingCache(t *testing.T) {
 	c := dig.New()
 	a, b := &processingCacheHandlerSpy{}, &processingCacheHandlerSpy{}
 	imageHandler := &processingCacheHandlerSpy{}
-	if err := c.Provide(func() interfaces.TaskHandler { return imageHandler }, dig.Name("imageMultimodal")); err != nil {
+	if err := c.Provide(
+		func() interfaces.TaskHandler { return imageHandler },
+		dig.Name("imageMultimodal"),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Provide(func() interfaces.TaskHandler { return a }, dig.Name("chunkExtractor")); err != nil {

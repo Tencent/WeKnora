@@ -22,12 +22,21 @@ func Digest(input any) string {
 // Value caches one validated JSON value. Missing isolation identifiers bypass
 // serialization and preserve the original computation path. Validators must
 // explicitly reject null when null is not a valid stage result.
-func Value[T any](ctx context.Context, r *Runtime, tenant uint64, scope, stage string, input any, validate func(T) error, compute func(context.Context) (T, error)) (T, error) {
+func Value[T any](
+	ctx context.Context,
+	r *Runtime,
+	tenant uint64,
+	scope, stage string,
+	input any,
+	validate func(T) error,
+	compute func(context.Context) (T, error),
+) (T, error) {
 	var zero T
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	if r == nil || r.store == nil || (!r.opts.ReadEnabled && !r.opts.WriteEnabled) || tenant == 0 || scope == "" || stage == "" {
+	if r == nil || r.store == nil || (!r.opts.ReadEnabled && !r.opts.WriteEnabled) || tenant == 0 || scope == "" ||
+		stage == "" {
 		value, err := compute(ctx)
 		if err != nil {
 			return zero, err
@@ -52,30 +61,38 @@ func Value[T any](ctx context.Context, r *Runtime, tenant uint64, scope, stage s
 	}
 	var computed T
 	var encodingFailure error
-	payloads, _, err := r.Batch(ctx, tenant, scope, stage, []any{input}, func(b []byte) error { _, e := decode(b); return e }, func(c context.Context, _ []int) ([][]byte, error) {
-		v, e := compute(c)
-		if e != nil {
-			return nil, e
-		}
-		if validate != nil {
-			if e = validate(v); e != nil {
+	payloads, _, err := r.Batch(
+		ctx,
+		tenant,
+		scope,
+		stage,
+		[]any{input},
+		func(b []byte) error { _, e := decode(b); return e },
+		func(c context.Context, _ []int) ([][]byte, error) {
+			v, e := compute(c)
+			if e != nil {
 				return nil, e
 			}
-		}
-		b, e := json.Marshal(v)
-		if e == nil {
-			// Check representation separately from the stage validator: a JSON
-			// round-trip fault is a cache failure, a validator error is not.
-			var decoded T
-			e = json.Unmarshal(b, &decoded)
-		}
-		if e != nil {
-			computed = v
-			encodingFailure = e
-			return nil, fmt.Errorf("%w: %v", errValueEncoding, e)
-		}
-		return [][]byte{b}, nil
-	})
+			if validate != nil {
+				if e = validate(v); e != nil {
+					return nil, e
+				}
+			}
+			b, e := json.Marshal(v)
+			if e == nil {
+				// Check representation separately from the stage validator: a JSON
+				// round-trip fault is a cache failure, a validator error is not.
+				var decoded T
+				e = json.Unmarshal(b, &decoded)
+			}
+			if e != nil {
+				computed = v
+				encodingFailure = e
+				return nil, fmt.Errorf("%w: %v", errValueEncoding, e)
+			}
+			return [][]byte{b}, nil
+		},
+	)
 	if encodingFailure != nil && ctx.Err() == nil {
 		return computed, nil
 	}

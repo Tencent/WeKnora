@@ -25,7 +25,13 @@ func (r *acceptanceKnowledgeRepo) UpdateKnowledge(_ context.Context, k *types.Kn
 	*r.knowledge = *k
 	return nil
 }
-func (r *acceptanceKnowledgeRepo) UpdateKnowledgeColumn(_ context.Context, _ string, column string, value interface{}) error {
+
+func (r *acceptanceKnowledgeRepo) UpdateKnowledgeColumn(
+	_ context.Context,
+	_ string,
+	column string,
+	value interface{},
+) error {
 	if column == "metadata" {
 		r.knowledge.Metadata = value.(types.JSON)
 	}
@@ -38,7 +44,12 @@ func (r *acceptanceChunks) DeleteChunksByKnowledgeID(context.Context, uint64, st
 	r.chunks = nil
 	return nil
 }
-func (r *acceptanceChunks) ListImageInfoByKnowledgeIDs(context.Context, uint64, []string) ([]interfaces.ChunkImageInfo, error) {
+
+func (r *acceptanceChunks) ListImageInfoByKnowledgeIDs(
+	context.Context,
+	uint64,
+	[]string,
+) ([]interfaces.ChunkImageInfo, error) {
 	return nil, nil
 }
 
@@ -65,11 +76,7 @@ func (m *acceptanceVLM) ProcessingCacheIdentity() string { return m.identity }
 // The cache uses the shipped SQLite migration and an actual close/reopen. The
 // knowledge, chunk, queue and object store boundaries deliberately remain fakes.
 func TestProcessingCacheAcceptanceReparseQueuedParseAndImageAfterReopen(t *testing.T) {
-	root, err := filepath.Abs("../../../.work-cache/full-cache")
-	require.NoError(t, err)
-	dir, err := os.MkdirTemp(root, "acceptance-")
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, os.RemoveAll(dir)) })
+	dir := t.TempDir()
 	path := filepath.Join(dir, "cache.sqlite")
 	open := func() *gorm.DB {
 		db, err := gorm.Open(sqlite.Open(path+"?_foreign_keys=on"), &gorm.Config{})
@@ -81,7 +88,7 @@ func TestProcessingCacheAcceptanceReparseQueuedParseAndImageAfterReopen(t *testi
 	}
 	db := open()
 	require.NoError(t, db.Exec("CREATE TABLE knowledges (id VARCHAR(36) PRIMARY KEY)").Error)
-	migration, err := os.ReadFile("../../../migrations/sqlite/000051_processing_cache.up.sql")
+	migration, err := os.ReadFile("../../../migrations/sqlite/000053_processing_cache.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(migration)).Error)
 	require.NoError(t, db.Exec("INSERT INTO knowledges(id) VALUES (?)", "knowledge-1").Error)
@@ -93,18 +100,40 @@ func TestProcessingCacheAcceptanceReparseQueuedParseAndImageAfterReopen(t *testi
 	k.FileName = "input.docx"
 	k.FileType = "docx"
 	k.FilePath = "input.md"
-	require.NoError(t, k.SetProcessOverrides(&types.KnowledgeProcessOverrides{SummaryEnabled: processConfigBoolPtr(false)}))
-	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 1, Type: types.KnowledgeBaseTypeDocument,
-		VLMConfig:      types.VLMConfig{Enabled: true, ModelID: "vlm"},
-		ChunkingConfig: types.ChunkingConfig{ParserEngineRules: []types.ParserEngineRule{{FileTypes: []string{"docx"}, Engine: "cache-test"}}}}
+	require.NoError(
+		t,
+		k.SetProcessOverrides(&types.KnowledgeProcessOverrides{SummaryEnabled: processConfigBoolPtr(false)}),
+	)
+	kb := &types.KnowledgeBase{
+		ID:        "kb-1",
+		TenantID:  1,
+		Type:      types.KnowledgeBaseTypeDocument,
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm"},
+		ChunkingConfig: types.ChunkingConfig{
+			ParserEngineRules: []types.ParserEngineRule{{FileTypes: []string{"docx"}, Engine: "cache-test"}},
+		},
+	}
 	kbService := &inlineLifecycleKBService{kb: kb}
-	repo := &acceptanceKnowledgeRepo{&inlineLifecycleKnowledgeRepo{embedFailureKnowledgeRepo: embedFailureKnowledgeRepo{knowledge: k}}}
+	repo := &acceptanceKnowledgeRepo{
+		&inlineLifecycleKnowledgeRepo{embedFailureKnowledgeRepo: embedFailureKnowledgeRepo{knowledge: k}},
+	}
 	catalog := &fakeBindCatalog{resources: make(map[string]*types.StoredResource)}
 	storage := &inlineImageStorageState{catalog: catalog}
-	file := inlineLifecycleFileService{inlineImageFileService: inlineImageFileService{content: "same document bytes", state: storage}, imageBytes: inlineImageTestPNG(t)}
+	file := inlineLifecycleFileService{
+		inlineImageFileService: inlineImageFileService{content: "same document bytes", state: storage},
+		imageBytes:             inlineImageTestPNG(t),
+	}
 	chunks := &acceptanceChunks{&inlineLifecycleChunkRepo{&inlineImageChunkRepo{}}}
 	queue := &acceptanceQueue{}
-	reader := &cacheParseReader{identity: "acceptance-parser-v1", result: &types.ReadResult{MarkdownContent: "Useful document text\n![figure](images/a.png)", ImageRefs: []types.ImageRef{{Filename: "a.png", OriginalRef: "images/a.png", ImageData: inlineImageTestPNG(t)}}}}
+	reader := &cacheParseReader{
+		identity: "acceptance-parser-v1",
+		result: &types.ReadResult{
+			MarkdownContent: "Useful document text\n![figure](images/a.png)",
+			ImageRefs: []types.ImageRef{
+				{Filename: "a.png", OriginalRef: "images/a.png", ImageData: inlineImageTestPNG(t)},
+			},
+		},
+	}
 	svc := harness.svc
 	svc.repo = repo
 	svc.kbService = kbService
@@ -153,13 +182,29 @@ func TestProcessingCacheAcceptanceReparseQueuedParseAndImageAfterReopen(t *testi
 		require.Equal(t, storage.saved[round], imagePayload.ImageURL)
 		require.NotEmpty(t, imagePayload.ChunkID)
 		require.False(t, oldIDs[imagePayload.ChunkID])
-		imageService := &ImageMultimodalService{chunkService: &inlineLifecycleChunkService{repo: chunks.inlineLifecycleChunkRepo}, knowledgeRepo: repo, kbService: kbService, modelService: inlineLifecycleModelService{model: model}, tenantRepo: svc.tenantRepo, fileSvc: file, taskEnqueuer: queue, processingCache: runtime, spanTracker: svc.spanTracker}
+		imageService := &ImageMultimodalService{
+			chunkService:    &inlineLifecycleChunkService{repo: chunks.inlineLifecycleChunkRepo},
+			knowledgeRepo:   repo,
+			kbService:       kbService,
+			modelService:    inlineLifecycleModelService{model: model},
+			tenantRepo:      svc.tenantRepo,
+			fileSvc:         file,
+			taskEnqueuer:    queue,
+			processingCache: runtime,
+			spanTracker:     svc.spanTracker,
+		}
 		require.NoError(t, imageService.Handle(ctx, queue.imageTasks[round]))
 		require.Len(t, queue.postProcessTasks, round+1)
 		var postPayload types.KnowledgePostProcessPayload
 		require.NoError(t, json.Unmarshal(queue.postProcessTasks[round].Payload(), &postPayload))
 		require.Equal(t, payload.Attempt, postPayload.Attempt)
-		post := &KnowledgePostProcessService{knowledgeRepo: repo, kbService: kbService, chunkRepo: &wikiEnqueueFailureChunkRepo{chunks: chunks.chunks}, taskEnqueuer: queue, spanTracker: svc.spanTracker}
+		post := &KnowledgePostProcessService{
+			knowledgeRepo: repo,
+			kbService:     kbService,
+			chunkRepo:     &wikiEnqueueFailureChunkRepo{chunks: chunks.chunks},
+			taskEnqueuer:  queue,
+			spanTracker:   svc.spanTracker,
+		}
 		require.NoError(t, post.Handle(ctx, queue.postProcessTasks[round]))
 		require.Equal(t, types.ParseStatusCompleted, k.ParseStatus)
 		require.Equal(t, 1, reader.calls)

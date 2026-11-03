@@ -14,8 +14,10 @@ import (
 	"time"
 )
 
+// ErrMiss indicates that no reusable record was found.
 var ErrMiss = errors.New("processing cache miss")
 
+// Record holds a scoped artifact and its integrity and expiration metadata.
 type Record struct {
 	TenantID            uint64
 	ScopeID, Stage, Key string
@@ -24,6 +26,7 @@ type Record struct {
 	ExpiresAt           time.Time
 }
 
+// Store provides scoped reads and atomic, version-aware writes and deletion.
 type Store interface {
 	Get(context.Context, uint64, string, string, string) (*Record, error)
 	// PutIfAbsent returns the existing winner when another writer inserts first.
@@ -32,6 +35,7 @@ type Store interface {
 	Delete(context.Context, *Record) error
 }
 
+// Options controls cache access, payload budgets, retention, and invalidation.
 type Options struct {
 	ReadEnabled, WriteEnabled bool
 	// MaxBytes <= 0 accepts payloads of any size; TTL <= 0 does not expire them.
@@ -47,13 +51,16 @@ type Options struct {
 // is disabled, inputs cannot be encoded, a store operation fails, a payload is
 // oversized, or a stored record/winner is invalid. Bypass may overlap Misses;
 // an ordinary cache miss is not a bypass. Each position is counted at most once.
-type Stats struct{ Hits, Misses, Bypass, Deduplicated int }
-type Runtime struct {
-	store   Store
-	opts    Options
-	mu      sync.Mutex
-	flights map[string]*flight
-}
+type (
+	Stats struct{ Hits, Misses, Bypass, Deduplicated int }
+	// Runtime validates artifacts and coalesces identical concurrent batches.
+	Runtime struct {
+		store   Store
+		opts    Options
+		mu      sync.Mutex
+		flights map[string]*flight
+	}
+)
 
 type flight struct {
 	done  chan struct{}
@@ -62,6 +69,7 @@ type flight struct {
 	err   error
 }
 
+// New constructs a runtime with an immutable copy of its stage budgets.
 func New(store Store, opts Options) *Runtime {
 	if opts.StageMaxBytes != nil {
 		copied := make(map[string]int, len(opts.StageMaxBytes))
@@ -73,6 +81,7 @@ func New(store Store, opts Options) *Runtime {
 	return &Runtime{store: store, opts: opts, flights: make(map[string]*flight)}
 }
 
+// PayloadLimit returns the configured byte budget for a stage.
 func (r *Runtime) PayloadLimit(stage string) int {
 	if r == nil {
 		return 0
@@ -112,17 +121,40 @@ func (r *Runtime) usable(rec *Record, t uint64, s, g, k string, validate func([]
 // cancel independently; cancellation of the computing owner fails all waiters.
 // Partially overlapping batches are not coalesced. Callers must include every
 // behavior-affecting setting in inputs and use a consistent contract per stage.
-func (r *Runtime) Batch(ctx context.Context, t uint64, s, g string, inputs []any, validate func([]byte) error, compute func(context.Context, []int) ([][]byte, error)) ([][]byte, Stats, error) {
+func (r *Runtime) Batch(
+	ctx context.Context,
+	t uint64,
+	s, g string,
+	inputs []any,
+	validate func([]byte) error,
+	compute func(context.Context, []int) ([][]byte, error),
+) ([][]byte, Stats, error) {
 	return r.batchFlight(ctx, t, s, g, inputs, validate, compute, false)
 }
 
 // BatchShared permits reuse from another scope in the same tenant. Use only
 // when inputs fully describe a scope-independent result (such as embeddings).
 // A reused artifact is copied into the current scope to preserve deletion rules.
-func (r *Runtime) BatchShared(ctx context.Context, t uint64, s, g string, inputs []any, validate func([]byte) error, compute func(context.Context, []int) ([][]byte, error)) ([][]byte, Stats, error) {
+func (r *Runtime) BatchShared(
+	ctx context.Context,
+	t uint64,
+	s, g string,
+	inputs []any,
+	validate func([]byte) error,
+	compute func(context.Context, []int) ([][]byte, error),
+) ([][]byte, Stats, error) {
 	return r.batchFlight(ctx, t, s, g, inputs, validate, compute, true)
 }
-func (r *Runtime) batchFlight(ctx context.Context, t uint64, s, g string, inputs []any, validate func([]byte) error, compute func(context.Context, []int) ([][]byte, error), shared bool) ([][]byte, Stats, error) {
+
+func (r *Runtime) batchFlight(
+	ctx context.Context,
+	t uint64,
+	s, g string,
+	inputs []any,
+	validate func([]byte) error,
+	compute func(context.Context, []int) ([][]byte, error),
+	shared bool,
+) ([][]byte, Stats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, Stats{}, err
 	}
@@ -185,7 +217,15 @@ func cloneBatch(in [][]byte) [][]byte {
 	return out
 }
 
-func (r *Runtime) batch(ctx context.Context, t uint64, s, g string, inputs []any, validate func([]byte) error, compute func(context.Context, []int) ([][]byte, error), shared bool) (result [][]byte, stats Stats, err error) {
+func (r *Runtime) batch(
+	ctx context.Context,
+	t uint64,
+	s, g string,
+	inputs []any,
+	validate func([]byte) error,
+	compute func(context.Context, []int) ([][]byte, error),
+	shared bool,
+) (result [][]byte, stats Stats, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, stats, err
 	}
@@ -250,7 +290,9 @@ func (r *Runtime) batch(ctx context.Context, t uint64, s, g string, inputs []any
 			if (err != nil && !errors.Is(err, ErrMiss)) || err == nil {
 				bypass[i] = true
 			}
-			if r.opts.WriteEnabled && err == nil && rec != nil && rec.TenantID == t && rec.ScopeID == s && rec.Stage == g && rec.Key == key {
+			if r.opts.WriteEnabled && err == nil && rec != nil && rec.TenantID == t && rec.ScopeID == s &&
+				rec.Stage == g &&
+				rec.Key == key {
 				_ = r.store.Delete(ctx, rec)
 				if err := ctx.Err(); err != nil {
 					return nil, stats, err
@@ -268,9 +310,9 @@ func (r *Runtime) batch(ctx context.Context, t uint64, s, g string, inputs []any
 				if err == nil && rec != nil && rec.ScopeID != "" && r.usable(rec, t, rec.ScopeID, g, key, validate) {
 					out[i], hits[i] = clone(rec.Payload), true
 					if r.opts.WriteEnabled {
-						copy := *rec
-						copy.ScopeID, copy.Payload = s, clone(rec.Payload)
-						winner, writeErr := r.store.PutIfAbsent(ctx, &copy)
+						replica := *rec
+						replica.ScopeID, replica.Payload = s, clone(rec.Payload)
+						winner, writeErr := r.store.PutIfAbsent(ctx, &replica)
 						if ctx.Err() != nil {
 							return nil, stats, ctx.Err()
 						}
@@ -309,12 +351,20 @@ func (r *Runtime) batch(ctx context.Context, t uint64, s, g string, inputs []any
 			return nil, stats, err
 		}
 		if len(payloads) != len(missing) {
-			return nil, stats, fmt.Errorf("processing cache: compute returned %d payloads for %d inputs", len(payloads), len(missing))
+			return nil, stats, fmt.Errorf(
+				"processing cache: compute returned %d payloads for %d inputs",
+				len(payloads),
+				len(missing),
+			)
 		}
 		for j, payload := range payloads {
 			if validate != nil {
 				if err := validate(clone(payload)); err != nil {
-					return nil, stats, fmt.Errorf("processing cache: invalid computed payload at input %d: %w", missing[j], err)
+					return nil, stats, fmt.Errorf(
+						"processing cache: invalid computed payload at input %d: %w",
+						missing[j],
+						err,
+					)
 				}
 			}
 		}
@@ -327,10 +377,18 @@ func (r *Runtime) batch(ctx context.Context, t uint64, s, g string, inputs []any
 			if r.PayloadLimit(g) > 0 && len(payload) > r.PayloadLimit(g) {
 				bypass[i] = true
 			}
-			if !enabled || !r.opts.WriteEnabled || keys[i] == "" || (r.PayloadLimit(g) > 0 && len(payload) > r.PayloadLimit(g)) {
+			if !enabled || !r.opts.WriteEnabled || keys[i] == "" ||
+				(r.PayloadLimit(g) > 0 && len(payload) > r.PayloadLimit(g)) {
 				continue
 			}
-			rec := &Record{TenantID: t, ScopeID: s, Stage: g, Key: keys[i], Payload: clone(payload), Checksum: digest(payload)}
+			rec := &Record{
+				TenantID: t,
+				ScopeID:  s,
+				Stage:    g,
+				Key:      keys[i],
+				Payload:  clone(payload),
+				Checksum: digest(payload),
+			}
 			if r.opts.TTL > 0 {
 				rec.ExpiresAt = time.Now().Add(r.opts.TTL)
 			}
@@ -339,7 +397,11 @@ func (r *Runtime) batch(ctx context.Context, t uint64, s, g string, inputs []any
 				return nil, stats, err
 			}
 			if err == nil && r.usable(winner, t, s, g, keys[i], validate) {
-				out[i] = clone(winner.Payload)
+				// Write-only mode persists artifacts but returns this computation.
+				// Only readers may replace it with an existing concurrent winner.
+				if r.opts.ReadEnabled {
+					out[i] = clone(winner.Payload)
+				}
 			} else {
 				bypass[i] = true
 			}

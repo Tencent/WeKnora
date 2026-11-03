@@ -37,13 +37,17 @@ func sortedWikiCacheItems(items []extractedItem) []extractedItem {
 func withWikiProcessingScope(ctx context.Context, document, kb string) context.Context {
 	return context.WithValue(withProcessingDocument(ctx, document), wikiProcessingKBKey{}, kb)
 }
+
 func wikiProcessingKB(ctx context.Context) string {
 	v, _ := ctx.Value(wikiProcessingKBKey{}).(string)
 	return v
 }
+
 func (s *wikiIngestService) wikiMapCacheEnabled(ctx context.Context, model chat.Chat) bool {
 	tenant, _ := types.TenantIDFromContext(ctx)
-	return s.processingCache.Enabled() && tenant != 0 && processingDocument(ctx) != "" && wikiProcessingKB(ctx) != "" && processingModelIdentity(model) != "" && !processingCacheBypassed(ctx)
+	return s.processingCache.Enabled() && tenant != 0 && processingDocument(ctx) != "" && wikiProcessingKB(ctx) != "" &&
+		processingModelIdentity(model) != "" &&
+		!processingCacheBypassed(ctx)
 }
 
 // Historical slugs are live state. Cached extraction asks only about content;
@@ -153,9 +157,12 @@ func validateWikiMapPayload(v wikiMapCachePayload, stage string, data map[string
 	}
 	return nil
 }
+
 func parseWikiMapPayload(stage string, result wikiTemplateResult, data map[string]string) (wikiMapCachePayload, error) {
 	v := wikiMapCachePayload{Kind: stage}
-	if err := completeProcessingResponse(&types.ChatResponse{Content: result.Content, FinishReason: result.FinishReason}); err != nil {
+	if err := completeProcessingResponse(
+		&types.ChatResponse{Content: result.Content, FinishReason: result.FinishReason},
+	); err != nil {
 		return v, err
 	}
 	raw := []byte(cleanLLMJSON(result.Content))
@@ -182,6 +189,7 @@ func parseWikiMapPayload(stage string, result wikiTemplateResult, data map[strin
 	}
 	return v, validateWikiMapPayload(v, stage, data)
 }
+
 func filterWikiCachedMerges(merges map[string]string, candidates string) {
 	var groups struct {
 		Items []struct {
@@ -212,6 +220,7 @@ func filterWikiCachedMerges(merges map[string]string, candidates string) {
 		}
 	}
 }
+
 func renderWikiMapPayload(v wikiMapCachePayload) (wikiTemplateResult, error) {
 	var content []byte
 	var err error
@@ -229,7 +238,16 @@ func renderWikiMapPayload(v wikiMapCachePayload) (wikiTemplateResult, error) {
 	}
 	return wikiTemplateResult{Content: string(content), FinishReason: "stop"}, err
 }
-func (s *wikiIngestService) cachedWikiMapResult(ctx context.Context, model chat.Chat, prompt string, messages []chat.Message, options *chat.ChatOptions, data map[string]string, compute func() (interface{}, error)) (interface{}, error) {
+
+func (s *wikiIngestService) cachedWikiMapResult(
+	ctx context.Context,
+	model chat.Chat,
+	prompt string,
+	messages []chat.Message,
+	options *chat.ChatOptions,
+	data map[string]string,
+	compute func() (interface{}, error),
+) (interface{}, error) {
 	stage := wikiMapCacheStage(prompt)
 	if stage == "" || !s.wikiMapCacheEnabled(ctx, model) {
 		return compute()
@@ -241,7 +259,9 @@ func (s *wikiIngestService) cachedWikiMapResult(ctx context.Context, model chat.
 		Model, KB string
 		Messages  []chat.Message
 		Options   *chat.ChatOptions
-	}{processingModelIdentity(model), wikiProcessingKB(ctx), messages, options}, func(v wikiMapCachePayload) error { return validateWikiMapPayload(v, stage, data) }, func(ctx context.Context) (wikiMapCachePayload, error) {
+	}{processingModelIdentity(model), wikiProcessingKB(ctx), messages, options}, func(v wikiMapCachePayload) error {
+		return validateWikiMapPayload(v, stage, data)
+	}, func(_ context.Context) (wikiMapCachePayload, error) {
 		raw, err := compute()
 		if err != nil {
 			return wikiMapCachePayload{}, err

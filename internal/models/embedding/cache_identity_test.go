@@ -29,7 +29,12 @@ func TestProcessingCacheFingerprintIncludesSecretsAndHeaders(t *testing.T) {
 
 func TestProcessingCacheFactoryProvidesFullIdentity(t *testing.T) {
 	allowLoopback(t)
-	config := Config{Source: types.ModelSourceRemote, Provider: "openai", ModelName: "text-embedding-3-small", APIKey: "secret"}
+	config := Config{
+		Source:    types.ModelSourceRemote,
+		Provider:  "openai",
+		ModelName: "text-embedding-3-small",
+		APIKey:    "secret",
+	}
 	first, err := NewEmbedder(config, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +48,8 @@ func TestProcessingCacheFactoryProvidesFullIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identified.ProcessingCacheIdentity() == second.(interface{ ProcessingCacheIdentity() string }).ProcessingCacheIdentity() {
+	secondIdentity := second.(interface{ ProcessingCacheIdentity() string }).ProcessingCacheIdentity()
+	if identified.ProcessingCacheIdentity() == secondIdentity {
 		t.Fatal("endpoint change did not invalidate")
 	}
 }
@@ -61,6 +67,7 @@ func (e *cacheImageEmbedder) BatchEmbedImages(_ context.Context, _ []Image) ([][
 	e.calls++
 	return [][]float32{{42}}, nil
 }
+
 func TestProcessingCacheIdentityWrapperPreservesImageSide(t *testing.T) {
 	inner := &cacheImageEmbedder{accepts: true}
 	outer := &processingCacheEmbedder{Embedder: inner, identity: "x"}
@@ -82,7 +89,12 @@ func TestProcessingCacheIdentityWrapperPreservesImageSide(t *testing.T) {
 }
 
 func TestProcessingCacheLocalUsesInjectedEndpoint(t *testing.T) {
-	config := Config{Source: types.ModelSourceLocal, BaseURL: "http://ignored:11434", ModelName: "nomic-embed-text", Dimensions: 1}
+	config := Config{
+		Source:     types.ModelSourceLocal,
+		BaseURL:    "http://ignored:11434",
+		ModelName:  "nomic-embed-text",
+		Dimensions: 1,
+	}
 	t.Setenv("OLLAMA_BASE_URL", "http://ollama-a:11434")
 	firstService, err := ollama.GetOllamaService()
 	if err != nil {
@@ -124,11 +136,17 @@ func TestProcessingCacheLocalUsesInjectedEndpoint(t *testing.T) {
 		}
 	}
 }
+
 func TestProcessingCacheRemoteEffectiveOverlayInvalidates(t *testing.T) {
 	allowLoopback(t)
 	snapshot := modelruntime.SnapshotCurrent()
 	t.Cleanup(func() { modelruntime.RestoreSnapshot(snapshot) })
-	config := Config{Source: types.ModelSourceRemote, Provider: "openai", ModelName: "text-embedding-3-small", Dimensions: 1}
+	config := Config{
+		Source:     types.ModelSourceRemote,
+		Provider:   "openai",
+		ModelName:  "text-embedding-3-small",
+		Dimensions: 1,
+	}
 	identity := func(e Embedder) string {
 		return e.(interface{ ProcessingCacheIdentity() string }).ProcessingCacheIdentity()
 	}

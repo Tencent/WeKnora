@@ -18,18 +18,38 @@ func (m *sharedMemory) GetShared(context.Context, uint64, string, string) (*Reco
 }
 
 func TestSharedReuseValidatesSourceAndPreservesWinner(t *testing.T) {
-	for _, mode := range []string{"valid", "tenant", "stage", "key", "expired", "checksum", "semantic", "oversize", "failure", "winner", "read-only"} {
+	for _, mode := range []string{
+		"valid",
+		"tenant",
+		"stage",
+		"key",
+		"expired",
+		"checksum",
+		"semantic",
+		"oversize",
+		"failure",
+		"winner",
+		"read-only",
+	} {
 		t.Run(mode, func(t *testing.T) {
 			m := &sharedMemory{memory: &memory{rows: map[string]*Record{}}}
 			opts := Options{ReadEnabled: true, WriteEnabled: true, TTL: time.Hour, MaxBytes: 20}
 			rt := New(m, opts)
 			compute := func(context.Context, []int) ([][]byte, error) { return [][]byte{[]byte(`"fresh"`)}, nil }
-			if _, _, err := rt.Batch(context.Background(), 1, "source", "embed", []any{"text"}, valid, compute); err != nil {
+			if _, _, err := rt.Batch(
+				context.Background(),
+				1,
+				"source",
+				"embed",
+				[]any{"text"},
+				valid,
+				compute,
+			); err != nil {
 				t.Fatal(err)
 			}
 			for _, r := range m.rows {
-				copy := *r
-				m.shared = &copy
+				recordCopy := *r
+				m.shared = &recordCopy
 			}
 			switch mode {
 			case "tenant":
@@ -57,7 +77,15 @@ func TestSharedReuseValidatesSourceAndPreservesWinner(t *testing.T) {
 				rt = New(m, opts)
 			}
 			calls := 0
-			out, stats, err := rt.BatchShared(context.Background(), 1, "target", "embed", []any{"text"}, valid, func(ctx context.Context, idx []int) ([][]byte, error) { calls++; return compute(ctx, idx) })
+			out, stats, err := rt.BatchShared(
+				context.Background(),
+				1,
+				"target",
+				"embed",
+				[]any{"text"},
+				valid,
+				func(ctx context.Context, idx []int) ([][]byte, error) { calls++; return compute(ctx, idx) },
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,7 +102,18 @@ func TestSharedReuseValidatesSourceAndPreservesWinner(t *testing.T) {
 			if mode == "valid" {
 				delete(m.rows, identity(1, "source", "embed", m.shared.Key))
 				m.sharedErr = ErrMiss
-				_, _, err = rt.BatchShared(context.Background(), 1, "target", "embed", []any{"text"}, valid, func(context.Context, []int) ([][]byte, error) { t.Fatal("lost copy after deletion"); return nil, nil })
+				_, _, err = rt.BatchShared(
+					context.Background(),
+					1,
+					"target",
+					"embed",
+					[]any{"text"},
+					valid,
+					func(context.Context, []int) ([][]byte, error) {
+						t.Fatal("lost copy after deletion")
+						return nil, nil
+					},
+				)
 				if err != nil {
 					t.Fatal(err)
 				}

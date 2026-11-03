@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// Model maps a cached artifact to its persisted database row.
 type Model struct {
 	TenantID  uint64    `gorm:"primaryKey;autoIncrement:false"`
 	ScopeID   string    `gorm:"primaryKey;type:varchar(36)"`
@@ -23,9 +24,10 @@ type Model struct {
 	CreatedAt time.Time `gorm:"not null"`
 }
 
+// TableName selects the processing cache table.
 func (Model) TableName() string { return "processing_cache" }
 
-// SQLite stores timestamps as text. Use UTC consistently so comparisons have
+// BeforeSave normalizes timestamps to UTC. SQLite stores timestamps as text. Use UTC consistently so comparisons have
 // the same chronological order as PostgreSQL TIMESTAMPTZ comparisons.
 func (m *Model) BeforeSave(*gorm.DB) error {
 	m.ExpiresAt = m.ExpiresAt.UTC()
@@ -33,6 +35,7 @@ func (m *Model) BeforeSave(*gorm.DB) error {
 	return nil
 }
 
+// Store persists artifacts using the application database.
 type Store struct {
 	db          *gorm.DB
 	mu          sync.Mutex
@@ -41,6 +44,7 @@ type Store struct {
 
 var _ processingcache.Store = (*Store)(nil)
 
+// New constructs a database-backed artifact store.
 func New(db *gorm.DB) *Store { return &Store{db: db} }
 
 func keyQuery(db *gorm.DB, tenant uint64, scope, stage, key string) *gorm.DB {
@@ -56,9 +60,18 @@ func (s *Store) lookup(ctx context.Context, tenant uint64, scope, stage, key str
 	if err != nil {
 		return nil, err
 	}
-	return &processingcache.Record{TenantID: row.TenantID, ScopeID: row.ScopeID, Stage: row.Stage, Key: row.CacheKey, Payload: row.Payload, Checksum: row.Checksum, ExpiresAt: row.ExpiresAt}, nil
+	return &processingcache.Record{
+		TenantID:  row.TenantID,
+		ScopeID:   row.ScopeID,
+		Stage:     row.Stage,
+		Key:       row.CacheKey,
+		Payload:   row.Payload,
+		Checksum:  row.Checksum,
+		ExpiresAt: row.ExpiresAt,
+	}, nil
 }
 
+// Get retrieves a nonexpired artifact from the requested scope.
 func (s *Store) Get(ctx context.Context, tenant uint64, scope, stage, key string) (*processingcache.Record, error) {
 	r, err := s.lookup(ctx, tenant, scope, stage, key)
 	if err == nil && !r.ExpiresAt.IsZero() && !time.Now().Before(r.ExpiresAt) {
@@ -79,21 +92,42 @@ func (s *Store) GetShared(ctx context.Context, tenant uint64, stage, key string)
 	if err != nil {
 		return nil, err
 	}
-	return &processingcache.Record{TenantID: row.TenantID, ScopeID: row.ScopeID, Stage: row.Stage, Key: row.CacheKey, Payload: row.Payload, Checksum: row.Checksum, ExpiresAt: row.ExpiresAt}, nil
+	return &processingcache.Record{
+		TenantID:  row.TenantID,
+		ScopeID:   row.ScopeID,
+		Stage:     row.Stage,
+		Key:       row.CacheKey,
+		Payload:   row.Payload,
+		Checksum:  row.Checksum,
+		ExpiresAt: row.ExpiresAt,
+	}, nil
 }
 
+// PutIfAbsent inserts an artifact or returns the existing live winner.
 func (s *Store) PutIfAbsent(ctx context.Context, r *processingcache.Record) (*processingcache.Record, error) {
 	if r == nil {
 		return nil, errors.New("processing cache: nil record")
 	}
 	now := time.Now().UTC()
 	s.cleanup(ctx, now)
-	row := Model{TenantID: r.TenantID, ScopeID: r.ScopeID, Stage: r.Stage, CacheKey: r.Key, Payload: r.Payload, Checksum: r.Checksum, ExpiresAt: r.ExpiresAt.UTC(), CreatedAt: now}
+	row := Model{
+		TenantID:  r.TenantID,
+		ScopeID:   r.ScopeID,
+		Stage:     r.Stage,
+		CacheKey:  r.Key,
+		Payload:   r.Payload,
+		Checksum:  r.Checksum,
+		ExpiresAt: r.ExpiresAt.UTC(),
+		CreatedAt: now,
+	}
 	// An atomic conditional UPDATE lets only one writer replace an expired row.
 	// A live winner cannot be overwritten, including across processes.
 	err := keyQuery(s.db.WithContext(ctx).Model(&Model{}), r.TenantID, r.ScopeID, r.Stage, r.Key).
 		Where("expires_at <> ? AND expires_at <= ?", time.Time{}, now).
-		Updates(map[string]any{"payload": row.Payload, "checksum": row.Checksum, "expires_at": row.ExpiresAt, "created_at": now}).Error
+		Updates(map[string]any{
+			"payload": row.Payload, "checksum": row.Checksum, "expires_at": row.ExpiresAt, "created_at": now,
+		}).
+		Error
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +137,7 @@ func (s *Store) PutIfAbsent(ctx context.Context, r *processingcache.Record) (*pr
 	return s.lookup(ctx, r.TenantID, r.ScopeID, r.Stage, r.Key)
 }
 
+// Delete removes only the observed version of an artifact.
 func (s *Store) Delete(ctx context.Context, r *processingcache.Record) error {
 	if r == nil {
 		return nil
@@ -111,6 +146,7 @@ func (s *Store) Delete(ctx context.Context, r *processingcache.Record) error {
 		Where("checksum = ? AND expires_at = ?", r.Checksum, r.ExpiresAt.UTC()).Delete(&Model{}).Error
 }
 
+// DeleteScope removes all artifacts belonging to one tenant and document.
 func (s *Store) DeleteScope(ctx context.Context, tenant uint64, scope string) error {
 	return s.db.WithContext(ctx).Where("tenant_id = ? AND scope_id = ?", tenant, scope).Delete(&Model{}).Error
 }
@@ -135,7 +171,8 @@ func (s *Store) DeleteExpired(ctx context.Context, before time.Time, limit int) 
 	}
 	var rows []Model
 	err := s.db.WithContext(ctx).Select("tenant_id", "scope_id", "stage", "cache_key", "checksum", "expires_at").
-		Where("expires_at <> ? AND expires_at <= ?", time.Time{}, before.UTC()).Order("expires_at").Limit(min(limit, 1000)).Find(&rows).Error
+		Where("expires_at <> ? AND expires_at <= ?", time.Time{}, before.UTC()).
+		Order("expires_at").Limit(min(limit, 1000)).Find(&rows).Error
 	if err != nil {
 		return 0, err
 	}
@@ -143,7 +180,15 @@ func (s *Store) DeleteExpired(ctx context.Context, before time.Time, limit int) 
 	for start := 0; start < len(rows); start += 100 {
 		query := s.db.WithContext(ctx)
 		for _, row := range rows[start:min(start+100, len(rows))] {
-			query = query.Or("tenant_id = ? AND scope_id = ? AND stage = ? AND cache_key = ? AND checksum = ? AND expires_at = ?", row.TenantID, row.ScopeID, row.Stage, row.CacheKey, row.Checksum, row.ExpiresAt)
+			query = query.Or(
+				"tenant_id = ? AND scope_id = ? AND stage = ? AND cache_key = ? AND checksum = ? AND expires_at = ?",
+				row.TenantID,
+				row.ScopeID,
+				row.Stage,
+				row.CacheKey,
+				row.Checksum,
+				row.ExpiresAt,
+			)
 		}
 		result := query.Delete(&Model{})
 		total += result.RowsAffected

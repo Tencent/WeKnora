@@ -1,8 +1,9 @@
 package service
 
 import (
-	"github.com/Tencent/WeKnora/internal/processingcache"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/processingcache"
 )
 
 func TestProcessingCacheSetters(t *testing.T) {

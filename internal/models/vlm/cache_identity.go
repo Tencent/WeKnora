@@ -8,12 +8,24 @@ func identityOf(v VLM) string {
 	}
 	return ""
 }
-func (v *debugVLM) ProcessingCacheIdentity() string        { return identityOf(v.inner) }
-func (v *langfuseVLM) ProcessingCacheIdentity() string     { return identityOf(v.inner) }
-func (v *concurrencyVLM) ProcessingCacheIdentity() string  { return identityOf(v.inner) }
-func (v *RemoteAPIVLM) ProcessingCacheIdentity() string    { return v.cacheIdentity }
-func (v *OllamaVLM) ProcessingCacheIdentity() string       { return v.cacheIdentity }
+func (v *debugVLM) ProcessingCacheIdentity() string       { return identityOf(v.inner) }
+func (v *langfuseVLM) ProcessingCacheIdentity() string    { return identityOf(v.inner) }
+func (v *concurrencyVLM) ProcessingCacheIdentity() string { return identityOf(v.inner) }
+
+// ProcessingCacheIdentity includes the current effective token budget.
+func (v *RemoteAPIVLM) ProcessingCacheIdentity() string {
+	if v.cacheIdentity == "" {
+		return ""
+	}
+	return processingcache.Digest([]any{v.cacheIdentity, vlmMaxTokens()})
+}
+
+// ProcessingCacheIdentity returns the immutable Ollama configuration digest.
+func (v *OllamaVLM) ProcessingCacheIdentity() string { return v.cacheIdentity }
+
+// ProcessingCacheIdentity returns the immutable cloud configuration digest.
 func (v *WeKnoraCloudVLM) ProcessingCacheIdentity() string { return v.cacheIdentity }
+
 func remoteVLMIdentity(v *RemoteAPIVLM) string {
 	i, ok := v.chat.(interface{ ProcessingCacheIdentity() string })
 	if !ok || i.ProcessingCacheIdentity() == "" {

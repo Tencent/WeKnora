@@ -5,11 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
+	"testing"
+
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types"
-	"strings"
-	"testing"
 )
 
 type cacheTestStore struct {
@@ -23,10 +24,12 @@ func (s *cacheTestStore) Get(_ context.Context, t uint64, scope, stage, key stri
 	}
 	return r, nil
 }
+
 func (s *cacheTestStore) PutIfAbsent(_ context.Context, r *processingcache.Record) (*processingcache.Record, error) {
 	s.rows[r.ScopeID+r.Stage+r.Key] = r
 	return r, nil
 }
+
 func (s *cacheTestStore) Delete(_ context.Context, r *processingcache.Record) error {
 	delete(s.rows, r.ScopeID+r.Stage+r.Key)
 	return nil
@@ -50,12 +53,18 @@ func (e *cacheTestEmbedder) GetDimensions() int {
 	}
 	return 1
 }
+
 func (e *cacheTestEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	e.calls++
 	e.singleCalls++
 	return []float32{float32(len(text))}, nil
 }
-func (e *cacheTestEmbedder) BatchEmbedWithPool(_ context.Context, _ embedding.Embedder, texts []string) ([][]float32, error) {
+
+func (e *cacheTestEmbedder) BatchEmbedWithPool(
+	_ context.Context,
+	_ embedding.Embedder,
+	texts []string,
+) ([][]float32, error) {
 	e.calls += len(texts)
 	e.batchCalls++
 	out := make([][]float32, len(texts))
@@ -70,6 +79,7 @@ func (e *cacheTestEmbedder) BatchEmbedWithPool(_ context.Context, _ embedding.Em
 	}
 	return out, nil
 }
+
 func cacheRuntime(s *cacheTestStore) *processingcache.Runtime {
 	return processingcache.New(s, processingcache.Options{ReadEnabled: true, WriteEnabled: true})
 }
@@ -81,8 +91,17 @@ func TestProcessingCacheEmbeddingUsesStableImageText(t *testing.T) {
 	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &recordingRepository{}}
 	service.SetProcessingCache(cacheRuntime(store))
 	for _, url := range []string{"resource://old", "resource://a-much-longer-new-location"} {
-		row := &types.IndexInfo{SourceID: "current", KnowledgeID: "doc", Content: "![diagram](" + url + ") <image url=\"" + url + "\">caption</image>"}
-		if err := service.BatchIndex(ctx, model, []*types.IndexInfo{row}, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		row := &types.IndexInfo{
+			SourceID:    "current",
+			KnowledgeID: "doc",
+			Content:     "![diagram](" + url + ") <image url=\"" + url + "\">caption</image>",
+		}
+		if err := service.BatchIndex(
+			ctx,
+			model,
+			[]*types.IndexInfo{row},
+			[]types.RetrieverType{types.VectorRetrieverType},
+		); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(row.Content, url) {
@@ -97,17 +116,75 @@ func TestProcessingCacheEmbeddingUsesStableImageText(t *testing.T) {
 func TestProcessingCacheEmbeddingImageDestinationSyntax(t *testing.T) {
 	service := &KeywordsVectorHybridRetrieveEngineService{}
 	service.SetProcessingCache(cacheRuntime(&cacheTestStore{rows: map[string]*processingcache.Record{}}))
-	for _, input := range []string{`![diagram](https://h/a(old).png "title")`, `![diagram](<https://h/a(new).png> "title")`, `![diagram](https://h/a\(new\).png "title")`} {
+	for _, input := range []string{
+		`![diagram](https://h/a(old).png "title")`,
+		`![diagram](<https://h/a(new).png> "title")`,
+		`![diagram](https://h/a\(new\).png "title")`,
+	} {
 		if got := service.embeddingText(context.Background(), input); got != `![diagram](image "title")` {
 			t.Fatalf("%s -> %s", input, got)
 		}
 	}
 }
+
+func TestProcessingCacheEmbeddingHTMLAttributeBoundaries(t *testing.T) {
+	for _, markup := range []string{
+		`<img title="src='cat' > diagram" src="%s" alt="picture">`,
+		`<IMG title='src="cat" > diagram' SRC = '%s' alt='picture'/>`,
+		`<img src=%s title="cat" alt=picture>`,
+		`<image title="url='cat' > diagram" url="%s">caption</image>`,
+		`<image url=%s title="cat">caption</image>`,
+		`<img data-src="keep" title="cat" src="%s">`,
+	} {
+		t.Run(markup, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+			service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &recordingRepository{}}
+			service.SetProcessingCache(cacheRuntime(&cacheTestStore{rows: map[string]*processingcache.Record{}}))
+			model := &cacheTestEmbedder{identity: "model"}
+			for _, address := range []string{"old.png", "new.png"} {
+				input := fmt.Sprintf(markup, address)
+				want := fmt.Sprintf(markup, "image")
+				if got := service.embeddingText(ctx, input); got != want {
+					t.Fatalf("normalized input = %q, want %q", got, want)
+				}
+				row := &types.IndexInfo{SourceID: "current", KnowledgeID: "doc", Content: input}
+				if err := service.BatchIndex(ctx, model, []*types.IndexInfo{row},
+					[]types.RetrieverType{types.VectorRetrieverType}); err != nil {
+					t.Fatal(err)
+				}
+				if row.Content != input {
+					t.Fatal("modified indexed content")
+				}
+			}
+			if model.calls != 1 {
+				t.Fatalf("address change caused %d model calls", model.calls)
+			}
+			changed := strings.ReplaceAll(fmt.Sprintf(markup, "new.png"), "cat", "dog")
+			row := &types.IndexInfo{SourceID: "current", KnowledgeID: "doc", Content: changed}
+			if err := service.BatchIndex(ctx, model, []*types.IndexInfo{row},
+				[]types.RetrieverType{types.VectorRetrieverType}); err != nil {
+				t.Fatal(err)
+			}
+			if model.calls != 2 {
+				t.Fatal("changed title reused old embedding")
+			}
+			disabled := &KeywordsVectorHybridRetrieveEngineService{}
+			if got := disabled.embeddingText(ctx, changed); got != changed {
+				t.Fatal("cache-disabled input changed")
+			}
+		})
+	}
+}
+
 func TestProcessingCacheRestartScopeOrderAndCurrentIDs(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	store := &cacheTestStore{rows: map[string]*processingcache.Record{}}
 	model := &cacheTestEmbedder{identity: "model-a"}
-	rows := []*types.IndexInfo{{SourceID: "a", ChunkID: "old", KnowledgeID: "doc-a", Content: "one"}, {SourceID: "b", KnowledgeID: "doc-b", Content: "x"}, {SourceID: "c", KnowledgeID: "doc-a", Content: "one"}}
+	rows := []*types.IndexInfo{
+		{SourceID: "a", ChunkID: "old", KnowledgeID: "doc-a", Content: "one"},
+		{SourceID: "b", KnowledgeID: "doc-b", Content: "x"},
+		{SourceID: "c", KnowledgeID: "doc-a", Content: "one"},
+	}
 	for run := 0; run < 2; run++ {
 		repo := &recordingRepository{}
 		service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repo}
@@ -138,12 +215,18 @@ func TestProcessingCacheRestartScopeOrderAndCurrentIDs(t *testing.T) {
 		t.Fatal("changed model identity reused old vector")
 	}
 }
+
 func TestProcessingCacheInvalidVectorsNotPersisted(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	store := &cacheTestStore{rows: map[string]*processingcache.Record{}}
 	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &recordingRepository{}}
 	service.SetProcessingCache(cacheRuntime(store))
-	err := service.BatchIndex(ctx, &cacheTestEmbedder{identity: "a", bad: true}, []*types.IndexInfo{{KnowledgeID: "a", Content: "x"}}, []types.RetrieverType{types.VectorRetrieverType})
+	err := service.BatchIndex(
+		ctx,
+		&cacheTestEmbedder{identity: "a", bad: true},
+		[]*types.IndexInfo{{KnowledgeID: "a", Content: "x"}},
+		[]types.RetrieverType{types.VectorRetrieverType},
+	)
 	if err == nil || len(store.rows) != 0 {
 		t.Fatal("invalid vector was accepted or persisted")
 	}
@@ -157,11 +240,17 @@ func TestProcessingCacheSingleIndexUsesEmbedAndStillWrites(t *testing.T) {
 	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repo}
 	service.SetProcessingCache(cacheRuntime(store))
 	for _, id := range []string{"old", "new"} {
-		if err := service.Index(ctx, model, &types.IndexInfo{SourceID: id, ChunkID: id, KnowledgeID: "doc", Content: "hello"}, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		if err := service.Index(
+			ctx,
+			model,
+			&types.IndexInfo{SourceID: id, ChunkID: id, KnowledgeID: "doc", Content: "hello"},
+			[]types.RetrieverType{types.VectorRetrieverType},
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if model.calls != 1 || model.singleCalls != 1 || model.batchCalls != 0 || len(repo.ids) != 2 || repo.ids[1] != "new" {
+	if model.calls != 1 || model.singleCalls != 1 || model.batchCalls != 0 || len(repo.ids) != 2 ||
+		repo.ids[1] != "new" {
 		t.Fatalf("calls=%d single=%d batch=%d saved=%v", model.calls, model.singleCalls, model.batchCalls, repo.ids)
 	}
 }
@@ -179,6 +268,7 @@ func (r *cacheIndexRepository) Save(_ context.Context, row *types.IndexInfo, par
 	}
 	return nil
 }
+
 func TestProcessingCacheMissingIdentityTenantScopeBypass(t *testing.T) {
 	for _, test := range []struct {
 		name, identity, scope string
@@ -194,7 +284,12 @@ func TestProcessingCacheMissingIdentityTenantScopeBypass(t *testing.T) {
 			service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &recordingRepository{}}
 			service.SetProcessingCache(cacheRuntime(store))
 			for i := 0; i < 2; i++ {
-				if err := service.BatchIndex(ctx, model, []*types.IndexInfo{{KnowledgeID: test.scope, Content: "x"}}, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+				if err := service.BatchIndex(
+					ctx,
+					model,
+					[]*types.IndexInfo{{KnowledgeID: test.scope, Content: "x"}},
+					[]types.RetrieverType{types.VectorRetrieverType},
+				); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -204,6 +299,7 @@ func TestProcessingCacheMissingIdentityTenantScopeBypass(t *testing.T) {
 		})
 	}
 }
+
 func TestProcessingCachePrecomputedBypass(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	store := &cacheTestStore{rows: map[string]*processingcache.Record{}}
@@ -212,13 +308,19 @@ func TestProcessingCachePrecomputedBypass(t *testing.T) {
 	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repo}
 	service.SetProcessingCache(cacheRuntime(store))
 	rows := []*types.IndexInfo{{SourceID: "image", KnowledgeID: "doc", Content: "caption"}}
-	if err := service.BatchIndex(ctx, &precomputedEmbedder{Embedder: model, vectors: [][]float32{{42}}}, rows, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+	if err := service.BatchIndex(
+		ctx,
+		&precomputedEmbedder{Embedder: model, vectors: [][]float32{{42}}},
+		rows,
+		[]types.RetrieverType{types.VectorRetrieverType},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if model.calls != 0 || len(store.rows) != 0 || repo.embeddings["image"][0] != 42 {
 		t.Fatal("image path did not bypass cache")
 	}
 }
+
 func TestProcessingCacheCorruptPayloadRecomputes(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	store := &cacheTestStore{rows: map[string]*processingcache.Record{}}
@@ -246,6 +348,7 @@ func TestProcessingCacheCorruptPayloadRecomputes(t *testing.T) {
 		}
 	}
 }
+
 func TestProcessingCacheTenantAndDocumentIsolation(t *testing.T) {
 	store := &cacheTestStore{rows: map[string]*processingcache.Record{}}
 	model := &cacheTestEmbedder{identity: "model"}
@@ -256,7 +359,12 @@ func TestProcessingCacheTenantAndDocumentIsolation(t *testing.T) {
 		doc    string
 	}{{1, "a"}, {1, "b"}, {2, "b"}} {
 		ctx := context.WithValue(context.Background(), types.TenantIDContextKey, test.tenant)
-		if err := service.BatchIndex(ctx, model, []*types.IndexInfo{{KnowledgeID: test.doc, Content: "same"}}, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		if err := service.BatchIndex(
+			ctx,
+			model,
+			[]*types.IndexInfo{{KnowledgeID: test.doc, Content: "same"}},
+			[]types.RetrieverType{types.VectorRetrieverType},
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -272,7 +380,12 @@ func TestProcessingCacheRejectsWrongVectorCount(t *testing.T) {
 	repo := &recordingRepository{}
 	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repo}
 	service.SetProcessingCache(cacheRuntime(store))
-	if err := service.BatchIndex(ctx, model, []*types.IndexInfo{{KnowledgeID: "a", Content: "x"}, {KnowledgeID: "a", Content: "y"}}, []types.RetrieverType{types.VectorRetrieverType}); err == nil {
+	if err := service.BatchIndex(
+		ctx,
+		model,
+		[]*types.IndexInfo{{KnowledgeID: "a", Content: "x"}, {KnowledgeID: "a", Content: "y"}},
+		[]types.RetrieverType{types.VectorRetrieverType},
+	); err == nil {
 		t.Fatal("accepted wrong vector count")
 	}
 	if len(store.rows) != 0 || len(repo.rows) != 0 {
@@ -288,7 +401,12 @@ func TestProcessingCacheSanitizedActualText(t *testing.T) {
 	service.SetProcessingCache(cacheRuntime(store))
 	for _, payload := range []string{strings.Repeat("A", 300), strings.Repeat("B", 300)} {
 		content := "before ![a](data:image/png;base64," + payload + ") after"
-		if err := service.BatchIndex(ctx, model, []*types.IndexInfo{{KnowledgeID: "doc", Content: content}}, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		if err := service.BatchIndex(
+			ctx,
+			model,
+			[]*types.IndexInfo{{KnowledgeID: "doc", Content: content}},
+			[]types.RetrieverType{types.VectorRetrieverType},
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -296,6 +414,7 @@ func TestProcessingCacheSanitizedActualText(t *testing.T) {
 		t.Fatalf("sanitized equivalent texts computed %d times", model.calls)
 	}
 }
+
 func TestProcessingCacheEffectiveDimensionInvalidates(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	store := &cacheTestStore{rows: map[string]*processingcache.Record{}}
@@ -307,7 +426,13 @@ func TestProcessingCacheEffectiveDimensionInvalidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	model.dimension = 2
-	if err := service.BatchIndex(ctx, model, rows, []types.RetrieverType{types.VectorRetrieverType}); err == nil || model.calls != 2 {
+	if err := service.BatchIndex(
+		ctx,
+		model,
+		rows,
+		[]types.RetrieverType{types.VectorRetrieverType},
+	); err == nil ||
+		model.calls != 2 {
 		t.Fatal("effective dimension reused stale vector")
 	}
 }

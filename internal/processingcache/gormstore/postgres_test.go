@@ -31,7 +31,11 @@ func TestPostgresProcessingCacheMigrationLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	adminSQL, _ := admin.DB()
-	defer adminSQL.Close()
+	defer func() {
+		if err := adminSQL.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	schema := fmt.Sprintf("processing_cache_test_%d", time.Now().UnixNano())
 	if err := admin.Exec("CREATE SCHEMA " + schema).Error; err != nil {
 		t.Fatal(err)
@@ -49,7 +53,11 @@ func TestPostgresProcessingCacheMigrationLifecycle(t *testing.T) {
 	}
 	connection.RuntimeParams["search_path"] = schema
 	raw := stdlib.OpenDB(*connection)
-	defer raw.Close()
+	defer func() {
+		if err := raw.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	db, err := gorm.Open(postgres.New(postgres.Config{Conn: raw}), config)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +69,7 @@ func TestPostgresProcessingCacheMigrationLifecycle(t *testing.T) {
 		}
 	}
 	must(db.Exec("CREATE TABLE knowledges(id VARCHAR(36) PRIMARY KEY)").Error)
-	up, err := os.ReadFile("../../../migrations/versioned/000134_processing_cache.up.sql")
+	up, err := os.ReadFile("../../../migrations/versioned/000137_processing_cache.up.sql")
 	must(err)
 	must(db.Exec(string(up)).Error)
 	must(db.Exec("INSERT INTO knowledges VALUES ('source'),('target')").Error)
@@ -69,22 +77,36 @@ func TestPostgresProcessingCacheMigrationLifecycle(t *testing.T) {
 	ctx := context.Background()
 	opts := processingcache.Options{ReadEnabled: true, WriteEnabled: true, TTL: time.Hour}
 	compute := func(context.Context, []int) ([][]byte, error) { return [][]byte{[]byte("vector")}, nil }
-	_, _, err = processingcache.New(store, opts).BatchShared(ctx, 1, "source", "embedding", []any{"input"}, nil, compute)
+	_, _, err = processingcache.New(store, opts).
+		BatchShared(ctx, 1, "source", "embedding", []any{"input"}, nil, compute)
 	must(err)
-	_, stats, err := processingcache.New(store, opts).BatchShared(ctx, 1, "target", "embedding", []any{"input"}, nil, func(context.Context, []int) ([][]byte, error) { t.Fatal("shared result recomputed"); return nil, nil })
+	_, stats, err := processingcache.New(store, opts).
+		BatchShared(ctx, 1, "target", "embedding", []any{"input"}, nil, func(context.Context, []int) ([][]byte, error) {
+			t.Fatal("shared result recomputed")
+			return nil, nil
+		})
 	must(err)
 	if stats.Hits != 1 {
 		t.Fatal(stats)
 	}
 	must(db.Exec("DELETE FROM knowledges WHERE id='source'").Error)
-	_, stats, err = processingcache.New(store, opts).BatchShared(ctx, 1, "target", "embedding", []any{"input"}, nil, compute)
+	_, stats, err = processingcache.New(store, opts).
+		BatchShared(ctx, 1, "target", "embedding", []any{"input"}, nil, compute)
 	must(err)
 	if stats.Hits != 1 {
 		t.Fatal("target lost after source deletion")
 	}
 	for _, expired := range []bool{false, true} {
 		key := fmt.Sprint("race-", expired)
-		rec := &processingcache.Record{TenantID: 1, ScopeID: "target", Stage: "embedding", Key: key, Payload: []byte("old"), Checksum: "old", ExpiresAt: time.Now().Add(time.Hour)}
+		rec := &processingcache.Record{
+			TenantID:  1,
+			ScopeID:   "target",
+			Stage:     "embedding",
+			Key:       key,
+			Payload:   []byte("old"),
+			Checksum:  "old",
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
 		if expired {
 			rec.ExpiresAt = time.Now().Add(-time.Hour)
 			_, err = store.PutIfAbsent(ctx, rec)
@@ -131,7 +153,18 @@ func TestPostgresProcessingCacheMigrationLifecycle(t *testing.T) {
 	if count != 0 {
 		t.Fatal("cascade retained rows")
 	}
-	if _, err := store.PutIfAbsent(ctx, &processingcache.Record{TenantID: 1, ScopeID: "target", Stage: "embedding", Key: "late", Payload: []byte("valid"), Checksum: "checksum", ExpiresAt: time.Now().Add(time.Hour)}); err == nil {
+	if _, err := store.PutIfAbsent(
+		ctx,
+		&processingcache.Record{
+			TenantID:  1,
+			ScopeID:   "target",
+			Stage:     "embedding",
+			Key:       "late",
+			Payload:   []byte("valid"),
+			Checksum:  "checksum",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	); err == nil {
 		t.Fatal("late write accepted")
 	} else {
 		var pgError *pgconn.PgError
@@ -139,7 +172,7 @@ func TestPostgresProcessingCacheMigrationLifecycle(t *testing.T) {
 			t.Fatalf("late write failed for unexpected reason: %v", err)
 		}
 	}
-	down, err := os.ReadFile("../../../migrations/versioned/000134_processing_cache.down.sql")
+	down, err := os.ReadFile("../../../migrations/versioned/000137_processing_cache.down.sql")
 	must(err)
 	must(db.Exec(string(down)).Error)
 	if db.Migrator().HasTable(&Model{}) {

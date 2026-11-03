@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/Tencent/WeKnora/internal/processingcache"
 	"io"
 	"net/http"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/utils"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/google/uuid"
 )
 
@@ -57,10 +57,11 @@ func NewWeKnoraCloudVLM(config *Config) (*WeKnoraCloudVLM, error) {
 			}
 		}
 	}
-	return &WeKnoraCloudVLM{cacheIdentity: processingcache.Digest(struct {
-		Config                *Config
-		Endpoint, RemoteModel string
-	}{config, baseURL + weKnoraCloudVLMPath, remoteModelName}),
+	return &WeKnoraCloudVLM{
+		cacheIdentity: processingcache.Digest(struct {
+			Config                *Config
+			Endpoint, RemoteModel string
+		}{config, baseURL + weKnoraCloudVLMPath, remoteModelName}),
 		modelName:       config.ModelName,
 		remoteModelName: remoteModelName,
 		modelID:         config.ModelID,
@@ -96,7 +97,8 @@ type weKnoraCloudVLMRequest struct {
 
 type weKnoraCloudVLMResponse struct {
 	Choices []struct {
-		Message struct {
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
@@ -111,7 +113,7 @@ func (v *WeKnoraCloudVLM) Predict(ctx context.Context, imgBytesList [][]byte, pr
 // thinking switch, so the options are accepted and used for nothing — the same
 // call goes out as Predict sends.
 func (v *WeKnoraCloudVLM) PredictWithOptions(
-	ctx context.Context, imgBytesList [][]byte, prompt string, _ *PredictOptions,
+	ctx context.Context, imgBytesList [][]byte, prompt string, opts *PredictOptions,
 ) (string, error) {
 	var parts []weKnoraCloudVLMContentPart
 
@@ -191,6 +193,12 @@ func (v *WeKnoraCloudVLM) PredictWithOptions(
 	}
 
 	content := vlmResp.Choices[0].Message.Content
+	if err := validateCompletionReason(
+		vlmResp.Choices[0].FinishReason,
+		opts != nil && opts.RequireComplete,
+	); err != nil {
+		return "", err
+	}
 	logger.Infof(ctx, "[VLM] WeKnoraCloud response received, len=%d", len(content))
 	return content, nil
 }

@@ -8,13 +8,13 @@ import (
 
 // ProcessingCacheConfig controls optional persistent processing-stage reuse.
 type ProcessingCacheConfig struct {
-	ReadEnabled     bool   `yaml:"read_enabled" json:"read_enabled"`
-	WriteEnabled    bool   `yaml:"write_enabled" json:"write_enabled"`
-	MaxBytes        int    `yaml:"max_bytes" json:"max_bytes"`
+	ReadEnabled     bool   `yaml:"read_enabled"      json:"read_enabled"`
+	WriteEnabled    bool   `yaml:"write_enabled"     json:"write_enabled"`
+	MaxBytes        int    `yaml:"max_bytes"         json:"max_bytes"`
 	ParsingMaxBytes int    `yaml:"parsing_max_bytes" json:"parsing_max_bytes"`
-	ImageMaxBytes   int    `yaml:"image_max_bytes" json:"image_max_bytes"`
-	RetentionDays   int    `yaml:"retention_days" json:"retention_days"`
-	Epoch           string `yaml:"epoch" json:"epoch"`
+	ImageMaxBytes   int    `yaml:"image_max_bytes"   json:"image_max_bytes"`
+	RetentionDays   int    `yaml:"retention_days"    json:"retention_days"`
+	Epoch           string `yaml:"epoch"             json:"epoch"`
 }
 
 // Options keeps retention and payload size bounded even for omitted settings.

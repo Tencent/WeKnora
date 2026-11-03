@@ -26,7 +26,11 @@ func TestProcessingCacheReopenDatabaseBindsCurrentChunk(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { raw.Close() })
+		t.Cleanup(func() {
+			if err := raw.Close(); err != nil {
+				t.Error(err)
+			}
+		})
 		if err := db.AutoMigrate(&gormstore.Model{}); err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +39,12 @@ func TestProcessingCacheReopenDatabaseBindsCurrentChunk(t *testing.T) {
 		engine.SetProcessingCache(processingcache.New(gormstore.New(db), processingcache.Options{
 			ReadEnabled: true, WriteEnabled: true, TTL: time.Hour, MaxBytes: 1024,
 		}))
-		if err := engine.Index(ctx, model, &types.IndexInfo{SourceID: id, ChunkID: id, KnowledgeID: "document", Content: "hello"}, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		if err := engine.Index(
+			ctx,
+			model,
+			&types.IndexInfo{SourceID: id, ChunkID: id, KnowledgeID: "document", Content: "hello"},
+			[]types.RetrieverType{types.VectorRetrieverType},
+		); err != nil {
 			t.Fatal(err)
 		}
 		if model.calls != 1-attempt {
@@ -56,18 +65,29 @@ func TestProcessingCacheCrossDocumentReuseSurvivesSourceDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := db.DB()
-	defer raw.Close()
+	defer func() {
+		if err := raw.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	if err := db.AutoMigrate(&gormstore.Model{}); err != nil {
 		t.Fatal(err)
 	}
 	store := gormstore.New(db)
 	model := &cacheTestEmbedder{identity: "shared-model"}
 	engine := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &cacheIndexRepository{}}
-	engine.SetProcessingCache(processingcache.New(store, processingcache.Options{ReadEnabled: true, WriteEnabled: true, TTL: time.Hour}))
+	engine.SetProcessingCache(
+		processingcache.New(store, processingcache.Options{ReadEnabled: true, WriteEnabled: true, TTL: time.Hour}),
+	)
 	index := func(tenant uint64, doc string) {
 		t.Helper()
 		ctx := context.WithValue(context.Background(), types.TenantIDContextKey, tenant)
-		if err := engine.Index(ctx, model, &types.IndexInfo{SourceID: doc, ChunkID: doc, KnowledgeID: doc, Content: "hello"}, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		if err := engine.Index(
+			ctx,
+			model,
+			&types.IndexInfo{SourceID: doc, ChunkID: doc, KnowledgeID: doc, Content: "hello"},
+			[]types.RetrieverType{types.VectorRetrieverType},
+		); err != nil {
 			t.Fatal(err)
 		}
 	}

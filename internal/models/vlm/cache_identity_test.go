@@ -1,14 +1,22 @@
 package vlm
 
 import (
+	"testing"
+
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
-	"testing"
 )
 
 func TestProcessingCacheIdentity(t *testing.T) {
-	cfg := &Config{Source: types.ModelSourceRemote, Provider: "openai", ModelName: "gpt-4o", BaseURL: "https://api.openai.com/v1", APIKey: "secret", CustomHeaders: map[string]string{"X-Route": "a"}}
+	cfg := &Config{
+		Source:        types.ModelSourceRemote,
+		Provider:      "openai",
+		ModelName:     "gpt-4o",
+		BaseURL:       "https://api.openai.com/v1",
+		APIKey:        "secret",
+		CustomHeaders: map[string]string{"X-Route": "a"},
+	}
 	build := func() string {
 		v, e := NewVLM(cfg, nil)
 		if e != nil {
@@ -38,7 +46,12 @@ func TestProcessingCacheIdentity(t *testing.T) {
 func TestProcessingCacheEffectiveOverlayIdentity(t *testing.T) {
 	snapshot := modelruntime.SnapshotCurrent()
 	t.Cleanup(func() { modelruntime.RestoreSnapshot(snapshot) })
-	cfg := &Config{Source: types.ModelSourceRemote, Provider: "openai", ModelName: "gpt-4o", BaseURL: "https://api.openai.com/v1"}
+	cfg := &Config{
+		Source:    types.ModelSourceRemote,
+		Provider:  "openai",
+		ModelName: "gpt-4o",
+		BaseURL:   "https://api.openai.com/v1",
+	}
 	build := func() VLM {
 		v, e := NewVLM(cfg, nil)
 		if e != nil {
@@ -48,7 +61,11 @@ func TestProcessingCacheEffectiveOverlayIdentity(t *testing.T) {
 	}
 	first := build()
 	id := identityOf(first)
-	for _, overlay := range []string{`{"providers":{"openai":{"api_key":"deployment-secret"}}}`, `{"providers":{"openai":{"headers":{"X-Route":"deployment"}}}}`, `{"providers":{"openai":{"models":[{"id":"gpt-4o","max_output_tokens":1234}]}}}`} {
+	for _, overlay := range []string{
+		`{"providers":{"openai":{"api_key":"deployment-secret"}}}`,
+		`{"providers":{"openai":{"headers":{"X-Route":"deployment"}}}}`,
+		`{"providers":{"openai":{"models":[{"id":"gpt-4o","max_output_tokens":1234}]}}}`,
+	} {
 		modelruntime.RestoreSnapshot(snapshot)
 		if e := modelruntime.ApplyOverlay([]byte(overlay), ""); e != nil {
 			t.Fatal(e)
@@ -61,6 +78,7 @@ func TestProcessingCacheEffectiveOverlayIdentity(t *testing.T) {
 		}
 	}
 }
+
 func TestProcessingCacheLocalAndCloudIdentity(t *testing.T) {
 	cfg := &Config{Source: types.ModelSourceLocal, ModelName: "local"}
 	t.Setenv("OLLAMA_BASE_URL", "http://ollama-a:11434")
@@ -79,7 +97,14 @@ func TestProcessingCacheLocalAndCloudIdentity(t *testing.T) {
 	if identityOf(first) == identityOf(second) || identityOf(first) != identityOf(old) {
 		t.Fatal("did not freeze injected endpoint")
 	}
-	cfg = &Config{Source: types.ModelSourceRemote, Provider: "weknoracloud", BaseURL: "https://api.openai.com", ModelName: "vision", AppID: "app", AppSecret: "secret"}
+	cfg = &Config{
+		Source:    types.ModelSourceRemote,
+		Provider:  "weknoracloud",
+		BaseURL:   "https://api.openai.com",
+		ModelName: "vision",
+		AppID:     "app",
+		AppSecret: "secret",
+	}
 	cloud, e := NewVLM(cfg, nil)
 	if e != nil {
 		t.Fatal(e)
