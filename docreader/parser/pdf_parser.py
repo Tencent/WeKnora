@@ -348,10 +348,6 @@ def _strip_arxiv_and_page_num_lines(text: str) -> str:
             continue
         if _is_probable_page_num_line(lines, i):
             continue
-        if "arXiv:" in ln:
-            ln = re.sub(r"\s*arXiv:\s*\S+\s*(?:\[[^\]]+\])?\s*[^\n]*", "", ln).strip()
-            if not ln:
-                continue
         kept.append(ln)
     return "\n".join(kept)
 
