@@ -28,7 +28,12 @@ func init() {
 				// Extent / presence observations are filter material by
 				// default; searching and sorting on them is an operator
 				// decision made through the gallery policy tiers.
-				Usage: GalleryUsage{InFilter: true},
+				//
+				// Internal attributes are the exception: they steer this
+				// pipeline's scheduling (see AttrSpec.Internal) and describe
+				// the input rather than the library's contents, so they are
+				// persisted for the record but never offered as a filter.
+				Usage: GalleryUsage{InFilter: !spec.Internal},
 			})
 		}
 		return defs

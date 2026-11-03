@@ -299,6 +299,9 @@ type ToolApprovalRequiredData struct {
 	// GrantScope, when set, offers to allow calls like this one for the rest
 	// of the session, and describes which calls that covers.
 	GrantScope string `json:"grant_scope,omitempty"`
+	// GrantLapsed, when set, is why an earlier grant for this call no longer
+	// applies; see types.ToolApprovalPromptRequest.
+	GrantLapsed string `json:"grant_lapsed,omitempty"`
 }
 
 // ToolApprovalResolvedData confirms the user decision (or timeout/cancel).

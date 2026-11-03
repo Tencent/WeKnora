@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/sandbox/workspace"
 )
 
 const (
-	// SkillsImageRoot is where installed skills live inside the snapshot image.
+	// SkillsImageRoot is where installed skills live inside the sandbox image.
 	// It is outside /workspace on purpose: /workspace is per-session scratch
 	// and is wiped before every snapshot.
-	SkillsImageRoot = "/opt/weknora/tenant/skills"
+	SkillsImageRoot = workspace.SkillsImageRoot
 
 	// SkillsManifestPath lists what the image claims to contain. It is a
 	// troubleshooting aid, never the source of truth for execution.
@@ -95,20 +97,14 @@ func SkillRequirementsPathIn(skillDir string) string {
 
 // RunnableWorkspaceScript reports whether scriptPath is a session-writable
 // file under /workspace that may be executed with an installed skill's
-// interpreter. /workspace/input is reserved for attachments and is excluded;
-// so are the workspace directory roots themselves.
+// interpreter. See RunnableWorkspaceScriptIn for shared machines.
 func RunnableWorkspaceScript(scriptPath string) (string, bool) {
-	clean := path.Clean(strings.TrimSpace(scriptPath))
-	if clean == SessionWorkspaceRoot || clean == SessionOutputRoot || clean == SessionInputRoot {
-		return "", false
-	}
-	if !strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
-		return "", false
-	}
-	if strings.HasPrefix(clean, SessionInputRoot+"/") {
-		return "", false
-	}
-	return clean, true
+	return workspace.RunnableScriptIn(RemoteWorkspaceLayout(), scriptPath)
+}
+
+// RunnableWorkspaceScriptIn is RunnableWorkspaceScript for an explicit layout.
+func RunnableWorkspaceScriptIn(l WorkspaceLayout, scriptPath string) (string, bool) {
+	return workspace.RunnableScriptIn(l, scriptPath)
 }
 
 // ValidatedSessionOutputDir normalises a configured artifact directory and
@@ -126,11 +122,12 @@ func RunnableWorkspaceScript(scriptPath string) (string, bool) {
 // included — and callers that compare the two (artifact collection) read
 // that as "this backend collects nothing", silently dropping every artifact.
 func ValidatedSessionOutputDir(dir string) (string, bool) {
-	clean := path.Clean(strings.TrimSpace(dir))
-	if !strings.HasPrefix(clean, SessionWorkspaceRoot+"/") {
-		return "", false
-	}
-	return clean, true
+	return workspace.ValidOutputDirIn(RemoteWorkspaceLayout(), dir)
+}
+
+// ValidatedOutputDirIn is ValidatedSessionOutputDir for an explicit layout.
+func ValidatedOutputDirIn(l WorkspaceLayout, dir string) (string, bool) {
+	return workspace.ValidOutputDirIn(l, dir)
 }
 
 // ValidatedImageSkillDir reports whether skillDir is exactly one installed

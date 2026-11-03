@@ -30,12 +30,12 @@
     user-select: none;
 
     .results-summary-text {
-      color: var(--td-text-color-placeholder);
+      color: var(--agent-step-color, var(--td-text-color-secondary));
       transition: color var(--app-motion-fast) ease;
     }
 
     &:hover .results-summary-text {
-      color: var(--td-text-color-secondary);
+      color: var(--agent-step-color, var(--td-text-color-secondary));
     }
   }
 
@@ -47,7 +47,7 @@
     font-size: var(--agent-step-summary-size, 13px);
     font-weight: 400;
     line-height: 1.55;
-    color: var(--td-text-color-secondary);
+    color: var(--agent-step-color, var(--td-text-color-secondary));
   }
 
   .status-label {
@@ -65,7 +65,7 @@
     font-size: var(--app-text-sm);
     line-height: 1.55;
     font-variant-numeric: tabular-nums;
-    color: var(--td-text-color-placeholder);
+    color: var(--agent-step-color, var(--td-text-color-secondary));
     white-space: nowrap;
     flex-shrink: 0;
 
@@ -80,7 +80,7 @@
 }
 
 .inline-dot {
-  color: var(--td-text-color-placeholder);
+  color: var(--agent-step-color, var(--td-text-color-secondary));
   font-size: var(--app-text-sm);
   line-height: 1;
   user-select: none;
@@ -94,12 +94,12 @@
   margin: 0;
   font-size: var(--agent-step-summary-size, 13px);
   line-height: 1.55;
-  color: var(--td-text-color-placeholder);
+  color: var(--agent-step-color, var(--td-text-color-secondary));
   cursor: pointer;
   transition: color var(--app-motion-fast) ease;
 
   &:hover:not(:disabled) {
-    color: var(--td-text-color-secondary);
+    color: var(--agent-step-color, var(--td-text-color-secondary));
   }
 
   &:disabled {
@@ -126,21 +126,21 @@
   flex-wrap: wrap;
   row-gap: 2px;
 
-  .action-title-icon.t-icon {
+  .action-title-icon {
     position: absolute;
     left: -42px;
     top: 3px;
     flex-shrink: 0;
     width: 18px;
     height: 18px;
-    color: var(--agent-step-icon-color, var(--td-text-color-placeholder));
+    color: var(--agent-step-icon-color, var(--td-text-color-secondary));
   }
 
   .action-name {
     font-size: var(--agent-step-text-size, 14px);
     line-height: 1.55;
     font-weight: 400;
-    color: var(--td-text-color-secondary);
+    color: var(--agent-step-color, var(--td-text-color-secondary));
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -449,6 +449,11 @@
   align-self: flex-start;
   font-size: var(--agent-step-summary-size, 13px);
   color: var(--td-text-color-secondary);
+}
+
+.prompt-grant-lapsed {
+  font-size: var(--agent-step-summary-size, 13px);
+  color: var(--td-warning-color);
 }
 
 .prompt-grant-scope {

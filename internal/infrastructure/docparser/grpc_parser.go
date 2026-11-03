@@ -252,3 +252,24 @@ func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 	}
 	return result, nil
 }
+
+// PreprocessImage straightens and crops a photographed page before OCR runs.
+// The docreader does the work; a page it declines to improve comes back as
+// fallback=true with no bytes, which the caller reads as "use the original".
+func (p *GRPCDocumentReader) PreprocessImage(ctx context.Context, image []byte) ([]byte, bool, error) {
+	p.mu.RLock()
+	client := p.client
+	p.mu.RUnlock()
+	if client == nil {
+		return nil, true, errNotConnected
+	}
+
+	resp, err := client.PreprocessImage(ctx, &proto.PreprocessImageRequest{Image: image})
+	if err != nil {
+		return nil, true, fmt.Errorf("gRPC PreprocessImage failed: %w", err)
+	}
+	if resp.GetFallbackNeeded() || len(resp.GetImage()) == 0 {
+		return nil, true, nil
+	}
+	return resp.GetImage(), false, nil
+}

@@ -41,6 +41,11 @@ function setup(link: unknown, initialPath = '/platform/knowledge-bases') {
   return { state, pushed, drafts, router }
 }
 
+test('an automation link uses the clock icon', () => {
+  const { state } = setup({ display_type: 'open_page', page: 'automations', label: 'Automations', detail: 'Remind me' })
+  assert.equal(state.icon.value, 'time')
+})
+
 test('opening a new-model link hands its form to the page, then navigates', () => {
   const { state, pushed, drafts } = setup({
     display_type: 'open_page', page: 'settings_models', label: 'Models',

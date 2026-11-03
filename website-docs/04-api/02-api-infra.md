@@ -342,9 +342,11 @@ curl -X POST $BASE/api/v1/datasource/validate-credentials -H "Authorization: Bea
 | `sync_mode` | string | 否 | `incremental`（默认）/`full` |
 | `conflict_strategy` | string | 否 | `overwrite`（默认）/`skip` |
 | `sync_deletions` | bool | 否 | 默认 true |
-| `sync_log_retention_days` | int | 否 | 默认 30 |
+| `sync_log_retention_days` | int | 否 | 本数据源同步日志保留天数，默认 30；非正值按 30 天处理 |
 
 响应：201 `DataSourceResponse`（凭证剥离，见 `internal/handler/dto/datasource.go`）。
+
+后台每日凌晨（服务所在时区）清理过期的 `success`、`partial`、`canceled` 同步日志，包括暂停和仅手动同步的数据源。保留期从完成时间计算，旧日志缺少完成时间时使用开始时间。运行中或等待执行的日志不清理；现有数据源的 `failed` 日志也会保留，因为该状态可能仍在等待任务重试。数据源软删除后继续沿用原保留期，并可清理 `failed` 日志；无来源日志按默认 30 天保留。
 
 ```bash
 curl -X POST $BASE/api/v1/datasource -H "Authorization: Bearer $TOKEN" \

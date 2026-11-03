@@ -244,3 +244,12 @@ func (p *WeKnoraCloudSignedDocumentReader) newSignedRequest(ctx context.Context,
 	}
 	return httpReq, nil
 }
+
+// PreprocessImage is not offered by the cloud-signed reader: page straightening
+// runs in the local docreader service, while this reader talks to WeKnoraCloud.
+// It reports that as a verdict — fallback=true, no error — so the caller's only
+// fallback (OCR the original bytes) needs no special case and nothing looks like
+// a failure in the logs.
+func (p *WeKnoraCloudSignedDocumentReader) PreprocessImage(_ context.Context, _ []byte) ([]byte, bool, error) {
+	return nil, true, nil
+}

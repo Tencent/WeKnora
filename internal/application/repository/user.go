@@ -146,6 +146,27 @@ func (r *userRepository) DeleteUser(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.User{}).Error
 }
 
+// DeleteUserRetiringSessions locks the web user, retires every session visible
+// under that lock, and soft-deletes the user in the same transaction. A user
+// row that is already soft-deleted is still held for the re-read; its sessions
+// are retired and the call returns nil.
+func (r *userRepository) DeleteUserRetiringSessions(ctx context.Context, id string, at time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := lockLiveWebUser(tx, id)
+		if err != nil && !errors.Is(err, errWebUserDeleted) {
+			return err
+		}
+		ids, err := ownerSessionIDs(tx, id)
+		if err != nil {
+			return err
+		}
+		if _, err := RetireSessionsTx(tx, ids, at); err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&types.User{}).Error
+	})
+}
+
 // ListUsers lists users with pagination
 func (r *userRepository) ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error) {
 	var users []*types.User

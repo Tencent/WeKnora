@@ -32,6 +32,15 @@ type Adapter struct {
 // New wraps a localsandbox Service as the session-scoped Manager the agent uses.
 func New(svc *localsandbox.Service) *Adapter { return &Adapter{svc: svc} }
 
+// LocalSandboxService exposes the wrapped service for desktop composition
+// (local shell jobs). Not part of the remote-facing capability interfaces.
+func (a *Adapter) LocalSandboxService() *localsandbox.Service {
+	if a == nil {
+		return nil
+	}
+	return a.svc
+}
+
 // maxListSessionFiles stops WalkDir once the listing is as large as the
 // list_sandbox_files tool will ever keep (500). The tool also truncates,
 // but that is after the whole tree is already in memory.

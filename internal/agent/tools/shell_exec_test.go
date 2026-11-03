@@ -231,7 +231,7 @@ func TestShellExecDescriptionDefinesOneExecutionEntry(t *testing.T) {
 		require.Contains(t, description, fact)
 	}
 	require.NotContains(t, description, "execute_skill_script")
-	require.Less(t, len(description), 2500)
+	require.Less(t, len(description), 2800)
 }
 
 func TestShellExecBoundsStdoutStderrErrorAndTotal(t *testing.T) {

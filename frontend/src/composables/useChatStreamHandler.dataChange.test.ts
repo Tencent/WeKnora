@@ -49,6 +49,19 @@ test('emits the marker of a Wiki edit', t => {
   assert.equal(handler.listener.mock.callCount(), 1)
 })
 
+for (const operation of ['automation.create', 'automation.update', 'automation.pause', 'automation.run_now']) {
+  test(`forwards ${operation} changes without requiring resource IDs`, t => {
+    const handler = setup(t)
+    handler.processStreamChunk({ response_type: 'tool_result', id: 'r1', data: {
+      tool_call_id: 'call', tool_name: 'run_operation', success: true,
+      data_change: { operation, area: 'automation' },
+    } })
+    assert.equal(handler.listener.mock.callCount(), 1)
+    assert.equal(handler.listener.mock.calls[0].arguments[0].detail.operation, operation)
+    assert.equal(handler.listener.mock.calls[0].arguments[0].detail.area, 'automation')
+  })
+}
+
 for (const data of [
   { success: false, data_change: change('agent.delete') },
   { success: true },

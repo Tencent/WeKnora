@@ -208,7 +208,8 @@ func TestShellExecInstallModeIgnoresWorkspaceLayout(t *testing.T) {
 // The remote description must not drift: it is prompt text a lot of behaviour
 // was tuned against.
 func TestShellExecDescriptionRemoteIsUnchanged(t *testing.T) {
-	require.Equal(t, legacyShellExecDescription,
+	require.Equal(t,
+		fmt.Sprintf(shellExecBodyTemplate, shellExecScopeOwned, shellExecLifetimeOwned),
 		shellExecDescription(sandbox.RemoteWorkspaceLayout()))
 }
 
@@ -557,4 +558,94 @@ func TestListSandboxFilesScopeErrorNamesResolvedDefaultDir(t *testing.T) {
 	require.False(t, result.Success)
 	require.Contains(t, result.Error, "/Users/dev/My Project")
 	require.NotContains(t, result.Error, `path ""`)
+}
+
+func TestSharedLayoutAllowsInspectingTheWholeMachine(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	root, ok := inspectRoot(l, "/workspace/sessions/7c9e6679-7425-40de-944b-e07fc1f90ae7/a.md")
+	require.True(t, ok, "a sibling session's directory is not refused any more")
+	require.Equal(t, "/", root)
+	root, ok = inspectRoot(l, sandbox.SkillsImageRoot+"/pdf/SKILL.md")
+	require.True(t, ok)
+	require.Equal(t, sandbox.SkillsImageRoot, root)
+
+	tool := &ShellExecTool{}
+	require.Equal(t, []string{"/"}, tool.workDirRootsFor(l),
+		"a shared machine allows work_dir anywhere, like a session-owned one")
+	require.Equal(t, []string{"/"}, tool.workDirRootsFor(sandbox.RemoteWorkspaceLayout()))
+}
+
+func TestSharedFileToolsProtectSiblingAttachments(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	sibling, err := sandbox.UserWorkspaceLayout("7c9e6679-7425-40de-944b-e07fc1f90ae7")
+	require.NoError(t, err)
+	for _, file := range []string{
+		sibling.InputDir + "/original.txt",
+		sibling.Root + "/output/../input/original.txt",
+	} {
+		t.Run(file, func(t *testing.T) {
+			target := sibling.InputDir + "/original.txt"
+			sink := &layoutFileSink{layout: l}
+			sink.files = map[string][]byte{target: []byte("original")}
+			writer := NewWriteSandboxFileTool(sink, 0)
+			editor := NewEditSandboxFileTool(sink)
+			for _, mode := range []string{"overwrite", "append"} {
+				args, err := json.Marshal(WriteSandboxFileInput{Path: file, Content: "modified", Mode: mode})
+				require.NoError(t, err)
+				result, err := writer.Execute(sandboxFileTestContext(), args)
+				require.NoError(t, err)
+				require.False(t, result.Success)
+				require.Contains(t, result.Error, sibling.InputDir+" is read-only")
+			}
+			result, err := editor.Execute(
+				sandboxFileTestContext(), mustEditSandboxArgs(file, "original", "modified", false),
+			)
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			require.Contains(t, result.Error, sibling.InputDir+" is read-only")
+			require.Zero(t, sink.calls)
+			require.Equal(t, "original", string(sink.files[target]))
+
+			// Ordinary sibling files remain writable with both tools.
+			work := sibling.OutputDir + "/report.txt"
+			result, err = writer.Execute(sandboxFileTestContext(), mustWriteSandboxArgs(work, "original"))
+			require.NoError(t, err)
+			require.True(t, result.Success, result.Error)
+			result, err = editor.Execute(
+				sandboxFileTestContext(), mustEditSandboxArgs(work, "original", "modified", false),
+			)
+			require.NoError(t, err)
+			require.True(t, result.Success, result.Error)
+			require.Equal(t, "modified", string(sink.files[work]))
+		})
+	}
+}
+
+func TestSharedLayoutToolCopyKeepsSessionPathsIntact(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	text := shellExecDescription(l)
+	require.Contains(t, text, l.InputDir)
+	require.Contains(t, text, l.OutputDir)
+	require.Contains(t, text, l.Root)
+	require.NotContains(t, text, l.Root+"/sessions/",
+		"substituting /workspace must not rewrite a path that already names the session")
+}
+
+func TestSharedLayoutShellDescriptionNamesTheSessionDirectory(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	text := shellExecDescription(l)
+	require.Contains(t, text, "CWD defaults to "+l.Root)
+	require.Contains(t, text, "Deleting this session removes its directory, not the machine")
+	require.Contains(t, text, "skill_name")
+	require.Contains(t, text, l.InputDir)
+	require.Contains(t, text, l.OutputDir)
+	require.Contains(t, text, "no nohup")
+	require.NotContains(t, text, "shared")
+	require.NotContains(t, text, "other sessions")
+	require.NotContains(t, text, "belongs to this session alone")
+	require.Contains(t, shellExecDescription(sandbox.RemoteWorkspaceLayout()), "belongs to this session alone")
 }

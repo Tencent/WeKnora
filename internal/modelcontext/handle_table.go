@@ -7,7 +7,7 @@ import (
 )
 
 // handleTable is the single bidirectional primitive behind every model-handle
-// space: cN/dN/bN/wN source handles, iN issue handles, res://NNNN resource
+// space: chunk://N, doc://N, kb://N and url://N source handles, iN issue handles, res://NNNN resource
 // handles, and the ref-N / c000 ingest handles exposed through HandleTable.
 //
 // It maps a durable dedup key to a sequentially allocated handle and stores

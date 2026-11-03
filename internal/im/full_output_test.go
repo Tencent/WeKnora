@@ -362,7 +362,7 @@ func TestExecuteQARequestFullOutputSkipsProgressWhenNotSupported(t *testing.T) {
 
 func TestFormatIMOutboundAnswerOrFallbackAfterCleanup(t *testing.T) {
 	got := formatIMOutboundAnswerOrFallback(
-		context.Background(), "<think>only reasoning</think>", nil, nil,
+		context.Background(), "<think>only reasoning</think>", nil,
 	)
 	if got != imNoAnswerFallback {
 		t.Fatalf("think-only final content = %q, want fallback %q", got, imNoAnswerFallback)

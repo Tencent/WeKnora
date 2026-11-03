@@ -78,3 +78,15 @@ func TestArtifactGuidanceUsesConfiguredOutputDirectory(t *testing.T) {
 	require.Contains(t, guidance, "/workspace/deliverables is the only directory collected for download")
 	require.NotContains(t, guidance, "/workspace/output is the only directory collected")
 }
+
+func TestSharedLayoutPromptNamesTheSessionDirectory(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	text := formatToolGuidanceForMode([]string{"shell_exec"}, false, l)
+	require.Contains(t, text, "Session workspace: "+l.Root)
+	require.Contains(t, text, l.InputDir)
+	require.Contains(t, text, l.OutputDir)
+	require.NotContains(t, text, "share this machine")
+	require.NotContains(t, text, "other conversations")
+	require.NotContains(t, text, "Session workspace: /workspace.")
+}

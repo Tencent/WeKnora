@@ -141,8 +141,8 @@ func holdbackCutoff(chunk string) int {
 }
 
 // formatIMOutboundAnswer strips thinking/tool blocks and applies IM content cleanup.
-func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
-	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc, storageResolvers...)
+func formatIMOutboundAnswer(ctx context.Context, raw string, resolver *storageurl.FileServiceResolver) string {
+	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), resolver)
 }
 
 // formatIMOutboundAnswerOrFallback guarantees that cleanup cannot turn a
@@ -152,11 +152,9 @@ func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenan
 func formatIMOutboundAnswerOrFallback(
 	ctx context.Context,
 	raw string,
-	tenant *types.Tenant,
-	defaultFileSvc interfaces.FileService,
-	storageResolvers ...interfaces.StorageBackendResolver,
+	resolver *storageurl.FileServiceResolver,
 ) string {
-	content := formatIMOutboundAnswer(ctx, raw, tenant, defaultFileSvc, storageResolvers...)
+	content := formatIMOutboundAnswer(ctx, raw, resolver)
 	if strings.TrimSpace(content) == "" {
 		return imNoAnswerFallback
 	}
@@ -184,11 +182,13 @@ func imQAFailureReply(err error) string {
 // cleanIMContent applies all IM-specific content transformations:
 //  1. Collapse <image> XML blocks back to plain markdown
 //  2. Strip <kb/> and <web/> citation tags
-//  3. Rewrite provider:// URLs to HTTP URLs (scheme-aware per tenant config)
-func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
+//  3. Rewrite storage references to HTTP URLs using their owning storage instance
+func cleanIMContent(ctx context.Context, content string, resolver *storageurl.FileServiceResolver) string {
 	content = stripImageXMLTags(content)
 	content = stripIMCitationTags(content)
-	resolver := newIMFileServiceResolver(tenant, defaultFileSvc, storageResolvers...).WithContext(ctx)
+	if resolver != nil {
+		resolver.WithContext(ctx)
+	}
 	content = rewriteStorageURLs(ctx, content, resolver)
 	return content
 }
@@ -202,6 +202,21 @@ func newIMFileServiceResolver(
 	storageResolvers ...interfaces.StorageBackendResolver,
 ) *storageurl.FileServiceResolver {
 	return storageurl.NewFileServiceResolver(tenant, defaultSvc, storageResolvers...)
+}
+
+// Every platform and output mode uses the same resource-aware resolver. Keep
+// it scoped to the reply so shared KB images select their owner's backend and
+// multiple images on the same instance reuse its client during streaming.
+func (s *Service) newOutboundFileServiceResolver(
+	tenant *types.Tenant,
+	agent *types.CustomAgent,
+	kbIDs []string,
+) *storageurl.FileServiceResolver {
+	return newIMFileServiceResolver(tenant, s.defaultFileSvc, s.storageResolver).
+		WithResources(s.resourceCatalog, s.tenantService).
+		WithAuthorization(func(ctx context.Context, reference string) error {
+			return s.authorizeOutboundResource(ctx, tenant, agent, kbIDs, reference)
+		})
 }
 
 func buildIMFileServiceForProvider(
@@ -298,7 +313,8 @@ type Service struct {
 	knowledgeService interfaces.KnowledgeService
 
 	// kbService is used by slash-commands (/info) to list and inspect knowledge bases.
-	kbService interfaces.KnowledgeBaseService
+	kbService      interfaces.KnowledgeBaseService
+	kbShareService interfaces.KBShareService
 
 	// oauthManager builds MCP OAuth authorization URLs so IM users can authorize
 	// OAuth-enabled MCP services out-of-band (IM cannot resolve the in-conversation
@@ -315,6 +331,7 @@ type Service struct {
 	defaultFileSvc  interfaces.FileService
 	documentReader  interfaces.DocumentReader
 	storageResolver interfaces.StorageBackendResolver
+	resourceCatalog interfaces.ResourceCatalog
 
 	// cmdRegistry holds all registered slash-commands.
 	cmdRegistry *CommandRegistry
@@ -432,6 +449,7 @@ func withIMIdentity(ctx context.Context, channel *IMChannel, msg *IncomingMessag
 	if msg != nil {
 		principalID := fmt.Sprintf("%d:%s:%s:%s", tenantID, channel.ID, msg.Platform, msg.UserID)
 		ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalIMUser, ID: principalID})
+		ctx = types.WithPrincipalAuthSource(ctx, types.AuthSourceIM)
 	}
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
 	// IM bots have no live client that can complete an in-conversation MCP OAuth
@@ -857,6 +875,8 @@ func NewService(
 	redisClient *redis.Client,
 	appCfg *config.Config,
 	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+	kbShareService interfaces.KBShareService,
 ) *Service {
 	// Resolve IM configuration with defaults.
 	workers, maxQueue, maxPerUser, globalMaxWorkers, rlWindow, rlMax := resolveIMConfig(appCfg)
@@ -882,6 +902,8 @@ func NewService(
 		defaultFileSvc:   defaultFileSvc,
 		documentReader:   documentReader,
 		storageResolver:  storageResolver,
+		resourceCatalog:  resourceCatalog,
+		kbShareService:   kbShareService,
 		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
@@ -2004,7 +2026,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 
 	outCtx := imOutboundContext(ctx)
 	reply := &ReplyMessage{
-		Content: formatIMOutboundAnswerOrFallback(outCtx, answer, req.tenant, s.defaultFileSvc, s.storageResolver),
+		Content: formatIMOutboundAnswerOrFallback(outCtx, answer,
+			s.newOutboundFileServiceResolver(req.tenant, req.agent, kbIDs)),
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
@@ -2052,7 +2075,8 @@ func (s *Service) handleMessageFullOutput(
 	// QA (and /stop) may have cancelled ctx. Platform updates must still run so
 	// the thinking card is replaced instead of hanging forever.
 	outCtx := imOutboundContext(ctx)
-	finalContent := formatIMOutboundAnswerOrFallback(outCtx, answer, tenant, s.defaultFileSvc, s.storageResolver)
+	finalContent := formatIMOutboundAnswerOrFallback(outCtx, answer,
+		s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs))
 
 	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalContent)
 	if finalizeErr != nil {
@@ -2828,6 +2852,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// XML tags that straddle a chunk boundary (see holdbackCutoff).
 	ticker := time.NewTicker(streamFlushInterval)
 	defer ticker.Stop()
+	fileResolver := s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs)
 
 	flush := func() {
 		bufMu.Lock()
@@ -2844,7 +2869,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			displaySource = displaySource[:cut]
 		}
 
-		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc, s.storageResolver)
+		display := cleanIMContent(ctx, displaySource, fileResolver)
 		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
 			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: %v", err)
 		}
@@ -2884,7 +2909,7 @@ loop:
 	bufMu.Unlock()
 
 	outCtx := imOutboundContext(ctx)
-	finalDisplay := cleanIMContent(outCtx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc, s.storageResolver)
+	finalDisplay := cleanIMContent(outCtx, FormatIMFinalFromParts(parts), fileResolver)
 	if noVisibleContent || finalDisplay == "" {
 		fallback := imNoAnswerFallback
 		if finalErr != nil {
@@ -2948,7 +2973,8 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 
 	outCtx := imOutboundContext(ctx)
 	return adapter.SendReply(outCtx, msg, &ReplyMessage{
-		Content: formatIMOutboundAnswerOrFallback(outCtx, answer, tenant, s.defaultFileSvc, s.storageResolver),
+		Content: formatIMOutboundAnswerOrFallback(outCtx, answer,
+			s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs)),
 		IsFinal: true,
 	})
 }

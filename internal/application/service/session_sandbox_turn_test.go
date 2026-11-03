@@ -12,7 +12,7 @@ func TestHoldSandboxTurnOpensAndClosesTheLease(t *testing.T) {
 	holder := &turnLeaseManager{}
 	svc := &sessionService{sandboxMgr: holder}
 
-	release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
+	_, release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
 	require.NoError(t, err)
 	require.Equal(t, 1, holder.begins)
 	require.Zero(t, holder.ends)
@@ -27,7 +27,7 @@ func TestHoldSandboxTurnDegradesWhenBeginFails(t *testing.T) {
 	holder := &turnLeaseManager{beginErr: context.Canceled}
 	svc := &sessionService{sandboxMgr: holder}
 
-	release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
+	_, release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
 	require.NoError(t, err)
 	require.Equal(t, 1, holder.begins)
 	release()
@@ -38,7 +38,7 @@ func TestHoldSandboxTurnFailsWhenRewindLocked(t *testing.T) {
 	holder := &turnLeaseManager{beginErr: sandbox.ErrSessionRewindLocked}
 	svc := &sessionService{sandboxMgr: holder}
 
-	release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
+	_, release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
 	require.ErrorIs(t, err, sandbox.ErrSessionRewindLocked)
 	release()
 	require.Zero(t, holder.ends)
@@ -48,7 +48,7 @@ func TestHoldSandboxTurnUsesBusyGateWithoutSandboxManager(t *testing.T) {
 	gate := NewSessionBusyGate()
 	svc := &sessionService{busyGate: gate}
 
-	release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
+	_, release, err := svc.holdSandboxTurn(context.Background(), "session-a", "")
 	require.NoError(t, err)
 	_, err = gate.TryLockRewind("session-a")
 	require.ErrorIs(t, err, ErrRewindSourceBusy)
@@ -87,14 +87,12 @@ type turnLeaseManager struct {
 	endErr   error
 }
 
-func (m *turnLeaseManager) BeginSessionTurn(context.Context, string) error {
+func (m *turnLeaseManager) BeginSessionTurn(ctx context.Context, _ string) (context.Context, func(), error) {
 	m.begins++
-	return m.beginErr
-}
-
-func (m *turnLeaseManager) EndSessionTurn(context.Context, string) error {
-	m.ends++
-	return m.endErr
+	if m.beginErr != nil {
+		return nil, nil, m.beginErr
+	}
+	return ctx, func() { m.ends++ }, nil
 }
 
 type rewindLockManager struct {

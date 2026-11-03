@@ -18,6 +18,7 @@ const (
 
 type config struct {
 	edition, baseURL, username, secret string
+	usePAT                             bool
 }
 
 func (c config) cloud() bool { return c.edition == editionCloud }
@@ -52,7 +53,11 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 	if cfg.edition != editionServer && cfg.edition != editionCloud {
 		return config{}, fmt.Errorf("%w: unsupported edition %q", datasource.ErrInvalidCredentials, cfg.edition)
 	}
-	if cfg.username == "" {
+	if !cfg.cloud() {
+		cfg.secret = configValue(ds, "token")
+		cfg.usePAT = cfg.secret != ""
+	}
+	if cfg.username == "" && !cfg.usePAT {
 		return config{}, fmt.Errorf("%w: base_url and username are required", datasource.ErrInvalidCredentials)
 	}
 	normalized, err := normalizeBaseURL(cfg.baseURL, cfg.cloud())
@@ -62,7 +67,7 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 	cfg.baseURL = normalized
 	if cfg.cloud() {
 		cfg.secret = configValue(ds, "api_token")
-	} else {
+	} else if !cfg.usePAT {
 		cfg.secret = configValue(ds, "password")
 	}
 	if cfg.secret == "" {

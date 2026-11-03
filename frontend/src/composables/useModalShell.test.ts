@@ -53,6 +53,7 @@ function fixture() {
       useDeploymentCapabilitiesStore: () => ({ isSupported: () => true, async ensureLoaded() {} }),
     },
     '@/api/agent': { listIMChannels: async () => ({ data: [] }) },
+    '@/api/assistant': { ASSISTANT_ACCESS_LEVELS: ['read_only', 'confirm', 'auto_write'] },
     '@/api/embed': { listEmbedChannels: async () => ({ data: [] }) },
     '@/api/skill': {},
     '@/api/system': { isNamedSandboxBackend: () => true },

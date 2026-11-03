@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/stretchr/testify/require"
@@ -318,4 +319,65 @@ func TestAdoptionIsOnlyAttemptedWhileTheNewGitDirIsMissing(t *testing.T) {
 
 	require.DirExists(t, filepath.Join(workspace, ".git"))
 	require.Equal(t, agentHEAD, strings.TrimSpace(runGitAt(t, env, workspace, "rev-parse", "HEAD")))
+}
+
+// layoutRunner records the checkpoint command. It does not embed
+// hostShellRunner: that fake returns VersionsWorkspace=false and would skip
+// the checkpoint before the layout is consulted.
+type layoutRunner struct {
+	layout   sandbox.WorkspaceLayout
+	cmds     []string
+	dirs     []string
+	exitCode int
+}
+
+func (r *layoutRunner) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	return r.layout, nil
+}
+
+func (r *layoutRunner) ExecShellCommand(
+	_ context.Context, _ string, command, workDir string, _ time.Duration, _ map[string]string,
+) (*sandbox.ExecuteResult, error) {
+	r.cmds = append(r.cmds, command)
+	r.dirs = append(r.dirs, workDir)
+	return &sandbox.ExecuteResult{ExitCode: r.exitCode, Stdout: strings.Repeat("a", 40) + "\n"}, nil
+}
+
+func (r *layoutRunner) VersionsWorkspace(context.Context, string) bool { return true }
+
+func TestCheckpointUsesTheSessionLayout(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	runner := &layoutRunner{layout: l}
+	cp := NewWorkspaceCheckpointer(runner).Checkpoint(
+		context.Background(), l.Root[len("/workspace/sessions/"):], "sb-1", "m-1")
+	require.NotNil(t, cp)
+	require.Contains(t, runner.cmds[0], "WORK_TREE='"+l.Root+"'")
+	require.Contains(t, runner.cmds[0], "GIT_DIR='"+l.GitDir+"'")
+	require.NotContains(t, runner.cmds[0], "legacy_git_dir", "a shared machine never adopts a work-tree .git")
+	require.Equal(t, l.Root, runner.dirs[0])
+}
+
+func TestCheckpointScriptForRemoteLayoutIsUnchanged(t *testing.T) {
+	require.Equal(t,
+		checkpointScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, "m-1"),
+		checkpointScriptFor(sandbox.RemoteWorkspaceLayout(), "m-1"))
+}
+
+func TestResetScriptChecksTheCommitFirst(t *testing.T) {
+	script, err := workspaceResetScriptFor(sandbox.RemoteWorkspaceLayout(), strings.Repeat("b", 40))
+	require.NoError(t, err)
+	require.Contains(t, script, `cat-file -e "`+strings.Repeat("b", 40)+`^{commit}" 2>/dev/null || exit 3`)
+	require.Less(t, strings.Index(script, "cat-file -e"), strings.Index(script, "reset --hard"))
+}
+
+func TestResetMapsMissingCommitToErrWorkspaceCommitMissing(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	runner := &layoutRunner{layout: l, exitCode: 3}
+	err = resetWorkspaceToCommit(context.Background(), runner, "s", strings.Repeat("c", 40), "sb")
+	require.ErrorIs(t, err, errWorkspaceCommitMissing)
+	require.Contains(t, runner.cmds[0], "GIT_DIR='"+l.GitDir+"'")
+	require.Contains(t, runner.cmds[0], "WORK_TREE='"+l.Root+"'")
+	require.Equal(t, l.Root, runner.dirs[0])
 }

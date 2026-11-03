@@ -30,6 +30,19 @@ func newSessionManagerDesktopHarness(t *testing.T, desktopEnabled bool) (*Sessio
 	return mgr, client
 }
 
+func TestDesktopMachineDoesNotPinASessionOwnedSandbox(t *testing.T) {
+	ctx := terminalTestContext()
+	mgr, _ := newSessionManagerDesktopTestHarness(t)
+	_, err := mgr.ExecShellCommand(ctx, "sess-live", "true", "", time.Second, nil)
+	require.NoError(t, err)
+
+	machineID, sandboxID, err := mgr.DesktopMachine(ctx, "sess-live")
+	require.NoError(t, err)
+	require.Equal(t, "sess-live", machineID)
+	require.Empty(t, sandboxID,
+		"session mode must resolve, including a stale rebuild, instead of pinning the current id")
+}
+
 func TestOpenSessionDesktopNoLiveSandbox(t *testing.T) {
 	ctx := terminalTestContext()
 	mgr, inner := newSessionManagerDesktopTestHarness(t)
@@ -132,4 +145,45 @@ func TestOpenSessionDesktopDisabledDoesNotDial(t *testing.T) {
 	_, err = mgr.OpenSessionDesktop(ctx, "sess-live", RemoteDesktopOptions{})
 	require.ErrorIs(t, err, ErrDesktopUnsupported)
 	require.False(t, inner.dialed, "must not dial websockify when the config is not a desktop image")
+}
+
+func TestDesktopMachineIsSharedByTheMachinesSessionsAndNamesTheSandbox(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	a, sandboxA, err := h.mgr.DesktopMachine(ctx, userSessionA)
+	require.NoError(t, err)
+	b, sandboxB, err := h.mgr.DesktopMachine(ctx, userSessionB)
+	require.NoError(t, err)
+	require.Equal(t, a, b)
+	require.Equal(t, sandboxA, sandboxB)
+	require.Len(t, a, 64)
+}
+
+func TestDesktopMachineChangesWithTheSandbox(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	before, sandboxBefore, err := h.mgr.DesktopMachine(ctx, userSessionA)
+	require.NoError(t, err)
+	m, _ := userAssignmentFor(userSessionA).UserMachine()
+	_, err = h.mgr.bindings.DeleteIfMatch(ctx, h.mgr.UserMachineKey(m), h.client.provider, sandboxBefore)
+	require.NoError(t, err)
+	// Closed inbound refuses to adopt the leftover machine and will not start
+	// a second one while it still exists. Removing it is what lets the next
+	// exec create the replacement the slot key must change with.
+	require.NoError(t, h.client.Delete(ctx, sandboxBefore))
+	_, err = h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	after, _, err := h.mgr.DesktopMachine(ctx, userSessionA)
+	require.NoError(t, err)
+	require.NotEqual(t, before, after, "a rebuilt machine gets a new slot key")
+}
+
+func TestDesktopMachineWithoutABindingIsNoLiveSandbox(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	_, _, err := h.mgr.DesktopMachine(ownerCtx(), userSessionA)
+	require.ErrorIs(t, err, ErrNoLiveSessionSandbox)
 }

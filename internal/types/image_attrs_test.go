@@ -101,7 +101,7 @@ func TestParseImageAttrsResponse(t *testing.T) {
 	t.Run("keeps a prose answer that ignores the protocol", func(t *testing.T) {
 		// No attribute lines at all: the model still described the image, so it
 		// becomes the caption, but nothing is claimed about the attributes —
-		// they stay absent so the caller's OnUnobserved clause decides.
+		// they stay absent so the pipeline's ocr_on_unobserved setting decides.
 		obs, ok := ParseImageAttrsResponse("- A wiring diagram.\n")
 		if !ok {
 			t.Fatal("expected a usable description")
@@ -162,17 +162,15 @@ func TestParseImageAttrsResponse(t *testing.T) {
 }
 
 // TestDefaultImageActions pins the conservative built-in table: OCR is gated on
-// contain.text == block OR contain.data_visual == true, and the fallback for an
-// unobserved text attribute is to keep OCR on. This is what makes a missed
-// observation cost one extra call rather than losing text.
+// contain.text == block OR contain.data_visual == true. The clause for an image
+// whose attributes were not observed is deliberately not here — it is the
+// scheduling pipeline's setting — so the table's whole content is the two
+// conditions that make an observation an answer.
 func TestDefaultImageActions(t *testing.T) {
 	t.Parallel()
 
 	actions := DefaultImageActions()
 
-	if !actions.OCR.OnUnobserved {
-		t.Error("default OCR.OnUnobserved must be true (conservative)")
-	}
 	wantOn := []ImageAttrCondition{
 		{Prop: "contain.text", Is: "block"},
 		{Prop: "contain.data_visual", Is: "true"},
@@ -196,14 +194,10 @@ func TestMergeImageActions(t *testing.T) {
 
 	custom := ImageActionsConfig{
 		OCR: ImageOCRAction{
-			On:           []ImageAttrCondition{{Prop: "contain.text", Is: "block"}},
-			OnUnobserved: false,
+			On: []ImageAttrCondition{{Prop: "contain.text", Is: "block"}},
 		},
 	}
 	merged := MergeImageActions(custom)
-	if merged.OCR.OnUnobserved {
-		t.Error("an explicit OCR.OnUnobserved must replace the default (true)")
-	}
 	if len(merged.OCR.On) != 1 {
 		t.Errorf("custom OCR.On must replace the default list, got %v", merged.OCR.On)
 	}

@@ -28,8 +28,20 @@ func (defaultPipeline) Description() string {
 // under one spelling and the run that reads it under another is the exact bug
 // this shape is meant to make impossible.
 const (
-	captionFieldKeyEnableCaption = "enable_caption"
-	captionFieldKeyEnableOCR     = "enable_ocr"
+	captionFieldKeyCaptionEnabled = "caption_enabled"
+	captionFieldKeyOCREnabled     = "ocr_enabled"
+	// Not a param: a note is explanation text, and its key only names the entry.
+	captionFieldKeyNoteActions = "note_actions"
+)
+
+// ImageCaptionSwitchKey and ImageOCRSwitchKey are this pipeline's two action
+// switches, under the names it declares them. They are exported because the
+// knowledge-base PATCH handler maps the API's image_caption_enabled /
+// image_ocr_enabled onto them: a second spelling of the key at that call site is
+// exactly how a rename comes to write a setting nothing reads.
+const (
+	ImageCaptionSwitchKey = captionFieldKeyCaptionEnabled
+	ImageOCRSwitchKey     = captionFieldKeyOCREnabled
 )
 
 // Fields declares the switches the panel renders for this pipeline. Caption and
@@ -37,10 +49,17 @@ const (
 // fields existed gets: both actions run, as before. The two thinking switches
 // default to false for the opposite reason — they are new work, and an action
 // that reasons costs a second full pass before it can say anything at all.
+//
+// Declared in the three runs the panel renders: the two standing switches, then
+// the advanced thinking switches, then the note. The thinking switches are
+// action-level fields, declared once at the action layer and carried in here —
+// a pipeline does not re-declare an action's tunable, only where that tunable
+// belongs in its own panel. What it carries is the declaration: the value a
+// knowledge base stores for it sits in this pipeline's own slot.
 func (defaultPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		{
-			Key:           captionFieldKeyEnableCaption,
+			Key:           captionFieldKeyCaptionEnabled,
 			Type:          types.ImageFieldTypeBool,
 			Label:         "Enable caption",
 			Description:   "Ask the model for a one-line description of every image and store it as the caption.",
@@ -48,18 +67,27 @@ func (defaultPipeline) Fields() []types.ImageFieldDef {
 			DecidesAction: true,
 		},
 		{
-			Key:           captionFieldKeyEnableOCR,
+			Key:           captionFieldKeyOCREnabled,
 			Type:          types.ImageFieldTypeBool,
 			Label:         "Enable OCR",
 			Description:   "Extract the text that appears in the image.",
 			Default:       true,
 			DecidesAction: true,
 		},
-		// The thinking switches are action-level fields, declared once at the
-		// action layer and carried in here — a pipeline does not re-declare
-		// an action's tunable.
-		imageActionThinkingFields[0],
-		imageActionThinkingFields[1],
+		// The thinking switches are action-level fields, declared once by the
+		// actions themselves and carried in here by reference — the value each
+		// one reads is this pipeline's own, stored under its slot.
+		captionThinkingField,
+		ocrThinkingField,
+		{
+			Key:   captionFieldKeyNoteActions,
+			Type:  types.ImageFieldTypeNote,
+			Group: types.ImageFieldGroupNote,
+			Label: "The two actions are independent",
+			Description: "Switch them separately: with OCR off the image is still described, " +
+				"and with caption off its text is still read. Only switching both off leaves " +
+				"an image untouched, which is why the panel refuses that combination.",
+		},
 	}
 }
 
@@ -74,7 +102,7 @@ func (defaultPipeline) Fields() []types.ImageFieldDef {
 // OCR off alone still leaves it described.
 func (defaultPipeline) Rules() []types.ImagePipelineRules {
 	return []types.ImagePipelineRules{{
-		AtLeastOne: []string{captionFieldKeyEnableCaption, captionFieldKeyEnableOCR},
+		AtLeastOne: []string{captionFieldKeyCaptionEnabled, captionFieldKeyOCREnabled},
 		MessageKey: "imagePipeline.errors.noActionEnabled",
 	}}
 }
@@ -89,29 +117,26 @@ func (defaultPipeline) Validate(params map[string]any) error {
 func (defaultPipeline) Run(ctx context.Context, r *runContext) error {
 	// The keys the shared actions read. Set before anything runs, so that a
 	// guard returning early below still leaves them filled in.
-	r.captionThinkingKey = imageFieldKeyCaptionThinking
-	r.ocrThinkingKey = imageFieldKeyOCRThinking
+	r.captionThinkingKey = captionThinkingField.Key
+	r.ocrThinkingKey = ocrThinkingField.Key
+	// This pipeline's own switches, handed to the actions: each action reads its
+	// gate and records that it was switched off, so "off" and "never scheduled"
+	// cannot look alike in the trace.
+	r.captionGateKey = captionFieldKeyCaptionEnabled
+	r.ocrGateKey = captionFieldKeyOCREnabled
 
-	// Both switches belong to this pipeline alone. Neither is a whole-task
-	// limit: an image handled by another pipeline may skip its caption while
-	// this one still captures it, so the field names are only meaningful
-	// relative to this pipeline and are recorded under those same names.
-	// Switching both off is guarded in the panel; if an API caller does it
-	// anyway, the run simply records that nothing was configured to happen.
-	if r.BoolParam(captionFieldKeyEnableCaption) {
-		if err := r.execute(ctx, types.ImageActionCaption); err != nil {
-			return err
-		}
-	}
-	if !r.BoolParam(captionFieldKeyEnableOCR) {
-		return nil
-	}
-	if err := r.execute(ctx, types.ImageActionOCR); err != nil {
+	// What this run was configured to do, under the keys the knowledge base
+	// stores it under: the config may change after the run, and a trace that
+	// cannot be read back against the settings that produced it cannot be
+	// audited.
+	r.recordConfig()
+
+	// Both actions always run: each reads its own gate and records that it was
+	// switched off. Scheduling around the switch instead would leave the trace
+	// unable to tell "off" from "never ran" — the pair this pipeline used to
+	// need a params snapshot to explain.
+	if err := r.execute(ctx, types.ImageActionCaption); err != nil {
 		return err
 	}
-	// Recorded so a trace row shows which switches were actually in force.
-	// Without it, a switch that read false and an action that never ran look
-	// identical in the output.
-	r.out["params"] = r.ParamSnapshot(captionFieldKeyEnableCaption, captionFieldKeyEnableOCR)
-	return nil
+	return r.execute(ctx, types.ImageActionOCR)
 }

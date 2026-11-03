@@ -144,8 +144,9 @@ func (h *Handler) IssueSandboxDesktopTicket(c *gin.Context) {
 
 // SandboxDesktopWS relays the browser's RFB stream to the session sandbox.
 //
-// Ticket, auth, and the exclusive slot stay HTTP because those run before
-// Ensure. Overlay states from Ensure (SANDBOX_NOT_BOUND / SANDBOX_PAUSED /
+// Ticket and auth stay HTTP. Locate may provision but does not start the
+// desktop; the operation hold and the exclusive slots come next, then Start.
+// Overlay states from locate or start (SANDBOX_NOT_BOUND / SANDBOX_PAUSED /
 // DESKTOP_UNSUPPORTED / DESKTOP_START_FAILED) must upgrade and then close
 // with a reason: the JS WebSocket API never exposes a failed handshake's
 // HTTP status, so a 409 here becomes a generic error overlay instead of
@@ -161,7 +162,7 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 	// 1. One-shot ticket. Auth reads the incoming request; workspace identity
 	//    is attached next. Do not capture c.Request.Context() before
 	//    AttachAuthenticatedUser — that snapshot has no tenant, and
-	//    EnsureSessionDesktop then fails with "missing workspace context"
+	//    LocateSessionDesktop then fails with "missing workspace context"
 	//    (mapped to DESKTOP_UPSTREAM). SandboxTerminalWS binds ctx after attach
 	//    for the same reason.
 	claims, err := h.desktopTickets.Consume(c.Request.Context(), c.Query("ticket"))
@@ -193,10 +194,52 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
-	// 2. One desktop per session, across replicas. Unlike the terminal's
-	//    5-per-session in-process counter, this must be distributed: two
-	//    browsers on one desktop means two people fighting over one keyboard.
-	releaseSlot, acquired, slotHold, err := h.acquireDesktopSlot(ctx, sessionID)
+	// 2. Locate. Lookup-only unless the user confirmed provision. A bare
+	//    handshake — panel opened, tab restored, background reconnect —
+	//    stays lookup-only: a running sandbox is attached, a paused one
+	//    reports SANDBOX_PAUSED, and a missing one reports SANDBOX_NOT_BOUND.
+	//    Only a confirmed click sets provision=1. This does not start the
+	//    desktop; the request context cancels it if the browser gives up.
+	allowProvision := terminalFlagParam(c.Query("provision"))
+	provision := h.terminalProvisionPin(ctx, c, allowProvision)
+	target, err := h.desktopService.LocateSessionDesktop(ctx, sessionID, provision)
+	if err != nil {
+		h.closeDesktopWithError(c, sessionID, allowProvision, "locate", err)
+		return
+	}
+
+	// 3. Hold the operation first: from here the shared machine cannot be
+	//    rebuilt or reclaimed, so the binding read next names the machine the
+	//    relay will reach.
+	opCtx, releaseOp, err := target.HoldOperation(ctx)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})
+		return
+	}
+	defer releaseOp()
+	if err := target.FixMachine(opCtx); err != nil {
+		h.closeDesktopWithError(c, sessionID, allowProvision, "locate", err)
+		return
+	}
+
+	// 4. One controlling desktop per machine, across replicas. The legacy
+	//    per-session slot is held too, so replicas still on the previous
+	//    release stay mutually exclusive during a rolling upgrade (remove it
+	//    in the following release). Unlike the terminal's 5-per-session
+	//    in-process counter, this must be distributed: two browsers on one
+	//    desktop means two people fighting over one keyboard.
+	releaseLegacy, gotLegacy, legacyHold, err := h.acquireDesktopSlot(ctx, desktopSlotKey(sessionID))
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve desktop"})
+		return
+	}
+	if !gotLegacy {
+		c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})
+		return
+	}
+	defer releaseLegacy()
+	releaseSlot, acquired, machineHold, err := h.acquireDesktopSlot(ctx, desktopMachineSlotKey(target.MachineID))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve desktop"})
@@ -207,16 +250,12 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 		return
 	}
 	defer releaseSlot()
+	slotHold, stopSlotHold := mergeDesktopHolds(legacyHold, machineHold, opCtx)
+	defer stopSlotHold()
 
-	// 3. Start, dial. Provisioning is opt-in per connect, because it creates
-	//    (or resumes and re-bills) a microVM and this is a GET. A bare
-	//    handshake — panel opened, tab restored, background reconnect —
-	//    stays lookup-only: a running sandbox is attached, a paused one
-	//    reports SANDBOX_PAUSED, and a missing one reports SANDBOX_NOT_BOUND.
-	//    Only a confirmed click sets provision=1. Use the request context so
-	//    a browser that gives up the handshake (and every DESKTOP_BUSY retry)
-	//    cancels this work and releases the slot. The relay context is
-	//    detached only after the browser socket is upgraded.
+	// Start, dial on the fixed sandbox. The relay context is detached only
+	// after the browser socket is upgraded. Losing either slot or the
+	// operation lease cancels this work.
 	ensureCtx := ctx
 	if slotHold != nil {
 		var cancelEnsure context.CancelFunc
@@ -225,9 +264,7 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 		defer stopEnsureWatch()
 		defer cancelEnsure()
 	}
-	allowProvision := terminalFlagParam(c.Query("provision"))
-	provision := h.terminalProvisionPin(ensureCtx, c, allowProvision)
-	desktop, err := h.desktopService.EnsureSessionDesktop(ensureCtx, sessionID, provision)
+	desktop, err := h.desktopService.StartSessionDesktop(ensureCtx, target)
 	if err != nil {
 		if slotHold != nil && slotHold.Err() != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})
@@ -257,9 +294,8 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 	//
 	//    A mute upstream is answered with 502 and nothing else. Tearing the
 	//    stack down from here and redialling was tried and made it worse: the
-	//    browser waits out a second Ensure inside the same upgrade, and the
-	//    healing belongs in EnsureSessionDesktop, which runs before the slot
-	//    matters.
+	//    browser waits out a second start inside the same upgrade, and the
+	//    healing belongs in StartSessionDesktop, which already ran.
 	prelude, err := readDesktopServerHandshake(ctx, desktop.Conn)
 	if err != nil {
 		_ = desktop.Conn.Close()
@@ -417,8 +453,25 @@ func readDesktopServerHandshake(ctx context.Context, conn *websocket.Conn) ([]by
 	})
 }
 
-// acquireDesktopSlot reserves the session's single desktop slot across all
-// replicas.
+// closeDesktopWithError upgrades and closes with the stable code for a
+// locate or machine-fix failure. The JS WebSocket API never exposes a failed
+// handshake's HTTP status, so overlay states have to ride a close reason.
+func (h *Handler) closeDesktopWithError(
+	c *gin.Context, sessionID string, allowProvision bool, stage string, err error,
+) {
+	ctx := c.Request.Context()
+	_, code := desktopErrorStatus(err)
+	logger.Warnf(ctx, "[sandbox-desktop] %s failed session=%s provision=%t code=%s: %v",
+		stage, sessionID, allowProvision, code, err)
+	browserConn, upErr := desktopUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if upErr != nil {
+		return
+	}
+	writeDesktopProtocolClose(browserConn, code)
+}
+
+// acquireDesktopSlot reserves one desktop slot across all replicas. key is
+// the full Redis key (session or machine); callers build it.
 //
 // The terminal's per-session cap is a process-local counter, which is
 // harmless there (a second shell is a cosmetic problem) and unacceptable here
@@ -429,13 +482,12 @@ func readDesktopServerHandshake(ctx context.Context, conn *websocket.Conn) ([]by
 // Redis absent means Lite mode, which is one process, so the in-process
 // limiter is the correct degradation there.
 func (h *Handler) acquireDesktopSlot(
-	ctx context.Context, sessionID string,
+	ctx context.Context, key string,
 ) (release func(), acquired bool, hold context.Context, err error) {
 	if h.redis == nil {
-		release, ok := sessionDesktopLimiter.acquire(sessionID)
+		release, ok := sessionDesktopLimiter.acquire(key)
 		return release, ok, nil, nil
 	}
-	key := desktopSlotKey(sessionID)
 	token, err := redislock.NewToken()
 	if err != nil {
 		return func() {}, false, nil, err
@@ -514,7 +566,34 @@ func desktopSlotKey(sessionID string) string {
 	return "weknora:desktop-slot:" + sessionID
 }
 
-// desktopLimiter caps the session to one desktop within this process.
+func desktopMachineSlotKey(machineID string) string {
+	return "weknora:desktop-slot:machine:" + machineID
+}
+
+// mergeDesktopHolds ends as soon as any hold ends. Nil holds (no Redis) are
+// ignored; with none left it returns nil, as a single missing hold did. The
+// stop function ends the merged context; the caller defers it once the relay
+// is done, which also satisfies go vet's lostcancel check on cancel vars
+// whose only other use sits inside a loop body.
+func mergeDesktopHolds(holds ...context.Context) (context.Context, func()) {
+	var live []context.Context
+	for _, h := range holds {
+		if h != nil {
+			live = append(live, h)
+		}
+	}
+	if len(live) == 0 {
+		return nil, func() {}
+	}
+	merged, cancel := context.WithCancelCause(context.Background())
+	for _, h := range live {
+		context.AfterFunc(h, func() { cancel(context.Cause(h)) })
+	}
+	return merged, func() { cancel(context.Canceled) }
+}
+
+// desktopLimiter caps one key to one desktop within this process. The key is
+// the full slot key, so a machine and a session do not share an entry.
 type desktopLimiter struct {
 	mu   sync.Mutex
 	open map[string]bool
@@ -522,20 +601,20 @@ type desktopLimiter struct {
 
 var sessionDesktopLimiter = &desktopLimiter{open: make(map[string]bool)}
 
-func (l *desktopLimiter) acquire(sessionID string) (func(), bool) {
+func (l *desktopLimiter) acquire(key string) (func(), bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.open[sessionID] {
+	if l.open[key] {
 		return func() {}, false
 	}
-	l.open[sessionID] = true
+	l.open[key] = true
 	released := false
 	return func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		if !released {
 			released = true
-			delete(l.open, sessionID)
+			delete(l.open, key)
 		}
 	}, true
 }

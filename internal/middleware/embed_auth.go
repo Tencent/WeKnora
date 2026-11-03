@@ -166,10 +166,11 @@ func EmbedAuth(
 				Type: types.PrincipalEmbedChannel,
 				ID:   fmt.Sprintf("%d:%s", ch.TenantID, ch.ID),
 			},
-			TenantID: ch.TenantID,
-			Tenant:   tenant,
-			Role:     types.TenantRoleViewer,
-			Extra:    map[types.ContextKey]any{types.EmbedChannelContextKey: ch},
+			TenantID:   ch.TenantID,
+			Tenant:     tenant,
+			Role:       types.TenantRoleViewer,
+			Extra:      map[types.ContextKey]any{types.EmbedChannelContextKey: ch},
+			AuthSource: types.AuthSourceEmbed,
 		})
 		c.Next()
 	}

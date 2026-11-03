@@ -292,8 +292,8 @@ func TestRenderUserTurnContent_QuestionOriginUsesHandles(t *testing.T) {
 		},
 	}
 	out := engine.RenderUserTurnContent("sess-1", "为什么在比较图形时需要谨慎处理？")
-	assert.Contains(t, out, `<question_origin knowledge_base_id="b1" name="TEST">`)
-	assert.Contains(t, out, `<document knowledge_id="d1" title="Corners" />`)
+	assert.Contains(t, out, `<question_origin knowledge_base_id="kb://1" name="TEST">`)
+	assert.Contains(t, out, `<document knowledge_id="doc://1" title="Corners" />`)
 	assert.NotContains(t, out, "kb-real-id")
 	assert.NotContains(t, out, "doc-real-id")
 }
@@ -362,8 +362,8 @@ func TestRenderUserTurnContent_PageContextUsesHandles(t *testing.T) {
 		},
 	}
 	out := engine.RenderUserTurnContent("sess-1", "修一下这个问题")
-	assert.Contains(t, out, `<page_context knowledge_base_id="b1">`)
-	assert.Contains(t, out, `<document knowledge_id="d1" title="Corners" />`)
+	assert.Contains(t, out, `<page_context knowledge_base_id="kb://1">`)
+	assert.Contains(t, out, `<document knowledge_id="doc://1" title="Corners" />`)
 	assert.Contains(t, out, `<wiki_issue issue_id="i1"`)
 	assert.NotContains(t, out, "kb-real-id")
 	assert.NotContains(t, out, "doc-real-id")
@@ -458,10 +458,10 @@ func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *t
 	messages := engine.buildMessagesWithLLMContext("system", "question", "session", nil, nil)
 	require.Len(t, messages, 2)
 	userContent := messages[1].Content
-	assert.Contains(t, userContent, `knowledge_base id="b1"`)
-	assert.Contains(t, userContent, `knowledge_id="d1"`)
-	assert.Contains(t, userContent, `knowledge_id="d2"`)
-	assert.Equal(t, "c1", engine.modelContext.ChunkHandle("chunk-real-id"))
+	assert.Contains(t, userContent, `knowledge_base id="kb://1"`)
+	assert.Contains(t, userContent, `knowledge_id="doc://1"`)
+	assert.Contains(t, userContent, `knowledge_id="doc://2"`)
+	assert.Equal(t, "chunk://1", engine.modelContext.ChunkHandle("chunk-real-id"))
 	assert.NotContains(t, userContent, "kb-real-id")
 	assert.NotContains(t, userContent, "chunk-real-id")
 	assert.NotContains(t, userContent, "doc-real-id")

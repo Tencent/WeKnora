@@ -725,6 +725,19 @@ func (c *DockerRemoteClient) Exec(
 	return result, nil
 }
 
+// dockerKeepAliveTimeout bounds the no-op exec KeepAlive runs.
+const dockerKeepAliveTimeout = 10 * time.Second
+
+// KeepAlive runs a no-op exec. dockerExecCommand touches the activity marker on
+// every exec, and the marker's mtime is all the idle sweeper reads, so ttl is
+// not needed here.
+func (c *DockerRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, _ time.Duration) error {
+	_, err := c.Exec(ctx, handle, RemoteExecRequest{
+		Command: "true", Timeout: dockerKeepAliveTimeout, User: DefaultSandboxExecUser,
+	})
+	return err
+}
+
 // dockerExecGrace is the slack between the in-container timeout and the
 // client-side deadline. It covers the round-trip and the wrapper's own
 // teardown so a script killed at the deadline is still reported as Killed

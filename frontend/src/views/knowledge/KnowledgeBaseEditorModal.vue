@@ -402,7 +402,7 @@
               </div>
             </div>
 
-            <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical">
+            <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical image-panel-flush">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
                 <p class="desc">
@@ -418,61 +418,51 @@
                 :pipeline-id="formData.imagePipeline"
                 @update:pipeline-id="onPipelineChange"
                 @update:invalid="onPipelineInvalidChange"
-              />
-            </div>
-
-            <div v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
-              class="setting-row setting-row-vertical">
-              <div class="setting-info">
-                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
-                <!-- 实现说明（不放 UI）：面板完全由后端属性注册表驱动 —— 属性名、说明、每个取值的
-                     含义都随 schema 端点下发，前端只按属性名覆盖翻译。所以新增属性仍是
-                     「后端加一行 / 前端自动跟随」，属性集合随版本演进不需要改这里。 -->
-                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
-              </div>
-              <div class="image-attr-panel">
-                <ul v-if="imageAttrDisplays.length" class="image-attr-list">
-                  <li v-for="attr in imageAttrDisplays" :key="attr.name" class="image-attr-row">
-                    <div class="image-attr-head">
-                      <span class="image-attr-label">{{ attr.label }}</span>
-                      <code class="image-attr-name">{{ attr.name }}</code>
+              >
+                <!-- 观察属性说明：收进面板的「附加说明」折叠区。属性字典来自后端注册表，
+                     流水线声明不了它，所以由宿主通过插槽递进去；折叠交给面板统一负责，
+                     这里不再套一层 details。 -->
+                <template #notes>
+                  <div
+                    v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
+                    class="image-attr-block"
+                  >
+                    <div class="image-attr-heading">
+                      <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaLabel') }}</label>
+                      <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsSchemaDescription') }}</p>
                     </div>
-                    <p v-if="attr.description" class="image-attr-desc">{{ attr.description }}</p>
-                    <ul class="image-attr-value-list">
-                      <li v-for="v in attr.values" :key="v.value" class="image-attr-value">
-                        <code>{{ v.value }}</code>
-                        <span class="image-attr-value-label">{{ v.label }}</span>
+                    <ul v-if="imageAttrDisplays.length" class="image-attr-list">
+                      <li v-for="attr in imageAttrDisplays" :key="attr.name" class="image-attr-row">
+                        <div class="image-attr-head">
+                          <span class="image-attr-label">{{ attr.label }}</span>
+                          <code class="image-attr-name">{{ attr.name }}</code>
+                        </div>
+                        <p v-if="attr.description" class="image-attr-desc">{{ attr.description }}</p>
+                        <ul class="image-attr-value-list">
+                          <li v-for="v in attr.values" :key="v.value" class="image-attr-value">
+                            <code>{{ v.value }}</code>
+                            <span class="image-attr-value-label">{{ v.label }}</span>
+                          </li>
+                        </ul>
                       </li>
                     </ul>
-                  </li>
-                </ul>
-                <div class="image-attr-section">
-                  <div class="setting-info">
-                    <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditions') }}</label>
-                    <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditionsDesc') }}</p>
+                    <div class="image-attr-section">
+                      <div class="setting-info">
+                        <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditions') }}</label>
+                        <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrConditionsDesc') }}</p>
+                      </div>
+                      <ul class="image-attr-condition-list">
+                        <li v-for="(cond, i) in imageAttrConditionDisplays" :key="i" class="image-attr-condition">
+                          <span class="image-attr-condition-label">{{ cond.label }}</span>
+                          <code class="image-attr-condition-raw">{{ cond.raw }}</code>
+                        </li>
+                      </ul>
+                    </div>
                   </div>
-                  <ul class="image-attr-condition-list">
-                    <li v-for="(cond, i) in imageAttrConditionDisplays" :key="i" class="image-attr-condition">
-                      <span class="image-attr-condition-label">{{ cond.label }}</span>
-                      <code class="image-attr-condition-raw">{{ cond.raw }}</code>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-
-              <!-- 观察失败兜底：与上方整块开关同级（不再嵌在属性面板里）。
-                   开关仍包在 setting-control 里，与其它开关行共用同一套
-                   右对齐 / 垂直居中 / 预留右列的排版，避免顶到行首 -->
-              <div class="setting-row">
-                <div class="setting-info">
-                  <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
-                  <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobservedDesc') }}</p>
-                </div>
-                <div class="setting-control">
-                  <t-switch v-model="formData.imageActions.ocr.on_unobserved" size="medium" />
-                </div>
-              </div>
+                </template>
+              </ImagePipelineSettings>
             </div>
+
           </div>
         </div>
       </div>
@@ -966,10 +956,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       descriptionLanguage: '',
       customInstructions: ''
     },
-    // 图片解析方案：方案选择与各方案的私有参数由 ImagePipelineSettings
-    // 编辑；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧写入
-    // 的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
-    // .on_unobserved 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
+    // 图片解析方案：方案选择与各方案的设置由 ImagePipelineSettings 编辑，每条
+    // 设置都存在声明它的那个方案的槽位里（见 pipelineParamKey），所以切走再切回
+    // 不会丢设置；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧
+    // 写入的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
+    // .on 直接被面板渲染，缺省会让面板读空列表。
     imageAttrsEnabled: false,
     // 图片向量默认关闭：能处理图片的向量模型也常只用来编码文本。
     imageVectorEnabled: false,
@@ -1142,6 +1133,8 @@ const loadKBData = async (
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
+      // 方案的设置原样带过来：面板读槽位，运行时也读槽位，两侧看的是同一份。
+      // 槽位里没有的字段由面板按声明取默认值——和运行时一致。
       imagePipelineParams:
         ((kb as Record<string, any>).image_processing_config?.image_pipeline_params as Record<
           string,
@@ -1334,10 +1327,10 @@ const handleMultimodalToggle = () => {
  */
 
 /**
- * 流水线参数的清理由 ImagePipelineSettings 自己完成（切换即清空上一条的
- * 私有参数）；这里只负责让旧的观察开关跟上选择——只有观察属性流水线把它
- * 点亮，这样无论从哪个控件看，知识库读到的是同一个意思，下方的属性面板
- * 也跟随这个开关显隐。
+ * 方案私有参数按槽位存放，切换方案不清理：每个方案读自己的键，切走再切回
+ * 正好找回上次在这里选的设置。这里只负责让旧的观察开关跟上选择——只有观察
+ * 属性流水线把它点亮，这样无论从哪个控件看，知识库读到的是同一个意思，下方
+ * 的属性面板也跟随这个开关显隐。
  */
 const onPipelineChange = (value: string) => {
   if (!formData.value) return
@@ -1565,13 +1558,14 @@ const buildSubmitData = () => {
   }
 
   // 图片属性观察配置：后端是整体替换语义（payload 不带该字段 = 保持不变）。
-  // UI 只编辑观察开关与 on_unobserved；快照里用 API 自定义过的 on 原样保留，
-  // 没有自定义时才取注册表默认值。合并规则见 buildImageProcessingConfig。
+  // 面板编辑的是所选方案的槽位参数；属性表只装触发条件，未观察到怎么办是方案
+  // 自己的设置（ocr_on_unobserved），随槽位一同回传。快照里用 API 自定义过的
+  // on 原样保留，没有自定义时才取注册表默认值。合并规则见
+  // buildImageProcessingConfig。
   {
     const built = buildImageProcessingConfig(formData.value.imageProcessingConfigSnapshot, {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
       imageVectorEnabled: formData.value.imageVectorEnabled,
-      onUnobserved: formData.value.imageActions.ocr.on_unobserved,
       defaultOn: displaySchema.value.default_actions.ocr.on,
       // 多模态开关决定是否处理图片：关闭时不写流水线字段（buildImageProcessingConfig
       // 对空 pipelineId 的处理是删掉这两个字段），配置里只留下观察开关的语义。
@@ -1981,8 +1975,35 @@ watch(() => chatResources.allModels, (list) => {
 // 图片属性面板（可观察属性 / OCR 触发条件 / 观察失败兜底）
 // 文案全部来自后端属性注册表（人话名 + 每个取值的含义），前端只做翻译覆盖，
 // 因此新增属性无需改这里。铺在所在设置区里、不套独立底色块（与整体风格一致）。
-.image-attr-panel {
-  margin-top: 4px;
+// 第三段（观察属性说明）与上方开关区之间的分割线：段与段之间才画线。
+// 属性字典与流水线自己的说明同处一个折叠区，只留间距不画线：分割线只用在
+// 段落之间（面板自己画），段内不画。
+.image-attr-block {
+  margin-top: 16px;
+}
+
+// .setting-row 自带下边框，那是给"一排互不相关的设置行"用的。图片流水线面板里
+// 的行属于三个分段之一，分段之间才画线（① / ② 由面板内的 .image-pipeline-divider
+// 画，② / ③ 由 .image-attr-block 的上边框画），所以段内的行显式去掉下边框 ——
+// 否则「识别时开启思考」与「观察失败仍 OCR」之间会多出一条不属于任何分段的线。
+.kb-multimodal-settings .setting-row.image-panel-flush {
+  border-bottom: none;
+}
+// 折叠标题：收起时仍能读到这一段是什么、为什么有它。
+// 属性字典的小标题。它现在活在面板的「附加说明」折叠区里，自己不再折叠，
+// 所以没有指针与展开语义 —— 折叠由面板统一负责。
+.image-attr-heading {
+  label {
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  .desc {
+    margin: 2px 0 0;
+    font-size: var(--app-text-sm);
+    line-height: 20px;
+    color: var(--td-text-color-secondary);
+  }
 }
 .image-attr-list,
 .image-attr-value-list,
@@ -1991,10 +2012,9 @@ watch(() => chatResources.allModels, (list) => {
   padding: 0;
   list-style: none;
 }
+// 属性之间只留间距，不画线。
 .image-attr-row + .image-attr-row {
   margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--td-component-border);
 }
 .image-attr-head {
   display: flex;

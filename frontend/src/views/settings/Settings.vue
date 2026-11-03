@@ -491,13 +491,18 @@ const handleClose = () => {
     document.activeElement.blur()
   }
   uiStore.closeSettings()
-  // 如果当前路由是设置页，返回上一页
+  // Only go back when Vue Router knows the previous route is inside the app.
   if (route.path === '/platform/settings') {
     const sec = route.query.section
     if (sec === 'model-catalog' || sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
       router.push('/platform/knowledge-bases')
     } else {
-      router.back()
+      const back = router.options.history.state.back
+      if (typeof back === 'string' && back.startsWith('/platform/')) {
+        router.back()
+      } else {
+        router.push('/platform/knowledge-bases')
+      }
     }
   }
 }

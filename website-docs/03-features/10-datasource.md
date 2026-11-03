@@ -184,22 +184,25 @@
 
 #### Confluence（`connector/confluence/`）
 
-支持 Confluence Server / Data Center 与 Confluence Cloud，均使用 HTTP Basic 认证。
+支持 Confluence Server / Data Center 与 Confluence Cloud。Server/DC 可使用个人访问令牌（PAT，Bearer 认证）或用户名与密码（HTTP Basic）；Cloud 使用邮箱与 API token（HTTP Basic）。
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `edition` | 否 | `server`（默认，Server / Data Center）或 `cloud` |
 | `base_url` | 是 | Confluence 地址，缺少协议时补 `https://`；Cloud 填 `https://<站点>.atlassian.net` 时自动补 `/wiki` |
-| `username` | 是 | Server/DC 用户名；Cloud 为 Atlassian 账号邮箱 |
-| `password` | Server/DC 必填 | Server/DC 账号密码 |
+| `username` | Basic 认证必填 | Server/DC 用户名；Cloud 为 Atlassian 账号邮箱；Server/DC 使用 PAT 时可留空 |
+| `token` | 否 | Server/DC 个人访问令牌；填写后优先使用 Bearer 认证，无需用户名和密码；Cloud 不使用此字段 |
+| `password` | Server/DC 未填 PAT 时必填 | Server/DC 账号密码 |
 | `api_token` | Cloud 必填 | 在 Atlassian 账号的 API tokens 页面创建 |
 
-`edition`、`base_url`、`username` 不属于密钥，界面会同时写入 Settings 以便编辑时回显；`password` / `api_token` 只存加密凭据。
+`edition`、`base_url`、`username` 不属于密钥，界面会同时写入 Settings 以便编辑时回显；`token` / `password` / `api_token` 只存加密凭据。
+
+Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 Personal access tokens 中创建，详见 [Atlassian 官方说明](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html)。连接测试、空间与页面读取以及同源私有图片下载使用同一种认证方式。
 
 <Screenshot
-  src="/screenshots/datasource-confluence.png"
-  caption="Confluence 数据源：版本选择与凭据填写"
-  hint="数据源编辑弹窗选中 Confluence，展示「Confluence 版本」下拉（Server / Data Center、Cloud）、地址、用户名与 Cloud API 令牌字段，以及测试连接后的空间选择列表。" />
+  src="/screenshots/datasource-confluence-pat.png"
+  caption="Confluence Server/DC 数据源：使用个人访问令牌"
+  hint="Server / Data Center 凭据表单：填写 PAT 后，用户名和密码可留空。截图使用本地模拟配置和示例令牌。" />
 
 - **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入附件和博客文章。
 - **内容**：取页面渲染后的 HTML 转为 Markdown（每页一个 `.md` 条目），正文为空时仅保留标题。条目 metadata 带 `space_key`、`space_name`、`page_id`，有作者时带 `creator`。

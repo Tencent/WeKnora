@@ -90,6 +90,10 @@ func (f *collaborationSessions) GetSession(_ context.Context, id string) (*types
 }
 
 func (f *collaborationSessions) AgentQA(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
+	ctx = types.WithRunMode(ctx, req.Mode)
+	if req.AssistantAccess.Valid() {
+		ctx = types.WithAccessLevel(ctx, req.AssistantAccess)
+	}
 	return f.run(ctx, req, bus)
 }
 
@@ -210,7 +214,7 @@ func TestCollaborationResultPublishedAfterTranscriptAndCapturesEventErrors(t *te
 			require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
 			s.Bind(
 				&collaborationSessions{run: func(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
-					if !req.Interactive || !req.Suspendable {
+					if req.Mode != types.RunModeAttended || !req.Suspendable {
 						return errors.New("expected suspendable child with forwarded interaction")
 					}
 					if req.Session.ID == scope.SessionID {
@@ -292,7 +296,7 @@ func TestCollaborationPinnedAccessDoesNotAllowImplicitWrite(t *testing.T) {
 	s, _, _, ctx := collaborationService(t)
 	scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "s", ID: "m"}
 	require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
-	snapshot, err := s.resolve(ctx, "a", types.AssistantAccessConfirm)
+	snapshot, err := s.resolveDelegated(ctx, "a", types.AssistantAccessConfirm, true)
 	require.NoError(t, err)
 	_, err = s.Runtime.Spawn(ctx, scope, "spawn", "one", "a", snapshot, "q")
 	require.NoError(t, err)
@@ -316,13 +320,16 @@ func TestCollaborationPinnedAccessDoesNotAllowImplicitWrite(t *testing.T) {
 		t,
 		s.attach(collaboration.WithBinding(ctx, b), &agent.AgentEngine{}, r, &types.AgentConfig{}, "child", "cm"),
 	)
-	_, err = r.ExecuteTool(ctx, "unsafe_write", json.RawMessage(`{}`))
-	require.ErrorContains(t, err, "requires approval")
+	res, err := r.ExecuteTool(ctx, "unsafe_write", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, res.Success, "a write the child cannot get approved here is refused")
 	require.False(t, write.called)
-	snapshot, err = s.resolve(ctx, "a", types.AssistantAccessAutoWrite)
+	snapshot, err = s.resolveDelegated(ctx, "a", types.AssistantAccessAutoWrite, true)
 	require.NoError(t, err)
 	work.Member.ConfigJSON = snapshot
 	s.tenants = &collaborationTenants{level: types.AssistantAccessAutoWrite}
+	r = tools.NewToolRegistry()
+	r.RegisterTool(write)
 	require.NoError(
 		t,
 		s.attach(collaboration.WithBinding(ctx, b), &agent.AgentEngine{}, r, &types.AgentConfig{}, "child", "cm"),
@@ -349,4 +356,46 @@ type collaborationWriteTool struct {
 func (t *collaborationWriteTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
 	t.called = true
 	return &types.ToolResult{Success: true}, nil
+}
+
+func TestWorkerAppliesAssistantCeilingOnlyUnderAssistantParent(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		assistantParent bool
+		want            types.AssistantAccessLevel
+	}{
+		{"ordinary parent", false, types.AssistantAccessAutoWrite},
+		{"assistant parent", true, types.AssistantAccessReadOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _, ctx := collaborationService(t)
+			s.tenants = &collaborationTenants{level: types.AssistantAccessReadOnly}
+			scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "group"}
+			require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
+			config, err := s.resolveDelegated(ctx, "a", types.AssistantAccessAutoWrite, tc.assistantParent)
+			require.NoError(t, err)
+			_, err = s.Runtime.Spawn(ctx, scope, "spawn", "worker", "a", config, "q")
+			require.NoError(t, err)
+			var work collaboration.Work
+			require.NoError(t, s.Runtime.Store.Change(ctx, scope, func(g *collaboration.Group) error {
+				m := g.Members[0]
+				r := m.Runs[0]
+				r.State, r.Owner, r.Lease = "running", "owner", time.Now().Add(time.Minute)
+				work = collaboration.Work{Scope: scope, Member: *m, Run: *r}
+				return nil
+			}))
+			var got types.AssistantAccessLevel
+			s.Bind(&collaborationSessions{run: func(
+				_ context.Context, req *types.QARequest, bus *event.EventBus,
+			) error {
+				got = req.AssistantAccess
+				return bus.Emit(context.Background(), event.Event{
+					Type: event.EventAgentComplete, Data: event.AgentCompleteData{FinalAnswer: "done"},
+				})
+			}})
+			_, err = s.run(ctx, work)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
 }

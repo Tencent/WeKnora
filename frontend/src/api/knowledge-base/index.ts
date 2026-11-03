@@ -111,10 +111,13 @@ export interface ImageAttrCondition {
   is: string;
 }
 
-// The OCR clause of the attribute -> work policy.
+// The OCR clause of the attribute -> work policy: the attribute conditions that
+// turn OCR on. What to do about an image whose attributes were NOT observed is
+// not part of this table — it is a setting of the pipeline that schedules OCR
+// (its own ocr_on_unobserved), so an on_unobserved left here by an older client
+// is ignored rather than honoured from two places.
 export interface ImageOCRAction {
   on: ImageAttrCondition[];
-  on_unobserved: boolean;
 }
 
 // The attribute -> work policy sent back to the API (snake_case JSON).
@@ -139,7 +142,6 @@ export const DEFAULT_IMAGE_ACTIONS: ImageActionsConfig = {
       { prop: 'contain.text', is: 'block' },
       { prop: 'contain.data_visual', is: 'true' },
     ],
-    on_unobserved: true,
   },
 };
 
@@ -180,21 +182,16 @@ export const FALLBACK_IMAGE_ATTR_SCHEMA: ImageAttrSchema = {
 };
 
 // Mirrors backend types.MergeImageActions: a custom OCR.On replaces the default
-// OCR.On wholesale (the "on" list is a unit); a config that only sets
-// on_unobserved keeps the default On. The result is what the form seeds with
-// and what makes an empty custom table safe to open.
+// OCR.On wholesale (the "on" list is a unit); anything else the custom table
+// does not mention keeps the default. The result is what the form seeds with and
+// what makes an empty custom table safe to open.
 export function mergeImageActions(
   custom?: ImageActionsConfig | null,
 ): ImageActionsConfig {
   if (custom && custom.ocr && custom.ocr.on && custom.ocr.on.length > 0) {
-    return { ocr: { on: custom.ocr.on, on_unobserved: custom.ocr.on_unobserved } };
+    return { ocr: { on: custom.ocr.on } };
   }
-  return {
-    ocr: {
-      on: DEFAULT_IMAGE_ACTIONS.ocr.on.map((c) => ({ ...c })),
-      on_unobserved: DEFAULT_IMAGE_ACTIONS.ocr.on_unobserved,
-    },
-  };
+  return { ocr: { on: DEFAULT_IMAGE_ACTIONS.ocr.on.map((c) => ({ ...c })) } };
 }
 
 // Fetch the canonical image-attribute registry + default actions from the
@@ -213,16 +210,20 @@ export async function fetchImageAttrSchema(kbId: string): Promise<ImageAttrSchem
 }
 
 // Mirrors backend types.ImageProcessingConfig (snake_case JSON). The UI edits
-// the attribute-observation switch, the on_unobserved toggle and the
-// image-vector switch; saving sends the snapshot back with those fields
-// updated so API-side settings survive a UI edit.
+// the attribute-observation switch, the pipeline pick and the image-vector
+// switch; saving sends the snapshot back with those fields updated so API-side
+// settings survive a UI edit.
 export interface ImageProcessingConfig {
   model_id?: string;
   image_actions?: ImageActionsConfig;
   image_attrs_enabled?: boolean;
   /** Which image pipeline runs for this base; empty means "follow the switch". */
   image_pipeline?: string;
-  /** That pipeline's private tunables, keyed by field. See ImagePipelineField. */
+  /**
+   * Every setting the picked pipeline declares, each under that pipeline's slot
+   * ("<pipeline>.<field key>"). The panel writes and reads this map, and it is
+   * where the run reads those settings from too.
+   */
   image_pipeline_params?: Record<string, unknown>;
   // Index and recall images by their own vectors. Off unless the knowledge
   // base opts in, and only takes effect with an embedding model that takes
@@ -238,11 +239,21 @@ export interface ImageProcessingConfig {
 // control per field without naming any pipeline.
 export interface ImagePipelineField {
   key: string;
-  type: 'bool' | 'string' | 'enum';
+  /**
+   * 'note' carries no value: it is explanation text the pipeline declares
+   * alongside the switches it explains.
+   */
+  type: 'bool' | 'string' | 'enum' | 'note';
   label: string;
   description: string;
   default: unknown;
   options: string[] | null;
+  /**
+   * Which run of the panel the field belongs to: 'switch' (standing, shown
+   * outright), 'advanced' or 'note' (both folded away). Absent or empty means
+   * 'switch', so a pipeline only mentions the group for fields it folds.
+   */
+  group?: 'switch' | 'advanced' | 'note';
   /** Whether this field turns an action on or off, as opposed to tuning one. */
   decides_action?: boolean;
 }

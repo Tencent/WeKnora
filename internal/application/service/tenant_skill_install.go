@@ -18,11 +18,13 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1674,6 +1676,20 @@ func (s *TenantSkillService) startMaintenanceSession(
 	}
 	if sess == nil {
 		return nil, nil, fmt.Errorf("create %s session returned nil", operation)
+	}
+	if s.placer != nil {
+		if _, err := s.placer.Place(types.WithSandboxTenantID(ctx, tenantID), sandboxalloc.PlaceRequest{
+			SessionTenantID: tenantID, SessionID: sess.ID,
+			ConfigTenantID: tenantID, ConfigID: configID, Purpose: allocation.PurposeMaintenance,
+		}); err != nil {
+			// The row was created for this operation only and nothing has run
+			// in it; leaving it would keep a hidden, pinned session around.
+			if delErr := s.sessions.DeleteSession(context.WithoutCancel(ctx), sess.ID); delErr != nil {
+				logger.Warnf(ctx, "[skill] remove %s session %s after a failed placement: %v",
+					operation, sess.ID, delErr)
+			}
+			return nil, nil, fmt.Errorf("record %s sandbox placement: %w", operation, err)
+		}
 	}
 	return sess, mgr, nil
 }

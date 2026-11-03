@@ -26,15 +26,16 @@ const (
 var readDocumentTool = BaseTool{
 	name: ToolReadDocument,
 	description: "Read a document from the knowledge bases in scope: its metadata plus chunks in document order.\n" +
-		"id is a dN document handle (reads a page of chunks starting at offset) or a cN chunk handle (reads that " +
-		"chunk; set context to include neighbouring chunks on each side).\n" +
+		"id is a doc://N document handle (reads a page of chunks starting at offset) or a chunk://N chunk handle " +
+		"(reads that chunk; set context to include neighbouring chunks on each side).\n" +
 		"query finds passages inside the document: matching chunks come back with one chunk of context on each " +
 		"side. By default query is case-insensitive and split on whitespace: a chunk matches when it contains " +
 		"every word, in any order. Set regex=true to match query as one POSIX regular expression instead. " +
 		"When a query result is truncated, repeat it with offset=next_offset to get the following matches.\n" +
 		"Page through long documents with offset and limit: offset counts chunks in reading order from 0 and is " +
-		"not a chunk index, so continue with the returned next_offset, and use id=cN with context to read around " +
-		"a specific chunk. A page holds fewer than limit chunks when they would exceed the output size budget; " +
+		"not a chunk index, so continue with the returned next_offset, and use id=chunk://N with context " +
+		"to read around a specific chunk. A page holds fewer than limit chunks when they would exceed " +
+		"the output size budget; " +
 		"next_offset always points at the first chunk not yet returned. Reading a long document end to end " +
 		"costs many calls, so prefer query or search_knowledge to locate the relevant part first.",
 	schema: json.RawMessage(`{
@@ -42,7 +43,7 @@ var readDocumentTool = BaseTool{
   "properties": {
     "id": {
       "type": "string",
-      "description": "dN document handle or cN chunk handle from retrieval results or the runtime context",
+      "description": "doc://N document handle or chunk://N chunk handle from retrieval results or the runtime context",
       "minLength": 1
     },
     "offset": {
@@ -66,7 +67,7 @@ var readDocumentTool = BaseTool{
     },
     "context": {
       "type": "integer",
-      "description": "Neighbouring chunks to include on each side of a cN chunk (default 0, max 5)",
+      "description": "Neighbouring chunks to include on each side of a chunk://N chunk (default 0, max 5)",
       "minimum": 0,
       "maximum": 5
     }
@@ -124,8 +125,10 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 	id := strings.TrimSpace(input.ID)
 	if id == "" {
-		return &types.ToolResult{Success: false, Error: "id is required (a dN document handle or a cN chunk handle)"},
-			fmt.Errorf("missing id")
+		return &types.ToolResult{
+			Success: false,
+			Error:   "id is required (a doc://N document handle or a chunk://N chunk handle)",
+		}, fmt.Errorf("missing id")
 	}
 	if t.knowledgeService == nil || t.chunkService == nil {
 		return &types.ToolResult{Success: false, Error: "document services are unavailable"},
@@ -202,7 +205,8 @@ func (t *ReadDocumentTool) resolveTarget(ctx context.Context, id string) (*types
 	}
 	chunk, err := t.chunkService.GetChunkByIDOnly(ctx, id)
 	if err != nil || chunk == nil {
-		return nil, nil, fmt.Errorf("id %s is neither a document (dN) nor a chunk (cN) in the current scope", id)
+		return nil, nil, fmt.Errorf(
+			"id %s is neither a document (doc://N) nor a chunk (chunk://N) in the current scope", id)
 	}
 	authorizedChunk, authErr := authorizeChunkInSearchTargets(
 		ctx, t.searchTargets, id, t.chunkService, t.knowledgeService,

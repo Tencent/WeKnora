@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -38,6 +39,27 @@ func TestSelectSessionBindingStoreFallsBackToMemoryWhenNotRequired(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, "memory", kind)
 	require.IsType(t, &sandbox.MemorySessionSandboxBindingStore{}, store)
+}
+
+func TestSelectSessionBindingStoreUserModeNeedsRedisAndEnv(t *testing.T) {
+	t.Cleanup(func() { allocation.SetUserModeAvailable(false) })
+
+	t.Setenv(allocation.UserModeEnvVar, "enabled")
+	_, _, err := selectSessionBindingStore(nil, true)
+	require.NoError(t, err)
+	require.False(t, allocation.UserModeAvailable(), "env opt-in without Redis must leave the gate closed")
+
+	mini := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	_, _, err = selectSessionBindingStore(client, true)
+	require.NoError(t, err)
+	require.True(t, allocation.UserModeAvailable(), "env opt-in with Redis opens the gate")
+
+	t.Setenv(allocation.UserModeEnvVar, "")
+	_, _, err = selectSessionBindingStore(client, true)
+	require.NoError(t, err)
+	require.False(t, allocation.UserModeAvailable(), "Redis without the env opt-in must leave the gate closed")
 }
 
 // fakeSessionLookup implements the narrow sessionExistenceLookup surface the

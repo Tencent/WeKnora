@@ -67,11 +67,11 @@ func TestAnnotateGraphResult(t *testing.T) {
 	base := "<retrieval mode=\"graph\">\n</retrieval>"
 	got := annotateGraphResult(base, map[string]interface{}{
 		"relations": []map[string]interface{}{{"source": "Kubernetes", "type": "orchestrates", "target": "Docker"}},
-		"errors":    []string{"KB b2: graph extraction not configured"},
+		"errors":    []string{"KB kb://2: graph extraction not configured"},
 	})
 	for _, want := range []string{
 		`<relation source="Kubernetes" type="orchestrates" target="Docker" />`,
-		"<error>KB b2: graph extraction not configured</error>",
+		"<error>KB kb://2: graph extraction not configured</error>",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %q", want, got)

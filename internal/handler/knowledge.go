@@ -488,7 +488,7 @@ type CreateKnowledgeFromURLRequest struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.create_from_url","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Fetches a public web page or file into the knowledge base and parses it in the background; follow with knowledge.get_parse_progress. Only use a URL the user gave."
+// @x-agent-hint "Imports a user-provided public web page or file URL as a source document; ingests asynchronously. Check knowledge.get_parse_progress."
 // @Router       /knowledge-bases/{id}/knowledge/url [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -578,7 +578,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge.create_manual","risk":"write","target":"knowledge_base.get","label":"name"}
-// @x-agent-hint "Creates a Markdown document. Send the full content, and status draft to keep it out of search or publish to index it."
+// @x-agent-hint "Creates a source document from complete Markdown. Set status publish to start asynchronous ingestion; omitted status defaults to draft without indexing. Use draft only when requested. Check knowledge.get_parse_progress."
 // @Router       /knowledge-bases/{id}/knowledge/manual [post]
 func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()

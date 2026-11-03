@@ -181,11 +181,15 @@ func (e *AgentEngine) emitCompletionEvent(
 	if state.SuspendedStep != nil {
 		steps = append(append([]types.AgentStep(nil), steps...), *state.SuspendedStep)
 	}
-	if len(state.PendingSteerMessages) > 0 {
+	seen := e.takeBackgroundSeen()
+	if len(state.PendingSteerMessages) > 0 || len(state.PendingBackground) > 0 || len(seen) > 0 {
 		// A stop or model failure can arrive after delivery but before the next
 		// response exists. Preserve that boundary without inventing an answer.
 		steps = append(append([]types.AgentStep(nil), steps...), types.AgentStep{
-			Iteration: state.CurrentRound, UserMessagesBefore: state.PendingSteerMessages,
+			Iteration:            state.CurrentRound,
+			UserMessagesBefore:   state.PendingSteerMessages,
+			BackgroundInjections: state.PendingBackground,
+			BackgroundSeenIDs:    seen,
 		})
 	}
 	// Convert knowledge refs to interface{} slice for event data

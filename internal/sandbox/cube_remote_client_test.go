@@ -532,6 +532,30 @@ func TestCubeRemoteClientExecArgvAndShell(t *testing.T) {
 	require.True(t, IsRemoteInvalidRequest(err))
 }
 
+func TestCubeRemoteClientExecForwardsBufferedOutput(t *testing.T) {
+	mock := newCubeMockServer(t)
+	mock.SetExecutor(func(string, string, []string) (string, string, int) {
+		return "out-line\n", "err-line\n", 0
+	})
+	client := newTestCubeRemoteClient(t, mock)
+	ctx := context.Background()
+	handle, err := client.Create(ctx, RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	var got []string
+	result, err := client.Exec(ctx, handle, RemoteExecRequest{
+		Command: "printf '%s' ok",
+		Shell:   true,
+		OnOutput: func(stream string, chunk []byte) {
+			got = append(got, stream+":"+string(chunk))
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "out-line\n", result.Stdout)
+	require.Equal(t, "err-line\n", result.Stderr)
+	require.Equal(t, []string{"stdout:out-line\n", "stderr:err-line\n"}, got)
+}
+
 func TestCubeRemoteClientExecTimeoutIsKilled(t *testing.T) {
 	mock := newCubeMockServer(t)
 	// A slow executor lets the outer request timeout fire before the mock
@@ -642,6 +666,10 @@ func TestNormalizeCubeError(t *testing.T) {
 		{"template not found", "Create", cubesandbox.ErrTemplateNotFound, RemoteErrorKindInvalidRequest},
 		{"authentication", "Health", cubesandbox.ErrAuthentication, RemoteErrorKindAuthentication},
 		{"path not found", "Stat", &cubesandbox.NotFoundError{Path: "/x"}, RemoteErrorKindNotFound},
+		{"list missing session dir", "ListDir", errors.New(
+			"failed to list /workspace/sessions/f2e82fcb-abf8-4677-9567-5e20d6cbcb1f/input: " +
+				"path not found: lstat /workspace/sessions/f2e82fcb-abf8-4677-9567-5e20d6cbcb1f: " +
+				"no such file or directory"), RemoteErrorKindNotFound},
 		{"gone", "Get", &cubesandbox.APIError{StatusCode: http.StatusGone}, RemoteErrorKindTerminal},
 		{"conflict", "Connect", &cubesandbox.APIError{StatusCode: http.StatusConflict}, RemoteErrorKindConflict},
 		{"rate limited", "Create", &cubesandbox.APIError{StatusCode: http.StatusTooManyRequests}, RemoteErrorKindCapacity},

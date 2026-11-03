@@ -76,7 +76,7 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		query = rewritten
 	}
 
-	model, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	model, err := p.modelService.GetChatModel(chatManage.ChatModelContext(ctx), chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get model, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()

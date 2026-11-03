@@ -1281,6 +1281,20 @@
                 theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
             </div>
           </div>
+
+          <!-- 执行权限上限：修改数据的工具（MCP、Wiki 写入）能否不经确认直接执行 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.mcp.accessLevel') }}</label>
+              <p class="desc">{{ $t('agentEditor.mcp.accessLevelDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.access_level">
+                <t-option v-for="level in ASSISTANT_ACCESS_LEVELS" :key="level" :value="level"
+                  :label="$t(`assistant.access.levels.${level}.label`)" />
+              </t-select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1907,6 +1921,7 @@ import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/setti
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
+import { ASSISTANT_ACCESS_LEVELS, type AssistantAccessLevel } from '@/api/assistant';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
 import { toolboxLocation } from '@/config/toolbox';
@@ -2892,6 +2907,8 @@ const defaultFormData = {
     mcp_services: [] as string[],
     // 对话中触发 OAuth 授权时的等待超时（秒），默认 600
     mcp_auth_wait_timeout: 600,
+    // 执行权限上限，默认自动执行
+    access_level: 'auto_write' as AssistantAccessLevel,
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
@@ -3634,6 +3651,7 @@ watch(() => props.visible, async (val) => {
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
         agentData.config.mcp_auth_wait_timeout = 600;
       }
+      if (!agentData.config.access_level) agentData.config.access_level = 'auto_write';
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
       if (!agentData.config.chat_parser_engine_rules) agentData.config.chat_parser_engine_rules = [];
@@ -3802,7 +3820,10 @@ const initMcpSelectionMode = () => {
     // 有指定 MCP 服务
     mcpSelectionMode.value = 'selected';
   } else {
-    mcpSelectionMode.value = 'none';
+    // Legacy configs with no mode run with every enabled MCP service for the
+    // owner (registerMCPTools treats "" as "all"). Show that actual runtime
+    // behaviour so the editor matches what the agent can call.
+    mcpSelectionMode.value = 'all';
   }
 };
 
@@ -3870,6 +3891,10 @@ watch(kbSelectionMode, (mode) => {
 
 // 监听 MCP 选择模式变化
 watch(mcpSelectionMode, (mode) => {
+  // Hydration may map a legacy empty mode to "all" for display only; do not
+  // persist that translation or clear the stored service list until the user
+  // actually edits the MCP selection.
+  if (isInitializing.value) return;
   formData.value.config.mcp_selection_mode = mode;
   if (mode === 'none') {
     // 不使用 MCP，清空相关配置
@@ -3880,6 +3905,14 @@ watch(mcpSelectionMode, (mode) => {
   }
   // selected 模式保持 mcp_services 不变
 });
+
+// Editing a legacy list is an explicit selection even if the radio was
+// already displayed as "selected". An empty list must also stay selected,
+// since an unset mode would allow every enabled service at runtime.
+watch(() => formData.value.config.mcp_services, () => {
+  if (isInitializing.value || mcpSelectionMode.value !== 'selected') return;
+  formData.value.config.mcp_selection_mode = 'selected';
+}, { deep: true });
 
 watch(() => formData.value.config.sandbox_config_id, async () => {
   if (!props.visible) return

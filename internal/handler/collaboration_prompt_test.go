@@ -43,3 +43,32 @@ func TestDelegatedPromptAnswerDoesNotBypassDurableScheduler(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduledPromptAnswerReattachesWithoutStartingChatRun(t *testing.T) {
+	for _, suspended := range []bool{true, false} {
+		t.Run(map[bool]string{true: "suspended", false: "still_running"}[suspended], func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest("POST", "/agent/prompts/p", nil)
+			resumer := &collaborationPromptResumer{delegated: true}
+			handler := &MCPServiceHandler{runResumer: resumer}
+			queued := 0
+			handler.SetScheduledPromptRouter(func(_ context.Context, prompt *types.AgentPrompt) bool {
+				require.Equal(t, "p", prompt.ID)
+				queued++
+				return true
+			})
+			handler.finishResolve(ctx, "p", hitl.Resolution{
+				Prompt: &types.AgentPrompt{ID: "p"}, Resume: suspended,
+			}, nil)
+			require.Equal(t, 200, recorder.Code)
+			require.Equal(t, 1, queued)
+			require.Zero(t, resumer.calls, "the scheduler must retain ownership of automation runs")
+			if suspended {
+				require.JSONEq(t, `{"success":true,"resumed":true}`, recorder.Body.String())
+			} else {
+				require.JSONEq(t, `{"success":true,"resumed":false}`, recorder.Body.String())
+			}
+		})
+	}
+}

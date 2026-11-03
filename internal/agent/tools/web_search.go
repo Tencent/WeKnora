@@ -26,7 +26,7 @@ var webSearchTool = BaseTool{
 	description: `Search the public web for current information, documentation, and facts.
 - Use relevant available knowledge sources according to the task; no fixed sequence of KB tools is required.
 - Search directly when the user requests external/current information or relevant local evidence is unavailable.
-- Returns up to %d results with titles, wN page IDs, source domains, publication dates when available, and
+- Returns up to %d results with titles, url://N page IDs, source domains, publication dates when available, and
   search snippets.
 - Use web_fetch with a returned page ID to read the source when snippets leave gaps. User-supplied URLs can be
   fetched directly without searching first.

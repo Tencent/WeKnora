@@ -73,6 +73,19 @@ func (c *AssistantConfig) EffectiveAccessLevel(requested AssistantAccessLevel) A
 	return level
 }
 
+// CapAccessLevel is the level a run of an agent whose ceiling is ceiling
+// gets for the requested level. An unset or unknown ceiling is auto_write;
+// an unset or unknown request gets the ceiling.
+func CapAccessLevel(requested, ceiling AssistantAccessLevel) AssistantAccessLevel {
+	if !ceiling.Valid() {
+		ceiling = AssistantAccessAutoWrite
+	}
+	if !requested.Valid() || assistantAccessRank[requested] > assistantAccessRank[ceiling] {
+		return ceiling
+	}
+	return requested
+}
+
 // Value implements driver.Valuer for JSON storage.
 func (c AssistantConfig) Value() (driver.Value, error) { return json.Marshal(c) }
 

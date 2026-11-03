@@ -154,6 +154,11 @@ func recordKBActivity(
 			activityDetails["agent_operation"] = agent.Operation
 		}
 	}
+	if via := types.ActingViaFromContext(ctx); via != "" {
+		if _, exists := activityDetails["agent_acting_via"]; !exists {
+			activityDetails["agent_acting_via"] = via
+		}
+	}
 	if task, ok := ctx.Value(kbActivityTaskContextKey{}).(kbActivityTaskMetadata); ok {
 		if task.TaskID != "" {
 			if _, exists := activityDetails["task_id"]; !exists {

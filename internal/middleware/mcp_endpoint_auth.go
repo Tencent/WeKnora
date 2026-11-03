@@ -73,6 +73,7 @@ func MCPEndpointAuth(svc interfaces.MCPEndpointService, tenantSvc interfaces.Ten
 			Role:        types.TenantRoleViewer,
 			APIKeyScope: &scope,
 			Extra:       map[types.ContextKey]any{types.MCPEndpointContextKey: ep},
+			AuthSource:  types.AuthSourceMCPEndpoint,
 		})
 		c.Next()
 	}

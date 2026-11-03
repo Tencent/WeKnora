@@ -126,6 +126,7 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
       ? JSON.stringify(response.modified_args)
       : request.args === undefined ? '' : JSON.stringify(request.args),
     grant_scope: request.grant_scope,
+    grant_lapsed: request.grant_lapsed,
     tool_call_id: p.tool_call_id,
     requested_at: requestedAt,
     suspendable: true,
@@ -516,7 +517,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           events.push({ type: 'answer', event_id: `step-${step.iteration}-answer`,
             content: preambleText, done: true, intermediate_answer: true, timestamp: stepTimestamp || undefined })
         }
-        if (!progressText && preambleText && hasToolCalls) {
+        if (!progressText && preambleText && hasToolCalls && !step.intermediate_answer) {
           events.push({
             type: 'answer',
             event_id: `step-${step.iteration}-preamble`,
@@ -799,6 +800,15 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     }
 
     if (!message) {
+      // Background notices attach to a turn that already exists. Opening a
+      // shell here would start a new assistant turn after the parent run.
+      if (
+        data.response_type === 'work_event' ||
+        data.response_type === 'work_started' ||
+        data.response_type === 'work_finished'
+      ) {
+        return
+      }
       const newMsg: ChatMessage = {
         id: dataId,
         request_id: dataId,
@@ -850,6 +860,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         .filter(m => m.role === 'assistant' && (m === message || (turnID && persistedAssistantId(m) === turnID)))
         .flatMap(m => (m.agentEventStream as ChatMessage[] | undefined) || [])
     }
+    // work_* cases read `payload` so the source-extracted tests, which call
+    // the case with the event object, and this handler share one binding.
+    const payload = dataPayload
 
     switch (responseType) {
       case 'collaboration_status': {
@@ -985,6 +998,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           delegated_task: d.delegated_task,
           args_json: d.args_json,
           grant_scope: d.grant_scope,
+          grant_lapsed: d.grant_lapsed,
           timeout_seconds: d.timeout_seconds,
           hot_wait_seconds: d.hot_wait_seconds,
           suspendable: d.suspendable,
@@ -1106,7 +1120,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       case 'tool_call': {
         if (dataPayload?.tool_name === 'final_answer') break
-        if (message.agentEventStream) {
+        // A page button follows the answer rather than starting more work; the
+        // server retracts that text with a progress event if the turn goes on.
+        if (message.agentEventStream && dataPayload?.tool_name !== 'open_page') {
           let retracted = false
           for (const ev of message.agentEventStream as ChatMessage[]) {
             if (ev.type === 'answer' && !ev.superseded && ev.content && String(ev.content).trim()) {
@@ -1191,6 +1207,44 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
+      case 'work_event': {
+        const inner = dataPayload?.inner as { response_type?: string; data?: ChatMessage } | undefined
+        if (inner?.response_type === 'command_output' && inner.data?.tool_call_id) {
+          // The async tool returns at the yield window, so later previews
+          // arrive after pending is cleared. Attach them to that card anyway.
+          // done on the preview hides the live tail; it does not complete the tool.
+          const toolCallId = inner.data.tool_call_id
+          const tool = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+            event => event.type === 'tool_call' && event.tool_call_id === toolCallId
+              && (event.tool_name === 'shell_exec' || event.tool_name === 'shell_exec_async'),
+          )
+          if (tool) {
+            tool.command_output = { ...inner.data }
+          }
+        }
+        break
+      }
+      case 'work_started':
+      case 'work_finished': {
+        const event = payload as ChatMessage | undefined
+        const workId = typeof event?.work_id === 'string' ? event.work_id : ''
+        if (workId) {
+          if (!message.background_work) message.background_work = {}
+          const backgroundWork = message.background_work as Record<string, {
+            state: unknown
+            title: unknown
+            kind: unknown
+            payload: unknown
+          }>
+          backgroundWork[workId] = {
+            state: (event?.state as string | undefined) ?? 'running',
+            title: event?.title,
+            kind: event?.kind,
+            payload: event?.payload,
+          }
+        }
+      }
+      break
       case 'tool_result':
       case 'error': {
         if (dataPayload) {
@@ -1587,6 +1641,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'tool_call' ||
       data.response_type === 'tool_result' ||
       data.response_type === 'command_output' ||
+      data.response_type === 'work_event' ||
+      data.response_type === 'work_started' ||
+      data.response_type === 'work_finished' ||
       data.response_type === 'reflection' ||
       data.response_type === 'artifacts_pending' ||
       data.response_type === 'context_compacted' ||

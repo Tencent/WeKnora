@@ -26,6 +26,22 @@
       <t-icon v-if="session?.is_pinned" name="pin" size="12px" class="chat-header__pin" />
       <span ref="titleTextRef" class="chat-header__title-text">{{ displayTitle }}</span>
     </h1>
+    <router-link
+      v-if="!titleEditing && automation"
+      class="chat-header__automation"
+      :to="`/platform/automations/${encodeURIComponent(automation.id)}`"
+      :title="t('chatHeader.automationOpen', { name: automation.name })"
+    >
+      <t-icon name="time" size="12px" />
+      <span>{{ automation.name }}</span>
+    </router-link>
+    <span
+      v-else-if="!titleEditing && session?.kind === 'automation'"
+      class="chat-header__automation"
+    >
+      <t-icon name="time" size="12px" />
+      <span>{{ t('chatHeader.automationTask') }}</span>
+    </span>
     <span
       v-if="!titleEditing && workspaceLabel"
       class="chat-header__workspace"
@@ -58,6 +74,10 @@
               <t-icon class="icon" name="edit-1" />
               <span>{{ t('menu.renameSession') }}</span>
             </button>
+            <button type="button" class="card-menu-item" @click="enterGrantsMode">
+              <t-icon class="icon" name="lock-on" />
+              <span>{{ t('chatHeader.grants.menu') }}</span>
+            </button>
             <button type="button" class="card-menu-item" @click="onMenuAction('copyMarkdown')">
               <t-icon class="icon" name="file-copy" />
               <span>{{ t('chatHeader.copyMarkdown') }}</span>
@@ -67,6 +87,27 @@
               <span>{{ t('chatHeader.deleteSession') }}</span>
             </button>
           </template>
+
+          <div v-else-if="menuMode === 'grants'" class="chat-header-confirm">
+            <div class="chat-header-confirm__title">{{ t('chatHeader.grants.menu') }}</div>
+            <div class="chat-header-confirm__body">{{ t('chatHeader.grants.description') }}</div>
+            <t-loading v-if="grantsLoading" size="small" />
+            <div v-else-if="!grants.length" class="chat-header-grants__empty">{{ t('chatHeader.grants.empty') }}</div>
+            <ul v-else class="chat-header-grants">
+              <li v-for="grant in grants" :key="grant.id" class="chat-header-grants__item">
+                <span class="chat-header-grants__label" :title="grant.label">{{ grant.label }}</span>
+                <button type="button" class="chat-header-confirm__btn" :disabled="revokingId === grant.id"
+                  @click="revokeGrant(grant)">
+                  {{ t('chatHeader.grants.revoke') }}
+                </button>
+              </li>
+            </ul>
+            <div class="chat-header-confirm__footer">
+              <button type="button" class="chat-header-confirm__btn" @click="backToMenu">
+                {{ t('common.back') }}
+              </button>
+            </div>
+          </div>
 
           <div v-else class="chat-header-confirm">
             <div class="chat-header-confirm__title">
@@ -96,11 +137,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { copyToClipboard } from '@/utils/clipboard'
 import { getMessageList } from '@/api/chat'
+import { getAutomationBySession } from '@/api/automation'
+import { listAgentGrants, revokeAgentGrant, type AgentGrant } from '@/api/mcp-service'
 import {
   removeSession,
   renameSession,
@@ -115,12 +158,13 @@ interface ChatHeaderSession {
   id: string
   title?: string
   description?: string
+  kind?: string
   tenant_id?: number | string
   is_pinned?: boolean
   host_workspace_dir?: string
 }
 
-type MenuMode = 'menu' | 'delete'
+type MenuMode = 'menu' | 'delete' | 'grants'
 
 const props = defineProps<{
   session: ChatHeaderSession | null
@@ -136,6 +180,20 @@ const titleDraft = ref('')
 const titleInputRef = ref<HTMLInputElement | null>(null)
 
 const displayTitle = computed(() => props.session?.title?.trim() || t('menu.newSession'))
+const automation = ref<{ id: string; name: string } | null>(null)
+
+watch(() => [props.session?.id, props.session?.kind] as const, async ([id, kind]) => {
+  automation.value = null
+  if (!id || kind !== 'automation') return
+  try {
+    const res = await getAutomationBySession(id)
+    if (props.session?.id === id && res.data?.id) {
+      automation.value = { id: res.data.id, name: res.data.name }
+    }
+  } catch {
+    // The badge stays, without a link, when the automation is gone.
+  }
+}, { immediate: true })
 const titleTextRef = ref<HTMLElement | null>(null)
 useSessionTitleMotion(titleTextRef, () => props.session?.id, () => displayTitle.value)
 const workspaceLabel = computed(() => {
@@ -155,6 +213,39 @@ function onMenuVisibleChange(visible: boolean): void {
 
 function enterConfirmMode(mode: 'delete'): void {
   menuMode.value = mode
+}
+
+const grants = ref<AgentGrant[]>([])
+const grantsLoading = ref(false)
+const revokingId = ref('')
+
+async function enterGrantsMode(): Promise<void> {
+  const session = props.session
+  if (!session) return
+  menuMode.value = 'grants'
+  grants.value = []
+  grantsLoading.value = true
+  try {
+    grants.value = await listAgentGrants(session.id)
+  } catch {
+    MessagePlugin.error(t('chatHeader.grants.loadFailed'))
+  } finally {
+    grantsLoading.value = false
+  }
+}
+
+async function revokeGrant(grant: AgentGrant): Promise<void> {
+  if (revokingId.value) return
+  revokingId.value = grant.id
+  try {
+    await revokeAgentGrant(grant.id)
+    grants.value = grants.value.filter((g) => g.id !== grant.id)
+    MessagePlugin.success(t('chatHeader.grants.revoked'))
+  } catch {
+    MessagePlugin.error(t('chatHeader.grants.revokeFailed'))
+  } finally {
+    revokingId.value = ''
+  }
 }
 
 function backToMenu(): void {
@@ -280,7 +371,7 @@ async function submitDeleteSession(): Promise<void> {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  max-width: min(360px, calc(100% - 36px));
+  max-width: min(520px, calc(100% - 36px));
   min-width: 0;
   box-sizing: border-box;
 }
@@ -330,6 +421,36 @@ async function submitDeleteSession(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-header__automation {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 160px;
+  margin-left: 6px;
+  padding: 0 8px;
+  height: 22px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  line-height: 22px;
+  text-decoration: none;
+  white-space: nowrap;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer-hover);
+  }
 }
 
 .chat-header__workspace {
@@ -418,6 +539,38 @@ async function submitDeleteSession(): Promise<void> {
   font-size: var(--app-text-base);
   line-height: 1.5;
   word-break: break-word;
+}
+
+.chat-header-grants {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.chat-header-grants__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-header-grants__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-header-grants__empty {
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
 }
 
 .chat-header-confirm__footer {

@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -66,10 +66,13 @@ type PendingRequest struct {
 	Description        string
 	Args               json.RawMessage
 	ToolCallID         string
-	// Grant, when set, lets the user allow calls with the same grant for the
-	// rest of the session; see types.ToolApprovalPromptRequest.
+	// Grant, when set, names the kind of call for matching remembered
+	// grants; see types.ToolApprovalPromptRequest. GrantRisk is the call's
+	// risk, empty meaning write: only a write may be remembered from the
+	// card, while a standing grant may also cover a destructive call.
 	Grant      string
 	GrantScope string
+	GrantRisk  policy.Risk
 	// Snapshot, when set, is the run state to resume from: the wait is cut
 	// to the hot-wait window and then suspends instead of timing out.
 	Snapshot        []byte
@@ -78,7 +81,9 @@ type PendingRequest struct {
 
 // MCPApproval is the surface used by MCPTool (mockable in tests).
 type MCPApproval interface {
-	NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool
+	// Action is the policy action of calling tool; the caller decides it
+	// under the run's access level.
+	Action(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Action
 	IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 	RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error)
 	// ResumeDecision is the decision carried by the answered prompt a resumed
@@ -138,7 +143,8 @@ type Gate struct {
 	timeout   time.Duration
 	hotWait   time.Duration // in-memory wait before a suspendable approval suspends the run
 	broker    *hitl.Broker
-	failClose bool // when true, NeedsApproval errors block (require approval) instead of skip
+	failClose bool // when true, policy read errors require approval instead of skipping it
+	grants    GrantStore
 }
 
 // Errors returned by Resolve; they alias the prompt broker's errors.
@@ -151,8 +157,12 @@ var (
 )
 
 // UnattendedApprovalReason is the refusal of a tool approval raised in a run
-// nobody watches (types.WithUnattendedRun).
+// nobody can answer (types.RunModeUnattended).
 const UnattendedApprovalReason = "it needs the user's approval, which nobody can give in this run"
+
+// DeferredApprovalReason is the refusal of a tool approval raised in a
+// deferred run that cannot save its state to wait for the answer.
+const DeferredApprovalReason = "it needs the user's approval, and this run cannot wait for it"
 
 // NewGate builds a gate. checker may be nil (disables gating). cfg may be nil
 // (defaults apply). broker may be nil (process-local prompts, single replica).
@@ -178,25 +188,21 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	return &Gate{checker: checker, timeout: timeout, hotWait: hotWait, broker: broker, failClose: failClose}
 }
 
-// NeedsApproval returns whether execution should pause for human confirmation.
-func (g *Gate) NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool {
-	if hitl.RequiresDelegatedApproval(ctx) {
-		return true
-	}
-	if g == nil || g.checker == nil || tenantID == 0 || serviceID == "" || toolName == "" {
-		return false
-	}
+// Verdict decides a call of an MCP tool under the run's access level: the
+// tool's risk comes from the workspace's policy and the service's
+// annotations, and a tool the workspace marked as requiring approval
+// always asks.
+func (g *Gate) Verdict(ctx context.Context, tenantID uint64, serviceID string, tool *types.MCPTool) policy.Verdict {
+	rules := policy.Rules{Level: types.AccessLevelFromContext(ctx)}
+	return policy.Decide(g.Action(ctx, tenantID, serviceID, tool), rules)
+}
+
+// requiredByPolicy reports whether the workspace marked the tool as always
+// requiring approval, for checkers that know nothing about risk.
+func (g *Gate) requiredByPolicy(ctx context.Context, tenantID uint64, serviceID, toolName string) bool {
 	ok, err := g.checker.IsRequired(ctx, tenantID, serviceID, toolName)
 	if err != nil {
-		// Default fail-close: a transient DB error must NOT silently allow a
-		// dangerous tool to run. Operators can opt into legacy behaviour via
-		// WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true.
-		if g.failClose {
-			logger.GetLogger(ctx).Warnf("mcp tool approval check failed (fail-close: requiring approval): %v", err)
-			return true
-		}
-		logger.GetLogger(ctx).Warnf("mcp tool approval check failed (fail-open: skip gate): %v", err)
-		return false
+		return g.failedAction(ctx, err).Always
 	}
 	return ok
 }
@@ -220,9 +226,6 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	if g == nil {
 		return Decision{Approved: true}, nil
 	}
-	if g.checker == nil && !hitl.RequiresDelegatedApproval(ctx) {
-		return Decision{Approved: true}, nil
-	}
 	return g.awaitToolApproval(ctx, req)
 }
 
@@ -234,57 +237,50 @@ func (g *Gate) RequestBuiltinApproval(ctx context.Context, req PendingRequest) (
 	if g == nil || g.broker == nil {
 		return Decision{}, fmt.Errorf("tool approval is not available")
 	}
-	if g.allowedInSession(ctx, req) {
-		return Decision{Approved: true, Granted: true}, nil
-	}
 	return g.awaitToolApproval(ctx, req)
 }
 
 // offeredGrantScope is the scope the card offers to allow, which needs both
 // a grant to match later calls and a description for the user.
 func offeredGrantScope(req PendingRequest) string {
+	if req.Grant == "" || req.grantRisk() != policy.RiskWrite {
+		return ""
+	}
+	return req.GrantScope
+}
+
+func grantRiskLabel(req PendingRequest) string {
+	if req.Grant == "" {
+		return ""
+	}
+	return string(req.grantRisk())
+}
+
+func grantLabel(req PendingRequest) string {
 	if req.Grant == "" {
 		return ""
 	}
 	return req.GrantScope
 }
 
-// grantedStatuses are the states of an approved prompt whose call ran or is
-// running.
-var grantedStatuses = []string{types.AgentPromptExecuting, types.AgentPromptDone}
-
-// allowedInSession reports whether the user already approved a call with
-// req's grant in this session and chose to allow the rest. Only the same
-// owner's approvals count, and any lookup failure asks again.
-func (g *Gate) allowedInSession(ctx context.Context, req PendingRequest) bool {
-	if req.Grant == "" || req.SessionID == "" || req.UserID == "" || req.TenantID == 0 {
-		return false
+func (req PendingRequest) grantRisk() policy.Risk {
+	if req.GrantRisk == "" {
+		return policy.RiskWrite
 	}
-	prompts, err := g.broker.SessionPrompts(ctx, req.SessionID, grantedStatuses)
-	if err != nil {
-		logger.Warnf(ctx, "tool approval: read session grants: %v", err)
-		return false
-	}
-	for _, p := range prompts {
-		if p.Kind != types.AgentPromptKindToolApproval || p.TenantID != req.TenantID || p.UserID != req.UserID {
-			continue
-		}
-		var request types.ToolApprovalPromptRequest
-		var response types.ToolApprovalPromptResponse
-		if json.Unmarshal(p.Request, &request) != nil || request.Grant != req.Grant ||
-			json.Unmarshal(p.Response, &response) != nil {
-			continue
-		}
-		if response.Approved && response.AllowInSession {
-			return true
-		}
-	}
-	return false
+	return req.GrantRisk
 }
 
 func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decision, error) {
-	if types.IsUnattendedRun(ctx) {
+	granted, lapse := g.granted(ctx, req)
+	if granted {
+		return Decision{Approved: true, Granted: true}, nil
+	}
+	mode := types.RunModeFromContext(ctx)
+	switch {
+	case mode == types.RunModeUnattended:
 		return Decision{Reason: UnattendedApprovalReason}, nil
+	case mode == types.RunModeDeferred && req.Snapshot == nil:
+		return Decision{Reason: DeferredApprovalReason}, nil
 	}
 	if req.EventBus == nil {
 		return Decision{}, fmt.Errorf("tool approval: EventBus is nil")
@@ -299,6 +295,9 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 		Args:               req.Args,
 		Grant:              req.Grant,
 		GrantScope:         offeredGrantScope(req),
+		GrantLapsed:        lapse,
+		GrantRisk:          grantRiskLabel(req),
+		GrantLabel:         grantLabel(req),
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("encode tool approval: %w", err)
@@ -307,15 +306,19 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 	if len(req.Args) > 0 {
 		_ = json.Unmarshal(req.Args, &argsObj)
 	}
-	wait := g.timeout
+	wait, fallback := g.timeout, g.timeout
 	var suspend *hitl.SuspendSpec
 	if req.Snapshot != nil {
 		wait = g.hotWait
 		suspend = &hitl.SuspendSpec{Snapshot: req.Snapshot, SnapshotVersion: req.SnapshotVersion}
 	}
+	if mode == types.RunModeDeferred {
+		// Nobody is watching: suspend at once, and never fall back to waiting.
+		wait, fallback = 0, 0
+	}
 	out, err := g.broker.Await(ctx, hitl.Spec{
 		Suspend:         suspend,
-		FallbackTimeout: g.timeout,
+		FallbackTimeout: fallback,
 		Prompt: &types.AgentPrompt{
 			TenantID:           req.TenantID,
 			UserID:             req.UserID,
@@ -347,6 +350,7 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 					Args:               argsObj,
 					ArgsJSON:           string(req.Args),
 					GrantScope:         offeredGrantScope(req),
+					GrantLapsed:        lapse,
 					TimeoutSeconds:     timeoutSec,
 					HotWaitSeconds:     timeoutSec,
 					Suspendable:        p.Suspendable,
@@ -379,7 +383,7 @@ func (g *Gate) awaitToolApproval(ctx context.Context, req PendingRequest) (Decis
 	}
 
 	d := toolApprovalDecision(out)
-	g.consumeDecision(ctx, &d, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
+	g.consumeDecision(ctx, &d, req.EventBus, out.Prompt)
 	return d, nil
 }
 
@@ -397,13 +401,12 @@ func promptWaitSeconds(p *types.AgentPrompt, wait, fallback time.Duration) int {
 // returned it.
 func (g *Gate) ResumeDecision(ctx context.Context, prompt *types.AgentPrompt, bus *event.EventBus) Decision {
 	d := toolApprovalDecision(hitl.Outcome{Prompt: prompt, Answered: true})
-	g.consumeDecision(ctx, &d, bus, prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID)
+	g.consumeDecision(ctx, &d, bus, prompt)
 	return d
 }
 
-func (g *Gate) consumeDecision(
-	ctx context.Context, d *Decision, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
-) {
+func (g *Gate) consumeDecision(ctx context.Context, d *Decision, bus *event.EventBus, prompt *types.AgentPrompt) {
+	sessionID, assistantMessageID, requestID := prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID
 	// An approved call stays "executing" until MarkExecuted.
 	consumeTo := types.AgentPromptDone
 	if d.Approved {
@@ -421,6 +424,9 @@ func (g *Gate) consumeDecision(
 			return
 		}
 		d.Reason = "could not confirm tool approval; tool was not executed"
+	}
+	if consumed {
+		g.remember(ctx, *d, prompt)
 	}
 	if bus == nil {
 		return
@@ -714,10 +720,33 @@ type Adapter struct {
 	Svc interface {
 		IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 		IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
+		Policy(ctx context.Context, tenantID uint64, serviceID, toolName string) (*types.MCPToolApproval, error)
+		ObserveRisk(ctx context.Context, tenantID uint64, serviceID, toolName string, risk string) error
 	}
 }
 
-var _ Checker = (*Adapter)(nil)
+var (
+	_ Checker     = (*Adapter)(nil)
+	_ RiskChecker = (*Adapter)(nil)
+)
+
+// Policy implements RiskChecker.
+func (a *Adapter) Policy(
+	ctx context.Context, tenantID uint64, serviceID, toolName string,
+) (*types.MCPToolApproval, error) {
+	if a == nil || a.Svc == nil {
+		return nil, nil
+	}
+	return a.Svc.Policy(ctx, tenantID, serviceID, toolName)
+}
+
+// ObserveRisk implements RiskChecker.
+func (a *Adapter) ObserveRisk(ctx context.Context, tenantID uint64, serviceID, toolName string, risk string) error {
+	if a == nil || a.Svc == nil {
+		return nil
+	}
+	return a.Svc.ObserveRisk(ctx, tenantID, serviceID, toolName, risk)
+}
 
 // IsRequired implements Checker.
 func (a *Adapter) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {

@@ -296,6 +296,8 @@ const messages = {
       "stepsCompleted": "已完成 <strong>{steps}</strong> 个步骤",
       "stepsCompletedWithDuration": "已完成 <strong>{steps}</strong> 个步骤，耗时 <strong>{duration}</strong>",
       "reasoningRounds": "思考 <strong>{rounds}</strong> 轮",
+      "earlierSteps": "已完成 {count} 个步骤",
+      "viewReasoning": "查看思路",
       "toolCalls": "调用 <strong>{tools}</strong> 次工具",
       "durationSuffix": "耗时 <strong>{duration}</strong>",
       "stepSummarySeparator": " · "
@@ -882,6 +884,8 @@ const messages = {
       "stepsCompleted": "已完成 <strong>{steps}</strong> 個步驟",
       "stepsCompletedWithDuration": "已完成 <strong>{steps}</strong> 個步驟，耗時 <strong>{duration}</strong>",
       "reasoningRounds": "思考 <strong>{rounds}</strong> 輪",
+      "earlierSteps": "已完成 {count} 個步驟",
+      "viewReasoning": "檢視思路",
       "toolCalls": "呼叫 <strong>{tools}</strong> 次工具",
       "durationSuffix": "耗時 <strong>{duration}</strong>",
       "stepSummarySeparator": " · "
@@ -1468,6 +1472,8 @@ const messages = {
       "stepsCompleted": "<strong>{steps}</strong>ステップ完了",
       "stepsCompletedWithDuration": "<strong>{steps}</strong>ステップ完了（所要時間<strong>{duration}</strong>）",
       "reasoningRounds": "推論<strong>{rounds}</strong>回",
+      "earlierSteps": "完了したステップ {count} 件",
+      "viewReasoning": "思考を表示",
       "toolCalls": "ツール呼び出し<strong>{tools}</strong>回",
       "durationSuffix": "所要時間<strong>{duration}</strong>",
       "stepSummarySeparator": " · "
@@ -2054,6 +2060,8 @@ const messages = {
       "stepsCompleted": "Completed <strong>{steps}</strong> step(s)",
       "stepsCompletedWithDuration": "Completed <strong>{steps}</strong> step(s) in <strong>{duration}</strong>",
       "reasoningRounds": "<strong>{rounds}</strong> reasoning round(s)",
+      "earlierSteps": "{count} earlier steps",
+      "viewReasoning": "View reasoning",
       "toolCalls": "<strong>{tools}</strong> tool call(s)",
       "durationSuffix": "<strong>{duration}</strong>",
       "stepSummarySeparator": " · "

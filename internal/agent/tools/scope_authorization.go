@@ -53,7 +53,7 @@ func searchTargetIsWholeKB(target *types.SearchTarget) bool {
 }
 
 // authorizeKnowledgeInSearchTargets is the shared authorization boundary for
-// every Agent tool that accepts a model-visible dN/knowledge_id. Handle
+// every Agent tool that accepts a model-visible doc://N/knowledge_id. Handle
 // decoding is necessary but never sufficient: the durable document must also
 // belong to the server-owned search scope for this Agent execution.
 func authorizeKnowledgeInSearchTargets(
@@ -149,7 +149,7 @@ func authorizeChunkInSearchTargets(
 }
 
 // validateKnowledgeBaseIDsInSearchTargets rejects hallucinated, stale, or
-// out-of-scope bN values after the model-context registry resolves them.
+// out-of-scope kb://N values after the model-context registry resolves them.
 func validateKnowledgeBaseIDsInSearchTargets(searchTargets types.SearchTargets, kbIDs []string) error {
 	for _, kbID := range dedupNonEmptyStrings(kbIDs) {
 		if !searchTargets.ContainsKB(kbID) {

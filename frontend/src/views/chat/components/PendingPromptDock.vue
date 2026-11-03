@@ -32,7 +32,8 @@
           <ToolApprovalCard v-if="prompt.type === 'tool_approval_required'" :ref="(el) => setCard(prompt, el)"
             variant="dock" v-bind="{ ...timing(prompt), ...authProps }" :service-name="prompt.service_name || ''"
             :mcp-tool-name="prompt.mcp_tool_name || ''" :description="prompt.description"
-            :delegated-task="prompt.delegated_task" :args-json="prompt.args_json" :grant-scope="prompt.grant_scope" />
+            :delegated-task="prompt.delegated_task" :args-json="prompt.args_json" :grant-scope="prompt.grant_scope"
+            :grant-lapsed="prompt.grant_lapsed" />
           <AskUserCard v-else-if="prompt.type === 'agent_prompt_required'" :ref="(el) => setCard(prompt, el)"
             variant="dock" v-bind="{ ...timing(prompt), ...authProps }" :request="prompt.request" />
           <McpOAuthCard v-else :ref="(el) => setCard(prompt, el)" variant="dock" v-bind="authProps"

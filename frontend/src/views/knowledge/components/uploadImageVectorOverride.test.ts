@@ -29,7 +29,7 @@ function fixture(kbInfo: any) {
       if (name === '@/stores/chatResources') return { useChatResourcesStore: () => ({}) }
       if (name === '@/stores/editorResources') return { useEditorResourcesStore: () => ({}) }
       if (name === '@/stores/ui') return { useUIStore: () => ({}) }
-      if (name === '@/api/knowledge-base') return { mergeImageActions: () => ({ ocr: { on: [], on_unobserved: true } }) }
+      if (name === '@/api/knowledge-base') return { mergeImageActions: () => ({ ocr: { on: [] } }) }
       if (name === '@/utils/imageProcessingConfig') return imageProcessingConfig
       return { default: {} }
     },
@@ -92,11 +92,11 @@ test('image capability warning uses the KB embedding model and tolerates shared 
 })
 
 for (const pipelineId of ['default', 'smartocr', 'caption_ocr', 'ob_cap_ocr']) {
-  for (const params of [undefined, {}, { 'caption.thinking': false }]) {
+  for (const params of [undefined, {}, { 'default.caption.thinking_enabled': false }]) {
     test(`reparse replaces KB parameters with document ${pipelineId} parameters ${JSON.stringify(params)}`, () => {
       const kb = {
         vlm_config: { enabled: true, model_id: 'vlm' },
-        image_processing_config: { image_pipeline: 'default', image_pipeline_params: { enable_caption: false, 'caption.thinking': true } },
+        image_processing_config: { image_pipeline: 'default', image_pipeline_params: { 'default.caption_enabled': false, 'default.caption.thinking_enabled': true } },
       }
       const f = fixture(kb)
       try {
@@ -104,7 +104,7 @@ for (const pipelineId of ['default', 'smartocr', 'caption_ocr', 'ob_cap_ocr']) {
         const result = JSON.parse(JSON.stringify(f.vm.buildProcessOverrides()))
         assert.equal(result.image_pipeline, imageProcessingConfig.normalizeImagePipelineId(pipelineId))
         assert.deepEqual(result.image_pipeline_params ?? {}, params ?? {})
-        assert.deepEqual(kb.image_processing_config.image_pipeline_params, { enable_caption: false, 'caption.thinking': true })
+        assert.deepEqual(kb.image_processing_config.image_pipeline_params, { 'default.caption_enabled': false, 'default.caption.thinking_enabled': true })
       } finally { f.dispose() }
     })
   }
@@ -113,7 +113,7 @@ for (const pipelineId of ['default', 'smartocr', 'caption_ocr', 'ob_cap_ocr']) {
 for (const kbPipeline of ['default', 'smartocr']) {
   for (const attrsEnabled of [false, true]) {
     test(`legacy reparse override ${attrsEnabled} only retains parameters from ${kbPipeline} when the pipeline matches`, () => {
-      const params = { 'caption.thinking': true }
+      const params = { 'default.caption.thinking_enabled': true }
       const f = fixture({
         vlm_config: { enabled: true, model_id: 'vlm' },
         image_processing_config: { image_pipeline: kbPipeline, image_pipeline_params: params },
@@ -130,13 +130,13 @@ for (const kbPipeline of ['default', 'smartocr']) {
 }
 
 test('reparse inherits KB parameters when the document has no pipeline selection', () => {
-  const params = { enable_caption: false }
+  const params = { 'default.caption_enabled': false }
   const f = fixture({
     vlm_config: { enabled: true, model_id: 'vlm' },
     image_processing_config: { image_pipeline: 'default', image_pipeline_params: params },
   })
   try {
-    for (const overrides of [undefined, { summary_enabled: false }, { image_pipeline_params: { enable_caption: true } }]) {
+    for (const overrides of [undefined, { summary_enabled: false }, { image_pipeline_params: { 'default.caption_enabled': true } }]) {
       f.vm.applyOverridesToState(overrides)
       assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildProcessOverrides().image_pipeline_params)), params)
     }

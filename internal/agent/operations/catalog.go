@@ -18,31 +18,21 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Risk classifies an operation by its effect on user data.
-type Risk string
+type Risk = policy.Risk
 
+// A probe operation runs without approval within a per-run budget, and uses
+// POST because the API does.
 const (
-	// RiskRead has no side effects.
-	RiskRead Risk = "read"
-	// RiskProbe changes no data but does real work to answer: it connects to
-	// an external service or runs a retrieval. It runs without approval,
-	// within a per-run budget, and uses POST because the API does.
-	RiskProbe Risk = "probe"
-	// RiskWrite changes state in a recoverable way (reparse, status change).
-	RiskWrite Risk = "write"
-	// RiskDestructive removes data or cannot be undone.
-	RiskDestructive Risk = "destructive"
+	RiskRead        = policy.RiskRead
+	RiskProbe       = policy.RiskProbe
+	RiskWrite       = policy.RiskWrite
+	RiskDestructive = policy.RiskDestructive
 )
-
-func (r Risk) valid() bool {
-	return r == RiskRead || r == RiskProbe || r == RiskWrite || r == RiskDestructive
-}
-
-// Mutates reports whether running the operation needs the user's approval.
-func (r Risk) Mutates() bool { return r == RiskWrite || r == RiskDestructive }
 
 // Location is where a parameter goes in the HTTP request.
 type Location string
@@ -203,22 +193,15 @@ type Access struct {
 	Level types.AssistantAccessLevel
 }
 
-// NeedsApproval reports whether running op must wait for the user.
+// NeedsApproval reports whether running op must wait for the user. An
+// operation the level denies is withheld before it gets here.
 func (a Access) NeedsApproval(op Operation) bool {
-	return op.AlwaysConfirm || a.NeedsApprovalFor(op.Risk)
+	return policy.Decide(policy.Action{Risk: op.Risk, Always: op.AlwaysConfirm}, a.Rules()) != policy.Allow
 }
 
-// NeedsApprovalFor reports whether a change of the given risk must wait for
-// the user; it also covers tools outside the catalog.
-func (a Access) NeedsApprovalFor(risk Risk) bool {
-	switch risk {
-	case RiskRead, RiskProbe:
-		return false
-	case RiskWrite:
-		return a.Level != types.AssistantAccessAutoWrite
-	default:
-		return true
-	}
+// Rules are the execution rules this access gives a run.
+func (a Access) Rules() policy.Rules {
+	return policy.Rules{Level: a.Level}
 }
 
 // Withholding says why an access leaves an operation out.
@@ -235,7 +218,7 @@ type Withholding struct {
 // approval target is withheld is withheld for the same reason, so every
 // offered mutation can still show the user what it acts on.
 func (c *Catalog) Withheld(a Access, op Operation) (Withholding, bool) {
-	if a.Level == types.AssistantAccessReadOnly && op.Risk.Mutates() {
+	if !policy.Offered(a.Level, op.Risk) {
 		return Withholding{ReadOnly: true}, true
 	}
 	if op.SystemAdmin && !a.SystemAdmin {
@@ -346,6 +329,10 @@ var allowedRouteAreas = map[string]bool{
 	"faq":                    true,
 	"agents":                 true,
 	"skills":                 true,
+	// The caller's own automations. Runs, grants and notifications live
+	// in other areas or behind routes left unannotated: the owner approves
+	// standing grants themselves.
+	"automations": true,
 	// Model and MCP responses carry endpoints and headers next to the
 	// names; only fields tagged x-agent are projected, so annotate the
 	// identifying ones and nothing else.
@@ -512,7 +499,7 @@ func validateOperation(op Operation) error {
 	if strings.TrimSpace(op.Summary) == "" {
 		return fmt.Errorf("summary is required")
 	}
-	if !op.Risk.valid() {
+	if !op.Risk.Valid() {
 		return fmt.Errorf("invalid risk %q", op.Risk)
 	}
 	if !allowedMethods[op.Method] {

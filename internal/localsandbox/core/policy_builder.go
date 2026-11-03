@@ -127,6 +127,7 @@ type PolicyBuilder struct {
 	homeDir    string
 	appDataDir string
 	skillsRoot string
+	jobsRoot   string
 }
 
 // NewPolicyBuilder returns a builder scoped to the user's home and app-data dirs.
@@ -134,6 +135,7 @@ func NewPolicyBuilder(homeDir, appDataDir string) *PolicyBuilder {
 	return &PolicyBuilder{
 		homeDir:    filepath.Clean(homeDir),
 		appDataDir: filepath.Clean(appDataDir),
+		jobsRoot:   filepath.Join(filepath.Clean(homeDir), ".weknora", "jobs"),
 	}
 }
 
@@ -293,6 +295,11 @@ func (b *PolicyBuilder) rejectBroadWorkspace(root string) error {
 			return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, root)
 		}
 	}
+	// Background jobs live under ~/.weknora/jobs. A workspace that covers that
+	// directory, or sits inside it, can read or replace another session's output.
+	if b.jobsRoot != "" && (PathUnder(b.jobsRoot, root) || PathUnder(root, b.jobsRoot)) {
+		return fmt.Errorf("%w: %q overlaps the background jobs directory", ErrWorkspaceTooBroad, root)
+	}
 	if isWellKnownWideRoot(root) {
 		return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, root)
 	}
@@ -307,7 +314,7 @@ func samePath(a, b string) bool {
 }
 
 func (b *PolicyBuilder) denyRead() []string {
-	deny := make([]string, 0, len(credentialDirNames)+1)
+	deny := make([]string, 0, len(credentialDirNames)+2)
 	for _, name := range credentialDirNames {
 		deny = append(deny, filepath.Join(b.homeDir, filepath.FromSlash(name)))
 	}
@@ -316,6 +323,9 @@ func (b *PolicyBuilder) denyRead() []string {
 	// rejects a workspace that sits inside this path.
 	if b.appDataDir != "" && b.appDataDir != string(filepath.Separator) {
 		deny = append(deny, b.appDataDir)
+	}
+	if b.jobsRoot != "" && !isFilesystemRoot(b.jobsRoot) {
+		deny = append(deny, b.jobsRoot)
 	}
 	return deny
 }

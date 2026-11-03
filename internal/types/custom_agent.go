@@ -212,6 +212,11 @@ type CustomAgentConfig struct {
 	// MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
 	// authorization before skipping. <=0 uses the gate's configured timeout.
 	MCPAuthWaitTimeout int `yaml:"mcp_auth_wait_timeout,omitempty" json:"mcp_auth_wait_timeout,omitempty"`
+	// AccessLevel is the highest access level a run of this agent gets: how
+	// far it may change data (MCP tools, Wiki writes) without asking. Empty
+	// means auto_write. The WeKnora assistant uses the workspace's assistant
+	// ceiling instead.
+	AccessLevel AssistantAccessLevel `yaml:"access_level,omitempty" json:"access_level,omitempty"`
 
 	// ===== Skills Settings (only for smart-reasoning mode) =====
 	// Skills selection mode: "all" = all installed skills, "selected" = specific skills, "none" = no skills

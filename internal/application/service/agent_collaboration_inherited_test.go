@@ -59,7 +59,14 @@ func TestInheritedChildSnapshotKeepsEffectiveScopeWithoutSecrets(t *testing.T) {
 	}
 	restored, err := svc.restoreInheritedConfig(ctx, &saved, tenant)
 	require.NoError(t, err)
-	require.Equal(t, types.AssistantAccessConfirm, restored.AssistantAccess)
+	require.Equal(t, types.AssistantAccessAutoWrite, restored.AssistantAccess,
+		"an ordinary agent's child is not held to the assistant ceiling")
+	assistantChild := saved
+	assistantChild.AssistantParent = true
+	capped, err := svc.restoreInheritedConfig(ctx, &assistantChild, tenant)
+	require.NoError(t, err)
+	require.Equal(t, types.AssistantAccessConfirm, capped.AssistantAccess,
+		"the assistant's child stays under the workspace's current ceiling")
 	require.Equal(t, []string{"doc"}, restored.SearchTargets[0].KnowledgeIDs)
 	require.Equal(t, []string{"tag"}, restored.SearchTargets[0].TagIDs)
 	require.Equal(t, []string{"kb"}, restored.WritableKBIDs)
@@ -72,7 +79,7 @@ func TestInheritedChildSnapshotKeepsEffectiveScopeWithoutSecrets(t *testing.T) {
 	require.True(t, restored.MultiTurnEnabled)
 	require.Empty(t, restored.TenantSkills, "unavailable installed skills must not be restored from stale bodies")
 	tenant.AssistantConfig.MaxAccessLevel = types.AssistantAccessReadOnly
-	restored, err = svc.restoreInheritedConfig(ctx, &saved, tenant)
+	restored, err = svc.restoreInheritedConfig(ctx, &assistantChild, tenant)
 	require.NoError(t, err)
 	require.Empty(t, restored.WritableKBIDs)
 	svc.knowledgeBaseService = &tagTargetKnowledgeBaseService{kbs: map[string]*types.KnowledgeBase{}}

@@ -157,7 +157,7 @@ func testCollaborationMCPApproval(t *testing.T, inherited bool) {
 					if err := s.attach(ctx, engine, registry, cfg, req.Session.ID, req.AssistantMessageID); err != nil {
 						return err
 					}
-					engine.SetInteractive(true)
+					engine.SetRunMode(types.RunModeAttended)
 					engine.EnableSuspension(json.RawMessage(`{}`))
 					if req.Resume != nil {
 						_, err := engine.Resume(
@@ -176,7 +176,7 @@ func testCollaborationMCPApproval(t *testing.T, inherited bool) {
 			)
 			scope := collaboration.Scope{TenantID: 7, UserID: "u", SessionID: "parent", ID: "parent-message"}
 			require.NoError(t, s.Runtime.Store.Ensure(ctx, scope))
-			config, err := s.resolve(ctx, "a", types.AssistantAccessReadOnly)
+			config, err := s.resolve(ctx, "a", types.AssistantAccessConfirm)
 			id := "a"
 			if inherited {
 				id = ""
@@ -185,7 +185,7 @@ func testCollaborationMCPApproval(t *testing.T, inherited bool) {
 				})
 				name := tools.NewMCPTool(svc, &types.MCPTool{Name: "write"}, manager, gate, 0).Name()
 				config, err = inheritedChildSnapshot(ctx, &types.AgentConfig{
-					MaxIterations: 5, AssistantAccess: types.AssistantAccessReadOnly,
+					MaxIterations: 5, AssistantAccess: types.AssistantAccessConfirm,
 				}, []string{name})
 			}
 			require.NoError(t, err)

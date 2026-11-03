@@ -479,7 +479,7 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 			fmt.Fprintf(&b, "    <matches query=\"%s\" count=\"0\" />\n", escapeAttr(query))
 			b.WriteString("    <hint>No chunk contains every word of the query. Retry with fewer or different " +
 				"words (the document's own language and terms), or read a chunk from search_knowledge " +
-				"results with id=cN and context.</hint>\n")
+				"results with id=chunk://N and context.</hint>\n")
 		}
 		b.WriteString("  </document>\n</retrieval>")
 		return b.String()

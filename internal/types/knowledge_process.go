@@ -50,6 +50,11 @@ type EffectiveProcessConfig struct {
 	ImageVectorEnabled       bool
 	ImageActions             ImageActionsConfig
 	ImagePipelineID          ImagePipelineID
-	ImagePipelineParams      map[string]any
-	ExtractConfig            ExtractConfig
+	// ImagePipelineParams carries every setting that pipeline declares, each
+	// under that pipeline's slot — including the ones this layer needs to read
+	// (the page-straightening mode, the OCR fallback clause). There is no second
+	// copy of them above: a run reads this map for them, and the trace echoes
+	// the same map, so what ran and what was recorded cannot disagree.
+	ImagePipelineParams map[string]any
+	ExtractConfig       ExtractConfig
 }

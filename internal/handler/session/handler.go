@@ -80,6 +80,7 @@ type Handler struct {
 	suspendedRuns     *service.SuspendedRunService
 	stopCollaboration func(context.Context, string, string) error
 	delegatedPrompt   func(context.Context, *types.AgentPrompt) bool
+	background        *service.BackgroundWork
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -116,6 +117,7 @@ func NewHandler(
 	forkService *service.SessionForkService,
 	rewindService *service.SessionRewindService,
 	approvedProjectDirs HostProjectDirsLoader,
+	backgroundWork *service.BackgroundWork,
 ) *Handler {
 	h := &Handler{
 		browserSkill:          browserSkill,
@@ -146,6 +148,7 @@ func NewHandler(
 		desktopLast:           desktopLast,
 		redis:                 rdb,
 		approvedProjectDirs:   approvedProjectDirs,
+		background:            backgroundWork,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

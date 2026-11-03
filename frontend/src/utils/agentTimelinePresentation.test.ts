@@ -79,3 +79,34 @@ test('progress grouping preserves approval, reasoning, tool, user input and fina
     assert.deepEqual(groupProgressUpdates(events), events)
   }
 })
+
+test('finished untitled reasoning rides on the tool call it led to', async () => {
+  const { attachReasoningToTools } = await import('./agentTimelinePresentation')
+  const tool = Object.freeze({ type: 'tool_call', tool_call_id: 't1', tool_name: 'knowledge_search' })
+  const events = [
+    { type: 'thinking', event_id: 'r1', content: 'Search first' }, tool,
+    { type: 'thinking', event_id: 'r2', title: '我先读一下文档', content: 'Read it' },
+    { type: 'tool_call', tool_call_id: 't2', tool_name: 'read_document' },
+    { type: 'thinking', event_id: 'r3', content: 'Still thinking' },
+    { type: 'tool_call', tool_call_id: 't3', tool_name: 'web_search' },
+    { type: 'thinking', event_id: 'r4', content: 'Wrap up' },
+  ]
+  const output = attachReasoningToTools(events, (e: any) => e.event_id !== 'r3')
+  assert.deepEqual(output.map((e: any) => e.event_id || e.tool_call_id), ['t1', 'r2', 't2', 'r3', 't3', 'r4'])
+  assert.deepEqual(output[0].reasoning, { id: 'reasoning-r1', content: 'Search first' })
+  assert.equal('reasoning' in tool, false)
+  assert.equal(output[2].reasoning, undefined, 'titled narration keeps its own row')
+  assert.equal(output[4].reasoning, undefined, 'reasoning that cannot attach keeps its own row')
+})
+
+test('earlier steps fold behind recent and attention-demanding rows', async () => {
+  const { earlierStepKeys } = await import('./agentTimelinePresentation')
+  const rows = (n: number, sticky: string[] = []) => Array.from({ length: n }, (_, i) => ({
+    key: `k${i}`, step: true, sticky: sticky.includes(`k${i}`),
+  }))
+  assert.deepEqual(earlierStepKeys(rows(4)), [], 'folding a single row saves nothing')
+  assert.deepEqual(earlierStepKeys(rows(6)), ['k0', 'k1', 'k2'])
+  assert.deepEqual(earlierStepKeys(rows(5, ['k1'])), [], 'sticky rows stay out of the fold')
+  assert.deepEqual(earlierStepKeys(rows(6, ['k1'])), ['k0', 'k2'])
+  assert.deepEqual(earlierStepKeys([...rows(6), { key: 'answer', step: false, sticky: false }]), ['k0', 'k1', 'k2'])
+})

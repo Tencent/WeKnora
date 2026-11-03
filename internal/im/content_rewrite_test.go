@@ -373,7 +373,7 @@ func TestCleanIMContent_AfterStreamReassembly(t *testing.T) {
 	sent, rem := simulateIMStreamFlush(parts)
 	require.Empty(t, rem)
 	joined := strings.Join(sent, "")
-	out := cleanIMContent(context.Background(), joined, tenant, nil)
+	out := cleanIMContent(context.Background(), joined, newIMFileServiceResolver(tenant, nil))
 	assert.Contains(t, out, "/api/v1/files/presigned")
 	assert.NotContains(t, out, "local://10000")
 }

@@ -80,7 +80,8 @@ func (c *Connector) pickerSpaces(ctx context.Context, client *client, cfg config
 // never becomes a map key retained in process memory or appears in diagnostics.
 func pickerSpaceCacheKey(cfg config) string {
 	fingerprint := sha256.Sum256([]byte(cfg.secret))
-	return cfg.edition + "\x00" + cfg.baseURL + "\x00" + cfg.username + "\x00" + fmt.Sprintf("%x", fingerprint)
+	return cfg.edition + "\x00" + cfg.baseURL + "\x00" + cfg.username + "\x00" +
+		fmt.Sprintf("%t:%x", cfg.usePAT, fingerprint)
 }
 
 // Type returns the connector type identifier.

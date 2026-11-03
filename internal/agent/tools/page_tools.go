@@ -318,7 +318,7 @@ func requestPageAction(
 	ctx context.Context, actor approval.PageActor, action types.PageActionPromptRequest,
 ) (approval.PageActionResult, *types.ToolResult) {
 	meta, _ := ToolExecFromContext(ctx)
-	if actor == nil || meta == nil || !meta.Interactive || meta.EventBus == nil {
+	if actor == nil || !meta.Attended() || meta.EventBus == nil {
 		return approval.PageActionResult{}, operationFailure(
 			"the user's page cannot be reached from this conversation; ask the user instead")
 	}

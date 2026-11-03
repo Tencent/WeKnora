@@ -128,3 +128,14 @@ func TestRemoteSandboxCapabilityIsOffOnLiteDesktop(t *testing.T) {
 	none := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{})
 	require.Equal(t, "route_not_registered", none.Capabilities["settings.sandbox.remote"].Reason)
 }
+
+func TestBuildDeploymentCapabilitiesUserAllocation(t *testing.T) {
+	off := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{Sandbox: true, SandboxRemote: true})
+	require.False(t, off.Capabilities["settings.sandbox.user_allocation"].Supported)
+	require.Equal(t, "deployment_gate_off", off.Capabilities["settings.sandbox.user_allocation"].Reason)
+
+	on := BuildDeploymentCapabilities("standard", DeploymentFeatureAvailability{
+		Sandbox: true, SandboxRemote: true, SandboxUserAllocation: true,
+	})
+	require.True(t, on.Capabilities["settings.sandbox.user_allocation"].Supported)
+}

@@ -30,11 +30,29 @@
       <circle cx="12" cy="12" r="9" />
       <path d="M12 11v6m0-10v.01" />
     </template>
+    <template v-else-if="name === 'play'">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m10 8 6 4-6 4V8Z" />
+    </template>
+    <template v-else-if="name === 'resume'">
+      <path d="M3 10a9 9 0 1 1 2 8M3 4v6h6" />
+      <path d="M12 7v5l3 2" />
+    </template>
+    <template v-else-if="name === 'pause'">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9 8v8m6-8v8" />
+    </template>
+    <template v-else-if="name === 'edit'">
+      <path d="m15 4 5 5M4 20l5-1L20 8a2.1 2.1 0 0 0-5-5L4 14l-1 7Z" />
+    </template>
+    <template v-else-if="name === 'delete'">
+      <path d="M3 6h18M9 6V3h6v3M5 6l1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14M10 10v7m4-7v7" />
+    </template>
   </svg>
 </template>
 
 <script setup lang="ts">
 defineProps<{
-  name: 'copy' | 'git-branch' | 'rollback' | 'bookmark-add' | 'compass' | 'folder' | 'info-circle'
+  name: 'copy' | 'git-branch' | 'rollback' | 'bookmark-add' | 'compass' | 'folder' | 'info-circle' | 'play' | 'resume' | 'pause' | 'edit' | 'delete'
 }>()
 </script>
