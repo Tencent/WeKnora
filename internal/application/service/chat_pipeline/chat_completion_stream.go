@@ -113,6 +113,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		})
 		return ErrModelCall.WithError(errors.New("chat stream returned nil channel"))
 	}
+	responseChan = holdTerminalUntilClose(ctx, responseChan)
 
 	pipelineInfo(ctx, "Stream", "model_started", map[string]interface{}{
 		"session_id": chatManage.SessionID,
@@ -264,6 +265,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						answerProduced = true
 					}
 					closeThinking()
+					// A stop that lands after the last provider chunk must not
+					// publish a successful completion.
+					if response.Done && ctx.Err() != nil {
+						return
+					}
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
@@ -272,6 +278,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 							Content:   response.Content,
 							Done:      response.Done,
 							Truncated: truncated,
+							Usage:     terminalUsage(response),
 						},
 					})
 				}
@@ -280,4 +287,84 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	}()
 
 	return next()
+}
+
+// holdTerminalUntilClose forwards a provider stream but holds its first
+// terminal answer chunk until the transport closes, attaching the last usage
+// the provider reported. OpenAI-compatible providers send usage in a chunk
+// after finish_reason, which the consumer would otherwise ignore as a
+// duplicate terminal. A stream that errored, ended incomplete or was cancelled
+// never completes: a held chunk is then released as plain content only.
+func holdTerminalUntilClose(ctx context.Context, in <-chan types.StreamResponse) <-chan types.StreamResponse {
+	out := make(chan types.StreamResponse)
+	go func() {
+		defer close(out)
+		var terminal *types.StreamResponse
+		var usage *types.TokenUsage
+		failed := false
+		send := func(response types.StreamResponse) bool {
+			select {
+			case out <- response:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+		for {
+			var response types.StreamResponse
+			var ok bool
+			select {
+			case <-ctx.Done():
+				return
+			case response, ok = <-in:
+			}
+			if !ok {
+				break
+			}
+			if response.Usage != nil {
+				value := *response.Usage
+				usage = &value
+			}
+			answer := response.ResponseType == types.ResponseTypeAnswer
+			if response.ResponseType == types.ResponseTypeError ||
+				(answer && response.FinishReason == types.FinishReasonIncomplete) {
+				failed = true
+			}
+			// An incomplete terminal passes through so it is reported as an error.
+			if answer && response.Done && response.FinishReason != types.FinishReasonIncomplete {
+				if terminal == nil {
+					held := response
+					terminal = &held
+				}
+				continue
+			}
+			if !send(response) {
+				return
+			}
+		}
+		if terminal == nil {
+			return
+		}
+		final := *terminal
+		if failed || ctx.Err() != nil {
+			if final.Content == "" {
+				return
+			}
+			final.Done = false
+			final.FinishReason = ""
+		} else {
+			final.Usage = usage
+		}
+		send(final)
+	}()
+	return out
+}
+
+// terminalUsage is the usage carried by the Done marker; nil otherwise, so an
+// event without usage keeps a nil interface rather than a typed nil pointer.
+func terminalUsage(response types.StreamResponse) interface{} {
+	if !response.Done || response.Usage == nil {
+		return nil
+	}
+	return response.Usage
 }
