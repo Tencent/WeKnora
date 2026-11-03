@@ -68,6 +68,17 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 			wantErr:   "VLM",
 		},
 		{
+			// A pdf needs the docreader service, which this service does not
+			// have. Cleanup would fail with "database unavailable" if it ran.
+			name: "parser engine unavailable",
+			setup: func(h *replaceFileHarness) {
+				h.repo.row.FileName = "a.pdf"
+				h.repo.row.FileType = "pdf"
+				h.svc.chunkRepo = failingCleanupChunkRepo{err: errors.New("database unavailable")}
+			},
+			wantErr: "is not available",
+		},
+		{
 			name: "resource cleanup fails",
 			setup: func(h *replaceFileHarness) {
 				h.svc.chunkRepo = failingCleanupChunkRepo{err: errors.New("database unavailable")}
