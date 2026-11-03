@@ -212,3 +212,27 @@ test('a current download failure stays visible and an explicit retry succeeds', 
     assert.equal(f.vm.textContent, 'recovered')
   } finally { f.close() }
 })
+
+test('upstream sibling-image rewrite cannot publish after switching documents and releases its URLs', async () => {
+  const ready = deferred<{ markdown: string; objectUrls: string[] }>()
+  const f = fixture({
+    '@/utils/markdownPreviewImages': {
+      PREVIEW_IMAGE_PAGE_SIZE: 100,
+      neutralizeRelativePreviewImages: (text: string) => text,
+      rewriteKnowledgeMarkdownImages: () => ready.promise,
+    },
+    '@/utils/documentPreviewMarkdown': { renderDocumentPreviewMarkdown: (text: string) => text },
+  })
+  try {
+    f.props.fileType = 'md'; await settle()
+    f.requests[1]!.result.resolve(text('old markdown')); await settle()
+    assert.equal(f.vm.markdownHtml, 'old markdown')
+    f.props.knowledgeId = 'b'; f.props.fileType = 'txt'; await settle()
+    f.requests[2]!.result.resolve(text('current')); await settle()
+    const orphan = URL.createObjectURL(new Blob(['sibling image']))
+    ready.resolve({ markdown: 'old rewritten', objectUrls: [orphan] }); await settle()
+    assert.ok(f.revoked.includes(orphan))
+    assert.equal(f.vm.markdownHtml, '')
+    assert.equal(f.vm.textContent, 'current')
+  } finally { f.close() }
+})

@@ -343,7 +343,7 @@ func (a *WebhookAdapter) sendToAppChat(ctx context.Context, accessToken, chatID 
 		ErrCode int    `json:"errcode"`
 		ErrMsg  string `json:"errmsg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	if result.ErrCode != 0 {
@@ -387,7 +387,7 @@ func (a *WebhookAdapter) sendToUser(ctx context.Context, accessToken, userID str
 		ErrCode int    `json:"errcode"`
 		ErrMsg  string `json:"errmsg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	if result.ErrCode != 0 {
@@ -427,7 +427,7 @@ func (a *WebhookAdapter) getAccessToken(ctx context.Context) (string, error) {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"` // seconds
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
 	if result.ErrCode != 0 {

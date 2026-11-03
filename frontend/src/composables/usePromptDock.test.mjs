@@ -62,6 +62,16 @@ test('leaves Lite host approvals to the composer card', () => {
   assert.deepEqual(ids(prompts), ['mcp'])
 })
 
+test('docks an open secure form and leaves other prompt kinds in the timeline', () => {
+  const prompts = pendingPrompts([{
+    role: 'assistant', is_completed: false, agentEventStream: [
+      { type: 'agent_prompt_required', kind: 'secure_form', pending_id: 'sf', resolved: false },
+      { type: 'agent_prompt_required', kind: 'something_else', pending_id: 'other', resolved: false },
+    ],
+  }])
+  assert.deepEqual(ids(prompts), ['sf'])
+})
+
 test('leaves settled runs, resolved prompts and unknown kinds in the timeline', () => {
   const prompts = pendingPrompts([
     { role: 'assistant', is_completed: true, agentEventStream: [approval('settled')] },

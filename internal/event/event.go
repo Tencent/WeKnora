@@ -3,6 +3,7 @@ package event
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/google/uuid"
@@ -110,6 +111,15 @@ type Event struct {
 // EventHandler is a function that handles events
 type EventHandler func(ctx context.Context, event Event) error
 
+// snapshotEventForHandler returns a per-handler copy of the event with an
+// isolated metadata map, for delivery paths that run handlers concurrently
+// against one Event value.
+func snapshotEventForHandler(event Event) Event {
+	e := event
+	e.Metadata = maps.Clone(e.Metadata)
+	return e
+}
+
 // EventBus manages event publishing and subscription
 type EventBus struct {
 	mu        sync.RWMutex
@@ -169,16 +179,21 @@ func (eb *EventBus) Emit(ctx context.Context, event Event) error {
 	}
 
 	if eb.asyncMode {
-		// Async mode: fire and forget
+		// Async mode: fire and forget. Each handler gets its own copy of the
+		// event: handlers may annotate what they receive (the WithTiming
+		// middleware writes Metadata["duration_ms"]), and a shared metadata
+		// map written from concurrent goroutines is a fatal concurrent-map
+		// panic the per-handler recover() cannot catch.
 		for _, handler := range handlers {
 			h := handler // capture loop variable
+			e := snapshotEventForHandler(event)
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
 						logger.Errorf(ctx, "event handler panic recovered (type=%s): %v", event.Type, r)
 					}
 				}()
-				_ = h(ctx, event)
+				_ = h(ctx, e)
 			}()
 		}
 		return nil
@@ -217,6 +232,7 @@ func (eb *EventBus) EmitAndWait(ctx context.Context, event Event) error {
 	for _, handler := range handlers {
 		wg.Add(1)
 		h := handler // capture loop variable
+		e := snapshotEventForHandler(event)
 
 		go func() {
 			defer wg.Done()
@@ -225,7 +241,7 @@ func (eb *EventBus) EmitAndWait(ctx context.Context, event Event) error {
 					errChan <- fmt.Errorf("event handler panic (type=%s): %v", event.Type, r)
 				}
 			}()
-			if err := h(ctx, event); err != nil {
+			if err := h(ctx, e); err != nil {
 				errChan <- err
 			}
 		}()

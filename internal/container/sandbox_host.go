@@ -36,7 +36,7 @@ type hostSandboxDeps struct {
 	// projects maps a session to a user-approved project directory.
 	// Nil means every session gets an auto-allocated workspace.
 	projects localsandbox.ProjectLookup
-	// modes reports the approval mode. nil means ModeAuto.
+	// modes reports the approval mode. nil means ModeAsk.
 	modes localsandbox.ModeLookup
 }
 
@@ -93,7 +93,7 @@ func buildHostSandboxManager(deps hostSandboxDeps) sandbox.Manager {
 }
 
 // hostModeLookup reads the machine-local approval mode from desktop prefs.
-// A nil loader means ModeAuto.
+// A nil loader means ModeAsk.
 func hostModeLookup(load HostApprovalModeLoader) localsandbox.ModeLookup {
 	if load == nil {
 		return nil
@@ -105,7 +105,7 @@ func hostModeLookup(load HostApprovalModeLoader) localsandbox.ModeLookup {
 // argument is unused: approval mode is process-wide, not per session.
 //
 // The stored value comes from a file the user can hand-edit. Unknown values
-// become Auto. Known-but-unshipped modes are left intact so Service can refuse
+// become Ask. Known-but-unshipped modes are left intact so Service can refuse
 // them rather than silently widening access.
 type prefsModeLookup struct {
 	load HostApprovalModeLoader
@@ -113,7 +113,7 @@ type prefsModeLookup struct {
 
 func (p prefsModeLookup) ModeForSession(context.Context, string) localsandbox.ApprovalMode {
 	if p.load == nil {
-		return localsandbox.ModeAuto
+		return localsandbox.ModeAsk
 	}
 	return localsandbox.ParseApprovalMode(p.load())
 }

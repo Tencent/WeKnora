@@ -258,11 +258,17 @@ type WikiPageRepository interface {
 	// UpdateMeta for bookkeeping-only writes instead.
 	Update(ctx context.Context, page *types.WikiPage) error
 
-	// UpdateMeta updates bookkeeping / provenance fields (in/out links,
-	// status, source_refs, chunk_refs, page_metadata, updated_at) without
-	// touching `version`. Safe for link maintenance, re-ingest with an
-	// unchanged body, and status-only transitions.
+	// UpdateMeta 更新状态、来源等元数据，不修改反链或版本；旧页面快照不得覆盖新的反链。
 	UpdateMeta(ctx context.Context, page *types.WikiPage) error
+
+	// AddInLink 在数据库当前数组上原子添加反链；已有反链、缺失或已删除目标均不产生写入。
+	AddInLink(ctx context.Context, tenantID uint64, kbID, targetSlug, sourceSlug string) error
+
+	// RemoveInLink 原子删除该来源的反链，保留其他来源；不存在的反链不更新目标页。
+	RemoveInLink(ctx context.Context, tenantID uint64, kbID, targetSlug, sourceSlug string) error
+
+	// UpdateLinks 仅保存链接重建结果；页面身份、旧链接、正文或版本不匹配时返回冲突。
+	UpdateLinks(ctx context.Context, previous, page *types.WikiPage) error
 
 	// UpdateAutoLinkedContent rewrites `content`, `out_links` and
 	// `updated_at` in place while leaving `version` untouched. Intended for

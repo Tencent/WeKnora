@@ -3,6 +3,7 @@ package vlm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -61,6 +62,53 @@ func TestOllamaPredictThinkingRequest(t *testing.T) {
 			options := body["options"].(map[string]any)
 			require.NotContains(t, options, "think")
 			require.Equal(t, 0.1, options["temperature"])
+		})
+	}
+}
+
+// A reply the model stopped because it ran out of tokens or context is
+// incomplete: it must surface as ErrTruncatedCompletion, like the remote VLM.
+func TestOllamaPredictRejectsTruncatedReply(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		doneReason string
+		wantErr    bool
+	}{
+		{"length", "length", true},
+		{"stop", "stop", false},
+		{"absent", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodHead {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				body := map[string]any{
+					"message": map[string]any{"role": "assistant", "content": "cut-off caption"},
+					"done":    true,
+				}
+				if tc.doneReason != "" {
+					body["done_reason"] = tc.doneReason
+				}
+				_ = json.NewEncoder(w).Encode(body)
+			}))
+			defer server.Close()
+			t.Setenv("OLLAMA_BASE_URL", server.URL)
+			service, err := ollama.GetOllamaService()
+			require.NoError(t, err)
+			model, err := NewOllamaVLM(&Config{ModelName: "test"}, service)
+			require.NoError(t, err)
+
+			result, err := model.Predict(context.Background(), nil, "describe")
+			if tc.wantErr {
+				require.True(t, errors.Is(err, ErrTruncatedCompletion), "got %v", err)
+				require.Empty(t, result)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "cut-off caption", result)
 		})
 	}
 }

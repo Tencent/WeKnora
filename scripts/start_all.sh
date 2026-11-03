@@ -59,9 +59,8 @@ log_success() {
 }
 
 # Inject build metadata into source-built images. docker-compose.yml
-# interpolates VITE_FRONTEND_COMMIT (frontend) and VERSION_ARG / COMMIT_ID_ARG /
-# BUILD_TIME_ARG / GO_VERSION_ARG (app); the build contexts contain no .git, so
-# the images cannot discover these values on their own.
+# interpolates app, frontend, and docreader build args. Their build contexts
+# contain no .git, so pass the source identity from the checkout explicitly.
 export_build_args() {
     # shellcheck source=/dev/null
     eval "$("$PROJECT_ROOT/scripts/get_version.sh" env)"
@@ -71,8 +70,9 @@ export_build_args() {
     export VERSION_ARG="${VERSION_ARG:-${VERSION:-unknown}}"
     export COMMIT_ID_ARG="${COMMIT_ID_ARG:-${COMMIT_ID:-unknown}}"
     export BUILD_TIME_ARG="${BUILD_TIME_ARG:-${BUILD_TIME:-unknown}}"
-    export GO_VERSION_ARG="${GO_VERSION_ARG:-${GO_VERSION:-unknown}}"
-    log_info "VITE_FRONTEND_COMMIT=${VITE_FRONTEND_COMMIT} VERSION_ARG=${VERSION_ARG} COMMIT_ID_ARG=${COMMIT_ID_ARG} BUILD_TIME_ARG=${BUILD_TIME_ARG}"
+    export DOCREADER_VERSION="${DOCREADER_VERSION:-${VERSION:-unknown}}"
+    export DOCREADER_COMMIT_ID="${DOCREADER_COMMIT_ID:-${COMMIT_ID:-unknown}}"
+    log_info "VITE_FRONTEND_COMMIT=${VITE_FRONTEND_COMMIT} VERSION_ARG=${VERSION_ARG} COMMIT_ID_ARG=${COMMIT_ID_ARG} BUILD_TIME_ARG=${BUILD_TIME_ARG} DOCREADER_VERSION=${DOCREADER_VERSION} DOCREADER_COMMIT_ID=${DOCREADER_COMMIT_ID}"
 }
 
 # 选择可用的 Docker Compose 命令（优先 docker compose，其次 docker-compose）

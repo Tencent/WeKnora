@@ -2,17 +2,41 @@ package localsandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
+
+// ErrAsyncCommandRefused is a background command that would need an approval.
+// A job has no turn to ask in, so it is refused rather than run unasked.
+var ErrAsyncCommandRefused = errors.New("localsandbox: background command refused")
 
 // StartForSession resolves the session policy and starts a managed job
 // process. Unlike Run it takes no root lock, applies no timeout and reads no
 // pipes — the caller owns draining and Wait.
 func (s *Service) StartForSession(ctx context.Context, req RunRequest) (Process, error) {
-	_, policy, err := s.workspaceFor(ctx, req.SessionID)
+	ws, policy, err := s.workspaceFor(ctx, req.SessionID)
 	if err != nil {
 		return nil, err
+	}
+	cwd, err := commandCwd(policy, req.WorkDir)
+	if err != nil {
+		return nil, err
+	}
+	if req.Spec.Command == "" {
+		req.Spec.Command = req.Command
+	}
+	req.Approver, req.Reviewer = nil, nil
+	_, refused, err := s.approveDelete(ctx, s.newTurn(ctx, req, ws), policy, cwd)
+	if err != nil {
+		return nil, err
+	}
+	if refused != nil {
+		if refused.Notice == dangerousDeleteNotice {
+			return nil, fmt.Errorf("%w: %s", ErrAsyncCommandRefused, refused.Notice)
+		}
+		return nil, fmt.Errorf("%w: %s run it with shell_exec, which can ask for approval",
+			ErrAsyncCommandRefused, refused.Notice)
 	}
 	return s.Start(ctx, policy, req)
 }

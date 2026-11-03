@@ -1,6 +1,7 @@
 package openaicompletions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -146,12 +147,72 @@ type rawToolCall struct {
 
 type rawMessage struct {
 	Role             string            `json:"role,omitempty"`
-	Content          string            `json:"content,omitempty"`
+	Content          messageContent    `json:"content,omitempty"`
 	ReasoningContent string            `json:"reasoning_content,omitempty"`
 	Reasoning        string            `json:"reasoning,omitempty"`
 	ReasoningText    string            `json:"reasoning_text,omitempty"`
 	ReasoningDetails json.RawMessage   `json:"reasoning_details,omitempty"`
 	ToolCalls        []json.RawMessage `json:"tool_calls,omitempty"`
+}
+
+// messageContent is the "content" of a message or delta. Most servers send a
+// string, but the field may also be a list of typed parts, as Mistral does
+// (string | ContentChunk[]): its reasoning models send "thinking" parts next to
+// the "text" ones. Text parts are joined into Text and thinking parts into
+// Thinking; other part types (references, images...) carry no answer text.
+type messageContent struct {
+	Text     string
+	Thinking string
+}
+
+type contentPart struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking json.RawMessage `json:"thinking"`
+}
+
+func (m *messageContent) UnmarshalJSON(data []byte) error {
+	*m = messageContent{}
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return nil
+	}
+	if data[0] == '"' {
+		return json.Unmarshal(data, &m.Text)
+	}
+	var parts []contentPart
+	if err := json.Unmarshal(data, &parts); err != nil {
+		return err
+	}
+	var text, thinking strings.Builder
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			text.WriteString(part.Text)
+		case "thinking":
+			thinking.WriteString(partsText(part.Thinking))
+		}
+	}
+	m.Text, m.Thinking = text.String(), thinking.String()
+	return nil
+}
+
+// partsText reads the text of a nested "thinking" value, which is a list of
+// text parts in Mistral's API. A plain string is accepted as well.
+func partsText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var parts []contentPart
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		b.WriteString(part.Text)
+	}
+	return b.String()
 }
 
 type rawChoice struct {
@@ -188,7 +249,7 @@ func (c *Client) reasoningText(m rawMessage) string {
 			}
 		}
 	}
-	return ""
+	return m.Content.Thinking
 }
 
 // streamToolIndex gives index-less streamed tool calls a stable index.
@@ -294,7 +355,7 @@ func (c *Client) parseResponse(raw []byte, opts *api.Options) (*types.ChatRespon
 		return nil, fmt.Errorf("no response from API")
 	}
 	choice := env.Choices[0]
-	content, inlineReasoning := splitThinkTags(choice.Message.Content)
+	content, inlineReasoning := splitThinkTags(choice.Message.Content.Text)
 	result := &types.ChatResponse{
 		Content:          content,
 		ReasoningContent: c.reasoningText(choice.Message),
@@ -450,7 +511,7 @@ func (c *Client) processStream(
 		choice := env.Choices[0]
 		delta := api.Delta{
 			Reasoning:    c.reasoningText(choice.Delta),
-			Content:      dsml.Feed(choice.Delta.Content),
+			Content:      dsml.Feed(choice.Delta.Content.Text),
 			FinishReason: choice.FinishReason,
 		}
 		if len(choice.Delta.ReasoningDetails) > 0 {

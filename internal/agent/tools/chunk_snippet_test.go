@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -112,6 +113,17 @@ func TestExtractSnippetForChineseQuery(t *testing.T) {
 	snippet := extractSnippetForQueries(content, []string{"退款申请的时限是多久？"})
 	if !strings.Contains(snippet, "退款申请") {
 		t.Fatalf("snippet did not reach the matching passage: %q", snippet)
+	}
+}
+
+func TestExtractSnippetForQueriesPreservesUnicodeOffsets(t *testing.T) {
+	content := strings.Repeat("İ", 500) + " refund policy"
+	snippet := extractSnippetForQueries(content, []string{"refund"})
+	if !utf8.ValidString(snippet) {
+		t.Errorf("snippet contains invalid UTF-8: %q", snippet)
+	}
+	if !strings.Contains(snippet, "refund") {
+		t.Errorf("snippet omitted the matched query term: %q", snippet)
 	}
 }
 

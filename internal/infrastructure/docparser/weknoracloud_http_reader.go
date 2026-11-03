@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -106,12 +105,17 @@ func (p *WeKnoraCloudSignedDocumentReader) Read(ctx context.Context, req *types.
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		logger.Errorf(context.Background(), "[WeKnoraCloud] http read unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
-		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, string(bodyBytes))
+		preview := readErrorPreview(resp.Body)
+		logger.Errorf(context.Background(), "[WeKnoraCloud] http read unexpected status %d: %s",
+			resp.StatusCode, preview)
+		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, preview)
+	}
+	bodyBytes, err := readCapped(resp.Body, maxJSONResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("http read response: %w", err)
 	}
 	var submit weKnoraCloudAsyncSubmitResponse
-	if err := json.NewDecoder(resp.Body).Decode(&submit); err != nil {
+	if err := json.Unmarshal(bodyBytes, &submit); err != nil {
 		logger.Errorf(context.Background(), "[WeKnoraCloud] decode read submit response: %v", err)
 		return nil, fmt.Errorf("http decode read submit response: %w", err)
 	}
@@ -165,12 +169,19 @@ func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, t
 		func() {
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				err = fmt.Errorf("http poll task status %d: %s", resp.StatusCode, string(bodyBytes))
-				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s status %d: %s", taskID, resp.StatusCode, string(bodyBytes))
+				preview := readErrorPreview(resp.Body)
+				err = fmt.Errorf("http poll task status %d: %s", resp.StatusCode, preview)
+				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s status %d: %s",
+					taskID, resp.StatusCode, preview)
 				return
 			}
-			if decodeErr := json.NewDecoder(resp.Body).Decode(&taskResp); decodeErr != nil {
+			bodyBytes, readErr := readCapped(resp.Body, maxResultResponseBytes)
+			if readErr != nil {
+				err = fmt.Errorf("http poll task response: %w", readErr)
+				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s read response: %v", taskID, readErr)
+				return
+			}
+			if decodeErr := json.Unmarshal(bodyBytes, &taskResp); decodeErr != nil {
 				err = fmt.Errorf("http decode task response: %w", decodeErr)
 				logger.Errorf(context.Background(), "[WeKnoraCloud] poll task_id=%s decode response: %v", taskID, decodeErr)
 			}
