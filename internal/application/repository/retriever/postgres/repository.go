@@ -429,7 +429,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		whereParts = append(whereParts, fmt.Sprintf(
 			"NOT (knowledge_base_id IN (%s) AND %s)",
 			strings.Join(placeholders, ", "),
-			types.GeneratedQuestionRowPredicate(""),
+			types.GeneratedQuestionRowPredicateParadeDB(""),
 		))
 	}
 
@@ -822,7 +822,7 @@ func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
 		SQL: fmt.Sprintf(
 			"NOT (knowledge_base_id IN (%s) AND %s)",
 			strings.Join(placeholders, ", "),
-			types.GeneratedQuestionRowPredicate(""),
+			types.GeneratedQuestionRowPredicateParadeDB(""),
 		),
 		Vars: vars,
 	}
