@@ -17,6 +17,10 @@ function splitRowCells(line: string): string[] {
 }
 
 function isTableRow(line: string): boolean {
+  // Four-space and tab-indented rows are literal code, not Markdown tables.
+  if (!/^ {0,3}\|/.test(line)) {
+    return false;
+  }
   const stripped = line.trim();
   return stripped.startsWith('|') && stripped.includes('|', 1);
 }
@@ -50,12 +54,28 @@ function normalizeTableBlock(block: string[]): string[] {
   return rows;
 }
 
-/** Fix MarkItDown-style tables: empty row + separator before real rows. */
+/** Fix MarkItDown-style tables outside literal fenced and indented code. */
 export function normalizeSpuriousTablePrefixes(content: string): string {
   const lines = content.split('\n');
   const out: string[] = [];
   let i = 0;
+  let fence: string | undefined;
   while (i < lines.length) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i]);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && /^[ \t\r]*$/.test(marker[2])) {
+        fence = undefined;
+      }
+      out.push(lines[i]);
+      i += 1;
+      continue;
+    }
+    if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
+      fence = marker[1];
+      out.push(lines[i]);
+      i += 1;
+      continue;
+    }
     if (!isTableRow(lines[i])) {
       out.push(lines[i]);
       i += 1;
