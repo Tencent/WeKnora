@@ -59,6 +59,8 @@ export interface ArtifactRefLabels {
   missingHint: string;
   /** 文件已被用户删除时的副标题，如「文件已删除」。 */
   deletedHint: string;
+  /** 快捷操作提示，如「加入知识库」。 */
+  addToKnowledge: string;
 }
 
 const RESOURCE_HANDLE_RE = /^resource:\/\/([A-Za-z0-9_-]{22})$/;
@@ -267,22 +269,34 @@ function renderCard(
   hint: string,
   index: number | null,
   variant: ArtifactCardVariant,
+  addToKnowledge: string,
 ): string {
   const safeName = escapeHTML(fileName);
   const safeHint = escapeHTML(hint);
+  const safeAddLabel = escapeHTML(addToKnowledge);
   // 卡片必须是内联元素：marked 会把图片包在 <p> 里，块级元素会被 HTML 解析器
   // 提到段落外面，破坏正文结构。
   const interactive = variant === 'ready' && index !== null
     ? ` data-artifact-index="${index}" role="button" tabindex="0"`
     : '';
   const state = variant === 'ready' ? '' : ` artifact-ref-card--${variant}`;
+  // The knowledge-base shortcut is a nested span (the card itself is a span
+  // inside a paragraph), so it must stop propagation in the click handler.
+  const kbAction = variant === 'ready' && index !== null
+    ? `<span class="artifact-ref-card__kb" data-artifact-kb-index="${index}" role="button" tabindex="0" title="${safeAddLabel}" aria-label="${safeAddLabel}">`
+      + '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M6 4h12v17l-6-4-6 4z"/><path d="M12 8v6"/><path d="M9 11h6"/>'
+      + '</svg></span>'
+    : '';
   return (
-    `<span class="artifact-ref-card${state}"${interactive} title="${safeName}">`
+    `<span class="artifact-ref-card${state}"${interactive} title="${safeName}" data-artifact-name="${safeName}">`
     + `<span class="artifact-ref-card__icon" aria-hidden="true">${renderArtifactFileIcon(fileName)}</span>`
     + '<span class="artifact-ref-card__text">'
     + `<span class="artifact-ref-card__name">${safeName}</span>`
     + `<span class="artifact-ref-card__hint">${safeHint}</span>`
-    + '</span></span>'
+    + '</span>'
+    + kbAction
+    + '</span>'
   );
 }
 
@@ -336,7 +350,7 @@ export function renderArtifactReference(args: {
     // 继续显示「生成中」。
     const fallbackName = ref.name || (args.alt || '').trim();
     if (!fallbackName) return '';
-    return renderCard(fallbackName, args.labels.missingHint, null, 'pending');
+    return renderCard(fallbackName, args.labels.missingHint, null, 'pending', args.labels.addToKnowledge);
   }
 
   // 用户删过的文件字节已经回收，下载会 404。图片类产物同样降级成卡片：走
@@ -344,13 +358,13 @@ export function renderArtifactReference(args: {
   if (artifact.deleted_at) {
     const name = artifact.file_name || (args.alt || '').trim();
     if (!name) return '';
-    return renderCard(name, args.labels.deletedHint, null, 'deleted');
+    return renderCard(name, args.labels.deletedHint, null, 'deleted', args.labels.addToKnowledge);
   }
 
   if (rendersAsImage(artifact)) {
     return renderImage(artifact, args.alt || '', args.context ?? null);
   }
-  return renderCard(artifact.file_name, args.labels.previewHint, artifact.index, 'ready');
+  return renderCard(artifact.file_name, args.labels.previewHint, artifact.index, 'ready', args.labels.addToKnowledge);
 }
 
 async function loadArtifactBlobURL(ctx: ArtifactRefContext, index: number): Promise<string | null> {
@@ -422,6 +436,22 @@ export function artifactIndexFromEventTarget(target: EventTarget | null): number
   if (!card) return null;
   const index = Number(card.getAttribute('data-artifact-index'));
   return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+/** The inline card's "add to knowledge base" shortcut, when the event hit it. */
+export function artifactKnowledgeIndexFromEventTarget(target: EventTarget | null): number | null {
+  if (!(target instanceof Element)) return null;
+  const action = target.closest('[data-artifact-kb-index]');
+  if (!action) return null;
+  const index = Number(action.getAttribute('data-artifact-kb-index'));
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+/** File name shown on the card that owns the event target. */
+export function artifactNameFromEventTarget(target: EventTarget | null): string {
+  if (!(target instanceof Element)) return '';
+  const card = target.closest('.artifact-ref-card[data-artifact-name]');
+  return card?.getAttribute('data-artifact-name') || '';
 }
 
 /** Links and images referencing a generated file must share its authorized

@@ -180,15 +180,15 @@
         </li>
       </ul>
     </template>
-  </div>
 
-  <AddArtifactToKnowledgeDialog
-    v-model:visible="addToKbVisible"
-    :session-id="sessionId"
-    :message-id="addToKbItem?.messageId || ''"
-    :artifact-index="addToKbItem?.index ?? 0"
-    :file-name="addToKbItem?.file_name || ''"
-  />
+    <AddArtifactToKnowledgeDialog
+      v-model:visible="addToKbVisible"
+      :session-id="sessionId"
+      :message-id="addToKbItem?.messageId || ''"
+      :artifact-index="addToKbItem?.index ?? 0"
+      :file-name="addToKbItem?.file_name || ''"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">

@@ -108,6 +108,17 @@
                 variant="text"
                 shape="square"
                 size="small"
+                :title="$t('agent.artifactDrawer.addToKnowledge')"
+                :aria-label="$t('agent.artifactDrawer.addToKnowledge')"
+                @click.stop="openAddToKnowledge(item)"
+              >
+                <template #icon><t-icon name="bookmark-add" size="16px" /></template>
+              </t-button>
+              <t-button
+                class="row-action"
+                variant="text"
+                shape="square"
+                size="small"
                 :title="$t('artifactLibrary.download')"
                 :aria-label="$t('artifactLibrary.download')"
                 :loading="isDownloading(item)"
@@ -167,6 +178,17 @@
             variant="text"
             shape="square"
             size="small"
+            :title="$t('agent.artifactDrawer.addToKnowledge')"
+            :aria-label="$t('agent.artifactDrawer.addToKnowledge')"
+            @click="openAddToKnowledge(previewItem)"
+          >
+            <template #icon><t-icon name="bookmark-add" size="16px" /></template>
+          </t-button>
+          <t-button
+            class="row-action"
+            variant="text"
+            shape="square"
+            size="small"
             :title="$t('artifactLibrary.download')"
             :aria-label="$t('artifactLibrary.download')"
             :loading="isDownloading(previewItem)"
@@ -213,6 +235,13 @@
         />
       </div>
     </t-drawer>
+    <AddArtifactToKnowledgeDialog
+      v-model:visible="addToKbVisible"
+      :session-id="addToKbItem?.session_id || ''"
+      :message-id="addToKbItem?.message_id || ''"
+      :artifact-index="addToKbItem?.index ?? 0"
+      :file-name="addToKbItem?.file_name || ''"
+    />
   </div>
 </template>
 
@@ -237,6 +266,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
+import AddArtifactToKnowledgeDialog from '@/views/chat/components/AddArtifactToKnowledgeDialog.vue'
 
 const PAGE_SIZE = 30
 const SEARCH_DEBOUNCE_MS = 300
@@ -256,6 +286,13 @@ const loadError = ref(false)
 const downloading = reactive<Record<string, boolean>>({})
 const deleting = reactive<Record<string, boolean>>({})
 const previewItem = ref<ArtifactLibraryItem | null>(null)
+const addToKbVisible = ref(false)
+const addToKbItem = ref<ArtifactLibraryItem | null>(null)
+
+function openAddToKnowledge(item: ArtifactLibraryItem) {
+  addToKbItem.value = item
+  addToKbVisible.value = true
+}
 const previewVisible = ref(false)
 const previewActions = ref<HTMLElement | null>(null)
 const scrollRoot = ref<HTMLElement | null>(null)
