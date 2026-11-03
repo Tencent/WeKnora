@@ -186,6 +186,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	broker.RegisterKind(types.AgentPromptKindMCPOAuth, validateMCPOAuthResponse)
 	broker.RegisterKind(types.AgentPromptKindAskUser, types.ValidateAskUserResponse)
 	broker.RegisterKind(types.AgentPromptKindPageAction, types.ValidatePageActionResponse)
+	broker.RegisterKind(types.AgentPromptKindSecureForm, types.ValidateSecureFormResponse)
 	// Default fail-close: if the checker errors, require approval (safer for a
 	// HITL feature). Set WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true to revert.
 	failClose := !strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN")), "true")

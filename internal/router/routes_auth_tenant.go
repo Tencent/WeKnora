@@ -209,6 +209,23 @@ func RegisterMyEnvVarRoutes(r *gin.RouterGroup, h *handler.MeEnvVarHandler) {
 	}
 }
 
+// RegisterMyCredentialVaultRoutes wires the caller's saved logins under
+// /me/credential-vault. Like /me/env-vars it has no role gate: the values are
+// the caller's own, and the service derives the owner from the context.
+// No endpoint returns a password. Undeclared for API keys (default-deny).
+func RegisterMyCredentialVaultRoutes(r *gin.RouterGroup, h *handler.CredentialVaultHandler) {
+	if h == nil {
+		return
+	}
+	me := r.Group("/me/credential-vault")
+	{
+		me.GET("", h.List)
+		me.POST("", h.Create)
+		me.PATCH("/:id", h.Update)
+		me.DELETE("/:id", h.Delete)
+	}
+}
+
 // RegisterAuthRoutes registers authentication routes
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rbacGuards) {
 	r.POST("/auth/register", handler.Register)

@@ -177,6 +177,8 @@ var toolDisplayNames = map[string]string{
 	agenttools.LegacyToolGetDocumentInfo:     "获取文档信息",
 	agenttools.ToolSearchConversations:       "回顾历史对话",
 	agenttools.ToolAskUser:                   "向用户提问",
+	agenttools.ToolRequestSecureForm:         "请求登录凭据",
+	agenttools.ToolBrowserFillSecret:         "填写登录凭据",
 	agenttools.ToolSearchMemory:              "查询长期记忆",
 	agenttools.ToolDatabaseQuery:             "查询数据",
 	agenttools.ToolDataAnalysis:              "数据分析",

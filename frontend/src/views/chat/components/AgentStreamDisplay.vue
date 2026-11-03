@@ -140,6 +140,15 @@
                   :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
               </div>
 
+              <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
+                <SecureFormCard :pending-id="event.pending_id" :request="event.request"
+                  :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                  :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                  :canceled="event.canceled" :abandoned="event.abandoned" />
+              </div>
+
               <!-- MCP OAuth in-conversation authorization prompt -->
               <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
                 <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
@@ -434,6 +443,15 @@
                 :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
                 :response="event.response" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
                 :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
+            </div>
+
+            <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
+              <SecureFormCard :pending-id="event.pending_id" :request="event.request"
+                :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                :canceled="event.canceled" :abandoned="event.abandoned" />
             </div>
 
             <!-- MCP OAuth in-conversation authorization prompt -->
@@ -790,6 +808,7 @@ import OpenPageCard from './OpenPageCard.vue';
 import PageEditCard from './PageEditCard.vue';
 import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
+import SecureFormCard from './SecureFormCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';
@@ -918,6 +937,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   wiki_update_issue: 'agentEditor.tools.wikiUpdateIssue',
   todo_write: 'agentStream.tools.todoWrite',
   ask_user: 'agentStream.tools.askUser',
+  request_secure_form: 'agentStream.tools.requestSecureForm',
+  browser_fill_secret: 'agentStream.tools.browserFillSecret',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
   attachment_parsing: 'agentStream.tools.attachmentParsing',
