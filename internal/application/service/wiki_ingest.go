@@ -15,8 +15,10 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -389,17 +391,18 @@ type WikiPendingOp struct {
 // both of which are correctness-critical short-lived flags rather
 // than data the system should survive without.
 type wikiIngestService struct {
-	wikiService    interfaces.WikiPageService
-	kbService      interfaces.KnowledgeBaseService
-	knowledgeSvc   interfaces.KnowledgeService
-	knowledgeRepo  interfaces.KnowledgeRepository
-	chunkRepo      interfaces.ChunkRepository
-	modelService   interfaces.ModelService
-	task           interfaces.TaskEnqueuer
-	audit          interfaces.AuditLogService
-	pendingRepo    interfaces.TaskPendingOpsRepository
-	deadLetterRepo interfaces.TaskDeadLetterRepository
-	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	processingCache *processingcache.Runtime
+	wikiService     interfaces.WikiPageService
+	kbService       interfaces.KnowledgeBaseService
+	knowledgeSvc    interfaces.KnowledgeService
+	knowledgeRepo   interfaces.KnowledgeRepository
+	chunkRepo       interfaces.ChunkRepository
+	modelService    interfaces.ModelService
+	task            interfaces.TaskEnqueuer
+	audit           interfaces.AuditLogService
+	pendingRepo     interfaces.TaskPendingOpsRepository
+	deadLetterRepo  interfaces.TaskDeadLetterRepository
+	redisClient     *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
 	// batch design means we look up the parent attempt by knowledge
@@ -2470,6 +2473,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	// share no trigram signal and were never candidates for each other).
 	candidatePages := make(map[string]*types.WikiPageLite)
 	itemCandidates := make(map[string]map[string]bool)
+	candidateLookupFailed := false
 	probe := func(item extractedItem) {
 		queries := make([]string, 0, 1+len(item.Aliases))
 		if item.Name != "" {
@@ -2491,6 +2495,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 				dedupCandidateTopK)
 			if err != nil {
 				logger.Warnf(ctx, "wiki ingest: dedup FindSimilarPages(%q) failed: %v", q, err)
+				candidateLookupFailed = true
 				continue
 			}
 			for _, p := range pages {
@@ -2581,10 +2586,10 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		writeDedupCandidateGroup(&candBuf, item, itemType, pages)
 		groups++
 	}
-	for _, item := range entities {
+	for _, item := range sortedWikiCacheItems(entities) {
 		renderGroup(item, "entity")
 	}
-	for _, item := range concepts {
+	for _, item := range sortedWikiCacheItems(concepts) {
 		renderGroup(item, "concept")
 	}
 	if groups == 0 {
@@ -2592,7 +2597,11 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		return stabilize()
 	}
 
-	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
+	dedupCtx := ctx
+	if candidateLookupFailed {
+		dedupCtx = withProcessingCacheBypass(ctx)
+	}
+	dedupeJSON, err := s.generateWithTemplate(dedupCtx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
 		"Candidates": candBuf.String(),
 	})
 	if err != nil {
@@ -2760,9 +2769,13 @@ func (s *wikiIngestService) generateWithTemplateResult(
 
 	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
 	requestJSON, _ := json.Marshal(struct {
-		Messages []chat.Message    `json:"messages"`
-		Options  *chat.ChatOptions `json:"options"`
-	}{Messages: messages, Options: opts})
+		Messages                    []chat.Message    `json:"messages"`
+		Options                     *chat.ChatOptions `json:"options"`
+		ModelIdentity, Document, KB string
+	}{
+		Messages: messages, Options: opts, ModelIdentity: processingModelIdentity(chatModel),
+		Document: processingDocument(ctx), KB: wikiProcessingKB(ctx),
+	})
 	requestKey := chat.BuildPromptCacheKey(
 		tenantID, chatModel.GetModelID(), "wiki_exact_request",
 		chat.FingerprintPromptPrefix(string(requestJSON)),
@@ -2885,10 +2898,16 @@ func (s *wikiIngestService) generateWithTemplateResult(
 		return wikiTemplateResult{Content: content, FinishReason: finishReason}, nil
 	}
 
-	// Missing tenant context is unexpected for production Wiki work. Fail safe
-	// by skipping cross-call coalescing instead of putting unrelated requests
+	uncachedExecute := execute
+	execute = func() (interface{}, error) {
+		return s.cachedWikiMapResult(ctx, chatModel, promptTpl, messages, opts, maskedData, uncachedExecute)
+	}
+
+	// Missing tenant context fails safe by skipping cross-call coalescing
 	// into a synthetic tenant-0 bucket.
-	if !tenantScoped {
+	if !tenantScoped ||
+		(s.processingCache.Enabled() && wikiMapCacheStage(promptTpl) != "" &&
+			processingModelIdentity(chatModel) == "") {
 		value, executeErr := execute()
 		if executeErr != nil {
 			return wikiTemplateResult{}, executeErr
@@ -3446,95 +3465,80 @@ func maskImageURLs(s string) (string, map[string]string) {
 }
 
 func maskImageURLsWithState(s string, urlToToken, tokenToURL map[string]string) string {
-	urls := collectMaskableImageURLs(s)
-	if len(urls) == 0 {
-		return s
-	}
-
-	for _, url := range urls {
-		if _, ok := urlToToken[url]; ok {
-			continue
+	tokenFor := func(url string) string {
+		if url == "" {
+			return url
+		}
+		if token, ok := urlToToken[url]; ok {
+			return token
 		}
 		token := fmt.Sprintf("wkimg:%04d", len(tokenToURL)+1)
 		urlToToken[url] = token
 		tokenToURL[token] = url
+		return token
 	}
-
-	replaceURLs := append([]string(nil), urls...)
-	sort.SliceStable(replaceURLs, func(i, j int) bool {
-		return len(replaceURLs[i]) > len(replaceURLs[j])
+	masked := docparser.RewriteMarkdownImageDestinations(s, tokenFor)
+	masked = rewriteHTMLCacheImageSources(masked, tokenFor)
+	return imageURLAttrRE.ReplaceAllStringFunc(masked, func(attribute string) string {
+		indices := imageURLAttrRE.FindStringSubmatchIndex(attribute)
+		start, end := indices[2], indices[3]
+		if start < 0 {
+			start, end = indices[4], indices[5]
+		}
+		return attribute[:start] + tokenFor(attribute[start:end]) + attribute[end:]
 	})
-
-	masked := s
-	for _, url := range replaceURLs {
-		masked = strings.ReplaceAll(masked, url, urlToToken[url])
-	}
-	return masked
-}
-
-func collectMaskableImageURLs(s string) []string {
-	seen := make(map[string]struct{})
-	var urls []string
-
-	addURL := func(url string) {
-		url = strings.TrimSpace(url)
-		if url == "" {
-			return
-		}
-		if _, ok := seen[url]; ok {
-			return
-		}
-		seen[url] = struct{}{}
-		urls = append(urls, url)
-	}
-
-	for _, match := range mdImageURLRE.FindAllStringSubmatch(s, -1) {
-		addURL(match[1])
-	}
-	for _, match := range imageURLAttrRE.FindAllStringSubmatch(s, -1) {
-		if match[1] != "" {
-			addURL(match[1])
-			continue
-		}
-		addURL(match[2])
-	}
-
-	return urls
 }
 
 // unmaskImageURLs restores known placeholders and drops any corrupted or
 // invented image placeholders so broken image links never reach storage.
 func unmaskImageURLs(out string, urlMap map[string]string) string {
-	out = mdImageURLRE.ReplaceAllStringFunc(out, func(match string) string {
-		parts := mdImageURLRE.FindStringSubmatch(match)
-		if len(parts) != 2 {
-			return match
-		}
-		url := strings.TrimSpace(parts[1])
-		if realURL, ok := urlMap[url]; ok {
-			idx := strings.LastIndex(match, "(")
-			if idx < 0 {
-				return match
+	// Structured Wiki outputs contain JSON-escaped Markdown titles. Restore
+	// decoded string values so quote escaping cannot change image boundaries.
+	if strings.Contains(strings.ToLower(out), "wkimg") && json.Valid([]byte(out)) {
+		var tree any
+		decoder := json.NewDecoder(strings.NewReader(out))
+		decoder.UseNumber()
+		if decoder.Decode(&tree) == nil {
+			var restore func(any) any
+			restore = func(value any) any {
+				switch v := value.(type) {
+				case string:
+					return unmaskImageText(v, urlMap)
+				case []any:
+					for i := range v {
+						v[i] = restore(v[i])
+					}
+					return v
+				case map[string]any:
+					for k := range v {
+						v[k] = restore(v[k])
+					}
+					return v
+				default:
+					return value
+				}
 			}
-			return match[:idx+1] + realURL + ")"
+			if encoded, err := json.Marshal(restore(tree)); err == nil {
+				return string(encoded)
+			}
+		}
+	}
+	return unmaskImageText(out, urlMap)
+}
+
+func unmaskImageText(out string, urlMap map[string]string) string {
+	out = docparser.RewriteMarkdownImageDestinations(out, func(url string) string {
+		if realURL, ok := urlMap[url]; ok {
+			return realURL
 		}
 		if canonical, ok := canonicalImagePlaceholder(url); ok {
-			realURL, known := urlMap[canonical]
-			if !known {
-				return ""
-			}
-			idx := strings.LastIndex(match, "(")
-			if idx < 0 {
-				return match
-			}
-			return match[:idx+1] + realURL + ")"
+			return urlMap[canonical]
 		}
 		if strings.HasPrefix(strings.ToLower(url), "wkimg") {
 			return ""
 		}
-		return match
+		return url
 	})
-
 	return replaceImagePlaceholderTokensOutsideMarkdown(out, urlMap)
 }
 
@@ -3551,24 +3555,10 @@ func canonicalImagePlaceholder(token string) (string, bool) {
 }
 
 func replaceImagePlaceholderTokensOutsideMarkdown(s string, urlMap map[string]string) string {
-	matches := mdImageURLRE.FindAllStringIndex(s, -1)
-	if len(matches) == 0 {
-		return replaceImagePlaceholderTokens(s, urlMap)
-	}
-
-	var b strings.Builder
-	last := 0
-	for _, match := range matches {
-		if match[0] > last {
-			b.WriteString(replaceImagePlaceholderTokens(s[last:match[0]], urlMap))
-		}
-		b.WriteString(s[match[0]:match[1]])
-		last = match[1]
-	}
-	if last < len(s) {
-		b.WriteString(replaceImagePlaceholderTokens(s[last:], urlMap))
-	}
-	return b.String()
+	return docparser.RewriteOutsideMarkdownImages(
+		s,
+		func(text string) string { return replaceImagePlaceholderTokens(text, urlMap) },
+	)
 }
 
 func replaceImagePlaceholderTokens(s string, urlMap map[string]string) string {

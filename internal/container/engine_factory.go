@@ -59,7 +59,12 @@ func createEngineServiceFromStore(
 	db *gorm.DB,
 	cfg *config.Config,
 	auditSink openSearchRepo.AuditSink,
-) (interfaces.RetrieveEngineService, error) {
+) (engine interfaces.RetrieveEngineService, err error) {
+	defer func() {
+		if err == nil {
+			attachProcessingCache(engine, newProcessingCache(db, cfg))
+		}
+	}()
 	if err := validateRuntimeVectorStoreAddresses(store); err != nil {
 		return nil, err
 	}

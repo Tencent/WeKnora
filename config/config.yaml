@@ -114,3 +114,13 @@ extract:
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)
   enable_cross_tenant_access: false
+processing_cache:
+  # Persistent processing cache, scoped to tenant and document.
+  read_enabled: false
+  write_enabled: false
+  max_bytes: 1048576
+  parsing_max_bytes: 67108864
+  image_max_bytes: 16777216
+  retention_days: 30
+  # Bump when a provider silently changes a model behind the same model name.
+  epoch: "1"

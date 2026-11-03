@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	ollamaapi "github.com/ollama/ollama/api"
@@ -19,6 +20,7 @@ import (
 
 // OllamaChat 实现了基于 Ollama 的聊天
 type OllamaChat struct {
+	cacheIdentity string
 	modelName     string
 	modelID       string
 	ollamaService *ollama.OllamaService
@@ -26,7 +28,15 @@ type OllamaChat struct {
 
 // NewOllamaChat 创建 Ollama 聊天实例
 func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*OllamaChat, error) {
+	identity := ""
+	if ollamaService != nil && ollamaService.BaseURL() != "" {
+		identity = processingcache.Digest(struct {
+			Config   *ChatConfig
+			Endpoint string
+		}{config, ollamaService.BaseURL()})
+	}
 	return &OllamaChat{
+		cacheIdentity: identity,
 		modelName:     config.ModelName,
 		modelID:       config.ModelID,
 		ollamaService: ollamaService,
