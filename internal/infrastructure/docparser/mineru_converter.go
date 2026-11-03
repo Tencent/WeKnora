@@ -502,6 +502,15 @@ func pingMinerUV1Auth(ctx context.Context, client *http.Client, endpoint, apiKey
 		}
 		return false, "MinerU API Key 无效"
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return false, "MinerU 版本不兼容：/v1/parse/jobs 返回 404，请确认使用的是 MinerU 4.0（4.1+ 已移除必要端点）"
+	}
+	if resp.StatusCode >= 500 {
+		return false, fmt.Sprintf("MinerU 服务异常 (HTTP %d)，请检查服务状态", resp.StatusCode)
+	}
+	if resp.StatusCode >= 400 {
+		return false, fmt.Sprintf("MinerU 服务返回状态 %d，请检查服务状态", resp.StatusCode)
+	}
 	return true, ""
 }
 

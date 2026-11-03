@@ -445,6 +445,17 @@ func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
+	if !connected && len(remoteEngines) == 0 {
+		// Reader is not connected and no remote engines were fetched —
+		// the DocReader service is unreachable.  Keep connected=false.
+	} else if connected && len(remoteEngines) == 0 {
+		// Reader claims connected but ListEngines failed (logged as
+		// WARNING in fetchRemoteEngines).  Re-check IsConnected() —
+		// if it now returns false the service died between calls.
+		if !reader.IsConnected() {
+			connected = false
+		}
+	}
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
@@ -546,6 +557,17 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
+	if !connected && len(remoteEngines) == 0 {
+		// Reader is not connected and no remote engines were fetched —
+		// the DocReader service is unreachable.  Keep connected=false.
+	} else if connected && len(remoteEngines) == 0 {
+		// Reader claims connected but ListEngines failed (logged as
+		// WARNING in fetchRemoteEngines).  Re-check IsConnected() —
+		// if it now returns false the service died between calls.
+		if !reader.IsConnected() {
+			connected = false
+		}
+	}
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
