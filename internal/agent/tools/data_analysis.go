@@ -1018,16 +1018,22 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 		if t.tenantService != nil {
 			resolvedTenant, err := t.tenantService.GetTenantByID(ctx, ownerTenantID)
 			if err != nil {
-				logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get KB owner tenant failed: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d err=%v",
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis][storage] get KB owner tenant failed: "+
+						"session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d err=%v",
 					t.sessionID, knowledge.ID, kbID, ownerTenantID, err)
 			} else if resolvedTenant != nil && resolvedTenant.ID == ownerTenantID {
 				tenant = resolvedTenant
 			} else {
-				logger.Warnf(ctx, "[Tool][DataAnalysis][storage] KB owner tenant lookup returned no matching tenant: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis][storage] KB owner tenant lookup returned no matching tenant: "+
+						"session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
 					t.sessionID, knowledge.ID, kbID, ownerTenantID)
 			}
 		}
-		logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolving KB storage as owner tenant: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
+		logger.Infof(ctx,
+			"[Tool][DataAnalysis][storage] resolving KB storage as owner tenant: "+
+				"session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
 			t.sessionID, knowledge.ID, kbID, ownerTenantID)
 	} else if tenant == nil {
 		tenantID := uint64(0)
