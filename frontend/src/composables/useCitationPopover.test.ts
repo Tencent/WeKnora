@@ -72,7 +72,7 @@ function fixture(mode: 'chat' | 'embed', options: { drawer?: boolean; refs?: cit
     if (modules[name]) return modules[name]
     const exports = modules[name] = {}
     runInNewContext(compiled.get(name)!, {
-      exports, window: win, document: { querySelector: () => hovered ? {} : null },
+      exports, window: win, Date: { now: () => now }, document: { querySelector: () => hovered ? {} : null },
       require(path: string) {
         if (path === 'vue') return vue
         if (path === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
@@ -162,6 +162,44 @@ for (const mode of ['chat', 'embed'] as const) {
     assert.equal(f.state.float.value.content, 'new')
   })
 
+  test(`${mode}: concurrent opens share one request and 404 remains cached`, async t => {
+    const f = fixture(mode); t.after(f.close)
+    f.fire('click', kb('missing')); f.fire('click', kb('missing'))
+    f.fire('mouseover', kb('missing')); f.tick(80)
+    assert.equal(f.requests.length, 1)
+    f.requests[0]!.pending.reject(Object.assign(new Error('not found'), { $httpStatus: 404 }))
+    await flush()
+    f.fire('click', kb('missing')); f.fire('mouseover', kb('missing')); f.tick(80)
+    assert.equal(f.requests.length, 1, '404 does not cause repeated requests')
+  })
+
+  test(`${mode}: hover retries a transient failure only after cooldown`, async t => {
+    const f = fixture(mode); t.after(f.close)
+    f.fire('mouseover', kb()); f.tick(80)
+    f.requests[0]!.pending.reject(new Error('offline')); await flush()
+    f.fire('mouseover', kb()); f.tick(80)
+    assert.equal(f.requests.length, 1)
+    f.tick(5000)
+    f.fire('mouseover', kb()); f.tick(80)
+    assert.equal(f.requests.length, 2)
+    f.requests[1]!.pending.resolve('restored'); await flush()
+    assert.equal(f.state.float.value.content, 'restored')
+  })
+
+  test(`${mode}: a scope change cannot reuse or cache an older request`, async t => {
+    const f = fixture(mode); t.after(f.close)
+    f.fire('click', kb())
+    if (mode === 'chat') f.session.value = 'other'; else f.token.value = 'other'
+    f.fire('click', kb())
+    if (mode === 'chat') f.session.value = 'session-a'; else f.token.value = 'token'
+    f.fire('click', kb())
+    assert.equal(f.requests.length, 3)
+    f.requests[0]!.pending.resolve('stale'); await flush()
+    assert.equal(f.state.float.value.loading, true)
+    f.requests[2]!.pending.resolve('fresh'); await flush()
+    assert.equal(f.state.float.value.content, 'fresh')
+  })
+
   test(`${mode}: root replacement detaches listeners and discards pending hovers and loads`, async t => {
     const f = fixture(mode); t.after(f.close)
     const oldRoot = f.root.value as unknown as Element
@@ -222,8 +260,18 @@ for (const mode of ['chat', 'embed'] as const) {
     f.refs.value = []; f.fire('click', kb('failed'))
     f.requests[1]!.pending.reject(new Error('failure')); await flush()
     assert.equal(f.state.float.value.error, mode === 'chat' ? 'agentStream.citation.loadFailed' : 'Failed to load')
+    f.fire('mouseover', kb('failed')); f.tick(80)
+    assert.equal(f.requests.length, 2, 'hover does not repeatedly retry')
     f.fire('click', kb('failed'))
-    assert.equal(f.requests.length, 2, 'failures remain cached')
+    assert.equal(f.requests.length, 3, 'explicit click retries transient failure')
+    f.fire('mouseover', kb('failed')); f.tick(80)
+    assert.equal(f.requests.length, 3, 'hover joins the retry rather than reviving the stale error')
+    assert.equal(f.state.float.value.loading, true)
+    f.requests[2]!.pending.resolve('recovered passage'); await flush()
+    assert.equal(f.state.float.value.content, 'recovered passage')
+    assert.equal(f.state.float.value.error, '')
+    f.fire('click', kb('failed'))
+    assert.equal(f.requests.length, 3, 'success is cached')
   })
 }
 
