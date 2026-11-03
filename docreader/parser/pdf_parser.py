@@ -226,6 +226,20 @@ def _page_image_area_ratio(page, raw) -> float:
     return image_area / page_area
 
 
+def _page_is_text_only(page, raw) -> bool:
+    """Conservatively recognize a page containing only text objects."""
+    seen = False
+    try:
+        for obj in page.get_objects():
+            seen = True
+            if obj.type != raw.FPDF_PAGEOBJ_TEXT:
+                return False
+        return seen
+    except Exception:
+        # Failure to inspect a page isn't evidence that it has no graphics.
+        return False
+
+
 def _extract_page_text(page) -> str:
     """Plain top-to-bottom text extraction (fallback path)."""
     textpage = None
@@ -424,13 +438,14 @@ def _is_figure_interior_line(text: str) -> bool:
     return False
 
 
-def _postprocess_pdf_text(text: str) -> str:
+def _postprocess_pdf_text(text: str, *, text_only_page: bool = False) -> str:
     if SANITIZE_PDF_TEXT:
         text = _sanitize_pdf_text(text)
     text = _strip_arxiv_and_page_num_lines(text)
-    text = _strip_lines_above_figure_captions(text)
-    if STRIP_CHART_TEXT_DEBRIS:
-        text = _strip_chart_text_debris(text)
+    if not text_only_page:
+        text = _strip_lines_above_figure_captions(text)
+        if STRIP_CHART_TEXT_DEBRIS:
+            text = _strip_chart_text_debris(text)
     return text
 
 
@@ -2352,6 +2367,18 @@ class PDFParser(BaseParser):
                                 text = plain
                     else:
                         text = plain
+                    # Inspect objects only when a later heuristic could remove
+                    # figure/chart text. Sanitizing first matches the cleanup
+                    # path for text containing PDF placeholder characters.
+                    cleanup_text = _sanitize_pdf_text(text) if SANITIZE_PDF_TEXT else text
+                    has_cleanup_context = (
+                        _FIGURE_CAPTION_SEARCH_RE.search(cleanup_text)
+                        or (STRIP_CHART_TEXT_DEBRIS and _CHART_CONTEXT_RE.search(cleanup_text))
+                    )
+                    text_only_page = bool(
+                        cls == "text" and has_cleanup_context
+                        and _page_is_text_only(page, pdfium_r)
+                    )
                     if cls == "text":
                         clips = _extract_vector_figure_clips(
                             page,
@@ -2367,7 +2394,7 @@ class PDFParser(BaseParser):
                             vector_clips[i] = clips
                             for ref_path, b64, _y, _cap in clips:
                                 images[ref_path] = b64
-                    text = _postprocess_pdf_text(text)
+                    text = _postprocess_pdf_text(text, text_only_page=text_only_page)
                     if cls == "text" and SOURCE_BOXES:
                         line_boxes[i] = _page_line_boxes(page, pdfium_r)
                     if cls == "text" and vector_clips.get(i):
