@@ -33,10 +33,13 @@ import (
 const (
 	// integrationDefaultAPIURL / integrationDefaultProxyURL match the user's
 	// local Cube deployment: CubeAPI on 33000, CubeProxy (openresty inside
-	// the cube-proxy docker container) on the host's port 80. The Dashboard
-	// (cube-webui) is exposed on 12088 and MUST NOT be used as a data-plane
-	// endpoint — POST requests against it return 405 because Dashboard is a
-	// static SPA server, not a routing proxy.
+	// the cube-proxy docker container) on the host's port 80. Ports vary per
+	// deployment — a verified second deployment serves CubeAPI on 3000 and
+	// the proxy on 8480 — so set CUBE_API_URL / CUBE_PROXY_URL rather than
+	// editing these defaults. The Dashboard (cube-webui) is exposed on 12088
+	// and MUST NOT be used as a data-plane endpoint — POST requests against
+	// it return 405 because Dashboard is a static SPA server, not a routing
+	// proxy.
 	integrationDefaultAPIURL   = "http://127.0.0.1:33000"
 	integrationDefaultProxyURL = "http://127.0.0.1:80"
 
@@ -63,6 +66,12 @@ func integrationConfig(t *testing.T) *Config {
 		cfg.CubeProxyURL = v
 	} else {
 		cfg.CubeProxyURL = integrationDefaultProxyURL
+	}
+	// Loopback endpoints are private addresses, and the outbound policy
+	// correctly refuses them unless the config opts in. Integration targets
+	// are local by definition, so allow opting in instead of patching.
+	if v := strings.TrimSpace(os.Getenv("CUBE_ALLOW_PRIVATE")); v == "1" || v == "true" {
+		cfg.AllowPrivateEndpoints = true
 	}
 	cfg.CubeSandboxDomain = DefaultCubeSandboxDomain
 	cfg.CubeHTTPTimeout = integrationHTTPTimeout
