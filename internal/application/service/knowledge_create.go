@@ -325,9 +325,10 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool,
 	title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	options ...types.KnowledgeCreationOptions,
 ) (*types.Knowledge, error) {
 	return s.createKnowledgeFromURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel,
-		title, tagIDs, channel, processOverrides, nil)
+		title, tagIDs, channel, processOverrides, nil, options...)
 }
 
 func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
@@ -335,7 +336,12 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 	title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
 	replacement *knowledgeReplacement,
+	options ...types.KnowledgeCreationOptions,
 ) (*types.Knowledge, error) {
+	folder, err := types.CreationFolder(options...)
+	if err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
@@ -343,7 +349,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 	if isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURLWithReplacement(
 			ctx, kbID, rawURL, fileName, fileType, enableMultimodel,
-			title, tagIDs, channel, processOverrides, replacement,
+			title, tagIDs, channel, processOverrides, replacement, options...,
 		)
 	}
 
@@ -413,6 +419,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderPath:       folder,
 		Type:             "url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -552,7 +559,12 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 	ctx context.Context, kbID, fileURL, fileName, fileType string,
 	enableMultimodel *bool, title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides, replacement *knowledgeReplacement,
+	options ...types.KnowledgeCreationOptions,
 ) (*types.Knowledge, error) {
+	folder, err := types.CreationFolder(options...)
+	if err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
 
@@ -651,6 +663,7 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderPath:       folder,
 		Type:             "file_url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -770,7 +783,12 @@ func (s *knowledgeService) CreateKnowledgeFromPassageSync(ctx context.Context,
 // CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	kbID string, payload *types.ManualKnowledgePayload, channel string,
+	options ...types.KnowledgeCreationOptions,
 ) (*types.Knowledge, error) {
+	folder, err := types.CreationFolder(options...)
+	if err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Start creating manual knowledge entry")
 
 	if payload == nil {
@@ -821,6 +839,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderPath:       folder,
 		Type:             types.KnowledgeTypeManual,
 		Channel:          defaultChannel(channel),
 		Title:            title,
