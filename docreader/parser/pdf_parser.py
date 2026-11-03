@@ -1928,6 +1928,10 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
         try:
             width, height = page.get_size()
             page_area = float(width) * float(height)
+            try:
+                page_box = page.get_bbox()
+            except Exception:
+                page_box = None
             if page_area <= 0:
                 continue
             for object_index, obj in enumerate(page.get_objects()):
@@ -1937,6 +1941,13 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
                     left, bottom, right, top = obj.get_bounds()
                 except Exception:
                     continue
+                # Form image bounds use local coordinates; only reject a
+                # top-level image that is entirely outside the page box.
+                if page_box is not None and obj.level == 0:
+                    page_left, page_bottom, page_right, page_top = page_box
+                    if (right <= page_left or left >= page_right or
+                        top <= page_bottom or bottom >= page_top):
+                        continue
                 area_ratio = abs((right - left) * (top - bottom)) / page_area
                 if area_ratio < EMBED_MIN_AREA_RATIO:
                     continue  # cheap skip before decoding (logos/decorations)
