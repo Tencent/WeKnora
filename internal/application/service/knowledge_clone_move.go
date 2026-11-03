@@ -1581,7 +1581,7 @@ func (s *knowledgeService) enqueueMovedKnowledge(
 				asynq.TaskID(taskID),
 				asynq.Retention(7*24*time.Hour),
 			)...)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, task)
 		if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) && !errors.Is(err, asynq.ErrDuplicateTask) {
 			return fmt.Errorf("failed to enqueue document process task: %w", err)
 		}

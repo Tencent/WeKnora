@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -17,6 +18,13 @@ import (
 type reparseScrubPendingRepo struct {
 	interfaces.TaskPendingOpsRepository
 	events *[]string
+	ops    []*types.TaskPendingOp
+}
+
+func (r *reparseScrubPendingRepo) Enqueue(_ context.Context, op *types.TaskPendingOp) error {
+	r.ops = append(r.ops, op)
+	*r.events = append(*r.events, "pending-enqueue")
+	return nil
 }
 
 func (r *reparseScrubPendingRepo) DeleteByDedupKey(_ context.Context, _, _, _, dedupKey, op string) error {
@@ -99,11 +107,26 @@ func TestReparseKnowledgeDequeuesOnlyInFlightRuns(t *testing.T) {
 		status string
 		want   []string
 	}{
-		{types.ParseStatusPending, []string{"dequeue:knowledge-1", "open-attempt", scrub, "enqueue"}},
-		{types.ParseStatusProcessing, []string{"dequeue:knowledge-1", "open-attempt", scrub, "enqueue"}},
-		{types.ParseStatusFinalizing, []string{"dequeue:knowledge-1", "open-attempt", scrub, "enqueue"}},
-		{types.ParseStatusCompleted, []string{"open-attempt", scrub, "enqueue"}},
-		{types.ParseStatusFailed, []string{"open-attempt", scrub, "enqueue"}},
+		{
+			types.ParseStatusPending,
+			[]string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusProcessing,
+			[]string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusFinalizing,
+			[]string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusCompleted,
+			[]string{"open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusFailed,
+			[]string{"open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.status, func(t *testing.T) {
@@ -113,8 +136,12 @@ func TestReparseKnowledgeDequeuesOnlyInFlightRuns(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, test.want, h.events)
-			require.Len(t, h.tasks.payloads, 1)
-			assert.Equal(t, 1, h.tasks.payloads[0].Attempt, "the task carries the attempt opened for it")
+			pending := h.svc.taskPendingRepo.(*reparseScrubPendingRepo)
+			require.Len(t, pending.ops, 1)
+			var payload types.DocumentProcessPayload
+			require.NoError(t, json.Unmarshal(pending.ops[0].Payload, &payload))
+			assert.Equal(t, 1, payload.Attempt, "the pending op carries the attempt opened for it")
+			require.Len(t, h.tasks.dispatches, 1)
 			assert.Equal(t, types.ParseStatusPending, h.repo.row.ParseStatus)
 		})
 	}

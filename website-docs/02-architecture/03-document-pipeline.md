@@ -200,7 +200,7 @@ type FileService interface {
 
 ### 入队 {#_4-1-入队}
 
-`knowledge_create.go` 组装 `types.DocumentProcessPayload`（含 `TenantID/KnowledgeID/KnowledgeBaseID/FilePath/FileName/FileType/EnableMultimodel/EnableQuestionGeneration/QuestionCount/Language/Attempt` 等），任务选项来自 `knowledge_task_options.go`：
+`knowledge_create.go` 组装 `types.DocumentProcessPayload`（含 `TenantID/KnowledgeID/KnowledgeBaseID/FilePath/FileName/FileType/EnableMultimodel/EnableQuestionGeneration/QuestionCount/Language/Attempt` 等），任务选项来自 `knowledge_task_options.go`。启用 durable pending queue 时，`enqueueDocumentProcessTask` 先写入按知识库分组的 `task_pending_ops`，再投递轻量 `document:dispatch` 触发器；没有该仓储的旧/测试 wiring 仍走直接入队：
 
 ```go
 opts := []asynq.Option{
@@ -209,7 +209,7 @@ opts := []asynq.Option{
     asynq.MaxRetry(3),                                  // 失败最多重试 3 次
 }
 task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, opts...)
-info, err := s.task.Enqueue(task)
+info, err := s.enqueueDocumentProcessTask(ctx, task)
 ```
 
 入队失败时会将 `ParseStatus` 置为 `failed`（文件已保存，可通过 reparse 重新触发）。
@@ -220,6 +220,7 @@ info, err := s.task.Enqueue(task)
 
 | 队列常量 | 名称 | 用途 |
 |----------|------|------|
+| `QueueDocumentDispatch` | `document_dispatch` | 按知识库公平释放 durable 文档处理入口 |
 | `QueueDefault` | `default` | 核心文档处理（解析/分块/嵌入/索引） |
 | `QueueChatAttachment` | `chat_attachment` | 会话临时文档解析 |
 | `QueuePostProcess` | `postprocess` | 后处理编排任务 |
@@ -235,6 +236,7 @@ info, err := s.task.Enqueue(task)
 ### 失败重试语义 {#_4-3-失败重试语义}
 
 - `TypeDocumentProcess`：`MaxRetry(3)` → 初始 + 3 次重试共 4 次尝试；每次尝试受 `DocumentProcessTimeout`（默认 2 小时，环境变量 `WEKNORA_DOCUMENT_PROCESS_TIMEOUT`）约束，其中单次 docreader 调用另受 `WEKNORA_DOCREADER_CALL_TIMEOUT`（默认 30 分钟）约束。
+- 通过 durable lane 释放的任务携带 `PendingOpID`：成功后删除对应 pending row，最终失败或跳过重试时释放并重新唤醒知识库 lane；进程重启时由启动恢复逻辑重新创建 dispatcher trigger。
 - 处理函数内的 panic 会被转换为错误交给重试与死信流程，最后一次失败时文档标为 `failed`；Lite 模式的执行器同样捕获 panic，不会导致进程退出。
 - Payload 携带 `Attempt`（重新解析时取历史最大 attempt+1）；Span Tracker 用 attempt 隔离每轮处理的进度树，新 attempt 会"取代"（supersede）旧任务的收尾动作。
 - 处理函数区分"是否最后一次 asynq 尝试"（`isLastRetry`）：非最后一次的失败直接返回错误让 asynq 重试，最后一次才把 `ParseStatus` 落为 `failed` 并写 `ErrorMessage`。读租户、读知识行或写 `processing` 状态时遇到数据库瞬时错误也返回错误重试，不再直接确认任务；只有知识行确实不存在时才静默结束。
