@@ -637,11 +637,30 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	logger.Infof(ctx, "processing data source sync: ds=%s syncLog=%s", payload.DataSourceID, payload.SyncLogID)
 
+	// Get sync log. It is loaded before the data source so that a redelivery of
+	// an already finished round is recognised even when the data source has been
+	// deleted in the meantime, instead of having its log rewritten to canceled.
+	syncLog, slErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
+
+	// An asynq retry (or redelivery) can arrive after the round already reached
+	// a terminal state. Do not replay it: success/partial are finished, and
+	// canceled was stopped on purpose. failed must fall through because the
+	// retry resumes from the persisted cursor, and running is the in-flight or
+	// crashed attempt that the retry has to pick up.
+	if slErr == nil && syncLog != nil {
+		switch syncLog.Status {
+		case types.SyncLogStatusSuccess, types.SyncLogStatusPartial, types.SyncLogStatusCanceled:
+			logger.Infof(ctx, "sync log already finished, skipping replay: ds=%s syncLog=%s status=%s",
+				payload.DataSourceID, payload.SyncLogID, syncLog.Status)
+			return nil
+		}
+	}
+
 	// Get data source
 	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
 	if err != nil {
 		logger.Warnf(ctx, "data source not found (likely deleted), cancelling sync: ds=%s err=%v", payload.DataSourceID, err)
-		if syncLog, slErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID); slErr == nil && syncLog != nil {
+		if slErr == nil && syncLog != nil {
 			syncLog.Status = types.SyncLogStatusCanceled
 			syncLog.FinishedAt = timePtr(time.Now().UTC())
 			syncLog.ErrorMessage = "data source has been deleted"
@@ -650,10 +669,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
-	// Get sync log
-	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get sync log: %v", err)
+	if slErr != nil {
+		logger.Errorf(ctx, "failed to get sync log: %v", slErr)
 		return nil
 	}
 
