@@ -769,7 +769,7 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 			merged.Docker = &types.DockerSandboxConfig{}
 		}
 		if strings.TrimSpace(merged.Docker.Image) == "" {
-			merged.Docker.Image = sandbox.DefaultDockerImage
+			merged.Docker.Image = sandbox.StandardDockerImage()
 		}
 	default:
 		return nil, apperrors.NewBadRequestError(
