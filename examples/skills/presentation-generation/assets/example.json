@@ -1,0 +1,56 @@
+{
+  "title": "WeKnora 犀牛鸟课题二",
+  "subtitle": "安全、持久、可审计的 Agent Sandbox Workbench",
+  "author": "Tencent × Rhino Bird",
+  "footer": "Topic 2 final submission",
+  "theme": {
+    "primary": "155EEF",
+    "accent": "12B76A",
+    "background": "F8FAFC",
+    "text": "101828",
+    "muted": "667085"
+  },
+  "slides": [
+    {
+      "layout": "title",
+      "title": "WeKnora 犀牛鸟课题二",
+      "subtitle": "安全、持久、可审计的 Agent Sandbox Workbench"
+    },
+    {
+      "layout": "section",
+      "eyebrow": "01 / ARCHITECTURE",
+      "title": "一套会话架构，三个正式后端",
+      "subtitle": "Docker、E2B 与 Cube 共享 SessionBoundManager、终端桥接和产物生命周期。"
+    },
+    {
+      "layout": "bullets",
+      "title": "核心能力",
+      "bullets": [
+        "Interactive Terminal：原生 PTY、ANSI、Unicode 与窗口 resize",
+        "Safe Files：固定 /workspace/output 根目录并拒绝路径逃逸",
+        "Audit & Limits：可检索命令审计和真实资源超限终止"
+      ]
+    },
+    {
+      "layout": "two_column",
+      "title": "安全边界",
+      "left": {
+        "title": "浏览器可以做什么",
+        "bullets": ["使用相对 POSIX 路径", "访问当前会话产物", "通过现有鉴权下载"]
+      },
+      "right": {
+        "title": "服务端必须拒绝",
+        "bullets": ["绝对路径与 traversal", "symlink / rename escape", "跨租户与跨会话访问"]
+      }
+    },
+    {
+      "layout": "metrics",
+      "title": "验收目标",
+      "metrics": [
+        { "value": "3", "label": "Sandbox backends", "detail": "Docker · E2B · Cube" },
+        { "value": "A1–A5", "label": "Acceptance suite", "detail": "真实命令与观测结果" },
+        { "value": "0", "label": "Second abstractions", "detail": "复用当前 Terminal / WS / Preview" }
+      ]
+    }
+  ]
+}
