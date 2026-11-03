@@ -782,3 +782,23 @@ stdio 传输（Claude Desktop 的 `claude_desktop_config.json`）：
 - `_path_within_root` 用 `os.path.commonpath` 做包含判断，防 `..` 与符号链接逃逸。
 
 ---
+
+### Built-in MCP document folders
+
+`add_document` accepts optional `folder_path` for Markdown, webpage URLs, and direct file URLs. The destination is saved when the document is created; indexing remains asynchronous. Omitting the parameter retains existing behavior.
+
+`list_documents` accepts `folder_path` and `folder_recursive` (default false). Omitting the folder lists all documents; an empty string selects the root. Recursive filtering includes descendants at directory boundaries and happens before pagination, including the returned total.
+
+Paths use `/` and support Unicode. Absolute paths, parent traversal, control characters and paths exceeding the existing folder length/depth limits are rejected. Existing endpoint tool permissions and knowledge base access rules still apply.
+
+Example MCP `tools/call` parameters:
+
+```json
+{"name":"add_document","arguments":{"knowledge_base_id":"kb-id","title":"库存设计","content":"# 库存设计\n正文","folder_path":"ERP/技术设计/库存"}}
+```
+
+```json
+{"name":"list_documents","arguments":{"knowledge_base_id":"kb-id","folder_path":"ERP/技术设计","folder_recursive":true,"page":1,"page_size":20}}
+```
+
+File-byte upload remains available through the existing REST API. A Base64 MCP upload tool is deferred until direct client-side file transfer has been validated with a real client.

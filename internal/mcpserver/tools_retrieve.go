@@ -82,6 +82,8 @@ func listDocumentsTool() mcp.Tool {
 		mcp.WithDescription("List the documents inside one knowledge base with pagination and an optional title "+
 			"keyword filter. Returns document ids that read_document accepts."),
 		mcp.WithString("knowledge_base_id", mcp.Required(), mcp.Description("Knowledge base id or exact name")),
+		mcp.WithString("folder_path", mcp.Description("Relative folder; omitted means all folders, empty means root")),
+		mcp.WithBoolean("folder_recursive", mcp.Description("Include descendant folders (default false)")),
 		mcp.WithString("keyword", mcp.Description("Optional substring to filter document titles")),
 		mcp.WithNumber("page", mcp.Description("1-based page number, default 1")),
 		mcp.WithNumber("page_size", mcp.Description("Documents per page, default 20, max 100")),
@@ -279,6 +281,7 @@ func grepPatternAndTerms(query string) (*regexp.Regexp, string) {
 }
 
 type documentSummary struct {
+	FolderPath  string `json:"folder_path"`
 	ID          string `json:"id"`
 	Title       string `json:"title"`
 	FileName    string `json:"file_name,omitempty"`
@@ -293,6 +296,7 @@ type documentSummary struct {
 func summarizeKnowledge(k *types.Knowledge) documentSummary {
 	return documentSummary{
 		ID:          k.ID,
+		FolderPath:  k.FolderPath,
 		Title:       k.Title,
 		FileName:    k.FileName,
 		FileType:    k.FileType,
@@ -334,10 +338,22 @@ func (s *Server) handleListDocuments(ctx context.Context, req mcp.CallToolReques
 	if pageSize > maxListPageSize {
 		pageSize = maxListPageSize
 	}
+	filter := types.KnowledgeListFilter{Keyword: strings.TrimSpace(req.GetString("keyword", ""))}
+	if _, present := req.GetArguments()["folder_path"]; present {
+		folder, err := requestFolder(req)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		filter.FolderPath = folder
+		filter.FolderScope = types.FolderScopeExact
+		if req.GetBool("folder_recursive", false) {
+			filter.FolderScope = types.FolderScopeSubtree
+		}
+	}
 	result, err := s.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(
 		ctx, kb.ID,
 		&types.Pagination{Page: page, PageSize: pageSize},
-		types.KnowledgeListFilter{Keyword: strings.TrimSpace(req.GetString("keyword", ""))},
+		filter,
 	)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("failed to list documents", err), nil
