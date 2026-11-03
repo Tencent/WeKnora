@@ -21,6 +21,7 @@ func Builtins() []*Definition {
 		newLongcatProvider(),
 		newMimoProvider(),
 		newMinimaxProvider(),
+		newMixedbreadProvider(),
 		newModelscopeProvider(),
 		newMoonshotProvider(),
 		newNovitaProvider(),

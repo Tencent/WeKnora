@@ -107,6 +107,12 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprint(probability(doc)))
 		}
 		return `{"code":0,"message":"success","data":{"scores":[` + strings.Join(parts, ",") + `]}}`
+	case body["top_k"] != nil: // Mixedbread; its /reranking path also matches the NIM suffix below
+		docs := texts(body["input"])
+		for i := len(docs) - 1; i >= 0; i-- {
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"score":%v}`, i, probability(docs[i])))
+		}
+		return `{"data":[` + strings.Join(parts, ",") + `],"object":"list"}`
 	case strings.HasSuffix(r.URL.Path, "/reranking"): // NIM
 		docs := texts(body["passages"])
 		for i := len(docs) - 1; i >= 0; i-- {
@@ -249,6 +255,15 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 				},
 				"top_n": float64(3), "rank_fields": []any{"text"}, "return_documents": false,
 				"parameters": map[string]any{"truncate": "END"},
+			},
+		},
+		{
+			name: "mixedbread sends plain input strings", provider: "mixedbread",
+			model:    "mixedbread-ai/mxbai-rerank-large-v2",
+			wantPath: "/v1/reranking", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model": "mixedbread-ai/mxbai-rerank-large-v2", "query": query,
+				"input": anyStrings(three), "top_k": float64(3), "return_input": false,
 			},
 		},
 		{
