@@ -2579,8 +2579,7 @@ export default {
     },
     hostApproval: {
       titleDelete: '删除文件前需要你确认',
-      titleDangerous: '危险操作确认',
-      titleDenied: '命令被沙盒拦截，需要访问以下目录',
+      titleDenied: 'WeKnora 想要访问以下目录',
       titleGeneric: '需要你确认',
       command: '命令',
       cwd: '目录',
@@ -2598,7 +2597,25 @@ export default {
       rejectedTag: '已拒绝',
       submitted: '已提交',
       submitFailed: '提交失败',
-      userRejected: '用户拒绝'
+      userRejected: '用户拒绝',
+      titleFileWrite: '写入工作区外的文件',
+      fileOnly: '只授权这一个文件',
+      writeMode: '方式',
+      writeModeOverwrite: '覆盖',
+      writeModeAppend: '追加',
+      writeModeEdit: '编辑',
+      writeBytes: '{bytes} 字节',
+      preview: '内容',
+      previewTruncated: '只显示前 64 KB',
+      env: '环境变量',
+      skillName: '技能',
+      stdin: '标准输入',
+      script: '命令运行的脚本'
+    },
+    hostReview: {
+      reviewing: '自动审批中…',
+      approved: '已自动批准：{reason}',
+      denied: '自动审批已拒绝：{reason}'
     }
   },
   kbSettings: {
@@ -6482,6 +6499,13 @@ export default {
       toggleOn: '开启网络搜索',
       toggleOff: '关闭网络搜索',
       notConfigured: '未配置网络搜索引擎'
+    },
+    hostApprovalMode: {
+      ask: '请求批准',
+      askHint: '删除和工作区外的写入都要你确认',
+      auto: '替我审批',
+      autoHint: '由模型代你判断，不打扰你',
+      switchFailed: '切换审批模式失败'
     }
   },
   manualEditor: {
@@ -8069,6 +8093,10 @@ export default {
       dataExtensions: '数据与扩展',
       systemAdministration: '系统管理',
       platform: '平台'
+    },
+    hostApprovalDefault: {
+      title: '默认执行权限审批',
+      description: '智能体要删除文件，或写入工作区以外时，用这里决定是每次问你，还是由模型替你审批。新会话按这个开始；当前会话可在输入框左侧切换。'
     }
   },
   agent: {

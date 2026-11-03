@@ -112,17 +112,15 @@ func SaveDesktopHTTPBindPublicPreference(v bool) error {
 	return saveDesktopPrefs(cur)
 }
 
-// LoadApprovalMode returns the stored mode. Unknown values become "auto".
-// Known-but-unshipped modes are returned unchanged so the sandbox can refuse
-// them instead of silently widening access.
+// LoadApprovalMode returns the stored default mode. Unknown values become
+// "ask". Known-but-unshipped modes are returned unchanged so the sandbox can
+// refuse them instead of silently widening access.
 func LoadApprovalMode() string {
 	return string(localsandbox.ParseApprovalMode(loadDesktopPrefs().ApprovalMode))
 }
 
-// SaveApprovalMode refuses what it cannot deliver. Storing "ask" would promise
-// an approval card that does not exist yet, and "full" would promise an
-// unsandboxed run that the sandbox has no policy for; both look like a working
-// setting and behave like a broken one.
+// SaveApprovalMode stores the default mode. Only shipped modes are accepted:
+// "full" would promise an unsandboxed run the sandbox has no policy for.
 func SaveApprovalMode(mode string) error {
 	requested := localsandbox.ApprovalMode(mode)
 	if !requested.Known() {

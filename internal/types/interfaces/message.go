@@ -21,6 +21,10 @@ type MessageService interface {
 	// GetRecentMessagesBySession gets recent messages of a session
 	GetRecentMessagesBySession(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
 
+	// GetRecentUserMessages returns a session's latest user messages, oldest
+	// first. The role filter runs before the limit.
+	GetRecentUserMessages(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
+
 	// GetMessagesBySessionBeforeTime gets messages before a specific time of a session
 	GetMessagesBySessionBeforeTime(
 		ctx context.Context, sessionID string, beforeTime time.Time, limit int,
@@ -88,6 +92,9 @@ type MessageRepository interface {
 	GetMessagesBySession(ctx context.Context, sessionID string, page int, pageSize int) ([]*types.Message, error)
 	// GetRecentMessagesBySession gets recent messages of a session
 	GetRecentMessagesBySession(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
+	// GetRecentUserMessages returns a session's latest user messages, oldest
+	// first. The role filter runs before the limit.
+	GetRecentUserMessages(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
 	// GetMessagesBySessionBeforeTime gets messages before a specific time of a session
 	GetMessagesBySessionBeforeTime(
 		ctx context.Context, sessionID string, beforeTime time.Time, limit int,

@@ -1,5 +1,5 @@
 import { emitAssistantDataChange } from '@/utils/assistantDataChange'
-import { approvalEventFromRecord, clearComposerApproval, showComposerApproval } from '@/views/chat/components/hostApproval'
+import { approvalEventFromRecord, clearComposerApproval, isModelReview, showComposerApproval } from '@/views/chat/components/hostApproval'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
 import { parseThinkBlocks } from '@/utils/thinkBlocks'
 import { markRaw, nextTick, type Ref } from 'vue'
@@ -1016,8 +1016,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ...(message.agentEventStream as ChatMessage[]),
           approvalEvent,
         ]
-        message.pendingHostApproval = approvalEvent
-        showComposerApproval(approvalEvent)
+        // A model review is a record, not a question for the user.
+        if (!isModelReview(approvalEvent)) {
+          message.pendingHostApproval = approvalEvent
+          showComposerApproval(approvalEvent)
+        }
         break
       }
       case 'agent_prompt_required': {
@@ -1091,6 +1094,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ev.timed_out = d.timed_out
           ev.canceled = d.canceled
           ev.resolve_scope = d.scope
+          ev.risk_level = d.risk_level
           message.agentEventStream = [...(message.agentEventStream as ChatMessage[])]
         }
         const pending = message.pendingHostApproval as { pending_id?: string } | undefined

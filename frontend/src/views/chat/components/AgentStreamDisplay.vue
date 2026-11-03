@@ -151,7 +151,9 @@
               </div>
 
               <div v-else-if="showInlineHostApproval(event)" class="tool-event">
-                <HostApprovalCard :pending-id="event.pending_id"
+                <HostReviewRecord v-if="isModelReview(event)" :host="event.host"
+                  :resolved="event.resolved" :approved="event.approved" :resolve-reason="event.resolve_reason" />
+                <HostApprovalCard v-else :pending-id="event.pending_id"
                   :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
                   :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
                   :resolved="event.resolved" :approved="event.approved"
@@ -444,7 +446,9 @@
             </div>
 
             <div v-else-if="showInlineHostApproval(event)" class="tool-event">
-              <HostApprovalCard :pending-id="event.pending_id"
+              <HostReviewRecord v-if="isModelReview(event)" :host="event.host"
+                :resolved="event.resolved" :approved="event.approved" :resolve-reason="event.resolve_reason" />
+              <HostApprovalCard v-else :pending-id="event.pending_id"
                 :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
                 :resolved="event.resolved" :approved="event.approved"
@@ -789,7 +793,8 @@ import AskUserCard from './AskUserCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';
-import { isHostApprovalEvent } from './hostApproval';
+import HostReviewRecord from './HostReviewRecord.vue';
+import { isHostApprovalEvent, isModelReview } from './hostApproval';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -1250,10 +1255,10 @@ const embedAuthProps = computed(() => ({
 const approvalEvent = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) =>
   event?.type === 'tool_approval_required';
 
-// Pending host cards sit above the composer. A resolved approval stays in the
-// timeline so the turn still shows what was allowed or refused.
-const showInlineHostApproval = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) =>
-  approvalEvent(event) && isHostApprovalEvent(event) && !!event.resolved;
+// Pending host cards sit above the composer. A resolved approval, and every
+// model review (pending or not), stays in the timeline.
+const showInlineHostApproval = (event: { type?: string; kind?: string; host?: any; resolved?: boolean }) =>
+  approvalEvent(event) && isHostApprovalEvent(event) && (!!event.resolved || isModelReview(event));
 
 const showInlineToolApproval = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) => {
   if (!approvalEvent(event) || isHostApprovalEvent(event)) return false;
