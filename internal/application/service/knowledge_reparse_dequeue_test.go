@@ -107,11 +107,26 @@ func TestReparseKnowledgeDequeuesOnlyInFlightRuns(t *testing.T) {
 		status string
 		want   []string
 	}{
-		{types.ParseStatusPending, []string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"}},
-		{types.ParseStatusProcessing, []string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"}},
-		{types.ParseStatusFinalizing, []string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"}},
-		{types.ParseStatusCompleted, []string{"open-attempt", scrub, "pending-enqueue", "dispatch"}},
-		{types.ParseStatusFailed, []string{"open-attempt", scrub, "pending-enqueue", "dispatch"}},
+		{
+			types.ParseStatusPending,
+			[]string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusProcessing,
+			[]string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusFinalizing,
+			[]string{"dequeue:knowledge-1", "open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusCompleted,
+			[]string{"open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
+		{
+			types.ParseStatusFailed,
+			[]string{"open-attempt", scrub, "pending-enqueue", "dispatch"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.status, func(t *testing.T) {
