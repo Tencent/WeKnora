@@ -71,11 +71,11 @@ func TestCreateKnowledgeFromFileGitLabPreservesSourcePaths(t *testing.T) {
 	require.Equal(t, nested.ID, duplicate.ID, "a retry must match this path's own knowledge")
 
 	for _, channel := range []string{"", types.ConnectorTypeFeishu} {
-		_, err := create(channel, "ds-3", "another/README.md")
-		require.ErrorAs(t, err, &dupErr, "other import channels retain content deduplication")
+		_, err := create(channel, "ds-3", "README.md")
+		require.ErrorAs(t, err, &dupErr, "other import channels retain content deduplication in the same folder")
 	}
-	_, err = create(types.ConnectorTypeGitLab, "", "missing-identity/README.md")
-	require.ErrorAs(t, err, &dupErr, "incomplete source identity retains content deduplication")
+	_, err = create(types.ConnectorTypeGitLab, "", "README.md")
+	require.ErrorAs(t, err, &dupErr, "incomplete source identity retains content deduplication in the same folder")
 }
 
 func TestCreateKnowledgeFromFileConfluencePreservesCopiedPages(t *testing.T) {
