@@ -1,5 +1,46 @@
 basePath: /api/v1
 definitions:
+  github_com_Tencent_WeKnora_internal_types.BatchShareKnowledgeBasesRequest:
+    properties:
+      kb_ids:
+        items:
+          type: string
+        maxItems: 100
+        minItems: 1
+        type: array
+      organization_ids:
+        items:
+          type: string
+        maxItems: 100
+        minItems: 1
+        type: array
+      permission:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+    required:
+    - kb_ids
+    - organization_ids
+    - permission
+    type: object
+  internal_handler.BatchShareKnowledgeBaseResult:
+    properties:
+      error:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      kb_id:
+        type: string
+      organization_id:
+        type: string
+      share:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShare'
+      status:
+        type: integer
+    type: object
+  internal_handler.BatchShareKnowledgeBasesResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/internal_handler.BatchShareKnowledgeBaseResult'
+        type: array
+    type: object
   github_com_Tencent_WeKnora_internal_agent_tools.AgentToolCatalog:
     properties:
       default_tools:
@@ -14547,6 +14588,51 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /knowledge-bases/shares/batch:
+    post:
+      consumes:
+      - application/json
+      description: 去重后最多 100 个知识库与组织组合。逐项授权和执行，返回每项状态；已存在的共享更新权限。
+      parameters:
+      - description: 批量共享信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.BatchShareKnowledgeBasesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.BatchShareKnowledgeBasesResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 批量共享知识库到组织
+      tags:
+      - 知识库共享
   /agent-chat/{session_id}:
     post:
       consumes:

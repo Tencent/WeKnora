@@ -188,6 +188,9 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// 也不能私自把 KB 暴露出去。
 	// 分享管理不通过 capability 授予（manage_spaces 也不含）；仅 full-access
 	// key（空间级全权）可管理分享，scoped key 保持 default-deny。
+	// The batch handler checks creator/Admin ownership for each body-carried KB.
+	g.apiKeyRoute(r, http.MethodPost, "/knowledge-bases/shares/batch", apiKeyFullAccess(),
+		g.Contributor(), orgHandler.BatchShareKnowledgeBases(g.cfg))
 	kbShares := g.apiKeyGroup(r.Group("/knowledge-bases/:id/shares"), apiKeyFullAccess())
 	{
 		// Share knowledge base
