@@ -17,6 +17,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path"
@@ -24,6 +25,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -1508,7 +1510,11 @@ const (
 	maxInlineImagesForMultimodal = 30
 	// remoteImageFetchTimeout is the per-image HTTP request timeout.
 	remoteImageFetchTimeout = 15 * time.Second
+	// DNS, connection setup and response headers must not consume the body budget.
+	remoteImageConnectTimeout = time.Second
 )
+
+type unreachableImageHostsKey struct{}
 
 // applyMultimodalBudget flags images beyond the per-syntax AI quota.
 // Inline resolvers visit matches in document order and construct text in one pass,
@@ -1707,13 +1713,6 @@ func fetchAndStoreRemoteImage(
 	imgURL string,
 ) (*remoteImageResult, error) {
 	whitelisted := isWhitelistedImageHost(imgURL)
-
-	if !whitelisted {
-		if err := secutils.ValidateURLForSSRF(imgURL); err != nil {
-			return nil, fmt.Errorf("blocked by SSRF policy: %w", err)
-		}
-	}
-
 	data, mimeType, err := downloadImage(ctx, client, imgURL)
 	if err != nil {
 		return nil, fmt.Errorf("download: %w", err)
@@ -1892,6 +1891,8 @@ func (r *ImageResolver) ResolveRemoteImages(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
+	// Both syntax passes share failed hosts only for this document.
+	ctx = context.WithValue(ctx, unreachableImageHostsKey{}, make(map[string]error))
 	markdown = UnwrapLinkedImages(markdown)
 
 	// The client owns a dedicated transport, so it is built only once a scan
@@ -1930,19 +1931,72 @@ func (r *ImageResolver) ResolveRemoteImages(
 }
 
 // downloadImage fetches an image from remoteURL using the provided SSRF-safe
-// client. It validates Content-Type and enforces maxRemoteImageSize.
+// client. Its timeout includes DNS policy checks, the request and the body read.
+// It validates Content-Type and enforces maxRemoteImageSize.
 func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (data []byte, mimeType string, err error) {
+	parent := ctx
+	unreachableHosts, _ := ctx.Value(unreachableImageHostsKey{}).(map[string]error)
+	ctx, cancel := context.WithTimeout(ctx, remoteImageFetchTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)
 	}
+	host := strings.ToLower(req.URL.Scheme + "://" + req.URL.Host)
+	if previousErr, skipped := unreachableHosts[host]; skipped {
+		return nil, "", fmt.Errorf("image host already unreachable: %w", previousErr)
+	}
+	var responded atomic.Bool
+	connectTimer := time.AfterFunc(remoteImageConnectTimeout, cancel)
+	defer connectTimer.Stop()
+	req = req.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotFirstResponseByte: func() {
+			responded.Store(true)
+		},
+	}))
+	defer func() {
+		if err != nil && !responded.Load() && parent.Err() == nil {
+			if ctx.Err() != nil {
+				err = fmt.Errorf("image host did not respond within %s: %w", remoteImageConnectTimeout, context.DeadlineExceeded)
+			}
+			if unreachableHosts != nil {
+				unreachableHosts[host] = err
+			}
+		}
+	}()
 	// Some CDNs require a browser-like User-Agent.
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; WeKnora/1.0)")
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("HTTP GET: %w", err)
+	type result struct {
+		response *http.Response
+		err      error
 	}
+	done := make(chan result)
+	go func() {
+		// The supplied SSRF-safe client validates every request and redirect.
+		response, requestErr := client.Do(req)
+		res := result{response, requestErr}
+		// The synchronous DNS checks cannot be cancelled. Close a late response
+		// if the caller has already stopped waiting for this image.
+		select {
+		case done <- res:
+		case <-ctx.Done():
+			if res.response != nil {
+				res.response.Body.Close()
+			}
+		}
+	}()
+	var resp *http.Response
+	select {
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
+	case res := <-done:
+		if res.err != nil {
+			return nil, "", fmt.Errorf("HTTP GET: %w", res.err)
+		}
+		resp = res.response
+	}
+	connectTimer.Stop()
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
