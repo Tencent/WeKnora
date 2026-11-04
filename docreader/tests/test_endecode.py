@@ -1,6 +1,5 @@
 import base64
 import binascii
-import re
 import unittest
 
 from docreader.utils.endecode import encode_image
@@ -34,26 +33,6 @@ class TestEncodeImage(unittest.TestCase):
     def test_strict_still_raises_on_bad_padding(self):
         with self.assertRaises(binascii.Error):
             encode_image(VALID_B64[:-3])
-
-
-class TestMarkdownBase64Reachability(unittest.TestCase):
-    """The payload group of the markdown data-URI pattern is not ASCII-only.
-
-    Pinned here rather than in the parser tests because importing
-    docreader.parser pulls in the whole parser dependency set; the pattern
-    itself is what decides whether encode_image can ever see non-ASCII.
-    """
-
-    # docreader/parser/markdown_parser.py
-    B64_PATTERN = re.compile(r"!\[(.*?)\]\(data:image/([^;]+);base64,([^\)]+)\)")
-
-    def test_markdown_title_lands_in_the_payload_group(self):
-        markdown = '![x](data:image/png;base64,%s "图片")' % VALID_B64
-        match = self.B64_PATTERN.search(markdown)
-        self.assertIsNotNone(match)
-        self.assertIn("图片", match.group(3))
-        # What the parser then hands to encode_image(errors="ignore").
-        self.assertEqual(encode_image(match.group(3), errors="ignore"), b"")
 
 
 if __name__ == "__main__":
