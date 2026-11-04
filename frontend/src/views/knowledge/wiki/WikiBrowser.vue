@@ -836,6 +836,7 @@ import {
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
 import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
+import { createWikiMarkdownRenderer, renderWikiMermaid } from './wikiMermaid'
 import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, graphDetailSlugs, graphDetailLevelForSlug, GRAPH_DETAIL_MAX, type GraphBounds, type GraphCluster, type LayoutPlacement } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { useAssistantStore } from '@/stores/assistant'
@@ -1666,8 +1667,11 @@ watch(graphDrawerContent, async () => {
   await nextTick()
   if (drawerBodyRef.value) {
     await hydrateProtectedFileImages(drawerBodyRef.value, kbFileAccess.value)
+    await renderWikiMermaid(drawerBodyRef.value)
   }
 })
+
+const wikiMarkdownRenderer = createWikiMarkdownRenderer()
 
 function renderMarkdown(content: string): string {
   // Pre-process wiki links [[slug|name]] to custom HTML tags
@@ -1678,7 +1682,7 @@ function renderMarkdown(content: string): string {
     return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
   })
 
-  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string
+  const html = marked.parse(preprocessed, { breaks: true, async: false, renderer: wikiMarkdownRenderer }) as string
   return sanitizeMarkdownHTML(html)
 }
 
@@ -2186,12 +2190,15 @@ const indexHasMore = computed(() => {
   return true
 })
 
-watch(renderedContent, async () => {
+async function refreshReaderBody() {
   await nextTick()
   if (readerBodyRef.value) {
     await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
+    await renderWikiMermaid(readerBodyRef.value)
   }
-})
+}
+
+watch(renderedContent, refreshReaderBody)
 
 // Index body may contain image markdown from an LLM-generated intro;
 // hydrate the same way as regular page content so protected URLs
@@ -2200,6 +2207,7 @@ watch(renderedIndexMarkdown, async () => {
   await nextTick()
   if (indexBodyRef.value) {
     await hydrateProtectedFileImages(indexBodyRef.value, kbFileAccess.value)
+    await renderWikiMermaid(indexBodyRef.value)
   }
 })
 
@@ -3041,6 +3049,14 @@ async function loadStats() {
 // --- Manual page editing / version management ---------------------------
 
 const editingPage = ref(false)
+
+// The reader body is `v-if="!editingPage"`, so saving or cancelling an edit
+// mounts a fresh element whose protected images and diagrams are pending again;
+// renderedContent may not change (cancel), so refresh the body when editing ends.
+watch(editingPage, (editing) => {
+  if (!editing) refreshReaderBody()
+})
+
 const savingPage = ref(false)
 const editForm = ref({ title: '', summary: '', content: '' })
 // Version the user started editing from — the optimistic-lock guard sent
@@ -5176,6 +5192,7 @@ watch(() => props.view, (v) => {
     nextTick(async () => {
       if (readerBodyRef.value && renderedContent.value) {
         await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
+        await renderWikiMermaid(readerBodyRef.value)
       }
     })
   }
@@ -6150,6 +6167,19 @@ onUnmounted(() => {
   line-height: 1.6;
   font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
+
+  :deep(pre.mermaid) {
+    margin: 12px 0;
+    padding: 12px;
+    background: transparent;
+    text-align: center;
+    overflow-x: auto;
+
+    svg {
+      max-width: 100%;
+      height: auto;
+    }
+  }
 
   :deep(h1) {
     font-size: var(--app-text-4xl);
