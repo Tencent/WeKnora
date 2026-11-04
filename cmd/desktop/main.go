@@ -239,6 +239,12 @@ func main() {
 		panic(fmt.Sprintf("initialize desktop signing key: %v", err))
 	}
 	runtime.LogStartupEnv(context.Background())
+	// Refuse to boot on a set-but-invalid SYSTEM_AES_KEY rather than
+	// silently writing credentials in plaintext (see ValidateStartupEnv).
+	if err := runtime.ValidateStartupEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
