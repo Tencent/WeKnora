@@ -34954,7 +34954,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "tag_ids": {
-                    "description": "Tag IDs for filtering (used for FAQ priority filtering)",
+                    "description": "OR tag filter: document tags resolve to knowledge IDs; FAQ tags filter the chunk index.\nIntersects knowledge_ids when provided; no matching tags returns no results.",
                     "type": "array",
                     "items": {
                         "type": "string"
