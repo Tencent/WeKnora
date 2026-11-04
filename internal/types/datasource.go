@@ -309,6 +309,11 @@ type Resource struct {
 
 // FetchedItem represents a single document/content item fetched from external source
 type FetchedItem struct {
+	// RetryOnFailure requires streaming ingestion to reject recorded failures
+	// before a connector checkpoints this item. Existing connectors retain their
+	// best-effort handling unless they explicitly opt in.
+	RetryOnFailure bool `json:"retry_on_failure,omitempty"`
+
 	// Unique ID in the external system
 	ExternalID string `json:"external_id"`
 

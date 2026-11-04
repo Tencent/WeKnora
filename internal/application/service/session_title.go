@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 
@@ -103,6 +104,29 @@ func sanitizeGeneratedTitle(raw, userQuery string) sanitizedSessionTitle {
 		return sanitizedSessionTitle{}
 	}
 
+	// Parse a structured completion before line selection or truncation. In
+	// particular, pretty-printed JSON must not become a title containing "{".
+	candidate := text
+	if strings.HasPrefix(candidate, "```") {
+		if _, body, ok := strings.Cut(candidate, "\n"); ok {
+			candidate = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(body), "```"))
+		}
+	}
+	if isStructuredTitleCandidate(candidate) {
+		var response struct {
+			Title      string          `json:"title"`
+			Type       json.RawMessage `json:"type"`
+			Properties json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal([]byte(candidate), &response); err != nil || strings.TrimSpace(response.Title) == "" {
+			return sanitizedSessionTitle{Title: fallbackTitleFromQuery(userQuery), FromQuery: true}
+		}
+		text = strings.TrimSpace(response.Title)
+		if len(response.Type) > 0 || len(response.Properties) > 0 || isStructuredTitleCandidate(text) {
+			return sanitizedSessionTitle{Title: fallbackTitleFromQuery(userQuery), FromQuery: true}
+		}
+	}
+
 	title := ""
 	for _, line := range strings.Split(text, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -122,6 +146,15 @@ func sanitizeGeneratedTitle(raw, userQuery string) sanitizedSessionTitle {
 		return sanitizedSessionTitle{Title: title}
 	}
 	return sanitizedSessionTitle{Title: strings.TrimSpace(string(runes[:maxSessionTitleRunes])), Truncated: true}
+}
+
+// isStructuredTitleCandidate recognizes JSON responses without treating ordinary
+// Markdown links or brace placeholders as structured completions.
+func isStructuredTitleCandidate(text string) bool {
+	if strings.HasPrefix(text, "{") {
+		return json.Valid([]byte(text)) || strings.HasPrefix(strings.TrimSpace(text[1:]), `"`)
+	}
+	return strings.HasPrefix(text, "[") && json.Valid([]byte(text))
 }
 
 // cleanTitleLine strips block and inline Markdown plus wrapping quotes from a

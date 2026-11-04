@@ -482,15 +482,59 @@ func (p *PluginSearch) searchByTargets(
 		go func(modelKey string, targets []*types.SearchTarget) {
 			defer wg.Done()
 
-			// Compute embedding once for this model group. When that fails, retain
-			// only targets that have a real keyword index; vector-only targets must
-			// propagate the embedding failure instead of looking like empty recall.
+			// An image query needs the image vector space; no text embedding can
+			// stand in for it. When the model key is unresolved the group cannot
+			// share one embedding call, so embed per target rather than letting
+			// HybridSearch run with QueryText alone.
+			if len(chatManage.QueryImage) > 0 && modelKey == "" && !chatManage.DisableVectorMatch {
+				var innerWg sync.WaitGroup
+				for _, target := range targets {
+					innerWg.Add(1)
+					go func(t *types.SearchTarget) {
+						defer innerWg.Done()
+						emb, err := p.queryVector(ctx, t.KnowledgeBaseID, queryText, chatManage.QueryImage)
+						if err != nil {
+							recordError(fmt.Errorf(
+								"knowledge base %s cannot embed the query image: %w",
+								t.KnowledgeBaseID, err,
+							))
+							return
+						}
+						recordError(p.searchSingleTarget(
+							ctx, chatManage, t, queryText, emb, false, &mu, &results,
+						))
+					}(target)
+				}
+				innerWg.Wait()
+				return
+			}
+
+			// Compute embedding once for this model group. When a text query's
+			// embedding fails, retain only targets that have a real keyword index;
+			// vector-only targets must propagate the failure instead of looking
+			// like empty recall. An image query never degrades to text: the
+			// picture did not participate in a keyword search.
 			var queryEmbedding []float32
 			disableVector := chatManage.DisableVectorMatch
 			searchableTargets := targets
 			if modelKey != "" && !disableVector {
 				emb, err := p.queryVector(ctx, targets[0].KnowledgeBaseID, queryText, chatManage.QueryImage)
 				if err != nil {
+					if len(chatManage.QueryImage) > 0 {
+						for _, target := range targets {
+							recordError(fmt.Errorf(
+								"knowledge base %s cannot embed the query image: %w",
+								target.KnowledgeBaseID, err,
+							))
+						}
+						pipelineWarn(ctx, "Search", "group_image_embed_failed", map[string]interface{}{
+							"model_key":      modelKey,
+							"kb_id":          targets[0].KnowledgeBaseID,
+							"error":          err.Error(),
+							"failed_targets": len(targets),
+						})
+						return
+					}
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
 					for _, target := range targets {
 						kb := kbMap[target.KnowledgeBaseID]

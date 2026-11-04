@@ -21,6 +21,7 @@ import MentionSelector from './MentionSelector.vue';
 import { useAuthStore } from '@/stores/auth';
 import type { BrowserKnowledgeBase } from '@/utils/mentionFileBrowser';
 import AgentSelector from './AgentSelector.vue';
+import HostApprovalModeSelect from './HostApprovalModeSelect.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { type ModelConfig } from '@/api/model';
@@ -686,6 +687,10 @@ const props = defineProps({
     default: false
   }
 });
+
+const hostApprovalModeVisible = computed(() =>
+  !props.embeddedMode && !!props.sessionId && deploymentCapabilities.isSupported('settings.sandbox.host'),
+);
 
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
@@ -3058,6 +3063,8 @@ defineExpose({
           <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
+
+          <HostApprovalModeSelect v-if="hostApprovalModeVisible && sessionId" :session-id="sessionId" />
 
           <t-tooltip v-if="settingsStore.isAgentStreamMode" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">

@@ -58,6 +58,8 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id", handler.GetSession)
 		sessions.GET("", handler.GetSessionsByTenant)
 		sessions.PUT("/:id", handler.UpdateSession)
+		sessions.GET("/:id/host-approval-mode", handler.GetHostApprovalMode)
+		sessions.PUT("/:id/host-approval-mode", handler.SetHostApprovalMode)
 		sessions.DELETE("/:id", handler.DeleteSession)
 		sessions.DELETE("/:id/messages", handler.ClearSessionMessages)
 		sessions.POST("/:session_id/generate_title", handler.GenerateTitle)

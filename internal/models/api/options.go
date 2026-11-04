@@ -78,6 +78,11 @@ type Options struct {
 	// markers; empty/short is the default 5-minute cache; long requests 1h/24h
 	// where the provider accepts it.
 	CacheRetention CacheRetention `json:"-"`
+	// Isolated marks a side call (host approval review) that must not inherit
+	// tools, provider-side conversation state, or a configured temperature.
+	// When the model accepts temperature, the request sends 0. Zero on an
+	// ordinary call still means unset.
+	Isolated bool `json:"-"`
 }
 
 // CompletionBudget is the single per-call generation cap. MaxTokens and

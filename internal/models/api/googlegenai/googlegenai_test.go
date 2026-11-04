@@ -796,3 +796,22 @@ func TestMapFinishReason(t *testing.T) {
 		})
 	}
 }
+
+func TestIsolatedRequestSendsTemperatureZeroDespiteExtraGeneration(t *testing.T) {
+	client := newTestClient(t, "https://generativelanguage.googleapis.com", func(c *Config) {
+		c.Settings.ExtraGeneration = map[string]any{"temperature": 0.9}
+	})
+	body, err := client.BuildRequestBody(
+		[]api.Message{{Role: "user", Content: "hi"}},
+		&api.Options{Isolated: true},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("BuildRequestBody: %v", err)
+	}
+	got := normalize(t, body).(map[string]any)
+	gen, _ := got["generationConfig"].(map[string]any)
+	if gen["temperature"] != 0.0 {
+		t.Fatalf("temperature = %v, want 0", gen["temperature"])
+	}
+}

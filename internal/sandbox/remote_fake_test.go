@@ -102,6 +102,7 @@ type fakeRemoteClient struct {
 	missingPathMakeDir   bool
 	execRequests         []RemoteExecRequest
 	writeFiles           []fakeRemoteWriteFile
+	removePaths          []string
 
 	// snapshots maps snapshotID -> source sandboxID.
 	snapshots   map[string]string
@@ -407,7 +408,10 @@ func (c *fakeRemoteClient) MakeDir(_ context.Context, handle RemoteSandboxHandle
 	return nil
 }
 
-func (c *fakeRemoteClient) Remove(context.Context, RemoteSandboxHandle, string) error {
+func (c *fakeRemoteClient) Remove(_ context.Context, _ RemoteSandboxHandle, path string) error {
+	c.mu.Lock()
+	c.removePaths = append(c.removePaths, path)
+	c.mu.Unlock()
 	return nil
 }
 
