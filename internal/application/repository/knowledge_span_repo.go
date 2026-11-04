@@ -55,6 +55,12 @@ type KnowledgeSpanRepository interface {
 	LastActivity(ctx context.Context, knowledgeIDs []string) (map[string]time.Time, error)
 }
 
+// DocumentGenerationSpanRepository atomically opens an attempt only for the
+// current producer, including cancellation of its superseded open spans.
+type DocumentGenerationSpanRepository interface {
+	OpenDocumentGenerationAttempt(context.Context, *types.KnowledgeProcessingSpan) (int, error)
+}
+
 type knowledgeSpanRepository struct {
 	db *gorm.DB
 }
@@ -62,6 +68,47 @@ type knowledgeSpanRepository struct {
 // NewKnowledgeSpanRepository wires the GORM-backed implementation.
 func NewKnowledgeSpanRepository(db *gorm.DB) KnowledgeSpanRepository {
 	return &knowledgeSpanRepository{db: db}
+}
+
+// OpenDocumentGenerationAttempt prevents an obsolete producer from allocating
+// a later attempt or cancelling the current producer's root during a reparse.
+func (r *knowledgeSpanRepository) OpenDocumentGenerationAttempt(
+	ctx context.Context, row *types.KnowledgeProcessingSpan,
+) (int, error) {
+	if row == nil || row.KnowledgeID == "" || row.SpanID == "" || row.Kind != types.SpanKindRoot {
+		return 0, errors.New("document generation: root span is required")
+	}
+	tenantID, token, ok := types.DocumentGenerationOwnerFromContext(ctx, row.KnowledgeID)
+	if !ok {
+		return 0, types.ErrDocumentGenerationSuperseded
+	}
+	var saved types.KnowledgeProcessingSpan
+	err := (&taskPendingOpsRepository{db: r.db}).documentTransaction(ctx, func(tx *gorm.DB) error {
+		generation, err := matchDocumentGeneration(tx, tenantID, row.KnowledgeID, token)
+		if err != nil {
+			return err
+		}
+		if generation == nil {
+			return types.ErrDocumentGenerationSuperseded
+		}
+		spans := &knowledgeSpanRepository{db: tx}
+		attempt, err := spans.NextAttempt(ctx, row.KnowledgeID)
+		if err != nil {
+			return err
+		}
+		if _, err := spans.CancelOpenSpansBeforeAttempt(ctx, row.KnowledgeID, attempt,
+			"ATTEMPT_SUPERSEDED", "superseded by a newer parse attempt"); err != nil {
+			return err
+		}
+		saved = *row
+		saved.Attempt = attempt
+		return spans.Upsert(ctx, &saved)
+	})
+	if err != nil {
+		return 0, err
+	}
+	*row = saved
+	return saved.Attempt, nil
 }
 
 func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.KnowledgeProcessingSpan) error {

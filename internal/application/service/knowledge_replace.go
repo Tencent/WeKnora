@@ -40,7 +40,7 @@ import (
 // knowledge's hash as a duplicate — path identity is what connectors need.
 func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	knowledgeID string, file *multipart.FileHeader, customFileName string, metadata map[string]string,
-) (*types.Knowledge, error) {
+) (_ *types.Knowledge, resultErr error) {
 	if file == nil {
 		return nil, werrors.NewBadRequestError("file is required")
 	}
@@ -135,6 +135,20 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	// Compensations must still run if the caller's context is cancelled
 	// mid-replacement (e.g. a sync task hitting its timeout).
 	cleanupCtx := context.WithoutCancel(ctx)
+	// Invalidate the previous producer before publishing the new source. The
+	// nested reparse reuses this token, so a stale rollback cannot restore its
+	// source over a replacement that began later.
+	ctx, err = s.beginDocumentGeneration(ctx, existing, existing.KnowledgeBaseID)
+	if err != nil {
+		s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
+		return nil, err
+	}
+	cleanupCtx = context.WithoutCancel(ctx)
+	defer func() {
+		if resultErr != nil {
+			s.failDocumentGeneration(ctx, existing, 0, resultErr)
+		}
+	}()
 
 	title := existing.Title
 	if title == existing.FileName {
@@ -164,7 +178,7 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		"error_message": "",
 		"updated_at":    time.Now(),
 	}
-	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, sourceColumns); err != nil {
+	if err := s.updateDocumentGenerationColumns(ctx, existing.TenantID, existing.ID, sourceColumns); err != nil {
 		current, readErr := s.repo.GetKnowledgeByID(cleanupCtx, existing.TenantID, existing.ID)
 		if readErr != nil || current == nil || current.FilePath != newPath {
 			logger.Errorf(ctx, "Failed to point knowledge %s at its replacement file: %v", existing.ID, err)
@@ -179,7 +193,7 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	if err != nil {
 		logger.Errorf(ctx, "Reparse after replacing the file of knowledge %s failed, restoring source: %v",
 			existing.ID, err)
-		if rerr := s.repo.UpdateKnowledgeColumns(cleanupCtx, existing.ID, map[string]interface{}{
+		if rerr := s.updateDocumentGenerationColumns(cleanupCtx, existing.TenantID, existing.ID, map[string]interface{}{
 			"title":         existing.Title,
 			"file_name":     existing.FileName,
 			"folder_path":   existing.FolderPath,
