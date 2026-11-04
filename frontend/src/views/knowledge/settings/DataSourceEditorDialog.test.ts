@@ -64,12 +64,12 @@ async function fixture({
       return { data: { id: 'source-temp' } }
     },
     // Lazy picker: the first call lists roots, later calls list one level.
-    async listResources(id: string, parentId?: string) {
-      calls.push({ method: 'listResources', args: [id, parentId] })
+    async listResources(id: string, parentId?: string, preview?: any) {
+      calls.push({ method: 'listResources', args: preview ? [id, parentId, JSON.parse(JSON.stringify(preview))] : [id, parentId] })
       return { data: resources.filter(r => (parentId ? r.parent_id === parentId : !r.parent_id)) }
     },
-    async resolveResourceAncestors(id: string, ids: string[]) {
-      calls.push({ method: 'resolveResourceAncestors', args: [id, ids] })
+    async resolveResourceAncestors(id: string, ids: string[], preview?: any) {
+      calls.push({ method: 'resolveResourceAncestors', args: [id, ids, preview ? JSON.parse(JSON.stringify(preview)) : undefined] })
       return { data: { ancestors: [] } }
     },
   }
@@ -126,6 +126,50 @@ test('rotated GitLab credentials are tested without updating the saved data sour
       base_url: 'https://gitlab.example.com', access_token: 'rotated-token',
     }] }])
     assert.equal(f.storedToken(), 'expired-token')
+  } finally { f.close() }
+})
+
+test('resource preview uses replacement credentials without saving them', async () => {
+  const f = await fixture()
+  try {
+    await f.replace()
+    await f.vm.loadResources()
+    const call = f.calls.find(call => call.method === 'listResources')
+    assert.ok(call)
+    assert.equal(call.args[2].credentials.access_token, 'rotated-token')
+    assert.equal(f.storedToken(), 'expired-token')
+    assert.equal(f.calls.some(call => call.method === 'putDataSourceCredentials'), false)
+  } finally { f.close() }
+})
+
+test('child and ancestor requests use the same unsaved credential snapshot', async () => {
+  const f = await fixture()
+  try {
+    await f.replace()
+    await f.vm.loadResources()
+    await f.vm.ensureChildrenLoaded('parent')
+    await f.vm.revealExistingSelections(['child'])
+    const calls = f.calls.filter(call => call.method === 'listResources' || call.method === 'resolveResourceAncestors')
+    assert.equal(calls.length, 3)
+    for (const call of calls) assert.equal(call.args[2].credentials.access_token, 'rotated-token')
+    assert.equal(f.storedToken(), 'expired-token')
+  } finally { f.close() }
+})
+
+test('a changed credential on a new draft is previewed and saved on submit', async () => {
+  const f = await fixture({ create: true })
+  try {
+    f.vm.form.type = 'gitlab'
+    f.vm.form.config.credentials = { access_token: 'initial-token' }
+    await f.vm.loadResources()
+    f.vm.form.config.credentials = { access_token: 'rotated-token' }
+    await f.vm.loadResources()
+    const listings = f.calls.filter(call => call.method === 'listResources')
+    assert.equal(listings[1].args[2].credentials.access_token, 'rotated-token')
+    assert.equal(f.calls.some(call => call.method === 'putDataSourceCredentials'), false)
+    await f.vm.handleSubmit()
+    assert.equal(f.storedToken(), 'rotated-token')
+    assert.ok(f.calls.findIndex(call => call.method === 'putDataSourceCredentials') < f.calls.findLastIndex(call => call.method === 'updateDataSource'))
   } finally { f.close() }
 })
 

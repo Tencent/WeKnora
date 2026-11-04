@@ -386,6 +386,74 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 	c.JSON(http.StatusOK, resources)
 }
 
+type previewResourcesRequest struct {
+	ParentID string                  `json:"parent_id"`
+	Config   *types.DataSourceConfig `json:"config"`
+}
+
+// PreviewAvailableResources lists with unsaved configuration without persisting it.
+func (h *DataSourceHandler) PreviewAvailableResources(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID := h.getTenantID(c)
+	if tenantID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	id := c.Param("id")
+	if _, status, msg := h.getOwnedDataSource(ctx, tenantID, id); status != http.StatusOK {
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+	var req previewResourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid preview request"})
+		return
+	}
+	resources, err := h.service.PreviewAvailableResources(ctx, id, req.ParentID, req.Config)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not list resources; check the data source connection."})
+		return
+	}
+	if resources == nil {
+		resources = make([]types.Resource, 0)
+	}
+	c.JSON(http.StatusOK, resources)
+}
+
+type previewAncestorsRequest struct {
+	ResourceIDs []string                `json:"resource_ids"`
+	Config      *types.DataSourceConfig `json:"config"`
+}
+
+// PreviewResourceAncestors resolves paths with the same unsaved configuration.
+func (h *DataSourceHandler) PreviewResourceAncestors(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID := h.getTenantID(c)
+	if tenantID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	id := c.Param("id")
+	if _, status, msg := h.getOwnedDataSource(ctx, tenantID, id); status != http.StatusOK {
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+	var req previewAncestorsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid preview request"})
+		return
+	}
+	ancestors, err := h.service.PreviewResourceAncestors(ctx, id, req.ResourceIDs, req.Config)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not resolve resources; check the data source connection."})
+		return
+	}
+	if ancestors == nil {
+		ancestors = make([]string, 0)
+	}
+	c.JSON(http.StatusOK, gin.H{"ancestors": ancestors})
+}
+
 // @Summary Resolve resource ancestors
 // @Description Resolve the ancestor ExternalIDs that must be expanded to reveal the given (possibly deeply nested) resources in a lazily-loaded picker. Used to restore an existing selection when editing a data source.
 // @Tags DataSource
