@@ -138,6 +138,13 @@ func (e *AgentEngine) runCompaction(
 	// exists and compact again immediately.
 	e.lastUsage = types.TokenUsage{}
 	e.lastSentMsgCount = 0
+	// The exhausted mark describes the pre-compaction history too. A
+	// successful compaction rebuilds that history below wherever the last
+	// failure parked the count, so the guard's premise — below this count
+	// the answer has not changed — no longer holds. Keeping the mark would
+	// silently skip every later compaction, including overflow recovery,
+	// until the message count climbs back above it.
+	e.compactionExhaustedAt = 0
 
 	return result.Messages, true
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 func TestAnydocReaderRejectsUnsupportedFileType(t *testing.T) {
@@ -78,10 +79,10 @@ func TestAnydocReaderFallsBackForScannedPDF(t *testing.T) {
 		}},
 		Metadata: map[string]string{"image_source_type": "scanned_pdf"},
 	}}
-	result, err := NewAnydocReader(nil, fallback).readScannedPDF(context.Background(), &types.ReadRequest{
+	result, err := NewAnydocReader(nil, fallback).readPDFFallback(context.Background(), &types.ReadRequest{
 		FileName: "exam.pdf",
 		FileType: "pdf",
-	}, errors.New("PDF has no extractable text (Scanned, 5 pages): OCR is required"))
+	}, errors.New("PDF has no extractable text (Scanned, 5 pages): OCR is required"), "scanned_pdf")
 	if err != nil {
 		t.Fatalf("readScannedPDF: %v", err)
 	}
@@ -100,9 +101,9 @@ func TestAnydocReaderFallsBackForScannedPDF(t *testing.T) {
 }
 
 func TestAnydocReaderScannedPDFWithoutFallbackKeepsError(t *testing.T) {
-	_, err := NewAnydocReader(nil, nil).readScannedPDF(context.Background(), &types.ReadRequest{
+	_, err := NewAnydocReader(nil, nil).readPDFFallback(context.Background(), &types.ReadRequest{
 		FileName: "exam.pdf",
-	}, errors.New("PDF has no extractable text: OCR is required"))
+	}, errors.New("PDF has no extractable text: OCR is required"), "scanned_pdf")
 	if err == nil {
 		t.Fatal("readScannedPDF succeeded without a fallback, want an error")
 	}
@@ -113,14 +114,101 @@ func TestAnydocReaderScannedPDFWithoutFallbackKeepsError(t *testing.T) {
 
 func TestAnydocReaderDisconnectedFallbackKeepsError(t *testing.T) {
 	fallback := &disconnectedDocReader{}
-	_, err := NewAnydocReader(nil, fallback).readScannedPDF(context.Background(), &types.ReadRequest{
+	_, err := NewAnydocReader(nil, fallback).readPDFFallback(context.Background(), &types.ReadRequest{
 		FileName: "exam.pdf",
-	}, errors.New("PDF has no extractable text: OCR is required"))
+	}, errors.New("PDF has no extractable text: OCR is required"), "scanned_pdf")
 	if err == nil {
 		t.Fatal("readScannedPDF succeeded with a disconnected fallback, want an error")
 	}
 	if !strings.Contains(err.Error(), "OCR is required") {
 		t.Errorf("error does not mention OCR: %v", err)
+	}
+}
+
+func TestAnydocReaderStructureFallbackPreservesPageClassification(t *testing.T) {
+	for _, source := range []string{"pdf_text_layer", "mixed_pdf", ""} {
+		t.Run(source, func(t *testing.T) {
+			fallback := &stubDocReader{result: &types.ReadResult{
+				MarkdownContent: "recovered text",
+				Metadata:        map[string]string{"image_source_type": source},
+			}}
+			req := &types.ReadRequest{
+				FileName:     "report.pdf",
+				FileType:     "pdf",
+				FileContent:  []byte("original bytes"),
+				ParserEngine: AnydocEngineName,
+			}
+			result, err := NewAnydocReader(nil, fallback).readPDFFallback(
+				context.Background(), req, errors.New("invalid PDF structure"), "invalid_structure")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Metadata["image_source_type"] != source ||
+				result.Metadata["anydoc_fallback"] != "invalid_structure" {
+				t.Fatalf("fallback metadata = %#v", result.Metadata)
+			}
+			if req.ParserEngine != AnydocEngineName || fallback.got.ParserEngine != BuiltinEngineName ||
+				string(fallback.got.FileContent) != string(req.FileContent) || fallback.got == req {
+				t.Fatalf("fallback mutated caller request or lost original bytes: %#v", fallback.got)
+			}
+		})
+	}
+}
+
+func TestAnydocReaderStructureFallbackFailures(t *testing.T) {
+	original := errors.New("invalid PDF structure")
+	for _, tc := range []struct {
+		name     string
+		fallback interfaces.DocReader
+		want     string
+	}{
+		{"missing", nil, original.Error()},
+		{"disconnected", &disconnectedDocReader{}, original.Error()},
+		{"error", &stubDocReader{err: errors.New("builtin failed")}, "builtin failed"},
+		{"nil result", &stubDocReader{}, "returned no result"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := NewAnydocReader(nil, tc.fallback).readPDFFallback(context.Background(),
+				&types.ReadRequest{FileName: "report.pdf"}, original, "invalid_structure")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("fallback error = %v, want %q", err, tc.want)
+			}
+			if tc.fallback == nil && !errors.Is(err, original) {
+				t.Fatalf("original conversion error was lost: %v", err)
+			}
+		})
+	}
+}
+
+func TestAnydocReaderFallbackPreservesErrorClassification(t *testing.T) {
+	for _, cause := range []error{context.Canceled, anydoc.ErrResourceLimit} {
+		fallback := &stubDocReader{err: cause}
+		_, err := NewAnydocReader(nil, fallback).readPDFFallback(context.Background(),
+			&types.ReadRequest{FileName: "report.pdf"}, errors.New("invalid PDF structure"), "invalid_structure")
+		if !errors.Is(err, cause) {
+			t.Fatalf("fallback error = %v, want wrapped %v", err, cause)
+		}
+	}
+}
+
+func TestAnydocReaderReadFallsBackForMalformedPDF(t *testing.T) {
+	if !anydoc.Available() {
+		t.Skip("requires linked anydoc converter")
+	}
+	content := []byte("%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n")
+	_, convertErr := anydoc.Convert(content, anydoc.Options{Format: "pdf"})
+	if !anydoc.PDFInvalidStructure(convertErr) {
+		t.Fatalf("fixture conversion error = %v, want malformed PDF", convertErr)
+	}
+	fallback := &stubDocReader{result: &types.ReadResult{MarkdownContent: "recovered"}}
+	result, err := NewAnydocReader(nil, fallback).Read(context.Background(), &types.ReadRequest{
+		FileName: "malformed.pdf", FileType: "pdf", FileContent: content,
+	})
+	if err != nil || result == nil || result.Metadata["anydoc_fallback"] != "invalid_structure" {
+		t.Fatalf("Read() = %#v, %v", result, err)
+	}
+	if fallback.got == nil || string(fallback.got.FileContent) != string(content) {
+		t.Fatal("Read did not hand the original PDF to the fallback")
 	}
 }
 

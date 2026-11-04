@@ -1537,64 +1537,45 @@ func TestUserMachineRecoversFromLostBindingByDigest(t *testing.T) {
 	require.Equal(t, first.ID(), again.ID(), "metadata recovery must adopt the same machine, not create a second")
 }
 
-func TestStaleUserMachineWaitsForOtherSessions(t *testing.T) {
+func TestStaleUserMachineKeepsSandboxAcrossSessionsAndTurns(t *testing.T) {
 	f := newUserLifecycleFixture(t)
 	ctx := context.Background()
 	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
 	require.NoError(t, err)
-	// InvalidateByConfig's scan does not see user keys; mark the machine the
-	// way the manager does (T10).
-	n, err := markBindingKeysStale(ctx, f.bindings, []SessionSandboxKey{f.sessionKey(userSessionA).Machine()}, "cfg-1")
+	machine := f.sessionKey(userSessionA).Machine()
+	// Simulate a stale marker written before shared machines stopped rebuilding.
+	n, err := markBindingKeysStale(ctx, f.bindings, []SessionSandboxKey{machine}, "cfg-1")
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
+	f.lifecycle.createRequest.TemplateID = "template-new"
 
-	machine := admission.MachineScope(f.machine.Digest("weknora"))
-	self := admission.SessionMember(userSessionA, "shell", "self")
-	selfLease, err := f.admission.Hold(ctx, machine, self, time.Minute)
-	require.NoError(t, err)
-	defer selfLease.Release()
-	ownTurn := admission.SessionMember(userSessionA, "turn", "own")
-	ownTurnLease, err := f.admission.Hold(ctx, machine, ownTurn, time.Minute)
-	require.NoError(t, err)
-	defer ownTurnLease.Release()
-	ctxA := withAdmissionExempt(ctx, self, ownTurn)
-
-	other, err := f.admission.Hold(ctx, machine, admission.SessionMember(userSessionB, "shell", "t"), time.Minute)
-	require.NoError(t, err)
-	kept, err := f.lifecycle.Resolve(ctxA, f.sessionKey(userSessionA))
-	require.NoError(t, err)
-	require.Equal(t, first.ID(), kept.ID(), "B is running a command; A's turn must not rebuild under it")
-	other.Release()
-
-	ownPTY, err := f.admission.Hold(ctx, machine, admission.SessionMember(userSessionA, "pty", "p"), time.Minute)
-	require.NoError(t, err)
-	kept, err = f.lifecycle.Resolve(ctxA, f.sessionKey(userSessionA))
-	require.NoError(t, err)
-	require.Equal(t, first.ID(), kept.ID(), "A's own terminal is not this request; it blocks the rebuild too")
-	ownPTY.Release()
-
-	rebuilt, err := f.lifecycle.Resolve(ctxA, f.sessionKey(userSessionA))
-	require.NoError(t, err)
-	require.NotEqual(t, first.ID(), rebuilt.ID())
-	creates, _, _, _, _ := f.client.counts()
-	require.Equal(t, 2, creates)
-}
-
-func TestStaleRebuildStopsWhenTheBarrierIsLost(t *testing.T) {
-	f := newUserLifecycleFixture(t)
-	ctx := context.Background()
-	first, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
-	require.NoError(t, err)
-	_, err = markBindingKeysStale(ctx, f.bindings, []SessionSandboxKey{f.sessionKey(userSessionA).Machine()}, "cfg-1")
-	require.NoError(t, err)
-
-	f.client.deleteHook = func(context.Context, string) error {
-		f.admission.LoseBarrier(admission.MachineScope(f.machine.Digest("weknora")))
-		return nil
+	for _, sessionID := range []string{userSessionA, userSessionB} {
+		key := f.sessionKey(sessionID)
+		for turn := 0; turn < 2; turn++ {
+			require.NoError(t, f.bindings.BeginTurn(ctx, key))
+			kept, err := f.lifecycle.Resolve(ctx, key)
+			require.NoError(t, err)
+			require.Equal(t, first.ID(), kept.ID(), "even an idle machine stays across new turns and sessions")
+			require.NoError(t, f.bindings.EndTurn(ctx, key))
+		}
 	}
-	_, err = f.lifecycle.Resolve(ctx, f.sessionKey(userSessionA))
-	require.ErrorIs(t, err, admission.ErrLeaseLost, "after losing the barrier no further destructive step runs")
-	_ = first
+	kept, err := f.lifecycle.Resolve(ctx, machine)
+	require.NoError(t, err)
+	require.Equal(t, first.ID(), kept.ID(), "machine-level access must also preserve the sandbox")
+	creates, _, _, _, deletes := f.client.counts()
+	require.Equal(t, 1, creates)
+	require.Zero(t, deletes)
+
+	// Explicit release is still available and the replacement uses the new image.
+	released, err := f.lifecycle.reclaimUserMachine(ctx, machine, func(context.Context) (bool, error) {
+		return true, nil
+	})
+	require.NoError(t, err)
+	require.True(t, released)
+	replacement, err := f.lifecycle.Resolve(ctx, f.sessionKey(userSessionB))
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID(), replacement.ID())
+	require.Equal(t, "template-new", f.client.lastCreateRequest.TemplateID)
 }
 
 func TestUserKeyWithoutAdmissionIsRefused(t *testing.T) {

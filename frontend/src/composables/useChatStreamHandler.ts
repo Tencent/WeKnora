@@ -1,5 +1,7 @@
 import { emitAssistantDataChange } from '@/utils/assistantDataChange'
+import { approvalEventFromRecord, clearComposerApproval, isModelReview, showComposerApproval } from '@/views/chat/components/hostApproval'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
+import { parseThinkBlocks } from '@/utils/thinkBlocks'
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
@@ -114,6 +116,22 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
       timed_out: p.status === 'expired',
     }]
   }
+  if (p.kind === 'secure_form') {
+    return [{
+      type: 'agent_prompt_required',
+      pending_id: p.id,
+      kind: p.kind,
+      request,
+      tool_call_id: p.tool_call_id,
+      requested_at: requestedAt,
+      suspendable: true,
+      expires_at: p.expires_at,
+      ...state,
+      answered: resolved && Boolean(p.response) && !response.declined,
+      resolve_reason: response.declined ? 'declined' : state.resolve_reason,
+      timed_out: p.status === 'expired',
+    }]
+  }
   if (p.kind !== 'tool_approval') return []
   return [{
     type: 'tool_approval_required',
@@ -147,6 +165,22 @@ function askUserHistoryCard(toolCallId: string, data: ChatMessage): ChatMessage 
     resolved: true,
     answered: Boolean(data.answered),
     response: data.answer,
+    resolve_reason: data.reason,
+    timed_out: Boolean(data.timed_out),
+    canceled: Boolean(data.canceled),
+  }
+}
+
+/** The card of a secure form that finished, from the stored tool result. */
+function secureFormHistoryCard(toolCallId: string, data: ChatMessage): ChatMessage {
+  return {
+    type: 'agent_prompt_required',
+    pending_id: `history-${toolCallId}`,
+    kind: 'secure_form',
+    request: data.request,
+    tool_call_id: toolCallId,
+    resolved: true,
+    answered: Boolean(data.answered),
     resolve_reason: data.reason,
     timed_out: Boolean(data.timed_out),
     canceled: Boolean(data.canceled),
@@ -528,6 +562,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           })
         }
 
+        const approvals = Array.isArray(step.approvals) ? step.approvals as ChatMessage[] : []
+        approvals.forEach((record) => {
+          events.push(approvalEventFromRecord(record))
+        })
+
         if (toolCalls && Array.isArray(toolCalls)) {
           toolCalls.forEach((toolCall: ChatMessage) => {
             if (toolCall.name === 'final_answer') return
@@ -536,6 +575,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             const target = toolCall.target as ChatMessage | undefined
             if (resultData?.display_type === 'ask_user') {
               events.push(askUserHistoryCard(String(toolCall.id || ''), resultData))
+              return
+            }
+            if (resultData?.display_type === 'secure_form') {
+              events.push(secureFormHistoryCard(String(toolCall.id || ''), resultData))
               return
             }
             events.push({
@@ -695,23 +738,16 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       restoreQuickAnswerFlags(item)
 
       if (item.content) {
-        const content = String(item.content)
-        const thinkCloseTag = '</think>'
-        if (!content.includes('<think>') && !content.includes(thinkCloseTag)) {
+        const parsed = parseThinkBlocks(String(item.content))
+        if (parsed.found) {
+          item.showThink = Boolean(parsed.think) || parsed.open
+          item.thinking = parsed.open
+          item.thinkContent = parsed.think
+          item.content = parsed.answer.trim()
+        } else {
           item.thinkContent = ''
           item.showThink = false
           item.thinking = false
-        } else if (content.includes(thinkCloseTag)) {
-          item.showThink = true
-          item.thinking = false
-          const index = content.trim().lastIndexOf(thinkCloseTag)
-          item.thinkContent = content.trim().substring(0, index).replace('<think>', '').trim()
-          item.content = content.trim().substring(index + thinkCloseTag.length)
-        } else if (content.includes('<think>')) {
-          item.showThink = true
-          item.thinking = true
-          item.thinkContent = content.replace('<think>', '').trim()
-          item.content = ''
         }
       }
 
@@ -989,7 +1025,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
         if (turnPromptEvents().some(e => e.pending_id === d.pending_id)) break
-        ;(message.agentEventStream as ChatMessage[]).push({
+        const approvalEvent = {
           type: 'tool_approval_required',
           pending_id: d.pending_id,
           service_name: d.service_name,
@@ -1006,8 +1042,21 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           expires_at: d.expires_at,
           requested_at: d.requested_at,
           tool_call_id: d.tool_call_id,
+          kind: d.kind,
+          host: d.host,
           resolved: false,
-        })
+        }
+        // Replace the array. A markRaw stream ignores push, so the open chat
+        // stayed on "running" until a session reload rebuilt it.
+        message.agentEventStream = [
+          ...(message.agentEventStream as ChatMessage[]),
+          approvalEvent,
+        ]
+        // A model review is a record, not a question for the user.
+        if (!isModelReview(approvalEvent)) {
+          message.pendingHostApproval = approvalEvent
+          showComposerApproval(approvalEvent)
+        }
         break
       }
       case 'agent_prompt_required': {
@@ -1080,7 +1129,15 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ev.resolve_reason = d.reason
           ev.timed_out = d.timed_out
           ev.canceled = d.canceled
+          ev.resolve_scope = d.scope
+          ev.risk_level = d.risk_level
+          message.agentEventStream = [...(message.agentEventStream as ChatMessage[])]
         }
+        const pending = message.pendingHostApproval as { pending_id?: string } | undefined
+        if (pending && pending.pending_id === pid) {
+          message.pendingHostApproval = null
+        }
+        clearComposerApproval(typeof pid === 'string' ? pid : undefined)
         break
       }
       case 'mcp_oauth_required': {
@@ -1651,7 +1708,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'run_suspended' ||
       data.response_type === 'run_resumed' ||
       data.response_type === 'agent_prompt_required' ||
-      data.response_type === 'agent_prompt_resolved'
+      data.response_type === 'agent_prompt_resolved' ||
+      data.response_type === 'tool_approval_required' ||
+      data.response_type === 'tool_approval_resolved' ||
+      data.response_type === 'mcp_oauth_required' ||
+      data.response_type === 'mcp_oauth_resolved'
 
     const activeAssistant = getTrailingIncompleteAssistant()
     const isCurrentlyAgentMode = activeAssistant?.isAgentMode === true
@@ -1755,18 +1816,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     if ((data.data as ChatMessage | undefined)?.is_fallback) obj.is_fallback = true
 
-    const thinkCloseTag = '</think>'
-    if (fullContent.value.includes('<think>') && !fullContent.value.includes(thinkCloseTag)) {
-      obj.thinking = true
-      obj.showThink = true
-      obj.content = ''
-      obj.thinkContent = fullContent.value.replace('<think>', '').trim()
-    } else if (fullContent.value.includes('<think>') && fullContent.value.includes(thinkCloseTag)) {
-      obj.thinking = false
-      obj.showThink = true
-      const index = fullContent.value.lastIndexOf(thinkCloseTag)
-      obj.thinkContent = fullContent.value.substring(0, index).replace('<think>', '').trim()
-      obj.content = fullContent.value.substring(index + thinkCloseTag.length).trim()
+    const parsed = parseThinkBlocks(fullContent.value)
+    if (parsed.found) {
+      obj.thinking = parsed.open
+      obj.showThink = Boolean(parsed.think) || parsed.open
+      obj.thinkContent = parsed.think
+      obj.content = parsed.answer.trim()
     } else {
       obj.content = fullContent.value
     }

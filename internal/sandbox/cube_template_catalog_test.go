@@ -422,7 +422,7 @@ func TestCubeRemoteClientEnsureStandardTemplateBuildsWhenAbsent(t *testing.T) {
 	// must be built from the variant that ships it.
 	require.Equal(t, DefaultCubeTemplateImage, payload["image"])
 	require.Equal(t, StandardTemplateName, payload["name"])
-	require.Equal(t, "1G", payload["writableLayerSize"])
+	require.Equal(t, "64G", payload["writableLayerSize"])
 	require.EqualValues(t, CubeEnvdPort, payload["probePort"])
 	require.Equal(t, CubeEnvdHealthPath, payload["probePath"])
 	require.Equal(t, true, payload["allowInternetAccess"])

@@ -22,8 +22,6 @@ type PluginExtractEntity struct {
 	modelService      interfaces.ModelService         // Model service for calling large language models
 	template          *types.PromptTemplateStructured // Template for generating prompts
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
-	knowledgeService  interfaces.KnowledgeService // For shared KB document resolution
-	knowledgeRepo     interfaces.KnowledgeRepository
 }
 
 // NewPluginExtractEntity creates a new extract-entity plugin instance
@@ -32,16 +30,12 @@ func NewPluginExtractEntity(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
-	knowledgeService interfaces.KnowledgeService,
-	knowledgeRepo interfaces.KnowledgeRepository,
 	config *config.Config,
 ) *PluginExtractEntity {
 	res := &PluginExtractEntity{
 		modelService:      modelService,
 		template:          config.ExtractManager.ExtractEntity,
 		knowledgeBaseRepo: knowledgeBaseRepo,
-		knowledgeService:  knowledgeService,
-		knowledgeRepo:     knowledgeRepo,
 	}
 	eventManager.Register(res)
 	return res
@@ -68,6 +62,12 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		logger.Debugf(ctx, "skipping extract entity, intent %q needs no KB retrieval", chatManage.Intent)
 		return next()
 	}
+	// SearchTargets already include access checks and resolved document/tag
+	// scopes. An empty scope must not fall back to the raw request's KB IDs.
+	allKBIDs := chatManage.SearchTargets.GetAllKnowledgeBaseIDs()
+	if len(allKBIDs) == 0 {
+		return next()
+	}
 
 	// Prefer the rewritten query: it resolves pronouns and ellipsis from the
 	// conversation, which the raw follow-up question lacks.
@@ -80,33 +80,6 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get model, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
-	}
-
-	// Collect all knowledge base IDs to query
-	kbIDSet := make(map[string]struct{})
-	for _, id := range chatManage.KnowledgeBaseIDs {
-		kbIDSet[id] = struct{}{}
-	}
-
-	// If KnowledgeIDs is specified, retrieve them and collect their knowledge base IDs (include shared KB docs)
-	// Also build a mapping from KnowledgeID to KnowledgeBaseID
-	knowledgeToKBMap := make(map[string]string)
-	if len(chatManage.KnowledgeIDs) > 0 {
-		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, chatManage.TenantID, chatManage.KnowledgeIDs)
-		if err != nil {
-			logger.Errorf(ctx, "failed to get knowledges: %v", err)
-			return next()
-		}
-		for _, k := range knowledges {
-			kbIDSet[k.KnowledgeBaseID] = struct{}{}
-			knowledgeToKBMap[k.ID] = k.KnowledgeBaseID
-		}
-	}
-
-	// Convert set to slice
-	allKBIDs := make([]string, 0, len(kbIDSet))
-	for id := range kbIDSet {
-		allKBIDs = append(allKBIDs, id)
 	}
 
 	// Batch retrieve all knowledge bases
@@ -134,15 +107,6 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		enabledKBIDs = append(enabledKBIDs, id)
 	}
 	chatManage.EntityKBIDs = enabledKBIDs
-
-	// Filter knowledgeToKBMap to only include files from enabled knowledge bases
-	entityKnowledge := make(map[string]string)
-	for knowledgeID, kbID := range knowledgeToKBMap {
-		if _, ok := enabledKBSet[kbID]; ok {
-			entityKnowledge[knowledgeID] = kbID
-		}
-	}
-	chatManage.EntityKnowledge = entityKnowledge
 
 	template := &types.PromptTemplateStructured{
 		Description: p.template.Description,

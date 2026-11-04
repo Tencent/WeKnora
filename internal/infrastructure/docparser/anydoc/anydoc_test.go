@@ -2,9 +2,33 @@ package anydoc
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 )
+
+func TestPDFInvalidStructureLegacyErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"legacy structure", errors.New("Invalid PDF structure"), true},
+		{"wrapped structure", fmt.Errorf("convert: %w", errors.New("invalid PDF structure")), true},
+		{"ocr", errors.New("no extractable text: OCR is required"), false},
+		{"encrypted", errors.New("password required"), false},
+		{"io", errors.New("failed to read input"), false},
+		{"unavailable", fmt.Errorf("%w: invalid PDF structure", ErrUnavailable), false},
+		{"resource limit", fmt.Errorf("%w: invalid PDF structure", ErrResourceLimit), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PDFInvalidStructure(tc.err); got != tc.want {
+				t.Fatalf("PDFInvalidStructure(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestFormatForFileResolvesTypeAndName(t *testing.T) {
 	cases := []struct {

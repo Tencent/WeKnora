@@ -55,6 +55,17 @@ func TestLoadFromExcelRetriesFailedCreate(t *testing.T) {
 	tool := &DataAnalysisTool{db: newTestDuckDB(t), sessionID: "test-excel-load-retry"}
 	t.Cleanup(func() { tool.Cleanup(ctx) })
 	path := filepath.Join(t.TempDir(), "retry.xlsx")
+	writeWorkbook(t, path, map[string][][]any{
+		"Sales": {{"id", "amount"}, {1, 10}},
+	}, []string{"Sales"})
+	// Keep the workbook directory readable so the failure reaches CREATE.
+	// A missing file now fails earlier, during worksheet discovery.
+	rewriteExcelParts(t, path, func(name string, data []byte) (string, []byte) {
+		if strings.HasPrefix(name, "xl/worksheets/sheet") && strings.HasSuffix(name, ".xml") {
+			data = []byte(`<worksheet><sheetData>`)
+		}
+		return name, data
+	})
 
 	if _, err := tool.LoadFromExcel(ctx, path, "excel_retry"); err == nil ||
 		!strings.Contains(err.Error(), "failed to create table from Excel") {
@@ -212,5 +223,28 @@ func TestDataAnalysisCleanupIncludesFailedCreate(t *testing.T) {
 	tool.Cleanup(context.Background())
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDataAnalysisCleanupAfterRequestCancellation(t *testing.T) {
+	db := newPlainDuckDB(t)
+	path := writeCSV(t, "aborted.csv", "id,amount", "1,10", "2,20")
+	tool := &DataAnalysisTool{db: db, sessionID: "test-aborted-request"}
+	if _, err := tool.LoadFromCSV(context.Background(), path, "k_aborted"); err != nil {
+		t.Fatalf("initial load: %v", err)
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tool.Cleanup(canceled)
+
+	retryTool := &DataAnalysisTool{db: db, sessionID: "test-retry-after-abort"}
+	defer retryTool.Cleanup(context.Background())
+	schema, err := retryTool.LoadFromCSV(context.Background(), path, "k_aborted")
+	if err != nil {
+		t.Fatalf("reload after request cancellation: %v", err)
+	}
+	if schema.RowCount != 2 {
+		t.Fatalf("row count after reload = %d, want 2", schema.RowCount)
 	}
 }

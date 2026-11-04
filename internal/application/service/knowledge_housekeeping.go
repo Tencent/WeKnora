@@ -67,8 +67,8 @@ type HousekeepingService struct {
 	queuedAt  time.Time
 }
 
-// queuedProbeTTL bounds how often QueuedWork rescans the queue; clients poll
-// far more often than a backlog changes.
+// queuedProbeTTL bounds how often QueuedWork and the sweep rescan the queue;
+// clients poll far more often than a backlog changes.
 const queuedProbeTTL = time.Minute
 
 // openSpanStatuses are the span states meaning "this span never finished".
@@ -375,17 +375,19 @@ func (h *HousekeepingService) recoverStrandedPendingSummaries(ctx context.Contex
 		logger.Warnf(ctx, "[Housekeeping] pending summary query failed: %v", err)
 		return
 	}
+	if len(rows) == 0 {
+		return
+	}
+	// One shared queue scan answers every row (see filterOutQueued).
+	queued, err := h.queuedSnapshot(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[Housekeeping] summary queue probe failed: %v (deferring %d row(s))", err, len(rows))
+		return
+	}
 	var recovered int64
 	for _, k := range rows {
-		if h.inspector != nil {
-			queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
-			if err != nil {
-				logger.Warnf(ctx, "[Housekeeping] summary queue probe failed for %s: %v (deferring)", k.ID, err)
-				continue
-			}
-			if queued {
-				continue
-			}
+		if _, ok := queued[k.ID]; ok {
+			continue
 		}
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("id = ? AND summary_status = ?", k.ID, types.SummaryStatusPending).
@@ -680,14 +682,14 @@ func (h *HousekeepingService) closeStalledSpans(
 // durable per document in task_pending_ops (dedup_key = knowledge ID), while
 // asynq only carries a per-KB wake-up trigger whose payload has no knowledge
 // ID — and TypeWikiIngest is deliberately absent from the inspector's
-// taskTypesForKnowledgeCancel set anyway. So HasQueuedTasksForKnowledge
+// taskTypesForKnowledgeCancel set anyway. So the queue snapshot
 // structurally reports "nothing queued" for a document whose only outstanding
 // work is a queued Wiki ingest, and the sweep force-fails a perfectly healthy
 // row. Probe the durable table directly before consulting the inspector.
 //
 // When no inspector is wired (nil) the durable gate still applies; only the
 // transient queue check is skipped. On probe error we fail safe, but in
-// opposite directions by design: an inspector error KEEPS the candidate as
+// opposite directions by design: a queue scan error KEEPS the candidates as
 // stuck (matching the span heartbeat query), whereas a durable-table error
 // DEFERS every candidate to the next sweep — we cannot tell backlog from
 // orphan without it, and wrongly failing a live document is not recoverable
@@ -720,6 +722,19 @@ func (h *HousekeepingService) filterOutQueued(
 		durable[id] = struct{}{}
 	}
 
+	// One shared queue scan answers every candidate. Under a large backlog
+	// every waiting document is a candidate, and probing per candidate walks
+	// the queues once per document, saturating Redis for hours. A nil
+	// snapshot (no inspector, or a failed scan) leaves every candidate stuck.
+	var queued map[string]struct{}
+	if len(durable) < len(candidates) {
+		var err error
+		if queued, err = h.queuedSnapshot(ctx); err != nil {
+			logger.Warnf(ctx, "[Housekeeping] %v (will fail safe and treat %d candidate(s) as stuck)",
+				err, len(candidates)-len(durable))
+		}
+	}
+
 	out := candidates[:0]
 	for _, k := range candidates {
 		if _, ok := durable[k.ID]; ok {
@@ -727,18 +742,7 @@ func (h *HousekeepingService) filterOutQueued(
 			wikiHeld = append(wikiHeld, k)
 			continue
 		}
-		if h.inspector == nil {
-			out = append(out, k)
-			continue
-		}
-		queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
-		if err != nil {
-			logger.Warnf(ctx,
-				"[Housekeeping] queue probe failed for %s: %v (will fail safe and treat as stuck)", k.ID, err)
-			out = append(out, k)
-			continue
-		}
-		if queued {
+		if _, ok := queued[k.ID]; ok {
 			skipped++
 			continue
 		}

@@ -10,6 +10,8 @@ import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
 import * as dataChange from '../utils/assistantDataChange.ts'
+import * as thinkBlocks from '../utils/thinkBlocks.ts'
+import * as hostApproval from '../views/chat/components/hostApproval.ts'
 import type { useChatStreamHandler as StreamHandler } from './useChatStreamHandler.ts'
 
 const source = readFileSync(new URL('./useChatStreamHandler.ts', import.meta.url), 'utf8')
@@ -23,6 +25,8 @@ const modules: Record<string, unknown> = {
   '@/utils/messageTimestamp': timestamps,
   '@/utils/steerStreamFork': steering,
   '@/utils/assistantDataChange': dataChange,
+  '@/utils/thinkBlocks': thinkBlocks,
+  '@/views/chat/components/hostApproval': hostApproval,
 }
 const exports: { useChatStreamHandler?: typeof StreamHandler } = {}
 vm.runInNewContext(compiled, {

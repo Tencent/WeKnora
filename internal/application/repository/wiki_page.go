@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -118,6 +119,9 @@ func (r *wikiPageRepository) UpdateWithRevision(
 	ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+			return err
+		}
 		if rev != nil {
 			// An already-present (page_id, version) pair means a concurrent
 			// writer snapshotted the same version first; its copy is
@@ -290,19 +294,26 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 	return nil
 }
 
-// UpdateMeta updates bookkeeping / provenance fields WITHOUT incrementing the
-// version number. "Content" for versioning purposes is the user-visible page
-// body (title/content/summary/page_type/status); everything else — links,
-// source refs, chunk refs, page_metadata — is considered bookkeeping and is
-// refreshed here so the version counter only advances on real edits.
-//
-// Used by link maintenance, re-ingest (same-content case), and status changes.
+// UpdateMeta 保存来源、状态和目录等元数据，不修改反链或版本。
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
-	result := r.db.WithContext(ctx).
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+				return err
+			}
+			return updateWikiPageMeta(tx, page)
+		})
+	}
+	return updateWikiPageMeta(r.db.WithContext(ctx), page)
+}
+
+// updateWikiPageMeta 保留主线的窄字段写入；普通保存与快照保护的保存都不覆盖反链。
+func updateWikiPageMeta(db *gorm.DB, page *types.WikiPage) error {
+	// 反链由专用原子操作维护，避免这份元数据快照覆盖并发添加的链接。
+	result := db.
 		Model(page).
 		Where("id = ?", page.ID).
 		Updates(map[string]interface{}{
-			"in_links":      page.InLinks,
 			"out_links":     page.OutLinks,
 			"aliases":       page.Aliases,
 			"status":        page.Status,
@@ -366,12 +377,25 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		pattern := "%" + escapeLikeKeyword(req.Query) + "%"
+		if r.wikiDialect() == "sqlite" {
+			// SQLite does not provide PostgreSQL's full-text functions or casts.
+			// Search the same user-visible fields with a case-insensitive LIKE.
+			query = query.Where(
+				"(LOWER(COALESCE(title, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(COALESCE(content, '')) LIKE LOWER(?) ESCAPE ? OR "+
+					"LOWER(CAST(aliases AS TEXT)) LIKE LOWER(?) ESCAPE ?)",
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
+			)
+		} else {
+			// Use PostgreSQL full-text search + ILIKE for aliases.
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || "+
+					"coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR "+
+					"aliases::text ILIKE ? ESCAPE ?)",
+				req.Query, pattern, likeEscapeChar,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -1149,19 +1173,23 @@ func wikiPageLitePointers(rows []types.WikiPageLite) []*types.WikiPageLite {
 	return out
 }
 
-// wikiTitleTrigrams returns the padded rune trigrams used by pg_trgm's text
-// similarity model. Padding lets short titles still share a meaningful signal
-// only when their beginnings or endings agree.
+// wikiTitleTrigrams follows pg_trgm's word boundaries: non-alphanumeric
+// characters separate words, and each word receives two leading spaces and
+// one trailing space before its rune trigrams are added to the shared set.
 func wikiTitleTrigrams(value string) map[string]struct{} {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
+	words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	if len(words) == 0 {
 		return nil
 	}
-	runes := append([]rune{' ', ' '}, []rune(value)...)
-	runes = append(runes, ' ')
-	grams := make(map[string]struct{}, len(runes)-2)
-	for i := 0; i+3 <= len(runes); i++ {
-		grams[string(runes[i:i+3])] = struct{}{}
+	grams := make(map[string]struct{})
+	for _, word := range words {
+		runes := append([]rune{' ', ' '}, []rune(word)...)
+		runes = append(runes, ' ')
+		for i := 0; i+3 <= len(runes); i++ {
+			grams[string(runes[i:i+3])] = struct{}{}
+		}
 	}
 	return grams
 }

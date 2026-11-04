@@ -5,12 +5,16 @@ from __future__ import annotations
 import io
 import logging
 import re
+import xml.etree.ElementTree as ET
 import zipfile
 from typing import Callable, Dict, Iterable, Set
 
 logger = logging.getLogger(__name__)
 
 SST_PART = "xl/sharedStrings.xml"
+_SST_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
+)
 _SST_OVERRIDE_RE = re.compile(
     r'<Override[^>]*PartName="[^"]*sharedStrings\.xml"[^>]*/>',
     re.IGNORECASE,
@@ -36,7 +40,7 @@ def repair_xlsx_bytes(content: bytes) -> bytes | None:
         names = _normalized_names(zin.namelist())
         sst_path = _find_shared_strings_path(names)
         if sst_path:
-            if sst_path == SST_PART:
+            if sst_path == SST_PART or _has_existing_shared_strings_part(zin):
                 return None
             return _rewrite_zip(
                 zin, lambda files: _rename_shared_strings_part(files, sst_path)
@@ -122,6 +126,28 @@ def _strip_unreadable_ranges(files: Dict[str, bytes], sheets: Dict[str, int]) ->
         )
         updated[name] = sheet.encode("utf-8")
     return updated
+
+def _has_existing_shared_strings_part(zin: zipfile.ZipFile) -> bool:
+    """Respect the manifest's part name instead of renaming a valid table."""
+    try:
+        manifest = ET.fromstring(zin.read("[Content_Types].xml"))
+    except (KeyError, ET.ParseError):
+        return False
+    for part in manifest.findall(
+        "{http://schemas.openxmlformats.org/package/2006/content-types}Override"
+    ):
+        if part.get("ContentType") != _SST_CONTENT_TYPE:
+            continue
+        name = part.get("PartName", "")
+        if not name.startswith("/"):
+            continue
+        try:
+            zin.getinfo(name[1:])
+        except KeyError:
+            continue
+        return True
+    return False
+
 
 def _normalized_names(namelist: Iterable[str]) -> Set[str]:
     return {name.replace("\\", "/") for name in namelist}

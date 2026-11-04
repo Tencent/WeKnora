@@ -58,18 +58,21 @@ log_success() {
     printf "%b\n" "${GREEN}[SUCCESS]${NC} $1"
 }
 
-# Inject git short hash into the frontend image when composing from source.
-# docker-compose.yml interpolates VITE_FRONTEND_COMMIT; the build context is
-# frontend/ (no .git), so Vite cannot discover the commit on its own.
-export_frontend_build_args() {
-    if [ -n "${VITE_FRONTEND_COMMIT:-}" ]; then
-        export VITE_FRONTEND_COMMIT
-        return 0
-    fi
+# Inject build metadata into source-built images. docker-compose.yml
+# interpolates app, frontend, and docreader build args. Their build contexts
+# contain no .git, so pass the source identity from the checkout explicitly.
+export_build_args() {
     # shellcheck source=/dev/null
     eval "$("$PROJECT_ROOT/scripts/get_version.sh" env)"
-    export VITE_FRONTEND_COMMIT="${COMMIT_ID:-unknown}"
-    log_info "VITE_FRONTEND_COMMIT=${VITE_FRONTEND_COMMIT}"
+    if [ -z "${VITE_FRONTEND_COMMIT:-}" ]; then
+        export VITE_FRONTEND_COMMIT="${COMMIT_ID:-unknown}"
+    fi
+    export VERSION_ARG="${VERSION_ARG:-${VERSION:-unknown}}"
+    export COMMIT_ID_ARG="${COMMIT_ID_ARG:-${COMMIT_ID:-unknown}}"
+    export BUILD_TIME_ARG="${BUILD_TIME_ARG:-${BUILD_TIME:-unknown}}"
+    export DOCREADER_VERSION="${DOCREADER_VERSION:-${VERSION:-unknown}}"
+    export DOCREADER_COMMIT_ID="${DOCREADER_COMMIT_ID:-${COMMIT_ID:-unknown}}"
+    log_info "VITE_FRONTEND_COMMIT=${VITE_FRONTEND_COMMIT} VERSION_ARG=${VERSION_ARG} COMMIT_ID_ARG=${COMMIT_ID_ARG} BUILD_TIME_ARG=${BUILD_TIME_ARG} DOCREADER_VERSION=${DOCREADER_VERSION} DOCREADER_COMMIT_ID=${DOCREADER_COMMIT_ID}"
 }
 
 # 选择可用的 Docker Compose 命令（优先 docker compose，其次 docker-compose）
@@ -372,7 +375,7 @@ start_docker() {
 	# 进入项目根目录再执行docker-compose命令
     cd "$PROJECT_ROOT"
 
-    export_frontend_build_args
+    export_build_args
     
     # 启动基本服务
     log_info "启动核心服务容器..."
@@ -516,7 +519,7 @@ restart_container() {
     # 进入项目根目录再执行docker-compose命令
     cd "$PROJECT_ROOT"
 
-    export_frontend_build_args
+    export_build_args
     
     # 检查容器是否存在
 	if ! "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps --services | grep -q "^$container_name$"; then

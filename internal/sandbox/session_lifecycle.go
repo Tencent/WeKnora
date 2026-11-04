@@ -238,7 +238,9 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	}
 
 	// A stale binding is one whose sandbox boots an image the config has since
-	// replaced. Rebuild waits for a turn boundary: the first resolve of a new
+	// replaced. Shared user machines keep their image until explicitly released,
+	// including bindings marked stale before this policy was introduced.
+	// Per-session rebuilds wait for a turn boundary: the first resolve of a new
 	// chat turn may destroy and recreate, later resolves of that same turn
 	// keep the sandbox so /workspace scratch and in-flight execs survive an
 	// install that landed mid-turn. A resolve with no turn lease (no AgentQA
@@ -247,14 +249,11 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	// Destroying before rebuilding is not optional: the recovery pass below
 	// adopts any live sandbox carrying this session's metadata, so a surviving
 	// one would simply be picked up again.
-	if binding != nil && binding.StaleAt != nil {
-		rebuilt, err := l.rebuildStale(ctx, key, *binding)
-		if err != nil {
-			return nil, err
+	if binding != nil && binding.StaleAt != nil && l.shouldRebuildStaleBinding(ctx, key) {
+		if err := l.destroyBindingLocked(ctx, key, *binding); err != nil {
+			return nil, fmt.Errorf("release stale sandbox binding: %w", err)
 		}
-		if rebuilt {
-			binding = nil
-		}
+		binding = nil
 	}
 	// First resolve of a turn spends rebuildOnce even when nothing was stale,
 	// so a later install in the same turn cannot tear the sandbox down.
@@ -287,67 +286,11 @@ func (l *remoteSessionLifecycle) resolveLocked(
 	return l.createAndBind(ctx, machine)
 }
 
-// rebuildStale replaces a sandbox booted from a superseded image. A
-// per-session machine rebuilds at its turn boundary. A shared machine also
-// needs every operation except this request's own to be gone, and holds the
-// machine barrier while it destroys so none can start in between; a closer
-// already at work wins. Losing the barrier stops before any further step.
-func (l *remoteSessionLifecycle) rebuildStale(
-	ctx context.Context, key SessionSandboxKey, binding SessionSandboxBinding,
-) (bool, error) {
-	if !l.shouldRebuildStaleBinding(ctx, key) {
-		return false, nil
-	}
-	if !key.IsUserScoped() {
-		if err := l.destroyBindingLocked(ctx, key, binding); err != nil {
-			return false, fmt.Errorf("release stale sandbox binding: %w", err)
-		}
-		return true, nil
-	}
-	scope := admission.MachineScope(l.digest(key))
-	barrier, err := l.admission.Close(ctx, scope, redisLifecycleLockLease)
-	if err != nil {
-		if !errors.Is(err, admission.ErrClosed) {
-			log.Printf("[sandbox] close %s for rebuild failed (%v); keeping the current sandbox", key, err)
-		}
-		return false, nil
-	}
-	defer barrier.Release()
-	// C3: a lost barrier also cancels the provider call in flight.
-	guarded, stop := admission.Bind(ctx, barrier)
-	defer stop()
-	others, err := l.admission.ActiveExcept(guarded, scope, admissionExemptFrom(ctx)...)
-	if err != nil || others > 0 {
-		return false, nil
-	}
-	// A sibling may have registered background work after the first check
-	// and ended its turn before we closed admission. Registration is now
-	// blocked, so recheck the machine's leases before destroying it.
-	if l.hasLiveMachineActivity(guarded, key) {
-		return false, nil
-	}
-	if err := barrier.Check(); err != nil {
-		return false, err
-	}
-	if err := l.destroyBindingLocked(guarded, key.Machine(), binding); err != nil {
-		if cause := barrier.Check(); cause != nil {
-			return false, cause
-		}
-		return false, fmt.Errorf("release stale sandbox binding: %w", err)
-	}
-	if err := barrier.Check(); err != nil {
-		// The old machine is gone but admission may already be open again:
-		// do not create a replacement under a lost barrier.
-		return false, err
-	}
-	return true, nil
-}
-
 // withAdmissionExempt records the admission members that belong to the
-// current request, so a rebuild it triggers does not wait for itself. The key
-// is a types.ContextKey that survives logger.CloneContext: the async QA run
-// (internal/handler/session/qa.go setupSSEStream) is built through it, and a
-// dropped exemption would make every turn block its own rebuild forever.
+// current request, so exclusive workspace operations do not wait for themselves.
+// The key is a types.ContextKey that survives logger.CloneContext: the async QA
+// run (internal/handler/session/qa.go setupSSEStream) is built through it, and a
+// dropped exemption would make a turn block its own exclusive operations.
 func withAdmissionExempt(ctx context.Context, members ...string) context.Context {
 	prev := admissionExemptFrom(ctx)
 	all := make([]string, 0, len(prev)+len(members))
@@ -1144,13 +1087,17 @@ func (l *remoteSessionLifecycle) metadata(key SessionSandboxKey) map[string]stri
 }
 
 // shouldRebuildStaleBinding reports whether this resolve may tear down a
-// stale sandbox. No turn, or the first resolve of a new turn, rebuilds. A
+// stale per-session sandbox. Shared user machines never rebuild on image changes.
+// No turn, or the first resolve of a new turn, rebuilds a per-session sandbox. A
 // turn that has already used the sandbox keeps it. A lease we cannot read is
 // treated as an in-flight turn so a Redis blip cannot destroy /workspace.
 func (l *remoteSessionLifecycle) shouldRebuildStaleBinding(
 	ctx context.Context,
 	key SessionSandboxKey,
 ) bool {
+	if key.IsUserScoped() {
+		return false
+	}
 	leaser, ok := l.bindings.(sessionTurnLeaseStore)
 	active, rebuildOnce := false, false
 	if ok && key.SessionID != "" {
@@ -1161,36 +1108,7 @@ func (l *remoteSessionLifecycle) shouldRebuildStaleBinding(
 			return false
 		}
 	}
-	if active && !rebuildOnce {
-		return false
-	}
-	if !key.IsUserScoped() {
-		return true
-	}
-	if l.hasLiveMachineActivity(ctx, key) {
-		return false
-	}
-	others, err := l.admission.ActiveExcept(ctx, admission.MachineScope(l.digest(key)), admissionExemptFrom(ctx)...)
-	if err != nil {
-		log.Printf("[sandbox] admission of %s unavailable (%v); keeping the current sandbox", key, err)
-		return false
-	}
-	return others == 0
-}
-
-func (l *remoteSessionLifecycle) hasLiveMachineActivity(ctx context.Context, key SessionSandboxKey) bool {
-	store, ok := l.bindings.(interface {
-		hasBackgroundActivity(context.Context, SessionSandboxKey) (bool, error)
-	})
-	if !ok {
-		return false
-	}
-	active, err := store.hasBackgroundActivity(ctx, key)
-	if err != nil {
-		log.Printf("[sandbox] background activity of %s unavailable (%v); keeping the current sandbox", key, err)
-		return true
-	}
-	return active
+	return !active || rebuildOnce
 }
 
 func (l *remoteSessionLifecycle) consumeTurnRebuild(

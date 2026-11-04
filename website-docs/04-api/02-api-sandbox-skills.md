@@ -40,7 +40,8 @@ ConfigResponse 为 `{id,name,description,sandbox_type,config,created_at,updated_
 | `desktop_enabled` | bool | 声明所选模板是 Cube/E2B 桌面模板；已安装技能后不能切换 |
 | `allow_private_endpoints` | bool | 允许私网集群地址，不放行 link-local/云元数据 |
 | `env_vars` | map[string]string | 该沙箱配置的环境，值加密保存 |
-| `skill_rollout` | string | next_turn（默认）/new_session |
+| `skill_rollout` | string | next_turn（默认）/new_session；`allocation_mode=user` 时不生效，已有共用机器始终保留当前镜像 |
+| `allocation_mode` | string | session（默认，每会话一台）/user（同一用户共用）；只影响首次分配，不迁移已有会话 |
 | `network` | object | Cube/E2B 网络策略，见下 |
 | `cube` / `e2b` / `docker` | object | 与 sandbox_type 对应的连接配置 |
 | `volume_mount` | object | 可选卷配置；后端能力决定是否生效，不能仅凭字段存在认定支持 |

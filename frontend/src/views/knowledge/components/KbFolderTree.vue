@@ -124,7 +124,6 @@
                   </div>
                 </template>
               </t-popup>
-              <span v-else class="kb-folder-row__more-placeholder" aria-hidden="true"></span>
             </span>
           </template>
         </div>
@@ -253,7 +252,10 @@ watch(
 
 <style scoped lang="less">
 .kb-folder-tree {
-  --kb-folder-indent: 14px;
+  /* Cap indent so a 8–10 level path still has room for the folder name.
+     Past this depth the chevron already shows the parent/child relation. */
+  --kb-folder-indent: 12px;
+  --kb-folder-indent-max: 4;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -352,7 +354,7 @@ watch(
   width: 100%;
   height: 32px;
   margin-bottom: 2px;
-  padding: 0 4px 0 calc(4px + var(--kb-folder-depth, 0) * var(--kb-folder-indent));
+  padding: 0 4px 0 calc(4px + min(var(--kb-folder-depth, 0), var(--kb-folder-indent-max)) * var(--kb-folder-indent));
   border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-primary);
@@ -374,13 +376,31 @@ watch(
   }
 
   &.active {
+    height: auto;
+    min-height: 32px;
+    align-items: flex-start;
+    padding-top: 6px;
+    padding-bottom: 6px;
     background: var(--app-selection-bg);
 
     .kb-folder-row__label,
     .kb-folder-row__icon {
       color: var(--td-brand-color);
     }
-    .kb-folder-row__label { font-weight: 500; }
+    .kb-folder-row__label {
+      font-weight: 500;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: unset;
+      overflow-wrap: anywhere;
+      line-height: 18px;
+    }
+    .kb-folder-row__toggle,
+    .kb-folder-row__toggle-placeholder,
+    .kb-folder-row__icon,
+    .kb-folder-row__trailing {
+      margin-top: 1px;
+    }
   }
 
   &.is-root .kb-folder-row__label {
@@ -428,12 +448,13 @@ watch(
 }
 
 .kb-folder-row__trailing {
+  position: relative;
   flex: 0 0 auto;
-  gap: 2px;
+  min-width: 16px;
   height: 20px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   margin-left: 2px;
 }
 
@@ -446,9 +467,10 @@ watch(
   line-height: 1;
 }
 
-.kb-folder-row__more-placeholder { width: 20px; }
-
 .kb-folder-row__more {
+  position: absolute;
+  right: 0;
+  top: 50%;
   display: inline-flex;
   opacity: 0;
   pointer-events: none;
@@ -457,10 +479,11 @@ watch(
   padding: 0;
   border: 0;
   border-radius: var(--app-radius-xs);
-  background: transparent;
+  background: var(--td-bg-color-container);
   color: var(--td-text-color-placeholder);
   align-items: center;
   justify-content: center;
+  transform: translateY(-50%);
   cursor: pointer;
   transition: color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 
@@ -480,6 +503,10 @@ watch(
   .kb-folder-row__more {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  .kb-folder-row__count {
+    visibility: hidden;
   }
 }
 

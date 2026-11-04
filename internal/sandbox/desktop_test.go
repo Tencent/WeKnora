@@ -96,6 +96,34 @@ func TestStartDesktopScriptFastPathRequiresVNCPort(t *testing.T) {
 	require.Contains(t, src, "port_open 5900")
 }
 
+func TestStartDesktopScriptDropsTheClientCwd(t *testing.T) {
+	// websockify inherits the starting Exec's cwd (/workspace/sessions/<sid>);
+	// deleting that session left it with a deleted cwd and every later
+	// connection died with ENOENT before any HTTP response — a bad handshake
+	// for every session on the machine, since websockify is shared. The script
+	// must move to a neutral cwd before spawning anything.
+	code := shellCode(startDesktopScript(t))
+	var found bool
+	for _, line := range strings.Split(code, "\n") {
+		if strings.TrimSpace(line) == "cd /" {
+			found = true
+		}
+	}
+	require.True(t, found, "start-desktop.sh must `cd /` before spawning daemons")
+}
+
+func TestStartDesktopScriptBoundsXProbesUnderTheLock(t *testing.T) {
+	// A wedged X server (accepts the connection, never replies) makes an
+	// unbounded xdpyinfo/xset hang forever while fd 9 — the start lock — is
+	// held, so the next start blocks on flock until its Exec times out. The
+	// same lock-hang class as the dbus-daemon seat-lock leak in wk-display.
+	src := shellCode(startDesktopScript(t))
+	require.Contains(t, src, "timeout 2 xdpyinfo -display :0")
+	require.Contains(t, src, "timeout 5 xset s off -dpms")
+	require.NotContains(t, src, "\nxdpyinfo -display :0",
+		"every xdpyinfo probe must carry its own timeout")
+}
+
 func TestStartDesktopScriptClosesLockFDInEveryDaemon(t *testing.T) {
 	// Reproduced against wechatopenai/weknora-sandbox:main-desktop: Xvfb,
 	// xfce4-session, dbus-launch, x11vnc and websockify all inherited fd 9
@@ -118,29 +146,74 @@ func TestStartDesktopScriptClosesLockFDInEveryDaemon(t *testing.T) {
 	}
 }
 
-func TestParseDesktopEnsureSecretAcceptsExactReadyLine(t *testing.T) {
+func TestParseDesktopEnsureAcceptsExactReadyLine(t *testing.T) {
 	const secret = "abcdefghijklmnopqrstuvwxyz012345"
-	got, ok := ParseDesktopEnsureSecret("READY " + secret + "\n")
+	got, token, ok := ParseDesktopEnsure("READY " + secret + "\n")
 	require.True(t, ok)
 	require.Equal(t, secret, got)
-	got, ok = ParseDesktopEnsureSecret("READY " + secret)
+	require.Empty(t, token, "legacy image prints no token")
+	got, token, ok = ParseDesktopEnsure("READY " + secret)
 	require.True(t, ok)
 	require.Equal(t, secret, got)
+	require.Empty(t, token)
 }
 
-func TestParseDesktopEnsureSecretRejectsNoise(t *testing.T) {
+func TestParseDesktopEnsureAcceptsOptionalToken(t *testing.T) {
+	const secret = "abcdefghijklmnopqrstuvwxyz012345"
+	for _, want := range []string{"0", "1", "7", "42", "99", "05"} {
+		got, token, ok := ParseDesktopEnsure("READY " + secret + " " + want + "\n")
+		require.True(t, ok, "token %q", want)
+		require.Equal(t, secret, got)
+		require.Equal(t, want, token)
+	}
+	_, token, ok := ParseDesktopEnsure("READY " + secret + " 3\r\n")
+	require.True(t, ok, "CRLF from a PTY-ish transport is tolerated")
+	require.Equal(t, "3", token)
+}
+
+func TestParseDesktopEnsureRejectsNoise(t *testing.T) {
 	const line = "READY abcdefghijklmnopqrstuvwxyz012345\n"
-	_, ok := ParseDesktopEnsureSecret(line + "extra\n")
+	_, _, ok := ParseDesktopEnsure(line + "extra\n")
 	require.False(t, ok, "suffix after READY is a leak")
-	_, ok = ParseDesktopEnsureSecret("started\n" + line)
+	_, _, ok = ParseDesktopEnsure("started\n" + line)
 	require.False(t, ok, "prefix before READY must not be ignored; last-line parse would dial with a polluted buffer")
-	_, ok = ParseDesktopEnsureSecret("\n" + line)
+	_, _, ok = ParseDesktopEnsure("\n" + line)
 	require.False(t, ok)
-	_, ok = ParseDesktopEnsureSecret("started\n")
+	_, _, ok = ParseDesktopEnsure("started\n")
 	require.False(t, ok)
-	_, ok = ParseDesktopEnsureSecret("READY short\n")
+	_, _, ok = ParseDesktopEnsure("READY short\n")
 	require.False(t, ok)
-	_, ok = ParseDesktopEnsureSecret("")
+	_, _, ok = ParseDesktopEnsure("")
+	require.False(t, ok)
+}
+
+func TestParseDesktopEnsureRejectsBadTokenAndMultiLine(t *testing.T) {
+	const ready = "READY abcdefghijklmnopqrstuvwxyz012345"
+	for name, in := range map[string]string{
+		"token too long":      ready + " 123\n",
+		"token not numeric":   ready + " ab\n",
+		"token negative":      ready + " -1\n",
+		"token empty":         ready + " \n",
+		"two tokens":          ready + " 1 2\n",
+		"token on next line":  ready + "\n1\n",
+		"two READY lines":     ready + " 1\n" + ready + " 1\n",
+		"double trailing nl":  ready + " 1\n\n",
+		"secret too long":     ready + "6 1\n",
+		"leading garbage":     "noise\n" + ready + " 1\n",
+		"token with suffix":   ready + " 1x\n",
+		"unicode digit token": ready + " \u0661\n",
+	} {
+		_, _, ok := ParseDesktopEnsure(in)
+		require.False(t, ok, name)
+	}
+}
+
+func TestParseDesktopEnsureSecretIsAThinWrapper(t *testing.T) {
+	const secret = "abcdefghijklmnopqrstuvwxyz012345"
+	got, ok := ParseDesktopEnsureSecret("READY " + secret + " 4\n")
+	require.True(t, ok)
+	require.Equal(t, secret, got)
+	_, ok = ParseDesktopEnsureSecret("started\nREADY " + secret + "\n")
 	require.False(t, ok)
 }
 
@@ -209,10 +282,82 @@ func TestDesktopResetListenersCmdClearsLeakedLock(t *testing.T) {
 	// Older images still leak the flock fd, so the reset has to unwedge them
 	// without an image rebuild.
 	reset := shellCode(DesktopResetListenersCmd())
-	require.Contains(t, reset, "x11vnc")
+	require.Contains(t, reset, "-rfbport 5900")
+	require.NotContains(t, reset, "pkill -x x11vnc",
+		"a comm-only pkill kills every seat's x11vnc, not just :0")
 	require.Contains(t, reset, "[w]ebsockify")
 	require.Contains(t, reset, "/run/desktop/.lock")
+	// Seat locks leak the same way (a daemonized dbus-daemon inherited fd 7
+	// and held /run/desktop/seat-1.lock forever; every claim of that seat
+	// queued until its Exec timed out). Unlinking wedged seat locks unwedges
+	// old images the same way the .lock unlink does.
+	require.Contains(t, reset, "/run/desktop/seat-*.lock")
 	// Xvfb and XFCE are expensive and never the reason 6080 is mute.
 	require.NotContains(t, reset, "Xvfb")
 	require.NotContains(t, reset, "xfce4-session")
+}
+
+func TestDesktopEnsureCmdClaimsASeat(t *testing.T) {
+	code := shellCode(DesktopEnsureCmd())
+	require.NotContains(t, code, "wk-desk")
+	require.Contains(t, code, "command -v wk-display")
+	require.Contains(t, code, `start-desktop.sh --proxy-only`)
+	claim := `seat=$(wk-display claim "$WEKNORA_SESSION_ID"`
+	ready := `printf 'READY %s %s\n' "$secret" "$seat"`
+	require.Contains(t, code, claim)
+	require.Contains(t, code, ready)
+	require.Less(t, strings.Index(code, claim), strings.Index(code, ready),
+		"the seat is claimed before READY is printed")
+	require.NotContains(t, code, "wk-display claim \"$WEKNORA_SESSION_ID\"\n",
+		"claim stdout must be captured; a bare call would leak past the single READY line")
+}
+
+func TestDesktopEnsureCmdLegacyLineWhenThereIsNoSeatToken(t *testing.T) {
+	code := shellCode(DesktopEnsureCmd())
+	require.Contains(t, code, `printf 'READY %s\n' "$secret"`)
+	require.Contains(t, code, `printf 'READY %s 0\n' "$secret"`)
+	require.Contains(t, code, "/run/desktop/tokens.d/0")
+	// The shared path still starts the full desktop, not only the proxy.
+	require.Contains(t, code, "/usr/local/bin/start-desktop.sh </dev/null")
+}
+
+func TestStartDesktopProxyOnlySkipsTheSharedSession(t *testing.T) {
+	code := shellCode(startDesktopScript(t))
+	require.Contains(t, code, "--proxy-only")
+	require.Contains(t, code, "--token-plugin TokenFile")
+	require.Contains(t, code, "--token-source /run/desktop/tokens.d")
+	require.Contains(t, code, "0: 127.0.0.1:5900")
+	start := strings.Index(code, `[ "$proxy_only" -eq 0 ]`)
+	require.GreaterOrEqual(t, start, 0)
+	end := strings.Index(code[start:], "\nfi\n")
+	require.Greater(t, end, 0)
+	block := code[start : start+end]
+	require.Contains(t, block, "xfce4-session")
+	require.Contains(t, block, "Xvfb :0")
+	require.NotContains(t, code, "start-browser.sh",
+		"the login Chrome is retired; humans take over on their session's own seat screen")
+	rest := code[start+end:]
+	require.NotContains(t, rest, "xfce4-session")
+	require.Contains(t, rest, "websockify")
+	require.NotContains(t, rest, "127.0.0.1:5900",
+		"websockify must not keep a fixed target; token 0 is a token file")
+}
+
+func TestDesktopReadyFastPathDependsOnMode(t *testing.T) {
+	code := shellCode(startDesktopScript(t))
+	require.Contains(t, code, "desktop_ready")
+	// Full mode still refuses 6080-only. proxy-only is 6080 alone.
+	fn := code[strings.Index(code, "desktop_ready()"):]
+	fn = fn[:strings.Index(fn, "\n}\n")]
+	require.Contains(t, fn, `port_open 6080 && port_open 5900`)
+	require.Contains(t, fn, `[ "$proxy_only" -eq 1 ]`)
+}
+
+func TestDesktopSeatIsolated(t *testing.T) {
+	for _, token := range []string{"1", "2", "8", "99", "01"} {
+		require.True(t, DesktopSeatIsolated(token), token)
+	}
+	for _, token := range []string{"", "0", "00", "100", "ab", "-1", "1x"} {
+		require.False(t, DesktopSeatIsolated(token), token)
+	}
 }

@@ -100,7 +100,11 @@ func (s *Server) handleWikiSearch(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil || strings.TrimSpace(query) == "" {
 		return mcp.NewToolResultError("query is required"), nil
 	}
-	kbs, err := s.wikiScopeFromRequest(ctx, ep, req.GetStringSlice("knowledge_base_ids", nil))
+	selectors, err := optionalKnowledgeBaseSelectors(req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	kbs, err := s.wikiScopeFromRequest(ctx, ep, selectors)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

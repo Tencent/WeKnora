@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,60 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+func TestMatchesCollectionName(t *testing.T) {
+	tests := []struct {
+		name       string
+		base       string
+		collection string
+		want       bool
+	}{
+		{"minimum dimension", "embeddings", "embeddings_1", true},
+		{"typical dimension", "weknora_embeddings", "weknora_embeddings_768", true},
+		{"custom base", "team_42_vectors", "team_42_vectors_1536", true},
+		{"base ending in underscore", "vectors_", "vectors__768", true},
+		{"longer base", "vectors", "vectors_extra_768", false},
+		{"backup collection", "weknora_embeddings", "weknora_embeddings_backup_768", false},
+		{"backup suffix", "vectors", "vectors_768_backup", false},
+		{"missing separator", "vectors", "vectors768", false},
+		{"missing dimension", "vectors", "vectors_", false},
+		{"base only", "vectors", "vectors", false},
+		{"short name", "vectors", "vec", false},
+		{"empty name", "vectors", "", false},
+		{"different base", "vectors", "other_768", false},
+		{"case mismatch", "vectors", "Vectors_768", false},
+		{"zero dimension", "vectors", "vectors_0", false},
+		{"negative dimension", "vectors", "vectors_-768", false},
+		{"explicit plus", "vectors", "vectors_+768", false},
+		{"leading zero", "vectors", "vectors_0768", false},
+		{"fraction", "vectors", "vectors_7.68", false},
+		{"non decimal", "vectors", "vectors_0x300", false},
+		{"leading space", "vectors", "vectors_ 768", false},
+		{"trailing space", "vectors", "vectors_768 ", false},
+		{"unicode digits", "vectors", "vectors_７６８", false},
+		{"overflow", "vectors", "vectors_999999999999999999999999999999999", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &qdrantRepository{collectionBaseName: tt.base}
+			if got := repo.matchesCollectionName(tt.collection); got != tt.want {
+				t.Errorf("matchesCollectionName(%q) = %v, want %v", tt.collection, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGeneratedCollectionNames(t *testing.T) {
+	repo := &qdrantRepository{collectionBaseName: "custom_vectors"}
+	for _, dimension := range []int{1, 384, 768, 1536, int(^uint(0) >> 1)} {
+		t.Run(strconv.Itoa(dimension), func(t *testing.T) {
+			name := repo.getCollectionName(dimension)
+			if !repo.matchesCollectionName(name) {
+				t.Errorf("generated collection name %q was rejected", name)
+			}
+		})
+	}
+}
 
 func TestNewQdrantValueMapSanitizesInvalidUTF8AndNUL(t *testing.T) {
 	malformed := "prefix" + string([]byte{0xff}) + "\x00suffix"
@@ -763,6 +818,74 @@ func TestKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
 	}
 }
 
+func TestBatchSaveRejectsMissingEmbeddings(t *testing.T) {
+	indices := []*types.IndexInfo{
+		{SourceID: "source-1", ChunkID: "chunk-1"},
+		{SourceID: "source-2", ChunkID: "chunk-2"},
+	}
+	for _, tt := range []struct {
+		name       string
+		indices    []*types.IndexInfo
+		params     map[string]any
+		wantError  string
+		wantPoints int
+	}{
+		{name: "empty input"},
+		{name: "missing parameters", indices: indices, wantError: "chunk-1"},
+		{name: "missing embedding map", indices: indices, params: map[string]any{}, wantError: "chunk-1"},
+		{
+			name: "wrong embedding map type", indices: indices,
+			params: map[string]any{fieldEmbedding: "invalid"}, wantError: "chunk-1",
+		},
+		{
+			name: "empty vectors", indices: indices,
+			params:    map[string]any{fieldEmbedding: map[string][]float32{"source-1": {}, "source-2": nil}},
+			wantError: "chunk-1",
+		},
+		{
+			name: "missing later vector", indices: indices,
+			params:    map[string]any{fieldEmbedding: map[string][]float32{"source-1": {1, 2}}},
+			wantError: "chunk-2",
+		},
+		{
+			name: "valid batch", indices: indices,
+			params:     map[string]any{fieldEmbedding: map[string][]float32{"source-1": {1, 2}, "source-2": {3, 4}}},
+			wantPoints: 2,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var saved int
+			client := newInterceptedQdrantClient(t, func(
+				_ context.Context, method string, req, _ any, _ *grpc.ClientConn,
+				_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				if tt.wantPoints == 0 {
+					t.Errorf("unexpected RPC %s", method)
+				}
+				request, ok := req.(*qdrant.UpsertPoints)
+				if !ok {
+					return fmt.Errorf("unexpected RPC %s", method)
+				}
+				saved += len(request.GetPoints())
+				return nil
+			})
+			repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+			repo.initializedCollections.Store(2, true)
+			err := repo.BatchSave(context.Background(), tt.indices, tt.params)
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Errorf("expected error identifying %s, got %v", tt.wantError, err)
+				}
+			} else if err != nil {
+				t.Errorf("BatchSave: %v", err)
+			}
+			if saved != tt.wantPoints {
+				t.Errorf("saved %d points, want %d", saved, tt.wantPoints)
+			}
+		})
+	}
+}
+
 func TestPointWritesWaitForApplication(t *testing.T) {
 	indices := make([]*types.IndexInfo, 101)
 	embeddings := make(map[string][]float32, len(indices))
@@ -877,6 +1000,77 @@ func TestPointWritesWaitForApplication(t *testing.T) {
 						t.Fatalf("applied %d writes before return, want %d", applied, operation.writes)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestCopyIndicesPagesWithoutDuplicates(t *testing.T) {
+	for _, total := range []int{0, 1, 63, 64, 65, 128, 130, 200} {
+		t.Run(fmt.Sprintf("%d points", total), func(t *testing.T) {
+			chunkMap := make(map[string]string, total)
+			for i := range total {
+				chunkMap[fmt.Sprintf("chunk-%d", i)] = fmt.Sprintf("target-chunk-%d", i)
+			}
+
+			var copied []string
+			client := newInterceptedQdrantClient(t, func(
+				_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+				_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				switch request := req.(type) {
+				case *qdrant.ScrollPoints:
+					start := 0
+					if offset := request.GetOffset(); offset != nil {
+						start = int(offset.GetNum())
+					}
+					end := min(start+int(request.GetLimit()), total)
+					response := reply.(*qdrant.ScrollResponse)
+					for i := start; i < end; i++ {
+						chunkID := fmt.Sprintf("chunk-%d", i)
+						response.Result = append(response.Result, &qdrant.RetrievedPoint{
+							Id: qdrant.NewIDNum(uint64(i)),
+							Payload: newQdrantValueMap(map[string]any{
+								fieldChunkID:     chunkID,
+								fieldSourceID:    chunkID,
+								fieldKnowledgeID: "knowledge-src",
+							}),
+							Vectors: &qdrant.VectorsOutput{VectorsOptions: &qdrant.VectorsOutput_Vector{
+								Vector: &qdrant.VectorOutput{Vector: &qdrant.VectorOutput_Dense{
+									Dense: &qdrant.DenseVector{Data: []float32{1, 2}},
+								}},
+							}},
+						})
+					}
+					if end < total {
+						response.NextPageOffset = qdrant.NewIDNum(uint64(end))
+					}
+					return nil
+				case *qdrant.UpsertPoints:
+					for _, point := range request.GetPoints() {
+						copied = append(copied, point.GetPayload()[fieldChunkID].GetStringValue())
+					}
+					return nil
+				default:
+					return fmt.Errorf("unexpected RPC %s", method)
+				}
+			})
+			repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+			repo.initializedCollections.Store(2, true)
+
+			err := repo.CopyIndices(context.Background(), "kb-src",
+				map[string]string{"knowledge-src": "knowledge-dst"}, chunkMap,
+				"kb-dst", 2, types.KnowledgeBaseTypeDocument)
+			if err != nil {
+				t.Fatalf("CopyIndices: %v", err)
+			}
+
+			if len(copied) != total {
+				t.Fatalf("copied %d points, want %d", len(copied), total)
+			}
+			slices.Sort(copied)
+			if dup := len(copied) - len(slices.Compact(copied)); dup != 0 {
+				t.Fatalf("copied %d duplicate points", dup)
 			}
 		})
 	}

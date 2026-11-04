@@ -389,8 +389,13 @@ function roleOf(el: HTMLElement): string {
   }
 }
 
+// aria-label is an explicit name. Visible text comes next: a title tooltip
+// such as "预览" must not hide the file name printed inside the control.
+// title is only the name when the control has no text of its own.
 function nameOf(el: HTMLElement): string {
-  return collapse(el.getAttribute('aria-label') || el.getAttribute('title')) || textOf(el)
+  const aria = collapse(el.getAttribute('aria-label'))
+  if (aria) return aria
+  return textOf(el) || collapse(el.getAttribute('title'))
 }
 
 function isPageTab(el: HTMLElement): boolean {

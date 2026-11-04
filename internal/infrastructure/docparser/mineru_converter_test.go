@@ -130,7 +130,7 @@ func TestParseMinerUFileParseResponse(t *testing.T) {
 	}
 }
 
-func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
+func TestMinerULegacyMultipartRequest(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(func() {
 		utils.SetSSRFWhitelistFromRaw("")
@@ -138,10 +138,13 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 
 	const fileContent = "%PDF-1.7 synthetic test content"
 	tests := []struct {
-		name     string
-		fileName string
-		fileType string
-		want     string
+		name       string
+		fileName   string
+		fileType   string
+		want       string
+		backend    string
+		effort     string
+		wantEffort string
 	}{
 		{name: "original basename", fileName: "reports/Illustrator 研报.pdf", fileType: "pdf", want: "Illustrator 研报.pdf"},
 		{
@@ -155,16 +158,34 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 		{name: "fallback from path-only name", fileName: "/", fileType: "pdf", want: "document.pdf"},
 		{name: "legacy fallback without metadata", want: "document"},
 		{name: "reject unsafe fallback type", fileType: "../pdf", want: "document"},
+		{
+			name: "hybrid high effort", fileName: "report.pdf", want: "report.pdf",
+			backend: "hybrid-auto-engine", effort: " HIGH ", wantEffort: "high",
+		},
+		{
+			name: "hybrid medium effort", fileName: "report.pdf", want: "report.pdf",
+			backend: "hybrid-auto-engine", effort: "medium", wantEffort: "medium",
+		},
+		{
+			name: "non-hybrid ignores effort", fileName: "report.pdf", want: "report.pdf",
+			backend: "pipeline", effort: "high",
+		},
+		{
+			name: "invalid effort is omitted", fileName: "report.pdf", want: "report.pdf",
+			backend: "hybrid-auto-engine", effort: "invalid",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			type capturedRequest struct {
-				method   string
-				path     string
-				fileName string
-				content  string
-				err      error
+				method    string
+				path      string
+				fileName  string
+				content   string
+				effort    string
+				hasEffort bool
+				err       error
 			}
 
 			captured := make(chan capturedRequest, 1)
@@ -190,6 +211,8 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 				}
 				got := capturedRequest{method: r.Method, path: r.URL.Path}
 				file, header, err := r.FormFile("files")
+				got.effort = r.FormValue("effort")
+				_, got.hasEffort = r.MultipartForm.Value["effort"]
 				if err != nil {
 					got.err = err
 				} else {
@@ -205,7 +228,11 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 			}))
 			defer server.Close()
 
-			reader := NewMinerUReader(map[string]string{"mineru_endpoint": server.URL})
+			reader := NewMinerUReader(map[string]string{
+				"mineru_endpoint": server.URL,
+				"mineru_model":    tt.backend,
+				"mineru_effort":   tt.effort,
+			})
 			result, err := reader.Read(context.Background(), &types.ReadRequest{
 				FileContent: []byte(fileContent),
 				FileName:    tt.fileName,
@@ -233,6 +260,10 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 			}
 			if request.content != fileContent {
 				t.Errorf("multipart content = %q, want %q", request.content, fileContent)
+			}
+			if request.effort != tt.wantEffort || request.hasEffort != (tt.wantEffort != "") {
+				t.Errorf("multipart effort = %q (present=%v), want %q",
+					request.effort, request.hasEffort, tt.wantEffort)
 			}
 		})
 	}

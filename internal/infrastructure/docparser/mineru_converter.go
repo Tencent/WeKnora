@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -42,6 +41,7 @@ type MinerUReader struct {
 	tier     string // V1 only: flash, basic, standard, advanced; "" = server default
 	// Legacy (<= 3.x) only; MinerU 4.0 dropped these request parameters.
 	backend       string // "pipeline", "vlm-*", "hybrid-*"
+	effort        string // legacy hybrid: medium or high; "" = server default
 	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
 	formulaEnable bool
 	tableEnable   bool
@@ -64,6 +64,7 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 		apiKey:        strings.TrimSpace(overrides["mineru_server_api_key"]),
 		tier:          resolveMinerUTier(overrides["mineru_tier"]),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
+		effort:        resolveMinerUEffort(overrides["mineru_effort"]),
 		vlmServerURL:  overrides["mineru_vlm_server_url"],
 		formulaEnable: parseBoolOr(overrides["mineru_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_enable_table"], true),
@@ -81,6 +82,15 @@ func resolveMinerUTier(raw string) string {
 		return tier
 	}
 	return ""
+}
+
+func resolveMinerUEffort(raw string) string {
+	switch effort := strings.ToLower(strings.TrimSpace(raw)); effort {
+	case "medium", "high":
+		return effort
+	default:
+		return ""
+	}
 }
 
 func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
@@ -104,7 +114,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	protocol, err := detectMinerUProtocol(ctx, utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 		Timeout:      mineruV1APITimeout,
 		MaxRedirects: 5,
-	}), c.endpoint)
+	}), c.endpoint, c.apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("MinerU protocol detection: %w", err)
 	}
@@ -288,6 +298,9 @@ func (c *MinerUReader) callFileParse(
 	if c.language != "" {
 		fields["lang_list"] = c.language
 	}
+	if c.effort != "" && strings.HasPrefix(c.backend, "hybrid-") {
+		fields["effort"] = c.effort
+	}
 	if c.vlmServerURL != "" && (strings.HasPrefix(c.backend, "vlm-http-client") || strings.HasPrefix(c.backend, "hybrid-http-client")) {
 		fields["server_url"] = c.vlmServerURL
 	}
@@ -324,11 +337,11 @@ func (c *MinerUReader) callFileParse(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, preview)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, maxResultResponseBytes)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("read response body: %w", err)
 	}
@@ -434,7 +447,7 @@ func validateMinerUOutboundURL(rawURL string) error {
 
 // PingMinerU checks if the self-hosted MinerU service is reachable. For
 // MinerU 4.0 it also verifies the configured API key, since /v1/health itself
-// is served without authentication.
+// is served without authentication unless sitting behind an authenticating gateway.
 func PingMinerU(endpoint, apiKey string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
@@ -449,7 +462,7 @@ func PingMinerU(endpoint, apiKey string) (bool, string) {
 	})
 	ctx := context.Background()
 
-	protocol, err := detectMinerUProtocol(ctx, client, endpoint)
+	protocol, err := detectMinerUProtocol(ctx, client, endpoint, apiKey)
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可用: %v", err)
 	}

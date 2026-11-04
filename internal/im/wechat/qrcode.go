@@ -16,11 +16,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/im"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -72,7 +72,7 @@ func (s *QRCodeService) GetLoginQRCode(ctx context.Context) (*QRCodeResult, erro
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response body: %w", err)
 	}
@@ -135,7 +135,7 @@ func (s *QRCodeService) PollQRCodeStatus(ctx context.Context, qrcode string) (*L
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response body: %w", err)
 	}

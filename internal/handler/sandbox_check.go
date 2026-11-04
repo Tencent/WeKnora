@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -242,7 +243,9 @@ func describeProbeMismatch(exitCode int, killed bool, stdout, stderr, execErr st
 }
 
 // firstProbeLine picks the first non-empty line and caps it, so one runaway log
-// line cannot flood the check panel.
+// line cannot flood the check panel. The trailing partial rune (if the cap
+// lands inside a multi-byte character) is dropped so the panel detail stays
+// valid UTF-8.
 func firstProbeLine(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -250,7 +253,11 @@ func firstProbeLine(output string) string {
 			continue
 		}
 		if len(trimmed) > 300 {
-			return trimmed[:300] + "…"
+			cut := trimmed[:300]
+			for len(cut) > 0 && !utf8.ValidString(cut) {
+				cut = cut[:len(cut)-1]
+			}
+			return cut + "…"
 		}
 		return trimmed
 	}

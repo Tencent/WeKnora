@@ -139,8 +139,13 @@
   </div>
 </template>
 
+<script lang="ts">
+// 关闭搜索框不会撤销已发送的写入；重开时先等同一空间的保存结束，再读取配置。
+const pendingRetrievalSaves = new Map<number | null, Promise<unknown>>()
+</script>
+
 <script setup lang="ts">
-import { reactive, computed, onMounted, nextTick, ref } from 'vue'
+import { reactive, computed, onMounted, onUnmounted, nextTick, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
@@ -165,10 +170,12 @@ const moveTab = (index: number, direction: number, event: KeyboardEvent) => {
   const buttons = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll('button')
   buttons?.[next]?.focus()
 }
-// PUT /tenants/kv/retrieval-config requires Admin+ on the server. Hide the
-// banner + lock all controls for non-Admins so they can read the
-// configuration without tripping a 403 mid-edit.
-const canEdit = computed(() => authStore.hasRole('admin'))
+const configTenantId = authStore.effectiveTenantId
+const isInitializing = ref(true)
+const viewInvalidated = ref(false)
+const isCurrentView = () => !viewInvalidated.value && authStore.effectiveTenantId === configTenantId
+// 加载完成前保持只读，避免用默认值覆盖尚未读回的空间配置。
+const canEdit = computed(() => authStore.hasRole('admin') && !isInitializing.value && isCurrentView())
 
 const defaultConfig: RetrievalConfig = {
   embedding_top_k: 50,
@@ -188,32 +195,54 @@ const rrfFields = computed<{ key: RrfField; label: string; description: string; 
 
 const localConfig = reactive<RetrievalConfig>({ ...defaultConfig })
 let initialConfig: RetrievalConfig = { ...defaultConfig }
-let isInitializing = true
+const SAVE_DEBOUNCE_MS = 500
+const INITIALIZATION_DELAY_MS = 100
+let initializationTimer: number | null = null
+let saveTimer: number | null = null
+let isSaving = false
+let saveRequested = false
+
+// 切空间可能先于页面销毁；一旦失效，即使切回原空间也不复用这次编辑会话。
+const invalidateView = () => {
+  viewInvalidated.value = true
+  if (initializationTimer !== null) clearTimeout(initializationTimer)
+  if (saveTimer !== null) clearTimeout(saveTimer)
+  initializationTimer = null
+  saveTimer = null
+  saveRequested = false
+}
 
 const loadConfig = async () => {
   try {
-    const response = await getTenantRetrievalConfig()
-    if (response.data) {
-      const cfg = response.data
-      Object.assign(localConfig, {
-        embedding_top_k: cfg.embedding_top_k || defaultConfig.embedding_top_k,
-        vector_threshold: cfg.vector_threshold || defaultConfig.vector_threshold,
-        keyword_threshold: cfg.keyword_threshold || defaultConfig.keyword_threshold,
-        rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
-        rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
-        rerank_model_id: cfg.rerank_model_id || '',
-        rrf_k: cfg.rrf_k,
-        rrf_vector_weight: cfg.rrf_vector_weight,
-        rrf_keyword_weight: cfg.rrf_keyword_weight,
-      })
-      initialConfig = { ...localConfig }
+    while (pendingRetrievalSaves.has(configTenantId)) {
+      // 旧请求失败也要重新读取；它的错误不属于新打开的设置页面。
+      await pendingRetrievalSaves.get(configTenantId)?.catch(() => {})
+      if (!isCurrentView()) return
     }
+    const response = await getTenantRetrievalConfig()
+    if (!isCurrentView() || !response.data) return
+    const cfg = response.data
+    Object.assign(localConfig, {
+      embedding_top_k: cfg.embedding_top_k || defaultConfig.embedding_top_k,
+      vector_threshold: cfg.vector_threshold || defaultConfig.vector_threshold,
+      keyword_threshold: cfg.keyword_threshold || defaultConfig.keyword_threshold,
+      rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
+      rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
+      rerank_model_id: cfg.rerank_model_id || '',
+      rrf_k: cfg.rrf_k,
+      rrf_vector_weight: cfg.rrf_vector_weight,
+      rrf_keyword_weight: cfg.rrf_keyword_weight,
+    })
+    initialConfig = { ...localConfig }
+    await nextTick()
+    await nextTick()
+    if (!isCurrentView()) return
+    initializationTimer = window.setTimeout(() => {
+      initializationTimer = null
+      if (isCurrentView()) isInitializing.value = false
+    }, INITIALIZATION_DELAY_MS)
   } catch (error: any) {
-    console.error('Failed to load retrieval config:', error)
-  } finally {
-    await nextTick()
-    await nextTick()
-    setTimeout(() => { isInitializing = false }, 100)
+    if (isCurrentView()) console.error('Failed to load retrieval config:', error)
   }
 }
 
@@ -222,27 +251,46 @@ const hasConfigChanged = (): boolean => {
 }
 
 const saveConfig = async () => {
+  if (isSaving || !saveRequested || !canEdit.value) return
+  saveRequested = false
   if (!hasConfigChanged()) return
+
+  const submittedConfig = { ...localConfig }
+  isSaving = true
+  let request: ReturnType<typeof updateTenantRetrievalConfig> | undefined
   try {
-    const response = await updateTenantRetrievalConfig({ ...localConfig })
-    if (response.data) {
-      initialConfig = { ...localConfig }
-    }
-    MessagePlugin.success(t('retrievalSettings.toasts.saveSuccess'))
+    request = updateTenantRetrievalConfig(submittedConfig)
+    pendingRetrievalSaves.set(configTenantId, request)
+    const response = await request
+    if (!isCurrentView()) return
+    if (!response.data) throw new Error('Missing retrieval configuration in save response')
+    // 只能确认本次提交的快照，不能把请求期间的新编辑也标记为已保存。
+    initialConfig = submittedConfig
+    if (!hasConfigChanged()) MessagePlugin.success(t('retrievalSettings.toasts.saveSuccess'))
   } catch (error: any) {
+    if (!isCurrentView()) return
     console.error('Failed to save retrieval config:', error)
     const errorMessage = error?.message || 'Unknown error'
     MessagePlugin.error(t('retrievalSettings.toasts.saveFailed', { message: errorMessage }))
+  } finally {
+    if (request && pendingRetrievalSaves.get(configTenantId) === request) {
+      pendingRetrievalSaves.delete(configTenantId)
+    }
+    isSaving = false
+    // 只接续已到期的新编辑；失败本身不产生重试，新的防抖也不能被提前执行。
+    if (saveRequested && saveTimer === null) void saveConfig()
   }
 }
 
-let saveTimer: number | null = null
 const debouncedSave = () => {
-  if (isInitializing) return
-  if (saveTimer) clearTimeout(saveTimer)
+  if (!canEdit.value) return
+  if (saveTimer !== null) clearTimeout(saveTimer)
+  saveRequested = false
   saveTimer = window.setTimeout(() => {
-    saveConfig().catch(() => {})
-  }, 500)
+    saveTimer = null
+    saveRequested = true
+    void saveConfig()
+  }, SAVE_DEBOUNCE_MS)
 }
 
 const handleParamChange = () => debouncedSave()
@@ -254,14 +302,14 @@ const handleRrfChange = (field: RrfField, value: number | string) => {
   debouncedSave()
 }
 const handleModelChange = (modelId: string) => {
+  if (!canEdit.value) return
   localConfig.rerank_model_id = modelId
   debouncedSave()
 }
 
-onMounted(async () => {
-  isInitializing = true
-  await loadConfig()
-})
+watch(() => authStore.effectiveTenantId, invalidateView, { flush: 'sync' })
+onUnmounted(invalidateView)
+onMounted(loadConfig)
 </script>
 
 <style lang="less" scoped>

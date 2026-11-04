@@ -73,7 +73,7 @@ func newIMResourceStorageFixture(t *testing.T) *imResourceStorageFixture {
 	catalog := appsvc.NewResourceCatalog(repository.NewResourceRepository(db))
 	f := &imResourceStorageFixture{
 		db: db, catalog: catalog, storage: appsvc.NewStorageBackendService(storageRepo, db, catalog),
-		tenants: appsvc.NewTenantService(repository.NewTenantRepository(db), storageRepo),
+		tenants: appsvc.NewTenantService(repository.NewTenantRepository(db), storageRepo, nil),
 		global:  filesvc.NewResourceCatalogFileService(filesvc.NewLocalFileService(t.TempDir(), ""), catalog),
 		tenant:  &types.Tenant{ID: 7}, baseURL: server.URL,
 	}

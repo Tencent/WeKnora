@@ -184,7 +184,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	}
 
 	// Read and decrypt with AES-128-ECB
-	encryptedData, err := io.ReadAll(resp.Body)
+	encryptedData, err := im.ReadIMAttachmentResponse(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		return nil, "", fmt.Errorf("read encrypted file: %w", err)
@@ -297,7 +297,10 @@ func (a *Adapter) ilinkPost(ctx context.Context, path string, payload interface{
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read ilink response: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ilink api %s returned status %d: %s", path, resp.StatusCode, string(respBody))

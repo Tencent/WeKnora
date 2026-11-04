@@ -434,6 +434,10 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status NOT IN ?",
 			tenantID, kbID, []string{"failed", "deleting"})
 
+	if params.ExcludeKnowledgeID != "" {
+		query = query.Where("id <> ?", params.ExcludeKnowledgeID)
+	}
+
 	switch params.Type {
 	case "file":
 		if params.DataSourceID != "" && params.ExternalID != "" {

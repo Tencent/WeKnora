@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -36,6 +37,21 @@ import (
 const (
 	maxAttachmentUploadsPerRequest = 5
 	maxAttachmentUploadTotalBytes  = int64(100 * 1024 * 1024)
+
+	// maxQARequestBodyBytes caps the JSON body of a chat request before the
+	// reader touches it.
+	//
+	// The body carries up to maxAttachmentUploadsPerRequest inline
+	// base64 attachments whose decoded total may reach
+	// maxAttachmentUploadTotalBytes; base64 inflates that by 4/3, so the
+	// largest legal body is about 134 MiB. That bound is only enforced after
+	// decoding, which means an unbounded read buffers the whole body first —
+	// and /knowledge-chat and /agent-chat are reachable by anonymous embed
+	// visitors, so one request could allocate as much memory as the process
+	// will surrender. Cap the read 2 MiB above the encoded maximum so a legal
+	// request is never refused for its envelope, while the per-attachment and
+	// total checks above stay the authority on what may be decoded.
+	maxQARequestBodyBytes = maxAttachmentUploadTotalBytes*4/3 + 2*1024*1024
 )
 
 // qaRequestContext holds all the common data needed for QA requests
@@ -193,10 +209,19 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(errors.ErrInvalidSessionID.Error())
 	}
 
-	// Parse request body
+	// Parse request body. Cap the reader first: ShouldBindJSON buffers the
+	// whole body before decoding, and the attachment limits below are applied
+	// after base64 decoding, so nothing else bounds this read.
+	if c.Request.Body != nil {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxQARequestBodyBytes)
+	}
 	var request CreateKnowledgeQARequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
+		var tooLarge *http.MaxBytesError
+		if stderrors.As(err, &tooLarge) {
+			return nil, nil, errors.NewBadRequestError("request body is too large")
+		}
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 
@@ -912,10 +937,17 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Validate request parameters
-	if request.Query == "" {
+	// Validate request parameters. A request needs a text query, a query
+	// image, or both: an image alone searches by visual similarity.
+	if request.Query == "" && request.QueryImage == "" {
 		logger.Error(ctx, "Query content is empty")
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
+		return
+	}
+	queryImage, queryImageType, imageErr := decodeQueryImage(request.QueryImage)
+	if imageErr != nil {
+		logger.Warnf(ctx, "Rejected query image: %v", imageErr)
+		_ = c.Error(errors.NewBadRequestError(imageErr.Error()))
 		return
 	}
 
@@ -967,6 +999,8 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	opts.QueryImage = queryImage
+	opts.QueryImageMediaType = queryImageType
 
 	logger.Infof(
 		ctx,
@@ -1000,6 +1034,58 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	})
 }
 
+// maxQueryImageBytes bounds a query image so one request cannot turn into a
+// large embed call. Multimodal embedding models work on far smaller images.
+const maxQueryImageBytes = 8 << 20 // 8 MiB
+
+// queryImageMediaTypes are the image types a multimodal embedder accepts.
+var queryImageMediaTypes = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+}
+
+// decodeQueryImage decodes a base64 or data-URI query image and reports its
+// MIME type. An empty value means "no image". Anything undecodable, too large,
+// or not a supported image type is an error: silently dropping it would run a
+// text search the caller did not ask for.
+func decodeQueryImage(raw string) ([]byte, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, "", nil
+	}
+	mediaType := ""
+	if strings.HasPrefix(raw, "data:") {
+		header, payload, ok := strings.Cut(raw, ",")
+		if !ok {
+			return nil, "", fmt.Errorf("query_image data URI is missing its payload")
+		}
+		if !strings.HasSuffix(header, ";base64") {
+			return nil, "", fmt.Errorf("query_image data URI must be base64 encoded")
+		}
+		mediaType = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+		raw = payload
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("query_image is not valid base64: %w", err)
+	}
+	if len(decoded) == 0 {
+		return nil, "", fmt.Errorf("query_image decoded to no bytes")
+	}
+	if len(decoded) > maxQueryImageBytes {
+		return nil, "", fmt.Errorf("query_image exceeds %d bytes", maxQueryImageBytes)
+	}
+	if mediaType == "" {
+		mediaType = http.DetectContentType(decoded)
+	}
+	if _, ok := queryImageMediaTypes[mediaType]; !ok {
+		return nil, "", fmt.Errorf("query_image must be one of png, jpeg, webp or gif, got %q", mediaType)
+	}
+	return decoded, mediaType, nil
+}
+
 // knowledgeSearchOptions validates the retrieval overrides of a
 // knowledge-search request.
 func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSearchOptions, error) {
@@ -1016,12 +1102,13 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 		return nil, err
 	}
 	return &types.KnowledgeSearchOptions{
-		VectorThreshold:      request.VectorThreshold,
-		KeywordThreshold:     request.KeywordThreshold,
-		MatchCount:           request.MatchCount,
-		DisableKeywordsMatch: request.DisableKeywordsMatch,
-		DisableVectorMatch:   request.DisableVectorMatch,
-		Rerank:               request.Rerank,
+		VectorThreshold:       request.VectorThreshold,
+		KeywordThreshold:      request.KeywordThreshold,
+		MatchCount:            request.MatchCount,
+		DisableKeywordsMatch:  request.DisableKeywordsMatch,
+		DisableVectorMatch:    request.DisableVectorMatch,
+		ParentSlotAggregation: request.ParentSlotAggregation,
+		Rerank:                request.Rerank,
 	}, nil
 }
 

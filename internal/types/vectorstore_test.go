@@ -140,7 +140,7 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		stores := BuildEnvVectorStores("postgres", lookup)
 		require.Len(t, stores, 1)
 		assert.Equal(t, "__env_postgres__", stores[0].ID)
-		assert.Equal(t, "PostgreSQL", stores[0].Name)
+		assert.Equal(t, "PostgreSQL (pgvector + ParadeDB)", stores[0].Name)
 		assert.Equal(t, PostgresRetrieverEngineType, stores[0].EngineType)
 		assert.True(t, stores[0].ConnectionConfig.UseDefaultConnection)
 	})

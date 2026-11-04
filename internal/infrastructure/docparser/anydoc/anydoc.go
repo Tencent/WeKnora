@@ -226,6 +226,18 @@ func PDFNeedsOCR(err error) bool {
 		strings.Contains(msg, "no extractable text")
 }
 
+// PDFInvalidStructure reports a malformed document error that another PDF
+// engine may still read. Encryption, resource limits and I/O errors are excluded.
+func PDFInvalidStructure(err error) bool {
+	if err == nil || errors.Is(err, ErrUnavailable) || errors.Is(err, ErrResourceLimit) {
+		return false
+	}
+	if malformed, typed := backendPDFInvalidStructure(err); typed {
+		return malformed
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalid pdf structure")
+}
+
 func normalizeExt(s string) string {
 	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), "."))
 }

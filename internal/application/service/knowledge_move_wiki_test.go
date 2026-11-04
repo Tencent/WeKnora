@@ -184,6 +184,26 @@ func TestMoveOneKnowledgeReuseVectorsIngestsIntoTargetKB(t *testing.T) {
 	assert.Equal(t, "kn-1", dstOps[0].DedupKey)
 }
 
+func TestMoveOneKnowledgeManualOnlyTargetSkipsWikiIngest(t *testing.T) {
+	svc, wikiRepo, pendingRepo, chunkRepo := newMoveWikiService(t)
+	disabled := false
+	target := wikiEnabledKB("kb-dst")
+	target.WikiConfig = &types.WikiConfig{AutoGenerate: &disabled}
+
+	err := svc.moveOneKnowledge(moveWikiCtx(), "kn-1",
+		wikiEnabledKB("kb-src"), target, "reuse_vectors")
+
+	require.NoError(t, err)
+	assert.Equal(t, "kb-dst", chunkRepo.movedToKB)
+	assert.Equal(t, []string{"kb-src"}, wikiRepo.listedKBs,
+		"moving out of the source KB must still reconcile its Wiki references")
+	assert.Empty(t, opsFor(pendingRepo.ops, "kb-dst"),
+		"a manual-only target must not receive an automatic Wiki ingest")
+	srcOps := opsFor(pendingRepo.ops, "kb-src")
+	require.Len(t, srcOps, 1)
+	assert.Equal(t, WikiOpRetract, srcOps[0].Op)
+}
+
 func TestMoveOneKnowledgeSkipsWikiWorkForNonWikiKBs(t *testing.T) {
 	svc, wikiRepo, pendingRepo, _ := newMoveWikiService(t)
 

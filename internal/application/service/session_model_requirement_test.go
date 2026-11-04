@@ -186,8 +186,9 @@ func TestResolveChatModelIDWikiFixerFallsBackToAvailableModel(t *testing.T) {
 		modelService: &stubModelService{
 			availableModels: []*types.Model{
 				{
-					ID:   "system-chat",
-					Type: types.ModelTypeKnowledgeQA,
+					ID:     "system-chat",
+					Type:   types.ModelTypeKnowledgeQA,
+					Status: types.ModelStatusActive,
 				},
 			},
 		},
@@ -209,7 +210,9 @@ func TestResolveChatModelIDWikiFixerFallsBackToAvailableModel(t *testing.T) {
 func TestResolveChatModelIDFallbackIsLimitedToInternalBuiltins(t *testing.T) {
 	svc := &sessionService{
 		modelService: &stubModelService{
-			availableModels: []*types.Model{{ID: "system-chat", Type: types.ModelTypeKnowledgeQA}},
+			availableModels: []*types.Model{
+				{ID: "system-chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
+			},
 		},
 	}
 	assistant := &types.QARequest{

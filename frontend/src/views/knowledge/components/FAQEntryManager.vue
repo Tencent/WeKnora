@@ -454,7 +454,14 @@
             <!-- 相似问 -->
             <div class="setting-row vertical setting-row-optional setting-row-similar">
               <div class="setting-info">
-                <label class="optional-label">{{ $t('knowledgeEditor.faq.similarQuestions') }}</label>
+                <div class="setting-label-row">
+                  <label class="optional-label">{{ $t('knowledgeEditor.faq.similarQuestions') }}</label>
+                  <AssistantActionButton v-if="editorForm.standard_question.trim()"
+                    :label="$t('assistant.actions.suggestFaqQuestions')"
+                    :query="$t('assistant.prompts.suggestFaqQuestions', { count: Math.max(0, 10 - editorForm.similar_questions.length) })"
+                    :selection="faqAssistantSelection"
+                    :disabled="savingEntry || editorForm.similar_questions.length >= 10" />
+                </div>
                 <p class="desc optional-desc">{{ $t('knowledgeEditor.faq.similarQuestionsDesc') }}</p>
               </div>
               <div class="setting-control">
@@ -520,9 +527,15 @@
               <div class="setting-control">
                 <div class="textarea-container">
                   <div class="full-width-input-wrapper textarea-wrapper">
-                    <t-textarea v-model="answerInput" :placeholder="$t('knowledgeEditor.faq.answerPlaceholder')"
-                      :autosize="{ minRows: 3, maxRows: 6 }" class="full-width-textarea" @keydown.ctrl.enter="addAnswer"
-                      @keydown.meta.enter="addAnswer" />
+                    <div class="faq-answer-draft">
+                      <t-textarea v-model="answerInput" :placeholder="$t('knowledgeEditor.faq.answerPlaceholder')"
+                        :autosize="{ minRows: 3, maxRows: 6 }" class="full-width-textarea" @keydown.ctrl.enter="addAnswer"
+                        @keydown.meta.enter="addAnswer" />
+                      <AssistantActionButton v-if="editorForm.standard_question.trim()" class="faq-answer-action"
+                        :label="$t(answerInput.trim() ? 'assistant.actions.refineAnswer' : 'assistant.actions.writeAnswer')"
+                        :query="$t(answerInput.trim() ? 'assistant.prompts.refineFaqAnswer' : 'assistant.prompts.writeFaqAnswer')"
+                        :selection="faqAnswerSelection" :disabled="savingEntry || editorForm.answers.length >= 5" />
+                    </div>
                     <t-button theme="primary" variant="outline"
                       :disabled="!answerInput.trim() || editorForm.answers.length >= 5" @click="addAnswer"
                       class="add-item-btn" size="small">
@@ -856,6 +869,7 @@
 
 <script setup lang="ts">
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -1172,6 +1186,25 @@ const savingEntry = ref(false)
 const answerInput = ref('')
 const similarInput = ref('')
 const negativeInput = ref('')
+
+const faqAnswerSelection = computed(() => ({
+  field: t('knowledgeEditor.faq.answers'),
+  text: JSON.stringify({
+    standard_question: editorForm.standard_question,
+    draft_answer: answerInput.value,
+    existing_answers: editorForm.answers,
+  }, null, 2),
+}))
+
+const faqAssistantSelection = computed(() => ({
+  field: t('knowledgeEditor.faq.similarQuestions'),
+  text: JSON.stringify({
+    standard_question: editorForm.standard_question,
+    existing_similar_questions: [...editorForm.similar_questions, similarInput.value].filter(Boolean),
+    negative_questions: [...editorForm.negative_questions, negativeInput.value].filter(Boolean),
+    answers: [...editorForm.answers, answerInput.value].filter(Boolean),
+  }, null, 2),
+}))
 
 const importVisible = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -2781,6 +2814,15 @@ watch(() => entries.value.map(e => ({
 </script>
 
 <style scoped lang="less">
+.faq-answer-draft {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+
+  .faq-answer-action { position: absolute; left: 8px; bottom: 8px; }
+  :deep(.t-textarea__inner) { padding-bottom: 44px; }
+}
+
 .faq-manager {
   display: flex;
   flex-direction: column;
@@ -4847,6 +4889,18 @@ watch(() => entries.value.map(e => ({
   flex: 1;
   max-width: 65%;
   padding-right: 24px;
+
+  .setting-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+
+    label {
+      margin-bottom: 0;
+    }
+  }
 
   label {
     font-size: var(--app-text-lg);

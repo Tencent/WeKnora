@@ -1,5 +1,11 @@
 <template>
-  <div v-if="visible" class="mention-menu" :style="[style, stableHeightStyle]" ref="menuRef" @click.stop>
+  <div v-if="visible" class="mention-menu" :style="[style, stableHeightStyle, browsingFiles ? browserMenuStyle : undefined]" ref="menuRef" @click.stop>
+    <MentionFileBrowser v-if="browsingFiles && browserContext" ref="fileBrowserRef"
+      :knowledge-bases="browserKnowledgeBases || []" :context="browserContext"
+      :supported-file-types="browserFileTypes || []" :selected-file-ids="browserSelectedIds || []"
+      :whole-kb-ids="browserWholeKbIds || []" :tag-kb-ids="browserTagKbIds || []"
+      @select="$emit('select', $event)" @back="leaveFileBrowser" />
+    <template v-else>
     <div class="mention-search">
       <div class="mention-search__box" :class="{ 'is-readonly': !searchable }">
         <span class="mention-search__icon">
@@ -36,6 +42,8 @@
       </div>
     </div>
 
+    <button v-if="currentGroupType === 'file' && browserKnowledgeBases?.length" type="button"
+      class="mention-browse-entry" @click="openFileBrowser">{{ $t('mentionBrowser.browse') }} <t-icon name="chevron-right" /></button>
     <div class="mention-list" ref="listRef" @scroll="onScroll">
       <!-- 根层级：分组入口 -->
       <template v-if="isRootView">
@@ -251,10 +259,16 @@
       </template>
     </div>
 
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import MentionFileBrowser from './MentionFileBrowser.vue';
+import type { FileBrowserContext } from '@/composables/useMentionFileBrowser';
+import type { BrowserKnowledgeBase } from '@/utils/mentionFileBrowser';
+import { fitBrowserViewport } from '@/utils/mentionFileBrowser';
+import { getRootZoom } from '@/utils/zoom';
 import { computed, watch, ref, nextTick, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -275,6 +289,12 @@ const props = defineProps<{
   loading?: boolean;
   // 空态下替换默认 "无结果" 文案，用于给上游（如"被智能体工具兼容性过滤掉了"）透传具体原因
   emptyHint?: string;
+  browserKnowledgeBases?: BrowserKnowledgeBase[];
+  browserContext?: FileBrowserContext;
+  browserFileTypes?: string[];
+  browserSelectedIds?: string[];
+  browserWholeKbIds?: string[];
+  browserTagKbIds?: string[];
   // 搜索关键词；在根层级非空时做跨分组的全局搜索，在分组内则只过滤该分组
   query?: string;
   // 为 true 时顶部搜索框可编辑并自动聚焦（按钮触发）；否则关键词来自输入框中 @ 之后的文本
@@ -283,7 +303,7 @@ const props = defineProps<{
   groupCounts?: Partial<Record<MentionItemType, number>>;
 }>();
 
-const emit = defineEmits(['select', 'update:activeIndex', 'update:query', 'loadMore', 'close']);
+const emit = defineEmits(['select', 'update:activeIndex', 'update:query', 'loadMore', 'close', 'focus-input']);
 
 const FLAT_GROUP_LIMIT = 5;
 
@@ -298,6 +318,35 @@ const isScrolling = ref(false);
 const isComposing = ref(false);
 const currentGroupType = ref<MentionItemType | null>(null);
 const groupActiveIndex = ref(0);
+const browsingFiles = ref(false);
+const fileBrowserRef = ref<InstanceType<typeof MentionFileBrowser>>();
+const browserMenuStyle = ref<Record<string, string>>({});
+watch([browsingFiles, () => props.visible, () => props.style], (_, __, onCleanup) => {
+  let disposed = false;
+  const viewport = window.visualViewport;
+  const fit = () => {
+    if (disposed || !browsingFiles.value || !props.visible || !menuRef.value) return;
+    browserMenuStyle.value = fitBrowserViewport(menuRef.value.getBoundingClientRect(), {
+      left: viewport?.offsetLeft || 0, top: viewport?.offsetTop || 0,
+      width: viewport?.width || window.innerWidth, height: viewport?.height || window.innerHeight,
+    }, getRootZoom());
+  };
+  onCleanup(() => {
+    disposed = true;
+    window.removeEventListener('resize', fit);
+    viewport?.removeEventListener('resize', fit);
+    viewport?.removeEventListener('scroll', fit);
+  });
+  browserMenuStyle.value = {};
+  if (!browsingFiles.value || !props.visible) return;
+  void nextTick(fit);
+  window.addEventListener('resize', fit);
+  viewport?.addEventListener('resize', fit);
+  viewport?.addEventListener('scroll', fit);
+}, { flush: 'post' });
+const openFileBrowser = () => { browsingFiles.value = true; };
+const leaveFileBrowser = () => { browsingFiles.value = false; focusSearch(); if (!props.searchable) emit('focus-input'); };
+watch(() => props.browserContext?.key, () => { browsingFiles.value = false; }, { flush: 'sync' });
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 onBeforeUnmount(() => {
@@ -333,7 +382,7 @@ const trimmedQuery = computed(() => (props.query ?? '').trim());
 const currentGroup = computed(() => mentionGroups.value.find(group => group.type === currentGroupType.value) || null);
 const isFlatMode = computed(() => !currentGroupType.value && trimmedQuery.value.length > 0);
 const isRootView = computed(() => !currentGroupType.value && !isFlatMode.value);
-const groupRows = computed(() => mentionGroups.value.filter(group => group.count > 0));
+const groupRows = computed(() => mentionGroups.value.filter(group => group.count > 0 || (group.type === 'file' && !!props.browserKnowledgeBases?.length)));
 
 const visibleGroups = computed(() => {
   const source: MentionGroup[] = currentGroup.value
@@ -411,7 +460,7 @@ const resetListScroll = () => {
 };
 
 const enterGroup = (type: MentionItemType) => {
-  const group = mentionGroups.value.find(item => item.type === type && item.count > 0);
+  const group = mentionGroups.value.find(item => item.type === type && (item.count > 0 || (type === 'file' && !!props.browserKnowledgeBases?.length)));
   if (!group) return;
   currentGroupType.value = type;
   emit('update:activeIndex', 0);
@@ -420,6 +469,7 @@ const enterGroup = (type: MentionItemType) => {
 };
 
 const leaveGroup = () => {
+  if (browsingFiles.value) { fileBrowserRef.value?.back(); return true; }
   if (!currentGroupType.value) return false;
   const rowIndex = groupRows.value.findIndex(group => group.type === currentGroupType.value);
   groupActiveIndex.value = Math.max(0, rowIndex);
@@ -432,6 +482,9 @@ const leaveGroup = () => {
 
 /** 全局搜索结果中，从当前高亮项进入其所在分组查看全部 */
 const enterActiveGroup = () => {
+  if (currentGroupType.value === 'file' && props.browserKnowledgeBases?.length) {
+    openFileBrowser(); return true;
+  }
   if (isRootView.value) {
     confirmActive();
     return true;
@@ -456,6 +509,7 @@ watch(() => visibleItems.value.length, (len) => {
 });
 
 const moveActive = (delta: number) => {
+  if (browsingFiles.value) { fileBrowserRef.value?.moveActive(delta); return; }
   if (isRootView.value) {
     const maxIndex = Math.max(0, groupRows.value.length - 1);
     groupActiveIndex.value = Math.min(maxIndex, Math.max(0, groupActiveIndex.value + delta));
@@ -473,6 +527,8 @@ const moveActive = (delta: number) => {
 };
 
 const confirmActive = () => {
+  if (browsingFiles.value) { fileBrowserRef.value?.confirmActive(); return; }
+  if (currentGroupType.value === 'file' && !visibleItems.value.length && props.browserKnowledgeBases?.length) { openFileBrowser(); return; }
   if (isRootView.value) {
     const group = groupRows.value[groupActiveIndex.value];
     if (group) enterGroup(group.type);
@@ -598,6 +654,7 @@ watch(() => props.activeIndex, (newIndex) => {
 });
 
 watch(() => props.visible, (newVisible) => {
+  browsingFiles.value = false;
   if (newVisible) {
     stableMinHeight.value = 0;
     currentGroupType.value = null;
@@ -626,11 +683,14 @@ const scrollToRow = (index: number) => {
 </script>
 
 <style scoped>
+.mention-browse-entry { flex-shrink: 0; display: flex; justify-content: space-between; border: 0; padding: 8px; background: transparent; color: var(--td-brand-color); cursor: pointer; font: inherit; }
+.mention-browse-entry:focus-visible { outline: 2px solid var(--td-brand-color); }
 /* 与输入框内其他下拉（推理强度、模型选择）保持同一套尺寸 */
 .mention-menu {
   position: fixed;
   z-index: 10000;
-  width: 260px;
+  width: 300px;
+  max-width: calc(100vw - 16px);
   max-height: 360px;
   padding: 4px;
   box-sizing: border-box;

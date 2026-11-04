@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -508,6 +509,19 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		},
 	)
 	if err != nil {
+		// A failed attempt may already have streamed answer text. The retry
+		// starts a new answer event, so leaving this draft live would make the
+		// final message concatenate the failed attempt with the recovered one.
+		// A user cancellation is the exception: there is no retry, and the
+		// partial text is the only answer the user has.
+		if ctx.Err() == nil && answerStreamed {
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data:      event.AgentFinalAnswerData{Replace: true},
+			})
+		}
 		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
 		return nil, err
 	}
@@ -584,10 +598,7 @@ func (e *AgentEngine) callLLMWithRetry(
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, tool_calls=%v",
 				round, i, msg.Role, len(msg.Content), tcNames)
 		} else {
-			preview := msg.Content
-			if len(preview) > 100 {
-				preview = preview[:100] + "..."
-			}
+			preview := cutDebugPreview(msg.Content, 100)
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, content=%s",
 				round, i, msg.Role, len(msg.Content), preview)
 		}
@@ -617,7 +628,7 @@ func (e *AgentEngine) callLLMWithRetry(
 		// into the summary envelope, where the next compaction cannot read it
 		// back out. The provider gets the sanitized view; the engine keeps the
 		// structured one.
-		compacted := e.forceCompaction(ctx, messages, round)
+		compacted := e.forceCompaction(ctx, *messagesPtr, round)
 		*messagesPtr = compacted
 		messages = agenttools.SanitizeMessages(compacted)
 		e.lastSentMsgCount = len(compacted)
@@ -723,10 +734,7 @@ func (e *AgentEngine) callLLMWithRetry(
 		}
 	}
 	if response.Content != "" {
-		preview := response.Content
-		if len(preview) > 300 {
-			preview = preview[:300] + "..."
-		}
+		preview := cutDebugPreview(response.Content, 300)
 		logger.Debugf(ctx, "[Agent][Round-%d] LLM content preview:\n%s", round, preview)
 	}
 
@@ -745,4 +753,17 @@ func reportModelContextLeaks(
 	}
 	logger.Warnf(ctx, "[%s][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
 		scope, len(leaks), modelcontext.SummarizeLeaks(leaks))
+}
+
+// cutDebugPreview keeps at most limit bytes of s for a debug log line, backing
+// off to a rune start so Chinese model output is never cut inside a character.
+func cutDebugPreview(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }

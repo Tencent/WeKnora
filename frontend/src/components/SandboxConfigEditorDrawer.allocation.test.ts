@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { parse } from '@vue/compiler-sfc'
+import { createSSRApp } from 'vue'
+import { renderToString } from 'vue/server-renderer'
 
 const source = readFileSync(new URL('./SandboxConfigEditorDrawer.vue', import.meta.url), 'utf8')
 
@@ -15,6 +18,27 @@ test('runtime step offers the allocation switch without the shared-root warning'
 
 test('payload always sends allocation_mode so switching back to session is explicit', () => {
   assert.match(source, /allocation_mode:\s*allocationMode\.value/)
+})
+
+test('skill rollout controls render only for per-session allocation', async () => {
+  const { descriptor } = parse(source)
+  const section = descriptor.template!.content.match(
+    /<section[^>]*>\s*<h4[^>]*>\{\{ \$t\('settings\.sandbox\.skillRollout'\)[\s\S]*?<\/section>/,
+  )?.[0]
+  assert.ok(section, 'the editor must still offer rollout controls for per-session sandboxes')
+  for (const allocationMode of ['session', 'user', 'session']) {
+    const app = createSSRApp({
+      template: section,
+      data: () => ({ currentStepKey: 'runtime', allocationMode, skillRollout: 'next_turn' }),
+    })
+    app.config.globalProperties.$t = (key: string) => key
+    app.component('t-radio-group', { template: '<div><slot /></div>' })
+    app.component('t-radio', { template: '<label><slot /></label>' })
+    const html = await renderToString(app)
+    for (const choice of ['skillRolloutNextTurn', 'skillRolloutNewSession']) {
+      assert.equal(html.includes(choice), allocationMode === 'session')
+    }
+  }
 })
 
 test('choosing shared allocation scrolls the retention field into view', () => {

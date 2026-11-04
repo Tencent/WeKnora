@@ -2,6 +2,9 @@
 
 WeKnora HTTP API 使用 `/api/v1` 前缀，支持 JWT、API Key 和 Embed token 认证；内置 MCP Server 端点另用端点令牌认证。调用各资源接口前，需按客户端类型选择凭证，并遵循统一的响应、错误处理、分页和流式事件约定。
 
+
+自动化计划、执行记录与站内通知见[自动化 API](02-api-automations.md)；这些接口只供已登录用户管理本人的任务，不接受 API Key。
+
 ## Base URL 与版本前缀
 
 - 所有业务 API 挂载在 `/api/v1` 前缀下（`router.go` 中 `r.Group("/api/v1")`）。
