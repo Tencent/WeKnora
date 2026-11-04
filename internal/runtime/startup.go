@@ -141,7 +141,8 @@ func LogStartupEnv(ctx context.Context) {
 	// stays so the banner alone still names the problem.
 	if k := os.Getenv("SYSTEM_AES_KEY"); k != "" && utils.GetAESKey() == nil {
 		logger.Warnf(ctx,
-			"[startup-env] SYSTEM_AES_KEY is set but does not decode to 32 bytes (%d chars); AES-256 requires exactly 32 bytes — encryption is DISABLED",
+			"[startup-env] SYSTEM_AES_KEY is set but does not decode to 32 bytes (%d chars); "+
+				"AES-256 requires exactly 32 bytes — encryption is DISABLED",
 			len(k))
 	}
 	// Upgrades from example configs keep the published example AES key,
