@@ -104,6 +104,23 @@ class ChatSSETest(unittest.TestCase):
         self.assertEqual(result["answer"], "done")
         self.response.__exit__.assert_called_once()
 
+    def test_stop_returns_partial_answer_in_both_chat_paths(self):
+        lines = [
+            b'data: {"response_type":"answer","content":"partial answer"}',
+            b"",
+            b'data: {"response_type":"stop","done":true}',
+            b"",
+            b'data: {"response_type":"error","content":"must not read"}',
+            b"",
+        ]
+        for agent in (False, True):
+            with self.subTest(agent=agent):
+                result = self.consume(lines, agent=agent)
+                self.assertEqual(result["answer"], "partial answer")
+                self.assertIs(result["stopped"], True)
+                self.assertEqual(result["session_id"], "session-1")
+                self.response.__exit__.assert_called_once()
+
     def test_eof_before_complete_fails_in_both_chat_paths(self):
         cases = [
             [],

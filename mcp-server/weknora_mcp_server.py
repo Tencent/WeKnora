@@ -509,6 +509,7 @@ class WeKnoraClient:
           data: {"response_type": "answer", "content": "..."}
           data: {"response_type": "references", "knowledge_references": [...]}
           data: {"response_type": "complete"}
+          data: {"response_type": "stop", "done": true}
         
         A blank line ends each event; multiple data lines are joined with newlines.
         We accumulate answer chunks and extract references, returning them as a dict.
@@ -578,16 +579,17 @@ class WeKnoraClient:
                         raise RequestException(
                             f"Server error: {event_data.get('content', 'unknown error')}"
                         )
-                    elif response_type == "complete":
-                        break
-                else:
-                    raise RequestException("SSE stream ended before complete event")
+                    elif response_type in ("complete", "stop"):
+                        result = {
+                            "answer": "".join(answer_chunks),
+                            "references": references,
+                            "_debug_events": debug_events,
+                        }
+                        if response_type == "stop":
+                            result["stopped"] = True
+                        return result
 
-            return {
-                "answer": "".join(answer_chunks),
-                "references": references,
-                "_debug_events": debug_events,
-            }
+            raise RequestException("SSE stream ended before complete event")
         except RequestException as e:
             logger.error(f"SSE stream request failed ({url}): {e}")
             raise
