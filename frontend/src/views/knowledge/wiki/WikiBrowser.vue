@@ -2190,13 +2190,15 @@ const indexHasMore = computed(() => {
   return true
 })
 
-watch(renderedContent, async () => {
+async function refreshReaderBody() {
   await nextTick()
   if (readerBodyRef.value) {
     await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
     await renderWikiMermaid(readerBodyRef.value)
   }
-})
+}
+
+watch(renderedContent, refreshReaderBody)
 
 // Index body may contain image markdown from an LLM-generated intro;
 // hydrate the same way as regular page content so protected URLs
@@ -3047,6 +3049,14 @@ async function loadStats() {
 // --- Manual page editing / version management ---------------------------
 
 const editingPage = ref(false)
+
+// The reader body is `v-if="!editingPage"`, so saving or cancelling an edit
+// mounts a fresh element whose protected images and diagrams are pending again;
+// renderedContent may not change (cancel), so refresh the body when editing ends.
+watch(editingPage, (editing) => {
+  if (!editing) refreshReaderBody()
+})
+
 const savingPage = ref(false)
 const editForm = ref({ title: '', summary: '', content: '' })
 // Version the user started editing from — the optimistic-lock guard sent
