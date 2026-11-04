@@ -405,7 +405,7 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 | `mentioned_items` | []object | 否 | @提及项（type/kb_id/kb_name/service_id/skill_name） |
 | `disable_title` | bool | 否 | 禁用自动标题 |
 | `images` | []object | 否 | 图片（`data` base64 / `url` / `caption`） |
-| `attachment_uploads` | []object | 否 | 内联附件（`data` base64、`file_name`、`file_size`） |
+| `attachment_uploads` | []object | 否 | 内联附件（`data` base64、`file_name`、`file_size`），每次请求默认最多 5 个，可通过环境变量 `MAX_ATTACHMENT_UPLOADS_PER_REQUEST` 调整 |
 | `attachment_ids` | []string | 否 | 已上传的会话附件 ID |
 | `channel` | string | 否 | 来源渠道 |
 | `suggestion_attribution` | object | 否 | 点击建议的归因信息 |

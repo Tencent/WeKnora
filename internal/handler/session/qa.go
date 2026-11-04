@@ -32,17 +32,17 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
-	maxAttachmentUploadsPerRequest = 5
-	maxAttachmentUploadTotalBytes  = int64(100 * 1024 * 1024)
+	defaultMaxAttachmentUploadsPerRequest = 5
+	maxAttachmentUploadTotalBytes         = int64(100 * 1024 * 1024)
 
 	// maxQARequestBodyBytes caps the JSON body of a chat request before the
 	// reader touches it.
 	//
-	// The body carries up to maxAttachmentUploadsPerRequest inline
-	// base64 attachments whose decoded total may reach
+	// The body carries inline base64 attachments whose decoded total may reach
 	// maxAttachmentUploadTotalBytes; base64 inflates that by 4/3, so the
 	// largest legal body is about 134 MiB. That bound is only enforced after
 	// decoding, which means an unbounded read buffers the whole body first —
@@ -368,7 +368,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		maxSize := secutils.GetMaxFileSize()
 		decodedAttachments, decodeErr := decodeAndValidateAttachmentUploads(
 			request.AttachmentUploads,
-			maxAttachmentUploadsPerRequest,
+			maxAttachmentUploadsPerRequest(),
 			maxSize,
 			maxAttachmentUploadTotalBytes,
 		)
@@ -399,33 +399,25 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			}
 		}
 
-		// Process all attachments concurrently.
+		// Raising the batch limit should not raise concurrent parser or ASR work.
 		processedAttachments = make(types.MessageAttachments, len(request.AttachmentUploads))
-		var wg sync.WaitGroup
-		errChan := make(chan error, len(request.AttachmentUploads))
-
+		var group errgroup.Group
+		group.SetLimit(defaultMaxAttachmentUploadsPerRequest)
 		for i, upload := range request.AttachmentUploads {
-			wg.Add(1)
-			go func(idx int, att AttachmentUpload) {
-				defer wg.Done()
-
+			group.Go(func() error {
 				processed, err := h.attachmentProcessor.ProcessAttachment(
-					attachmentRuntimeCtx, decodedAttachments[idx], att.FileName, int64(len(decodedAttachments[idx])), tenantID, asrModelID,
+					attachmentRuntimeCtx, decodedAttachments[i], upload.FileName,
+					int64(len(decodedAttachments[i])), tenantID, asrModelID,
 				)
 				if err != nil {
-					errChan <- fmt.Errorf("attachment %d processing failed: %w", idx+1, err)
-					return
+					return fmt.Errorf("attachment %d processing failed: %w", i+1, err)
 				}
-
-				processedAttachments[idx] = *processed
-			}(i, upload)
+				processedAttachments[i] = *processed
+				return nil
+			})
 		}
 
-		wg.Wait()
-		close(errChan)
-
-		if len(errChan) > 0 {
-			err := <-errChan
+		if err := group.Wait(); err != nil {
 			logger.Errorf(ctx, "[%s] attachment processing failed: %v", logPrefix, err)
 			return nil, nil, errors.NewBadRequestError(fmt.Sprintf("attachment processing failed: %v", err))
 		}
@@ -543,6 +535,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	return reqCtx, &request, nil
+}
+
+func maxAttachmentUploadsPerRequest() int {
+	limit, err := strconv.Atoi(strings.TrimSpace(os.Getenv("MAX_ATTACHMENT_UPLOADS_PER_REQUEST")))
+	if err != nil || limit <= 0 {
+		return defaultMaxAttachmentUploadsPerRequest
+	}
+	return limit
 }
 
 func decodeAndValidateAttachmentUploads(
