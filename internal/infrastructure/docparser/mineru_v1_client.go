@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -34,8 +35,8 @@ const (
 	mineruV1CancelBudget = 10 * time.Second
 )
 
-// MinerU V1 tiers accepted by POST /v1/parse/jobs. An empty tier means the
-// server's default selection policy (standard → basic for PDF/image).
+// MinerU V1 tiers accepted by Jobs and Tasks. An empty tier leaves selection
+// to the server; defaults differ between versions and deployments.
 var mineruV1Tiers = map[string]struct{}{
 	"flash":    {},
 	"basic":    {},
@@ -47,7 +48,8 @@ type minerUProtocol int
 
 const (
 	minerUProtocolLegacy minerUProtocol = iota // MinerU <= 3.x: POST /file_parse
-	minerUProtocolV1                           // MinerU >= 4.0: /v1/*
+	minerUProtocolV1                           // MinerU 4.0.x: Jobs API
+	minerUProtocolTasks                        // MinerU 4.1+: Tasks API
 )
 
 // minerUV1Client talks to any MinerU V1 deployment (self-hosted api-server or
@@ -176,12 +178,36 @@ func detectMinerUProtocol(
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var health struct {
-			Status string `json:"status"`
+			Status   string `json:"status"`
+			Version  string `json:"version"`
+			Features struct {
+				TaskOutputFormats []string `json:"task_output_formats"`
+			} `json:"features"`
 		}
 		if err := json.Unmarshal(body, &health); err != nil || health.Status != "ok" {
 			return minerUProtocolLegacy, fmt.Errorf("unexpected /v1/health response: %s",
 				truncateForLog(string(body), 300))
 		}
+		// Prefer the advertised Tasks capability: some compatible services
+		// report an API version such as 1.0.0 rather than the MinerU release.
+		if health.Features.TaskOutputFormats != nil {
+			for _, format := range health.Features.TaskOutputFormats {
+				if format == "default" {
+					return minerUProtocolTasks, nil
+				}
+			}
+			return minerUProtocolTasks, fmt.Errorf("MinerU Tasks does not advertise default output")
+		}
+		parts := strings.Split(strings.TrimPrefix(health.Version, "v"), ".")
+		if len(parts) >= 2 {
+			major, majorErr := strconv.Atoi(parts[0])
+			minor, minorErr := strconv.Atoi(parts[1])
+			if majorErr == nil && minorErr == nil && major == 4 && minor >= 1 {
+				return minerUProtocolTasks, nil
+			}
+		}
+		// Preserve Jobs compatibility when older health responses omit a
+		// release version or use an unrelated API version.
 		return minerUProtocolV1, nil
 	case http.StatusUnauthorized:
 		if apiKey == "" {
@@ -371,7 +397,7 @@ func (c *minerUV1Client) putBytes(ctx context.Context, up *minerUV1Upload, conte
 		return fmt.Errorf("upload bytes: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return fmt.Errorf("upload bytes status %d: %s", resp.StatusCode, truncateForLog(string(body), 300))
 	}
@@ -470,14 +496,23 @@ func minerUV1ZipOutput(job *minerUV1Job) (minerUV1FileRef, error) {
 }
 
 func (c *minerUV1Client) downloadFile(ctx context.Context, fileID string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		c.baseURL+"/v1/files/"+url.PathEscape(fileID)+"/content", nil)
+	return c.downloadURL(ctx, c.baseURL+"/v1/files/"+url.PathEscape(fileID)+"/content")
+}
+
+// downloadURL also handles Tasks result URLs, including signed storage URLs.
+// Keep SSRF checks and redirect credential isolation in the shared safe client.
+func (c *minerUV1Client) downloadURL(ctx context.Context, rawURL string) ([]byte, error) {
+	target, err := c.resolveURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid result URL: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return nil, err
 	}
-	// Go drops Authorization when following a redirect to another host, so a
-	// 302 to a CDN (official API) does not leak the key.
-	c.setAuth(req)
+	if c.sameOrigin(target) {
+		c.setAuth(req)
+	}
 
 	resp, err := c.bulkClient.Do(req)
 	if err != nil {
