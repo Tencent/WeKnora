@@ -225,6 +225,13 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 		}
 		return nil, err
 	}
+	ctx, err = s.bindInitialDocumentGeneration(ctx, knowledge)
+	if errors.Is(err, types.ErrDocumentGenerationSuperseded) {
+		return knowledge, nil
+	}
+	if err != nil {
+		return knowledge, err
+	}
 	// Set tag relations
 	if err := s.attachCreationTags(ctx, knowledge, tagIDs, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
@@ -274,7 +281,7 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 		payloadBytes,
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocument(ctx, task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -437,6 +444,13 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
+	ctx, err = s.bindInitialDocumentGeneration(ctx, knowledge)
+	if errors.Is(err, types.ErrDocumentGenerationSuperseded) {
+		return knowledge, nil
+	}
+	if err != nil {
+		return knowledge, err
+	}
 	// Set tag relations
 	if err := s.attachCreationTags(ctx, knowledge, tagIDs, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
@@ -482,7 +496,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		payloadBytes,
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocument(ctx, task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -683,6 +697,13 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
+	ctx, err = s.bindInitialDocumentGeneration(ctx, knowledge)
+	if errors.Is(err, types.ErrDocumentGenerationSuperseded) {
+		return knowledge, nil
+	}
+	if err != nil {
+		return knowledge, err
+	}
 	// Set tag relations
 	if err := s.attachCreationTags(ctx, knowledge, tagIDs, replacement); err != nil {
 		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
@@ -729,7 +750,7 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		payloadBytes,
 		documentProcessTaskOptions(s.config)...,
 	)
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocument(ctx, task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -952,6 +973,13 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
+	ctx, err = s.bindInitialDocumentGeneration(ctx, knowledge)
+	if errors.Is(err, types.ErrDocumentGenerationSuperseded) {
+		return knowledge, nil
+	}
+	if err != nil {
+		return knowledge, err
+	}
 	// Process passages
 	if syncMode {
 		logger.Info(ctx, "Processing passage synchronously")
@@ -1007,7 +1035,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			payloadBytes,
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocument(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -1188,6 +1216,24 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 // created. The API may still return the row so callers can retry it.
 func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowledge *types.Knowledge) {
 	if knowledge == nil {
+		return
+	}
+	if generations, ok := s.taskPendingRepo.(interfaces.DocumentGenerationRepository); ok && !knowledge.IsManual() {
+		token, exists := types.DocumentGenerationFromContext(ctx, knowledge.TenantID, knowledge.ID)
+		if !exists {
+			var err error
+			token, err = generations.InitialDocumentGeneration(
+				ctx, knowledge.TenantID, knowledge.ID, knowledge.KnowledgeBaseID)
+			if err != nil || token == "" {
+				return
+			}
+		}
+		_, err := generations.UpdateDocumentGeneration(ctx, knowledge.TenantID, knowledge.ID, token, map[string]any{
+			"parse_status": types.ParseStatusFailed, "error_message": "Failed to enqueue processing task",
+		})
+		if err != nil {
+			logger.Errorf(ctx, "Failed to mark document generation after enqueue error: %v", err)
+		}
 		return
 	}
 	knowledge.ParseStatus = "failed"

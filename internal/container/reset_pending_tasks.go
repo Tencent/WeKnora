@@ -151,7 +151,16 @@ func stuckKnowledgeParseQuery(db *gorm.DB) *gorm.DB {
 			  AND task_pending_ops.op = ?
 		))`, types.ParseStatusFinalizing, types.TypeWikiIngest,
 			types.TaskScopeKnowledgeBase, "ingest")
-	return q
+	// Document admission also persists before a transient runner exists. Only
+	// the parsing phase is resumable here; finalizing may own lost Lite subtasks.
+	return q.Where(`NOT (parse_status IN ? AND EXISTS (
+		SELECT 1 FROM task_pending_ops
+		WHERE task_pending_ops.task_type = ?
+		  AND task_pending_ops.scope = ?
+		  AND task_pending_ops.op = ?
+		  AND task_pending_ops.dedup_key = knowledges.id
+	))`, []string{types.ParseStatusPending, types.ParseStatusProcessing},
+		types.TypeDocumentProcess, types.TaskScopeKnowledgeBase, "process")
 }
 
 func stuckKnowledgeSummaryQuery(db *gorm.DB) *gorm.DB {
