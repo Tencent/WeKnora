@@ -27,13 +27,18 @@ class RequestThreadPoolExecutor(ThreadPoolExecutor):
     """Collect PDF wrapper cycles and trim idle arenas after large RPC tasks."""
 
     def submit(self, fn, /, *args, **kwargs):
-        return super().submit(self._run, fn, args, kwargs)
+        return super().submit(self._run, [fn, args, kwargs])
 
     @staticmethod
-    def _run(fn, args, kwargs):
+    def _run(task):
+        fn, args, kwargs = task
+        # The thread pool retains its submitted arguments until _run returns.
+        # Transfer ownership so cleanup can release the callable and inputs.
+        task.clear()
         try:
             return fn(*args, **kwargs)
         finally:
+            del fn, args, kwargs
             if getattr(_request_memory, "reclaim", False):
                 _request_memory.reclaim = False
                 # Inside the RPC handler, gRPC still owns the request argument.

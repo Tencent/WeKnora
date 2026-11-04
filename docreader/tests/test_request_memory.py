@@ -1,6 +1,7 @@
 import threading
 import unittest
 import weakref
+from functools import partial
 from unittest.mock import patch
 
 from docreader.utils.request_memory import (
@@ -10,6 +11,43 @@ from docreader.utils.request_memory import (
 
 
 class RequestMemoryTest(unittest.TestCase):
+    def test_large_request_inputs_are_released_before_allocator_trim(self):
+        class Payload:
+            def __init__(self):
+                self.data = bytearray(16 * 1024 * 1024)
+
+        for carrier in ("positional", "keyword", "callable"):
+            with self.subTest(carrier=carrier):
+                ready = threading.Event()
+                released_at_trim = []
+
+                def rpc_task(value):
+                    self.assertTrue(ready.wait(timeout=5))
+                    track_request_size(len(value.data))
+                    return "completed"
+
+                def trim(_padding):
+                    released_at_trim.append(reference() is None)
+
+                with patch(
+                    "docreader.utils.request_memory._malloc_trim", side_effect=trim
+                ) as malloc_trim:
+                    with RequestThreadPoolExecutor(max_workers=1) as pool:
+                        payload = Payload()
+                        reference = weakref.ref(payload)
+                        if carrier == "positional":
+                            future = pool.submit(rpc_task, payload)
+                        elif carrier == "keyword":
+                            future = pool.submit(rpc_task, value=payload)
+                        else:
+                            future = pool.submit(partial(rpc_task, payload))
+                        del payload
+                        ready.set()
+                        self.assertEqual(future.result(timeout=5), "completed")
+
+                malloc_trim.assert_called_once_with(0)
+                self.assertEqual(released_at_trim, [True])
+
     def test_large_request_is_reclaimed_after_worker_locals_are_released(self):
         references = []
 
