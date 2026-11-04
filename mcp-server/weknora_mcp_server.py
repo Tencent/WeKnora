@@ -247,9 +247,8 @@ class WeKnoraClient:
         """Resolve an agent ID or name to its canonical ID.
 
         If *agent_id_or_name* is already a UUID it is returned unchanged.
-        Otherwise all agents are listed and the first one whose ``id``
-        matches exactly or whose ``name`` matches case-insensitively is
-        returned.
+        Otherwise an exact ``id`` match takes precedence over the first
+        case-insensitive ``name`` match.
         Raises ValueError when no match is found.
         """
         if self._UUID_RE.match(agent_id_or_name):
@@ -259,13 +258,16 @@ class WeKnoraClient:
         if isinstance(agents, dict):
             agents = agents.get("list", agents.get("items", []))
         needle = agent_id_or_name.lower()
+        name_match = None
         for agent in (agents or []):
             if not isinstance(agent, dict):
                 continue
             if agent.get("id") == agent_id_or_name:
                 return agent["id"]
-            if agent.get("name", "").lower() == needle:
-                return agent["id"]
+            if name_match is None and agent.get("name", "").lower() == needle:
+                name_match = agent["id"]
+        if name_match is not None:
+            return name_match
         raise ValueError(
             f"Agent {agent_id_or_name!r} not found. "
             "Use list_agents to see available agent IDs and names."
