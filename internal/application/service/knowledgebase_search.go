@@ -501,6 +501,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			questionOffKBIDs = append(questionOffKBIDs, kb.ID)
 		}
 	}
+
 	// The query is embedded with the primary's model, or with the first
 	// vector KB of the group when the primary has none (a wiki primary
 	// searched together with document KBs): asking the primary for its empty
@@ -528,6 +529,15 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		}
 	}
 
+	// Document tags live in knowledge_tag_relations, while the index's tag_id
+	// belongs to FAQ chunks. Resolve the document filter before backend TopK.
+	docTagKBIDs, docKnowledgeIDs, err := s.resolveDocumentTagScope(ctx, groupKBs, params)
+	if err != nil {
+		return nil, err
+	}
+	docVectorKBIDs = intersectStrings(docVectorKBIDs, docTagKBIDs)
+	docKeywordKBIDs = intersectStrings(docKeywordKBIDs, docTagKBIDs)
+
 	// Add vector retrieval params if supported
 	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch &&
 		(len(faqVectorKBIDs) > 0 || len(docVectorKBIDs) > 0) {
@@ -539,6 +549,12 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		}
 
 		appendVectorParams := func(kbIDs []string, knowledgeType string) {
+			knowledgeIDs := docKnowledgeIDs
+			var tagIDs []string
+			if knowledgeType == types.KnowledgeTypeFAQ {
+				knowledgeIDs = params.KnowledgeIDs
+				tagIDs = params.TagIDs
+			}
 			retrieveParams = append(retrieveParams, types.RetrieveParams{
 				Query:                         params.QueryText,
 				Embedding:                     queryEmbedding,
@@ -546,8 +562,8 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 				TopK:                          matchCount,
 				Threshold:                     params.VectorThreshold,
 				RetrieverType:                 types.VectorRetrieverType,
-				KnowledgeIDs:                  params.KnowledgeIDs,
-				TagIDs:                        params.TagIDs,
+				KnowledgeIDs:                  knowledgeIDs,
+				TagIDs:                        tagIDs,
 				KnowledgeType:                 knowledgeType,
 				ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(kbIDs, questionOffKBIDs),
 			})
@@ -576,8 +592,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			TopK:                          matchCount,
 			Threshold:                     params.KeywordThreshold,
 			RetrieverType:                 types.KeywordsRetrieverType,
-			KnowledgeIDs:                  params.KnowledgeIDs,
-			TagIDs:                        params.TagIDs,
+			KnowledgeIDs:                  docKnowledgeIDs,
 			ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(docKeywordKBIDs, questionOffKBIDs),
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
@@ -603,6 +618,50 @@ func generatedQuestionKBIDs(searched, disabled []string) []string {
 		}
 	}
 	return matched
+}
+
+// resolveDocumentTagScope translates the document part of a TagIDs filter into
+// knowledge IDs. A separate lookup per KB keeps shared-KB ownership and
+// multi-KB scopes isolated; the returned IDs are the OR union across matched
+// KBs and are always paired with the returned KB IDs.
+func (s *knowledgeBaseService) resolveDocumentTagScope(
+	ctx context.Context,
+	groupKBs []*types.KnowledgeBase,
+	params types.SearchParams,
+) ([]string, []string, error) {
+	var documentKBIDs []string
+	for _, kb := range groupKBs {
+		if kb.Type != types.KnowledgeBaseTypeFAQ {
+			documentKBIDs = append(documentKBIDs, kb.ID)
+		}
+	}
+	if len(params.TagIDs) == 0 {
+		return documentKBIDs, params.KnowledgeIDs, nil
+	}
+
+	matchedKBIDs := make([]string, 0, len(documentKBIDs))
+	matchedKnowledgeIDs := make([]string, 0)
+	for _, kb := range groupKBs {
+		if kb.Type == types.KnowledgeBaseTypeFAQ {
+			continue
+		}
+		knowledgeIDs, err := s.kgRepo.ListIDsByTagIDs(ctx, kb.TenantID, kb.ID, params.TagIDs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve document tag IDs for knowledge base %s: %w", kb.ID, err)
+		}
+		knowledgeIDs = uniqueNonEmptyStrings(knowledgeIDs)
+		if len(params.KnowledgeIDs) > 0 {
+			knowledgeIDs = intersectStrings(knowledgeIDs, params.KnowledgeIDs)
+		}
+		if len(knowledgeIDs) == 0 {
+			// An empty KnowledgeIDs slice means unrestricted retrieval in the
+			// backend, so an unmatched KB must be omitted altogether.
+			continue
+		}
+		matchedKBIDs = append(matchedKBIDs, kb.ID)
+		matchedKnowledgeIDs = append(matchedKnowledgeIDs, knowledgeIDs...)
+	}
+	return uniqueNonEmptyStrings(matchedKBIDs), uniqueNonEmptyStrings(matchedKnowledgeIDs), nil
 }
 
 // resolveQueryEmbedding returns the query embedding for a store group. It

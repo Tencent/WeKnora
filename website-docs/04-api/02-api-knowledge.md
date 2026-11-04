@@ -235,10 +235,12 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 | `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回 |
 | `knowledge_base_ids` | []string | 否 | 一次检索多个知识库，路径上的 `:id` 必须在其中；这些知识库的 embedding 模型必须相同，否则返回 400 |
 | `knowledge_ids` | []string | 否 | 限定知识条目 |
-| `tag_ids` | []string | 否 | 标签过滤（OR） |
+| `tag_ids` | []string | 否 | 标签过滤（OR）：文档知识库按文档标签召回，FAQ 知识库按条目标签召回；与 `knowledge_ids` 取交集，无匹配时返回空结果 |
 | `only_recommended` | bool | 否 | FAQ 仅推荐条目 |
 | `skip_context_enrichment` | bool | 否 | 跳过父块/上下文补齐 |
 | `rerank` | object | 否 | 传入即开启 rerank（`{}` 使用空间配置的模型），字段见 [rerank 对象](./01-api-overview.md#retrieval-api) |
+
+多知识库检索时，`tag_ids` 分别在各知识库内解析；某个知识库没有匹配标签时，该库不参与召回。共享知识库按所属空间查询文档标签。标签范围在召回前生效，开启 `rerank` 时同样适用。
 
 响应：200 `{"success":true,"data":[SearchResult]}`；带 `rerank` 时多一个 `meta.rerank`（见 [meta.rerank 诊断](./01-api-overview.md#retrieval-api)）。
 
