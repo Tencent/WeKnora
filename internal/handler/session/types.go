@@ -93,6 +93,10 @@ type CreateKnowledgeQARequest struct {
 	// ignore it.
 	AssistantAccess types.AssistantAccessLevel `json:"assistant_access,omitempty"`
 
+	// Run-budget overrides for this request. Zero fields inherit the agent.
+	MaxRunTokens    int `json:"max_run_tokens,omitempty"`
+	MaxRunSeconds   int `json:"max_run_seconds,omitempty"`
+	MaxWriteActions int `json:"max_write_actions,omitempty"`
 	// ReasoningEffort overrides thinking for this request; empty inherits the agent configuration.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
