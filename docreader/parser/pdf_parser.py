@@ -19,6 +19,7 @@ self-sufficient using pypdfium2 + the Go-side OCR that already exists.
 import base64
 from collections import Counter, deque
 import io
+import json
 import logging
 import os
 import re
@@ -2416,6 +2417,7 @@ class PDFParser(BaseParser):
         vector_figure_count = 0
         blocks = []
         source_blocks = []
+        image_source_types = {}
         offset = 0
 
         def place(part: str) -> int:
@@ -2431,6 +2433,7 @@ class PDFParser(BaseParser):
             page_only = {"type": "pdf", "page": i + 1, "mapping": "exact"}
             if classes[i] == "scanned":
                 page_filename = f"{base_name}_page_{i+1}.jpg"
+                image_source_types[f"images/{page_filename}"] = "scanned_pdf"
                 part = f"![{page_filename}](images/{page_filename})"
                 start = place(part)
                 source_blocks.append(
@@ -2450,9 +2453,12 @@ class PDFParser(BaseParser):
                         )
                     )
                 vector_figure_count += len(vector_clips.get(i, []))
+                for ref_path, _b64, _y, _caption in vector_clips.get(i, []):
+                    image_source_types[ref_path] = "pdf_text_layer"
                 page_images = list(embedded.get(i, []))
                 page_images.sort(key=lambda item: item[2], reverse=True)
                 for ref_path, _b64, _y in page_images:
+                    image_source_types[ref_path] = "pdf_text_layer"
                     fname = os.path.basename(ref_path)
                     part = f"![{fname}]({ref_path})"
                     start = place(part)
@@ -2472,6 +2478,7 @@ class PDFParser(BaseParser):
             "embedded_image_count": embedded_count,
             "vector_figure_count": vector_figure_count,
             "image_source_type": "scanned_pdf" if scanned_indices else "pdf_text_layer",
+            "image_source_types": json.dumps(image_source_types, ensure_ascii=False),
         }
 
         logger.info(

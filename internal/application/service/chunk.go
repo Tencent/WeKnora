@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -498,9 +499,15 @@ func (s *chunkService) UpdateDocumentChunk(
 	if err != nil {
 		return nil, err
 	}
-	if chunk.ChunkType != types.ChunkTypeText {
-		return nil, fmt.Errorf("only text chunks can be edited")
+	imageText := chunk.ChunkType == types.ChunkTypeImageOCR || chunk.ChunkType == types.ChunkTypeImageCaption
+	if chunk.ChunkType != types.ChunkTypeText && !imageText {
+		return nil, fmt.Errorf("only text, image OCR and image caption chunks can be edited")
 	}
+	saveIndexStatus := func() error {
+		return s.chunkRepository.UpdateChunkFieldsByIDs(ctx, chunk.TenantID, []string{chunk.ID},
+			map[string]interface{}{"index_status": chunk.IndexStatus})
+	}
+
 	if err := s.validateDocumentChunkRelations(ctx, chunk); err != nil {
 		return nil, err
 	}
@@ -524,27 +531,27 @@ func (s *chunkService) UpdateDocumentChunk(
 	}
 	if newContent == chunk.Content && newEnabled == chunk.IsEnabled {
 		if chunk.IndexStatus == "failed" {
-			if chunk.ParentChunkID != "" && chunk.ContentRevision > 0 {
+			if !imageText && chunk.ParentChunkID != "" && chunk.ContentRevision > 0 {
 				if err := s.rebuildParentContent(ctx, chunk); err != nil {
 					logger.Warnf(ctx, "Failed to rebuild parent chunk while retrying edit: %v", err)
 					return chunk, nil
 				}
 			}
 			chunk.IndexStatus = "processing"
-			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
-			if err := s.syncChunkIndex(ctx, chunk); err != nil {
+			_ = saveIndexStatus()
+			if err := s.syncEditedChunkIndex(ctx, chunk); err != nil {
 				chunk.IndexStatus = "failed"
-				_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+				_ = saveIndexStatus()
 				return chunk, nil
 			}
 			chunk.IndexStatus = "ready"
-			if err := s.chunkRepository.UpdateChunk(ctx, chunk); err != nil {
+			if err := saveIndexStatus(); err != nil {
 				return nil, err
 			}
 		}
 		return chunk, nil
 	}
-	if content != nil {
+	if content != nil && !imageText {
 		sourceContent := chunk.SourceContent
 		if sourceContent == "" {
 			sourceContent = chunk.Content
@@ -573,6 +580,23 @@ func (s *chunkService) UpdateDocumentChunk(
 		chunk.SourceLocators = nil
 	}
 	chunk.Content = newContent
+	if imageText {
+		var images []map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(chunk.ImageInfo), &images); err != nil || len(images) != 1 || images[0] == nil {
+			return nil, fmt.Errorf("image chunk must describe exactly one image")
+		}
+		field := "caption"
+		if chunk.ChunkType == types.ChunkTypeImageOCR {
+			field = "ocr_text"
+		}
+		images[0][field], _ = json.Marshal(newContent)
+		info, err := json.Marshal(images)
+		if err != nil {
+			return nil, err
+		}
+		chunk.ImageInfo = string(info)
+		chunk.ContentHash = fmt.Sprintf("%x", sha256.Sum256([]byte(newContent)))
+	}
 	chunk.IsEnabled = newEnabled
 	chunk.ContentRevision++
 	chunk.LastEditorID = actorID
@@ -582,19 +606,19 @@ func (s *chunkService) UpdateDocumentChunk(
 		return nil, err
 	}
 
-	if bodyChanged && chunk.ParentChunkID != "" {
+	if bodyChanged && !imageText && chunk.ParentChunkID != "" {
 		if err := s.rebuildParentContent(ctx, chunk); err != nil {
 			logger.Warnf(ctx, "Failed to rebuild parent chunk after edit: %v", err)
 			chunk.IndexStatus = "failed"
-			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			_ = saveIndexStatus()
 			return chunk, nil
 		}
 	}
-	if bodyChanged || newEnabled != revision.IsEnabled {
+	if !imageText && (bodyChanged || newEnabled != revision.IsEnabled) {
 		if err := s.syncEditedChunkImages(ctx, chunk); err != nil {
 			logger.Warnf(ctx, "Failed to synchronize image children after chunk edit: %v", err)
 			chunk.IndexStatus = "failed"
-			_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+			_ = saveIndexStatus()
 			return chunk, nil
 		}
 	}
@@ -608,14 +632,14 @@ func (s *chunkService) UpdateDocumentChunk(
 			}
 		}
 	}
-	if err := s.syncChunkIndex(ctx, chunk); err != nil {
+	if err := s.syncEditedChunkIndex(ctx, chunk); err != nil {
 		chunk.IndexStatus = "failed"
-		_ = s.chunkRepository.UpdateChunk(ctx, chunk)
+		_ = saveIndexStatus()
 		logger.Errorf(ctx, "Chunk %s saved but reindex failed: %v", chunk.ID, err)
 		return chunk, nil
 	}
 	chunk.IndexStatus = "ready"
-	if err := s.chunkRepository.UpdateChunk(ctx, chunk); err != nil {
+	if err := saveIndexStatus(); err != nil {
 		return nil, err
 	}
 	return chunk, nil
@@ -660,16 +684,19 @@ func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.C
 		child.IsEnabled = desiredEnabled
 		child.IndexStatus = "processing"
 		child.UpdatedAt = time.Now()
-		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+		if err := s.chunkRepository.UpdateChunkFieldsByIDs(ctx, child.TenantID, []string{child.ID},
+			map[string]interface{}{"is_enabled": child.IsEnabled, "index_status": child.IndexStatus}); err != nil {
 			return err
 		}
-		if err := s.syncChunkIndex(ctx, child); err != nil {
+		if err := s.syncEditedChunkIndex(ctx, child); err != nil {
 			child.IndexStatus = "failed"
-			_ = s.chunkRepository.UpdateChunk(ctx, child)
+			_ = s.chunkRepository.UpdateChunkFieldsByIDs(ctx, child.TenantID, []string{child.ID},
+				map[string]interface{}{"index_status": child.IndexStatus})
 			return err
 		}
 		child.IndexStatus = "ready"
-		if err := s.chunkRepository.UpdateChunk(ctx, child); err != nil {
+		if err := s.chunkRepository.UpdateChunkFieldsByIDs(ctx, child.TenantID, []string{child.ID},
+			map[string]interface{}{"index_status": child.IndexStatus}); err != nil {
 			return err
 		}
 	}
@@ -717,7 +744,7 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 	}
 	replacements := make([]replacement, 0)
 	for _, child := range children {
-		if child.ContentRevision == 0 {
+		if child.ContentRevision == 0 || types.IsImageChildChunkType(child.ChunkType) {
 			continue
 		}
 		start, end := child.StartAt-parent.StartAt, child.EndAt-parent.StartAt
@@ -757,7 +784,35 @@ func (s *chunkService) rebuildParentContent(ctx context.Context, edited *types.C
 		parent.Content = searchutil.JoinChunkContent(parent.Content, conflict.content, "\n\n")
 	}
 	parent.UpdatedAt = time.Now()
-	return s.chunkRepository.UpdateChunk(ctx, parent)
+	return s.chunkRepository.UpdateChunkFieldsByIDs(ctx, parent.TenantID, []string{parent.ID},
+		map[string]interface{}{
+			"content": parent.Content, "source_content": parent.SourceContent,
+			"source_locators": parent.SourceLocators,
+		})
+}
+
+// A parent-state update and a manual image edit may finish embedding out of
+// order. Re-read after the write and repair a superseded snapshot before
+// reporting ready. Sustained edits stay visibly failed and can be retried.
+func (s *chunkService) syncEditedChunkIndex(ctx context.Context, chunk *types.Chunk) error {
+	for range 3 {
+		current, err := s.chunkRepository.GetChunkByID(ctx, chunk.TenantID, chunk.ID)
+		if err != nil {
+			return err
+		}
+		if err := s.syncChunkIndex(ctx, current); err != nil {
+			return err
+		}
+		latest, err := s.chunkRepository.GetChunkByID(ctx, chunk.TenantID, chunk.ID)
+		if err != nil {
+			return err
+		}
+		if latest.ContentRevision == current.ContentRevision && latest.Content == current.Content &&
+			latest.IsEnabled == current.IsEnabled {
+			return nil
+		}
+	}
+	return fmt.Errorf("chunk changed repeatedly while indexing; retry index synchronization")
 }
 
 func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) error {

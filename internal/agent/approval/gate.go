@@ -187,6 +187,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	broker.RegisterKind(types.AgentPromptKindAskUser, types.ValidateAskUserResponse)
 	broker.RegisterKind(types.AgentPromptKindPageAction, types.ValidatePageActionResponse)
 	broker.RegisterKind(types.AgentPromptKindBudget, types.ValidateBudgetPauseResponse)
+	broker.RegisterKind(types.AgentPromptKindSecureForm, types.ValidateSecureFormResponse)
 	// Default fail-close: if the checker errors, require approval (safer for a
 	// HITL feature). Set WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true to revert.
 	failClose := !strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN")), "true")
@@ -288,6 +289,8 @@ type HostPendingRequest struct {
 	ToolCallID         string
 	EventBus           *event.EventBus
 	Host               event.HostApprovalPayload
+	// Tool is the registered tool asking; empty means shell_exec.
+	Tool string
 }
 
 // RequestHostAndWait blocks until the session owner answers a Lite host
@@ -306,8 +309,9 @@ func (g *Gate) RequestHostAndWait(ctx context.Context, req HostPendingRequest) (
 	}
 
 	host := req.Host
+	toolName := hostToolName(req.Tool)
 	request, err := json.Marshal(types.ToolApprovalPromptRequest{
-		RegisteredToolName: "shell_exec",
+		RegisteredToolName: toolName,
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("encode host approval: %w", err)
@@ -336,7 +340,7 @@ func (g *Gate) RequestHostAndWait(ctx context.Context, req HostPendingRequest) (
 					TenantID:           req.TenantID,
 					SessionID:          req.SessionID,
 					AssistantMessageID: req.AssistantMessageID,
-					RegisteredToolName: "shell_exec",
+					RegisteredToolName: toolName,
 					TimeoutSeconds:     timeoutSec,
 					HotWaitSeconds:     timeoutSec,
 					Suspendable:        p.Suspendable,
@@ -369,6 +373,16 @@ func (g *Gate) RequestHostAndWait(ctx context.Context, req HostPendingRequest) (
 		}, nil
 	}
 	d := toolApprovalDecision(out)
+	// A stop and an answer can be ready together. The stop must win, or an
+	// approval given as the user pressed Stop would still run the command.
+	if ctx.Err() != nil && d.Approved {
+		d.Approved = false
+		d.ModifiedArgs = nil
+		d.Scope = ""
+		d.Access = ""
+		d.Reason = "request canceled"
+		d.ContextCanceled = true
+	}
 	g.consumeDecision(ctx, &d, req.EventBus, out.Prompt)
 	return d, nil
 }
@@ -959,4 +973,11 @@ func (a *Adapter) IsEnabled(ctx context.Context, tenantID uint64, serviceID, too
 		return true, nil
 	}
 	return a.Svc.IsEnabled(ctx, tenantID, serviceID, toolName)
+}
+
+func hostToolName(tool string) string {
+	if strings.TrimSpace(tool) == "" {
+		return "shell_exec"
+	}
+	return tool
 }

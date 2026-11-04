@@ -3,6 +3,20 @@ import test from 'node:test'
 import { browserToolTitle, browserToolSummary, browserToolContent, browserToolIncomplete, browserActionLabel } from './browserToolDisplay'
 const t = (key: string) => key
 
+test('shared-control sync renders nested page evidence without control receipts', () => {
+ const event = {arguments:{method:'cooperate',action:'sync'},output:{
+  context_id:'control-secret',observation_id:'observation-secret',kind:'baseline',
+  observation:{text:'Name\nSave',title:'Form',url:'https://example.com/form?token=secret',truncated:true},
+ }}
+ const content = browserToolContent(event)
+ assert.equal(content.text,'Name\nSave')
+ assert.equal(content.title,'Form')
+ assert.equal(content.address,'https://example.com/form')
+ assert.equal(content.truncated,true)
+ assert.equal(JSON.stringify(content).includes('secret'),false)
+ assert.equal(browserActionLabel(t,'cooperate'),'localBrowser.readPage')
+})
+
 test('browser steps expose actions and host without URL credentials/query', () => {
  const title=browserToolTitle(t,{arguments:{method:'navigate',url:'https://user:secret@example.com/cart?token=private'},pending:true})
  assert.equal(title,'localBrowser.local · localBrowser.openPage · example.com…')

@@ -1,5 +1,5 @@
 <template>
-  <div class="host-approval" :class="{ 'is-dangerous': host.reason === 'dangerous', 'is-resolved': resolved }">
+  <div class="host-approval" :class="{ 'is-resolved': resolved }">
     <div class="host-approval__header">
       <t-icon class="host-approval__icon" :name="headerIcon" />
       <span class="host-approval__title">{{ $t(titleKey) }}</span>
@@ -10,13 +10,52 @@
     </div>
 
     <div class="host-approval__body">
-      <div class="host-approval__label">{{ $t('agentStream.hostApproval.command') }}</div>
-      <pre class="host-approval__code">{{ host.command }}</pre>
-      <div v-if="host.cwd" class="host-approval__meta">
-        {{ $t('agentStream.hostApproval.cwd') }}：<code>{{ host.cwd }}</code>
-      </div>
+      <template v-if="host.command">
+        <div class="host-approval__label">{{ $t('agentStream.hostApproval.command') }}</div>
+        <pre class="host-approval__code">{{ host.command }}</pre>
+      </template>
 
-      <template v-if="host.grant_path">
+      <template v-if="host.skill_name">
+        <div class="host-approval__label">{{ $t('agentStream.hostApproval.skillName') }}</div>
+        <pre class="host-approval__code">{{ host.skill_name }}</pre>
+      </template>
+
+      <template v-if="envLines.length">
+        <div class="host-approval__label">{{ $t('agentStream.hostApproval.env') }}</div>
+        <pre class="host-approval__code">{{ envLines.join('\n') }}</pre>
+      </template>
+
+      <template v-if="host.stdin">
+        <div class="host-approval__label">{{ $t('agentStream.hostApproval.stdin') }}</div>
+        <pre class="host-approval__code is-muted">{{ host.stdin }}</pre>
+      </template>
+
+      <template v-for="script in host.scripts || []" :key="script.path">
+        <div class="host-approval__label">{{ $t('agentStream.hostApproval.script') }}: {{ script.path }}</div>
+        <pre class="host-approval__code is-muted">{{ script.content }}</pre>
+      </template>
+
+      <template v-if="host.reason === 'file_write'">
+        <div class="host-approval__label">{{ $t('agentStream.hostApproval.grantPath') }}</div>
+        <pre class="host-approval__code">{{ host.file_path }}</pre>
+        <div class="host-approval__meta">
+          {{ $t('agentStream.hostApproval.writeMode') }}：{{ writeModeLabel }} ·
+          {{ $t('agentStream.hostApproval.writeBytes', { bytes: host.write_bytes || 0 }) }} ·
+          {{ $t('agentStream.hostApproval.fileOnly') }}
+        </div>
+        <template v-if="host.write_preview">
+          <button type="button" class="host-approval__toggle" @click="previewExpanded = !previewExpanded">
+            <t-icon :name="previewExpanded ? 'chevron-down' : 'chevron-right'" />
+            {{ $t('agentStream.hostApproval.preview') }}
+          </button>
+          <pre v-if="previewExpanded" class="host-approval__code is-muted">{{ host.write_preview }}</pre>
+          <div v-if="previewExpanded && previewTruncated" class="host-approval__meta">
+            {{ $t('agentStream.hostApproval.previewTruncated') }}
+          </div>
+        </template>
+      </template>
+
+      <template v-if="host.grant_path && host.reason !== 'file_write'">
         <div class="host-approval__label">{{ $t('agentStream.hostApproval.grantPath') }}</div>
         <pre class="host-approval__code">{{ host.grant_path }}</pre>
         <t-radio-group v-if="!resolved && canNarrowAccess(host)" v-model="access" variant="default-filled" size="small">
@@ -25,7 +64,7 @@
         </t-radio-group>
       </template>
 
-      <div v-if="host.first_attempt_ran && !resolved" class="host-approval__notice">
+      <div v-if="showsRerunNotice(host, resolved)" class="host-approval__notice">
         <t-icon name="info-circle" />
         <span>{{ $t('agentStream.hostApproval.firstAttemptRan') }}</span>
       </div>
@@ -52,7 +91,7 @@
         @click="submit('approve', 'session')">
         {{ $t('agentStream.hostApproval.approveSession') }}
       </t-button>
-      <t-button :theme="host.reason === 'dangerous' ? 'danger' : 'primary'" :loading="submitting"
+      <t-button theme="primary" :loading="submitting"
         @click="submit('approve', 'once')">
         {{ $t('agentStream.hostApproval.approveOnce') }}
       </t-button>
@@ -70,7 +109,9 @@ import {
   canNarrowAccess,
   clearComposerApproval,
   hostApprovalTitleKey,
+  hostEnvLines,
   sessionRuleLabels,
+  showsRerunNotice,
   type HostApprovalAccess,
   type HostApprovalPayload,
   type HostApprovalScope,
@@ -90,12 +131,26 @@ const props = defineProps<{
 const { t } = useI18n()
 const submitting = ref(false)
 const snippetExpanded = ref(false)
+const previewExpanded = ref(false)
+const PREVIEW_LIMIT = 64 * 1024
 const access = ref<HostApprovalAccess>(props.host.grant_access === 'read' ? 'read' : 'write')
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
 
 const titleKey = computed(() => hostApprovalTitleKey(props.host.reason))
 const sessionRules = computed(() => sessionRuleLabels(props.host))
+const envLines = computed(() => hostEnvLines(props.host))
+const previewTruncated = computed(() => (props.host.write_preview?.length || 0) >= PREVIEW_LIMIT)
+const writeModeLabel = computed(() => {
+  switch (props.host.write_mode) {
+    case 'append':
+      return t('agentStream.hostApproval.writeModeAppend')
+    case 'edit':
+      return t('agentStream.hostApproval.writeModeEdit')
+    default:
+      return t('agentStream.hostApproval.writeModeOverwrite')
+  }
+})
 
 const secondsLeft = computed(() => {
   if (props.resolved) return -1
@@ -110,7 +165,7 @@ const timerClass = computed(() => {
 })
 
 const headerIcon = computed(() => {
-  if (!props.resolved) return props.host.reason === 'dangerous' ? 'error-circle' : 'secured'
+  if (!props.resolved) return 'secured'
   return props.approved ? 'check-circle' : 'close-circle'
 })
 
@@ -173,10 +228,6 @@ const submit = async (decision: 'approve' | 'reject', scope: HostApprovalScope) 
   background: var(--td-bg-color-container);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
 
-  &.is-dangerous {
-    border-color: var(--td-error-color-5);
-  }
-
   &.is-resolved {
     box-shadow: none;
     opacity: 0.85;
@@ -192,10 +243,6 @@ const submit = async (decision: 'approve' | 'reject', scope: HostApprovalScope) 
 .host-approval__icon {
   font-size: var(--app-text-2xl);
   color: var(--td-brand-color);
-
-  .is-dangerous & {
-    color: var(--td-error-color);
-  }
 }
 
 .host-approval__title {

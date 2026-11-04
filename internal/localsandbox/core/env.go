@@ -14,10 +14,29 @@ var inheritedEnvNames = map[string]struct{}{
 }
 
 // blockedExplicitEnvNames are never taken from RunRequest.Env. Skill keys
-// (AWS_*, *_TOKEN) must still overlay; these are loader-injection knobs.
+// (AWS_*, *_TOKEN) must still overlay; these run code the command text does not
+// show. Bash reads BASH_ENV even under --noprofile --norc. PATH and PYTHONPATH
+// have ordinary uses, so they stay allowed and the approval card shows them.
 var blockedExplicitEnvNames = map[string]struct{}{
-	"DYLD_INSERT_LIBRARIES": {}, "DYLD_LIBRARY_PATH": {}, "DYLD_FRAMEWORK_PATH": {},
-	"LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
+	"BASH_ENV": {}, "ENV": {}, "ZDOTDIR": {}, "SHELLOPTS": {}, "BASHOPTS": {}, "PS4": {}, "PROMPT_COMMAND": {},
+	"PERL5OPT": {}, "PERL5LIB": {}, "PYTHONSTARTUP": {}, "PYTHONINSPECT": {},
+	"NODE_OPTIONS": {}, "RUBYOPT": {}, "RUBYLIB": {},
+}
+
+// blockedExplicitEnvPrefixes cover the dynamic loaders and exported bash
+// functions, which can replace any command by name.
+var blockedExplicitEnvPrefixes = []string{"DYLD_", "LD_", "BASH_FUNC_"}
+
+func blockedExplicitEnv(name string) bool {
+	if _, blocked := blockedExplicitEnvNames[name]; blocked {
+		return true
+	}
+	for _, prefix := range blockedExplicitEnvPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // FilterInheritedEnv keeps only the allowlisted names from a raw environ.
@@ -58,7 +77,7 @@ func BuildCommandEnv(explicit map[string]string, extraPATH []string) map[string]
 		if k == "" {
 			continue
 		}
-		if _, blocked := blockedExplicitEnvNames[k]; blocked {
+		if blockedExplicitEnv(k) {
 			continue
 		}
 		out[k] = v

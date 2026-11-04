@@ -41,12 +41,13 @@ func (r *optionalSummaryKnowledgeRepo) CompleteProcessingWithoutSubtasks(context
 func TestKnowledgePostProcessOptionalSummary(t *testing.T) {
 	t.Setenv("NEO4J_ENABLE", "true")
 	for _, tt := range []struct {
-		name      string
-		summary   *bool
-		question  bool
-		graph     bool
-		wiki      bool
-		wantTasks []string
+		name         string
+		summary      *bool
+		question     bool
+		graph        bool
+		wiki         bool
+		autoGenerate *bool
+		wantTasks    []string
 	}{
 		{name: "legacy defaults generate summary", wantTasks: []string{types.TypeSummaryGeneration}},
 		{
@@ -73,6 +74,14 @@ func TestKnowledgePostProcessOptionalSummary(t *testing.T) {
 			wiki:      true,
 			wantTasks: []string{types.TypeWikiIngest},
 		},
+		{
+			name:         "manual-only Wiki preserves other enrichment",
+			summary:      processConfigBoolPtr(false),
+			question:     true,
+			wiki:         true,
+			autoGenerate: processConfigBoolPtr(false),
+			wantTasks:    []string{types.TypeQuestionGeneration},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			knowledge := &types.Knowledge{
@@ -90,6 +99,7 @@ func TestKnowledgePostProcessOptionalSummary(t *testing.T) {
 				IndexingStrategy: types.IndexingStrategy{
 					VectorEnabled: true, GraphEnabled: tt.graph, WikiEnabled: tt.wiki,
 				},
+				WikiConfig:               &types.WikiConfig{AutoGenerate: tt.autoGenerate},
 				QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: tt.question},
 				ExtractConfig:            &types.ExtractConfig{Enabled: tt.graph},
 			}

@@ -25,6 +25,7 @@ func TestBrowserFlatSchemaCoversEveryMethod(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(schema.Properties["method"], &method))
 	valid := map[string]string{
+		"cooperate":  `{"action":"sync","max_text_chars":3000}`,
 		"screenshot": `{"ref":"e3","tab_id":1}`,
 		"observe":    `{}`, "snapshot": `{}`, "navigate": `{"url":"https://example.com"}`,
 		"navigate_back": `{}`, "navigate_forward": `{}`, "reload": `{}`,
@@ -61,6 +62,12 @@ func TestBrowserFlatSchemaCoversEveryMethod(t *testing.T) {
 func TestBrowserFlatArgumentsRejectBeforeDispatch(t *testing.T) {
 	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
 	for _, raw := range []string{
+		`{"method":"cooperate"}`,
+		`{"method":"cooperate","action":"disable"}`,
+		`{"method":"cooperate","action":"wait","timeout_ms":25001}`,
+		`{"method":"cooperate","action":"sync","timeout_ms":25001}`,
+		`{"method":"cooperate","action":"status","timeout_ms":25001}`,
+		`{"method":"cooperate","action":"status","control_policy":"target"}`,
 		`{"method":"observe","keep_open":"true"}`,
 		`null`, `[]`, `{}`, `{"method":"unknown"}`,
 		`{"method":"navigate","params":{"url":"https://example.com"}}`,
@@ -94,6 +101,54 @@ func TestBrowserFlatArgumentsRejectBeforeDispatch(t *testing.T) {
 	require.Error(t, tool.ValidateArguments(
 		json.RawMessage(`{"method":"observe","max_tokens":750}`),
 	))
+}
+
+func TestBrowserSharedControlArguments(t *testing.T) {
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+	for _, raw := range []string{
+		`{"method":"cooperate","action":"sync","control_policy":"target","tab_id":2}`,
+		`{"method":"cooperate","action":"wait","timeout_ms":25000}`,
+		`{"method":"cooperate","action":"status"}`,
+		`{"method":"click","ref":"e1","context_id":"ctx",
+		  "expect":[{"target":"#price","field":"text","equals":"  $100\n"}]}`,
+		`{"method":"fill","selector":"#name","value":"new","context_id":"ctx",
+		  "expect":[{"target":"#name","field":"value","equals":"old"}]}`,
+		`{"method":"press","key":"Enter","context_id":"ctx","observation_id":"obs"}`,
+		`{"method":"evaluate","expression":"document.title","context_id":"ctx","observation_id":"obs"}`,
+		`{"method":"observe","probe_hover":true,"context_id":"ctx","observation_id":"obs"}`,
+		`{"method":"click","ref":"e1","context_id":"ctx","depends_on":["#price"]}`,
+		`{"method":"click","ref":"e1","context_id":"ctx","expect":[
+		  {"target":"#item","field":"attribute","attribute":"disabled","equals":null},
+		  {"target":"#box","field":"checked","equals":true},
+		  {"target":"#error","field":"exists","equals":false}]}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			require.NoError(t, tool.ValidateArguments(json.RawMessage(raw)))
+			var input map[string]any
+			require.NoError(t, json.Unmarshal([]byte(raw), &input))
+			method := input["method"].(string)
+			delete(input, "method")
+			require.Equal(t, input, browserCallParams(method, input), "preserve the caller's actual receipts and facts")
+		})
+	}
+	for _, condition := range []string{
+		`{"target":"#price","field":"text","equals":100}`,
+		`{"target":"#box","field":"checked","equals":"true"}`,
+		`{"target":"#item","field":"attribute","equals":null}`,
+		`{"target":"#item","field":"attribute","attribute":" ","equals":null}`,
+		`{"target":"#price","field":"text","equals":"100","attribute":"value"}`,
+		`{"target":" ","field":"exists","equals":false}`,
+		`{"target":"#price","field":"text","equals":"100","script":"alert(1)"}`,
+	} {
+		t.Run(condition, func(t *testing.T) {
+			require.Error(t, tool.ValidateArguments(json.RawMessage(
+				`{"method":"click","ref":"e1","context_id":"ctx","expect":[`+condition+`]}`)))
+		})
+	}
+	require.Error(t, tool.ValidateArguments(json.RawMessage(`{"method":"click","ref":"e1","context_id":""}`)))
+	require.Error(t, tool.ValidateArguments(json.RawMessage(`{"method":"snapshot","expect":[]}`)))
+	require.Equal(t, map[string]any{"action": "sync", "max_tokens": 750},
+		browserCallParams("cooperate", map[string]any{"action": "sync", "max_text_chars": float64(3000)}))
 }
 
 func TestBrowserDescriptionSignaturesMatchRules(t *testing.T) {

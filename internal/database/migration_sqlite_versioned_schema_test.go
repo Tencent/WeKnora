@@ -47,6 +47,7 @@ var versionedSQLiteTables = []string{
 	"notifications",
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
+	"credential_vault_items",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -88,26 +89,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-func expectedSQLiteMigrationVersion(t *testing.T, repoRoot string) int {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(repoRoot, "migrations", "sqlite"))
-	require.NoError(t, err)
-	latest := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".up.sql") {
-			continue
-		}
-		var version int
-		_, scanErr := fmt.Sscanf(name, "%d_", &version)
-		require.NoError(t, scanErr, "sqlite migration filename %s", name)
-		if version > latest {
-			latest = version
-		}
-	}
-	require.Positive(t, latest)
-	return latest
-}
+const expectedSQLiteMigrationVersion = 53
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -118,7 +100,7 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 
 	db := openSQLiteDB(t, dbPath)
 	version, dirty := sqliteMigrationState(t, db)
-	require.Equal(t, expectedSQLiteMigrationVersion(t, repoRoot), version)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
 	require.False(t, dirty)
 
 	for _, table := range versionedSQLiteTables {
@@ -186,7 +168,7 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 
 	db = openSQLiteDB(t, dbPath)
 	versionAfter, dirtyAfter := sqliteMigrationState(t, db)
-	require.Equal(t, expectedSQLiteMigrationVersion(t, repoRoot), versionAfter)
+	require.Equal(t, expectedSQLiteMigrationVersion, versionAfter)
 	require.False(t, dirtyAfter)
 
 	for _, table := range versionedSQLiteTables {
@@ -240,7 +222,7 @@ func TestSQLiteMigrationsUpgradeV16AddsSessionForkColumns(t *testing.T) {
 
 	db = openSQLiteDB(t, dbPath)
 	versionAfter, dirtyAfter := sqliteMigrationState(t, db)
-	require.Equal(t, expectedSQLiteMigrationVersion(t, repoRoot), versionAfter)
+	require.Equal(t, expectedSQLiteMigrationVersion, versionAfter)
 	require.False(t, dirtyAfter)
 	for _, column := range versionedSQLiteColumns["sessions"] {
 		require.Truef(
@@ -264,7 +246,7 @@ func TestSQLiteSandboxAllocationMigrationRollsBack(t *testing.T) {
 
 	db := openSQLiteDB(t, dbPath)
 	version, dirty := sqliteMigrationState(t, db)
-	require.Equal(t, expectedSQLiteMigrationVersion(t, repoRoot), version)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
 	require.False(t, dirty)
 	for _, table := range []string{"session_sandbox_assignments", "sandbox_user_machines"} {
 		require.Truef(t, sqliteTableExists(t, db, table), "up must create %s", table)

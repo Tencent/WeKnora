@@ -437,19 +437,30 @@ func (r *chunkRepository) SaveChunkRevision(
 	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		imageText := chunk.ChunkType == types.ChunkTypeImageOCR || chunk.ChunkType == types.ChunkTypeImageCaption
+		if imageText {
+			if err := syncEditedImageCopies(tx, chunk, expectedRevision); err != nil {
+				return err
+			}
+		}
+		fields := map[string]interface{}{
+			"content":          common.CleanInvalidUTF8(chunk.Content),
+			"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
+			"source_locators":  chunk.SourceLocators,
+			"content_revision": chunk.ContentRevision,
+			"is_enabled":       chunk.IsEnabled,
+			"metadata":         chunk.Metadata,
+			"index_status":     chunk.IndexStatus,
+			"last_editor_id":   chunk.LastEditorID,
+			"updated_at":       chunk.UpdatedAt,
+		}
+		if imageText {
+			fields["image_info"] = chunk.ImageInfo
+			fields["content_hash"] = chunk.ContentHash
+		}
 		result := tx.Model(&types.Chunk{}).
 			Where("id = ? AND tenant_id = ? AND content_revision = ?", chunk.ID, chunk.TenantID, expectedRevision).
-			Updates(map[string]interface{}{
-				"content":          common.CleanInvalidUTF8(chunk.Content),
-				"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
-				"source_locators":  chunk.SourceLocators,
-				"content_revision": chunk.ContentRevision,
-				"is_enabled":       chunk.IsEnabled,
-				"metadata":         chunk.Metadata,
-				"index_status":     chunk.IndexStatus,
-				"last_editor_id":   chunk.LastEditorID,
-				"updated_at":       chunk.UpdatedAt,
-			})
+			Updates(fields)
 		if result.Error != nil {
 			return result.Error
 		}

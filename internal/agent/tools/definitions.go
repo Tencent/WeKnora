@@ -21,6 +21,11 @@ const (
 	// ToolAskUser asks the user a question through a card and waits for the
 	// answer; the run may suspend until it arrives.
 	ToolAskUser = "ask_user"
+	// ToolRequestSecureForm shows a secure credential card for the sandbox
+	// browser; the agent gets a handle, never the values.
+	ToolRequestSecureForm = "request_secure_form"
+	// ToolBrowserFillSecret fills the values behind such a handle.
+	ToolBrowserFillSecret = "browser_fill_secret"
 	// Knowledge retrieval surface. search_knowledge covers semantic, keyword
 	// and hybrid retrieval over chunk-indexed knowledge bases; read_document
 	// reads a document's metadata and chunks (by page, by chunk handle, or by
@@ -242,6 +247,8 @@ func SwitchManagedTools() []string {
 		ToolEditSkillFile,
 		ToolDiscoverMCPTools,
 		ToolCallMCPTool,
+		ToolRequestSecureForm,
+		ToolBrowserFillSecret,
 	}
 }
 

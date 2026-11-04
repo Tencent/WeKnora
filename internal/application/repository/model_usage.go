@@ -6,12 +6,15 @@ import (
 )
 
 func knowledgeBaseModelUsageBindings(kb *types.KnowledgeBase, modelID string) []types.ModelUsageBinding {
-	bindings := make([]types.ModelUsageBinding, 0, 7)
+	bindings := make([]types.ModelUsageBinding, 0, 8)
 	if kb.EmbeddingModelID == modelID {
 		bindings = append(bindings, types.ModelUsageBindingEmbeddingModel)
 	}
 	if kb.SummaryModelID == modelID {
 		bindings = append(bindings, types.ModelUsageBindingSummaryModel)
+	}
+	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.ModelID == modelID {
+		bindings = append(bindings, types.ModelUsageBindingQuestionModel)
 	}
 	if kb.ImageProcessingConfig.ModelID == modelID {
 		bindings = append(bindings, types.ModelUsageBindingImageProcessingModel)
@@ -65,8 +68,9 @@ func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
 				"vlm_config->>'model_id' = ? OR "+
 				"asr_config->>'model_id' = ? OR "+
 				"wiki_config->>'synthesis_model_id' = ? OR "+
-				"auto_tag_config->>'model_id' = ?",
-			modelID, modelID, modelID, modelID, modelID, modelID, modelID,
+				"auto_tag_config->>'model_id' = ? OR "+
+				"question_generation_config->>'model_id' = ?",
+			modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID,
 		)
 	}
 	return db.Where(
@@ -75,8 +79,9 @@ func scopeKnowledgeBasesByModelID(db *gorm.DB, modelID string) *gorm.DB {
 			"json_extract(vlm_config, '$.model_id') = ? OR "+
 			"json_extract(asr_config, '$.model_id') = ? OR "+
 			"json_extract(wiki_config, '$.synthesis_model_id') = ? OR "+
-			"json_extract(auto_tag_config, '$.model_id') = ?",
-		modelID, modelID, modelID, modelID, modelID, modelID, modelID,
+			"json_extract(auto_tag_config, '$.model_id') = ? OR "+
+			"json_extract(question_generation_config, '$.model_id') = ?",
+		modelID, modelID, modelID, modelID, modelID, modelID, modelID, modelID,
 	)
 }
 

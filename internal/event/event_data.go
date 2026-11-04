@@ -317,12 +317,18 @@ type ToolApprovalResolvedData struct {
 	TimedOut  bool   `json:"timed_out,omitempty"`
 	Canceled  bool   `json:"canceled,omitempty"`
 	// Scope is "once" or "session" for host approvals.
-	Scope string `json:"scope,omitempty"`
+	Scope     string `json:"scope,omitempty"`
+	RiskLevel string `json:"risk_level,omitempty"`
 }
 
-// HostApprovalPayload describes a Lite host command waiting for the user.
+// HostApprovalPayload describes a Lite host action waiting for approval, by
+// the user or by the review model.
 type HostApprovalPayload struct {
-	Reason          string `json:"reason"`
+	Reason string `json:"reason"`
+	// Reviewer is "user" (a card) or "model" (auto review, no card).
+	Reviewer        string `json:"reviewer,omitempty"`
+	RiskLevel       string `json:"risk_level,omitempty"`
+	Tool            string `json:"tool,omitempty"`
 	Command         string `json:"command,omitempty"`
 	Cwd             string `json:"cwd,omitempty"`
 	GrantPath       string `json:"grant_path,omitempty"`
@@ -332,6 +338,24 @@ type HostApprovalPayload struct {
 	AllowSession    bool   `json:"allow_session"`
 	// SessionRules is what "allow for this session" remembers for a delete.
 	SessionRules []string `json:"session_rules,omitempty"`
+	// FilePath, WriteMode, WriteBytes and WritePreview describe a file tool
+	// write. WritePreview is the content or diff, capped for the card.
+	FilePath     string `json:"file_path,omitempty"`
+	WriteMode    string `json:"write_mode,omitempty"`
+	WriteBytes   int    `json:"write_bytes,omitempty"`
+	WritePreview string `json:"write_preview,omitempty"`
+	// Env, SkillName, Stdin and Scripts are what the command runs with besides
+	// its own text. Env values under a secret-looking name are masked.
+	Env       map[string]string `json:"env,omitempty"`
+	SkillName string            `json:"skill_name,omitempty"`
+	Stdin     string            `json:"stdin,omitempty"`
+	Scripts   []HostScript      `json:"scripts,omitempty"`
+}
+
+// HostScript is a script a host command runs, shown on its approval card.
+type HostScript struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
 }
 
 // AgentPromptRequiredData asks the user a question of the given kind.
