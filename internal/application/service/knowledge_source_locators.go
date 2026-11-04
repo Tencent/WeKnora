@@ -127,7 +127,7 @@ func buildSourceIndex(
 	for _, f := range found {
 		runePos += utf8.RuneCountInString(final[bytePos:f.at])
 		bytePos = f.at
-		images[f.image].SourceLocators = idx.LocatorsAt(runePos)
+		images[f.image].SourceLocators = idx.NearestLocatorsAt(runePos)
 	}
 	return idx
 }
