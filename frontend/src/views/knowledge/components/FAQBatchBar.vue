@@ -8,6 +8,7 @@ const props = defineProps<{
   disabledCount: number
   canEdit: boolean
   canManage: boolean
+  visible?: boolean
   tagLoading?: boolean
   statusAction?: 'enable' | 'disable' | null
   deleteLoading?: boolean
@@ -15,6 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'cancel'): void
+  (event: 'selectLoaded'): void
   (event: 'batchTag'): void
   (event: 'enable'): void
   (event: 'disable'): void
@@ -32,11 +34,15 @@ const actionLoading = computed(() => (
 
 <template>
   <transition name="faq-batch-bar-fade">
-    <div v-if="count > 0 && (canEdit || canManage)" class="faq-batch-bar" role="region"
+    <div v-if="(visible || count > 0) && (canEdit || canManage)" class="faq-batch-bar" role="region"
       :aria-label="t('knowledgeBase.selectedCount', { count })">
       <div class="faq-batch-bar__inner">
         <div class="faq-batch-bar__selection">
           <span class="faq-batch-bar__count">{{ t('knowledgeBase.selectedCount', { count }) }}</span>
+          <t-button variant="text" theme="default" size="small" :disabled="actionLoading"
+            @click="emit('selectLoaded')">
+            {{ t('knowledgeBase.selectLoaded') }}
+          </t-button>
           <t-button variant="text" theme="default" size="small" :disabled="actionLoading"
             @click="emit('cancel')">
             {{ t('knowledgeBase.clearSelection') }}
@@ -45,19 +51,19 @@ const actionLoading = computed(() => (
 
         <div class="faq-batch-bar__actions">
           <t-button v-if="canEdit" theme="default" variant="outline" size="small"
-            :disabled="actionLoading" :loading="tagLoading" @click="emit('batchTag')">
+            :disabled="actionLoading || count === 0" :loading="tagLoading" @click="emit('batchTag')">
             <template #icon><t-icon name="discount" size="14px" /></template>
             {{ t('knowledgeEditor.faq.batchUpdateTag') }}
           </t-button>
 
           <t-button v-if="canEdit && disabledCount > 0" theme="default" variant="outline" size="small"
-            :disabled="actionLoading" :loading="statusAction === 'enable'" @click="emit('enable')">
+            :disabled="actionLoading || count === 0" :loading="statusAction === 'enable'" @click="emit('enable')">
             <template #icon><t-icon name="check-circle" size="14px" /></template>
             {{ t('knowledgeEditor.faq.batchEnable') }}
           </t-button>
 
           <t-button v-if="canEdit && enabledCount > 0" theme="default" variant="outline" size="small"
-            :disabled="actionLoading" :loading="statusAction === 'disable'" @click="emit('disable')">
+            :disabled="actionLoading || count === 0" :loading="statusAction === 'disable'" @click="emit('disable')">
             <template #icon><t-icon name="minus-circle" size="14px" /></template>
             {{ t('knowledgeEditor.faq.batchDisable') }}
           </t-button>
@@ -66,7 +72,7 @@ const actionLoading = computed(() => (
             :content="t('knowledgeEditor.faq.confirmBatchDelete', { count })"
             :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
             :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('delete')">
-            <t-button theme="danger" variant="outline" size="small" :disabled="actionLoading"
+            <t-button theme="danger" variant="outline" size="small" :disabled="actionLoading || count === 0"
               :loading="deleteLoading" @click.stop>
               <template #icon><t-icon name="delete" size="14px" /></template>
               {{ t('knowledgeEditor.faq.batchDelete') }}
@@ -100,6 +106,7 @@ const actionLoading = computed(() => (
 
 .faq-batch-bar__selection {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -136,6 +143,10 @@ const actionLoading = computed(() => (
   .faq-batch-bar__inner {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .faq-batch-bar__selection {
+    flex-shrink: 1;
   }
 
   .faq-batch-bar__actions {

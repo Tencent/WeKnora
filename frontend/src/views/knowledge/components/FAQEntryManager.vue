@@ -130,6 +130,15 @@
                   </button>
                 </t-tooltip>
               </div>
+              <t-tooltip v-if="canSelectEntries" :content="$t(batchMode ? 'common.cancel' : 'menu.batchManage')" placement="top">
+                <t-button variant="text" theme="default" class="content-bar-icon-btn faq-batch-toggle"
+                  size="small" :class="{ active: batchMode }" :aria-pressed="batchMode"
+                  :disabled="batchActionLoading"
+                  @click="toggleBatchMode">
+                  <template #icon><t-icon :name="batchMode ? 'close' : 'check-rectangle'" size="16px" /></template>
+                  {{ $t(batchMode ? 'common.cancel' : 'menu.batchManage') }}
+                </t-button>
+              </t-tooltip>
               <!-- 新建：新建条目 / 导入 -->
               <template v-if="faqCreateOptions.length">
                 <t-tooltip :content="$t('knowledgeEditor.faq.createGroup')" placement="top">
@@ -162,7 +171,7 @@
           </div>
           <!-- Card List Container with Scroll -->
           <div ref="scrollContainer" class="faq-scroll-container"
-            :class="{ 'has-batch-bar': selectedRowKeys.length > 0 && canSelectEntries }" @scroll="handleScroll">
+            :class="{ 'has-batch-bar': (batchMode || selectedRowKeys.length > 0) && canSelectEntries }" @scroll="handleScroll">
             <!-- FAQ 骨架屏 -->
             <div v-if="loading && entries.length === 0" class="faq-skeleton-grid"
               :class="{ 'faq-skeleton-list': viewMode === 'list' }">
@@ -189,6 +198,11 @@
                   <!-- Card Header -->
                   <div class="faq-card-header">
                     <div class="faq-header-top">
+                      <div v-if="canSelectEntries && batchMode" class="faq-card-check" @click.stop>
+                        <t-checkbox :checked="selectedRowKeys.includes(entry.id)" :disabled="batchActionLoading"
+                          :aria-label="entry.standard_question"
+                          @change="(checked: boolean) => handleCardSelect(entry.id, checked)" />
+                      </div>
                       <div class="faq-question" :title="entry.standard_question">
                         {{ entry.standard_question }}
                       </div>
@@ -421,8 +435,10 @@
           <div class="faq-batch-bar-anchor">
             <FAQBatchBar :count="selectedRowKeys.length" :enabled-count="selectedEnabledCount"
               :disabled-count="selectedDisabledCount" :can-edit="canEdit" :can-manage="canManage"
+              :visible="batchMode"
               :tag-loading="batchTagLoading" :status-action="batchStatusAction"
-              :delete-loading="batchDeleteLoading" @cancel="clearFAQSelection" @batch-tag="openBatchTagDialog"
+              :delete-loading="batchDeleteLoading" @cancel="exitBatchMode" @select-loaded="selectLoadedEntries"
+              @batch-tag="openBatchTagDialog"
               @enable="handleBatchStatusChange(true)" @disable="handleBatchStatusChange(false)"
               @delete="handleBatchDelete" />
           </div>
@@ -1058,6 +1074,7 @@ const initViewMode = (): FAQViewMode => {
   }
 }
 const viewMode = ref<FAQViewMode>(initViewMode())
+const batchMode = ref(false)
 const formatEntryDate = (value?: string) => {
   if (!value) return '—'
   const date = new Date(value)
@@ -1598,6 +1615,7 @@ const checkAndLoadMore = () => {
 const handleCardSelect = (entryId: number, checked: boolean) => {
   if (!canSelectEntries.value || batchActionLoading.value) return
   if (checked) {
+    batchMode.value = true
     if (!selectedRowKeys.value.includes(entryId)) {
       selectedRowKeys.value.push(entryId)
     }
@@ -1609,10 +1627,29 @@ const handleCardSelect = (entryId: number, checked: boolean) => {
   }
 }
 
-const clearFAQSelection = () => {
+const selectLoadedEntries = () => {
+  if (!canSelectEntries.value || batchActionLoading.value) return
+  selectedRowKeys.value = [...new Set(entries.value.map(entry => entry.id))]
+}
+
+const toggleBatchMode = () => {
+  if (!canSelectEntries.value || batchActionLoading.value) return
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) selectedRowKeys.value = []
+}
+
+const exitBatchMode = () => {
   if (batchActionLoading.value) return
+  batchMode.value = false
   selectedRowKeys.value = []
 }
+
+watch(canSelectEntries, (canSelect) => {
+  if (!canSelect) {
+    batchMode.value = false
+    selectedRowKeys.value = []
+  }
+})
 
 const resetEditorForm = () => {
   editorForm.standard_question = ''
@@ -2521,6 +2558,8 @@ watch(
     currentPage = 1
     hasMore.value = true
     selectedTagIds.value = []
+    batchMode.value = false
+    selectedRowKeys.value = []
     tagFilterCleared.value = false
     uiStore.clearSelectedTagIds()
     overallFAQTotal.value = 0
@@ -2770,6 +2809,8 @@ onUnmounted(() => {
 })
 
 // 切换视图时保留选择，重建布局并补齐可视区域。
+watch(batchMode, () => nextTick(arrangeCards))
+
 watch(viewMode, async (mode) => {
   try {
     localStorage.setItem(FAQ_VIEW_MODE_KEY, mode)
@@ -2987,6 +3028,20 @@ watch(() => entries.value.map(e => ({
       outline-offset: 2px;
     }
   }
+}
+
+.faq-batch-toggle {
+  gap: 4px;
+  padding: 0 8px;
+
+  &.active {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
+.faq-card-check {
+  flex-shrink: 0;
 }
 
 .faq-entry-list {
@@ -3581,6 +3636,10 @@ watch(() => entries.value.map(e => ({
 
   &.has-batch-bar {
     padding-bottom: 76px;
+
+    @media (max-width: 760px) {
+      padding-bottom: 164px;
+    }
   }
 }
 
