@@ -805,7 +805,8 @@ class Gpt3PaperLayoutTest(unittest.TestCase):
                 page.close()
         # Margin sidebar must not appear as one-glyph-per-line prefix.
         self.assertNotRegex(layout[:300], r"^0\n2\n0\n2")
-        self.assertIn("Few-Shot Learners", layout)
+        self.assertIn("Language Models are Few-Shot Learners", layout)
+        self.assertIn("Tom B. Brown", layout)
 
         doc = PDFParser(file_name="gpt3.pdf", file_type="pdf").parse_into_text(content)
         self.assertIn("Language Models are Few-Shot Learners", doc.content)
@@ -845,6 +846,42 @@ class ScanEnglishDictLayoutTest(unittest.TestCase):
             pdf.close()
         self.assertIn("This is a digital copy of a book", text)
         self.assertNotIn("Thisisadigitalcopyofabook", text)
+
+
+class MixedGlyphHeightLayoutTest(unittest.TestCase):
+    """Regression: one line must not split by letter shape (tight glyph boxes)."""
+
+    def test_apostrophe_and_ascenders_stay_on_one_line(self):
+        import pypdfium2 as pdfium
+        import pypdfium2.raw as pdfium_r
+
+        from docreader.parser.pdf_parser import _extract_layout_text
+        from docreader.tests.test_source_locator_pdf import pdf_fixture
+
+        text = "Lumiere's camera was portable and quickly set up by day."
+        pdf = pdfium.PdfDocument(pdf_fixture([{"lines": [(text, 60, 700)]}]))
+        try:
+            layout = _extract_layout_text(pdf[0], pdfium_r)
+        finally:
+            pdf.close()
+        self.assertEqual(layout.strip(), text.replace("'", "\u2019"))
+
+    def test_words_positioned_without_space_glyphs_are_spaced(self):
+        import pypdfium2 as pdfium
+        import pypdfium2.raw as pdfium_r
+
+        from docreader.parser.pdf_parser import _extract_layout_text
+        from docreader.tests.test_source_locator_pdf import pdf_fixture
+
+        # Each word is its own text object at Helvetica 14pt metrics, one
+        # space width apart, as LaTeX and OCR text layers emit them.
+        words = [("Tom", 60.0, 700), ("B.", 91.9, 700), ("Brown", 109.0, 700)]
+        pdf = pdfium.PdfDocument(pdf_fixture([{"lines": words}]))
+        try:
+            layout = _extract_layout_text(pdf[0], pdfium_r)
+        finally:
+            pdf.close()
+        self.assertEqual(layout.strip(), "Tom B. Brown")
 
 
 class PDFRouterIntegrationTest(unittest.TestCase):
