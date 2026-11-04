@@ -66,6 +66,12 @@ func main() {
 	// Print the env banner before container build so operators see what
 	// config landed even when DB / storage init fails.
 	runtime.LogStartupEnv(context.Background())
+	// Refuse to boot on a set-but-invalid SYSTEM_AES_KEY rather than
+	// silently writing credentials in plaintext (see ValidateStartupEnv).
+	if err := runtime.ValidateStartupEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "fatal: %v\n", err)
+		os.Exit(1)
+	}
 	runtime.MarkServerStarted()
 
 	// Build dependency injection container
