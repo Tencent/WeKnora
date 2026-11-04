@@ -23,12 +23,12 @@ test('FAQ 批量操作通过组件事件直接连接，不再依赖全局事件'
 })
 
 test('批量操作条根据选择状态和权限展示有效操作', () => {
-  assert.match(batchBar, /v-if="count > 0 && \(canEdit \|\| canManage\)"/)
   assert.match(batchBar, /v-if="canEdit && disabledCount > 0"/)
   assert.match(batchBar, /v-if="canEdit && enabledCount > 0"/)
   assert.match(batchBar, /<t-popconfirm v-if="canManage"/)
   assert.match(manager, /const canSelectEntries = computed\(\(\) => canEdit\.value \|\| canManage\.value\)/)
   assert.match(manager, /if \(!canSelectEntries\.value \|\| batchActionLoading\.value\) return/)
+  assert.match(batchBar, /v-if="\(visible \|\| count > 0\) && \(canEdit \|\| canManage\)"/)
 })
 
 test('危险操作需要确认，所有批量请求都防止重复提交', () => {
