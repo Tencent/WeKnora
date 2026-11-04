@@ -130,7 +130,7 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
       expires_at: p.expires_at,
       ...state,
       answered: resolved && Boolean(p.response) && !response.declined,
-      response,
+      ...(resolved ? { response } : {}),
       resolve_reason: response.declined ? 'declined' : state.resolve_reason,
       timed_out: p.status === 'expired',
     }]

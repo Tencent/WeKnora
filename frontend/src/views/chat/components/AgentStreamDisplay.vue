@@ -148,6 +148,8 @@
                   :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
                   :response="event.response" :resolve-reason="event.resolve_reason"
                   :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
+              </div>
+
               <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
                 <SecureFormCard :pending-id="event.pending_id" :request="event.request"
                   :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
@@ -461,6 +463,8 @@
                 :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
                 :response="event.response" :resolve-reason="event.resolve_reason"
                 :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
+            </div>
+
             <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
               <SecureFormCard :pending-id="event.pending_id" :request="event.request"
                 :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
