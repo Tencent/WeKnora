@@ -25,6 +25,7 @@ import os
 import re
 import statistics
 import threading
+from decimal import Decimal, ROUND_CEILING
 from typing import Iterator
 
 from docreader.config import CONFIG
@@ -1824,7 +1825,12 @@ def _select_embedded_images(
     for m in meta:
         hash_pages[m["hash"]].add(m["page"])
 
-    repeat_threshold = max(2, int(num_text_pages * repeat_frac)) if num_text_pages else 2
+    # A fraction is a minimum share: rounding down would classify an image
+    # as repeated even when it appears on fewer pages than configured.
+    repeat_threshold = (
+        max(2, int((Decimal(str(repeat_frac)) * num_text_pages).to_integral_value(rounding=ROUND_CEILING)))
+        if num_text_pages else 2
+    )
     banned = {h for h, pages in hash_pages.items() if len(pages) >= repeat_threshold}
 
     kept: list = []
