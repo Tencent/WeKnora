@@ -169,7 +169,9 @@ test('a changed credential on a new draft is previewed and saved on submit', asy
     assert.equal(f.calls.some(call => call.method === 'putDataSourceCredentials'), false)
     await f.vm.handleSubmit()
     assert.equal(f.storedToken(), 'rotated-token')
-    assert.ok(f.calls.findIndex(call => call.method === 'putDataSourceCredentials') < f.calls.findLastIndex(call => call.method === 'updateDataSource'))
+    const credentialIndex = f.calls.findIndex(call => call.method === 'putDataSourceCredentials')
+    const finalUpdateIndex = f.calls.map(call => call.method).lastIndexOf('updateDataSource')
+    assert.ok(credentialIndex >= 0 && credentialIndex < finalUpdateIndex)
   } finally { f.close() }
 })
 
