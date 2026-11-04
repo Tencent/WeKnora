@@ -21,14 +21,20 @@ type previewHandlerService struct {
 func (*previewHandlerService) GetDataSource(context.Context, string) (*types.DataSource, error) {
 	return &types.DataSource{ID: "one", KnowledgeBaseID: "kb"}, nil
 }
-func (s *previewHandlerService) PreviewAvailableResources(_ context.Context, _ string, parent string, cfg *types.DataSourceConfig) ([]types.Resource, error) {
+
+func (s *previewHandlerService) PreviewAvailableResources(
+	_ context.Context, _ string, parent string, cfg *types.DataSourceConfig,
+) ([]types.Resource, error) {
 	s.called = true
 	if parent != "parent" || cfg.Credentials["token"] != "synthetic-secret" {
 		return nil, errors.New("wrong preview")
 	}
 	return nil, errors.New("synthetic-secret")
 }
-func (s *previewHandlerService) PreviewResourceAncestors(_ context.Context, _ string, ids []string, cfg *types.DataSourceConfig) ([]string, error) {
+
+func (s *previewHandlerService) PreviewResourceAncestors(
+	_ context.Context, _ string, ids []string, cfg *types.DataSourceConfig,
+) ([]string, error) {
 	s.called = true
 	if len(ids) != 1 || ids[0] != "child" || cfg.Credentials["token"] != "synthetic-secret" {
 		return nil, errors.New("wrong preview")
@@ -38,16 +44,18 @@ func (s *previewHandlerService) PreviewResourceAncestors(_ context.Context, _ st
 
 func TestDataSourcePreviewAuthorizationAndRedaction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	resourceBody := `{"parent_id":"parent","config":{"credentials":{"token":"synthetic-secret"}}}`
+	ancestorBody := `{"resource_ids":["child"],"config":{"credentials":{"token":"synthetic-secret"}}}`
 	for _, tc := range []struct {
 		path, body string
 		tenant     uint64
 		want       int
 		called     bool
 	}{
-		{"resources/preview", `{"parent_id":"parent","config":{"credentials":{"token":"synthetic-secret"}}}`, 0, 401, false},
-		{"resources/preview", `{"parent_id":"parent","config":{"credentials":{"token":"synthetic-secret"}}}`, 2, 403, false},
-		{"resources/preview", `{"parent_id":"parent","config":{"credentials":{"token":"synthetic-secret"}}}`, 1, 400, true},
-		{"resource-ancestors/preview", `{"resource_ids":["child"],"config":{"credentials":{"token":"synthetic-secret"}}}`, 1, 200, true},
+		{"resources/preview", resourceBody, 0, 401, false},
+		{"resources/preview", resourceBody, 2, 403, false},
+		{"resources/preview", resourceBody, 1, 400, true},
+		{"resource-ancestors/preview", ancestorBody, 1, 200, true},
 	} {
 		svc := &previewHandlerService{}
 		kb := &stubKBServiceForDS{getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
@@ -61,7 +69,8 @@ func TestDataSourcePreviewAuthorizationAndRedaction(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/datasource/one/"+tc.path, strings.NewReader(tc.body)))
 		if w.Code != tc.want || svc.called != tc.called || strings.Contains(w.Body.String(), "synthetic-secret") {
-			t.Fatalf("%s tenant %d: status %d called %v body %s", tc.path, tc.tenant, w.Code, svc.called, w.Body.String())
+			t.Fatalf("%s tenant %d: status %d called %v body %s",
+				tc.path, tc.tenant, w.Code, svc.called, w.Body.String())
 		}
 	}
 }

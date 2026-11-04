@@ -501,6 +501,7 @@ func (s *DataSourceService) previewConnector(
 	return connector, config, nil
 }
 
+// PreviewAvailableResources lists resources using request-local configuration.
 func (s *DataSourceService) PreviewAvailableResources(
 	ctx context.Context, dsID string, parentID string, preview *types.DataSourceConfig,
 ) ([]types.Resource, error) {
@@ -511,6 +512,7 @@ func (s *DataSourceService) PreviewAvailableResources(
 	return connector.ListResources(ctx, config, parentID)
 }
 
+// PreviewResourceAncestors resolves paths using request-local configuration.
 func (s *DataSourceService) PreviewResourceAncestors(
 	ctx context.Context, dsID string, resourceIDs []string, preview *types.DataSourceConfig,
 ) ([]string, error) {

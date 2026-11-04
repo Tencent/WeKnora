@@ -199,7 +199,8 @@ func skipsBodyLogging(path string) bool {
 	return strings.HasPrefix(path, "/api/v1/local-browser/") ||
 		path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser") ||
 		(strings.HasPrefix(path, "/api/v1/datasource/") &&
-			(strings.HasSuffix(path, "/resources/preview") || strings.HasSuffix(path, "/resource-ancestors/preview"))) ||
+			(strings.HasSuffix(path, "/resources/preview") ||
+				strings.HasSuffix(path, "/resource-ancestors/preview"))) ||
 		strings.HasPrefix(path, "/api/v1/agent/secure-forms/") ||
 		path == "/api/v1/me/credential-vault" || strings.HasPrefix(path, "/api/v1/me/credential-vault/")
 }

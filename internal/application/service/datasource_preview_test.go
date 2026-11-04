@@ -29,7 +29,10 @@ func (c *previewTestConnector) Validate(_ context.Context, config *types.DataSou
 	c.config = config
 	return nil
 }
-func (c *previewTestConnector) ListResources(_ context.Context, config *types.DataSourceConfig, parent string) ([]types.Resource, error) {
+
+func (c *previewTestConnector) ListResources(
+	_ context.Context, config *types.DataSourceConfig, parent string,
+) ([]types.Resource, error) {
 	c.config, c.parent = config, parent
 	return []types.Resource{}, nil
 }
@@ -39,7 +42,10 @@ type confluencePreviewConnector struct{ previewTestConnector }
 func (*confluencePreviewConnector) Type() string { return types.ConnectorTypeConfluence }
 
 func TestConfluenceReplacementValidatesUpdatedPublicFields(t *testing.T) {
-	stored, err := (&types.DataSourceConfig{Credentials: map[string]interface{}{"username": "old", "password": "old"}, Settings: map[string]interface{}{"username": "old"}}).ToJSON()
+	stored, err := (&types.DataSourceConfig{
+		Credentials: map[string]interface{}{"username": "old", "password": "old"},
+		Settings:    map[string]interface{}{"username": "old"},
+	}).ToJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,20 +56,28 @@ func TestConfluenceReplacementValidatesUpdatedPublicFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &DataSourceService{dsRepo: repo, connectorRegistry: registry}
-	if _, err := s.UpdateDataSourceCredentials(context.Background(), "one", map[string]interface{}{"username": "new", "password": "new"}); err != nil {
+	if _, err := s.UpdateDataSourceCredentials(
+		context.Background(), "one", map[string]interface{}{"username": "new", "password": "new"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if connector.config.Settings["username"] != "new" {
 		t.Fatalf("validation used old username: %#v", connector.config.Settings)
 	}
 }
-func (c *previewTestConnector) ResolveResourceAncestors(_ context.Context, config *types.DataSourceConfig, ids []string) ([]string, error) {
+
+func (c *previewTestConnector) ResolveResourceAncestors(
+	_ context.Context, config *types.DataSourceConfig, ids []string,
+) ([]string, error) {
 	c.config = config
 	return ids, nil
 }
 
 func TestResourcePreviewUsesUnsavedConfigWithoutPersisting(t *testing.T) {
-	stored, err := (&types.DataSourceConfig{Credentials: map[string]interface{}{"token": "old"}, Settings: map[string]interface{}{"username": "old"}}).ToJSON()
+	stored, err := (&types.DataSourceConfig{
+		Credentials: map[string]interface{}{"token": "old"},
+		Settings:    map[string]interface{}{"username": "old"},
+	}).ToJSON()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,12 +88,16 @@ func TestResourcePreviewUsesUnsavedConfigWithoutPersisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &DataSourceService{dsRepo: &previewRepo{ds: ds}, connectorRegistry: registry}
-	preview := &types.DataSourceConfig{Credentials: map[string]interface{}{"token": "new"}, Settings: map[string]interface{}{"username": "new"}}
+	preview := &types.DataSourceConfig{
+		Credentials: map[string]interface{}{"token": "new"},
+		Settings:    map[string]interface{}{"username": "new"},
+	}
 	ctx := context.Background()
 	if _, err := s.PreviewAvailableResources(ctx, ds.ID, "parent", preview); err != nil {
 		t.Fatal(err)
 	}
-	if connector.parent != "parent" || connector.config.Credentials["token"] != "new" || connector.config.Settings["username"] != "new" {
+	if connector.parent != "parent" || connector.config.Credentials["token"] != "new" ||
+		connector.config.Settings["username"] != "new" {
 		t.Fatalf("preview was not applied: %#v", connector.config)
 	}
 	if _, err := s.PreviewResourceAncestors(ctx, ds.ID, []string{"child"}, preview); err != nil {
