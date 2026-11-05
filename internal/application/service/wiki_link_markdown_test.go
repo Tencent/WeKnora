@@ -74,6 +74,9 @@ func (s markdownLintKBService) GetKnowledgeBaseByIDOnly(context.Context, string)
 func TestWikiLintUsesCurrentMarkdownInsteadOfStaleOutLinks(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(
 		&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}, &types.WikiPageIssue{},
 	))
