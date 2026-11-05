@@ -1053,7 +1053,7 @@ onUnmounted(() => {
 
     <!-- Mermaid -->
     <MermaidFilePreview class="preview-mermaid" v-else-if="previewType === 'mermaid' && mermaidSource !== null && active"
-      :key="mermaidSource" :source="mermaidSource" :title="fileName" @fallback="mermaidFallback" />
+      :key="mermaidSource" :before-open="exitPreviewFullscreen" :source="mermaidSource" :title="fileName" @fallback="mermaidFallback" />
 
     <!-- Audio -->
     <div v-else-if="previewType === 'audio' && blobUrl" class="preview-audio">
