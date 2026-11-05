@@ -226,6 +226,17 @@ func truncateForLog(s string, n int) string {
 	return s[:n] + "..."
 }
 
+// rawResponseLogBytes caps the debug dump of a provider response.
+const rawResponseLogBytes = 4000
+
+// rawResponsePreview returns the debug dump of a provider response within
+// rawResponseLogBytes. The response is JSON that usually carries CJK document
+// titles and OCR text, so the cut must land on a rune boundary; a byte cut
+// leaves invalid UTF-8 in the log sink.
+func rawResponsePreview(raw string) string {
+	return truncateForLog(raw, rawResponseLogBytes)
+}
+
 // --- parse flow ---
 
 // Parse uploads content, runs a parse job and returns the markdown and
