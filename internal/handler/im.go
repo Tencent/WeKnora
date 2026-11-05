@@ -17,7 +17,7 @@ import (
 // validIMPlatforms is the set of supported IM platforms.
 var validIMPlatforms = map[string]bool{
 	"wecom": true, "feishu": true, "lark": true, "slack": true, "telegram": true, "dingtalk": true,
-	"mattermost": true, "wechat": true, "qqbot": true, "yunzhijia": true,
+	"mattermost": true, "wechat": true, "qqbot": true, "yunzhijia": true, "line": true,
 }
 
 // invalidIMPlatformError is the 400 message listing the accepted platforms. It

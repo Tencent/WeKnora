@@ -20,7 +20,7 @@ func newInfoCommand(kbService interfaces.KnowledgeBaseService) *InfoCommand {
 }
 
 func (c *InfoCommand) Name() string        { return "info" }
-func (c *InfoCommand) Description() string { return "查看当前智能体的信息与能力" }
+func (c *InfoCommand) Description() string { return "查看當前智能體的信息與能力" }
 
 func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []string) (*CommandResult, error) {
 	var sb strings.Builder
@@ -32,7 +32,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 	// ── Header ──
 	name := cmdCtx.AgentName
 	if name == "" {
-		name = "未命名智能体"
+		name = "未命名智能體"
 	}
 	sb.WriteString(fmt.Sprintf("🤖 **%s**\n", name))
 	if cmdCtx.CustomAgent != nil && cmdCtx.CustomAgent.Description != "" {
@@ -40,7 +40,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 	}
 
 	if cmdCtx.CustomAgent == nil {
-		sb.WriteString("\n未绑定智能体，发送 `/help` 查看可用指令。")
+		sb.WriteString("\n未綁定智能體，發送 `/help` 查看可用指令。")
 		return &CommandResult{Content: sb.String()}, nil
 	}
 
@@ -49,25 +49,25 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 	// ── Mode ──
 	if cmdCtx.CustomAgent.IsAgentMode() {
 		sb.WriteString("\n🧠 **Agent模式**\n")
-		sb.WriteString("支持多步思考、工具调用（ReAct）\n")
+		sb.WriteString("支持多步思考、工具調用（ReAct）\n")
 	} else {
 		sb.WriteString("\n🧠 **Agent模式**\n")
-		sb.WriteString("基于知识库检索直接回答（RAG）\n")
+		sb.WriteString("基於知識庫檢索直接回答（RAG）\n")
 	}
 
 	// ── Knowledge bases ──
 	// KBSelectionMode: "all" uses every KB under the tenant (IDs list is empty),
 	// "selected" uses the explicit KnowledgeBases list, "none"/empty means disabled.
-	sb.WriteString("\n📚 **知识库**\n")
+	sb.WriteString("\n📚 **知識庫**\n")
 	if cfg.KBSelectionMode == "all" {
 		kbs, err := c.kbService.ListKnowledgeBasesByTenantID(ctx, cmdCtx.TenantID)
 		if err == nil && len(kbs) > 0 {
 			for _, kb := range kbs {
 				sb.WriteString(fmt.Sprintf("  · %s\n", kb.Name))
 			}
-			sb.WriteString(fmt.Sprintf("  共 %d 个（全部启用）\n", len(kbs)))
+			sb.WriteString(fmt.Sprintf("  共 %d 個（全部啟用）\n", len(kbs)))
 		} else {
-			sb.WriteString("  全部启用\n")
+			sb.WriteString("  全部啟用\n")
 		}
 	} else if len(cfg.KnowledgeBases) > 0 {
 		kbs, err := c.kbService.ListKnowledgeBasesByTenantID(ctx, cmdCtx.TenantID)
@@ -84,7 +84,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 				sb.WriteString(fmt.Sprintf("  · %s\n", label))
 			}
 		} else {
-			sb.WriteString(fmt.Sprintf("  已选择 %d 个\n", len(cfg.KnowledgeBases)))
+			sb.WriteString(fmt.Sprintf("  已選擇 %d 個\n", len(cfg.KnowledgeBases)))
 		}
 	} else {
 		sb.WriteString("  未配置\n")
@@ -93,7 +93,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 	// ── Skills ──
 	sb.WriteString("\n⚡ **Skills**\n")
 	if cfg.SkillsSelectionMode == "all" {
-		sb.WriteString("  全部启用\n")
+		sb.WriteString("  全部啟用\n")
 	} else if cfg.SkillsSelectionMode == "selected" && len(cfg.SelectedSkills) > 0 {
 		for _, s := range cfg.SelectedSkills {
 			sb.WriteString(fmt.Sprintf("  · %s\n", s))
@@ -103,30 +103,30 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 	}
 
 	// ── MCP ──
-	sb.WriteString("\n🔌 **MCP 服务**\n")
+	sb.WriteString("\n🔌 **MCP 服務**\n")
 	if cfg.MCPSelectionMode == "all" {
 		sb.WriteString("  全部接入\n")
 	} else if cfg.MCPSelectionMode == "selected" && len(cfg.MCPServices) > 0 {
-		sb.WriteString(fmt.Sprintf("  已接入 %d 个服务\n", len(cfg.MCPServices)))
+		sb.WriteString(fmt.Sprintf("  已接入 %d 個服務\n", len(cfg.MCPServices)))
 	} else {
 		sb.WriteString("  未配置\n")
 	}
 
 	// ── Web search ──
-	sb.WriteString("\n🌐 **网络搜索**\n")
+	sb.WriteString("\n🌐 **網絡搜尋**\n")
 	if cfg.WebSearchEnabled {
-		sb.WriteString("  已启用\n")
+		sb.WriteString("  已啟用\n")
 	} else {
-		sb.WriteString("  未启用\n")
+		sb.WriteString("  未啟用\n")
 	}
 
 	// ── Footer ──
-	outputLabel := "流式输出"
+	outputLabel := "流式輸出"
 	if cmdCtx.ChannelOutputMode == "full" {
-		outputLabel = "完整输出"
+		outputLabel = "完整輸出"
 	}
-	sb.WriteString(fmt.Sprintf("\n⚙️ **输出模式**\n  %s\n", outputLabel))
-	sb.WriteString("\n---\n发送 `/help` 查看所有可用指令")
+	sb.WriteString(fmt.Sprintf("\n⚙️ **輸出模式**\n  %s\n", outputLabel))
+	sb.WriteString("\n---\n發送 `/help` 查看所有可用指令")
 
 	return &CommandResult{Content: sb.String()}, nil
 }

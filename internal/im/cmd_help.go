@@ -18,7 +18,7 @@ func newHelpCommand(registry *CommandRegistry) *HelpCommand {
 
 func (c *HelpCommand) Name() string { return "help" }
 func (c *HelpCommand) Description() string {
-	return "显示可用指令列表，或查看某个指令的详细用法"
+	return "顯示可用指令列表，或查看某個指令的詳細用法"
 }
 
 func (c *HelpCommand) Execute(_ context.Context, _ *CommandContext, args []string) (*CommandResult, error) {
@@ -28,7 +28,7 @@ func (c *HelpCommand) Execute(_ context.Context, _ *CommandContext, args []strin
 		cmd, _, ok := c.registry.Parse("/" + name)
 		if !ok {
 			return &CommandResult{
-				Content: fmt.Sprintf("未知指令 `%s`，发送 `/help` 查看所有可用指令。", args[0]),
+				Content: fmt.Sprintf("未知指令 `%s`，發送 `/help` 查看所有可用指令。", args[0]),
 			}, nil
 		}
 		return &CommandResult{
@@ -45,6 +45,6 @@ func (c *HelpCommand) Execute(_ context.Context, _ *CommandContext, args []strin
 	for _, cmd := range cmds {
 		sb.WriteString(fmt.Sprintf("· `/%s` — %s\n", cmd.Name(), cmd.Description()))
 	}
-	sb.WriteString("\n发送 `/help <指令名>` 查看详细用法")
+	sb.WriteString("\n發送 `/help <指令名>` 詳細用法")
 	return &CommandResult{Content: sb.String()}, nil
 }

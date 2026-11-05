@@ -1,0 +1,454 @@
+package line
+
+import (
+	"bytes"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/Tencent/WeKnora/internal/im"
+)
+
+// newTestContext builds a gin.Context bound to a recorder with the given
+// POST body. It mirrors how the IM webhook router feeds a request.
+func newTestContext(t *testing.T, body string) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req := httptest.NewRequest(http.MethodPost, "/callback", bytes.NewReader([]byte(body)))
+	c.Request = req
+	return c, w
+}
+
+// TestVerifySignatureHMAC confirms HMAC-SHA256 over the raw body matches the
+// expected Base64 signature, and that VerifyCallback rejects tampering.
+func TestVerifySignatureHMAC(t *testing.T) {
+	secret := "secret-key-123"
+	adapter := NewWebhookAdapter("access-token", secret, "")
+
+	body := []byte(`{"events":[{"type":"message"}]}`)
+	// Independently compute the expected signature (oracle for verifySignature).
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
+	cases := []struct {
+		name       string
+		signature  string
+		wantErr    bool
+	}{
+		{"valid signature", expected, false},
+		{"missing header", "", true},
+		{"wrong signature", "not-a-valid-signature", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newTestContext(t, string(body))
+			if tc.signature != "" {
+				c.Request.Header.Set("X-Line-Signature", tc.signature)
+			}
+			err := adapter.VerifyCallback(c)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected signature error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestParseCallbackTextMessage decodes a LINE text message into IncomingMessage.
+func TestParseCallbackTextMessage(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	const payload = `{
+		"destination": "U-destination",
+		"events": [
+			{
+				"type": "message",
+				"token": "tok-1",
+				"source": {"type": "user", "userId": "U-abcd123"},
+				"replyToken": "rtk-987",
+				"message": {"type": "Text", "id": "msg-555", "text": " 你好 世界 "}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage, got nil")
+	}
+	if incoming.Platform != im.PlatformLine {
+		t.Errorf("Platform = %q, want %q", incoming.Platform, im.PlatformLine)
+	}
+	if incoming.UserID != "U-abcd123" {
+		t.Errorf("UserID = %q, want U-abcd123", incoming.UserID)
+	}
+	if incoming.Content != "你好 世界" {
+		t.Errorf("Content = %q, want trimmed text", incoming.Content)
+	}
+	if incoming.MessageID != "msg-555" {
+		t.Errorf("MessageID = %q, want msg-555", incoming.MessageID)
+	}
+	if incoming.ChatType != im.ChatTypeDirect {
+		t.Errorf("ChatType = %q, want direct", incoming.ChatType)
+	}
+	if incoming.Extra["replyToken"] != "rtk-987" {
+		t.Errorf("replyToken extra = %q, want rtk-987", incoming.Extra["replyToken"])
+	}
+}
+
+// TestParseCallbackChatMessage verifies group/room mapping to ChatTypeGroup.
+func TestParseCallbackChatMessage(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	const payload = `{
+		"events": [
+			{
+				"type": "message",
+				"source": {"type": "group", "userId": "", "groupId": "G-42"},
+				"replyToken": "rtk-g",
+			"message": {"type": "Text", "id": "msg-g", "text": "ping", "mention": {"mentionees": [{"index": 0, "type": "bot"}]}}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage, got nil")
+	}
+	if incoming.ChatType != im.ChatTypeGroup {
+		t.Errorf("ChatType = %q, want group", incoming.ChatType)
+	}
+	if incoming.ChatID != "G-42" {
+		t.Errorf("ChatID = %q, want G-42", incoming.ChatID)
+	}
+}
+
+// TestParseCallbackEmptyEvents confirms a payload without events yields no message.
+func TestParseCallbackEmptyEvents(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	c, _ := newTestContext(t, `{"destination":"U-", "events":[]}`)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming != nil {
+		t.Fatalf("expected nil message for empty events, got %+v", incoming)
+	}
+}
+
+// TestHandleURLVerificationNoEvents checks that a request without events is
+// treated as verification (HTTP 200, handled = true).
+func TestHandleURLVerificationNoEvents(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	c, w := newTestContext(t, `{"destination":"U-"}`)
+	handled := adapter.HandleURLVerification(c)
+	if !handled {
+		t.Fatal("expected HandleURLVerification = true for no-events request")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+// TestHandleURLVerificationWithEvents ensures a real message event is NOT
+// reported as a verification request.
+func TestHandleURLVerificationWithEvents(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	const payload = `{"events":[{"type":"message","message":{"type":"Text","text":"hi"}}]}`
+	c, _ := newTestContext(t, payload)
+	handled := adapter.HandleURLVerification(c)
+	if handled {
+		t.Fatal("expected HandleURLVerification = false when events present")
+	}
+}
+
+// TestParseCallbackGroupNotMentionedSkipped confirms that a group message with
+// no bot @-mention is ignored (nil) so everyday group chatter does not disturb
+// the answer pipeline.
+func TestParseCallbackGroupNotMentionedSkipped(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	const payload = `{
+		"events": [
+			{
+				"type": "message",
+				"source": {"type": "group", "userId": "", "groupId": "G-42"},
+				"replyToken": "rtk-g",
+				"message": {"type": "Text", "id": "msg-g", "text": "hey everyone"}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming != nil {
+		t.Fatalf("expected nil message for un-mentioned group chat, got %+v", incoming)
+	}
+}
+
+// TestParseCallbackGroupMentionStripsBotName verifies that a @-mentioned group
+// message has its leading @botname stripped so only the clean question reaches
+// the answer pipeline.
+func TestParseCallbackGroupMentionStripsBotName(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	const payload = `{
+		"events": [
+			{
+				"type": "message",
+				"source": {"type": "group", "userId": "U-abc", "groupId": "G-42"},
+				"replyToken": "rtk-g",
+				"message": {"type": "Text", "id": "msg-g", "text": "@LINE_Bot can you help?", "mention": {"mentionees": [{"index": 0, "type": "bot", "id": "BOT"}]}}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage for mentioned group message, got nil")
+	}
+	if incoming.ChatType != im.ChatTypeGroup {
+		t.Errorf("ChatType = %q, want group", incoming.ChatType)
+	}
+	if got := incoming.Content; got != "can you help?" {
+		t.Errorf("Content = %q, want %q", got, "can you help?")
+	}
+}
+
+// TestShouldEmitDirectReply confirms the LINE adapter only emits the final
+// reply or a plain reply and drops intermediate streaming updates.
+func TestShouldEmitDirectReply(t *testing.T) {
+	cases := []struct {
+		name     string
+		reply    *im.ReplyMessage
+		wantEmit bool
+	}{
+		{"nil reply", nil, false},
+		{"final reply", &im.ReplyMessage{IsFinal: true}, true},
+		{"plain reply", &im.ReplyMessage{IsStreaming: false}, true},
+		{"streaming intermediate", &im.ReplyMessage{IsStreaming: true, IsFinal: false}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldEmitDirectReply(tc.reply); got != tc.wantEmit {
+				t.Errorf("shouldEmitDirectReply() = %v, want %v", got, tc.wantEmit)
+			}
+		})
+	}
+}
+
+// TestStripBotMention verifies leading @botname stripping.
+func TestStripBotMention(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no mention", "hello there", "hello there"},
+		{"leading mention", "@LINE_Bot can you help?", "can you help?"},
+		{"mention trailing spaces", "@LINE_Bot   ", ""},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripBotMention(tc.in); got != tc.want {
+				t.Errorf("stripBotMention(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPlatform confirms the adapter reports the LINE platform.
+func TestPlatform(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret", "/reset")
+	if adapter.Platform() != im.PlatformLine {
+		t.Errorf("Platform() = %q, want %q", adapter.Platform(), im.PlatformLine)
+	}
+}
+
+// TestNewFactoryRequiresCredentials verifies the factory rejects missing creds.
+func TestNewFactoryRequiresCredentials(t *testing.T) {
+	factory := NewFactory()
+
+	_, _, err := factory(context.Background(), &im.IMChannel{
+		Credentials: []byte(`{"channel_access_token":""}`),
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for empty channel_access_token")
+	}
+
+	adapter, cancel, err := factory(context.Background(), &im.IMChannel{
+		Credentials: []byte(`{"channel_access_token":"tok","channel_secret":"sec"}`),
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cancel != nil {
+		defer cancel()
+	}
+	if adapter == nil {
+		t.Fatal("expected non-nil adapter for valid credentials")
+	}
+}
+
+// TestIsReset confirms the reset-keyword matching rules: exact, trimmed,
+// case-insensitive, and a no-op when no keyword is configured.
+func TestIsReset(t *testing.T) {
+	cases := []struct {
+		name         string
+		resetKeyword string
+		content      string
+		want         bool
+	}{
+		{"no keyword configured", "", "/reset", false},
+		{"exact match", "/reset", "/reset", true},
+		{"case-insensitive", "/reset", "/RESET", true},
+		{"trims surrounding whitespace", "/reset", "  /reset  ", true},
+		{"trailing args is not a reset", "/reset", "/reset now", false},
+		{"different keyword", "/clear", "/reset", false},
+		{"plain text is not a reset", "/reset", "please reset me", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewWebhookAdapter("token", "secret", tc.resetKeyword)
+			if got := a.isReset(tc.content); got != tc.want {
+				t.Errorf("isReset(%q) with keyword=%q = %v, want %v", tc.content, tc.resetKeyword, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseCallbackResetKeyword confirms the adapter flags a matching reset
+// keyword so the service can route it through the session-clear path, and that
+// a normal message is left unflagged.
+func TestParseCallbackResetKeyword(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	const payload = `{
+		"destination": "U-destination",
+		"events": [
+			{
+				"type": "message",
+				"token": "rtk-reset",
+				"source": {"type": "user", "userId": "U-abcd123"},
+				"replyToken": "rtk-reset",
+				"message": {"type": "Text", "id": "msg-reset", "text": "  /reset "}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage, got nil")
+	}
+	if incoming.Extra["reset"] != "true" {
+		t.Errorf("reset flag = %q, want %q", incoming.Extra["reset"], "true")
+	}
+
+	// A normal message must NOT set the reset flag.
+	const other = `{
+		"destination": "U-destination",
+		"events": [
+			{
+				"type": "message",
+				"token": "rtk-chat",
+				"source": {"type": "user", "userId": "U-abcd123"},
+				"replyToken": "rtk-chat",
+				"message": {"type": "Text", "id": "msg-chat", "text": "hello there"}
+			}
+		]
+	}`
+	c2, _ := newTestContext(t, other)
+	incoming2, err := adapter.ParseCallback(c2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if incoming2 == nil {
+		t.Fatal("expected IncomingMessage, got nil")
+	}
+	if incoming2.Extra["reset"] == "true" {
+		t.Errorf("reset flag must not be set for a normal message, got true")
+	}
+}
+
+// TestParseCallbackNumericTimestampLowercaseText is the regression test for the
+// two core parsing bugs: LINE's real payload sends the event timestamp as a JSON
+// number (1793261422841, not a quoted string) and the message type lowercase
+// ("text", not "Text"). Under the old struct/tag this failed to unmarshal and
+// this text message was silently skipped. It must now produce a message.
+func TestParseCallbackNumericTimestampLowercaseText(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	// Numeric timestamp (no quotes) + lowercase "text" — matches LINE's wire format.
+	const payload = `{
+		"destination": "U-destination",
+		"events": [
+			{
+				"type": "message",
+				"token": "tok-1",
+				"timestamp": 1793261422841,
+				"source": {"type": "user", "userId": "U-abcd123"},
+				"replyToken": "rtk-987",
+				"message": {"type": "text", "id": "msg-555", "text": "hello"}
+			}
+		]
+	}`
+
+	c, _ := newTestContext(t, payload)
+	incoming, err := adapter.ParseCallback(c)
+	if err != nil {
+		t.Fatalf("numeric timestamp / lowercase text caused unmarshal error: %v", err)
+	}
+	if incoming == nil {
+		t.Fatal("expected IncomingMessage for lowercase text payload, got nil")
+	}
+	if incoming.UserID != "U-abcd123" {
+		t.Errorf("UserID = %q, want U-abcd123", incoming.UserID)
+	}
+	if incoming.Content != "hello" {
+		t.Errorf("Content = %q, want %q", incoming.Content, "hello")
+	}
+}
+
+// TestHandleURLVerificationMalformedBodyNotVerification confirms that a body
+// which fails to parse is surfaced as NOT-handled (false) instead of being
+// swallowed and misreported as a webhook verification.
+func TestHandleURLVerificationMalformedBodyNotVerification(t *testing.T) {
+	adapter := NewWebhookAdapter("access-token", "secret-key-123", "/reset")
+
+	c, _ := newTestContext(t, `{ this is not valid json `)
+	if handled := adapter.HandleURLVerification(c); handled {
+		t.Fatal("expected HandleURLVerification = false for a malformed body")
+	}
+}
