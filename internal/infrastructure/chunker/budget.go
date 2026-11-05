@@ -80,9 +80,11 @@ func enforceChunkBudget(chunks []Chunk, budget int) []Chunk {
 		}
 		spanLen := c.End - c.Start
 		prefixLen := len(content) - spanLen
-		if spanLen <= 0 || prefixLen < 0 {
-			// Malformed or synthetic-only chunks are not produced by the
-			// splitters; treat their content as source-backed.
+		if spanLen <= 0 {
+			// No source span: the whole content is synthetic context. Never
+			// attribute it to source offsets; drop it if it cannot fit.
+			prefixLen = len(content)
+		} else if prefixLen < 0 {
 			prefixLen = 0
 		}
 
@@ -93,23 +95,38 @@ func enforceChunkBudget(chunks []Chunk, budget int) []Chunk {
 		}
 
 		// Context headers and synthetic table headers are context, not source
-		// content. Drop them before sacrificing retrievable text.
+		// content. Drop them before sacrificing retrievable text. A dropped
+		// synthetic header must also be skipped when slicing the body, or its
+		// text would be attributed to source offsets it does not occupy.
+		keepPrefix := prefixLen > 0
 		if overhead+prefixLen >= budget {
 			c.ContextHeader = ""
 			overhead = 0
 		}
 		if overhead+prefixLen >= budget {
-			prefixLen = 0
+			keepPrefix = false
 		}
-		bodyBudget := budget - overhead - prefixLen
+		bodyBudget := budget - overhead
+		if keepPrefix {
+			bodyBudget -= prefixLen
+		}
 		if bodyBudget <= 0 {
 			c.ContextHeader = ""
-			prefixLen = 0
 			bodyBudget = budget
+			if keepPrefix {
+				bodyBudget -= prefixLen
+				if bodyBudget <= 0 {
+					keepPrefix = false
+					bodyBudget = budget
+				}
+			}
 		}
 
 		body := content[prefixLen:]
-		prefix := string(content[:prefixLen])
+		prefix := ""
+		if keepPrefix {
+			prefix = string(content[:prefixLen])
+		}
 		for offset := 0; offset < len(body); {
 			end := runeSplitEnd(body, offset, bodyBudget)
 			piece := string(body[offset:end])

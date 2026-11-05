@@ -281,6 +281,92 @@ func TestSplitText_ExplicitTokenLimitWithOverlapStaysWithinBudget(t *testing.T) 
 	assertChunkSourceSpans(t, chunks, text)
 }
 
+func TestEnforceChunkBudget_SyntheticTableHeaderBeyondBudgetKeepsSourceOffsets(t *testing.T) {
+	header := "| A | B |\n| --- | --- |\n"
+	source := strings.Repeat("数据", 20)
+	budget := runeLen(header) / 2
+	chunks := enforceChunkBudget([]Chunk{{
+		Content: header + source,
+		Start:   0,
+		End:     runeLen(source),
+	}}, budget)
+
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+	assertChunkEmbeddingBudget(t, chunks, budget)
+	assertChunkSourceSpans(t, chunks, source)
+	for i, c := range chunks {
+		if strings.Contains(c.Content, "| A | B |") {
+			t.Errorf("chunk[%d] kept a synthetic table header that does not fit the budget", i)
+		}
+	}
+}
+
+func TestEnforceChunkBudget_OneRuneBudget(t *testing.T) {
+	source := "中文🙂"
+	chunks := enforceChunkBudget([]Chunk{{
+		Content: source,
+		Start:   0,
+		End:     runeLen(source),
+	}}, 1)
+
+	if len(chunks) != runeLen(source) {
+		t.Fatalf("expected %d one-rune chunks, got %d", runeLen(source), len(chunks))
+	}
+	assertChunkEmbeddingBudget(t, chunks, 1)
+	assertChunkSourceSpans(t, chunks, source)
+}
+
+func TestEnforceChunkBudget_SyntheticOnlyChunkIsNotMappedToSource(t *testing.T) {
+	chunks := enforceChunkBudget([]Chunk{{
+		Content: strings.Repeat("表头", 20),
+		Start:   7,
+		End:     7,
+	}}, 5)
+
+	if len(chunks) != 0 {
+		t.Fatalf("synthetic-only chunk must not be attributed to source offsets, got %d chunks", len(chunks))
+	}
+}
+
+func TestEnforceChunkBudget_ContextHeaderConsumesBudget(t *testing.T) {
+	source := strings.Repeat("正文", 50)
+	chunks := enforceChunkBudget([]Chunk{{
+		Content:       source,
+		ContextHeader: strings.Repeat("标", 100),
+		Start:         0,
+		End:           runeLen(source),
+	}}, 20)
+
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+	assertChunkEmbeddingBudget(t, chunks, 20)
+	assertChunkSourceSpans(t, chunks, source)
+	for i, c := range chunks {
+		if c.ContextHeader != "" {
+			t.Errorf("chunk[%d] kept a context header that leaves no room for content", i)
+		}
+	}
+}
+
+func TestSplitText_MinimumTokenBudgetOneRune(t *testing.T) {
+	text := "中文🙂"
+	cfg := SplitterConfig{
+		ChunkSize:  10000,
+		TokenLimit: 1,
+		Languages:  []string{LangChinese},
+		Separators: []string{"\n"},
+	}
+	chunks := SplitText(text, cfg)
+	if len(chunks) != runeLen(text) {
+		t.Fatalf("expected %d one-rune chunks, got %d", runeLen(text), len(chunks))
+	}
+	assertChunkEmbeddingBudget(t, chunks, 1)
+	assertChunkSourceSpans(t, chunks, text)
+}
+
 func TestSplitText_NoTokenLimitKeepsExistingOversizeBehavior(t *testing.T) {
 	text := strings.Repeat("中", 1000)
 	cfg := SplitterConfig{
