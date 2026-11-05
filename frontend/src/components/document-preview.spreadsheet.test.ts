@@ -22,7 +22,7 @@ const compiled = ts.transpileModule(
   },
 ).outputText
 
-type Row = { number: number; text: string }
+type Row = { number: number; text: string; querySelectorAll: () => { text: string }[] }
 type LocateResult = { found: boolean; precise: boolean; granularity?: string; reason?: string }
 
 const firstRows = [
@@ -46,7 +46,11 @@ const request: SourceLocateRequest = {
   scope: `# Sheet1\n${quote}`,
 }
 
-function fixture(sheets = [{ name: 'Sheet1', texts: firstRows }], sanitizedIds = true) {
+function fixture(
+  sheets: { name: string; texts: (string | string[])[] }[] = [{ name: 'Sheet1', texts: firstRows }],
+  sanitizedIds = true,
+  extension = 'xlsx',
+) {
   // Exercise the native SheetJS parse/render path with synthetic workbooks.
   // The small DOM adapter supplies selectors/closest that xmldom omits;
   // scrolling and highlight effects are observed separately below.
@@ -54,13 +58,18 @@ function fixture(sheets = [{ name: 'Sheet1', texts: firstRows }], sanitizedIds =
   for (const sheet of sheets) {
     XLSX.utils.book_append_sheet(
       book,
-      XLSX.utils.aoa_to_sheet(sheet.texts.map((text) => [text])),
+      XLSX.utils.aoa_to_sheet(
+        sheet.texts.map((text) => (typeof text === 'string' ? [text] : text)),
+      ),
       sheet.name,
     )
   }
-  const parsed = XLSX.read(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }), {
-    type: 'buffer',
-  })
+  // CSV follows renderExcel's string input path. Multiple-sheet CSV fixtures
+  // represent an inconsistent rendered state, which must never select a table.
+  const parsed =
+    extension === 'csv' && sheets.length === 1
+      ? XLSX.read(XLSX.write(book, { type: 'string', bookType: 'csv' }), { type: 'string' })
+      : XLSX.read(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' })
   const tables = parsed.SheetNames.map((name, index) => {
     const html = XLSX.utils.sheet_to_html(parsed.Sheets[name]!, { id: `sheet-${index}` })
     const doc = new DOMParser().parseFromString(html, 'text/html')
@@ -72,6 +81,7 @@ function fixture(sheets = [{ name: 'Sheet1', texts: firstRows }], sanitizedIds =
       const row = {
         number: Number(/-[A-Z]+(\d+)$/.exec(first.getAttribute('id')!)![1]),
         text: tds.map((td) => td.textContent || '').join(' '),
+        querySelectorAll: () => tds.map((td) => ({ text: td.textContent || '' })),
       }
       cells.push(
         ...tds.map((td) => ({
@@ -84,7 +94,12 @@ function fixture(sheets = [{ name: 'Sheet1', texts: firstRows }], sanitizedIds =
     return { rows, querySelectorAll: () => cells }
   })
   const box = {
-    text: sheets.map((sheet) => `${sheet.name}\n${sheet.texts.join('\n')}`).join('\n'),
+    text: sheets
+      .map(
+        (sheet) =>
+          `${sheet.name}\n${sheet.texts.map((text) => (typeof text === 'string' ? text : text.join(' '))).join('\n')}`,
+      )
+      .join('\n'),
     querySelector(selector: string) {
       const match = /^#(user-content-)?sheet-(\d+)$/.exec(selector)
       return match && !!match[1] === sanitizedIds ? tables[Number(match[2])] : null
@@ -99,7 +114,8 @@ function fixture(sheets = [{ name: 'Sheet1', texts: firstRows }], sanitizedIds =
   const ctx = runInNewContext(`${compiled}\n({ locateExcel, applyLocate })`, {
     previewContent: { value: box },
     previewType: { value: 'excel' },
-    excelSheetNames: sheets.map((sheet) => sheet.name),
+    previewExt: extension,
+    excelSheetNames: parsed.SheetNames,
     props,
     matchSpreadsheetSourceRows,
     spreadsheetScopeCovered,
@@ -146,6 +162,161 @@ test('partial Sheet1 citation reveals and highlights rows 1–19 as a source reg
     assert.equal(f.revealed[0], f.tables[0].rows[0])
     assert.equal(f.fallbacks.length, 0)
   }
+})
+
+const csvCells = [
+  ['Date', 'Type', 'Amount'],
+  ['Oct 31, 2026', 'Other fee', '-1.50'],
+  ['Oct 30, 2026', 'Order', '25.00'],
+  ['Oct 29, 2026', 'Other fee', '-2.00'],
+]
+const csvLocator: SourceLocator = {
+  type: 'sheet',
+  mapping: 'exact',
+  partial: true,
+  row_start: 2,
+  row_end: 3,
+  quote: csvCells
+    .slice(1, 3)
+    .map((cells) => `| ${cells.join(' | ')} |`)
+    .join('\n'),
+}
+const csvRequest: SourceLocateRequest = {
+  token: 1,
+  locators: [csvLocator],
+  quotes: [],
+  scope: csvLocator.quote,
+}
+const csvSheets = [{ name: 'Sheet1', texts: csvCells }]
+
+test('CSV mappings without sheet names locate verified rows through applyLocate', () => {
+  for (const sheet of [undefined, '']) {
+    for (const sanitized of [true, false]) {
+      for (const partial of [true, false]) {
+        const f = fixture(csvSheets, sanitized, 'csv')
+        f.props.locate = { ...csvRequest, locators: [{ ...csvLocator, sheet, partial }] }
+        f.applyLocate()
+        assert.equal(f.events[0]?.found, true)
+        assert.equal(f.events[0]?.granularity, 'block')
+        assert.equal(f.events[0]?.reason, undefined)
+        assert.deepEqual(Array.from(f.marks[0]), f.tables[0]!.rows.slice(1, 3))
+        assert.equal(f.revealed[0], f.tables[0]!.rows[1])
+        assert.equal(f.fallbacks.length, 0)
+        assert.equal(f.props.locate.locators[0]?.sheet, sheet, 'do not mutate API evidence')
+      }
+    }
+  }
+})
+
+test('CSV mappings still reject changed values, wrong rows, invalid ranges and missing quotes', () => {
+  for (const change of [
+    { quote: csvLocator.quote!.replace('-1.50', '-1.51') },
+    { row_start: 3, row_end: 4 },
+    { row_start: 0 },
+    { quote: undefined },
+  ]) {
+    const f = fixture(csvSheets, true, 'csv')
+    const result = f.locateExcel({ ...csvRequest, locators: [{ ...csvLocator, ...change }] })
+    assert.equal(result.found, false)
+    assert.equal(f.marks.length, 0)
+    assert.equal(f.fallbacks.length, 0)
+  }
+})
+
+test('CSV coverage warnings and unavailable revisions survive reselecting a citation', () => {
+  const f = fixture(csvSheets, true, 'csv')
+  f.props.locate = {
+    ...csvRequest,
+    scope: `${csvRequest.scope}\nUnmapped content`,
+  }
+  f.applyLocate()
+  assert.equal(f.events[0]?.reason, 'partial')
+  assert.equal(f.marks[0]?.length, 2)
+  f.props.locate = { ...csvRequest, token: 2, unavailable: true }
+  f.applyLocate()
+  assert.equal(f.marks.length, 0)
+  assert.equal(f.events.at(-1)?.reason, 'unavailable')
+})
+
+test('unnamed CSV mappings cannot choose among tables or override an explicit sheet name', () => {
+  for (const [sheets, loc] of [
+    [[...csvSheets, { ...csvSheets[0]!, name: 'OtherSheet' }], csvLocator],
+    [csvSheets, { ...csvLocator, sheet: 'MissingSheet' }],
+  ] as const) {
+    const f = fixture([...sheets], true, 'csv')
+    assert.equal(f.locateExcel({ ...csvRequest, locators: [loc] }).found, false)
+    assert.equal(f.marks.length, 0)
+    assert.equal(f.fallbacks.length, 0)
+  }
+})
+
+test('Excel workbook mappings still require matching sheet names even for one sheet', () => {
+  for (const extension of ['xlsx', 'xls', 'xlsm']) {
+    const f = fixture(csvSheets, true, extension)
+    assert.equal(f.locateExcel(csvRequest).found, false)
+    assert.equal(f.marks.length, 0)
+    assert.equal(f.fallbacks.length, 0)
+  }
+})
+
+const feeCells = ['Oct 31, 2026', 'Other fee', '--', '300000000001', '-0.17', 'FEE-TEST_11']
+const feeQuote = `| ${feeCells.join(' | ')} |`
+test('CSV and Excel preserve cell boundaries between placeholders and signed numbers', () => {
+  for (const extension of ['csv', 'xlsx']) {
+    const f = fixture([{ name: 'Sheet1', texts: [feeCells] }], true, extension)
+    const loc = {
+      ...csvLocator,
+      sheet: extension === 'xlsx' ? 'Sheet1' : undefined,
+      row_start: 1,
+      row_end: 1,
+      quote: feeQuote,
+    }
+    assert.equal(f.locateExcel({ ...csvRequest, scope: feeQuote, locators: [loc] }).found, true)
+    assert.deepEqual(Array.from(f.marks[0]), f.tables[0]!.rows)
+    const changed = { ...loc, quote: feeQuote.replace('-0.17', '0.17') }
+    assert.equal(
+      f.locateExcel({ ...csvRequest, scope: changed.quote, locators: [changed] }).found,
+      false,
+    )
+  }
+})
+
+test('empty cells and separate numeric cells do not authorize changed cell values', () => {
+  for (const extension of ['csv', 'xlsx']) {
+    const f = fixture([{ name: 'Sheet1', texts: [['Entry', '', '1', '23']] }], true, extension)
+    const loc = {
+      ...csvLocator,
+      sheet: extension === 'xlsx' ? 'Sheet1' : undefined,
+      row_start: 1,
+      row_end: 1,
+      quote: '| Entry | | 1 | 23 |',
+    }
+    assert.equal(f.locateExcel({ ...csvRequest, scope: loc.quote, locators: [loc] }).found, true)
+    const changed = { ...loc, quote: '| Entry | | 12 | 3 |' }
+    assert.equal(
+      f.locateExcel({ ...csvRequest, scope: changed.quote, locators: [changed] }).found,
+      false,
+    )
+  }
+})
+
+test('CSV quoted commas, line breaks and duplicate rows retain their structural row identity', () => {
+  const cells = [
+    'Oct 31, 2026',
+    'Other fee, adjustment\nsecond line',
+    '--',
+    '300000000001',
+    '-0.17',
+  ]
+  const f = fixture(
+    [{ name: 'Sheet1', texts: [['Date', 'Type', 'Ref', 'ID', 'Amount'], cells, cells] }],
+    true,
+    'csv',
+  )
+  const quote = `| ${cells.join(' | ')} |`
+  const loc = { ...csvLocator, row_start: 3, row_end: 3, quote }
+  assert.equal(f.locateExcel({ ...csvRequest, scope: quote, locators: [loc] }).found, true)
+  assert.deepEqual(Array.from(f.marks[0]), [f.tables[0]!.rows[2]])
 })
 
 test('a real unmapped paragraph retains the partial-coverage warning', () => {

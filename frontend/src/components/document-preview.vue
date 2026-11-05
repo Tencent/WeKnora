@@ -723,15 +723,30 @@ function sheetRows(table: Element): Map<number, Element> {
   return rows;
 }
 
+function spreadsheetRowText(row: Element): string {
+  // Preserve cell boundaries so a placeholder such as "--" cannot become
+  // the negative sign of a number in the next cell.
+  return (
+    '| ' +
+    Array.from(row.querySelectorAll('td, th'))
+      .map((cell) => buildTextIndex(cell).text)
+      .join(' | ') +
+    ' |'
+  );
+}
+
 function locateExcel(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
   const locators = request.locators.filter((l) => l.type === 'sheet' && l.mapping === 'exact');
+  const singleCsv = previewExt === 'csv' && excelSheetNames.length === 1;
   const targets: Element[] = [];
   const verified: SourceLocator[] = [];
   let missed = false;
   for (const loc of locators) {
-    const byName = loc.sheet ? excelSheetNames.indexOf(loc.sheet) : -1;
+    // CSV locators omit the sheet name. Only its single rendered sheet can
+    // supply that identity; workbooks and explicit names still require a match.
+    const byName = loc.sheet ? excelSheetNames.indexOf(loc.sheet) : singleCsv ? 0 : -1;
     if (byName < 0) {
       missed = true;
       continue;
@@ -750,8 +765,11 @@ function locateExcel(request: SourceLocateRequest): SourceLocateResult {
         ([number]) =>
           number >= (loc.row_start || 0) && number <= (loc.row_end ?? loc.row_start ?? 0),
       )
-      .map(([number, row]) => ({ number, text: buildTextIndex(row).text }));
-    const matched = matchSpreadsheetSourceRows(loc, sourceRows);
+      .map(([number, row]) => ({ number, text: spreadsheetRowText(row) }));
+    const matched = matchSpreadsheetSourceRows(
+      { ...loc, sheet: excelSheetNames[sheetIdx] },
+      sourceRows,
+    );
     if (!matched.length) {
       missed = true;
       continue;
