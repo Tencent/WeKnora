@@ -134,7 +134,7 @@ if err != nil {
 }
 
 // Streaming Q&A
-err = apiClient.KnowledgeQAStream(context.Background(), session.ID, "What is machine learning?", func(response *client.StreamResponse) error {
+err = apiClient.KnowledgeQAStream(context.Background(), session.ID, &client.KnowledgeQARequest{Query: "What is machine learning?"}, func(response *client.StreamResponse) error {
     // Handle each response chunk
     fmt.Print(response.Content)
     return nil
