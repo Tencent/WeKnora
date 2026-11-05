@@ -18,6 +18,7 @@ The client includes the following main functional modules:
 10. **Sandbox skills**: Install a skill onto a sandbox config (zip upload, or ClawHub / SkillHub / GitHub source) and configure the environment variables it needs
 11. **Long-term memory**: The caller's cross-session memories (settings, items, confirm/reject, topics, document affinity, export, consolidate)
 12. **Auth**: Login, refresh tokens, and switch the active workspace (`SwitchTenant` records the last-active-tenant preference)
+13. **Backup & restore**: Full-instance export, server-side snapshots, and restore (SystemAdmin JWT)
 
 ## Usage
 
