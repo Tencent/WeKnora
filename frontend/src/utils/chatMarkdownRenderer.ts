@@ -289,26 +289,44 @@ export function closeDanglingStreamingEmphasis(text: string): string {
   return working.slice(0, cut) + closers + working.slice(cut)
 }
 
-const FLANKING_BOLD = /(?<!\*)\*\*(?=\S)([^*\n]*?\p{P})\*\*(?=[\p{L}\p{N}])/gu
-const FLANKING_STRIKE = /(?<!~)~~(?=\S)([^~\n]*?\p{P})~~(?=[\p{L}\p{N}])/gu
-const FLANKING_ITALIC = /(?<![*\p{L}\p{N}])\*(?=\S)([^*\n]*?\p{P})\*(?=[\p{L}\p{N}])/gu
+// Match complete pairs, including those that need no repair, so a closing
+// delimiter cannot be reused as the next span's opening delimiter.
+const BOLD_PAIRS = /(?<!\*)\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*/gu
+const STRIKE_PAIRS = /(?<!~)~~(?=\S)([^~\n]+?)(?<=\S)~~/gu
+const ITALIC_PAIRS = /(?<![*\p{L}\p{N}])\*(?=\S)([^*\n]+?)(?<=\S)\*/gu
 
-// Opening-delimiter variant of the rule above. CommonMark also refuses to *open*
-// emphasis when the run is preceded by a letter/number and immediately followed
-// by punctuation, so `知识库中**《手册》**整理` stays literal even though the
-// closing `**` is fine. The `(?=\p{P})` guard keeps exponent/glob/math markers
-// like `x**2`, `2**3**4`, and `**/*.js` untouched (those are followed by a
-// number or slash-as-content, not an emphasis-opening punctuation run).
-const FLANKING_BOLD_OPEN = /(?<=[\p{L}\p{N}])\*\*(?=\p{P})([^*\n]+?)\*\*/gu
-const FLANKING_STRIKE_OPEN = /(?<=[\p{L}\p{N}])~~(?=\p{P})([^~\n]+?)~~/gu
+function isEscapedDelimiter(text: string, offset: number): boolean {
+  let backslashes = 0
+  for (let i = offset - 1; i >= 0 && text[i] === '\\'; i--) backslashes++
+  return backslashes % 2 === 1
+}
+
+function repairPairedEmphasis(
+  segment: string,
+  pairs: RegExp,
+  tag: 'strong' | 'del' | 'em',
+): string {
+  return segment.replace(pairs, (full: string, body: string, offset: number) => {
+    const markerLength = tag === 'em' ? 1 : 2
+    if (
+      isEscapedDelimiter(segment, offset) ||
+      isEscapedDelimiter(segment, offset + full.length - markerLength)
+    ) {
+      return full
+    }
+    // Keep whole Unicode boundary characters even when they use surrogate pairs.
+    const before = segment.slice(Math.max(0, offset - 2), offset)
+    const after = segment.slice(offset + full.length, offset + full.length + 2)
+    const blockedOpen = tag !== 'em' && /[\p{L}\p{N}]$/u.test(before) && /^\p{P}/u.test(body)
+    const blockedClose = /\p{P}$/u.test(body) && /^[\p{L}\p{N}]/u.test(after)
+    return blockedOpen || blockedClose ? '<' + tag + '>' + body + '</' + tag + '>' : full
+  })
+}
 
 function repairFlankingEmphasisSegment(segment: string): string {
-  return segment
-    .replace(FLANKING_BOLD, '<strong>$1</strong>')
-    .replace(FLANKING_BOLD_OPEN, '<strong>$1</strong>')
-    .replace(FLANKING_STRIKE, '<del>$1</del>')
-    .replace(FLANKING_STRIKE_OPEN, '<del>$1</del>')
-    .replace(FLANKING_ITALIC, '<em>$1</em>')
+  const bold = repairPairedEmphasis(segment, BOLD_PAIRS, 'strong')
+  const strike = repairPairedEmphasis(bold, STRIKE_PAIRS, 'del')
+  return repairPairedEmphasis(strike, ITALIC_PAIRS, 'em')
 }
 
 /**

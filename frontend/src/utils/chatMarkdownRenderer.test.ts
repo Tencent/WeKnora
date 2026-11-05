@@ -292,6 +292,163 @@ test('repairFlankingEmphasis bolds punctuation-adjacent emphasis CommonMark woul
   assert.equal(repairFlankingEmphasis('2**3**4'), '2**3**4')
 })
 
+function renderEmphasisSample(source: string, streaming = false): string {
+  return stripFadeTail(
+    renderChatMarkdown(source, {
+      renderer: createChatMarkdownRenderer(),
+      escapeMarkdown: (value) => value,
+      sanitizeHtml: (value) => value,
+      streaming,
+    }),
+  )
+}
+
+test('adjacent complete bold pairs never reuse the first closing delimiter as an opener', () => {
+  const source = '合计为 **甲**（记录显示为 **-乙**）。'
+  assert.equal(repairFlankingEmphasis(source), source)
+  assert.equal(
+    repairFlankingEmphasis(source.replace('为 **-', '为**-')),
+    '合计为 **甲**（记录显示为<strong>-乙</strong>）。',
+  )
+})
+
+test('adjacent complete strike pairs keep explanatory text outside deletion', () => {
+  const source = '结束~~旧值~~（说明为 ~~新值~~）。'
+  assert.equal(repairFlankingEmphasis(source), source)
+  assert.equal(
+    repairFlankingEmphasis(source.replace('为 ~~', '为~~')),
+    source.replace('为 ~~', '为~~'),
+  )
+})
+
+test('adjacent bold spans render independently in streaming and final answers', () => {
+  for (const gap of ['', ' ']) {
+    const source = `合计为 **甲**（记录显示为${gap}**-乙**）。`
+    for (const streaming of [false, true]) {
+      assert.equal(
+        renderEmphasisSample(source, streaming),
+        `<p>合计为 <strong>甲</strong>（记录显示为${gap}<strong>-乙</strong>）。</p>\n`,
+      )
+    }
+  }
+})
+
+test('adjacent strikethrough spans render independently in streaming and final answers', () => {
+  for (const gap of ['', ' ']) {
+    for (const streaming of [false, true]) {
+      assert.equal(
+        renderEmphasisSample(`结束~~旧值~~（说明为${gap}~~新值~~）。`, streaming),
+        `<p>结束<del>旧值</del>（说明为${gap}<del>新值</del>）。</p>\n`,
+      )
+    }
+  }
+})
+
+test('a completed first span remains isolated through every later streaming prefix', () => {
+  const source = '合计为 **甲**（记录显示为 **-乙**）。'
+  const firstEnd = source.indexOf('**（') + 2
+  for (let end = firstEnd; end <= source.length; end++) {
+    const html = renderEmphasisSample(source.slice(0, end), true)
+    assert.match(html, /<strong>甲<\/strong>/, source.slice(0, end))
+    assert.doesNotMatch(html, /<strong>甲<strong>/)
+  }
+})
+
+test('an unfinished later span stays literal in the final answer without extending the first', () => {
+  assert.equal(
+    renderEmphasisSample('合计为 **甲**（记录为 **未完成'),
+    '<p>合计为 <strong>甲</strong>（记录为 **未完成</p>\n',
+  )
+})
+
+test('existing punctuation repairs coexist with normal pairs in one answer', () => {
+  const html = renderEmphasisSample(
+    '正常 **甲**，知识库中**《手册》**整理，**XBRL（语言）**是一种格式。',
+  )
+  assert.equal(
+    html,
+    '<p>正常 <strong>甲</strong>，知识库中<strong>《手册》</strong>整理，<strong>XBRL（语言）</strong>是一种格式。</p>\n',
+  )
+})
+
+test('punctuation repair keeps Unicode letter boundaries outside the BMP', () => {
+  assert.equal(repairFlankingEmphasis('𠮷**《字》**尾'), '𠮷<strong>《字》</strong>尾')
+  assert.equal(repairFlankingEmphasis('**字）**𠮷'), '<strong>字）</strong>𠮷')
+})
+
+test('existing combined strong and italic delimiter runs remain supported', () => {
+  assert.equal(repairFlankingEmphasis('前**《甲》***斜体*'), '前<strong>《甲》</strong>*斜体*')
+  assert.equal(repairFlankingEmphasis('***粗斜体***'), '***粗斜体***')
+})
+
+test('code and literal arithmetic/glob markers retain their existing interpretation', () => {
+  for (const source of [
+    '`合计为 **甲**（记录显示为 **-乙**）。`',
+    '```text\n结束~~旧值~~（说明为 ~~新值~~）。\n```',
+    '2**3**4 与 x**2 和 **/*.js',
+    String.raw`\*\*普通标记\*\*`,
+  ])
+    assert.equal(repairFlankingEmphasis(source), source)
+})
+
+test('emphasis pairing keeps existing inline and display math rendering', () => {
+  for (const source of [
+    '$x^2 + y^2 = z^2$',
+    '$$\n\\frac{1}{2}+\\sqrt{4}\n$$',
+    '\\(x + y\\)',
+    '\\[E=mc^2\\]',
+  ]) {
+    const html = renderEmphasisSample(source)
+    assert.match(html, /class="katex/)
+    assert.doesNotMatch(html, /katex-error/)
+  }
+})
+
+test('escaped delimiters stay literal while even backslashes retain normal repair', () => {
+  for (const source of [
+    String.raw`\**《字》**文`,
+    String.raw`**字）\**文`,
+    String.raw`\~~《删》~~文`,
+    String.raw`~~删）\~~文`,
+  ]) {
+    assert.equal(repairFlankingEmphasis(source), source)
+  }
+  assert.equal(
+    repairFlankingEmphasis(String.raw`\\**字）**文`),
+    String.raw`\\<strong>字）</strong>文`,
+  )
+  assert.equal(repairFlankingEmphasis(String.raw`\\*字）*文`), String.raw`\\<em>字）</em>文`)
+})
+
+test('triple emphasis and escaped markers render through the normal Markdown parser', () => {
+  const html = renderEmphasisSample('***粗斜体*** 与 \\*\\*普通标记\\*\\*')
+  assert.match(html, /<em><strong>粗斜体<\/strong><\/em>/)
+  assert.match(html, /\*\*普通标记\*\*/)
+  assert.doesNotMatch(html, /<em>\*<\/em>/)
+})
+
+test('ordinary adjacent italic pairs are not converted into a larger span', () => {
+  const source = '*甲*（说明为 *乙*）。'
+  assert.equal(repairFlankingEmphasis(source), source)
+  assert.equal(renderEmphasisSample(source), '<p><em>甲</em>（说明为 <em>乙</em>）。</p>\n')
+})
+
+test('formatted currency spans remain separate from explanatory text and math', () => {
+  for (const gap of ['', ' ']) {
+    for (const streaming of [false, true]) {
+      const html = renderEmphasisSample(
+        `金额 **$12.34 USD**（显示为${gap}**-$12.34**）。`,
+        streaming,
+      )
+      assert.equal(
+        html,
+        `<p>金额 <strong>$12.34 USD</strong>（显示为${gap}<strong>-$12.34</strong>）。</p>\n`,
+      )
+      assert.doesNotMatch(html, /katex/)
+    }
+  }
+})
+
 test('renderChatMarkdown bolds punctuation-adjacent emphasis both mid-stream and when complete', () => {
   const renderer = createChatMarkdownRenderer()
   const options = {
