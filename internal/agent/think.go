@@ -8,7 +8,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -598,7 +597,7 @@ func (e *AgentEngine) callLLMWithRetry(
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, tool_calls=%v",
 				round, i, msg.Role, len(msg.Content), tcNames)
 		} else {
-			preview := cutDebugPreview(msg.Content, 100)
+			preview := previewForLog(msg.Content, messagePreviewRunes, "...")
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=%s, len=%d, content=%s",
 				round, i, msg.Role, len(msg.Content), preview)
 		}
@@ -734,7 +733,7 @@ func (e *AgentEngine) callLLMWithRetry(
 		}
 	}
 	if response.Content != "" {
-		preview := cutDebugPreview(response.Content, 300)
+		preview := previewForLog(response.Content, llmContentPreviewRunes, "...")
 		logger.Debugf(ctx, "[Agent][Round-%d] LLM content preview:\n%s", round, preview)
 	}
 
@@ -753,17 +752,4 @@ func reportModelContextLeaks(
 	}
 	logger.Warnf(ctx, "[%s][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
 		scope, len(leaks), modelcontext.SummarizeLeaks(leaks))
-}
-
-// cutDebugPreview keeps at most limit bytes of s for a debug log line, backing
-// off to a rune start so Chinese model output is never cut inside a character.
-func cutDebugPreview(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "..."
 }

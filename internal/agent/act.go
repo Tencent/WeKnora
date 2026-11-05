@@ -177,8 +177,6 @@ var toolDisplayNames = map[string]string{
 	agenttools.LegacyToolGetDocumentInfo:     "获取文档信息",
 	agenttools.ToolSearchConversations:       "回顾历史对话",
 	agenttools.ToolAskUser:                   "向用户提问",
-	agenttools.ToolRequestSecureForm:         "请求登录凭据",
-	agenttools.ToolBrowserFillSecret:         "填写登录凭据",
 	agenttools.ToolSearchMemory:              "查询长期记忆",
 	agenttools.ToolDatabaseQuery:             "查询数据",
 	agenttools.ToolDataAnalysis:              "数据分析",
@@ -594,9 +592,6 @@ func (e *AgentEngine) runToolCallAnswered(
 	})
 
 	principal, _ := types.PrincipalFromContext(ctx)
-	// Same ID stored on this turn's user messages; host auto-review uses it
-	// to tell current-turn authorization from earlier / forked history.
-	requestID, _ := types.RequestIDFromContext(toolCtx)
 	execTimeout := toolExecutionTimeout(tc.Function.Name, tc.Function.Arguments)
 	if tool, lookupErr := e.toolRegistry.GetTool(tc.Function.Name); lookupErr == nil {
 		if timed, ok := tool.(interface{ ExecutionTimeout() time.Duration }); ok {
@@ -606,7 +601,6 @@ func (e *AgentEngine) runToolCallAnswered(
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
 		SessionID:          sessionID,
 		AssistantMessageID: assistantMessageID,
-		RequestID:          requestID,
 		EventBus:           e.eventBus,
 		ToolCallID:         tc.ID,
 		UserID:             principal.StorageID(),
@@ -689,10 +683,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	}
 
 	if toolCall.Result != nil && toolCall.Result.Output != "" {
-		preview := toolCall.Result.Output
-		if len(preview) > 500 {
-			preview = preview[:500] + "... (truncated)"
-		}
+		preview := previewForLog(toolCall.Result.Output, toolOutputPreviewRunes, "... (truncated)")
 		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
