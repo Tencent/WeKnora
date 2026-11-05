@@ -116,7 +116,8 @@ func officeHasVectorMedia(data []byte, prefix string) bool {
 // does not promise that browsers or vision models can render those formats.
 func (r *AnydocReader) readVectorDOCX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	if !r.canFallback() {
-		return nil, fmt.Errorf("anydoc conversion of %q with EMF/WMF images requires a connected docreader", req.FileName)
+		return nil, fmt.Errorf("anydoc conversion of %q with EMF/WMF images requires a connected docreader",
+			req.FileName)
 	}
 	fallbackReq := *req
 	fallbackReq.ParserEngine = "markitdown"
