@@ -131,19 +131,21 @@ test('a late native request cannot leave a disposed preview fullscreen', async t
 })
 
 test('diagram zoom exits native fullscreen before opening its body-mounted viewer', async () => {
-  const code = source.slice(source.indexOf('async function openMermaid()'), source.indexOf('async function loadPreview()'))
+  const preview = readFileSync(new URL('./mermaid-file/MermaidFilePreview.vue', import.meta.url), 'utf8')
+  const code = preview.slice(preview.indexOf('async function open()'), preview.indexOf('onBeforeUnmount(()'))
+  const image = {}
   const calls = []
   let finishExit
-  const open = vm.runInNewContext(`${code}; openMermaid`, {
-    mermaidSvg: { value: '<svg />' }, props: { active: true }, previewRoot: { value: { isConnected: true } },
-    exitPreviewFullscreen: () => new Promise(resolve => { finishExit = resolve }),
-    openMermaidFullscreen: svg => calls.push(svg),
+  const open = vm.runInNewContext(`let closeViewer; ${code}; open`, {
+    img: { value: image }, controller: new AbortController(),
+    props: { beforeOpen: () => new Promise(resolve => { finishExit = resolve }) },
+    openMermaidFullscreen: target => calls.push(target),
   })
   const pending = open()
   assert.deepEqual(calls, [])
   finishExit()
   await pending
-  assert.deepEqual(calls, ['<svg />'])
+  assert.deepEqual(calls, [image])
 })
 
 test('toolbar reserves layout space in normal and fullscreen modes and keeps exit visible on errors', async () => {
