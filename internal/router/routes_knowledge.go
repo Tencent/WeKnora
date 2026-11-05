@@ -110,7 +110,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kbRebuild.POST("/rebuild-index", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RebuildKnowledgeBaseIndex)
 	// Whole-KB image reprocess for documents uploaded before image
 	// processing was enabled; same access shape as rebuild-index.
-	kbRebuild.POST("/reprocess-images", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.BatchReprocessKnowledgeImages)
+	kbRebuild.POST("/reprocess-images",
+		g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.BatchReprocessKnowledgeImages)
 
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	kgrp := r.Group("/knowledge")
@@ -141,7 +142,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
 		// Image-only reprocess: replaces multimodal results without
 		// re-parsing; same access shape as reparse.
-		k.POST("/:id/reprocess-images", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReprocessKnowledgeImages)
+		k.POST("/:id/reprocess-images",
+			g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReprocessKnowledgeImages)
 		k.POST("/:id/cancel-parse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.CancelKnowledgeParse)
 		// Downloading exposes the original source file, so it has a stricter
 		// boundary than viewing parsed content or previewing it: tenant Viewers

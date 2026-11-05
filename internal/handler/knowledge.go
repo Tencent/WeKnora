@@ -649,7 +649,7 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -701,7 +701,7 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -1812,7 +1812,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -2054,7 +2054,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -2101,7 +2101,7 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -2375,7 +2375,7 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -2428,7 +2428,7 @@ func (h *KnowledgeHandler) RegenerateKnowledgeSummary(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
@@ -2490,7 +2490,7 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -2557,7 +2557,7 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -2615,25 +2615,25 @@ func (h *KnowledgeHandler) ReprocessKnowledgeImages(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
 	// Same write-access shape as reparse: image results are KB content.
 	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
 	knowledge, err := h.kgService.ReprocessKnowledgeImages(effCtx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_id": id})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -2654,7 +2654,7 @@ func (h *KnowledgeHandler) BatchReprocessKnowledgeImages(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 	if kbID == "" {
-		c.Error(errors.NewBadRequestError("Knowledge base ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge base ID cannot be empty"))
 		return
 	}
 
@@ -2663,18 +2663,18 @@ func (h *KnowledgeHandler) BatchReprocessKnowledgeImages(c *gin.Context) {
 	var req batchReprocessImagesRequest
 	if c.Request.ContentLength != 0 {
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.Error(errors.NewBadRequestError("Invalid batch reprocess request body").WithDetails(err.Error()))
+			_ = c.Error(errors.NewBadRequestError("Invalid batch reprocess request body").WithDetails(err.Error()))
 			return
 		}
 	}
 
 	_, effKBID, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(errors.NewForbiddenError("no permission to reprocess images in this kb"))
+		_ = c.Error(errors.NewForbiddenError("no permission to reprocess images in this kb"))
 		return
 	}
 	if err := h.requireKBOwnershipOrAdmin(c, effKBID); err != nil {
@@ -2686,11 +2686,11 @@ func (h *KnowledgeHandler) BatchReprocessKnowledgeImages(c *gin.Context) {
 	result, err := h.kgService.BatchReprocessKnowledgeImages(ctx, effKBID, req.IDs)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": effKBID})
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -2723,7 +2723,7 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 
@@ -2914,7 +2914,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
 		return
 	}
 	chunkID := secutils.SanitizeForLog(c.Param("chunk_id"))

@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
-	"strings"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -167,7 +167,8 @@ func (s *knowledgeService) deleteOldImageChunks(
 		if err != nil {
 			return fmt.Errorf("resolve embedding model for image chunk cleanup: %w", err)
 		}
-		engine, err := retriever.CreateRetrieveEngineForKB(ctx, s.retrieveEngine, s.ownership, knowledge.TenantID, kb.VectorStoreID)
+		engine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, knowledge.TenantID, kb.VectorStoreID)
 		if err != nil {
 			return fmt.Errorf("resolve retrieve engine for image chunk cleanup: %w", err)
 		}

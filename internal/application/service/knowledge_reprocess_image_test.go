@@ -21,16 +21,16 @@ import (
 // enqueuer. The KB has no embedding model, so the vector-cleanup branch is
 // skipped — indexing is not this feature's seam.
 type reprocessFixture struct {
-	svc    *knowledgeService
-	db     *gorm.DB
+	svc     *knowledgeService
+	db      *gorm.DB
 	catalog *stubReprocessCatalog
-	tasks  *stubReprocessEnqueuer
+	tasks   *stubReprocessEnqueuer
 }
 
 type stubReprocessCatalog struct {
 	interfaces.ResourceCatalog
-	refs      map[string][]string                    // knowledgeID -> resource:// refs
-	resources map[string]*types.StoredResource       // ref -> resource
+	refs      map[string][]string              // knowledgeID -> resource:// refs
+	resources map[string]*types.StoredResource // ref -> resource
 }
 
 func (c *stubReprocessCatalog) ListReferencesByOwner(
@@ -61,7 +61,8 @@ func (e *stubReprocessEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*a
 
 func newReprocessFixture(t *testing.T) *reprocessFixture {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared&_pragma=foreign_keys(1)"), &gorm.Config{})
+	dsn := "file:" + t.Name() + "?mode=memory&cache=shared&_pragma=foreign_keys(1)"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.Chunk{}))
 
@@ -255,7 +256,8 @@ func TestListDocumentImagesUsesResourceHandles(t *testing.T) {
 func TestClearStaleImageOverrides(t *testing.T) {
 	k := &types.Knowledge{
 		ID: "doc", TenantID: 7,
-		Metadata: types.JSON(`{"process_overrides":{"enable_multimodel":false,"vlm_config":{"enabled":false},"chunking_config":{"strategy":"auto"}}}`),
+		Metadata: types.JSON(`{"process_overrides":{"enable_multimodel":false,` +
+			`"vlm_config":{"enabled":false},"chunking_config":{"strategy":"auto"}}}`),
 	}
 	require.NoError(t, clearStaleImageOverrides(k))
 	overrides, err := k.ProcessOverrides()
