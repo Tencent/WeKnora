@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "data": {
+    "version": "1.2.0-example",
+    "edition": "community",
+    "commit_id": "0000000",
+    "build_time": "2026-01-01T00:00:00Z",
+    "go_version": "go1.example",
+    "keyword_index_engine": "example-keyword-engine",
+    "vector_store_engine": "example-vector-engine",
+    "graph_database_engine": "example-graph-engine",
+    "minio_enabled": true,
+    "db_version": "example-db-version"
+  }
+}
