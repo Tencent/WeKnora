@@ -556,9 +556,18 @@ type ImageMultimodalPayload struct {
 	// SourceLocators place the image in the original file; copied onto the
 	// OCR and caption chunks built from it.
 	SourceLocators SourceLocators `json:"source_locators,omitempty"`
+	// Trigger names what fanned these image tasks out. "" (and "upload") is
+	// the parse pipeline; "reprocess_images" is the explicit image-reprocess
+	// path, whose finalize must NOT re-spawn text enrichment (see
+	// KnowledgePostProcessPayload.SkipEnrichment).
+	Trigger string `json:"trigger,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.
+// ImageTaskTriggerReprocess is the Trigger value image tasks carry when the
+// explicit reprocess-images path (not the parse pipeline) fanned them out.
+const ImageTaskTriggerReprocess = "reprocess_images"
+
 type KnowledgePostProcessPayload struct {
 	TracingContext
 	TenantID        uint64 `json:"tenant_id"`
@@ -566,6 +575,13 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
 	Attempt         int    `json:"attempt,omitempty"`
+	// SkipEnrichment finalizes the knowledge without re-spawning the LLM
+	// enrichment subtasks (summary / question / wiki / auto-tag / graph).
+	// Set when the run that led here changed nothing the enrichment reads —
+	// an image reprocess replaced multimodal results while text chunks and
+	// their indexes stayed byte-identical, so a regenerated summary would
+	// only duplicate the existing one.
+	SkipEnrichment bool `json:"skip_enrichment,omitempty"`
 }
 
 // KnowledgeAutoTagPayload identifies a document whose parsed content should be

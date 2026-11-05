@@ -16,6 +16,12 @@ const props = defineProps<{
   traceVisible: boolean;
   /** Whether the knowledge base has a folder structure to file documents into. */
   foldersAvailable?: boolean;
+  /**
+   * Whether the knowledge base has the image pipeline enabled. Gates the
+   * "reprocess images" action: it only makes sense for a KB that runs
+   * caption/OCR, and a KB without it gets a backend config error anyway.
+   */
+  imagePipelineEnabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -23,6 +29,7 @@ const emit = defineEmits<{
   (e: 'edit'): void;
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
+  (e: 'reprocess-images'): void;
   (e: 'cancel-parse'): void;
   (e: 'move'): void;
   (e: 'move-folder'): void;
@@ -78,6 +85,19 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
     <div class="doc-action-menu-item" @click.stop>
       <t-icon class="icon" name="refresh" />
       <span>{{ $t('knowledgeBase.rebuildDocument') }}</span>
+    </div>
+  </t-popconfirm>
+
+  <!-- 重处理图片：只重跑图片理解（描述/OCR），不重建文档 -->
+  <t-popconfirm
+    v-if="imagePipelineEnabled && !isParseInFlight && canMutateKnowledge"
+    :content="$t('knowledgeBase.reprocessImagesConfirm', { fileName })"
+    :confirm-btn="{ content: $t('common.confirm'), theme: 'primary' }"
+    :cancel-btn="{ content: $t('common.cancel') }" placement="left"
+    @confirm="emit('reprocess-images')">
+    <div class="doc-action-menu-item" @click.stop>
+      <t-icon class="icon" name="image" />
+      <span>{{ $t('knowledgeBase.reprocessImages') }}</span>
     </div>
   </t-popconfirm>
 

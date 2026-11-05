@@ -28,11 +28,13 @@ import {
   updateKnowledgeTagBatch,
   createKnowledgeFromURL,
   reparseKnowledge,
+  reprocessKnowledgeImages,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   batchDownloadKnowledge,
   delKnowledgeDetails,
   batchReparseKnowledge,
+  batchReprocessKnowledgeImages,
   getKnowledgeSpans,
   getKnowledgeDetails,
   listKnowledgeFolders,
@@ -506,6 +508,7 @@ const selectedDocumentAssistantActions = computed(() => {
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const batchReprocessingImages = ref(false);
 const batchTagging = ref(false);
 const batchDownloading = ref(false);
 let batchDownloadController: AbortController | undefined;
@@ -628,6 +631,35 @@ const resetStatusPolling = () => {
   for (const id of pendingReparseAck.keys()) clearReparseAck(id);
   reparseVersionById.clear();
   batchReparsing.value = false;
+};
+
+// Batch-bar image reprocess: the selected documents' stored images re-run
+// caption/OCR under the KB's current config. The backend accounts each
+// document independently (accepted / skipped by reason), so the toast
+// reports the accounting rather than a raw count.
+const handleBatchReprocessImages = async () => {
+  if (batchReprocessingImages.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  const targetKbId = kbId.value;
+  batchReprocessingImages.value = true;
+  try {
+    const res: any = await batchReprocessKnowledgeImages(targetKbId, ids);
+    if (res?.success) {
+      const d = res?.data;
+      MessagePlugin.success(t('knowledgeBase.batchReprocessImagesResult', {
+        accepted: d?.accepted ?? 0,
+        skipped: d?.skipped ?? 0,
+      }));
+      resetPage();
+      loadKnowledgeFiles(targetKbId);
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeBase.reprocessImagesFailed'));
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.reprocessImagesFailed'));
+  } finally {
+    batchReprocessingImages.value = false;
+  }
 };
 
 const confirmBatchReparse = async () => {
@@ -2089,6 +2121,20 @@ const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
   }
 };
 
+// Image-only reprocess: re-runs caption/OCR on the document's stored images.
+// Cheaper than a reparse — text chunks and their index stay untouched — so it
+// just refreshes the list to show the new processing state.
+const submitReprocessImages = async (item: KnowledgeCard) => {
+  try {
+    await reprocessKnowledgeImages(item.id);
+    MessagePlugin.success(t('knowledgeBase.reprocessImagesSubmitted'));
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.reprocessImagesFailed'));
+  }
+};
+
 const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrides) => {
   try {
     await reparseKnowledge(id, processConfig ? { process_config: processConfig } : undefined);
@@ -2380,7 +2426,7 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'reprocess-images' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -2390,6 +2436,7 @@ const handleCardAction = (
     if (isParseInFlight(item.parse_status)) return onReparseMenuClick(idx, item);
     return confirmRebuildKnowledge(idx, item);
   }
+  if (action === 'reprocess-images') return submitReprocessImages(item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
@@ -2399,13 +2446,14 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'edit' | 'reparse' | 'reprocess-images' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'download') return downloadKnowledge(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
+  if (action === 'reprocess-images') return submitReprocessImages(item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
@@ -2756,6 +2804,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                 </template>
                 <template v-else-if="(cardList.length || visibleSubFolders.length) && viewMode === 'list'">
                   <DocumentListView :kb-id="kbId" :items="cardList" :folder-options="folderOptions"
+                    :image-pipeline-enabled="!!kbInfo?.vlm_config?.enabled"
                     :sub-folders="visibleSubFolders"
                     :selected-ids="selectedIds"
                     :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
@@ -2800,7 +2849,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                   :can-download="canDownloadKnowledge" :can-mutate="canMutateKnowledge"
                   :visible="batchMode || selectedIds.size > 0"
                   :show-move-to-folder="canEdit" :folder-options="folderOptions"
+                  :show-reprocess-images="!!kbInfo?.vlm_config?.enabled"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse"
+                  @reprocess-images="handleBatchReprocessImages"
                   @batch-tag="handleBatchTag" @download="handleBatchDownload" @select-loaded="toggleSelectAll(true)"
                   @move-to-folder="(path: string) => moveKnowledgeIntoFolder(Array.from(selectedIds), path)">
                   <template #assistant>

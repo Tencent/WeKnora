@@ -1892,6 +1892,10 @@ const doSubmit = async () => {
         }
       }
 
+      // Turning image processing on for a KB with existing documents is
+      // handled by the batch bar's reprocess-images action: users select
+      // the backlog themselves instead of being prompted here.
+
       emit('success', kbId)
       handleClose()
     }
