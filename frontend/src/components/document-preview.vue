@@ -21,6 +21,7 @@ import {
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
+import { mermaidImage } from '@/utils/mermaidImage';
 import {
   FILE_PREVIEW_SNIFF_BYTES,
   getHighlightLang as resolveHighlightLang,
@@ -462,8 +463,14 @@ async function fetchPreviewBlob(): Promise<Blob> {
 async function renderMermaid(blob: Blob) {
   const text = await blob.text();
   const svg = await renderMermaidToSvg(text, `file-preview-mermaid-${Date.now()}`);
-  if (svg) {
-    mermaidSvg.value = sanitizeMarkdownHTML(svg);
+  // Mermaid can emit HTML void tags (for example <br>) inside labels.
+  // Serialize through an inert template so the SVG image receives valid XML.
+  const template = document.createElement('template');
+  template.innerHTML = svg || '';
+  const diagram = template.content.querySelector('svg');
+  const image = diagram ? mermaidImage(new XMLSerializer().serializeToString(diagram)) : null;
+  if (image) {
+    mermaidSvg.value = sanitizeMarkdownHTML(image);
     return;
   }
   previewType.value = 'text';
