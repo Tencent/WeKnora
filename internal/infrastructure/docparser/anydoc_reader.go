@@ -56,6 +56,9 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	if r.extractImages && fileTypeOf(req) == "pptx" && pptxHasVectorMedia(req.FileContent) {
 		return r.readVectorPPTX(ctx, req)
 	}
+	if r.extractImages && fileTypeOf(req) == "docx" && officeHasVectorMedia(req.FileContent, "word/media/") {
+		return r.readVectorDOCX(ctx, req)
+	}
 
 	converted, err := anydoc.Convert(req.FileContent, anydoc.Options{
 		Format:     format,
@@ -89,12 +92,16 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 // Inspect only the ZIP directory: no media decompression or filesystem writes
 // are needed to decide which reader can preserve the presentation's images.
 func pptxHasVectorMedia(data []byte) bool {
+	return officeHasVectorMedia(data, "ppt/media/")
+}
+
+func officeHasVectorMedia(data []byte, prefix string) bool {
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return false // Let the converter report malformed input normally.
 	}
 	for _, file := range archive.File {
-		if file.FileInfo().IsDir() || !strings.HasPrefix(file.Name, "ppt/media/") {
+		if file.FileInfo().IsDir() || !strings.HasPrefix(file.Name, prefix) {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(file.Name)) {
@@ -103,6 +110,31 @@ func pptxHasVectorMedia(data []byte) bool {
 		}
 	}
 	return false
+}
+
+// readVectorDOCX preserves the original vector bytes through MarkItDown; it
+// does not promise that browsers or vision models can render those formats.
+func (r *AnydocReader) readVectorDOCX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	if !r.canFallback() {
+		return nil, fmt.Errorf("anydoc conversion of %q with EMF/WMF images requires a connected docreader", req.FileName)
+	}
+	fallbackReq := *req
+	fallbackReq.ParserEngine = "markitdown"
+	result, err := r.fallback.Read(ctx, &fallbackReq)
+	if err != nil {
+		return nil, fmt.Errorf("anydoc DOCX vector-media fallback failed for %q: %w", req.FileName, err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("anydoc DOCX vector-media fallback returned no result for %q", req.FileName)
+	}
+	if result.Metadata == nil {
+		result.Metadata = map[string]string{}
+	}
+	if result.Metadata["parser"] == "" {
+		result.Metadata["parser"] = "markitdown"
+	}
+	result.Metadata["anydoc_fallback"] = "docx_vector_media"
+	return result, nil
 }
 
 func (r *AnydocReader) readVectorPPTX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
