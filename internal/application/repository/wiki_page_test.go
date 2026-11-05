@@ -536,6 +536,22 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	assert.Equal(t, int64(1), got)
 }
 
+func TestCountOrphans_NullAndEmptyInLinks(t *testing.T) {
+	wikiInLinkBackends(t, func(t *testing.T, db *gorm.DB, _ wikiBacklinkMutator) {
+		repo := NewWikiPageRepository(db)
+		ctx := context.Background()
+		for i, inLinks := range []any{nil, "null", "[]", `["entity/source"]`} {
+			page := makeWikiPage("kb-orphans", "entity/page-"+strconv.Itoa(i), types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+			require.NoError(t, repo.Create(ctx, page))
+			require.NoError(t, db.Model(page).Update("in_links", inLinks).Error)
+		}
+
+		got, err := repo.CountOrphans(ctx, "kb-orphans")
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), got)
+	})
+}
+
 func TestWikiStatsQueriesExcludeArchivedPages(t *testing.T) {
 	db := setupWikiPagesTestDB(t)
 	repo := NewWikiPageRepository(db)

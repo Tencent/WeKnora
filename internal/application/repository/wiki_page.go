@@ -89,7 +89,7 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
 	}
-	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+	return "(in_links IS NULL OR in_links = 'null'::JSONB OR in_links = '[]'::JSONB)"
 }
 
 // Create inserts a new wiki page record
