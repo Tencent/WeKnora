@@ -20,6 +20,37 @@ func TestWikiGranularityGuidance_RoutesByKey(t *testing.T) {
 	}
 }
 
+func TestWikiPageModifyRemovalNoticeOnlyForPureRetraction(t *testing.T) {
+	tmpl, err := template.New("modify").Parse(WikiPageModifyUserPrompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name        string
+		additions   string
+		retractions string
+		wantNotice  bool
+	}{
+		{name: "new contribution", additions: "1"},
+		{name: "reparse swap", additions: "1", retractions: "1"},
+		{name: "deleted source", retractions: "1", wantNotice: true},
+		{name: "no source changes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var b strings.Builder
+			if err := tmpl.Execute(&b, map[string]string{
+				"HasAdditions": tc.additions, "HasRetractions": tc.retractions,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Contains(b.String(), "This page's primary source document was removed.")
+			if got != tc.wantNotice {
+				t.Errorf("removal notice present = %v, want %v", got, tc.wantNotice)
+			}
+		})
+	}
+}
+
 func TestWikiGranularityGuidance_UnknownDefaultsToStandard(t *testing.T) {
 	unknowns := []string{"", "FOCUSED", "detailed", "minimal", "full", "unknown"}
 	for _, k := range unknowns {
