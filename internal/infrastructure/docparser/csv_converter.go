@@ -8,11 +8,18 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Match the maximum size of a single Markdown entry extracted from a parser
 // result package. The upload cap alone cannot bound padding of ragged CSV rows.
 const maxCSVMarkdownBytes = maxZipEntryBytes
+
+// Keep source metadata bounded, like the office structure fallback. Rows past
+// this limit are still rendered, but must not claim a verified source position.
+const maxCSVSourceBlocks = 200000
 
 // ErrCSVMarkdownTooLarge marks deterministic CSV expansion failures.
 // Callers should report the failure without retrying the same document.
@@ -23,8 +30,16 @@ func csvToMarkdown(data []byte) (string, error) {
 }
 
 func csvToMarkdownContext(ctx context.Context, data []byte, limit int) (string, error) {
-	if err := ctx.Err(); err != nil {
+	result, err := csvToMarkdownResult(ctx, data, limit)
+	if err != nil {
 		return "", err
+	}
+	return result.MarkdownContent, nil
+}
+
+func csvToMarkdownResult(ctx context.Context, data []byte, limit int) (*types.ReadResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	// Excel's "CSV UTF-8" export starts with a byte order mark.
 	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
@@ -32,41 +47,41 @@ func csvToMarkdownContext(ctx context.Context, data []byte, limit int) (string, 
 	reader := newCSVReader(ctx, data)
 	for {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return nil, err
 		}
 		record, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		rows++
 		width = max(width, len(record))
 		for _, cell := range record {
 			size, err := csvEscapedSize(ctx, cell, limit-contentBytes)
 			if errors.Is(err, ErrCSVMarkdownTooLarge) {
-				return "", csvSizeError(limit)
+				return nil, csvSizeError(limit)
 			}
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			contentBytes += size
 		}
 		// Check after every row: a late wide row also widens all preceding rows.
 		if _, err := csvMarkdownSize(rows, width, contentBytes, limit); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	if rows == 0 {
-		return "", nil
+		return &types.ReadResult{}, nil
 	}
 	size, err := csvMarkdownSize(rows, width, contentBytes, limit)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Re-read the input rather than retain every record. Grow only after the
@@ -74,19 +89,23 @@ func csvToMarkdownContext(ctx context.Context, data []byte, limit int) (string, 
 	var out strings.Builder
 	out.Grow(size)
 	reader = newCSVReader(ctx, data)
+	blocks := make([]types.SourceBlock, 0, min(rows, maxCSVSourceBlocks))
+	var inputOffset int64
+	inputLineBreaks, multilineBreaks, pos := 0, 0, 0
 	for row := 0; row < rows; row++ {
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return nil, err
 		}
 		record, err := reader.Read()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
+		startByte := out.Len()
 		out.WriteString("| ")
 		for col := 0; col < width; col++ {
 			if col%1024 == 0 {
 				if err := ctx.Err(); err != nil {
-					return "", err
+					return nil, err
 				}
 			}
 			if col > 0 {
@@ -95,28 +114,57 @@ func csvToMarkdownContext(ctx context.Context, data []byte, limit int) (string, 
 			if col < len(record) {
 				writer := csvContextWriter{ctx: ctx, out: &out}
 				if _, err := csvCellReplacer.WriteString(writer, record[col]); err != nil {
-					return "", err
+					return nil, err
 				}
 			}
 		}
 		out.WriteString(" |\n")
+		if len(blocks) < maxCSVSourceBlocks {
+			// FieldPos counts physical lines, including blank lines skipped by
+			// Read. Subtract only line breaks inside previous records so sheet
+			// row numbers preserve blanks without counting multiline cells twice.
+			startLine, _ := reader.FieldPos(0)
+			sheetRow := startLine - multilineBreaks
+			endOffset := reader.InputOffset()
+			inputLineBreaks += bytes.Count(data[inputOffset:endOffset], []byte{'\n'})
+			endLine := inputLineBreaks
+			if data[endOffset-1] != '\n' {
+				endLine++ // The final record need not end with a newline.
+			}
+			multilineBreaks += endLine - startLine
+			inputOffset = endOffset
+
+			end := pos + utf8.RuneCountInString(out.String()[startByte:])
+			blocks = append(blocks, types.SourceBlock{
+				Start: pos, End: end,
+				Locator: types.SourceLocator{
+					Type: types.SourceLocatorSheet, Mapping: "exact",
+					RowStart: sheetRow, RowEnd: sheetRow,
+				},
+			})
+			pos = end
+		}
 		if row == 0 {
 			out.WriteByte('|')
 			for col := 0; col < width; col++ {
 				if col%1024 == 0 {
 					if err := ctx.Err(); err != nil {
-						return "", err
+						return nil, err
 					}
 				}
 				out.WriteString(" --- |")
 			}
 			out.WriteByte('\n')
+			// The generated separator belongs to the header, not another
+			// sheet row. Keep it covered when citations include the table header.
+			pos += 6*width + 2
+			blocks[0].End = pos
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return nil, err
 	}
-	return out.String(), nil
+	return &types.ReadResult{MarkdownContent: out.String(), SourceBlocks: blocks}, nil
 }
 
 func csvSizeError(limit int) error {
