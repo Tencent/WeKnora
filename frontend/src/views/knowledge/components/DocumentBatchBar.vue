@@ -17,12 +17,16 @@ defineProps<{
   /** Hidden when the knowledge base has no folder structure to file into. */
   showMoveToFolder?: boolean;
   folderOptions?: FolderOption[];
+  /** Hidden when the KB's image pipeline is off — the action needs it. */
+  showReprocessImages?: boolean;
+  reprocessImagesLoading?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'delete'): void;
   (e: 'reparse'): void;
+  (e: 'reprocessImages'): void;
   (e: 'batchTag'): void;
   (e: 'moveToFolder', folderPath: string): void;
   (e: 'download'): void;
@@ -70,6 +74,18 @@ const folderPickerVisible = ref(false);
               :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || downloadLoading" :loading="reparseLoading" @click.stop>
               <template #icon><t-icon name="refresh" size="14px" /></template>
               {{ t('knowledgeBase.rebuildDocument') }}
+            </t-button>
+          </t-popconfirm>
+
+          <!-- 重处理图片：仅重跑选中文档已存储图片的理解，正文与索引不动 -->
+          <t-popconfirm v-if="canMutate && showReprocessImages" theme="default"
+            :content="t('knowledgeBase.confirmBatchReprocessImages', { count })"
+            :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+            :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('reprocessImages')">
+            <t-button theme="default" variant="outline" size="small"
+              :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || downloadLoading" :loading="reprocessImagesLoading" @click.stop>
+              <template #icon><t-icon name="image" size="14px" /></template>
+              {{ t('knowledgeBase.reprocessImages') }}
             </t-button>
           </t-popconfirm>
 
