@@ -2603,6 +2603,104 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	})
 }
 
+// ReprocessKnowledgeImages re-runs image understanding (caption/OCR) for the
+// images a document already has stored — no re-parse, no re-upload, no id
+// change. Sibling of reparse: same editor-level KB access, but it only
+// replaces image understanding results, so it is deliberately cheaper and
+// never invalidates text chunks or their index.
+func (h *KnowledgeHandler) ReprocessKnowledgeImages(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start reprocessing knowledge images")
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Knowledge ID is empty")
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	// Same write-access shape as reparse: image results are KB content.
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	knowledge, err := h.kgService.ReprocessKnowledgeImages(effCtx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_id": id})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge image reprocess submitted, knowledge ID: %s", id)
+	c.JSON(http.StatusAccepted, gin.H{
+		"success": true,
+		"message": "Image reprocessing started",
+		"data":    knowledge,
+	})
+}
+
+// BatchReprocessKnowledgeImages offers documents of a knowledge base an
+// image reprocess run — all documents with an empty body, or the named
+// subset from the batch bar's selection. Each document is accepted or
+// skipped independently; the response accounts for both so a backlog drain
+// is verifiable.
+func (h *KnowledgeHandler) BatchReprocessKnowledgeImages(c *gin.Context) {
+	ctx := c.Request.Context()
+	kbID := secutils.SanitizeForLog(c.Param("id"))
+	if kbID == "" {
+		c.Error(errors.NewBadRequestError("Knowledge base ID cannot be empty"))
+		return
+	}
+
+	// Optional selection: {"ids": [...]} reprocesses exactly those
+	// documents; an empty or absent body takes the whole knowledge base.
+	var req batchReprocessImagesRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.Error(errors.NewBadRequestError("Invalid batch reprocess request body").WithDetails(err.Error()))
+			return
+		}
+	}
+
+	_, effKBID, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("no permission to reprocess images in this kb"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, effKBID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, effectiveTenantID)
+
+	result, err := h.kgService.BatchReprocessKnowledgeImages(ctx, effKBID, req.IDs)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": effKBID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"success": true,
+		"message": "Batch image reprocessing started",
+		"data":    result,
+	})
+}
+
 // CancelKnowledgeParse godoc
 // @Summary      取消知识解析
 // @Description  取消进行中的知识解析任务。当前已写入的 chunk / 索引保留，可通过 reparse 接口重新触发解析。已完成 / 已失败 / 删除中的知识不支持取消。
@@ -3317,6 +3415,11 @@ func parseFilterTime(raw string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, lastErr
+}
+
+type batchReprocessImagesRequest struct {
+	// Documents to reprocess; empty means every document of the KB.
+	IDs []string `json:"ids" extensions:"x-agent=knowledge_ids"`
 }
 
 type batchReparseKnowledgeRequest struct {
