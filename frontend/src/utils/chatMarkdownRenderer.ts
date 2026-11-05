@@ -1,9 +1,9 @@
-import { marked, type Renderer } from 'marked'
+import { Marked, marked, type Renderer, type Token, type MarkedExtension } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import type { Tokens } from 'marked'
 
 import type { CachedMermaidSvgHtml } from './mermaidStreaming.ts'
-import { ensureLiteralSingleTildeOnGlobalMarked } from './markedLiteralTilde.ts'
+import { ensureLiteralSingleTildeOnGlobalMarked, literalSingleTildeExtension } from './markedLiteralTilde.ts'
 import { normalizeSandboxArtifactRefs } from './sandboxArtifactRefs.ts'
 import {
   collapseStandaloneCitationParagraphs,
@@ -206,6 +206,28 @@ export function stripTrailingStreamingHorizontalRule(content: string): string {
   )
 }
 
+// Only the final inline block can still grow. Let marked descend into quotes
+// and list items and decide whether the tail is prose, code, or other structure.
+function streamingTail(text: string): Token | undefined {
+  let token = chatMarked.lexer(text).at(-1)
+  while (token?.type === 'blockquote' || token?.type === 'list' || token?.type === 'list_item') {
+    const child: Token | undefined =
+      token.type === 'list'
+        ? token.items.at(-1)
+        : 'tokens' in token
+          ? token.tokens?.at(-1)
+          : undefined
+    if (!child) break
+    token = child
+  }
+  return token
+}
+
+function stripStreamingMarkerLines(text: string): string {
+  const stripped = stripTrailingStreamingListMarker(stripTrailingStreamingHorizontalRule(text))
+  return stripped !== text && streamingTail(text)?.type === 'code' ? text : stripped
+}
+
 function maskMatches(text: string, regex: RegExp): string {
   return text.replace(regex, (match) => match.replace(/[^\n]/g, '\u0000'))
 }
@@ -238,24 +260,37 @@ function isOdd(text: string, marker: RegExp): boolean {
 export function closeDanglingStreamingEmphasis(text: string): string {
   if (!text || !/[*~`]/.test(text)) return text
 
-  // Mask code so markers inside it are never counted; \u0000 keeps offsets.
-  let masked = maskMatches(text, /```[\s\S]*?```/g)
-  if (isOdd(masked, /```/g)) {
-    const open = masked.lastIndexOf('```')
-    masked = masked.slice(0, open) + masked.slice(open).replace(/[^\n]/g, '\u0000')
-  }
-  masked = maskMatches(masked, /`[^`\n]*`/g)
-  let appendInlineCode = false
-  if (isOdd(masked, /`/g)) {
-    appendInlineCode = true
-    const open = masked.lastIndexOf('`')
-    masked = masked.slice(0, open) + masked.slice(open).replace(/[^\n]/g, '\u0000')
-  }
+  const tail = streamingTail(text)
+  if (!tail || tail.type === 'code' || tail.type === 'html') return text
+  if (tail.type === 'table' && /\|\s*$/.test(text)) return text
+  const inline: Token[] | undefined =
+    tail.type === 'table'
+      ? (tail.rows.at(-1) ?? tail.header).at(-1)?.tokens
+      : 'tokens' in tail
+        ? tail.tokens
+        : undefined
+  // Completed inline tokens have already been paired by marked. Count only
+  // markers still in prose, including an ambiguous marker in an empty list item.
+  if (!inline && tail.type !== 'list_item') return text
+  let masked: string = inline?.length
+    ? inline
+        .map((token: Token) =>
+          token.type === 'text' ? token.raw : token.raw.replace(/[^\n]/g, '\u0000'),
+        )
+        .join('')
+    : tail.raw
+  if (text.endsWith('\n') && !masked.endsWith('\n')) masked += '\n'
+  // Preserve the delimiter width when provisionally closing an inline span.
+  const open = masked.match(/`+/)
+  if (open && !masked.slice(open.index! + open[0].length).trim()) return text
+  const inlineCloser = open?.[0] ?? ''
+  if (open)
+    masked = masked.slice(0, open.index) + masked.slice(open.index).replace(/[^\n]/g, '\u0000')
 
   // Drop a trailing emphasis-marker run with no content after it: ambiguous and
   // not yet renderable. Anchored to the current line so earlier text is intact.
   let working = text
-  if (!appendInlineCode) {
+  if (!inlineCloser) {
     const trailing = masked.match(/[*~]+[ \t]*$/)
     if (trailing) {
       working = text.slice(0, text.length - trailing[0].length)
@@ -271,8 +306,7 @@ export function closeDanglingStreamingEmphasis(text: string): string {
   const needBold = isOdd(masked, /\*\*/g)
   const needItalic = isOdd(withoutBold, /\*/g)
 
-  let closers = ''
-  if (appendInlineCode) closers += '`'
+  let closers = inlineCloser
   if (needItalic) closers += '*'
   if (needBold) closers += '**'
   if (needStrike) closers += '~~'
@@ -289,66 +323,53 @@ export function closeDanglingStreamingEmphasis(text: string): string {
   return working.slice(0, cut) + closers + working.slice(cut)
 }
 
-// Match complete pairs, including those that need no repair, so a closing
-// delimiter cannot be reused as the next span's opening delimiter.
-const BOLD_PAIRS = /(?<!\*)\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*/gu
-const STRIKE_PAIRS = /(?<!~)~~(?=\S)([^~\n]+?)(?<=\S)~~/gu
-const ITALIC_PAIRS = /(?<![*\p{L}\p{N}])\*(?=\S)([^*\n]+?)(?<=\S)\*/gu
-
-function isEscapedDelimiter(text: string, offset: number): boolean {
-  let backslashes = 0
-  for (let i = offset - 1; i >= 0 && text[i] === '\\'; i--) backslashes++
-  return backslashes % 2 === 1
+// Use the same masked source marked supplies to its native emphasis tokenizer.
+// Escapes, code spans and link destinations cannot contribute a delimiter.
+function flankingPair(src: string, masked: string, prev: string, marker: string) {
+  if (!src.startsWith(marker)) return
+  const offset = masked.length - src.length
+  if (masked[offset - 1] === marker[0]) return
+  const end = masked.indexOf(marker[0]!, offset + marker.length)
+  if (end <= offset + marker.length || !masked.startsWith(marker, end)) return
+  const body = src.slice(marker.length, end - offset)
+  if (/^\s|\s$|[\r\n]/.test(body)) return
+  const previous = prev && masked.slice(Math.max(0, offset - 2), offset)
+  const after = src.slice(end - offset + marker.length)
+  const blockedOpen = marker !== '*' && /[\p{L}\p{N}]$/u.test(previous) && /^\p{P}/u.test(body)
+  const blockedClose = /\p{P}$/u.test(body) && /^[\p{L}\p{N}]/u.test(after)
+  if (!blockedOpen && !blockedClose) return
+  if (marker === '*' && /[\p{L}\p{N}]$/u.test(previous)) return
+  return { raw: src.slice(0, end - offset + marker.length), text: body }
 }
 
-function repairPairedEmphasis(
-  segment: string,
-  pairs: RegExp,
-  tag: 'strong' | 'del' | 'em',
-): string {
-  return segment.replace(pairs, (full: string, body: string, offset: number) => {
-    const markerLength = tag === 'em' ? 1 : 2
-    if (
-      isEscapedDelimiter(segment, offset) ||
-      isEscapedDelimiter(segment, offset + full.length - markerLength)
-    ) {
-      return full
-    }
-    // Keep whole Unicode boundary characters even when they use surrogate pairs.
-    const before = segment.slice(Math.max(0, offset - 2), offset)
-    const after = segment.slice(offset + full.length, offset + full.length + 2)
-    const blockedOpen = tag !== 'em' && /[\p{L}\p{N}]$/u.test(before) && /^\p{P}/u.test(body)
-    const blockedClose = /\p{P}$/u.test(body) && /^[\p{L}\p{N}]/u.test(after)
-    return blockedOpen || blockedClose ? '<' + tag + '>' + body + '</' + tag + '>' : full
-  })
+const chatEmphasis: MarkedExtension = {
+  tokenizer: {
+    emStrong(src, masked, prev = '') {
+      if (this.lexer.state.inRawBlock) return false
+      const marker = src.startsWith('**') ? '**' : '*'
+      const pair = flankingPair(src, masked, prev, marker)
+      if (!pair) return false
+      return {
+        type: marker === '**' ? 'strong' : 'em',
+        ...pair,
+        tokens: this.lexer.inlineTokens(pair.text),
+      }
+    },
+    del(src, masked, prev = '') {
+      if (this.lexer.state.inRawBlock) return false
+      const pair = flankingPair(src, masked, prev, '~~')
+      if (!pair) return false
+      return { type: 'del', ...pair, tokens: this.lexer.inlineTokens(pair.text) }
+    },
+  },
 }
 
-function repairFlankingEmphasisSegment(segment: string): string {
-  const bold = repairPairedEmphasis(segment, BOLD_PAIRS, 'strong')
-  const strike = repairPairedEmphasis(bold, STRIKE_PAIRS, 'del')
-  return repairPairedEmphasis(strike, ITALIC_PAIRS, 'em')
-}
-
-/**
- * Render emphasis the model clearly intended but CommonMark refuses to parse.
- *
- * CommonMark's flanking rule rejects a closing `**`/`*`/`~~` that is preceded by
- * punctuation and immediately followed by a letter/number, so a very common
- * model pattern like `**XBRL（…语言）**是一种` (and even ASCII `**a)**b`) renders
- * as literal asterisks — both mid-stream and when complete. The mirror case is
- * an *opening* `**`/`~~` preceded by a letter/number and immediately followed by
- * punctuation (`知识库中**《手册》**整理`), which CommonMark also refuses to open.
- * We convert just those blocked patterns into explicit HTML so they bold
- * reliably. Code spans/fences are skipped so their literal markers are untouched.
- */
-export function repairFlankingEmphasis(text: string): string {
-  if (!text || !/[*~]/.test(text)) return text
-  const parts = text.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
-  for (let i = 0; i < parts.length; i += 2) {
-    parts[i] = repairFlankingEmphasisSegment(parts[i])
-  }
-  return parts.join('')
-}
+const chatMarked = new Marked(
+  { breaks: true, gfm: true },
+  literalSingleTildeExtension,
+  markedKatex({ throwOnError: false, nonStandard: true }),
+  chatEmphasis,
+)
 
 /**
  * Hide a trailing list/underline marker that has no content after it yet.
@@ -482,7 +503,7 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   configureMarkedForChatMarkdown()
 
   const streamingSafeText = options.streaming
-    ? stripTrailingStreamingListMarker(stripTrailingStreamingHorizontalRule(rawText))
+    ? stripStreamingMarkerLines(rawText)
     : rawText
   const imageContextSafeText = normalizeLegacyImageContextMarkup(
     streamingSafeText,
@@ -504,18 +525,17 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   // bare `   - `, which would otherwise flash an empty nested item under the
   // previous line right as the next item starts streaming.
   const balancedInline = options.streaming
-    ? stripTrailingStreamingListMarker(closeDanglingStreamingEmphasis(inlineTags))
+    ? stripStreamingMarkerLines(closeDanglingStreamingEmphasis(inlineTags))
     : inlineTags
   const preparedMarkdown = options.prepareMarkdown
     ? options.prepareMarkdown(balancedInline, options.cachedMermaidSvgHtml)
     : balancedInline
-  const flankingSafeMarkdown = repairFlankingEmphasis(preparedMarkdown)
   // Convert <kb>/<web>/wiki tags to HTML placeholders before escapeMarkdown so
   // agent sanitizers (e.g. UUID stripping) cannot damage chunk_id attributes.
   const { content: markdownWithPlaceholders, htmlSnippets } =
-    extractCitationHtmlPlaceholders(flankingSafeMarkdown, options.knowledgeReferences)
+    extractCitationHtmlPlaceholders(preparedMarkdown, options.knowledgeReferences)
   const escapedMarkdown = options.escapeMarkdown(markdownWithPlaceholders)
-  const html = marked.parse(markdownWithPlaceholders, {
+  const html = chatMarked.parse(markdownWithPlaceholders, {
     renderer: options.renderer,
     breaks: true,
     async: false,

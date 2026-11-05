@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { marked } from 'marked'
 
 import {
   applyStreamingTailFade,
@@ -10,7 +11,6 @@ import {
   normalizeLegacyImageContextMarkup,
   preprocessMathDelimiters,
   renderChatMarkdown,
-  repairFlankingEmphasis,
   replaceIncompleteImageWithPlaceholder,
   stripTrailingStreamingHorizontalRule,
   stripTrailingStreamingListMarker,
@@ -222,6 +222,8 @@ test('closeDanglingStreamingEmphasis closes unfinished inline markers without fa
   assert.equal(closeDanglingStreamingEmphasis('前文 ~~删除'), '前文 ~~删除~~')
   assert.equal(closeDanglingStreamingEmphasis('***又粗又斜'), '***又粗又斜***')
   assert.equal(closeDanglingStreamingEmphasis('运行 `npm run'), '运行 `npm run`')
+  assert.equal(closeDanglingStreamingEmphasis('正文\n``'), '正文\n``')
+  assert.equal(closeDanglingStreamingEmphasis('运行 ``a`b'), '运行 ``a`b``')
 
   // A trailing marker run with no content after it is ambiguous (e.g. the start
   // of the next `**` in a bold list) and is hidden until content arrives, rather
@@ -262,34 +264,39 @@ test('renderChatMarkdown renders an unfinished bold line as bold immediately whi
   )
 })
 
-test('repairFlankingEmphasis bolds punctuation-adjacent emphasis CommonMark would drop', () => {
+function assertChatMarkdown(source: string, expected: string) {
+  const native = marked.parse(expected, { async: false, breaks: true }) as string
+  assert.equal(renderEmphasisSample(source), markStandaloneStrongParagraphs(native), source)
+}
+
+test('chat Markdown bolds punctuation-adjacent emphasis CommonMark would drop', () => {
   // Closing delimiter sits between punctuation and a letter -> CommonMark rejects
-  // it; we convert exactly that blocked pattern to explicit HTML.
-  assert.equal(repairFlankingEmphasis('**XBRL（语言）**是一种'), '<strong>XBRL（语言）</strong>是一种')
-  assert.equal(repairFlankingEmphasis('**a)**b'), '<strong>a)</strong>b')
-  assert.equal(repairFlankingEmphasis('~~删除）~~文字'), '<del>删除）</del>文字')
-  assert.equal(repairFlankingEmphasis('*斜体）*文字'), '<em>斜体）</em>文字')
+  // it; the chat tokenizer recognizes the blocked pair.
+  assertChatMarkdown('**XBRL（语言）**是一种', '<strong>XBRL（语言）</strong>是一种')
+  assertChatMarkdown('**a)**b', '<strong>a)</strong>b')
+  assertChatMarkdown('~~删除）~~文字', '<del>删除）</del>文字')
+  assertChatMarkdown('*斜体）*文字', '<em>斜体）</em>文字')
 
   // Opening delimiter sits between a letter/number and punctuation -> CommonMark
   // refuses to open emphasis even though the closer is valid; we bold it too.
-  assert.equal(
-    repairFlankingEmphasis('知识库中**《xxx》学程手册**整理'),
+  assertChatMarkdown(
+    '知识库中**《xxx》学程手册**整理',
     '知识库中<strong>《xxx》学程手册</strong>整理',
   )
-  assert.equal(repairFlankingEmphasis('在**《书名》**'), '在<strong>《书名》</strong>')
-  assert.equal(repairFlankingEmphasis('看到~~《删》文字~~后面'), '看到<del>《删》文字</del>后面')
+  assertChatMarkdown('在**《书名》**', '在<strong>《书名》</strong>')
+  assertChatMarkdown('看到~~《删》文字~~后面', '看到<del>《删》文字</del>后面')
 
   // Cases marked already handles, literal markers, and code must be untouched.
-  assert.equal(repairFlankingEmphasis('**中文**后面'), '**中文**后面')
-  assert.equal(repairFlankingEmphasis('**中文）** 后面'), '**中文）** 后面')
-  assert.equal(repairFlankingEmphasis('正文 **加粗** 收尾'), '正文 **加粗** 收尾')
-  assert.equal(repairFlankingEmphasis('`**a)**b`'), '`**a)**b`')
-  assert.equal(repairFlankingEmphasis('2 ** 3 ** 4'), '2 ** 3 ** 4')
-  assert.equal(repairFlankingEmphasis('价格 3 * 5 * 7 元'), '价格 3 * 5 * 7 元')
+  assertChatMarkdown('**中文**后面', '**中文**后面')
+  assertChatMarkdown('**中文）** 后面', '**中文）** 后面')
+  assertChatMarkdown('正文 **加粗** 收尾', '正文 **加粗** 收尾')
+  assertChatMarkdown('`**a)**b`', '`**a)**b`')
+  assertChatMarkdown('2 ** 3 ** 4', '2 ** 3 ** 4')
+  assertChatMarkdown('价格 3 * 5 * 7 元', '价格 3 * 5 * 7 元')
   // Exponent / glob markers stay literal: the opener is followed by a number or
   // path content, not an emphasis-opening punctuation run.
-  assert.equal(repairFlankingEmphasis('x**2 + y**2'), 'x**2 + y**2')
-  assert.equal(repairFlankingEmphasis('2**3**4'), '2**3**4')
+  assertChatMarkdown('x**2 + y**2', 'x**2 + y**2')
+  assertChatMarkdown('2**3**4', '2**3**4')
 })
 
 function renderEmphasisSample(source: string, streaming = false): string {
@@ -305,20 +312,17 @@ function renderEmphasisSample(source: string, streaming = false): string {
 
 test('adjacent complete bold pairs never reuse the first closing delimiter as an opener', () => {
   const source = '合计为 **甲**（记录显示为 **-乙**）。'
-  assert.equal(repairFlankingEmphasis(source), source)
-  assert.equal(
-    repairFlankingEmphasis(source.replace('为 **-', '为**-')),
+  assertChatMarkdown(source, source)
+  assertChatMarkdown(
+    source.replace('为 **-', '为**-'),
     '合计为 **甲**（记录显示为<strong>-乙</strong>）。',
   )
 })
 
 test('adjacent complete strike pairs keep explanatory text outside deletion', () => {
   const source = '结束~~旧值~~（说明为 ~~新值~~）。'
-  assert.equal(repairFlankingEmphasis(source), source)
-  assert.equal(
-    repairFlankingEmphasis(source.replace('为 ~~', '为~~')),
-    source.replace('为 ~~', '为~~'),
-  )
+  assertChatMarkdown(source, source)
+  assertChatMarkdown(source.replace('为 ~~', '为~~'), source.replace('为 ~~', '为~~'))
 })
 
 test('adjacent bold spans render independently in streaming and final answers', () => {
@@ -372,13 +376,13 @@ test('existing punctuation repairs coexist with normal pairs in one answer', () 
 })
 
 test('punctuation repair keeps Unicode letter boundaries outside the BMP', () => {
-  assert.equal(repairFlankingEmphasis('𠮷**《字》**尾'), '𠮷<strong>《字》</strong>尾')
-  assert.equal(repairFlankingEmphasis('**字）**𠮷'), '<strong>字）</strong>𠮷')
+  assertChatMarkdown('𠮷**《字》**尾', '𠮷<strong>《字》</strong>尾')
+  assertChatMarkdown('**字）**𠮷', '<strong>字）</strong>𠮷')
 })
 
 test('existing combined strong and italic delimiter runs remain supported', () => {
-  assert.equal(repairFlankingEmphasis('前**《甲》***斜体*'), '前<strong>《甲》</strong>*斜体*')
-  assert.equal(repairFlankingEmphasis('***粗斜体***'), '***粗斜体***')
+  assertChatMarkdown('前**《甲》***斜体*', '前<strong>《甲》</strong>*斜体*')
+  assertChatMarkdown('***粗斜体***', '***粗斜体***')
 })
 
 test('code and literal arithmetic/glob markers retain their existing interpretation', () => {
@@ -388,7 +392,7 @@ test('code and literal arithmetic/glob markers retain their existing interpretat
     '2**3**4 与 x**2 和 **/*.js',
     String.raw`\*\*普通标记\*\*`,
   ])
-    assert.equal(repairFlankingEmphasis(source), source)
+    assertChatMarkdown(source, source)
 })
 
 test('emphasis pairing keeps existing inline and display math rendering', () => {
@@ -411,13 +415,10 @@ test('escaped delimiters stay literal while even backslashes retain normal repai
     String.raw`\~~《删》~~文`,
     String.raw`~~删）\~~文`,
   ]) {
-    assert.equal(repairFlankingEmphasis(source), source)
+    assertChatMarkdown(source, source)
   }
-  assert.equal(
-    repairFlankingEmphasis(String.raw`\\**字）**文`),
-    String.raw`\\<strong>字）</strong>文`,
-  )
-  assert.equal(repairFlankingEmphasis(String.raw`\\*字）*文`), String.raw`\\<em>字）</em>文`)
+  assertChatMarkdown(String.raw`\\**字）**文`, String.raw`\\<strong>字）</strong>文`)
+  assertChatMarkdown(String.raw`\\*字）*文`, String.raw`\\<em>字）</em>文`)
 })
 
 test('triple emphasis and escaped markers render through the normal Markdown parser', () => {
@@ -429,7 +430,7 @@ test('triple emphasis and escaped markers render through the normal Markdown par
 
 test('ordinary adjacent italic pairs are not converted into a larger span', () => {
   const source = '*甲*（说明为 *乙*）。'
-  assert.equal(repairFlankingEmphasis(source), source)
+  assertChatMarkdown(source, source)
   assert.equal(renderEmphasisSample(source), '<p><em>甲</em>（说明为 <em>乙</em>）。</p>\n')
 })
 
@@ -821,4 +822,69 @@ test('renderChatMarkdown keeps ~~strikethrough~~ while leaving single tildes lit
   assert.match(html, /~b~/)
   assert.match(html, /2020~2035/)
   assert.match(html, /8:00~12:00/)
+})
+
+test('streaming and settled emphasis leave literal code intact', () => {
+  const literal = '**字）**文 ~~删）~~文'
+  for (const source of [
+    '``' + literal + '``',
+    '~~~txt\n' + literal + '\n~~~',
+    '````txt\n' + literal + '\n```',
+    '> ~~~\n> ' + literal + '\n> ~~~',
+    '- ~~~\n  ' + literal + '\n  ~~~',
+    '    ' + literal,
+  ]) {
+    for (const streaming of [true, false]) {
+      const html = renderEmphasisSample(source, streaming)
+      assert.match(html, /<code[^>]*>\*\*字）\*\*文 ~~删）~~文/, source)
+      assert.doesNotMatch(html, /&lt;(?:strong|del)|文~~/, source)
+    }
+  }
+})
+
+test('every fence prefix keeps its literal body and prose resumes after the fence', () => {
+  const source = '~~~txt\n**字）**文\n***\n~~~'
+  for (let end = source.indexOf('\n') + 1; end <= source.length; end++) {
+    const prefix = source.slice(0, end)
+    assert.equal(renderEmphasisSample(prefix, true), renderEmphasisSample(prefix), prefix)
+  }
+  assert.match(renderEmphasisSample(source + '\n**字）**文', true), /<strong>字）<\/strong>文/)
+})
+
+test('inline code and link destinations stay literal inside surrounding markup', () => {
+  for (const streaming of [true, false]) {
+    const html = renderEmphasisSample('**before ``literal * ~~`` after**', streaming)
+    assert.match(html, /<strong>before <code>literal \* ~~<\/code> after<\/strong>/)
+    assert.doesNotMatch(html, /<\/strong>\*/)
+    const link = renderEmphasisSample('[doc](https://example.org/**字）**文)', streaming)
+    assert.match(link, /href="https:\/\/example.org\//)
+    assert.doesNotMatch(link, /strong/)
+  }
+})
+
+test('native code and links inside a punctuation-blocked pair retain their own delimiters', () => {
+  const html = renderEmphasisSample('**[docs](https://example.org/a**b) 和 `**字）**文`）**之后')
+  assert.match(
+    html,
+    /<strong><a href="https:\/\/example.org\/a\*\*b">docs<\/a> 和 <code>\*\*字）\*\*文<\/code>）<\/strong>之后/,
+  )
+})
+
+test('caller-provided code renderer receives the exact code and language', () => {
+  const renderer = createChatMarkdownRenderer({
+    codeRenderer(token) {
+      assert.equal(token.lang, 'mermaid')
+      assert.equal(token.text, 'A[**字）**文] --> B')
+      return '<pre>diagram</pre>'
+    },
+  })
+  for (const streaming of [false, true]) {
+    const html = renderChatMarkdown('~~~mermaid\nA[**字）**文] --> B\n~~~', {
+      renderer,
+      streaming,
+      escapeMarkdown: String,
+      sanitizeHtml: String,
+    })
+    assert.equal(stripFadeTail(html), '<pre>diagram</pre>')
+  }
 })
