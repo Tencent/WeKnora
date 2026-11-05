@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { resolve, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { mermaidFileFrame } from './scripts/mermaid-file-frame'
 import { copyPdfJsWasm } from './scripts/copy-pdfjs-wasm.mjs'
 import { createRequire } from 'node:module'
 import { defineConfig, type Plugin } from 'vite'
@@ -142,6 +143,7 @@ export default defineConfig({
     vue(),
     vueJsx(),
     embedHtmlDevFallback(),
+    mermaidFileFrame(),
     pdfJsWasmAssets(),
   ],
   resolve: {

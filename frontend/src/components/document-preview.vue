@@ -19,9 +19,7 @@ import {
   rewriteKnowledgeMarkdownImages,
 } from '@/utils/markdownPreviewImages';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
-import { openMermaidFullscreen } from '@/utils/mermaidViewer';
-import { renderMermaidToSvg } from '@/utils/mermaidShared';
-import { mermaidImage } from '@/utils/mermaidImage';
+import MermaidFilePreview from './mermaid-file/MermaidFilePreview.vue';
 import {
   FILE_PREVIEW_SNIFF_BYTES,
   getHighlightLang as resolveHighlightLang,
@@ -99,7 +97,8 @@ const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
 const excelHtml = ref('');
-const mermaidSvg = ref('');
+const mermaidSource = ref<string | null>(null);
+let loadedMermaidBlob: Blob | undefined;
 const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const pdfData = shallowRef<ArrayBuffer | null>(null);
@@ -331,7 +330,10 @@ async function renderExcel(blob: Blob, fileType?: string) {
 }
 
 async function renderText(blob: Blob, fileType: string) {
-  let text = await blob.text();
+  renderTextContent(await blob.text(), fileType);
+}
+
+function renderTextContent(text: string, fileType: string) {
   if (shouldPrettyPrintJson(fileType)) {
     text = prettyPrintJson(text);
   }
@@ -460,35 +462,17 @@ async function fetchPreviewBlob(): Promise<Blob> {
   throw new Error('Missing preview source');
 }
 
-async function renderMermaid(blob: Blob) {
-  const text = await blob.text();
-  const svg = await renderMermaidToSvg(text, `file-preview-mermaid-${Date.now()}`);
-  // Mermaid can emit HTML void tags (for example <br>) inside labels.
-  // Serialize through an inert template so the SVG image receives valid XML.
-  const template = document.createElement('template');
-  template.innerHTML = svg || '';
-  const diagram = template.content.querySelector('svg');
-  const image = diagram ? mermaidImage(new XMLSerializer().serializeToString(diagram)) : null;
-  if (image) {
-    mermaidSvg.value = sanitizeMarkdownHTML(image);
-    return;
-  }
+function mermaidFallback(source: string) {
+  if (!props.active || mermaidSource.value !== source) return;
   previewType.value = 'text';
-  await renderText(new Blob([text], { type: 'text/plain' }), 'mmd');
-}
-
-async function openMermaid() {
-  const svg = mermaidSvg.value;
-  if (!svg) return;
-  // The diagram viewer mounts on body, outside the native fullscreen element.
-  await exitPreviewFullscreen();
-  if (props.active && previewRoot.value?.isConnected) openMermaidFullscreen(svg);
+  renderTextContent(source, 'mmd');
 }
 
 async function loadPreview() {
   const sourceKey = getPreviewSourceKey();
   if (!sourceKey) return;
-  if (loadedForId === sourceKey) return;
+  const sourceBlob = props.sourceBlob;
+  if (loadedForId === sourceKey && (!loadedMermaidBlob || loadedMermaidBlob === sourceBlob)) return;
 
   cleanup();
   loading.value = true;
@@ -578,7 +562,11 @@ async function loadPreview() {
         break;
       }
       case 'mermaid': {
-        await renderMermaid(blob);
+        const source = await blob.text();
+        if (getPreviewSourceKey() === sourceKey && props.sourceBlob === sourceBlob && props.active) {
+          loadedMermaidBlob = sourceBlob;
+          mermaidSource.value = source;
+        }
         break;
       }
     }
@@ -603,7 +591,8 @@ function cleanup() {
   highlightedCode.value = '';
   markdownHtml.value = '';
   excelHtml.value = '';
-  mermaidSvg.value = '';
+  mermaidSource.value = null;
+  loadedMermaidBlob = undefined;
   htmlViewMode.value = 'render';
   pptxData.value = null;
   pdfData.value = null;
@@ -1063,9 +1052,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Mermaid -->
-    <div v-else-if="previewType === 'mermaid' && mermaidSvg" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-mermaid" @click="openMermaid">
-      <div class="mermaid-body" v-html="mermaidSvg" />
-    </div>
+    <MermaidFilePreview class="preview-mermaid" v-else-if="previewType === 'mermaid' && mermaidSource !== null && active"
+      :key="mermaidSource" :source="mermaidSource" :title="fileName" @fallback="mermaidFallback" />
 
     <!-- Audio -->
     <div v-else-if="previewType === 'audio' && blobUrl" class="preview-audio">
@@ -1366,22 +1354,6 @@ onUnmounted(() => {
       word-wrap: normal;
       display: block;
       background: transparent;
-    }
-  }
-}
-
-// ── Mermaid ──
-.preview-mermaid {
-  .preview-container();
-  display: flex;
-  justify-content: center;
-  padding: 24px 16px;
-  cursor: zoom-in;
-  .mermaid-body {
-    max-width: 100%;
-    :deep(svg) {
-      max-width: 100%;
-      height: auto;
     }
   }
 }
