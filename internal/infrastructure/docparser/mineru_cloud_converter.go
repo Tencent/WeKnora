@@ -300,7 +300,11 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 	// Dump the raw extract_result JSON for debugging
 	rawExtract := string(pollResp.Data.ExtractResult)
 	if len(rawExtract) > rawResponseLogBytes {
-		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result (truncated to %d chars): %s", rawResponseLogBytes, rawResponsePreview(rawExtract))
+		logger.Infof(
+			context.Background(),
+			"[MinerUCloud] Raw extract_result (truncated to %d chars): %s",
+			rawResponseLogBytes, rawResponsePreview(rawExtract),
+		)
 	} else {
 		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result: %s", rawExtract)
 	}

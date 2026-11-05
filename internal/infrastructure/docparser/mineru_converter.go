@@ -349,7 +349,11 @@ func (c *MinerUReader) callFileParse(
 	// Dump raw response for debugging (truncate if too large)
 	rawStr := string(respBody)
 	if len(rawStr) > rawResponseLogBytes {
-		logger.Infof(context.Background(), "[MinerU] Raw response (truncated to %d chars): %s", rawResponseLogBytes, rawResponsePreview(rawStr))
+		logger.Infof(
+			context.Background(),
+			"[MinerU] Raw response (truncated to %d chars): %s",
+			rawResponseLogBytes, rawResponsePreview(rawStr),
+		)
 	} else {
 		logger.Infof(context.Background(), "[MinerU] Raw response: %s", rawStr)
 	}
