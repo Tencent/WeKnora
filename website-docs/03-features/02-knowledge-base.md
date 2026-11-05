@@ -62,6 +62,8 @@
 
 Word 文档中的 EMF/WMF 图片（包括嵌入对象的预览图）会尝试转换为 PNG，再进入图片识别和展示流程。转换依赖解析服务中的 ImageMagick 或 LibreOffice；默认 Docker 镜像包含 LibreOffice。无法渲染的嵌入对象保留在原始文档中，不作为图片进入画廊；已有文档需要重新解析才能应用此处理。
 
+启用 anydoc 且开启图片提取时，包含 EMF/WMF 媒体的 DOCX 文档会自动交给 docreader 的 MarkItDown 管线处理，因此这类文档仍需要运行 docreader 服务。服务不可用时会明确报错，避免图片在 anydoc 解析时被静默丢弃。
+
 <Screenshot src="/screenshots/kb-image-gallery.png" caption="知识库画廊：图片瀑布流与来源文档筛选" hint="展示画廊页签、搜索和来源文档筛选弹层，放入含照片、图表的多份文档；另一张详情可展示 OCR、描述与来源链接。" />
 
 <Screenshot src="/screenshots/kb-image-gallery-detail.png" caption="画廊详情：查看原图、图片描述、识别文字与来源文档" />

@@ -1,6 +1,8 @@
 package docparser
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -17,13 +19,14 @@ import (
 //
 // Embedded images are rendered in place from the document model. PDFs with no
 // text layer or a structure anydoc rejects are handed to the configured
-// fallback reader (typically the builtin docreader).
+// fallback reader (typically the builtin docreader). DOCX files with EMF/WMF
+// media use docreader's MarkItDown pipeline to preserve and rasterize the images.
 type AnydocReader struct {
 	// extractImages controls whether embedded images are parsed and placed
 	// in the markdown. Off halves parse time for text-only indexing.
 	extractImages bool
-	// fallback is used when a PDF needs OCR or has an invalid structure. Nil means the
-	// conversion error is returned to the caller.
+	// fallback handles PDFs needing OCR/structure recovery and DOCX metafiles.
+	// Nil means a document requiring it returns an error.
 	fallback interfaces.DocReader
 }
 
@@ -45,6 +48,9 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	format, ok := anydoc.FormatForFile(req.FileType, req.FileName)
 	if !ok {
 		return nil, fmt.Errorf("anydoc engine does not support file type %q", fileTypeOf(req))
+	}
+	if format == "docx" && r.extractImages && docxHasMetafiles(req.FileContent) {
+		return r.readDOCXMetafileFallback(ctx, req)
 	}
 
 	converted, err := anydoc.Convert(req.FileContent, anydoc.Options{
@@ -114,6 +120,50 @@ func (r *AnydocReader) readPDFFallback(
 		result.Metadata["image_source_type"] = "scanned_pdf"
 	}
 	return result, nil
+}
+
+func (r *AnydocReader) readDOCXMetafileFallback(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	if !r.canFallback() {
+		return nil, fmt.Errorf("anydoc cannot render EMF/WMF images in %q: docreader is required", req.FileName)
+	}
+	logger.Infof(ctx, "[anydoc] falling back to markitdown for %q: docx_metafile", req.FileName)
+	fallbackReq := *req
+	fallbackReq.ParserEngine = "markitdown"
+	fallbackReq.FileType = "docx"
+	result, err := r.fallback.Read(ctx, &fallbackReq)
+	if err != nil {
+		return nil, fmt.Errorf("anydoc DOCX metafile fallback failed for %q: %w", req.FileName, err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("anydoc DOCX metafile fallback returned no result for %q", req.FileName)
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("anydoc DOCX metafile fallback failed for %q: %s", req.FileName, result.Error)
+	}
+	if result.Metadata == nil {
+		result.Metadata = map[string]string{}
+	}
+	if result.Metadata["parser"] == "" {
+		result.Metadata["parser"] = "markitdown"
+	}
+	result.Metadata["anydoc_fallback"] = "docx_metafile"
+	return result, nil
+}
+
+// Inspect only the ZIP directory, before anydoc can discard legacy image nodes.
+// Invalid archives are left to the converter's existing validation.
+func docxHasMetafiles(data []byte) bool {
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return false
+	}
+	for _, file := range archive.File {
+		name := strings.ToLower(file.Name)
+		if strings.HasPrefix(name, "word/media/") && (strings.HasSuffix(name, ".emf") || strings.HasSuffix(name, ".wmf")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *AnydocReader) canFallback() bool {
