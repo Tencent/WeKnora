@@ -723,15 +723,11 @@ function sheetRows(table: Element): Map<number, Element> {
   return rows;
 }
 
-function spreadsheetRowText(row: Element): string {
-  // Preserve cell boundaries so a placeholder such as "--" cannot become
-  // the negative sign of a number in the next cell.
-  return (
-    '| ' +
-    Array.from(row.querySelectorAll('td, th'))
-      .map((cell) => buildTextIndex(cell).text)
-      .join(' | ') +
-    ' |'
+function spreadsheetRowCells(row: Element): string[] {
+  return Array.from(row.querySelectorAll('td, th'), (cell) =>
+    Array.from(cell.childNodes, (node) =>
+      node.nodeName.toLowerCase() === 'br' ? '\n' : node.textContent || '',
+    ).join(''),
   );
 }
 
@@ -765,10 +761,12 @@ function locateExcel(request: SourceLocateRequest): SourceLocateResult {
         ([number]) =>
           number >= (loc.row_start || 0) && number <= (loc.row_end ?? loc.row_start ?? 0),
       )
-      .map(([number, row]) => ({ number, text: spreadsheetRowText(row) }));
+      .map(([number, row]) => ({ number, cells: spreadsheetRowCells(row) }));
     const matched = matchSpreadsheetSourceRows(
       { ...loc, sheet: excelSheetNames[sheetIdx] },
       sourceRows,
+      singleCsv,
+      request.sourceMarkdown,
     );
     if (!matched.length) {
       missed = true;

@@ -22,7 +22,7 @@ const compiled = ts.transpileModule(
   },
 ).outputText
 
-type Row = { number: number; text: string; querySelectorAll: () => { text: string }[] }
+type Row = { number: number; text: string; querySelectorAll: () => unknown[] }
 type LocateResult = { found: boolean; precise: boolean; granularity?: string; reason?: string }
 
 const firstRows = [
@@ -81,7 +81,7 @@ function fixture(
       const row = {
         number: Number(/-[A-Z]+(\d+)$/.exec(first.getAttribute('id')!)![1]),
         text: tds.map((td) => td.textContent || '').join(' '),
-        querySelectorAll: () => tds.map((td) => ({ text: td.textContent || '' })),
+        querySelectorAll: () => tds,
       }
       cells.push(
         ...tds.map((td) => ({
@@ -119,7 +119,6 @@ function fixture(
     props,
     matchSpreadsheetSourceRows,
     spreadsheetScopeCovered,
-    buildTextIndex: (row: { text: string }) => ({ text: row.text }),
     commitMarks: (_ranges: unknown[], rows: Row[]) => marks.push(rows),
     clearLocateMarks: () => {
       marks.length = 0
@@ -438,4 +437,34 @@ test('verified mappings on multiple sheets highlight only their own rows', () =>
   })
   assert.equal(result.reason, undefined)
   assert.deepEqual(Array.from(f.marks[0]), [...f.tables[0]!.rows, ...f.tables[1]!.rows])
+})
+
+test('complete table-row quotes verify text cell boundaries in CSV and Excel', () => {
+  for (const extension of ['csv', 'xlsx']) {
+    const rows = [
+      ['Total', 'AB'],
+      ['North', 'east'],
+      ['One|Two', 'Three'],
+    ]
+    const f = fixture([{ name: 'Sheet1', texts: rows }], true, extension)
+    const check = (row: number, quote: string) =>
+      f.locateExcel({
+        ...csvRequest,
+        scope: quote,
+        locators: [
+          {
+            ...csvLocator,
+            sheet: extension === 'xlsx' ? 'Sheet1' : undefined,
+            row_start: row,
+            row_end: row,
+            quote,
+          },
+        ],
+      }).found
+    assert.equal(check(1, '| Total | A |'), false)
+    assert.equal(check(1, '| Total | AB |'), true)
+    assert.equal(check(2, '| Northe | ast |'), false)
+    assert.equal(check(3, '| One | Two | Three |'), false)
+    assert.equal(check(3, String.raw`| One\|Two | Three |`), true)
+  }
 })
