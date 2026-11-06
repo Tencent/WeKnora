@@ -474,7 +474,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		}
 		if err := validateExtractConfig(kb.ExtractConfig); err != nil {
 			logger.Error(ctx, "Invalid extract configuration", err)
-			c.Error(err)
+			_ = c.Error(err)
 			return
 		}
 	}

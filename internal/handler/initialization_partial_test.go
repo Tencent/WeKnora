@@ -69,10 +69,12 @@ func TestUpdateKBConfigPartial(t *testing.T) {
 			require.Zero(t, kb.QuestionGenerationConfig.QuestionCount)
 			require.Empty(t, kb.QuestionGenerationConfig.CustomInstructions)
 		}},
-		{"enable preserves count", `,"questionGeneration":{"enabled":true}`,
+		{
+			"enable preserves count", `,"questionGeneration":{"enabled":true}`,
 			func(t *testing.T, kb *types.KnowledgeBase) {
 				require.Equal(t, 7, kb.QuestionGenerationConfig.QuestionCount)
-			}},
+			},
+		},
 		{"first enable default", `,"questionGeneration":{"enabled":true}`, func(t *testing.T, kb *types.KnowledgeBase) {
 			require.True(t, kb.QuestionGenerationConfig.Enabled)
 			require.Equal(t, 3, kb.QuestionGenerationConfig.QuestionCount)
@@ -86,16 +88,19 @@ func TestUpdateKBConfigPartial(t *testing.T) {
 			require.True(t, kb.QuestionGenerationConfig.Enabled)
 			require.Equal(t, 7, kb.QuestionGenerationConfig.QuestionCount)
 		}},
-		{"zero count stays zero", `,"questionGeneration":{"customInstructions":"updated"}`,
+		{
+			"zero count stays zero", `,"questionGeneration":{"customInstructions":"updated"}`,
 			func(t *testing.T, kb *types.KnowledgeBase) {
 				require.Zero(t, kb.QuestionGenerationConfig.QuestionCount)
-			}},
+			},
+		},
 		{"VLM explicit disable", `,"vlm_config":{"enabled":false}`, func(t *testing.T, kb *types.KnowledgeBase) {
 			require.False(t, kb.VLMConfig.IsEnabled())
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			kb := &types.KnowledgeBase{ID: "kb", TenantID: 7, EmbeddingModelID: "embedding",
+			kb := &types.KnowledgeBase{
+				ID: "kb", TenantID: 7, EmbeddingModelID: "embedding",
 				VLMConfig: types.VLMConfig{
 					Enabled: true, ModelID: "vision", DescriptionLanguage: "en",
 					ModelName: "legacy", BaseURL: "http://legacy",
@@ -122,7 +127,8 @@ func TestUpdateKBConfigPartial(t *testing.T) {
 				kb.QuestionGenerationConfig = nil
 			}
 			repo := &stubInitializationKBRepo{}
-			h := &InitializationHandler{kbService: &stubInitializationKBService{kb: kb}, kbRepository: repo,
+			h := &InitializationHandler{
+				kbService: &stubInitializationKBService{kb: kb}, kbRepository: repo,
 				modelService: &stubTenantStampModelService{
 					getModelByID: func(context.Context, string) (*types.Model, error) {
 						return &types.Model{ID: "model"}, nil
