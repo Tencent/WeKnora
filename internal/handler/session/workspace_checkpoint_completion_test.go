@@ -143,7 +143,7 @@ func TestQuickAnswerCompletionPersistsSandboxCheckpoint(t *testing.T) {
 		eventBus:         bus,
 		streamHandler:    streamHandler,
 		assistantMessage: message,
-	}, "", "")
+	}, "", "", "")
 
 	require.Equal(t, 1, runner.calls, "quick-answer complete must checkpoint before persist")
 	require.NotNil(t, stub.checkpoint, "UpdateMessage must see SandboxCheckpoint")

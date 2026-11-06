@@ -222,6 +222,11 @@ type AgentFinalAnswerData struct {
 	// complete. Carried on both the content event and the Done marker,
 	// because a live-streamed answer only learns of the cap at the close.
 	Truncated bool `json:"truncated,omitempty"`
+	// ModelID is the chat model that actually produced the answer, set on
+	// the Done marker by the knowledge pipeline. The requested binding can
+	// differ (an invalid per-request override falls back server-side), so
+	// completion metadata reports this instead of the request field.
+	ModelID string `json:"model_id,omitempty"`
 }
 
 // ContextCompactedData reports that older conversation was replaced by a
