@@ -34,6 +34,7 @@ func TestKnowledgeBaseUpdateSettingsAccess(t *testing.T) {
 				{"name", "renamed", false},
 				{"embedding_model_id", "embedding", false},
 				{"summary_model_id", "summary", false},
+				{"question_generation_config", map[string]any{"model_id": "questions"}, false},
 				{"asr_config", map[string]any{"enabled": false}, false},
 				{"vlm_config", map[string]any{"enabled": false}, false},
 				{"storage_backend_id", "receiver-store", true},

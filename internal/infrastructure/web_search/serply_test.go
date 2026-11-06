@@ -34,8 +34,9 @@ func TestSerplySearchMapsOptionsAndTrimsResults(t *testing.T) {
 			 {"title":"Extra","link":"https://example.com/extra"}]}`))}, nil
 		},
 	)}}
-	results, err := p.SearchWithFilters(t.Context(), "rust & go", 2, false,
-		types.WebSearchFilters{Country: "DE", Freshness: "pw"})
+	results, err := p.Search(t.Context(), types.WebSearchRequest{
+		Query: "rust & go", MaxResults: 2, Filters: types.WebSearchFilters{Country: "DE", Freshness: "pw"},
+	})
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	require.Equal(t, "Snippet", results[0].Snippet)
@@ -57,7 +58,7 @@ func TestSerplyDefaultsLimitsAndErrors(t *testing.T) {
 			}, nil
 		})
 		p := &SerplyProvider{client: &http.Client{Transport: transport}}
-		_, err := p.Search(context.Background(), "query", tc.requested, false)
+		_, err := p.Search(context.Background(), types.WebSearchRequest{Query: "query", MaxResults: tc.requested})
 		require.ErrorContains(t, err, "HTTP 401")
 		require.NotContains(t, err.Error(), "secret")
 	}
@@ -76,12 +77,15 @@ func TestSerplyOmitsRegionForALLAndRejectsDateRanges(t *testing.T) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"results":[]}`))}, nil
 		},
 	)}}
-	_, err := p.SearchWithFilters(t.Context(), "query", 1, false, types.WebSearchFilters{Country: "ALL"})
+	_, err := p.Search(t.Context(), types.WebSearchRequest{
+		Query: "query", MaxResults: 1, Filters: types.WebSearchFilters{Country: "ALL"},
+	})
 	require.NoError(t, err)
 	require.False(t, got.Has("gl"))
 	got = nil
-	_, err = p.SearchWithFilters(t.Context(), "query", 1, false,
-		types.WebSearchFilters{Freshness: "2026-01-01to2026-02-01"})
+	_, err = p.Search(t.Context(), types.WebSearchRequest{
+		Query: "query", MaxResults: 1, Filters: types.WebSearchFilters{Freshness: "2026-01-01to2026-02-01"},
+	})
 	require.ErrorContains(t, err, "date ranges are not supported")
 	require.Nil(t, got, "no request is sent for an unsupported filter")
 }

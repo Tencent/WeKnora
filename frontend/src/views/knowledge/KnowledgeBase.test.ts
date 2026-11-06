@@ -13,7 +13,7 @@ async function setup(t: TestContext, translate = (key: string, _params?: unknown
     getCardDetails: t.mock.fn(), getfDetails() {}, onVisibleChange() {},
   }
   const listKnowledgeFolders = t.mock.fn(async (_id: string) => ({ data: { folders: [] } }))
-  const batchQueryKnowledge = t.mock.fn(async (query: string) => {
+  const batchQueryKnowledge = t.mock.fn(async (query: string, _kbId?: string) => {
     const ids = new URLSearchParams(query).getAll('ids')
     return { success: true, data: hook.cardList.value.filter(card => ids.includes(card.id)).map(card => ({ ...card })) }
   })
@@ -181,7 +181,8 @@ test('batch reparse preserves loaded pages and updates statuses without reloadin
   t.mock.timers.tick(1500)
   await flush()
   assert.equal(f.vm.pendingReparseAck.has('doc-69'), false)
-  assert.equal(f.batchQueryKnowledge.mock.calls[0].arguments[0], 'ids=doc-69&')
+  assert.equal(f.batchQueryKnowledge.mock.calls[0].arguments[0], 'ids=doc-69')
+  assert.equal(f.batchQueryKnowledge.mock.calls[0].arguments[1], 'kb')
   assert.equal(f.hook.getKnowled.mock.callCount(), 0)
   assert.equal(f.hook.cardList.value, cards)
   assert.equal(cards.length, 70)
@@ -190,16 +191,28 @@ test('batch reparse preserves loaded pages and updates statuses without reloadin
 
 test('an older batch acknowledgement timeout does not clear a newer batch', async t => {
   const f = await setup(t)
-  f.vm.pendingReparseAck = new Set(['older'])
-  const older = f.vm.awaitBatchReparseReflection(['older'])
-  for (let i = 0; i < 29; i++) {
-    await flush()
-    t.mock.timers.tick(400)
-  }
-  f.vm.pendingReparseAck.add('newer')
+  f.hook.cardList.value = [
+    { id: 'older', parse_status: 'completed' },
+    { id: 'newer', parse_status: 'completed' },
+  ]
+  f.batchQueryKnowledge.mock.mockImplementation(async (query: string) => ({
+    success: true,
+    data: new URLSearchParams(query).getAll('ids').map(id => ({ id, parse_status: 'completed' })),
+  }))
+  f.vm.selectedIds = new Set(['older'])
+  await f.vm.confirmBatchReparse()
   await flush()
-  t.mock.timers.tick(400)
-  await older
+  for (let i = 0; i < 15; i++) {
+    t.mock.timers.tick(400)
+    await flush()
+  }
+  f.vm.selectedIds = new Set(['newer'])
+  await f.vm.confirmBatchReparse()
+  await flush()
+  for (let i = 0; i < 15; i++) {
+    t.mock.timers.tick(400)
+    await flush()
+  }
   assert.equal(f.vm.pendingReparseAck.has('older'), false)
   assert.equal(f.vm.pendingReparseAck.has('newer'), true)
   assert.equal(f.hook.getKnowled.mock.callCount(), 0)
@@ -207,16 +220,29 @@ test('an older batch acknowledgement timeout does not clear a newer batch', asyn
 
 test('batch acknowledgement waits stop once their own IDs are acknowledged', async t => {
   const f = await setup(t)
-  f.vm.pendingReparseAck = new Set(['older', 'newer'])
-  let finished = false
-  const older = f.vm.awaitBatchReparseReflection(['older']).then(() => { finished = true })
+  f.hook.cardList.value = [
+    { id: 'older', parse_status: 'completed' },
+    { id: 'newer', parse_status: 'completed' },
+  ]
+  f.batchQueryKnowledge.mock.mockImplementation(async () => ({
+    success: true,
+    data: [
+      { id: 'older', parse_status: 'processing' },
+      { id: 'newer', parse_status: 'completed' },
+    ],
+  }))
+  f.vm.selectedIds = new Set(['older', 'newer'])
+  await f.vm.confirmBatchReparse()
   await flush()
-  f.vm.pendingReparseAck.delete('older')
-  t.mock.timers.tick(400)
-  await flush()
-  assert.equal(finished, true)
-  await older
+  assert.equal(f.vm.pendingReparseAck.has('older'), true)
   assert.equal(f.vm.pendingReparseAck.has('newer'), true)
+  t.mock.timers.tick(1500)
+  await flush()
+  assert.equal(f.vm.pendingReparseAck.has('older'), false)
+  assert.equal(f.vm.pendingReparseAck.has('newer'), true)
+  assert.equal(f.hook.cardList.value[0].parse_status, 'processing')
+  assert.equal(f.hook.cardList.value[1].parse_status, 'pending')
+  assert.equal(f.hook.getKnowled.mock.callCount(), 0)
 })
 
 test('accepts a rebuild completed between polls after the bounded acknowledgement window', async t => {

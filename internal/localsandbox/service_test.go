@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 )
@@ -224,27 +225,16 @@ func TestServiceRunRejectsFullAccessUntilImplemented(t *testing.T) {
 	require.Empty(t, backend.prepared)
 }
 
-// Ask compiles to a perfectly valid policy with nothing writable, so without
-// the approval loop above it every write fails with a bare path-denied error
-// and no explanation. Refuse the turn instead of running it half-disabled.
-func TestServiceRunRefusesModeItCannotEnforce(t *testing.T) {
-	backend := &fakeBackend{}
-	svc := serviceFixture(t, backend, ModeAsk)
+func TestServiceRunServesAskAndAuto(t *testing.T) {
+	for _, mode := range []ApprovalMode{ModeAsk, ModeAuto} {
+		backend := &fakeBackend{exit: ExitStatus{Code: 0}}
+		svc := serviceFixture(t, backend, mode)
 
-	_, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo hi"})
-	require.ErrorIs(t, err, ErrApprovalModeNotShipped)
-	require.Empty(t, backend.prepared)
-}
-
-// Substituting a mode the caller did not ask for is the failure this guards:
-// ask is stricter than auto, so quietly running auto would widen access.
-func TestServiceRunDoesNotSubstituteAutoForAsk(t *testing.T) {
-	backend := &fakeBackend{exit: ExitStatus{Code: 0}}
-	svc := serviceFixture(t, backend, ModeAsk)
-
-	res, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo hi"})
-	require.Error(t, err)
-	require.Nil(t, res)
+		res, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "echo hi"})
+		require.NoError(t, err, mode)
+		require.Equal(t, 0, res.Exit.Code, mode)
+		require.Len(t, backend.prepared, 1, mode)
+	}
 }
 
 func TestServiceRunRunsInWorkspace(t *testing.T) {
@@ -444,6 +434,15 @@ func TestPreviewCommandMasksInlineAssignments(t *testing.T) {
 	require.Contains(t, got, "TOKEN=***")
 	require.Contains(t, got, "FOO=***")
 	require.Contains(t, got, "--model cogview-4")
+}
+
+func TestPreviewCommandCutsOnRuneBoundary(t *testing.T) {
+	// "文" is three bytes, so byte 240 falls one byte into the 80th rune
+	// after the 2-byte "a " prefix.
+	command := "a " + strings.Repeat("文", 100)
+	got := previewCommand(command)
+	require.True(t, utf8.ValidString(got), "preview is not valid UTF-8: %q", got)
+	require.Equal(t, "a "+strings.Repeat("文", 79)+"…", got)
 }
 
 // Two sessions on the same project share one directory. Overlapping Run

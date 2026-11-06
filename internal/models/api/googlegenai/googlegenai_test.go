@@ -730,6 +730,42 @@ func TestChatStreamEOFWithoutFinishReasonIsIncomplete(t *testing.T) {
 	}
 }
 
+// Tokens read by Gemini's built-in tools (URL context, search, code execution)
+// are reported in toolUsePromptTokenCount, apart from promptTokenCount, and
+// totalTokenCount includes them.
+func TestUsageCountsToolUsePromptTokens(t *testing.T) {
+	client := newTestClient(t, "http://example.invalid", nil)
+	cached := 4
+	got := client.usage(rawUsage{
+		PromptTokenCount:        10,
+		ToolUsePromptTokenCount: 6,
+		CandidatesTokenCount:    5,
+		ThoughtsTokenCount:      3,
+		TotalTokenCount:         24,
+		CachedContentTokenCount: &cached,
+	})
+	if got.PromptTokens != 16 {
+		t.Errorf("PromptTokens = %d, want 16", got.PromptTokens)
+	}
+	if got.CompletionTokens != 8 {
+		t.Errorf("CompletionTokens = %d, want 8", got.CompletionTokens)
+	}
+	if got.TotalTokens != 24 {
+		t.Errorf("TotalTokens = %d, want 24", got.TotalTokens)
+	}
+	if got.CacheReadTokens != 4 || got.CacheMissTokens != 12 {
+		t.Errorf("cache read/miss = %d/%d, want 4/12", got.CacheReadTokens, got.CacheMissTokens)
+	}
+}
+
+func TestUsageWithoutTotalSumsToolUsePromptTokens(t *testing.T) {
+	client := newTestClient(t, "http://example.invalid", nil)
+	got := client.usage(rawUsage{PromptTokenCount: 10, ToolUsePromptTokenCount: 6, CandidatesTokenCount: 5})
+	if got.PromptTokens != 16 || got.TotalTokens != 21 {
+		t.Errorf("PromptTokens/TotalTokens = %d/%d, want 16/21", got.PromptTokens, got.TotalTokens)
+	}
+}
+
 func TestMapFinishReason(t *testing.T) {
 	tests := []struct {
 		reason       string
@@ -758,5 +794,24 @@ func TestMapFinishReason(t *testing.T) {
 				t.Fatalf("mapFinishReason(%q, %v) = %q, want %q", tt.reason, tt.hasToolCalls, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsolatedRequestSendsTemperatureZeroDespiteExtraGeneration(t *testing.T) {
+	client := newTestClient(t, "https://generativelanguage.googleapis.com", func(c *Config) {
+		c.Settings.ExtraGeneration = map[string]any{"temperature": 0.9}
+	})
+	body, err := client.BuildRequestBody(
+		[]api.Message{{Role: "user", Content: "hi"}},
+		&api.Options{Isolated: true},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("BuildRequestBody: %v", err)
+	}
+	got := normalize(t, body).(map[string]any)
+	gen, _ := got["generationConfig"].(map[string]any)
+	if gen["temperature"] != 0.0 {
+		t.Fatalf("temperature = %v, want 0", gen["temperature"])
 	}
 }

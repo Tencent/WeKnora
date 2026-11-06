@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WeKnora 0.9.0 — promotional film</title>
+<style>
+html,body{margin:0;background:#f2f1e9;min-height:100%;font-family:system-ui,sans-serif}
+body{display:grid;place-items:center;padding:24px;box-sizing:border-box}
+main{width:min(100%,1920px)}video{display:block;width:100%;max-height:85vh;background:#f2f1e9}
+nav{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:12px;font-size:14px;color:#555}
+button{font:inherit;padding:8px 16px;border:1px solid #ccc;border-radius:8px;background:white;color:#222;cursor:pointer}
+</style>
+<main>
+<video controls playsinline preload="auto" poster="out/release-film/weknora-v0.9.0-narrated-poster.png" src="out/release-film/weknora-v0.9.0-narrated-en.mp4"></video>
+<nav><button id="play">Play film</button><button id="pause">Pause</button><button id="replay">Replay</button><button data-at="87">Knowledge base rename</button><button data-at="113">Browser Skill</button><span id="status">English narration · Subtitles included</span></nav>
+</main>
+<script>
+const movie=document.querySelector('video'),status=document.querySelector('#status');
+movie.volume=.65;
+document.querySelector('#play').onclick=()=>movie.play();
+document.querySelector('#pause').onclick=()=>movie.pause();
+document.querySelector('#replay').onclick=()=>{movie.currentTime=0;movie.play()};
+document.querySelectorAll('[data-at]').forEach(button=>button.onclick=()=>{movie.currentTime=Number(button.dataset.at);movie.play()});
+movie.ontimeupdate=()=>status.textContent=`${movie.currentTime.toFixed(1)} / ${movie.duration.toFixed(1)} seconds`;
+movie.onended=()=>status.textContent=`Playback complete — ${movie.duration.toFixed(0)} seconds`;
+movie.onerror=()=>status.textContent='Playback error';
+</script>
+</html>

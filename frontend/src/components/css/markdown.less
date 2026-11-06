@@ -1,5 +1,16 @@
 // Legacy Markdown styles for non-chat document/editor surfaces that render
 // `.md-content`. Chat answer Markdown must use `chat-markdown.less` only.
+//
+// 正文容器是 `.md-content`（合并视图额外带 `.doc-merged-content` 以限制行宽）。
+// `.doc_content` 只是文档抽屉的外壳，里面还有「元数据 / 文件内容」等 UI 标题，
+// 不要为了「让样式命中」把 Markdown 排版挂到 `.doc_content` 上——那会连抽屉
+// 自身的 h4 小标题一起改掉。
+:deep(.doc-merged-content) {
+    // 合并全文视图独占抽屉宽度：限制行宽（钉钉式窄栏）并居中。
+    max-width: 680px;
+    margin-inline: auto;
+}
+
 :deep(.md-content) {
     box-sizing: border-box !important;
 
@@ -29,12 +40,56 @@
     h4,
     h5,
     h6 {
-        margin-top: 5px;
-        font-weight: bold;
+        margin: 20px 0 10px;
+        font-weight: 700;
+        line-height: 1.35;
         color: var(--td-text-color-primary);
         font-family: var(--app-font-family);
         transition: all var(--app-motion-base) ease-out;
+    }
+
+    // 标题层级必须一眼可辨：旧规则把 h1~h6 都设成 --app-text-3xl(20px)，
+    // 而后面的 h2/h3 又把字号调小，导致 h4(20px) 反而比 h3(16px) 还大。
+    h1 {
+        font-size: var(--app-text-4xl);
+        margin-top: 24px;
+    }
+
+    h2 {
         font-size: var(--app-text-3xl);
+        margin-top: 22px;
+    }
+
+    h3 {
+        font-size: var(--app-text-2xl);
+        font-weight: 600;
+        margin-top: 18px;
+        margin-bottom: 8px;
+    }
+
+    h4 {
+        font-size: var(--app-text-xl);
+        font-weight: 600;
+        margin-top: 16px;
+        margin-bottom: 8px;
+    }
+
+    h5 {
+        font-size: var(--app-text-lg);
+        font-weight: 600;
+        margin-top: 14px;
+        margin-bottom: 6px;
+    }
+
+    h6 {
+        font-size: var(--app-text-base);
+        font-weight: 600;
+        margin-top: 12px;
+        margin-bottom: 6px;
+    }
+
+    > :first-child {
+        margin-top: 0;
     }
 
     .hljs-title,
@@ -96,23 +151,9 @@
         font-family: var(--app-font-family);
     }
 
-    h2 {
-        font-size: var(--app-text-2xl);
-    }
-
-    h3 {
-        font-size: var(--app-text-xl);
-        font-weight: 500;
-    }
-
     summary {
         font-size: var(--app-text-base);
         cursor: pointer;
-    }
-
-    li>ol,
-    li>ul {
-        margin: 0 0;
     }
 
     hr {
@@ -159,12 +200,43 @@
     }
 
     p {
-        margin: 0;
+        margin: 0 0 var(--app-space-3);
+        line-height: 1.75;
+    }
+
+    p:last-child {
+        margin-bottom: 0;
     }
 
     code {
         white-space: pre-wrap;
         word-break: break-all;
+        padding: 1px 5px;
+        background: var(--td-bg-color-secondarycontainer);
+        border-radius: var(--app-radius-xs);
+        font-family: var(--app-font-family-mono);
+        font-size: 0.92em;
+    }
+
+    pre {
+        margin: 14px 0;
+        padding: 12px 14px;
+        background: var(--td-bg-color-secondarycontainer);
+        border-radius: var(--app-radius-md);
+        overflow-x: auto;
+        font-size: var(--app-text-md);
+        line-height: 1.6;
+        white-space: pre;
+        word-break: normal;
+
+        code {
+            padding: 0;
+            background: none;
+            border-radius: 0;
+            font-size: inherit;
+            white-space: pre;
+            word-break: normal;
+        }
     }
 
     h1 p,
@@ -183,6 +255,22 @@
     ul,
     ol {
         padding-left: 30px;
+        margin: 10px 0;
+    }
+
+    li {
+        margin: 2px 0;
+        line-height: 1.75;
+    }
+
+    li>ul,
+    li>ol {
+        margin: 4px 0;
+        padding-left: 26px;
+    }
+
+    li>p {
+        margin: 4px 0;
     }
 
     ul:first-child,
@@ -196,13 +284,22 @@
     }
 
     blockquote {
-        padding: 0.8em 1.4rem;
-        margin: 1em 0;
+        padding: 10px 16px;
+        margin: 14px 0;
         font-weight: 400;
+        line-height: 1.75;
+        color: var(--td-text-color-secondary);
         border-left: 4px solid var(--td-brand-color);
-        background-color: var(--td-brand-color)21;
-        border-radius: 0px 8px 8px 0px;
-        box-shadow: rgb(149 149 149 / 13%) 0px 5px 10px;
+        background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+        border-radius: 0 var(--app-radius-md) var(--app-radius-md) 0;
+
+        > :first-child {
+            margin-top: 0;
+        }
+
+        > :last-child {
+            margin-bottom: 0;
+        }
     }
 
     table {

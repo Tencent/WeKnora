@@ -95,12 +95,12 @@ type SplitterConfig struct {
 // (Go DefaultConfig: 64, knowledge.go buildSplitterConfig: 50, Python
 // docreader: 100). All consolidated to 80 here.
 //
-// Existing knowledge bases that stored ChunkOverlap=0 in the DB pick
-// this 80 up on next re-index; their previously-indexed embeddings will
-// not match new ones bit-for-bit. Recall stays similar but search
-// ranking can shift slightly. To freeze the old behavior on a per-KB
-// basis, explicitly set ChunkingConfig.ChunkOverlap to 64 before
-// re-indexing.
+// An empty SplitterConfig / ChunkingConfig (both size and overlap unset)
+// still receives DefaultChunkOverlap on normalize. An explicit
+// ChunkOverlap of 0 with a configured ChunkSize is preserved — wiki-only
+// KBs and atomic FAQ-style content rely on true zero overlap. KBs that
+// previously depended on stored 0 being rewritten to 80 should set
+// ChunkOverlap to 80 (or another positive value) before re-indexing.
 const (
 	DefaultChunkSize    = 512
 	DefaultChunkOverlap = 80

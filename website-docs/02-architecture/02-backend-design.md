@@ -2,6 +2,13 @@
 
 Go 后端以 Handler、Service、Repository 和基础设施分层组织请求处理，通过 uber/dig 装配依赖。`cmd/server` 负责启动与退出，`internal/` 实现路由鉴权、业务服务和存储访问。
 
+
+## 助手与任务运行模块
+
+`internal/agent/policy` 统一判断读取、探测、写入和破坏性操作；`agent_prompts` 与 `agent_run_suspensions` 保存可恢复的人工交互，`agent_grants` 保存有范围的授权。`agent_collaborations` 记录子智能体状态，自动化服务维护任务计划、运行和通知。后台 Shell 使用独立工作标识及等待、取消接口，不等同于交互终端进程。
+
+这些运行能力与普通文档入库队列各有职责，不能把恢复待审批状态理解成可重放任意外部写入。
+
 ## 分层架构 {#_1-分层架构}
 
 后端遵循经典的 **Handler → Service → Repository → 数据库** 四层结构，层间依赖全部通过接口（`internal/types/interfaces/`）解耦，由 DI 容器在启动时装配：

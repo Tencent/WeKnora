@@ -152,8 +152,7 @@ func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 	tokens += e.EstimateString(msg.Content)
 	tokens += e.EstimateString(msg.Name)
 	tokens += e.EstimateString(msg.ToolCallID)
-	tokens += e.EstimateString(msg.ReasoningContent)
-	tokens += e.EstimateReasoningArtifacts(msg)
+	tokens += e.EstimateReasoning(msg)
 	tokens += e.estimateImageParts(msg)
 
 	for _, tc := range msg.ToolCalls {
@@ -166,11 +165,40 @@ func (e *Estimator) EstimateMessage(msg *chat.Message) int {
 	return tokens
 }
 
+// EstimateReasoning counts the reasoning text and provider state that are
+// replayed, excluding legacy display fields superseded by canonical metadata.
+func (e *Estimator) EstimateReasoning(msg *chat.Message) int {
+	text, artifacts := e.estimateReasoning(msg)
+	return text + artifacts
+}
+
 // EstimateReasoningArtifacts counts the opaque provider state replayed with an
 // assistant turn. The signature carries a protocol tag that is stripped before
 // it goes out, so only the payload after the tag is billed; the metadata is
 // sent as-is, one JSON value per namespace key.
 func (e *Estimator) EstimateReasoningArtifacts(msg *chat.Message) int {
+	_, artifacts := e.estimateReasoning(msg)
+	return artifacts
+}
+
+func (e *Estimator) estimateReasoning(msg *chat.Message) (text, artifacts int) {
+	// Anthropic stores the same signed thinking in both display fields and
+	// canonical blocks. replayThinkingBlocks sends only the canonical blocks
+	// when they decode successfully, including when the list is empty. Match
+	// that precedence; malformed metadata still falls back to legacy fields.
+	if raw := msg.ReasoningMetadata["anthropic_thinking_blocks"]; len(raw) > 0 {
+		var blocks []struct {
+			Type, Thinking, Signature, Data string
+		}
+		if json.Unmarshal(raw, &blocks) == nil {
+			for key, value := range msg.ReasoningMetadata {
+				if key != "anthropic_redacted_thinking" {
+					artifacts += e.EstimateString(key) + e.EstimateString(string(value))
+				}
+			}
+			return 0, artifacts
+		}
+	}
 	tokens := 0
 	if sig := msg.ReasoningSignature; sig != "" {
 		if _, payload, found := strings.Cut(sig, ":"); found {
@@ -179,7 +207,7 @@ func (e *Estimator) EstimateReasoningArtifacts(msg *chat.Message) int {
 		tokens += e.EstimateString(sig)
 	}
 	tokens += e.estimateProviderMetadata(msg.ReasoningMetadata)
-	return tokens
+	return e.EstimateString(msg.ReasoningContent), tokens
 }
 
 // estimateProviderMetadata counts one opaque provider-state map, one JSON

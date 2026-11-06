@@ -103,6 +103,74 @@ func TestPolicyValidateRejectsCwdOutsideRoots(t *testing.T) {
 	require.ErrorIs(t, p.Validate(), ErrCwdOutsideRoots)
 }
 
+// A path that was safe at approval can be replaced by a symlink before the
+// backend resolves it. Validate must refuse the resolved target when it is
+// git metadata, ~/Library, or a system path, for both files and roots.
+func TestPolicyValidateRejectsResolvedGrantTargets(t *testing.T) {
+	home := "/Users/dev"
+	workspace := filepath.Join(home, "My Project")
+	private := []string{home, "/Users", "/Volumes", "/var", "/private/var"}
+
+	base := func() Policy {
+		return Policy{
+			WritableRoots: []WritableRoot{{Path: workspace}},
+			PrivateRoots:  private,
+			Cwd:           workspace,
+		}
+	}
+
+	t.Run("git file outside writable root", func(t *testing.T) {
+		p := base()
+		p.WritableFiles = []string{"/Users/dev/other/.git/config"}
+		require.Error(t, p.Validate())
+	})
+	t.Run("home library file", func(t *testing.T) {
+		p := base()
+		p.WritableFiles = []string{filepath.Join(home, "Library", "Prefs.txt")}
+		require.Error(t, p.Validate())
+	})
+	t.Run("etc passwd", func(t *testing.T) {
+		p := base()
+		p.WritableFiles = []string{"/etc/passwd"}
+		require.Error(t, p.Validate())
+	})
+
+	for _, path := range []string{
+		"/Users/dev/other/.git",
+		filepath.Join(home, "Library"),
+		"/etc/passwd",
+	} {
+		t.Run("writable root "+path, func(t *testing.T) {
+			p := Policy{
+				WritableRoots: []WritableRoot{{Path: path}},
+				PrivateRoots:  private,
+				Cwd:           path,
+			}
+			require.Error(t, p.Validate())
+		})
+	}
+
+	t.Run("writable file is home", func(t *testing.T) {
+		p := base()
+		p.WritableFiles = []string{home}
+		require.Error(t, p.Validate())
+	})
+	t.Run("writable root is home", func(t *testing.T) {
+		p := Policy{
+			WritableRoots: []WritableRoot{{Path: home}},
+			PrivateRoots:  private,
+			Cwd:           home,
+		}
+		require.Error(t, p.Validate())
+	})
+
+	t.Run("ordinary file", func(t *testing.T) {
+		p := base()
+		p.WritableFiles = []string{filepath.Join(home, "Desktop", "a.txt")}
+		require.NoError(t, p.Validate())
+	})
+}
+
 // A deny-read entry that swallows a writable root is a contradiction the
 // backends cannot express coherently; reject it at the door.
 func TestPolicyValidateRejectsDenyReadCoveringWritableRoot(t *testing.T) {

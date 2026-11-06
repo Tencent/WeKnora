@@ -31,7 +31,7 @@ type TavilyProvider struct {
 }
 
 // NewTavilyProvider creates a new Tavily provider from parameters (no environment variables).
-func NewTavilyProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewTavilyProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Tavily provider")
 	}
@@ -54,10 +54,9 @@ func (p *TavilyProvider) Name() string {
 // Search performs a web search using Tavily Search API
 func (p *TavilyProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}

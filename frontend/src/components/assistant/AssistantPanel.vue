@@ -19,6 +19,23 @@
           <span class="assistant-panel__header-icon" aria-hidden="true"><ResourceIcon type="assistant" :size="16" /></span>
           <span class="assistant-panel__title">{{ assistantName }}</span>
         </template>
+        <template #beside>
+          <t-popup placement="bottom-left" trigger="hover" show-arrow
+            :overlay-inner-style="{ maxWidth: '320px', padding: '12px 14px' }">
+            <button type="button" class="assistant-panel__help" :aria-label="t('assistant.help.label')"
+              @click.stop @pointerdown.stop>
+              <t-icon name="help-circle" size="16px" />
+            </button>
+            <template #content>
+              <div class="assistant-help">
+                <p class="assistant-help__title">{{ t('assistant.help.title') }}</p>
+                <p>{{ t('assistant.help.identity') }}</p>
+                <p>{{ t('assistant.help.page') }}</p>
+                <p>{{ t('assistant.help.access') }}</p>
+              </div>
+            </template>
+          </t-popup>
+        </template>
       </ChildAgentTabBar>
       <t-tooltip :content="t('assistant.newConversation')" placement="bottom">
         <button type="button" class="assistant-panel__action" :disabled="!assistant.sessionId || starting"
@@ -179,7 +196,7 @@ import {
 import { removeSession, SESSION_MUTATION_EVENT, type SessionMutationDetail } from '@/components/sessionMutations'
 import type { PageContextPayload } from '@/api/chat/streame'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const childTabs = createChildAgentTabs()
 provide(childAgentTabsKey, childTabs)
@@ -253,6 +270,14 @@ const initialMessage = ref<{
 const initialQuery = computed(() => initialMessage.value?.sessionId === assistant.sessionId
   ? initialMessage.value.query : '')
 
+function settingsWelcome(section: string) {
+  const key = te(`assistant.settingsPages.${section}.q1`) ? section : 'fallback'
+  return {
+    description: t(`assistant.settingsPages.${key}.description`),
+    starters: [t(`assistant.settingsPages.${key}.q1`), t(`assistant.settingsPages.${key}.q2`), t(`assistant.settingsPages.${key}.q3`)],
+  }
+}
+
 const welcomeContent = computed(() => {
   const general = {
     description: t('assistant.welcomeDesc'),
@@ -281,6 +306,12 @@ const welcomeContent = computed(() => {
     description: t('assistant.welcomeDescriptions.mcp'),
     starters: [t('assistant.starters.mcpFind'), t('assistant.starters.mcpSetup'), t('assistant.starters.mcpExamples')],
   }
+  if (c?.page === 'settings') return settingsWelcome(c.section || 'fallback')
+  if (route.name === 'settings') {
+    const section = typeof route.query.section === 'string' ? route.query.section : 'general'
+    const panel = typeof route.query.panel === 'string' ? route.query.panel : ''
+    return settingsWelcome(section === 'system-global' && panel ? `system-global-${panel}` : section)
+  }
   if (c?.agentId) return {
     description: t('assistant.agentWelcomeDesc'),
     starters: [t('assistant.starters.agentConfig'), t('assistant.starters.agentModel'), t('assistant.starters.agentKnowledge')],
@@ -299,11 +330,15 @@ const welcomeContent = computed(() => {
   }
   if (c?.page === 'chat') return {
     description: t('assistant.welcomeDescriptions.chat'),
-    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatOpenQuestions'), t('assistant.starters.chatTodos')],
+    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatCheck'), t('assistant.starters.chatFollowup')],
   }
   if (c?.knowledgeBaseId || route.name === 'knowledgeBaseDetail') return {
     description: t('assistant.welcomeDescriptions.knowledgeBase'),
     starters: [t('assistant.starters.knowledgeTopics'), t('assistant.starters.recentActivity'), t('assistant.starters.knowledgeGaps')],
+  }
+  if (route.name === 'artifactLibrary') return {
+    description: t('assistant.welcomeDescriptions.artifacts'),
+    starters: [t('assistant.starters.artifactRecent'), t('assistant.starters.artifactSources'), t('assistant.starters.artifactCreate')],
   }
   if (route.name === 'knowledgeBaseList' || route.name === 'home') return {
     description: t('assistant.welcomeDescriptions.knowledgeBases'),
@@ -312,6 +347,10 @@ const welcomeContent = computed(() => {
   if (route.name === 'agentList') return {
     description: t('assistant.welcomeDescriptions.agents'),
     starters: [t('assistant.starters.agents'), t('assistant.starters.agentCreate'), t('assistant.starters.agentChoose')],
+  }
+  if (route.name === 'organizationList') return {
+    description: t('assistant.welcomeDescriptions.organizations'),
+    starters: [t('assistant.starters.organizationShared'), t('assistant.starters.organizationJoin'), t('assistant.starters.organizationCreate')],
   }
   if (route.name === 'automationList') return {
     description: t('assistant.welcomeDescriptions.automation'),
@@ -327,7 +366,7 @@ const welcomeContent = computed(() => {
   }
   if (route.name === 'toolbox' && route.params.section === 'browserconnection') return {
     description: t('assistant.welcomeDescriptions.browser'),
-    starters: [t('assistant.starters.browserConnect'), t('assistant.starters.browserTasks'), t('assistant.starters.browserSafety')],
+    starters: [t('assistant.starters.browserConnect'), t('assistant.starters.browserTasks'), t('assistant.starters.browserReconnect')],
   }
   if (route.name === 'toolbox') return {
     description: t('assistant.welcomeDescriptions.skills'),
@@ -335,7 +374,7 @@ const welcomeContent = computed(() => {
   }
   if (route.name === 'chat') return {
     description: t('assistant.welcomeDescriptions.chat'),
-    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatOpenQuestions'), t('assistant.starters.chatTodos')],
+    starters: [t('assistant.starters.chatSummary'), t('assistant.starters.chatCheck'), t('assistant.starters.chatFollowup')],
   }
   return general
 })
@@ -542,6 +581,8 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '../css/suggested-questions.less';
+@import (reference) '../css/settings-section.less';
 .assistant-panel {
   display: none;
   position: relative;
@@ -635,8 +676,34 @@ onUnmounted(() => {
   font-size: var(--app-text-lg);
 }
 
+.assistant-panel__help {
+  .settings-title-help();
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+}
+
+.assistant-help {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+    line-height: 1.6;
+  }
+
+  p.assistant-help__title {
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-md);
+    font-weight: 600;
+  }
+}
+
 .assistant-panel__title {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   font-size: var(--app-text-base);
   font-weight: 500;
@@ -755,22 +822,32 @@ onUnmounted(() => {
     flex: 0 0 auto;
     flex-direction: column;
     align-items: flex-start;
+    gap: 10px;
     margin: 0;
     padding: 0 16px 4px;
   }
 
   .assistant-starter {
+    display: inline-flex;
+    align-items: center;
     max-width: 100%;
-    padding: 10px 14px;
-    border-color: transparent;
-    border-radius: var(--app-radius-pill);
-    background: var(--td-bg-color-secondarycontainer);
+    padding: 8px 14px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-lg);
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    font-size: var(--app-text-md);
     line-height: 1.5;
     text-align: left;
+    white-space: normal;
+    transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background var(--app-motion-base) ease;
 
     &:hover:not(:disabled) {
-      background: var(--td-bg-color-container-hover);
-      border-color: var(--td-component-stroke);
+      .suggestion-chip-hover();
+    }
+
+    &:active:not(:disabled) {
+      .suggestion-chip-active();
     }
   }
 }

@@ -93,20 +93,29 @@ func TestCSVToMarkdownRejectsExcessivePadding(t *testing.T) {
 	}
 }
 
-func TestProjectedCSVTableSizeMatchesRender(t *testing.T) {
+func TestCSVMarkdownSizeMatchesRender(t *testing.T) {
 	// Cells chosen to exercise every csvCellReplacer escape: a pipe, a
 	// backslash before it, a quoted newline, and a lone carriage return.
 	in := "a|b,\"x\\|y\nz\",w\r\n1,p|q,\"lone\rcr\"\n"
 
 	records, width := parseCSVForBudget(t, in)
-	projected := projectedCSVTableSize(records, width)
+	contentBytes := 0
+	for _, record := range records {
+		for _, cell := range record {
+			contentBytes += len(csvCellReplacer.Replace(cell))
+		}
+	}
+	projected, err := csvMarkdownSize(len(records), width, contentBytes, maxCSVMarkdownBytes)
+	if err != nil {
+		t.Fatalf("csvMarkdownSize: %v", err)
+	}
 
 	md, err := csvToMarkdown([]byte(in))
 	if err != nil {
 		t.Fatalf("csvToMarkdown(%q) error: %v", in, err)
 	}
-	if int64(len(md)) != projected {
-		t.Errorf("projectedCSVTableSize = %d, rendered table is %d bytes", projected, len(md))
+	if len(md) != projected {
+		t.Errorf("csvMarkdownSize = %d, rendered table is %d bytes", projected, len(md))
 	}
 }
 

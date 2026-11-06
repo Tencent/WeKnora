@@ -36,6 +36,8 @@ type TenantHandler struct {
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
+	// modelService validates the models chosen as workspace defaults.
+	modelService interfaces.ModelService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -63,6 +65,7 @@ func NewTenantHandler(
 	kbService interfaces.KnowledgeBaseService,
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
+	modelService interfaces.ModelService,
 ) *TenantHandler {
 	return &TenantHandler{
 		service:          service,
@@ -72,6 +75,7 @@ func NewTenantHandler(
 		kbService:        kbService,
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
+		modelService:     modelService,
 	}
 }
 
@@ -319,29 +323,6 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			Name:        strings.TrimSpace(req.Name),
 			Description: strings.TrimSpace(req.Description),
 		}
-	}
-
-	// Apply the system-setting-driven default storage quota when the
-	// caller didn't specify one (always true for self-serve; sometimes
-	// true for the superuser branch when the JSON omits storage_quota).
-	// We resolve at create time on purpose — the on-disk row should
-	// carry an explicit value, so changing the setting later doesn't
-	// silently shrink/grow established tenants. Negative values are
-	// treated as "use default" so a misconfigured setting can't yield
-	// a negative quota that the storage-used checks would interpret as
-	// "unlimited" (StorageQuota <= 0 disables enforcement in
-	// knowledge_create.go).
-	if tenantData.StorageQuota <= 0 {
-		gb := h.systemSettingSvc.GetInt(
-			ctx,
-			"tenant.default_storage_quota_gb",
-			"WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
-			10,
-		)
-		if gb <= 0 {
-			gb = 10
-		}
-		tenantData.StorageQuota = gb * 1024 * 1024 * 1024
 	}
 
 	logger.Infof(ctx, "Creating tenant, name: %s", secutils.SanitizeForLog(tenantData.Name))
@@ -1282,7 +1263,9 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  获取空间级别的KV配置。支持 web-search-config、prompt-templates、parser-engine-config、
+// @Description  storage-engine-config、chat-history-config、retrieval-config、memory-config、
+// @Description  assistant-config、default-settings。
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1329,6 +1312,9 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "assistant-config":
 		h.GetTenantAssistantConfig(c)
 		return
+	case "default-settings":
+		h.GetTenantDefaultSettings(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1338,7 +1324,8 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  更新空间级别的KV配置。支持 web-search-config、parser-engine-config、storage-engine-config、
+// @Description  chat-history-config、retrieval-config、memory-config、assistant-config、default-settings。
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1382,6 +1369,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	case "assistant-config":
 		h.updateTenantAssistantConfigInternal(c)
+		return
+	case "default-settings":
+		h.updateTenantDefaultSettingsInternal(c)
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)

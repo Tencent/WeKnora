@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -92,6 +94,114 @@ func TestBuildRetryArgv_ScalarsAndSlices(t *testing.T) {
 			t.Fatalf("idx %d: got %q want %q\nfull got=%v", i, got[i], want[i], got)
 		}
 	}
+}
+
+// newModelUpdateLikeCmd mirrors the flag registration of cli/cmd/model/update.go,
+// including the persistent -y that the root command contributes.
+func newModelUpdateLikeCmd() *cobra.Command {
+	c := &cobra.Command{Use: "update", Args: cobra.ExactArgs(1)}
+	var isDefault, yes bool
+	var format string
+	c.Flags().BoolVar(&isDefault, "default", false, "Mark this the default model for its type")
+	c.Flags().StringVar(&format, "format", "", "Output format")
+	c.PersistentFlags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation")
+	return c
+}
+
+// runRetryArgv replays everything after `weknora model update` into a fresh
+// copy of the same command, the way an agent or a human would run the argv it
+// was just handed. It returns the resulting --default value and the parse error.
+func runRetryArgv(t *testing.T, argv []string) (bool, error) {
+	t.Helper()
+	c := newModelUpdateLikeCmd()
+	c.SilenceUsage = true
+	c.SilenceErrors = true
+	c.SetArgs(argv[3:]) // drop the `weknora model update` prefix
+	c.RunE = func(*cobra.Command, []string) error { return nil }
+	err := c.Execute()
+	got, _ := c.Flags().GetBool("default")
+	return got, err
+}
+
+// `retry_argv` is documented as "directly executable", and on exit-10 agents are
+// told to surface it verbatim for the human to approve. pflag gives every bool
+// flag a NoOptDefVal, so the two-token `--name value` form left that value as a
+// stray positional and the command refused the argv outright. For `--name=false`
+// it was worse: the flag fell back to its NoOptDefVal "true", so the retry argv
+// set the very flag the caller had asked to clear.
+func TestBuildRetryArgv_BoolFlagsRoundTrip(t *testing.T) {
+	tests := []struct {
+		name        string
+		typed       []string
+		wantDefault bool
+	}{
+		{
+			name:        "bare bool",
+			typed:       []string{"--default", "--format", "json"},
+			wantDefault: true,
+		},
+		{
+			name:        "explicit false must stay false",
+			typed:       []string{"--default=false", "--format", "json"},
+			wantDefault: false,
+		},
+		{
+			name:        "explicit true",
+			typed:       []string{"--default=true", "--format", "json"},
+			wantDefault: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := newModelUpdateLikeCmd()
+			require.NoError(t, src.Flags().Parse(tt.typed))
+
+			argv := cmdutil.BuildRetryArgv(src,
+				[]string{"weknora", "model", "update", "mdl_abc"},
+				"default", "format")
+
+			gotDefault, err := runRetryArgv(t, argv)
+			require.NoError(t, err, "retry_argv must be executable as emitted: %v", argv)
+			assert.Equal(t, tt.wantDefault, gotDefault,
+				"replayed argv changed the flag value: %v", argv)
+		})
+	}
+}
+
+// The single-token form is load-bearing, not cosmetic: pflag ignores the token
+// after `--name` for a bool flag. Assert the argv elements themselves so a
+// future refactor cannot quietly reintroduce the two-token form while the
+// round-trip test still passes for the bare-flag case. (testify's Contains on
+// a slice compares whole elements, not substrings, so "--default=false" is not
+// matched by the "--default" element check below.)
+func TestBuildRetryArgv_BoolFlagUsesSingleToken(t *testing.T) {
+	src := newModelUpdateLikeCmd()
+	require.NoError(t, src.Flags().Parse([]string{"--default=false", "--format", "json"}))
+
+	got := cmdutil.BuildRetryArgv(src,
+		[]string{"weknora", "model", "update", "mdl_abc"},
+		"default", "format")
+
+	assert.Contains(t, got, "--default=false")
+	assert.NotContains(t, got, "--default")
+	assert.NotContains(t, got, "false")
+}
+
+// String and slice flags keep their existing two-token form.
+func TestBuildRetryArgv_NonBoolFlagsUnchanged(t *testing.T) {
+	src := newModelUpdateLikeCmd()
+	var name string
+	src.Flags().StringVar(&name, "name", "", "")
+	require.NoError(t, src.Flags().Parse([]string{"--name", "Renamed", "--format", "json"}))
+
+	got := cmdutil.BuildRetryArgv(src,
+		[]string{"weknora", "model", "update", "mdl_abc"},
+		"default", "format", "name")
+
+	assert.Contains(t, got, "--name")
+	assert.NotContains(t, got, "--name=Renamed")
+	assert.Contains(t, got, "Renamed")
 }
 
 func TestBuildRetryArgv_SkipsFlagsNotInAllow(t *testing.T) {

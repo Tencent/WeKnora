@@ -190,6 +190,14 @@ func IsRemoteConflict(err error) bool {
 	return remoteKind(err) == RemoteErrorKindConflict
 }
 
+// IsRemoteTimeout reports whether err classifies as a deadline the op exceeded
+// (in-container kill wrapper, transport deadline). The caller did nothing
+// wrong and the binding is still valid: such failures may be retried, and a
+// transient provider stall usually clears on the next attempt.
+func IsRemoteTimeout(err error) bool {
+	return remoteKind(err) == RemoteErrorKindTimeout
+}
+
 // snapshotDeleteKind reclassifies a snapshot/template delete that failed
 // because sandboxes still reference it. E2B returns that as HTTP 400
 // invalid_request; it is Conflict: the caller did nothing wrong and should

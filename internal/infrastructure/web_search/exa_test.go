@@ -43,7 +43,9 @@ func TestExaProviderSearchMapping(t *testing.T) {
 	defer srv.Close()
 
 	p := &ExaProvider{client: srv.Client(), baseURL: srv.URL + "/search", apiKey: "exa-test", includeText: true}
-	results, err := p.Search(context.Background(), "hello", 2, true)
+	results, err := p.Search(context.Background(), types.WebSearchRequest{
+		Query: "hello", MaxResults: 2, IncludeDate: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +91,7 @@ func TestExaProviderSupportsConnectionTestProbe(t *testing.T) {
 		baseURL: srv.URL + "/search",
 		apiKey:  "exa-test",
 	}
-	results, err := p.Search(context.Background(), "test", 1, false)
+	results, err := p.Search(context.Background(), types.WebSearchRequest{Query: "test", MaxResults: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,10 +110,10 @@ func TestExaProviderValidationAndStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := &ExaProvider{client: srv.Client(), baseURL: srv.URL, apiKey: "key"}
-	if _, err := p.Search(context.Background(), "q", 1, false); err == nil {
+	if _, err := p.Search(context.Background(), types.WebSearchRequest{Query: "q", MaxResults: 1}); err == nil {
 		t.Fatal("expected status error")
 	}
-	if _, err := p.Search(context.Background(), " ", 1, false); err == nil {
+	if _, err := p.Search(context.Background(), types.WebSearchRequest{Query: " ", MaxResults: 1}); err == nil {
 		t.Fatal("expected empty query error")
 	}
 }

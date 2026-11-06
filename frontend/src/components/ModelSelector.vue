@@ -33,7 +33,7 @@
           <span class="model-name">{{ modelDisplayName(model) }}</span>
           <span v-if="model.display_name" class="model-raw-name">{{ model.name }}</span>
           <t-tag v-if="model.is_builtin" size="small" theme="primary">{{ $t('model.builtinTag') }}</t-tag>
-          <t-tag v-if="model.is_default" size="small" theme="success">{{ $t('model.defaultTag') }}</t-tag>
+          <t-tag v-if="isDefaultModelForType(model, modelType)" size="small" theme="success">{{ $t('model.defaultTag') }}</t-tag>
           <span
             v-if="showContextWindow"
             class="model-ctx"
@@ -65,6 +65,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { filterModelsByType } from './modelSelectorFilter'
+import { isDefaultModelForType } from '@/utils/modelDefaults'
 import {
   formatContextWindow,
   isDefaultContextWindow,

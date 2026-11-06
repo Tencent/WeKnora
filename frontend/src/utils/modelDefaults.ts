@@ -3,6 +3,17 @@ export interface ModelDefaultCandidate {
   type: string
   status?: string
   is_default?: boolean
+  default_for?: string[]
+  parameters?: { supports_vision?: boolean }
+}
+
+export function modelSupportsType(model: ModelDefaultCandidate, modelType: string): boolean {
+  return model.type === modelType
+    || (modelType === 'VLLM' && model.type === 'KnowledgeQA' && model.parameters?.supports_vision === true)
+}
+
+export function isDefaultModelForType(model: ModelDefaultCandidate, modelType: string): boolean {
+  return Boolean(model.default_for?.includes(modelType) || (model.type === modelType && model.is_default))
 }
 
 /**
@@ -15,8 +26,11 @@ export function selectInitialModelId(
 ): string | null {
   const active = models.filter(
     model => Boolean(model.id?.trim())
-      && model.type === modelType
+      && modelSupportsType(model, modelType)
       && (!model.status || model.status === 'active'),
   )
-  return active.find(model => model.is_default)?.id?.trim() ?? active[0]?.id?.trim() ?? null
+  const chosen = active.find(model => model.default_for?.includes(modelType))
+    ?? active.find(model => isDefaultModelForType(model, modelType))
+    ?? active[0]
+  return chosen?.id?.trim() ?? null
 }

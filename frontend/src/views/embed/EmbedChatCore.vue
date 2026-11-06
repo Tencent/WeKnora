@@ -299,9 +299,7 @@ const {
   hostContext: hostContextRef,
   onMessagesChange: (has) => emit('messages-state', has),
   onSessionTitle: (title) => {
-    if (props.useSessionHeaderTitle) {
-      emit('session-title', title)
-    }
+    emit('session-title', title)
   },
   onTurnComplete: (message) => { void loadFollowUpSuggestions(message, true) },
   onMessagesLoaded: loadPersistedFollowUps,
@@ -344,11 +342,17 @@ const fetchSuggestedQuestions = async () => {
   }
 }
 
-const onSendMsg = (query: string, imageFiles: File[] = [], attachmentFiles: File[] = []) => {
+const onSendMsg = (
+  query: string,
+  imageFiles: File[] = [],
+  attachmentFiles: File[] = [],
+  onPrepared?: () => void,
+) => {
   void sendMsg(query, {
     webSearchEnabled: webSearchEnabled.value,
     imageFiles,
     attachmentFiles,
+    onPrepared,
   })
 }
 

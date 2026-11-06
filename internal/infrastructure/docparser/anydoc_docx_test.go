@@ -79,7 +79,7 @@ func TestAnydocReaderDoesNotRouteOtherDocuments(t *testing.T) {
 	}{
 		{"photo", "docx", "word/media/photo.png", "true"},
 		{"text only", "docx", "word/media/diagram.emf", "false"},
-		{"other format", "pptx", "ppt/media/diagram.emf", "true"},
+		{"other format", "pptx", "word/media/diagram.emf", "true"},
 		{"outside media", "docx", "custom/diagram.emf", "true"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

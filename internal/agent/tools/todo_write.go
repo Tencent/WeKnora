@@ -151,7 +151,7 @@ type TodoWriteInput struct {
 type PlanStep struct {
 	ID          string `json:"id" jsonschema:"Unique identifier for this step (e.g., 'step1', 'step2')"`
 	Description string `json:"description" jsonschema:"Clear description of what to investigate or accomplish in this step"`
-	Status      string `json:"status" jsonschema:"Current status: pending (not started), in_progress (executing), completed (finished)"`
+	Status      string `json:"status" jsonschema:"Status: pending, in_progress, completed, or skipped"`
 }
 
 // NewTodoWriteTool creates a new todo_write tool instance
@@ -178,6 +178,17 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	// Parse plan steps
 	planSteps := input.Steps
+	for i, step := range planSteps {
+		switch step.Status {
+		case "pending", "in_progress", "completed", "skipped":
+		default:
+			return &types.ToolResult{
+				Success: false,
+				Error: fmt.Sprintf("Invalid status %q for step %d; use pending, in_progress, completed, or skipped",
+					step.Status, i+1),
+			}, nil
+		}
+	}
 
 	// Generate formatted output
 	output := generatePlanOutput(input.Task, planSteps)
@@ -218,6 +229,7 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 	pendingCount := 0
 	inProgressCount := 0
 	completedCount := 0
+	skippedCount := 0
 	for _, step := range steps {
 		switch step.Status {
 		case "pending":
@@ -226,6 +238,8 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 			inProgressCount++
 		case "completed":
 			completedCount++
+		case "skipped":
+			skippedCount++
 		}
 	}
 	totalCount := len(steps)
@@ -244,11 +258,14 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 	output += fmt.Sprintf("✅ Completed: %d\n", completedCount)
 	output += fmt.Sprintf("🔄 In Progress: %d\n", inProgressCount)
 	output += fmt.Sprintf("⏳ Pending: %d\n", pendingCount)
+	if skippedCount > 0 {
+		output += fmt.Sprintf("⏭️ Skipped: %d\n", skippedCount)
+	}
 
 	output += "\n=== ⚠️ Important Reminder ===\n"
 	if remainingCount > 0 {
 		output += fmt.Sprintf("**%d tasks remaining!**\n\n", remainingCount)
-		output += "**All tasks must be completed before summarizing or drawing conclusions.**\n\n"
+		output += "**All remaining tasks must be completed before summarizing or drawing conclusions.**\n\n"
 		output += "Next steps:\n"
 		if inProgressCount > 0 {
 			output += "- Continue completing tasks currently in progress\n"
@@ -258,7 +275,10 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 			output += "- Complete each task in order, do not skip\n"
 		}
 		output += "- After completing each task, update todo_write to mark it as completed\n"
-		output += "- Only generate the final summary after all tasks are completed\n"
+		output += "- Only generate the final summary after all remaining tasks are completed\n"
+	} else if skippedCount > 0 {
+		output += "No tasks remain pending or in progress; skipped tasks were not completed.\n\n"
+		output += "Account for the skipped tasks when synthesizing the findings.\n"
 	} else {
 		output += "✅ **All tasks completed!**\n\n"
 		output += "You can now:\n"

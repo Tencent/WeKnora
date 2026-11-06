@@ -45,9 +45,13 @@ def _topic_from_json(value: object) -> _Topic | None:
     topics: list[_Topic] = []
     children = value.get("children")
     if isinstance(children, dict):
-        attached = children.get("attached")
-        if isinstance(attached, list):
-            for child in attached:
+        # All four groups contain recursive topics in the XMind JSON schema.
+        # Keep their text and notes, as the classic XML parser already does.
+        for group_name in ("attached", "detached", "summary", "callout"):
+            group = children.get(group_name)
+            if not isinstance(group, list):
+                continue
+            for child in group:
                 topic = _topic_from_json(child)
                 if topic is not None:
                     topics.append(topic)

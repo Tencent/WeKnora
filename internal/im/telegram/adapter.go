@@ -293,7 +293,7 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 		OK     bool            `json:"ok"`
 		Result json.RawMessage `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &apiResp); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	if !apiResp.OK {

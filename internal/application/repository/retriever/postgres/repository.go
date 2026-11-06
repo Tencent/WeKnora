@@ -22,12 +22,25 @@ type pgRepository struct {
 	db                   *gorm.DB // Database connection
 	keywordScoreMu       sync.Mutex
 	keywordScoreFunction string
+
+	// autoIndex is whether ensureHNSWIndex may build indexes at all
+	// (AUTO_MIGRATE != false).
+	autoIndex bool
+	// hnswSeen holds every embedding dimension ensureHNSWIndex has already
+	// scheduled in this process, so the catalog is consulted once per
+	// dimension (int -> struct{}).
+	hnswSeen sync.Map
+	// buildHNSWIndex is the work ensureHNSWIndex runs in the background;
+	// tests swap it for a recorder.
+	buildHNSWIndex func(dimension int)
 }
 
 // NewPostgresRetrieveEngineRepository creates a new PostgreSQL retriever repository
 func NewPostgresRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRepository {
 	logger.GetLogger(context.Background()).Info("[Postgres] Initializing PostgreSQL retriever engine repository")
-	return &pgRepository{db: db}
+	repo := &pgRepository{db: db, autoIndex: autoHNSWIndexEnabled()}
+	repo.buildHNSWIndex = repo.buildHNSWIndexInBackground
+	return repo
 }
 
 // keywordScoreFunctionSQL only selects fixed, schema-qualified function names.
@@ -133,6 +146,7 @@ func (g *pgRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, add
 		return err
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully saved index for source ID: %s", indexInfo.SourceID)
+	g.ensureHNSWIndex(embeddingDB.Dimension)
 	return nil
 }
 
@@ -165,6 +179,9 @@ func (g *pgRepository) BatchSave(
 		return err
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch saved %d indices", len(indexInfoList))
+	for _, indexInfoDB := range indexInfoDBList {
+		g.ensureHNSWIndex(indexInfoDB.Dimension)
+	}
 	return nil
 }
 
@@ -270,6 +287,9 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
 		Vars: []interface{}{true},
 	})
+	if exclusion := generatedQuestionExclusionClause(params.ExcludeGeneratedQuestionKBIDs); exclusion != nil {
+		conds = append(conds, exclusion)
+	}
 	conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
 		{Column: clause.Column{Name: "score"}, Desc: true},
 	}})
@@ -334,6 +354,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		len(params.Embedding), params.TopK, params.Threshold)
 
 	dimension := len(params.Embedding)
+	g.ensureHNSWIndex(dimension)
 	queryVector := pgvector.NewHalfVector(params.Embedding)
 
 	// Build WHERE conditions for filtering
@@ -398,6 +419,19 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	// is_enabled filter
 	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
 	allVars = append(allVars, true)
+	if len(params.ExcludeGeneratedQuestionKBIDs) > 0 {
+		placeholders := make([]string, len(params.ExcludeGeneratedQuestionKBIDs))
+		paramStart := len(allVars) + 1
+		for i, id := range params.ExcludeGeneratedQuestionKBIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, id)
+		}
+		whereParts = append(whereParts, fmt.Sprintf(
+			"NOT (knowledge_base_id IN (%s) AND %s)",
+			strings.Join(placeholders, ", "),
+			types.GeneratedQuestionRowPredicate(""),
+		))
+	}
 
 	// Build WHERE clause string
 	whereClause := ""
@@ -772,4 +806,24 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk tag ID")
 	return nil
+}
+
+func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
+	if len(kbIDs) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(kbIDs))
+	vars := make([]interface{}, len(kbIDs))
+	for i, id := range kbIDs {
+		placeholders[i] = "?"
+		vars[i] = id
+	}
+	return clause.Expr{
+		SQL: fmt.Sprintf(
+			"NOT (knowledge_base_id IN (%s) AND %s)",
+			strings.Join(placeholders, ", "),
+			types.GeneratedQuestionRowPredicate(""),
+		),
+		Vars: vars,
+	}
 }

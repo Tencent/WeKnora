@@ -5,6 +5,7 @@ import { marked } from 'marked'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { registerUnsavedChanges } from '@/utils/unsavedChanges'
 import { useUIStore } from '@/stores/ui'
+import { resolvePreferredKnowledgeBaseId } from '@/utils/manualKnowledgeDraft'
 import {
   getKnowledgeDetails,
   getKnowledgeBaseById,
@@ -633,6 +634,9 @@ const loadKnowledgeBases = async () => {
     kbOptions.value = list
 
     if (mode.value === 'create') {
+      // Explicit kbId (KB-page callers) keeps the historical force-insert path.
+      // Chat preferences are soft: only select an id already in the writable
+      // candidate list, otherwise fall back to list[0].
       const presetKbId = uiStore.manualEditorKBId
       if (presetKbId) {
         const exists = list.find((item) => item.value === presetKbId)
@@ -644,7 +648,10 @@ const loadKnowledgeBases = async () => {
         }
         form.kbId = presetKbId
       } else {
-        form.kbId = list[0]?.value ?? ''
+        form.kbId = resolvePreferredKnowledgeBaseId(
+          uiStore.manualEditorPreferredKbIds,
+          list.map((item) => item.value),
+        )
       }
     }
   } catch (error) {
@@ -751,8 +758,13 @@ const initialize = async () => {
     const presetKbId = uiStore.manualEditorKBId
     if (presetKbId) {
       form.kbId = presetKbId
-    } else if (!form.kbId && kbOptions.value.length) {
-      form.kbId = kbOptions.value[0].value
+    } else {
+      // Re-resolve preferences against the loaded candidates (resetForm may have
+      // left form.kbId empty; do not re-apply a preferred id missing from the list).
+      form.kbId = resolvePreferredKnowledgeBaseId(
+        uiStore.manualEditorPreferredKbIds,
+        kbOptions.value.map((item) => item.value),
+      )
     }
     form.title = form.title || generateDefaultTitle()
     form.content = form.content || ''

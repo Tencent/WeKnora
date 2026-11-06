@@ -25,15 +25,18 @@ type Refresher interface {
 // six-step sequence with subtly diverging error wording.
 func RefreshAndPersist(ctx context.Context, store secrets.Store, refresher Refresher, profileName string) (string, error) {
 	refresh, err := store.Get(profileName, "refresh")
+	// A read failure means the local store is unusable (keychain denied,
+	// unreadable file) — a different failure from "no refresh token stored",
+	// and it must not send agents down the re-login path.
+	if err != nil && !errors.Is(err, secrets.ErrNotFound) {
+		return "", Wrapf(CodeLocalKeychainDenied, err, "load refresh token")
+	}
 	if errors.Is(err, secrets.ErrNotFound) || refresh == "" {
 		return "", &Error{
 			Code:    CodeAuthTokenExpired,
 			Message: "refresh token missing for profile " + profileName,
 			Hint:    "run `weknora auth login` to re-authenticate",
 		}
-	}
-	if err != nil {
-		return "", Wrapf(CodeLocalKeychainDenied, err, "load refresh token")
 	}
 
 	resp, err := refresher.RefreshToken(ctx, refresh)

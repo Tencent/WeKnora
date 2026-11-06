@@ -45,7 +45,7 @@ func TestKnowledgeBaseParsingParamsAndProjection(t *testing.T) {
 		"parser_file_types": raw(
 			[]string{"pdf"},
 		), "parser_engine": raw("builtin"), "image_pipeline": raw("default"), "image_ocr_enabled": raw(false),
-		"question_generation_enabled": raw(true), "question_count": raw(5),
+		"question_generation_enabled": raw(true), "question_count": raw(5), "question_model_id": raw("questions"),
 	}
 	call, err := op.Build(params)
 	require.NoError(t, err)
@@ -65,6 +65,7 @@ func TestKnowledgeBaseParsingParamsAndProjection(t *testing.T) {
   "image_ocr_enabled": false,
   "question_generation_config": {
     "enabled": true,
+    "model_id": "questions",
     "question_count": 5
   }
 }`, string(call.Body))

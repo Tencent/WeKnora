@@ -106,6 +106,11 @@
           <ChatHistorySettings />
         </div>
 
+        <!-- 默认配置（空间级默认模型与搜索引擎） -->
+        <div v-if="currentSection === 'defaults'" class="section">
+          <DefaultSettings />
+        </div>
+
         <!-- 长期记忆（空间级开关） -->
         <div v-if="currentSection === 'memory'" class="section">
           <MemoryWorkspaceSettings />
@@ -124,6 +129,10 @@
         <!-- 沙箱密钥（成员自己的技能 / 沙箱密钥） -->
         <div v-if="currentSection === 'envvars'" class="section">
           <EnvVarSettings />
+        </div>
+
+        <div v-if="currentSection === 'credentialvault'" class="section">
+          <CredentialVaultSettings />
         </div>
 
         <!-- 向量数据库引擎 -->
@@ -208,6 +217,7 @@ import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useModalShell } from '@/composables/useModalShell'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import SystemInfo from './SystemInfo.vue'
@@ -221,7 +231,9 @@ import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
 import MemorySettings from './MemorySettings.vue'
 import EnvVarSettings from './EnvVarSettings.vue'
+import CredentialVaultSettings from './CredentialVaultSettings.vue'
 import MemoryWorkspaceSettings from './MemoryWorkspaceSettings.vue'
+import DefaultSettings from './DefaultSettings.vue'
 import AssistantSettings from './AssistantSettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
@@ -366,6 +378,7 @@ const navItems = computed(() => {
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
+    { key: 'defaults', icon: 'setting-1', label: t('defaultSettings.title') },
     { key: 'memory', icon: 'bulletpoint', label: t('memoryWorkspaceSettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
@@ -381,6 +394,7 @@ const navItems = computed(() => {
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
     { key: 'assistant', icon: 'assistant', label: t('assistantSettings.title') },
     { key: 'envvars', icon: 'key', label: envNavLabel() },
+    { key: 'credentialvault', icon: 'lock-on', label: t('credentialVault.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     ...integrationItems,
@@ -405,12 +419,12 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile', 'assistant', 'mymemory', 'envvars']),
+      items: pickItems(['general', 'userprofile', 'assistant', 'mymemory', 'envvars', 'credentialvault']),
     },
     {
       key: 'workspace',
       label: t('settings.navGroups.workspace'),
-      items: pickItems(['tenant', 'members', 'chathistory', 'memory']),
+      items: pickItems(['tenant', 'members', 'defaults', 'chathistory', 'memory']),
     },
     {
       key: 'models_runtime',
@@ -484,6 +498,15 @@ const handleSubMenuClick = (parentKey: string, childKey: string) => {
 // 控制弹窗显示
 const visible = computed(() => {
   return route.path === '/platform/settings' || uiStore.showSettingsModal
+})
+
+useAssistantPageContext(() => {
+  if (!visible.value) return null
+  const panel = typeof route.query.panel === 'string' ? route.query.panel : ''
+  const section = currentSection.value === 'system-global' && panel
+    ? `system-global-${panel}`
+    : currentSection.value
+  return { page: 'settings', section }
 })
 
 // 关闭弹窗

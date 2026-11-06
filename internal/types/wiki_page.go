@@ -535,6 +535,9 @@ func (g WikiExtractionGranularity) Normalize() WikiExtractionGranularity {
 // Whether the wiki feature is turned on is controlled by IndexingStrategy.WikiEnabled;
 // this struct only carries wiki-specific tunables.
 type WikiConfig struct {
+	// AutoGenerate disables background Wiki generation when false. Omitted means true.
+	// Manual page APIs and Wiki retrieval remain available while Wiki is enabled.
+	AutoGenerate *bool `yaml:"auto_generate,omitempty" json:"auto_generate,omitempty" default:"true" extensions:"x-agent=wiki_auto_generate"`
 	// SynthesisModelID is the model that writes Wiki pages. Empty uses summary_model_id.
 	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id" extensions:"x-agent=wiki_synthesis_model_id"`
 	// MaxPagesPerIngest limits pages created or updated per ingest. 0 means no limit.
@@ -583,6 +586,12 @@ type WikiConfig struct {
 	// this knob trades a single KB's peak throughput for cross-KB fairness.
 	// Set it >= the wiki pool size to effectively disable the cap.
 	IngestMaxInflight int `yaml:"ingest_max_inflight" json:"ingest_max_inflight,omitempty"`
+}
+
+// IsAutoGenerateEnabled preserves automatic generation for configurations saved
+// before the switch existed.
+func (c *WikiConfig) IsAutoGenerateEnabled() bool {
+	return c == nil || c.AutoGenerate == nil || *c.AutoGenerate
 }
 
 // IngestBatchSizeOrDefault returns IngestBatchSize when set (> 0),

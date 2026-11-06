@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -132,7 +133,7 @@ func (a *Adapter) BotOpenID(ctx context.Context) (string, error) {
 			OpenID string `json:"open_id"`
 		} `json:"bot"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode bot info: %w", err)
 	}
 	if result.Code != 0 {
@@ -765,7 +766,7 @@ func (a *Adapter) postFeishuMessage(ctx context.Context, accessToken, url string
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return 0, "", fmt.Errorf("decode response: %w", err)
 	}
 	return result.Code, result.Msg, nil
@@ -832,17 +833,44 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	// Use the original file name from the message, or extract from Content-Disposition
 	fileName := msg.FileName
 	if fileName == "" {
-		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-			if idx := strings.Index(cd, "filename="); idx >= 0 {
-				fileName = strings.Trim(cd[idx+len("filename="):], "\" ")
-			}
-		}
+		fileName = contentDispositionFilename(resp.Header.Get("Content-Disposition"))
 	}
 	if fileName == "" {
 		fileName = msg.FileKey
 	}
 
 	return resp.Body, fileName, nil
+}
+
+// contentDispositionFilename extracts a filename using the standard parser so
+// quoted parameters and RFC 5987 filename* are decoded correctly. A fallback
+// keeps accepting malformed headers emitted by some proxies.
+func contentDispositionFilename(cd string) string {
+	if cd == "" {
+		return ""
+	}
+	if _, params, err := mime.ParseMediaType(cd); err == nil {
+		if name := params["filename"]; name != "" {
+			return name
+		}
+	}
+	idx := strings.Index(cd, "filename=")
+	if idx < 0 {
+		return ""
+	}
+	value := strings.TrimSpace(cd[idx+len("filename="):])
+	if value == "" {
+		return ""
+	}
+	if value[0] == '"' {
+		if end := strings.IndexByte(value[1:], '"'); end >= 0 {
+			return value[1 : end+1]
+		}
+	}
+	if semi := strings.IndexByte(value, ';'); semi >= 0 {
+		value = value[:semi]
+	}
+	return strings.Trim(strings.TrimSpace(value), "\"")
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -1073,7 +1101,7 @@ func (a *Adapter) cardkitCreate(ctx context.Context, accessToken, cardJSON strin
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
@@ -1155,7 +1183,7 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
 	if result.Code != 0 {
@@ -1346,7 +1374,7 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 			ImageKey string `json:"image_key"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode upload response: %w", err)
 	}
 	if result.Code != 0 {
@@ -1393,7 +1421,7 @@ func (a *Adapter) cardkitSetStreaming(
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
 	if result.Code != 0 {
@@ -1437,7 +1465,7 @@ func (a *Adapter) getTenantAccessToken(ctx context.Context) (string, error) {
 		TenantAccessToken string `json:"tenant_access_token"`
 		Expire            int    `json:"expire"` // seconds
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	if result.Code != 0 {

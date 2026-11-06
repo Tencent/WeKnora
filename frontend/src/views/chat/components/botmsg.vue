@@ -18,7 +18,7 @@
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
-                    :embedded-mode="embeddedMode"
+                    :embedded-mode="embeddedMode" defer-tool-approvals
                     :can-fork="canFork"
                     :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
@@ -35,7 +35,7 @@
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
-                    :embedded-mode="embeddedMode"
+                    :embedded-mode="embeddedMode" defer-tool-approvals
                     :can-fork="canFork"
                     :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
@@ -178,6 +178,7 @@ import { useAssistantStore } from '@/stores/assistant';
 import {
     buildManualMarkdown,
     formatManualTitle,
+    collectManualPreferredKbIds,
 } from '@/utils/chatMessageShared';
 import { copyWithToast } from '@/utils/clipboard';
 import {
@@ -497,6 +498,7 @@ const handleAddToKnowledge = () => {
     ``
     uiStore.openManualEditor({
         mode: 'create',
+        preferredKbIds: collectManualPreferredKbIds(props.session?.knowledge_references),
         title: manualTitle,
         content: manualContent,
         status: 'draft',

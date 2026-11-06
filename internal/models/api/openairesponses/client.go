@@ -135,8 +135,9 @@ func (c *Client) ChatStream(
 // --- response decoding ---
 
 type rawContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Refusal string `json:"refusal"`
 }
 
 // rawOutputItem is the union of the output item shapes this package reads:
@@ -199,9 +200,8 @@ type rawResponse struct {
 // finishReason maps the response status onto the Chat Completions
 // vocabulary the rest of the engine understands.
 func (r *rawResponse) finishReason(hasToolCalls bool) string {
-	if hasToolCalls {
-		return "tool_calls"
-	}
+	// An incomplete response is checked first: a tool call cut off by
+	// max_output_tokens carries truncated arguments and must not be run.
 	if r != nil && r.Status == "incomplete" && r.IncompleteDetails != nil {
 		switch r.IncompleteDetails.Reason {
 		case "max_output_tokens":
@@ -209,6 +209,9 @@ func (r *rawResponse) finishReason(hasToolCalls bool) string {
 		case "content_filter":
 			return "content_filter"
 		}
+	}
+	if hasToolCalls {
+		return "tool_calls"
 	}
 	return "stop"
 }
@@ -239,8 +242,11 @@ func streamItem(raw json.RawMessage) (rawOutputItem, bool, error) {
 func itemText(item rawOutputItem) string {
 	var b strings.Builder
 	for _, part := range item.Content {
-		if part.Type == "output_text" {
+		switch part.Type {
+		case "output_text":
 			b.WriteString(part.Text)
+		case "refusal":
+			b.WriteString(part.Refusal)
 		}
 	}
 	return b.String()
@@ -421,7 +427,7 @@ func (c *Client) processStream(
 		}
 
 		switch ev.Type {
-		case "response.output_text.delta":
+		case "response.output_text.delta", "response.refusal.delta":
 			if ev.Delta != "" {
 				assembler.Process(ch, api.Delta{Content: ev.Delta})
 			}
@@ -545,7 +551,7 @@ func (c *Client) completeStream(
 		}
 	}
 	finishReason := resp.finishReason(assembler.ToolCallCount() > 0)
-	if incomplete && finishReason == "stop" {
+	if incomplete && (finishReason == "stop" || finishReason == "tool_calls") {
 		finishReason = "length"
 	}
 	assembler.Process(ch, api.Delta{FinishReason: finishReason})

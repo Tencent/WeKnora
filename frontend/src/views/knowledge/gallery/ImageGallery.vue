@@ -18,6 +18,7 @@ import GallerySourcePicker from './GallerySourcePicker.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -965,10 +966,12 @@ watch(
       :resolve-src="resolveImageSrc"
       :image-error="imageError"
       :attr-rows="attrRows"
+      :can-edit="props.canEdit"
       @select="(i: number) => (viewerIndex = i)"
       @load-more="onViewerLoadMore"
       @close="closeViewer"
       @open-source="onOpenSource"
+      @saved="closeViewer(); reload()"
     />
   </div>
 </template>

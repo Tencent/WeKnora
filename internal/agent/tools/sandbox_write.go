@@ -120,6 +120,7 @@ type WriteSandboxFileTool struct {
 	sessionBound
 	sink         SandboxFileSink
 	sizeGuidance string
+	approvals    HostApprovals
 }
 
 // NewWriteSandboxFileTool constructs the tool. `sink` MUST NOT be nil.
@@ -137,6 +138,14 @@ func NewWriteSandboxFileTool(sink SandboxFileSink, completionTokens int) *WriteS
 		sink:         sink,
 		sizeGuidance: writeSizeGuidance(writeBudgetBytes(completionTokens)),
 	}
+}
+
+// WithHostApprovals lets writes outside the host workspace be approved.
+func (t *WriteSandboxFileTool) WithHostApprovals(h HostApprovals) *WriteSandboxFileTool {
+	if t != nil {
+		t.approvals = h
+	}
+	return t
 }
 
 // Description is built from the session sandbox layout so host paths never
@@ -170,7 +179,9 @@ func writeSandboxDescription(l sandbox.WorkspaceLayout, sizeGuidance string) str
 	return fmt.Sprintf(rewriteRemoteWorkspaceCopy(writeSandboxFileDescription, l), sizeGuidance)
 }
 
-const hostWriteSandboxFileDescription = "Create, overwrite, or append a text file in %s.\n" +
+const hostWriteSandboxFileDescription = "Create, overwrite, or append a text file in %s, " +
+	"or in a directory already approved for this session. " +
+	"A file outside that can be written once the write is approved; only that one file is opened.\n" +
 	"Send both path and content (path first). Use edit_sandbox_file for small changes to an existing file. " +
 	"File content does not pass through shell quoting.\n" +
 	"Large files: first call uses mode=overwrite (default), " +
@@ -249,8 +260,8 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	}
 
 	clean := resolveIn(layout, trimmed)
-	rootDir, ok := writableRootIn(layout, clean)
-	if !ok {
+	rootDir, inScope := writableRootIn(layout, clean)
+	if !inScope && !layout.IsHost() {
 		return &types.ToolResult{
 			Success: false,
 			Error:   writeScopeErrorIn(layout, input.Path),
@@ -292,6 +303,26 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	mode, modeErr := normalizeWriteMode(input.Mode)
 	if modeErr != "" {
 		return &types.ToolResult{Success: false, Error: modeErr}, nil
+	}
+
+	if !inScope {
+		rootDir = path.Dir(clean)
+		apply := func(current []byte, exists bool) ([]byte, error) {
+			if mode != writeModeAppend {
+				return chunk, nil
+			}
+			if !exists {
+				return nil, fmt.Errorf("it does not exist yet; write the first chunk with mode=%q", writeModeOverwrite)
+			}
+			return append(append([]byte(nil), current...), chunk...), nil
+		}
+		var refusal string
+		ctx, refusal = authorizeHostWrite(
+			ctx, t.sink, t.approvals, ToolWriteSandboxFile, sessionID, clean, mode, apply, "",
+		)
+		if refusal != "" {
+			return &types.ToolResult{Success: false, Error: refusal}, nil
+		}
 	}
 
 	// Held across the read and the write: an append that reads its base while

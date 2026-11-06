@@ -10,24 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type unfilteredSearchProvider struct{ called bool }
-
-func (p *unfilteredSearchProvider) Name() string { return "unfiltered" }
-func (p *unfilteredSearchProvider) Search(context.Context, string, int, bool) ([]*types.WebSearchResult, error) {
-	p.called = true
-	return nil, nil
+type recordingSearcher struct {
+	calls   int
+	request types.WebSearchRequest
+	results []*types.WebSearchResult
 }
 
-type filteredSearchProvider struct {
-	unfilteredSearchProvider
-	filters types.WebSearchFilters
+func (p *recordingSearcher) Search(_ context.Context, req types.WebSearchRequest) ([]*types.WebSearchResult, error) {
+	p.calls++
+	p.request = req
+	return p.results, nil
 }
 
-func (p *filteredSearchProvider) SearchWithFilters(
-	_ context.Context, _ string, _ int, _ bool, f types.WebSearchFilters,
-) ([]*types.WebSearchResult, error) {
-	p.filters = f
-	return nil, nil
+func searcherFactory(searcher interfaces.WebSearcher) infra.SearchFactory {
+	return func(types.WebSearchProviderParameters) (interfaces.WebSearcher, error) { return searcher, nil }
 }
 
 type filterProviderRepository struct {
@@ -40,31 +36,58 @@ func (filterProviderRepository) GetByID(
 	return &types.WebSearchProviderEntity{ID: id, TenantID: tenantID, Provider: types.WebSearchProviderType(id)}, nil
 }
 
-func TestWebSearchServiceRejectsUnsupportedFilters(t *testing.T) {
-	plain := &unfilteredSearchProvider{}
-	filtered := &filteredSearchProvider{}
+func TestWebClientRejectsUnsupportedFilters(t *testing.T) {
+	plain := &recordingSearcher{}
+	filtered := &recordingSearcher{}
 	r := infra.NewRegistry()
-	r.Register("plain", func(types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
-		return plain, nil
-	})
-	r.Register("filtered", func(types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
-		return filtered, nil
-	})
+	r.Add(infra.Spec{Type: "plain", Search: searcherFactory(plain)})
+	r.Add(infra.Spec{Type: "filtered", Filters: true, Search: searcherFactory(filtered)})
 	s := &WebSearchService{registry: r, providerRepo: filterProviderRepository{}}
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
-	cfg := types.DefaultWebSearchConfig()
-	cfg.Filters = types.WebSearchFilters{Country: "DE", Freshness: "pd"}
-	_, err := s.Search(ctx, "plain", cfg, "query")
+	plainClient, err := s.Resolve(ctx, "plain")
+	require.NoError(t, err)
+	filteredClient, err := s.Resolve(ctx, "filtered")
+	require.NoError(t, err)
+
+	filters := types.WebSearchFilters{Country: "DE", Freshness: "pd"}
+	_, err = plainClient.Search(ctx, types.WebSearchRequest{Query: "query", Filters: filters})
 	require.ErrorContains(t, err, "does not support")
-	require.False(t, plain.called)
-	_, err = s.Search(ctx, "filtered", cfg, "query")
+	require.Zero(t, plain.calls)
+
+	_, err = filteredClient.Search(ctx, types.WebSearchRequest{
+		Query: "query", Filters: types.WebSearchFilters{Country: "Germany"},
+	})
+	require.ErrorContains(t, err, "two-letter")
+	require.Zero(t, filtered.calls, "invalid filters never reach the provider")
+
+	_, err = filteredClient.Search(ctx, types.WebSearchRequest{Query: "query", MaxResults: 3, Filters: filters})
 	require.NoError(t, err)
-	require.Equal(t, cfg.Filters, filtered.filters)
-	require.False(t, filtered.called)
-	cfg.Filters = types.WebSearchFilters{}
-	_, err = s.Search(ctx, "plain", cfg, "query")
+	require.Equal(t, types.WebSearchRequest{Query: "query", MaxResults: 3, Filters: filters}, filtered.request)
+
+	_, err = plainClient.Search(ctx, types.WebSearchRequest{Query: "query"})
 	require.NoError(t, err)
-	require.True(t, plain.called)
+	require.Equal(t, 1, plain.calls)
+}
+
+func TestWebClientAppliesTenantBlacklist(t *testing.T) {
+	searcher := &recordingSearcher{results: []*types.WebSearchResult{
+		{URL: "https://blocked.example.com/a"},
+		{URL: "https://kept.example.org/b"},
+	}}
+	r := infra.NewRegistry()
+	r.Add(infra.Spec{Type: "plain", Search: searcherFactory(searcher)})
+	s := &WebSearchService{registry: r, providerRepo: filterProviderRepository{}}
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{
+		WebSearchConfig: &types.WebSearchConfig{Blacklist: []string{"*://blocked.example.com/*"}},
+	})
+
+	client, err := s.Resolve(ctx, "plain")
+	require.NoError(t, err)
+	results, err := client.Search(ctx, types.WebSearchRequest{Query: "q"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "https://kept.example.org/b", results[0].URL)
 }
 
 func TestBraveProviderConfigurationIsAvailable(t *testing.T) {

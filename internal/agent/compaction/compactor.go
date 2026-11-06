@@ -154,11 +154,7 @@ func (c *Compactor) summarizeHistory(ctx context.Context, p *Preparation) (strin
 		ctx, p.MessagesToSummarize, p.OmittedHistory, p.PreviousSummary, instructions, c.settings.summaryBudget(),
 	)
 	if err != nil {
-		// The previous summary is still the best record of everything
-		// before this span, so the archive is appended to it rather than
-		// replacing it.
-		return joinNonEmpty(p.PreviousSummary,
-			rawArchive(p.MessagesToSummarize, c.settings.summaryBudget(), c.estimator)), true
+		return c.fallbackHistory(p), true
 	}
 	return text, false
 }

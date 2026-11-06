@@ -65,30 +65,6 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-func TestTruncateString(t *testing.T) {
-	tests := []struct {
-		input  string
-		maxLen int
-		want   string
-	}{
-		{"hello world", 20, "hello world"},
-		{"hello world", 5, "hello..."},
-		{"", 10, ""},
-		{"abc", 3, "abc"},
-		{"abcd", 3, "abc..."},
-		{"中文测试", 2, "中文..."},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := truncateString(tt.input, tt.maxLen)
-			if got != tt.want {
-				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAppendUnique(t *testing.T) {
 	arr := types.StringArray{"a", "b"}
 

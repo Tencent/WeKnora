@@ -1,13 +1,13 @@
 package session
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -21,6 +21,9 @@ import (
 const (
 	// maxTextFileLines is the line limit for inline text content; excess lines are truncated.
 	maxTextFileLines = 500
+	// maxTextFileContentBytes bounds inline text content (same cap as IM attachments);
+	// a single minified-JSON or log line can otherwise be as large as the upload limit.
+	maxTextFileContentBytes = 32 << 10 // 32 KiB
 	// textFileExtensions lists plain-text extensions handled by the line-based reader.
 	textFileExtensions = ".txt,.md,.markdown,.json,.xml,.yaml,.yml,.csv,.log"
 )
@@ -97,10 +100,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 
 	// Extract text content based on file type; errors are non-fatal.
 	if p.isTextFile(ext) {
-		if err := p.processTextFile(ctx, data, attachment); err != nil {
-			logger.Warnf(ctx, "text file processing failed: %v", err)
-			attachment.Content = fmt.Sprintf("<error><message>Failed to process text file</message><details>%v</details></error>", err)
-		}
+		p.processTextFile(ctx, data, attachment)
 	} else if docparser.IsAudioFormat(ext) {
 		if err := p.processAudioFile(ctx, data, baseName, attachment, asrModelID); err != nil {
 			logger.Warnf(ctx, "audio transcription failed: %v, keeping placeholder", err)
@@ -131,32 +131,38 @@ func (p *AttachmentProcessor) isTextFile(ext string) bool {
 	return strings.Contains(textFileExtensions, ext)
 }
 
-// processTextFile reads plain-text content line by line, truncating at maxTextFileLines.
-func (p *AttachmentProcessor) processTextFile(ctx context.Context, data []byte, attachment *types.MessageAttachment) error {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	var lines []string
+// processTextFile reads plain-text content line by line, truncating at maxTextFileLines
+// lines and maxTextFileContentBytes bytes.
+func (p *AttachmentProcessor) processTextFile(ctx context.Context, data []byte, attachment *types.MessageAttachment) {
+	var lines [][]byte
 	lineCount := 0
 
-	for scanner.Scan() {
+	for line := range bytes.Lines(data) {
 		lineCount++
 		if lineCount <= maxTextFileLines {
-			lines = append(lines, scanner.Text())
+			line = bytes.TrimSuffix(line, []byte("\n"))
+			lines = append(lines, bytes.TrimSuffix(line, []byte("\r")))
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("failed to read file content: %w", err)
+	content := bytes.Join(lines, []byte("\n"))
+	truncated := lineCount > maxTextFileLines
+	if len(content) > maxTextFileContentBytes {
+		end := maxTextFileContentBytes
+		for end > 0 && !utf8.RuneStart(content[end]) {
+			end--
+		}
+		content = content[:end]
+		truncated = true
 	}
 
 	attachment.LineCount = lineCount
-	attachment.Content = strings.Join(lines, "\n")
+	attachment.Content = string(content)
 
-	if lineCount > maxTextFileLines {
+	if truncated {
 		attachment.IsTruncated = true
-		logger.Infof(ctx, "text file truncated: total=%d, kept=%d", lineCount, maxTextFileLines)
+		logger.Infof(ctx, "text file truncated: total=%d lines, kept=%d bytes", lineCount, len(content))
 	}
-
-	return nil
 }
 
 // processWithDocParser extracts content via SimpleFormatReader (md, csv, json, images, etc.).

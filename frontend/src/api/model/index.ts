@@ -89,6 +89,7 @@ export interface ModelConfig {
   // context window. Computed by the backend from provider + name + overrides.
   capabilities?: ModelCapabilities;
   is_default?: boolean;
+  default_for?: string[];
   is_builtin?: boolean;
   status?: string;
   // Per-field configured? metadata from the main response. For builtin

@@ -92,7 +92,7 @@ function fixture() {
     app.mount({})
     return { vm: instance.value, unmount: () => { app.unmount(); assert.deepEqual(errors, []) } }
   }
-  return { mount, dialogs, resources, ui, warnings, emit: modules['@/utils/assistantDataChange'].emitAssistantDataChange }
+  return { mount, dialogs, resources, chat, ui, warnings, emit: modules['@/utils/assistantDataChange'].emitAssistantDataChange }
 }
 
 async function settle() {
@@ -100,6 +100,29 @@ async function settle() {
   await new Promise<void>(resolve => setImmediate(resolve))
   await vue.nextTick()
 }
+
+test('agent creation prefills vision and ASR defaults without enabling uploads or replacing explicit choices', async () => {
+  const f = fixture()
+  f.chat.allModels.push(
+    { id: 'vision', type: 'VLLM', is_default: true, capabilities: { thinking_levels: [] } },
+    { id: 'asr', type: 'ASR', is_default: true, capabilities: { thinking_levels: [] } },
+  )
+  const props = vue.reactive({ visible: false, mode: 'create' })
+  const { vm, unmount } = f.mount('../views/agent/AgentEditorModal.vue', props)
+  try {
+    props.visible = true
+    await settle()
+    assert.equal(vm.formData.config.vlm_model_id, 'vision')
+    assert.equal(vm.formData.config.asr_model_id, 'asr')
+    assert.ok(!vm.formData.config.image_upload_enabled)
+    assert.ok(!vm.formData.config.audio_upload_enabled)
+    vm.formData.config.vlm_model_id = 'explicit-vision'
+    vm.formData.config.asr_model_id = 'explicit-asr'
+    vm.applyDefaultModelsIfEmpty()
+    assert.equal(vm.formData.config.vlm_model_id, 'explicit-vision')
+    assert.equal(vm.formData.config.asr_model_id, 'explicit-asr')
+  } finally { unmount() }
+})
 
 for (const mode of ['edit', 'create'] as const) {
   test(`${mode}: initialization stays clean, while real edits require confirmation`, async () => {

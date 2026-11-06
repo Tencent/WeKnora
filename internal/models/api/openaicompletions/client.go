@@ -1,6 +1,7 @@
 package openaicompletions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -88,7 +89,7 @@ func (c *Client) Chat(ctx context.Context, messages []api.Message, opts *api.Opt
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-	result, err := c.parseResponse(raw)
+	result, err := c.parseResponse(raw, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +128,7 @@ func (c *Client) ChatStream(
 		if dumper != nil {
 			defer dumper.Close()
 		}
-		c.processStream(ctx, resp.Body, ch, dumper)
+		c.processStream(ctx, resp.Body, ch, dumper, opts)
 	}()
 	return ch, nil
 }
@@ -146,12 +147,72 @@ type rawToolCall struct {
 
 type rawMessage struct {
 	Role             string            `json:"role,omitempty"`
-	Content          string            `json:"content,omitempty"`
+	Content          messageContent    `json:"content,omitempty"`
 	ReasoningContent string            `json:"reasoning_content,omitempty"`
 	Reasoning        string            `json:"reasoning,omitempty"`
 	ReasoningText    string            `json:"reasoning_text,omitempty"`
 	ReasoningDetails json.RawMessage   `json:"reasoning_details,omitempty"`
 	ToolCalls        []json.RawMessage `json:"tool_calls,omitempty"`
+}
+
+// messageContent is the "content" of a message or delta. Most servers send a
+// string, but the field may also be a list of typed parts, as Mistral does
+// (string | ContentChunk[]): its reasoning models send "thinking" parts next to
+// the "text" ones. Text parts are joined into Text and thinking parts into
+// Thinking; other part types (references, images...) carry no answer text.
+type messageContent struct {
+	Text     string
+	Thinking string
+}
+
+type contentPart struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking json.RawMessage `json:"thinking"`
+}
+
+func (m *messageContent) UnmarshalJSON(data []byte) error {
+	*m = messageContent{}
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return nil
+	}
+	if data[0] == '"' {
+		return json.Unmarshal(data, &m.Text)
+	}
+	var parts []contentPart
+	if err := json.Unmarshal(data, &parts); err != nil {
+		return err
+	}
+	var text, thinking strings.Builder
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			text.WriteString(part.Text)
+		case "thinking":
+			thinking.WriteString(partsText(part.Thinking))
+		}
+	}
+	m.Text, m.Thinking = text.String(), thinking.String()
+	return nil
+}
+
+// partsText reads the text of a nested "thinking" value, which is a list of
+// text parts in Mistral's API. A plain string is accepted as well.
+func partsText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var parts []contentPart
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		b.WriteString(part.Text)
+	}
+	return b.String()
 }
 
 type rawChoice struct {
@@ -188,7 +249,7 @@ func (c *Client) reasoningText(m rawMessage) string {
 			}
 		}
 	}
-	return ""
+	return m.Content.Thinking
 }
 
 // streamToolIndex gives index-less streamed tool calls a stable index.
@@ -282,7 +343,7 @@ func (c *Client) extractToolCallMetadata(raw json.RawMessage) types.ToolCallMeta
 	return md
 }
 
-func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
+func (c *Client) parseResponse(raw []byte, opts *api.Options) (*types.ChatResponse, error) {
 	var env rawEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
@@ -294,7 +355,7 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 		return nil, fmt.Errorf("no response from API")
 	}
 	choice := env.Choices[0]
-	content, inlineReasoning := splitThinkTags(choice.Message.Content)
+	content, inlineReasoning := splitThinkTags(choice.Message.Content.Text)
 	result := &types.ChatResponse{
 		Content:          content,
 		ReasoningContent: c.reasoningText(choice.Message),
@@ -312,6 +373,17 @@ func (c *Client) parseResponse(raw []byte) (*types.ChatResponse, error) {
 			return nil, err
 		}
 		result.ToolCalls = calls
+	}
+	if result.FinishReason == "stop" || result.FinishReason == "tool_calls" {
+		if rest, dsmlCalls := extractDSMLToolCalls(result.Content, opts); len(dsmlCalls) > 0 {
+			result.Content = rest
+			// A gateway may echo a native call in content. Native calls are
+			// authoritative; recovering the echo would execute it twice.
+			if len(result.ToolCalls) == 0 {
+				result.ToolCalls = dsmlCalls
+				result.FinishReason = "tool_calls"
+			}
+		}
 	}
 	// Classify the cache status even when the vendor omitted the usage block,
 	// so "no counters at all" is still distinguishable from a real miss on the
@@ -342,13 +414,42 @@ func splitThinkTags(content string) (answer, reasoning string) {
 
 func (c *Client) processStream(
 	ctx context.Context, body io.Reader, ch chan<- types.StreamResponse, dumper *api.StreamPacketDumper,
+	opts *api.Options,
 ) {
 	assembler := api.NewStreamAssembler(ctx, c.cfg.Endpoint.Model)
 	reader := api.NewSSEReader(body)
 	var reasoningDetails []json.RawMessage
 	toolIndexes := &streamToolIndex{}
+	dsml := &dsmlFilter{options: opts}
+
+	// flushDSML releases the held-back content and, when it carried DSML tool
+	// calls, merges them into the delta so they land before the finish chunk.
+	flushDSML := func(delta *api.Delta) {
+		reason := delta.FinishReason
+		if reason == "" {
+			reason = assembler.LastFinishReason
+		}
+		rest, calls := dsml.Flush(reason == "stop" || reason == "tool_calls")
+		delta.Content += rest
+		if len(calls) == 0 || len(delta.ToolCalls) > 0 || assembler.ToolCallCount() > 0 {
+			return
+		}
+		logger.Infof(ctx, "[LLM Stream] Recovered %d DSML tool call(s) from content", len(calls))
+		delta.ToolCalls = append(delta.ToolCalls, dsmlToolCallDeltas(calls, dsmlIndexBase+assembler.ToolCallCount())...)
+		if delta.FinishReason == "stop" {
+			delta.FinishReason = "tool_calls"
+		}
+	}
 
 	finish := func(end func(chan<- types.StreamResponse)) {
+		var tail api.Delta
+		flushDSML(&tail)
+		if tail.Content != "" || len(tail.ToolCalls) > 0 {
+			assembler.Process(ch, tail)
+			if len(tail.ToolCalls) > 0 && assembler.LastFinishReason == "stop" {
+				assembler.LastFinishReason = "tool_calls"
+			}
+		}
 		if len(reasoningDetails) > 0 {
 			merged, _ := json.Marshal(reasoningDetails)
 			assembler.ReasoningMetadata = types.ProviderMetadata{metadataReasoningDetails: merged}
@@ -410,7 +511,7 @@ func (c *Client) processStream(
 		choice := env.Choices[0]
 		delta := api.Delta{
 			Reasoning:    c.reasoningText(choice.Delta),
-			Content:      choice.Delta.Content,
+			Content:      dsml.Feed(choice.Delta.Content.Text),
 			FinishReason: choice.FinishReason,
 		}
 		if len(choice.Delta.ReasoningDetails) > 0 {
@@ -435,6 +536,9 @@ func (c *Client) processStream(
 					assembler.SetToolCallMetadata(idx, md)
 				}
 			}
+		}
+		if delta.FinishReason != "" {
+			flushDSML(&delta)
 		}
 		assembler.Process(ch, delta)
 	}
