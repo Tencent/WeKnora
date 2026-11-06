@@ -762,6 +762,10 @@ def _page_chars(
     # rotated dimensions and would discard valid text on cropped/rotated pages.
     try:
         crop_left, crop_bottom, crop_right, crop_top = page.get_cropbox()
+        # Some converters write reversed corners. Compare glyphs against the
+        # normalized bounds, as PageGeometry does for source locators.
+        crop_left, crop_right = min(crop_left, crop_right), max(crop_left, crop_right)
+        crop_bottom, crop_top = min(crop_bottom, crop_top), max(crop_bottom, crop_top)
     except Exception:
         width, height = page.get_size()
         crop_left, crop_bottom, crop_right, crop_top = 0, 0, width, height
