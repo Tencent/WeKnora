@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -48,6 +49,21 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 			continue
 		}
 
+		// A JSON number keeps its literal text when it becomes a string.
+		// Decoding into interface{} would round it through float64 first, so
+		// large identifiers lose digits and precise decimals lose precision.
+		if targetType == "string" {
+			if literal, ok := jsonNumberLiteral(rawVal); ok {
+				converted, err := json.Marshal(literal)
+				if err != nil {
+					return args
+				}
+				argsMap[key] = converted
+				changed = true
+				continue
+			}
+		}
+
 		var val interface{}
 		if err := json.Unmarshal(rawVal, &val); err != nil {
 			continue
@@ -79,6 +95,23 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		return args
 	}
 	return result
+}
+
+// jsonNumberLiteral reports whether raw holds a JSON number and returns its
+// literal text unchanged. Strings, booleans, null, arrays and objects are not
+// numbers and are left to the regular casting path.
+func jsonNumberLiteral(raw json.RawMessage) (string, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return "", false
+	}
+	if c := trimmed[0]; c != '-' && (c < '0' || c > '9') {
+		return "", false
+	}
+	if !json.Valid(trimmed) {
+		return "", false
+	}
+	return string(trimmed), true
 }
 
 // castValue attempts to convert val to the expected targetType.
@@ -152,7 +185,9 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 		}
 
 	case "string":
-		// Non-string values -> string (e.g., number or bool passed as non-string)
+		// Non-string values -> string (e.g., number or bool passed as non-string).
+		// JSON numbers are already quoted from their literal text in CastParams;
+		// the float64 branch is only a fallback for direct callers.
 		switch v := val.(type) {
 		case bool:
 			if v {
