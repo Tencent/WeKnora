@@ -83,6 +83,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
+	page.Slug = normalizeSlug(page.Slug)
 	if page.Slug == "" {
 		return nil, errors.New("wiki page slug is required")
 	}
@@ -100,7 +101,11 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
-	page.OutLinks = s.parseOutLinks(page.Content)
+	outLinks, err := s.parsePageOutLinks(ctx, page)
+	if err != nil {
+		return nil, err
+	}
+	page.OutLinks = outLinks
 	if err := s.applyFolderToPage(ctx, page); err != nil {
 		return nil, err
 	}
@@ -264,10 +269,10 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, err
 	}
 
-	// Outbound links are a pure derivative of content, so they only shift
-	// when content shifts. Re-parse unconditionally to stay consistent with
-	// the stored body.
-	existing.OutLinks = s.parseOutLinks(existing.Content)
+	existing.OutLinks, err = s.parsePageOutLinks(ctx, existing)
+	if err != nil {
+		return nil, err
+	}
 	normalizeWikiHierarchy(existing)
 
 	if contentChanged {
@@ -321,14 +326,18 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	oldOutLinks := existing.OutLinks
 
 	existing.Content = stripWikiInlineChunkCitations(page.Content)
-	existing.OutLinks = s.parseOutLinks(existing.Content)
+	existing.OutLinks, err = s.parsePageOutLinks(ctx, existing)
+	if err != nil {
+		return err
+	}
 	existing.UpdatedAt = time.Now()
 
 	if err := s.repo.UpdateAutoLinkedContent(ctx, existing); err != nil {
 		return fmt.Errorf("update auto-linked content: %w", err)
 	}
 
-	s.syncInLinks(ctx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
+	linkCtx := types.WithWikiPageWriteSnapshot(ctx, nil)
+	s.syncInLinks(linkCtx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
 
 	return nil
 }
@@ -447,6 +456,9 @@ func (s *wikiPageService) RevertPageToVersion(
 // GetPageBySlug retrieves a wiki page by its slug
 func (s *wikiPageService) GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error) {
 	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if normalized := normalizeSlug(slug); errors.Is(err, repository.ErrWikiPageNotFound) && normalized != slug {
+		page, err = s.repo.GetBySlug(ctx, kbID, normalized)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1136,7 +1148,9 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 
 	// Re-parse outbound links and rebuild inbound links
 	for _, p := range pages {
-		p.OutLinks = s.parseOutLinks(p.Content)
+		p.OutLinks = parseOutLinks(p.Content, func(slug string) bool {
+			return pageMap[slug] != nil
+		})
 		for _, target := range p.OutLinks {
 			if tp, exists := pageMap[target]; exists {
 				tp.InLinks = append(tp.InLinks, p.Slug)
@@ -1374,27 +1388,57 @@ func isInvalidWikiSearchQuery(err error) bool {
 
 // --- Internal helpers ---
 
-// parseOutLinks extracts [[wiki-link]] slugs from markdown content
-func (s *wikiPageService) parseOutLinks(content string) types.StringArray {
-	matches := wikiLinkRegex.FindAllStringSubmatch(content, -1)
+func wikiLinkParts(match string) (slug, display string) {
+	slug, display, _ = strings.Cut(match[2:len(match)-2], "|")
+	return strings.TrimSpace(slug), display
+}
+
+func wikiLinkTarget(raw string, exists func(string) bool) string {
+	normalized := normalizeSlug(raw)
+	// Prefer an exact live slug for pages stored before slug normalization.
+	if raw != normalized && exists != nil && exists(raw) {
+		return raw
+	}
+	return normalized
+}
+
+// parseOutLinks extracts and deduplicates wiki links in document order.
+func parseOutLinks(content string, exists func(string) bool) types.StringArray {
 	seen := make(map[string]bool)
 	var links types.StringArray
-
-	for _, match := range matches {
-		if len(match) > 1 {
-			slug := strings.TrimSpace(match[1])
-			// Handle [[slug|display name]] format — slug is the first part
-			if parts := strings.SplitN(slug, "|", 2); len(parts) == 2 {
-				slug = strings.TrimSpace(parts[0])
-			}
-			slug = normalizeSlug(slug)
-			if slug != "" && !seen[slug] {
-				seen[slug] = true
-				links = append(links, slug)
-			}
+	for _, match := range wikiLinkRegex.FindAllString(content, -1) {
+		raw, _ := wikiLinkParts(match)
+		slug := wikiLinkTarget(raw, exists)
+		if slug != "" && !seen[slug] {
+			seen[slug] = true
+			links = append(links, slug)
 		}
 	}
 	return links
+}
+
+func (s *wikiPageService) existingNonCanonicalLinkSlugs(ctx context.Context, kbID, content string) (map[string]bool, error) {
+	var slugs []string
+	seen := make(map[string]bool)
+	for _, match := range wikiLinkRegex.FindAllString(content, -1) {
+		raw, _ := wikiLinkParts(match)
+		if raw != normalizeSlug(raw) && !seen[raw] {
+			slugs = append(slugs, raw)
+			seen[raw] = true
+		}
+	}
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	return s.repo.ExistsSlugs(ctx, kbID, slugs)
+}
+
+func (s *wikiPageService) parsePageOutLinks(ctx context.Context, page *types.WikiPage) (types.StringArray, error) {
+	exact, err := s.existingNonCanonicalLinkSlugs(ctx, page.KnowledgeBaseID, page.Content)
+	if err != nil {
+		return nil, fmt.Errorf("look up legacy wiki link targets: %w", err)
+	}
+	return parseOutLinks(page.Content, func(slug string) bool { return exact[slug] }), nil
 }
 
 // normalizeSlug normalizes a wiki link slug
@@ -1422,13 +1466,8 @@ func slugNamespace(slug string) string {
 func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string) (string, bool)) (string, bool) {
 	changed := false
 	out := wikiLinkRegex.ReplaceAllStringFunc(content, func(match string) string {
-		inner := match[2 : len(match)-2]
-		rawSlug := inner
-		display := ""
-		if parts := strings.SplitN(inner, "|", 2); len(parts) == 2 {
-			rawSlug = parts[0]
-			display = strings.TrimSpace(parts[1])
-		}
+		rawSlug, display := wikiLinkParts(match)
+		display = strings.TrimSpace(display)
 		norm := normalizeSlug(rawSlug)
 		if norm == "" {
 			return match
@@ -1471,10 +1510,42 @@ func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string)
 func (s *wikiPageService) RepairContentLinks(
 	ctx context.Context, kbID, selfSlug, content string,
 ) (string, bool, error) {
-	if strings.TrimSpace(content) == "" {
-		return content, false, nil
+	return s.repairContentLinks(ctx, kbID, selfSlug, content, "")
+}
+
+func (s *wikiPageService) FixBrokenLink(ctx context.Context, kbID, pageSlug, targetSlug string) (bool, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, pageSlug)
+	if err != nil {
+		return false, err
 	}
-	outLinks := s.parseOutLinks(content)
+	content, changed, err := s.repairContentLinks(ctx, kbID, pageSlug, page.Content, targetSlug)
+	if err != nil || !changed {
+		return false, err
+	}
+
+	ctx = types.WithWikiPageWriteSnapshot(ctx, page)
+	page.Content = content
+	if err := s.UpdateAutoLinkedContent(ctx, page); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *wikiPageService) repairContentLinks(
+	ctx context.Context, kbID, selfSlug, content, targetSlug string,
+) (string, bool, error) {
+	exact, err := s.existingNonCanonicalLinkSlugs(ctx, kbID, content)
+	if err != nil {
+		return content, false, err
+	}
+	exactExists := func(slug string) bool { return exact[slug] }
+	outLinks := parseOutLinks(content, exactExists)
+	if targetSlug != "" {
+		if !slices.Contains(outLinks, targetSlug) {
+			return content, false, nil
+		}
+		outLinks = []string{targetSlug}
+	}
 	if len(outLinks) == 0 {
 		return content, false, nil
 	}
@@ -1483,14 +1554,16 @@ func (s *wikiPageService) RepairContentLinks(
 	if err != nil {
 		return content, false, err
 	}
+	dead := make(map[string]bool)
 	deadPrefixes := make(map[string]struct{})
-	for _, l := range outLinks {
-		if l == selfSlug || existMap[l] {
+	for _, slug := range outLinks {
+		if slug == selfSlug || existMap[slug] {
 			continue
 		}
-		deadPrefixes[slugNamespace(l)] = struct{}{}
+		dead[slug] = true
+		deadPrefixes[slugNamespace(slug)] = struct{}{}
 	}
-	if len(deadPrefixes) == 0 {
+	if len(dead) == 0 {
 		return content, false, nil
 	}
 
@@ -1500,28 +1573,25 @@ func (s *wikiPageService) RepairContentLinks(
 	}
 	liveByPrefix := make(map[string]map[string]struct{})
 	var candidateSlugs []string
-	for _, sl := range allSlugs {
-		ns := slugNamespace(sl)
+	for _, slug := range allSlugs {
+		ns := slugNamespace(normalizeSlug(slug))
 		if _, want := deadPrefixes[ns]; !want {
 			continue
 		}
-		set, ok := liveByPrefix[ns]
-		if !ok {
-			set = make(map[string]struct{})
-			liveByPrefix[ns] = set
+		if liveByPrefix[ns] == nil {
+			liveByPrefix[ns] = make(map[string]struct{})
 		}
-		set[sl] = struct{}{}
-		candidateSlugs = append(candidateSlugs, sl)
-	}
-	if len(candidateSlugs) == 0 {
-		return content, false, nil
+		liveByPrefix[ns][slug] = struct{}{}
+		candidateSlugs = append(candidateSlugs, slug)
 	}
 
-	// Build a title -> slug reverse lookup for candidate pages so the
-	// display-text lever (the safest, most precise one) can fire. Bounded to
-	// the relevant namespaces so this stays cheap even on large KBs.
+	// Display text can identify a candidate even when its slug is very different.
 	titleToSlug := make(map[string]string)
-	if lites, lerr := s.repo.ListBySlugs(ctx, kbID, candidateSlugs); lerr == nil {
+	if len(candidateSlugs) > 0 {
+		lites, err := s.repo.ListBySlugs(ctx, kbID, candidateSlugs)
+		if err != nil && targetSlug != "" {
+			return content, false, err
+		}
 		for _, lp := range lites {
 			if lp != nil && lp.Title != "" {
 				titleToSlug[lp.Title] = lp.Slug
@@ -1530,23 +1600,57 @@ func (s *wikiPageService) RepairContentLinks(
 	}
 
 	resolveCache := make(map[string]string)
-	newContent, changed := rewriteDeadWikiLinks(content, func(norm, display string) (string, bool) {
-		if norm == selfSlug || existMap[norm] {
-			return "", false
+	replace := func(match string) string {
+		raw, display := wikiLinkParts(match)
+		slug := wikiLinkTarget(raw, exactExists)
+		if !dead[slug] {
+			return match
 		}
-		key := norm + "\x00" + display
-		if cached, ok := resolveCache[key]; ok {
-			return cached, cached != ""
+		key := slug + "\x00" + strings.TrimSpace(display)
+		resolved, cached := resolveCache[key]
+		if !cached {
+			resolved, _ = resolveDeadSlug(slug, display, liveByPrefix[slugNamespace(slug)], titleToSlug)
+			resolveCache[key] = resolved
 		}
-		resolved, ok := resolveDeadSlug(norm, display, liveByPrefix[slugNamespace(norm)], titleToSlug)
-		if !ok || resolved == norm {
-			resolveCache[key] = ""
-			return "", false
+		if resolved == slug {
+			return match
 		}
-		resolveCache[key] = resolved
-		return resolved, true
+		if resolved != "" {
+			_, label, hasLabel := strings.Cut(match[2:len(match)-2], "|")
+			if hasLabel {
+				return "[[" + resolved + "|" + label + "]]"
+			}
+			return "[[" + resolved + "]]"
+		}
+		if targetSlug == "" {
+			return match
+		}
+		if label := strings.TrimSpace(display); label != "" {
+			return label
+		}
+		return raw
+	}
+	if targetSlug == "" {
+		newContent := wikiLinkRegex.ReplaceAllStringFunc(content, replace)
+		return newContent, newContent != content, nil
+	}
+
+	// Lint can report stale edges from code examples. Only edit links in prose.
+	var out strings.Builder
+	last := 0
+	scanForbiddenSpans(content, func(link span) {
+		match := content[link.start:link.end]
+		if replacement := replace(match); replacement != match {
+			out.WriteString(content[last:link.start])
+			out.WriteString(replacement)
+			last = link.end
+		}
 	})
-	return newContent, changed, nil
+	if last == 0 {
+		return content, false, nil
+	}
+	out.WriteString(content[last:])
+	return out.String(), true, nil
 }
 
 // syncInLinks 只移除新正文中消失的边；对仍存在的边做幂等添加以修复缺失反链。
