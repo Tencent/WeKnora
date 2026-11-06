@@ -510,6 +510,12 @@ func kbStorageBindingChanged(kb *types.KnowledgeBase, backendID, provider string
 func (h *InitializationHandler) applyKBStorageBinding(
 	ctx context.Context, kb *types.KnowledgeBase, kbID string, req *KBModelConfigRequest,
 ) error {
+	// A partial model/config update must not rewrite the storage projection.
+	// The CLI intentionally omits storage fields when changing models.
+	if strings.TrimSpace(req.StorageBackendID) == "" && strings.TrimSpace(req.StorageProvider) == "" {
+		return nil
+	}
+
 	// Bind the concrete storage instance. Provider remains a compatibility
 	// projection for older clients and historical rows.
 	if strings.TrimSpace(req.StorageBackendID) != "" {
