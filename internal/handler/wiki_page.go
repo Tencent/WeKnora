@@ -58,7 +58,12 @@ func decodeWikiPageUpdate(c *gin.Context, req *types.WikiPageUpdateRequest) erro
 	dec := json.NewDecoder(c.Request.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(req); err != nil {
-		return fmt.Errorf("invalid request body: %w; PUT accepts only title, content, summary, page_type, status, aliases and version. source_refs and other stored fields are maintained by wiki ingestion and cannot be updated here", err)
+		return fmt.Errorf(
+			"invalid request body: %w; PUT accepts only title, content, summary, page_type, "+
+				"status, aliases and version. source_refs and other stored fields are maintained "+
+				"by wiki ingestion and cannot be updated here",
+			err,
+		)
 	}
 	// Reject trailing JSON rather than silently applying only the first object.
 	if err := dec.Decode(new(any)); err != io.EOF {
