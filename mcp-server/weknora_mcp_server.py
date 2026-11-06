@@ -15,7 +15,7 @@ import re
 import secrets
 import sys
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Iterator
 
 import urllib3
 import requests
@@ -124,6 +124,29 @@ def _normalize_kb_entries(resp: object) -> list[Dict]:
         elif item.get("id"):
             out.append(item)
     return out
+
+
+def _iter_sse_lines(response: requests.Response) -> Iterator[bytes]:
+    """Split SSE lines without treating a CRLF split across chunks as two breaks."""
+    pending = bytearray()
+    skip_lf = False
+    for chunk in response.iter_content(chunk_size=512):
+        if not chunk:
+            continue
+        if skip_lf and chunk.startswith(b"\n"):
+            chunk = chunk[1:]
+        # Emit bare CR immediately. If the next chunk starts with LF, it
+        # belongs to this same line ending.
+        skip_lf = chunk.endswith(b"\r")
+        for part in chunk.splitlines(keepends=True):
+            if part.endswith((b"\r", b"\n")):
+                pending.extend(part.rstrip(b"\r\n"))
+                yield bytes(pending)
+                pending.clear()
+            else:
+                pending.extend(part)
+    if pending:
+        yield bytes(pending)
 
 
 class WeKnoraClient:
@@ -532,9 +555,8 @@ class WeKnoraClient:
             with response:
                 response.raise_for_status()
                 first_line = True
-                for raw_line in response.iter_lines():
-                    if isinstance(raw_line, bytes):
-                        raw_line = raw_line.decode("utf-8")
+                for line in _iter_sse_lines(response):
+                    raw_line = line.decode("utf-8")
                     if first_line:
                         # SSE ignores exactly one BOM at the start of the stream.
                         raw_line = raw_line.removeprefix("\ufeff")
