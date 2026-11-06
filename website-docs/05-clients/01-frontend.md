@@ -342,7 +342,7 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
 
 `frontend/docker-entrypoint.sh`（运行时配置注入）：
 
-1. 生成 `/usr/share/nginx/html/config.js`，把 `MAX_FILE_SIZE_MB`、`MAX_SKILL_BUNDLE_SIZE_MB` 与 `DEFAULT_LOCALE` 写入 `window.__RUNTIME_CONFIG__` 供前端运行时读取；
+1. 生成 `/usr/share/nginx/html/config.js`，把 `MAX_FILE_SIZE_MB`、`MAX_SKILL_BUNDLE_SIZE_MB`、`DEFAULT_LOCALE` 与 `MCP_BASE_URL` 写入 `window.__RUNTIME_CONFIG__` 供前端运行时读取；
 2. 用 `envsubst` 渲染 nginx 模板；
 3. 前台启动 nginx。
 
@@ -351,6 +351,7 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
 | `MAX_FILE_SIZE_MB` | 整数（MB） | `50` | 全站请求体上限与前端上传大小上限 |
 | `MAX_SKILL_BUNDLE_SIZE_MB` | 整数（MB） | `256` | 只作用于技能 ZIP 上传路由；小于 `MAX_FILE_SIZE_MB` 时抬到该值，最大 512 |
 | `DEFAULT_LOCALE` | 字符串 | 空 | 默认界面语言，仅允许 `zh-CN` / `en-US` / `ru-RU` / `ko-KR` / `ja-JP`，其他值被丢弃 |
+| `MCP_BASE_URL` | URL | 空 | MCP Server 页面展示的对外地址，仅接受 `http(s)://` 且不含引号等特殊字符的值，其他值被丢弃；留空跟随页面域名 |
 | `APP_HOST` | 字符串 | `app` | 后端主机名 |
 | `APP_PORT` | 整数 | `8080` | 后端端口 |
 | `APP_SCHEME` | 字符串 | `http` | 后端协议，远程 HTTPS 后端可设 `https` |
