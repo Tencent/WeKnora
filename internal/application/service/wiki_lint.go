@@ -357,18 +357,11 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 
 		switch issue.Type {
 		case LintIssueBrokenLink:
-			// Replace [[broken-slug]] with plain text so the reference text is
-			// preserved but no longer renders as a dangling wiki link.
 			if issue.TargetSlug == "" {
 				continue
 			}
-			page, err := s.wikiService.GetPageBySlug(ctx, kbID, issue.PageSlug)
-			if err != nil {
-				continue
-			}
-			target := issue.TargetSlug
-			page.Content = strings.ReplaceAll(page.Content, "[["+target+"]]", target)
-			if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err == nil {
+			changed, err := s.wikiService.FixBrokenLink(ctx, kbID, issue.PageSlug, issue.TargetSlug)
+			if err == nil && changed {
 				fixed++
 			}
 

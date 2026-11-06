@@ -277,7 +277,20 @@ func (r *wikiPageRepository) DeleteRevisionsByPage(ctx context.Context, pageID s
 // pages appear as v2 on first view and confuse users who expect `version` to
 // correspond to the number of intentional revisions.
 func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error {
-	result := r.db.WithContext(ctx).
+	db := r.db.WithContext(ctx)
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		return db.Transaction(func(tx *gorm.DB) error {
+			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+				return err
+			}
+			return updateWikiAutoLinkedContent(tx, page)
+		})
+	}
+	return updateWikiAutoLinkedContent(db, page)
+}
+
+func updateWikiAutoLinkedContent(db *gorm.DB, page *types.WikiPage) error {
+	result := db.
 		Model(page).
 		Where("id = ?", page.ID).
 		Updates(map[string]interface{}{

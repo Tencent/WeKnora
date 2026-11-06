@@ -217,6 +217,10 @@ func sortSpans(spans []span) {
 //   - reference link definitions: lines of the form [label]: url ...
 //   - autolinks <url>
 func computeForbiddenSpans(s string) ([]span, map[string]struct{}) {
+	return scanForbiddenSpans(s, nil)
+}
+
+func scanForbiddenSpans(s string, onWikiLink func(span)) ([]span, map[string]struct{}) {
 	spans := make([]span, 0, 8)
 	used := make(map[string]struct{})
 	i := 0
@@ -263,7 +267,11 @@ func computeForbiddenSpans(s string) ([]span, map[string]struct{}) {
 					if slug := extractWikiSlug(inner); slug != "" {
 						used[slug] = struct{}{}
 					}
-					spans = append(spans, span{start: i, end: end})
+					link := span{start: i, end: end}
+					spans = append(spans, link)
+					if onWikiLink != nil {
+						onWikiLink(link)
+					}
 					i = end
 					continue
 				}
