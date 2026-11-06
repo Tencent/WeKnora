@@ -12,6 +12,7 @@ import {
 import { updateMyPreferences } from '@/api/auth'
 import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
+import { unsupportedGalleryFormat } from './galleryImageFormat'
 import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
 import GallerySourcePicker from './GallerySourcePicker.vue'
 
@@ -108,6 +109,7 @@ const activeSearchIds = computed(() => {
 // ---------------------------------------------------------------------------
 const thumbUrls = ref<Record<string, string>>({})
 const thumbBroken = ref<Record<string, boolean>>({})
+const imageFormats = ref<Record<string, string>>({})
 // Object URLs keyed by the raw storage URL they were fetched for, so a
 // thumbnail and the viewer share one blob and a reload reuses what is already
 // on screen instead of fetching (and leaking) a fresh copy.
@@ -128,6 +130,7 @@ function releaseBlobs(keep: Set<string> = new Set()): void {
     if (keep.has(raw)) continue
     URL.revokeObjectURL(objectUrl)
     blobByRawUrl.delete(raw)
+    delete imageFormats.value[raw]
   }
 }
 
@@ -141,6 +144,7 @@ async function fetchBlobUrl(rawUrl: string, signal: AbortSignal): Promise<string
     // Cancellation can race with a completed body read. Never create a URL
     // after this query's cleanup, even if the response ignored the abort.
     if (signal.aborted) return rawUrl
+    imageFormats.value[rawUrl] = unsupportedGalleryFormat(blob.type, rawUrl)
     const objectUrl = URL.createObjectURL(blob)
     blobByRawUrl.set(rawUrl, objectUrl)
     return objectUrl
@@ -162,6 +166,11 @@ function resolveImageSrc(rawUrl: string): Promise<string> {
     inflight.set(rawUrl, pending)
   }
   return pending
+}
+
+function imageError(img: ImageAsset): string {
+  const format = imageFormats.value[img.url] ?? unsupportedGalleryFormat('', img.url)
+  return format ? t(`${NS}.unsupportedFormat`, { format }) : t(`${NS}.imageLoadError`)
 }
 
 async function resolveThumbnails(imgs: ImageAsset[], token: number) {
@@ -918,7 +927,7 @@ watch(
               />
               <div v-else-if="thumbBroken[img.id]" class="ig-card__broken">
                 <t-icon name="image-error" size="20px" />
-                <span>{{ t(`${NS}.imageLoadError`) }}</span>
+                <span>{{ imageError(img) }}</span>
               </div>
               <span v-if="!img.is_enabled" class="ig-card__badge">
                 {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
@@ -955,6 +964,7 @@ watch(
       :loading="loading"
       :thumb-urls="thumbUrls"
       :resolve-src="resolveImageSrc"
+      :image-error="imageError"
       :attr-rows="attrRows"
       :can-edit="props.canEdit"
       @select="(i: number) => (viewerIndex = i)"
