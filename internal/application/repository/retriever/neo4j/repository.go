@@ -142,11 +142,12 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id})-[r]-(m:` + labelExpr + ` {kg: $knowledge_id}) RETURN r",
 					"DELETE r",
 					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
+				) YIELD failedBatches, failedOperations, wasTerminated
+				RETURN failedBatches, failedOperations, wasTerminated
         	`
-			if _, err := tx.Run(ctx, deleteRelsQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
-				return nil, fmt.Errorf("failed to delete relationships: %v", err)
+			params := map[string]any{"knowledge_id": namespace.Knowledge}
+			if err := runGraphDeleteBatches(ctx, tx, deleteRelsQuery, params); err != nil {
+				return nil, fmt.Errorf("failed to delete relationships: %w", err)
 			}
 
 			deleteNodesQuery := `
@@ -154,11 +155,11 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id}) RETURN n",
 					"DELETE n",
 					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
+				) YIELD failedBatches, failedOperations, wasTerminated
+				RETURN failedBatches, failedOperations, wasTerminated
         	`
-			if _, err := tx.Run(ctx, deleteNodesQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
-				return nil, fmt.Errorf("failed to delete nodes: %v", err)
+			if err := runGraphDeleteBatches(ctx, tx, deleteNodesQuery, params); err != nil {
+				return nil, fmt.Errorf("failed to delete nodes: %w", err)
 			}
 		}
 		return nil, nil
@@ -167,6 +168,28 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 		return err
 	}
 	logger.Infof(ctx, "delete graph result: %v", result)
+	return nil
+}
+
+func runGraphDeleteBatches(
+	ctx context.Context, tx neo4j.ManagedTransaction, query string, params map[string]any,
+) error {
+	result, err := tx.Run(ctx, query, params)
+	if err != nil {
+		return err
+	}
+	// APOC can return a result row even when one of its inner batches failed.
+	record, err := result.Single(ctx)
+	if err != nil {
+		return err
+	}
+	failedBatches, _ := record.Get("failedBatches")
+	failedOperations, _ := record.Get("failedOperations")
+	terminated, _ := record.Get("wasTerminated")
+	if failedBatches != int64(0) || failedOperations != int64(0) || terminated != false {
+		return fmt.Errorf("incomplete APOC deletion (failed batches: %v, failed operations: %v, terminated: %v)",
+			failedBatches, failedOperations, terminated)
+	}
 	return nil
 }
 
