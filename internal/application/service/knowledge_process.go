@@ -504,12 +504,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// 删除知识图谱数据（如果存在）
+	// 删除知识图谱数据（如果存在）。失败时排队独立重试，避免旧图谱节点
+	// 在后续重建中继续被检索到，同时不阻断本次解析。
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
-	}
+	s.cleanupGraphData(ctx, tenantInfo.ID, []types.NameSpace{namespace})
 
 	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
 
@@ -3794,17 +3792,15 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	}
 	ctx = withAttempt(ctx, attempt)
 
-	// Cleanup old resources (indexes, chunks, graph) for update operations
+	// Cleanup old resources (indexes, chunks, graph) for update operations.
+	// Graph cleanup failures are independently retried; remaining failures are
+	// returned so asynq retries instead of acking a half-cleaned document.
 	if payload.NeedCleanup {
 		if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"knowledge_id": payload.KnowledgeID,
 			})
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return nil
+			return fmt.Errorf("failed to cleanup old resources for %s: %w", knowledge.ID, err)
 		}
 	}
 

@@ -3,7 +3,9 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -25,7 +27,46 @@ const (
 	// graphSearchMaxRows bounds returned (node, relation) rows as a backstop
 	// for hub entities whose neighbourhood alone is huge.
 	graphSearchMaxRows = 2000
+	// defaultGraphCleanupTimeout bounds one namespace's cleanup so a slow or
+	// unreachable Neo4j cannot hold a delete/rebuild task open indefinitely.
+	// Operators can override it with NEO4J_CLEANUP_TIMEOUT (e.g. "5m").
+	defaultGraphCleanupTimeout = 2 * time.Minute
 )
+
+// graphCleanupTimeout returns the per-namespace graph cleanup budget.
+func graphCleanupTimeout() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("NEO4J_CLEANUP_TIMEOUT")); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultGraphCleanupTimeout
+}
+
+// graphCleanupQueries builds the two APOC batch statements used to remove one
+// document's graph. Both statements run in their own auto-commit transaction
+// (see DelGraph), so APOC commits each batch instead of piling every batch
+// into one long managed transaction. parallel:false avoids lock conflicts
+// between relationship and node batches on the same label.
+func graphCleanupQueries(labelExpr string) (deleteRelsQuery, deleteNodesQuery string) {
+	deleteRelsQuery = `
+		CALL apoc.periodic.iterate(
+			"MATCH (n:` + labelExpr + ` {kg: $knowledge_id})-[r]-(m:` + labelExpr + ` {kg: $knowledge_id}) RETURN r",
+			"DELETE r",
+			{batchSize: 1000, parallel: false, params: {knowledge_id: $knowledge_id}}
+		) YIELD batches, total
+		RETURN total
+	`
+	deleteNodesQuery = `
+		CALL apoc.periodic.iterate(
+			"MATCH (n:` + labelExpr + ` {kg: $knowledge_id}) RETURN n",
+			"DELETE n",
+			{batchSize: 1000, parallel: false, params: {knowledge_id: $knowledge_id}}
+		) YIELD batches, total
+		RETURN total
+	`
+	return deleteRelsQuery, deleteNodesQuery
+}
 
 // NewNeo4jRepository creates a new Neo4j repository
 func NewNeo4jRepository(driver neo4j.Driver) interfaces.RetrieveGraphRepository {
@@ -124,49 +165,55 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 	return nil
 }
 
-// DelGraph deletes a graph from the Neo4j repository
+// DelGraph deletes a graph from the Neo4j repository.
+//
+// Each APOC statement runs as its own auto-commit transaction instead of
+// inside session.ExecuteWrite. The previous single managed transaction kept
+// every batch open until the whole delete finished; on a busy or restarting
+// Neo4j it hit the driver's 30s MaxTransactionRetryTime and surfaced as
+// TransactionExecutionLimit from knowledge delete/rebuild (#5220). Callers
+// retry failed cleanups asynchronously, so a transient connection failure is
+// no longer turned into a permanently failed document operation.
 func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameSpace) error {
 	if n.driver == nil {
 		logger.Warnf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil
 	}
+	if len(namespaces) == 0 {
+		return nil
+	}
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 
-	result, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		for _, namespace := range namespaces {
-			labelExpr := n.Label(namespace)
-
-			deleteRelsQuery := `
-				CALL apoc.periodic.iterate(
-					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id})-[r]-(m:` + labelExpr + ` {kg: $knowledge_id}) RETURN r",
-					"DELETE r",
-					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
-        	`
-			if _, err := tx.Run(ctx, deleteRelsQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
-				return nil, fmt.Errorf("failed to delete relationships: %v", err)
+	timeout := graphCleanupTimeout()
+	for _, namespace := range namespaces {
+		cleanupCtx, cancel := context.WithTimeout(ctx, timeout)
+		deleteRelsQuery, deleteNodesQuery := graphCleanupQueries(n.Label(namespace))
+		params := map[string]interface{}{"knowledge_id": namespace.Knowledge}
+		steps := []struct {
+			name   string
+			cypher string
+		}{
+			{name: "relationships", cypher: deleteRelsQuery},
+			{name: "nodes", cypher: deleteNodesQuery},
+		}
+		for _, step := range steps {
+			result, err := session.Run(cleanupCtx, step.cypher, params)
+			if err != nil {
+				cancel()
+				return fmt.Errorf("failed to delete graph %s for knowledge %s (kb %s): %w",
+					step.name, namespace.Knowledge, namespace.KnowledgeBase, err)
 			}
-
-			deleteNodesQuery := `
-				CALL apoc.periodic.iterate(
-					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id}) RETURN n",
-					"DELETE n",
-					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
-        	`
-			if _, err := tx.Run(ctx, deleteNodesQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
-				return nil, fmt.Errorf("failed to delete nodes: %v", err)
+			// APOC only finishes its batches once the result is consumed.
+			if _, err := result.Consume(cleanupCtx); err != nil {
+				cancel()
+				return fmt.Errorf("failed to finish deleting graph %s for knowledge %s (kb %s): %w",
+					step.name, namespace.Knowledge, namespace.KnowledgeBase, err)
 			}
 		}
-		return nil, nil
-	})
-	if err != nil {
-		return err
+		cancel()
 	}
-	logger.Infof(ctx, "delete graph result: %v", result)
+	logger.Infof(ctx, "deleted graph data for %d namespace(s)", len(namespaces))
 	return nil
 }
 

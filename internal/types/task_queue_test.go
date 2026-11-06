@@ -82,7 +82,7 @@ func TestEveryAsynqTaskTypeHasADeclaredQueue(t *testing.T) {
 		TypeChunkExtract, TypeDocumentProcess, TypeFAQImport,
 		TypeQuestionGeneration, TypeSummaryGeneration, TypeKBClone,
 		TypeIndexDelete, TypeKBDelete, TypeKnowledgeListDelete,
-		TypeKnowledgeListReparse, TypeKnowledgeMove, TypeDataTableSummary,
+		TypeKnowledgeListReparse, TypeKnowledgeMove, TypeGraphCleanup, TypeDataTableSummary,
 		TypeImageMultimodal, TypeKnowledgePostProcess, TypeKnowledgeAutoTag, TypeKnowledgeBaseProfile,
 		TypeManualProcess,
 		TypeDataSourceSync, TypeWikiIngest, TypeWikiFinalize, TypeTemporaryDocumentProcess,

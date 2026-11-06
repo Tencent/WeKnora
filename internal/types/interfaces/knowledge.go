@@ -224,6 +224,9 @@ type KnowledgeService interface {
 	ProcessKnowledgeMove(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeListDelete handles Asynq knowledge list delete tasks
 	ProcessKnowledgeListDelete(ctx context.Context, t *asynq.Task) error
+	// ProcessGraphCleanup retries Neo4j graph cleanup independently of the
+	// delete/rebuild operation that scheduled it.
+	ProcessGraphCleanup(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks
 	ProcessKnowledgeListReparse(ctx context.Context, t *asynq.Task) error
 	// GetKBCloneProgress retrieves the progress of a knowledge base clone task
