@@ -378,6 +378,40 @@
               <t-checkbox v-model="config.paddleocr_vl_use_chart_recognition">{{ $t('settings.parser.chartRecognition') }}</t-checkbox>
             </div>
           </div>
+          <div class="form-item">
+            <div class="header-rows__head">
+              <label class="form-label" style="margin-bottom: 0;">{{ $t('settings.parser.gatewayHeadersLabel') }}</label>
+              <t-button variant="text" size="small" theme="primary" @click="addPaddleHeader">
+                {{ $t('settings.parser.gatewayHeadersAdd') }}
+              </t-button>
+            </div>
+            <p class="form-desc">{{ $t('settings.parser.gatewayHeadersHint') }}</p>
+            <div v-if="paddleHeaders.length > 0" class="header-rows">
+              <div v-for="(row, idx) in paddleHeaders" :key="idx" class="header-row">
+                <t-input
+                  v-model="row.key"
+                  class="header-row__key"
+                  :placeholder="$t('settings.parser.gatewayHeadersKeyPlaceholder')"
+                />
+                <t-input
+                  v-model="row.value"
+                  class="header-row__value"
+                  type="password"
+                  :placeholder="$t('settings.parser.gatewayHeadersValuePlaceholder')"
+                />
+                <t-button
+                  variant="text"
+                  shape="square"
+                  size="small"
+                  class="header-row__remove"
+                  :aria-label="$t('common.delete')"
+                  @click="removePaddleHeader(idx)"
+                >
+                  <t-icon name="close" />
+                </t-button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- Section 3 — paddleocr_vl_cloud 云 API 配置 -->
@@ -487,6 +521,27 @@ const loading = ref(true)
 const error = ref('')
 
 const config = ref<ParserEngineConfig>({ ...DEFAULT_PARSER_CONFIG })
+/** 自建 PaddleOCR-VL 服务前的网关鉴权请求头，按行编辑后再折叠成对象提交 */
+const paddleHeaders = ref<Array<{ key: string; value: string }>>([])
+
+function addPaddleHeader() {
+  paddleHeaders.value.push({ key: '', value: '' })
+}
+
+function removePaddleHeader(idx: number) {
+  paddleHeaders.value.splice(idx, 1)
+}
+
+function paddleHeadersToObject(): Record<string, string> | undefined {
+  const headers: Record<string, string> = {}
+  for (const row of paddleHeaders.value) {
+    const key = row.key.trim()
+    if (!key) continue
+    headers[key] = row.value.trim()
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined
+}
+
 const saving = ref(false)
 const saveMessage = ref('')
 const saveSuccess = ref(false)
@@ -620,8 +675,14 @@ async function loadConfig() {
       paddleocr_vl_cloud_use_seal_recognition: data?.paddleocr_vl_cloud_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_seal_recognition ?? true,
       paddleocr_vl_cloud_use_chart_recognition: data?.paddleocr_vl_cloud_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_chart_recognition ?? false,
     }
+    // 保留服务端返回的脱敏占位符（***），保存时按同名 header 合并回真实值
+    paddleHeaders.value = Object.entries(data?.paddleocr_vl_headers ?? {}).map(([key, value]) => ({
+      key,
+      value: String(value ?? ''),
+    }))
   } catch {
     config.value = { ...DEFAULT_PARSER_CONFIG }
+    paddleHeaders.value = []
   }
 }
 
@@ -657,6 +718,7 @@ function buildConfigPayload(): ParserEngineConfig {
     paddleocr_vl_endpoint: config.value.paddleocr_vl_endpoint?.trim() ?? '',
     paddleocr_vl_use_seal_recognition: config.value.paddleocr_vl_use_seal_recognition,
     paddleocr_vl_use_chart_recognition: config.value.paddleocr_vl_use_chart_recognition,
+    paddleocr_vl_headers: paddleHeadersToObject(),
     paddleocr_vl_cloud_token: config.value.paddleocr_vl_cloud_token?.trim() ?? '',
     paddleocr_vl_cloud_model: config.value.paddleocr_vl_cloud_model?.trim() ?? '',
     paddleocr_vl_cloud_use_seal_recognition: config.value.paddleocr_vl_cloud_use_seal_recognition,
@@ -947,6 +1009,41 @@ onMounted(loadAll)
 :deep(.t-input-number) {
   width: 100%;
   font-size: var(--app-text-md);
+}
+
+// ---- 网关请求头（paddleocr_vl 自建服务） ----
+// 与 ModelEditorDialog 的自定义 Header 一致：名称 + 值 + 删除按钮一行
+.header-rows__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.header-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .header-row__key {
+    flex: 0 0 42%;
+  }
+
+  .header-row__value {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .header-row__remove {
+    flex: 0 0 auto;
+  }
 }
 
 :deep(.t-checkbox) {

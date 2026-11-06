@@ -8075,6 +8075,11 @@ export default {
       mineruLegacySectionHint: 'MinerU 4.0에서 아래 요청 파라미터가 제거되어 4.0 이상 서버에서는 무시됩니다. VLM 서버는 MinerU 쪽에서 설정하세요.',
       paddleocrVlEndpointPlaceholder: '예: http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'PaddleOCR-VL 전체 서비스(pipeline) 주소를 입력하세요. /layout-parsing 접미사는 불필요합니다',
+      gatewayHeadersLabel: '게이트웨이 헤더',
+      gatewayHeadersHint: '자체 호스팅 서비스 앞단 게이트웨이 인증 등에 사용할 HTTP 헤더를 모든 파싱 요청에 추가합니다. 값은 마스킹되어 표시되며 수정하지 않으면 유지됩니다',
+      gatewayHeadersAdd: '헤더 추가',
+      gatewayHeadersKeyPlaceholder: '헤더 이름(예: X-API-Key)',
+      gatewayHeadersValuePlaceholder: '헤더 값',
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token'
     },
     weknoraCloud: {
