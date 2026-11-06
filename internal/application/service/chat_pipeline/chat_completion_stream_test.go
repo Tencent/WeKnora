@@ -298,7 +298,8 @@ func TestStreamDoneMarkerCarriesChatModelID(t *testing.T) {
 	chatManage.ChatModelID = "model-effective"
 	chatManage.EventBus = bus
 	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
-	require.Nil(t, plugin.OnEvent(context.Background(), types.CHAT_COMPLETION_STREAM, chatManage, func() *PluginError { return nil }))
+	next := func() *PluginError { return nil }
+	require.Nil(t, plugin.OnEvent(context.Background(), types.CHAT_COMPLETION_STREAM, chatManage, next))
 
 	require.Eventually(t, func() bool {
 		bus.mu.Lock()

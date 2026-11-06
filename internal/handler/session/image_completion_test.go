@@ -136,10 +136,10 @@ func TestSharedImageCompletionWaitsForPersistedReferences(t *testing.T) {
 						require.Zero(t, completed, "completion must not escape while the database write is pending")
 					}
 					answer := "![host image](" + image + ")"
-				if quick {
-					message.Content = answer
-					h.completeQuickAnswerTurn(saveCtx, streamCtx, "", "", "")
-				} else {
+					if quick {
+						message.Content = answer
+						h.completeQuickAnswerTurn(saveCtx, streamCtx, "", "", "")
+					} else {
 						require.NoError(t, bus.Emit(runCtx, event.Event{
 							Type: event.EventAgentComplete,
 							Data: event.AgentCompleteData{MessageID: "m", FinalAnswer: answer},
