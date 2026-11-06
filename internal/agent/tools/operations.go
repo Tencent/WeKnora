@@ -71,7 +71,8 @@ const (
 	approvalPolicyAutoWrite = "Operations with risk write run right away, except skill installs; destructive " +
 		"ones and skill installs ask the user to confirm before they run."
 	approvalPolicyReadOnly = "The user set the assistant to read-only, so only read and probe operations can run. " +
-		"If they ask for a change, say it is off and that they can allow changes in the assistant settings."
+		"If they ask for a change, say it is off and that they can allow changes with the execution permission " +
+		"selector below the chat input."
 )
 
 // withheldReason tells the model, and through it the user, why an operation
@@ -79,7 +80,8 @@ const (
 func withheldReason(w operations.Withholding, access operations.Access) string {
 	switch {
 	case w.ReadOnly:
-		return "The user set the assistant to read-only; they can allow changes in the assistant settings."
+		return "The user set the assistant to read-only; they can allow changes with the execution permission " +
+			"selector below the chat input."
 	case w.SystemAdmin:
 		return "Requires system administrator permission; " +
 			"workspace owner/admin roles and cross-workspace access do not grant it."
