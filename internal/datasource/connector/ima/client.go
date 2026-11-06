@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -37,6 +39,10 @@ const (
 	// maxJSONResponseBytes bounds every API response body. Listings and document
 	// payloads are small; a larger body means a broken or hostile server.
 	maxJSONResponseBytes = 16 << 20
+
+	// Longer Retry-After hints end the request instead of retrying too early
+	// or tying up the sync worker for an unbounded period.
+	maxRateLimitWait = 30 * time.Second
 )
 
 // client wraps the IMA OpenAPI. It is safe for concurrent use.
@@ -179,22 +185,34 @@ func (c *client) callAPIAt(
 		bodyPreview := truncate(string(respBody), 500)
 		logger.Infof(ctx, "[IMA] POST %s → status=%d bodyLen=%d", label, resp.StatusCode, len(respBody))
 
-		// HTTP-level auth failures: surface as ErrInvalidCredentials.
+		ok := resp.StatusCode >= 200 && resp.StatusCode < 300
+		var env apiEnvelope
+		var decodeErr error
+		if ok || resp.StatusCode == http.StatusForbidden {
+			decodeErr = json.Unmarshal(respBody, &env)
+		}
+
+		// IMA can report throttling as a business code in a 403 or 2xx
+		// response. Classify it before treating a 403 as an auth failure.
+		code := env.statusCode()
+		if resp.StatusCode == http.StatusTooManyRequests || (decodeErr == nil && (code == 110021 || code == 200001)) {
+			lastErr = fmt.Errorf("ima rate limited: status=%d body=%s", resp.StatusCode, bodyPreview)
+			if attempt == maxRetries {
+				return lastErr
+			}
+			wait := rateLimitDelay(resp.Header.Get("Retry-After"), backoff[attempt])
+			if wait > maxRateLimitWait {
+				return lastErr
+			}
+			if sErr := sleepCtx(ctx, wait); sErr != nil {
+				return sErr
+			}
+			continue
+		}
+
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return fmt.Errorf("%w: status=%d body=%s",
 				datasource.ErrInvalidCredentials, resp.StatusCode, bodyPreview)
-		}
-
-		if resp.StatusCode == http.StatusTooManyRequests {
-			wait := backoff[minInt(attempt, len(backoff)-1)]
-			lastErr = fmt.Errorf("ima rate limited: status=429 body=%s", bodyPreview)
-			if attempt < maxRetries {
-				if sErr := sleepCtx(ctx, wait); sErr != nil {
-					return sErr
-				}
-				continue
-			}
-			return lastErr
 		}
 
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
@@ -208,32 +226,24 @@ func (c *client) callAPIAt(
 			return lastErr
 		}
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if !ok {
 			return fmt.Errorf("ima api http error: status=%d body=%s", resp.StatusCode, bodyPreview)
 		}
 
-		var env apiEnvelope
-		if err := json.Unmarshal(respBody, &env); err != nil {
-			return fmt.Errorf("decode envelope: %w", err)
+		if decodeErr != nil {
+			return fmt.Errorf("decode envelope: %w", decodeErr)
 		}
 
 		// Business-level errors.
 		// 110030 (无权限) is mapped to ErrInvalidCredentials so the service marks
 		// the source in `error` state and stops scheduling until re-authenticated.
-		// 110021 (限频) is retried. Everything else — including 110001 (参数非法),
+		// Everything else — including 110001 (参数非法),
 		// which is a bug on our side rather than a credential problem — surfaces
 		// verbatim so the user sees IMA's own message.
-		if code := env.statusCode(); code != 0 {
+		if code != 0 {
 			if code == 110030 {
 				return fmt.Errorf("%w: ima code=%d msg=%s",
 					datasource.ErrInvalidCredentials, code, env.message())
-			}
-			if code == 110021 && attempt < maxRetries {
-				lastErr = fmt.Errorf("ima rate limited: code=%d msg=%s", code, env.message())
-				if sErr := sleepCtx(ctx, backoff[minInt(attempt, len(backoff)-1)]); sErr != nil {
-					return sErr
-				}
-				continue
 			}
 			return fmt.Errorf("ima api error: code=%d msg=%s", code, env.message())
 		}
@@ -434,9 +444,18 @@ func redact(t string) string {
 	return t[:6] + "..." + t[len(t)-4:]
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
+func rateLimitDelay(header string, fallback time.Duration) time.Duration {
+	header = strings.TrimSpace(header)
+	if seconds, err := strconv.ParseUint(header, 10, 64); err == nil {
+		if seconds > uint64(maxRateLimitWait/time.Second) {
+			return maxRateLimitWait + time.Second
+		}
+		return time.Duration(seconds) * time.Second
+	} else if errors.Is(err, strconv.ErrRange) {
+		return maxRateLimitWait + time.Second
 	}
-	return b
+	if retryAt, err := http.ParseTime(header); err == nil {
+		return max(0, time.Until(retryAt))
+	}
+	return fallback
 }
