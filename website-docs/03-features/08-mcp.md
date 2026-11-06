@@ -89,7 +89,7 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 `ask` 是同步调用，服务端时限默认 4 分钟，可用 `WEKNORA_MCP_ASK_TIMEOUT` 调整（Go duration，如 `10m`，也接受纯秒数，如 `600`）。客户端在请求 `_meta.progressToken` 中提供 token 后，服务端会立即发送进度通知，并在运行期间约每 15 秒发送一次 `notifications/progress`；不提供 token 时不发通知。进度通知是尽力发送，不能替代客户端或反向代理自身的超时配置；超时值只控制 WeKnora 服务端等待本次问答的时长。
 
-使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。
+使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。若 MCP 对外地址与管理端域名不同（例如管理端位于额外认证之后、MCP 走独立域名），在 frontend 容器设置 `MCP_BASE_URL`，页面展示的地址和客户端配置会改用该地址。
 
 <Screenshot
   src="/screenshots/mcp-server-endpoint.png"
