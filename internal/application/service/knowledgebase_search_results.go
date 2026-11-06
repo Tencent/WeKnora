@@ -10,9 +10,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// processSearchResults handles the processing of search results, optimizing database queries.
+// processSearchResults hydrates up to maxPrimary eligible index hits and their context.
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
+	maxPrimary int,
 	skipEnrichment bool,
 ) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
@@ -21,15 +22,41 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	// Collect all knowledge and chunk IDs, track scores and match info
-	index := s.buildChunkIndex(chunks)
+	knowledgeIDs := make([]string, 0, len(chunks))
+	seen := make(map[string]bool, len(chunks))
+	for _, chunk := range chunks {
+		if !seen[chunk.KnowledgeID] {
+			seen[chunk.KnowledgeID] = true
+			knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
+		}
+	}
 
 	// Batch fetch knowledge data (include shared KB so cross-tenant retrieval works)
-	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(index.knowledgeIDs))
-	knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, index.knowledgeIDs)
+	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(knowledgeIDs))
+	knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return nil, err
 	}
+
+	// Cancellation leaves partial index entries on disk. Use the current
+	// document state for both primary hits and enrichment, before cutting
+	// the candidate list so a cancelled hit cannot occupy a result slot.
+	primary := make([]*types.IndexWithScore, 0, min(len(chunks), maxPrimary))
+	primaryKnowledge := make(map[string]*types.Knowledge)
+	for _, chunk := range chunks {
+		if len(primary) == maxPrimary {
+			break
+		}
+		if knowledge := knowledgeMap[chunk.KnowledgeID]; knowledge != nil &&
+			knowledge.ParseStatus != types.ParseStatusCancelled {
+			primary = append(primary, chunk)
+			primaryKnowledge[chunk.KnowledgeID] = knowledge
+		}
+	}
+	if len(primary) == 0 {
+		return nil, nil
+	}
+	index := s.buildChunkIndex(primary)
 
 	// Batch fetch chunks (include shared KB chunks)
 	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(index.chunkIDs))
@@ -82,7 +109,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	}
 
 	// Build final search results
-	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+	searchResults := s.assembleSearchResults(ctx, primary, chunkMap, primaryKnowledge, index, skipEnrichment)
 
 	// Results can come from org-shared KBs owned by another workspace; the
 	// chunks above were already permission checked, so look up their image
@@ -95,7 +122,6 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 // chunkIndex holds pre-computed lookup structures for processing search results.
 type chunkIndex struct {
-	knowledgeIDs    []string
 	chunkIDs        []string
 	scores          map[string]float64
 	vectorScores    map[string]float64
@@ -104,7 +130,7 @@ type chunkIndex struct {
 	processedIDs    map[string]bool // tracks all IDs (chunk + enrichment) to avoid duplicates
 }
 
-// buildChunkIndex collects knowledge/chunk IDs and builds score/matchType maps
+// buildChunkIndex collects chunk IDs and builds score/matchType maps
 // from the raw retrieval results.
 func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *chunkIndex {
 	idx := &chunkIndex{
@@ -115,12 +141,7 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		processedIDs:    make(map[string]bool, len(chunks)*2),
 	}
 
-	processedKnowledgeIDs := make(map[string]bool)
 	for _, chunk := range chunks {
-		if !processedKnowledgeIDs[chunk.KnowledgeID] {
-			idx.knowledgeIDs = append(idx.knowledgeIDs, chunk.KnowledgeID)
-			processedKnowledgeIDs[chunk.KnowledgeID] = true
-		}
 		idx.chunkIDs = append(idx.chunkIDs, chunk.ChunkID)
 		idx.scores[chunk.ChunkID] = chunk.Score
 		idx.vectorScores[chunk.ChunkID] = chunk.VectorScore

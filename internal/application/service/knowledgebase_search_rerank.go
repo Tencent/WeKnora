@@ -127,8 +127,7 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 		diag.Outcome = types.RerankOutcomeNoCandidates
 		return out, nil
 	}
-	pool := chunks[:min(len(chunks), max(topK, types.DefaultRetrievalTopK))]
-	candidates, err := s.processSearchResults(ctx, pool, true)
+	candidates, err := s.processSearchResults(ctx, chunks, max(topK, types.DefaultRetrievalTopK), true)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +143,7 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 		out.Results = final
 		return out, nil
 	}
-	out.Results, err = s.enrichRerankedResults(ctx, pool, final)
+	out.Results, err = s.enrichRerankedResults(ctx, chunks, final)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +222,7 @@ func (s *knowledgeBaseService) enrichRerankedResults(
 		rerankedByID[r.ID] = r
 	}
 
-	enriched, err := s.processSearchResults(ctx, primary, false)
+	enriched, err := s.processSearchResults(ctx, primary, len(primary), false)
 	if err != nil {
 		return nil, err
 	}
