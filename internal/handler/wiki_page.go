@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,28 +23,85 @@ import (
 
 // WikiPageHandler handles HTTP requests for wiki page operations
 type WikiPageHandler struct {
-	wikiService   interfaces.WikiPageService
-	kbService     interfaces.KnowledgeBaseService
-	lintService   *service.WikiLintService
-	auditService  interfaces.AuditLogService
-	memoryService interfaces.MemoryService
+	wikiService      interfaces.WikiPageService
+	kbService        interfaces.KnowledgeBaseService
+	knowledgeService interfaces.KnowledgeService
+	lintService      *service.WikiLintService
+	auditService     interfaces.AuditLogService
+	memoryService    interfaces.MemoryService
 }
 
 // NewWikiPageHandler creates a new wiki page handler
 func NewWikiPageHandler(
 	wikiService interfaces.WikiPageService,
 	kbService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
 	lintService *service.WikiLintService,
 	auditService interfaces.AuditLogService,
 	memoryService interfaces.MemoryService,
 ) *WikiPageHandler {
 	return &WikiPageHandler{
-		wikiService:   wikiService,
-		kbService:     kbService,
-		lintService:   lintService,
-		auditService:  auditService,
-		memoryService: memoryService,
+		wikiService:      wikiService,
+		kbService:        kbService,
+		knowledgeService: knowledgeService,
+		lintService:      lintService,
+		auditService:     auditService,
+		memoryService:    memoryService,
 	}
+}
+
+// decodeWikiPageUpdate binds the strict PUT payload. The update DTO is a
+// whitelist; encoding/json's default behaviour of ignoring unknown fields used
+// to turn a body carrying source_refs into a 200 with no change at all, which
+// looked like a successful edit to API clients (issue #5188).
+func decodeWikiPageUpdate(c *gin.Context, req *types.WikiPageUpdateRequest) error {
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(req); err != nil {
+		return fmt.Errorf("invalid request body: %w; PUT accepts only title, content, summary, page_type, status, aliases and version. source_refs and other stored fields are maintained by wiki ingestion and cannot be updated here", err)
+	}
+	// Reject trailing JSON rather than silently applying only the first object.
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return stderrors.New("invalid request body: expected a single JSON object")
+	}
+	return nil
+}
+
+// validateCreateSourceRefs resolves client-supplied source_refs against server
+// data. The create endpoint binds a full WikiPage, so an unvalidated ref could
+// point at a nonexistent document or one in another knowledge base. Titles are
+// rebuilt from the knowledge record, matching the Agent wiki tools' resolution.
+func (h *WikiPageHandler) validateCreateSourceRefs(
+	ctx context.Context, kbID string, refs types.StringArray,
+) (types.StringArray, error) {
+	if h.knowledgeService == nil {
+		return nil, stderrors.New("source_refs validation is unavailable")
+	}
+	resolved := make(types.StringArray, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		knowledgeID, _ := types.ParseWikiSourceRef(ref)
+		if knowledgeID == "" {
+			return nil, fmt.Errorf("invalid source_refs entry %q: expected a knowledge ID", ref)
+		}
+		if _, ok := seen[knowledgeID]; ok {
+			continue
+		}
+		seen[knowledgeID] = struct{}{}
+		knowledge, err := h.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve source document %q: %w", knowledgeID, err)
+		}
+		if knowledge == nil || knowledge.KnowledgeBaseID != kbID {
+			return nil, fmt.Errorf("source document %q was not found in knowledge base %q", knowledgeID, kbID)
+		}
+		title := strings.TrimSpace(knowledge.Title)
+		if title == "" {
+			title = strings.TrimSpace(knowledge.FileName)
+		}
+		resolved = append(resolved, types.FormatWikiSourceRef(knowledge.ID, title))
+	}
+	return resolved, nil
 }
 
 // validateWikiKB validates that the KB exists and is a wiki type
@@ -388,6 +447,14 @@ func (h *WikiPageHandler) CreatePage(c *gin.Context) {
 
 	page.KnowledgeBaseID = kbID
 	page.TenantID = tenantID
+	if len(page.SourceRefs) > 0 {
+		refs, err := h.validateCreateSourceRefs(c.Request.Context(), kbID, page.SourceRefs)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		page.SourceRefs = refs
+	}
 	page.PageType = strings.TrimSpace(page.PageType)
 	page.Status = strings.TrimSpace(page.Status)
 	if page.PageType != "" && !types.IsValidWikiPageType(page.PageType) {
@@ -512,8 +579,8 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 	}
 
 	var req types.WikiPageUpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+	if err := decodeWikiPageUpdate(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
