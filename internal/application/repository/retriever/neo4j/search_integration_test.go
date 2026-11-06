@@ -22,7 +22,9 @@ func integrationDriver(t *testing.T) neo4j.Driver {
 		t.Skip("set WEKNORA_NEO4J_TEST_URI to run the live Neo4j regression")
 	}
 	auth := neo4j.NoAuth()
-	if user, password := os.Getenv("WEKNORA_NEO4J_TEST_USERNAME"), os.Getenv("WEKNORA_NEO4J_TEST_PASSWORD"); user != "" || password != "" {
+	user := os.Getenv("WEKNORA_NEO4J_TEST_USERNAME")
+	password := os.Getenv("WEKNORA_NEO4J_TEST_PASSWORD")
+	if user != "" || password != "" {
 		auth = neo4j.BasicAuth(user, password, "")
 	}
 	driver, err := neo4j.NewDriver(uri, auth)
