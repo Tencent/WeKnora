@@ -11,7 +11,32 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/datasource"
 )
+
+func TestValidateCredentialsDoesNotProbeDocumentContent(t *testing.T) {
+	denied := errors.New("forbidden.accessDenied: the operator has no permission")
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "docs", RootNodeID: "root", Name: "Docs"}},
+		nodes: map[string][]node{
+			"root": {{ID: "doc", Name: "Handbook", Type: "FILE", Category: "ALIDOC", Extension: "adoc"}},
+		},
+		blockErrors: map[string]error{"doc": denied},
+	}
+	connector := testConnector(api)
+	ctx := context.Background()
+
+	if err := datasource.ValidateCredentials(ctx, connector, testConfig()); err != nil {
+		t.Fatalf("valid credentials should allow browsing workspaces: %v", err)
+	}
+	if len(api.blockCalls) != 0 {
+		t.Fatalf("credential validation probed document content: %v", api.blockCalls)
+	}
+	if err := connector.Validate(ctx, testConfig("docs")); !errors.Is(err, denied) {
+		t.Fatalf("validating the selected workspace should still report the unreadable document, got %v", err)
+	}
+}
 
 // A tenant lists every workspace in the organisation, but the operator is only
 // granted access to some of them. Validate must not fail because an unrelated,

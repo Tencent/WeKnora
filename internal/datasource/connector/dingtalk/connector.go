@@ -141,6 +141,18 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	return validateTenantCredentials(ctx, api, settings)
 }
 
+// ValidateCredentials checks workspace discovery without reading any document.
+func (c *Connector) ValidateCredentials(ctx context.Context, dataSourceConfig *types.DataSourceConfig) error {
+	cfg, err := parseConfig(dataSourceConfig)
+	if err != nil {
+		return err
+	}
+	if _, err := c.api(cfg).listWorkspaces(ctx); err != nil {
+		return fmt.Errorf("validate DingTalk credentials: %w", err)
+	}
+	return nil
+}
+
 // validateTenantCredentials samples every workspace in the tenant, which is
 // what a data source without a selection is going to sync.
 func validateTenantCredentials(ctx context.Context, api dingTalkAPI, settings documentSettings) error {
