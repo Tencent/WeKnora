@@ -4484,7 +4484,11 @@ func (s *knowledgeService) convert(
 	}
 	if err != nil {
 		code, message := docReaderFailure(err)
-		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
+		if engineMessage := parseFailureMessageForEngine(parserEngine, err); engineMessage != "" {
+			message = engineMessage
+		}
+		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s engine=%s code=%s: %v",
+			knowledge.ID, parserEngine, code, err)
 		result, taskErr := s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 		s.failStageWithRetry(ctx, knowledge.ID, types.StageDocReader,
 			code, message, err, taskErr != nil)
