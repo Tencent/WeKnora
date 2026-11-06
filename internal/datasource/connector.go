@@ -51,6 +51,17 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// ValidateCredentials uses a discovery-only check when the connector offers one.
+// Other connectors use their regular configuration validation.
+func ValidateCredentials(ctx context.Context, connector Connector, config *types.DataSourceConfig) error {
+	if validator, ok := connector.(interface {
+		ValidateCredentials(context.Context, *types.DataSourceConfig) error
+	}); ok {
+		return validator.ValidateCredentials(ctx, config)
+	}
+	return connector.Validate(ctx, config)
+}
+
 // StreamHandler receives items and progress checkpoints emitted during a
 // streaming fetch. The service implements it to ingest each item as it arrives
 // (bounding memory to one item instead of the whole wiki) and to persist the
