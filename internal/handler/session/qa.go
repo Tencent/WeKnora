@@ -1485,6 +1485,10 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// (Agent mode handles completion in the defer block instead)
 	if mode == qaModeNormal {
 		var completionHandled bool
+		// turnModelID is the chat model the pipeline actually ran — captured
+		// from the final-answer Done marker, where it can differ from the
+		// requested binding (an invalid per-request override falls back).
+		var turnModelID string
 
 		// Persist the pipeline's retrieval/attachment stages so a reloaded
 		// conversation redraws the timeline it showed while streaming, including
@@ -1521,10 +1525,13 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					return nil
 				}
 				completionHandled = true
+				if data.ModelID != "" {
+					turnModelID = data.ModelID
+				}
 
 				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeQuickAnswerTurn(updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID)
+				h.completeQuickAnswerTurn(updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID, turnModelID)
 			}
 			return nil
 		})
@@ -2117,9 +2124,11 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 // completeQuickAnswerTurn finishes a KnowledgeQA (fast-answer) turn.
 // EventAgentComplete must run before the GORM write: handleComplete attaches
 // SandboxCheckpoint (and artifacts) to the in-memory message, and
-// completeAssistantMessage is the only persist on this path.
+// completeAssistantMessage is the only persist on this path. modelID is the
+// chat model the pipeline actually ran ("" when unknown, e.g. the early-fail
+// path), surfaced on the complete event so clients can label the turn.
 func (h *Handler) completeQuickAnswerTurn(
-	ctx context.Context, streamCtx *sseStreamContext, query, userMessageID string,
+	ctx context.Context, streamCtx *sseStreamContext, query, userMessageID, modelID string,
 ) {
 	if streamCtx == nil || streamCtx.assistantMessage == nil {
 		return
@@ -2136,6 +2145,7 @@ func (h *Handler) completeQuickAnswerTurn(
 			SessionID: streamCtx.assistantMessage.SessionID,
 			Data: event.AgentCompleteData{
 				MessageID: streamCtx.assistantMessage.ID,
+				ModelID:   modelID,
 			},
 		})
 	}
@@ -2180,7 +2190,7 @@ func (h *Handler) registerQuickAnswerFailureHandler(
 			context.WithoutCancel(ctx),
 			types.TenantIDContextKey, sessionTenantID,
 		)
-		h.completeQuickAnswerTurn(updateCtx, streamCtx, "", "")
+		h.completeQuickAnswerTurn(updateCtx, streamCtx, "", "", "")
 		return nil
 	})
 }
