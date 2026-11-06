@@ -1421,16 +1421,12 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 	}
 
 	// Source graph namespaces must not keep exposing a document after it
-	// leaves the KB. The exact namespace deletion is repeatable on retry.
-	if s.graphEngine != nil {
-		if err := s.graphEngine.DelGraph(ctx,
-			[]types.NameSpace{{
-				KnowledgeBase: sourceKB.ID,
-				Knowledge:     knowledge.ID,
-			}}); err != nil {
-			return err
-		}
-	}
+	// leaves the KB. Cleanup is idempotent and, when Neo4j is unavailable,
+	// retried independently so the move itself can still commit.
+	s.cleanupGraphData(ctx, tenantID, []types.NameSpace{{
+		KnowledgeBase: sourceKB.ID,
+		Knowledge:     knowledge.ID,
+	}})
 
 	// 3. Update chunks' knowledge_base_id in DB
 	if err := s.chunkRepo.MoveChunksByKnowledgeID(ctx, tenantID, knowledge.ID, targetKB.ID); err != nil {

@@ -291,6 +291,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Register knowledge list delete handler
 	mux.HandleFunc(types.TypeKnowledgeListDelete, params.KnowledgeService.ProcessKnowledgeListDelete)
 
+	// Register graph cleanup retry handler
+	mux.HandleFunc(types.TypeGraphCleanup, params.KnowledgeService.ProcessGraphCleanup)
+
 	// Register knowledge list reparse handler
 	mux.HandleFunc(types.TypeKnowledgeListReparse, params.KnowledgeService.ProcessKnowledgeListReparse)
 

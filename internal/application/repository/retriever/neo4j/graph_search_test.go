@@ -3,7 +3,6 @@ package neo4j
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -51,15 +50,9 @@ func TestGraphSearchProjectionValidation(t *testing.T) {
 }
 
 func TestGraphSearchIntegration(t *testing.T) {
-	uri := os.Getenv("WEKNORA_NEO4J_TEST_URI")
-	if uri == "" {
-		t.Skip("set WEKNORA_NEO4J_TEST_URI to run the live public graph-query regression")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	driver, err := neo4j.NewDriver(uri, neo4j.NoAuth())
-	require.NoError(t, err)
-	t.Cleanup(func() { assert.NoError(t, driver.Close(context.Background())) })
+	driver := integrationDriver(t)
 	require.NoError(t, driver.VerifyConnectivity(ctx))
 	repo := NewGraphSearchRepository(driver).(*Neo4jRepository)
 	// Exercise escaping against a real engine, not only a string assertion.

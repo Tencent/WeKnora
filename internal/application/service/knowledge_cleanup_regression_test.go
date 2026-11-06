@@ -139,3 +139,53 @@ func TestRemoveSourceRefHandlesTitledAndPaddedRefs(t *testing.T) {
 	require.Nil(t, removeSourceRef(types.StringArray{"doc-1|T"}, "doc-1"))
 	require.Equal(t, types.StringArray{"doc-1|T"}, removeSourceRef(types.StringArray{"doc-1|T"}, ""))
 }
+
+type graphCleanupQueue struct {
+	tasks []*asynq.Task
+	err   error
+}
+
+func (q *graphCleanupQueue) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	if q.err != nil {
+		return nil, q.err
+	}
+	q.tasks = append(q.tasks, task)
+	return &asynq.TaskInfo{ID: "graph-cleanup"}, nil
+}
+
+func TestCleanupKnowledgeResourcesSchedulesGraphCleanupRetry(t *testing.T) {
+	f := newDocumentWriteFixture(t)
+	queue := &graphCleanupQueue{}
+	f.svc.task = queue
+	f.graph.err = errors.New("neo4j unavailable")
+	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+
+	// A graph outage must not abort the rebuild after chunks were removed.
+	require.NoError(t, f.svc.cleanupKnowledgeResources(f.ctx, row))
+	require.Len(t, queue.tasks, 1)
+	require.Equal(t, types.TypeGraphCleanup, queue.tasks[0].Type())
+	var payload types.GraphCleanupPayload
+	require.NoError(t, json.Unmarshal(queue.tasks[0].Payload(), &payload))
+	require.Equal(t, uint64(7), payload.TenantID)
+	require.Equal(t, []types.NameSpace{{KnowledgeBase: "kb", Knowledge: "doc"}}, payload.Namespaces)
+
+	// The retry task is independent of the knowledge row and remains retryable.
+	require.ErrorContains(t, f.svc.ProcessGraphCleanup(context.Background(), queue.tasks[0]), "neo4j unavailable")
+	f.graph.err = nil
+	require.NoError(t, f.svc.ProcessGraphCleanup(context.Background(), queue.tasks[0]))
+	require.Equal(t, 3, f.graph.calls)
+}
+
+func TestProcessGraphCleanupRejectsInvalidPayload(t *testing.T) {
+	f := newDocumentWriteFixture(t)
+	for _, raw := range []string{
+		`{`,
+		`{}`,
+		`{"tenant_id":7,"namespaces":[{"knowledge_base":"kb"}]}`,
+	} {
+		task := asynq.NewTask(types.TypeGraphCleanup, []byte(raw))
+		require.ErrorIs(t, f.svc.ProcessGraphCleanup(context.Background(), task), asynq.SkipRetry)
+	}
+	require.Zero(t, f.graph.calls)
+}

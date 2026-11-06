@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -588,19 +589,17 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		return nil
 	})
 
-	// Delete the knowledge graph
+	// Delete the knowledge graph. Neo4j is an auxiliary index: a transient
+	// cleanup failure must not leave the knowledge row stuck in "deleting".
 	wg.Go(func() error {
-		namespaces := []types.NameSpace{}
+		namespaces := make([]types.NameSpace, 0, len(knowledgeList))
 		for _, knowledge := range knowledgeList {
 			namespaces = append(
 				namespaces,
 				types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID},
 			)
 		}
-		if err := s.graphEngine.DelGraph(ctx, namespaces); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge graph failed")
-			return err
-		}
+		s.cleanupGraphData(ctx, tenantInfo.ID, namespaces)
 		return nil
 	})
 
@@ -745,11 +744,11 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	// this cleanup and re-binds whatever the new body still references.
 	deleteExtractedImages(ctx, fileSvc, knowledgeResourceOwners(s.resourceCatalog, knowledge.ID), imageURLs)
 
+	// Graph cleanup is best-effort here: a Neo4j outage must not abort the
+	// rebuild after vectors/chunks have already been removed. The retry task
+	// carries the namespace, so no durable knowledge row state is required.
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge graph data")
-		cleanupErr = errors.Join(cleanupErr, err)
-	}
+	s.cleanupGraphData(ctx, tenantInfo.ID, []types.NameSpace{namespace})
 
 	if knowledge.StorageSize > 0 {
 		tenantInfo.StorageUsed -= knowledge.StorageSize
@@ -823,5 +822,89 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 	}
 
 	logger.Infof(ctx, "Successfully deleted %d knowledge items", len(payload.KnowledgeIDs))
+	return nil
+}
+
+const (
+	graphCleanupMaxRetry    = 5
+	graphCleanupTaskTimeout = 10 * time.Minute
+)
+
+// enqueueGraphCleanup schedules an independent, idempotent retry for Neo4j
+// graph cleanup. The namespaces travel in the payload because the knowledge
+// rows may already be deleted by the time the worker runs.
+func enqueueGraphCleanup(
+	ctx context.Context,
+	enq interfaces.TaskEnqueuer,
+	tenantID uint64,
+	namespaces []types.NameSpace,
+) error {
+	if enq == nil {
+		return errors.New("task enqueuer unavailable")
+	}
+	if tenantID == 0 || len(namespaces) == 0 {
+		return errors.New("invalid graph cleanup scope")
+	}
+	payloadBytes, err := json.Marshal(types.GraphCleanupPayload{
+		TenantID:   tenantID,
+		Namespaces: namespaces,
+		Initiator:  types.TaskInitiatorFromContext(ctx),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal graph cleanup payload: %w", err)
+	}
+	task := asynq.NewTask(types.TypeGraphCleanup, payloadBytes,
+		asynq.Queue(types.QueueMaintenance),
+		asynq.MaxRetry(graphCleanupMaxRetry),
+		asynq.Timeout(graphCleanupTaskTimeout),
+	)
+	if err := enqueueWithRetry(ctx, enq, task); err != nil {
+		return fmt.Errorf("enqueue graph cleanup: %w", err)
+	}
+	return nil
+}
+
+// cleanupGraphData keeps a transient Neo4j failure from blocking the document
+// operation that triggered it. Failed deletions are retried asynchronously;
+// DelGraph is idempotent, so a late retry is safe even after rows are gone.
+func (s *knowledgeService) cleanupGraphData(ctx context.Context, tenantID uint64, namespaces []types.NameSpace) {
+	if s.graphEngine == nil || len(namespaces) == 0 {
+		return
+	}
+	if err := s.graphEngine.DelGraph(ctx, namespaces); err != nil {
+		if enqueueErr := enqueueGraphCleanup(ctx, s.task, tenantID, namespaces); enqueueErr != nil {
+			logger.Errorf(ctx,
+				"Graph cleanup failed and retry task could not be scheduled: cleanup=%v enqueue=%v",
+				err, enqueueErr)
+			return
+		}
+		logger.Warnf(ctx, "Graph cleanup failed; scheduled an independent retry: %v", err)
+	}
+}
+
+// ProcessGraphCleanup handles the graph cleanup retry task. Returning an error
+// lets asynq retry again; exhausting the retry budget lands in the dead-letter
+// table without flipping the owning knowledge back to failed.
+func (s *knowledgeService) ProcessGraphCleanup(ctx context.Context, t *asynq.Task) error {
+	var payload types.GraphCleanupPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("invalid graph cleanup payload: %v: %w", err, asynq.SkipRetry)
+	}
+	if payload.TenantID == 0 || len(payload.Namespaces) == 0 {
+		return fmt.Errorf("invalid graph cleanup scope: %w", asynq.SkipRetry)
+	}
+	for _, namespace := range payload.Namespaces {
+		if namespace.KnowledgeBase == "" || namespace.Knowledge == "" {
+			return fmt.Errorf("invalid graph cleanup namespace: %w", asynq.SkipRetry)
+		}
+	}
+	ctx = payload.Initiator.Apply(ctx)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
+	if s.graphEngine == nil {
+		return nil
+	}
+	if err := s.graphEngine.DelGraph(ctx, payload.Namespaces); err != nil {
+		return fmt.Errorf("delete graph data for %d namespace(s): %w", len(payload.Namespaces), err)
+	}
 	return nil
 }
