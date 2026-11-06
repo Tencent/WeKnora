@@ -62,3 +62,20 @@ func TestWorkWaitToolTimeoutCoversTheWait(t *testing.T) {
 	assert.Equal(t, 330*time.Second, toolExecutionTimeout("work_wait", `{"wait_sec":999}`))
 	assert.Equal(t, 90*time.Second, toolExecutionTimeout("work_wait"))
 }
+
+// The wire cap follows the model's declared output limit. An unknown limit
+// means no cap at all — the provider bounds output by the model, while the
+// internal budget (24576 with a sandbox) keeps sizing the history reserve.
+func TestWireCompletionBudgetOmitsCapWhenModelLimitUnknown(t *testing.T) {
+	unknown := &AgentEngine{config: &types.AgentConfig{SandboxConfigID: "cfg-1"}}
+	assert.Equal(t, 0, unknown.wireCompletionBudget(24576),
+		"unknown model output: no wire cap; provider applies its own bound")
+
+	known := &AgentEngine{config: &types.AgentConfig{
+		SandboxConfigID:      "cfg-1",
+		ModelMaxOutputTokens: 8192,
+	}}
+	assert.Equal(t, 8192, known.wireCompletionBudget(8192))
+	// A context-clamped budget below the model limit passes through.
+	assert.Equal(t, 4096, known.wireCompletionBudget(4096))
+}
