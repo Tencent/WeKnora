@@ -510,6 +510,11 @@ func kbStorageBindingChanged(kb *types.KnowledgeBase, backendID, provider string
 func (h *InitializationHandler) applyKBStorageBinding(
 	ctx context.Context, kb *types.KnowledgeBase, kbID string, req *KBModelConfigRequest,
 ) error {
+	// Model-only clients omit storage fields. Keep the stored binding and
+	// provider projection instead of implicitly switching them to local.
+	if strings.TrimSpace(req.StorageBackendID) == "" && strings.TrimSpace(req.StorageProvider) == "" {
+		return nil
+	}
 	// Bind the concrete storage instance. Provider remains a compatibility
 	// projection for older clients and historical rows.
 	if strings.TrimSpace(req.StorageBackendID) != "" {
