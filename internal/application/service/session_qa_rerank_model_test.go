@@ -32,6 +32,18 @@ func rerankFixtureModel(id string, isDefault bool) *types.Model {
 	}
 }
 
+// chatFixtureModel is a non-rerank model, for cases where the tenant has no
+// rerank model at all.
+func chatFixtureModel(id string) *types.Model {
+	return &types.Model{
+		ID:        id,
+		Name:      id,
+		Type:      types.ModelTypeKnowledgeQA,
+		Status:    types.ModelStatusActive,
+		IsDefault: false,
+	}
+}
+
 func tenantInfoWithRerank(modelID string) *types.Tenant {
 	return &types.Tenant{
 		RetrievalConfig: &types.RetrievalConfig{RerankModelID: modelID},
@@ -64,7 +76,7 @@ func TestResolveKnowledgeQARerankModel(t *testing.T) {
 
 	t.Run("no rerank model stays empty", func(t *testing.T) {
 		svc := &sessionService{modelService: &rerankModelFake{models: []*types.Model{
-			rerankFixtureModel("chat-1", false),
+			chatFixtureModel("chat-1"),
 		}}}
 		require.Equal(t, "", svc.resolveKnowledgeQARerankModel(context.Background(), ""))
 	})
