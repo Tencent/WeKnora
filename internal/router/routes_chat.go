@@ -156,6 +156,16 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 		agentChat.POST("/:session_id", handler.AgentQA)
 	}
 
+	// Interactive A2UI button actions (upstream issue #3017). Write path: it
+	// re-validates the clicked button against the persisted message content and
+	// may run a server-side executor, so it needs the explicit chat capability
+	// like the agent-chat POST above. Per-session ownership and the per-action
+	// role floor are enforced inside the handler.
+	agentActions := g.apiKeyGroup(r.Group("/agent/actions", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
+	{
+		agentActions.POST("/execute", handler.ExecuteAgentCardAction)
+	}
+
 	// 新增知识检索接口，不需要session_id
 	knowledgeSearch := g.apiKeyGroup(r.Group("/knowledge-search", g.Viewer()), apiKeyRetrieve(apiKeyFullAccess()))
 	{
