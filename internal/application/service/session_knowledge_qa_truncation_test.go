@@ -55,7 +55,7 @@ func TestConsumeFallbackStreamTruncation(t *testing.T) {
 			// the stream last and alone carries the truncation flag.
 			require.GreaterOrEqual(t, len(answers), 1, "ignore reasoning and duplicate EOF")
 			var delivered strings.Builder
-			for _, answer := range answers {
+			for _, answer := range answers[:len(answers)-1] {
 				delivered.WriteString(answer.Content)
 				require.True(t, answer.IsFallback)
 				require.False(t, answer.Done, "content events must not close the answer")

@@ -1276,7 +1276,8 @@ func (s *sessionService) consumeFallbackStream(
 			}
 			if response.Done {
 				// Flush the closing tail as a plain content event, then defer
-				// the Done marker to the channel close.
+				// the Done marker to the channel close. The truncation flag
+				// rides only the closing event.
 				response.Content += decoder.Flush()
 				finalContent += response.Content
 				if response.Content != "" {
@@ -1287,7 +1288,6 @@ func (s *sessionService) consumeFallbackStream(
 						Data: event.AgentFinalAnswerData{
 							Content:    response.Content,
 							IsFallback: true,
-							Truncated:  truncated,
 						},
 					}); err != nil {
 						logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
