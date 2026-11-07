@@ -774,6 +774,9 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 	taskID, _ := asynq.GetTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, kbActivityTrigger(ctx))
 

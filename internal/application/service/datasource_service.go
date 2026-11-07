@@ -521,6 +521,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		ForceFull:    false,
 		Initiator:    types.TaskInitiatorFromContext(ctx),
 		Trigger:      "manual",
+		Language:     types.LanguageFromContextOrDefault(ctx),
 	}
 	langfuse.InjectTracing(ctx, payload)
 
@@ -632,6 +633,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 	taskID, _ := asynq.GetTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, payload.Trigger)
 

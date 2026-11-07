@@ -1093,6 +1093,51 @@ func (s *customAgentService) truncateQuestions(questions []types.SuggestedQuesti
 	return questions
 }
 
+type wikiSuggestionTemplateEntry struct {
+	locale        string
+	conceptPrefix string
+	conceptSuffix string
+	aboutPrefix   string
+	aboutSuffix   string
+}
+
+// wikiSuggestionTemplates wraps a page title into a question per locale.
+// Korean and Japanese put the particle after the title, so they only use
+// the suffix. Exact locale wins, then the first entry in the same
+// language; anything else gets the bare title. Locales are lower-case.
+var wikiSuggestionTemplates = [...]wikiSuggestionTemplateEntry{
+	{"zh-cn", "什么是", "？", "介绍一下", ""},
+	{"zh-tw", "什麼是", "？", "介紹一下", ""},
+	{"zh-hk", "什麼是", "？", "介紹一下", ""},
+	{"zh-hant", "什麼是", "？", "介紹一下", ""},
+	{"en-us", "What is ", "?", "Tell me about ", ""},
+	{"ru-ru", "Что такое ", "?", "Расскажи о ", ""},
+	{"ko-kr", "", "란 무엇인가요?", "", "에 대해 알려주세요"},
+	{"ja-jp", "", "とは？", "", "について教えて"},
+}
+
+// wikiSuggestionTemplate picks the exact locale, else the first template in
+// the same language (en-GB → en-US), else nothing.
+func wikiSuggestionTemplate(locale string) (wikiSuggestionTemplateEntry, bool) {
+	locale = strings.ToLower(locale)
+	language, _, _ := strings.Cut(locale, "-")
+	family := -1
+	for i, template := range wikiSuggestionTemplates {
+		if template.locale == locale {
+			return template, true
+		}
+		if family < 0 {
+			if templateLanguage, _, _ := strings.Cut(template.locale, "-"); templateLanguage == language {
+				family = i
+			}
+		}
+	}
+	if family < 0 {
+		return wikiSuggestionTemplateEntry{}, false
+	}
+	return wikiSuggestionTemplates[family], true
+}
+
 // wikiSuggestionFromPage converts a wiki page into a human-readable suggested
 // question string. The template is chosen per page type so the chip reads
 // naturally for that kind of content:
@@ -1111,17 +1156,15 @@ func wikiSuggestionFromPage(page *types.WikiPage, locale string) string {
 	if title == "" {
 		return ""
 	}
+	template, ok := wikiSuggestionTemplate(locale)
+	if !ok {
+		return title
+	}
 	switch page.PageType {
 	case types.WikiPageTypeConcept:
-		if isEnglishLocale(locale) {
-			return "What is " + title + "?"
-		}
-		return "什么是" + title + "？"
+		return template.conceptPrefix + title + template.conceptSuffix
 	case types.WikiPageTypeEntity, types.WikiPageTypeSummary:
-		if isEnglishLocale(locale) {
-			return "Tell me about " + title
-		}
-		return "介绍一下" + title
+		return template.aboutPrefix + title + template.aboutSuffix
 	default:
 		return title
 	}
@@ -1237,14 +1280,4 @@ func (s *customAgentService) groupKBIDsByEffectiveTenant(
 		out[kb.TenantID] = append(out[kb.TenantID], kbID)
 	}
 	return out
-}
-
-// isEnglishLocale reports whether the locale string is an English variant.
-// Unknown / empty locales fall back to Chinese, matching the product default.
-func isEnglishLocale(locale string) bool {
-	switch locale {
-	case "en-US", "en", "en-GB":
-		return true
-	}
-	return false
 }

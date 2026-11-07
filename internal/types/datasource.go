@@ -501,6 +501,9 @@ type DataSourceSyncPayload struct {
 	Initiator TaskInitiator `json:"initiator,omitempty"`
 	// Trigger distinguishes a user-requested run from a scheduler-created run.
 	Trigger string `json:"trigger,omitempty"`
+	// Language is the requester's locale for manual syncs; scheduled syncs
+	// leave it empty and use the deployment default.
+	Language string `json:"language,omitempty"`
 
 	// Data source ID to sync
 	DataSourceID string `json:"data_source_id"`

@@ -3708,6 +3708,9 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	ctx = logger.WithRequestID(ctx, payload.RequestId)
 	ctx = logger.WithField(ctx, "manual_process", payload.KnowledgeID)
 	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -4905,6 +4908,9 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 	taskID, _ := asynq.GetTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, kbActivityTrigger(ctx))
 
