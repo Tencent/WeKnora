@@ -84,6 +84,13 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 	}
 	replacement := &knowledgeReplacement{previous: previous, metadata: metadata, tagIDs: tagIDs}
 	var created *types.Knowledge
+	// Preserve the source folder hierarchy on updates too (issue #5171): a
+	// path-qualified custom name relocates the knowledge when the source
+	// folder changed, matching the fresh-create path.
+	customName := item.FileName
+	if folder := sourceFolderPath(item); folder != "" && item.FileName != "" {
+		customName = folder + "/" + item.FileName
+	}
 	if len(item.Content) > 0 {
 		file, buildErr := bytesToFileHeader(item.Content, item.FileName)
 		if buildErr != nil {
@@ -93,10 +100,20 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 			return nil, err
 		}
 		created, err = s.createKnowledgeFromFile(plan.ctx, previous.KnowledgeBaseID, file, metadata,
-			nil, item.FileName, tagIDs, channel, nil, replacement)
+			nil, customName, tagIDs, channel, nil, replacement)
 	} else {
 		created, err = s.createKnowledgeFromURL(plan.ctx, previous.KnowledgeBaseID, item.URL, item.FileName,
 			"", nil, item.Title, tagIDs, channel, nil, replacement)
+		if created != nil {
+			// URL creates have no path-qualified name to split, so the source
+			// folder lands on the row directly (issue #5171).
+			if folder := sourceFolderPath(item); folder != "" {
+				if fErr := s.repo.UpdateKnowledgeColumn(plan.ctx, created.ID, "folder_path", folder); fErr != nil {
+					logger.Warnf(plan.ctx, "failed to attach datasource folder to replaced knowledge %s: %v",
+						created.ID, fErr)
+				}
+			}
+		}
 	}
 	if !replacement.committed {
 		return created, err
