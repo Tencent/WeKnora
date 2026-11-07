@@ -324,7 +324,7 @@ func parseIPForTest(t *testing.T, s string) net.IP {
 // illegal characters (issue #4268).
 func TestNormalizeMultipartFilename(t *testing.T) {
 	// Produce real GBK bytes for the reported reproduction name.
-	gbkName, err := transform.String(simplifiedchinese.GBK.NewEncoder(), "基于统一场论的月行九道天文数学原理研究.pdf")
+	gbkName, _, err := transform.String(simplifiedchinese.GBK.NewEncoder(), "基于统一场论的月行九道天文数学原理研究.pdf")
 	if err != nil {
 		t.Fatalf("encode fixture: %v", err)
 	}
