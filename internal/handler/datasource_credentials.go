@@ -59,6 +59,20 @@ type dataSourceCredentialsPutRequest struct {
 	Credentials map[string]interface{} `json:"credentials" binding:"required"`
 }
 
+// Put godoc
+// @Summary      设置数据源凭据
+// @Description  连接器凭据是原子映射，整体写入：credentials 必须非空；如需删除请用 DELETE /datasource/{id}/credentials/credentials
+// @Tags         数据源
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "数据源 ID"
+// @Param        request  body      map[string]interface{}  true  "{credentials: {字段: 值}}（必须非空）"
+// @Success      200      {object}  handler.DataResponse{data=dto.CredentialsResponse}  "写入后的凭据状态"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      404      {object}  errors.AppError         "数据源不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /datasource/{id}/credentials [put]
 func (h *DataSourceCredentialsHandler) Put(c *gin.Context) {
 	ds, ok := h.ownDataSource(c)
 	if !ok {
@@ -94,6 +108,19 @@ func (h *DataSourceCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField godoc
+// @Summary      清除数据源凭据
+// @Description  清除整个凭据映射；当前仅支持 field=credentials
+// @Tags         数据源
+// @Produce      json
+// @Param        id     path      string  true  "数据源 ID"
+// @Param        field  path      string  true  "字段名（credentials）"
+// @Success      204
+// @Failure      400  {object}  errors.AppError  "字段名非法"
+// @Failure      404  {object}  errors.AppError  "数据源不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /datasource/{id}/credentials/{field} [delete]
 func (h *DataSourceCredentialsHandler) DeleteField(c *gin.Context) {
 	ds, ok := h.ownDataSource(c)
 	if !ok {

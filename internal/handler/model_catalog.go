@@ -293,9 +293,8 @@ func (h *ModelHandler) GetModelProvider(c *gin.Context) {
 
 // ResolveModelCatalog godoc
 // @Summary      解析模型的有效接入配置
-// @Description  根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示
+// @Description  根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示。GET 走查询参数；POST 见 resolve-post，同一处理函数、参数改在 JSON 请求体中提供
 // @Tags         模型管理
-// @Accept       json
 // @Produce      json
 // @Param        provider    query     string  true   "厂商标识"
 // @Param        model       query     string  false  "模型名"
@@ -304,10 +303,7 @@ func (h *ModelHandler) GetModelProvider(c *gin.Context) {
 // @Success      200         {object}  map[string]interface{}  "解析结果"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// Registered under both verbs: POST carries the row spec in the body, GET
-// keeps query-string compatibility for old clients (issue #1909).
 // @Router       /models/catalog/resolve [get]
-// @Router       /models/catalog/resolve [post]
 func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 	// POST carries the row spec in the body; GET remains compatible with old clients.
 	query := c.Query
@@ -413,4 +409,39 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// resolveModelCatalogPost documents the POST form of /models/catalog/resolve.
+// The route itself is served by ResolveModelCatalog, which handles both
+// verbs on the same registration (issue #1909): GET keeps query-string
+// compatibility for old clients, POST carries the row spec — and optionally
+// a spec override for editor drafts not yet saved — as a JSON body. This
+// stub exists only so swag can give the POST operation its own body
+// contract instead of copying GET's query parameters, and is deliberately
+// never mounted.
+//
+// @Summary      解析模型的有效接入配置（JSON 请求体）
+// @Description  与 GET /models/catalog/resolve 为同一处理函数，但参数经 JSON 请求体传入，并支持可选的 spec 覆盖
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      handler.resolveModelCatalogBody  true  "{provider, model?, base_url?, model_type?, spec?}"
+// @Success      200      {object}  handler.DataResponse  "解析结果"
+// @Failure      400      {object}  errors.AppError       "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/catalog/resolve [post]
+//
+//nolint:unused // documentation-only stub carrying the POST contract of a dual-verb route
+func resolveModelCatalogPost() {}
+
+// resolveModelCatalogBody is the POST contract of the catalog resolver:
+// the same string fields GET takes in query, plus an optional spec
+// override merged over the vendor's catalog entry.
+type resolveModelCatalogBody struct {
+	Provider  string                   `json:"provider" binding:"required"`
+	Model     string                   `json:"model,omitempty"`
+	BaseURL   string                   `json:"base_url,omitempty"`
+	ModelType string                   `json:"model_type,omitempty"`
+	Spec      *types.ModelSpecOverride `json:"spec,omitempty"`
 }
