@@ -61,8 +61,12 @@ type Config struct {
 	// calls now go through the chat factory, so the override has to travel
 	// with them — otherwise /models reports capabilities computed WITH the
 	// override while the actual request is built without it.
-	Spec  *types.ModelSpecOverride
-	Extra map[string]any
+	Spec *types.ModelSpecOverride
+	// MaxOutputTokens is the per-response output limit the model row declares
+	// (a spec override wins over the row field); 0 when nothing declares one,
+	// which leaves the built-in OCR completion budget uncapped.
+	MaxOutputTokens int
+	Extra           map[string]any
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
 	AppID         string
@@ -85,20 +89,28 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 			ifType = "openai"
 		}
 	}
+	// Same provider fact the agent path acts on (session_agent_qa.go): a
+	// pinned spec override states the limit more specifically than the row
+	// field, and anything unknown stays 0 so callers keep their fallback.
+	maxOutputTokens := m.Parameters.MaxOutputTokens
+	if m.Parameters.Spec != nil && m.Parameters.Spec.MaxOutputTokens > 0 {
+		maxOutputTokens = m.Parameters.Spec.MaxOutputTokens
+	}
 	return &Config{
-		ModelID:        m.ID,
-		APIKey:         m.Parameters.APIKey,
-		BaseURL:        m.Parameters.BaseURL,
-		ModelName:      m.Name,
-		Source:         m.Source,
-		InterfaceType:  ifType,
-		Provider:       m.Parameters.Provider,
-		MaxConcurrency: m.Parameters.MaxConcurrency,
-		Spec:           m.Parameters.Spec,
-		Extra:          stringMapToAnyMap(m.Parameters.ExtraConfig),
-		CustomHeaders:  m.Parameters.CustomHeaders,
-		AppID:          appID,
-		AppSecret:      appSecret,
+		ModelID:         m.ID,
+		APIKey:          m.Parameters.APIKey,
+		BaseURL:         m.Parameters.BaseURL,
+		ModelName:       m.Name,
+		Source:          m.Source,
+		InterfaceType:   ifType,
+		Provider:        m.Parameters.Provider,
+		MaxConcurrency:  m.Parameters.MaxConcurrency,
+		Spec:            m.Parameters.Spec,
+		MaxOutputTokens: maxOutputTokens,
+		Extra:           stringMapToAnyMap(m.Parameters.ExtraConfig),
+		CustomHeaders:   m.Parameters.CustomHeaders,
+		AppID:           appID,
+		AppSecret:       appSecret,
 	}
 }
 

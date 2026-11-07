@@ -22,11 +22,18 @@ const (
 	// can be raised further via VLM_HTTP_TIMEOUT_SECONDS.
 	defaultTimeout = 180 * time.Second
 	// defaultMaxToks is the fallback completion budget for a single VLM
-	// request. Reasoning vision models spend part of it on hidden thinking
-	// tokens, so a dense scanned page can stop at finish_reason=length; raise
-	// it via VLM_MAX_TOKENS.
-	defaultMaxToks = 5000
-	defaultTemp    = float32(0.1)
+	// request. The budget covers hidden thinking tokens too, so a reasoning
+	// vision model transcribing a dense page (TOC, formulas, large tables)
+	// exhausts anything smaller and the page is dropped at
+	// finish_reason=length. It is lowered to the model row's declared output
+	// limit when the row knows one, and raised per model via
+	// extra_config.max_tokens or process wide via VLM_MAX_TOKENS.
+	defaultMaxToks = 16384
+	// weKnoraCloudMaxToks keeps the hosted WeKnoraCloud VLM at its historical
+	// budget: the managed endpoint documents its own limits, so raising the
+	// self-hosted default must not silently change what those requests send.
+	weKnoraCloudMaxToks = 5000
+	defaultTemp         = float32(0.1)
 )
 
 // vlmHTTPTimeout returns the HTTP client timeout for VLM requests, read from
@@ -41,9 +48,9 @@ func vlmHTTPTimeout() time.Duration {
 	return defaultTimeout
 }
 
-// vlmMaxTokens returns the completion budget for a single VLM request, read
-// from the VLM_MAX_TOKENS env var when set (and positive), falling back to
-// defaultMaxToks otherwise. The budget covers thinking tokens as well, so a
+// vlmMaxTokens reads the process-wide VLM_MAX_TOKENS override: a set and
+// positive value wins, everything else reports 0 so the caller falls through
+// to the remaining layers. The budget covers thinking tokens as well, so a
 // reasoning vision model can exhaust the default on a dense page and fail OCR
 // with finish_reason=length; this makes the cap adjustable without a rebuild.
 func vlmMaxTokens() int {
@@ -52,7 +59,38 @@ func vlmMaxTokens() int {
 			return tokens
 		}
 	}
+	return 0
+}
+
+// remoteAPIBudget resolves the completion budget for one remote VLM request,
+// most specific layer first: a valid extra_config.max_tokens override (this
+// model), a valid VLM_MAX_TOKENS value (this process), then the built-in
+// default capped by the output limit the model row declares. Non-positive
+// values mean "unset" at every layer, so an invalid override never disables a
+// safer fallback below it.
+func remoteAPIBudget(extraMaxToks, envMaxToks, modelLimit int) int {
+	if extraMaxToks > 0 {
+		return extraMaxToks
+	}
+	if envMaxToks > 0 {
+		return envMaxToks
+	}
+	if modelLimit > 0 && modelLimit < defaultMaxToks {
+		return modelLimit
+	}
 	return defaultMaxToks
+}
+
+// extraConfigMaxToks reads a positive integer override from the model's
+// extra_config. A missing, non-numeric or non-positive value reports 0, which
+// callers treat as "unset".
+func extraConfigMaxToks(extra map[string]string, key string) int {
+	if raw, ok := extra[key]; ok {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // RemoteAPIVLM implements VLM on top of the catalog-driven chat client: a
@@ -64,6 +102,13 @@ type RemoteAPIVLM struct {
 	modelID     string
 	chat        chat.Chat
 	temperature float64
+	// extraMaxToks is the parsed extra_config.max_tokens override for this
+	// model; 0 when unset, so the budget falls through to the wider layers.
+	extraMaxToks int
+	// modelMaxOutputToks is the per-response output limit the model row
+	// declares (spec override wins); 0 when unknown, which leaves the built-in
+	// default uncapped.
+	modelMaxOutputToks int
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -102,10 +147,12 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 		return nil, err
 	}
 	return &RemoteAPIVLM{
-		modelName:   config.ModelName,
-		modelID:     config.ModelID,
-		chat:        client,
-		temperature: temp,
+		modelName:          config.ModelName,
+		modelID:            config.ModelID,
+		chat:               client,
+		temperature:        temp,
+		extraMaxToks:       extraConfigMaxToks(extra, "max_tokens"),
+		modelMaxOutputToks: config.MaxOutputTokens,
 	}, nil
 }
 
@@ -138,7 +185,7 @@ func (v *RemoteAPIVLM) PredictWithOptions(
 	logger.Infof(ctx, "[VLM] Calling chat protocol, model=%s, numImages=%d, totalImageSize=%d",
 		v.modelName, len(imgBytesList), totalImageSize)
 
-	maxTokens := vlmMaxTokens()
+	maxTokens := remoteAPIBudget(v.extraMaxToks, vlmMaxTokens(), v.modelMaxOutputToks)
 	chatOpts := &chat.ChatOptions{
 		Temperature: v.temperature,
 		MaxTokens:   maxTokens,

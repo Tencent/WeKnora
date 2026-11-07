@@ -137,7 +137,7 @@ func (v *WeKnoraCloudVLM) PredictWithOptions(
 				Content: parts,
 			},
 		},
-		MaxTokens:   defaultMaxToks,
+		MaxTokens:   weKnoraCloudMaxToks,
 		Temperature: float64(defaultTemp),
 		Stream:      false,
 	}
