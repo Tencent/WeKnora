@@ -2149,7 +2149,7 @@ func (h *Handler) registerQuickAnswerCompletionHandler(
 	streamCtx *sseStreamContext, sessionID, query, userMessageID string, sessionTenantID uint64,
 ) *bool {
 	completionHandled := new(bool)
-	streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
+	streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)
 		if !ok {
 			return nil
