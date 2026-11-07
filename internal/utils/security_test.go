@@ -5,6 +5,10 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 func TestSSRFSafeURL(t *testing.T) {
@@ -312,4 +316,48 @@ func parseIPForTest(t *testing.T, s string) net.IP {
 		t.Fatalf("invalid test IP: %s", s)
 	}
 	return ip
+}
+
+// Multipart clients built without iconv (Windows curl Schannel builds) send
+// the Content-Disposition filename in the zh-CN legacy codepage; the server
+// must rescue those names before the UTF-8 syntax check rejects them as
+// illegal characters (issue #4268).
+func TestNormalizeMultipartFilename(t *testing.T) {
+	// Produce real GBK bytes for the reported reproduction name.
+	gbkName, err := transform.String(simplifiedchinese.GBK.NewEncoder(), "基于统一场论的月行九道天文数学原理研究.pdf")
+	if err != nil {
+		t.Fatalf("encode fixture: %v", err)
+	}
+	if utf8.ValidString(gbkName) {
+		t.Fatalf("fixture must be non-UTF-8 to exercise the fallback")
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"ascii passthrough", "K_Neutrino_Capture.pdf", "K_Neutrino_Capture.pdf"},
+		{
+			"valid utf-8 cjk passthrough",
+			"基于统一场论的月行九道天文数学原理研究.pdf",
+			"基于统一场论的月行九道天文数学原理研究.pdf",
+		},
+		{"gbk bytes rescued", gbkName, "基于统一场论的月行九道天文数学原理研究.pdf"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeMultipartFilename(tt.input); got != tt.want {
+				t.Fatalf("NormalizeMultipartFilename(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+
+	// Bytes that GBK cannot turn into valid UTF-8 come back unchanged so the
+	// caller's validation still rejects them.
+	in := "\xff\xfe\x00broken"
+	if got := NormalizeMultipartFilename(in); got != in {
+		t.Fatalf("undecodable bytes must pass through unchanged, got %q", got)
+	}
 }
