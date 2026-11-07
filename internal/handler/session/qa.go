@@ -2115,13 +2115,18 @@ func (h *Handler) completeQuickAnswerTurn(
 		// handleComplete would append FinalAnswer a second time. Usage rides
 		// along when the stream's final answer event carried it: handleComplete
 		// both persists it on the message and reports it in the complete event.
+		// Only set it when present — a typed-nil pointer would travel as a
+		// non-nil interface and read as "usage reported" downstream.
+		completeData := event.AgentCompleteData{
+			MessageID: streamCtx.assistantMessage.ID,
+		}
+		if streamCtx.turnUsage != nil {
+			completeData.Usage = streamCtx.turnUsage
+		}
 		_ = streamCtx.eventBus.Emit(ctx, event.Event{
 			Type:      event.EventAgentComplete,
 			SessionID: streamCtx.assistantMessage.SessionID,
-			Data: event.AgentCompleteData{
-				MessageID: streamCtx.assistantMessage.ID,
-				Usage:     streamCtx.turnUsage,
-			},
+			Data:      completeData,
 		})
 	}
 	h.completeStreamAssistantMessage(ctx, streamCtx, query, userMessageID)
