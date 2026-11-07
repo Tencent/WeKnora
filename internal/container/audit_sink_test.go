@@ -27,6 +27,9 @@ func (f *fakeAuditSvc) List(context.Context, uint64, *interfaces.AuditLogQuery) 
 	return nil, nil
 }
 func (f *fakeAuditSvc) Purge(context.Context, int) (int64, error) { return 0, nil }
+func (f *fakeAuditSvc) CardActionAlreadyExecuted(context.Context, uint64, string, string, string) (bool, error) {
+	return false, nil
+}
 
 func ctxWithTenant(id uint64) context.Context {
 	return context.WithValue(context.Background(), types.TenantIDContextKey, id)

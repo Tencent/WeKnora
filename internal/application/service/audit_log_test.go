@@ -24,6 +24,11 @@ type stubAuditRepo struct {
 	created []*types.AuditLog
 	// countErr lets a test inject a transient lookup failure.
 	countErr error
+
+	// rows/listErr back the ListCardActionRows stub used by the card-action
+	// dedup test.
+	rows    []*types.AuditLog
+	listErr error
 }
 
 func (s *stubAuditRepo) Create(_ context.Context, entry *types.AuditLog) error {
@@ -172,4 +177,59 @@ func TestAuditLog_LogDenied_DegradesGracefullyOnDedupLookupError(t *testing.T) {
 	if len(repo.created) != 1 {
 		t.Fatalf("expected fallthrough write on dedup error, got %d entries", len(repo.created))
 	}
+}
+
+// TestAuditCardActionAlreadyExecuted pins the one-shot dedup predicate: only
+// a SUCCESS row whose details carry the same message_id AND action_name
+// counts. Denial rows never count (a refused first click must not permanently
+// refuse the real one); a malformed details blob is skipped, not fatal.
+func TestAuditCardActionAlreadyExecuted(t *testing.T) {
+	matching := `{"message_id":"msg-1","action_name":"confirm"}`
+	cases := []struct {
+		name    string
+		rows    []*types.AuditLog
+		listErr error
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "matching success row counts",
+			rows: []*types.AuditLog{{Outcome: types.AuditOutcomeSuccess, Details: types.JSON(matching)}},
+			want: true,
+		},
+		{
+			name: "different message_id does not count",
+			rows: []*types.AuditLog{{Outcome: types.AuditOutcomeSuccess, Details: types.JSON(`{"message_id":"msg-2","action_name":"confirm"}`)}},
+		},
+		{
+			name: "different action_name does not count",
+			rows: []*types.AuditLog{{Outcome: types.AuditOutcomeSuccess, Details: types.JSON(`{"message_id":"msg-1","action_name":"noop"}`)}},
+		},
+		{
+			name: "denied row never counts",
+			rows: []*types.AuditLog{{Outcome: types.AuditOutcomeDenied, Details: types.JSON(matching)}},
+		},
+		{name: "no rows"},
+		{name: "lookup error propagates", listErr: errors.New("transient"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, _ := newSvcForTest()
+			repo.rows = tc.rows
+			repo.listErr = tc.listErr
+			got, err := svc.CardActionAlreadyExecuted(context.Background(), 7, "s2/ok", "msg-1", "confirm")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Fatalf("CardActionAlreadyExecuted = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func (s *stubAuditRepo) ListCardActionRows(_ context.Context, _ uint64, _ string) ([]*types.AuditLog, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rows, s.listErr
 }
