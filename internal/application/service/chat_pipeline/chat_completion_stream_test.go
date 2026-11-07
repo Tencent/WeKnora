@@ -313,3 +313,38 @@ func TestStreamCarriesUsageOnFinalAnswer(t *testing.T) {
 	// Chunks without usage keep it unset instead of manufacturing a zero value.
 	require.Nil(t, events[0].Usage)
 }
+
+// The assembler emits the finish chunk (Done, no usage) before its End
+// emission (Done, usage). The closing answer event must wait for the channel
+// to close so the usage trailer is not dropped (review finding on PR #5253).
+func TestStreamCarriesUsageTrailerAfterFinishChunk(t *testing.T) {
+	usage := &types.TokenUsage{PromptTokens: 1000, CompletionTokens: 5, TotalTokens: 1005}
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "hel"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "lo", Done: true},
+		// The assembler's End emission: Done again, no content, usage attached.
+		{ResponseType: types.ResponseTypeAnswer, Done: true, Usage: usage},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-usage-trailer"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(
+		context.Background(), types.CHAT_COMPLETION_STREAM, chatManage,
+		func() *PluginError { return nil },
+	))
+
+	require.Eventually(t, func() bool {
+		events := bus.finalAnswerEvents()
+		return len(events) == 2 && events[len(events)-1].Done
+	}, 2*time.Second, 5*time.Millisecond)
+	events := bus.finalAnswerEvents()
+	// Only the closing event may carry Done; the trailer never becomes a
+	// second Done event after the session's answer closed.
+	require.Equal(t, []event.AgentFinalAnswerData{
+		{Content: "hel"},
+		{Content: "hello", Done: true, Usage: usage},
+	}, events)
+}
