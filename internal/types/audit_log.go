@@ -199,6 +199,14 @@ const (
 	AuditActionFAQImportStarted   AuditAction = "faq.import_started"
 	AuditActionFAQImportCompleted AuditAction = "faq.import_completed"
 	AuditActionFAQImportFailed    AuditAction = "faq.import_failed"
+
+	// Interactive A2UI button actions (upstream issue #3017, route B — official
+	// A2UI v0.9). TargetType is "a2ui_button", TargetID is
+	// "<surface_id>/<source_component_id>". Executed is the success row; Denied
+	// covers the five refusal paths (unresolved button, action-name mismatch,
+	// whitelist refusal, insufficient role, unsupported action type).
+	AuditActionAgentCardExecuted AuditAction = "agent.card_action_executed"
+	AuditActionAgentCardDenied   AuditAction = "agent.card_action_denied"
 )
 
 // AuditOutcome separates asynchronous acceptance from terminal business
