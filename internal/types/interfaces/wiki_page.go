@@ -201,7 +201,7 @@ type WikiPageService interface {
 	PruneEmptyFolderChains(ctx context.Context, kbID string, folderIDs []string) ([]string, error)
 	// FindOrCreateFolderPath resolves a category path (e.g. ["AI","RAG"]) to a
 	// folder id, creating any missing intermediate folders. Returns the leaf
-	// folder id and the canonical (cleaned) path. An empty/blank path resolves
+	// folder id and the trimmed folder names. An empty/blank path resolves
 	// to the root ("").
 	FindOrCreateFolderPath(ctx context.Context, kbID string, tenantID uint64, path []string) (string, []string, error)
 	// MovePage relocates a page into folderID ("" = root), recomputing its

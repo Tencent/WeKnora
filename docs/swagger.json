@@ -37494,6 +37494,14 @@
                     "description": "SynthesisModelID is the model that writes Wiki pages. Empty uses summary_model_id.",
                     "type": "string",
                     "x-agent": "wiki_synthesis_model_id"
+                },
+                "taxonomy": {
+                    "description": "Taxonomy restricts automatic placement of newly generated entity and concept pages.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiTaxonomyConfig"
+                        }
+                    ]
                 }
             }
         },
@@ -38364,6 +38372,35 @@
                 "total_pages": {
                     "type": "integer",
                     "x-agent": true
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiTaxonomyCategory": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "maxLength": 240
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 80
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiTaxonomyConfig": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiTaxonomyCategory"
+                    }
+                },
+                "fallback": {
+                    "description": "Fallback names the folder for unmatched pages. Empty uses Uncategorized.",
+                    "type": "string",
+                    "maxLength": 80
                 }
             }
         },

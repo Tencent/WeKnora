@@ -9996,6 +9996,11 @@ definitions:
           summary_model_id.
         type: string
         x-agent: wiki_synthesis_model_id
+      taxonomy:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiTaxonomyConfig'
+        description: Taxonomy restricts automatic placement of newly generated entity
+          and concept pages.
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity:
     enum:
@@ -10697,6 +10702,26 @@ definitions:
       total_pages:
         type: integer
         x-agent: true
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiTaxonomyCategory:
+    properties:
+      description:
+        maxLength: 240
+        type: string
+      name:
+        maxLength: 80
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiTaxonomyConfig:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiTaxonomyCategory'
+        type: array
+      fallback:
+        description: Fallback names the folder for unmatched pages. Empty uses Uncategorized.
+        maxLength: 80
+        type: string
     type: object
   gorm.DeletedAt:
     properties:

@@ -70,3 +70,32 @@ func TestFillOmittedIndexingFlagsKeepsDefaults(t *testing.T) {
 	assert.False(t, explicit.IndexingStrategy.VectorEnabled)
 	assert.True(t, explicit.IndexingStrategy.GraphEnabled)
 }
+
+func TestApplyKnowledgeBasePatchReplacesWikiTaxonomy(t *testing.T) {
+	original := &types.WikiTaxonomyConfig{
+		Categories: []types.WikiTaxonomyCategory{{Name: "Previous", Description: "Previous description"}},
+		Fallback:   "Other",
+	}
+	kb := &types.KnowledgeBase{WikiConfig: &types.WikiConfig{SynthesisModelID: "wiki-model", Taxonomy: original}}
+	for _, tc := range []struct {
+		name  string
+		patch string
+		want  *types.WikiTaxonomyConfig
+	}{
+		{"omitted", `{"max_pages_per_ingest":5}`, original},
+		{"replaced", `{"taxonomy":{"categories":[{"name":"New"}]}}`,
+			&types.WikiTaxonomyConfig{Categories: []types.WikiTaxonomyCategory{{Name: "New"}}}},
+		{"cleared", `{"taxonomy":{"categories":[]}}`,
+			&types.WikiTaxonomyConfig{Categories: []types.WikiTaxonomyCategory{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := applyKnowledgeBasePatch(kb, PatchKnowledgeBaseRequest{}, map[string]json.RawMessage{
+				"wiki_config": json.RawMessage(tc.patch),
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got.Config.WikiConfig.Taxonomy)
+			require.Equal(t, "wiki-model", got.Config.WikiConfig.SynthesisModelID)
+			require.Equal(t, "Previous description", kb.WikiConfig.Taxonomy.Categories[0].Description)
+		})
+	}
+}

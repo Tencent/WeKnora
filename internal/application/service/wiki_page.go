@@ -1931,13 +1931,16 @@ func (s *wikiPageService) CreateFolder(
 func (s *wikiPageService) FindOrCreateFolderPath(
 	ctx context.Context, kbID string, tenantID uint64, path []string,
 ) (string, []string, error) {
-	clean := types.CleanWikiCategoryPath(path)
+	clean := types.TrimWikiFolderSegments(path)
 	if len(clean) == 0 {
 		return types.WikiFolderRootID, nil, nil
 	}
 	parentID := types.WikiFolderRootID
 	parentPath := ""
 	for depth, name := range clean {
+		if _, err := validateFolderName(name); err != nil {
+			return "", nil, err
+		}
 		child, err := s.repo.GetChildFolderByName(ctx, kbID, parentID, name)
 		if err != nil {
 			if !errors.Is(err, repository.ErrWikiFolderNotFound) {
