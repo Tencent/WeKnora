@@ -1077,27 +1077,21 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(
 ) error {
 	redisKey := multimodalPendingKey(payload.KnowledgeID)
 
-	var pendingCount int64
-	if s.redisClient == nil {
-		pendingCount = liteMultimodalDecrBy(redisKey, 1)
-	} else {
-		var err error
-		pendingCount, err = s.redisClient.Decr(ctx, redisKey).Result()
-		if err != nil && err != redis.Nil {
-			// Redis hiccup must not strand the parent knowledge. Best-effort:
-			// enqueue post-process anyway. KnowledgePostProcess is idempotent
-			// (it transitions parse_status processing → completed under a row
-			// guard), so a duplicate triggered by a sibling image is harmless.
-			// The alternative — silently returning — is what produced the
-			// "permanently stuck" reports we are fixing here.
-			logger.Warnf(ctx,
-				"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
-				payload.KnowledgeID, err)
-			return s.enqueueKnowledgePostProcessTask(ctx, payload)
-		}
+	pendingCount, current, err := decrementMultimodalCounter(ctx, s.redisClient, redisKey, payload.CounterBatch, 1)
+	if err != nil {
+		// Redis hiccup must not strand the parent knowledge. Best-effort:
+		// enqueue post-process anyway. KnowledgePostProcess is idempotent
+		// (it transitions parse_status processing → completed under a row
+		// guard), so a duplicate triggered by a sibling image is harmless.
+		// The alternative — silently returning — is what produced the
+		// "permanently stuck" reports we are fixing here.
+		logger.Warnf(ctx,
+			"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
+			payload.KnowledgeID, err)
+		return s.enqueueKnowledgePostProcessTask(ctx, payload)
 	}
 
-	if pendingCount > 0 {
+	if !current || pendingCount > 0 {
 		return nil
 	}
 	logger.Infof(ctx, "[ImageMultimodal] All images processed for knowledge %s. Finalizing...", payload.KnowledgeID)
@@ -1106,11 +1100,7 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(
 	if err := s.enqueueKnowledgePostProcessTask(ctx, payload); err != nil {
 		return err
 	}
-	if s.redisClient == nil {
-		liteMultimodalDel(redisKey)
-	} else {
-		s.redisClient.Del(ctx, redisKey)
-	}
+	deleteMultimodalCounter(ctx, s.redisClient, redisKey, payload.CounterBatch)
 	return nil
 }
 
