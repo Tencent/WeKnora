@@ -21583,55 +21583,6 @@ paths:
         risk: read
       x-agent-hint: 'Use when a document is stuck or failed: tells a stalled parse
         from a running one, names the failed stage.'
-  /knowledge/{id}/stages:
-    get:
-      consumes:
-      - application/json
-      description: 返回该知识在解析流水线的 trace tree（root → stage → subspan）：每段状态、耗时、input/output、错误码、langfuse_trace_id。支持
-        ?attempt=N 查看历史尝试；不传则返回最新尝试。前端用于渲染时间线 + 多模态/embedding 子节点 + 一键跳转 Langfuse。
-      parameters:
-      - description: 知识ID
-        in: path
-        name: id
-        required: true
-        type: string
-        x-agent: knowledge_id
-      - description: 指定尝试号；省略或非正数=最新
-        in: query
-        minimum: 1
-        name: attempt
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            allOf:
-            - $ref: '#/definitions/internal_handler.DataResponse'
-            - properties:
-                data:
-                  $ref: '#/definitions/internal_handler.KnowledgeSpansData'
-              type: object
-        "403":
-          description: 无权访问所属知识库
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: 知识不存在
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 获取知识文档解析的 Span 树（含历史尝试）
-      tags:
-      - 知识管理
-      x-agent:
-        id: knowledge.get_parse_progress
-        risk: read
-      x-agent-hint: 'Use when a document is stuck or failed: tells a stalled parse
-        from a running one, names the failed stage.'
   /knowledge/batch:
     get:
       consumes:
