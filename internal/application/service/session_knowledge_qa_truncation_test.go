@@ -68,7 +68,8 @@ func TestConsumeFallbackStreamTruncation(t *testing.T) {
 			require.Equal(t, delivered.String(), cm.ChatResponse.Content, "store all emitted chunks")
 			original := strings.Join(tt.chunks, "")
 			if tt.truncated && strings.TrimSpace(original) == "" {
-				require.NotEmpty(t, strings.TrimSpace(delivered.String()), "the fallback text is delivered in the tail event")
+				// The fallback text rides the tail event.
+				require.NotEmpty(t, strings.TrimSpace(delivered.String()))
 			} else {
 				require.Equal(t, original, delivered.String(), "partial and natural-stop answers must be preserved")
 			}
