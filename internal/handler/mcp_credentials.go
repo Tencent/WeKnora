@@ -64,7 +64,13 @@ type mcpCredentialsPutRequest struct {
 // @Failure      404      {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// The same per-field credential handler serves every resource group that
+// mounts a credentials subresource; each mounted path must be declared or
+// that group is missing from the generated Swagger document (issue #1909).
 // @Router       /mcp-services/{id}/credentials [put]
+// @Router       /models/{id}/credentials [put]
+// @Router       /web-search-providers/{id}/credentials [put]
+// @Router       /datasource/{id}/credentials [put]
 func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
@@ -133,7 +139,12 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 // @Failure      404  {object}  errors.AppError  "服务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// Same shared-handler mount set as Put above: declare every resource group
+// that mounts this subresource (issue #1909).
 // @Router       /mcp-services/{id}/credentials/{field} [delete]
+// @Router       /models/{id}/credentials/{field} [delete]
+// @Router       /web-search-providers/{id}/credentials/{field} [delete]
+// @Router       /datasource/{id}/credentials/{field} [delete]
 func (h *MCPCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")

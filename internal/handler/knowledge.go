@@ -691,6 +691,8 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 // @x-agent      {"id":"knowledge.get_parse_progress","risk":"read"}
 // @x-agent-hint "Use when a document is stuck or failed: tells a stalled parse from a running one, names the failed stage."
 // @Router       /knowledge/{id}/spans [get]
+// /:id/stages is registered as an alias of /:id/spans (issue #1909).
+// @Router       /knowledge/{id}/stages [get]
 //
 // Always returns the canonical 5-stage timeline; missing stage rows are
 // synthesized as "pending" so the frontend timeline always renders five

@@ -304,7 +304,10 @@ func (h *ModelHandler) GetModelProvider(c *gin.Context) {
 // @Success      200         {object}  map[string]interface{}  "解析结果"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// Registered under both verbs: POST carries the row spec in the body, GET
+// keeps query-string compatibility for old clients (issue #1909).
 // @Router       /models/catalog/resolve [get]
+// @Router       /models/catalog/resolve [post]
 func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 	// POST carries the row spec in the body; GET remains compatible with old clients.
 	query := c.Query
