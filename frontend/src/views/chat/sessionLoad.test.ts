@@ -87,6 +87,13 @@ function fixture(
     isImRecovering: ref(false),
     window: { removeEventListener() {} },
     SESSION_MUTATION_EVENT: 'mutation',
+    // The teardown names both of these, and unlike handleSessionMutation -- whose own
+    // region the harness composes below, because these tests call it -- this handler is
+    // defined after the onBeforeMount that ends that region. Nothing here exercises it:
+    // dispose() is only the trigger for stale-request invalidation, so it stands down as
+    // the no-op collaborator the rest of this fixture is made of.
+    A2UI_CONFIRM_EVENT: 'weknora:a2ui-confirm',
+    handleA2uiConfirm: () => {},
     backgroundPoller: { dispose() {} },
     clearComposerApproval() {},
     loadFollowUpSuggestions() {},
