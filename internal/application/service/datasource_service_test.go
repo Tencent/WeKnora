@@ -297,7 +297,8 @@ type deletionLookupKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	knowledge         *types.Knowledge
 	lookupErr         error
-	metadataUpdates   []map[string]string // metadata persisted via UpdateKnowledge / UpdateKnowledgeColumn
+	metadataUpdates   []map[string]string  // metadata persisted via UpdateKnowledge / UpdateKnowledgeColumn
+	folderUpdates     []folderColumnUpdate // folder_path column writes (issue #5171)
 	metadataUpdateErr error
 	hardDeleted       []string
 	hardDeleteErr     error
@@ -321,9 +322,21 @@ func (r *deletionLookupKnowledgeRepo) UpdateKnowledge(_ context.Context, knowled
 	return nil
 }
 
+// folderColumnUpdate records a folder_path column write so folder-attach
+// behavior can be asserted without a real repository.
+type folderColumnUpdate struct {
+	id    string
+	value string
+}
+
 func (r *deletionLookupKnowledgeRepo) UpdateKnowledgeColumn(
 	ctx context.Context, id string, column string, value interface{},
 ) error {
+	if column == "folder_path" {
+		v, _ := value.(string)
+		r.folderUpdates = append(r.folderUpdates, folderColumnUpdate{id: id, value: v})
+		return nil
+	}
 	if column != "metadata" {
 		return fmt.Errorf("unexpected column update %q", column)
 	}
@@ -582,6 +595,91 @@ func TestIngestItem_PersistsSourceUpdatedAt(t *testing.T) {
 	assert.False(t, present)
 	_, present = repo.metadataUpdates[0]["source_created_at"]
 	assert.False(t, present)
+}
+
+// TestIngestItem_ComposesSourceFolderIntoCustomFileName verifies that a
+// connector-published folder_path is composed into the path-qualified custom
+// name the create flow splits into folder + display name, so synced
+// documents keep the source hierarchy instead of piling up at the KB root
+// (issue #5171). Root-level items keep the flat name, and an invalid folder
+// syncs flat instead of failing the item.
+func TestIngestItem_ComposesSourceFolderIntoCustomFileName(t *testing.T) {
+	ks := &sweepFakeKS{repo: &sweepFakeRepo{}}
+	svc := &DataSourceService{knowledgeService: ks}
+	_, err := svc.ingestItem(context.Background(), &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+	}, &types.FetchedItem{
+		ExternalID:  "ima:1",
+		Title:       "Spec",
+		Content:     []byte("# hello\n"),
+		ContentType: "text/markdown",
+		FileName:    "spec.md",
+		Metadata:    map[string]string{"folder_path": "研发资料/规格"},
+	}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, ks.events, "create:研发资料/规格/spec.md")
+
+	// Root-level items (no folder_path metadata) stay flat.
+	ks2 := &sweepFakeKS{repo: &sweepFakeRepo{}}
+	svc2 := &DataSourceService{knowledgeService: ks2}
+	_, err = svc2.ingestItem(context.Background(), &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+	}, &types.FetchedItem{
+		ExternalID:  "ima:2",
+		Title:       "Root",
+		Content:     []byte("# hello\n"),
+		ContentType: "text/markdown",
+		FileName:    "root.md",
+	}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, ks2.events, "create:root.md")
+
+	// An unpublishable folder syncs flat instead of failing the item.
+	ks3 := &sweepFakeKS{repo: &sweepFakeRepo{}}
+	svc3 := &DataSourceService{knowledgeService: ks3}
+	_, err = svc3.ingestItem(context.Background(), &types.DataSource{
+		ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1",
+	}, &types.FetchedItem{
+		ExternalID:  "ima:3",
+		Title:       "Bad",
+		Content:     []byte("# hello\n"),
+		ContentType: "text/markdown",
+		FileName:    "bad.md",
+		Metadata:    map[string]string{"folder_path": "bad\x01folder"},
+	}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, ks3.events, "create:bad.md")
+}
+
+// TestIngestItem_URLItemLandsInSourceFolder verifies that a URL-only item
+// gets its source folder written straight onto the knowledge row, since the
+// URL create flow has no path-qualified name to split (issue #5171).
+func TestIngestItem_URLItemLandsInSourceFolder(t *testing.T) {
+	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
+	repo := &deletionLookupKnowledgeRepo{}
+	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "url:1",
+		URL:        "https://example.com/doc",
+		Metadata:   map[string]string{"folder_path": "网页收藏"},
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, repo.folderUpdates, 1)
+	assert.Equal(t, "url-knowledge-1", repo.folderUpdates[0].id)
+	assert.Equal(t, "网页收藏", repo.folderUpdates[0].value)
+
+	// Without folder_path metadata there is no folder write.
+	repo = &deletionLookupKnowledgeRepo{}
+	ks = &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-2"}}
+	svc = &DataSourceService{knowledgeService: ks}
+	_, err = svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "url:2",
+		URL:        "https://example.com/doc2",
+	}, nil)
+	require.NoError(t, err)
+	assert.Empty(t, repo.folderUpdates)
 }
 
 func TestProcessSync_SyncDeletionsDeletesMatchingKnowledge(t *testing.T) {

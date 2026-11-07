@@ -1434,6 +1434,26 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //   - Has URL only      → CreateKnowledgeFromURL  (让 WeKnora 下载并解析)
 //
 // Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
+// sourceFolderPath returns the folder path a connector published for this
+// item ("folder_path" metadata, "A/B" style), normalized to the knowledge
+// folder format. Empty when the connector did not publish one or the value
+// fails input validation — an unpublishable folder syncs flat, exactly as it
+// did before folder support, instead of failing the whole item.
+func sourceFolderPath(item *types.FetchedItem) string {
+	if item == nil || item.Metadata == nil {
+		return ""
+	}
+	folder := types.NormalizeKnowledgeFolderPath(item.Metadata["folder_path"])
+	if folder == "" {
+		return ""
+	}
+	if _, ok := secutils.ValidateInput(folder); !ok {
+		logger.Warnf(context.Background(), "ignoring datasource folder path %q: invalid characters", folder)
+		return ""
+	}
+	return folder
+}
+
 func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
 	// Reject unsupported source files before replacing an existing document.
 	// Do not classify generic BadRequest errors: missing storage configuration
@@ -1451,6 +1471,17 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if mc, ok := item.Metadata["channel"]; ok && mc != "" {
 			channel = mc
 		}
+	}
+
+	// Preserve the source folder hierarchy (issue #5171): connectors publish
+	// each item's folder path as "folder_path" metadata ("A/B", no leading
+	// slash). Composing it with the file name yields the path-qualified
+	// custom name the create/replace flows already split into folder_path
+	// plus display name, so synced documents land in the matching
+	// knowledge-base folder instead of piling up at the root.
+	customName := item.FileName
+	if folder := sourceFolderPath(item); folder != "" && item.FileName != "" {
+		customName = folder + "/" + item.FileName
 	}
 
 	metadata := map[string]string{
@@ -1523,9 +1554,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			ds.KnowledgeBaseID,
 			fh,
 			metadata,
-			nil,           // use KB default for multimodal
-			item.FileName, // customFileName — must include extension for file-type validation
-			tagIDs,        // auto-tag from data source
+			nil,        // use KB default for multimodal
+			customName, // customFileName — must include extension for file-type validation
+			tagIDs,     // auto-tag from data source
 			channel,
 			nil,
 		); err != nil {
@@ -1583,6 +1614,15 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				ctx, created.ID, "metadata", created.Metadata,
 			); uErr != nil {
 				return isUpdate, fmt.Errorf("attach datasource metadata: %w", uErr)
+			}
+			// URL creates have no path-qualified name to split, so the source
+			// folder lands on the row directly (issue #5171).
+			if folder := sourceFolderPath(item); folder != "" {
+				if fErr := s.knowledgeService.GetRepository().UpdateKnowledgeColumn(
+					ctx, created.ID, "folder_path", folder,
+				); fErr != nil {
+					return isUpdate, fmt.Errorf("attach datasource folder: %w", fErr)
+				}
 			}
 		}
 		s.sweepStaleSubtree(ctx, ds, item)
