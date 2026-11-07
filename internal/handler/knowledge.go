@@ -691,8 +691,12 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 // @x-agent      {"id":"knowledge.get_parse_progress","risk":"read"}
 // @x-agent-hint "Use when a document is stuck or failed: tells a stalled parse from a running one, names the failed stage."
 // @Router       /knowledge/{id}/spans [get]
-// /:id/stages is registered as an alias of /:id/spans (issue #1909).
-// @Router       /knowledge/{id}/stages [get]
+// /knowledge/{id}/stages is registered as a pure alias of this handler
+// (issue #1909). It is deliberately NOT annotated as a second @Router:
+// swag would copy the x-agent block above onto the alias path, and the
+// agent operations catalog enforces global uniqueness of operation IDs,
+// so annotating it would make server startup fail with
+// operation "knowledge.get_parse_progress" declared twice.
 //
 // Always returns the canonical 5-stage timeline; missing stage rows are
 // synthesized as "pending" so the frontend timeline always renders five
