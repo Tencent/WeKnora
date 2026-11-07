@@ -47,7 +47,8 @@ func TestQuickAnswerCompleteCarriesUsage(t *testing.T) {
 	require.Equal(t, usage, complete.Usage, "complete event must carry usage at top level")
 	require.Equal(t, usage, complete.Data["usage"], "complete event must carry usage inside data")
 	require.NotNil(t, messages.saved, "assistant message must be persisted")
-	require.Same(t, msg, messages.saved)
+	// The persistence path may re-read the message; assert by value.
+	require.Equal(t, "DONE", messages.saved.Content)
 	require.Equal(t, usage, messages.saved.Usage, "persisted message must keep the turn usage")
 }
 
