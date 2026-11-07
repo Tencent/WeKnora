@@ -477,6 +477,10 @@ func mcpOAuthCallbackURL() string {
 	return base + "/api/v1/mcp-oauth/callback"
 }
 
+// imMCPAuthNoticeHeader is the fixed lead-in line of every system-generated
+// MCP authorization notice (see buildIMMCPAuthNotice).
+const imMCPAuthNoticeHeader = "⚠️ 以下 MCP 服务需要授权后才能使用，请点击链接完成授权，然后重新发送你的消息："
+
 // buildIMMCPAuthNotice builds a user-facing authorization notice for the given
 // OAuth-enabled MCP services. When the OAuth manager and APP_EXTERNAL_URL are
 // available it generates a per-service authorization URL (StartAuthorization)
@@ -530,8 +534,43 @@ func (s *Service) buildIMMCPAuthNotice(ctx context.Context, services []imMCPAuth
 		}
 	}
 
-	return "⚠️ 以下 MCP 服务需要授权后才能使用，请点击链接完成授权，然后重新发送你的消息：\n" +
+	return imMCPAuthNoticeHeader + "\n" +
 		strings.Join(lines, "\n")
+}
+
+// stripIMAuthNotices removes MCP authorization notice paragraphs that a reply
+// body carries over from earlier turns. A stored IM answer keeps the notice
+// appended to it, that text re-enters the conversation history, and the model
+// then echoes or rewrites whole notice blocks in later answers — appending
+// this turn's notice on top would show one stale link per echoed block. A
+// paragraph counts as a system-generated notice only when it carries the exact
+// fixed lead-in followed by bullet lines; prose is never touched. Returns the
+// body unchanged when no notice block is present.
+func stripIMAuthNotices(body string) string {
+	if !strings.Contains(body, imMCPAuthNoticeHeader) {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); {
+		if strings.Contains(lines[i], imMCPAuthNoticeHeader) {
+			// Drop the lead-in plus the bullet lines that belong to the same
+			// notice block; anything the model wrote around it stays.
+			i++
+			for i < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i]), "•") {
+				i++
+			}
+			continue
+		}
+		kept = append(kept, lines[i])
+		i++
+	}
+	stripped := strings.TrimSpace(strings.Join(kept, "\n"))
+	// Collapse the blank runs the removals left between paragraphs.
+	for strings.Contains(stripped, "\n\n\n") {
+		stripped = strings.ReplaceAll(stripped, "\n\n\n", "\n\n")
+	}
+	return stripped
 }
 
 // appendIMAuthNotice appends an authorization notice to an existing reply body,
@@ -2919,6 +2958,11 @@ loop:
 			answer = fallback
 		}
 	}
+	// Strip notice blocks echoed from earlier turns before appending this
+	// turn's notice, so the reply keeps exactly one authorization section
+	// with this turn's links.
+	finalDisplay = stripIMAuthNotices(finalDisplay)
+	answer = stripIMAuthNotices(answer)
 	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
 		finalDisplay = appendIMAuthNotice(finalDisplay, notice)
 		answer = appendIMAuthNotice(answer, notice)
@@ -3160,6 +3204,10 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	if answer == "" {
 		answer = imNoAnswerFallback
 	}
+	// Strip notice blocks echoed from earlier turns before appending this
+	// turn's notice, so the stored reply keeps exactly one authorization
+	// section with this turn's links.
+	answer = stripIMAuthNotices(answer)
 	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
 		answer = appendIMAuthNotice(answer, notice)
 	}
