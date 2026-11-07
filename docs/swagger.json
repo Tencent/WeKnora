@@ -4201,7 +4201,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）",
+                "description": "连接器凭据是原子映射，整体写入：credentials 必须非空；如需删除请用 DELETE /datasource/{id}/credentials/credentials",
                 "consumes": [
                     "application/json"
                 ],
@@ -4209,19 +4209,19 @@
                     "application/json"
                 ],
                 "tags": [
-                    "MCP服务"
+                    "数据源"
                 ],
-                "summary": "设置 MCP 服务凭据",
+                "summary": "设置数据源凭据",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP 服务 ID",
+                        "description": "数据源 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "{api_key?, token?, client_secret?: string}",
+                        "description": "{credentials: {字段: 值}}（必须非空）",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -4257,7 +4257,7 @@
                         }
                     },
                     "404": {
-                        "description": "服务不存在",
+                        "description": "数据源不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -4275,25 +4275,25 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "删除指定字段的存储凭据；删除已为空的字段是幂等的",
+                "description": "清除整个凭据映射；当前仅支持 field=credentials",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "MCP服务"
+                    "数据源"
                 ],
-                "summary": "移除 MCP 服务的单个凭据字段",
+                "summary": "清除数据源凭据",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP 服务 ID",
+                        "description": "数据源 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "字段名（api_key | token | client_secret）",
+                        "description": "字段名（credentials）",
                         "name": "field",
                         "in": "path",
                         "required": true
@@ -4310,7 +4310,7 @@
                         }
                     },
                     "404": {
-                        "description": "服务不存在",
+                        "description": "数据源不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -15385,10 +15385,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示。GET 走查询参数；POST 见 resolve-post，同一处理函数、参数改在 JSON 请求体中提供",
                 "produces": [
                     "application/json"
                 ],
@@ -15442,7 +15439,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示",
+                "description": "与 GET /models/catalog/resolve 为同一处理函数，但参数经 JSON 请求体传入，并支持可选的 spec 覆盖",
                 "consumes": [
                     "application/json"
                 ],
@@ -15452,40 +15449,29 @@
                 "tags": [
                     "模型管理"
                 ],
-                "summary": "解析模型的有效接入配置",
+                "summary": "解析模型的有效接入配置（JSON 请求体）",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "厂商标识",
-                        "name": "provider",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "模型名",
-                        "name": "model",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Base URL",
-                        "name": "base_url",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "模型类型",
-                        "name": "model_type",
-                        "in": "query"
+                        "description": "{provider, model?, base_url?, model_type?, spec?}",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.resolveModelCatalogBody"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "解析结果",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/internal_handler.DataResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -16050,7 +16036,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）",
+                "description": "为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）。模型字段：api_key（所有厂商）、app_secret（WeKnora Cloud）",
                 "consumes": [
                     "application/json"
                 ],
@@ -16058,19 +16044,19 @@
                     "application/json"
                 ],
                 "tags": [
-                    "MCP服务"
+                    "模型管理"
                 ],
-                "summary": "设置 MCP 服务凭据",
+                "summary": "设置模型凭据",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP 服务 ID",
+                        "description": "模型 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "{api_key?, token?, client_secret?: string}",
+                        "description": "{api_key?, app_secret?: string}",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -16106,7 +16092,7 @@
                         }
                     },
                     "404": {
-                        "description": "服务不存在",
+                        "description": "模型不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -16124,25 +16110,25 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "删除指定字段的存储凭据；删除已为空的字段是幂等的",
+                "description": "删除指定字段的存储凭据；删除已为空的字段是幂等的。字段名：api_key | app_secret",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "MCP服务"
+                    "模型管理"
                 ],
-                "summary": "移除 MCP 服务的单个凭据字段",
+                "summary": "移除模型的单个凭据字段",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP 服务 ID",
+                        "description": "模型 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "字段名（api_key | token | client_secret）",
+                        "description": "字段名（api_key | app_secret）",
                         "name": "field",
                         "in": "path",
                         "required": true
@@ -16159,7 +16145,7 @@
                         }
                     },
                     "404": {
-                        "description": "服务不存在",
+                        "description": "模型不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -25040,7 +25026,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）",
+                "description": "为服务商写入 api_key；省略时返回当前配置状态，空字符串视为 no-op（如需删除请用 DELETE）",
                 "consumes": [
                     "application/json"
                 ],
@@ -25048,19 +25034,19 @@
                     "application/json"
                 ],
                 "tags": [
-                    "MCP服务"
+                    "联网搜索"
                 ],
-                "summary": "设置 MCP 服务凭据",
+                "summary": "设置联网搜索服务商凭据",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP 服务 ID",
+                        "description": "服务商 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "{api_key?, token?, client_secret?: string}",
+                        "description": "{api_key?: string}",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -25096,7 +25082,7 @@
                         }
                     },
                     "404": {
-                        "description": "服务不存在",
+                        "description": "服务商不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -25114,25 +25100,25 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "删除指定字段的存储凭据；删除已为空的字段是幂等的",
+                "description": "删除指定字段的存储凭据；当前仅支持 api_key；删除已为空的字段是幂等的",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "MCP服务"
+                    "联网搜索"
                 ],
-                "summary": "移除 MCP 服务的单个凭据字段",
+                "summary": "移除联网搜索服务商的凭据字段",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "MCP 服务 ID",
+                        "description": "服务商 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "字段名（api_key | token | client_secret）",
+                        "description": "字段名（api_key）",
                         "name": "field",
                         "in": "path",
                         "required": true
@@ -25149,7 +25135,7 @@
                         }
                     },
                     "404": {
-                        "description": "服务不存在",
+                        "description": "服务商不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -43911,6 +43897,29 @@
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_handler.resolveModelCatalogBody": {
+            "type": "object",
+            "required": [
+                "provider"
+            ],
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "model_type": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "spec": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSpecOverride"
                 }
             }
         },
