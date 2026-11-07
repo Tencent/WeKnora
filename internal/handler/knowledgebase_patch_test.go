@@ -83,10 +83,16 @@ func TestApplyKnowledgeBasePatchReplacesWikiTaxonomy(t *testing.T) {
 		want  *types.WikiTaxonomyConfig
 	}{
 		{"omitted", `{"max_pages_per_ingest":5}`, original},
-		{"replaced", `{"taxonomy":{"categories":[{"name":"New"}]}}`,
-			&types.WikiTaxonomyConfig{Categories: []types.WikiTaxonomyCategory{{Name: "New"}}}},
-		{"cleared", `{"taxonomy":{"categories":[]}}`,
-			&types.WikiTaxonomyConfig{Categories: []types.WikiTaxonomyCategory{}}},
+		{
+			"replaced",
+			`{"taxonomy":{"categories":[{"name":"New"}]}}`,
+			&types.WikiTaxonomyConfig{Categories: []types.WikiTaxonomyCategory{{Name: "New"}}},
+		},
+		{
+			"cleared",
+			`{"taxonomy":{"categories":[]}}`,
+			&types.WikiTaxonomyConfig{Categories: []types.WikiTaxonomyCategory{}},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := applyKnowledgeBasePatch(kb, PatchKnowledgeBaseRequest{}, map[string]json.RawMessage{
