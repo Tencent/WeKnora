@@ -34,14 +34,25 @@ type WritableRoot struct {
 	// Path is an absolute, cleaned host path.
 	Path string
 	// ReadOnlySubpaths sit inside Path but must not be written, typically
-	// Path/.git.
+	// Path/.git. They stay read-only even where another root covers them.
 	ReadOnlySubpaths []string
+	// ProtectGitDirs keeps every directory named .git anywhere under Path
+	// read-only, including ones created later. A git hook or config written
+	// there runs with the user's own rights outside the sandbox.
+	ProtectGitDirs bool
+	// ProtectBareGitDirs keeps hooks and config read-only in any directory
+	// under Path whose name ends in .git. A grant sets it; a workspace does
+	// not, so git clone --bare keeps working there.
+	ProtectBareGitDirs bool
 }
 
 // Policy is the platform-neutral permission declaration. It is a value
 // object: comparable by Fingerprint, free of side effects, safe to copy.
 type Policy struct {
 	WritableRoots []WritableRoot
+	// WritableFiles are single files opened for read and write, nothing else
+	// in their directory. Paths are resolved and absolute.
+	WritableFiles []string
 	// ReadableRoots are re-opened after PrivateRoots is denied, so this is
 	// also the list that decides what survives inside a private subtree.
 	// An entry may name a file (a shell startup script), not just a directory.
@@ -169,6 +180,14 @@ func (p Policy) Validate() error {
 			}
 		}
 	}
+	if err := checkAbsolute(p.WritableFiles...); err != nil {
+		return err
+	}
+	for _, file := range p.WritableFiles {
+		if isFilesystemRoot(file) {
+			return fmt.Errorf("%w: writable file %q", ErrFilesystemRoot, file)
+		}
+	}
 	if err := checkAbsolute(p.ReadableRoots...); err != nil {
 		return err
 	}
@@ -194,6 +213,23 @@ func (p Policy) Validate() error {
 			if PathUnder(root.Path, deny) {
 				return fmt.Errorf("%w: %q covers %q", ErrDenyReadCoversRoot, deny, root.Path)
 			}
+		}
+		for _, file := range p.WritableFiles {
+			if PathUnder(file, deny) {
+				return fmt.Errorf("%w: %q covers %q", ErrDenyReadCoversRoot, deny, file)
+			}
+		}
+	}
+	// Seatbelt resolves symlinks and then validates again. A writable file or
+	// root that now lands on a path a grant would refuse must not be compiled.
+	for _, root := range p.WritableRoots {
+		if err := p.rejectResolvedGrant(root.Path); err != nil {
+			return err
+		}
+	}
+	for _, file := range p.WritableFiles {
+		if err := p.rejectResolvedGrant(file); err != nil {
+			return err
 		}
 	}
 	if err := checkAbsolute(p.Cwd); err != nil {
@@ -232,6 +268,7 @@ func (p Policy) Fingerprint() string {
 func (p Policy) canonical() Policy {
 	out := Policy{
 		WritableRoots: make([]WritableRoot, len(p.WritableRoots)),
+		WritableFiles: append([]string(nil), p.WritableFiles...),
 		ReadableRoots: append([]string(nil), p.ReadableRoots...),
 		PrivateRoots:  append([]string(nil), p.PrivateRoots...),
 		DenyRead:      append([]string(nil), p.DenyRead...),
@@ -242,11 +279,15 @@ func (p Policy) canonical() Policy {
 	for i, root := range p.WritableRoots {
 		subs := append([]string(nil), root.ReadOnlySubpaths...)
 		sort.Strings(subs)
-		out.WritableRoots[i] = WritableRoot{Path: root.Path, ReadOnlySubpaths: subs}
+		out.WritableRoots[i] = WritableRoot{
+			Path: root.Path, ReadOnlySubpaths: subs, ProtectGitDirs: root.ProtectGitDirs,
+			ProtectBareGitDirs: root.ProtectBareGitDirs,
+		}
 	}
 	sort.Slice(out.WritableRoots, func(i, j int) bool {
 		return out.WritableRoots[i].Path < out.WritableRoots[j].Path
 	})
+	sort.Strings(out.WritableFiles)
 	sort.Strings(out.ReadableRoots)
 	sort.Strings(out.PrivateRoots)
 	sort.Strings(out.DenyRead)

@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -375,6 +378,158 @@ func TestResolveSandboxForExecutionDoesNotPersistOwnerForTheDefaultConfig(t *tes
 	stored, err := pinner.Read(context.Background(), "s-1")
 	require.NoError(t, err)
 	require.Zero(t, stored.TenantID, "the deployment default has no owning workspace")
+}
+
+// pinFixture is a fresh session plus named remote backends the resolver
+// distinguishes by config id. Allocation tests use it to prove the winning
+// assignment, not the caller's candidate, is what the request runs on.
+type pinFixture struct {
+	db              *gorm.DB
+	pinner          *SessionSandboxPinner
+	resolver        sandbox.TenantSandboxResolver
+	managers        map[string]sandbox.Manager
+	ctx             context.Context
+	sessionID       string
+	sessionTenantID uint64
+	configTenantID  uint64
+}
+
+func newPinFixture(t *testing.T) *pinFixture {
+	t.Helper()
+	db := newPinTestDB(t)
+	managers := map[string]sandbox.Manager{
+		"cfg-a": &pinTestManager{typ: sandbox.SandboxTypeCube},
+		"cfg-b": &pinTestManager{typ: sandbox.SandboxTypeE2B},
+	}
+	return &pinFixture{
+		db:              db,
+		pinner:          NewSessionSandboxPinner(db),
+		resolver:        configMapResolver{byID: managers},
+		managers:        managers,
+		ctx:             context.Background(),
+		sessionID:       "s-1",
+		sessionTenantID: 7,
+		configTenantID:  7,
+	}
+}
+
+func (fx *pinFixture) managerFor(configID string) sandbox.Manager {
+	return fx.managers[configID]
+}
+
+// setPin writes the two pin columns directly. SkipHooks keeps the session id
+// the fixture created.
+func (fx *pinFixture) setPin(t *testing.T, pin SandboxPin) {
+	t.Helper()
+	require.NoError(t, fx.db.Session(&gorm.Session{SkipHooks: true}).
+		Model(&types.Session{}).
+		Where("id = ?", fx.sessionID).
+		Updates(map[string]any{
+			"sandbox_config_id":        pin.ConfigID,
+			"sandbox_config_tenant_id": pin.TenantID,
+		}).Error)
+}
+
+// configMapResolver returns a distinct manager per config id so a test can
+// tell which backend a request actually resolved.
+type configMapResolver struct {
+	byID map[string]sandbox.Manager
+}
+
+func (r configMapResolver) Resolve(_ context.Context, _ uint64, configID string) (sandbox.Manager, error) {
+	m, ok := r.byID[configID]
+	if !ok || m == nil {
+		return nil, sandbox.ErrSandboxConfigNotFound
+	}
+	return m, nil
+}
+
+type recordingPlacer struct {
+	calls  []sandboxalloc.PlaceRequest
+	answer func(sandboxalloc.PlaceRequest) allocation.Assignment
+	lookup map[string]allocation.Assignment
+}
+
+func (r *recordingPlacer) Place(_ context.Context, req sandboxalloc.PlaceRequest) (allocation.Assignment, error) {
+	r.calls = append(r.calls, req)
+	return r.answer(req), nil
+}
+
+func (r *recordingPlacer) Lookup(_ context.Context, id string) (allocation.Assignment, bool, error) {
+	a, ok := r.lookup[id]
+	return a, ok, nil
+}
+
+func TestResolveSandboxForExecutionUsesTheAssignmentsConfig(t *testing.T) {
+	fx := newPinFixture(t) // named remote backends cfg-a and cfg-b, fresh session row
+	placer := &recordingPlacer{answer: func(req sandboxalloc.PlaceRequest) allocation.Assignment {
+		// Another replica won with cfg-b.
+		return allocation.Assignment{SessionID: req.SessionID, ConfigTenantID: req.ConfigTenantID, ConfigID: "cfg-b"}
+	}}
+	fx.pinner.WithPlacer(placer)
+	ctx := types.WithSandboxTenantID(fx.ctx, fx.sessionTenantID)
+
+	mgr, pin, err := resolveSandboxForExecution(ctx, fx.resolver, nil, fx.pinner,
+		fx.configTenantID, fx.sessionID, "cfg-a", nil)
+	require.NoError(t, err)
+	require.Equal(t, "cfg-b", pin.ConfigID)
+	require.Equal(t, fx.managerFor("cfg-b"), mgr, "the request runs on the winner's config, not its own candidate")
+	require.Len(t, placer.calls, 1)
+}
+
+// A placed session resolves straight from its assignment: no second
+// placement round trip, and a released one never runs again.
+func TestResolveSandboxForExecutionUsesAnExistingAssignmentWithoutPlacing(t *testing.T) {
+	fx := newPinFixture(t)
+	placer := &recordingPlacer{lookup: map[string]allocation.Assignment{
+		fx.sessionID: {SessionID: fx.sessionID, ConfigTenantID: fx.configTenantID, ConfigID: "cfg-b"},
+	}}
+	fx.pinner.WithPlacer(placer)
+	ctx := types.WithSandboxTenantID(fx.ctx, fx.sessionTenantID)
+
+	mgr, pin, err := resolveSandboxForExecution(ctx, fx.resolver, nil, fx.pinner,
+		fx.configTenantID, fx.sessionID, "cfg-a", nil)
+	require.NoError(t, err)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-b", TenantID: fx.configTenantID}, pin)
+	require.Equal(t, fx.managerFor("cfg-b"), mgr)
+	require.Empty(t, placer.calls)
+
+	released := placer.lookup[fx.sessionID]
+	at := time.Now()
+	released.ReleasedAt = &at
+	placer.lookup[fx.sessionID] = released
+	_, _, err = resolveSandboxForExecution(ctx, fx.resolver, nil, fx.pinner,
+		fx.configTenantID, fx.sessionID, "cfg-a", nil)
+	require.ErrorIs(t, err, sandbox.ErrSandboxSessionDeleted)
+	require.Empty(t, placer.calls)
+}
+
+func TestPinnerReadPrefersTheAssignmentsConfig(t *testing.T) {
+	fx := newPinFixture(t)
+	// The pin column still names the legacy owner tenant; the assignment is authoritative.
+	fx.setPin(t, SandboxPin{ConfigID: "cfg-a"})
+	placer := &recordingPlacer{lookup: map[string]allocation.Assignment{
+		fx.sessionID: {
+			SessionID: fx.sessionID, ConfigTenantID: 9, ConfigID: "cfg-a",
+			Machine: allocation.UserMachine{OwnerTenantID: 7, OwnerID: "u-1", ConfigTenantID: 9, ConfigID: "cfg-a"},
+		},
+	}}
+	fx.pinner.WithPlacer(placer)
+	got, err := fx.pinner.Read(fx.ctx, fx.sessionID)
+	require.NoError(t, err)
+	require.Equal(t, SandboxPin{ConfigID: "cfg-a", TenantID: 9}, got)
+	require.Empty(t, placer.calls, "reading never places")
+}
+
+func TestLookupOnlyPathsNeverPlace(t *testing.T) {
+	fx := newPinFixture(t)
+	placer := &recordingPlacer{answer: func(sandboxalloc.PlaceRequest) allocation.Assignment {
+		return allocation.Assignment{}
+	}}
+	fx.pinner.WithPlacer(placer)
+	_, err := sandboxConfigForExistingSandbox(fx.ctx, fx.pinner, fx.sessionID)
+	require.NoError(t, err)
+	require.Empty(t, placer.calls)
 }
 
 type failingSandboxResolver struct{}

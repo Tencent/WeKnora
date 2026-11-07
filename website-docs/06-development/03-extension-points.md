@@ -341,7 +341,7 @@ type Transcriber interface {
 
 ### 现有实现
 
-- **厂商**：`internal/models/providers/` 定义 31 个内置厂商，一个厂商一份（`acedatacloud.go`、`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/`，内置品牌素材可为 SVG 或 PNG。
+- **厂商**：`internal/models/providers/` 定义 32 个内置厂商，一个厂商一份（`acedatacloud.go`、`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/`，内置品牌素材可为 SVG 或 PNG。
 - **协议**：`internal/models/api/<protocol>`。对话 `openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；向量 `openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；重排 `cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`、`teirank`、`pineconerank`；语音 `openaitranscriptions`、`openaichataudio`。
 - **模型目录**：`internal/models/catalog/data/seed.json`（模型元数据）+ `overrides.json`（协议、思考映射与 compat 修正）→ 由脚本生成 `models.generated.json`，编译时嵌入。
 - **运行时**：`internal/models/runtime` 组合厂商定义与目录（`New()`），应用部署叠加 `config/models.json`，并为每个模型行解析出协议、端点和兼容设置。
@@ -382,47 +382,59 @@ make model-catalog-diff VENDOR=deepseek # 只看一家
 
 ```go
 // internal/types/interfaces/web_search.go
-type WebSearchProvider interface {
-    // Name returns the name of the provider
-    Name() string
-    // Search performs a web search
-    Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error)
+type WebSearcher interface {
+    Search(ctx context.Context, req types.WebSearchRequest) ([]*types.WebSearchResult, error)
+}
+
+type WebFetcher interface {
+    Fetch(ctx context.Context, pageURL string) (*types.WebPage, error)
 }
 ```
 
-注册表是工厂映射（按需用租户参数实例化）：
+注册表按提供商类型登记工厂（按需用租户参数实例化）和能力声明：
 
 ```go
 // internal/infrastructure/web_search/registry.go
-type ProviderFactory func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+type SearchFactory func(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)
+type FetchFactory func(params types.WebSearchProviderParameters) (interfaces.WebFetcher, error)
 
-type Registry struct {
-    factories map[string]ProviderFactory
-    mu        sync.RWMutex
+type Spec struct {
+    Type    string
+    Filters bool          // 声明 Search 接受 country / freshness 过滤
+    Search  SearchFactory
+    Fetch   FetchFactory  // 可选；为空时使用本地读页，非空时引擎自身失败会回退本地读页
 }
 
-func (r *Registry) Register(id string, factory ProviderFactory)
-func (r *Registry) CreateProvider(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
+func (r *Registry) Add(spec Spec)
+func (r *Registry) Capabilities(providerType string) (types.WebSearchCapabilities, error)
+func (r *Registry) NewSearcher(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)
+func (r *Registry) NewFetcher(providerType string, params types.WebSearchProviderParameters) (interfaces.WebFetcher, error)
 ```
 
-支持按地区、时效过滤的引擎可额外实现可选接口 `FilteredWebSearchProvider`（`SearchWithFilters`）；不支持过滤的引擎不得静默丢弃调用方请求的过滤条件。
+支持按地区、时效过滤的引擎从 `WebSearchRequest.Filters` 读取条件，并以 `Filters: true` 注册；`web_search` 工具据此给出带 `country` / `freshness` 的 schema。未声明 `Filters` 的引擎不会收到过滤条件：服务层会直接拒绝带过滤条件的请求，而不是静默丢弃。
+
+应用层通过 `WebSearchService.Resolve(ctx, providerID)` 取得绑定了租户策略（超时、黑名单、代理）的 `WebClient`，它同时实现 `WebSearcher`、`WebFetcher` 和 `Capabilities()`。
 
 ### 现有实现
 
-`internal/infrastructure/web_search/` 目录：`duckduckgo.go`、`google.go`、`bing.go`、`brave.go`、`tavily.go`、`ollama.go`、`baidu.go`、`searxng.go`、`keenable.go`、`zhipu.go`、`exa.go`、`metaso.go`、`bocha.go`、`serply.go`（另有 `proxy.go` 出站代理支持）。类型常量在 `internal/types/web_search_provider.go`（`WebSearchProviderTypeXxx`，与注册 ID 一一对应）。
+`internal/infrastructure/web_search/` 目录：`duckduckgo.go`、`google.go`、`bing.go`、`brave.go`、`tavily.go`、`ollama.go`、`baidu.go`、`searxng.go`、`keenable.go`、`zhipu.go`、`exa.go`、`metaso.go`、`bocha.go`、`serply.go`、`searchapi.go`（另有 `proxy.go` 出站代理支持）。类型常量在 `internal/types/web_search_provider.go`（`WebSearchProviderTypeXxx`，与注册 ID 一一对应）。
 
 ### 新增步骤
 
 1. 在 `internal/types/web_search_provider.go` 增加 `WebSearchProviderType` 常量；
-2. 在 `internal/infrastructure/web_search/` 新建 `mysearch.go`，实现 `WebSearchProvider` 并暴露工厂 `func NewMySearchProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)`；
+2. 在 `internal/infrastructure/web_search/` 新建 `mysearch.go`，实现 `WebSearcher` 并暴露工厂 `func NewMySearchProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error)`；
 3. **注册点：`internal/container/container.go` 的 `registerWebSearchProviders()`**：
 
 ```go
 func registerWebSearchProviders(registry *infra_web_search.Registry) {
-    registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
-    registry.Register("google", infra_web_search.NewGoogleProvider)
-    // ... 在此追加：
-    registry.Register("mysearch", infra_web_search.NewMySearchProvider)
+    for _, spec := range []infra_web_search.Spec{
+        {Type: "duckduckgo", Search: infra_web_search.NewDuckDuckGoProvider},
+        {Type: "google", Search: infra_web_search.NewGoogleProvider},
+        // ... 在此追加：
+        {Type: "mysearch", Search: infra_web_search.NewMySearchProvider},
+    } {
+        registry.Add(spec)
+    }
 }
 ```
 

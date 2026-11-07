@@ -18,6 +18,7 @@ const (
 
 type config struct {
 	edition, baseURL, username, secret string
+	usePAT                             bool
 }
 
 func (c config) cloud() bool { return c.edition == editionCloud }
@@ -52,7 +53,11 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 	if cfg.edition != editionServer && cfg.edition != editionCloud {
 		return config{}, fmt.Errorf("%w: unsupported edition %q", datasource.ErrInvalidCredentials, cfg.edition)
 	}
-	if cfg.username == "" {
+	if !cfg.cloud() {
+		cfg.secret = configValue(ds, "token")
+		cfg.usePAT = cfg.secret != ""
+	}
+	if cfg.username == "" && !cfg.usePAT {
 		return config{}, fmt.Errorf("%w: base_url and username are required", datasource.ErrInvalidCredentials)
 	}
 	normalized, err := normalizeBaseURL(cfg.baseURL, cfg.cloud())
@@ -62,7 +67,7 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 	cfg.baseURL = normalized
 	if cfg.cloud() {
 		cfg.secret = configValue(ds, "api_token")
-	} else {
+	} else if !cfg.usePAT {
 		cfg.secret = configValue(ds, "password")
 	}
 	if cfg.secret == "" {
@@ -238,9 +243,12 @@ type pageBody struct {
 // deletion baseline has to travel inside the checkpoint or retries would either
 // re-fetch everything or treat unprocessed pages as deletions.
 type cursor struct {
-	SpacePages       map[string]map[string]string `json:"space_pages"`
-	FullSyncBaseline map[string]map[string]string `json:"full_sync_baseline,omitempty"`
-	FullSync         bool                         `json:"full_sync,omitempty"`
+	Attachments             map[string]map[string]string `json:"attachments,omitempty"`
+	AttachmentOwners        map[string]string            `json:"attachment_owners,omitempty"`
+	FullAttachmentsBaseline map[string]map[string]string `json:"full_attachments_baseline,omitempty"`
+	SpacePages              map[string]map[string]string `json:"space_pages"`
+	FullSyncBaseline        map[string]map[string]string `json:"full_sync_baseline,omitempty"`
+	FullSync                bool                         `json:"full_sync,omitempty"`
 }
 
 func decodeCursor(old *types.SyncCursor) cursor {
@@ -268,10 +276,17 @@ func clonePageMap(in map[string]map[string]string) map[string]map[string]string 
 }
 
 func (c cursor) clone() cursor {
+	owners := make(map[string]string, len(c.AttachmentOwners))
+	for id, owner := range c.AttachmentOwners {
+		owners[id] = owner
+	}
 	return cursor{
-		SpacePages:       clonePageMap(c.SpacePages),
-		FullSyncBaseline: clonePageMap(c.FullSyncBaseline),
-		FullSync:         c.FullSync,
+		Attachments:             clonePageMap(c.Attachments),
+		AttachmentOwners:        owners,
+		FullAttachmentsBaseline: clonePageMap(c.FullAttachmentsBaseline),
+		SpacePages:              clonePageMap(c.SpacePages),
+		FullSyncBaseline:        clonePageMap(c.FullSyncBaseline),
+		FullSync:                c.FullSync,
 	}
 }
 

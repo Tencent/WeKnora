@@ -285,6 +285,11 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options) (map[strin
 		// messages legitimately produces no turns.
 		contents = []map[string]any{}
 	}
+	// Gemini has no in-sequence instruction role; the envelope identifies
+	// this trailing input as runtime context, rather than new user intent.
+	if opts != nil && opts.RuntimeNotice != "" {
+		contents = append(contents, map[string]any{"role": roleUser, "parts": []part{{"text": opts.RuntimeNotice}}})
+	}
 	body := map[string]any{"contents": contents}
 	if len(system) > 0 {
 		body["systemInstruction"] = map[string]any{
@@ -320,7 +325,9 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options) (map[strin
 
 func (c *Client) applySampling(gen map[string]any, opts *api.Options) {
 	s := c.cfg.Settings
-	if opts.Temperature > 0 {
+	if opts.Isolated {
+		gen["temperature"] = 0.0
+	} else if opts.Temperature > 0 {
 		gen["temperature"] = opts.Temperature
 	}
 	if opts.TopP > 0 {

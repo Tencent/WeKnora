@@ -281,7 +281,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 31 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -309,6 +309,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | OpenRouter | `openrouter` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
+| Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -348,6 +349,50 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 [Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
 拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
 超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
+
+### Runcrate
+
+Runcrate 是提供 OpenAI 兼容推理 API 的 GPU 云，默认地址为 `https://api.runcrate.ai/v1`，
+对话、向量和视觉模型共用该地址，模型 ID 带厂商前缀（如 `deepseek-ai/DeepSeek-V4.1-Flash`）。
+使用 GitHub 账号即可免费使用开源模型，API Key 在
+[Runcrate 控制台](https://www.runcrate.ai/dashboard/api-keys?utm_source=WeKnora&utm_medium=directory&utm_campaign=gpu_pricing)创建。
+
+通过 `POST /api/v1/models` 创建向量模型时，请求体示例：
+
+```json
+{
+  "name": "Qwen/Qwen3-Embedding-8B",
+  "type": "Embedding",
+  "source": "remote",
+  "parameters": {
+    "provider": "runcrate",
+    "base_url": "https://api.runcrate.ai/v1",
+    "api_key": "your-runcrate-api-key"
+  }
+}
+```
+
+思考强度通过 `reasoning_effort` 发送，关闭思考时发送 `none`；GLM-5.3、GLM-5.3 Flash、
+Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关闭」档位。
+
+## 设置空间默认模型 {#workspace-defaults}
+
+在「设置 → 默认设置」为当前空间选择常用模型，减少创建资源或运行任务时的重复选择。空间成员可以查看，管理员及所有者可以修改；每次选择后自动保存，页面会显示当前生效的模型及其来源。
+
+| 设置项 | 用途 |
+| --- | --- |
+| 对话模型 | 未明确指定模型时，用于问答与生成 |
+| 辅助任务模型 | 用于会话标题、MCP 使用说明、记忆提取等短文本生成；留空时跟随对话默认模型 |
+| 向量模型 | 用于需要默认向量模型的配置与任务 |
+| 重排模型 | 用于需要默认重排模型的检索与评估 |
+| 视觉模型 | 可选择视觉模型，或支持视觉输入的对话模型 |
+| 语音模型 | 用于需要默认语音识别模型的任务 |
+
+已在智能体、知识库或任务中明确选择的模型优先使用。未指定时，按空间默认、部署默认、第一个可用模型的顺序选择；空间默认模型被删除或停用时也按此顺序回退。清空一项可以恢复默认回退行为。没有可用模型时，需要先在「设置 → 模型」添加并启用对应模型。
+
+更改空间默认设置不会批量替换已有资源的模型配置，也不会自动重建向量索引。若要更换已有知识库的向量模型，仍需按知识库流程重建索引。
+
+同一页面还可选择默认联网搜索服务，前提是部署支持联网搜索且已配置服务。它沿用搜索服务的默认标记，连接地址和凭据仍在[网络搜索设置](11-web-search.md)中维护。接口与完整字段见[空间默认设置 API](../04-api/02-api-tenant.md#default-settings)。
 
 ## 查看引用与调整配置
 
@@ -419,7 +464,7 @@ const (
 | Azure OpenAI | `api_version` | 全部 | 留空走 `/openai/v1` 数据面；填写版本号（如 `2025-04-01-preview`）则走旧的 `/openai/deployments/{部署名}` 路径 |
 | 腾讯云 LKEAP | SecretKey（必填，按密钥加密保存）、`region`（默认 `ap-guangzhou`） | 重排 | 重排接口使用 TC3 签名，API Key 一栏填 SecretId |
 | 火山引擎 | SecretKey（必填，按密钥加密保存）、`region`（默认 `cn-beijing`）、`instruction` | 重排 | 重排接口使用 AK/SK 签名，API Key 一栏填 Access Key ID；`instruction` 默认为控制台原文 |
-| 自定义、GPUStack、LiteLLM | `score_scale` | 重排 | 「Rerank 分数标度」：`probability`（0~1 相关度，BGE 一类）或 `logit`（无界分数，Qwen3-Reranker 一类，会换算到 0~1 后再与重排阈值比较）。按端点后实际部署的模型选择 |
+| 自定义、GPUStack、LiteLLM | `score_scale` | 重排 | 「Rerank 分数标度」：端点已返回归一化的 0~1 相关度时选 `probability`；端点返回原始 logit 时选 `logit`（应用 sigmoid 后再与重排阈值比较）。按服务端输出约定选择，不能仅凭模型族判断 |
 | 自定义、GPUStack | `truncate_prompt_tokens` | 重排 | vLLM 扩展参数，默认不发送；只在后端因文档过长报错时填写 |
 
 #### 管理 API（`internal/router/routes_infra.go`）
@@ -671,3 +716,11 @@ return wrapChatConcurrency(c, config.MaxConcurrency, err)
 仓库根目录的 `rerank_server_demo.py` 是一个**自托管 Rerank 服务的最小参考实现**：FastAPI + HuggingFace `AutoModelForSequenceClassification`，暴露 `POST /rerank`，请求体 `{query, documents}`，返回 `{"results": [{index, document: {text}, score}]}`。
 
 示例服务返回 `score` 字段，可用于验证客户端兼容性。`cohererank` 协议（`internal/models/api/cohererank`）优先读取 `relevance_score`，缺失时读取 `score`；`document` 同时接受字符串和 `{text}` 对象。遵循此协议的私有重排服务可通过 `generic` provider 接入。
+
+### 自建重排端点的分数标度
+
+[vLLM 的 Qwen3-Reranker 官方配方](https://github.com/vllm-project/vllm/blob/main/examples/pooling/score/qwen3_reranker_online.py)使用 `classifier_from_token: ["no", "yes"]` 和 `is_original_qwen3_reranker: true`。这类端点的相关度已归一化，应选择 `score_scale=probability`，不要再次做 sigmoid。例如 0.9996 的概率误选 `logit` 后会变为约 0.731，影响阈值和与检索分数的融合。
+
+GPUStack 的默认值仍为 `logit`，依据其[重排 API 文档](https://docs.gpustack.ai/2.0/user-guide/rerank-api/)中 `bge-reranker-v2-m3` 返回负数及大于 1 的示例；这不代表所有 BGE 或 Qwen3 部署都输出 logit。如果该端点已经输出概率，请在模型配置中显式选择 `probability`。同样的规则适用于自定义和 LiteLLM 端点。原始 logit 也可能恰好落在 0~1，不能只看单次响应的取值范围自动判断。
+
+本修正不自动修改已保存的 `score_scale`，也不改变提供商默认值。受影响的既有模型需检查服务端输出并手动调整分数标度；不会因此新增模型调用或自动重建向量。

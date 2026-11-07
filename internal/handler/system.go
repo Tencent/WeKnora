@@ -38,6 +38,7 @@ type runtimeKnowledgeCanceller interface {
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
+	documentProgress *service.DocumentProgressService
 	cfg              *config.Config
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader
@@ -83,8 +84,10 @@ func NewSystemHandler(cfg *config.Config,
 	knowledgeSvc interfaces.KnowledgeService,
 	storageBackendRepo interfaces.StorageBackendRepository,
 	sandboxConfigSvc *service.TenantSandboxConfigService,
+	documentProgress *service.DocumentProgressService,
 ) *SystemHandler {
 	return &SystemHandler{
+		documentProgress:   documentProgress,
 		cfg:                cfg,
 		neo4jDriver:        neo4jDriver,
 		documentReader:     documentReader,
@@ -286,6 +289,8 @@ type GetSystemInfoResponse struct {
 	CommitID            string `json:"commit_id,omitempty" extensions:"x-agent"`
 	BuildTime           string `json:"build_time,omitempty" extensions:"x-agent"`
 	GoVersion           string `json:"go_version,omitempty" extensions:"x-agent"`
+	DocReaderVersion    string `json:"docreader_version,omitempty" extensions:"x-agent"`
+	DocReaderCommitID   string `json:"docreader_commit_id,omitempty" extensions:"x-agent"`
 	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty" extensions:"x-agent"`
 	VectorStoreEngine   string `json:"vector_store_engine,omitempty" extensions:"x-agent"`
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty" extensions:"x-agent"`
@@ -320,7 +325,7 @@ var (
 // @Produce      json
 // @Success      200  {object}  DataResponse{data=GetSystemInfoResponse}  "系统信息"
 // @x-agent {"id":"system.get_info","risk":"read"}
-// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
+// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Docreader build information is omitted when its service is unavailable or does not support GetInfo. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -361,12 +366,27 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		uptimeSec = int64(runtime.ServerUptime().Seconds())
 	}
 
+	var docReaderVersion, docReaderCommitID string
+	if reader, ok := h.documentReader.(interface {
+		GetVersionInfo(context.Context) (string, string, error)
+	}); ok {
+		// A disconnected or older docreader must not fail system/info.
+		versionCtx, cancel := context.WithTimeout(ctx, time.Second)
+		version, commitID, err := reader.GetVersionInfo(versionCtx)
+		cancel()
+		if err == nil {
+			docReaderVersion, docReaderCommitID = version, commitID
+		}
+	}
+
 	response := GetSystemInfoResponse{
 		Version:             Version,
 		Edition:             Edition,
 		CommitID:            CommitID,
 		BuildTime:           BuildTime,
 		GoVersion:           GoVersion,
+		DocReaderVersion:    docReaderVersion,
+		DocReaderCommitID:   docReaderCommitID,
 		KeywordIndexEngine:  keywordIndexEngine,
 		VectorStoreEngine:   vectorStoreEngine,
 		GraphDatabaseEngine: graphDatabaseEngine,
@@ -2440,9 +2460,8 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 
 // ApplyDefaultStorageQuotaToAllTenants godoc
 // @Summary      Apply the default storage quota to every existing workspace
-// @Description  Reads the current value of `tenant.default_storage_quota_gb`
-// @Description  (3-tier resolver: DB > ENV > default) and writes that many
-// @Description  GiB into storage_quota for every row in tenants. Bypasses
+// @Description  Resolves the MB override or legacy GB default (DB > ENV > default per setting)
+// @Description  and writes the effective byte quota to every existing workspace. Bypasses
 // @Description  the per-workspace PUT whitelist, which forbids storage_quota
 // @Description  edits by Owners. SystemAdmin only.
 // @Description  Idempotent — running twice with the same setting is a no-op.
@@ -2454,18 +2473,8 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 
-	// Resolve via the same 3-tier path the CreateTenant handler uses
-	// so the action's effect mirrors what new tenants would receive.
-	gb := h.systemSettingSvc.GetInt(
-		ctx,
-		"tenant.default_storage_quota_gb",
-		"WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
-		10,
-	)
-	if gb <= 0 {
-		gb = 10
-	}
-	quotaBytes := gb * 1024 * 1024 * 1024
+	quotaBytes := service.ResolveDefaultTenantStorageQuota(ctx, h.systemSettingSvc)
+	gb := float64(quotaBytes) / float64(1024*1024*1024)
 
 	affected, err := h.tenantSvc.BulkSetStorageQuota(ctx, quotaBytes)
 	if err != nil {

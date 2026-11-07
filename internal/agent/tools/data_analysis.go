@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 
@@ -37,9 +38,9 @@ var dataAnalysisTool = BaseTool{
 		"the single table \"" + DataAnalysisTableName + "\"; write SQL against that table name and never put " +
 		"the document ID inside the SQL. For Excel files with multiple sheets, non-empty sheets are loaded into " +
 		"the same table and the source sheet name is exposed as a '__sheet_name' column so you can " +
-		"filter/aggregate per sheet. Only the .xlsx container is readable: a legacy binary .xls must be " +
-		"re-saved as .xlsx (or exported as .csv) before it can be analysed. If the user's question requires " +
-		"data statistics, convert the question into SQL and execute it.",
+		"filter/aggregate per sheet. A legacy binary .xls is converted to .xlsx before it is read; " +
+		"if that conversion fails, re-save the workbook as .xlsx or export the sheet as .csv. " +
+		"If the user's question requires data statistics, convert the question into SQL and execute it.",
 	schema: utils.GenerateSchema[DataAnalysisInput](),
 }
 
@@ -51,9 +52,9 @@ const excelSheetNameColumn = "__sheet_name"
 // .xls workbooks start with ("D0 CF 11 E0 A1 B1 1A E1").
 //
 // DuckDB's excel extension only reads the ZIP-based OOXML container
-// (.xlsx/.xlsm), so a genuine .xls has to be rejected up front: handed to
-// read_xlsx it fails with the opaque "No xl/workbook.xml found in xlsx file",
-// which says nothing about the real cause or what to do about it.
+// (.xlsx/.xlsm). A genuine .xls is converted before read_xlsx; if that
+// conversion fails, the caller gets an actionable error instead of
+// "No xl/workbook.xml found in xlsx file".
 var legacyXLSMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 // hasLegacyXLSContainer reports whether path holds an OLE2 compound document,
@@ -77,10 +78,9 @@ func hasLegacyXLSContainer(path string) bool {
 	return bytes.Equal(head, legacyXLSMagic)
 }
 
-// errLegacyBinaryXLS is the actionable failure returned for a binary .xls
-// workbook. The data analysis tool cannot read it, and silently reporting an
-// empty table (or leaking DuckDB's xlsx-internals error) leaves the model
-// guessing; naming the conversion to perform is what the caller can act on.
+// errLegacyBinaryXLS is returned when a binary .xls workbook cannot be
+// converted to .xlsx. Naming the conversion the caller can still do beats
+// DuckDB's "No xl/workbook.xml found in xlsx file".
 func errLegacyBinaryXLS() error {
 	return fmt.Errorf(
 		"legacy binary .xls workbooks are not supported by data analysis: " +
@@ -177,7 +177,7 @@ func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
 }
 
 type DataAnalysisInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"short dN document ID to query"`
+	KnowledgeID string `json:"knowledge_id" jsonschema:"doc://N document handle to query"`
 	SQL         string `json:"sql" jsonschema:"Read-only SELECT executed on the document. Reference the document as the table \"dataset\" (for example SELECT COUNT(*) FROM dataset); it is the only table available"` //nolint:lll // jsonschema tag
 }
 
@@ -269,9 +269,12 @@ func (t *DataAnalysisTool) Cleanup(ctx context.Context) {
 
 	logger.Infof(ctx, "[Tool][DataAnalysis] Cleaning up %d tables for session: %s", len(t.createdTables), t.sessionID)
 
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
 	for _, tableName := range t.createdTables {
 		dropSQL := fmt.Sprintf("DROP TABLE IF EXISTS \"%s\"", tableName)
-		if _, err := t.db.ExecContext(ctx, dropSQL); err != nil {
+		if _, err := t.db.ExecContext(cleanupCtx, dropSQL); err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to drop table '%s': %v", tableName, err)
 			// Continue to drop other tables even if one fails
 			continue
@@ -577,8 +580,8 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 // Multi-sheet workbooks are supported: XLSX sheets containing only formatting
 // are skipped; rows from the remaining sheets are unioned (UNION ALL BY NAME) into a
 // single table. A synthetic '__sheet_name' column is added so downstream SQL
-// can filter / aggregate per sheet. If sheet enumeration fails for any
-// reason, we fall back to reading just the first sheet (original behavior).
+// can filter / aggregate per sheet. If spatial metadata is unavailable, sheet
+// names are read from the workbook itself rather than silently omitting sheets.
 //
 // Parameters:
 //   - ctx: context for cancellation and timeout
@@ -589,35 +592,36 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 //
-// Note: requires the DuckDB 'excel' extension (for read_xlsx) and the
-// 'spatial' extension (for st_read_meta used to enumerate sheets).
+// Note: requires the DuckDB 'excel' extension (for read_xlsx). Sheet discovery
+// uses 'spatial' (st_read_meta) when available, with OOXML metadata as a fallback.
 //
-// Binary BIFF .xls workbooks are rejected with an actionable error before
-// DuckDB is touched: the excel extension only reads the ZIP-based OOXML
-// container, so a real .xls would otherwise surface as "No xl/workbook.xml
-// found in xlsx file".
+// Binary BIFF .xls workbooks are converted to a temporary .xlsx before DuckDB
+// is touched. The excel extension only reads the ZIP-based OOXML container, so
+// a real .xls would otherwise surface as "No xl/workbook.xml found in xlsx
+// file". A workbook that cannot be converted returns an actionable error.
 func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
-	if hasLegacyXLSContainer(filename) {
-		logger.Warnf(ctx,
-			"[Tool][DataAnalysis] Rejecting legacy binary .xls workbook '%s' (session=%s): "+
-				"DuckDB can only read the ZIP-based .xlsx container",
-			filename, t.sessionID,
-		)
-		return nil, errLegacyBinaryXLS()
-	}
-
 	if !t.loadedTables[tableName] {
+		if hasLegacyXLSContainer(filename) {
+			prepared, cleanup, err := prepareExcelForDuckDB(filename)
+			if err != nil {
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis] Could not convert legacy binary .xls workbook '%s' (session=%s): %v",
+					filename, t.sessionID, err,
+				)
+				return nil, errLegacyBinaryXLS()
+			}
+			defer cleanup()
+			filename = prepared
+		}
+
 		t.recordCreatedTable(tableName)
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
 		if enumErr != nil {
-			logger.Warnf(ctx,
-				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
-				filename, t.sessionID, enumErr,
-			)
+			return nil, fmt.Errorf("failed to enumerate Excel worksheets: %w", enumErr)
 		}
-		if enumErr == nil && len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
+		if len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
 			filtered, err := filterEmptyExcelSheets(ctx, filename, sheetNames)
 			switch {
 			case err != nil && ctx.Err() != nil:
@@ -653,14 +657,36 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 	return t.LoadFromTable(ctx, tableName)
 }
 
-// listExcelSheets returns the names of every sheet (layer) inside the given
-// Excel workbook by querying DuckDB's spatial st_read_meta table function.
-// The returned slice preserves the on-disk order of sheets.
+// listExcelSheets preserves workbook order and recovers from unavailable or
+// empty spatial metadata by reading sheet names from the OOXML container.
+func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
+	names, metaErr := t.listExcelSheetsFromSpatial(ctx, filename)
+	if metaErr == nil && len(names) > 0 {
+		return names, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if metaErr == nil {
+		metaErr = fmt.Errorf("spatial metadata contains no worksheets")
+	}
+	names, err := listExcelSheetsFromWorkbook(ctx, filename)
+	if err != nil {
+		return nil, fmt.Errorf("spatial metadata: %v; workbook metadata: %w", metaErr, err)
+	}
+	logger.Warnf(ctx,
+		"[Tool][DataAnalysis] Using workbook metadata for '%s' after spatial enumeration failed: %v",
+		filename, metaErr,
+	)
+	return names, nil
+}
+
+// listExcelSheetsFromSpatial queries DuckDB's spatial st_read_meta function.
 //
 // st_read_meta returns a single row whose `layers` column is a LIST of
 // STRUCTs (one per layer / sheet). We UNNEST that list and project the
 // struct's `name` field to get a flat list of sheet names.
-func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
+func (t *DataAnalysisTool) listExcelSheetsFromSpatial(ctx context.Context, filename string) ([]string, error) {
 	metaSQL := fmt.Sprintf(
 		"SELECT UNNEST(layers).name FROM st_read_meta('%s')",
 		sqlSingleQuoteEscape(filename),
@@ -695,7 +721,7 @@ func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string)
 func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) string {
 	escFile := sqlSingleQuoteEscape(filename)
 
-	// No sheet info (enumeration failed or empty): read the first sheet only.
+	// Without an explicit sheet selection, retain the default read_xlsx SQL form.
 	if len(sheetNames) == 0 {
 		return fmt.Sprintf(
 			"CREATE TABLE \"%s\" AS SELECT * FROM read_xlsx('%s', header=true, all_varchar=true)",

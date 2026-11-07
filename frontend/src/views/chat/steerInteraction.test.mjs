@@ -6,7 +6,7 @@ import test from 'node:test'
 import { makeSteerClientId } from '../../utils/steerId.ts'
 import ts from 'typescript'
 import { reactive } from 'vue'
-import { previewSteerMessage, discardSteerPreview, forkAfterInjectedUser, reconcileSteerMessageId } from '../../utils/steerStreamFork.ts'
+import { previewSteerMessage, discardSteerPreview, forkAfterInjectedUser, reconcileSteerMessageId, persistedAssistantId } from '../../utils/steerStreamFork.ts'
 
 const source = readFileSync(new URL('./index.vue', import.meta.url), 'utf8')
 const handlers = source.slice(source.indexOf('const dropSteerQueueItem ='), source.indexOf('let attachingSteerFollowUp ='))
@@ -111,7 +111,9 @@ const streamSource = readFileSync(new URL('../../composables/useChatStreamHandle
 const receiptStart = streamSource.indexOf("case 'user_message_injected': {")
 const receiptEnd = streamSource.indexOf("case 'complete':", receiptStart)
 assert.ok(receiptStart >= 0 && receiptEnd > receiptStart)
-const receipt = ts.transpile(`() => { switch ('user_message_injected') {
+const consolidation = streamSource.slice(streamSource.indexOf('const consolidateCollaborationStatus ='), streamSource.indexOf('const reconstructEventStreamFromSteps ='))
+const receipt = ts.transpile(`() => { ${consolidation}
+switch ('user_message_injected') {
   ${streamSource.slice(receiptStart, receiptEnd)}
 } }`)
 
@@ -121,7 +123,7 @@ function receiveInjection(h, steerId, userId) {
     message: h.state.messagesList.findLast(m => m.role === 'assistant'),
     dataPayload: { steer_id: steerId, user_message_id: userId, content: '写到Docx' },
     data: {}, dataId: 'request', replaySegments: new Map(),
-    forkAfterInjectedUser, log() {}, emitMessageCreated() {}, onAgentChunkBound() {},
+    forkAfterInjectedUser, persistedAssistantId, log() {}, emitMessageCreated() {}, onAgentChunkBound() {},
     onUserMessageInjected(id) {
       const index = h.state.steerQueue.value.findIndex(item => item.steer_id === id)
       if (index >= 0) h.state.steerQueue.value.splice(index, 1)

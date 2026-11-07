@@ -71,21 +71,21 @@ func newGenericProvider() *Definition {
 			Type:   "select",
 			Options: []ExtraFieldOption{
 				{
-					Label:  "Unbounded score (Qwen3-Reranker class)",
-					Labels: map[string]string{"zh-CN": "无界分数（Qwen3-Reranker 一类）"},
+					Label:  "Unnormalized logits (apply sigmoid)",
+					Labels: map[string]string{"zh-CN": "未归一化的 logit（应用 sigmoid）"},
 					Value:  "logit",
 				},
 				{
-					Label:  "0..1 relevance (BGE class)",
-					Labels: map[string]string{"zh-CN": "0~1 相关度（BGE 一类）"},
+					Label:  "Already normalized relevance (0..1)",
+					Labels: map[string]string{"zh-CN": "已归一化的相关度（0~1）"},
 					Value:  "probability",
 				},
 			},
-			Placeholder:  "match the reranker actually deployed behind this endpoint",
-			Placeholders: map[string]string{"zh-CN": "按这个端点后面实际部署的重排模型选择"},
+			Placeholder:  "match the endpoint output; vLLM Qwen3 no/yes recipe: probability",
+			Placeholders: map[string]string{"zh-CN": "按端点输出选择；vLLM Qwen3 no/yes 配方选择 probability"},
 			// A gateway serves whatever reranker was deployed behind it, and
-			// the two families disagree. The vendor default follows the
-			// documentation; the operator knows which model is actually there.
+			// serving configuration determines its output scale. A model
+			// family alone does not identify whether normalization was applied.
 			Required:   false,
 			ModelTypes: []types.ModelType{types.ModelTypeRerank},
 		}, {

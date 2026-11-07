@@ -16,13 +16,18 @@ import (
 // graphQueryMaxChunks+4 chunks referenced by it.
 func graphToolOverEveryCap() *QueryKnowledgeGraphTool {
 	relations := make([]*types.GraphRelation, 0, graphQueryMaxRelations+13)
+	nodes := []*types.GraphNode{{Name: "Docker", ID: "docker-doc"}}
 	for i := 0; i < graphQueryMaxRelations+12; i++ {
+		name := fmt.Sprintf("Service%02d", i)
+		nodes = append(nodes, &types.GraphNode{Name: name, ID: name, Chunks: []string{"c-00"}})
 		relations = append(relations, &types.GraphRelation{
-			Node1: "Docker", Node2: fmt.Sprintf("Service%02d", i), Type: "depends_on",
+			Node1: "Docker", Node2: name, Type: "depends_on", SourceID: "docker-doc", TargetID: name,
 		})
 	}
 	// A repeat of a relation already in the list must not inflate the total.
-	relations = append(relations, &types.GraphRelation{Node1: "Docker", Node2: "Service00", Type: "depends_on"})
+	relations = append(relations, &types.GraphRelation{
+		Node1: "Docker", Node2: "Service00", Type: "depends_on", SourceID: "docker-doc", TargetID: "Service00",
+	})
 
 	chunks := make(map[string]*types.Chunk, graphQueryMaxChunks+4)
 	chunkIDs := make([]string, 0, graphQueryMaxChunks+4)
@@ -33,15 +38,16 @@ func graphToolOverEveryCap() *QueryKnowledgeGraphTool {
 			ID: id, KnowledgeBaseID: "kb-1", KnowledgeID: "doc", Content: "Docker evidence", IsEnabled: true,
 		}
 	}
+	nodes[0].Chunks = chunkIDs
 	graphRepo := &stubGraphRepo{graph: &types.GraphData{
-		Node:     []*types.GraphNode{{Name: "Docker", Chunks: chunkIDs}},
+		Node:     nodes,
 		Relation: relations,
 	}}
 	return NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{
 		kb: &types.KnowledgeBase{ID: "kb-1", ExtractConfig: &types.ExtractConfig{
 			Enabled: true, Nodes: []*types.GraphNode{{Name: "技术"}},
 		}},
-	}).WithGraph(graphRepo, &stubGraphChunkRepo{chunks: chunks})
+	}).WithGraph(graphRepo, &stubGraphChunkRepo{chunks: chunks}).WithKnowledgeScope(liveGraphEvidenceDocuments())
 }
 
 // A hub entity has far more relations than the tool returns. The cut has to be
@@ -62,7 +68,7 @@ func TestQueryKnowledgeGraph_MarksCappedRelationsAndChunks(t *testing.T) {
 	assert.Contains(t, result.Output, "=== ⚠️ Truncated ===")
 	assert.Contains(t, result.Output, fmt.Sprintf("Relations: %d of %d shown", graphQueryMaxRelations,
 		graphQueryMaxRelations+12))
-	assert.Contains(t, result.Output, fmt.Sprintf("Graph evidence chunks: %d of %d fetched", graphQueryMaxChunks,
+	assert.Contains(t, result.Output, fmt.Sprintf("Graph evidence chunks: %d of %d shown", graphQueryMaxChunks,
 		graphQueryMaxChunks+4))
 
 	relations, ok := result.Data["relations"].([]map[string]interface{})
@@ -104,8 +110,13 @@ func TestQueryKnowledgeGraph_MarksCappedQueryTerms(t *testing.T) {
 // no truncation marker and no total, so a marker always means a subset.
 func TestQueryKnowledgeGraph_NoTruncationMarkerWhenNothingDropped(t *testing.T) {
 	graphRepo := &stubGraphRepo{graph: &types.GraphData{
-		Node:     []*types.GraphNode{{Name: "Docker", Chunks: []string{"c-1"}}},
-		Relation: []*types.GraphRelation{{Node1: "Kubernetes", Node2: "Docker", Type: "orchestrates"}},
+		Node: []*types.GraphNode{
+			{Name: "Docker", ID: "docker-doc", Chunks: []string{"c-1"}},
+			{Name: "Kubernetes", ID: "k8s-doc", Chunks: []string{"c-1"}},
+		},
+		Relation: []*types.GraphRelation{{
+			Node1: "Kubernetes", Node2: "Docker", Type: "orchestrates", SourceID: "k8s-doc", TargetID: "docker-doc",
+		}},
 	}}
 	chunkRepo := &stubGraphChunkRepo{chunks: map[string]*types.Chunk{
 		"c-1": {ID: "c-1", KnowledgeBaseID: "kb-1", KnowledgeID: "doc", Content: "Docker", IsEnabled: true},
@@ -114,7 +125,7 @@ func TestQueryKnowledgeGraph_NoTruncationMarkerWhenNothingDropped(t *testing.T) 
 		kb: &types.KnowledgeBase{ID: "kb-1", ExtractConfig: &types.ExtractConfig{
 			Enabled: true, Nodes: []*types.GraphNode{{Name: "技术"}},
 		}},
-	}).WithGraph(graphRepo, chunkRepo)
+	}).WithGraph(graphRepo, chunkRepo).WithKnowledgeScope(liveGraphEvidenceDocuments())
 
 	args, err := json.Marshal(QueryKnowledgeGraphInput{KnowledgeBaseIDs: []string{"kb-1"}, Query: "Docker"})
 	require.NoError(t, err)

@@ -22,24 +22,43 @@ func (e *AgentEngine) Resume(
 	snapshot []byte,
 	answered *types.AgentPrompt,
 ) (*types.AgentState, error) {
-	if answered == nil {
-		return nil, fmt.Errorf("resume needs an answered prompt")
-	}
 	snap, err := DecodeRunSnapshot(snapshot)
 	if err != nil {
 		return nil, err
 	}
+	e.bindCollaborationInput(sessionID, messageID)
 	p := snap.PendingRound
-	if p.BlockedIndex < 0 || p.BlockedIndex >= len(p.Calls) || len(p.Step.ToolCalls) != p.BlockedIndex {
-		return nil, fmt.Errorf("snapshot round is inconsistent: blocked %d of %d calls, %d done",
-			p.BlockedIndex, len(p.Calls), len(p.Step.ToolCalls))
+	wait := answered == nil && snap.CollaborationWait && e.collaboration != nil && e.collaboration.Child == nil
+	if answered == nil && !wait {
+		return nil, fmt.Errorf("resume needs an answered prompt or owned collaboration wait")
 	}
-	if p.Calls[p.BlockedIndex].ID != answered.ToolCallID {
-		return nil, fmt.Errorf("prompt %s answers call %s, run is blocked on %s",
-			answered.ID, answered.ToolCallID, p.Calls[p.BlockedIndex].ID)
+	if !snap.BetweenRounds {
+		if p.BlockedIndex < 0 || p.BlockedIndex >= len(p.Calls) || len(p.Step.ToolCalls) != p.BlockedIndex {
+			return nil, fmt.Errorf("snapshot round is inconsistent: blocked %d of %d calls, %d done",
+				p.BlockedIndex, len(p.Calls), len(p.Step.ToolCalls))
+		}
+		if wait && p.Calls[p.BlockedIndex].Name != "wait_agent" {
+			return nil, fmt.Errorf("unsafe collaboration checkpoint")
+		}
+		if answered != nil && p.Calls[p.BlockedIndex].ID != answered.ToolCallID {
+			return nil, fmt.Errorf("prompt %s answers call %s, run is blocked on %s",
+				answered.ID, answered.ToolCallID, p.Calls[p.BlockedIndex].ID)
+		}
+	} else if !wait {
+		return nil, fmt.Errorf("between-round resume requires collaboration ownership")
+	}
+	if e.collaboration != nil {
+		var stop func()
+		ctx, stop = e.collaboration.Start(ctx)
+		defer stop()
 	}
 	logger.Infof(ctx, "[Agent] Resuming: session=%s, message=%s, prompt=%s, round=%d",
-		sessionID, messageID, answered.ID, snap.CurrentRound+1)
+		sessionID, messageID, func() string {
+			if answered != nil {
+				return answered.ID
+			}
+			return "collaboration"
+		}(), snap.CurrentRound+1)
 	defer e.toolRegistry.Cleanup(ctx)
 
 	state := &types.AgentState{
@@ -50,6 +69,9 @@ func (e *AgentEngine) Resume(
 	}
 	systemPrompt := e.buildSystemPrompt(ctx)
 	e.beginTurn(snap.Query, snap.ImageURLs, state)
+	if err := e.restoreCollaborationDeliveries(ctx, snap); err != nil {
+		return nil, err
+	}
 	for id, content := range snap.UserMessages {
 		e.recordSteerMessage(id, content)
 	}
@@ -64,17 +86,22 @@ func (e *AgentEngine) Resume(
 		}
 		return nil
 	}
-	for _, step := range state.RoundSteps {
+	for i, step := range state.RoundSteps {
+		e.replayCollaborationDeliveries(&messages, i, true)
 		if err := appendUsers(step); err != nil {
 			return nil, err
 		}
+		e.replayCollaborationDeliveries(&messages, i, false)
 		messages = e.appendToolResults(messages, step)
 		messages = e.appendToolImages(ctx, messages, step)
 	}
+	e.replayCollaborationDeliveries(&messages, len(state.RoundSteps), true)
 	if err := appendUsers(p.Step); err != nil {
 		return nil, err
 	}
+	e.replayCollaborationDeliveries(&messages, len(state.RoundSteps), false)
 	if e.toolRegistry != nil {
+		e.toolRegistry.RestoreMCPExposure(snap.MCPToolRefs)
 		e.toolRegistry.RememberMCPHistory(messages)
 		// These calls were issued before suspension, including the first call
 		// to a tool whose definition was only exposed by a describe round.
@@ -83,20 +110,30 @@ func (e *AgentEngine) Resume(
 	}
 	tools := e.buildToolsForLLM()
 
-	startTime := time.Now()
-	step, suspended := e.finishPendingRound(ctx, p, answered, state.CurrentRound, sessionID, messageID)
-	if suspended != nil {
-		logger.Infof(ctx, "[Agent][Round-%d] Suspended again waiting on prompt %s",
-			state.CurrentRound+1, suspended.PromptID)
-		state.Suspended = suspended
-		state.SuspendedStep = &step
-		e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)
-		return state, nil
+	if wait && snap.BetweenRounds {
+		if err := e.collaboration.ClearWait(ctx); err != nil {
+			return nil, err
+		}
 	}
-	state.RoundSteps = append(state.RoundSteps, step)
-	messages = e.appendToolResults(messages, step)
-	messages = e.appendToolImages(ctx, messages, step)
-	state.CurrentRound++
+	if !snap.BetweenRounds {
+		startTime := time.Now()
+		step, suspended := e.finishPendingRound(ctx, p, answered, state.CurrentRound, sessionID, messageID)
+		if suspended != nil {
+			logger.Infof(ctx, "[Agent][Round-%d] Suspended again waiting on prompt %s",
+				state.CurrentRound+1, suspended.PromptID)
+			state.Suspended = suspended
+			state.SuspendedStep = &step
+			if e.collaboration != nil {
+				e.collaboration.End(true)
+			}
+			e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)
+			return state, nil
+		}
+		state.RoundSteps = append(state.RoundSteps, step)
+		messages = e.appendToolResults(messages, step)
+		messages = e.appendToolImages(ctx, messages, step)
+		state.CurrentRound++
+	}
 
 	if _, err := e.executeLoop(ctx, state, snap.Query, messages, tools, sessionID, messageID); err != nil {
 		logger.Errorf(ctx, "[Agent] Resumed execution failed: %v", err)

@@ -1,13 +1,12 @@
 package types
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestWebSearchFilterValidationAndRuntimeOnlyScope(t *testing.T) {
+func TestWebSearchFilterValidation(t *testing.T) {
 	for _, freshness := range []string{"", "pd", "pw", "pm", "py", "2026-01-01to2026-09-07"} {
 		require.NoError(t, (WebSearchFilters{Country: "DE", Freshness: freshness}).Validate())
 	}
@@ -23,10 +22,4 @@ func TestWebSearchFilterValidationAndRuntimeOnlyScope(t *testing.T) {
 	for _, country := range []string{"", "us", "ALL"} {
 		require.NoError(t, (WebSearchFilters{Country: country}).Validate())
 	}
-	cfg := DefaultWebSearchConfig()
-	cfg.Filters = WebSearchFilters{Country: "DE", Freshness: "pw"}
-	encoded, err := json.Marshal(cfg)
-	require.NoError(t, err)
-	require.NotContains(t, string(encoded), "DE")
-	require.NotContains(t, string(encoded), "pw")
 }

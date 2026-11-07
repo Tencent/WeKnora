@@ -1,0 +1,1 @@
+ALTER TABLE sessions ADD COLUMN owner_auth_source VARCHAR(32) NOT NULL DEFAULT '';

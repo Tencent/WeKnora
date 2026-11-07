@@ -24,6 +24,20 @@ type resourceCatalogFileService struct {
 	inner       interfaces.FileService
 	catalog     interfaces.ResourceCatalog
 	externalURL string
+	global      bool
+}
+
+// NewGlobalResourceCatalogFileService pins writes to the process-wide driver's
+// concrete instance, independently of workspace defaults and legacy aliases.
+func NewGlobalResourceCatalogFileService(
+	inner interfaces.FileService,
+	catalog interfaces.ResourceCatalog,
+) interfaces.FileService {
+	svc := NewResourceCatalogFileService(inner, catalog)
+	if wrapped, ok := svc.(*resourceCatalogFileService); ok {
+		wrapped.global = true
+	}
+	return svc
 }
 
 // NewResourceCatalogFileService decorates a physical FileService with stable
@@ -70,7 +84,16 @@ func (s *resourceCatalogFileService) register(
 	contentHash string,
 ) (string, error) {
 	kind, mimeType := resourceKind(name)
-	ref, err := s.catalog.Register(ctx, tenantID, physical, interfaces.ResourceRegistration{
+	register := s.catalog.Register
+	if s.global {
+		registrar, ok := s.catalog.(interfaces.GlobalResourceRegistrar)
+		if !ok {
+			_ = s.inner.DeleteFile(ctx, physical)
+			return "", fmt.Errorf("global storage registration is unavailable")
+		}
+		register = registrar.RegisterGlobal
+	}
+	ref, err := register(ctx, tenantID, physical, interfaces.ResourceRegistration{
 		Kind:         kind,
 		MimeType:     mimeType,
 		OriginalName: filepath.Base(name),

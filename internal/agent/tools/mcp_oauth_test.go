@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -88,7 +89,9 @@ type approvedOAuthGate struct {
 	oauthPrompts *int
 }
 
-func (approvedOAuthGate) NeedsApproval(context.Context, uint64, string, string) bool { return true }
+func (approvedOAuthGate) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskWrite, Always: true}
+}
 
 func (approvedOAuthGate) IsEnabled(context.Context, uint64, string, string) (bool, error) {
 	return true, nil

@@ -160,6 +160,7 @@ test('filtering keeps the flat result count and adds no folder number', async t 
 
 test('the page lists exactly the direct sub-folders of the current folder', async t => {
   const f = await setup(t, syncedTree)
+  f.vm.folderTreeCollapsed = true
   await selectFolder(f, '天诛渗透攻防')
   assert.deepEqual(
     f.vm.visibleSubFolders.map((node: { path: string }) => node.path),
@@ -168,6 +169,15 @@ test('the page lists exactly the direct sub-folders of the current folder', asyn
 
   await selectFolder(f, '')
   assert.equal(f.vm.visibleSubFolders.length, 5)
+})
+
+test('an open folder tree does not repeat folders in the document pane', async t => {
+  const f = await setup(t, syncedTree)
+  f.vm.folderTreeCollapsed = false
+  await selectFolder(f, '')
+  assert.equal(f.vm.visibleSubFolders.length, 0)
+  await selectFolder(f, '天诛渗透攻防')
+  assert.equal(f.vm.visibleSubFolders.length, 0)
 })
 
 test('filtering hides sub-folder entries because it lists matching documents', async t => {

@@ -33,6 +33,12 @@ func TestCreateAgentDefaultsOmittedModeToSmartReasoning(t *testing.T) {
 	if !created.Config.MultiTurnEnabled {
 		t.Fatal("smart-reasoning agent should keep earlier turns")
 	}
+	if created.Config.MaxIterations != types.UnlimitedMaxIterations {
+		t.Fatalf("new agent max_iterations = %d, want unlimited", created.Config.MaxIterations)
+	}
+	if got := types.AgentRoundMaxCompletionTokens(created.Config.MaxCompletionTokens); got != 24576 {
+		t.Fatalf("new agent completion budget = %d, want 24576", got)
+	}
 }
 
 func TestCreateAgentKeepsExplicitQuickAnswer(t *testing.T) {

@@ -111,16 +111,16 @@ func TestRewriteStorageURLs_MinIOFallbackViaGlobal(t *testing.T) {
 	assert.NotContains(t, out, "](minio://")
 }
 
-func TestRewriteStorageURLs_ScopedPath(t *testing.T) {
+func TestRewriteStorageURLs_ScopedPathRequiresBoundBackend(t *testing.T) {
 	stub := &stubIMFileService{
 		getFileURL: func(_ context.Context, filePath string) (string, error) {
-			assert.Equal(t, "storage://backend-a/cos://bucket/ap-test/10000/exports/a.png", filePath)
-			return "https://storage.example/a.png", nil
+			t.Fatal("an explicit backend must not fall back to global storage")
+			return "", nil
 		},
 	}
 	input := "![img](storage://backend-a/cos://bucket/ap-test/10000/exports/a.png)"
 	output := rewriteStorageURLs(context.Background(), input, newIMFileServiceResolver(&types.Tenant{}, stub))
-	assert.Contains(t, output, "https://storage.example/a.png")
+	assert.Equal(t, input, output)
 }
 
 // When GetFileURL resolves a resource:// alias to a still-internal storage://
@@ -163,6 +163,6 @@ func TestCleanIMContent_MinIOFallbackIntegration(t *testing.T) {
 		StorageEngineConfig: &types.StorageEngineConfig{DefaultProvider: "cos"},
 	}
 	in := "see ![x](minio://wizard-test/10000/exports/x.png) ok"
-	out := cleanIMContent(context.Background(), in, tenant, stub)
+	out := cleanIMContent(context.Background(), in, newIMFileServiceResolver(tenant, stub))
 	assert.Contains(t, out, "https://minio.example/img.png")
 }

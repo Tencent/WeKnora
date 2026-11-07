@@ -1,8 +1,8 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
-import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
-import { previewKnowledgeFile } from '@/api/knowledge-base/index';
+import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
+import { getKnowledgeDetails, listKnowledgeFiles, previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
 import hljs from 'highlight.js';
@@ -13,6 +13,11 @@ import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
+import {
+  neutralizeRelativePreviewImages,
+  PREVIEW_IMAGE_PAGE_SIZE,
+  rewriteKnowledgeMarkdownImages,
+} from '@/utils/markdownPreviewImages';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
@@ -79,6 +84,14 @@ const emit = defineEmits<{
 
 const loading = ref(false);
 const error = ref('');
+// Async renderer setup/mount failures do not emit the renderer's `error` event.
+// Surface them in the preview instead of leaving an empty document area.
+onErrorCaptured((err) => {
+  error.value = t('preview.loadFailed');
+  loading.value = false;
+  console.error('Document renderer failed:', err);
+  return false;
+});
 const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');
@@ -105,6 +118,13 @@ const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+let markdownImageGeneration = 0;
+let markdownImageUrls: string[] = [];
+
+function revokeMarkdownImageUrls() {
+  for (const url of markdownImageUrls) URL.revokeObjectURL(url);
+  markdownImageUrls = [];
+}
 
 const isFullscreen = ref(false);
 const previewRoot = ref<HTMLElement | null>(null);
@@ -336,7 +356,58 @@ async function renderMarkdown(blob: Blob) {
     return;
   }
 
-  markdownHtml.value = renderDocumentPreviewMarkdown(text);
+  const generation = ++markdownImageGeneration;
+  revokeMarkdownImageUrls();
+  const previewOptions = {
+    // 预览工具栏已经显示文件名；正文第一行的同名 H1 属于重复标题。
+    titles: [props.fileName],
+  };
+  // Relative images stay on a data URI unless a sibling file replaces them.
+  // Painting the original href makes the browser request it from the page route.
+  let source = props.knowledgeId ? neutralizeRelativePreviewImages(text) : text;
+  if (props.knowledgeId) {
+    markdownHtml.value = renderDocumentPreviewMarkdown(source, undefined, previewOptions);
+    try {
+      const rewritten = await rewriteKnowledgeMarkdownImages(text, props.knowledgeId, {
+        getKnowledge: async (id) => {
+          const res = await getKnowledgeDetails(id);
+          const data = res?.data || res;
+          if (!data || typeof data !== 'object') return null;
+          return {
+            knowledgeBaseId: data.knowledge_base_id || '',
+            folderPath: data.folder_path || '',
+          };
+        },
+        listFiles: async (knowledgeBaseId, folderPath, page) => {
+          const res = await listKnowledgeFiles(knowledgeBaseId, {
+            page,
+            page_size: PREVIEW_IMAGE_PAGE_SIZE,
+            folder_path: folderPath,
+          });
+          const rows = Array.isArray(res?.data) ? res.data : [];
+          return {
+            total: Number(res?.total ?? rows.length),
+            rows: rows.map((row: { id?: string; file_name?: string; folder_path?: string }) => ({
+              id: String(row?.id || ''),
+              fileName: String(row?.file_name || ''),
+              folderPath: row?.folder_path || '',
+            })),
+          };
+        },
+        loadPreview: (id) => previewKnowledgeFile(id),
+      });
+      if (generation !== markdownImageGeneration) {
+        for (const url of rewritten.objectUrls) URL.revokeObjectURL(url);
+        return;
+      }
+      markdownImageUrls = rewritten.objectUrls;
+      source = neutralizeRelativePreviewImages(rewritten.markdown);
+    } catch (err) {
+      console.warn('Relative markdown images were left unresolved', err);
+    }
+  }
+  if (generation !== markdownImageGeneration) return;
+  markdownHtml.value = renderDocumentPreviewMarkdown(source, undefined, previewOptions);
 }
 
 function onImageLoad(e: Event) {
@@ -515,6 +586,8 @@ async function loadPreview() {
 }
 
 function cleanup() {
+  markdownImageGeneration += 1;
+  revokeMarkdownImageUrls();
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';
@@ -1473,9 +1546,12 @@ onUnmounted(() => {
 
 :deep(.markdown-body) {
   font-size: var(--app-text-base);
-  line-height: 1.7;
+  line-height: 1.75;
   color: @text-primary;
   word-break: break-word;
+  // 正文窄栏：全屏 / 宽抽屉下限制行宽，避免中文长行难以阅读。
+  max-width: 680px;
+  margin-inline: auto;
 
   h1, h2, h3, h4, h5, h6 {
     margin-top: 20px;
@@ -1483,20 +1559,36 @@ onUnmounted(() => {
     font-weight: 600;
     line-height: 1.4;
   }
+  h1:first-child,
+  h2:first-child,
+  h3:first-child,
+  h4:first-child,
+  h5:first-child,
+  h6:first-child { margin-top: 0; }
+  // 标题层级：旧规则里 h4~h6 没有字号，会退回正文字号（14px），和 h3 的
+  // 17px 几乎看不出差别；这里补齐 24 / 20 / 18 / 16 / 15 / 14 的完整层级。
   h1 { font-size: var(--app-text-4xl); border-bottom: 1px solid @border-color; padding-bottom: 8px; }
   h2 { font-size: var(--app-text-3xl); border-bottom: 1px solid @border-color; padding-bottom: 6px; }
-  h3 { font-size: 17px; }
+  h3 { font-size: var(--app-text-2xl); }
+  h4 { font-size: var(--app-text-xl); margin-top: 16px; margin-bottom: 8px; }
+  h5 { font-size: var(--app-text-lg); margin-top: 14px; margin-bottom: 6px; }
+  h6 { font-size: var(--app-text-base); margin-top: 12px; margin-bottom: 6px; }
 
-  p { margin: 8px 0; }
+  p { margin: 10px 0; }
+  p:last-child { margin-bottom: 0; }
   blockquote {
-    margin: 12px 0;
-    padding: 8px 16px;
+    margin: 14px 0;
+    padding: 10px 16px;
     border-left: 4px solid @border-color;
     background: @bg-subtle;
     color: var(--td-text-color-secondary);
   }
-  ul, ol { padding-left: 24px; margin: 8px 0; }
-  li { margin: 4px 0; }
+  blockquote > :first-child { margin-top: 0; }
+  blockquote > :last-child { margin-bottom: 0; }
+  ul, ol { padding-left: 28px; margin: 10px 0; }
+  li { margin: 4px 0; line-height: 1.75; }
+  li > ul, li > ol { margin: 4px 0; padding-left: 24px; }
+  li > p { margin: 4px 0; }
   ul li:has(> .task-checkbox) { list-style: none; }
   .task-checkbox {
     display: inline-block;
@@ -1541,9 +1633,9 @@ onUnmounted(() => {
   }
   code {
     background: var(--td-bg-color-secondarycontainer);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 0.9em;
+    padding: 1px 5px;
+    border-radius: var(--app-radius-xs);
+    font-size: 0.92em;
   }
   img { max-width: 100%; border-radius: var(--app-radius-xs); }
   hr { border: none; border-top: 1px solid @border-color; margin: 20px 0; }

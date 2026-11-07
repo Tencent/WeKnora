@@ -383,8 +383,13 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 
 	// Parse request body
+	limitJSONBody(c, hybridSearchJSONMaxBytes)
 	var req types.SearchParams
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
@@ -474,8 +479,13 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start creating knowledge base")
 
 	// Parse request body
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
@@ -817,7 +827,26 @@ type UpdateKnowledgeBaseRequest struct {
 	// VLMConfig updates the knowledge base's multimodal (vision) config.
 	// Optional: nil means "no change", mirroring how CreateKnowledgeBase
 	// accepts a top-level vlm_config.
-	VLMConfig *types.VLMConfig `json:"vlm_config"`
+	VLMConfig             *types.VLMConfig `json:"vlm_config"`
+	questionModelProvided bool
+}
+
+// UnmarshalJSON retains whether an older client supplied the question-model binding.
+func (r *UpdateKnowledgeBaseRequest) UnmarshalJSON(data []byte) error {
+	type plain UpdateKnowledgeBaseRequest
+	if err := json.Unmarshal(data, (*plain)(r)); err != nil {
+		return err
+	}
+	var payload struct {
+		Config struct {
+			Questions map[string]json.RawMessage `json:"question_generation_config"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	_, r.questionModelProvided = payload.Config.Questions["model_id"]
+	return nil
 }
 
 // UpdateKnowledgeBase godoc
@@ -858,6 +887,10 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
+	}
+	if !req.questionModelProvided && req.Config != nil && req.Config.QuestionGenerationConfig != nil &&
+		currentKB.QuestionGenerationConfig != nil {
+		req.Config.QuestionGenerationConfig.ModelID = currentKB.QuestionGenerationConfig.ModelID
 	}
 	if err := validateKnowledgeBaseSettingsUpdate(c, currentKB, req.Config, req.VLMConfig); err != nil {
 		_ = c.Error(err)
@@ -908,7 +941,8 @@ func validateKnowledgeBaseSettingsUpdate(
 	c *gin.Context, kb *types.KnowledgeBase, cfg *types.KnowledgeBaseConfig, vlm *types.VLMConfig,
 ) error {
 	settings := vlm != nil || cfg != nil && (cfg.EmbeddingModelID != nil || cfg.SummaryModelID != nil ||
-		cfg.StorageBackendID != nil || cfg.ASRConfig != nil)
+		cfg.StorageBackendID != nil || cfg.ASRConfig != nil ||
+		questionModelBindingChanged(kb, cfg.QuestionGenerationConfig))
 	if !settings {
 		return nil
 	}
@@ -921,6 +955,17 @@ func validateKnowledgeBaseSettingsUpdate(
 		return apperrors.NewForbiddenError("只有知识库所属空间可以修改存储配置")
 	}
 	return nil
+}
+
+func questionModelBindingChanged(kb *types.KnowledgeBase, next *types.QuestionGenerationConfig) bool {
+	if next == nil {
+		return false
+	}
+	previous := ""
+	if kb.QuestionGenerationConfig != nil {
+		previous = kb.QuestionGenerationConfig.ModelID
+	}
+	return strings.TrimSpace(next.ModelID) != strings.TrimSpace(previous)
 }
 
 // PatchKnowledgeBaseRequest changes the settings it carries. A field left
@@ -1043,14 +1088,17 @@ func applyKnowledgeBasePatch(
 		if image.ImagePipelineParams == nil {
 			image.ImagePipelineParams = map[string]any{}
 		}
+		// The switch is stored under the slot of the pipeline that declares it,
+		// and nowhere else: a second spelling would be a setting with two homes,
+		// and the run reads only the slot. The keys come from the pipeline's own
+		// declaration rather than being spelled here, so a rename cannot leave
+		// this call site writing something nothing reads.
 		for key, value := range map[string]*bool{
-			"enable_caption": patch.ImageCaptionEnabled,
-			"enable_ocr":     patch.ImageOCREnabled,
+			service.ImageCaptionSwitchKey: patch.ImageCaptionEnabled,
+			service.ImageOCRSwitchKey:     patch.ImageOCREnabled,
 		} {
 			if value != nil {
-				// Namespaced values take precedence at execution time.
-				image.ImagePipelineParams["default."+key] = *value
-				image.ImagePipelineParams[key] = *value
+				image.ImagePipelineParams[types.SlotKey(string(types.ImagePipelineDefault), key)] = *value
 			}
 		}
 		used = true
@@ -1224,8 +1272,13 @@ func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
 		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
 		return
 	}
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}

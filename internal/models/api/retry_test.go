@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +35,9 @@ func TestPostJSONWithRetryAlwaysReportsAnUnreachableUpstream(t *testing.T) {
 func TestPostJSONWithRetrySucceedsAfterATransportFailure(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	var headers []http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = append(headers, r.Header.Clone())
 		attempts++
 		if attempts == 1 {
 			// Hang up mid-request so the client sees a transport error.
@@ -51,11 +54,16 @@ func TestPostJSONWithRetrySucceedsAfterATransportFailure(t *testing.T) {
 
 	var out map[string]any
 	err := Endpoint{}.PostJSONWithRetry(
-		context.Background(), server.URL, map[string]any{}, &out, fastPolicy(), "test",
+		types.WithSessionID(context.Background(), "retry-session"),
+		server.URL, map[string]any{}, &out, fastPolicy(), "test",
 	)
 	require.NoError(t, err)
 	assert.Equal(t, true, out["ok"])
 	assert.Equal(t, 2, attempts)
+	for _, h := range headers {
+		assert.Equal(t, "retry-session", h.Get("X-Conversation-ID"))
+		assert.Equal(t, "WeKnora", h.Get("User-Agent"))
+	}
 }
 
 // A non-2xx reply is the vendor answering. Repeating a rejected request costs

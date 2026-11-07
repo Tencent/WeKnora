@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -298,6 +297,7 @@ type StreamResponse struct {
 
 // KnowledgeQAStream knowledge Q&A streaming API.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) KnowledgeQAStream(
 	ctx context.Context,
 	sessionID string,
@@ -321,8 +321,7 @@ func (c *Client) KnowledgeQAStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return err
 	}
@@ -331,6 +330,7 @@ func (c *Client) KnowledgeQAStream(
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(newSSELineSplitter())
 	// Default 64KiB per-line cap truncates large SSE data lines (the
 	// references event bundles chunk contents that can reach hundreds of
 	// KiB). Raise the cap so those lines parse instead of erroring with
@@ -389,12 +389,16 @@ func (c *Client) KnowledgeQAStream(
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
+	if err := incompleteSSEDataError(dataBuffer); err != nil {
+		return err
+	}
 	debugLogger.Debug("knowledge_qa_stream_completed", "message_count", messageCount)
 	return nil
 }
 
 // ContinueStream continues to receive an active stream for a session.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) ContinueStream(
 	ctx context.Context,
 	sessionID string,
@@ -417,12 +421,12 @@ func (c *Client) ContinueStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newAPIError(resp.StatusCode, body)
+		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 	}
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(newSSELineSplitter())
 	// See KnowledgeQAStream: raise the per-line cap so large SSE data lines
 	// (references event) parse instead of erroring with "token too long".
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -434,7 +438,8 @@ func (c *Client) ContinueStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if data := completeSSEData(dataBuffer); data != "" && eventType == "message" {
+			// An absent or empty event field defaults to "message" in SSE.
+			if data := completeSSEData(dataBuffer); data != "" && (eventType == "" || eventType == "message") {
 				var streamResponse StreamResponse
 				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
@@ -452,9 +457,10 @@ func (c *Client) ContinueStream(
 			continue
 		}
 
-		// Process lines with event: prefix
-		if strings.HasPrefix(line, "event:") {
-			eventType = strings.TrimPrefix(line[6:], " ") // Remove "event:" prefix
+		// Process the event field, including an empty colonless field.
+		if line == "event" || strings.HasPrefix(line, "event:") {
+			_, value, _ := strings.Cut(line, ":") // A colonless field has an empty value.
+			eventType = strings.TrimPrefix(value, " ")
 		}
 
 		// Process lines with data: prefix
@@ -467,7 +473,7 @@ func (c *Client) ContinueStream(
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
-	return nil
+	return incompleteSSEDataError(dataBuffer)
 }
 
 // StopSession stops the generation for a specific assistant message under a session.
@@ -561,8 +567,7 @@ func (c *Client) SearchKnowledgeDetailed(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return nil, err
 	}

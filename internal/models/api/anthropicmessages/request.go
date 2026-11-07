@@ -154,7 +154,10 @@ func (c *Client) planThinking(opts *api.Options) thinkingPlan {
 	plan := thinkingPlan{enabled: true}
 	switch s.ThinkingMode {
 	case api.AnthropicThinkingAdaptive:
-		plan.body = map[string]any{"type": "adaptive"}
+		// Opus 4.7 and later default to display "omitted", which returns
+		// thinking blocks with empty text; ask for the summary so the
+		// reasoning stream has something to show.
+		plan.body = map[string]any{"type": "adaptive", "display": "summarized"}
 		if level.Graded() && s.SupportsEffort {
 			plan.effort = levels.Value(level)
 		}
@@ -202,7 +205,10 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 	body["max_tokens"] = maxTokens
 
 	if opts != nil {
-		if s.SupportsTemperature && opts.Temperature > 0 && (!plan.enabled || s.TemperatureWithThinking) {
+		acceptsTemperature := s.SupportsTemperature && (!plan.enabled || s.TemperatureWithThinking)
+		if opts.Isolated && acceptsTemperature {
+			body["temperature"] = 0.0
+		} else if acceptsTemperature && opts.Temperature > 0 {
 			body["temperature"] = opts.Temperature
 		} else if s.SupportsTopP && opts.TopP > 0 && !plan.enabled {
 			// temperature and top_p are mutually exclusive on current models;
@@ -279,6 +285,12 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 		// entries were system messages legitimately produces no turns.
 		converted = []message{}
 	}
+	// Anthropic has no in-sequence instruction role. Keep the marked runtime
+	// notice in a trailing input turn, after the existing cache breakpoint;
+	// never move transient recovery text into the stable system prefix.
+	if opts != nil && opts.RuntimeNotice != "" {
+		converted = append(converted, message{Role: "user", Content: opts.RuntimeNotice})
+	}
 	body["messages"] = converted
 
 	if plan.body != nil {
@@ -287,11 +299,7 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 	if plan.effort != "" {
 		body["output_config"] = map[string]any{"effort": plan.effort}
 	}
-	for k, v := range s.ExtraBody {
-		if _, exists := body[k]; !exists {
-			body[k] = v
-		}
-	}
+	api.MergeExtraBody(body, s.ExtraBody, opts != nil && opts.Isolated)
 	return body, nil
 }
 
@@ -521,7 +529,7 @@ func mapStopReason(reason string, toolCalls int, incomplete bool) string {
 	switch {
 	case incomplete, reason == "":
 		return types.FinishReasonIncomplete
-	case reason == "max_tokens":
+	case reason == "max_tokens", reason == "model_context_window_exceeded":
 		return "length"
 	case reason == "tool_use" || (toolCalls > 0 && reason == "end_turn"):
 		return "tool_calls"

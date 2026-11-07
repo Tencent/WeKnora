@@ -8,6 +8,25 @@ const source = readFileSync(new URL('./Input-field.vue', import.meta.url), 'utf8
 const focusCode = source.slice(source.indexOf('const focusInput ='), source.indexOf('const onInput ='))
 const sendCode = source.slice(source.indexOf('const createSession ='), source.indexOf('const updateAgentModeDropdownPosition ='))
 
+test('host page navigation preserves the assistant draft and uploads but clears the main chat composer', () => {
+  const start = source.indexOf('onBeforeRouteUpdate(')
+  const routeCode = source.slice(start, source.indexOf('defineExpose(', start))
+  for (const embeddedMode of [true, false]) {
+    const state = { draft: '还没有写完的问题', uploads: ['draft.pdf'], navigations: 0 }
+    let beforeUpdate
+    vm.runInNewContext(ts.transpile(routeCode), {
+      props: { embeddedMode },
+      onBeforeRouteUpdate: callback => { beforeUpdate = callback },
+      clearvalue: () => { state.draft = '' },
+      clearPendingUploads: () => { state.uploads = [] },
+    })
+    beforeUpdate({ params: { kbId: 'next' } }, { params: { kbId: 'previous' } }, () => { state.navigations++ })
+    assert.equal(state.draft, embeddedMode ? '还没有写完的问题' : '')
+    assert.deepEqual(state.uploads, embeddedMode ? ['draft.pdf'] : [])
+    assert.equal(state.navigations, 1, 'preserving an assistant draft must not block page navigation')
+  }
+})
+
 for (const mode of ['normal', 'embedded', 'after', 'inject']) {
   test(`${mode} send clears the draft and restores focus after the DOM update`, async () => {
     const effects = [], ticks = []

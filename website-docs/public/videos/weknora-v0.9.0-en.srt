@@ -1,0 +1,135 @@
+1
+00:00:00,495 --> 00:00:02,770
+Meet WeKnora, v0.9.0.
+
+2
+00:00:02,770 --> 00:00:05,430
+Your assistant is right beside the logo.
+
+3
+00:00:06,220 --> 00:00:08,570
+Ask what's new, or how something works.
+
+4
+00:00:08,570 --> 00:00:11,380
+It checks the product docs before answering.
+
+5
+00:00:12,470 --> 00:00:16,645
+Get a practical overview of the release, and help with the page you're on.
+
+6
+00:00:16,645 --> 00:00:19,905
+The Assistant works with your identity and permissions.
+
+7
+00:00:22,595 --> 00:00:25,855
+Need an agent? Start here, and describe the job.
+
+8
+00:00:28,195 --> 00:00:33,430
+It finds the knowledge, models, MCP tools, and skills already available.
+
+9
+00:00:34,395 --> 00:00:38,355
+Review how they fit together, then approve the agent's creation.
+
+10
+00:00:40,270 --> 00:00:44,805
+Now your coordinator is ready, with the right knowledge and tools connected.
+
+11
+00:00:47,570 --> 00:00:50,905
+For a bigger task, let several agents share the work.
+
+12
+00:00:52,920 --> 00:00:55,983
+Atlas checks the agenda. Iris reviews sign-ups.
+
+13
+00:00:55,983 --> 00:00:58,055
+Nova handles preparation.
+
+14
+00:00:59,120 --> 00:01:04,280
+Their results return to one conversation, as a briefing you can actually use.
+
+15
+00:01:05,570 --> 00:01:09,205
+For recurring work, describe the task and when it should run.
+
+16
+00:01:11,045 --> 00:01:14,207
+The Assistant adds your time zone and access rules.
+
+17
+00:01:14,207 --> 00:01:16,505
+Check the schedule before saving.
+
+18
+00:01:17,920 --> 00:01:23,430
+Try a run now. Get the preparation brief, then let the schedule handle the next one.
+
+19
+00:01:27,595 --> 00:01:30,355
+Choose read only, ask first, or auto.
+
+20
+00:01:32,220 --> 00:01:36,280
+For a change, check the exact resource and proposed update.
+
+21
+00:01:37,170 --> 00:01:40,380
+Approve it. The name updates in your knowledge base.
+
+22
+00:01:41,620 --> 00:01:47,080
+Longer tasks can keep running in the background, with progress right in the conversation.
+
+23
+00:01:49,120 --> 00:01:51,930
+When it's ready, open the finished run sheet.
+
+24
+00:01:53,570 --> 00:01:57,205
+Browser Skill takes the work into your connected browser.
+
+25
+00:01:58,945 --> 00:02:01,157
+Fill the event form from your knowledge.
+
+26
+00:02:01,157 --> 00:02:04,805
+Watch it happen, then review the draft before publishing.
+
+27
+00:02:07,595 --> 00:02:10,880
+Looking for an image? Search your documents visually.
+
+28
+00:02:12,045 --> 00:02:15,980
+See its description, extracted text, and the source document.
+
+29
+00:02:17,595 --> 00:02:20,705
+Wiki Graph groups connected ideas by topic.
+
+30
+00:02:21,995 --> 00:02:24,930
+Focus on a group to explore the connections.
+
+31
+00:02:26,320 --> 00:02:29,155
+Then open a page and read it in context.
+
+32
+00:02:30,570 --> 00:02:34,355
+And every sourced answer gives you a way to check the evidence.
+
+33
+00:02:35,795 --> 00:02:39,905
+Preview the citation, then jump straight to the supporting passage.
+
+34
+00:02:41,495 --> 00:02:44,430
+WeKnora. Ask. Create. Work together.

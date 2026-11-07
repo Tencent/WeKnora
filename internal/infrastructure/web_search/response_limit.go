@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
+	"unicode/utf8"
 )
 
 // maxJSONResponseBytes bounds every provider response body. A search result set
@@ -47,5 +49,27 @@ func readCapped(body io.Reader, limit int64) ([]byte, error) {
 // the status code, which is the useful part.
 func readErrorPreview(body io.Reader) string {
 	data, _ := io.ReadAll(io.LimitReader(body, maxErrorPreviewBytes))
-	return string(data)
+	return trimPartialUTF8(string(data))
+}
+
+// trimPartialUTF8 drops a trailing incomplete rune. io.LimitReader stops on a
+// byte count, so a preview of a Chinese error body can end mid-rune; that would
+// put invalid UTF-8 into logs and API error responses.
+func trimPartialUTF8(s string) string {
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// errorPreviewString renders a failed response body for an error message. It is
+// bounded like maxErrorPreviewBytes and never ends in the middle of a UTF-8
+// rune: providers such as Zhipu, Metaso and Bocha answer with Chinese text, and
+// cutting on a byte index would put invalid UTF-8 into logs and API responses.
+func errorPreviewString(body []byte) string {
+	detail := strings.TrimSpace(string(body))
+	if len(detail) > maxErrorPreviewBytes {
+		detail = detail[:maxErrorPreviewBytes]
+	}
+	return trimPartialUTF8(detail)
 }

@@ -1,0 +1,29 @@
+// Shared by the assistant conversation and child-agent detail viewport.
+.chat-scrollbar() {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--td-component-stroke) transparent;
+
+    &:hover,
+    &:focus-within {
+        scrollbar-color: var(--td-scrollbar-color) transparent;
+    }
+
+    &::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        border-radius: var(--app-radius-sm);
+        background: var(--td-component-stroke);
+    }
+
+    &:hover::-webkit-scrollbar-thumb,
+    &:focus-within::-webkit-scrollbar-thumb {
+        background: var(--td-scrollbar-color);
+    }
+}

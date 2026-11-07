@@ -8,10 +8,11 @@ const styles = readFileSync(new URL('./agent-interaction-card.less', import.meta
 const descriptionCode = source.slice(
   source.indexOf('const descriptionParts ='), source.indexOf('const isJsonValid ='),
 ).replace(/^interface .*$/m, '').replace(/ as \w+\[\]/g, '')
-const evaluate = (description, serviceName = 'docs-mcp') => runInNewContext(
-  descriptionCode + '\n;({ descriptionParts, question })',
+const evaluate = (description, serviceName = 'docs-mcp', delegatedTask = '') => runInNewContext(
+  descriptionCode + '\n;({ descriptionParts, question, compactDescription, hasLongDescription, argumentSummary })',
   {
-    props: { description, serviceName },
+    props: { description, serviceName, delegatedTask },
+    argsText: { value: '{"period":2,"limit":3}' },
     computed: fn => ({ value: fn() }),
     isOperation: { value: serviceName === 'WeKnora' },
     targetLabel: { value: serviceName + ' › tool' },
@@ -91,4 +92,12 @@ test('a warning right after the summary is not mistaken for the target', () => {
   assert.equal(descriptionParts.value.target, '')
   assert.equal(descriptionParts.value.head, 'This drops existing tools.')
   assert.equal(question.value, 'operationQuestionNoTarget {"action":"Update MCP service"}')
+})
+
+test('delegated approval keeps task separate from description and shows actual arguments', () => {
+  const result = evaluate('hotlist: Read article rankings.\n\n## Parameters\n- period: days\n\n## Examples\n{}', 'KM', 'hotlist')
+  assert.equal(result.compactDescription.value, 'Read article rankings.')
+  assert.equal(result.hasLongDescription.value, true)
+  assert.match(result.argumentSummary.value, /period=2.*limit=3/)
+  assert.doesNotMatch(result.descriptionParts.value.head, /^hotlist:/)
 })

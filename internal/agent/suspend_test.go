@@ -13,6 +13,18 @@ import (
 
 const suspendingToolName = "mcp_svc_danger"
 
+// With operator prompt suspension off, only collaboration waits may checkpoint.
+func TestCollaborationOnlySuspensionKeepsPromptsInProcess(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.EnableSuspension(json.RawMessage(`{}`))
+	require.NotNil(t, engine.snapshotFunc(0, suspendingToolName))
+
+	engine.RestrictSuspensionToCollaboration()
+	require.Nil(t, engine.snapshotFunc(0, suspendingToolName))
+	require.Nil(t, engine.snapshotFunc(0, "ask_user"))
+	require.NotNil(t, engine.snapshotFunc(0, "wait_agent"))
+}
+
 // suspendingTool stands in for an approval-gated MCP tool whose approval
 // outlived the hot wait: it saves the run state and suspends.
 type suspendingTool struct {

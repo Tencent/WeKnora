@@ -67,6 +67,15 @@ func newClient(cfg config) (*client, error) {
 	return &client{cfg: cfg, http: datasource.NewConnectorHTTPClient(60 * time.Second)}, nil
 }
 
+// authenticate applies the selected credentials to both API and private image requests.
+func (c *client) authenticate(req *http.Request) {
+	if c.cfg.usePAT {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.secret)
+		return
+	}
+	req.SetBasicAuth(c.cfg.username, c.cfg.secret)
+}
+
 func (c *client) get(ctx context.Context, endpoint string, output interface{}) error {
 	fullURL, err := c.resolveEndpoint(endpoint)
 	if err != nil {
@@ -77,7 +86,7 @@ func (c *client) get(ctx context.Context, endpoint string, output interface{}) e
 		if err != nil {
 			return err
 		}
-		req.SetBasicAuth(c.cfg.username, c.cfg.secret)
+		c.authenticate(req)
 		req.Header.Set("Accept", "application/json")
 		resp, err := c.http.Do(req)
 		if err == nil {
@@ -278,7 +287,7 @@ func (c *client) downloadImage(ctx context.Context, absURL string) ([]byte, stri
 	if err != nil {
 		return nil, "", err
 	}
-	req.SetBasicAuth(c.cfg.username, c.cfg.secret)
+	c.authenticate(req)
 	req.Header.Set("Accept", "image/*,*/*;q=0.8")
 	resp, err := c.imageHTTPClient().Do(req)
 	if err != nil {

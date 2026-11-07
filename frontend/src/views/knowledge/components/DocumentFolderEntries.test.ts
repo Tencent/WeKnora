@@ -219,47 +219,60 @@ function mountCards(overrides: Record<string, unknown> = {}) {
   })
 }
 
-test('the list renders one folder row before the document rows', () => {
+test('the list renders folder tiles above the document table', () => {
   const opened: string[] = []
   const view = mountList({ onOpenFolder: (path: string) => opened.push(path) })
   try {
-    const rows = allElements(view.root).filter((element) => classesOf(element).includes('doc-list-row'))
-    const folderRows = rows.filter((row) => row.props['data-folder-path'] !== undefined)
-    const documentRows = rows.filter((row) => row.props['data-folder-path'] === undefined)
+    const folderTiles = allElements(view.root).filter((element) => classesOf(element).includes('doc-folder-tile'))
+    const documentRows = allElements(view.root).filter((element) => classesOf(element).includes('doc-list-row'))
 
-    assert.equal(folderRows.length, 1)
+    assert.equal(folderTiles.length, 1)
     assert.equal(documentRows.length, 2)
-    assert.ok(rows.indexOf(folderRows[0]) < rows.indexOf(documentRows[0]), 'folder row comes first')
-    assert.equal(folderRows[0].props['data-folder-path'], folder.path)
-    assert.match(textOf(folderRows[0]), /2024使用培训视频/)
-    // The folder takes no part in batch selection: its checkbox cell stays empty.
+    assert.equal(folderTiles[0].props['data-folder-path'], folder.path)
+    assert.match(textOf(folderTiles[0]), /2024使用培训视频/)
+    const headings = allElements(view.root).filter((element) => classesOf(element).includes('doc-section-header'))
+    assert.equal(headings.length, 2)
+    assert.match(textOf(headings[0]), /Folders|文件夹/)
+    assert.match(textOf(headings[1]), /Documents|文档/)
     assert.equal(
-      allElements(folderRows[0]).filter((element) => classesOf(element).includes('doc-list-check')).length,
+      allElements(folderTiles[0]).filter((element) => classesOf(element).includes('doc-list-check')).length,
       0,
     )
+    assert.equal(
+      documentRows.filter((row) => row.props['data-folder-path'] !== undefined).length,
+      0,
+      'folders are not table rows',
+    )
 
-    folderRows[0].props.onClick({ stopPropagation() {} })
+    folderTiles[0].props.onClick({ stopPropagation() {} })
     assert.deepEqual(opened, [folder.path])
   } finally {
     view.unmount()
   }
 })
 
-test('the card grid renders one folder card before the document cards', () => {
+test('the card grid renders one folder tile above the document cards', () => {
   const opened: string[] = []
   const view = mountCards({ onOpenFolder: (path: string) => opened.push(path) })
   try {
-    const cards = allElements(view.root).filter((element) => classesOf(element).includes('knowledge-card'))
-    const folderCards = cards.filter((card) => card.props['data-folder-path'] !== undefined)
-    const documentCards = cards.filter((card) => card.props['data-folder-path'] === undefined)
+    const folderTiles = allElements(view.root).filter((element) => classesOf(element).includes('doc-folder-tile'))
+    const documentCards = allElements(view.root).filter((element) => classesOf(element).includes('knowledge-card'))
 
-    assert.equal(folderCards.length, 1)
+    assert.equal(folderTiles.length, 1)
     assert.equal(documentCards.length, 2)
-    assert.ok(cards.indexOf(folderCards[0]) < cards.indexOf(documentCards[0]), 'folder card comes first')
-    assert.equal(folderCards[0].props['data-folder-path'], folder.path)
-    assert.match(textOf(folderCards[0]), /2024使用培训视频/)
+    assert.equal(folderTiles[0].props['data-folder-path'], folder.path)
+    assert.match(textOf(folderTiles[0]), /2024使用培训视频/)
+    const headings = allElements(view.root).filter((element) => classesOf(element).includes('doc-section-header'))
+    assert.equal(headings.length, 2)
+    assert.match(textOf(headings[0]), /Folders|文件夹/)
+    assert.match(textOf(headings[1]), /Documents|文档/)
+    assert.equal(
+      allElements(view.root).find((element) => classesOf(element).includes('knowledge-card') && element.props['data-folder-path']),
+      undefined,
+      'folders are not document cards',
+    )
 
-    folderCards[0].props.onClick({ stopPropagation() {} })
+    folderTiles[0].props.onClick({ stopPropagation() {} })
     assert.deepEqual(opened, [folder.path])
   } finally {
     view.unmount()
@@ -270,17 +283,21 @@ test('no folder rows or cards are rendered when the caller filters them out', ()
   const list = mountList({ subFolders: [] })
   try {
     const rows = allElements(list.root).filter((element) => classesOf(element).includes('doc-list-row'))
+    assert.equal(allElements(list.root).filter((element) => classesOf(element).includes('doc-folder-tile')).length, 0)
     assert.equal(rows.filter((row) => row.props['data-folder-path'] !== undefined).length, 0)
     assert.equal(rows.length, 2)
+    assert.equal(allElements(list.root).filter((element) => classesOf(element).includes('doc-section-header')).length, 0)
   } finally {
     list.unmount()
   }
 
   const cards = mountCards({ subFolders: [] })
   try {
+    const folderTiles = allElements(cards.root).filter((element) => classesOf(element).includes('doc-folder-tile'))
     const cardElements = allElements(cards.root).filter((element) => classesOf(element).includes('knowledge-card'))
-    assert.equal(cardElements.filter((card) => card.props['data-folder-path'] !== undefined).length, 0)
+    assert.equal(folderTiles.length, 0)
     assert.equal(cardElements.length, 2)
+    assert.equal(allElements(cards.root).filter((element) => classesOf(element).includes('doc-section-header')).length, 0)
   } finally {
     cards.unmount()
   }

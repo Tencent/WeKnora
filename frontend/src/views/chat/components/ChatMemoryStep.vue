@@ -14,9 +14,9 @@
       @keydown.enter.prevent="emit('toggle')"
       @keydown.space.prevent="emit('toggle')"
     >
-      <t-icon v-if="variant !== 'root'" class="memory-icon" name="bookmark" />
+      <ChatTimelineIcon v-if="variant !== 'root'" class="memory-icon" name="bookmark" />
       <span class="memory-name">{{ t('chat.memoryUsedCount', { count: memories.length }) }}</span>
-      <t-icon class="memory-chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" />
+      <ChatTimelineIcon width="14" height="14" class="memory-chevron" :name="expanded ? 'chevron-down' : 'chevron-right'" />
     </div>
 
     <div v-if="expanded" class="memory-detail-content">
@@ -39,6 +39,7 @@
 </template>
 
 <script setup lang="ts">
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { useI18n } from 'vue-i18n'
 
 type Memory = { id: string; kind: string; content: string }
@@ -90,7 +91,7 @@ const memoryKindLabel = (kind: string) => {
   &:focus-visible {
     outline: none;
 
-    .memory-name {
+    .memory-name, .memory-icon {
       color: var(--td-text-color-primary);
     }
   }
@@ -103,21 +104,21 @@ const memoryKindLabel = (kind: string) => {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  color: var(--agent-step-icon-color, var(--td-text-color-placeholder));
+  color: var(--agent-step-icon-color, var(--td-text-color-secondary));
 }
 
 .memory-name {
   font-size: var(--agent-step-text-size, 14px);
   line-height: 1.55;
   font-weight: 400;
-  color: var(--td-text-color-secondary);
+  color: var(--agent-step-color, var(--td-text-color-secondary));
   word-break: break-word;
 }
 
 .memory-chevron {
   flex-shrink: 0;
   font-size: var(--app-text-md);
-  color: var(--agent-step-icon-color, var(--td-text-color-placeholder));
+  color: var(--agent-step-icon-color, var(--td-text-color-secondary));
 }
 
 .memory-root {
@@ -144,7 +145,7 @@ const memoryKindLabel = (kind: string) => {
   margin-top: 4px;
   font-size: var(--agent-step-summary-size, 13px);
   line-height: 1.55;
-  color: var(--td-text-color-secondary);
+  color: var(--agent-step-color, var(--td-text-color-secondary));
 }
 
 .memory-row {

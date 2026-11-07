@@ -3,7 +3,7 @@ export type BrowserToolEvent = { arguments?: unknown; output?: unknown; error?: 
 const methodKeys: Record<string, string> = {
   navigate: 'openPage', navigate_back: 'switchPage', navigate_forward: 'switchPage', reload: 'openPage',
   screenshot: 'captureScreenshot', stop: 'stop',
-  observe: 'readPage', snapshot: 'readPage', get_html: 'readPage', tab_list: 'listTabs',
+  cooperate: 'readPage', observe: 'readPage', snapshot: 'readPage', get_html: 'readPage', tab_list: 'listTabs',
   click: 'clickPage', fill: 'fillPage', press: 'pressKey', wait_ms: 'waitPage', wait_for_navigation: 'waitPage',
   hover: 'hoverPage', wheel: 'scrollPage', scroll_to: 'scrollPage', focus: 'focusElement', blur: 'blurElement',
   select: 'selectOption', tab_close: 'closeTab', evaluate: 'runScript', console: 'readConsole', network: 'readNetwork',
@@ -63,7 +63,8 @@ export function browserToolSummary(t: Translate, event: BrowserToolEvent): strin
 export function browserToolContent(event: BrowserToolEvent) {
   const output = { ...record(event.tool_data), ...record(event.output) }
   const args = record(event.arguments)
-  let content = text(output.text) || text(output.html)
+  const observation = args.method === 'cooperate' ? record(output.observation) : output
+  let content = text(observation.text) || text(observation.html)
   const entries = Array.isArray(output.entries) ? output.entries : []
   if (args.method === 'console') {
     content = entries.slice(0, 100).map(record).map(entry => {
@@ -88,10 +89,10 @@ export function browserToolContent(event: BrowserToolEvent) {
     error: error.slice(0, 4000),
     recoveryHint: text(output.recovery_hint).slice(0, 4000),
     empty: diagnostics && entries.length === 0 && !error && !event.pending && !browserToolIncomplete(event),
-    title: text(output.title).slice(0, 300),
-    address: browserPageAddress(output.final_url || output.url || args.url),
+    title: text(observation.title).slice(0, 300),
+    address: browserPageAddress(output.final_url || output.url || observation.url || args.url),
     text: content.slice(0, 12000),
-    truncated: output.truncated === true || content.length > 12000 || diagnostics && (entries.length > 100 || entries.some(entry => record(entry).truncated === true || Array.isArray(record(entry).stack_trace) && record(entry).stack_trace.length > 20)),
+    truncated: observation.truncated === true || content.length > 12000 || diagnostics && (entries.length > 100 || entries.some(entry => record(entry).truncated === true || Array.isArray(record(entry).stack_trace) && record(entry).stack_trace.length > 20)),
     image: ['png', 'jpeg'].includes(format) && image.length <= 8 * 1024 * 1024 && /^[A-Za-z0-9+/\r\n]+={0,2}$/.test(image)
       ? `data:image/${format};base64,${image}` : '',
     tabs: Array.isArray(output.tabs) ? output.tabs.map(record).map(tab => ({

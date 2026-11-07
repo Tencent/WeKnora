@@ -49,7 +49,7 @@ type ZhipuProvider struct {
 }
 
 // NewZhipuProvider creates a Zhipu AI web search provider from persisted parameters.
-func NewZhipuProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewZhipuProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if err := ValidateZhipuParameters(params); err != nil {
 		return nil, err
 	}
@@ -102,10 +102,9 @@ func (p *ZhipuProvider) Name() string {
 // Search performs a web search using Zhipu AI's standalone Web Search API.
 func (p *ZhipuProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	preparedQuery := normalizeZhipuQuery(query)
 	if preparedQuery == "" {
 		return nil, fmt.Errorf("query is empty")
@@ -230,10 +229,8 @@ func zhipuHTTPError(statusCode int, body []byte) error {
 	if err := json.Unmarshal(body, &response); err == nil && (response.Error.Code != "" || response.Error.Message != "") {
 		return fmt.Errorf("Zhipu API returned status %d (%s): %s", statusCode, response.Error.Code, response.Error.Message)
 	}
-	detail := strings.TrimSpace(string(body))
-	if len(detail) > 4096 {
-		detail = detail[:4096]
-	}
+	detail := errorPreviewString(body)
+
 	if detail == "" {
 		return fmt.Errorf("Zhipu API returned status %d", statusCode)
 	}

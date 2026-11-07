@@ -7,8 +7,12 @@
  * no field: adding one there arrives here as a new option and a new control.
  * A field is rendered by its declared type, and its label falls back to the
  * backend's own wording when this locale has nothing for it.
+ *
+ * The panel renders those fields in the order the pipeline declared them, and
+ * that order is part of what a pipeline decides about itself. Nothing here may
+ * sort, group or reorder them — see the note above the field loop.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useSlots, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   fetchImagePipelines,
@@ -21,7 +25,11 @@ import {
 const props = defineProps<{
   /** The selected pipeline id. */
   pipelineId: string
-  /** That pipeline's private tunables; a missing key reads the field default. */
+  /**
+   * Every pipeline's private tunables, stored under the slot of the pipeline
+   * that owns each one. A missing key reads the field's declared default, so a
+   * pipeline the operator has never configured still renders real switches.
+   */
   params: Record<string, unknown>
 }>()
 
@@ -31,6 +39,8 @@ const emit = defineEmits<{
   /** Turned on while the current pick is configured to do nothing at all. */
   'update:invalid': [value: boolean]
 }>()
+
+import { pipelineParamKey, readPipelineParam } from '@/utils/imageProcessingConfig'
 
 const { t, te } = useI18n()
 
@@ -45,6 +55,42 @@ const current = computed<ImagePipelineSpec | undefined>(() =>
 
 /** Its fields, in the order the backend declared them. */
 const fields = computed<ImagePipelineField[]>(() => current.value?.fields ?? [])
+
+/**
+ * The run of the panel a field belongs to. A pipeline declares its fields in
+ * three runs — standing switches, advanced switches, notes — and the empty
+ * group is the first of them, so a standing switch says nothing about groups.
+ */
+function fieldGroup(field: ImagePipelineField): string {
+  return field.group || 'switch'
+}
+
+// Each run keeps the order it was declared in: filter preserves it, and that is
+// the whole reason nothing here may re-sort (see the note in the template).
+const standingFields = computed(() => fields.value.filter((f) => fieldGroup(f) === 'switch'))
+const advancedFields = computed(() => fields.value.filter((f) => fieldGroup(f) === 'advanced'))
+const noteFields = computed(() => fields.value.filter((f) => fieldGroup(f) === 'note'))
+
+// Both folded runs start closed: a pipeline declares them to keep them out of
+// the way rather than to lengthen the panel.
+const advancedOpen = ref(false)
+const notesOpen = ref(false)
+
+// The notes run also carries whatever the host hands over through the slot, and
+// a pipeline that declares no note of its own must still show that — the smart
+// pipeline's attribute dictionary is the case it exists for.
+const slots = useSlots()
+const hasNotesSlot = computed(() => Boolean(slots.notes))
+
+/**
+ * The wording of one value of an enum field. A pipeline that wants its options
+ * read as words declares them under the field's own overlay path, so a fourth
+ * mode needs no frontend change; without one the stored value is shown as it is.
+ */
+function enumOptionLabel(field: ImagePipelineField, option: string): string {
+  const key = `${fieldKey(field, 'options')}.${option}`
+  return te(key) ? t(key) : option
+}
 
 // Every rule the selected pipeline breaks, reported by the backend and in the
 // backend's own terms: each violation carries the i18n key of its own wording
@@ -115,12 +161,12 @@ function defaultValue(field: ImagePipelineField): unknown {
 }
 
 function paramValue(field: ImagePipelineField): unknown {
-  const own = props.params?.[field.key]
+  const own = readPipelineParam(props.params, current.value?.id ?? '', field.key)
   return own === undefined || own === null ? defaultValue(field) : own
 }
 
 /** i18n overlay key for one field of one pipeline. */
-function fieldKey(field: ImagePipelineField, part: 'label' | 'description'): string {
+function fieldKey(field: ImagePipelineField, part: 'label' | 'description' | 'options'): string {
   return `imagePipeline.${current.value?.id ?? ''}.${field.key}.${part}`
 }
 
@@ -146,15 +192,15 @@ function pipelineDescription(pipeline: ImagePipelineSpec): string {
 }
 
 function onPipelineChange(value: string) {
+  // The parameters stay: they are stored per pipeline, so switching back finds
+  // the choice that was made here last time. Clearing them used to lose it.
   emit('update:pipelineId', value)
-  // A pipeline's parameters are only meaningful to that pipeline. Switching one
-  // drops the other's, rather than carrying a stale key across that it silently
-  // ignores.
-  emit('update:params', {})
 }
 
 function onParamChange(key: string, value: unknown) {
-  emit('update:params', { ...props.params, [key]: value })
+  // Stored under the pipeline's own slot, so two pipelines that declare the same
+  // field key never read each other's value, and switching back keeps both.
+  emit('update:params', { ...props.params, [pipelineParamKey(current.value?.id ?? '', key)]: value })
 }
 
 async function load() {
@@ -191,57 +237,155 @@ watch(() => props.pipelineId, () => {
     </div>
 
     <template v-else>
-      <div class="image-pipeline-row">
-        <div class="image-pipeline-info">
-          <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineLabel') }}</label>
+      <!-- Section 1 of 3: which pipeline, and how it differs from the others. -->
+      <div class="image-pipeline-section">
+        <div class="image-pipeline-row">
+          <div class="image-pipeline-info">
+            <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineLabel') }}</label>
+          </div>
+          <div class="image-pipeline-control">
+            <t-select
+              :value="pipelineId"
+              :placeholder="$t('knowledgeEditor.advanced.multimodal.imagePipelinePlaceholder')"
+              @change="onPipelineChange"
+            >
+              <t-option
+                v-for="pipeline in pipelines"
+                :key="pipeline.id"
+                :value="pipeline.id"
+                :label="pipelineName(pipeline)"
+              />
+            </t-select>
+          </div>
         </div>
-        <div class="image-pipeline-control">
-          <t-select
-            :value="pipelineId"
-            :placeholder="$t('knowledgeEditor.advanced.multimodal.imagePipelinePlaceholder')"
-            @change="onPipelineChange"
-          >
-            <t-option
-              v-for="pipeline in pipelines"
-              :key="pipeline.id"
-              :value="pipeline.id"
-              :label="pipelineName(pipeline)"
-            />
-          </t-select>
-        </div>
+        <p v-if="current" class="image-pipeline-desc">{{ pipelineDescription(current) }}</p>
       </div>
-      <p v-if="current" class="image-pipeline-desc">{{ pipelineDescription(current) }}</p>
 
-      <!-- One row per field the running pipeline declares. A pipeline with no
-           fields shows nothing here, which is the honest rendering of "nothing
-           to tune" rather than an empty section. -->
-      <div v-for="field in fields" :key="field.key" class="image-pipeline-row">
-        <div class="image-pipeline-info">
-          <label>{{ fieldLabel(field) }}</label>
-          <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
-        </div>
-        <div class="image-pipeline-control">
-          <t-switch
-            v-if="field.type === 'bool'"
-            :value="Boolean(paramValue(field))"
-            size="medium"
-            @change="(value: boolean) => onParamChange(field.key, value)"
-          />
-          <t-select
-            v-else-if="field.type === 'enum'"
-            :value="String(paramValue(field) ?? '')"
-            clearable
-            @change="(value: string) => onParamChange(field.key, value)"
-          >
-            <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="opt" />
-          </t-select>
-          <t-input
-            v-else
-            :value="String(paramValue(field) ?? '')"
-            @change="(value: string) => onParamChange(field.key, value)"
-          />
+      <div v-if="standingFields.length" class="image-pipeline-divider" />
+
+      <!-- Section 2 of 3: the standing switches, each with its own description
+           beside it. Section 3 (the observation attributes) belongs to the host
+           dialog, which is where the attribute registry is read.
+
+           The pipeline declares its fields in three runs — standing switches,
+           advanced switches, notes — and this panel renders them as three
+           places: here, the folded "advanced" block below, and the folded
+           "notes" block under that. A run the pipeline does not declare renders
+           nothing at all: no rows, no fold title, and no rule of its own, so a
+           panel made of one switch looks like one switch.
+
+           ==================== DO NOT REORDER THESE ROWS ====================
+           Every row below is a field the SELECTED PIPELINE declared, and the
+           order of its declaration is the order of this panel. What a panel
+           shows, and in what order, is decided in the pipeline's own Go file
+           (internal/application/service/image_pipeline_<id>.go, method Fields)
+           — not here. This component is a renderer and must stay one: it
+           cannot tell a tunable of the describe call from a tunable of the
+           read call, so any sorting or grouping it attempted would be a guess.
+
+           An earlier version of this file regrouped the fields by key prefix —
+           "caption.* first, then ocr.*" — which read well for the smart
+           pipeline and silently scrambled the manual one, whose switches and
+           the thinking tunables that belong to them alternate. If a panel's
+           order looks wrong, fix the declaration. See the Fields() doc on the
+           imagePipeline interface for the full contract.
+           =================================================================== -->
+      <!-- Every declared field is a setting of the selected pipeline, stored in
+           that pipeline's own slot — including the ones the pipeline carries in
+           from the action that owns them. There is no field this panel reads
+           from somewhere else, which is what keeps the value it draws and the
+           value the run reads the same value. -->
+      <div v-if="standingFields.length" class="image-pipeline-section">
+        <div v-for="field in standingFields" :key="field.key" class="image-pipeline-row">
+          <div class="image-pipeline-info">
+            <label>{{ fieldLabel(field) }}</label>
+            <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
+          </div>
+          <div class="image-pipeline-control">
+            <t-switch
+              v-if="field.type === 'bool'"
+              :value="Boolean(paramValue(field))"
+              size="medium"
+              @change="(value: boolean) => onParamChange(field.key, value)"
+            />
+            <t-select
+              v-else-if="field.type === 'enum'"
+              :value="String(paramValue(field) ?? '')"
+              clearable
+              @change="(value: string) => onParamChange(field.key, value)"
+            >
+              <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="enumOptionLabel(field, opt)" />
+            </t-select>
+            <t-input
+              v-else
+              :value="String(paramValue(field) ?? '')"
+              @change="(value: string) => onParamChange(field.key, value)"
+            />
+          </div>
         </div>
       </div>
+
+      <!-- The advanced switches, folded away. The toggle is a real button, so
+           the title opens it as well as the arrow. -->
+      <template v-if="advancedFields.length">
+        <div class="image-pipeline-section">
+          <button type="button" class="advanced-toggle" @click="advancedOpen = !advancedOpen">
+            <t-icon name="chevron-right" class="toggle-arrow" :class="{ open: advancedOpen }" />
+            <span>{{ $t('knowledgeEditor.advanced.multimodal.advancedSettingsLabel') }}</span>
+          </button>
+          <div v-if="advancedOpen" class="advanced-section">
+            <div v-for="field in advancedFields" :key="field.key" class="image-pipeline-row">
+              <div class="image-pipeline-info">
+                <label>{{ fieldLabel(field) }}</label>
+                <p v-if="fieldDescription(field)" class="desc">{{ fieldDescription(field) }}</p>
+              </div>
+              <div class="image-pipeline-control">
+                <t-switch
+                  v-if="field.type === 'bool'"
+                  :value="Boolean(paramValue(field))"
+                  size="medium"
+                  @change="(value: boolean) => onParamChange(field.key, value)"
+                />
+                <t-select
+                  v-else-if="field.type === 'enum'"
+                  :value="String(paramValue(field) ?? '')"
+                  clearable
+                  @change="(value: string) => onParamChange(field.key, value)"
+                >
+                  <t-option v-for="opt in field.options ?? []" :key="opt" :value="opt" :label="enumOptionLabel(field, opt)" />
+                </t-select>
+                <t-input
+                  v-else
+                  :value="String(paramValue(field) ?? '')"
+                  @change="(value: string) => onParamChange(field.key, value)"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- What the pipeline wants said about itself, folded away with it — plus
+           whatever the host folds in here through the slot. For the smart
+           pipeline that is the attribute dictionary: it explains what the OCR
+           policy reads, it comes from the attribute registry rather than from
+           the pipeline, and it belongs in the same place a reader looks for
+           this pipeline's explanation. -->
+      <template v-if="noteFields.length || hasNotesSlot">
+        <div class="image-pipeline-section">
+          <button type="button" class="advanced-toggle" @click="notesOpen = !notesOpen">
+            <t-icon name="chevron-right" class="toggle-arrow" :class="{ open: notesOpen }" />
+            <span>{{ $t('knowledgeEditor.advanced.multimodal.notesLabel') }}</span>
+          </button>
+          <div v-if="notesOpen" class="advanced-section">
+            <div v-for="note in noteFields" :key="note.key" class="image-pipeline-note">
+              <label>{{ fieldLabel(note) }}</label>
+              <p v-if="fieldDescription(note)" class="desc">{{ fieldDescription(note) }}</p>
+            </div>
+            <slot name="notes" />
+          </div>
+        </div>
+      </template>
 
       <!-- Every broken rule, listed rather than summarised: each line names what
            is wrong and, through the field it points at, which control to turn
@@ -329,6 +473,75 @@ watch(() => props.pipelineId, () => {
     margin: 0;
     padding-left: 1em;
     list-style: disc;
+  }
+}
+// Sections 1 and 2 of the panel: a rule goes between the sections and never
+// inside one, so a section reads as a block rather than as a series of rows
+// separated by lines. Section 3 (the observation attributes) lives in the host
+// dialog, which is where the attribute registry is read, and brings its own
+// separating line with it. A folded run the pipeline does not declare draws no
+// rule either — see the template.
+.image-pipeline-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.image-pipeline-divider {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--td-component-border);
+}
+// The folded runs follow the chunking panel's advanced options exactly — same
+// button, same arrow, same collapse — so "advanced" looks and behaves the same
+// wherever a knowledge base shows it. The whole row is the button, which is why
+// the title opens it as well as the arrow.
+.advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  user-select: none;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+}
+
+.toggle-arrow {
+  font-size: var(--app-text-xl);
+  transition: transform var(--app-motion-fast) ease;
+
+  &.open {
+    transform: rotate(90deg);
+  }
+}
+
+.advanced-section {
+  margin-top: 4px;
+}
+
+// One declared note: a title and the prose under it, worded like a setting
+// row's label and description so it reads as part of the same panel.
+.image-pipeline-note {
+  label {
+    display: block;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  .desc {
+    margin: 4px 0 0;
+    opacity: 0.75;
+    font-size: var(--app-text-sm);
+    line-height: 1.5;
   }
 }
 </style>

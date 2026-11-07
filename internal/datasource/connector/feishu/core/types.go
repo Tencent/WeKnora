@@ -177,7 +177,7 @@ type WikiNode struct {
 	ObjType        string `json:"obj_type"`  // "doc", "sheet", "mindnote", "bitable", "file", "docx", "slides"
 	ParentNodeID   string `json:"parent_node_token"`
 	NodeType       string `json:"node_type"` // "origin" or "shortcut"
-	OriginNodeID   string `json:"origin_node_id"`
+	OriginNodeID   string `json:"origin_node_token"`
 	OriginSpaceID  string `json:"origin_space_id"`
 	HasChild       bool   `json:"has_child"`
 	Title          string `json:"title"`

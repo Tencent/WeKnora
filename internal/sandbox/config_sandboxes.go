@@ -45,6 +45,12 @@ func MetadataSessionIDKey() string {
 	return remoteMetadataSessionID
 }
 
+// MetadataAllocationUser marks a shared user machine in provider metadata.
+const MetadataAllocationUser = "user"
+
+// MetadataAllocationKey returns the provider metadata key for the allocation mode.
+func MetadataAllocationKey() string { return remoteMetadataAllocation }
+
 // configSandboxFilter narrows a listing to one workspace's one config.
 func configSandboxFilter(tenantID uint64, configID string) RemoteListFilter {
 	return RemoteListFilter{

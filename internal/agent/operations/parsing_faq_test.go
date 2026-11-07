@@ -45,7 +45,7 @@ func TestKnowledgeBaseParsingParamsAndProjection(t *testing.T) {
 		"parser_file_types": raw(
 			[]string{"pdf"},
 		), "parser_engine": raw("builtin"), "image_pipeline": raw("default"), "image_ocr_enabled": raw(false),
-		"question_generation_enabled": raw(true), "question_count": raw(5),
+		"question_generation_enabled": raw(true), "question_count": raw(5), "question_model_id": raw("questions"),
 	}
 	call, err := op.Build(params)
 	require.NoError(t, err)
@@ -65,6 +65,7 @@ func TestKnowledgeBaseParsingParamsAndProjection(t *testing.T) {
   "image_ocr_enabled": false,
   "question_generation_config": {
     "enabled": true,
+    "model_id": "questions",
     "question_count": 5
   }
 }`, string(call.Body))
@@ -91,19 +92,22 @@ func TestKnowledgeBaseParsingParamsAndProjection(t *testing.T) {
     "image_processing_config": {
       "image_pipeline": "default",
       "image_pipeline_params": {
-        "default.enable_ocr": false,
+        "default.ocr_enabled": false,
+        "default.caption_enabled": true,
+        "default.enable_ocr": true,
         "enable_ocr": true,
         "private_token": "secret",
         "default": {
-          "enable_ocr": true
+          "ocr_enabled": true
         }
       }
     }
   }
 }`)
 	assert.Contains(t, out, `"engine":"builtin"`)
-	assert.Contains(t, out, `"default.enable_ocr":false`, "literal map keys must not resolve as nested paths")
-	assert.Contains(t, out, `"enable_ocr":true`)
+	assert.Contains(t, out, `"default.ocr_enabled":false`, "literal map keys must not resolve as nested paths")
+	assert.Contains(t, out, `"default.caption_enabled":true`)
+	assert.NotContains(t, out, "enable_ocr", "obsolete keys must not report stale switch values")
 	assert.NotContains(t, out, "secret")
 	assert.NotContains(t, out, `"default":`)
 	_, exposed := op.Param("parser_engine_rules")

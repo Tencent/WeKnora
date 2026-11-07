@@ -316,7 +316,10 @@ type WikiIngestPayload struct {
 	types.TracingContext
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Language        string `json:"language,omitempty"`
+	// KnowledgeID restricts an operator trigger to one existing durable key.
+	// Automatic triggers leave it empty and keep their normal batch selection.
+	KnowledgeID string `json:"knowledge_id,omitempty"`
+	Language    string `json:"language,omitempty"`
 }
 
 // WikiRetractPayload is the asynq task payload for wiki content retraction
@@ -895,9 +898,8 @@ func uniqueWikiFolderIDs(values []string) []string {
 // scheduleFinalize enqueues a debounced, coalesced KB-global finalize trigger.
 // asynq.TaskID ("wiki-finalize-<kbID>") makes concurrent schedules within the
 // debounce window collapse into one pending task; the conflict error is the
-// expected coalescing signal, not a failure. In Lite mode the sync executor
-// ignores TaskID, so finalize simply runs once per batch (acceptable at the
-// small scale Lite mode targets).
+// expected coalescing signal, not a failure. Lite mode reserves stable IDs
+// in-process for the lifetime of each delayed or running task.
 func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIngestPayload) {
 	langfuse.InjectTracing(ctx, &payload)
 	b, _ := json.Marshal(payload)
@@ -2839,7 +2841,16 @@ func (s *wikiIngestService) generateWithTemplateResult(
 				break
 			}
 
-			rewrite.WriteString(response.Content)
+			fragment := response.Content
+			if canContinue && round > 0 {
+				fragment = trimWikiContinuationOverlap(rewrite.String(), fragment)
+			}
+			rewrite.WriteString(fragment)
+			if canContinue {
+				if err := validateWikiRewrite(rewrite.String(), maskedData); err != nil {
+					return wikiTemplateResult{}, err
+				}
+			}
 
 			if !canContinue || !isLengthStopFinishReason(finishReason) || round >= wikiPageModifyMaxContinuations {
 				break
@@ -3338,15 +3349,6 @@ func slugify(s string) string {
 	return s
 }
 
-// truncateString truncates a string to maxLen runes
-func truncateString(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
-}
-
 // appendUnique appends a string to a StringArray if not already present
 func appendUnique(arr types.StringArray, s string) types.StringArray {
 	for _, v := range arr {
@@ -3403,7 +3405,14 @@ var (
 	// e.g. <image url="...">. Capture both double- and single-quoted forms.
 	imageURLAttrRE = regexp.MustCompile(`(?i)<image\b[^>]*\surl\s*=\s*(?:"([^"]*)"|'([^']*)')`)
 
-	imagePlaceholderTokenRE = regexp.MustCompile(`wkimg:[A-Za-z0-9_-]+`)
+	imagePlaceholderTokenRE = regexp.MustCompile(`(?i)wkimg\s*[:：/_\-]?\s*[0-9]{1,6}`)
+
+	// looseImagePlaceholderTokenRE matches a whole token that the synthesis
+	// model may have rewritten with a different separator (wkimg/0010,
+	// wkimg_0010, wkimg-0010, "wkimg 0010", full-width colon). The numeric
+	// suffix still identifies the image, so these are normalised back to the
+	// canonical wkimg:0010 form before lookup.
+	looseImagePlaceholderTokenRE = regexp.MustCompile(`(?i)^wkimg\s*[:：/_\-]?\s*([0-9]{1,6})$`)
 )
 
 func maskTemplateDataImageURLs(data map[string]string) (map[string]string, map[string]string) {
@@ -3509,13 +3518,36 @@ func unmaskImageURLs(out string, urlMap map[string]string) string {
 			}
 			return match[:idx+1] + realURL + ")"
 		}
-		if strings.HasPrefix(url, "wkimg:") {
+		if canonical, ok := canonicalImagePlaceholder(url); ok {
+			realURL, known := urlMap[canonical]
+			if !known {
+				return ""
+			}
+			idx := strings.LastIndex(match, "(")
+			if idx < 0 {
+				return match
+			}
+			return match[:idx+1] + realURL + ")"
+		}
+		if strings.HasPrefix(strings.ToLower(url), "wkimg") {
 			return ""
 		}
 		return match
 	})
 
 	return replaceImagePlaceholderTokensOutsideMarkdown(out, urlMap)
+}
+
+// canonicalImagePlaceholder normalises the separator variants a model may
+// introduce and reports whether token is a whole image placeholder. Only the
+// separator is normalised: the digits are preserved verbatim so an invented
+// index such as wkimg:9999 does not accidentally resolve to a real image.
+func canonicalImagePlaceholder(token string) (string, bool) {
+	m := looseImagePlaceholderTokenRE.FindStringSubmatch(strings.TrimSpace(token))
+	if m == nil {
+		return "", false
+	}
+	return "wkimg:" + m[1], true
 }
 
 func replaceImagePlaceholderTokensOutsideMarkdown(s string, urlMap map[string]string) string {
@@ -3541,7 +3573,11 @@ func replaceImagePlaceholderTokensOutsideMarkdown(s string, urlMap map[string]st
 
 func replaceImagePlaceholderTokens(s string, urlMap map[string]string) string {
 	return imagePlaceholderTokenRE.ReplaceAllStringFunc(s, func(token string) string {
-		if realURL, ok := urlMap[token]; ok {
+		canonical, ok := canonicalImagePlaceholder(token)
+		if !ok {
+			return ""
+		}
+		if realURL, ok := urlMap[canonical]; ok {
 			return realURL
 		}
 		return ""

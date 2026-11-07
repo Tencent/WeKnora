@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import zipfile
+from decimal import Decimal, ROUND_HALF_UP, localcontext
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,16 @@ def percent_as_text_default() -> bool:
     return _env_bool(PERCENT_AS_TEXT_ENV, False)
 
 
+def _percentage_number(value, decimals: int, grouping: str = "") -> str:
+    # Excel rounds displayed ties away from zero; Python float formatting
+    # rounds ties to even. Scale in decimal to avoid introducing binary ties.
+    with localcontext() as context:
+        context.rounding = ROUND_HALF_UP
+        context.prec = max(28, len(str(value)) + decimals + 4)
+        amount = Decimal(str(value)) * 100
+        return f"{amount:{grouping}.{decimals}f}"
+
+
 def _format_percentage(value, number_format: str):
     """Render supported Excel percentage formats, leaving other formats intact."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -100,7 +111,7 @@ def _format_percentage(value, number_format: str):
     amount = abs(value) if section_index == 1 else value
     grouping = "," if match["group"] else ""
     try:
-        number = f"{float(amount) * 100:{grouping}.{decimals}f}"
+        number = _percentage_number(amount, decimals, grouping)
         return f"{match['sign']}{match['open'] or ''}{number}%{match['close'] or ''}"
     except (TypeError, ValueError, OverflowError):
         return None
@@ -146,7 +157,7 @@ def _materialize_percentage_cells(ws, row_hint_min: int) -> tuple[int, int]:
             ):
                 # Fallback for a cell that lost its percentage format while its
                 # row kept one. Logged because it rewrites an unformatted value.
-                text = f"{float(cell.value) * 100:.2f}%"
+                text = _percentage_number(cell.value, 2) + "%"
                 hinted += 1
                 logger.info(
                     "XLSX pre-parse: %s!%s%d has no percentage format but its row "

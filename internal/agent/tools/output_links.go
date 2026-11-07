@@ -48,6 +48,13 @@ func outputEntriesSnapshot(entries []sandbox.RemoteDirEntry) map[string]sandbox.
 	return files
 }
 
+// ChangedOutputFileLinks reports deliverable links for files that appeared or
+// changed between two output-directory listings. An empty non-nil slice means
+// the listings were compared and nothing changed.
+func ChangedOutputFileLinks(outputDir string, before, after []sandbox.RemoteDirEntry) []string {
+	return changedOutputLinks(outputDir, outputEntriesSnapshot(before), outputEntriesSnapshot(after))
+}
+
 func changedOutputLinks(outputDir string, before, after map[string]sandbox.RemoteDirEntry) []string {
 	var paths []string
 	for filePath, next := range after {

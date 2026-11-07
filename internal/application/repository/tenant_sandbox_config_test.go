@@ -116,3 +116,36 @@ func TestSandboxConfigRepoCordonRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got.CordonedAt)
 }
+
+func TestCordonRefreshAndClearMatchOnlyTheHeldStamp(t *testing.T) {
+	repo, _ := newSandboxConfigTestRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 1, Name: "prod", SandboxType: "e2b",
+		Config: &types.TenantSandboxConfig{SandboxType: "e2b"},
+	}))
+
+	held := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, repo.SetCordon(ctx, 1, "cfg-a", held))
+	newer := held.Add(time.Minute)
+	require.NoError(t, repo.RefreshCordon(ctx, 1, "cfg-a", held, newer))
+
+	got, err := repo.GetByID(ctx, 1, "cfg-a")
+	require.NoError(t, err)
+	require.NotNil(t, got.CordonedAt)
+	require.True(t, got.CordonedAt.Equal(newer))
+
+	err = repo.RefreshCordon(ctx, 1, "cfg-a", held, held.Add(2*time.Minute))
+	require.ErrorIs(t, err, ErrSandboxConfigCordoned)
+	require.NoError(t, repo.ClearCordonIf(ctx, 1, "cfg-a", held))
+
+	got, err = repo.GetByID(ctx, 1, "cfg-a")
+	require.NoError(t, err)
+	require.NotNil(t, got.CordonedAt)
+	require.True(t, got.CordonedAt.Equal(newer), "a newer stamp survives a stale refresh and a stale clear")
+
+	require.NoError(t, repo.ClearCordonIf(ctx, 1, "cfg-a", newer))
+	got, err = repo.GetByID(ctx, 1, "cfg-a")
+	require.NoError(t, err)
+	require.Nil(t, got.CordonedAt)
+}

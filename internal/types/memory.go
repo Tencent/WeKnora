@@ -100,9 +100,8 @@ const (
 	MemoryContentMaxRunes = 300
 )
 
-// DefaultMemoryMaxItems bounds how many active items one subject may hold.
-// Beyond this the lowest ranked items are archived, which is the only
-// automatic forgetting in the system.
+// DefaultMemoryMaxItems 分别限制每个主体的活跃条目和待确认条目数量。
+// 活跃条目超限时归档低排名项；待确认条目超限时归档最旧项。
 const DefaultMemoryMaxItems = 200
 
 // MemoryKinds lists every valid kind in resident-block render order.
@@ -206,9 +205,9 @@ type MemorySubject struct {
 	BlockUpdatedAt  *time.Time `json:"block_updated_at"  gorm:"column:block_updated_at"`
 	ItemCount       int        `json:"item_count"        gorm:"column:item_count;not null;default:0"`
 	LastExtractedAt *time.Time `json:"last_extracted_at" gorm:"column:last_extracted_at"`
-	// ExtractCursor is the legacy subject-wide watermark, retained for
-	// the upgrade boundary for newly initialized session cursors. It is never
-	// advanced by new workers; each session has its own progress row.
+	// ExtractCursor is the legacy upgrade boundary and the administrator's
+	// forget cutoff. Clear advances it; workers only advance per-session rows.
+	// New session cursors and extraction context cannot precede this watermark.
 	ExtractCursor   *time.Time            `json:"extract_cursor" gorm:"column:extract_cursor"`
 	ExtractionState MemoryExtractionState `json:"-" gorm:"column:extraction_state;type:jsonb"`
 	// PendingSessions is the legacy queue, imported into indexed progress rows
@@ -341,7 +340,7 @@ type MemoryConfig struct {
 	// the settings UI promises, so the extraction task must never fail merely
 	// because this is blank.
 	ExtractModelID string `json:"extract_model_id"`
-	// MaxItems caps active items per subject. 0 means DefaultMemoryMaxItems.
+	// MaxItems 分别限制每个主体的 active 和 pending 条数；0 使用默认值。
 	MaxItems int `json:"max_items"`
 	// ExtractDelaySeconds is how long a finished turn waits before
 	// distillation runs. Waiting lets one model call cover the several
@@ -521,7 +520,7 @@ func (c *MemoryConfig) ExtractMinInterval() time.Duration {
 	return time.Duration(c.ExtractMinIntervalSeconds) * time.Second
 }
 
-// EffectiveMaxItems returns the active-item cap for a possibly nil config.
+// EffectiveMaxItems 返回每个主体各自的 active/pending 上限，兼容 nil 配置。
 func (c *MemoryConfig) EffectiveMaxItems() int {
 	if c == nil || c.MaxItems <= 0 {
 		return DefaultMemoryMaxItems

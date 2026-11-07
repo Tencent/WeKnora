@@ -66,5 +66,64 @@ func TestAttachPendingPrompts(t *testing.T) {
 
 	repo.calls = 0
 	h.attachPendingPrompts(ctx, "s1", []*types.Message{{ID: "m3"}})
-	assert.Zero(t, repo.calls, "no lookup without an awaiting message")
+	assert.Equal(t, 1, repo.calls, "completed messages also restore approval history")
+}
+
+func TestAttachResolvedApprovalHistory(t *testing.T) {
+	caller := types.Principal{Type: "user", ID: "u1"}
+	repo := &sessionPromptRepo{rows: []*types.AgentPrompt{
+		{
+			ID:                 "approved",
+			SessionID:          "s",
+			AssistantMessageID: "m",
+			UserID:             caller.StorageID(),
+			Kind:               types.AgentPromptKindToolApproval,
+			Status:             types.AgentPromptDone,
+			Response:           types.JSON(`{"approved":true}`),
+		},
+		{
+			ID:                 "rejected",
+			SessionID:          "s",
+			AssistantMessageID: "m",
+			UserID:             caller.StorageID(),
+			Kind:               types.AgentPromptKindToolApproval,
+			Status:             types.AgentPromptDone,
+			Response:           types.JSON(`{"approved":false}`),
+		},
+		{
+			ID:                 "other-owner",
+			SessionID:          "s",
+			AssistantMessageID: "m",
+			UserID:             "other",
+			Kind:               types.AgentPromptKindToolApproval,
+			Status:             types.AgentPromptDone,
+		},
+		{
+			ID:                 "other-tenant",
+			TenantID:           9,
+			SessionID:          "s",
+			AssistantMessageID: "m",
+			UserID:             caller.StorageID(),
+			Kind:               types.AgentPromptKindToolApproval,
+			Status:             types.AgentPromptDone,
+		},
+		{
+			ID:                 "oauth",
+			SessionID:          "s",
+			AssistantMessageID: "m",
+			UserID:             caller.StorageID(),
+			Kind:               types.AgentPromptKindMCPOAuth,
+			Status:             types.AgentPromptDone,
+		},
+	}}
+	m := &types.Message{ID: "m", IsCompleted: true}
+	(&MessageHandler{Prompts: repo}).attachPendingPrompts(
+		types.WithPrincipal(context.Background(), caller),
+		"s",
+		[]*types.Message{m},
+	)
+	require.Len(t, m.PromptHistory, 2)
+	require.Equal(t, "done", m.PromptHistory[0].Status)
+	require.JSONEq(t, `{"approved":true}`, string(m.PromptHistory[0].Response))
+	require.Nil(t, m.PendingPrompt)
 }

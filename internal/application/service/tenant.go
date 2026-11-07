@@ -25,11 +25,16 @@ type ListTenantsParams struct {
 type tenantService struct {
 	repo        interfaces.TenantRepository // Repository for tenant data operations
 	storageRepo interfaces.StorageBackendRepository
+	settings    interfaces.SystemSettingService
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
-	return &tenantService{repo: repo, storageRepo: storageRepo}
+func NewTenantService(
+	repo interfaces.TenantRepository,
+	storageRepo interfaces.StorageBackendRepository,
+	settings interfaces.SystemSettingService,
+) interfaces.TenantService {
+	return &tenantService{repo: repo, storageRepo: storageRepo, settings: settings}
 }
 
 // CreateTenant creates a new tenant
@@ -48,6 +53,11 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	tenant.Status = "active"
 	tenant.CreatedAt = time.Now()
 	tenant.UpdatedAt = time.Now()
+	// All creation paths, including registration and OIDC provisioning, must
+	// persist the resolved default instead of relying on the database default.
+	if tenant.StorageQuota <= 0 {
+		tenant.StorageQuota = ResolveDefaultTenantStorageQuota(ctx, s.settings)
+	}
 
 	if err := s.validateStorageBucketUniqueness(ctx, tenant); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -306,18 +316,16 @@ func (s *tenantService) GetTenantByIDForUser(ctx context.Context, tenantID uint6
 }
 
 func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.WeKnoraCloudCredentials {
-	// Try to get tenant info from context first (already loaded by middleware).
-	// CredentialsConfig.Scan handles decryption, so credentials are ready to use.
-	if tenant, ok := types.TenantInfoFromContext(ctx); ok {
-		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-			return creds
-		}
-	}
-
-	// Fallback: load tenant from repo by tenantID
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil
+	}
+	// Model initialization may run for a shared KB's owner while middleware
+	// still carries the caller's tenant info. Never reuse another tenant's credentials.
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok && tenant != nil && tenant.ID == tenantID {
+		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+			return creds
+		}
 	}
 
 	tenant, err := s.repo.GetTenantByID(ctx, tenantID)

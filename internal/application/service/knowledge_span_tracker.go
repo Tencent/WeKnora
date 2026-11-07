@@ -38,6 +38,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
+
+	"github.com/Tencent/WeKnora/internal/common"
 )
 
 // maxSpanNameLen matches knowledge_processing_spans.name (varchar(255)).
@@ -520,11 +522,11 @@ func (t *spanTracker) failSpan(
 	if errorDetail != nil {
 		detail = errorDetail.Error()
 		if len(detail) > 8192 {
-			detail = detail[:8192]
+			detail = common.TruncateUTF8Bytes(detail, 8192)
 		}
 	}
 	if len(errorMessage) > 1024 {
-		errorMessage = errorMessage[:1024]
+		errorMessage = common.TruncateUTF8Bytes(errorMessage, 1024)
 	}
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  span.KnowledgeID,
@@ -844,7 +846,7 @@ func (t *spanTracker) FinalizeAttempt(ctx context.Context, knowledgeID string, a
 		dur = now.Sub(started).Milliseconds()
 	}
 	if len(errorMessage) > 1024 {
-		errorMessage = errorMessage[:1024]
+		errorMessage = common.TruncateUTF8Bytes(errorMessage, 1024)
 	}
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  root.KnowledgeID,
@@ -918,6 +920,7 @@ func (noopSpanTracker) LatestAttempt(_ context.Context, _ string) int { return 0
 func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, _ types.JSONMap) *Span {
 	return nil
 }
+
 func (noopSpanTracker) BeginSubSpan(_ context.Context, _ *Span, _, _ string, _ types.JSONMap) *Span {
 	return nil
 }
@@ -926,9 +929,11 @@ func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error
 func (noopSpanTracker) FailSpanRetryable(_ context.Context, _ *Span, _, _ string, _ error) {}
 func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                      {}
 func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span     { return nil }
+
 func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
 	return nil
 }
+
 func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
 }
 func (noopSpanTracker) AbortAttempt(_ context.Context, _ string, _ int, _, _, _ string) {}

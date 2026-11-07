@@ -129,6 +129,15 @@
               <span>{{ $t('knowledgeEditor.wikiBrowser.backToOverview') }}</span>
             </div>
           </div>
+          <div v-if="graphMode === 'overview'" class="legend-detail">
+            <div class="legend-detail-label">
+              <span>{{ $t('knowledgeEditor.wikiBrowser.graphDetailLevel') }}</span>
+              <span class="legend-detail-value">{{ graphDetailLabel }}</span>
+            </div>
+            <t-slider v-model="graphDetailLevel" :min="0" :max="GRAPH_DETAIL_MAX" :step="1"
+              :marks="graphDetailMarks" :label="graphDetailLabel" />
+            <div class="legend-detail-hint">{{ $t('knowledgeEditor.wikiBrowser.graphDetailHint') }}</div>
+          </div>
           <template v-if="graphStatusCard">
             <div class="wiki-graph-status-card">
               <div class="status-card-header">
@@ -450,11 +459,8 @@
                                 })
                                 }}</span>
                               </div>
-                              <t-button v-if="props.canEdit" size="small" theme="primary" variant="base"
-                                @click="triggerAutoFix">
-                                <template #icon><t-icon name="tools" /></template>
-                                {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
-                              </t-button>
+                              <AssistantButton v-if="props.canEdit"
+                                :label="$t('knowledgeEditor.wikiBrowser.issueFixBtn')" @click="triggerAutoFix" />
                             </div>
                             <div class="wiki-issue-popup-list">
                               <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
@@ -485,11 +491,8 @@
                                         }) }}
                                     </span>
                                     <div v-if="props.canEdit" class="wiki-issue-popup-actions">
-                                      <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)"
-                                        style="margin-right: 12px; font-weight: 500;">
-                                        <t-icon name="tools" style="margin-right: 4px;" />{{
-                                          $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
-                                      </span>
+                                      <AssistantButton :label="$t('knowledgeEditor.wikiBrowser.issueFixSingle')"
+                                        @click="triggerFixIssue(issue)" />
                                       <span class="wiki-issue-popup-action"
                                         style="color: var(--td-text-color-placeholder);"
                                         @click="handleIssueIgnore(issue.id)">{{
@@ -547,6 +550,8 @@
                         </t-button>
                       </template>
                       <template v-else>
+                        <AssistantActionsButton icon-only :label="$t('assistant.actions.readContent')"
+                          :actions="readingAssistantActions" />
                         <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.editBtn')"
                           placement="top">
                           <button type="button" class="wiki-action-btn"
@@ -729,7 +734,7 @@
               </span>
               <div class="wiki-issue-popup-actions">
                 <span class="wiki-issue-popup-action" @click="navigateToSlugAndFix(issue.slug)"
-                  style="margin-right: 12px; font-weight: 500;">
+                  style="font-weight: 500;">
                   <t-icon name="arrow-right-circle" style="margin-right: 4px;" />{{
                     $t('knowledgeEditor.wikiBrowser.issueGoFix') }}
                 </span>
@@ -813,7 +818,7 @@
 
 <script setup lang="ts">
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
-import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, reactive, shallowRef, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
@@ -831,9 +836,11 @@ import {
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
 import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
-import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
+import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, graphDetailSlugs, graphDetailLevelForSlug, GRAPH_DETAIL_MAX, type GraphBounds, type GraphCluster, type LayoutPlacement } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { useAssistantStore } from '@/stores/assistant'
+import AssistantButton from '@/components/assistant/AssistantButton.vue'
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue'
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import {
   listWikiPages,
@@ -1003,6 +1010,14 @@ const activeSystemView = ref<'' | 'index'>('')
 // the scenes so clearing the query can snap back without re-fetching.
 const searchResults = ref<WikiPage[] | null>(null)
 const pageIssues = ref<WikiPageIssue[]>([])
+const readingAssistantActions = computed(() => {
+  const source = JSON.stringify({ knowledge_base_id: props.knowledgeBaseId, wiki_slug: selectedPage.value?.slug });
+  return [
+    { key: 'summary', label: t('assistant.actions.readSummary'), query: t('assistant.prompts.readSummary', { source }) },
+    { key: 'steps', label: t('assistant.actions.readSteps'), query: t('assistant.prompts.readSteps', { source }) },
+    { key: 'faq', label: t('assistant.actions.extractFaq'), query: t('assistant.prompts.extractFaq', { source }) },
+  ];
+})
 const showIssuesBox = ref(false)
 useAssistantPageContext(() => {
   const page = selectedPage.value
@@ -1039,6 +1054,11 @@ const graphUnlinkedSlugs = computed(() => {
 })
 function toggleUnlinkedNodes() {
   showUnlinkedNodes.value = !showUnlinkedNodes.value
+  if (showUnlinkedNodes.value && graphMode.value === 'overview' && graphDetailLevel.value < GRAPH_DETAIL_MAX) {
+    // Shelf pages require full detail; the synchronous watcher renders them.
+    graphDetailLevel.value = GRAPH_DETAIL_MAX
+    return
+  }
   if (!showUnlinkedNodes.value && graphSelectedSlug.value && graphUnlinkedSlugs.value.has(graphSelectedSlug.value)) {
     graphSelectedSlug.value = null
     graphHighlightSlug.value = null
@@ -1057,6 +1077,18 @@ const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept
 // "back to overview" and show the truncation hint.
 const graphMode = ref<'overview' | 'ego'>('overview')
 const graphCenter = ref<string>('')
+// Start with every fetched page. The user can reduce detail to landmarks or
+// their nearby pages. Ego hides the control and keeps every returned node.
+const graphDetailLevel = ref(GRAPH_DETAIL_MAX)
+const graphDetailMarks = computed<Record<number, string>>(() => ({
+  0: t('knowledgeEditor.wikiBrowser.graphDetailOverview'),
+  1: t('knowledgeEditor.wikiBrowser.graphDetailOneHop'),
+  2: t('knowledgeEditor.wikiBrowser.graphDetailTwoHops'),
+  [GRAPH_DETAIL_MAX]: t('knowledgeEditor.wikiBrowser.graphDetailAll'),
+}))
+const graphDetailLabel = computed(() => graphDetailMarks.value[graphDetailLevel.value])
+const graphDetailClusters = shallowRef<GraphCluster[]>([])
+const graphDetailPlacements = shallowRef(new Map<string, LayoutPlacement>())
 const GRAPH_OVERVIEW_LIMIT = 500
 const GRAPH_EGO_LIMIT = 500
 const GRAPH_EGO_DEFAULT_DEPTH = 1
@@ -1277,9 +1309,8 @@ function preferredDefaultTab(tabs: Array<{ type: string }>): string {
 
 // groupedPages projects the bucketed state into the shape the sidebar
 // template expects: one {type, label, items, total, loading, hasMore}
-// per displayed group. Groups with zero total are hidden (nothing to
-// show) but groups with total > 0 but items.length === 0 still render
-// so the collapse header can trigger a lazy fetch.
+// per displayed group. Built-in tab totals come from whole-library stats;
+// groups with no pages remain visible when they still contain directories.
 const groupedPages = computed(() => {
   type Group = {
     type: string
@@ -1302,8 +1333,10 @@ const groupedPages = computed(() => {
   const push = (tab: string) => {
     const bucket = pagesByType.value[tab]
     if (!bucket) return
-    const total = bucket.total || statTotal(tab) || bucket.categoryPaths.length
-    if (total === 0) return
+    const total = CONTENT_TABS.includes(tab)
+      ? statTotal(tab)
+      : bucket.total || statTotal(tab) || bucket.categoryPaths.length
+    if (total === 0 && bucket.items.length === 0 && bucket.categoryPaths.length === 0) return
     out.push({
       type: tab,
       label: getTypeLabel(tab),
@@ -1587,6 +1620,21 @@ const graphStatusCard = computed((): { icon: string; title: string; primary: str
     }
   }
   if (meta.mode === 'overview') {
+    if (graphDetailLevel.value < GRAPH_DETAIL_MAX) {
+      return {
+        icon: 'chart-bubble',
+        title: t('knowledgeEditor.wikiBrowser.cardOverviewTitle'),
+        primary: t('knowledgeEditor.wikiBrowser.cardOverviewPrimary', {
+          returned: graphDetailSlugs(
+            graphDetailClusters.value,
+            graphDetailPlacements.value,
+            graphDetailLevel.value,
+          ).size,
+          total: meta.total,
+        }),
+        secondary: t('knowledgeEditor.wikiBrowser.cardOverviewDetailHint'),
+      }
+    }
     const hiddenCount = showUnlinkedNodes.value ? 0 : graphUnlinkedSlugs.value.size
     const secondary = hiddenCount > 0
       ? t('knowledgeEditor.wikiBrowser.unlinkedHidden', { count: hiddenCount })
@@ -3859,6 +3907,10 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     graphNodeElsRef = []
     graphEdgeElsRef = []
     graphAdjacencyRef = new Map()
+    if (graphMode.value === 'overview') {
+      graphDetailClusters.value = []
+      graphDetailPlacements.value = new Map()
+    }
     return
   }
   const graph = showUnlinkedNodes.value ? data : {
@@ -3903,28 +3955,46 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   const nodeG = document.createElementNS('http://www.w3.org/2000/svg', 'g')
   rootG.appendChild(nodeG)
 
+  // Overview detail needs the spanning tree and anchors. A non-empty prior
+  // map clears both, so the overview always lays out the full fetched slice
+  // and then overlays preserved coordinates onto the slugs that remain.
+  const layoutPrior = graphMode.value === 'overview' ? new Map<string, { x: number; y: number }>() : priorCoords
+  const layout = buildGraphLayout(graph.nodes, graph.edges, width, height, layoutPrior)
+  const visibleSlugs = graphMode.value === 'overview'
+    ? graphDetailSlugs(layout.clusters, layout.placements, graphDetailLevel.value)
+    : new Set(graph.nodes.map(n => n.slug))
+  if (graphMode.value === 'overview') {
+    graphDetailClusters.value = layout.clusters
+    graphDetailPlacements.value = layout.placements
+  }
+  const renderNodes = graph.nodes.filter(n => visibleSlugs.has(n.slug))
+  // Ego and bloom keep every returned link. Overview draws only the level's edges.
+  const renderEdges = graphMode.value === 'overview'
+    ? graph.edges.filter(edge => visibleSlugs.has(edge.source) && visibleSlugs.has(edge.target))
+    : graph.edges
+  const showClusterChrome = graphMode.value === 'overview' && graphDetailLevel.value >= GRAPH_DETAIL_MAX
+
   // Build adjacency for highlight
   const adjacency = new Map<string, Set<string>>()
-  for (const edge of graph.edges) {
+  for (const edge of renderEdges) {
     if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set())
     if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set())
     adjacency.get(edge.source)!.add(edge.target)
     adjacency.get(edge.target)!.add(edge.source)
   }
 
-  const layout = buildGraphLayout(graph.nodes, graph.edges, width, height, priorCoords)
-  const regions = layout.sections
+  const regions = showClusterChrome || graphMode.value !== 'overview' ? layout.sections : []
   if (regions.length) graphLayoutBounds = {
     left: Math.min(...regions.map(r => r.left)), top: Math.min(...regions.map(r => r.top)),
     right: Math.max(...regions.map(r => r.right)), bottom: Math.max(...regions.map(r => r.bottom)),
   }
-  graphImportantSlugs = new Set([...graph.nodes]
+  graphImportantSlugs = new Set([...renderNodes]
     .sort((a, b) => b.link_count - a.link_count)
-    .slice(0, Math.max(1, Math.min(12, Math.ceil(graph.nodes.length / 30))))
+    .slice(0, Math.max(1, Math.min(12, Math.ceil(renderNodes.length / 30))))
     .map(n => n.slug))
-  // Outlines separate groups in the overview. Ego exploration shows only
-  // nodes and links, including after pivoting or expanding a neighborhood.
-  const overviewClusters = graphMode.value === 'overview' ? layout.clusters : []
+  // Outlines and landmark captions are the full-detail overview. Lower levels
+  // draw only the hierarchy slice. Ego exploration shows nodes and links only.
+  const overviewClusters = showClusterChrome ? layout.clusters : []
   for (const cluster of overviewClusters) {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
     path.classList.add('graph-cluster-outline')
@@ -3958,7 +4028,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   }
   // Each landmark names its own page; no individual page is presented as
   // the title of the entire connected component.
-  if (graphMode.value === 'overview') {
+  if (showClusterChrome) {
     const pageBySlug = new Map(graph.nodes.map(n => [n.slug, n]))
     for (const cluster of layout.clusters) {
       if (cluster.slugs.length < 5) continue
@@ -4023,7 +4093,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     }
   }
   // Section captions describe why these pages have no visible neighbors.
-  for (const section of layout.sections) {
+  for (const section of regions) {
     const caption = document.createElementNS('http://www.w3.org/2000/svg', 'text')
     caption.setAttribute('x', String(section.left + 16))
     caption.setAttribute('y', String(section.top + 20))
@@ -4038,11 +4108,11 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   }
 
   const nodeMap = new Map<string, GNode>()
-  graphNodes = graph.nodes.map(n => {
+  graphNodes = renderNodes.map(n => {
     const prior = priorCoords.get(n.slug)
     const placement = layout.placements.get(n.slug)!
     const node: GNode = {
-      x: placement.x, y: placement.y, vx: 0, vy: 0,
+      x: prior?.x ?? placement.x, y: prior?.y ?? placement.y, vx: 0, vy: 0,
       slug: n.slug, title: n.title, type: n.page_type,
       linkCount: n.link_count || 0, pinned: prior?.pinned ?? false,
       familiar: !!n.familiar,
@@ -4117,7 +4187,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Detect bidirectional edges (A→B and B→A both exist)
   const edgePairSet = new Set<string>()
-  for (const edge of graph.edges) {
+  for (const edge of renderEdges) {
     edgePairSet.add(`${edge.source}→${edge.target}`)
   }
 
@@ -4126,7 +4196,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   const edgeEls: EdgeEl[] = []
   const processedPairs = new Set<string>()
 
-  for (const edge of graph.edges) {
+  for (const edge of renderEdges) {
     const pairKey = [edge.source, edge.target].sort().join('↔')
     if (processedPairs.has(pairKey)) continue
     processedPairs.add(pairKey)
@@ -4235,7 +4305,6 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     text.setAttribute('font-size', '11')
     text.setAttribute('fill', 'var(--td-text-color-secondary)')
     text.setAttribute('pointer-events', 'none')
-    text.style.transition = 'opacity 0.2s' // Smooth fade in/out
     text.style.textShadow = '0 1px 3px var(--td-bg-color-container), 0 -1px 3px var(--td-bg-color-container), 1px 0 3px var(--td-bg-color-container), -1px 0 3px var(--td-bg-color-container)'
     text.textContent = n.title.length > 14 ? n.title.substring(0, 14) + '…' : n.title
     g.appendChild(text)
@@ -4417,6 +4486,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Measure after all DOM writes to avoid forcing a layout for every node.
   for (const { text, node } of nodeEls) node.labelWidth = text.getComputedTextLength() || node.labelWidth
+  // Hide only after every measurement, keeping reads and writes separate.
+  // The first label pass reveals only the collision-filtered set.
+  for (const { text } of nodeEls) text.style.display = 'none'
 
   // Pan & zoom on SVG background
   const centerNode = nodeMap.get(graphCenter.value)
@@ -4432,7 +4504,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   function tick() {
     alpha *= 0.985
     if (alpha < 0.02) { refreshGraphLabels(); graphAnimFrame = 0; return }
-    stepGraphLayout(graphNodes, graph.edges, layout.placements, alpha, retained)
+    stepGraphLayout(graphNodes, renderEdges, layout.placements, alpha, retained)
 
     // Update SVG positions
     for (const { g, node } of nodeEls) {
@@ -4476,6 +4548,14 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   }
   refreshGraphLabels()
 }
+
+// The slider is overview-only. Re-render in place so landmarks already on
+// screen keep their coordinates while the newly revealed pages join them.
+// Sync so a search that raises the level can center the node afterwards.
+watch(graphDetailLevel, () => {
+  if (graphMode.value !== 'overview') return
+  renderGraph({ preserveLayout: true })
+}, { flush: 'sync' })
 
 // Set edge line positions, shortened to stop at node circle boundary so arrows are visible
 function setEdgePositions(line: SVGLineElement, s: GNode, t: GNode, nodeRadius: (n: GNode) => number) {
@@ -4580,13 +4660,26 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
   let panning = false
   let panStartX = 0, panStartY = 0
   let dragStartX = 0, dragStartY = 0
+  let labelFrame = 0
+  let labelScale: number | undefined
+
+  function scheduleLabelsUpdate() {
+    if (labelFrame) return
+    labelFrame = requestAnimationFrame(() => {
+      labelFrame = 0
+      updateLabelsVisibility()
+    })
+  }
 
   function applyTransform() {
     rootG.setAttribute('transform', `translate(${translateX},${translateY}) scale(${scale})`)
-    updateLabelsVisibility()
+    // Translation does not change screen-space label collisions or contours.
+    // Keep the viewport immediate, but coalesce zoom/layout/hover work per frame.
+    if (scale !== labelScale) scheduleLabelsUpdate()
   }
 
   function updateLabelsVisibility() {
+    labelScale = scale
     // Arrowheads shrink to specks around every node when zoomed out.
     rootG.classList.toggle('hide-edge-markers', scale < 0.8)
     const markersVisible = showArrows.value && scale >= 0.8
@@ -4601,8 +4694,9 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
     // Hide labels when zoomed out too much or hide less important labels
     // We only want to show labels for important nodes (high link count) when zoomed out
     for (const { text, top } of graphSectionEls) {
-      text.setAttribute('font-size', String(13 / scale))
-      text.setAttribute('y', String(top - 12 / scale))
+      const fontSize = String(13 / scale), y = String(top - 12 / scale)
+      if (text.getAttribute('font-size') !== fontSize) text.setAttribute('font-size', fontSize)
+      if (text.getAttribute('y') !== y) text.setAttribute('y', y)
     }
     const positionsBySlug = new Map(graphNodes.map(n => [n.slug, n]))
     for (const contour of graphContourEls) {
@@ -4625,7 +4719,6 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
       const outside = graphFocusedSlugs.size > 0 && !graphFocusedSlugs.has(cluster.representative)
       group.classList.toggle('is-outside-focus', outside)
       const shown = !!anchor && (outside ? anchorSlug === cluster.anchors[0] : scale < 1.2)
-      group.style.display = shown ? '' : 'none'
       if (!shown || !anchor) return []
       const labelX = anchor.x
       const labelY = anchor.y + graphNodeRadius(anchor.linkCount) + 18 / scale
@@ -4636,12 +4729,8 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
         left: x - labelWidth / 2 - 8, right: x + labelWidth / 2 + 8, top: y - 16, bottom: y + 5 }]
     })
     const captionedSlugs = new Set(groupLabels.map(label => label.slug.slice('anchor:'.length)))
-    const candidates = graphNodeElsRef.flatMap(({ text, node }) => {
+    const candidates = graphNodeElsRef.flatMap(({ node }) => {
       const required = node.slug === graphSelectedSlug.value || node.slug === graphHighlightSlug.value
-      // Keep text legible in screen pixels. At overview scale show a few
-      // landmarks; zooming in reveals the individual page labels.
-      text.setAttribute('font-size', String(12 / scale))
-      text.setAttribute('dy', String(graphNodeRadius(node.linkCount) + 16 / scale))
       // The representative caption replaces its ordinary label at overview
       // scales, including hover/selection, so the page name appears only once.
       if (captionedSlugs.has(node.slug)) return []
@@ -4659,13 +4748,23 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
     const visible = visibleGraphLabels([...groupLabels, ...candidates])
     for (const { group, anchorSlug } of graphClusterEls) {
       const shown = visible.has(`anchor:${anchorSlug}`)
-      group.style.visibility = shown ? 'visible' : 'hidden'
-      group.setAttribute('tabindex', shown ? '0' : '-1')
+      const display = shown ? '' : 'none', tabIndex = shown ? '0' : '-1'
+      if (group.style.display !== display) group.style.display = display
+      if (group.getAttribute('tabindex') !== tabIndex) group.setAttribute('tabindex', tabIndex)
     }
-    for (const { text, node } of graphNodeElsRef) text.style.opacity = visible.has(node.slug) ? '1' : '0'
-
+    for (const { text, node } of graphNodeElsRef) {
+      const shown = visible.has(node.slug)
+      const display = shown ? '' : 'none'
+      if (text.style.display !== display) text.style.display = display
+      if (!shown) continue
+      // Only visible labels need screen-pixel sizing. Check attributes so
+      // hover/layout refreshes at the same zoom do not trigger SVG layout.
+      const fontSize = String(12 / scale), dy = String(graphNodeRadius(node.linkCount) + 16 / scale)
+      if (text.getAttribute('font-size') !== fontSize) text.setAttribute('font-size', fontSize)
+      if (text.getAttribute('dy') !== dy) text.setAttribute('dy', dy)
+    }
   }
-  refreshGraphLabels = updateLabelsVisibility
+  refreshGraphLabels = scheduleLabelsUpdate
 
   // Export methods for programmatic pan/zoom
   let animId = 0
@@ -4763,6 +4862,7 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
   window.addEventListener('keydown', onKeyDown)
   disposeGraphPanZoom = () => {
     cancelAnimationFrame(animId)
+    cancelAnimationFrame(labelFrame)
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
     window.removeEventListener('keydown', onKeyDown)
@@ -4954,8 +5054,23 @@ let graphAdjacencyRef = new Map<string, Set<string>>()
 async function handleGraphSearchSelect(value: string) {
   if (!value) return
   // A search result must remain reachable even when its shelf was collapsed.
-  if (!showUnlinkedNodes.value && graphUnlinkedSlugs.value.has(value)) {
-    showUnlinkedNodes.value = true
+  const revealUnlinked = !showUnlinkedNodes.value && graphUnlinkedSlugs.value.has(value)
+  if (revealUnlinked) showUnlinkedNodes.value = true
+
+  if (graphMode.value === 'overview') {
+    // A loaded page outside the current level is drawn at the smallest level
+    // that contains it. Shelf pages are not in the spanning tree, so they
+    // use full detail. Raise the slider before centering.
+    const placements = graphDetailPlacements.value
+    const needed = placements.has(value)
+      ? graphDetailLevelForSlug(graphDetailClusters.value, placements, value)
+      : revealUnlinked ? GRAPH_DETAIL_MAX : null
+    if (needed !== null && needed > graphDetailLevel.value) {
+      graphDetailLevel.value = needed
+    } else if (revealUnlinked) {
+      renderGraph()
+    }
+  } else if (revealUnlinked) {
     renderGraph()
   }
 
@@ -6657,6 +6772,9 @@ span.graph-focus-name {
   position: absolute;
   top: 16px;
   right: 16px;
+  width: 256px;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-sm);
@@ -6734,6 +6852,48 @@ span.graph-focus-name {
   gap: 8px;
 }
 
+.legend-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+
+  .legend-detail-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: var(--app-text-xs);
+    line-height: 14px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .legend-detail-value {
+    color: var(--td-text-color-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .legend-detail-hint {
+    font-size: var(--app-text-xs);
+    line-height: 16px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  :deep(.t-slider) {
+    width: 100%;
+  }
+
+  :deep(.t-slider__container) {
+    margin-bottom: 24px;
+  }
+
+  :deep(.t-slider__mark-text) {
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-secondary);
+  }
+}
+
 .legend-action {
   display: flex;
   align-items: center;
@@ -6774,7 +6934,7 @@ span.graph-focus-name {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 240px;
+  max-width: 100%;
   padding-top: 8px;
   border-top: 1px dashed var(--td-component-stroke);
   user-select: none;
@@ -6809,6 +6969,7 @@ span.graph-focus-name {
     font-size: var(--app-text-xs);
     line-height: 14px;
     color: var(--td-text-color-secondary);
+    overflow-wrap: anywhere;
   }
 }
 
@@ -6979,6 +7140,7 @@ span.graph-focus-name {
 .wiki-issue-popup-actions {
   display: flex;
   align-items: center;
+  gap: 12px;
 }
 
 .wiki-issue-popup-action {

@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -147,6 +148,20 @@ type MCPTool struct {
 	InputSchema json.RawMessage `json:"inputSchema"` // JSON Schema for tool parameters
 	// RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).
 	RequireApproval bool `json:"require_approval,omitempty" extensions:"x-agent"`
+	// Annotations are the hints the service declares in tools/list. They come
+	// from outside and only seed the tool's risk.
+	Annotations *MCPToolAnnotations `json:"annotations,omitempty"`
+}
+
+// MCPToolAnnotations are the MCP tool annotations WeKnora reads.
+type MCPToolAnnotations struct {
+	ReadOnlyHint    *bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint *bool `json:"destructiveHint,omitempty"`
+}
+
+// DeclaresReadOnly reports whether the service declared the tool read-only.
+func (t *MCPTool) DeclaresReadOnly() bool {
+	return t != nil && t.Annotations != nil && t.Annotations.ReadOnlyHint != nil && *t.Annotations.ReadOnlyHint
 }
 
 // MCPToolApproval persists per-tool policies for an MCP service, including
@@ -162,10 +177,20 @@ type MCPToolApproval struct {
 	// are treated as enabled for backwards compatibility. The DB/GORM default is
 	// true; inserts persist false via a map Create so GORM does not omit the
 	// Go zero value.
-	Enabled   bool      `json:"enabled" gorm:"not null;default:true"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Enabled bool `json:"enabled" gorm:"not null;default:true"`
+	// Risk is the workspace's explicit risk for the tool (read, probe, write
+	// or destructive); empty defers to ObservedRisk.
+	Risk string `json:"risk" gorm:"type:varchar(16);not null;default:''"`
+	// ObservedRisk is the highest risk the service has declared for the tool.
+	// It only rises on its own: a service cannot lower its tool's risk
+	// without the workspace setting Risk.
+	ObservedRisk string    `json:"observed_risk" gorm:"type:varchar(16);not null;default:''"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
+
+// ErrInvalidMCPToolPolicy rejects a policy value the caller supplied.
+var ErrInvalidMCPToolPolicy = errors.New("invalid MCP tool policy")
 
 // MCPToolPolicyPatch is a partial per-tool policy update. Nil fields are left
 // unchanged on existing rows. A newly inserted row uses RequireApproval=false
@@ -173,6 +198,10 @@ type MCPToolApproval struct {
 type MCPToolPolicyPatch struct {
 	RequireApproval *bool
 	Enabled         *bool
+	// Risk sets the explicit risk; an empty string clears it.
+	Risk *string
+	// ObservedRisk records a risk the service declared.
+	ObservedRisk *string
 }
 
 // BeforeCreate sets ID for MCPToolApproval.

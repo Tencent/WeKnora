@@ -52,9 +52,14 @@ func RegisterSessionRoutes(
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
+		// Chat-box voice input: not session-bound so the new-chat page can dictate
+		// before a session exists. The agent's ASR switch gates it in the handler.
+		sessions.POST("/transcriptions", handler.TranscribeVoiceInput)
 		sessions.GET("/:id", handler.GetSession)
 		sessions.GET("", handler.GetSessionsByTenant)
 		sessions.PUT("/:id", handler.UpdateSession)
+		sessions.GET("/:id/host-approval-mode", handler.GetHostApprovalMode)
+		sessions.PUT("/:id/host-approval-mode", handler.SetHostApprovalMode)
 		sessions.DELETE("/:id", handler.DeleteSession)
 		sessions.DELETE("/:id/messages", handler.ClearSessionMessages)
 		sessions.POST("/:session_id/generate_title", handler.GenerateTitle)
@@ -79,6 +84,13 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/steer", handler.ListSteerMessages)
 		sessions.DELETE("/:id/steer/:steer_id", handler.DeleteSteerMessage)
 		sessions.POST("/:session_id/steer/:steer_id/inject", handler.PromoteSteerMessage)
+		// Background work: cheap list for the chip, on-demand output for the
+		// user, owner-only cancel. Same WorkHandler the model tools use.
+		// GET stays on :id and POST on :session_id so each verb's radix tree
+		// keeps the wildcard name it already uses.
+		sessions.GET("/:id/background-work", handler.ListBackgroundWork)
+		sessions.GET("/:id/background-work/:work_id", handler.GetBackgroundWork)
+		sessions.POST("/:session_id/background-work/:work_id/cancel", handler.CancelBackgroundWork)
 		// POST and DELETE share this path but gin maintains a separate radix tree
 		// per HTTP verb, and the existing trees use different wildcard names
 		// (POST uses :session_id, DELETE uses :id). Use whatever matches each

@@ -37,7 +37,8 @@ export type DisplayType =
     | 'find_operations'
     | 'run_operation'
     | 'search_weknora_docs'
-    | 'read_weknora_doc';
+    | 'read_weknora_doc'
+    | 'work_wait';
 
 // Search result item
 export interface SearchResultItem {

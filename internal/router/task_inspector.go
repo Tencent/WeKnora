@@ -183,9 +183,10 @@ func matchesKnowledgeListDelete(taskType string, payload []byte, knowledgeID str
 
 // HasQueuedTasksForKnowledge reports whether any pending / scheduled /
 // retry / active task referencing knowledgeID still lives in the queue.
-// Read-only counterpart of CancelTasksForKnowledge — the housekeeping
-// sweep uses it to avoid flagging a backlogged-but-not-orphaned row as
-// failed. Short-circuits on the first match and never deletes anything.
+// Read-only counterpart of CancelTasksForKnowledge. Short-circuits on the
+// first match and never deletes anything, but each call pages through the
+// queues from the start: to check many documents (e.g. the housekeeping
+// sweep), use QueuedKnowledgeIDs instead.
 func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 	ctx context.Context, knowledgeID string,
 ) (bool, error) {

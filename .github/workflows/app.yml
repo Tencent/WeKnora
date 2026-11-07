@@ -22,6 +22,8 @@ on:
       - "website-docs/0*/**"
       - "website-docs/.vitepress/config.mts"
       - "docker/Dockerfile.app"
+      - "scripts/docker-entrypoint.sh"
+      - "scripts/docker-entrypoint_test.sh"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
@@ -52,6 +54,8 @@ on:
       - "website-docs/0*/**"
       - "website-docs/.vitepress/config.mts"
       - "docker/Dockerfile.app"
+      - "scripts/docker-entrypoint.sh"
+      - "scripts/docker-entrypoint_test.sh"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
@@ -78,7 +82,7 @@ env:
   GO_VERSION: "1.26"
   GOPROXY: https://proxy.golang.org,direct
   # Keep tests independent of a developer machine's custom log template.
-  LOG_FORMAT: ""
+  WEKNORA_LOG_FORMAT: ""
   BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
 jobs:
@@ -100,6 +104,8 @@ jobs:
       - name: Download modules
         run: go mod download
 
+      - name: Test Docker entrypoint permissions
+        run: bash scripts/docker-entrypoint_test.sh
       - name: Verify third-party notices and source bundle
         run: |
           bash ./scripts/check-license-bundle.sh

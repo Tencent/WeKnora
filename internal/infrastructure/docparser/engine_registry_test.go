@@ -5,7 +5,23 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
+
+// Locally advertised parser formats must pass the shared import gate used by
+// direct uploads, URL imports, workers and datasource connectors (#4598).
+// Check metadata even when a converter is not linked into this test build.
+func TestLocalParserFormatsPassImportValidation(t *testing.T) {
+	for _, engine := range ListAllEngines(true, nil, nil) {
+		t.Run(engine.Name, func(t *testing.T) {
+			for _, ext := range engine.FileTypes {
+				if !utils.IsSupportedImportExtension(ext) {
+					t.Errorf("engine advertises %q but the shared import gate rejects it", ext)
+				}
+			}
+		})
+	}
+}
 
 func TestListAllEnginesBuiltinIncludesDocumentFormats(t *testing.T) {
 	engines := ListAllEngines(true, nil, nil)

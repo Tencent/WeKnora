@@ -15,8 +15,10 @@ import (
 // with its prompt when the system, not the run itself, moves the prompt on:
 // the reaper taking over, or the user moving on without answering.
 type SuspendedRunService struct {
-	broker   *hitl.Broker
-	messages interfaces.MessageRepository
+	RecoverAnswered func(context.Context, *types.AgentPrompt) (bool, error)
+	StopDelegation  func(context.Context, *types.AgentPrompt) error
+	broker          *hitl.Broker
+	messages        interfaces.MessageRepository
 }
 
 // NewSuspendedRunService builds the service.
@@ -28,7 +30,7 @@ func NewSuspendedRunService(broker *hitl.Broker, messages interfaces.MessageRepo
 
 // Hooks returns the message updates the broker runs as it takes prompts over.
 func (s *SuspendedRunService) Hooks() hitl.RunHooks {
-	return hitl.RunHooks{Suspended: s.MarkAwaitingInput, Closed: s.Close}
+	return hitl.RunHooks{RecoverAnswered: s.RecoverAnswered, Suspended: s.MarkAwaitingInput, Closed: s.Close}
 }
 
 // Reap runs one reaper sweep.
@@ -58,6 +60,11 @@ func (s *SuspendedRunService) MarkAwaitingInput(
 func (s *SuspendedRunService) Close(
 	ctx context.Context, prompt *types.AgentPrompt, state *types.AgentRunSuspension, reason string,
 ) error {
+	if s.StopDelegation != nil {
+		if err := s.StopDelegation(ctx, prompt); err != nil {
+			return err
+		}
+	}
 	return s.update(ctx, prompt, state, func(msg *types.Message, snap *agent.RunSnapshot) {
 		msg.AgentSteps = agenttools.SanitizeAgentStepsForStorage(snap.ClosedSteps(reason))
 		msg.KnowledgeReferences = mergeSnapshotReferences(msg.KnowledgeReferences, snap.KnowledgeRefs)

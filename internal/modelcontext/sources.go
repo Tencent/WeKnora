@@ -1,12 +1,14 @@
 // sources.go is the source-reference half of the model-context registry:
-// request-local cN/dN/bN/wN handles for chunks, documents, knowledge bases
-// and web pages, plus the tool-argument codec that maps them back to durable
+// request-local chunk://N, doc://N, kb://N and url://N handles for chunks,
+// documents, knowledge bases and web pages, plus the tool-argument codec that
+// maps them back to durable
 // identifiers. Request lifecycles use Registry so source and resource handles
 // cannot be encoded or decoded out of order.
 package modelcontext
 
 import (
 	"encoding/json"
+	"html"
 	"net/url"
 	"regexp"
 	"sort"
@@ -52,10 +54,10 @@ func newSourceRegistry(citationsEnabled ...bool) *sourceRegistry {
 	}
 	return &sourceRegistry{
 		citationsEnabled: enabled,
-		chunks:           newHandleTable[ChunkReference]("c", 0, 1),
-		docs:             newHandleTable[struct{}]("d", 0, 1),
-		kbs:              newHandleTable[struct{}]("b", 0, 1),
-		webs:             newHandleTable[webMeta]("w", 0, 1),
+		chunks:           newHandleTable[ChunkReference](chunkHandlePrefix, 0, 1),
+		docs:             newHandleTable[struct{}](docHandlePrefix, 0, 1),
+		kbs:              newHandleTable[struct{}](kbHandlePrefix, 0, 1),
+		webs:             newHandleTable[webMeta](webHandlePrefix, 0, 1),
 	}
 }
 
@@ -70,7 +72,7 @@ func (r *sourceRegistry) Count() int {
 // input: a model-emitted handle is echoed back only when it already exists,
 // and is never accepted as a new durable identity.
 func knownHandle[M any](table *handleTable[M], id string) string {
-	handle := strings.ToLower(id)
+	handle := canonicalSourceHandle(id)
 	if table.has(handle) {
 		return handle
 	}
@@ -89,7 +91,7 @@ func (r *sourceRegistry) registerChunk(ref ChunkReference, evidence bool) string
 	if ref.ChunkID == "" {
 		return ""
 	}
-	if shortSourceHandleRE.MatchString(ref.ChunkID) {
+	if isSourceHandleShaped(ref.ChunkID) {
 		return knownHandle(r.chunks, ref.ChunkID)
 	}
 	handle := r.chunks.register(ref.ChunkID, ref.ChunkID, ref, mergeChunkReference)
@@ -122,7 +124,7 @@ func (r *sourceRegistry) RegisterDocument(id string) string {
 	if r == nil || id == "" {
 		return ""
 	}
-	if shortSourceHandleRE.MatchString(id) {
+	if isSourceHandleShaped(id) {
 		return knownHandle(r.docs, id)
 	}
 	return r.docs.register(id, id, struct{}{}, nil)
@@ -133,7 +135,7 @@ func (r *sourceRegistry) RegisterKnowledgeBase(id string) string {
 	if r == nil || id == "" {
 		return ""
 	}
-	if shortSourceHandleRE.MatchString(id) {
+	if isSourceHandleShaped(id) {
 		return knownHandle(r.kbs, id)
 	}
 	return r.kbs.register(id, id, struct{}{}, nil)
@@ -148,7 +150,7 @@ func (r *sourceRegistry) registerWeb(rawURL, title string, evidence bool) string
 	if r == nil || rawURL == "" {
 		return ""
 	}
-	if shortSourceHandleRE.MatchString(rawURL) {
+	if isSourceHandleShaped(rawURL) {
 		return knownHandle(r.webs, rawURL)
 	}
 	// Dedup on the canonical (fragment-stripped) URL while decoding back to
@@ -211,21 +213,29 @@ func (r *sourceRegistry) ChunkHandle(id string) string {
 // package-internal replay paths that predate per-tool contracts.
 type toolArgumentPolicy func(toolName, key string) bool
 
-// DecodeToolCallsWithPolicy restores handles only for fields explicitly owned
-// by the named tool. This prevents dynamic tools with coincidentally named
-// fields from inheriting built-in source semantics.
-func (r *sourceRegistry) DecodeToolCallsWithPolicy(toolCalls []types.LLMToolCall, policy toolArgumentPolicy) {
+// DecodeToolCallsWithPolicy restores handles in every string argument. Fields
+// explicitly owned by the named tool receive the bare durable ID, so dynamic
+// tools with coincidentally named fields do not inherit built-in source
+// semantics; bareText fields (SQL) receive bare IDs inside the expression;
+// all other text receives durable text forms (URLs and weknora:// URIs).
+func (r *sourceRegistry) DecodeToolCallsWithPolicy(
+	toolCalls []types.LLMToolCall,
+	policy toolArgumentPolicy,
+	bareText toolArgumentPolicy,
+) {
 	for i := range toolCalls {
 		toolName := toolCalls[i].Function.Name
 		toolCalls[i].Function.Arguments = r.decodeJSONWithPolicy(
 			toolCalls[i].Function.Arguments,
 			false,
 			func(key string) bool { return policy == nil || policy(toolName, key) },
+			func(key string) bool { return bareText != nil && bareText(toolName, key) },
 		)
 	}
 }
 
-// UnresolvedToolHandlesWithPolicy reports unknown handles only in fields that
+// UnresolvedToolHandlesWithPolicy reports handles left in a decoded call: any
+// scheme-shaped handle in any string, plus legacy handles in ID fields that
 // belong to the named tool's declared source contract.
 func (r *sourceRegistry) UnresolvedToolHandlesWithPolicy(
 	toolName, raw string,
@@ -259,12 +269,15 @@ func (r *sourceRegistry) collectUnresolvedToolHandles(
 ) {
 	switch typed := value.(type) {
 	case string:
+		for _, handle := range r.UnresolvedTextHandles(typed) {
+			seen[handle] = struct{}{}
+		}
 		key = strings.ToLower(key)
 		if _, ok := sourceKeySpaces[key]; !ok || !allowed(key) {
 			return
 		}
 		handle := strings.TrimSpace(typed)
-		if shortSourceHandleRE.MatchString(handle) && (r == nil || r.durableForHandle(handle) == "") {
+		if isSourceHandleShaped(handle) && (r == nil || r.durableForHandle(handle) == "") {
 			seen[handle] = struct{}{}
 		}
 	case []interface{}:
@@ -296,18 +309,26 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 	// message reuse metadata that appears only in the turn's final answer.
 	for i := range out {
 		processToolResult := out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name))
+		// Stored text (instructions, prompts, earlier answers) carries
+		// workspace objects as weknora:// URIs in every role.
+		reasoningBefore := out[i].ReasoningContent
 		if out[i].Role == "assistant" || processToolResult {
 			out[i].Content = r.CompactPublicCitations(out[i].Content, false)
-			reasoningBefore := out[i].ReasoningContent
 			out[i].ReasoningContent = r.CompactPublicCitations(out[i].ReasoningContent, false)
-			dropStaleReasoningSignature(&out[i], reasoningBefore)
 		}
+		out[i].Content = r.EncodeDurableURIs(out[i].Content)
+		out[i].ReasoningContent = r.EncodeDurableURIs(out[i].ReasoningContent)
+		dropStaleReasoningSignature(&out[i], reasoningBefore)
 		if len(out[i].MultiContent) > 0 {
 			out[i].MultiContent = append([]chat.MessageContentPart(nil), out[i].MultiContent...)
 			for j := range out[i].MultiContent {
-				if out[i].MultiContent[j].Type == "text" && (out[i].Role == "assistant" || processToolResult) {
+				if out[i].MultiContent[j].Type != "text" {
+					continue
+				}
+				if out[i].Role == "assistant" || processToolResult {
 					out[i].MultiContent[j].Text = r.CompactPublicCitations(out[i].MultiContent[j].Text, false)
 				}
+				out[i].MultiContent[j].Text = r.EncodeDurableURIs(out[i].MultiContent[j].Text)
 			}
 		}
 		if len(out[i].ToolCalls) > 0 {
@@ -325,6 +346,19 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 		if out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name)) {
 			r.registerLegacyToolReferences(out[i].Content, false)
 			out[i].Content = r.CompactKnownText(out[i].Content)
+			if out[i].Name == "web_search" || out[i].Name == "web_fetch" {
+				// Citation IDs and fetch targets are distinct: expose the actual URL after
+				// compaction so models need not infer new sequential IDs for page links.
+				out[i].Content = webPageHeaderRE.ReplaceAllStringFunc(out[i].Content, func(header string) string {
+					match := webPageHeaderRE.FindStringSubmatch(header)
+					header = webPageURLAttrRE.ReplaceAllString(header, "")
+					rawURL := r.durableForHandle(match[1])
+					if rawURL == "" {
+						return header
+					}
+					return strings.TrimSuffix(header, ">") + ` url="` + html.EscapeString(rawURL) + `">`
+				})
+			}
 		}
 		for j := range out[i].ToolCalls {
 			toolName := out[i].ToolCalls[j].Function.Name
@@ -332,105 +366,11 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 				out[i].ToolCalls[j].Function.Arguments,
 				true,
 				func(key string) bool { return argumentPolicy == nil || argumentPolicy(toolName, key) },
+				nil,
 			)
 		}
 	}
 	return out
-}
-
-var shortSourceHandleRE = regexp.MustCompile(`(?i)^[cdbw][1-9][0-9]*$`)
-
-var shortSourceHandleInTextRE = regexp.MustCompile(`(?i)\b[cdbw][1-9][0-9]*\b`)
-
-// DecodeKnownText restores registered source handles embedded in a structured
-// expression such as a built-in SQL tool argument. It must not be used for
-// arbitrary prose; modelcontext owns the small tool/key policy that calls it.
-func (r *sourceRegistry) DecodeKnownText(text string) string {
-	if r == nil || text == "" {
-		return text
-	}
-	return shortSourceHandleInTextRE.ReplaceAllStringFunc(text, func(handle string) string {
-		if real := r.durableForHandle(handle); real != "" {
-			return real
-		}
-		return handle
-	})
-}
-
-// DecodeKnownQuotedText restores source handles only inside single-quoted,
-// double-quoted, or backtick-quoted segments. It is intended for structured
-// expressions such as SQL, where replacing an unquoted token could corrupt a
-// legitimate table/column handle that happens to look like d1 or b2.
-func (r *sourceRegistry) DecodeKnownQuotedText(text string) string {
-	if r == nil || text == "" {
-		return text
-	}
-	return rewriteQuotedText(text, func(segment string) string {
-		return shortSourceHandleInTextRE.ReplaceAllStringFunc(segment, func(handle string) string {
-			if real := r.durableForHandle(handle); real != "" {
-				return real
-			}
-			return handle
-		})
-	})
-}
-
-// UnresolvedQuotedTextHandles reports handle-shaped values inside quoted
-// structured-text segments that do not exist in this request registry.
-func (r *sourceRegistry) UnresolvedQuotedTextHandles(text string) []string {
-	if text == "" {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	rewriteQuotedText(text, func(segment string) string {
-		for _, handle := range shortSourceHandleInTextRE.FindAllString(segment, -1) {
-			if r == nil || r.durableForHandle(handle) == "" {
-				seen[handle] = struct{}{}
-			}
-		}
-		return segment
-	})
-	result := make([]string, 0, len(seen))
-	for handle := range seen {
-		result = append(result, handle)
-	}
-	sort.Strings(result)
-	return result
-}
-
-func rewriteQuotedText(text string, rewrite func(string) string) string {
-	var out strings.Builder
-	out.Grow(len(text))
-	for i := 0; i < len(text); {
-		quote := text[i]
-		if quote != '\'' && quote != '"' && quote != '`' {
-			out.WriteByte(text[i])
-			i++
-			continue
-		}
-		start := i
-		i++
-		for i < len(text) {
-			if text[i] == '\\' && i+1 < len(text) {
-				i += 2
-				continue
-			}
-			if text[i] != quote {
-				i++
-				continue
-			}
-			// SQL escapes a quote by doubling it (''). Keep scanning the
-			// same literal instead of treating the first quote as its end.
-			if i+1 < len(text) && text[i+1] == quote {
-				i += 2
-				continue
-			}
-			i++
-			break
-		}
-		out.WriteString(rewrite(text[start:i]))
-	}
-	return out.String()
 }
 
 func (r *sourceRegistry) registerToolArguments(raw string, allowed func(string) bool) {
@@ -468,7 +408,10 @@ func (r *sourceRegistry) registerToolArgumentValue(key string, value interface{}
 // registration and decoding.
 func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool) {
 	value = strings.TrimSpace(value)
-	if value == "" || shortSourceHandleRE.MatchString(value) {
+	if _, id, ok := parseDurableURI(value); ok {
+		value = id
+	}
+	if value == "" || isSourceHandleShaped(value) {
 		return
 	}
 	space, ok := sourceKeySpaces[strings.ToLower(key)]
@@ -497,7 +440,12 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool)
 	}
 }
 
-func (r *sourceRegistry) decodeJSONWithPolicy(raw string, encode bool, allowed func(string) bool) string {
+func (r *sourceRegistry) decodeJSONWithPolicy(
+	raw string,
+	encode bool,
+	allowed func(string) bool,
+	bareText func(string) bool,
+) string {
 	if r == nil || strings.TrimSpace(raw) == "" {
 		return raw
 	}
@@ -505,7 +453,10 @@ func (r *sourceRegistry) decodeJSONWithPolicy(raw string, encode bool, allowed f
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		return raw
 	}
-	value = r.walkJSON("", value, encode, allowed)
+	if bareText == nil {
+		bareText = func(string) bool { return false }
+	}
+	value = r.walkJSON("", value, encode, allowed, bareText)
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return raw
@@ -513,39 +464,51 @@ func (r *sourceRegistry) decodeJSONWithPolicy(raw string, encode bool, allowed f
 	return string(encoded)
 }
 
-func (r *sourceRegistry) walkJSON(key string, value interface{}, encode bool, allowed func(string) bool) interface{} {
+func (r *sourceRegistry) walkJSON(
+	key string,
+	value interface{},
+	encode bool,
+	allowed func(string) bool,
+	bareText func(string) bool,
+) interface{} {
 	switch typed := value.(type) {
 	case string:
-		if !allowed(strings.ToLower(key)) {
-			return typed
-		}
+		lower := strings.ToLower(key)
+		_, idKey := sourceKeySpaces[lower]
+		idField := idKey && allowed(lower)
 		if encode {
 			// Encode matches on exact real identifiers (UUIDs/URLs), which do
 			// not collide with prose, so it stays key-agnostic.
-			if handle := r.handleForDurable(typed); handle != "" {
-				return handle
+			if allowed(lower) {
+				if handle := r.handleForDurable(typed); handle != "" {
+					return handle
+				}
 			}
-			return typed
+			return r.EncodeDurableURIs(typed)
 		}
-		// Decode only ID-bearing keys, and only when the value is handle-shaped,
-		// so ordinary strings that coincidentally equal an handle are preserved.
-		if _, ok := sourceKeySpaces[strings.ToLower(key)]; !ok {
-			return typed
+		if idField {
+			trimmed := strings.TrimSpace(typed)
+			if isSourceHandleShaped(trimmed) {
+				if durable := r.durableForHandle(trimmed); durable != "" {
+					return durable
+				}
+				return typed
+			}
+			if _, id, ok := parseDurableURI(trimmed); ok {
+				return id
+			}
 		}
-		if !shortSourceHandleRE.MatchString(strings.TrimSpace(typed)) {
-			return typed
+		if bareText(lower) {
+			return r.DecodeBareText(typed)
 		}
-		if real := r.durableForHandle(typed); real != "" {
-			return real
-		}
-		return typed
+		return r.DecodeDurableText(typed)
 	case []interface{}:
 		for i := range typed {
-			typed[i] = r.walkJSON(key, typed[i], encode, allowed)
+			typed[i] = r.walkJSON(key, typed[i], encode, allowed, bareText)
 		}
 	case map[string]interface{}:
 		for childKey, item := range typed {
-			typed[childKey] = r.walkJSON(childKey, item, encode, allowed)
+			typed[childKey] = r.walkJSON(childKey, item, encode, allowed, bareText)
 		}
 	}
 	return value
@@ -568,29 +531,22 @@ func (r *sourceRegistry) handleForDurable(real string) string {
 }
 
 func (r *sourceRegistry) durableForHandle(handle string) string {
-	handle = strings.ToLower(strings.TrimSpace(handle))
-	if real, _, ok := r.chunks.resolve(handle); ok {
-		return real
+	_, durable, _, ok := r.resolveSourceHandle(handle)
+	if !ok {
+		return ""
 	}
-	if real, _, ok := r.docs.resolve(handle); ok {
-		return real
-	}
-	if real, _, ok := r.kbs.resolve(handle); ok {
-		return real
-	}
-	if real, _, ok := r.webs.resolve(handle); ok {
-		return real
-	}
-	return ""
+	return durable
 }
 
 // CompactKnownText is intentionally limited to identifiers already registered
-// from structured runtime/tool data. It is used for metadata envelopes, not
-// arbitrary retrieved prose.
+// from structured runtime/tool data, plus explicit weknora:// URIs. It is used
+// for metadata envelopes, not arbitrary retrieved prose.
 func (r *sourceRegistry) CompactKnownText(text string) string {
 	if r == nil || text == "" {
 		return text
 	}
+	// URIs first: their embedded IDs must become one handle, not "weknora://kb/kb://1".
+	text = r.EncodeDurableURIs(text)
 	// The snapshot spans all four source tables and is sorted longest-value
 	// first GLOBALLY: a web URL may contain a registered document UUID as a
 	// substring, so per-table passes could corrupt the longer value.
@@ -606,3 +562,7 @@ func (r *sourceRegistry) CompactKnownText(text string) string {
 	}
 	return text
 }
+
+var webPageHeaderRE = regexp.MustCompile(`<page id="(url://[1-9][0-9]*)"[^>]*>`)
+
+var webPageURLAttrRE = regexp.MustCompile(` url="[^"]*"`)

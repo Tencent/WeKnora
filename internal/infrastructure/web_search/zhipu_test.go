@@ -118,7 +118,9 @@ func TestZhipuProviderSearch(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	results, err := provider.Search(ctx, query, maxZhipuResults+1, true)
+	results, err := provider.Search(ctx, types.WebSearchRequest{
+		Query: query, MaxResults: maxZhipuResults + 1, IncludeDate: true,
+	})
 	if err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
@@ -160,7 +162,7 @@ func TestZhipuProviderSearchDefaults(t *testing.T) {
 		searchEngine: defaultZhipuSearchEngine,
 		contentSize:  defaultZhipuContentSize,
 	}
-	if _, err := provider.Search(context.Background(), "test", 0, false); err != nil {
+	if _, err := provider.Search(context.Background(), types.WebSearchRequest{Query: "test"}); err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
 }
@@ -179,7 +181,7 @@ func TestZhipuProviderSearchError(t *testing.T) {
 		searchEngine: defaultZhipuSearchEngine,
 		contentSize:  defaultZhipuContentSize,
 	}
-	_, err := provider.Search(context.Background(), "test", 1, false)
+	_, err := provider.Search(context.Background(), types.WebSearchRequest{Query: "test", MaxResults: 1})
 	if err == nil || !strings.Contains(err.Error(), "rate limited") {
 		t.Fatalf("Search() error = %v, want rate limited error", err)
 	}

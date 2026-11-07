@@ -20,14 +20,16 @@ type stubMCPToolApprovalService struct {
 	interfaces.MCPToolApprovalService
 	requireApproval *bool
 	enabled         *bool
+	risk            *string
 	err             error
 }
 
 func (s *stubMCPToolApprovalService) SetPolicy(
-	_ context.Context, _ uint64, _, _ string, requireApproval, enabled *bool,
+	_ context.Context, _ uint64, _, _ string, patch types.MCPToolPolicyPatch,
 ) error {
-	s.requireApproval = requireApproval
-	s.enabled = enabled
+	s.requireApproval = patch.RequireApproval
+	s.enabled = patch.Enabled
+	s.risk = patch.Risk
 	return s.err
 }
 

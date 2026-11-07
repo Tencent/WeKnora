@@ -86,6 +86,11 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.QuestionGenerationConfig != nil {
 		base := eff.QuestionGenerationConfig
 		eff.QuestionGenerationConfig = *overrides.QuestionGenerationConfig
+		if strings.TrimSpace(eff.QuestionGenerationConfig.ModelID) == "" {
+			eff.QuestionGenerationConfig.ModelID = base.ModelID
+		} else {
+			eff.QuestionGenerationConfig.ModelID = strings.TrimSpace(eff.QuestionGenerationConfig.ModelID)
+		}
 		if eff.QuestionGenerationConfig.CustomInstructions == "" {
 			eff.QuestionGenerationConfig.CustomInstructions = base.CustomInstructions
 		}
@@ -108,7 +113,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.ImagePipelineID != nil {
 		// The pick and its params travel as one unit: params keyed for one
 		// pipeline say nothing to another, so an id without its params would
-		// silently run the new pipeline on the old pipeline's switches.
+		// silently run the new pipeline on the old pipeline's switches — and
+		// the params are also where every setting of that pipeline lives,
+		// including the ones the run reads from this layer.
 		eff.ImagePipelineID = types.NormalizeImagePipelineID(*overrides.ImagePipelineID)
 		eff.ImagePipelineParams = overrides.ImagePipelineParams
 		// The explicit pick also decides the legacy switch, so the fallback
@@ -287,10 +294,18 @@ func reparseFileTypes(k *types.Knowledge) []string {
 }
 
 func defaultQuestionGenerationConfig(kb *types.KnowledgeBase) types.QuestionGenerationConfig {
-	if kb == nil || kb.QuestionGenerationConfig == nil {
-		return types.QuestionGenerationConfig{}
+	var config types.QuestionGenerationConfig
+	if kb == nil {
+		return config
 	}
-	return *kb.QuestionGenerationConfig
+	if kb.QuestionGenerationConfig != nil {
+		config = *kb.QuestionGenerationConfig
+	}
+	config.ModelID = strings.TrimSpace(config.ModelID)
+	if config.ModelID == "" {
+		config.ModelID = strings.TrimSpace(kb.SummaryModelID)
+	}
+	return config
 }
 
 func derefExtractConfig(cfg *types.ExtractConfig) types.ExtractConfig {

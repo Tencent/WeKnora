@@ -8,21 +8,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// customImageActions is a table that differs from the built-in one, so a
+// preserved table can be told from a re-applied default.
+func customImageActions() *types.ImageActionsConfig {
+	return &types.ImageActionsConfig{
+		OCR: types.ImageOCRAction{
+			On: []types.ImageAttrCondition{
+				{Prop: "contain.text", Is: "block"},
+			},
+		},
+	}
+}
+
 // imageConfiguredKB is a knowledge base whose image settings have been filled
 // in: the attribute-observed pipeline is on and the action table carries a value
 // that differs from the built-in default, so a reset is visible.
 func imageConfiguredKB() *types.KnowledgeBase {
-	// OnUnobserved=false is distinguishable from the built-in true, so the test
-	// can tell a preserved custom table from a re-applied default.
-	customActions := &types.ImageActionsConfig{
-		OCR: types.ImageOCRAction{
-			On: []types.ImageAttrCondition{
-				{Prop: "contain.text", Is: "block"},
-				{Prop: "contain.data_visual", Is: "true"},
-			},
-			OnUnobserved: false,
-		},
-	}
 	return &types.KnowledgeBase{
 		ID:       "kb-1",
 		TenantID: 1,
@@ -31,7 +32,7 @@ func imageConfiguredKB() *types.KnowledgeBase {
 		ImageProcessingConfig: types.ImageProcessingConfig{
 			ModelID:           "vlm-image",
 			ImageAttrsEnabled: true,
-			ImageActions:      customActions,
+			ImageActions:      customImageActions(),
 		},
 	}
 }
@@ -59,7 +60,7 @@ func TestUpdateKnowledgeBase_KeepsImageConfigWhenRequestOmitsIt(t *testing.T) {
 	assert.Equal(t, "vlm-image", got.ModelID, "image model was reset")
 	assert.True(t, got.ImageAttrsEnabled, "the attribute switch was reset")
 	require.NotNil(t, got.ImageActions, "image actions were reset")
-	assert.False(t, got.ImageActions.OCR.OnUnobserved, "image action contents were reset")
+	assert.Equal(t, customImageActions().OCR.On, got.ImageActions.OCR.On, "image action contents were reset")
 
 	// The fields the request did carry still land.
 	assert.Equal(t, "renamed", updated.Name)

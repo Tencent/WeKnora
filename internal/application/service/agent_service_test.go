@@ -522,6 +522,9 @@ func TestWeKnoraAssistantIsAHiddenBuiltinWithOperations(t *testing.T) {
 	require.True(t, types.GrantsOperationCatalog(agent))
 	require.True(t, types.UsesWorkspaceModelFallback(agent))
 	require.Equal(t, "weknora_assistant", agent.Config.SystemPromptID)
+	require.Equal(t, "all", agent.Config.KBSelectionMode)
+	require.Equal(t, 24576, agent.Config.MaxCompletionTokens)
+	require.Equal(t, types.UnlimitedMaxIterations, agent.Config.MaxIterations)
 	require.NotContains(t, agent.Config.AllowedTools, tools.ToolRunOperation,
 		"operations are granted by ID, never through the editable allowlist")
 	for _, def := range tools.AvailableToolDefinitions() {
@@ -578,30 +581,6 @@ func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
 	require.Empty(t, registered(apiKey, granted))
 }
 
-func TestRegisterOperationToolsOffersAgentTrialsUnlessReadOnly(t *testing.T) {
-	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
-		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
-		types.Caller{TenantID: 7, UserID: "u1"})
-	svc := &agentService{
-		operationDispatcher: operations.NewHandlerDispatcher(),
-		trialRunner:         NewAgentTrialRunner(nil, nil),
-	}
-	for level, want := range map[types.AssistantAccessLevel]bool{
-		types.AssistantAccessReadOnly:  false,
-		types.AssistantAccessConfirm:   true,
-		types.AssistantAccessAutoWrite: true,
-	} {
-		registry := tools.NewToolRegistry()
-		svc.registerOperationTools(webUser, registry, &types.AgentConfig{
-			OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: level,
-		})
-		_, err := registry.GetTool(tools.ToolTryAgent)
-		assert.Equal(t, want, err == nil, level)
-		_, err = registry.GetTool(tools.ToolOpenPage)
-		assert.NoError(t, err, "opening a page is offered at every level, read-only included")
-	}
-}
-
 func TestRegisterOperationToolsOffersPageToolsByAccessLevel(t *testing.T) {
 	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
 		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
@@ -621,6 +600,8 @@ func TestRegisterOperationToolsOffersPageToolsByAccessLevel(t *testing.T) {
 		})
 		_, err := registry.GetTool(tools.ToolReadPage)
 		assert.NoError(t, err, "reading the page is offered at every level")
+		_, err = registry.GetTool(tools.ToolViewPage)
+		assert.NoError(t, err, "viewing a page is offered at every level")
 		_, err = registry.GetTool(tools.ToolSelectTab)
 		assert.NoError(t, err, "selecting a tab is offered at every level")
 		_, err = registry.GetTool(tools.ToolFillPage)
@@ -783,7 +764,7 @@ func TestRegisterSandboxShellIfAllowedHostIgnoresSkillsGate(t *testing.T) {
 
 	svc.registerSandboxShellIfAllowed(ctx, registry, "sess-1", &types.AgentConfig{
 		SkillsEnabled: false,
-	})
+	}, tools.HostApprovals{})
 
 	require.True(t, toolRegistered(registry, tools.ToolShellExec),
 		"the host backend is the Lite feature and must not wait on SkillsEnabled")
@@ -908,7 +889,7 @@ func TestRegisterSandboxShellIfAllowedRemoteKeepsSkillsGate(t *testing.T) {
 	svc.registerSandboxShellIfAllowed(ctx, registry, "sess-1", &types.AgentConfig{
 		SandboxConfigID: "cfg-1",
 		SkillsEnabled:   false,
-	})
+	}, tools.HostApprovals{})
 
 	require.False(t, toolRegistered(registry, tools.ToolShellExec),
 		"a remote shell still exists only to serve skill scripts")

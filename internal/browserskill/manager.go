@@ -17,7 +17,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -629,19 +628,24 @@ func validExtensionOrigin(origin string) bool {
 
 // observe consumes window interrupts at the gateway, which owns explicit pause
 // and resume. Forwarding them as well leaves a second, one-shot daemon marker
-// that passive resume snapshots cannot clear and rejects the next user-approved
+// that passive resume reads cannot clear and rejects the next user-approved
 // action. pauseTask cancels active RPCs through the normal daemon cancel path.
 func (m *Manager) observe(d *device, data []byte) bool {
 	var e struct {
 		Event   string `json:"event"`
 		Payload struct {
 			Session string `json:"session_id"`
+			Reason  string `json:"reason"`
+			TabID   uint64 `json:"tab_id"`
 		} `json:"payload"`
 	}
 	if json.Unmarshal(data, &e) != nil {
 		return false
 	}
-	if e.Event != "session.user_interrupt" && e.Event != "session.window_closed" {
+	if e.Event != "session.user_interrupt" && e.Event != "session.window_closed" && e.Event != "session.ended" {
+		return false
+	}
+	if e.Event == "session.ended" && (e.Payload.Reason != "user_moved_tab" || e.Payload.TabID == 0) {
 		return false
 	}
 	d.mu.Lock()
@@ -652,7 +656,7 @@ func (m *Manager) observe(d *device, data []byte) bool {
 				continue
 			}
 			pauseTask(t)
-			if e.Event == "session.window_closed" {
+			if e.Event == "session.window_closed" || e.Event == "session.ended" {
 				t.id = ""
 			}
 		}
@@ -724,12 +728,18 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 	return reply.Result, nil
 }
 
-// agentWindowTabs lists every tab in the task's Agent Window, including tabs
-// the browser user opened there; any of them keeps the window alive.
-func agentWindowTabs(ctx context.Context, d *device, session string) ([]float64, error) {
+// checkLastTabClose prevents Chrome from removing the Agent Window as a side
+// effect of closing its final tab. Creating a placeholder here would revoke the
+// caller's shared-control receipt, so the caller must create it explicitly and
+// synchronize the original target before choosing the close action.
+func checkLastTabClose(ctx context.Context, d *device, session string, tabID any) error {
+	target, ok := numericID(tabID)
+	if !ok {
+		return nil // The extension reports the invalid parameter itself.
+	}
 	list, err := rpc(ctx, d, "tool.tab_list", map[string]any{"session_id": session, "scope": "agent"})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var listed struct {
 		Tabs []struct {
@@ -737,65 +747,17 @@ func agentWindowTabs(ctx context.Context, d *device, session string) ([]float64,
 		} `json:"tabs"`
 	}
 	if json.Unmarshal(list, &listed) != nil {
-		return nil, errors.New("invalid BrowserSkill tab list")
+		return errors.New("invalid BrowserSkill tab list")
 	}
-	ids := make([]float64, 0, len(listed.Tabs))
-	for _, tab := range listed.Tabs {
-		ids = append(ids, tab.ID)
+	if len(listed.Tabs) == 1 && listed.Tabs[0].ID == target {
+		return &RPCError{
+			Code: "permission_denied",
+			Message: "Before closing the last tab, create an about:blank task tab, then cooperate sync " +
+				"with the original tab_id and inspect its state before closing it",
+			Data: json.RawMessage(`{"reason":"last_tab_requires_placeholder","effect_state":"none"}`),
+		}
 	}
-	return ids, nil
-}
-
-// preserveAgentWindow keeps a retained task's Agent Window open when the agent
-// closes its last tab there. Chrome removes a window together with its final
-// tab, and the extension reports that removal as a user-closed window, which
-// would pause the task and drop its session. A blank tab created through the
-// native tab_create RPC is agent-owned, so session stop closes it with the
-// other agent tabs. Only official RPCs are used; the extension needs no patch.
-// It returns the placeholder's tab ID, or 0 when none was needed.
-func preserveAgentWindow(ctx context.Context, d *device, session string, tabID any) (float64, error) {
-	target, ok := numericID(tabID)
-	if !ok {
-		return 0, nil // The extension reports the invalid parameter itself.
-	}
-	tabs, err := agentWindowTabs(ctx, d, session)
-	if err != nil {
-		return 0, err
-	}
-	if len(tabs) != 1 || tabs[0] != target {
-		return 0, nil
-	}
-	created, err := rpc(ctx, d, "tool.tab_create", map[string]any{
-		"session_id": session, "url": "about:blank", "active": false,
-	})
-	if err != nil {
-		return 0, err
-	}
-	var placeholder struct {
-		ID float64 `json:"tab_id"`
-	}
-	if json.Unmarshal(created, &placeholder) != nil || placeholder.ID == 0 {
-		return 0, errors.New("invalid BrowserSkill tab_create result")
-	}
-	return placeholder.ID, nil
-}
-
-// releasePlaceholder undoes preserveAgentWindow after tab_close failed or was
-// interrupted, so a refused close (unauthorized or borrowed tab) does not leave
-// an extra agent-owned blank tab behind. The extension may have closed the
-// target before the reply was lost, in which case the placeholder is the tab
-// keeping the Agent Window open: it is removed only while the target still
-// exists. Best effort with its own deadline, since the failed call's context
-// may already be cancelled.
-func releasePlaceholder(d *device, session string, tabID any, placeholder float64) {
-	target, _ := numericID(tabID)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	tabs, err := agentWindowTabs(ctx, d, session)
-	if err != nil || !slices.Contains(tabs, target) {
-		return
-	}
-	_, _ = rpc(ctx, d, "tool.tab_close", map[string]any{"session_id": session, "tab_id": placeholder})
+	return nil
 }
 
 func numericID(v any) (float64, bool) {
@@ -814,6 +776,7 @@ func numericID(v any) (float64, bool) {
 }
 
 var methods = map[string]bool{
+	"cooperate":           true,
 	"snapshot":            true,
 	"observe":             true,
 	"navigate":            true,
@@ -953,6 +916,12 @@ func (m *Manager) Call(
 	// Reading page content does not require every image, ad and subframe to load.
 	// Callers can explicitly request load/networkidle for a page that needs it.
 	switch method {
+	case "cooperate":
+		if clean["action"] == "sync" {
+			if _, supplied := clean["control_policy"]; !supplied {
+				clean["control_policy"] = "auto"
+			}
+		}
 	case "navigate", "navigate_back", "navigate_forward", "reload":
 		if _, supplied := clean["wait_until"]; !supplied {
 			clean["wait_until"] = "domcontentloaded"
@@ -978,15 +947,11 @@ func (m *Manager) Call(
 	}
 	var result json.RawMessage
 	var err error
-	var placeholder float64
 	if method == "tab_close" {
-		placeholder, err = preserveAgentWindow(callCtx, d, id, clean["tab_id"])
+		err = checkLastTabClose(callCtx, d, id, clean["tab_id"])
 	}
 	if err == nil {
 		result, err = rpc(callCtx, d, "tool."+method, clean)
-		if err != nil && placeholder != 0 {
-			releasePlaceholder(d, id, clean["tab_id"], placeholder)
-		}
 	}
 	if method == "request_help" && err == nil {
 		var help struct {
@@ -1170,8 +1135,9 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	method := "session.start"
 	params := map[string]any{"focused": false, "browser_instance_id": browserID}
 	if id != "" {
-		// Refresh the observation before releasing a paused task to the agent.
-		method = "tool.snapshot"
+		// A passive observe also restores the official control toolbar, which
+		// a browser-side stop hides. It does not release the user's hold.
+		method = "tool.observe"
 		params = map[string]any{"session_id": id}
 	}
 	// Persist before creating a window: a crash can never forget an active task.
@@ -1184,9 +1150,9 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	result, err := rpc(lifecycleCtx, d, method, params)
 	// A cancel acknowledgement can precede the extension's terminal response.
-	// Only the passive resume snapshot may be retried while that response drains.
+	// Only the passive resume read may be retried while that response drains.
 	drainUntil := time.Now().Add(2 * time.Second)
-	for method == "tool.snapshot" && err != nil &&
+	for method == "tool.observe" && err != nil &&
 		strings.Contains(err.Error(), "unfinished command") && time.Now().Before(drainUntil) {
 		select {
 		case <-lifecycleCtx.Done():
@@ -1196,6 +1162,27 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 		}
 		if lifecycleCtx.Err() != nil {
 			break
+		}
+	}
+	if err == nil && id != "" && action == "resume" {
+		// A passive read cannot release a BrowserSkill hold/stop. Only
+		// the user's Resume action in the browser can return that authority.
+		var status json.RawMessage
+		status, err = rpc(lifecycleCtx, d, "tool.cooperate", map[string]any{"session_id": id, "action": "status"})
+		if err == nil {
+			var control struct {
+				Stopped bool `json:"stopped"`
+				State   struct {
+					Mode string `json:"mode"`
+				} `json:"state"`
+			}
+			if err = json.Unmarshal(status, &control); err == nil && (control.Stopped || control.State.Mode == "held") {
+				err = &RPCError{
+					Code: "task_paused",
+					Message: "Resume control in the BrowserSkill browser overlay first, " +
+						"then click Continue operation in the conversation preview",
+				}
+			}
 		}
 	}
 	d.mu.Lock()

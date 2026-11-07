@@ -211,6 +211,11 @@ type SearchResult struct {
 
 	// ChunkMetadata stores chunk-level metadata (e.g., generated questions)
 	ChunkMetadata JSON `json:"chunk_metadata,omitempty"`
+	// SkipGeneratedQuestions keeps generated questions out of the rerank
+	// passage. Search sets it when the knowledge base's question generation
+	// switch is off, including bases that were turned off before the index
+	// rows were disabled.
+	SkipGeneratedQuestions bool `json:"-" gorm:"-"`
 	// ContextHeader is the chunk's heading breadcrumb, part of what was
 	// embedded (Chunk.EmbeddingContent) but not of Content. Internal only.
 	ContextHeader string `json:"-"`

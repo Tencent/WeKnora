@@ -257,7 +257,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Avatar:      req.Avatar,
 		Config:      req.Config,
 	}
-	agent.EnsureDefaults()
+	agent.EnsureCreationDefaults()
 	// The DB column (varchar(64)) has no application-level guard, so an
 	// oversized avatar used to reach postgres and come back as a raw driver
 	// 500. Reject it here with a 400 that names the limit.

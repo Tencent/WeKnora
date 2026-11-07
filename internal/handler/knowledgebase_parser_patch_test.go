@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -85,19 +86,22 @@ func TestParserRoutingPatchRejectsAmbiguousOrInvalidChanges(t *testing.T) {
 func TestImageControlsPreserveOtherParamsAndRespectNamespace(t *testing.T) {
 	kb := &types.KnowledgeBase{ImageProcessingConfig: types.ImageProcessingConfig{
 		ImagePipelineID: "default", ImagePipelineParams: map[string]any{
-			"default.enable_ocr": true,
-			"enable_caption":     true,
-			"caption.thinking":   true,
+			"default.ocr_enabled":              true,
+			"caption_enabled":                  true,
+			"default.caption.thinking_enabled": true,
 		},
 	}}
 	result, err := parsingPatch(t, kb, `{"image_ocr_enabled":false}`)
 	require.NoError(t, err)
 	image := result.Config.ImageProcessingConfig
-	assert.Equal(t, false, image.ImagePipelineParams["enable_ocr"])
-	assert.Equal(t, false, image.ImagePipelineParams["default.enable_ocr"])
-	assert.Equal(t, true, image.ImagePipelineParams["caption.thinking"])
-	assert.Equal(t, true, image.ImagePipelineParams["enable_caption"])
-	assert.Equal(t, true, kb.ImageProcessingConfig.ImagePipelineParams["default.enable_ocr"])
+	assert.Equal(t, false, image.ImagePipelineParams["default.ocr_enabled"])
+	assert.Equal(t, true, image.ImagePipelineParams["default.caption.thinking_enabled"])
+	assert.Equal(t, true, image.ImagePipelineParams["caption_enabled"])
+	// One home per setting: the switch lands in the pipeline's slot and is not
+	// also written under its bare name, which nothing reads.
+	_, bare := image.ImagePipelineParams["ocr_enabled"]
+	assert.False(t, bare, "the switch must be stored under its slot only")
+	assert.Equal(t, true, kb.ImageProcessingConfig.ImagePipelineParams["default.ocr_enabled"])
 	require.NoError(t, service.ValidateImagePipelineParams(types.ImagePipelineDefault, image.ImagePipelineParams))
 	result, err = parsingPatch(t, kb, `{"image_ocr_enabled":false,"image_caption_enabled":false}`)
 	require.NoError(t, err)
@@ -118,6 +122,56 @@ func TestImageControlsPreserveOtherParamsAndRespectNamespace(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "default", result.Config.ImageProcessingConfig.ImagePipelineID)
+}
+
+func TestImageControlsPatchProjectsEffectiveSwitches(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		caption bool
+		ocr     bool
+	}{
+		{name: "caption only", caption: true, ocr: false},
+		{name: "OCR only", caption: false, ocr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kb := &types.KnowledgeBase{ID: "kb1", ImageProcessingConfig: types.ImageProcessingConfig{
+				ImagePipelineID: "default", ImagePipelineParams: map[string]any{
+					"enable_caption":         !tc.caption,
+					"enable_ocr":             !tc.ocr,
+					"default.enable_caption": !tc.caption,
+					"default.enable_ocr":     !tc.ocr,
+					"private_token":          "secret",
+				},
+			}}
+			patch, err := json.Marshal(map[string]bool{
+				"image_caption_enabled": tc.caption,
+				"image_ocr_enabled":     tc.ocr,
+			})
+			require.NoError(t, err)
+			result, err := parsingPatch(t, kb, string(patch))
+			require.NoError(t, err)
+			kb.ImageProcessingConfig = *result.Config.ImageProcessingConfig
+			body, err := json.Marshal(map[string]any{"data": kb})
+			require.NoError(t, err)
+			for _, operationID := range []string{"knowledge_base.get", "knowledge_base.update"} {
+				t.Run(operationID, func(t *testing.T) {
+					op, ok := operations.Builtin().Get(operationID)
+					require.True(t, ok)
+					projected, err := op.Project(body)
+					require.NoError(t, err)
+					fields, ok := projected.Data.(map[string]any)
+					require.True(t, ok)
+					assert.Equal(t, tc.caption, fields["default.caption_enabled"])
+					assert.Equal(t, tc.ocr, fields["default.ocr_enabled"])
+					for _, key := range []string{
+						"enable_caption", "enable_ocr", "default.enable_caption", "default.enable_ocr", "private_token",
+					} {
+						assert.NotContains(t, fields, key)
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestParsingPatchKeepsVLMAndQuestionOptions(t *testing.T) {

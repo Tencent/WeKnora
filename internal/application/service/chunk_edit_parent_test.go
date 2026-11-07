@@ -44,6 +44,13 @@ func (r *editableChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chunk) e
 	return nil
 }
 
+func (r *editableChunkRepo) UpdateChunkFieldsByIDs(
+	_ context.Context, _ uint64, _ []string, fields map[string]interface{},
+) error {
+	r.chunk.IndexStatus = fields["index_status"].(string)
+	return nil
+}
+
 type editableChunkKBRepo struct {
 	interfaces.KnowledgeBaseRepository
 }
@@ -77,6 +84,32 @@ func (r *imageSyncChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chunk) 
 			copyOfChunk := *chunk
 			r.children[i] = &copyOfChunk
 			return nil
+		}
+	}
+	return nil
+}
+
+func (r *imageSyncChunkRepo) GetChunkByID(_ context.Context, _ uint64, id string) (*types.Chunk, error) {
+	for _, child := range r.children {
+		if child.ID == id {
+			copyOfRow := *child
+			return &copyOfRow, nil
+		}
+	}
+	return nil, ErrChunkNotFound
+}
+
+func (r *imageSyncChunkRepo) UpdateChunkFieldsByIDs(
+	_ context.Context, _ uint64, ids []string, fields map[string]interface{},
+) error {
+	for _, child := range r.children {
+		for _, id := range ids {
+			if child.ID == id {
+				if enabled, ok := fields["is_enabled"]; ok {
+					child.IsEnabled = enabled.(bool)
+				}
+				child.IndexStatus = fields["index_status"].(string)
+			}
 		}
 	}
 	return nil
@@ -223,6 +256,17 @@ func (r *parentRebuildChunkRepo) ListChunkByParentID(
 func (r *parentRebuildChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chunk) error {
 	copyOfChunk := *chunk
 	r.updated = &copyOfChunk
+	return nil
+}
+
+func (r *parentRebuildChunkRepo) UpdateChunkFieldsByIDs(
+	_ context.Context, _ uint64, _ []string, fields map[string]interface{},
+) error {
+	copyOfRow := *r.parent
+	copyOfRow.Content = fields["content"].(string)
+	copyOfRow.SourceContent = fields["source_content"].(string)
+	copyOfRow.SourceLocators = fields["source_locators"].(types.SourceLocators)
+	r.updated = &copyOfRow
 	return nil
 }
 

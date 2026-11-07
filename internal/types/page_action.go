@@ -78,6 +78,7 @@ type PageNavigateTarget struct {
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
 	WikiSlug        string `json:"wiki_slug,omitempty"`
 	AgentID         string `json:"agent_id,omitempty"`
+	AutomationID    string `json:"automation_id,omitempty"`
 	Section         string `json:"section,omitempty"`
 	// Panel is a tab inside a settings section, e.g. system-global's users.
 	Panel        string `json:"panel,omitempty"`

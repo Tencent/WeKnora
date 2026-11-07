@@ -1,9 +1,16 @@
-/** TDesign icon names for agent / RAG pipeline tool steps. */
+const COLLABORATION_TOOLS = new Set(['spawn_agent', 'list_agents', 'send_message', 'followup_task', 'interrupt_agent', 'wait_agent'])
+
+/** Collaboration steps share the agent mark with child-task rows. */
+export function isCollaborationTool(toolName: string): boolean {
+  return COLLABORATION_TOOLS.has(toolName)
+}
+
+/** Semantic icon names shared by the agent and RAG timeline renderers. */
 export function getAgentToolIconName(
   toolName: string,
   searchSource?: 'knowledge' | 'web' | 'mixed',
 ): string {
-  if (toolName === 'local_browser') return 'internet'
+  if (toolName === 'local_browser') return 'browser'
   if (toolName === 'thinking') {
     return 'ai-search'
   }
@@ -19,7 +26,7 @@ export function getAgentToolIconName(
   if (toolName === 'grep_chunks') {
     return 'search'
   }
-  if (toolName === 'web_search') {
+  if (toolName === 'web_search' || toolName === 'web_fetch') {
     return 'internet'
   }
   if (toolName === 'read_document' || toolName === 'list_documents') {
@@ -68,10 +75,10 @@ export function getAgentToolIconName(
   if (toolName === 'run_operation') {
     return 'terminal'
   }
-  if (toolName === 'try_agent') {
-    return 'chat'
+  if (isCollaborationTool(toolName)) {
+    return 'agent'
   }
-  if (toolName === 'open_page') {
+  if (toolName === 'open_page' || toolName === 'view_page') {
     return 'jump'
   }
   if (toolName === 'search_weknora_docs') {

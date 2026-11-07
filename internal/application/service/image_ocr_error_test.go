@@ -72,17 +72,17 @@ func TestRunOCRActionRecordsFailureWithoutFailing(t *testing.T) {
 	if err := runOCRAction(context.Background(), r); err != nil {
 		t.Fatalf("runOCRAction error = %v, want nil (failure is recorded, not propagated)", err)
 	}
-	if got := r.out["ocr_status"]; got != "failed" {
+	if got := r.out[keyOCRResult]; got != "failed" {
 		t.Errorf("ocr_status = %v, want failed", got)
 	}
-	if got := r.out["ocr_error_code"]; got != "OCR_REQUEST_FAILED" {
+	if got := r.out[keyOCRErrorCode]; got != "OCR_REQUEST_FAILED" {
 		t.Errorf("ocr_error_code = %v, want OCR_REQUEST_FAILED", got)
 	}
-	if _, ok := r.out["ocr_error"]; !ok {
+	if _, ok := r.out[keyOCRError]; !ok {
 		t.Errorf("ocr_error not recorded for a failed call")
 	}
-	if _, skipped := r.out["ocr_skipped"]; skipped {
-		t.Errorf(`a failed call must not read as skipped: %v`, r.out["ocr_skipped"])
+	if got := r.out[keyOCRResult]; got != "failed" {
+		t.Errorf("a failed call must read as failed, never as skipped: %v", got)
 	}
 	if got := r.imageInfo.OCRText; got != "" {
 		t.Errorf("a failed call must leave no OCR text behind, got %q", got)
@@ -98,7 +98,7 @@ func TestRunOCRActionCodesTruncation(t *testing.T) {
 	if err := runOCRAction(context.Background(), r); err != nil {
 		t.Fatalf("runOCRAction error = %v, want nil", err)
 	}
-	if got := r.out["ocr_error_code"]; got != "OCR_TRUNCATED" {
+	if got := r.out[keyOCRErrorCode]; got != "OCR_TRUNCATED" {
 		t.Errorf("ocr_error_code = %v, want OCR_TRUNCATED", got)
 	}
 }
@@ -114,13 +114,13 @@ func TestRunOCRActionRejectsEmptyOutput(t *testing.T) {
 	if err := runOCRAction(context.Background(), r); err != nil {
 		t.Fatalf("runOCRAction returned %v for an empty-but-successful answer", err)
 	}
-	if got := r.out["ocr_status"]; got != "failed" {
+	if got := r.out[keyOCRResult]; got != "failed" {
 		t.Errorf("ocr_status = %v, want failed (empty output is invalid, not no_text)", got)
 	}
-	if got := r.out["ocr_error_code"]; got != "OCR_INVALID_OUTPUT" {
+	if got := r.out[keyOCRErrorCode]; got != "OCR_INVALID_OUTPUT" {
 		t.Errorf("ocr_error_code = %v, want OCR_INVALID_OUTPUT", got)
 	}
-	if _, ok := r.out["ocr_error"]; !ok {
+	if _, ok := r.out[keyOCRError]; !ok {
 		t.Errorf("ocr_error not recorded for invalid output")
 	}
 }
@@ -153,10 +153,10 @@ func TestDefaultPipelineRecordsOCRFailure(t *testing.T) {
 	if err := pipeline.Run(context.Background(), r); err != nil {
 		t.Fatalf("pipeline.Run error = %v, want nil (failure is recorded, not propagated)", err)
 	}
-	if got := r.out["ocr_status"]; got != "failed" {
+	if got := r.out[keyOCRResult]; got != "failed" {
 		t.Errorf("ocr_status = %v, want failed", got)
 	}
-	if got := r.out["ocr_error"]; got == "" {
+	if got := r.out[keyOCRError]; got == "" {
 		t.Error("ocr_error not recorded for a failed call")
 	}
 }

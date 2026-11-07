@@ -116,3 +116,16 @@ func TestSuspendedRunReapExpiresAndCloses(t *testing.T) {
 	require.False(t, open.IsCompleted)
 	require.Equal(t, types.MessageRunStateAwaitingInput, open.RunState)
 }
+
+func TestSuspendedRunSupersedeAlsoStopsDelegation(t *testing.T) {
+	runs, broker, db := newSuspendedRunFixture(t)
+	messageID := seedSuspendedRun(t, broker, db, "parent", "prompt", nil)
+	var stopped *types.AgentPrompt
+	runs.StopDelegation = func(_ context.Context, p *types.AgentPrompt) error { stopped = p; return nil }
+	n, err := runs.SupersedeSession(context.Background(), "parent")
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.NotNil(t, stopped)
+	require.Equal(t, messageID, stopped.AssistantMessageID)
+	require.Equal(t, "parent", stopped.SessionID)
+}

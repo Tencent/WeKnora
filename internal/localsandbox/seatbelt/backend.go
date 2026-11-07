@@ -87,6 +87,9 @@ func (b *seatbeltBackend) Prepare(ctx context.Context, p core.Policy) (core.Prep
 func (b *seatbeltBackend) Spawn(
 	ctx context.Context, prep core.Prepared, cmd core.Command,
 ) (core.Process, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := cmd.Validate(); err != nil {
 		return nil, err
 	}
@@ -133,6 +136,7 @@ func (b *seatbeltBackend) Spawn(
 
 	proc := &seatbeltProcess{
 		cmd:      execCmd,
+		pid:      pid,
 		stdout:   stdout,
 		stderr:   stderr,
 		started:  started,
@@ -157,7 +161,18 @@ func resolvePolicyPaths(p core.Policy) (core.Policy, error) {
 				return core.Policy{}, err
 			}
 		}
-		out.WritableRoots[i] = core.WritableRoot{Path: path, ReadOnlySubpaths: subs}
+		out.WritableRoots[i] = core.WritableRoot{
+			Path: path, ReadOnlySubpaths: subs, ProtectGitDirs: root.ProtectGitDirs,
+			ProtectBareGitDirs: root.ProtectBareGitDirs,
+		}
+	}
+	out.WritableFiles = make([]string, len(p.WritableFiles))
+	for i, file := range p.WritableFiles {
+		var err error
+		out.WritableFiles[i], err = resolveExisting(file)
+		if err != nil {
+			return core.Policy{}, err
+		}
 	}
 	out.ReadableRoots = make([]string, len(p.ReadableRoots))
 	for i, root := range p.ReadableRoots {
@@ -246,6 +261,7 @@ func withSandboxTemp(env []string, cwd string, explicit map[string]string) []str
 
 type seatbeltProcess struct {
 	cmd      *exec.Cmd
+	pid      int
 	stdout   io.ReadCloser
 	stderr   io.ReadCloser
 	started  time.Time
@@ -258,7 +274,7 @@ type seatbeltProcess struct {
 
 func (p *seatbeltProcess) Stdout() io.Reader { return p.stdout }
 func (p *seatbeltProcess) Stderr() io.Reader { return p.stderr }
-func (p *seatbeltProcess) PID() int          { return p.cmd.Process.Pid }
+func (p *seatbeltProcess) PID() int          { return p.pid }
 
 func (p *seatbeltProcess) watchContext(ctx context.Context) {
 	select {
@@ -280,17 +296,14 @@ func (p *seatbeltProcess) watchContext(ctx context.Context) {
 // descendants running after a timeout.
 func (p *seatbeltProcess) Kill() error {
 	p.mu.Lock()
-	// ProcessState is written before cmd.Wait returns, so this closes the
-	// window between Wait returning and reaped being set.
-	if p.reaped || p.cmd.ProcessState != nil {
+	// reaped is set under this lock as soon as Wait returns. Cmd.ProcessState
+	// is written by Wait itself, so another goroutine must not read it.
+	if p.reaped {
 		p.mu.Unlock()
 		return nil
 	}
 	p.killed = true
-	pid := 0
-	if p.cmd.Process != nil {
-		pid = p.cmd.Process.Pid
-	}
+	pid := p.pid
 	p.mu.Unlock()
 
 	if pid == 0 {

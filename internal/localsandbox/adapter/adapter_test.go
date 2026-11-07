@@ -211,7 +211,7 @@ func TestAdapterExecShellCommandAnnotatesDenial(t *testing.T) {
 	res, err := a.ExecShellCommand(context.Background(), "s1", "touch /etc/x", "", 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.ExitCode)
-	require.Contains(t, res.Stderr, "[sandbox] denied by workspace policy")
+	require.Contains(t, res.Stderr, "[sandbox] blocked")
 }
 
 func TestAdapterListSessionFilesStopsWalkingAtCap(t *testing.T) {

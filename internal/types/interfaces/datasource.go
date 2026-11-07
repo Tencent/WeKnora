@@ -135,6 +135,8 @@ type SyncLogRepository interface {
 	// CancelPendingByDataSource marks all non-terminal sync logs for a data source as canceled.
 	CancelPendingByDataSource(ctx context.Context, dsID string) error
 
-	// CleanupOldLogs deletes sync logs older than the retention period
-	CleanupOldLogs(ctx context.Context, retentionDays int) error
+	// CleanupOldLogs deletes expired terminal logs using each source's policy.
+	// Failed logs of live sources are retained because they may be awaiting retry.
+	// defaultRetentionDays applies to missing sources and unset policies.
+	CleanupOldLogs(ctx context.Context, defaultRetentionDays int) error
 }

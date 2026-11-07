@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -85,7 +87,15 @@ func TestExecuteLoop_EmptyThenAnswer_EmitsSingleTerminalAnswer(t *testing.T) {
 	recorder.attach(engine.eventBus)
 
 	state := &types.AgentState{}
-	_, err := engine.executeLoop(context.Background(), state, "test query", emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	_, err := engine.executeLoop(
+		context.Background(),
+		state,
+		"test query",
+		emptyMessages(),
+		emptyTools(),
+		"sess-1",
+		"msg-1",
+	)
 
 	require.NoError(t, err)
 	assert.True(t, state.IsComplete)
@@ -114,7 +124,15 @@ func TestExecuteLoop_AllEmptyResponses_FallbackIsSoleTerminalAnswer(t *testing.T
 	recorder.attach(engine.eventBus)
 
 	state := &types.AgentState{}
-	_, err := engine.executeLoop(context.Background(), state, "test query", emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	_, err := engine.executeLoop(
+		context.Background(),
+		state,
+		"test query",
+		emptyMessages(),
+		emptyTools(),
+		"sess-1",
+		"msg-1",
+	)
 
 	require.NoError(t, err)
 	assert.True(t, state.IsComplete)
@@ -123,4 +141,64 @@ func TestExecuteLoop_AllEmptyResponses_FallbackIsSoleTerminalAnswer(t *testing.T
 	done, content := recorder.snapshot()
 	assert.Equal(t, 1, done, "retries exhausted must still emit exactly one terminal answer event")
 	assert.Contains(t, content, "unable to generate a response", "the terminal answer must be the fallback text")
+}
+
+func TestEmptyResponseRecoveryPreservesUserIntentAndTools(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{Done: true}}},
+		{chunks: []types.StreamResponse{{Done: true, FinishReason: "tool_calls", ToolCalls: []types.LLMToolCall{{
+			ID: "status", Type: "function", Function: types.FunctionCall{Name: "check_status", Arguments: `{}`},
+		}}}}},
+		{chunks: []types.StreamResponse{{Content: "Task result", Done: true}}},
+	}}
+	engine := newTestEngine(t, model)
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	tool := newCountingTool("check_status")
+	engine.toolRegistry.RegisterTool(tool)
+	recorder := &terminalAnswerRecorder{}
+	recorder.attach(engine.eventBus)
+
+	state, err := engine.Execute(context.Background(), "s", "m", "Continue the task", nil, nil)
+	require.NoError(t, err)
+	require.True(t, state.IsComplete)
+	require.Equal(t, "Task result", state.FinalAnswer)
+	require.Equal(t, 1, tool.calls, "empty output must still allow work before answering")
+	require.Len(t, model.calls, 3)
+	userMessages := func(messages []chat.Message) []chat.Message {
+		var users []chat.Message
+		for _, message := range messages {
+			if message.Role == "user" {
+				users = append(users, message)
+			}
+		}
+		return users
+	}
+	require.NotEmpty(t, userMessages(model.calls[0]))
+	for _, messages := range model.calls[1:] {
+		require.Equal(
+			t,
+			userMessages(model.calls[0]),
+			userMessages(messages),
+			"recovery must not fabricate user instructions",
+		)
+	}
+	require.Equal(t, model.calls[0], model.calls[1], "retry must preserve the complete cacheable transcript")
+	require.Empty(t, model.opts[0].RuntimeNotice)
+	require.Contains(t, model.opts[1].RuntimeNotice, `"type":"empty_response_retry"`)
+	require.Contains(t, model.opts[1].RuntimeNotice, "Tools and waiting remain available")
+	require.Empty(t, model.opts[2].RuntimeNotice, "recovery applies to only the next model round")
+	for _, messages := range model.calls {
+		for _, message := range messages {
+			require.NotContains(
+				t,
+				message.Content,
+				`"type":"empty_response_retry"`,
+				"recovery must not pollute durable history",
+			)
+		}
+	}
+	require.NotEmpty(t, model.opts[1].Tools)
+	require.NotEqual(t, "none", model.opts[1].ToolChoice)
+	done, _ := recorder.snapshot()
+	require.Equal(t, 1, done, "recovery must not emit a premature final answer")
 }

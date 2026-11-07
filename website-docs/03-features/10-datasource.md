@@ -35,6 +35,7 @@
 | 腾讯 IMA | `ima` | 知识库中的文件与笔记 |
 | GitLab | `gitlab` | 仓库指定分支/标签下的目录 |
 | Seafile | `seafile` | 资料库中的目录与文件 |
+| Nextcloud | `nextcloud` | WebDAV 目录与文件，见 [Nextcloud data source](26-nextcloud.md) |
 | RSS / Atom | `rss` | 订阅源文章 |
 
 各连接器支持的格式、认证与删除检测见参考部分。
@@ -184,24 +185,27 @@
 
 #### Confluence（`connector/confluence/`）
 
-支持 Confluence Server / Data Center 与 Confluence Cloud，均使用 HTTP Basic 认证。
+支持 Confluence Server / Data Center 与 Confluence Cloud。Server/DC 可使用个人访问令牌（PAT，Bearer 认证）或用户名与密码（HTTP Basic）；Cloud 使用邮箱与 API token（HTTP Basic）。
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `edition` | 否 | `server`（默认，Server / Data Center）或 `cloud` |
 | `base_url` | 是 | Confluence 地址，缺少协议时补 `https://`；Cloud 填 `https://<站点>.atlassian.net` 时自动补 `/wiki` |
-| `username` | 是 | Server/DC 用户名；Cloud 为 Atlassian 账号邮箱 |
-| `password` | Server/DC 必填 | Server/DC 账号密码 |
+| `username` | Basic 认证必填 | Server/DC 用户名；Cloud 为 Atlassian 账号邮箱；Server/DC 使用 PAT 时可留空 |
+| `token` | 否 | Server/DC 个人访问令牌；填写后优先使用 Bearer 认证，无需用户名和密码；Cloud 不使用此字段 |
+| `password` | Server/DC 未填 PAT 时必填 | Server/DC 账号密码 |
 | `api_token` | Cloud 必填 | 在 Atlassian 账号的 API tokens 页面创建 |
 
-`edition`、`base_url`、`username` 不属于密钥，界面会同时写入 Settings 以便编辑时回显；`password` / `api_token` 只存加密凭据。
+`edition`、`base_url`、`username` 不属于密钥，界面会同时写入 Settings 以便编辑时回显；`token` / `password` / `api_token` 只存加密凭据。
+
+Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 Personal access tokens 中创建，详见 [Atlassian 官方说明](https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html)。连接测试、空间与页面读取以及同源私有图片下载使用同一种认证方式。
 
 <Screenshot
-  src="/screenshots/datasource-confluence.png"
-  caption="Confluence 数据源：版本选择与凭据填写"
-  hint="数据源编辑弹窗选中 Confluence，展示「Confluence 版本」下拉（Server / Data Center、Cloud）、地址、用户名与 Cloud API 令牌字段，以及测试连接后的空间选择列表。" />
+  src="/screenshots/datasource-confluence-pat.png"
+  caption="Confluence Server/DC 数据源：使用个人访问令牌"
+  hint="Server / Data Center 凭据表单：填写 PAT 后，用户名和密码可留空。截图使用本地模拟配置和示例令牌。" />
 
-- **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入附件和博客文章。
+- **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入博客文章；PDF/Office 附件可按下面的设置启用。
 - **内容**：取页面渲染后的 HTML 转为 Markdown（每页一个 `.md` 条目），正文为空时仅保留标题。条目 metadata 带 `space_key`、`space_name`、`page_id`，有作者时带 `creator`。
 - **增量**：按页面版本号比对，版本未变的页面跳过。实现了流式同步，每页入库后保存游标；全量同步的中途游标同时保留上次的页面基线，任务重试可续传，也能继续对账删除。
 - **删除保护**：所选空间不可访问、页面列表为空而上次有内容，或本次消失的页面不少于 20 个且占上次页面数 80% 以上时，整次同步报错，不执行删除。开启同步删除后，其余情况下消失的页面按删除处理。
@@ -210,6 +214,20 @@
 ```json
 {"credentials":{"edition":"cloud","base_url":"https://team.atlassian.net","username":"me@example.com","api_token":"<token>"},"resource_ids":["<space-id>"]}
 ```
+
+**可选附件同步**：在数据源配置的 `settings` 中设置 `"sync_attachments": true`（默认关闭；目前通过数据源 API 配置，没有新增 UI 开关）。连接器使用 [Server/DC 附件列表](https://developer.atlassian.com/server/confluence/rest/v951/api-group-attachments/) 或 [Cloud v2 附件列表](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/#api-pages-id-attachments-get)，将 `.pdf`、`.doc`、`.docx`、`.ppt`、`.pptx`、`.xls`、`.xlsx` 文件分别作为知识条目交给现有文件入库/解析流水线。其它扩展名不在此同步范围；内联图片继续沿用页面图片处理。
+
+- 单附件上限为 20 MiB，既检查声明大小，也限制实际读取字节数。文件 metadata 保留来源页面标题/URL、附件 ID/版本与更新时间。下载沿用现有 Confluence 同源及上下文路径边界；跨域下载重定向会明确失败，不放宽凭据转发规则。依赖跨域 CDN 重定向的 Cloud 文件目前不支持下载。
+- 附件独立于页面正文版本检查。页面不变但附件更新时，只重新导入变更附件；稳定子项 ID 保持来源身份，复用已有文件替换逻辑。入库确认不代表异步解析已完成，解析进度仍在文档任务中查看。
+- 下载或入库失败时记录失败并中断本轮，保留该附件的旧文件及已确认的先前进度。修复失败原因后重试；全量同步的重试也会从已确认附件继续。大小超限等持续失败需要先处理源文件。已同步文件被改名为不支持的扩展名时会报告失败并保留旧文件，避免误判为删除。
+- 完整附件列表中消失的文件，以及被确认删除页面的已知附件，均通过原有 `sync_deletions` 开关处理。分页失败时不推断删除；删除失败时不确认游标，后续重试仍会看到待删除项。关闭附件同步不删除已有文件，并保留其状态供重新开启时对账；页面删除仍受原有删除检测和保护阈值约束。
+
+非机密设置示例（合并到现有 `settings`，保留其它配置）：
+
+```json
+{"settings":{"sync_attachments":true}}
+```
+
 
 #### Yuque 语雀（`connector/yuque/`）
 
@@ -230,15 +248,12 @@
 
 - **认证**：企业内部应用 Client ID、Client Secret 和有目标知识库访问权限的操作人 Union ID；开通 `Wiki.Workspace.Read`、`Wiki.Node.Read`、`Storage.File.Read` 后发布应用。
 - **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown。当前不导入钉钉表格，也不依赖异步导出回调。
-- **上传文件（默认关闭）**：`Settings.include_uploaded_files`（默认 `false`）开启后，所选范围内钉盘中的普通上传附件（`FILE/DOCUMENT` 的 `docx` / `pptx` / `xlsx` / `pdf`）会被下载并交给 WeKnora 自带解析器入库，文件名保留原扩展名、按扩展名选择解析器；单个文件上限 64 MiB，超出上限即失败且不重试（重签名只会拿到同样的字节）。下载失败（401/403/404 等）会重新申请签名后重试，最多 3 次。
+- **上传文件（默认关闭）**：`Settings.include_uploaded_files`（默认 `false`）开启后，所选范围内钉盘中的普通上传附件（`FILE/DOCUMENT` 的 `docx` / `pptx` / `xlsx` / `pdf`）会被下载并交给 WeKnora 自带解析器入库，文件名保留原扩展名、按扩展名选择解析器；单个文件上限 64 MiB，超出上限记录为文件失败并提示压缩或拆分，本轮不重复下载（重签名只会拿到同样的字节）。即使本轮待处理文件全部超限，也记为部分成功并保留后续定时同步；失败文件不推进成功版本游标，压缩或拆分后可在后续同步恢复。下载失败（401/403/404 等）会重新申请签名后重试，最多 3 次。
 - **开关的默认值与成本**：`include_uploaded_files` 未设置或非法值一律按 `false` 处理，因此**存量数据源升级后的下一次同步（含增量同步）行为不变**，不会突然开始下载和向量化附件。打开后，这些文件的正文会进入知识库，占用存储并产生 embedding 成本；不需要时请保持关闭。关闭时连接校验、资源列表和同步都会跳过上传附件，同步日志给出的原因是 `include_uploaded_files` 未启用，而不是类型不支持。
 - **开关的作用点**：测试连接（校验）、资源选择列表、全量同步与增量同步共用同一个判据，一处关闭即处处一致。
-- **目录结构（默认关闭）**：钉钉知识库本身就是目录树，但连接器历来把文档平铺到知识库根目录，`folder_path` 为空，不同来源目录的文档在知识库里无法区分。`Settings.preserve_folder_structure`（默认 `false`）开启后，`FileName` 编码为 `<工作区名>/<子目录>/…/<标题>.ext`，由下游 `SplitKnowledgeRelativePath` → `NormalizeKnowledgeFolderPath` 拆出 `folder_path`——与语雀 `folder_mode=toc`、飞书云盘目录映射是同一套机制。**工作区名是第一段**：一个知识库可以同时链接多个钉钉数据源，没有这一段，不同工作区里同名的顶层目录会静默合并成一个（语雀用书名作第一段是同样的理由）；工作区没有名字时退回用它的 ID。**路径始终以工作区为根**：选整个工作区、选某个子目录、选单篇文档，同一篇文档都落到同一个目录，不会出现两份。每一层目录名单独清洗（名字里的 `/`、`\`、`:` 等替换为 `_`），因此目录名里的斜杠不会凭空多出一层；同名子目录合并为同一个知识库目录（钉钉节点 ID 唯一、标题不唯一），`.`、`..` 这类非法层级由下游归一化丢弃而不是让同步失败。开启后目录由连接器托管：在知识库里手动调整过的目录，会在该文档下次同步时被覆盖回钉钉的结构。
-- **目录开关的默认值与作用范围**：`preserve_folder_structure` 未设置或非法值一律按 `false` 处理，因此**存量数据源升级后 `FileName` 逐字节不变、`folder_path` 仍为空**。它只决定**入库路径**，不决定哪些文档入库：测试连接与资源选择列表不受它影响，关掉它也不会让任何文档消失。目录维度不写入同步游标——开关开与关时游标里的"资源 → 文档版本"表完全一致，所以目录永远不会让文档被判定为"源端已删除"。
-- **目录相关注意 / 限制**：
-  - **开启开关不会自动归位已导入的文档**：增量同步按 `modifiedTimestamp` 判断变化，只重新读取内容有变化的文档，因此**已经在知识库里的文档会保持原来的扁平文件名**——它们并没有被重新读取。只有内容变更过的文档、或手动触发一次全量同步之后，才会整体移到新目录。这与语雀修改 `folder_mode` 后的行为一致。
-  - **`include_uploaded_files` 关闭时**，上传附件（`docx` / `pptx` / `xlsx` / `pdf`）不入库，其所在目录自然也不会出现；在线 `adoc` 文档不受该开关影响。
-  - **目录深度与长度由下游统一裁剪**：`folder_path` 最多 16 层、单个目录名最多 128 字节、整条路径最多 1024 字节，超出部分被截断（与文件夹上传同一套规则）。
+- **保留目录结构**：开启 `settings.preserve_folder_structure` 后，以工作区名为根目录保留来源层级。默认关闭，不改变已有数据源的导入路径；同一文档不因选择整个工作区、子目录或单篇文档而产生不同路径。
+- **更新已有目录**：开启后仅新读取的文档使用新结构。需要整理全部已导入内容时，手动执行一次全量同步。开启期间，来源目录由连接器管理，手动调整的本地目录可能在后续同步时被覆盖。
+- **目录与文件范围分别设置**：目录开关只影响入库路径；`include_uploaded_files` 决定是否导入上传到钉盘的 Office/PDF 等文件。在线文档不受后者影响。目录深度和长度仍遵循知识库路径限制。
 - **同步**：按文档 `modifiedTimestamp`（毫秒）增量读取，缺失时回退 `modifiedTime`；合并重叠选择。全量同步也会对照上次游标对账删除，避免 `sync_mode=full` 漏删。目录遍历不完整时暂缓删除。
 - **正文**：公开 Blocks API 只返回文档根下的一级块；高亮块等容器若响应里带有 `children` 会继续渲染，否则在元数据中标记 `nested_blocks_unavailable`，避免把残缺正文当成完整成功。
 - **校验**：测试连接会列出知识库、探测根节点列表，并在根下存在在线文档时试读 Blocks；对已开启摄取的上传文件只解析存储位置并申请下载 URL，不下载正文，以便尽早发现缺少 `Wiki.Node.Read` / `Storage.File.Read`，同时让校验对多兆字节文件保持廉价。
@@ -310,7 +325,7 @@ flowchart LR
 
 - **防御性取消**：数据源或知识库已被删除时，把 SyncLog 置为 `canceled` 并返回 nil（不再重试）。
 - **两条抓取路径**：连接器实现了 `StreamingConnector` 走 `processSyncStreaming`（流式）；否则按 `ForceFull || SyncMode==full` 走 `FetchAll`，或带上 `ParseSyncCursor()` 的游标走 `FetchIncremental`（批量）。
-- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。实现了 `FullStreamingConnector` 的连接器（包括 Feishu/Lark Wiki 与云盘、Seafile、Confluence）在全量同步时改走 `FetchFullStream`：重新抓取全部条目，同时保留旧游标作为删除对账基线。
+- **流式路径的游标策略**（`streamStartCursor`）：用户触发的全量同步在**首次尝试**时丢弃游标全量抓取；Asynq **重试**（attempt > 0）以及所有增量同步都从最后一个 checkpoint 续传。实现了 `FullStreamingConnector` 的连接器（包括 Feishu/Lark Wiki 与云盘、Seafile、Nextcloud、Confluence）在全量同步时改走 `FetchFullStream`：重新抓取全部条目，同时保留旧游标作为删除对账基线。
 - **入库核心 `applyFetchedItem` → `ingestItem`**：
   - `IsDeleted=true` 且 `sync_deletions=true` 时，按租户、知识库、数据源 ID 和 external_id 查找并真实删除对应知识；关闭同步删除则保留已有知识。删除能力还取决于连接器是否提供可靠的删除检测；
   - 有 `Content` 字节 → 包装成 `multipart.FileHeader` 走 `KnowledgeService.CreateKnowledgeFromFile`（完整文档解析流水线）；只有 `URL` → 走 `CreateKnowledgeFromURL` 由 WeKnora 下载解析；
@@ -454,7 +469,7 @@ type StreamingConnector interface {
 }
 ```
 
-任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark（知识库与云盘）、GitLab 和 Confluence 连接器实现了 `StreamingConnector`；Feishu/Lark、Seafile 和 Confluence 另实现 `FullStreamingConnector`，全量同步也能对账删除。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
+任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark（知识库与云盘）、GitLab 和 Confluence 连接器实现了 `StreamingConnector`；Feishu/Lark、Seafile、Nextcloud 和 Confluence 另实现 `FullStreamingConnector`，全量同步也能对账删除。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
 
 #### ConnectorRegistry：注册与查找
 
@@ -473,9 +488,10 @@ registry.Register(imaConnector.NewConnector())                      // ima
 registry.Register(rssConnector.NewConnector())                      // rss
 registry.Register(gitlabConnector.NewConnector())                   // gitlab
 registry.Register(seafileConnector.NewConnector())                  // seafile
+registry.Register(nextcloudConnector.NewConnector())                // nextcloud
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`、`nextcloud`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

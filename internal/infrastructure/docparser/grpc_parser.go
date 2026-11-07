@@ -18,7 +18,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// Match the HTTP upload envelope allowance: legal file bytes still need room
+// for protobuf field tags, filenames, parser overrides and response framing.
+const grpcMessageEnvelopeSlack = 1 << 20
+
 func getMaxMessageSize() int {
+	return getMaxFileSize() + grpcMessageEnvelopeSlack
+}
+
+func getMaxFileSize() int {
 	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
 		if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {
 			return size * 1024 * 1024
@@ -93,6 +101,22 @@ func (p *GRPCDocumentReader) IsConnected() bool {
 	return p.conn != nil
 }
 
+// GetVersionInfo queries the running docreader rather than assuming its image
+// matches the app build. Older docreaders return Unimplemented to the caller.
+func (p *GRPCDocumentReader) GetVersionInfo(ctx context.Context) (string, string, error) {
+	p.mu.RLock()
+	client := p.client
+	p.mu.RUnlock()
+	if client == nil {
+		return "", "", errNotConnected
+	}
+	info, err := client.GetInfo(ctx, &proto.GetInfoRequest{})
+	if err != nil {
+		return "", "", err
+	}
+	return info.GetVersion(), info.GetCommitId(), nil
+}
+
 func (p *GRPCDocumentReader) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -110,6 +134,12 @@ func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	p.mu.RUnlock()
 	if client == nil {
 		return nil, errNotConnected
+	}
+
+	maxFileSize := getMaxFileSize()
+	if len(req.FileContent) > maxFileSize {
+		return nil, status.Errorf(codes.ResourceExhausted,
+			"docreader file content size %d exceeds maximum %d", len(req.FileContent), maxFileSize)
 	}
 
 	protoReq := &proto.ReadRequest{
@@ -251,4 +281,25 @@ func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 		})
 	}
 	return result, nil
+}
+
+// PreprocessImage straightens and crops a photographed page before OCR runs.
+// The docreader does the work; a page it declines to improve comes back as
+// fallback=true with no bytes, which the caller reads as "use the original".
+func (p *GRPCDocumentReader) PreprocessImage(ctx context.Context, image []byte) ([]byte, bool, error) {
+	p.mu.RLock()
+	client := p.client
+	p.mu.RUnlock()
+	if client == nil {
+		return nil, true, errNotConnected
+	}
+
+	resp, err := client.PreprocessImage(ctx, &proto.PreprocessImageRequest{Image: image})
+	if err != nil {
+		return nil, true, fmt.Errorf("gRPC PreprocessImage failed: %w", err)
+	}
+	if resp.GetFallbackNeeded() || len(resp.GetImage()) == 0 {
+		return nil, true, nil
+	}
+	return resp.GetImage(), false, nil
 }

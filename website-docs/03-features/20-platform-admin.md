@@ -38,7 +38,7 @@
 | --- | --- | --- |
 | 系统设置 | 全局运行时开关（注册模式、空间策略、并发、SSRF 白名单等），按设置项的生效规则应用，见下方设置表 | `GET/PUT/DELETE /system/admin/settings[/:key]` |
 | 模型目录 | 查看目录模型及其来源，编辑、添加模型或用 JSON 批量修改（保存即生效），按版本历史恢复；详见[模型目录管理](06-models.md#系统管理员维护模型目录) | `/system/admin/model-catalog*` |
-| 任务队列 | 查看 asynq 各队列实时积压、逐个任务的重试/归档/删除、批量清空归档任务；Lite 模式返回 `available=false` | `/system/admin/runtime/queues*` |
+| 任务队列 | 查看队列积压、逐个任务操作与归档；按资料查看入库/Wiki 进度及失败历史，单份或限量批量启动已有 Wiki 待办。Lite 模式仍可读取资料进度 | `/system/admin/runtime/queues*`、`/system/admin/runtime/documents*` |
 | 平台 API Key | 面向控制面自动化的 platform 作用域 Key，能力包括 `system_tenants_read/manage`、`system_settings_read/manage`、`system_runtime_read/manage`、`system_audit_read` | `/system/admin/api-keys` |
 | 系统审计日志 | `tenant_id = 0` 的平台级事件（改设置、提升/撤销管理员、队列操作等）。空间级审计接口按 tenant 过滤，看不到这些行 | `GET /system/admin/audit-log` |
 
@@ -46,6 +46,16 @@
 
 - **重置用户密码**（`POST /system/admin/users/reset-password`）：替换目标用户的本地密码并吊销其全部会话。**不能给自己重置**——自助改密码仍要求提供旧密码；
 - **批量套用默认存储配额**（`POST /system/admin/tenants/apply-default-storage-quota`）：把当前的默认配额写到所有已存在的空间上。该操作更新已有空间的配额数据。
+
+### 按资料查看进度与启动 Wiki
+
+「任务队列」中的资料进度视图支持搜索资料标题、文件名和知识库名，并按未完成、失败或已完成筛选。入库状态与 Wiki 状态分别展示；详情仅显示当前处理轮次的阶段元数据，以及最近 50 条原始失败记录（每条错误预览最多 2048 字符）。恢复成功后历史记录仍保留，历史失败数量不代表当前状态。资料正文、任务载荷和阶段输入输出不在此视图中返回。
+
+存在可领取 Wiki 待办、已完成主要入库阶段且已启用 Wiki 的资料，可点击「立即整理」。批量启动接受 1–100 份，沿当前搜索范围优先安排等待最久的资料；已被 Worker 领取的资料会跳过。重复请求使用稳定任务 ID 去重。返回的数量表示队列已接收，Wiki 完成进度需继续观察。
+
+启动沿用现有 Worker、知识库并发和模型限制；原待办内容、重试次数和失败归档保留。没有可启动待办的失败资料仍需通过现有资料重试流程处理。批量数量限制本次安排的资料数，自动 Worker 会继续处理其他积压。队列部分不可用时，提示会包含已接收数量，可刷新后再次操作。
+
+该视图属于系统管理员的运行元数据权限；平台 API Key 分别要求 `system_runtime_read` 和 `system_runtime_manage`。资料进度直接读取数据库，在 Lite 模式及 Redis Inspector 不可用时仍可查看。
 
 ### 管理平台用户
 
@@ -78,7 +88,8 @@
 | `auth.default_tenant_mode` | `create_personal` / `tenantless` | `create_personal` | 只影响之后注册的新用户 |
 | `tenant.self_service_creation_enabled` | bool | `true` | 立即 |
 | `tenant.max_owned_per_user` | int | `10`（0 = 用内置默认，负数 = 关闭限额） | 每次建空间时读取 |
-| `tenant.default_storage_quota_gb` | int | `10` | **仅新建空间时读取**，不回写已有空间 |
+| `tenant.default_storage_quota_gb` | int | `10` | MB 设置未启用时的新空间默认配额（GB） |
+| `tenant.default_storage_quota_mb` | int | `0` | 正数优先于 GB；0 或负数沿用 GB。包含注册自动创建的个人空间 |
 | `tenant.auto_create_api_key` | bool | `false` | 每次建空间时读取 |
 | `ssrf.whitelist` | 字符串列表 | 空 | 立即（`SSRF_WHITELIST_EXTRA` 仍只由部署方维护，不在此覆盖） |
 | `asynq.core/postprocess/enrichment/maintenance/shared/wiki_concurrency` | int | 见[异步任务系统](../02-architecture/05-async-tasks.md) | 各 worker pool 重新装配 |
@@ -110,3 +121,18 @@
 - `cmd/server/bootstrap.go`：首个系统管理员引导。
 - `frontend/src/config/settingsAccess.ts`：平台设置分区。
 - `internal/application/service/system_setting.go`：运行时设置注册表。
+
+### 默认空间存储配额
+
+手动创建空间、普通注册及 OIDC 注册自动创建个人空间，均在创建服务中写入相同的默认配额。
+例如设置 `WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_MB=50`，新空间获得 50 × 1024² 字节。
+MB 设置为正数时优先于 GB 设置；MB 为 0 或负数时沿用原有 GB 设置，GB 为非正数时回退到 10 GB。
+每个设置分别遵循 **数据库覆盖值 > 环境变量 > 内置默认值**，因此保存 MB 为 0 可覆盖环境变量并恢复 GB 配置。
+超出 int64 字节范围的 MB 值回退到 GB；GB 溢出时回退到 10 GB，不会产生无限配额。
+
+默认值只影响之后新建的空间。显式指定的正数 `storage_quota`（字节）继续生效；已有空间不会自动改写。
+如需更新存量空间，管理员可使用“应用到所有现有空间”，确认框展示当前实际生效的 MB/GB 配额。
+该操作会覆盖所有现有空间的配额，包括单独调整过的值。
+
+无需修改数据库列默认值。服务写入显式字节值，可避免手工 `ALTER TABLE ... SET DEFAULT` 在升级时被 GORM
+模型中的默认值重置；原有列默认值保留以兼容直接 SQL 等未经过服务的写入。

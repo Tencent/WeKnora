@@ -31,6 +31,19 @@ func (r *resourceRepository) GetByID(ctx context.Context, id string) (*types.Sto
 	return &resource, err
 }
 
+func (r *resourceRepository) BindStorageBackend(
+	ctx context.Context, id, backendID string,
+) (*types.StoredResource, error) {
+	err := r.db.WithContext(ctx).Model(&types.StoredResource{}).
+		Where("id = ? AND state = ? AND (storage_backend_id = '' OR storage_backend_id IS NULL)",
+			id, types.ResourceStateActive).
+		Update("storage_backend_id", backendID).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.GetByID(ctx, id)
+}
+
 func (r *resourceRepository) GetByHandle(ctx context.Context, handle string) (*types.StoredResource, error) {
 	var resource types.StoredResource
 	err := r.db.WithContext(ctx).

@@ -36,6 +36,7 @@ export interface ASRConfigOverride {
 }
 
 export interface QuestionGenerationConfigOverride {
+  model_id?: string
   enabled?: boolean
   question_count?: number
   custom_instructions?: string
@@ -74,8 +75,8 @@ export interface KnowledgeProcessOverrides {
   // Per-upload override of the knowledge base's attribute-observed image
   // pipeline switch.
   image_attrs_enabled?: boolean
-  // Per-upload override of the image pipeline and its private tunables. The
-  // pair travels as one unit; when image_pipeline is set the backend also
+  // Per-upload override of the image pipeline and every setting it declares.
+  // The pair travels as one unit; when image_pipeline is set the backend also
   // derives image_attrs_enabled from it.
   image_pipeline?: string
   image_pipeline_params?: Record<string, unknown>

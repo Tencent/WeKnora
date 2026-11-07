@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -23,7 +24,7 @@ type DuckDuckGoProvider struct {
 
 // NewDuckDuckGoProvider creates a new DuckDuckGo provider.
 // DuckDuckGo is free and requires no API key; optional ProxyURL tunnels requests via an HTTP/HTTPS proxy.
-func NewDuckDuckGoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewDuckDuckGoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	client, err := NewSearchHTTPClient(30*time.Second, params.ProxyURL)
 	if err != nil {
 		return nil, err
@@ -39,10 +40,9 @@ func (p *DuckDuckGoProvider) Name() string {
 // Search performs a web search using DuckDuckGo HTML endpoint with API fallback
 func (p *DuckDuckGoProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults := request.Query, request.MaxResults
 	if maxResults <= 0 {
 		maxResults = 5
 	}
@@ -224,22 +224,15 @@ func (p *DuckDuckGoProvider) searchAPI(
 
 // cleanDDGURL cleans the URL from DuckDuckGo HTML endpoint
 func cleanDDGURL(urlStr string) string {
-	if strings.HasPrefix(urlStr, "//duckduckgo.com/l/?uddg=") {
-		trimmed := strings.TrimPrefix(urlStr, "//duckduckgo.com/l/?uddg=")
-		if idx := strings.Index(trimmed, "&rut="); idx != -1 {
-			decodedStr, err := url.PathUnescape(trimmed[:idx])
-			if err == nil {
-				return decodedStr
-			}
-			return ""
-		}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil || parsedURL.Host != "duckduckgo.com" || parsedURL.Path != "/l/" ||
+		(parsedURL.Scheme != "" && parsedURL.Scheme != "https") {
+		return urlStr
 	}
-	if strings.HasPrefix(urlStr, "https://duckduckgo.com/l/?uddg=") {
-		if parsedURL, err := url.Parse(urlStr); err == nil {
-			if uddg := parsedURL.Query().Get("uddg"); uddg != "" {
-				return uddg
-			}
-		}
+	// uddg is a query parameter. Tracking fields are optional and unordered;
+	// decode the destination exactly once for both absolute and network-path URLs.
+	if target := parsedURL.Query().Get("uddg"); target != "" {
+		return target
 	}
 	return urlStr
 }
@@ -249,8 +242,16 @@ func extractTitle(text string) string {
 	lines := strings.Split(text, "\n")
 	if len(lines) > 0 {
 		title := strings.TrimSpace(lines[0])
-		if len(title) > 100 {
-			title = title[:100] + "..."
+		const maxTitleBytes = 100
+		if len(title) > maxTitleBytes {
+			// Back off to a rune boundary: titles are often Chinese, and a partial
+			// rune is invalid UTF-8 that the knowledge base's title column rejects.
+			// Same rule as #4555 / #4583.
+			cut := maxTitleBytes
+			for cut > 0 && !utf8.RuneStart(title[cut]) {
+				cut--
+			}
+			title = title[:cut] + "..."
 		}
 		return title
 	}
