@@ -282,3 +282,34 @@ func TestStreamReportsIncompleteAsError(t *testing.T) {
 		require.False(t, answer.Done, "a cut-off stream must not close the answer as complete")
 	}
 }
+
+// The provider reports token usage on the stream's final chunk; the closing
+// answer event must carry it so the KnowledgeQA turn can report usage on the
+// complete event and persist it with the message (issue #3865).
+func TestStreamCarriesUsageOnFinalAnswer(t *testing.T) {
+	usage := &types.TokenUsage{PromptTokens: 21203, CompletionTokens: 27, TotalTokens: 21230}
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "hel"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "lo", Done: true, Usage: usage},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-usage"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(
+		context.Background(), types.CHAT_COMPLETION_STREAM, chatManage,
+		func() *PluginError { return nil },
+	))
+
+	require.Eventually(t, func() bool {
+		events := bus.finalAnswerEvents()
+		return len(events) == 2 && events[len(events)-1].Done
+	}, 2*time.Second, 5*time.Millisecond)
+	events := bus.finalAnswerEvents()
+	require.Equal(t, "hello", events[len(events)-1].Content)
+	require.Same(t, usage, events[len(events)-1].Usage.(*types.TokenUsage))
+	// Chunks without usage keep it unset instead of manufacturing a zero value.
+	require.Nil(t, events[0].Usage)
+}

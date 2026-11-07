@@ -131,6 +131,10 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingOpen := false
 		answerCompleted := false
 		answerProduced := false
+		// Providers report usage on the final stream chunk; keep the latest
+		// seen so the closing answer event can hand it to the QA turn
+		// (issue #3865: the complete event carried no usage on this path).
+		var turnUsage *types.TokenUsage
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -243,6 +247,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeAnswer {
+					if response.Usage != nil {
+						turnUsage = response.Usage
+					}
 					// Providers can emit a completion once for finish_reason and again
 					// for their EOF sentinel. A final answer is a terminal event for a
 					// single stream, so forwarding a later duplicate would put an answer
@@ -272,6 +279,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 							Content:   response.Content,
 							Done:      response.Done,
 							Truncated: truncated,
+							Usage:     turnUsage,
 						},
 					})
 				}
