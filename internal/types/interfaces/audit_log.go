@@ -48,6 +48,12 @@ type AuditLogRepository interface {
 	// Implementations should delete in a single statement (no per-row
 	// fetch) so the long-tail cost stays at "one DELETE per sweep".
 	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+	// ListCardActionRows returns the newest agent.card_action_executed rows
+	// for one (tenant_id, target_id), newest first, capped at the list limit.
+	// Feeds the card-action one-shot dedup. The caller MUST build target_id
+	// with the same truncation the write path uses or the lookup misses
+	// every row.
+	ListCardActionRows(ctx context.Context, tenantID uint64, targetID string) ([]*types.AuditLog, error)
 }
 
 // AuditLogService is the high-level audit API the rest of the codebase
@@ -74,4 +80,11 @@ type AuditLogService interface {
 	// which keeps the daily sweep cheap when retention is disabled.
 	// Returns rows deleted; transient repo errors propagate.
 	Purge(ctx context.Context, retentionDays int) (int64, error)
+	// CardActionAlreadyExecuted reports whether this button (targetID) was
+	// already successfully executed for this message and action name. The
+	// incoming messageID/targetID are ALREADY truncated to the write-path
+	// widths. Lookup errors propagate: the caller degrades to proceed — the
+	// exclusive live-run claim is the real double-run backstop, and audit is
+	// best-effort by design.
+	CardActionAlreadyExecuted(ctx context.Context, tenantID uint64, targetID, messageID, actionName string) (bool, error)
 }

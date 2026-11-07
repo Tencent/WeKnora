@@ -10,6 +10,16 @@ import "@/assets/theme/tdesign-overrides.less";
 import "@/assets/dropdown-menu.less";
 import "@/components/css/chat-hljs-dark.less";
 import "@/components/css/assistant-page-fill.less";
+// A2UI v0.9 official cards (producer-side integration): component styles for
+// the a2ui-vue community renderer. A card only mounts into the DOM (lazily) once
+// a ```a2ui fence appears in a message, so its styles must be loaded beforehand.
+import "a2ui-vue/dist/a2ui-vue.css";
+// Our host layer: supply the design tokens a2ui-vue lacks, fix its box-model
+// defects, and style the degraded state. These overrides outrank the library
+// through one extra class layer in the selector (0-1-1 vs the library's 0-1-0),
+// not through import order here; they still load after the library styles, since
+// when two rules tie on specificity, source order is the only tiebreaker.
+import "@/assets/theme/a2ui-card.css";
 // vue-virtual-scroller ships its own tiny stylesheet — required for
 // RecycleScroller/DynamicScroller to size their viewport correctly.
 // Without it the scroller computes 0 height and renders no items.

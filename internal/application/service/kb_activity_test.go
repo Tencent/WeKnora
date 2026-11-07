@@ -29,6 +29,10 @@ func (*captureKBActivityAudit) List(context.Context, uint64, *interfaces.AuditLo
 
 func (*captureKBActivityAudit) Purge(context.Context, int) (int64, error) { return 0, nil }
 
+func (*captureKBActivityAudit) CardActionAlreadyExecuted(context.Context, uint64, string, string, string) (bool, error) {
+	return false, nil
+}
+
 func TestRecordKBActivityCarriesInitiatorAndTaskMetadata(t *testing.T) {
 	ctx := types.TaskInitiator{UserID: "user-1", Role: types.TenantRoleAdmin}.Apply(context.Background())
 	ctx = withKBActivityTask(ctx, "task-1", "user")

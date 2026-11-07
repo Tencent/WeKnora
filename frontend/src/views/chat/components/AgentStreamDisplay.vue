@@ -892,6 +892,12 @@ import {
   ensureMermaidInitialized,
   enhanceMarkdownContainer,
 } from '@/utils/mermaidShared';
+import {
+  createSurfaceAwareCodeRenderer,
+  markA2uiTagBlocks,
+  mountA2uiSurfaces,
+  unmountA2uiSurfaces,
+} from '@/utils/a2uiSurface';
 import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
@@ -2868,6 +2874,37 @@ const onRootKeydown = (e: KeyboardEvent) => {
   }
 };
 
+// A2UI official cards. The registry key is the persisted assistant message id — the same one the execute
+// endpoint accepts. The key is frozen into a per-component-instance constant on the first mount: a streamed
+// answer is written out before that id arrives, so the unmount path would read a different value, never find
+// the entry again, and leave the nested app and its onEvent subscription in the module-level Map forever.
+// /api/v1/agent/actions/execute still receives props.messageId from A2uiCard, unrelated to this registry key.
+const a2uiSessionId = (): string => props.sessionId || '';
+let a2uiMountId: string | null = null;
+
+// Mount timing. Two entry points: onMounted covers "a history session was opened and never re-rendered
+// afterwards", onUpdated covers the moment streaming finishes. The mount function flips the placeholder from
+// pending to mounting before awaiting, so both entries running at once still mount one app each. The segment
+// must be finished first: decoding a half-written JSON before the typewriter has fully revealed the ```a2ui
+// fence body always fails. Embedded hosts get no placeholder from createSurfaceAwareCodeRenderer at all, so
+// the early return here only saves querying rootElement on every re-render.
+function mountA2uiSurfacesIfDone(): void {
+  if (props.embeddedMode || !isSegmentDone.value) return;
+  if (a2uiMountId === null) {
+    a2uiMountId = persistedAssistantId(props.session) || String(props.session?.id || '');
+  }
+  void mountA2uiSurfaces(rootElement.value, a2uiSessionId(), a2uiMountId);
+}
+
+// Unmount. Vue only honours app.unmount(): if the host component is destroyed and the nested apps are merely
+// dropped along with the DOM, they leak together with their onEvent subscriptions, so the host must explicitly
+// release the cards of its own message. The key used is the one frozen at mount time — for why it is not
+// recomputed on the fly, see the liveSurfaceApps comment in utils/a2uiSurface.ts.
+function releaseA2uiSurfaces(): void {
+  if (a2uiMountId === null) return;
+  unmountA2uiSurfaces(a2uiSessionId(), a2uiMountId);
+}
+
 onMounted(() => {
   nextTick(async () => {
     const root = rootElement.value;
@@ -2879,10 +2916,14 @@ onMounted(() => {
     rebindCitations();
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
+    mountA2uiSurfacesIfDone();
   });
 });
 
 onBeforeUnmount(() => {
+  // First, and before the `!root` bail-out below: releasing the A2UI surface
+  // apps does not need the element, and skipping it would leak them.
+  releaseA2uiSurfaces();
   const root = rootElement.value;
   if (!root) return;
   root.removeEventListener('click', onRootClick, true);
@@ -2904,12 +2945,20 @@ onUpdated(() => {
     // simply retries later (and the answerFullyRendered pass is the backstop).
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
+    mountA2uiSurfacesIfDone();
   });
 });
 
 // 自定义渲染器 - 支持 Mermaid
 const agentRenderer = new marked.Renderer();
-agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
+// ```a2ui fence → mount placeholder for the official A2UI v0.9 card. WeKnora is a producer and the agent
+// system prompt teaches exactly this format, so cards produced by an agent turn must render here, not only
+// in botmsg for plain Q&A. The three embedded hosts skip it: there the fence falls back to a code block by
+// design, so not even a placeholder div is generated — that avoids rendering an empty shell nobody mounts.
+agentRenderer.code = createSurfaceAwareCodeRenderer(
+  Boolean(props.embeddedMode),
+  createMermaidCodeRenderer('mermaid-agent'),
+);
 
 // Files the agent generated in its sandbox carry the same `resource://` handle
 // as any other stored file, so they are matched against this reply's artifacts
@@ -2970,6 +3019,8 @@ const renderAgentMarkdown = (
     prepareMarkdown: prepareAgentMarkdown,
     injectCachedMermaidSvg,
     entityLinkLabels: entityLinkLabels.value,
+    // Official <a2ui-json> tag form. Skipped when embedded — same plane rule as the code renderer.
+    markA2uiTags: props.embeddedMode ? undefined : markA2uiTagBlocks,
   });
 };
 
