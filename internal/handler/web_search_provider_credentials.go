@@ -39,7 +39,7 @@ type webSearchCredentialsPutRequest struct {
 
 // Put godoc
 // @Summary      设置联网搜索服务商凭据
-// @Description  为服务商写入 api_key；省略时返回当前配置状态，空字符串视为 no-op（如需删除请用 DELETE）
+// @Description  写入 api_key；省略时返回当前配置状态
 // @Tags         联网搜索
 // @Accept       json
 // @Produce      json

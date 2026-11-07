@@ -33,7 +33,7 @@ type modelCredentialsPutRequest struct {
 
 // Put godoc
 // @Summary      设置模型凭据
-// @Description  为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）。模型字段：api_key（所有厂商）、app_secret（WeKnora Cloud）
+// @Description  写入 api_key 或 app_secret；省略的字段保留原值
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
@@ -100,7 +100,7 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 
 // DeleteField godoc
 // @Summary      移除模型的单个凭据字段
-// @Description  删除指定字段的存储凭据；删除已为空的字段是幂等的。字段名：api_key | app_secret
+// @Description  删除指定字段的存储凭据；删除已为空的字段是幂等的
 // @Tags         模型管理
 // @Produce      json
 // @Param        id     path      string  true  "模型 ID"

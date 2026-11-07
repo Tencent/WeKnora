@@ -61,7 +61,7 @@ type dataSourceCredentialsPutRequest struct {
 
 // Put godoc
 // @Summary      设置数据源凭据
-// @Description  连接器凭据是原子映射，整体写入：credentials 必须非空；如需删除请用 DELETE /datasource/{id}/credentials/credentials
+// @Description  整体写入 credentials 映射，必须非空
 // @Tags         数据源
 // @Accept       json
 // @Produce      json
