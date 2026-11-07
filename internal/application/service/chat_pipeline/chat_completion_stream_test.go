@@ -308,7 +308,8 @@ func TestStreamCarriesUsageOnFinalAnswer(t *testing.T) {
 		return len(events) == 2 && events[len(events)-1].Done
 	}, 2*time.Second, 5*time.Millisecond)
 	events := bus.finalAnswerEvents()
-	require.Equal(t, "hello", events[len(events)-1].Content)
+	// Events carry per-chunk content; the consumer accumulates.
+	require.Equal(t, "lo", events[len(events)-1].Content)
 	require.Same(t, usage, events[len(events)-1].Usage.(*types.TokenUsage))
 	// Chunks without usage keep it unset instead of manufacturing a zero value.
 	require.Nil(t, events[0].Usage)
@@ -342,9 +343,10 @@ func TestStreamCarriesUsageTrailerAfterFinishChunk(t *testing.T) {
 	}, 2*time.Second, 5*time.Millisecond)
 	events := bus.finalAnswerEvents()
 	// Only the closing event may carry Done; the trailer never becomes a
-	// second Done event after the session's answer closed.
+	// second Done event after the session's answer closed. Events carry
+	// per-chunk content — the consumer accumulates.
 	require.Equal(t, []event.AgentFinalAnswerData{
 		{Content: "hel"},
-		{Content: "hello", Done: true, Usage: usage},
+		{Content: "lo", Done: true, Usage: usage},
 	}, events)
 }
