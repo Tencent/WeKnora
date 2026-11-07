@@ -146,7 +146,7 @@ func (s *knowledgeBaseService) ReadChunkImage(ctx context.Context, result *types
 		return nil, fmt.Errorf("chunk %s carries no image URL", result.ID)
 	}
 	if !isStoredImageURL(imageURL) {
-		data, err := secutils.DownloadBytes(imageURL)
+		data, err := secutils.DownloadBytes(ctx, imageURL)
 		if err != nil {
 			return nil, fmt.Errorf("download %s: %w", imageURL, err)
 		}
