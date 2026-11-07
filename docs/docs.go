@@ -4208,7 +4208,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "连接器凭据是原子映射，整体写入：credentials 必须非空；如需删除请用 DELETE /datasource/{id}/credentials/credentials",
+                "description": "整体写入 credentials 映射，必须非空",
                 "consumes": [
                     "application/json"
                 ],
@@ -15392,7 +15392,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示。GET 走查询参数；POST 见 resolve-post，同一处理函数、参数改在 JSON 请求体中提供",
+                "description": "根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示",
                 "produces": [
                     "application/json"
                 ],
@@ -15446,7 +15446,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "与 GET /models/catalog/resolve 为同一处理函数，但参数经 JSON 请求体传入，并支持可选的 spec 覆盖",
+                "description": "与 GET 同函数；参数走 JSON 请求体，支持可选 spec 覆盖",
                 "consumes": [
                     "application/json"
                 ],
@@ -15459,12 +15459,13 @@ const docTemplate = `{
                 "summary": "解析模型的有效接入配置（JSON 请求体）",
                 "parameters": [
                     {
-                        "description": "{provider, model?, base_url?, model_type?, spec?}",
+                        "description": "{provider, model?, base_url?, model_type?, spec?: {api?, reasoning?, input?, context_window?, max_output_tokens?, thinking_levels?, compat?}}",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/internal_handler.resolveModelCatalogBody"
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 ],
@@ -16043,7 +16044,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）。模型字段：api_key（所有厂商）、app_secret（WeKnora Cloud）",
+                "description": "写入 api_key 或 app_secret；省略的字段保留原值",
                 "consumes": [
                     "application/json"
                 ],
@@ -16117,7 +16118,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "删除指定字段的存储凭据；删除已为空的字段是幂等的。字段名：api_key | app_secret",
+                "description": "删除指定字段的存储凭据；删除已为空的字段是幂等的",
                 "produces": [
                     "application/json"
                 ],
@@ -25033,7 +25034,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "为服务商写入 api_key；省略时返回当前配置状态，空字符串视为 no-op（如需删除请用 DELETE）",
+                "description": "写入 api_key；省略时返回当前配置状态",
                 "consumes": [
                     "application/json"
                 ],
@@ -43904,29 +43905,6 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
-                }
-            }
-        },
-        "internal_handler.resolveModelCatalogBody": {
-            "type": "object",
-            "required": [
-                "provider"
-            ],
-            "properties": {
-                "base_url": {
-                    "type": "string"
-                },
-                "model": {
-                    "type": "string"
-                },
-                "model_type": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "spec": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSpecOverride"
                 }
             }
         },

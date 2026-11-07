@@ -14224,21 +14224,6 @@ definitions:
           type: string
         type: array
     type: object
-  internal_handler.resolveModelCatalogBody:
-    properties:
-      base_url:
-        type: string
-      model:
-        type: string
-      model_type:
-        type: string
-      provider:
-        type: string
-      spec:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSpecOverride'
-    required:
-    - provider
-    type: object
   internal_handler.sandboxConfigRequest:
     properties:
       config:
@@ -17479,7 +17464,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 连接器凭据是原子映射，整体写入：credentials 必须非空；如需删除请用 DELETE /datasource/{id}/credentials/credentials
+      description: 整体写入 credentials 映射，必须非空
       parameters:
       - description: 数据源 ID
         in: path
@@ -25006,8 +24991,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）。模型字段：api_key（所有厂商）、app_secret（WeKnora
-        Cloud）
+      description: 写入 api_key 或 app_secret；省略的字段保留原值
       parameters:
       - description: 模型 ID
         in: path
@@ -25049,7 +25033,7 @@ paths:
       - 模型管理
   /models/{id}/credentials/{field}:
     delete:
-      description: 删除指定字段的存储凭据；删除已为空的字段是幂等的。字段名：api_key | app_secret
+      description: 删除指定字段的存储凭据；删除已为空的字段是幂等的
       parameters:
       - description: 模型 ID
         in: path
@@ -25082,8 +25066,7 @@ paths:
       - 模型管理
   /models/catalog/resolve:
     get:
-      description: 根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示。GET
-        走查询参数；POST 见 resolve-post，同一处理函数、参数改在 JSON 请求体中提供
+      description: 根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示
       parameters:
       - description: 厂商标识
         in: query
@@ -25119,15 +25102,16 @@ paths:
     post:
       consumes:
       - application/json
-      description: 与 GET /models/catalog/resolve 为同一处理函数，但参数经 JSON 请求体传入，并支持可选的 spec
-        覆盖
+      description: 与 GET 同函数；参数走 JSON 请求体，支持可选 spec 覆盖
       parameters:
-      - description: '{provider, model?, base_url?, model_type?, spec?}'
+      - description: '{provider, model?, base_url?, model_type?, spec?: {api?, reasoning?,
+          input?, context_window?, max_output_tokens?, thinking_levels?, compat?}}'
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/internal_handler.resolveModelCatalogBody'
+          additionalProperties: true
+          type: object
       produces:
       - application/json
       responses:
@@ -30948,7 +30932,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 为服务商写入 api_key；省略时返回当前配置状态，空字符串视为 no-op（如需删除请用 DELETE）
+      description: 写入 api_key；省略时返回当前配置状态
       parameters:
       - description: 服务商 ID
         in: path
