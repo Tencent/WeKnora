@@ -5,7 +5,76 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
+
+func TestPlanBatchTaxonomyUsesOnlyConfiguredFolders(t *testing.T) {
+	service := &wikiIngestService{}
+	kb := &types.KnowledgeBase{WikiConfig: &types.WikiConfig{
+		Taxonomy: &types.WikiTaxonomyConfig{
+			Categories: []types.WikiTaxonomyCategory{{Name: "升级 (OS)", Description: "Operating system lifecycle"}},
+			Fallback:   "未分类",
+		},
+	}}
+	updates := map[string][]SlugUpdate{
+		"entity/accepted":  {{Type: types.WikiPageTypeEntity}},
+		"concept/invented": {{Type: types.WikiPageTypeConcept}},
+		"concept/nested":   {{Type: types.WikiPageTypeConcept}},
+		"concept/missing":  {{Type: types.WikiPageTypeConcept}},
+		"summary/example":  {{Type: "summary"}},
+	}
+	model := &templateCaptureChatModel{response: `{"assignments":[
+		{"slug":"entity/accepted","path":["升级 (OS)"]},
+		{"slug":"concept/invented","path":["Invented"]},
+		{"slug":"concept/nested","path":["升级 (OS)","Invented"]},
+		{"slug":"concept/unrequested","path":["升级 (OS)"]}
+	]}`}
+	got := service.planBatchTaxonomy(t.Context(), model, kb, updates, "English")
+	require.Equal(t, map[string][]string{
+		"entity/accepted":  {"升级 (OS)"},
+		"concept/invented": {"未分类"},
+		"concept/nested":   {"未分类"},
+		"concept/missing":  {"未分类"},
+	}, got)
+	require.Contains(t, model.prompt, "Operating system lifecycle")
+	require.NotContains(t, model.prompt, "summary/example")
+	require.Equal(t, "wiki_taxonomy_plan", model.purpose)
+
+	// A failed call still assigns every input to the configured fallback.
+	got = service.planBatchTaxonomy(t.Context(), &scriptedTemplateChatModel{}, kb, updates, "English")
+	require.Equal(t, []string{"未分类"}, got["entity/accepted"])
+	require.Len(t, got, 4)
+}
+
+func TestReduceCustomTaxonomyPlacesNewPagesAndKeepsExistingPlacement(t *testing.T) {
+	service, store, model := newWikiPageRetryReducer(t)
+	ctx := t.Context()
+	kb := &types.KnowledgeBase{ID: "kb-row-guard", TenantID: 1}
+	batch := service.newWikiBatchContext(kb.ID, nil)
+	batch.CustomTaxonomy = true
+	batch.PlannedFolderID = service.resolvePlannedFolders(ctx, kb, map[string][]string{
+		"entity/alpha": {"升级 (OS)"},
+		"entity/beta":  {"升级 (OS)"},
+	})
+	require.NotEmpty(t, batch.PlannedFolderID["entity/beta"])
+
+	alpha := wikiPageRetryUpdates()
+	beta := append([]SlugUpdate(nil), alpha...)
+	beta[0].Slug = "entity/beta"
+	beta[0].Item.Name = "Beta"
+	_, _, _, _, err := service.reduceSlugUpdates(ctx, model, kb.ID, "entity/alpha", alpha, kb.TenantID, batch, nil)
+	require.NoError(t, err)
+	_, _, _, _, err = service.reduceSlugUpdates(ctx, model, kb.ID, "entity/beta", beta, kb.TenantID, batch, nil)
+	require.NoError(t, err)
+
+	existing, err := store.GetPageBySlug(ctx, kb.ID, "entity/alpha")
+	require.NoError(t, err)
+	require.Empty(t, existing.FolderID)
+	created, err := store.GetPageBySlug(ctx, kb.ID, "entity/beta")
+	require.NoError(t, err)
+	require.Equal(t, batch.PlannedFolderID["entity/beta"], created.FolderID)
+	require.Equal(t, types.StringArray{"升级 (OS)"}, created.CategoryPath)
+}
 
 func TestFormatExistingTaxonomyForPrompt(t *testing.T) {
 	got := formatExistingTaxonomyForPrompt([][]string{

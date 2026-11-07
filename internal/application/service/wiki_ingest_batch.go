@@ -713,6 +713,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// single pass assigns every new entity/concept slug a coherent category_path
 	// that reuses existing folders. Reduce then only applies the plan to pages
 	// that don't already have a category (user-curated pages are never churned).
+	batchCtx.CustomTaxonomy = kb.WikiConfig.HasCustomTaxonomy()
 	batchCtx.PlannedFolderID = s.resolvePlannedFolders(ctx, kb,
 		s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang))
 
@@ -2146,6 +2147,11 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		return changed, affectedType, false, updateDeferred, err
 	}
 
+	if batchCtx != nil && batchCtx.CustomTaxonomy && !exists && len(additions) > 0 &&
+		batchCtx.PlannedFolderID[slug] == "" {
+		return false, "", false, false, fmt.Errorf("wiki ingest: configured taxonomy folder unavailable for %q", slug)
+	}
+
 	var remainingSourcesContent strings.Builder
 	var deletedContent strings.Builder
 	var relatedSlugs strings.Builder
@@ -2381,9 +2387,10 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 	// Apply the batch taxonomy plan, but only to pages that aren't already
 	// filed — so brand-new pages get a coherent folder while previously-filed
 	// or user-moved pages keep their placement (manual edits are authoritative).
+	// Custom taxonomy also preserves existing pages at the root.
 	// The page's category_path cache is derived from folder_id downstream by
 	// CreatePage/UpdatePage, so assigning the folder id is sufficient here.
-	if page.FolderID == "" && batchCtx != nil {
+	if page.FolderID == "" && batchCtx != nil && (!batchCtx.CustomTaxonomy || !exists) {
 		if fid := batchCtx.PlannedFolderID[slug]; fid != "" {
 			page.FolderID = fid
 		}

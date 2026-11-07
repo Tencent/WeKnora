@@ -145,6 +145,27 @@
               </div>
             </div>
 
+            <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+              <label class="form-label" for="wiki-taxonomy-categories">{{ $t('knowledgeEditor.wiki.taxonomyLabel') }}</label>
+              <p class="form-tip">{{ $t('knowledgeEditor.wiki.taxonomyTip') }}</p>
+              <t-textarea
+                id="wiki-taxonomy-categories"
+                v-model="formData.wikiConfig.taxonomyCategories"
+                :placeholder="wikiTaxonomyExample"
+                :autosize="{ minRows: 3, maxRows: 8 }"
+              />
+            </div>
+
+            <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled && formData.wikiConfig.taxonomyCategories.trim()" class="form-item">
+              <label class="form-label" for="wiki-taxonomy-fallback">{{ $t('knowledgeEditor.wiki.taxonomyFallbackLabel') }}</label>
+              <t-input
+                id="wiki-taxonomy-fallback"
+                v-model="formData.wikiConfig.taxonomyFallback"
+                placeholder="Uncategorized"
+                :maxlength="80"
+              />
+            </div>
+
             <div class="form-item" data-guide="kb-create-name">
               <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
               <t-input
@@ -629,6 +650,7 @@ import {
   type ImageActionsConfig,
   type ImageAttrSchema,
   type KnowledgeBaseProfile,
+  type WikiTaxonomyConfig,
 } from '@/api/knowledge-base'
 import {
   buildImageProcessingConfig,
@@ -1044,6 +1066,9 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
       contentInstructions: '',
       extractionInstructions: '',
+      taxonomyCategories: '',
+      taxonomyFallback: '',
+      hadTaxonomy: false,
     },
     indexingStrategy: {
       vectorEnabled: true,
@@ -1220,6 +1245,11 @@ const loadKBData = async (
         ) as 'focused' | 'standard' | 'exhaustive',
         contentInstructions: kb.wiki_config?.content_instructions || '',
         extractionInstructions: kb.wiki_config?.extraction_instructions || '',
+        taxonomyCategories: kb.wiki_config?.taxonomy?.categories?.length
+          ? JSON.stringify(kb.wiki_config.taxonomy.categories, null, 2)
+          : '',
+        taxonomyFallback: kb.wiki_config?.taxonomy?.fallback || '',
+        hadTaxonomy: Boolean(kb.wiki_config?.taxonomy?.categories?.length),
       },
       indexingStrategy: {
         vectorEnabled: kb.indexing_strategy?.vector_enabled ?? true,
@@ -1542,6 +1572,11 @@ const validateForm = (): boolean => {
 }
 
 // 构建提交数据
+const wikiTaxonomyExample = computed(() => JSON.stringify([{
+  name: t('knowledgeEditor.wiki.taxonomyExampleName'),
+  description: t('knowledgeEditor.wiki.taxonomyExampleDescription'),
+}], null, 2))
+
 const buildSubmitData = () => {
   if (!formData.value) return null
 
@@ -1675,13 +1710,32 @@ const buildSubmitData = () => {
   // Wiki enablement is carried solely by indexing_strategy.wiki_enabled.
   // wiki_config only holds wiki-specific tunables.
   if (formData.value.type !== 'faq') {
+    const wiki = formData.value.wikiConfig
+    const categoryText = wiki.taxonomyCategories.trim()
+    let taxonomy: WikiTaxonomyConfig | undefined
+    if (categoryText || wiki.hadTaxonomy) {
+      try {
+        const categories = categoryText ? JSON.parse(categoryText) : []
+        if (!Array.isArray(categories) || categories.some(category =>
+          typeof category?.name !== 'string' ||
+          (category.description !== undefined && typeof category.description !== 'string')
+        )) {
+          throw new Error()
+        }
+        taxonomy = { categories, fallback: categories.length ? wiki.taxonomyFallback.trim() : '' }
+      } catch {
+        currentSection.value = 'basic'
+        throw new Error(t('knowledgeEditor.wiki.taxonomyInvalidJSON'))
+      }
+    }
     data.wiki_config = {
-      auto_generate: formData.value.wikiConfig?.autoGenerate ?? true,
+      auto_generate: wiki.autoGenerate ?? true,
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
-      max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
-      extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
-      content_instructions: formData.value.wikiConfig?.contentInstructions || '',
-      extraction_instructions: formData.value.wikiConfig?.extractionInstructions || '',
+      max_pages_per_ingest: wiki.maxPagesPerIngest || 0,
+      extraction_granularity: wiki.extractionGranularity || 'standard',
+      content_instructions: wiki.contentInstructions || '',
+      extraction_instructions: wiki.extractionInstructions || '',
+      ...(taxonomy ? { taxonomy } : {}),
     }
   }
 
@@ -1780,15 +1834,8 @@ const doSubmit = async () => {
           question_index_mode: formData.value.faqConfig.questionIndexMode || 'separate'
         }
       }
-      if (formData.value.wikiConfig && formData.value.type !== 'faq') {
-        updateConfig.wiki_config = {
-          auto_generate: formData.value.wikiConfig.autoGenerate ?? true,
-          synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
-          max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
-          extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
-          content_instructions: formData.value.wikiConfig.contentInstructions || '',
-          extraction_instructions: formData.value.wikiConfig.extractionInstructions || '',
-        }
+      if (data.wiki_config) {
+        updateConfig.wiki_config = data.wiki_config
       }
       if (formData.value.type !== 'faq') {
         updateConfig.auto_tag_config = data.auto_tag_config

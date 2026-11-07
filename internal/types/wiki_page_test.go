@@ -6,6 +6,39 @@ import (
 	"testing"
 )
 
+func TestWikiTaxonomyConfigValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config WikiTaxonomyConfig
+	}{
+		{"blank name", WikiTaxonomyConfig{Categories: []WikiTaxonomyCategory{{Name: "  "}}}},
+		{"nested name", WikiTaxonomyConfig{Categories: []WikiTaxonomyCategory{{Name: "Product／Versions"}}}},
+		{"duplicate name", WikiTaxonomyConfig{Categories: []WikiTaxonomyCategory{{Name: "OS"}, {Name: " os "}}}},
+		{"duplicate default fallback", WikiTaxonomyConfig{Categories: []WikiTaxonomyCategory{{Name: "uncategorized"}}}},
+		{"long description", WikiTaxonomyConfig{
+			Categories: []WikiTaxonomyCategory{{Name: "OS", Description: strings.Repeat("字", 241)}},
+		}},
+		{"too many categories", WikiTaxonomyConfig{Categories: make([]WikiTaxonomyCategory, 31)}},
+		{"invalid fallback", WikiTaxonomyConfig{Fallback: "Other|Unknown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.config.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+	config := WikiTaxonomyConfig{
+		Categories: []WikiTaxonomyCategory{{Name: " 升级 (OS) "}, {Name: "概念"}},
+		Fallback:   " 未分类 ",
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := config.FallbackName(); got != "未分类" {
+		t.Errorf("fallback = %q, want 未分类", got)
+	}
+}
+
 func TestWikiPageTypes(t *testing.T) {
 	// Verify all page type constants are non-empty and unique
 	pageTypes := []string{
