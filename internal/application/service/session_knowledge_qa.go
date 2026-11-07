@@ -1275,6 +1275,11 @@ func (s *sessionService) consumeFallbackStream(
 				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
 			}
 			if response.Done {
+				if pendingClose {
+					// Duplicate EOF sentinel: its usage was already captured
+					// above; the closing state must not be recomputed.
+					continue
+				}
 				// Flush the closing tail as a plain content event, then defer
 				// the Done marker to the channel close. The truncation flag
 				// rides only the closing event.
