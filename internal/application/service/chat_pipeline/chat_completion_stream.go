@@ -295,7 +295,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					}
 					if !response.Done {
 						closeThinking()
-						eventBus.Emit(ctx, types.Event{
+						_ = eventBus.Emit(ctx, types.Event{
 							ID:        answerID,
 							Type:      types.EventType(event.EventAgentFinalAnswer),
 							SessionID: chatManage.SessionID,
