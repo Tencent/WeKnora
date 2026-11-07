@@ -1254,10 +1254,16 @@ func (s *sessionService) consumeFallbackStream(
 	var finalContent string
 	streamCompleted := false
 	decoder := modelContext.StreamDecoder()
+	// Keep the provider's usage (reported on the final chunk) so the closing
+	// answer event can carry it to the QA turn's complete event (issue #3865).
+	var turnUsage *types.TokenUsage
 
 	for response := range responseChan {
 		// Emit event for each answer chunk
 		if response.ResponseType == types.ResponseTypeAnswer {
+			if response.Usage != nil {
+				turnUsage = response.Usage
+			}
 			response.Content = decoder.Feed(response.Content)
 			if response.Done {
 				response.Content += decoder.Flush()
@@ -1276,6 +1282,7 @@ func (s *sessionService) consumeFallbackStream(
 					Done:       response.Done,
 					IsFallback: true,
 					Truncated:  truncated,
+					Usage:      turnUsage,
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
