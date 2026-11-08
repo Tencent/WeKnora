@@ -33,15 +33,16 @@ func (d *engineTestDocuments) Create(
 	return &types.TemporaryDocument{ID: "doc-1"}, nil
 }
 
-func uploadWithEngine(t *testing.T, h *Handler, agentID string) {
+func uploadTemporaryDocument(t *testing.T, h *Handler, fields map[string]string) {
 	t.Helper()
 	body := &bytes.Buffer{}
 	form := multipart.NewWriter(body)
 	part, err := form.CreateFormFile("file", "report.pdf")
 	require.NoError(t, err)
 	_, _ = part.Write([]byte("%PDF-1.4"))
-	require.NoError(t, form.WriteField("parser_engine", "mineru_cloud"))
-	require.NoError(t, form.WriteField("agent_id", agentID))
+	for name, value := range fields {
+		require.NoError(t, form.WriteField(name, value))
+	}
 	require.NoError(t, form.Close())
 
 	c, ctx := newResolveAgentTestContext(7)
@@ -51,6 +52,11 @@ func uploadWithEngine(t *testing.T, h *Handler, agentID string) {
 	c.Request = req
 	h.UploadTemporaryDocument(c)
 	require.Empty(t, c.Errors)
+}
+
+func uploadWithEngine(t *testing.T, h *Handler, agentID string) {
+	t.Helper()
+	uploadTemporaryDocument(t, h, map[string]string{"parser_engine": "mineru_cloud", "agent_id": agentID})
 }
 
 // A shared agent parses in its owner's workspace; the caller must not pick
@@ -72,4 +78,42 @@ func TestUploadTemporaryDocumentIgnoresCallerEngineForSharedAgents(t *testing.T)
 	h.customAgentService = &resolveOwnAgentStub{agent: &types.CustomAgent{ID: "own-agent", TenantID: 7}}
 	uploadWithEngine(t, h, "own-agent")
 	require.Equal(t, "mineru_cloud", own.options.ParserEngine, "the caller's own workspace keeps its choice")
+}
+
+// A deployment default engine is not an agent choice. The upload must keep
+// options.ParserEngine empty so the parse worker resolves the tenant's chat
+// rules first and only then the deployment default.
+func TestUploadTemporaryDocumentLeavesTenantRulePrecedenceToWorker(t *testing.T) {
+	types.SetDeploymentParserDefaults("mineru", []string{"pdf"}, nil)
+	t.Cleanup(func() { types.SetDeploymentParserDefaults("", nil, nil) })
+
+	docs := &engineTestDocuments{}
+	h := &Handler{
+		sessionService:     engineTestSessions{},
+		temporaryDocuments: docs,
+		customAgentService: &resolveOwnAgentStub{agent: &types.CustomAgent{ID: "own-agent", TenantID: 7}},
+	}
+	uploadTemporaryDocument(t, h, map[string]string{"agent_id": "own-agent"})
+	require.Empty(t, docs.options.ParserEngine,
+		"tenant rules must be resolved by the worker, not pre-empted by the deployment default")
+}
+
+// An agent's own rule still decides the engine at upload time.
+func TestUploadTemporaryDocumentUsesExplicitAgentRule(t *testing.T) {
+	types.SetDeploymentParserDefaults("mineru", []string{"pdf"}, nil)
+	t.Cleanup(func() { types.SetDeploymentParserDefaults("", nil, nil) })
+
+	docs := &engineTestDocuments{}
+	h := &Handler{
+		sessionService:     engineTestSessions{},
+		temporaryDocuments: docs,
+		customAgentService: &resolveOwnAgentStub{agent: &types.CustomAgent{
+			ID: "own-agent", TenantID: 7,
+			Config: types.CustomAgentConfig{
+				ChatParserEngineRules: []types.ParserEngineRule{{FileTypes: []string{"pdf"}, Engine: "paddleocr_vl"}},
+			},
+		}},
+	}
+	uploadTemporaryDocument(t, h, map[string]string{"agent_id": "own-agent"})
+	require.Equal(t, "paddleocr_vl", docs.options.ParserEngine)
 }

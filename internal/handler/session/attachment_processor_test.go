@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,4 +61,63 @@ func TestProcessTextFileStillTruncatesByLineCount(t *testing.T) {
 	assert.Equal(t, maxTextFileLines+1, attachment.LineCount)
 	assert.True(t, attachment.IsTruncated)
 	assert.True(t, strings.HasSuffix(attachment.Content, fmt.Sprintf("line %d", maxTextFileLines)))
+}
+
+// recordingDocReader keeps the last read request so a test can see which
+// engine the attachment path actually asked for.
+type recordingDocReader struct {
+	interfaces.DocumentReader
+	last *types.ReadRequest
+}
+
+func (r *recordingDocReader) Read(_ context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	r.last = req
+	return &types.ReadResult{MarkdownContent: "text"}, nil
+}
+
+// The engine is resolved per attachment file type: a message with a PDF and a
+// spreadsheet must not run both through the PDF's engine.
+func TestAttachmentParserEngineResolverResolvesPerFileType(t *testing.T) {
+	types.SetDeploymentParserDefaults("mineru", []string{"pdf"}, nil)
+	t.Cleanup(func() { types.SetDeploymentParserDefaults("", nil, nil) })
+
+	tenantConfig := &types.ParserEngineConfig{
+		ChatParserEngineRules: []types.ParserEngineRule{{FileTypes: []string{"docx"}, Engine: "paddleocr_vl"}},
+	}
+	resolve := attachmentParserEngineResolver(nil, tenantConfig)
+	assert.Equal(t, "mineru", resolve("pdf"))
+	assert.Equal(t, "paddleocr_vl", resolve("docx"))
+	assert.Empty(t, resolve("xlsx"))
+
+	// The same file type: a tenant rule beats the deployment default.
+	pdfTenant := &types.ParserEngineConfig{
+		ChatParserEngineRules: []types.ParserEngineRule{{FileTypes: []string{"pdf"}, Engine: "paddleocr_vl"}},
+	}
+	assert.Equal(t, "paddleocr_vl", attachmentParserEngineResolver(nil, pdfTenant)("pdf"))
+
+	agent := &types.CustomAgent{Config: types.CustomAgentConfig{
+		ChatParserEngineRules: []types.ParserEngineRule{{FileTypes: []string{"pdf"}, Engine: "builtin"}},
+	}}
+	resolve = attachmentParserEngineResolver(agent, tenantConfig)
+	assert.Equal(t, "builtin", resolve("pdf"), "an explicit agent rule beats tenant rules and the deployment default")
+	assert.Equal(t, "paddleocr_vl", resolve("docx"))
+}
+
+func TestProcessWithDocumentReaderUsesTheAttachmentsOwnEngine(t *testing.T) {
+	// markitdown only exists in the docreader service, so NewReader routes it
+	// to the recording reader and the test can see the request.
+	types.SetDeploymentParserDefaults("markitdown", []string{"pdf"}, nil)
+	t.Cleanup(func() { types.SetDeploymentParserDefaults("", nil, nil) })
+
+	reader := &recordingDocReader{}
+	processor := &AttachmentProcessor{documentReader: reader}
+	resolve := attachmentParserEngineResolver(nil, nil)
+
+	require.NoError(t, processor.processWithDocumentReader(
+		context.Background(), []byte("data"), "report.pdf", ".pdf", &types.MessageAttachment{}, 1, resolve))
+	assert.Equal(t, "markitdown", reader.last.ParserEngine)
+
+	require.NoError(t, processor.processWithDocumentReader(
+		context.Background(), []byte("data"), "sheet.xlsx", ".xlsx", &types.MessageAttachment{}, 1, resolve))
+	assert.Empty(t, reader.last.ParserEngine, "a spreadsheet must not inherit the PDF engine")
 }

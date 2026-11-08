@@ -166,7 +166,7 @@ func (s *temporaryDocumentService) parse(
 	var options types.TemporaryDocumentCreateOptions
 	_ = json.Unmarshal(document.ProcessingOptions, &options)
 	if options.ParserEngine == "" || options.ParserEngine == "auto" {
-		if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil {
+		if tenant, ok := types.TenantInfoFromContext(ctx); ok {
 			options.ParserEngine = tenant.ParserEngineConfig.ResolveChatParserEngine(ext)
 		}
 	}
@@ -196,10 +196,11 @@ func (s *temporaryDocumentService) parse(
 		FileContent: data, FileName: document.FileName, FileType: strings.TrimPrefix(ext, "."),
 		ParserEngine: parserEngine,
 	}
-	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil &&
-		tenant.ParserEngineConfig != nil {
-		request.ParserEngineOverrides = tenant.ParserEngineConfig.ToOverridesMap()
+	var parserConfig *types.ParserEngineConfig
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok {
+		parserConfig = tenant.ParserEngineConfig
 	}
+	request.ParserEngineOverrides = types.ParserOverridesFor(parserConfig)
 	deps := docparser.ReaderDeps{Overrides: request.ParserEngineOverrides, Remote: s.documentReader}
 	if s.tenantService != nil {
 		deps.WeKnoraCloudCredentials = s.tenantService.GetWeKnoraCloudCredentials

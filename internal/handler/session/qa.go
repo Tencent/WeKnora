@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -388,16 +387,15 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			asrModelID = customAgent.Config.ASRModelID
 		}
 
-		// Resolve the agent's chat parser engine from attachment file types
-		if customAgent != nil {
-			for _, att := range request.AttachmentUploads {
-				ext := strings.ToLower(filepath.Ext(att.FileName))
-				if engine := customAgent.Config.ResolveChatParserEngine(ext); engine != "" {
-					attachmentRuntimeCtx = context.WithValue(attachmentRuntimeCtx, types.ChatParserEngineContextKey, engine)
-					break
-				}
+		// Per attachment: the agent's rule, then tenant rules, then the
+		// deployment default. Shared agents skip the caller's tenant rules.
+		var tenantParserConfig *types.ParserEngineConfig
+		if effectiveTenantID == 0 || effectiveTenantID == tenantID {
+			if tenant, ok := types.TenantInfoFromContext(ctx); ok {
+				tenantParserConfig = tenant.ParserEngineConfig
 			}
 		}
+		parserEngineFor := attachmentParserEngineResolver(customAgent, tenantParserConfig)
 
 		// Process all attachments concurrently.
 		processedAttachments = make(types.MessageAttachments, len(request.AttachmentUploads))
@@ -411,6 +409,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 				processed, err := h.attachmentProcessor.ProcessAttachment(
 					attachmentRuntimeCtx, decodedAttachments[idx], att.FileName, int64(len(decodedAttachments[idx])), tenantID, asrModelID,
+					parserEngineFor,
 				)
 				if err != nil {
 					errChan <- fmt.Errorf("attachment %d processing failed: %w", idx+1, err)
