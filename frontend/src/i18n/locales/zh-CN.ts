@@ -2728,7 +2728,7 @@ export default {
       immutableHint: '创建后不可更改。如需迁移，请创建一个绑定到目标存储的新 KB 并重新索引。',
       immutableEdit: '向量存储绑定在创建后无法更改。',
       retrievalLabel: '检索引擎',
-      retrievalDesc: '各检索方式实际使用的引擎。',
+      retrievalDesc: '各检索方式配置的引擎。',
       vectorRetrieval: '向量检索',
       keywordRetrieval: '关键词检索',
       retrievalDisabled: '未启用',

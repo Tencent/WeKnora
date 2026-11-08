@@ -7212,7 +7212,7 @@ export default {
       immutableHint: 'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
       immutableEdit: 'Vector store binding cannot be changed after creation.',
       retrievalLabel: 'Retrieval engines',
-      retrievalDesc: 'The engine each retrieval type actually runs on.',
+      retrievalDesc: 'The engines configured for each retrieval type.',
       vectorRetrieval: 'Vector retrieval',
       keywordRetrieval: 'Keyword retrieval',
       retrievalDisabled: 'Disabled',

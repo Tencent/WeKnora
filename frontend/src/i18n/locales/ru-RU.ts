@@ -2726,7 +2726,7 @@ export default {
       immutableHint: 'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
       immutableEdit: 'Vector store binding cannot be changed after creation.',
       retrievalLabel: 'Поисковые движки',
-      retrievalDesc: 'Движок, на котором фактически выполняется каждый тип поиска.',
+      retrievalDesc: 'Движки, настроенные для каждого типа поиска.',
       vectorRetrieval: 'Векторный поиск',
       keywordRetrieval: 'Поиск по ключевым словам',
       retrievalDisabled: 'Отключено',

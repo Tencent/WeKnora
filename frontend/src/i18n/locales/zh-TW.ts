@@ -2728,7 +2728,7 @@ export default {
       immutableHint: '建立後不可更改。如需遷移，請建立一個綁定到目標存儲的新 KB 並重新索引。',
       immutableEdit: '向量存儲綁定在建立後無法更改。',
       retrievalLabel: '檢索引擎',
-      retrievalDesc: '各檢索方式實際使用的引擎。',
+      retrievalDesc: '各檢索方式設定的引擎。',
       vectorRetrieval: '向量檢索',
       keywordRetrieval: '關鍵詞檢索',
       retrievalDisabled: '未啟用',

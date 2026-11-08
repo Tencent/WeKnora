@@ -7212,7 +7212,7 @@ export default {
       immutableHint: '作成後は変更できません。後から移行するには、目的のストアに紐づけた新しいナレッジベースを作成し、インデックスを再作成してください。',
       immutableEdit: 'ベクトルストアの紐づけは作成後に変更できません。',
       retrievalLabel: '検索エンジン',
-      retrievalDesc: '検索方式ごとに実際に使われるエンジンです。',
+      retrievalDesc: '検索方式ごとに設定されているエンジンです。',
       vectorRetrieval: 'ベクトル検索',
       keywordRetrieval: 'キーワード検索',
       retrievalDisabled: '無効',

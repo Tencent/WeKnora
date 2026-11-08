@@ -1482,13 +1482,14 @@ func TestEngineRetrievers(t *testing.T) {
 		{Type: KeywordsRetrieverType, EngineType: "postgres", Label: "ParadeDB (BM25)"},
 	}, EngineRetrievers(GetDefaultRetrieverEngines()))
 
-	// Vector on PostgreSQL, keyword on both: one row per retrieval type.
+	// Vector on PostgreSQL, keyword configured on both: one row per
+	// retrieval type listing every configured engine.
 	t.Setenv("RETRIEVE_DRIVER", "postgres,elasticsearch_v7")
 	assert.Equal(t, []RetrieverDisplay{
 		{Type: VectorRetrieverType, EngineType: "postgres", Label: "pgvector"},
 		{
 			Type: KeywordsRetrieverType, EngineType: "postgres,elasticsearch",
-			Label: "ParadeDB (BM25) + Elasticsearch (BM25)",
+			Label: "ParadeDB (BM25) / Elasticsearch (BM25)",
 		},
 	}, EngineRetrievers(GetDefaultRetrieverEngines()))
 

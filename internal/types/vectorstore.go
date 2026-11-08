@@ -547,13 +547,14 @@ type StoreDisplay struct {
 	Source     string `json:"vector_store_source,omitempty"`
 	EngineType string `json:"vector_store_engine_type,omitempty"`
 	Status     string `json:"vector_store_status,omitempty"` // "available" / "unavailable"
-	// Retrievers names the engine behind each retrieval type, so the UI can
-	// show where keyword and vector search actually run. Empty for shared
-	// and unavailable stores.
+	// Retrievers names the engines configured for each retrieval type, for
+	// display. Empty for shared and unavailable stores, and for env-bound
+	// knowledge bases viewed from another workspace.
 	Retrievers []RetrieverDisplay `json:"vector_store_retrievers,omitempty"`
 }
 
-// RetrieverDisplay is the engine serving one retrieval type, for display.
+// RetrieverDisplay is the engines configured for one retrieval type, for
+// display.
 type RetrieverDisplay struct {
 	Type       RetrieverType `json:"type"`
 	EngineType string        `json:"engine_type"`
@@ -585,8 +586,9 @@ func RetrieverDisplays(engine RetrieverEngineType, supported []RetrieverType) []
 
 // EngineRetrievers turns retriever engine params (a workspace's effective
 // env engines, or one store's supported types) into display rows: one per
-// retrieval type, vector first. Several engines serving the same type (a
-// multi-driver RETRIEVE_DRIVER) are joined into one label.
+// retrieval type, vector first. Several engines configured for the same
+// type (a multi-driver RETRIEVE_DRIVER) are listed in one label; retrieval
+// itself queries only one of them, so the label does not say which.
 func EngineRetrievers(params []RetrieverEngineParams) []RetrieverDisplay {
 	var out []RetrieverDisplay
 	for _, rt := range []RetrieverType{VectorRetrieverType, KeywordsRetrieverType} {
@@ -600,7 +602,7 @@ func EngineRetrievers(params []RetrieverEngineParams) []RetrieverDisplay {
 		}
 		if len(engines) > 0 {
 			out = append(out, RetrieverDisplay{
-				Type: rt, EngineType: strings.Join(engines, ","), Label: strings.Join(labels, " + "),
+				Type: rt, EngineType: strings.Join(engines, ","), Label: strings.Join(labels, " / "),
 			})
 		}
 	}

@@ -2726,7 +2726,7 @@ export default {
       immutableHint: '생성 후 변경할 수 없습니다. 다른 스토어로 옮기려면 원하는 스토어에 바인딩된 새 KB를 만들고 다시 인덱싱하세요.',
       immutableEdit: '벡터 스토어 바인딩은 생성 후 변경할 수 없습니다.',
       retrievalLabel: '검색 엔진',
-      retrievalDesc: '검색 방식별로 실제 사용되는 엔진입니다.',
+      retrievalDesc: '검색 방식별로 설정된 엔진입니다.',
       vectorRetrieval: '벡터 검색',
       keywordRetrieval: '키워드 검색',
       retrievalDisabled: '사용 안 함',
