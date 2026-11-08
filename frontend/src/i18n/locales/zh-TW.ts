@@ -1110,7 +1110,12 @@ export default {
     mcpserver: {
       title: 'MCP Server',
       subtitle: '把當前空間發布為 MCP 服務，供 Claude Desktop、Cursor、Claude Code 等 MCP 用戶端直接連結。每個端點有獨立的權杖、知識庫範圍和工具清單。',
-      listTitle: '已發布的端點',
+      listTitle: '空間端點',
+      personalTitle: '個人端點',
+      personalRateLimitLabel: '個人端點每分鐘總呼叫次數',
+      personalRateLimitHint: '空間內所有成員的個人端點共用這一個額度。',
+      writeToolNeedsRole: '你的角色不能使用寫入類工具',
+      settingsSaved: '設定已儲存',
       empty: '暫無 MCP 端點',
       disabled: '已停用',
       cardSummary: '{tools} 個工具 · {scope}',
