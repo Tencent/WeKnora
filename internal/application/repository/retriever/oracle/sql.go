@@ -2,7 +2,6 @@ package oracle
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -38,19 +37,16 @@ var insertColumns = append(append([]string{}, columnsForRetrieve...), fieldEmbed
 // maxInListSize stays below Oracle's 1000-element IN-list limit (ORA-01795).
 const maxInListSize = 500
 
-var identPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
-
 // sanitizeTableBase turns a user table prefix into an unquoted Oracle
-// identifier. Hyphens (allowed by ValidateIndexConfig) become underscores;
-// anything else invalid falls back to def. This is the only user string that
-// is spliced into SQL text, so it must stay strictly validated.
+// identifier (see types.OracleTableBase); anything invalid falls back to def.
+// This is the only user string that is spliced into SQL text, so it must stay
+// strictly validated. ValidateOracleIndexConfig rejects such prefixes for
+// UI-created stores; the fallback still guards env configuration.
 func sanitizeTableBase(name, def string) string {
-	name = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), "-", "_"))
-	// Leave room for "_<dim>_VEC" style suffixes within the 128-byte limit.
-	if !identPattern.MatchString(name) || len(name) > 100 {
-		return strings.ToUpper(def)
+	if base, ok := types.OracleTableBase(name); ok {
+		return base
 	}
-	return name
+	return strings.ToUpper(def)
 }
 
 // binds accumulates positional bind values and hands out ":N" placeholders in

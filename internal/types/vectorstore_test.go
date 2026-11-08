@@ -1206,9 +1206,41 @@ func TestValidateIndexConfig(t *testing.T) {
 	})
 
 	t.Run("oracle GetIndexNameOrDefault", func(t *testing.T) {
-		assert.Equal(t, "weknora_embeddings", IndexConfig{}.GetIndexNameOrDefault(OracleRetrieverEngineType))
-		ic := IndexConfig{CollectionPrefix: "custom_prefix"}
-		assert.Equal(t, "custom_prefix", ic.GetIndexNameOrDefault(OracleRetrieverEngineType))
+		oracle := OracleRetrieverEngineType
+		assert.Equal(t, "WEKNORA_EMBEDDINGS", IndexConfig{}.GetIndexNameOrDefault(oracle))
+		spelledOut := IndexConfig{CollectionPrefix: "weknora_embeddings"}
+		assert.Equal(t, "WEKNORA_EMBEDDINGS", spelledOut.GetIndexNameOrDefault(oracle),
+			"the default spelled out is the same table")
+		assert.Equal(t, "CUSTOM_PREFIX", IndexConfig{CollectionPrefix: "custom_prefix"}.GetIndexNameOrDefault(oracle))
+		assert.Equal(t, "CUSTOM_PREFIX", IndexConfig{CollectionPrefix: "Custom_Prefix"}.GetIndexNameOrDefault(oracle),
+			"prefixes differing only in case are duplicates")
+		assert.Equal(t, "BY_NAME", IndexConfig{CollectionName: "by_name"}.GetIndexNameOrDefault(oracle),
+			"collection_name is used when no prefix is set, like the repository")
+		assert.Equal(t, "MY_KB", IndexConfig{CollectionPrefix: "my-kb"}.GetIndexNameOrDefault(oracle),
+			"env prefixes with '-' map like the repository")
+	})
+
+	t.Run("oracle table prefix validation", func(t *testing.T) {
+		for _, ok := range []string{"", "a", "kb_vectors", "KB1", strings.Repeat("a", OracleTableBaseMaxLen)} {
+			assert.NoError(t, ValidateOracleIndexConfig(IndexConfig{CollectionPrefix: ok}), ok)
+			assert.NoError(t, ValidateOracleIndexConfig(IndexConfig{CollectionName: ok}), ok)
+		}
+		for _, bad := range []string{
+			"my-kb", "1abc", "_abc", "a b", "a;DROP TABLE t", strings.Repeat("a", OracleTableBaseMaxLen+1),
+		} {
+			assert.Error(t, ValidateOracleIndexConfig(IndexConfig{CollectionPrefix: bad}), bad)
+			assert.Error(t, ValidateOracleIndexConfig(IndexConfig{CollectionName: bad}), bad)
+		}
+	})
+
+	t.Run("OracleTableBase", func(t *testing.T) {
+		base, ok := OracleTableBase("kb_vectors")
+		assert.True(t, ok)
+		assert.Equal(t, "KB_VECTORS", base)
+		_, ok = OracleTableBase(strings.Repeat("a", OracleTableBaseMaxLen+1))
+		assert.False(t, ok)
+		_, ok = OracleTableBase("")
+		assert.False(t, ok)
 	})
 }
 

@@ -401,71 +401,98 @@ func (r *oracleRepository) CopyIndices(ctx context.Context,
 		return err
 	}
 	table := tableName(r.tableBase, dim)
-	type src struct{ id, sourceID, chunkID, knowledgeID string }
-	var sources []src
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(
-		"SELECT id, source_id, chunk_id, knowledge_id FROM %s WHERE knowledge_base_id = :1", table), sourceKB)
-	if err != nil {
-		return fmt.Errorf("copy indices scan: %w", err)
+	copied := 0
+	// Page through the source rows like Doris does, so a large knowledge base
+	// is never held in memory at once. Each page's cursor is closed before
+	// its rows are written; the writes go to targetKB, so they do not shift
+	// the OFFSET of the source pages.
+	for offset := 0; ; offset += writeBatchSize {
+		sources, err := r.copySourcePage(ctx, table, sourceKB, offset)
+		if err != nil {
+			return err
+		}
+		maps := make([]copyMapping, 0, len(sources))
+		for _, s := range sources {
+			targetChunk, ok := chunkMap[s.chunkID]
+			if !ok {
+				continue
+			}
+			targetKnowledge, ok := knowledgeMap[s.knowledgeID]
+			if !ok {
+				continue
+			}
+			maps = append(maps, copyMapping{
+				s.id, uuid.New().String(), translateSourceID(s.sourceID, s.chunkID, targetChunk),
+				targetChunk, targetKnowledge,
+			})
+		}
+		n, err := r.copyBatch(ctx, table, targetKB, maps)
+		if err != nil {
+			return err
+		}
+		copied += n
+		if len(sources) < writeBatchSize {
+			break
+		}
 	}
+	logger.GetLogger(ctx).Infof("[Oracle] CopyIndices done, dim=%d, copied=%d", dim, copied)
+	return nil
+}
+
+type copySource struct{ id, sourceID, chunkID, knowledgeID string }
+
+type copyMapping struct{ oldID, newID, sourceID, chunkID, knowledgeID string }
+
+// copySourcePage reads one page (writeBatchSize rows) of a knowledge base's
+// rows, ordered by id. The cursor is closed when it returns.
+func (r *oracleRepository) copySourcePage(ctx context.Context, table, sourceKB string, offset int,
+) ([]copySource, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(
+		"SELECT id, source_id, chunk_id, knowledge_id FROM %s WHERE knowledge_base_id = :1 "+
+			"ORDER BY id OFFSET :2 ROWS FETCH NEXT :3 ROWS ONLY", table), sourceKB, offset, writeBatchSize)
+	if err != nil {
+		return nil, fmt.Errorf("copy indices scan: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var sources []copySource
 	for rows.Next() {
-		var s src
+		var s copySource
 		var sourceID, chunkID, knowledgeID sql.NullString
 		if err := rows.Scan(&s.id, &sourceID, &chunkID, &knowledgeID); err != nil {
-			_ = rows.Close()
-			return err
+			return nil, err
 		}
 		s.sourceID, s.chunkID, s.knowledgeID = sourceID.String, chunkID.String, knowledgeID.String
 		sources = append(sources, s)
 	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
+	return sources, rows.Err()
+}
 
-	// Each batch is one INSERT ... SELECT joined to an inline id-mapping table,
-	// so vectors are copied server-side without per-row round trips.
-	type mapping struct{ oldID, newID, sourceID, chunkID, knowledgeID string }
-	var maps []mapping
-	for _, s := range sources {
-		targetChunk, ok := chunkMap[s.chunkID]
-		if !ok {
-			continue
-		}
-		targetKnowledge, ok := knowledgeMap[s.knowledgeID]
-		if !ok {
-			continue
-		}
-		maps = append(maps, mapping{
-			s.id, uuid.New().String(), translateSourceID(s.sourceID, s.chunkID, targetChunk),
-			targetChunk, targetKnowledge,
-		})
+// copyBatch copies one batch with a single INSERT ... SELECT joined to an
+// inline id-mapping table, so vectors are copied server-side without per-row
+// round trips. It returns the number of rows inserted.
+func (r *oracleRepository) copyBatch(ctx context.Context, table, targetKB string, batch []copyMapping) (int, error) {
+	if len(batch) == 0 {
+		return 0, nil
 	}
-	copied := 0
-	for start := 0; start < len(maps); start += writeBatchSize {
-		batch := maps[start:min(start+writeBatchSize, len(maps))]
-		b := &binds{}
-		kb := b.add(targetKB)
-		selects := make([]string, len(batch))
-		for i, m := range batch {
-			selects[i] = fmt.Sprintf("SELECT %s AS old_id, %s AS new_id, %s AS new_source, "+
-				"%s AS new_chunk, %s AS new_knowledge FROM dual",
-				b.add(m.oldID), b.add(m.newID), b.add(m.sourceID), b.add(m.chunkID), b.add(m.knowledgeID))
-		}
-		q := fmt.Sprintf(`INSERT INTO %[1]s (%[2]s)
-			SELECT m.new_id, s.content, m.new_source, s.source_type, m.new_chunk, m.new_knowledge, %[3]s,
-				s.tag_id, s.is_enabled, s.embedding
-			FROM %[1]s s JOIN (%[4]s) m ON s.id = m.old_id`,
-			table, strings.Join(insertColumns, ", "), kb, strings.Join(selects, " UNION ALL "))
-		res, err := r.db.ExecContext(ctx, q, b.args...)
-		if err != nil {
-			return fmt.Errorf("copy indices insert: %w", err)
-		}
-		n, _ := res.RowsAffected()
-		copied += int(n)
+	b := &binds{}
+	kb := b.add(targetKB)
+	selects := make([]string, len(batch))
+	for i, m := range batch {
+		selects[i] = fmt.Sprintf("SELECT %s AS old_id, %s AS new_id, %s AS new_source, "+
+			"%s AS new_chunk, %s AS new_knowledge FROM dual",
+			b.add(m.oldID), b.add(m.newID), b.add(m.sourceID), b.add(m.chunkID), b.add(m.knowledgeID))
 	}
-	logger.GetLogger(ctx).Infof("[Oracle] CopyIndices done, dim=%d, copied=%d", dim, copied)
-	return nil
+	q := fmt.Sprintf(`INSERT INTO %[1]s (%[2]s)
+		SELECT m.new_id, s.content, m.new_source, s.source_type, m.new_chunk, m.new_knowledge, %[3]s,
+			s.tag_id, s.is_enabled, s.embedding
+		FROM %[1]s s JOIN (%[4]s) m ON s.id = m.old_id`,
+		table, strings.Join(insertColumns, ", "), kb, strings.Join(selects, " UNION ALL "))
+	res, err := r.db.ExecContext(ctx, q, b.args...)
+	if err != nil {
+		return 0, fmt.Errorf("copy indices insert: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // translateSourceID mirrors the Qdrant/Doris rule: plain chunk -> target chunk,

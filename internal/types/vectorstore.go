@@ -347,11 +347,17 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 		}
 		return "weknora_embeddings"
 	case OracleRetrieverEngineType:
-		// Table base name; per-dimension tables are suffixed with _<dim>.
-		if c.CollectionPrefix != "" {
-			return c.CollectionPrefix
+		// Table base name (per-dimension tables are suffixed with _<dim>),
+		// resolved like the repository does, so names that map to the same
+		// Oracle table (e.g. differing only in case) are duplicates.
+		name := c.CollectionPrefix
+		if name == "" {
+			name = c.CollectionName
 		}
-		return "weknora_embeddings"
+		if base, ok := OracleTableBase(name); ok {
+			return base
+		}
+		return "WEKNORA_EMBEDDINGS"
 	default:
 		return c.IndexName
 	}
@@ -498,6 +504,44 @@ const (
 // validIndexNamePattern restricts index/collection names to safe characters.
 // Must start with a letter, followed by alphanumeric, underscore, or hyphen. Max 128 chars.
 var validIndexNamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,127}$`)
+
+// OracleTableBaseMaxLen bounds an Oracle table base name so that
+// <base>_<dim> plus the index suffixes (_VEC, _TXT, _LEX, ...) stay within
+// Oracle's 128-byte identifier limit.
+const OracleTableBaseMaxLen = 100
+
+var oracleTableBasePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+
+// OracleTableBase turns a table prefix into the unquoted Oracle identifier
+// used as the table base: upper case, with '-' mapped to '_' (env prefixes
+// may contain it). ok is false for anything else that is not a safe
+// identifier; the caller then falls back to the default name.
+func OracleTableBase(name string) (base string, ok bool) {
+	base = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), "-", "_"))
+	if len(base) > OracleTableBaseMaxLen || !oracleTableBasePattern.MatchString(base) {
+		return "", false
+	}
+	return base, true
+}
+
+// ValidateOracleIndexConfig rejects Oracle table prefixes that the repository
+// would rewrite or replace with the default, so every accepted prefix maps to
+// a table of its own. Only letters, digits and underscores are allowed.
+func ValidateOracleIndexConfig(ic IndexConfig) error {
+	for field, name := range map[string]string{
+		"collection_prefix": ic.CollectionPrefix, "collection_name": ic.CollectionName,
+	} {
+		if name == "" {
+			continue
+		}
+		if len(name) > OracleTableBaseMaxLen || !oracleTableBasePattern.MatchString(name) {
+			return errors.NewValidationError(fmt.Sprintf(
+				"%s for oracle must start with a letter and contain only letters, digits, or underscores (max %d)",
+				field, OracleTableBaseMaxLen))
+		}
+	}
+	return nil
+}
 
 // ValidateIndexConfig checks IndexConfig fields for safe values.
 // Call this from the service layer before persisting a VectorStore.
