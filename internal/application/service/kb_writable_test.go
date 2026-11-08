@@ -53,4 +53,14 @@ func TestKBWritableIDs(t *testing.T) {
 	require.Empty(t, kbWritableIDs(apiKey(chatOnly), shares, targets, true))
 	ingest := types.TenantAPIKeyScope{Capabilities: types.StringArray{string(types.APIKeyCapabilityIngest)}}
 	require.Equal(t, []string{"own"}, kbWritableIDs(apiKey(ingest), shares, targets, true))
+
+	// A personal MCP endpoint needs the ingest capability and its owner's role.
+	member := func(role types.TenantRole, scope types.TenantAPIKeyScope) context.Context {
+		scope.ActsAsMember = true
+		return types.WithTenantAPIKeyScope(caller(role, "u"), scope)
+	}
+	require.Empty(t, kbWritableIDs(member(types.TenantRoleViewer, ingest), shares, targets, true))
+	require.Empty(t, kbWritableIDs(member(types.TenantRoleContributor, chatOnly), shares, targets, true))
+	require.Equal(t, []string{"own", "shared-editor"},
+		kbWritableIDs(member(types.TenantRoleContributor, ingest), shares, targets, true))
 }

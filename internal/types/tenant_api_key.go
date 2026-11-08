@@ -273,6 +273,16 @@ type TenantAPIKeyScope struct {
 	FullAccess       bool
 	KnowledgeBaseIDs StringArray
 	Capabilities     StringArray
+	// ActsAsMember marks a scope that only narrows a real member's request,
+	// such as a personal MCP endpoint. Role and ownership checks still apply
+	// to the member instead of being skipped as for a machine key.
+	ActsAsMember bool
+}
+
+// IsMachine reports whether the scope stands in for the caller's identity,
+// so member role and ownership checks do not apply.
+func (s TenantAPIKeyScope) IsMachine() bool {
+	return !s.ActsAsMember
 }
 
 func WithTenantAPIKeyScope(ctx context.Context, scope TenantAPIKeyScope) context.Context {
@@ -298,6 +308,7 @@ func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
 		FullAccess:       s.FullAccess,
 		KnowledgeBaseIDs: normalizeIDArray(s.KnowledgeBaseIDs),
 		Capabilities:     NormalizeAPIKeyCapabilities(s.Capabilities),
+		ActsAsMember:     s.ActsAsMember,
 	}
 }
 

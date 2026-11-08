@@ -72,7 +72,7 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 		// API-key principals are authorized solely by the APIKeyGate
 		// (role + KB scope + default-deny). The JWT role ladder does not
 		// apply to a machine principal, so short-circuit here.
-		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && scope.IsMachine() {
 			c.Next()
 			return
 		}
@@ -281,11 +281,11 @@ func EvaluateOwnershipOrRole(
 
 func ownershipRequestFromContext(ctx context.Context, cfg *config.Config) access.OwnershipRequest {
 	caller := types.CallerFromContext(ctx)
-	_, apiKey := types.TenantAPIKeyScopeFromContext(ctx)
+	scope, apiKey := types.TenantAPIKeyScopeFromContext(ctx)
 	return access.OwnershipRequest{
 		UserID:               caller.UserID,
 		Role:                 caller.Role,
-		APIKey:               apiKey,
+		APIKey:               apiKey && scope.IsMachine(),
 		CrossTenantSuperuser: IsCrossTenantSuperuser(ctx, cfg),
 		Enforce:              rbacEnforcementEnabled(cfg),
 	}
