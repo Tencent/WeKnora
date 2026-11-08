@@ -120,9 +120,6 @@ const (
 	GrantScopeContextKey ContextKey = "GrantScope"
 	// StandingGrantScopeContextKey carries the standing GrantScope of an agent run; see WithStandingGrantScope.
 	StandingGrantScopeContextKey ContextKey = "StandingGrantScope"
-	// ChatParserEngineContextKey carries the resolved parser engine
-	// from the agent's ChatParserEngineRules for chat attachment processing.
-	ChatParserEngineContextKey ContextKey = "ChatParserEngine"
 )
 
 // String returns the string representation of the context key

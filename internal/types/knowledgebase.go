@@ -327,11 +327,15 @@ func SetPreferParserEngine(fn func(fileType string) string) {
 
 // DefaultParserEngine returns the engine used when no parser_engine_rules
 // match. Empty string means builtin (docreader) or Go simple-format routing.
-// When the anydoc binding is linked it is preferred for every type it
-// converts (except Go simple formats). ppt/pptx otherwise fall back to
+// A deployment default (parser_defaults in config.yaml) wins for the file
+// types it lists. When the anydoc binding is linked it is preferred for every
+// type it converts (except Go simple formats). ppt/pptx otherwise fall back to
 // markitdown.
 func DefaultParserEngine(fileType string) string {
 	ft := normalizeParserFileType(fileType)
+	if engine, ok := deploymentParserEngineFor(ft); ok {
+		return engine
+	}
 	if preferParserEngine != nil {
 		if engine := preferParserEngine(ft); engine != "" {
 			return engine
