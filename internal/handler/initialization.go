@@ -1899,6 +1899,19 @@ func (h *InitializationHandler) buildTestModel(
 	}
 }
 
+// resolveTestCreds mirrors modelService.resolveWeKnoraCloudCredentials: the
+// row's own app_secret (LKEAP / Volcengine SecretKey, the OCI Generative AI
+// private key) wins, and the space's WeKnora Cloud credential only fills in
+// when the row has none. Without this a test of a stored OCI row sent the
+// WeKnora Cloud secret instead of its key and always failed.
+func (h *InitializationHandler) resolveTestCreds(ctx context.Context, req *ModelTestRequest) (string, string, bool) {
+	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	if own := decryptModelAppSecret(req.AppSecret); own != "" {
+		appSecret = own
+	}
+	return appID, appSecret, ok
+}
+
 // resolveTenantWeKnoraCloudCreds 从当前空间上下文里取出 WeKnoraCloud 凭证，
 // 供测试连接端点补齐 appID/appSecret。与 service.resolveWeKnoraCloudCredentials
 // 对应，但因为 handler 还没有被注入 tenantService（历史原因），暂时从
@@ -1951,7 +1964,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	appID, appSecret, ok := h.resolveTestCreds(ctx, &req)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
 		c.Error(errors.NewBadRequestError("空间信息未找到"))
@@ -2025,7 +2038,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		}
 	}
 
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	appID, appSecret, ok := h.resolveTestCreds(ctx, &req)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
 		c.Error(errors.NewBadRequestError("空间信息未找到"))
@@ -2205,7 +2218,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 		return
 	}
 
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	appID, appSecret, ok := h.resolveTestCreds(ctx, &req)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
 		c.Error(errors.NewBadRequestError("空间信息未找到"))
