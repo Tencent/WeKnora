@@ -112,7 +112,6 @@ import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import { listVectorStores, type VectorStoreEntity } from '@/api/vector-store'
 import type { VectorStoreRetriever, VectorStoreSource, VectorStoreStatus } from '@/api/knowledge-base'
-import { getTenantDefaultSettings } from '@/api/default-settings'
 import VectorStoreBadge from '@/components/VectorStoreBadge.vue'
 
 const props = withDefaults(defineProps<{
@@ -198,29 +197,12 @@ const goToVectorStoreSettings = () => {
   uiStore.openSettings('vectorstore')
 }
 
-// Pre-select the workspace's default store, when the user has not picked
-// one yet and it is still listed. A missing or unreadable default leaves
-// "System default", the behavior without one.
-const applyWorkspaceDefault = async () => {
-  if (localVectorStoreId.value) return
-  try {
-    const id = (await getTenantDefaultSettings()).data?.vector_store_id || ''
-    if (id && userStores.value.some((s) => s.id === id)) {
-      localVectorStoreId.value = id
-      emit('update:vectorStoreId', id)
-    }
-  } catch (e) {
-    console.warn('[KBVectorStoreSettings] failed to load the default vector store', e)
-  }
-}
-
 onMounted(async () => {
   if (props.mode !== 'create') return
   loading.value = true
   try {
     const resp = await listVectorStores()
     if (resp.success) allStores.value = resp.data || []
-    await applyWorkspaceDefault()
   } catch (e) {
     // Graceful degradation: if vector-store listing fails the dropdown
     // simply renders only the "System default" entry, which is exactly

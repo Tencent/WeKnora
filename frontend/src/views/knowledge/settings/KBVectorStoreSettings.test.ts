@@ -7,33 +7,24 @@ const stores = [
   { id: 'oracle-1', name: 'Oracle ADB', engine_type: 'oracle', source: 'user' },
 ]
 
-function setup(t: TestContext, props: Record<string, unknown>, defaultStore = 'oracle-1') {
+function setup(t: TestContext, props: Record<string, unknown>) {
   const f = fixture(t)
   const emitted: string[] = []
   const { vm } = f.component(new URL('./KBVectorStoreSettings.vue', import.meta.url), {
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     '@/stores/ui': { useUIStore: () => ({ openSettings() {} }) },
     '@/api/vector-store': { listVectorStores: async () => ({ success: true, data: stores }) },
-    '@/api/default-settings': {
-      getTenantDefaultSettings: async () => ({ data: { vector_store_id: defaultStore } }),
-    },
     '@/components/VectorStoreBadge.vue': { name: 'VectorStoreBadge', render: () => null },
   }, { ...props, 'onUpdate:vectorStoreId': (id: string) => emitted.push(id) })
   return { vm, emitted }
 }
 
-test('create mode pre-selects the workspace default store', async t => {
-  const { vm, emitted } = setup(t, { mode: 'create', vectorStoreId: '' })
+test('create mode shows the store the editor pre-selected', async t => {
+  const { vm, emitted } = setup(t, { mode: 'create', vectorStoreId: 'oracle-1' })
   await flush()
   assert.equal(vm.localVectorStoreId, 'oracle-1')
-  assert.deepEqual(emitted, ['oracle-1'])
-})
-
-test('a default store that is no longer listed leaves the system default', async t => {
-  const { vm, emitted } = setup(t, { mode: 'create', vectorStoreId: '' }, 'deleted')
-  await flush()
-  assert.equal(vm.localVectorStoreId, '')
-  assert.deepEqual(emitted, [])
+  assert.deepEqual(vm.userStores.map((s: any) => s.id), ['oracle-1'])
+  assert.deepEqual(emitted, [], 'showing the selection is not a user change')
 })
 
 test('edit mode names the engine per retrieval type and marks disabled ones', async t => {

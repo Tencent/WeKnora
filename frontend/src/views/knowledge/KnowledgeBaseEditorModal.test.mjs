@@ -59,3 +59,14 @@ test('Wiki auto-generation setting defaults on, loads from the KB, and is submit
   assert.match(source, /knowledgeEditor\.wiki\.autoGenerateLabel/)
   assert.match(source, /knowledgeEditor\.wiki\.autoGenerateTip/)
 })
+
+test('create mode pre-selects the workspace default vector store before the form is marked clean', () => {
+  // Regression: applying the default after markClean made cancelling an
+  // untouched create dialog ask about unsaved changes.
+  const createBranch = source.match(/\/\/ 创建模式：初始化空表单[\s\S]*?modalShell\.markClean\(\)/)?.[0]
+  assert.ok(createBranch, 'expected to find the create-mode init block')
+  assert.match(createBranch, /formData\.value\.vectorStoreId = tenantDefaultVectorStore\.value/)
+  assert.match(source, /loadTenantDefaultVectorStore\(\)\]\)/)
+  // Only a still-registered store counts as the default.
+  assert.match(source, /s\.source === 'user' && s\.id === id/)
+})

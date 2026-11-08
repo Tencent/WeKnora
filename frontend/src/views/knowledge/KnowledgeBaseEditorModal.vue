@@ -634,6 +634,8 @@ import {
   type KnowledgeBaseProfile,
   type VectorStoreRetriever,
 } from '@/api/knowledge-base'
+import { getTenantDefaultSettings } from '@/api/default-settings'
+import { listVectorStores } from '@/api/vector-store'
 import {
   buildImageProcessingConfig,
   resolveImagePipelineFromKb as resolveKbImagePipeline,
@@ -768,6 +770,8 @@ const generatedProfileMeta = computed(() => {
 const initialStorageProvider = ref<string>('')
 /** Tenant-wide default from Settings → Storage engine (used when creating a KB). */
 const tenantDefaultStorageProvider = ref('local')
+// Workspace default vector store, pre-selected in create mode ('' = system default).
+const tenantDefaultVectorStore = ref('')
 const initialIndexingStrategy = ref<any>(null)
 const dsCount = ref(0)
 // Identifier of the user who created this KB. Empty for older rows
@@ -1426,6 +1430,22 @@ async function loadTenantDefaultStorageProvider(force = false) {
   }
 }
 
+// The default only counts while its store is still registered: a deleted
+// one silently leaves "System default", the behavior without a default.
+async function loadTenantDefaultVectorStore() {
+  tenantDefaultVectorStore.value = ''
+  if (props.mode === 'edit') return
+  try {
+    const [defaults, stores] = await Promise.all([getTenantDefaultSettings(), listVectorStores()])
+    const id = defaults.data?.vector_store_id || ''
+    if (id && (stores.data || []).some((s) => s.source === 'user' && s.id === id)) {
+      tenantDefaultVectorStore.value = id
+    }
+  } catch (e) {
+    console.warn('[KnowledgeBaseEditorModal] failed to load the default vector store', e)
+  }
+}
+
 /** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
 function resolvedStorageProvider(): string {
   const explicit = formData.value?.storageProvider?.trim()
@@ -1933,6 +1953,7 @@ const resetState = () => {
   hasFiles.value = false
   initialStorageProvider.value = ''
   tenantDefaultStorageProvider.value = 'local'
+  tenantDefaultVectorStore.value = ''
   initialIndexingStrategy.value = null
   saving.value = false
   loading.value = false
@@ -1972,7 +1993,7 @@ watch(() => props.visible, async (newVal) => {
     }
     
     // 加载模型列表与空间默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
-    await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
+    await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider(), loadTenantDefaultVectorStore()])
 
     if (generation !== kbEditorLoadGeneration || !props.visible) return
     
@@ -1983,6 +2004,7 @@ watch(() => props.visible, async (newVal) => {
       // 创建模式：初始化空表单，并预填空间默认存储引擎
       formData.value = initFormData(props.initialType || 'document')
       formData.value.storageProvider = tenantDefaultStorageProvider.value
+      formData.value.vectorStoreId = tenantDefaultVectorStore.value
       hasFiles.value = false
       applyDefaultModelsIfEmpty()
       loading.value = false
