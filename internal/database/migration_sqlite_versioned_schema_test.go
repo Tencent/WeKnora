@@ -48,6 +48,7 @@ var versionedSQLiteTables = []string{
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
 	"credential_vault_items",
+	"mcp_endpoint_settings",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -79,6 +80,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_oauth_tokens":            {"principal_type", "principal_id"},   // 000064
 	"mcp_tool_approvals":          {"enabled", "risk", "observed_risk"}, // 000091, 000126
 	"mcp_services":                {"usage_instructions"},               // 000092
+	"mcp_endpoints":               {"kind", "user_id"},                  // 000137
 	"message_artifacts":           {"deleted_at"},                       // 000107
 	"tenant_skills": {
 		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
@@ -89,7 +91,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 52
+const expectedSQLiteMigrationVersion = 53
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

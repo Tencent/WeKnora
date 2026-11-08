@@ -199,3 +199,124 @@ func TestTouchLastUsedToleratesMissingRepository(_ *testing.T) {
 	srv := &Server{}
 	srv.touchLastUsed(context.Background(), "ep-1") // must not panic
 }
+
+type settingsEndpointRepo struct {
+	recordingEndpointRepo
+	settings *types.MCPEndpointSettings
+}
+
+func (r *settingsEndpointRepo) GetSettings(context.Context, uint64) (*types.MCPEndpointSettings, error) {
+	return r.settings, nil
+}
+
+// newPersonalTestEngine serves several endpoints from one server, each
+// addressed by its id and acting as a member with role, so the shared
+// personal quota and the owner role gate can be observed across endpoints.
+func newPersonalTestEngine(
+	t *testing.T, role types.TenantRole, repo interfaces.MCPEndpointRepository, eps ...*types.MCPEndpoint,
+) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil, nil, nil, nil, nil, nil)
+	byID := map[string]*types.MCPEndpoint{}
+	for _, ep := range eps {
+		byID[ep.ID] = ep
+	}
+	r := gin.New()
+	r.POST("/mcp/:endpoint_id", func(c *gin.Context) {
+		ep := byID[c.Param("endpoint_id")]
+		ctx := context.WithValue(c.Request.Context(), types.MCPEndpointContextKey, ep)
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, ep.TenantID)
+		ctx = types.WithCaller(ctx, types.Caller{TenantID: ep.TenantID, UserID: ep.UserID, Role: role})
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}, gin.WrapH(srv.Handler()))
+	return r
+}
+
+func rpcAt(t *testing.T, r *gin.Engine, path, method string, params any) map[string]any {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	raw := strings.TrimSpace(w.Body.String())
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(line, "data:") {
+			raw = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			break
+		}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("%s: bad json %q: %v", method, raw, err)
+	}
+	return out
+}
+
+func toolResultText(resp map[string]any) string {
+	result, _ := resp["result"].(map[string]any)
+	content, _ := result["content"].([]any)
+	if len(content) == 0 {
+		return ""
+	}
+	first, _ := content[0].(map[string]any)
+	text, _ := first["text"].(string)
+	return text
+}
+
+func TestPersonalEndpointHidesWriteToolsFromViewer(t *testing.T) {
+	ep := &types.MCPEndpoint{
+		ID: "ep-p", TenantID: 1, Enabled: true, Kind: types.MCPEndpointKindPersonal, UserID: "u1",
+		Tools: types.StringArray{types.MCPEndpointToolReadDocument, types.MCPEndpointToolAddDocument},
+	}
+	repo := &settingsEndpointRepo{recordingEndpointRepo: recordingEndpointRepo{touched: make(chan string, 8)}}
+
+	viewer := newPersonalTestEngine(t, types.TenantRoleViewer, repo, ep)
+	if names := toolNames(t, rpcAt(t, viewer, "/mcp/ep-p", "tools/list", map[string]any{})); len(names) != 1 ||
+		names[0] != types.MCPEndpointToolReadDocument {
+		t.Fatalf("viewer tools = %v", names)
+	}
+	resp := rpcAt(t, viewer, "/mcp/ep-p", "tools/call", map[string]any{
+		"name": types.MCPEndpointToolAddDocument, "arguments": map[string]any{},
+	})
+	if resp["result"] != nil && !strings.Contains(toolResultText(resp), "role") {
+		t.Fatalf("viewer must not reach add_document: %v", resp)
+	}
+
+	contributor := newPersonalTestEngine(t, types.TenantRoleContributor, repo, ep)
+	names := toolNames(t, rpcAt(t, contributor, "/mcp/ep-p", "tools/list", map[string]any{}))
+	if len(names) != 2 {
+		t.Fatalf("contributor tools = %v", names)
+	}
+}
+
+func TestPersonalEndpointsShareWorkspaceQuota(t *testing.T) {
+	tools := types.StringArray{types.MCPEndpointToolReadDocument}
+	a := &types.MCPEndpoint{
+		ID: "ep-a", TenantID: 9, Enabled: true, Kind: types.MCPEndpointKindPersonal, UserID: "u1",
+		Tools: tools, RateLimitPerMinute: 100,
+	}
+	b := &types.MCPEndpoint{
+		ID: "ep-b", TenantID: 9, Enabled: true, Kind: types.MCPEndpointKindPersonal, UserID: "u2",
+		Tools: tools, RateLimitPerMinute: 100,
+	}
+	repo := &settingsEndpointRepo{
+		recordingEndpointRepo: recordingEndpointRepo{touched: make(chan string, 8)},
+		settings:              &types.MCPEndpointSettings{TenantID: 9, PersonalRateLimitPerMinute: 1},
+	}
+	r := newPersonalTestEngine(t, types.TenantRoleViewer, repo, a, b)
+	call := func(path string) string {
+		return toolResultText(rpcAt(t, r, path, "tools/call", map[string]any{
+			"name": types.MCPEndpointToolReadDocument, "arguments": map[string]any{},
+		}))
+	}
+	if text := call("/mcp/ep-a"); strings.Contains(text, "rate limit") {
+		t.Fatalf("first personal call should pass: %q", text)
+	}
+	if text := call("/mcp/ep-b"); !strings.Contains(text, "rate limit") {
+		t.Fatalf("second member's endpoint should hit the shared quota: %q", text)
+	}
+}

@@ -50,12 +50,13 @@ func (r *mcpEndpointRepository) GetByTokenHash(ctx context.Context, tokenHash st
 	return &ep, nil
 }
 
-func (r *mcpEndpointRepository) ListByTenant(ctx context.Context, tenantID uint64) ([]*types.MCPEndpoint, error) {
+func (r *mcpEndpointRepository) List(ctx context.Context, owner types.MCPEndpointOwner) ([]*types.MCPEndpoint, error) {
 	var rows []*types.MCPEndpoint
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
-		Order("created_at DESC").
-		Find(&rows).Error
+	q := r.db.WithContext(ctx).Where("tenant_id = ? AND kind = ?", owner.TenantID, owner.Kind)
+	if owner.Kind == types.MCPEndpointKindPersonal {
+		q = q.Where("user_id = ?", owner.UserID)
+	}
+	err := q.Order("created_at DESC").Find(&rows).Error
 	return rows, err
 }
 
@@ -75,4 +76,20 @@ func (r *mcpEndpointRepository) TouchLastUsed(ctx context.Context, id string) er
 		Model(&types.MCPEndpoint{}).
 		Where("id = ?", id).
 		UpdateColumn("last_used_at", now).Error
+}
+
+func (r *mcpEndpointRepository) GetSettings(ctx context.Context, tenantID uint64) (*types.MCPEndpointSettings, error) {
+	var settings types.MCPEndpointSettings
+	err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).First(&settings).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+func (r *mcpEndpointRepository) SaveSettings(ctx context.Context, settings *types.MCPEndpointSettings) error {
+	return r.db.WithContext(ctx).Save(settings).Error
 }

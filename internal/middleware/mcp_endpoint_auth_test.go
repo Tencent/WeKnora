@@ -28,12 +28,30 @@ func (f *fakeMCPEndpointService) Authenticate(_ context.Context, endpointID, tok
 	return f.ep, nil
 }
 
+type fakeMCPOwnerUserService struct {
+	interfaces.UserService
+	users map[string]*types.User
+}
+
+func (f *fakeMCPOwnerUserService) GetUserByID(_ context.Context, id string) (*types.User, error) {
+	return f.users[id], nil
+}
+
 func newMCPAuthTestEngine(svc *fakeMCPEndpointService, capture *map[string]any) *gin.Engine {
+	return newMCPAuthTestEngineWithOwners(svc, newFakeMemberService(), &fakeMCPOwnerUserService{}, capture)
+}
+
+func newMCPAuthTestEngineWithOwners(
+	svc *fakeMCPEndpointService,
+	members *fakeMemberService,
+	users *fakeMCPOwnerUserService,
+	capture *map[string]any,
+) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.ContextWithFallback = true
 	tenantSvc := &fakeTenantService{tenant: &types.Tenant{ID: 42, Status: "active"}}
-	r.POST("/mcp/:endpoint_id", MCPEndpointAuth(svc, tenantSvc), func(c *gin.Context) {
+	r.POST("/mcp/:endpoint_id", MCPEndpointAuth(svc, tenantSvc, members, users), func(c *gin.Context) {
 		ctx := c.Request.Context()
 		ep, _ := MCPEndpointFromContext(ctx)
 		scope, _ := types.TenantAPIKeyScopeFromContext(ctx)
@@ -45,6 +63,7 @@ func newMCPAuthTestEngine(svc *fakeMCPEndpointService, capture *map[string]any) 
 			"tenant":     tenantID,
 			"principal":  principal,
 			"authSource": types.PrincipalAuthSourceFromContext(ctx),
+			"caller":     types.CallerFromContext(ctx),
 		}
 		c.Status(http.StatusNoContent)
 	})
@@ -127,4 +146,87 @@ func TestMCPEndpointAuthRejectsBadTokens(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("disabled endpoint: status %d, want 403", w.Code)
 	}
+}
+
+func TestMCPEndpointAuthSpaceEndpointActsAsViewerMachineUser(t *testing.T) {
+	ep := &types.MCPEndpoint{ID: "ep-1", TenantID: 42, Enabled: true, Kind: types.MCPEndpointKindSpace}
+	var captured map[string]any
+	r := newMCPAuthTestEngine(&fakeMCPEndpointService{ep: ep, token: "mcp_secret"}, &captured)
+
+	if code := serveMCPAuth(r, "/mcp/ep-1", "mcp_secret"); code != http.StatusNoContent {
+		t.Fatalf("status %d", code)
+	}
+	caller := captured["caller"].(types.Caller)
+	if caller.UserID != "mcp-ep-1" || caller.Role != types.TenantRoleViewer {
+		t.Fatalf("space endpoint caller = %+v", caller)
+	}
+}
+
+func TestMCPEndpointAuthPersonalEndpointActsAsOwner(t *testing.T) {
+	ep := &types.MCPEndpoint{
+		ID: "ep-p", TenantID: 42, Enabled: true,
+		Kind: types.MCPEndpointKindPersonal, UserID: "user-1",
+	}
+	members := newFakeMemberService()
+	members.seedActive("user-1", 42, types.TenantRoleContributor)
+	users := &fakeMCPOwnerUserService{users: map[string]*types.User{
+		"user-1": {ID: "user-1", TenantID: 42, IsActive: true},
+	}}
+	var captured map[string]any
+	r := newMCPAuthTestEngineWithOwners(&fakeMCPEndpointService{ep: ep, token: "mcp_secret"}, members, users, &captured)
+
+	if code := serveMCPAuth(r, "/mcp/ep-p", "mcp_secret"); code != http.StatusNoContent {
+		t.Fatalf("status %d", code)
+	}
+	caller := captured["caller"].(types.Caller)
+	if caller.UserID != "user-1" || caller.Role != types.TenantRoleContributor || caller.TenantID != 42 {
+		t.Fatalf("personal endpoint caller = %+v", caller)
+	}
+	if scope := captured["scope"].(types.TenantAPIKeyScope); scope.FullAccess {
+		t.Fatalf("personal endpoint must keep the endpoint scope: %+v", scope)
+	}
+}
+
+func TestMCPEndpointAuthPersonalEndpointRejectsFormerMembers(t *testing.T) {
+	ep := &types.MCPEndpoint{
+		ID: "ep-p", TenantID: 42, Enabled: true,
+		Kind: types.MCPEndpointKindPersonal, UserID: "user-1",
+	}
+	activeUser := map[string]*types.User{"user-1": {ID: "user-1", IsActive: true}}
+	cases := []struct {
+		name    string
+		members func() *fakeMemberService
+		users   map[string]*types.User
+	}{
+		{"no membership", newFakeMemberService, activeUser},
+		{"suspended membership", func() *fakeMemberService {
+			m := newFakeMemberService()
+			m.seedActive("user-1", 42, types.TenantRoleAdmin)
+			m.members[memberKey("user-1", 42)].Status = types.TenantMemberStatusSuspended
+			return m
+		}, activeUser},
+		{"inactive user", func() *fakeMemberService {
+			m := newFakeMemberService()
+			m.seedActive("user-1", 42, types.TenantRoleAdmin)
+			return m
+		}, map[string]*types.User{"user-1": {ID: "user-1", IsActive: false}}},
+	}
+	for _, tc := range cases {
+		var captured map[string]any
+		r := newMCPAuthTestEngineWithOwners(
+			&fakeMCPEndpointService{ep: ep, token: "mcp_secret"},
+			tc.members(), &fakeMCPOwnerUserService{users: tc.users}, &captured,
+		)
+		if code := serveMCPAuth(r, "/mcp/ep-p", "mcp_secret"); code != http.StatusForbidden {
+			t.Errorf("%s: status %d, want 403", tc.name, code)
+		}
+	}
+}
+
+func serveMCPAuth(r *gin.Engine, path, token string) int {
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w.Code
 }

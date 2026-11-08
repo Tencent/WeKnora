@@ -290,6 +290,14 @@ func TestMCPEndpointRoutesDeclareValidAPIKeyPolicies(t *testing.T) {
 		"PUT /api/v1/mcp-endpoints/:endpoint_id",
 		"DELETE /api/v1/mcp-endpoints/:endpoint_id",
 		"POST /api/v1/mcp-endpoints/:endpoint_id/rotate-token",
+		"GET /api/v1/mcp-endpoints/settings",
+		"PUT /api/v1/mcp-endpoints/settings",
+		"GET /api/v1/mcp-personal-endpoints",
+		"POST /api/v1/mcp-personal-endpoints",
+		"GET /api/v1/mcp-personal-endpoints/:endpoint_id",
+		"PUT /api/v1/mcp-personal-endpoints/:endpoint_id",
+		"DELETE /api/v1/mcp-personal-endpoints/:endpoint_id",
+		"POST /api/v1/mcp-personal-endpoints/:endpoint_id/rotate-token",
 	} {
 		if !routes[want] {
 			t.Errorf("route %s not registered", want)
@@ -309,7 +317,7 @@ func TestMCPServerRoutesAreMountedAndReported(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	srv := mcpserver.NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	RegisterMCPServerRoutes(engine, srv, &stubMCPEndpointServiceForRoutes{}, nil)
+	RegisterMCPServerRoutes(engine, srv, &stubMCPEndpointServiceForRoutes{}, nil, nil, nil)
 
 	routes := map[string]bool{}
 	for _, r := range engine.Routes() {
