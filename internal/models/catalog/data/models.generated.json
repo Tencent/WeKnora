@@ -6392,7 +6392,10 @@
           "image"
         ],
         "context_window": 500000,
-        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/x-ai-grok-4-7.htm"
+        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/x-ai-grok-4-7.htm",
+        "thinking_levels": {
+          "off": null
+        }
       },
       {
         "id": "xai.grok-4.3",
@@ -6403,7 +6406,10 @@
           "image"
         ],
         "context_window": 1000000,
-        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/xai-grok-4-3.htm"
+        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/xai-grok-4-3.htm",
+        "thinking_levels": {
+          "off": null
+        }
       },
       {
         "id": "xai.grok-4.6",
@@ -6424,7 +6430,14 @@
           "image"
         ],
         "context_window": 1000000,
-        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/xai-grok-4-20.htm"
+        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/xai-grok-4-20.htm",
+        "thinking_levels": {
+          "off": null,
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": null
+        }
       },
       {
         "id": "xai.grok-4.20-non-reasoning",
@@ -6447,7 +6460,14 @@
         ],
         "context_window": 1048576,
         "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/google-gemini-2-5-pro.htm",
-        "max_output_tokens": 65536
+        "max_output_tokens": 65536,
+        "thinking_levels": {
+          "off": null,
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": null
+        }
       },
       {
         "id": "google.gemini-2.5-flash",
@@ -6459,7 +6479,14 @@
         ],
         "context_window": 1048576,
         "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/google-gemini-2-5-flash.htm",
-        "max_output_tokens": 65536
+        "max_output_tokens": 65536,
+        "thinking_levels": {
+          "off": null,
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": null
+        }
       },
       {
         "id": "google.gemini-2.5-flash-lite",
@@ -6481,7 +6508,11 @@
           "text"
         ],
         "context_window": 128000,
-        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/openai-gpt-oss-120b.htm"
+        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/openai-gpt-oss-120b.htm",
+        "thinking_levels": {
+          "off": null,
+          "minimal": null
+        }
       },
       {
         "id": "openai.gpt-oss-20b",
@@ -6491,7 +6522,11 @@
           "text"
         ],
         "context_window": 128000,
-        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/openai-gpt-oss-20b.htm"
+        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/openai-gpt-oss-20b.htm",
+        "thinking_levels": {
+          "off": null,
+          "minimal": null
+        }
       }
     ]
   }

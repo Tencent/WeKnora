@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -45,6 +46,13 @@ func TestOCIEnterpriseAILive(t *testing.T) {
 		{Role: "system", Content: "Answer with one word."},
 		{Role: "user", Content: "What is the capital of Japan?"},
 	}, &chat.ChatOptions{})
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(resp.Content), "tokyo")
+
+	// A requested thinking level must map to something the endpoint accepts
+	// (clamped, or omitted for models without effort control).
+	resp, err = c.Chat(ctx, []chat.Message{{Role: "user", Content: "What is the capital of Japan? One word."}},
+		&chat.ChatOptions{ReasoningEffort: api.ReasoningHigh})
 	require.NoError(t, err)
 	require.Contains(t, strings.ToLower(resp.Content), "tokyo")
 

@@ -406,6 +406,12 @@ Grok 4.20（reasoning / non-reasoning）可作为视觉模型；Grok 4.7 官方�
 Grok 4.6 页面未说明图片输入，仅作为对话模型。各区域可用模型不同（xAI 仅限美国区域），请以
 [按区域的模型列表](https://docs.oracle.com/en-us/iaas/Content/generative-ai/model-endpoint-regions.htm)为准。
 需要专用集群的导入模型和端点不同的 Grok 4.20 Multi-Agent 未收录，可手动填写模型名。
+
+思考强度按 OCI Responses 端点实际接受的取值配置（已在 `us-chicago-1`、`ap-osaka-1` 实测）：Grok 4.7 / 4.3
+可选 minimal～high，不能关闭思考，不接受 xhigh；gpt-oss-120b / 20b 可选 low～high，不能关闭；Grok 4.20
+reasoning 与 Gemini 2.5 Pro / Flash 不接受 `reasoning.effort`，只提供「自动」。早于本厂商、以自定义请求头
+`OpenAI-Project` 传项目的模型行仍视为已填写项目 OCID；未填 provider 且 Base URL 为 `*.oci.oraclecloud.com/openai`
+的旧行会按本厂商识别，对话改走 Responses API。
 向量、重排与 IAM 签名认证不在本厂商范围内。
 
 ## 设置空间默认模型 {#workspace-defaults}

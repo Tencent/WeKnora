@@ -56,6 +56,55 @@ func TestOCIEnterpriseAIProvider(t *testing.T) {
 	ep, err = r.Endpoint(types.ModelTypeKnowledgeQA, modelruntime.Connection{})
 	require.NoError(t, err)
 	assert.NotContains(t, ep.Headers, "OpenAI-Project")
+
+	// A custom header wins whatever its case, and only one is sent.
+	ep, err = r.Endpoint(types.ModelTypeKnowledgeQA, modelruntime.Connection{
+		Extra:   params.ExtraConfig,
+		Headers: map[string]string{"openai-project": "lower"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "lower", ep.Headers["openai-project"])
+	assert.NotContains(t, ep.Headers, "OpenAI-Project")
+
+	// Rows that passed the project as a custom header before the field
+	// existed stay valid.
+	legacy := &types.ModelParameters{
+		Provider:      providers.OCIEnterpriseAIID,
+		CustomHeaders: map[string]string{"OpenAI-Project": "ocid1.generativeaiproject.oc1.x"},
+	}
+	assert.NoError(t, modelruntime.ValidateRow("xai.grok-4.7", types.ModelTypeKnowledgeQA, legacy))
+}
+
+// Thinking levels follow what the OCI Responses endpoint accepts (checked
+// live): Grok 4.7/4.3 take minimal..high but cannot stop reasoning and
+// reject xhigh; gpt-oss rejects minimal; Grok 4.20 reasoning and Gemini 2.5
+// reject reasoning.effort entirely, so only automatic thinking is offered.
+func TestOCIEnterpriseAIThinkingLevels(t *testing.T) {
+	levels := func(model string) api.ThinkingLevelMap {
+		r, err := modelruntime.Resolve(modelruntime.Ref{
+			Provider: providers.OCIEnterpriseAIID, Model: model, ModelType: types.ModelTypeKnowledgeQA,
+		})
+		require.NoError(t, err)
+		return r.ThinkingLevels
+	}
+	for _, model := range []string{"xai.grok-4.7", "xai.grok-4.3"} {
+		l := levels(model)
+		assert.False(t, l.Supports(api.ReasoningOff), model)
+		assert.True(t, l.Supports(api.ReasoningMinimal), model)
+		assert.True(t, l.Supports(api.ReasoningHigh), model)
+		assert.False(t, l.Supports(api.ReasoningXHigh), model)
+	}
+	for _, model := range []string{"openai.gpt-oss-120b", "openai.gpt-oss-20b"} {
+		l := levels(model)
+		assert.False(t, l.Supports(api.ReasoningOff), model)
+		assert.False(t, l.Supports(api.ReasoningMinimal), model)
+		assert.True(t, l.Supports(api.ReasoningLow), model)
+	}
+	for _, model := range []string{"xai.grok-4.20-reasoning", "google.gemini-2.5-pro", "google.gemini-2.5-flash"} {
+		assert.Equal(t, []api.ReasoningEffort{api.ReasoningAuto}, levels(model).SupportedLevels(), model)
+		// A requested level never reaches the wire as an effort.
+		assert.Equal(t, api.ReasoningAuto, levels(model).Clamp(api.ReasoningHigh), model)
+	}
 }
 
 // The VLM picker only offers models that accept images: those whose Oracle

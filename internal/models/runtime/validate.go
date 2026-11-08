@@ -40,7 +40,8 @@ func ValidateRow(modelName string, modelType types.ModelType, params *types.Mode
 	if err != nil {
 		return fmt.Errorf("model parameters: %w", err)
 	}
-	if missing := resolved.Vendor.MissingRequiredExtra(modelType, params.ExtraConfig); len(missing) > 0 {
+	missing := resolved.Vendor.MissingRequiredExtra(modelType, params.ExtraConfig, params.CustomHeaders)
+	if len(missing) > 0 {
 		return fmt.Errorf("model parameters: %s requires extra_config %s", resolved.Vendor.Name,
 			strings.Join(missing, ", "))
 	}

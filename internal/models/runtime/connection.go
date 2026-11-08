@@ -49,7 +49,9 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 		headers[k] = val
 	}
 	for _, f := range v.ExtraFields {
-		if f.Header == "" || !f.AppliesTo(kind) {
+		// A custom header of the same name, in any case, wins below; adding
+		// the field under its own spelling would send both.
+		if f.Header == "" || !f.AppliesTo(kind) || providers.HeaderValue(c.Headers, f.Header) != "" {
 			continue
 		}
 		if val := strings.TrimSpace(c.Extra[f.Key]); val != "" {
