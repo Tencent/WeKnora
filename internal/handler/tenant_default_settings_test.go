@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,7 +36,8 @@ func (s *defaultSettingsTenantService) UpdateTenant(_ context.Context, tenant *t
 }
 
 // defaultSettingsStores knows one registered store, "store-1"; the env
-// store resolves as env and everything else as unavailable.
+// store resolves as env, "broken" fails the lookup and everything else is
+// unavailable.
 type defaultSettingsStores struct {
 	interfaces.VectorStoreService
 }
@@ -46,6 +48,8 @@ func (defaultSettingsStores) ResolveStoreView(_ context.Context, _ uint64, id st
 		return types.StoreDisplay{Source: types.StoreSourceUser}, nil
 	case "__env_postgres__":
 		return types.StoreDisplay{Source: types.StoreSourceEnv}, nil
+	case "broken":
+		return types.UnavailableStoreDisplay(), errors.New("database is down")
 	}
 	return types.UnavailableStoreDisplay(), nil
 }
@@ -98,6 +102,10 @@ func TestUpdateDefaultSettingsRepairsStaleSlotsIndividually(t *testing.T) {
 		{
 			name: "unknown vector store is rejected", next: types.DefaultSettings{VectorStoreID: "missing"},
 			wantError: "vector store not found",
+		},
+		{
+			name: "vector store lookup failure is a server error", next: types.DefaultSettings{VectorStoreID: "broken"},
+			wantError: "Failed to validate vector store",
 		},
 		{
 			name:     "deleted default store may stay while another slot changes",
