@@ -26734,6 +26734,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_models_providers.ExtraField": {
             "type": "object",
             "properties": {
+                "accept": {
+                    "description": "Accept lists the file types a \"file\" field offers (the HTML accept\nattribute, e.g. \".pem\"). The file's text content is the value.",
+                    "type": "string"
+                },
                 "default": {
                     "type": "string"
                 },
@@ -26784,7 +26788,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "type": {
-                    "description": "\"string\", \"number\", \"boolean\", \"select\", \"password\"",
+                    "description": "\"string\", \"number\", \"boolean\", \"select\", \"password\", \"file\"",
                     "type": "string"
                 }
             }

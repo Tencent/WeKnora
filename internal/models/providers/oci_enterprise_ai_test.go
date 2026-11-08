@@ -132,3 +132,20 @@ func TestOCIEnterpriseAIVisionModels(t *testing.T) {
 		"xai.grok-4.20-non-reasoning", "xai.grok-4.20-reasoning", "xai.grok-4.3", "xai.grok-4.7",
 	}, ids(types.ModelTypeVLLM))
 }
+
+func TestOCIGenAIProvider(t *testing.T) {
+	v, ok := modelruntime.Get(providers.OCIGenAIID)
+	require.True(t, ok)
+	for _, mt := range []types.ModelType{types.ModelTypeEmbedding, types.ModelTypeRerank} {
+		assert.Equal(t, providers.OCIGenAIBaseURL, v.GetDefaultURL(mt), mt)
+	}
+	assert.False(t, v.SupportsType(types.ModelTypeKnowledgeQA), "chat is the OCI Enterprise AI provider")
+
+	// The compartment is required on save; the auth mode has a default.
+	params := &types.ModelParameters{Provider: providers.OCIGenAIID}
+	assert.ErrorContains(t, modelruntime.ValidateRow("cohere.embed-v4.0", types.ModelTypeEmbedding, params),
+		"compartment_id")
+	params.ExtraConfig = map[string]string{"compartment_id": "ocid1.compartment.oc1..x"}
+	assert.NoError(t, modelruntime.ValidateRow("cohere.embed-v4.0", types.ModelTypeEmbedding, params))
+	assert.NoError(t, modelruntime.ValidateRow("cohere.rerank-v4.0-fast", types.ModelTypeRerank, params))
+}

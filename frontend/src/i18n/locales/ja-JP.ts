@@ -9124,6 +9124,8 @@ export default {
     update: '差し替え',
     remove: '削除',
     inputPlaceholder: '値を入力してください',
+    uploadFile: 'ファイルをアップロード',
+    fileLoaded: '読み込み済み：{name}',
     savedToast: '認証情報を保存しました',
     saveFailed: '認証情報の保存に失敗しました',
     removedToast: '認証情報を削除しました',

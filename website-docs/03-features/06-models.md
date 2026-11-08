@@ -281,7 +281,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 33 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -310,6 +310,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
 | Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
 | OCI Enterprise AI | `oci_enterprise_ai` | ✓ | | | ✓ | |
+| OCI Generative AI | `oci_genai` | | ✓ | ✓ | | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -412,7 +413,48 @@ Grok 4.6 页面未说明图片输入，仅作为对话模型。各区域可用�
 reasoning 与 Gemini 2.5 Pro / Flash 不接受 `reasoning.effort`，只提供「自动」。早于本厂商、以自定义请求头
 `OpenAI-Project` 传项目的模型行仍视为已填写项目 OCID；未填 provider 且 Base URL 为 `*.oci.oraclecloud.com/openai`
 的旧行会按本厂商识别，对话改走 Responses API。
-向量、重排与 IAM 签名认证不在本厂商范围内。
+向量与重排请使用下面的 OCI Generative AI 厂商。
+
+### OCI Generative AI
+
+[OCI Generative AI](https://docs.oracle.com/en-us/iaas/Content/generative-ai/oci-genai-auth.htm)
+厂商通过原生推理接口（`https://inference.generativeai.<region>.oci.oraclecloud.com`，默认
+`us-chicago-1`）提供向量与重排：向量调用 `POST /20231130/actions/embedText`，重排调用
+`POST /20231130/actions/rerankText`。请求使用 OCI IAM 签名认证（IAM-Based Authentication），
+不使用 API Key：
+
+- **API 签名密钥**（默认）：填写租户 OCID、用户 OCID、指纹，并上传 `.pem` 私钥文件。私钥作为
+  加密凭证保存，编辑时不重新上传则沿用原私钥；私钥已加密时在「私钥口令」中填写口令。
+- **实例主体**：WeKnora 运行在 OCI 计算实例上时，以实例身份签名，无需填写密钥。需要为该实例所在的
+  动态组授予 Generative AI 推理的 IAM 策略。
+
+两种方式都必须填写「区间 OCID」（`compartment_id`），保存时校验。通过 `POST /api/v1/models`
+创建时，私钥内容放在 `app_secret`：
+
+```json
+{
+  "name": "cohere.embed-v4.0",
+  "type": "Embedding",
+  "source": "remote",
+  "parameters": {
+    "provider": "oci_genai",
+    "base_url": "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
+    "app_secret": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----",
+    "embedding_parameters": {"dimension": 1536},
+    "extra_config": {
+      "auth_mode": "api_key",
+      "compartment_id": "ocid1.compartment.oc1..xxxx",
+      "tenancy_ocid": "ocid1.tenancy.oc1..xxxx",
+      "user_ocid": "ocid1.user.oc1..xxxx",
+      "fingerprint": "12:34:56:..."
+    }
+  }
+}
+```
+
+模型目录收录 `cohere.embed-v4.0`（1536 维，可选 256 / 512 / 1024，每次最多 96 条）和
+`cohere.rerank-v4.0-fast`，已在 `us-chicago-1`、`ap-osaka-1` 实测。v3 系列向量模型与
+Rerank 3.5 已被 Oracle 标记为弃用。
 
 ## 设置空间默认模型 {#workspace-defaults}
 
@@ -478,7 +520,7 @@ const (
 | `interface_type` | string | 空（VLM：local 默认 `ollama`，remote 默认 `openai`） | 接口协议类型 |
 | `embedding_parameters.dimension` | int | 0 | 向量维度 |
 | `embedding_parameters.truncate_prompt_tokens` | int | 0 | 服务端截断 token 数。这是 vLLM 的扩展参数，只发给 `generic`、`gpustack`（为 0 时沿用历史值 511）；托管厂商的文档里没有它，一律不发 |
-| `embedding_parameters.supports_dimension_override` | bool | false | 是否在请求里指定向量维度。字段名由厂商决定（OpenAI 系 `dimensions`、Gemini `outputDimensionality`、百炼多模态 `parameters.dimension`）；厂商文档里没有该参数的模型（NVIDIA NIM、混元、Novita、ada-002 等）即使勾选也不发 |
+| `embedding_parameters.supports_dimension_override` | bool | false | 是否在请求里指定向量维度。字段名由厂商决定（OpenAI 系 `dimensions`、Gemini `outputDimensionality`、百炼多模态 `parameters.dimension`、OCI `outputDimensions`）；厂商文档里没有该参数的模型（NVIDIA NIM、混元、Novita、ada-002 等）即使勾选也不发 |
 | `parameter_size` | string | 空 | Ollama 模型参数规模（如 "7B"），后端维护、前端不可改 |
 | `provider` | string | 空（按 BaseURL 自动检测） | 厂商 ID，取值见[内置厂商](#内置厂商) |
 | `extra_config` | map[string]string | nil | 厂商额外字段（见下节）；保留键 `api`（强制对话协议）、`remote_model_name`（远端模型名）、`thinking_control`（旧版思考参数格式） |

@@ -798,6 +798,8 @@ export default {
     update: '更換',
     remove: '移除',
     inputPlaceholder: '請輸入',
+    uploadFile: '上傳檔案',
+    fileLoaded: '已讀取：{name}',
     savedToast: '憑據已儲存',
     saveFailed: '儲存憑據失敗',
     removedToast: '憑據已移除',

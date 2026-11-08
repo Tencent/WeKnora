@@ -232,6 +232,8 @@
   "oci_enterprise_ai/KnowledgeQA/xai.grok-4.3": "df048784046692893d668286945baa6f8477f9f330cb4fbbb0d49c7b650c0be2",
   "oci_enterprise_ai/KnowledgeQA/xai.grok-4.6": "abe54beb348af9134216cde49402df2aedd1c6bf0703c63013dac78c8ff5fc01",
   "oci_enterprise_ai/KnowledgeQA/xai.grok-4.7": "5793bc6f8afa1dc28b5c3f6ef903c2b633128f4d67d632687b85b7b8bd45837f",
+  "oci_genai/Embedding/cohere.embed-v4.0": "b1fd9c5a9092942ce80411c63f90e20c217c1b048953a2c7f0019f8d19fb9c19",
+  "oci_genai/Rerank/cohere.rerank-v4.0-fast": "5b75a7d990fbf8111227929ffce9fc796b0e00f9743bef63ac3c5666e979683c",
   "openai/ASR/gpt-4o-mini-transcribe": "ce0044f799b08a1524971126a2881e0a0f830d26cc44f141f93f944ac55eee8b",
   "openai/ASR/gpt-4o-transcribe": "3e533c7d02be1039d0316d2c4968ce73052240248baa096c1df5cabf713692e9",
   "openai/ASR/gpt-transcribe": "540a1ae5b477a4f73d9c2269bb3ec2b7f95459995140517987ae5f76e68b6899",

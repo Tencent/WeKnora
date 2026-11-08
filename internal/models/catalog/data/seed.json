@@ -5058,6 +5058,25 @@
         "context_window": 128000,
         "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/openai-gpt-oss-20b.htm"
       }
+    ],
+    "oci_genai": [
+      {
+        "id": "cohere.embed-v4.0",
+        "name": "Cohere Embed 4",
+        "type": "Embedding",
+        "dimension": 1536,
+        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/cohere-embed-4.htm"
+      },
+      {
+        "id": "cohere.rerank-v4.0-fast",
+        "name": "Cohere Rerank 4 Fast",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32000,
+        "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/cohere-rerank-4-0.htm"
+      }
     ]
   }
 }

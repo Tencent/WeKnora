@@ -798,6 +798,8 @@ export default {
     update: '교체',
     remove: '제거',
     inputPlaceholder: '값을 입력하세요',
+    uploadFile: '파일 업로드',
+    fileLoaded: '불러옴: {name}',
     savedToast: 'credential이 저장되었습니다',
     saveFailed: 'credential 저장 실패',
     removedToast: 'credential이 제거되었습니다',

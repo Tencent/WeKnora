@@ -9124,6 +9124,8 @@ export default {
     update: 'Replace',
     remove: 'Remove',
     inputPlaceholder: 'Enter value',
+    uploadFile: 'Upload file',
+    fileLoaded: 'Loaded: {name}',
     savedToast: 'Credential saved',
     saveFailed: 'Failed to save credential',
     removedToast: 'Credential removed',

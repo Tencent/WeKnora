@@ -34,7 +34,7 @@ type ExtraField struct {
 	Key         string            `json:"key"`
 	Label       string            `json:"label"`
 	Labels      map[string]string `json:"labels,omitempty"`
-	Type        string            `json:"type"` // "string", "number", "boolean", "select", "password"
+	Type        string            `json:"type"` // "string", "number", "boolean", "select", "password", "file"
 	Required    bool              `json:"required"`
 	Default     string            `json:"default,omitempty"`
 	Placeholder string            `json:"placeholder,omitempty"`
@@ -45,6 +45,9 @@ type ExtraField struct {
 	ModelTypes []types.ModelType `json:"model_types,omitempty"`
 	// Secret marks values that must never be echoed back to the UI.
 	Secret bool `json:"secret,omitempty"`
+	// Accept lists the file types a "file" field offers (the HTML accept
+	// attribute, e.g. ".pem"). The file's text content is the value.
+	Accept string `json:"accept,omitempty"`
 	// Header, when set, sends the field's value as this HTTP header on every
 	// request (e.g. a project id the vendor reads from `OpenAI-Project`).
 	// Empty values send nothing; a user's custom header of the same name

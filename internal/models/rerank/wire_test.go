@@ -107,6 +107,12 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprint(probability(doc)))
 		}
 		return `{"code":0,"message":"success","data":{"scores":[` + strings.Join(parts, ",") + `]}}`
+	case strings.HasSuffix(r.URL.Path, "/actions/rerankText"): // OCI Generative AI
+		docs := texts(body["documents"])
+		for i := len(docs) - 1; i >= 0; i-- {
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevanceScore":%v}`, i, probability(docs[i])))
+		}
+		return `{"id":"r","documentRanks":[` + strings.Join(parts, ",") + `]}`
 	case strings.HasSuffix(r.URL.Path, "/reranking"): // NIM
 		docs := texts(body["passages"])
 		for i := len(docs) - 1; i >= 0; i-- {

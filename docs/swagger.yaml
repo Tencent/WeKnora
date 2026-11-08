@@ -1359,6 +1359,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_models_providers.ExtraField:
     properties:
+      accept:
+        description: |-
+          Accept lists the file types a "file" field offers (the HTML accept
+          attribute, e.g. ".pem"). The file's text content is the value.
+        type: string
       default:
         type: string
       header:
@@ -1398,7 +1403,7 @@ definitions:
         description: Secret marks values that must never be echoed back to the UI.
         type: boolean
       type:
-        description: '"string", "number", "boolean", "select", "password"'
+        description: '"string", "number", "boolean", "select", "password", "file"'
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_models_providers.ExtraFieldOption:
