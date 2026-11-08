@@ -270,6 +270,9 @@
           :bound-name="formData.vectorStoreInfo?.name"
           :bound-engine-type="formData.vectorStoreInfo?.engineType"
           :bound-status="formData.vectorStoreInfo?.status"
+          :bound-retrievers="formData.vectorStoreInfo?.retrievers"
+          :vector-enabled="formData.indexingStrategy?.vectorEnabled"
+          :keyword-enabled="formData.indexingStrategy?.keywordEnabled"
           @update:vector-store-id="handleVectorStoreIdUpdate"
         />
       </div>
@@ -629,6 +632,7 @@ import {
   type ImageActionsConfig,
   type ImageAttrSchema,
   type KnowledgeBaseProfile,
+  type VectorStoreRetriever,
 } from '@/api/knowledge-base'
 import {
   buildImageProcessingConfig,
@@ -1060,6 +1064,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       name: undefined as string | undefined,
       engineType: undefined as string | undefined,
       status: undefined as string | undefined,
+      retrievers: undefined as VectorStoreRetriever[] | undefined,
     },
   }
 }
@@ -1239,6 +1244,7 @@ const loadKBData = async (
         name: kb.vector_store_name,
         engineType: kb.vector_store_engine_type,
         status: kb.vector_store_status,
+        retrievers: kb.vector_store_retrievers,
       },
     }
     // 拉取后端属性注册表，驱动属性面板的动态渲染（编辑模式有 kbId）。

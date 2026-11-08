@@ -106,6 +106,13 @@ func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 		}
 	}
 
+	if cfg.VectorStoreID != "" && cfg.VectorStoreID != previous.VectorStoreID {
+		if err := h.validateDefaultVectorStore(c, tenant.ID, cfg.VectorStoreID); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+
 	updated := *tenant
 	updated.DefaultSettings = &cfg
 	updatedTenant, err := h.service.UpdateTenant(ctx, &updated)
@@ -123,4 +130,18 @@ func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 		"data":    updatedTenant.DefaultSettings,
 		"message": "Default settings updated successfully",
 	})
+}
+
+// validateDefaultVectorStore accepts only a registered store this workspace
+// owns and the server can reach. The env store is not a choice: it is what
+// an empty value already means.
+func (h *TenantHandler) validateDefaultVectorStore(c *gin.Context, tenantID uint64, storeID string) error {
+	if h.vectorStoreService == nil {
+		return errors.NewServiceUnavailableError("Vector store service is unavailable")
+	}
+	view, err := h.vectorStoreService.ResolveStoreView(c.Request.Context(), tenantID, storeID)
+	if err != nil || view.Source != types.StoreSourceUser {
+		return errors.NewBadRequestError("vector_store_id: vector store not found")
+	}
+	return nil
 }

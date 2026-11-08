@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -546,6 +547,76 @@ type StoreDisplay struct {
 	Source     string `json:"vector_store_source,omitempty"`
 	EngineType string `json:"vector_store_engine_type,omitempty"`
 	Status     string `json:"vector_store_status,omitempty"` // "available" / "unavailable"
+	// Retrievers names the engine behind each retrieval type, so the UI can
+	// show where keyword and vector search actually run. Empty for shared
+	// and unavailable stores.
+	Retrievers []RetrieverDisplay `json:"vector_store_retrievers,omitempty"`
+}
+
+// RetrieverDisplay is the engine serving one retrieval type, for display.
+type RetrieverDisplay struct {
+	Type       RetrieverType `json:"type"`
+	EngineType string        `json:"engine_type"`
+	// Label is a product name ("pgvector", "ParadeDB (BM25)") and is not
+	// translated.
+	Label string `json:"label"`
+}
+
+// retrieverLabels names the technique an engine uses for a retrieval type,
+// where it is more telling than the engine's name. Engines not listed are
+// shown by their display name.
+var retrieverLabels = map[RetrieverEngineType]map[RetrieverType]string{
+	PostgresRetrieverEngineType: {VectorRetrieverType: "pgvector", KeywordsRetrieverType: "ParadeDB (BM25)"},
+	SQLiteRetrieverEngineType:   {VectorRetrieverType: "sqlite-vec", KeywordsRetrieverType: "SQLite FTS5"},
+	ElasticsearchRetrieverEngineType: {
+		VectorRetrieverType: "Elasticsearch (dense_vector)", KeywordsRetrieverType: "Elasticsearch (BM25)",
+	},
+}
+
+// RetrieverDisplays lists the given retrieval types of one engine, vector
+// first, with their labels.
+func RetrieverDisplays(engine RetrieverEngineType, supported []RetrieverType) []RetrieverDisplay {
+	params := make([]RetrieverEngineParams, 0, len(supported))
+	for _, rt := range supported {
+		params = append(params, RetrieverEngineParams{RetrieverType: rt, RetrieverEngineType: engine})
+	}
+	return EngineRetrievers(params)
+}
+
+// EngineRetrievers turns retriever engine params (a workspace's effective
+// env engines, or one store's supported types) into display rows: one per
+// retrieval type, vector first. Several engines serving the same type (a
+// multi-driver RETRIEVE_DRIVER) are joined into one label.
+func EngineRetrievers(params []RetrieverEngineParams) []RetrieverDisplay {
+	var out []RetrieverDisplay
+	for _, rt := range []RetrieverType{VectorRetrieverType, KeywordsRetrieverType} {
+		var engines, labels []string
+		for _, p := range params {
+			if p.RetrieverType != rt || slices.Contains(engines, string(p.RetrieverEngineType)) {
+				continue
+			}
+			engines = append(engines, string(p.RetrieverEngineType))
+			labels = append(labels, retrieverLabel(p.RetrieverEngineType, rt))
+		}
+		if len(engines) > 0 {
+			out = append(out, RetrieverDisplay{
+				Type: rt, EngineType: strings.Join(engines, ","), Label: strings.Join(labels, " + "),
+			})
+		}
+	}
+	return out
+}
+
+func retrieverLabel(engine RetrieverEngineType, rt RetrieverType) string {
+	if label := retrieverLabels[engine][rt]; label != "" {
+		return label
+	}
+	for _, info := range GetVectorStoreTypes() {
+		if info.Type == string(engine) {
+			return info.DisplayName
+		}
+	}
+	return string(engine)
 }
 
 // DefaultStoreDisplay is the display payload for KBs that fall back to the

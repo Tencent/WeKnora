@@ -140,6 +140,9 @@ func buildKBResponse(
 	if storeView.Status != "" {
 		m["vector_store_status"] = storeView.Status
 	}
+	if len(storeView.Retrievers) > 0 {
+		m["vector_store_retrievers"] = storeView.Retrievers
+	}
 	for k, v := range extras {
 		m[k] = v
 	}

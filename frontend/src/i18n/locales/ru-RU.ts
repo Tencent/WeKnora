@@ -2725,6 +2725,11 @@ export default {
       systemDefault: 'System default',
       immutableHint: 'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
       immutableEdit: 'Vector store binding cannot be changed after creation.',
+      retrievalLabel: 'Поисковые движки',
+      retrievalDesc: 'Движок, на котором фактически выполняется каждый тип поиска.',
+      vectorRetrieval: 'Векторный поиск',
+      keywordRetrieval: 'Поиск по ключевым словам',
+      retrievalDisabled: 'Отключено',
       unavailableHint: 'The bound vector store is currently unavailable; check its connection configuration in Settings → Vector Stores.',
       goGlobalSettings: 'Go to Vector Store Settings'
     }
@@ -7174,6 +7179,13 @@ export default {
     readOnly: 'Изменять может только администратор пространства. Вы можете посмотреть, какие значения действуют сейчас.',
     modelGroup: 'Модели',
     webSearchGroup: 'Веб-поиск',
+    knowledgeGroup: 'Базы знаний',
+    vectorStore: {
+      label: 'Векторное хранилище по умолчанию',
+      description: 'Выбирается заранее при создании базы знаний. Существующие базы знаний не меняются; при создании через API без хранилища используется системное по умолчанию.',
+      placeholder: 'Не задано (системное по умолчанию)',
+      stale: 'Выбранное векторное хранилище удалено или недоступно; новые базы знаний будут использовать системное по умолчанию.',
+    },
     unsetPlaceholder: 'Не задано (системное значение)',
     followChatPlaceholder: 'Не задано (как модель чата по умолчанию)',
     slots: {
