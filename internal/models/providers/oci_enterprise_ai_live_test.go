@@ -23,7 +23,7 @@ import (
 //
 //	OCI_ENTERPRISE_AI_TEST_ENDPOINT=https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/openai/v1 \
 //	OCI_ENTERPRISE_AI_TEST_API_KEY=... OCI_ENTERPRISE_AI_TEST_PROJECT_ID=ocid1.generativeaiproject.oc1.... \
-//	OCI_ENTERPRISE_AI_TEST_MODEL=xai.grok-4.3 [OCI_ENTERPRISE_AI_TEST_VLM_MODEL=xai.grok-4.3] \
+//	OCI_ENTERPRISE_AI_TEST_MODEL=xai.grok-4.7 [OCI_ENTERPRISE_AI_TEST_VLM_MODEL=xai.grok-4.7] \
 //	go test -run TestOCIEnterpriseAILive ./internal/models/providers/
 func TestOCIEnterpriseAILive(t *testing.T) {
 	apiKey := os.Getenv("OCI_ENTERPRISE_AI_TEST_API_KEY")

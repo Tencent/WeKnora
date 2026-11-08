@@ -387,7 +387,7 @@ Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关�
 
 ```json
 {
-  "name": "xai.grok-4.3",
+  "name": "xai.grok-4.7",
   "type": "KnowledgeQA",
   "source": "remote",
   "parameters": {
@@ -401,7 +401,8 @@ Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关�
 
 模型目录收录 [Enterprise AI 可用模型](https://docs.oracle.com/en-us/iaas/Content/generative-ai/agentic-regions.htm)
 中的按需模型，图片输入以各模型官方页面为准：Gemini 2.5 Pro / Flash / Flash-Lite、Grok 4.3、
-Grok 4.20（reasoning / non-reasoning）可作为视觉模型；gpt-oss-120b / 20b 官方说明不支持图片，
+Grok 4.20（reasoning / non-reasoning）可作为视觉模型；Grok 4.7 官方页面未写明图片输入，但已在
+`us-chicago-1` 实测可识别图片，同样可作为视觉模型。gpt-oss-120b / 20b 官方说明不支持图片，
 Grok 4.6 页面未说明图片输入，仅作为对话模型。各区域可用模型不同（xAI 仅限美国区域），请以
 [按区域的模型列表](https://docs.oracle.com/en-us/iaas/Content/generative-ai/model-endpoint-regions.htm)为准。
 需要专用集群的导入模型和端点不同的 Grok 4.20 Multi-Agent 未收录，可手动填写模型名。

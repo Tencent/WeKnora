@@ -47,10 +47,10 @@ func newOCIEnterpriseAIProvider() *Definition {
 		Name:  "OCI Enterprise AI",
 		Names: map[string]string{"zh-CN": "OCI Enterprise AI"},
 		Description: "Oracle OCI Generative AI OpenAI-compatible endpoint with a project: " +
-			"xai.grok-4.3, google.gemini-2.5-flash, openai.gpt-oss-120b, etc.",
+			"xai.grok-4.7, google.gemini-2.5-flash, openai.gpt-oss-120b, etc.",
 		Descriptions: map[string]string{
 			"zh-CN": "Oracle OCI Generative AI 的 OpenAI 兼容端点（需项目 OCID）：" +
-				"xai.grok-4.3、google.gemini-2.5-flash、openai.gpt-oss-120b 等",
+				"xai.grok-4.7、google.gemini-2.5-flash、openai.gpt-oss-120b 等",
 		},
 		Website:      "https://docs.oracle.com/en-us/iaas/Content/generative-ai/openai-compatible-api.htm",
 		Icon:         ociEnterpriseAIIcon,
