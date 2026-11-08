@@ -98,6 +98,11 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 一个空间可以创建多个端点。例如给客服团队一个只开检索和问答、只看两个知识库的端点，给内容团队另一个开了写入工具的端点。令牌可随时轮换，端点可随时停用，删除端点后使用它的客户端立即断开。
 
+端点分两种：
+
+- **空间端点**：管理员创建，令牌代表整个空间，能做什么只由端点配置决定。适合机器人、自动化流程等没有对应成员的接入方。
+- **个人端点**：任何成员都能为自己创建，只有本人看得到。调用以本人身份和当前角色执行，审计日志记在本人名下；写入工具需要 Contributor 及以上，并且和网页一样只能改自己创建的知识库（管理员不受此限）。成员被移出空间或停用后端点立即失效，降级后写入工具立即隐藏。空间内所有个人端点共用一个每分钟调用额度，由管理员在页面顶部设置，默认 60 次。
+
 端点暴露的工具按四组勾选，默认只开只读工具：
 
 | 组 | 工具 | 说明 |
@@ -501,6 +506,8 @@ WeKnora 调用外部 MCP 服务时，由 `mcp-go v1.1.1` 按每个对端独立�
 
 `mcp_endpoints` 表（PostgreSQL 迁移 `000102_mcp_endpoints`，SQLite `000022_mcp_endpoints`）每行一个端点：`tenant_id`、`name`、`description`、`enabled`、`token_hash`（SHA-256）、`token_hint`（前缀展示用）、`knowledge_base_ids`（空数组表示空间内全部）、`tools`（白名单）、`default_agent_id`（空为内置快速问答）、`rate_limit_per_minute`（默认 60，上限 6000）、`last_used_at`。类型定义在 `internal/types/mcp_endpoint.go`，工具目录在 `internal/types/mcp_endpoint_tools.go`。
 
+迁移 `000137_mcp_personal_endpoints`（SQLite `000053`）新增 `kind`（`space` / `personal`，已有端点为 `space`）和 `user_id`（个人端点的所属成员），以及 `mcp_endpoint_settings` 表（每个空间一行，`personal_rate_limit_per_minute` 默认 60）。
+
 管理接口挂在 `/api/v1/mcp-endpoints`，读取需 Viewer，变更需 Admin，API Key 需要 `manage_channels` 能力（字段与示例见[MCP API](../04-api/02-api-agent-mcp.md#mcp-server-端点)）：
 
 | 方法 | 路径 | 说明 |
@@ -510,6 +517,9 @@ WeKnora 调用外部 MCP 服务时，由 `mcp-go v1.1.1` 按每个对端独立�
 | POST | `/mcp-endpoints` | 创建，响应含一次性 `token` |
 | GET / PUT / DELETE | `/mcp-endpoints/:endpoint_id` | 详情 / 更新 / 删除 |
 | POST | `/mcp-endpoints/:endpoint_id/rotate-token` | 轮换令牌，响应含新 `token` |
+| GET / PUT | `/mcp-endpoints/settings` | 个人端点共用额度；读取 Viewer，修改 Admin |
+
+个人端点挂在 `/api/v1/mcp-personal-endpoints`，路径与上表相同，任何成员只能管理自己的端点，不声明 API Key 策略，因此 API Key 调用一律拒绝。
 
 端点令牌是一个新的凭证，因此受限 API Key 只能创建、修改或轮换不超出自身权限的端点：端点的知识库必须在 Key 的知识库白名单之内（Key 有白名单时，端点不能留空，留空表示空间内全部），端点工具所需的能力（retrieve / chat / ingest 等）也必须是 Key 已有的，否则返回 403。
 
@@ -525,8 +535,9 @@ flowchart LR
     G --> Q["ask：SessionService.AgentQA / KnowledgeQA<br/>同步收集 final_answer + references"]
 ```
 
-- 公开路由 `/mcp/:endpoint_id` 注册在全局 Auth 中间件之前，与 embed 公开路由同级；`MCPEndpointAuth` 解析令牌后通过 `applyAuthSession` 写入租户、合成用户、`mcp_endpoint` principal，以及由端点换算出的 `TenantAPIKeyScope`（`types.MCPEndpointScope`），下游服务据此做知识库范围和能力检查。
-- 全局只有一个 `MCPServer` 实例注册完整工具目录；`WithToolFilter` 按请求上下文里的端点过滤 `tools/list`，`WithToolHandlerMiddleware` 在 `tools/call` 再校验一次白名单并做每端点滑动窗口限流（Redis 优先，本地回退）。
+- 公开路由 `/mcp/:endpoint_id` 注册在全局 Auth 中间件之前，与 embed 公开路由同级；`MCPEndpointAuth` 解析令牌后通过 `applyAuthSession` 写入租户、`mcp_endpoint` principal，以及由端点换算出的 `TenantAPIKeyScope`（`types.MCPEndpointScope`），下游服务据此做知识库范围和能力检查。空间端点写入合成用户和 Viewer 角色；个人端点每次请求重新读取所属成员的成员关系，写入本人和当前角色，成员已移出、停用或账号被禁用时返回 403。
+- 个人端点的作用域带 `ActsAsMember`：它只收窄成员本人的请求，`RequireRole`、创建人检查（`EvaluateOwnershipOrRole`）和 `kbWritableIDs` 不会像对机器 Key 那样跳过它。写入工具因此和网页路由一样要求「知识库创建人或管理员」；写入工具所需的最低角色复用 `access.CreatorRoleFloor`。
+- 全局只有一个 `MCPServer` 实例注册完整工具目录；`WithToolFilter` 按请求上下文里的端点过滤 `tools/list`，`WithToolHandlerMiddleware` 在 `tools/call` 再校验一次白名单并做滑动窗口限流（Redis 优先，本地回退）：空间端点按端点计数，个人端点共用一个空间级计数。
 - 传输使用 `WithStateLess(true)`，任意副本都能处理任意请求，客户端无需保持 `Mcp-Session-Id`。
 - `ask` 工具的会话归属为 `mcp_endpoint:<tenant>:<endpoint>`，续聊时校验 `session_id` 属于同一端点；单次回答上限 4 分钟。
 - 文档级工具（列表、阅读、写入）先用 `access.ResolveKB` 解析权限，再在知识库所属空间下执行，因此组织分享过来的知识库也能读写，且新建文档落在所有者空间。

@@ -22810,6 +22810,53 @@ paths:
       summary: 轮换 MCP 端点令牌
       tags:
       - MCP端点
+  /mcp-endpoints/settings:
+    get:
+      description: 返回个人端点共用的每分钟调用次数上限
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 空间设置
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取 MCP 端点空间设置
+      tags:
+      - MCP端点
+    put:
+      consumes:
+      - application/json
+      description: 设置空间内所有个人端点合计的每分钟调用次数上限
+      parameters:
+      - description: personal_rate_limit_per_minute
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的空间设置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 更新 MCP 端点空间设置
+      tags:
+      - MCP端点
   /mcp-endpoints/tools:
     get:
       description: 返回工作空间 MCP 端点可勾选的工具清单、分组和默认勾选项
@@ -22825,6 +22872,166 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 获取 MCP 端点工具目录
+      tags:
+      - MCP端点
+  /mcp-personal-endpoints:
+    get:
+      description: 只返回当前成员自己创建的个人端点
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 端点列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取个人 MCP 端点列表
+      tags:
+      - MCP端点
+    post:
+      consumes:
+      - application/json
+      description: 端点以当前成员身份调用，能力不超过该成员的角色；响应中的 token 只返回一次
+      parameters:
+      - description: 端点配置：name、description、enabled、knowledge_base_ids、tools 等
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建的端点，含一次性 token
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 角色不允许所选工具
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 创建个人 MCP 端点
+      tags:
+      - MCP端点
+  /mcp-personal-endpoints/{endpoint_id}:
+    delete:
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            $ref: '#/definitions/internal_handler.SuccessResponse'
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 删除个人 MCP 端点
+      tags:
+      - MCP端点
+    get:
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 端点详情
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取个人 MCP 端点详情
+      tags:
+      - MCP端点
+    put:
+      consumes:
+      - application/json
+      description: rate_limit_per_minute 对个人端点无效，个人端点共用管理员设置的空间额度
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      - description: 要更新的字段，未提供的字段保持不变
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的端点
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 更新个人 MCP 端点
+      tags:
+      - MCP端点
+  /mcp-personal-endpoints/{endpoint_id}/rotate-token:
+    post:
+      parameters:
+      - description: 端点 ID
+        in: path
+        name: endpoint_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 含新 token 的端点
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 端点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 轮换个人 MCP 端点令牌
       tags:
       - MCP端点
   /mcp-services:

@@ -172,6 +172,7 @@ flowchart TD
 | `/agents`、`/agents/:id/shares|embed-channels|im-channels` | RegisterCustomAgentRoutes 等 | `full_access` / `manage_channels` |
 | `/organizations`、`/user/favorites`、`/skills` | 对应 Register 函数 | `manage_spaces` 等 |
 | `/im-channels`、`/embed-channels`、`/mcp-endpoints`、`/wechat` | RegisterIMChannelRoutes / RegisterEmbedChannelRoutes / RegisterMCPEndpointRoutes | `manage_channels` |
+| `/mcp-personal-endpoints` | RegisterMCPEndpointRoutes | 不声明策略，API Key 一律拒绝 |
 | `/datasource`、`/knowledgebase/:kb_id/wiki`、`/chunker/preview` | RegisterDataSourceRoutes / RegisterWikiPageRoutes / RegisterChunkerDebugRoutes | `manage_datasources` / `ingest` |
 
 ### rbacGuards：集中式权限矩阵 {#_4-3-rbacguards-集中式权限矩阵}
@@ -205,7 +206,7 @@ kb.PUT("/:id", g.OwnedKBOrAdmin(), handler.UpdateKnowledgeBase)
 | `Recovery()` | recovery.go | panic 捕获 + 堆栈记录 + 500 响应 |
 | `ErrorHandler()` | error_handler.go | 读取 `c.Errors` 末位错误：`*errors.AppError` 按其 `HTTPCode` 返回 `{success:false, error:{code,message,details}}` 统一信封；其余 500 |
 | `EmbedAuth(...)` | embed_auth.go | 仅挂在 `/api/v1/embed/:channel_id` 公开组：校验 publish token，注入 Embed 渠道上下文；Redis 三级限流（每 IP/分钟、渠道全局/分钟、渠道/日） |
-| `MCPEndpointAuth(...)` | mcp_endpoint_auth.go | 仅挂在 `/mcp/:endpoint_id`：校验端点 Bearer Token，注入端点所属空间、机器主体与由工具白名单和知识库范围派生的 API Key 式权限范围 |
+| `MCPEndpointAuth(...)` | mcp_endpoint_auth.go | 仅挂在 `/mcp/:endpoint_id`：校验端点 Bearer Token，注入端点所属空间与由工具白名单和知识库范围派生的 API Key 式权限范围；空间端点以机器主体执行，个人端点以所属成员及其当前角色执行 |
 | `AttachAuthenticatedUser(...)` | ws_auth.go | 沙箱终端等 WebSocket 路由：用短时 ticket 解析出的用户建立与 `Auth` 相同的认证会话，成员与角色仍从数据库解析 |
 | `PublicAuthRateLimit()` | auth_public_ratelimit.go | 免认证的邀请查询/受邀注册路由：**进程内存**滑动窗口，60s/30 次/IP，后台每 2 分钟清理过期桶，超限返回 429 |
 | `Auth(...)` | auth.go | 核心认证，三态：① JWT（`Authorization: Bearer`，`userService.ValidateToken`）；② API Key（`X-API-Key`，`AuthenticateAPIKey`）；③ `noAuthAPI` 白名单。支持 `X-Tenant-ID` 切换租户（`IsTenantAccessible` 三层校验：自有租户/跨租户超管/active membership），`resolveTenantRole` 解析租户内角色。写入 context：`TenantIDContextKey`、`TenantInfoContextKey`、`UserContextKey`、`UserIDContextKey`、`TenantRoleContextKey`、`SystemAdminContextKey`、`PrincipalContextKey` 等 |

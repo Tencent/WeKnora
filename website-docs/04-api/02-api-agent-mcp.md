@@ -391,6 +391,8 @@ curl -X DELETE $BASE/api/v1/mcp-services/mcp-1/oauth/token -H "Authorization: Be
 | PUT | `/mcp-endpoints/:endpoint_id` | 部分更新，省略的字段保持原值 |
 | DELETE | `/mcp-endpoints/:endpoint_id` | 删除，使用该端点的客户端立即失效 |
 | POST | `/mcp-endpoints/:endpoint_id/rotate-token` | 轮换令牌，响应含新 `token`，旧令牌立即失效 |
+| GET | `/mcp-endpoints/settings` | 空间设置 `{personal_rate_limit_per_minute}`，Viewer+ |
+| PUT | `/mcp-endpoints/settings` | 修改个人端点共用的每分钟调用上限，Admin+；1–6000，0 为默认 60 |
 
 请求字段（创建和更新相同，均可选）：
 
@@ -404,13 +406,28 @@ curl -X DELETE $BASE/api/v1/mcp-services/mcp-1/oauth/token -H "Authorization: Be
 | `default_agent_id` | string | `ask` 使用的 Agent，空为内置快速问答；内部内置 Agent 不可选 |
 | `rate_limit_per_minute` | int | 每分钟工具调用上限，0 或省略为 60，最大 6000 |
 
-响应 `data` 为 `{id,tenant_id,name,description,enabled,token_hint,knowledge_base_ids,tools,default_agent_id,rate_limit_per_minute,path,last_used_at,created_at,updated_at}`，创建和轮换时额外带 `token`。使用受限 API Key 调用时，端点的知识库和工具所需能力不能超出该 Key 的范围，否则 403。
+响应 `data` 为 `{id,tenant_id,kind,name,description,enabled,token_hint,knowledge_base_ids,tools,default_agent_id,rate_limit_per_minute,path,last_used_at,created_at,updated_at}`，创建和轮换时额外带 `token`。使用受限 API Key 调用时，端点的知识库和工具所需能力不能超出该 Key 的范围，否则 403。
 
 ```bash
 curl -X POST $BASE/api/v1/mcp-endpoints -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"产品文档助手","knowledge_base_ids":["kb-1"],"tools":["search_knowledge","read_document","ask"]}'
 ```
+
+### 个人端点（/api/v1/mcp-personal-endpoints）
+
+成员为自己创建的端点，`kind` 为 `personal`。只返回和操作当前成员自己的端点，管理员也看不到他人的个人端点。权限：Viewer+；不接受 API Key。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/mcp-personal-endpoints` | 本人的个人端点列表 |
+| POST | `/mcp-personal-endpoints` | 创建；201，响应含一次性 `token` |
+| GET | `/mcp-personal-endpoints/:endpoint_id` | 详情 |
+| PUT | `/mcp-personal-endpoints/:endpoint_id` | 部分更新 |
+| DELETE | `/mcp-personal-endpoints/:endpoint_id` | 删除 |
+| POST | `/mcp-personal-endpoints/:endpoint_id/rotate-token` | 轮换令牌 |
+
+请求字段与空间端点相同，但 `rate_limit_per_minute` 无效：空间内所有个人端点共用 `/mcp-endpoints/settings` 的额度。角色低于 Contributor 时勾选 `add_document`、`update_document`、`delete_document` 返回 403。
 
 ## Agent 运行时交互（/api/v1/agent）
 
