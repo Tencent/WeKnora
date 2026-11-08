@@ -169,7 +169,8 @@
       <t-form ref="formRef" :data="form" :rules="formRules" label-align="top" class="store-form">
         <!--
           Edit 模式特殊提示：engine_type / connection_config / index_config
-          创建后不可改，仅 name 可编辑。用 inline-alert 而不是大块 banner，
+          创建后不可改，仅 name 与文件字段（如 Oracle 钱包）可编辑，
+          有文件字段时提示文案相应切换。用 inline-alert 而不是大块 banner，
           视觉与其他抽屉的提示一致。
         -->
         <section v-if="editingStore" class="setting-drawer__section">
@@ -177,7 +178,9 @@
 
           <div class="inline-alert inline-alert--info">
             <t-icon name="info-circle-filled" class="inline-alert__icon" />
-            <span class="inline-alert__text">{{ t('vectorStoreSettings.immutableNotice') }}</span>
+            <span class="inline-alert__text">{{
+              t(fileFields.length ? 'vectorStoreSettings.immutableNoticeExceptFile' : 'vectorStoreSettings.immutableNotice')
+            }}</span>
           </div>
 
           <div class="form-item">

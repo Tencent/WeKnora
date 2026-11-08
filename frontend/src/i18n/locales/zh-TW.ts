@@ -7300,6 +7300,7 @@ export default {
     testConnection: '測試連結',
     testing: '測試中...',
     immutableNotice: '建立後無法更改引擎類型、連結和索引設定。\n如需更改，請刪除後重新建立。',
+    immutableNoticeExceptFile: '建立後無法更改引擎類型、索引設定及除上傳檔案外的連結設定（上傳的檔案可在下方替換）。\n如需更改其他設定，請刪除後重新建立。',
     fileSelect: '選擇檔案',
     fileReselect: '重新選擇',
     fileReplace: '替換檔案',

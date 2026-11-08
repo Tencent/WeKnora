@@ -2624,6 +2624,7 @@ export default {
     testConnection: '接続テスト',
     testing: 'テスト中...',
     immutableNotice: 'エンジンの種類、接続情報、インデックス設定は作成後に変更できません。\n変更するには、削除して作成し直してください。',
+    immutableNoticeExceptFile: 'エンジンの種類、インデックス設定、およびアップロードしたファイル以外の接続情報は作成後に変更できません（ファイルは下で差し替えできます）。\nその他を変更するには、削除して作成し直してください。',
     fileSelect: 'ファイルを選択',
     fileReselect: '選び直す',
     fileReplace: 'ファイルを差し替える',

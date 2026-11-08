@@ -2624,6 +2624,7 @@ export default {
     testConnection: 'Test Connection',
     testing: 'Testing...',
     immutableNotice: 'Engine type, connection, and index settings cannot be changed after creation.\nTo change these, delete and recreate.',
+    immutableNoticeExceptFile: 'Engine type, index settings, and connection settings other than the uploaded file cannot be changed after creation (the file can be replaced below).\nTo change the rest, delete and recreate.',
     fileSelect: 'Choose file',
     fileReselect: 'Choose another',
     fileReplace: 'Replace file',

@@ -7299,6 +7299,7 @@ export default {
     testConnection: '연결 테스트',
     testing: '테스트 중...',
     immutableNotice: '엔진 타입, 연결 정보, 인덱스 설정은 생성 후 변경할 수 없습니다.\n변경이 필요하면 삭제 후 다시 생성하세요.',
+    immutableNoticeExceptFile: '엔진 타입, 인덱스 설정, 업로드한 파일을 제외한 연결 정보는 생성 후 변경할 수 없습니다(파일은 아래에서 교체할 수 있습니다).\n다른 항목을 변경하려면 삭제 후 다시 생성하세요.',
     fileSelect: '파일 선택',
     fileReselect: '다시 선택',
     fileReplace: '파일 교체',

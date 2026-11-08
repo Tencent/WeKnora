@@ -7300,6 +7300,7 @@ export default {
     testConnection: '测试连接',
     testing: '测试中...',
     immutableNotice: '创建后无法更改引擎类型、连接和索引设置。\n如需更改，请删除后重新创建。',
+    immutableNoticeExceptFile: '创建后无法更改引擎类型、索引设置及除上传文件外的连接设置（上传的文件可在下方替换）。\n如需更改其他设置，请删除后重新创建。',
     fileSelect: '选择文件',
     fileReselect: '重新选择',
     fileReplace: '替换文件',
