@@ -10,8 +10,10 @@
 package ocigenai
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +78,10 @@ func NewAuth(c Credentials) (api.AuthFunc, error) {
 			return nil, fmt.Errorf("OCI private key: %w", err)
 		}
 	case AuthInstancePrincipal:
+		if !instancePrincipalAllowed() {
+			return nil, fmt.Errorf("OCI instance principal is disabled; set %s=true on the server to allow it",
+				EnvAllowInstancePrincipal)
+		}
 		p, err := instancePrincipal()
 		if err != nil {
 			return nil, fmt.Errorf("OCI instance principal: %w", err)
@@ -100,27 +106,76 @@ func NewAuth(c Credentials) (api.AuthFunc, error) {
 	}, nil
 }
 
+// EnvAllowInstancePrincipal opts a deployment into instance-principal
+// signing. It is off by default: the instance principal is the server's own
+// OCI identity, so allowing it lets anyone who can create a model row spend
+// the operator's tenancy (in any compartment its policies reach).
+const EnvAllowInstancePrincipal = "OCI_GENAI_ALLOW_INSTANCE_PRINCIPAL"
+
+func instancePrincipalAllowed() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(EnvAllowInstancePrincipal)), "true")
+}
+
+// Instance metadata service; reachable only from an OCI compute instance.
+const instanceMetadataURL = "http://169.254.169.254/opc/v2/instance/"
+
 var (
 	instanceMu       sync.Mutex
 	instanceProvider common.ConfigurationProvider
+	instanceErr      error
+	instanceErrAt    time.Time
+	// probeInstanceMetadata is replaced in tests.
+	probeInstanceMetadata = func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, instanceMetadataURL, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer Oracle")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("instance metadata service unreachable (not running on OCI compute?): %w", err)
+		}
+		_ = resp.Body.Close()
+		return nil
+	}
 )
+
+// instanceRetryAfter is how long a failure is remembered, so a deployment
+// outside OCI does not retry the SDK's long federation backoff on every
+// client build.
+const instanceRetryAfter = time.Minute
 
 // instancePrincipal returns the process-wide instance principal. It is the
 // VM's identity, so one provider (which refreshes its own token) serves
-// every model row. A failure is not cached: the metadata service may simply
-// not have been reachable yet.
+// every model row. The metadata service is probed with a short timeout
+// first: the SDK otherwise retries for about two minutes, uncancellable,
+// when it is unreachable. Failures are cached briefly, not for good: the
+// metadata service may simply not have been reachable yet.
 func instancePrincipal() (common.ConfigurationProvider, error) {
 	instanceMu.Lock()
 	defer instanceMu.Unlock()
 	if instanceProvider != nil {
 		return instanceProvider, nil
 	}
-	p, err := auth.InstancePrincipalConfigurationProvider()
+	if instanceErr != nil && time.Since(instanceErrAt) < instanceRetryAfter {
+		return nil, instanceErr
+	}
+	p, err := newInstancePrincipal()
 	if err != nil {
+		instanceErr, instanceErrAt = err, time.Now()
 		return nil, err
 	}
-	instanceProvider = p
+	instanceProvider, instanceErr = p, nil
 	return p, nil
+}
+
+func newInstancePrincipal() (common.ConfigurationProvider, error) {
+	if err := probeInstanceMetadata(); err != nil {
+		return nil, err
+	}
+	return auth.InstancePrincipalConfigurationProvider()
 }
 
 // Extra-config keys of a model row (the provider's extra fields).

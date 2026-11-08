@@ -2,12 +2,19 @@ package ocigenai
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +42,10 @@ func TestNewAuth(t *testing.T) {
 	assert.Contains(t, req.Header.Get("Authorization"),
 		`headers="date (request-target) host content-length content-type x-content-sha256"`)
 
+	// The signature verifies against the public key over exactly the signed
+	// headers (draft-cavage HTTP signatures, as OCI specifies).
+	verifySignature(t, req, body, &key.PublicKey)
+
 	missing := full
 	missing.User, missing.PrivateKey = "", ""
 	_, err = NewAuth(missing)
@@ -52,4 +63,62 @@ func TestNewAuth(t *testing.T) {
 func TestNewConfigRequiresCompartment(t *testing.T) {
 	_, err := NewConfig(api.Endpoint{}, "", "", map[string]string{})
 	assert.ErrorContains(t, err, "compartment")
+}
+
+func verifySignature(t *testing.T, req *http.Request, body []byte, pub *rsa.PublicKey) {
+	t.Helper()
+	auth := req.Header.Get("Authorization")
+	field := func(name string) string {
+		m := regexp.MustCompile(name + `="([^"]*)"`).FindStringSubmatch(auth)
+		require.Len(t, m, 2, name)
+		return m[1]
+	}
+	sum := sha256.Sum256(body)
+	assert.Equal(t, base64.StdEncoding.EncodeToString(sum[:]), req.Header.Get("X-Content-Sha256"))
+	var lines []string
+	for _, h := range strings.Fields(field("headers")) {
+		value := req.Header.Get(h)
+		switch h {
+		case "(request-target)":
+			value = strings.ToLower(req.Method) + " " + req.URL.RequestURI()
+		case "host":
+			value = req.URL.Host
+		}
+		lines = append(lines, h+": "+value)
+	}
+	digest := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	sig, err := base64.StdEncoding.DecodeString(field("signature"))
+	require.NoError(t, err)
+	require.NoError(t, rsa.VerifyPKCS1v15(pub, crypto.SHA256, digest[:], sig))
+}
+
+func TestInstancePrincipalIsOptIn(t *testing.T) {
+	t.Setenv(EnvAllowInstancePrincipal, "")
+	_, err := NewAuth(Credentials{Mode: AuthInstancePrincipal})
+	assert.ErrorContains(t, err, EnvAllowInstancePrincipal)
+}
+
+func TestInstancePrincipalFailureIsCachedBriefly(t *testing.T) {
+	t.Setenv(EnvAllowInstancePrincipal, "true")
+	probes := 0
+	restore := probeInstanceMetadata
+	probeInstanceMetadata = func() error { probes++; return errors.New("unreachable") }
+	t.Cleanup(func() {
+		probeInstanceMetadata = restore
+		instanceMu.Lock()
+		instanceProvider, instanceErr, instanceErrAt = nil, nil, time.Time{}
+		instanceMu.Unlock()
+	})
+
+	_, err := NewAuth(Credentials{Mode: AuthInstancePrincipal})
+	assert.ErrorContains(t, err, "unreachable")
+	_, err = NewAuth(Credentials{Mode: AuthInstancePrincipal})
+	assert.ErrorContains(t, err, "unreachable")
+	assert.Equal(t, 1, probes, "a recent failure is not retried")
+
+	instanceMu.Lock()
+	instanceErrAt = time.Now().Add(-2 * instanceRetryAfter)
+	instanceMu.Unlock()
+	_, _ = NewAuth(Credentials{Mode: AuthInstancePrincipal})
+	assert.Equal(t, 2, probes, "an old failure is retried")
 }

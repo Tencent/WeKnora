@@ -1835,7 +1835,11 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req.APIKey == "" {
 		req.APIKey = stored.Parameters.APIKey
 	}
-	if req.AppSecret == "" {
+	// The stored second credential belongs to the stored vendor: a test
+	// against another vendor must not send it (an OCI private key to WeKnora
+	// Cloud, say).
+	if req.AppSecret == "" && (req.Provider == "" || stored.Parameters.Provider == "" ||
+		req.Provider == stored.Parameters.Provider) {
 		req.AppSecret = stored.Parameters.AppSecret
 	}
 	// Same contract as PUT /models/{id}: an absent or masked secret extra

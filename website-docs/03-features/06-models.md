@@ -426,7 +426,8 @@ reasoning 与 Gemini 2.5 Pro / Flash 不接受 `reasoning.effort`，只提供「
 - **API 签名密钥**（默认）：填写租户 OCID、用户 OCID、指纹，并上传 `.pem` 私钥文件。私钥作为
   加密凭证保存，编辑时不重新上传则沿用原私钥；私钥已加密时在「私钥口令」中填写口令。
 - **实例主体**：WeKnora 运行在 OCI 计算实例上时，以实例身份签名，无需填写密钥。需要为该实例所在的
-  动态组授予 Generative AI 推理的 IAM 策略。
+  动态组授予 Generative AI 推理的 IAM 策略。实例主体是服务器自身的 OCI 身份，默认关闭，需在服务端设置
+  `OCI_GENAI_ALLOW_INSTANCE_PRINCIPAL=true` 才能选用；不在 OCI 上运行时，创建客户端会在约 2 秒内报错。
 
 两种方式都必须填写「区间 OCID」（`compartment_id`），保存时校验。通过 `POST /api/v1/models`
 创建时，私钥内容放在 `app_secret`：
@@ -453,7 +454,7 @@ reasoning 与 Gemini 2.5 Pro / Flash 不接受 `reasoning.effort`，只提供「
 ```
 
 模型目录收录 `cohere.embed-v4.0`（1536 维，可选 256 / 512 / 1024，每次最多 96 条）和
-`cohere.rerank-v4.0-fast`，已在 `us-chicago-1`、`ap-osaka-1` 实测。v3 系列向量模型与
+`cohere.rerank-v4.0-fast`（每次最多 1000 篇文档，超出自动分批），已在 `us-chicago-1`、`ap-osaka-1` 实测。v3 系列向量模型与
 Rerank 3.5 已被 Oracle 标记为弃用。Cohere Embed 4 的余弦相似度整体偏低（日语测试数据中正确文档约 0.47），低于默认向量阈值 0.5
 时会检索不到结果，建议在智能体的检索设置中把向量阈值调到 0.2–0.3。
 

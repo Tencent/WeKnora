@@ -2276,7 +2276,7 @@ const handleCancel = () => {
 }
 
 .secret-file-name {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;

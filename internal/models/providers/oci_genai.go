@@ -13,7 +13,10 @@
 //   - the catalogued models are Cohere Embed 4 and Cohere Rerank 4 Fast;
 //     the v3 embed and rerank 3.5 models are deprecated
 //     (https://docs.oracle.com/en-us/iaas/Content/generative-ai/pretrained-models.htm).
-//     Embed 4 takes up to 96 texts per request in on-demand mode.
+//     Embed 4 takes up to 96 texts per request in on-demand mode, and
+//     rerankText at most 1000 documents;
+//   - instance-principal signing is off unless the server sets
+//     OCI_GENAI_ALLOW_INSTANCE_PRINCIPAL=true.
 //
 // Chat on the same service is the OpenAI-compatible "OCI Enterprise AI"
 // provider; this one only covers what that endpoint does not serve.
@@ -134,6 +137,12 @@ func newOCIGenAIProvider() *Definition {
 			Embeddings: api.EmbeddingsCompat{
 				// Embed 4, on-demand: at most 96 texts per request.
 				MaxBatchSize: api.Ptr(96),
+			},
+			Rerank: api.RerankCompat{
+				// rerankText rejects more than 10000 documents x
+				// maxChunksPerDocument (default 10): 1000 documents per
+				// request (checked live; 1001 answers 400).
+				MaxDocuments: api.Ptr(1000),
 			},
 		},
 	}

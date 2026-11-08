@@ -32,6 +32,13 @@ func TestSanitizeBody(t *testing.T) {
 			want: `{"app_secret":"***","appSecret":"***"}`,
 		},
 		{
+			// Bodies are cut at 10KB before redaction, so a long PEM can
+			// lose its closing quote.
+			name: "truncated app_secret",
+			in:   `{"name":"x","app_secret":"-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA`,
+			want: `{"name":"x","app_secret":"***"`,
+		},
+		{
 			name: "camelCase apiKey",
 			in:   `{"modelName":"gpt-5.2","apiKey":"sk-secret-123","provider":"azure_openai"}`,
 			want: `{"modelName":"gpt-5.2","apiKey":"***","provider":"azure_openai"}`,
