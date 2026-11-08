@@ -67,7 +67,7 @@ func (p *GoogleProvider) Search(
 	cseCall := p.srv.Cse.List().Context(ctx).Cx(p.engineID).Q(query)
 
 	if maxResults > 0 {
-		cseCall = cseCall.Num(int64(maxResults))
+		cseCall = cseCall.Num(int64(min(maxResults, 10)))
 	} else {
 		cseCall = cseCall.Num(5)
 	}
