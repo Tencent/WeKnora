@@ -231,6 +231,12 @@ func TestKnowledgeBaseActivityHandler_RequiresCreatorOrAdmin(t *testing.T) {
 	}
 }
 
+func stubActivityAuditService(entries []*types.AuditLog) *stubAuditService {
+	return &stubAuditService{list: func(context.Context, uint64, *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		return entries, nil
+	}}
+}
+
 type stubActivityUserService struct {
 	interfaces.UserService
 	users map[string]*types.User
@@ -283,18 +289,16 @@ func serveKBActivity(t *testing.T, h *AuditLogHandler) kbActivityListResponse {
 }
 
 func TestKnowledgeBaseActivityHandler_ResolvesActorNames(t *testing.T) {
-	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
-		return []*types.AuditLog{
-			{ID: 6, ActorUserID: "u-1"},
-			{ID: 5, ActorUserID: "u-1"},
-			{ID: 4, ActorUserID: "u-email-only"},
-			{ID: 3, ActorUserID: "u-gone"},
-			{ID: 2, ActorUserID: "mcp-ep-1"},
-			{ID: 1, ActorUserID: "mcp-ep-deleted"},
-			{ID: 0, ActorUserID: "embed-ch-1"},
-			{ID: 0},
-		}, nil
-	}}
+	svc := stubActivityAuditService([]*types.AuditLog{
+		{ID: 6, ActorUserID: "u-1"},
+		{ID: 5, ActorUserID: "u-1"},
+		{ID: 4, ActorUserID: "u-email-only"},
+		{ID: 3, ActorUserID: "u-gone"},
+		{ID: 2, ActorUserID: "mcp-ep-1"},
+		{ID: 1, ActorUserID: "mcp-ep-deleted"},
+		{ID: 0, ActorUserID: "embed-ch-1"},
+		{ID: 0},
+	})
 	users := &stubActivityUserService{users: map[string]*types.User{
 		"u-1":          {ID: "u-1", Username: "alice", Email: "alice@example.com"},
 		"u-email-only": {ID: "u-email-only", Email: "bob@example.com"},
@@ -326,9 +330,7 @@ func TestKnowledgeBaseActivityHandler_ResolvesActorNames(t *testing.T) {
 }
 
 func TestKnowledgeBaseActivityHandler_SkipsEndpointAndChannelLookupWithoutPrefixedActors(t *testing.T) {
-	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
-		return []*types.AuditLog{{ID: 1, ActorUserID: "u-1"}}, nil
-	}}
+	svc := stubActivityAuditService([]*types.AuditLog{{ID: 1, ActorUserID: "u-1"}})
 	users := &stubActivityUserService{users: map[string]*types.User{"u-1": {ID: "u-1", Username: "alice"}}}
 	endpoints := &stubActivityMCPEndpointService{}
 	channels := &stubActivityEmbedChannelService{}
@@ -341,13 +343,11 @@ func TestKnowledgeBaseActivityHandler_SkipsEndpointAndChannelLookupWithoutPrefix
 }
 
 func TestKnowledgeBaseActivityHandler_LookupFailureKeepsFeed(t *testing.T) {
-	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
-		return []*types.AuditLog{
-			{ID: 3, ActorUserID: "u-1"},
-			{ID: 2, ActorUserID: "mcp-ep-1"},
-			{ID: 1, ActorUserID: "embed-ch-1"},
-		}, nil
-	}}
+	svc := stubActivityAuditService([]*types.AuditLog{
+		{ID: 3, ActorUserID: "u-1"},
+		{ID: 2, ActorUserID: "mcp-ep-1"},
+		{ID: 1, ActorUserID: "embed-ch-1"},
+	})
 	lookupErr := fmt.Errorf("db unavailable")
 	h := NewAuditLogHandler(svc,
 		&stubActivityUserService{err: lookupErr},
