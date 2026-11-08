@@ -102,6 +102,8 @@ func (m *mockVectorStoreRepo) ExistsByEndpointAndIndex(
 type mockStoreRegistry struct {
 	registered   map[string]bool
 	unregistered []string
+	// engines are returned by GetByStoreID; missing IDs return nil.
+	engines map[string]interfaces.RetrieveEngineService
 }
 
 func newMockStoreRegistry() *mockStoreRegistry {
@@ -113,7 +115,7 @@ func (m *mockStoreRegistry) RegisterWithStoreID(storeID string, _ interfaces.Ret
 }
 
 func (m *mockStoreRegistry) GetByStoreID(storeID string) (interfaces.RetrieveEngineService, error) {
-	return nil, nil
+	return m.engines[storeID], nil
 }
 
 func (m *mockStoreRegistry) UnregisterByStoreID(storeID string) {
@@ -168,6 +170,14 @@ func (m *mockEngineService) BatchUpdateChunkEnabledStatus(_ context.Context, _ m
 }
 func (m *mockEngineService) BatchUpdateChunkTagID(_ context.Context, _ map[string]string) error {
 	return nil
+}
+
+// keywordsOnlyEngine is a loaded engine that serves keyword retrieval only,
+// like an Elasticsearch 7 store.
+type keywordsOnlyEngine struct{ mockEngineService }
+
+func (*keywordsOnlyEngine) Support() []types.RetrieverType {
+	return []types.RetrieverType{types.KeywordsRetrieverType}
 }
 
 // ---------------------------------------------------------------------------
@@ -1151,7 +1161,7 @@ func (panickingRegistry) UnregisterByStoreID(string) { panic("registry exploded"
 
 func TestResolveStoreView(t *testing.T) {
 	ctx := context.Background()
-	svc, db, _ := newGuardTestService(t)
+	svc, db, registry := newGuardTestService(t)
 	insertGuardStore(t, db, "store-A", 1)
 	svc.envStores = []types.VectorStore{
 		{ID: "__env_es__", Name: "Env ES", EngineType: types.ElasticsearchRetrieverEngineType},
@@ -1176,6 +1186,33 @@ func TestResolveStoreView(t *testing.T) {
 		assert.Equal(t, "Env ES", v.Name)
 		assert.Equal(t, types.StoreSourceEnv, v.Source)
 	})
+	t.Run("empty store id lists the tenant's effective engines", func(t *testing.T) {
+		tenant := &types.Tenant{ID: 1, RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{
+			{RetrieverType: types.KeywordsRetrieverType, RetrieverEngineType: types.PostgresRetrieverEngineType},
+		}}}
+		v, err := svc.ResolveStoreView(context.WithValue(ctx, types.TenantInfoContextKey, tenant), 1, "")
+		require.NoError(t, err)
+		assert.Equal(t, []types.RetrieverDisplay{
+			{Type: types.KeywordsRetrieverType, EngineType: "postgres", Label: "ParadeDB (BM25)"},
+		}, v.Retrievers)
+	})
+	t.Run("unloaded store lists every retrieval type", func(t *testing.T) {
+		v, err := svc.ResolveStoreView(ctx, 1, "store-A")
+		require.NoError(t, err)
+		assert.Equal(t, []types.RetrieverDisplay{
+			{Type: types.VectorRetrieverType, EngineType: "qdrant", Label: "Qdrant"},
+			{Type: types.KeywordsRetrieverType, EngineType: "qdrant", Label: "Qdrant"},
+		}, v.Retrievers)
+	})
+	t.Run("loaded engine reports what it supports", func(t *testing.T) {
+		registry.engines = map[string]interfaces.RetrieveEngineService{"__env_es__": &keywordsOnlyEngine{}}
+		t.Cleanup(func() { registry.engines = nil })
+		v, err := svc.ResolveStoreView(ctx, 1, "__env_es__")
+		require.NoError(t, err)
+		assert.Equal(t, []types.RetrieverDisplay{
+			{Type: types.KeywordsRetrieverType, EngineType: "elasticsearch", Label: "Elasticsearch (BM25)"},
+		}, v.Retrievers)
+	})
 	t.Run("miss returns unavailable", func(t *testing.T) {
 		v, err := svc.ResolveStoreView(ctx, 1, "store-zzz")
 		require.NoError(t, err)
@@ -1190,19 +1227,30 @@ func TestResolveStoreView(t *testing.T) {
 }
 
 func TestBatchResolveStoreView(t *testing.T) {
-	ctx := context.Background()
-	svc, db, _ := newGuardTestService(t)
+	tenant := &types.Tenant{ID: 1, RetrieverEngines: types.RetrieverEngines{Engines: []types.RetrieverEngineParams{
+		{RetrieverType: types.KeywordsRetrieverType, RetrieverEngineType: types.PostgresRetrieverEngineType},
+	}}}
+	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, tenant)
+	svc, db, registry := newGuardTestService(t)
 	insertGuardStore(t, db, "store-A", 1)
 	insertGuardStore(t, db, "store-B", 1)
 	svc.envStores = []types.VectorStore{
 		{ID: "__env_qd__", Name: "Env QD", EngineType: types.QdrantRetrieverEngineType},
 	}
+	registry.engines = map[string]interfaces.RetrieveEngineService{"store-B": &keywordsOnlyEngine{}}
 
 	got, err := svc.BatchResolveStoreView(ctx, 1, []string{
-		"store-A", "store-zzz", "__env_qd__", "",
+		"store-A", "store-B", "store-zzz", "__env_qd__", "",
 	})
 	require.NoError(t, err)
-	require.Len(t, got, 4)
+	require.Len(t, got, 5)
+	assert.Len(t, got["store-A"].Retrievers, 2)
+	assert.Equal(t, []types.RetrieverDisplay{
+		{Type: types.KeywordsRetrieverType, EngineType: "qdrant", Label: "Qdrant"},
+	}, got["store-B"].Retrievers)
+	assert.Equal(t, []types.RetrieverDisplay{
+		{Type: types.KeywordsRetrieverType, EngineType: "postgres", Label: "ParadeDB (BM25)"},
+	}, got[""].Retrievers)
 	assert.Equal(t, types.StoreSourceUser, got["store-A"].Source)
 	assert.Equal(t, "store-A", got["store-A"].Name)
 	assert.Equal(t, types.StoreSourceUnavailable, got["store-zzz"].Source)
