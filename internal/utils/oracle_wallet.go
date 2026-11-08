@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/sijms/go-ora/v2/configurations"
@@ -129,21 +130,31 @@ func validateSSO(sso []byte) (err error) {
 // private directory and returns it for go-ora's WALLET option. The directory
 // is keyed by content hash, so repeated engine builds reuse it and a rotated
 // wallet gets a fresh directory. Modes are 0700/0600.
+//
+// The shared temp dir may be writable by other local users, so both
+// directories are checked before use (see ensurePrivateDir) and an existing
+// cwallet.sso is only reused when it is a private regular file.
 func OracleWalletDir(wallet string) (string, error) {
 	sso, err := base64.StdEncoding.DecodeString(wallet)
 	if err != nil || len(sso) == 0 {
 		return "", fmt.Errorf("%w: stored wallet is not valid base64", ErrInvalidOracleWallet)
 	}
 	sum := sha256.Sum256(sso)
-	dir := filepath.Join(os.TempDir(), "weknora-oracle-wallets", hex.EncodeToString(sum[:16]))
-	target := filepath.Join(dir, oracleWalletFileName)
-	if existing, err := os.ReadFile(target); err == nil && bytes.Equal(existing, sso) {
-		return dir, nil
+	base := filepath.Join(os.TempDir(), "weknora-oracle-wallets")
+	dir := filepath.Join(base, hex.EncodeToString(sum[:16]))
+	for _, d := range []string{base, dir} {
+		if err := ensurePrivateDir(d); err != nil {
+			return "", err
+		}
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+	target := filepath.Join(dir, oracleWalletFileName)
+	if fi, err := os.Lstat(target); err == nil && fi.Mode().IsRegular() && privateToCurrentUser(fi) {
+		if existing, err := os.ReadFile(target); err == nil && bytes.Equal(existing, sso) {
+			return dir, nil
+		}
 	}
 	// Write then rename so a concurrent reader never sees a partial file.
+	// Rename replaces whatever entry was there (even a symlink) atomically.
 	tmp, err := os.CreateTemp(dir, ".cwallet-*")
 	if err != nil {
 		return "", err
@@ -163,4 +174,37 @@ func OracleWalletDir(wallet string) (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+// ensurePrivateDir creates p (mode 0700) or verifies an existing p: it must
+// be a real directory (not a symlink) owned by the current user. Group/other
+// permission bits on a directory we own are removed rather than refused.
+func ensurePrivateDir(p string) error {
+	created := true
+	if err := os.Mkdir(p, 0o700); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		created = false
+	}
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 || !fi.IsDir() {
+		return fmt.Errorf("oracle wallet directory %s is not a directory", p)
+	}
+	if !ownedByCurrentUser(fi) {
+		return fmt.Errorf("oracle wallet directory %s is not owned by the current user", p)
+	}
+	if created || (runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0) {
+		return os.Chmod(p, 0o700)
+	}
+	return nil
+}
+
+// privateToCurrentUser reports whether fi is owned by the current user with
+// no group/other permission bits (always true on Windows: no POSIX modes).
+func privateToCurrentUser(fi fs.FileInfo) bool {
+	return ownedByCurrentUser(fi) && (runtime.GOOS == "windows" || fi.Mode().Perm()&0o077 == 0)
 }

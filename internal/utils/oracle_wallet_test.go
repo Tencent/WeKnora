@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -102,4 +103,61 @@ func TestOracleWalletDir(t *testing.T) {
 	_, err = OracleWalletDir("%%%")
 	assert.ErrorIs(t, err, ErrInvalidOracleWallet)
 	assert.True(t, strings.HasPrefix(dir, os.TempDir()))
+}
+
+func TestOracleWalletDirRejectsSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need extra privileges on Windows")
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	elsewhere := t.TempDir()
+	base := filepath.Join(tmp, "weknora-oracle-wallets")
+
+	require.NoError(t, os.Symlink(elsewhere, base))
+	_, err := OracleWalletDir(b64([]byte("wallet-a")))
+	assert.Error(t, err, "symlinked base directory")
+	entries, _ := os.ReadDir(elsewhere)
+	assert.Empty(t, entries, "nothing is written through the symlink")
+
+	// A symlinked per-wallet directory is refused as well.
+	require.NoError(t, os.Remove(base))
+	dir, err := OracleWalletDir(b64([]byte("wallet-a")))
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(dir))
+	require.NoError(t, os.Symlink(elsewhere, dir))
+	_, err = OracleWalletDir(b64([]byte("wallet-a")))
+	assert.Error(t, err, "symlinked wallet directory")
+
+	// So is a regular file in place of the directory.
+	require.NoError(t, os.Remove(dir))
+	require.NoError(t, os.WriteFile(dir, nil, 0o600))
+	_, err = OracleWalletDir(b64([]byte("wallet-a")))
+	assert.Error(t, err, "file instead of directory")
+}
+
+func TestOracleWalletDirRepairsPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no POSIX permission bits on Windows")
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	dir, err := OracleWalletDir(b64([]byte("wallet-a")))
+	require.NoError(t, err)
+	base := filepath.Dir(dir)
+	target := filepath.Join(dir, "cwallet.sso")
+
+	// Loosened modes and a world-readable wallet file with the right content.
+	require.NoError(t, os.Chmod(base, 0o755))
+	require.NoError(t, os.Chmod(dir, 0o777))
+	require.NoError(t, os.Chmod(target, 0o644))
+
+	again, err := OracleWalletDir(b64([]byte("wallet-a")))
+	require.NoError(t, err)
+	assert.Equal(t, dir, again)
+	for p, want := range map[string]fs.FileMode{base: 0o700, dir: 0o700, target: 0o600} {
+		st, err := os.Stat(p)
+		require.NoError(t, err)
+		assert.Equal(t, want, st.Mode().Perm(), p)
+	}
 }
