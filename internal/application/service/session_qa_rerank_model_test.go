@@ -61,7 +61,11 @@ func TestResolveKnowledgeQARerankModel(t *testing.T) {
 	}}}
 
 	t.Run("tenant config wins", func(t *testing.T) {
-		ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, tenantInfoWithRerank("tenant-rerank"))
+		ctx := context.WithValue(
+			context.Background(),
+			types.TenantInfoContextKey,
+			tenantInfoWithRerank("tenant-rerank"),
+		)
 		require.Equal(t, "tenant-rerank", svc.resolveKnowledgeQARerankModel(ctx, ""))
 	})
 
