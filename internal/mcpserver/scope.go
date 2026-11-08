@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -100,7 +101,32 @@ func (s *Server) scopedKBContext(
 		}
 		return ctx, err
 	}
+	if required != types.OrgRoleViewer {
+		if err := s.requireOwnerKBWrite(ctx, kb); err != nil {
+			return ctx, err
+		}
+	}
 	return scoped, nil
+}
+
+// requireOwnerKBWrite applies the web's "KB creator or Admin" route guard.
+// Space endpoints skip it as machine keys do; a personal endpoint acts as its
+// owner. A KB from another workspace resolves as not found, as on the web
+// routes, and is left to its share permission.
+func (s *Server) requireOwnerKBWrite(ctx context.Context, kb *types.KnowledgeBase) error {
+	err := middleware.EvaluateOwnershipOrRole(ctx, s.cfg, types.TenantRoleAdmin, func() (string, error) {
+		if kb.TenantID != types.CallerFromContext(ctx).TenantID {
+			return "", middleware.ErrResourceNotFound
+		}
+		return kb.CreatorID, nil
+	})
+	if err == nil || errors.Is(err, middleware.ErrResourceNotFound) {
+		return nil
+	}
+	if errors.Is(err, middleware.ErrOwnershipForbidden) {
+		return fmt.Errorf("only the creator of knowledge base %q or a workspace admin can change its documents", kb.ID)
+	}
+	return err
 }
 
 // authorizeKB resolves the caller's grant on kb and returns it together with
