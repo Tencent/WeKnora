@@ -454,7 +454,8 @@ reasoning 与 Gemini 2.5 Pro / Flash 不接受 `reasoning.effort`，只提供「
 
 模型目录收录 `cohere.embed-v4.0`（1536 维，可选 256 / 512 / 1024，每次最多 96 条）和
 `cohere.rerank-v4.0-fast`，已在 `us-chicago-1`、`ap-osaka-1` 实测。v3 系列向量模型与
-Rerank 3.5 已被 Oracle 标记为弃用。
+Rerank 3.5 已被 Oracle 标记为弃用。Cohere Embed 4 的余弦相似度整体偏低（日语测试数据中正确文档约 0.47），低于默认向量阈值 0.5
+时会检索不到结果，建议在智能体的检索设置中把向量阈值调到 0.2–0.3。
 
 ## 设置空间默认模型 {#workspace-defaults}
 
