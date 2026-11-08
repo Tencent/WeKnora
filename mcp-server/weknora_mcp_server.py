@@ -131,7 +131,7 @@ class WeKnoraClient:
 
     def __init__(self, base_url: str, api_key: str):
         """Initialize the WeKnora API client with base URL and authentication"""
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         # SSL verification: enabled by default. Set WEKNORA_VERIFY_SSL=false to disable
         # (e.g. for self-signed certs in dev environments — NOT recommended for production).
