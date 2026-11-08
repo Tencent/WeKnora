@@ -785,30 +785,36 @@ func TestHousekeeping_RecoversSoftDeletedDeletingRow(t *testing.T) {
 	assert.Equal(t, types.ParseStatusFailed, status)
 	assert.Contains(t, errMsg, "delete completed")
 	// Sweep D picks the settled row up in the same pass and closes the span
-	// its dead parse attempt left open.
+	// its dead parse attempt left open, naming the reason Sweep C recorded.
 	spanStatus, _, spanMsg := readSpanState(t, db, "doc-deleted")
 	assert.Equal(t, types.SpanStatusCancelled, spanStatus)
-	assert.Contains(t, spanMsg, "deleted without closing its trace spans")
+	assert.Contains(t, spanMsg, "delete completed")
 }
 
-// Backpressure still wins for soft-deleted rows: a queued delete task covers
-// the row, so the sweep defers instead of settling a delete that is still
-// running.
+// Backpressure still wins for the row itself: a queued delete task covers the
+// soft-deleted row, so Sweep C defers instead of settling a delete that is
+// still running. Sweep D, however, already reaps the row's orphaned parse
+// spans — deleting is terminal for spans regardless of the delete backlog.
 func TestHousekeeping_KeepsBackloggedSoftDeletedDeletingRow(t *testing.T) {
 	db := setupHousekeepingDB(t)
 	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
 		deleteQueued: map[string]bool{"kid-deleted-backlogged": true},
 	})
-	insertSoftDeletedKnowledge(t, db, "kid-deleted-backlogged",
-		time.Now().Add(-3*time.Hour))
-	insertSpan(t, db, "kid-deleted-backlogged", 1, "doc-backlogged", types.SpanStatusRunning, time.Now().Add(-3*time.Hour))
+	stale := time.Now().Add(-3 * time.Hour)
+	insertSoftDeletedKnowledge(t, db, "kid-deleted-backlogged", stale)
+	insertSpan(t, db, "kid-deleted-backlogged", 1, "doc-backlogged",
+		types.SpanStatusRunning, stale)
 
 	svc.runSweep(context.Background())
 
-	status, _ := readKnowledgeStatus(t, db, "kid-deleted-backlogged")
+	status, errMsg := readKnowledgeStatus(t, db, "kid-deleted-backlogged")
 	assert.Equal(t, types.ParseStatusDeleting, status)
-	spanStatus, _, _ := readSpanState(t, db, "doc-backlogged")
-	assert.Equal(t, types.SpanStatusRunning, spanStatus)
+	assert.Empty(t, errMsg)
+	// The row's error_message is empty, so the span closes with the
+	// delete-specific fallback message rather than a recovery note.
+	spanStatus, _, spanMsg := readSpanState(t, db, "doc-backlogged")
+	assert.Equal(t, types.SpanStatusCancelled, spanStatus)
+	assert.Equal(t, deletingSpanMessage, spanMsg)
 }
 
 // The #3345 ghost branch keeps its own message: a live deleting row and a
