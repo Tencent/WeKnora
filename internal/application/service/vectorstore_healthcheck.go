@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +53,8 @@ func (s *vectorStoreService) TestConnection(
 		return testWeaviateConnection(ctx, config)
 	case types.DorisRetrieverEngineType:
 		return testDorisConnection(ctx, config)
+	case types.OracleRetrieverEngineType:
+		return testOracleConnection(ctx, config)
 	case types.OpenSearchRetrieverEngineType:
 		return testOpenSearchConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
@@ -347,6 +350,43 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 	}
 	if i := strings.Index(version, "Doris-"); i >= 0 {
 		return strings.TrimSpace(version[i+len("Doris-"):]), nil
+	}
+	return version, nil
+}
+
+// testOracleConnection pings Oracle and returns version_full (e.g.
+// "23.7.0.25.01"). Versions before 23ai lack the VECTOR type, so they are
+// rejected here instead of failing later at CREATE TABLE.
+func testOracleConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
+	defer cancel()
+
+	db, err := secutils.OpenOracleDB(secutils.OracleConnParams{
+		Addr: config.Addr, Service: config.Database, Username: config.Username, Password: config.Password,
+		UseTLS: config.UseTLS, Wallet: config.Wallet, WalletDir: config.WalletDir,
+	}, true)
+	if err != nil {
+		return "", errors.NewBadRequestError("failed to create oracle connection: invalid configuration")
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := db.PingContext(testCtx); err != nil {
+		logger.Warnf(ctx, "Oracle connection test failed: %v", err)
+		return "", errors.NewBadRequestError(
+			"failed to connect to oracle: connection refused, unknown service name or authentication failed")
+	}
+
+	var version string
+	if err := db.QueryRowContext(testCtx,
+		"SELECT version_full FROM product_component_version WHERE product LIKE 'Oracle%' FETCH FIRST 1 ROWS ONLY",
+	).Scan(&version); err != nil {
+		logger.Warnf(ctx, "Oracle version detection failed: %v", err)
+		return "", nil
+	}
+	majorStr, _, _ := strings.Cut(version, ".")
+	if major, err := strconv.Atoi(majorStr); err == nil && major < 23 {
+		return version, errors.NewBadRequestError("oracle " + version +
+			" does not support the VECTOR type; Oracle AI Database 23ai or later is required")
 	}
 	return version, nil
 }

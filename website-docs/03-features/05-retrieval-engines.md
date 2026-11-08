@@ -38,6 +38,7 @@
 | Milvus | `milvus` | HNSW（IP/COSINE/L2） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
 | Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
 | Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
+| Oracle AI Database | `oracle` | AI Vector Search（VECTOR + HNSW，COSINE） | Oracle Text CONTEXT 索引（CONTAINS + ACCUM） | `SCORE(1)/100` | WORLD_LEXER（中日韩 + 空格分词语言） | 每维一张表 | SQL 内 | 中（23ai Free 容器 / Autonomous Database） | 已有 Oracle 数据库，向量与业务数据同库 |
 | 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
 
 > 说明：无论引擎自身是否提供"混合检索"，WeKnora 的混合始终是**上层统一的 RRF 融合**（`knowledgebase_search_fusion.go`）——向量与关键词各自独立检索，按 rank 加权合并（见 [混合检索打分与归一化](#_5-混合检索打分与归一化)），因此各引擎只需分别提供两类单模检索。
@@ -48,7 +49,7 @@
 
 | 环境变量 | 默认 | 说明 |
 |----------|------|------|
-| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
+| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `oracle` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
 | `MULTI_STORE_RETRIEVE_TIMEOUT_SEC` | 30 | 多 store 并行检索每组超时 |
 | `ELASTICSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` | — / `WeKnora` | ES v7/v8 共用 |
 | `OPENSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` / `_INSECURE_SKIP_VERIFY` | — | OpenSearch |
@@ -56,6 +57,7 @@
 | `MILVUS_ADDRESS` / `_COLLECTION` / `_METRIC_TYPE` / `_USERNAME` / `_PASSWORD` / `_DB_NAME` | `localhost:19530` / `weknora_embeddings` / `IP` | metric 改后需重建 collection |
 | `WEAVIATE_HOST` / `_GRPC_ADDRESS` / `_SCHEME` / `_AUTH_ENABLED` / `_API_KEY` / `_COLLECTION` | `weaviate:8080` / `weaviate:50051` / `http` | 容器内用服务名 |
 | `DORIS_ADDR` / `_HTTP_PORT` / `_DATABASE` / `_USERNAME` / `_PASSWORD` / `_TABLE_PREFIX` / `_COMPAT_MODE` | `doris-fe:9030` / 8030 / `weknora` / `root` / — / `weknora_embeddings` / `auto` | Doris 4.1+；compat 模式建表后不可互换 |
+| `ORACLE_ADDR` / `_SERVICE_NAME` / `_USERNAME` / `_PASSWORD` / `_USE_TLS` / `_WALLET_DIR` / `_TABLE_PREFIX` | `oracle:1521` / `FREEPDB1` / — / — / `false` / — / `weknora_embeddings` | Oracle AI Database 23ai+；`_WALLET_DIR` 可选（mTLS，设置后自动启用 TLS） |
 | `TENCENT_VECTORDB_ADDR` / `_USERNAME` / `_API_KEY` / `_DATABASE` / `_COLLECTION` | — | 三项核心缺一跳过注册 |
 | `NEO4J_ENABLE` / `NEO4J_URI` / `_USERNAME` / `_PASSWORD` | `false` / `bolt://neo4j:7687` | 图谱检索（独立于向量引擎体系） |
 
@@ -102,7 +104,7 @@ flowchart TD
     ENV["环境变量 RETRIEVE_DRIVER=postgres,qdrant,..."] --> REG
     DB["DB 表 vector_stores (实例级绑定)"] --> LOAD["loadDBStoresIntoRegistry"]
     LOAD --> REG["RetrieveEngineRegistry"]
-    REG --> BET["byEngineType: postgres / elasticsearch / opensearch / qdrant / milvus / weaviate / doris / sqlite / tencent_vectordb"]
+    REG --> BET["byEngineType: postgres / elasticsearch / opensearch / qdrant / milvus / weaviate / doris / oracle / sqlite / tencent_vectordb"]
     REG --> BSI["byStoreID: store-uuid 到引擎实例"]
 
     Q["HybridSearch(kbIDs, params)"] --> GRP["resolveStoreGroups 按 (VectorStoreID, 属主租户) 分组"]
@@ -124,7 +126,7 @@ flowchart TD
 
 ### 引擎逐个详解 {#_2-引擎逐个详解}
 
-引擎类型常量见 `internal/types/retriever.go`：`postgres`、`elasticsearch`、`opensearch`、`qdrant`、`milvus`、`weaviate`、`doris`、`sqlite`、`tencent_vectordb`（另有 `infinity`、`elasticfaiss` 为遗留枚举，无可部署实现）。除特别注明外，所有引擎的 `Support()` 均返回 `[keywords, vector]` 两类。
+引擎类型常量见 `internal/types/retriever.go`：`postgres`、`elasticsearch`、`opensearch`、`qdrant`、`milvus`、`weaviate`、`doris`、`oracle`、`sqlite`、`tencent_vectordb`（另有 `infinity`、`elasticfaiss` 为遗留枚举，无可部署实现）。除特别注明外，所有引擎的 `Support()` 均返回 `[keywords, vector]` 两类。
 
 #### PostgreSQL（pgvector + ParadeDB）— 默认引擎 {#_2-1-postgresql-pgvector-paradedb-—-默认引擎}
 
@@ -222,6 +224,20 @@ flowchart TD
 - **写入**：DUPLICATE KEY 表按 id 显式 delete + insert 保持替换语义；enabled/tag 更新经 Stream Load partial update。
 - 配置：`DORIS_ADDR` / `DORIS_HTTP_PORT` / `DORIS_DATABASE` / `DORIS_USERNAME` / `DORIS_PASSWORD` / `DORIS_TABLE_PREFIX` / `DORIS_COMPAT_MODE`。
 
+#### Oracle AI Database（23ai / 26ai） {#oracle-ai-database}
+
+`internal/application/repository/retriever/oracle/`（`repository.go` + `sql.go`）。使用纯 Go 驱动 go-ora（无需 Instant Client），通过 SSRF 安全 dialer 建连。
+
+- **前提**：Oracle AI Database 23ai 及以上（`VECTOR` 类型；"测试连接" 会拒绝 23ai 之前的版本）。用户需建表/建索引权限；关键词检索的 WORLD_LEXER 偏好需 `CTXAPP` 角色（`CTX_DDL`）。
+- **建表**：每维度一张表 `{PREFIX}_{dim}`（前缀 `collection_prefix` / `ORACLE_TABLE_PREFIX`，转大写；`-` 替换为 `_`），列 `embedding VECTOR(dim, FLOAT32)`。同时建：chunk/knowledge/kb/source 普通索引、`CTXSYS.CONTEXT` 全文索引（`LEXER` 为 WORLD_LEXER，`SYNC (ON COMMIT)`）、HNSW 向量索引（`ORGANIZATION INMEMORY NEIGHBOR GRAPH DISTANCE COSINE`）。全文/向量索引创建失败（如 `vector_memory_size = 0` 或无 CTXSYS 权限）只记 WARN：向量检索退化为精确扫描，关键词检索无命中。
+- **向量检索**：`VECTOR_DISTANCE(embedding, TO_VECTOR(:q), COSINE)` + `FETCH APPROX FIRST n ROWS ONLY`，分数 `1 - distance`；相似度阈值放在 ANN 子查询外层，避免妨碍向量索引。
+- **关键词检索**：`CONTAINS(content, :q, 1) > 0`，按 `SCORE(1)` 排序，分数缩放到 `[0,1]`。查询词在应用侧按文字种类切分（平假名丢弃、汉字连续 3 字以上转 bigram），每个词用 `{}` 包裹（用户输入中的 Oracle Text 运算符按字面处理），以 `ACCUM` 连接。
+- **写入**：同一批按 id 先删后 `INSERT ALL`（每条语句最多 100 行），`CopyIndices` 在服务端 `INSERT ... SELECT`（向量不出库）。超过 4000 字节的文本/向量字面量拆成多个 VARCHAR2 绑定后在服务端 `TO_CLOB(:1) || :2 ...` 拼接，避免 go-ora 的临时 LOB 往返（高延迟链路下差异明显）。
+- **连接**：`addr`（`host:port`）+ `database`（服务名）+ 用户名/密码；`use_tls` 启用 TCPS（校验服务端证书）。
+- **钱包（可选，mTLS）**：Autonomous Database 等要求 mTLS 时，在界面上传从 OCI 控制台下载的 `Wallet_*.zip`（或单独的 `cwallet.sso`，≤ 1 MB），上传后自动启用 TLS。服务端只在内存中读取 ZIP（不解压到磁盘；拒绝符号链接与超大成员），用 go-ora 解析校验后仅保存自动登录钱包 `cwallet.sso`，与密码一样以 AES-GCM 加密存储、接口返回时脱敏；连接时按内容哈希落盘到临时目录（0700/0600）。创建时选择一次即可用于"测试连接"和保存；编辑已有向量库时可**替换钱包**（连接地址等其他设置仍不可改），不重新上传则继续使用当前钱包。env 驱动改用 `ORACLE_WALLET_DIR` 指定钱包目录。
+- **运维**：`SYNC (ON COMMIT)` 使新行立即可检索，但频繁小批量写入会使 CONTEXT 索引碎片化，建议定期执行 `CTX_DDL.OPTIMIZE_INDEX('<PREFIX>_<dim>_TXT', 'FULL')`。HNSW 索引占用 SGA 的 Vector Pool（约 `1.3 × 行数 × 维度 × 4` 字节），需相应设置 `vector_memory_size`。
+- 配置：`ORACLE_ADDR` / `ORACLE_SERVICE_NAME` / `ORACLE_USERNAME` / `ORACLE_PASSWORD` / `ORACLE_USE_TLS` / `ORACLE_WALLET_DIR` / `ORACLE_TABLE_PREFIX`（env 驱动 `RETRIEVE_DRIVER=oracle`；也可在 设置 → 向量数据库引擎 中注册）。
+
 #### 腾讯云 VectorDB {#_2-10-腾讯云-vectordb}
 
 `internal/application/repository/retriever/tencentvectordb/repository.go`。RpcClient，EventualConsistency，10s 超时。
@@ -245,6 +261,7 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 | SQLite | 每维度一张 `vec0` 虚表（启动时按存量数据维度自动补建） |
 | Qdrant / Milvus / TencentVectorDB | 每维度一个 collection：`{base}_{dim}`，首写时 `ensureCollection` 惰性创建（sync.Map 记忆已建维度） |
 | Doris | 每维度一张表：`{prefix}_{dim}`，`schema.go` 生成 DDL 并轮询 ANN 索引就绪 |
+| Oracle | 每维度一张表：`{PREFIX}_{dim}`（`VECTOR(dim, FLOAT32)`），首写时惰性建表与索引（sync.Map 记忆已建维度） |
 | Elasticsearch | 单索引 `dense_vector` mapping（`ELASTICSEARCH_INDEX`），维度在 mapping 中固定 |
 | OpenSearch | 按维度创建 `{OPENSEARCH_INDEX}_{dim}` 别名及物理索引；另有无维度的关键词索引 |
 
@@ -260,7 +277,7 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 
 | 引擎 | 引擎原生分数 | 驱动换算 |
 |------|---------|--------|
-| Postgres / SQLite | cosine 距离 | `1 - distance` |
+| Postgres / SQLite / Oracle | cosine 距离 | `1 - distance` |
 | Qdrant / TencentVectorDB / Doris | cosine（或归一化向量的内积） | 直通 |
 | Milvus（IP / COSINE） | 内积 / cosine | 直通 |
 | Milvus（L2） | 平方欧氏距离，单位向量下 = `2 - 2cos` | 分数 `1 - d/2`，阈值换成半径 `2(1 - threshold)` |
@@ -333,7 +350,7 @@ sequenceDiagram
 |------|----------|
 | 引擎注册（env + DB store） | `internal/container/container.go`（`initRetrieveEngineRegistry`）、`engine_factory.go` |
 | 注册表 / 组合引擎 / 工厂 | `internal/application/service/retriever/`（`registry.go`、`composite.go`、`factory.go`、`normalizer.go`） |
-| 各引擎实现 | `internal/application/repository/retriever/{postgres,sqlite,elasticsearch,opensearch,qdrant,milvus,weaviate,doris,tencentvectordb,neo4j}` |
+| 各引擎实现 | `internal/application/repository/retriever/{postgres,sqlite,elasticsearch,opensearch,qdrant,milvus,weaviate,doris,oracle,tencentvectordb,neo4j}` |
 | 混合检索调度与融合 | `internal/application/service/knowledgebase_search*.go` |
 | 引擎类型常量 | `internal/types/retriever.go` |
 | 租户默认引擎 | `internal/types/tenant.go`（`GetDefaultRetrieverEngines`） |

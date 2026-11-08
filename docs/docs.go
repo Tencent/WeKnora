@@ -23966,7 +23966,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Update a vector store (name only). Engine type, connection config, and index config are immutable. Env stores cannot be modified.",
+                "description": "Update a vector store's name, and optionally replace an Oracle store's wallet\n(omit wallet to keep the current one). Engine type, other connection settings,\nand index config are immutable. Env stores cannot be modified.",
                 "consumes": [
                     "application/json"
                 ],
@@ -28407,7 +28407,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "database": {
-                    "description": "Database name used by engines that support database-level namespaces\n(currently Milvus, Tencent VectorDB, and Doris).",
+                    "description": "Database name used by engines that support database-level namespaces\n(currently Milvus, Tencent VectorDB, and Doris). Oracle stores its\nservice name (e.g. FREEPDB1) here.",
                     "type": "string"
                 },
                 "grpc_address": {
@@ -28415,7 +28415,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "host": {
-                    "description": "Qdrant",
+                    "description": "Qdrant (Host/Port/UseTLS). UseTLS is also read by Oracle, where it\nswitches the connection to TCPS.",
                     "type": "string"
                 },
                 "http_port": {
@@ -28448,6 +28448,10 @@ const docTemplate = `{
                 },
                 "version": {
                     "description": "Version is the detected server version (e.g., \"7.10.1\", \"16.2\", \"1.12.6\").\nAuto-populated by TestConnection on successful connectivity check.",
+                    "type": "string"
+                },
+                "wallet": {
+                    "description": "Oracle (optional): uploaded auto-login wallet, stored as base64 of\ncwallet.sso (AES-GCM encrypted at rest, masked in responses). Setting it\nenables mTLS; UseTLS alone enables one-way TLS (TCPS).",
                     "type": "string"
                 }
             }
@@ -34571,6 +34575,7 @@ const docTemplate = `{
                 "milvus",
                 "weaviate",
                 "doris",
+                "oracle",
                 "sqlite",
                 "tencent_vectordb",
                 "opensearch"
@@ -34584,6 +34589,7 @@ const docTemplate = `{
                 "MilvusRetrieverEngineType",
                 "WeaviateRetrieverEngineType",
                 "DorisRetrieverEngineType",
+                "OracleRetrieverEngineType",
                 "SQLiteRetrieverEngineType",
                 "TencentVectorDBRetrieverEngineType",
                 "OpenSearchRetrieverEngineType"
@@ -42500,6 +42506,10 @@ const docTemplate = `{
             ],
             "properties": {
                 "name": {
+                    "type": "string"
+                },
+                "wallet": {
+                    "description": "Wallet replaces an Oracle store's wallet (base64 of Wallet_*.zip or\ncwallet.sso). Omit or leave empty to keep the current wallet.",
                     "type": "string"
                 }
             }

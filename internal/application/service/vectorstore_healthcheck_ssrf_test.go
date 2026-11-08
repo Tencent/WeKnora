@@ -76,3 +76,26 @@ func TestTestConnection_DorisBlocksUnsafeAddrAtDialSink(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// The Oracle probe dials through utils.SSRFSafeDialContext (go-ora custom
+// dialer), so a metadata address is refused at the socket, not just by the
+// input validator.
+func TestTestConnection_OracleBlocksUnsafeAddrAtDialSink(t *testing.T) {
+	svc := NewVectorStoreService(&mockVectorStoreRepo{}, nil, nil, nil, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := svc.TestConnection(ctx, types.OracleRetrieverEngineType, types.ConnectionConfig{
+		Addr:     "169.254.169.254:1521",
+		Database: "FREEPDB1",
+		Username: "weknora",
+		Password: "x",
+	})
+	if err == nil {
+		t.Fatal("expected oracle connectivity probe to reject unsafe address")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to oracle") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

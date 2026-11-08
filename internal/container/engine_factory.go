@@ -25,6 +25,7 @@ import (
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
+	oracleRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/oracle"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
@@ -76,6 +77,8 @@ func createEngineServiceFromStore(
 		return createWeaviateEngine(store)
 	case types.DorisRetrieverEngineType:
 		return createDorisEngine(store)
+	case types.OracleRetrieverEngineType:
+		return createOracleEngine(store)
 	case types.SQLiteRetrieverEngineType:
 		return createSQLiteEngine(store, db)
 	case types.TencentVectorDBRetrieverEngineType:
@@ -111,7 +114,8 @@ func validateRuntimeVectorStoreAddresses(store types.VectorStore) error {
 		types.OpenSearchRetrieverEngineType,
 		types.MilvusRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType:
+		types.DorisRetrieverEngineType,
+		types.OracleRetrieverEngineType:
 		return check("vector store address", cc.Addr)
 	case types.QdrantRetrieverEngineType:
 		endpoint := cc.Host
@@ -364,6 +368,27 @@ func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineServic
 		db, httpBase, cc.Username, cc.Password, cc.Database, &store.IndexConfig,
 	)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.DorisRetrieverEngineType), nil
+}
+
+// createOracleEngine builds the Oracle AI Database engine (go-ora thin
+// driver; connections dial through the SSRF-safe dialer).
+func createOracleEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+	cc := store.ConnectionConfig
+	if cc.Addr == "" || cc.Database == "" {
+		return nil, fmt.Errorf("oracle connection requires addr (host:port) and database (service name)")
+	}
+	db, err := utils.OpenOracleDB(utils.OracleConnParams{
+		Addr: cc.Addr, Service: cc.Database, Username: cc.Username, Password: cc.Password,
+		UseTLS: cc.UseTLS, Wallet: cc.Wallet, WalletDir: cc.WalletDir,
+	}, true)
+	if err != nil {
+		return nil, fmt.Errorf("create oracle client: %w", err)
+	}
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(time.Hour)
+	repo := oracleRepo.NewOracleRetrieveEngineRepository(db, &store.IndexConfig)
+	return retriever.NewKVHybridRetrieveEngine(repo, types.OracleRetrieverEngineType), nil
 }
 
 // hostFromAddr 从 "host:port" 中拆出 host 部分；Addr 没有冒号时整段当作 host。

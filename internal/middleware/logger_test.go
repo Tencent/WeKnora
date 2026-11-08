@@ -89,6 +89,16 @@ func TestSanitizeBody(t *testing.T) {
 			want: `{"query":"see chart","image":"data:image/png;base64,[redacted 80 chars]"}`,
 		},
 		{
+			name: "oracle wallet upload",
+			in:   `{"engine_type":"oracle","connection_config":{"addr":"db:1522","wallet":"UEsDBBQAAAAIAA=="}}`,
+			want: `{"engine_type":"oracle","connection_config":{"addr":"db:1522","wallet":"***"}}`,
+		},
+		{
+			name: "secret value cut off by body truncation has no closing quote",
+			in:   `{"name":"x","wallet":"UEsDBBQAAAAIAAAAAAAAAA`,
+			want: `{"name":"x","wallet":"***"`,
+		},
+		{
 			name: "data URI inside a secret field is still masked",
 			in:   `{"apiKey":"data:image/png;base64,AAAA"}`,
 			want: `{"apiKey":"***"}`,

@@ -62,6 +62,10 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		return err
 	}
 
+	if err := normalizeWallet(store.EngineType, &store.ConnectionConfig); err != nil {
+		return err
+	}
+
 	// 2.1. SSRF validation on user-supplied addresses (whitelist-first).
 	// Placed before any network I/O (step 5 TestConnection, step 7 registry
 	// factory) so a blocked address never triggers an outbound connection.
@@ -145,7 +149,37 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 	}
 
 	logger.Infof(ctx, "Updating vector store: tenant=%d, id=%s", store.TenantID, store.ID)
+	if store.ConnectionConfig.Wallet != "" {
+		if err := s.replaceWallet(ctx, store); err != nil {
+			return err
+		}
+	}
 	return s.repo.Update(ctx, store)
+}
+
+// replaceWallet rotates the Oracle wallet of an existing store. It is the only
+// connection setting that may change after creation: the endpoint, and thus
+// where the vectors live, stays the same. Omitting the wallet keeps the
+// current one. The engine is rebuilt so new connections use the new wallet.
+func (s *vectorStoreService) replaceWallet(ctx context.Context, update *types.VectorStore) error {
+	existing, err := s.repo.GetByID(ctx, update.TenantID, update.ID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return errors.NewNotFoundError("vector store not found")
+	}
+	if err := normalizeWallet(existing.EngineType, &update.ConnectionConfig); err != nil {
+		return err
+	}
+	existing.ConnectionConfig.Wallet = update.ConnectionConfig.Wallet
+	if err := s.repo.UpdateConnectionConfig(ctx, existing); err != nil {
+		return err
+	}
+	// The replaced engine is not closed (the registry has no Close hook yet);
+	// its pool drains via ConnMaxLifetime.
+	s.registerInRegistry(ctx, existing)
+	return nil
 }
 
 // DeleteStore deletes a vector store by tenant + id, after verifying that no
@@ -467,6 +501,16 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 		if config.Database == "" {
 			return errors.NewValidationError("database is required for doris")
 		}
+	case types.OracleRetrieverEngineType:
+		if config.Addr == "" {
+			return errors.NewValidationError("addr is required for oracle (host:port)")
+		}
+		if config.Database == "" {
+			return errors.NewValidationError("database (service name) is required for oracle")
+		}
+		if config.Username == "" || config.Password == "" {
+			return errors.NewValidationError("username and password are required for oracle")
+		}
 	case types.OpenSearchRetrieverEngineType:
 		if config.Addr == "" {
 			return errors.NewValidationError("addr is required for opensearch")
@@ -474,6 +518,24 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 	case types.SQLiteRetrieverEngineType:
 		// No connection config needed for SQLite
 	}
+	return nil
+}
+
+// normalizeWallet validates an uploaded Oracle wallet (base64 of a wallet ZIP
+// or cwallet.sso) and replaces it with the base64 cwallet.sso that is stored
+// and used at connect time. Other engines do not accept a wallet.
+func normalizeWallet(engineType types.RetrieverEngineType, config *types.ConnectionConfig) error {
+	if config.Wallet == "" {
+		return nil
+	}
+	if engineType != types.OracleRetrieverEngineType {
+		return errors.NewValidationError("wallet is only supported for oracle")
+	}
+	normalized, err := secutils.NormalizeOracleWallet(config.Wallet)
+	if err != nil {
+		return errors.NewValidationError(err.Error())
+	}
+	config.Wallet = normalized
 	return nil
 }
 
@@ -506,7 +568,8 @@ func validateConnectionAddrSSRF(engineType types.RetrieverEngineType, config typ
 		types.OpenSearchRetrieverEngineType,
 		types.MilvusRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType:
+		types.DorisRetrieverEngineType,
+		types.OracleRetrieverEngineType:
 		// Single address field: a URL (es/opensearch) or bare host:port
 		// (milvus/tencent/doris). ValidateURLForSSRF normalises both.
 		return check(config.Addr)
@@ -564,6 +627,9 @@ func (s *vectorStoreService) TestRawConnection(
 	//    driver's internal default (e.g. milvus empty addr -> localhost:19530),
 	//    which would otherwise dial an internal host unchecked.
 	if err := validateConnectionConfig(engineType, config); err != nil {
+		return "", err
+	}
+	if err := normalizeWallet(engineType, &config); err != nil {
 		return "", err
 	}
 	// 3. SSRF policy on every user-supplied address field.
