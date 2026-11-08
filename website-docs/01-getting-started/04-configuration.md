@@ -130,6 +130,35 @@ flowchart LR
 | `web_search` | `WebSearchConfig` | `timeout`：Web 搜索超时秒数 |
 | `models` | `[]ModelConfig` | 历史遗留的静态模型清单（`type`/`source`/`model_name`/`parameters`）；现推荐用 `builtin_models.yaml` 或界面配置 |
 | `frontend_base_url` | string | 空 | SPA 对外 origin，用于生成邀请等绝对链接（env `FRONTEND_BASE_URL`） |
+| `parser_defaults` | `ParserDefaultsConfig` | 部署级解析引擎默认值，只补空缺，见下文 |
+
+`parser_defaults` 只补空缺，优先级从高到低：
+
+1. KB/智能体显式规则
+2. 租户解析设置（仅聊天附件）
+3. 部署默认 `parser_defaults`
+4. 内置回退
+
+租户 `overrides` 覆盖部署值。`engine` 需要配 `file_types`；`file_types` 为空或省略时不设默认引擎，`overrides` 不受影响。
+
+`${ENV}` 对本段所有值展开。启动时对 URL 类 override（`mineru_endpoint` 等）做结构校验：未展开的 `${ENV}` 或非绝对 http(s) URL 会导致启动失败，内网地址只告警。内网地址需加入 `SSRF_WHITELIST_EXTRA`（推荐）或平台 `ssrf.whitelist`，否则解析时会被 SSRF 校验拒绝。
+
+示例（自建 MinerU 作为 PDF/Office 的默认引擎）：
+
+```yaml
+parser_defaults:
+  engine: mineru
+  file_types: [pdf, doc, docx, ppt, pptx]
+  overrides:
+    mineru_endpoint: ${MINERU_ENDPOINT}
+```
+
+常用 override 键（完整语义见[文档解析](../03-features/03-document-parsing.md#mineru-self-hosted)）：
+
+- MinerU 自建：`mineru_endpoint`、`mineru_server_api_key`、`mineru_parse_method`、`mineru_tier`
+- MinerU 云：`mineru_api_key`、`mineru_cloud_model`、`mineru_cloud_language`
+- OpenDataLoader：`odl_hybrid`、`odl_hybrid_url`
+- PaddleOCR-VL：`paddleocr_vl_endpoint`、`paddleocr_vl_use_seal_recognition`
 
 ## 重要环境变量
 

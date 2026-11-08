@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +29,7 @@ type Config struct {
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
+	ParserDefaults  *ParserDefaultsConfig  `yaml:"parser_defaults"  json:"parser_defaults"`
 	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
 	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
 	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
@@ -131,6 +133,20 @@ type DocReaderConfig struct {
 
 type VectorDatabaseConfig struct {
 	Driver string `yaml:"driver" json:"driver"`
+}
+
+// ParserDefaultsConfig supplies deployment-wide parser defaults. They only
+// fill gaps: explicit knowledge base or agent parser rules and tenant parser
+// settings take precedence.
+type ParserDefaultsConfig struct {
+	// Engine is the parser engine used when no rule matches, e.g. "mineru".
+	Engine string `yaml:"engine" json:"engine"`
+	// FileTypes restricts Engine to these extensions. An empty list disables
+	// the default engine.
+	FileTypes []string `yaml:"file_types" json:"file_types"`
+	// Overrides are passed to docreader as parser_engine_overrides under the
+	// tenant values, e.g. mineru_endpoint.
+	Overrides map[string]string `yaml:"overrides" json:"overrides"`
 }
 
 // ConversationConfig 对话服务配置
@@ -662,6 +678,20 @@ func LoadConfig() (*Config, error) {
 		os.Getenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS"),
 	)
 
+	// Install deployment parser defaults (config.yaml parser_defaults) and
+	// report them once. Explicit KB/agent rules and tenant parser settings win.
+	defaults := ParserDefaultsConfig{}
+	if cfg.ParserDefaults != nil {
+		defaults = *cfg.ParserDefaults
+	}
+	types.SetDeploymentParserDefaults(defaults.Engine, defaults.FileTypes, defaults.Overrides)
+	fmt.Printf("[config] parser defaults: engine=%q file_types=%v overrides=%d\n",
+		defaults.Engine, defaults.FileTypes, len(defaults.Overrides))
+	if len(defaults.Overrides) > 0 {
+		fmt.Println("[config] parser defaults: whitelist private endpoints via SSRF_WHITELIST_EXTRA " +
+			"or the ssrf.whitelist setting, or their parses will fail SSRF validation")
+	}
+
 	return &cfg, nil
 }
 
@@ -702,6 +732,36 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
 		errs = append(errs, fmt.Sprintf("audit.retention_days must be >= 0 (got %d); use 0 to disable purge",
 			cfg.Audit.RetentionDays))
+	}
+
+	if cfg.ParserDefaults != nil {
+		// Only structural problems are fatal: ssrf.whitelist loads after this
+		// check, so a host/DNS rejection here cannot distinguish a
+		// misconfiguration from a whitelist that arrives later.
+		for _, key := range utils.ParserOutboundURLKeys {
+			rawURL := strings.TrimSpace(cfg.ParserDefaults.Overrides[key])
+			if rawURL == "" {
+				continue
+			}
+			if strings.Contains(rawURL, "${") {
+				errs = append(errs, fmt.Sprintf(
+					"parser_defaults.overrides.%s references an unset environment variable: %s", key, rawURL))
+				continue
+			}
+			parsed, parseErr := url.Parse(rawURL)
+			if parseErr != nil || parsed.Hostname() == "" ||
+				(parsed.Scheme != "http" && parsed.Scheme != "https") {
+				errs = append(errs, fmt.Sprintf(
+					"parser_defaults.overrides.%s must be an absolute http(s) URL with a host, got %q", key, rawURL))
+				continue
+			}
+			if err := utils.ValidateURLForSSRF(rawURL); err != nil {
+				fmt.Printf("[config] WARNING: parser_defaults.overrides.%s = %q is not allowed by startup "+
+					"SSRF checks (%v). If documents fail to parse, whitelist the host via SSRF_WHITELIST_EXTRA "+
+					"(always merged; recommended for deployment config) or the platform setting ssrf.whitelist "+
+					"(applied after startup, not visible to this check)\n", key, rawURL, err)
+			}
+		}
 	}
 
 	if cfg.Conversation != nil {

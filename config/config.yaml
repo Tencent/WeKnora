@@ -114,3 +114,11 @@ extract:
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)
   enable_cross_tenant_access: false
+
+# Deployment parser defaults (optional). See the configuration guide:
+# website-docs/01-getting-started/04-configuration.md
+# parser_defaults:
+#   engine: mineru
+#   file_types: [pdf, doc, docx, ppt, pptx]
+#   overrides:
+#     mineru_endpoint: ${MINERU_ENDPOINT}

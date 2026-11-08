@@ -1320,6 +1320,17 @@ func parseHostForHint(rawURL string) (string, error) {
 	return u.Hostname(), nil
 }
 
+// ParserOutboundURLKeys lists parser override keys whose values trigger
+// outbound requests. Startup checks deployment defaults; the parse pipeline
+// re-checks merged overrides per document.
+var ParserOutboundURLKeys = []string{
+	"mineru_endpoint",
+	"mineru_vlm_server_url",
+	"odl_hybrid_url",
+	"paddleocr_vl_endpoint",
+	"paddleocr_vl_cloud_base_url",
+}
+
 // ValidateURLForSSRF is the centralised entry-point that all handlers should
 // call to validate a user-supplied URL. It first checks the SSRF_WHITELIST;
 // whitelisted hosts skip the full isSSRFSafeURL check.
