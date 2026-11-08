@@ -236,7 +236,14 @@ func TestEveryCataloguedModelResolves(t *testing.T) {
 			if modelType == "" {
 				modelType = types.ModelTypeKnowledgeQA
 			}
-			if err := modelruntime.ValidateRow(m.ID, modelType, &types.ModelParameters{Provider: v.ID}); err != nil {
+			// A row written through the editor carries the vendor's required
+			// extra fields (e.g. a project id); fill them like the form does.
+			extra := map[string]string{}
+			for _, key := range v.MissingRequiredExtra(modelType, nil) {
+				extra[key] = "x"
+			}
+			params := &types.ModelParameters{Provider: v.ID, ExtraConfig: extra}
+			if err := modelruntime.ValidateRow(m.ID, modelType, params); err != nil {
 				t.Errorf("%s/%s: ValidateRow: %v", v.ID, m.ID, err)
 			}
 		}

@@ -48,6 +48,14 @@ func (r *Resolved) Endpoint(kind types.ModelType, c Connection) (api.Endpoint, e
 	for k, val := range v.Headers {
 		headers[k] = val
 	}
+	for _, f := range v.ExtraFields {
+		if f.Header == "" || !f.AppliesTo(kind) {
+			continue
+		}
+		if val := strings.TrimSpace(c.Extra[f.Key]); val != "" {
+			headers[f.Header] = val
+		}
+	}
 	for k, val := range c.Headers {
 		headers[k] = val
 	}

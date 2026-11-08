@@ -281,7 +281,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 31 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -309,6 +309,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
 | Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
+| OCI Enterprise AI | `oci_enterprise_ai` | ✓ | | | ✓ | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -371,6 +372,40 @@ Runcrate 是提供 OpenAI 兼容推理 API 的 GPU 云，默认地址为 `https:
 
 思考强度通过 `reasoning_effort` 发送，关闭思考时发送 `none`；GLM-5.3、GLM-5.3 Flash、
 Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关闭」档位。
+
+### OCI Enterprise AI
+
+[OCI Enterprise AI](https://docs.oracle.com/en-us/iaas/Content/generative-ai/openai-compatible-api.htm)
+是 Oracle OCI Generative AI 的 OpenAI 兼容端点，地址为
+`https://inference.generativeai.<region>.oci.oraclecloud.com/openai/v1`（默认 `us-chicago-1`）。
+接入方式与 OpenAI 厂商相同（Bearer API Key、对话走 Responses API、图片以 `input_image` 发送），
+只多一个必填的「项目 OCID」（`ocid1.generativeaiproject.oc1.<region>....`），以 `OpenAI-Project`
+请求头发送；缺少时 xAI、Gemini 等非 OpenAI 模型会返回 400。API Key（OCI Generative AI API Key）
+与项目必须属于端点所在区域，且 API Key 需有允许 Generative AI 推理的 IAM 策略。
+
+通过 `POST /api/v1/models` 创建对话模型时，请求体示例：
+
+```json
+{
+  "name": "xai.grok-4.3",
+  "type": "KnowledgeQA",
+  "source": "remote",
+  "parameters": {
+    "provider": "oci_enterprise_ai",
+    "base_url": "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/openai/v1",
+    "api_key": "your-oci-generative-ai-api-key",
+    "extra_config": {"project_id": "ocid1.generativeaiproject.oc1.us-chicago-1.xxxx"}
+  }
+}
+```
+
+模型目录收录 [Enterprise AI 可用模型](https://docs.oracle.com/en-us/iaas/Content/generative-ai/agentic-regions.htm)
+中的按需模型，图片输入以各模型官方页面为准：Gemini 2.5 Pro / Flash / Flash-Lite、Grok 4.3、
+Grok 4.20（reasoning / non-reasoning）可作为视觉模型；gpt-oss-120b / 20b 官方说明不支持图片，
+Grok 4.6 页面未说明图片输入，仅作为对话模型。各区域可用模型不同（xAI 仅限美国区域），请以
+[按区域的模型列表](https://docs.oracle.com/en-us/iaas/Content/generative-ai/model-endpoint-regions.htm)为准。
+需要专用集群的导入模型和端点不同的 Grok 4.20 Multi-Agent 未收录，可手动填写模型名。
+向量、重排与 IAM 签名认证不在本厂商范围内。
 
 ## 设置空间默认模型 {#workspace-defaults}
 

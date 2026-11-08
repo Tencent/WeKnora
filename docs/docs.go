@@ -26737,6 +26737,10 @@ const docTemplate = `{
                 "default": {
                     "type": "string"
                 },
+                "header": {
+                    "description": "Header, when set, sends the field's value as this HTTP header on every\nrequest (e.g. a project id the vendor reads from ` + "`" + `OpenAI-Project` + "`" + `).\nEmpty values send nothing; a user's custom header of the same name wins.",
+                    "type": "string"
+                },
                 "key": {
                     "type": "string"
                 },

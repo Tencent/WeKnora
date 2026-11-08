@@ -45,6 +45,40 @@ type ExtraField struct {
 	ModelTypes []types.ModelType `json:"model_types,omitempty"`
 	// Secret marks values that must never be echoed back to the UI.
 	Secret bool `json:"secret,omitempty"`
+	// Header, when set, sends the field's value as this HTTP header on every
+	// request (e.g. a project id the vendor reads from `OpenAI-Project`).
+	// Empty values send nothing; a user's custom header of the same name wins.
+	Header string `json:"header,omitempty"`
+}
+
+// AppliesTo reports whether the field is shown for a model type.
+func (f ExtraField) AppliesTo(modelType types.ModelType) bool {
+	if len(f.ModelTypes) == 0 {
+		return true
+	}
+	for _, mt := range f.ModelTypes {
+		if mt == modelType {
+			return true
+		}
+	}
+	return false
+}
+
+// MissingRequiredExtra returns the keys of required, non-secret extra fields
+// that a row for modelType leaves empty. Fields with a Default are satisfied by
+// it, and secret fields are skipped: their value is stored outside
+// extra_config (AppSecret) and checked where it is used.
+func (v *Definition) MissingRequiredExtra(modelType types.ModelType, extra map[string]string) []string {
+	var missing []string
+	for _, f := range v.ExtraFields {
+		if !f.Required || f.Secret || f.Default != "" || !f.AppliesTo(modelType) {
+			continue
+		}
+		if strings.TrimSpace(extra[f.Key]) == "" {
+			missing = append(missing, f.Key)
+		}
+	}
+	return missing
 }
 
 // CredentialLabel renames the primary credential input for one vendor.
