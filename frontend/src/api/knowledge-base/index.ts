@@ -9,6 +9,17 @@ export { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
 
 export type KnowledgeBaseActivity = AuditLog;
 
+export interface KnowledgeBaseActivityActor {
+  kind: 'user' | 'mcp_endpoint' | 'embed_channel';
+  // Empty when the user, endpoint, or channel no longer exists.
+  name: string;
+}
+
+export interface ListKnowledgeBaseActivityResponse extends ListAuditLogResponse {
+  // Keyed by actor_user_id. Ids missing here could not be resolved.
+  actors?: Record<string, KnowledgeBaseActivityActor>;
+}
+
 export interface ListKnowledgeBaseActivityParams {
   after_id?: number;
   limit?: number;
@@ -20,7 +31,7 @@ export interface ListKnowledgeBaseActivityParams {
 export async function listKnowledgeBaseActivity(
   id: string,
   params: ListKnowledgeBaseActivityParams = {},
-): Promise<ListAuditLogResponse> {
+): Promise<ListKnowledgeBaseActivityResponse> {
   const query = new URLSearchParams();
   if (params.after_id) query.set('after_id', String(params.after_id));
   if (params.limit) query.set('limit', String(params.limit));
@@ -28,7 +39,7 @@ export async function listKnowledgeBaseActivity(
   if (params.outcome) query.set('outcome', params.outcome);
   if (params.actor) query.set('actor', params.actor);
   const qs = query.toString();
-  return (await get(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`)) as unknown as ListAuditLogResponse;
+  return (await get(`/api/v1/knowledge-bases/${id}/activity${qs ? `?${qs}` : ''}`)) as unknown as ListKnowledgeBaseActivityResponse;
 }
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）

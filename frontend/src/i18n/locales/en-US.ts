@@ -3730,6 +3730,10 @@ export default {
         targetChange: 'Change details'
       },
       systemActor: 'System',
+      actorMCPEndpoint: 'MCP endpoint · {name}',
+      actorDeletedMCPEndpoint: 'Deleted MCP endpoint',
+      actorEmbedChannel: 'Embed channel · {name}',
+      actorDeletedEmbedChannel: 'Deleted embed channel',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
       viaAssistant: 'Via WeKnora Assistant',

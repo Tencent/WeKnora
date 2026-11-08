@@ -38,7 +38,7 @@ func newAuditHandlerTestRouter(svc interfaces.AuditLogService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
-	h := NewAuditLogHandler(svc)
+	h := NewAuditLogHandler(svc, nil, nil, nil)
 	r.GET("/tenants/:id/audit-log", h.ListTenantAuditLog)
 	return r
 }
@@ -159,7 +159,7 @@ func TestAuditLogHandler_InvalidTenantIDReturns400(t *testing.T) {
 
 func newKBActivityHandlerTestRouter(
 	t *testing.T,
-	svc interfaces.AuditLogService,
+	h *AuditLogHandler,
 	callerTenantID uint64,
 	kb *types.KnowledgeBase,
 	userID string,
@@ -177,7 +177,6 @@ func newKBActivityHandlerTestRouter(
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	})
-	h := NewAuditLogHandler(svc)
 	r.GET("/knowledge-bases/:id/activity", h.ListKnowledgeBaseActivity)
 	return r
 }
@@ -194,7 +193,7 @@ func TestKnowledgeBaseActivityHandler_UsesKBScope(t *testing.T) {
 	}}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/activity?after_id=30&limit=10&outcome=partial", nil)
-	newKBActivityHandlerTestRouter(t, svc, 7,
+	newKBActivityHandlerTestRouter(t, NewAuditLogHandler(svc, nil, nil, nil), 7,
 		&types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "creator"},
 		"creator", types.TenantRoleViewer).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -209,7 +208,7 @@ func TestKnowledgeBaseActivityHandler_BlocksSharedWorkspace(t *testing.T) {
 	}}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/activity", nil)
-	newKBActivityHandlerTestRouter(t, svc, 8,
+	newKBActivityHandlerTestRouter(t, NewAuditLogHandler(svc, nil, nil, nil), 8,
 		&types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "creator"},
 		"creator", types.TenantRoleOwner).ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
@@ -224,11 +223,144 @@ func TestKnowledgeBaseActivityHandler_RequiresCreatorOrAdmin(t *testing.T) {
 	}}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/activity", nil)
-	newKBActivityHandlerTestRouter(t, svc, 7,
+	newKBActivityHandlerTestRouter(t, NewAuditLogHandler(svc, nil, nil, nil), 7,
 		&types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "creator"},
 		"other", types.TenantRoleContributor).ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+type stubActivityUserService struct {
+	interfaces.UserService
+	users map[string]*types.User
+	err   error
+}
+
+func (s *stubActivityUserService) GetUsersByIDs(_ context.Context, _ []string) (map[string]*types.User, error) {
+	return s.users, s.err
+}
+
+type stubActivityMCPEndpointService struct {
+	interfaces.MCPEndpointService
+	endpoints []*types.MCPEndpoint
+	err       error
+	calls     int
+}
+
+func (s *stubActivityMCPEndpointService) List(_ context.Context, _ uint64) ([]*types.MCPEndpoint, error) {
+	s.calls++
+	return s.endpoints, s.err
+}
+
+type stubActivityEmbedChannelService struct {
+	interfaces.EmbedChannelService
+	channels []*types.EmbedChannel
+	err      error
+	calls    int
+}
+
+func (s *stubActivityEmbedChannelService) ListByTenant(_ context.Context, _ uint64) ([]*types.EmbedChannel, error) {
+	s.calls++
+	return s.channels, s.err
+}
+
+func serveKBActivity(t *testing.T, h *AuditLogHandler) kbActivityListResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases/kb-1/activity", nil)
+	newKBActivityHandlerTestRouter(t, h, 7,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7, CreatorID: "creator"},
+		"creator", types.TenantRoleViewer).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var got kbActivityListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return got
+}
+
+func TestKnowledgeBaseActivityHandler_ResolvesActorNames(t *testing.T) {
+	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		return []*types.AuditLog{
+			{ID: 6, ActorUserID: "u-1"},
+			{ID: 5, ActorUserID: "u-1"},
+			{ID: 4, ActorUserID: "u-email-only"},
+			{ID: 3, ActorUserID: "u-gone"},
+			{ID: 2, ActorUserID: "mcp-ep-1"},
+			{ID: 1, ActorUserID: "mcp-ep-deleted"},
+			{ID: 0, ActorUserID: "embed-ch-1"},
+			{ID: 0},
+		}, nil
+	}}
+	users := &stubActivityUserService{users: map[string]*types.User{
+		"u-1":          {ID: "u-1", Username: "alice", Email: "alice@example.com"},
+		"u-email-only": {ID: "u-email-only", Email: "bob@example.com"},
+	}}
+	endpoints := &stubActivityMCPEndpointService{endpoints: []*types.MCPEndpoint{
+		{ID: "ep-1", Name: "Claude Desktop"},
+		{ID: "ep-unused", Name: "Unused"},
+	}}
+	channels := &stubActivityEmbedChannelService{channels: []*types.EmbedChannel{{ID: "ch-1", Name: "Help center"}}}
+
+	got := serveKBActivity(t, NewAuditLogHandler(svc, users, endpoints, channels))
+
+	want := map[string]kbActivityActor{
+		"u-1":            {Kind: kbActivityActorUser, Name: "alice"},
+		"u-email-only":   {Kind: kbActivityActorUser, Name: "bob@example.com"},
+		"u-gone":         {Kind: kbActivityActorUser},
+		"mcp-ep-1":       {Kind: kbActivityActorMCPEndpoint, Name: "Claude Desktop"},
+		"mcp-ep-deleted": {Kind: kbActivityActorMCPEndpoint},
+		"embed-ch-1":     {Kind: kbActivityActorEmbedChannel, Name: "Help center"},
+	}
+	if len(got.Actors) != len(want) {
+		t.Fatalf("actors = %+v, want %+v", got.Actors, want)
+	}
+	for id, w := range want {
+		if got.Actors[id] != w {
+			t.Fatalf("actors[%q] = %+v, want %+v", id, got.Actors[id], w)
+		}
+	}
+}
+
+func TestKnowledgeBaseActivityHandler_SkipsEndpointAndChannelLookupWithoutPrefixedActors(t *testing.T) {
+	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		return []*types.AuditLog{{ID: 1, ActorUserID: "u-1"}}, nil
+	}}
+	users := &stubActivityUserService{users: map[string]*types.User{"u-1": {ID: "u-1", Username: "alice"}}}
+	endpoints := &stubActivityMCPEndpointService{}
+	channels := &stubActivityEmbedChannelService{}
+
+	serveKBActivity(t, NewAuditLogHandler(svc, users, endpoints, channels))
+
+	if endpoints.calls != 0 || channels.calls != 0 {
+		t.Fatalf("unexpected lookups: endpoints=%d channels=%d", endpoints.calls, channels.calls)
+	}
+}
+
+func TestKnowledgeBaseActivityHandler_LookupFailureKeepsFeed(t *testing.T) {
+	svc := &stubAuditService{list: func(_ context.Context, _ uint64, _ *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
+		return []*types.AuditLog{
+			{ID: 3, ActorUserID: "u-1"},
+			{ID: 2, ActorUserID: "mcp-ep-1"},
+			{ID: 1, ActorUserID: "embed-ch-1"},
+		}, nil
+	}}
+	lookupErr := fmt.Errorf("db unavailable")
+	h := NewAuditLogHandler(svc,
+		&stubActivityUserService{err: lookupErr},
+		&stubActivityMCPEndpointService{err: lookupErr},
+		&stubActivityEmbedChannelService{err: lookupErr})
+
+	got := serveKBActivity(t, h)
+
+	if len(got.Data) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(got.Data))
+	}
+	if len(got.Actors) != 0 {
+		t.Fatalf("failed lookups must omit actors instead of reporting them deleted, got %+v", got.Actors)
 	}
 }
 
@@ -246,7 +378,7 @@ func newSystemAuditHandlerTestRouter(svc interfaces.AuditLogService) *gin.Engine
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
-	h := NewAuditLogHandler(svc)
+	h := NewAuditLogHandler(svc, nil, nil, nil)
 	r.GET("/system/admin/audit-log", h.ListSystemAuditLog)
 	return r
 }
