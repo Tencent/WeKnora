@@ -60,10 +60,12 @@ func newOCIGenAIProvider() *Definition {
 		// There is no bearer key; the generic API key input carries the
 		// passphrase of an encrypted private key.
 		CredentialLabels: []CredentialLabel{{
-			Label:  "Private key passphrase",
-			Labels: map[string]string{"zh-CN": "私钥口令"},
-			Hint:   "Only for an encrypted private key. Not used with instance principal.",
-			Hints:  map[string]string{"zh-CN": "仅在私钥已加密时填写；实例主体认证无需填写。"},
+			Label:        "Private key passphrase",
+			Labels:       map[string]string{"zh-CN": "私钥口令"},
+			Placeholder:  "Leave empty unless the private key is encrypted",
+			Placeholders: map[string]string{"zh-CN": "私钥未加密时留空"},
+			Hint:         "Only for an encrypted private key. Not used with instance principal.",
+			Hints:        map[string]string{"zh-CN": "仅在私钥已加密时填写；实例主体认证无需填写。"},
 		}},
 		ExtraFields: []ExtraField{
 			{

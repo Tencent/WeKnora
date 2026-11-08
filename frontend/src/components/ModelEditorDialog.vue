@@ -356,10 +356,10 @@
               </span>
             </div>
             <t-input v-else v-model="formData.appSecret" type="password"
-              :placeholder="secretExtraField.placeholder || ''" autocomplete="new-password" spellcheck="false">
+              :placeholder="extraFieldDisplayPlaceholder(secretExtraField)" autocomplete="new-password" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
-            <p v-if="secretExtraField.placeholder" class="form-desc">{{ secretExtraField.placeholder }}</p>
+            <p v-if="secretExtraField.placeholder" class="form-desc">{{ extraFieldDisplayPlaceholder(secretExtraField) }}</p>
           </div>
 
           <!-- 厂商声明的其余额外字段：按 type 动态渲染，值存入 extra_config[key] -->
