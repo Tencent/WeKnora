@@ -34539,6 +34539,21 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.RetrieverDisplay": {
+            "type": "object",
+            "properties": {
+                "engine_type": {
+                    "type": "string"
+                },
+                "label": {
+                    "description": "Label is a product name (\"pgvector\", \"ParadeDB (BM25)\") and is not\ntranslated.",
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverType"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams": {
             "type": "object",
             "properties": {
@@ -40080,6 +40095,13 @@ const docTemplate = `{
                 },
                 "vector_store_name": {
                     "type": "string"
+                },
+                "vector_store_retrievers": {
+                    "description": "VectorStoreRetrievers lists the engines configured for each retrieval\ntype. Omitted for shared and unavailable stores.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverDisplay"
+                    }
                 },
                 "vector_store_source": {
                     "type": "string"

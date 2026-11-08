@@ -340,6 +340,9 @@ type KnowledgeBaseView struct {
 	VectorStoreSource     string `json:"vector_store_source,omitempty"`
 	VectorStoreEngineType string `json:"vector_store_engine_type,omitempty"`
 	VectorStoreStatus     string `json:"vector_store_status,omitempty"`
+	// VectorStoreRetrievers lists the engines configured for each retrieval
+	// type. Omitted for shared and unavailable stores.
+	VectorStoreRetrievers []types.RetrieverDisplay `json:"vector_store_retrievers,omitempty"`
 	// MyPermission is the caller's role on a knowledge base shared from
 	// another workspace; GET /knowledge-bases/{id} sets it.
 	MyPermission string `json:"my_permission,omitempty" enums:"admin,editor,viewer" extensions:"x-agent"`

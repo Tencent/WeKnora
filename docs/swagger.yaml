@@ -7591,6 +7591,18 @@ definitions:
         description: Recall score
         type: number
     type: object
+  github_com_Tencent_WeKnora_internal_types.RetrieverDisplay:
+    properties:
+      engine_type:
+        type: string
+      label:
+        description: |-
+          Label is a product name ("pgvector", "ParadeDB (BM25)") and is not
+          translated.
+        type: string
+      type:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverType'
+    type: object
   github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams:
     properties:
       retriever_engine_type:
@@ -11954,6 +11966,13 @@ definitions:
         x-agent: vector_store_id
       vector_store_name:
         type: string
+      vector_store_retrievers:
+        description: |-
+          VectorStoreRetrievers lists the engines configured for each retrieval
+          type. Omitted for shared and unavailable stores.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverDisplay'
+        type: array
       vector_store_source:
         type: string
       vector_store_status:
