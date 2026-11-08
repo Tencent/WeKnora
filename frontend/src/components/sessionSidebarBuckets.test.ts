@@ -7,8 +7,16 @@ import {
   buildBucketDefinitions,
   createEmptyBucket,
   prependSessionToWebBucket,
+  removeSessionFromBuckets,
+  mergeBucketPage,
+  isChannelBucket,
+  type SidebarSessionBucket,
   type BucketDefinition,
 } from './sessionSidebarBuckets.ts'
+import {
+  buildSessionSourceOptions,
+  shouldShowSessionSourceFilter,
+} from './sessionSidebarSourceFilter.ts'
 
 const imDef: BucketDefinition = {
   key: 'im:feishu',
@@ -86,4 +94,66 @@ test('buildBucketDefinitions hides channel buckets unless admin', () => {
     adminDefs.map((def) => def.key),
     ['im:feishu', 'embed:ch1', 'api', 'web'],
   )
+})
+
+const channelDefs: BucketDefinition[] = [
+  { key: 'api', apiSource: 'api', label: 'API', kind: 'api' },
+  imDef,
+  { key: 'embed:widget', apiSource: 'embed:widget', label: 'Widget', kind: 'embed' },
+]
+
+// Follow the sidebar's deletion/count-probe -> visibility -> source-options path.
+for (const def of channelDefs) {
+  for (const removal of ['single', 'batch', 'count probe'] as const) {
+    test(`${def.kind}: ${removal} keeps the empty active source available until switching to web`, () => {
+      const web = prependSessionToWebBucket(
+        createEmptyBucket({ key: 'web', apiSource: 'web', label: 'My chats', kind: 'web' }),
+        { id: 'web-chat', title: 'Web conversation' },
+      )
+      const rows = removal === 'batch'
+        ? [{ id: 'first' }, { id: 'last' }]
+        : [{ id: 'last' }]
+      let buckets: Record<string, SidebarSessionBucket> = {
+        web,
+        [def.key]: mergeBucketPage(
+          applyBucketCountProbe(createEmptyBucket(def), rows.length),
+          rows,
+          rows.length,
+          1,
+        ),
+      }
+      if (removal === 'count probe') {
+        buckets[def.key] = applyBucketCountProbe(createEmptyBucket(def), 0)
+      } else {
+        for (const row of rows) buckets = removeSessionFromBuckets(buckets, row.id)
+      }
+      assert.equal(buckets[def.key].total, 0)
+      assert.deepEqual(buckets[def.key].items, [])
+      assert.deepEqual(buckets.web.items.map((row) => row.id), ['web-chat'])
+
+      const visibleChannels = Object.values(buckets).filter(
+        (bucket) => isChannelBucket(bucket) && bucketVisible(bucket, def.key),
+      )
+      assert.equal(shouldShowSessionSourceFilter(visibleChannels.length), true)
+      const options = buildSessionSourceOptions('My chats', visibleChannels, () => '')
+      assert.deepEqual(options.map((option) => option.value), ['web', def.key])
+      assert.equal(options.find((option) => option.value === def.key)?.label, def.label)
+
+      // Once the user switches back, the empty channel disappears as before.
+      assert.equal(bucketVisible(buckets[def.key], 'web'), false)
+      assert.equal(bucketVisible(buckets.web, 'web'), true)
+    })
+  }
+}
+
+test('only the active channel stays visible while its count is unknown', () => {
+  const bucket = createEmptyBucket(imDef)
+  assert.equal(bucketVisible(bucket, imDef.key), true)
+  assert.equal(bucketVisible(bucket, 'api'), false)
+  assert.equal(bucketVisible(bucket, 'web'), false)
+})
+
+test('nonempty inactive channels remain visible', () => {
+  const bucket = applyBucketCountProbe(createEmptyBucket(imDef), 1)
+  assert.equal(bucketVisible(bucket, 'api'), true)
 })
