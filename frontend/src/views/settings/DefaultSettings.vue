@@ -44,30 +44,32 @@
       </div>
     </div>
 
-    <h3 class="group-title">{{ t('defaultSettings.knowledgeGroup') }}</h3>
-    <div class="settings-group">
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('defaultSettings.vectorStore.label') }}</label>
-          <p class="desc">{{ t('defaultSettings.vectorStore.description') }}</p>
-          <p v-if="settingsLoaded && vectorStoreStale" class="desc hint warn">
-            {{ t('defaultSettings.vectorStore.stale') }}
-          </p>
-        </div>
-        <div class="setting-control model-control">
-          <t-select
-            :value="settings.vector_store_id"
-            :options="vectorStoreOptions"
-            :disabled="!canEdit || saving || !settingsLoaded"
-            :loading="vectorStoresLoading"
-            :placeholder="t('defaultSettings.vectorStore.placeholder')"
-            clearable
-            style="width: 100%"
-            @change="onVectorStoreChange"
-          />
+    <template v-if="vectorStoreSupported">
+      <h3 class="group-title">{{ t('defaultSettings.knowledgeGroup') }}</h3>
+      <div class="settings-group">
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ t('defaultSettings.vectorStore.label') }}</label>
+            <p class="desc">{{ t('defaultSettings.vectorStore.description') }}</p>
+            <p v-if="settingsLoaded && vectorStoreStale" class="desc hint warn">
+              {{ t('defaultSettings.vectorStore.stale') }}
+            </p>
+          </div>
+          <div class="setting-control model-control">
+            <t-select
+              :value="settings.vector_store_id"
+              :options="vectorStoreOptions"
+              :disabled="!canEdit || saving || !settingsLoaded"
+              :loading="vectorStoresLoading"
+              :placeholder="t('defaultSettings.unsetPlaceholder')"
+              clearable
+              style="width: 100%"
+              @change="onVectorStoreChange"
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </template>
 
     <template v-if="webSearchSupported">
       <h3 class="group-title">{{ t('defaultSettings.webSearchGroup') }}</h3>
@@ -235,6 +237,7 @@ const onModelChange = async (field: ModelField, id: string) => {
   }
 }
 
+const vectorStoreSupported = computed(() => deploymentCapabilities.isSupported('settings.vectorstore'))
 // Registered stores only: the env store is what "unset" already means.
 const vectorStores = ref<VectorStoreEntity[]>([])
 const vectorStoresLoading = ref(false)
@@ -340,7 +343,7 @@ const openModels = (type: DefaultModelType) => {
 onMounted(() => {
   void chatResources.ensureModels(true).catch(() => {})
   void loadSettings()
-  void loadVectorStores()
+  if (vectorStoreSupported.value) void loadVectorStores()
   if (webSearchSupported.value) void loadWebSearchProviders()
 })
 </script>

@@ -7184,7 +7184,6 @@ export default {
     vectorStore: {
       label: '預設向量儲存',
       description: '新建知識庫時預設選中的向量儲存。既有知識庫不受影響；透過 API 建立且未指定時仍使用系統預設。',
-      placeholder: '未設定（使用系統預設）',
       stale: '已設定的向量儲存不存在或無法使用，新建知識庫將使用系統預設。',
     },
     unsetPlaceholder: '未設定（使用系統預設）',

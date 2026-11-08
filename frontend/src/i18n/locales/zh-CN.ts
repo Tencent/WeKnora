@@ -7184,7 +7184,6 @@ export default {
     vectorStore: {
       label: '默认向量存储',
       description: '新建知识库时默认选中的向量存储。已有知识库不受影响；通过 API 创建且未指定时仍使用系统默认。',
-      placeholder: '未设置（使用系统默认）',
       stale: '已设置的向量存储不存在或不可用，新建知识库将使用系统默认。',
     },
     unsetPlaceholder: '未设置（使用系统默认）',

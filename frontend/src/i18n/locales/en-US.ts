@@ -2881,7 +2881,6 @@ export default {
     vectorStore: {
       label: 'Default vector store',
       description: 'Pre-selected when creating a knowledge base. Existing knowledge bases are not affected; creating one through the API without a store still uses the system default.',
-      placeholder: 'Not set (system default)',
       stale: 'The selected vector store no longer exists or is unavailable; new knowledge bases will use the system default.',
     },
     unsetPlaceholder: 'Not set (system default)',

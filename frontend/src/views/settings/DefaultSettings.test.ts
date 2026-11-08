@@ -11,7 +11,7 @@ const initial: DefaultSettings = {
   rerank_model_id: 'rerank', vlm_model_id: 'vision', asr_model_id: 'asr', vector_store_id: '',
 }
 
-function setup(t: TestContext, read = async () => ({ data: { ...initial } })) {
+function setup(t: TestContext, read = async () => ({ data: { ...initial } }), unsupported: string[] = []) {
   const f = fixture(t)
   const api = {
     getTenantDefaultSettings: t.mock.fn(read),
@@ -36,7 +36,9 @@ function setup(t: TestContext, read = async () => ({ data: { ...initial } })) {
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/stores/ui': { useUIStore: () => ({}) },
     '@/stores/chatResources': { useChatResourcesStore: () => store },
-    '@/stores/deploymentCapabilities': { useDeploymentCapabilitiesStore: () => ({ isSupported: () => true }) },
+    '@/stores/deploymentCapabilities': { useDeploymentCapabilitiesStore: () => ({
+      isSupported: (key: string) => !unsupported.includes(key),
+    }) },
   })
   return { vm, store, api }
 }
@@ -103,4 +105,11 @@ test('the default vector store lists registered stores only and flags a deleted 
   // Clearing returns to the system default.
   await vm.onVectorStoreChange(undefined)
   assert.equal(vm.settings.vector_store_id, '')
+})
+
+test('the default vector store follows the vector store deployment capability', async t => {
+  const { vm, api } = setup(t, undefined, ['settings.vectorstore'])
+  await flush()
+  assert.equal(vm.vectorStoreSupported, false)
+  assert.equal(api.listVectorStores.mock.callCount(), 0)
 })
