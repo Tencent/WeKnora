@@ -78,10 +78,16 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		return err
 	}
 
-	// 2.6. Engine-specific index config validation (OpenSearch HNSW bounds).
-	// Create-only: UpdateStore mutates just the name, so this is not re-run there.
+	// 2.6. Engine-specific index config validation (OpenSearch HNSW bounds,
+	// Oracle table prefix).
+	// Create-only: UpdateStore never changes the index config, so this is not re-run there.
 	if store.EngineType == types.OpenSearchRetrieverEngineType {
 		if err := validateOpenSearchIndexConfig(store.IndexConfig); err != nil {
+			return err
+		}
+	}
+	if store.EngineType == types.OracleRetrieverEngineType {
+		if err := types.ValidateOracleIndexConfig(store.IndexConfig); err != nil {
 			return err
 		}
 	}
@@ -137,9 +143,10 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 	return nil
 }
 
-// UpdateStore updates an existing vector store (name only).
-// NOTE: If connection_config or index_config become mutable in the future,
-// registry re-registration must be added here (unregister old + register new).
+// UpdateStore updates an existing vector store: the name, plus the Oracle
+// wallet when ConnectionConfig.Wallet is set (the engine is then re-registered).
+// NOTE: If other connection_config or index_config fields become mutable in
+// the future, they need the same test-before-write and re-registration.
 func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.VectorStore) error {
 	if store.TenantID == 0 {
 		return errors.NewValidationError("tenant_id is required")
@@ -149,37 +156,57 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 	}
 
 	logger.Infof(ctx, "Updating vector store: tenant=%d, id=%s", store.TenantID, store.ID)
+	// The new wallet is validated and connection-tested before any write, so
+	// a rejected wallet leaves the stored row and the registered engine as is.
+	var rotated *types.VectorStore
 	if store.ConnectionConfig.Wallet != "" {
-		if err := s.replaceWallet(ctx, store); err != nil {
+		var err error
+		if rotated, err = s.prepareWallet(ctx, store); err != nil {
 			return err
 		}
 	}
-	return s.repo.Update(ctx, store)
-}
-
-// replaceWallet rotates the Oracle wallet of an existing store. It is the only
-// connection setting that may change after creation: the endpoint, and thus
-// where the vectors live, stays the same. Omitting the wallet keeps the
-// current one. The engine is rebuilt so new connections use the new wallet.
-func (s *vectorStoreService) replaceWallet(ctx context.Context, update *types.VectorStore) error {
-	existing, err := s.repo.GetByID(ctx, update.TenantID, update.ID)
-	if err != nil {
+	if err := s.repo.Update(ctx, store); err != nil {
 		return err
 	}
-	if existing == nil {
-		return errors.NewNotFoundError("vector store not found")
+	if rotated == nil {
+		return nil
 	}
-	if err := normalizeWallet(existing.EngineType, &update.ConnectionConfig); err != nil {
-		return err
-	}
-	existing.ConnectionConfig.Wallet = update.ConnectionConfig.Wallet
-	if err := s.repo.UpdateConnectionConfig(ctx, existing); err != nil {
+	if err := s.repo.UpdateConnectionConfig(ctx, rotated); err != nil {
 		return err
 	}
 	// The replaced engine is not closed (the registry has no Close hook yet);
 	// its pool drains via ConnMaxLifetime.
-	s.registerInRegistry(ctx, existing)
+	s.registerInRegistry(ctx, rotated)
 	return nil
+}
+
+// prepareWallet builds the rotated Oracle store for a wallet replacement and
+// runs the same connection test as CreateStore on it, without writing
+// anything. The wallet is the only connection setting that may change after
+// creation: the endpoint, and thus where the vectors live, stays the same.
+func (s *vectorStoreService) prepareWallet(ctx context.Context, update *types.VectorStore) (*types.VectorStore, error) {
+	existing, err := s.repo.GetByID(ctx, update.TenantID, update.ID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, errors.NewNotFoundError("vector store not found")
+	}
+	if err := normalizeWallet(existing.EngineType, &update.ConnectionConfig); err != nil {
+		return nil, err
+	}
+	rotated := *existing
+	rotated.Name = update.Name
+	rotated.ConnectionConfig.Wallet = update.ConnectionConfig.Wallet
+	version, err := s.TestConnection(ctx, rotated.EngineType, rotated.ConnectionConfig)
+	if err != nil {
+		return nil, errors.NewBadRequestError(
+			fmt.Sprintf("connection test failed: %s. Ensure the server is reachable before saving.", err.Error()))
+	}
+	if version != "" {
+		rotated.ConnectionConfig.Version = version
+	}
+	return &rotated, nil
 }
 
 // DeleteStore deletes a vector store by tenant + id, after verifying that no

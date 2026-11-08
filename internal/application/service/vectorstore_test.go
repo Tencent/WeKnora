@@ -74,12 +74,26 @@ func (m *mockVectorStoreRepo) List(_ context.Context, tenantID uint64) ([]*types
 	return result, nil
 }
 
+// Update and UpdateConnectionConfig write only their column to a stored
+// entry (if any), like the real repository's Select(...).Updates.
 func (m *mockVectorStoreRepo) Update(_ context.Context, store *types.VectorStore) error {
-	return m.updateErr
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	if s, _ := m.GetByID(context.Background(), store.TenantID, store.ID); s != nil {
+		s.Name = store.Name
+	}
+	return nil
 }
 
-func (m *mockVectorStoreRepo) UpdateConnectionConfig(_ context.Context, _ *types.VectorStore) error {
-	return m.updateErr
+func (m *mockVectorStoreRepo) UpdateConnectionConfig(_ context.Context, store *types.VectorStore) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	if s, _ := m.GetByID(context.Background(), store.TenantID, store.ID); s != nil {
+		s.ConnectionConfig = store.ConnectionConfig
+	}
+	return nil
 }
 
 func (m *mockVectorStoreRepo) Delete(_ context.Context, _ uint64, _ string) error {

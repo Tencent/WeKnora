@@ -54,7 +54,7 @@ func (s *vectorStoreService) TestConnection(
 	case types.DorisRetrieverEngineType:
 		return testDorisConnection(ctx, config)
 	case types.OracleRetrieverEngineType:
-		return testOracleConnection(ctx, config)
+		return oracleConnectionTester(ctx, config)
 	case types.OpenSearchRetrieverEngineType:
 		return testOpenSearchConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
@@ -354,9 +354,13 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 	return version, nil
 }
 
+// oracleConnectionTester is replaced in tests that have no Oracle server.
+var oracleConnectionTester = testOracleConnection
+
 // testOracleConnection pings Oracle and returns version_full (e.g.
-// "23.7.0.25.01"). Versions before 23ai lack the VECTOR type, so they are
-// rejected here instead of failing later at CREATE TABLE.
+// "23.7.0.25.01"). Versions before 23.6 are rejected here instead of failing
+// later: before 23ai there is no VECTOR type, and 23.4/23.5 cannot run DML on
+// tables with an HNSW index (see oracleVersionSupported).
 func testOracleConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
 	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
 	defer cancel()
@@ -383,12 +387,30 @@ func testOracleConnection(ctx context.Context, config types.ConnectionConfig) (s
 		logger.Warnf(ctx, "Oracle version detection failed: %v", err)
 		return "", nil
 	}
-	majorStr, _, _ := strings.Cut(version, ".")
-	if major, err := strconv.Atoi(majorStr); err == nil && major < 23 {
+	if !oracleVersionSupported(version) {
 		return version, errors.NewBadRequestError("oracle " + version +
-			" does not support the VECTOR type; Oracle AI Database 23ai or later is required")
+			" is not supported; Oracle AI Database 23.6 or later (23ai RU 23.6 or 26ai) is required")
 	}
 	return version, nil
+}
+
+// oracleVersionSupported reports whether a version_full string is 23.6 or
+// later. Transactional HNSW indexes (DML on an indexed table) arrived in RU
+// 23.6; 26ai reports 23.26.x. Unparseable versions are let through, like an
+// undetectable version.
+func oracleVersionSupported(version string) bool {
+	parts := strings.SplitN(version, ".", 3)
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return true
+	}
+	minor := 0
+	if len(parts) > 1 {
+		if minor, err = strconv.Atoi(parts[1]); err != nil {
+			return true
+		}
+	}
+	return major > 23 || (major == 23 && minor >= 6)
 }
 
 // testOpenSearchConnection verifies the cluster is reachable, runs a

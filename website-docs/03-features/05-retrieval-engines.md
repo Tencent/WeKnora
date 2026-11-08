@@ -38,7 +38,7 @@
 | Milvus | `milvus` | HNSW（IP/COSINE/L2） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
 | Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
 | Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
-| Oracle AI Database | `oracle` | AI Vector Search（VECTOR + HNSW，COSINE） | Oracle Text CONTEXT 索引（CONTAINS + ACCUM） | `SCORE(1)/100` | WORLD_LEXER（中日韩 + 空格分词语言） | 每维一张表 | SQL 内 | 中（23ai Free 容器 / Autonomous Database） | 已有 Oracle 数据库，向量与业务数据同库 |
+| Oracle AI Database | `oracle` | AI Vector Search（VECTOR + HNSW，COSINE） | Oracle Text CONTEXT 索引（CONTAINS + ACCUM） | `SCORE(1)/100` | WORLD_LEXER（中日韩 + 空格分词语言） | 每维一张表 | SQL 内 | 中（23ai Free 容器 23.6+ / Autonomous Database） | 已有 Oracle 数据库，向量与业务数据同库 |
 | 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
 
 > 说明：无论引擎自身是否提供"混合检索"，WeKnora 的混合始终是**上层统一的 RRF 融合**（`knowledgebase_search_fusion.go`）——向量与关键词各自独立检索，按 rank 加权合并（见 [混合检索打分与归一化](#_5-混合检索打分与归一化)），因此各引擎只需分别提供两类单模检索。
@@ -57,7 +57,7 @@
 | `MILVUS_ADDRESS` / `_COLLECTION` / `_METRIC_TYPE` / `_USERNAME` / `_PASSWORD` / `_DB_NAME` | `localhost:19530` / `weknora_embeddings` / `IP` | metric 改后需重建 collection |
 | `WEAVIATE_HOST` / `_GRPC_ADDRESS` / `_SCHEME` / `_AUTH_ENABLED` / `_API_KEY` / `_COLLECTION` | `weaviate:8080` / `weaviate:50051` / `http` | 容器内用服务名 |
 | `DORIS_ADDR` / `_HTTP_PORT` / `_DATABASE` / `_USERNAME` / `_PASSWORD` / `_TABLE_PREFIX` / `_COMPAT_MODE` | `doris-fe:9030` / 8030 / `weknora` / `root` / — / `weknora_embeddings` / `auto` | Doris 4.1+；compat 模式建表后不可互换 |
-| `ORACLE_ADDR` / `_SERVICE_NAME` / `_USERNAME` / `_PASSWORD` / `_USE_TLS` / `_WALLET_DIR` / `_TABLE_PREFIX` | `oracle:1521` / `FREEPDB1` / — / — / `false` / — / `weknora_embeddings` | Oracle AI Database 23ai+；`_WALLET_DIR` 可选（mTLS，设置后自动启用 TLS） |
+| `ORACLE_ADDR` / `_SERVICE_NAME` / `_USERNAME` / `_PASSWORD` / `_USE_TLS` / `_WALLET_DIR` / `_TABLE_PREFIX` | `oracle:1521` / `FREEPDB1` / — / — / `false` / — / `weknora_embeddings` | Oracle AI Database 23.6+（23ai RU 23.6 或 26ai）；`_WALLET_DIR` 可选（mTLS，设置后自动启用 TLS） |
 | `TENCENT_VECTORDB_ADDR` / `_USERNAME` / `_API_KEY` / `_DATABASE` / `_COLLECTION` | — | 三项核心缺一跳过注册 |
 | `NEO4J_ENABLE` / `NEO4J_URI` / `_USERNAME` / `_PASSWORD` | `false` / `bolt://neo4j:7687` | 图谱检索（独立于向量引擎体系） |
 
@@ -228,7 +228,7 @@ flowchart TD
 
 `internal/application/repository/retriever/oracle/`（`repository.go` + `sql.go`）。使用纯 Go 驱动 go-ora（无需 Instant Client），通过 SSRF 安全 dialer 建连。
 
-- **前提**：Oracle AI Database 23ai 及以上（`VECTOR` 类型；"测试连接" 会拒绝 23ai 之前的版本）。用户需建表/建索引权限；关键词检索的 WORLD_LEXER 偏好需 `CTXAPP` 角色（`CTX_DDL`）。
+- **前提**：Oracle AI Database 23.6 及以上（23ai RU 23.6 或 26ai；需要 `VECTOR` 类型及可执行 DML 的事务型 HNSW 索引，23.4/23.5 不支持；"测试连接" 会拒绝 23.6 之前的版本）。用户需建表/建索引权限；关键词检索的 WORLD_LEXER 偏好需 `CTXAPP` 角色（`CTX_DDL`）。
 - **建表**：每维度一张表 `{PREFIX}_{dim}`（前缀 `collection_prefix` / `ORACLE_TABLE_PREFIX`，转大写；`-` 替换为 `_`），列 `embedding VECTOR(dim, FLOAT32)`。同时建：chunk/knowledge/kb/source 普通索引、`CTXSYS.CONTEXT` 全文索引（`LEXER` 为 WORLD_LEXER，`SYNC (ON COMMIT)`）、HNSW 向量索引（`ORGANIZATION INMEMORY NEIGHBOR GRAPH DISTANCE COSINE`）。全文/向量索引创建失败（如 `vector_memory_size = 0` 或无 CTXSYS 权限）只记 WARN：向量检索退化为精确扫描，关键词检索无命中。
 - **向量检索**：`VECTOR_DISTANCE(embedding, TO_VECTOR(:q), COSINE)` + `FETCH APPROX FIRST n ROWS ONLY`，分数 `1 - distance`；相似度阈值放在 ANN 子查询外层，避免妨碍向量索引。
 - **关键词检索**：`CONTAINS(content, :q, 1) > 0`，按 `SCORE(1)` 排序，分数缩放到 `[0,1]`。查询词在应用侧按文字种类切分（平假名丢弃、汉字连续 3 字以上转 bigram），每个词用 `{}` 包裹（用户输入中的 Oracle Text 运算符按字面处理），以 `ACCUM` 连接。
