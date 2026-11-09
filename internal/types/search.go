@@ -272,8 +272,10 @@ type SearchParams struct {
 	// Turns vector matching off, leaving keyword matching only.
 	DisableVectorMatch bool `json:"disable_vector_match" extensions:"x-agent"`
 	// Limits the search to these documents of the knowledge base.
-	KnowledgeIDs    []string `json:"knowledge_ids" extensions:"x-agent,x-agent-maximum=20"`
-	TagIDs          []string `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	KnowledgeIDs []string `json:"knowledge_ids" extensions:"x-agent,x-agent-maximum=20"`
+	// OR tag filter: document tags resolve to knowledge IDs; FAQ tags filter the chunk index.
+	// Intersects knowledge_ids when provided; no matching tags returns no results.
+	TagIDs          []string `json:"tag_ids"`
 	ScopeTagIDs     []string `json:"scope_tag_ids,omitempty"`
 	OnlyRecommended bool     `json:"only_recommended"`
 	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
