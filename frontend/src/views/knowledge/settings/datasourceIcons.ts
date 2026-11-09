@@ -18,9 +18,6 @@ export const datasourceIconMap: Record<string, string> = {
   // Lingo (词典) is the same product and brand as wiki/drive.
   feishu_lingo: feishuIcon,
   lark_lingo: larkIcon,
-  // Lingo (词典) reuses the Feishu/Lark brand icons.
-  feishu_lingo: feishuIcon,
-  lark_lingo: larkIcon,
   notion: notionIcon,
   yuque: yuqueIcon,
   dingtalk: dingtalkIcon,
