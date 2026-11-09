@@ -70,11 +70,39 @@ func newEvaluationMemoryStorage() *evaluationMemoryStorage {
 	return res
 }
 
+// Storage never exposes mutable pointers to workers or response encoders.
+func cloneEvaluationDetail(src *types.EvaluationDetail) *types.EvaluationDetail {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	if src.Task != nil {
+		task := *src.Task
+		dst.Task = &task
+	}
+	if src.Params != nil {
+		dst.Params = src.Params.Clone()
+	}
+	if src.Metric != nil {
+		metric := *src.Metric
+		dst.Metric = &metric
+	}
+	return &dst
+}
+
+func (e *EvaluationService) cleanupOwnedEvaluationKB(ctx context.Context, id string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := e.knowledgeBaseService.DeleteKnowledgeBase(cleanupCtx, id); err != nil {
+		logger.Errorf(cleanupCtx, "Failed to delete owned evaluation KB %s: %v", id, err)
+	}
+}
+
 func (e *evaluationMemoryStorage) register(params *types.EvaluationDetail) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	logger.Infof(context.Background(), "Registering evaluation task: %s", params.Task.ID)
-	e.store[params.Task.ID] = params
+	e.store[params.Task.ID] = cloneEvaluationDetail(params)
 }
 
 func (e *evaluationMemoryStorage) get(taskID string) (*types.EvaluationDetail, error) {
@@ -85,7 +113,7 @@ func (e *evaluationMemoryStorage) get(taskID string) (*types.EvaluationDetail, e
 	if !ok {
 		return nil, errors.New("task not found")
 	}
-	return res, nil
+	return cloneEvaluationDetail(res), nil
 }
 
 func (e *evaluationMemoryStorage) update(taskID string, fn func(params *types.EvaluationDetail)) error {
@@ -141,6 +169,14 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
+	// A KB is owned only after this invocation successfully creates it.
+	ownedKBID := ""
+	transferred := false
+	defer func() {
+		if ownedKBID != "" && !transferred {
+			e.cleanupOwnedEvaluationKB(ctx, ownedKBID)
+		}
+	}()
 	// Handle knowledge base creation if not provided
 	if knowledgeBaseID == "" {
 		logger.Info(ctx, "No knowledge base ID provided, creating new knowledge base")
@@ -180,6 +216,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			return nil, err
 		}
 		knowledgeBaseID = kb.ID
+		ownedKBID = kb.ID
 		logger.Infof(ctx, "Created new knowledge base with ID: %s", knowledgeBaseID)
 	} else {
 		logger.Infof(ctx, "Using existing knowledge base ID: %s", knowledgeBaseID)
@@ -201,6 +238,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			return nil, err
 		}
 		knowledgeBaseID = kb.ID
+		ownedKBID = kb.ID
 		logger.Infof(ctx, "Created new knowledge base with ID: %s based on existing one", knowledgeBaseID)
 	}
 
@@ -302,30 +340,35 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 	// Start evaluation in background goroutine
 	logger.Info(ctx, "Starting evaluation in background")
+	initial := cloneEvaluationDetail(detail)
+	transferred = true
 	go func() {
+		defer e.cleanupOwnedEvaluationKB(ctx, ownedKBID)
 		// Create new context with logger for background task
 		newCtx := logger.CloneContext(ctx)
 		logger.Infof(newCtx, "Background evaluation started for task ID: %s", taskID)
 
 		// Update task status to running
-		detail.Task.Status = types.EvaluationStatueRunning
+		e.evaluationMemoryStorage.update(taskID, func(d *types.EvaluationDetail) { d.Task.Status = types.EvaluationStatueRunning })
 		logger.Info(newCtx, "Evaluation task status set to running")
 
 		// Execute actual evaluation
 		if err := e.EvalDataset(newCtx, detail, knowledgeBaseID); err != nil {
-			detail.Task.Status = types.EvaluationStatueFailed
-			detail.Task.ErrMsg = err.Error()
+			e.evaluationMemoryStorage.update(taskID, func(d *types.EvaluationDetail) {
+				d.Task.Status = types.EvaluationStatueFailed
+				d.Task.ErrMsg = err.Error()
+			})
 			logger.Errorf(newCtx, "Evaluation task failed: %v, task ID: %s", err, taskID)
 			return
 		}
 
 		// Mark task as completed successfully
 		logger.Infof(newCtx, "Evaluation task completed successfully, task ID: %s", taskID)
-		detail.Task.Status = types.EvaluationStatueSuccess
+		e.evaluationMemoryStorage.update(taskID, func(d *types.EvaluationDetail) { d.Task.Status = types.EvaluationStatueSuccess })
 	}()
 
 	logger.Infof(ctx, "Evaluation task created successfully, task ID: %s", taskID)
-	return detail, nil
+	return initial, nil
 }
 
 // EvalDataset performs the actual evaluation of a dataset
@@ -363,21 +406,15 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	// Setup cleanup of temporary resources
 	defer func() {
 		logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
-		if err := deleteReferencedKnowledge(ctx,
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := deleteReferencedKnowledge(cleanupCtx,
 			e.knowledgeService,
 			knowledgeBaseID,
 			[]string{knowledge.ID}); err != nil {
 			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
 		}
 
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
-		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); err != nil {
-			logger.Errorf(
-				ctx,
-				"Failed to delete knowledge base: %v, knowledge base ID: %s",
-				err, knowledgeBaseID,
-			)
-		}
 	}()
 
 	// Initialize parallel evaluation metrics
@@ -412,8 +449,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 
 			// Execute knowledge QA pipeline
 			logger.Infof(ctx, "Running knowledge QA for question: %s", qaPair.Question)
-			err = e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
-			if err != nil {
+			if err := e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"]); err != nil {
 				logger.Errorf(ctx, "Failed to process question %d: %v", i, err)
 				return err
 			}
@@ -430,13 +466,14 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			// Update progress metrics
 			mu.Lock()
 			finished += 1
+			completed := finished
 			metricResult := metricHook.MetricResult()
-			mu.Unlock()
 			e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
 				params.Metric = metricResult
-				params.Task.Finished = finished
-				logger.Infof(ctx, "Updated task progress: %d/%d completed", finished, params.Task.Total)
+				params.Task.Finished = completed
+				logger.Infof(ctx, "Updated task progress: %d/%d completed", completed, params.Task.Total)
 			})
+			mu.Unlock()
 			return nil
 		})
 	}
