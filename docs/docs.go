@@ -34009,6 +34009,13 @@ const docTemplate = `{
                     "description": "PaddleOCR-VL self-hosted pipeline service (full /layout-parsing API).",
                     "type": "string"
                 },
+                "paddleocr_vl_headers": {
+                    "description": "PaddleOCRVLHeaders are extra HTTP headers sent with every\n/layout-parsing request, for deployments behind an authenticating\ngateway. Values may carry credentials, so they are redacted in responses.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "paddleocr_vl_use_chart_recognition": {
                     "type": "boolean"
                 },

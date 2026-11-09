@@ -1493,7 +1493,7 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		return
 	}
 	merged := types.MergeParserEngineConfigForUpdate(&cfg, tenant.ParserEngineConfig)
-	if err := validateParserEngineOutboundURLs(merged); err != nil {
+	if err := validateParserEngineConfig(merged); err != nil {
 		c.Error(errors.NewValidationError(err.Error()))
 		return
 	}
@@ -1912,9 +1912,12 @@ func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
 	})
 }
 
-func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
+func validateParserEngineConfig(cfg *types.ParserEngineConfig) error {
 	if cfg == nil {
 		return nil
+	}
+	if err := types.ValidatePaddleOCRVLHeaders(cfg.PaddleOCRVLHeaders); err != nil {
+		return err
 	}
 	if endpoint := strings.TrimSpace(cfg.MinerUEndpoint); endpoint != "" {
 		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {

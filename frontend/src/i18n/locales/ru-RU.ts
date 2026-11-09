@@ -8085,6 +8085,11 @@ export default {
       mineruLegacySectionHint: 'В MinerU 4.0 эти параметры запроса удалены, поэтому серверы 4.0+ их игнорируют; VLM-сервер настраивается на стороне MinerU.',
       paddleocrVlEndpointPlaceholder: 'напр. http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'Адрес полного сервиса PaddleOCR-VL (pipeline); суффикс /layout-parsing не требуется',
+      gatewayHeadersLabel: 'Заголовки шлюза',
+      gatewayHeadersHint: 'Дополнительные HTTP-заголовки для каждого запроса разбора, например для аутентификации на шлюзе перед self-hosted сервисом. Значения скрыты и сохраняются, пока вы их не измените',
+      gatewayHeadersAdd: 'Добавить заголовок',
+      gatewayHeadersKeyPlaceholder: 'Имя заголовка, напр. X-API-Key',
+      gatewayHeadersValuePlaceholder: 'Значение заголовка',
       paddleocrVlCloudTokenPlaceholder: 'Токен PaddleOCR-VL AI Studio'
     },
     weknoraCloud: {

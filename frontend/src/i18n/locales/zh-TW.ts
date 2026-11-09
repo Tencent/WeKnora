@@ -8086,6 +8086,11 @@ export default {
       mineruLegacySectionHint: 'MinerU 4.0 已移除以下請求參數，連結 4.0 及以上服務時會被忽略；VLM 地址改在 MinerU 伺服器端設定。',
       paddleocrVlEndpointPlaceholder: '如 http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: '填寫 PaddleOCR-VL 完整服務（pipeline）地址，無需 /layout-parsing 後綴',
+      gatewayHeadersLabel: '閘道請求標頭',
+      gatewayHeadersHint: '附加到每個解析請求的 HTTP 標頭，用於自建服務前的閘道驗證；值以遮蔽形式顯示，未修改時保留原值',
+      gatewayHeadersAdd: '新增請求標頭',
+      gatewayHeadersKeyPlaceholder: 'Header 名稱，如 X-API-Key',
+      gatewayHeadersValuePlaceholder: 'Header 值',
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL 飛槳星河社區 Token'
     },
     weknoraCloud: {

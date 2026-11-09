@@ -141,6 +141,8 @@ export interface ParserEngineConfig {
   paddleocr_vl_endpoint?: string
   paddleocr_vl_use_seal_recognition?: boolean | null
   paddleocr_vl_use_chart_recognition?: boolean | null
+  /** 附加到 /layout-parsing 请求的 HTTP 头（网关鉴权）；值在响应中统一脱敏 */
+  paddleocr_vl_headers?: Record<string, string>
   // PaddleOCR-VL 云 API 参数
   paddleocr_vl_cloud_token?: string
   paddleocr_vl_cloud_model?: string
