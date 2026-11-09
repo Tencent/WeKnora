@@ -160,7 +160,10 @@ only after its Ollama pull finishes (run 'model update <id> --default' then).`,
 				Action: "model.create",
 				// Never echo the API key into the plan (it is read from stdin
 				// precisely so it never lands in argv / history / dry-run output).
-				Args: map[string]any{"name": opts.Name, "type": opts.Type, "source": opts.Source, "provider": opts.Provider, "default": opts.Default},
+				Args: map[string]any{
+					"name": opts.Name, "type": opts.Type, "source": opts.Source,
+					"provider": opts.Provider, "default": opts.Default,
+				},
 			}); handled {
 				return err
 			}
@@ -182,7 +185,8 @@ only after its Ollama pull finishes (run 'model update <id> --default' then).`,
 	cmd.Flags().StringVar(&opts.BaseURL, "base-url", "", "Model API base URL (e.g. http://localhost:11434 for Ollama)")
 	cmd.Flags().BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Read the provider API key from stdin (kept out of argv / history)")
 	cmd.Flags().IntVar(&opts.Dimension, "dimension", 0, "Embedding dimension (Embedding models only)")
-	cmd.Flags().BoolVar(&opts.Default, "default", false, "Set the workspace default for this model type (remote models; local ones after the pull)")
+	cmd.Flags().BoolVar(&opts.Default, "default", false,
+		"Set the workspace default for this model type (remote models; local ones after the pull)")
 	cmd.Flags().StringArrayVar(&opts.Params, "param", nil, "Extra provider parameter as key=value, repeatable (value parsed as JSON: true/42/text)")
 	_ = cmd.MarkFlagRequired("type")
 	_ = cmd.MarkFlagRequired("source")
@@ -303,7 +307,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 	if opts.Default {
 		suffix = ", workspace default"
 	}
-	fmt.Fprintf(iostreams.IO.Out, "✓ Created model %q (id: %s, type: %s%s)\n",
+	_, _ = fmt.Fprintf(iostreams.IO.Out, "✓ Created model %q (id: %s, type: %s%s)\n",
 		created.Name, created.ID, created.Type, suffix)
 	return nil
 }

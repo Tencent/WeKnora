@@ -106,7 +106,9 @@ Reversible write: without -y/--yes in a non-TTY / JSON context it exits 10
 	cmd.Flags().StringVar(&opts.BaseURL, "base-url", "", "New model API base URL")
 	cmd.Flags().BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Rotate the provider API key, read from stdin (kept out of argv / history)")
 	cmd.Flags().StringArrayVar(&opts.Params, "param", nil, "Set an extra provider parameter as key=value, repeatable (value parsed as JSON)")
-	cmd.Flags().BoolVar(&opts.Default, "default", false, "Set or clear the workspace default for this model type (--default=false clears it only when this model holds it)")
+	cmd.Flags().BoolVar(&opts.Default, "default", false,
+		"Set or clear the workspace default for this model type "+
+			"(--default=false clears it only when this model holds it)")
 	cmdutil.AddFormatFlag(cmd, modelListFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetWriteRisk(cmd, "model.update")
@@ -192,7 +194,7 @@ func runUpdate(ctx context.Context, opts *UpdateOptions, fopts *cmdutil.FormatOp
 	if opts.flags.def && opts.Default {
 		suffix = ", workspace default"
 	}
-	fmt.Fprintf(iostreams.IO.Out, "✓ Updated model %q (id: %s%s)\n", updated.Name, updated.ID, suffix)
+	_, _ = fmt.Fprintf(iostreams.IO.Out, "✓ Updated model %q (id: %s%s)\n", updated.Name, updated.ID, suffix)
 	return nil
 }
 
