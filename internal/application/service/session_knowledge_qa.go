@@ -180,6 +180,11 @@ func (s *sessionService) KnowledgeQA(
 		req.ReasoningEffort, &chatManage.SummaryConfig.Thinking, &chatManage.SummaryConfig.ReasoningEffort,
 	)
 
+	// Fill the rerank model the same way the retrieval API path does when the
+	// overrides left it empty (issue #1800): the rerank stage otherwise skips
+	// with "empty_model_id" and the answer goes out in raw retrieval order.
+	chatManage.RerankModelID = s.resolveKnowledgeQARerankModel(ctx, chatManage.RerankModelID)
+
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
 	// plugin reads.
