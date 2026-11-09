@@ -19,6 +19,10 @@ const (
 	// RerankDashScope is Alibaba Model Studio's native shape, which wraps
 	// the same fields in input/parameters and answers under output.
 	RerankDashScope RerankAPI = "dashscope-rerank"
+	// RerankMixedbread is Mixedbread's standalone /v1/reranking endpoint:
+	// documents go out as a plain input array beside the query and results
+	// live under data with a 0..1 score.
+	RerankMixedbread RerankAPI = "mixedbread-reranking"
 	// RerankNIM is NVIDIA NIM's retrieval shape: a query object, a passages
 	// array, and rankings carrying an unbounded logit instead of a
 	// probability.
@@ -40,7 +44,7 @@ const (
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI,
+	case RerankCohere, RerankDashScope, RerankMixedbread, RerankNIM, RerankPinecone, RerankTEI,
 		RerankTencentLKEAP, RerankVolcengineKnowledge:
 		return true
 	}
@@ -52,7 +56,7 @@ func (a RerankAPI) Known() bool {
 // vendor SDKs are imported.
 func (a RerankAPI) HTTPServed() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI:
+	case RerankCohere, RerankDashScope, RerankMixedbread, RerankNIM, RerankPinecone, RerankTEI:
 		return true
 	}
 	return false

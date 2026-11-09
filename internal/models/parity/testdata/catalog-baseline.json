@@ -172,6 +172,8 @@
   "minimax/KnowledgeQA/MiniMax-M2.7": "3f6c046bb99022ee88f3c99f3f9e7e75ecfabaad6f97a601352297ec33ffadde",
   "minimax/KnowledgeQA/MiniMax-M2.7-highspeed": "bc4a3116243b4dd2a4b764db9fa8155f8262ab4a05a34cc1e8b6bcc2e17cde72",
   "minimax/KnowledgeQA/MiniMax-M3": "153a02aafdcdfbd115c5e1fd6b5f03b145dfe22e13cf2641dc9f52722ac4ca98",
+  "mixedbread/Rerank/mixedbread-ai/mxbai-rerank-base-v2": "bfcdf91eca4f4686bdce7e3f2e7ca58ecb1a3c6c35e0f3385bfeaf05a2cd168f",
+  "mixedbread/Rerank/mixedbread-ai/mxbai-rerank-large-v2": "47f315aaf008cac1a01892a2412e65b622fd011d49816b9f0ca3c97d621a5aa3",
   "modelscope/Embedding/Qwen/Qwen3-Embedding-0.6B": "a4515af27268a360fe7ee62eb4c4785bc5e3079f65e0264acc99ba974b9a777b",
   "modelscope/Embedding/Qwen/Qwen3-Embedding-8B": "a76960f74528a100af92aad4def93306da5eb819ba8fc916693197d779f0ebd2",
   "modelscope/KnowledgeQA/Qwen/Qwen3-235B-A22B-Instruct-2507": "cbd8290913b5b1a584aaa9cd20ccb6478b67c62a73d9aa3f9f9c5aee0baf7d80",

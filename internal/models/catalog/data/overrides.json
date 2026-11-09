@@ -1183,6 +1183,22 @@
         }
       }
     ],
+    "mixedbread": [
+      {
+        "id": "mixedbread-ai/mxbai-rerank-large-v2",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 1000
+        }
+      },
+      {
+        "id": "mixedbread-ai/mxbai-rerank-base-v2",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 1000
+        }
+      }
+    ],
     "modelscope": [
       {
         "id": "Qwen/Qwen3-235B-A22B-Thinking-2507",
