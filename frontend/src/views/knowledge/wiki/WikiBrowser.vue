@@ -822,7 +822,7 @@ import { ref, computed, reactive, shallowRef, onMounted, onUnmounted, watch, nex
 import { useRouter, useRoute } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
-import { marked } from 'marked'
+import { marked, Renderer, type Tokens } from 'marked'
 import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
@@ -874,6 +874,17 @@ const assistant = useAssistantStore()
 const settingsStore = useSettingsStore()
 
 ensureLiteralSingleTildeOnGlobalMarked()
+
+class WikiRenderer extends Renderer {
+  override link(token: Tokens.Link): string {
+    // Wiki pages have no source directory to resolve a sibling Markdown file against.
+    if (/^(?![a-z][a-z\d+.-]*:|\/)[^?#]*\.md(?:[?#]|$)/i.test(token.href)) {
+      return this.parser.parseInline(token.tokens)
+    }
+    return super.link(token)
+  }
+}
+const wikiRenderer = new WikiRenderer()
 
 const { t } = useI18n()
 
@@ -1678,7 +1689,7 @@ function renderMarkdown(content: string): string {
     return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
   })
 
-  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string
+  const html = marked.parse(preprocessed, { breaks: true, async: false, renderer: wikiRenderer })
   return sanitizeMarkdownHTML(html)
 }
 
