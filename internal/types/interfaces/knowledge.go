@@ -212,6 +212,8 @@ type KnowledgeService interface {
 	ProcessManualUpdate(ctx context.Context, t *asynq.Task) error
 	// ProcessDocument handles Asynq document processing tasks
 	ProcessDocument(ctx context.Context, t *asynq.Task) error
+	// ProcessDocumentDispatch releases one document from a durable per-KB lane.
+	ProcessDocumentDispatch(ctx context.Context, t *asynq.Task) error
 	// ProcessFAQImport handles Asynq FAQ import tasks
 	ProcessFAQImport(ctx context.Context, t *asynq.Task) error
 	// ProcessQuestionGeneration handles Asynq question generation tasks

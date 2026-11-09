@@ -53,6 +53,7 @@ opt := &asynq.RedisClientOpt{
 
 | 任务类型 | 常量 | 用途 | 队列 |
 | --- | --- | --- | --- |
+| `document:dispatch` | `TypeDocumentDispatch` | 按知识库从 durable pending lane 释放一个文档处理任务，避免单个知识库占满入口 | `document_dispatch` |
 | `document:process` | `TypeDocumentProcess` | 文档解析入口（DocReader / 切分 / 向量化） | `default` |
 | `manual:process` | `TypeManualProcess` | 手工知识更新（cleanup + 重新索引） | `default` |
 | `temporary_document:process` | `TypeTemporaryDocumentProcess` | 会话临时文档（聊天附件）解析 | `chat_attachment` |
@@ -92,7 +93,7 @@ opt := &asynq.RedisClientOpt{
 
 | Pool | 默认并发 | 消费队列（权重） | 配置键 / 环境变量 |
 | --- | --- | --- | --- |
-| `core` | 8 | `default`(1)、`chat_attachment`(3) | `asynq.core_concurrency` / `WEKNORA_ASYNQ_CORE_CONCURRENCY` |
+| `core` | 8 | `document_dispatch`(2)、`default`(1)、`chat_attachment`(3) | `asynq.core_concurrency` / `WEKNORA_ASYNQ_CORE_CONCURRENCY` |
 | `postprocess` | 2 | `postprocess`(1) | `asynq.postprocess_concurrency` / `WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY` |
 | `enrichment` | 12 | `summary`(2)、`multimodal`(1)、`graph`(1)、`question`(1)、`memory`(1) | `asynq.enrichment_concurrency` / `WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY` |
 | `maintenance` | 4 | `sync`(2)、`low`(1) | `asynq.maintenance_concurrency` / `WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY` |
@@ -132,6 +133,7 @@ flowchart LR
     CRON -->|"asynq.Client.Enqueue"| REDIS
 
     subgraph REDIS["Redis (asynq broker)"]
+        Q0["document_dispatch (2)"]
         Q1["default (1)"]
         Q2["chat_attachment (3)"]
         Q3["postprocess (1)"]
@@ -154,6 +156,7 @@ flowchart LR
         WK["wiki pool<br/>并发 8"]
     end
 
+    Q0 --> CORE
     Q1 --> CORE
     Q2 --> CORE
     Q3 --> PP
@@ -166,6 +169,7 @@ flowchart LR
     Q10 --> WK
     Q11 --> EN
     Q11 -. "弹性借用" .-> SH
+    Q0 -. "弹性借用" .-> SH
     Q1 -. "弹性借用" .-> SH
     Q2 -. "弹性借用" .-> SH
     Q4 -. "弹性借用" .-> SH
@@ -294,7 +298,7 @@ stateDiagram-v2
 
 ### 持久化任务队列与服务级死信（`internal/application/repository/task_queue.go`） {#_7-2-持久化任务队列与服务级死信-internal-application-repository-task-queue-go}
 
-`task_pending_ops` 表是 Redis list 队列的持久化替代（重启不丢、无 TTL 驱逐），队列身份是 `(task_type, scope, scope_id)` 三元组，目前主要消费者是 Wiki ingest：
+`task_pending_ops` 表是 Redis list 队列的持久化替代（重启不丢、无 TTL 驱逐），队列身份是 `(task_type, scope, scope_id)` 三元组。Wiki ingest 与文档处理入口都使用它：文档处理按知识库建立 durable lane，由 `document:dispatch` 触发器逐个释放到 `default` 队列；触发器丢失时服务启动会按活跃知识库恢复。
 
 - `Enqueue` / `EnqueueIfKnowledgeBaseActive`：后者在事务中用 Postgres `SHARE` 行锁校验 KB 仍存活、且所属租户未被软删除，防止 KB 或租户删除后仍写入新的持久化工作。
 - **已删除租户**：租户删除只做软删除，其知识库与 `task_pending_ops` 行仍在。服务启动恢复时会清理已软删除租户的待处理行；Wiki ingest / finalize 任务在调用模型前检查租户是否存活，租户已删除则丢弃该知识库的队列，不再产生模型请求。

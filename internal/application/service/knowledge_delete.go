@@ -508,6 +508,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	for _, kid := range inFlightIDs {
 		s.dequeueKnowledgeTasks(ctx, kid)
 	}
+	for _, knowledge := range knowledgeList {
+		s.scrubDocumentPendingProcess(ctx, knowledge.KnowledgeBaseID, knowledge.ID, "delete")
+	}
 
 	chunkImageInfos := plan.imageInfo
 	knowledgeToKB := make(map[string]string)
