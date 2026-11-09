@@ -478,6 +478,9 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 		return fmt.Errorf("failed to unmarshal KB clone payload: %w", err)
 	}
 	ctx = payload.Initiator.Apply(ctx)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 
 	if payload.TenantID == 0 || payload.SourceID == "" || payload.TaskID == "" {
@@ -1128,6 +1131,9 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 		return fmt.Errorf("invalid move scope: %w", asynq.SkipRetry)
 	}
 	ctx = payload.Initiator.Apply(ctx)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 	sourceKB, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.SourceKBID)
