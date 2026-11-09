@@ -120,6 +120,10 @@ type WikiPageService interface {
 	// only need the slug set (e.g. wiki ingest's "before" snapshot).
 	ListSlugsBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]string, error)
 
+	// FindTitlesOnOtherPages returns the titles of live pages other than
+	// excludeSlug that match any of the given strings, ignoring case.
+	FindTitlesOnOtherPages(ctx context.Context, kbID, excludeSlug string, titles []string) ([]string, error)
+
 	// ListBySlugs is the lazy fetcher used by the wiki ingest batch
 	// context: returns lightweight projections (no content / source_refs)
 	// for the requested slugs in a single IN query. Used in place of
@@ -306,6 +310,10 @@ type WikiPageRepository interface {
 	// projected to a single column for the wiki ingest pipeline's
 	// "before" snapshot path.
 	ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error)
+
+	// FindTitlesOnOtherPages returns the titles of live pages other than
+	// excludeSlug that match any of the given strings, ignoring case.
+	FindTitlesOnOtherPages(ctx context.Context, kbID, excludeSlug string, titles []string) ([]string, error)
 
 	// ListBySlugs returns lightweight projections (slug/title/page_type/
 	// status/aliases/out_links) for the given slugs in one IN query.
