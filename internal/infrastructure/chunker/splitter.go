@@ -65,6 +65,9 @@ type SplitterConfig struct {
 	ChunkSize    int
 	ChunkOverlap int
 	Separators   []string
+	// ChunkOverlapExplicit distinguishes a configured zero overlap from the
+	// zero value used by older callers to request the default.
+	ChunkOverlapExplicit bool
 
 	// Strategy selects an adaptive tier. Empty = legacy (backwards-compatible).
 	// See strategy.go for valid values.

@@ -185,16 +185,16 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 
 // defaultChunkSizeAndOverlap fills unset size/overlap fields.
 //
-// An empty config (both fields still at Go zero values) still receives the
-// package defaults. When ChunkSize is already set, ChunkOverlap == 0 is kept
-// as an explicit "no overlap" request — matching the wiki-only KB preset and
-// the DefaultChunkOverlap docs ("Use 0 for strictly atomic data").
+// An empty config (both fields still at Go zero values) receives the package
+// defaults unless zero overlap was explicitly configured. When ChunkSize is
+// already set, ChunkOverlap == 0 is kept as a "no overlap" request. This matches
+// the wiki-only KB preset and the DefaultChunkOverlap docs ("Use 0 for strictly atomic data").
 func defaultChunkSizeAndOverlap(cfg SplitterConfig) SplitterConfig {
 	sizeUnset := cfg.ChunkSize <= 0
 	if sizeUnset {
 		cfg.ChunkSize = DefaultChunkSize
 	}
-	if cfg.ChunkOverlap < 0 || (cfg.ChunkOverlap == 0 && sizeUnset) {
+	if cfg.ChunkOverlap < 0 || (cfg.ChunkOverlap == 0 && sizeUnset && !cfg.ChunkOverlapExplicit) {
 		cfg.ChunkOverlap = DefaultChunkOverlap
 	}
 	return cfg
@@ -227,12 +227,21 @@ func NormalizeLineEndings(text string) string {
 // and ingestion remain in lockstep as the parent-child defaults evolve.
 // Languages are copied to both levels so parent and child splitters use the same boundary rules.
 // TokenLimit is copied only to children because parents keep the configured context window.
-func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (parent, child SplitterConfig) {
+func DeriveParentChildConfigs(
+	base SplitterConfig, parentSize, childSize int, childOverlap ...*int,
+) (parent, child SplitterConfig) {
 	if parentSize <= 0 {
 		parentSize = 4096
 	}
 	if childSize <= 0 {
 		childSize = 384
+	}
+	childOverlapSize := childSize / 5
+	if len(childOverlap) > 0 && childOverlap[0] != nil {
+		childOverlapSize = *childOverlap[0]
+	}
+	if childOverlapSize < 0 {
+		childOverlapSize = 0
 	}
 	parent = SplitterConfig{
 		ChunkSize:    parentSize,
@@ -243,11 +252,14 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 	}
 	child = SplitterConfig{
 		ChunkSize:    childSize,
-		ChunkOverlap: childSize / 5,
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-		TokenLimit:   base.TokenLimit,
-		Languages:    base.Languages,
+		ChunkOverlap: childOverlapSize,
+		// The child overlap is derived or explicitly configured here, so zero
+		// is meaningful and must not be replaced by the generic default.
+		ChunkOverlapExplicit: true,
+		Separators:           base.Separators,
+		Strategy:             base.Strategy,
+		TokenLimit:           base.TokenLimit,
+		Languages:            base.Languages,
 	}
 	return
 }

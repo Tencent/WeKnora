@@ -16,6 +16,7 @@ export interface ChunkingConfigOverride {
   enable_parent_child?: boolean
   parent_chunk_size?: number
   child_chunk_size?: number
+  child_chunk_overlap?: number
   strategy?: string
   token_limit?: number
   languages?: string[]
