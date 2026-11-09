@@ -84,7 +84,9 @@ curl -X POST $BASE/api/v1/auth/login -H 'Content-Type: application/json' -d '{"e
 
 用途：查询注册模式等认证配置。免认证。Handler: `internal/handler/auth.go`
 
-响应：200 `{"success":true,"registration_mode":"self_serve|invite_register|invite_only","complex_password_enabled":false}`
+响应：200 `{"success":true,"registration_mode":"self_serve|invite_register|invite_only","first_registration_open":false,"complex_password_enabled":false}`
+
+`registration_mode` 是当前生效的运维配置值；`first_registration_open` 为 `true` 表示部署内尚无任何账号，首位用户此时可按公开注册流程自行注册（即使模式为 `invite_only` / `invite_register`，见 [全新部署例外](../03-features/01-tenant-auth.md)）。首位账号创建后该标志立即变为 `false`。前端据此决定是否显示注册页签。
 
 ```bash
 curl $BASE/api/v1/auth/config
