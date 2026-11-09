@@ -217,6 +217,7 @@ const {
   totalChunks, totalMessages,
   clearResults,
 } = useCmdkSearch({
+  enabled: () => open.value,
   lockedKbIds: () => (activeKbScope.value ? [activeKbScope.value.id] : []),
   agentsEnabled: () => deploymentCapabilities.isSupported('agents'),
 })
