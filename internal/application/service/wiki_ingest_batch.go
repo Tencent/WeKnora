@@ -2223,6 +2223,7 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		// calls.
 		sourceContextByRef := make(map[string]string)
 
+		namingOtherPages := s.aliasesNamingOtherPages(ctx, kbID, slug, additions)
 		for _, add := range additions {
 			cited := collectCitedChunkContent(add.SourceChunks, chunkContentByID)
 			// Frame the chunks with the document-level summary body so the
@@ -2258,6 +2259,9 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			docTitles = appendUnique(docTitles, add.DocTitle)
 
 			for _, alias := range add.Item.Aliases {
+				if namingOtherPages[types.NormalizeWikiAlias(alias)] {
+					continue
+				}
 				page.Aliases = appendUnique(page.Aliases, alias)
 			}
 			page.SourceRefs = appendUnique(page.SourceRefs, add.SourceRef)
