@@ -6,6 +6,7 @@ import type { TenantInfo as TenantInfoFromAPI } from '@/api/tenant'
 import i18n from '@/i18n'
 import { reloadFontFromStorage } from '@/composables/useFont'
 import { reloadThemeFromStorage } from '@/composables/useTheme'
+import { safeRemoveItem, userKey } from '@/composables/preferenceStorage'
 import { resetMigrationLatch } from '@/composables/preferenceStorage'
 import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -241,7 +242,12 @@ export const useAuthStore = defineStore('auth', () => {
   // only on an actual tenant change, so logout / init paths are not touched.
   const clearTenantScopedClientState = () => {
     try {
-      localStorage.removeItem('weknora_last_chat_model_id')
+      // The last-chat-model key is user-namespaced via preferenceStorage,
+      // but model ids are still tenant-scoped, so a tenant change voids the
+      // remembered pick. The un-namespaced legacy key is cleaned up for
+      // browsers upgraded from before user scoping.
+      safeRemoveItem(userKey('last_chat_model'))
+      safeRemoveItem('weknora_last_chat_model_id')
       localStorage.removeItem('weknora_current_kb')
       const raw = localStorage.getItem('WeKnora_settings')
       if (raw) {
