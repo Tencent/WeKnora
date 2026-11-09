@@ -541,6 +541,7 @@ curl -X DELETE $BASE/api/v1/messages/s-1/m-1 -H "Authorization: Bearer $TOKEN"
 | GET | `/api/v1/sessions/:id/messages/:message_id/artifacts` | 同上，仅本条消息文件 |
 | GET | `/api/v1/sessions/:id/messages/:message_id/artifacts/:index/download` | 200 文件流，Content-Disposition: attachment |
 | DELETE | `/api/v1/sessions/:id/messages/:message_id/artifacts/:index` | 200 `{success:true,data:{file_name,deleted}}`，删除该文件 |
+| POST | `/api/v1/sessions/:id/messages/:message_id/artifacts/:index/knowledge` | 200 `{success:true,data:{knowledge,duplicate}}`，把产物文件直接导入指定知识库（body：`knowledge_base_id`） |
 
 Artifact 字段：index、handle（可选 resource:// 引用）、file_name、file_type、file_size、source_path、mod_time、created_at。响应不返回底层对象存储 URL。下载 index 从 0 开始，必须使用对应消息列表的索引，不能拿会话汇总索引直接拼消息下载地址。非法索引返回 400，越界或文件不存在返回 404。
 

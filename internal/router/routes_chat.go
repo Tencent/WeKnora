@@ -124,6 +124,10 @@ func RegisterSessionRoutes(
 		// Deleting reclaims the stored bytes, so it is owner-only: unlike the
 		// download above it does not honour shared-agent read access.
 		sessions.DELETE("/:id/messages/:message_id/artifacts/:index", handler.DeleteMessageArtifact)
+		// Quick action: import the generated file itself into a knowledge
+		// base. Session access mirrors the download route; knowledge-base
+		// write permission is enforced inside the handler.
+		sessions.POST("/:session_id/messages/:message_id/artifacts/:index/knowledge", handler.AddMessageArtifactToKnowledge)
 	}
 
 	// Cross-session artifact library. Same guards as /sessions: the rows come
