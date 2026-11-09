@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -1020,6 +1021,22 @@ func (s *DataSourceService) applyFetchedItem(
 			})
 			return false, err
 		default:
+			var appErr *werrors.AppError
+			if errors.As(err, &appErr) && appErr.Code == werrors.ErrImportPrerequisiteMissing {
+				// A missing VLM/ASR prerequisite can never succeed on replay:
+				// the file waits for the operator to configure a model.
+				// Classify it as a permanent rejection — visible in the sync
+				// log, stream keeps going, cursor advances past it — so one
+				// image cannot abort the round and force every later sync to
+				// re-fetch the same items again (Tencent/WeKnora#4712).
+				result.Failed++
+				recordSyncError(result, types.SyncItemError{
+					Title:   item.Title,
+					Code:    "prerequisite_not_configured",
+					Message: appErr.Message,
+				})
+				return true, nil
+			}
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
