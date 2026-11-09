@@ -179,7 +179,7 @@ type CustomAgentConfig struct {
 	// Model ID to use for conversations
 	ModelID string `yaml:"model_id" json:"model_id" extensions:"x-agent"`
 	// ReRank model ID for retrieval
-	RerankModelID string `yaml:"rerank_model_id" json:"rerank_model_id"`
+	RerankModelID string `yaml:"rerank_model_id" json:"rerank_model_id" extensions:"x-agent"`
 	// Temperature for LLM (0-1)
 	Temperature float64 `yaml:"temperature" json:"temperature"`
 	// Maximum completion tokens. Quick-answer uses this for the RAG answer.
