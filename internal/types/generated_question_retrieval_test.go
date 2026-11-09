@@ -1,6 +1,9 @@
 package types
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIsGeneratedQuestionSource(t *testing.T) {
 	const chunkID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
@@ -32,6 +35,20 @@ func TestIsGeneratedQuestionSource(t *testing.T) {
 				t.Fatalf("IsGeneratedQuestionSource() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGeneratedQuestionRowPredicateParadeDBAvoidsColumnComparison(t *testing.T) {
+	sql := GeneratedQuestionRowPredicateParadeDB("")
+	if !strings.Contains(sql, "starts_with(source_id, chunk_id || '-')") {
+		t.Fatalf("predicate = %q, want starts_with prefix test", sql)
+	}
+	if strings.Contains(sql, "source_id <>") || strings.Contains(sql, "substr(") {
+		t.Fatalf("predicate still compares columns: %s", sql)
+	}
+	qualified := GeneratedQuestionRowPredicateParadeDB("embeddings")
+	if !strings.Contains(qualified, "starts_with(embeddings.source_id, embeddings.chunk_id || '-')") {
+		t.Fatalf("qualified predicate = %q", qualified)
 	}
 }
 
