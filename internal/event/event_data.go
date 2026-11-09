@@ -222,6 +222,9 @@ type AgentFinalAnswerData struct {
 	// complete. Carried on both the content event and the Done marker,
 	// because a live-streamed answer only learns of the cap at the close.
 	Truncated bool `json:"truncated,omitempty"`
+	// Usage is the provider's token usage for the turn, set on the Done marker
+	// only (*types.TokenUsage; interface avoids the event/types import cycle).
+	Usage interface{} `json:"usage,omitempty"`
 }
 
 // ContextCompactedData reports that older conversation was replaced by a
