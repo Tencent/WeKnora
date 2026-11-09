@@ -37,7 +37,7 @@ var (
 type MinerUReader struct {
 	endpoint string
 	timeout  time.Duration
-	apiKey   string // V1 only: the server's --api-key
+	apiKey   string // server --api-key (V1), or the gateway key when a legacy endpoint sits behind auth
 	tier     string // V1 only: flash, basic, standard, advanced; "" = server default
 	// Legacy (<= 3.x) only; MinerU 4.0 dropped these request parameters.
 	backend       string // "pipeline", "vlm-*", "hybrid-*"
@@ -325,6 +325,13 @@ func (c *MinerUReader) callFileParse(
 		return "", nil, nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	// Legacy MinerU servers (<= 3.x) do not require an API key themselves, but
+	// deployments commonly sit behind an authenticating gateway (NewAPI/OneAPI
+	// etc.). When a key is configured, attach it so the request survives the
+	// gateway, matching the V1 path's behaviour.
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 		Timeout:      c.timeout,
@@ -470,7 +477,7 @@ func PingMinerU(endpoint, apiKey string) (bool, string) {
 		return pingMinerUV1Auth(ctx, client, endpoint, apiKey)
 	}
 
-	resp, err := client.Get(endpoint + "/docs")
+	resp, err := pingMinerULegacy(ctx, client, endpoint, apiKey)
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
 	}
@@ -479,6 +486,20 @@ func PingMinerU(endpoint, apiKey string) (bool, string) {
 		return false, fmt.Sprintf("MinerU 服务返回状态 %d", resp.StatusCode)
 	}
 	return true, ""
+}
+
+// pingMinerULegacy probes a legacy MinerU server's /docs endpoint. Like the
+// V1 probe, it attaches the configured API key so a server sitting behind an
+// authenticating gateway is still reachable.
+func pingMinerULegacy(ctx context.Context, client *http.Client, endpoint, apiKey string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/docs", nil)
+	if err != nil {
+		return nil, fmt.Errorf("构建请求失败: %v", err)
+	}
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	return client.Do(req)
 }
 
 // pingMinerUV1Auth hits an authenticated V1 endpoint: a server started with
