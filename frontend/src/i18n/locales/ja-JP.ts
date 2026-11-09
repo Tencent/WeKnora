@@ -3730,6 +3730,10 @@ export default {
         targetChange: '変更内容'
       },
       systemActor: 'システム',
+      actorMCPEndpoint: 'MCP エンドポイント · {name}',
+      actorDeletedMCPEndpoint: '削除済みの MCP エンドポイント',
+      actorEmbedChannel: '埋め込みチャネル · {name}',
+      actorDeletedEmbedChannel: '削除済みの埋め込みチャネル',
       actorWithAPIKey: '{actor} · API Key · {name}',
       actorAPIKey: 'API Key · {name}',
       viaAssistant: 'WeKnora アシスタント経由',

@@ -273,7 +273,11 @@ import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
 import { auditActionLabel } from '@/i18n/auditActionLabel'
-import { listKnowledgeBaseActivity, type KnowledgeBaseActivity } from '@/api/knowledge-base'
+import {
+  listKnowledgeBaseActivity,
+  type KnowledgeBaseActivity,
+  type KnowledgeBaseActivityActor,
+} from '@/api/knowledge-base'
 import type { AuditOutcome } from '@/api/tenant/audit-log'
 import { useAuthStore } from '@/stores/auth'
 
@@ -292,6 +296,7 @@ const { t, te, tm, locale } = useI18n()
 const authStore = useAuthStore()
 
 const entries = ref<KnowledgeBaseActivity[]>([])
+const actors = ref<Record<string, KnowledgeBaseActivityActor>>({})
 const cursor = ref(0)
 const hasMore = ref(true)
 const loading = ref(false)
@@ -525,12 +530,17 @@ function targetDiff(entry: KnowledgeBaseActivity): string {
 }
 
 function actorPersonLabel(entry: KnowledgeBaseActivity): string {
-  if (!entry.actor_user_id) return t('knowledgeEditor.activity.systemActor')
+  const id = entry.actor_user_id
+  if (!id) return t('knowledgeEditor.activity.systemActor')
+  const actor = actors.value[id]
+  if (actor?.name) return actor.name
+  if (actor?.kind === 'mcp_endpoint') return t('knowledgeEditor.activity.actorDeletedMCPEndpoint')
+  if (actor?.kind === 'embed_channel') return t('knowledgeEditor.activity.actorDeletedEmbedChannel')
   const me = authStore.user
-  if (me?.id === entry.actor_user_id) {
-    return me.username?.trim() || me.email?.trim() || entry.actor_user_id.slice(0, 8)
+  if (me?.id === id) {
+    return me.username?.trim() || me.email?.trim() || id.slice(0, 8)
   }
-  return entry.actor_user_id.slice(0, 8)
+  return id.slice(0, 8)
 }
 
 function actorAPIKeyLabel(entry: KnowledgeBaseActivity): string {
@@ -538,8 +548,19 @@ function actorAPIKeyLabel(entry: KnowledgeBaseActivity): string {
   return name ? t('knowledgeEditor.activity.actorAPIKey', { name }) : ''
 }
 
-function actorLabel(entry: KnowledgeBaseActivity): string {
+// The table column shows only the bare name to fit; the tooltip and detail
+// drawer use this longer form, which names the endpoint or channel kind.
+function actorKindLabel(entry: KnowledgeBaseActivity): string {
   const person = actorPersonLabel(entry)
+  const actor = entry.actor_user_id ? actors.value[entry.actor_user_id] : undefined
+  if (!actor?.name) return person
+  if (actor.kind === 'mcp_endpoint') return t('knowledgeEditor.activity.actorMCPEndpoint', { name: person })
+  if (actor.kind === 'embed_channel') return t('knowledgeEditor.activity.actorEmbedChannel', { name: person })
+  return person
+}
+
+function actorLabel(entry: KnowledgeBaseActivity): string {
+  const person = actorKindLabel(entry)
   const keyName = activityAPIKeyName(entry)
   const label = keyName
     ? t('knowledgeEditor.activity.actorWithAPIKey', { actor: person, name: keyName })
@@ -728,6 +749,7 @@ async function fetchPage(reset = false) {
     })
     const page = response.data || []
     entries.value = reset ? page : [...entries.value, ...page]
+    actors.value = reset ? response.actors || {} : { ...actors.value, ...response.actors }
     cursor.value = response.next_cursor || 0
     hasMore.value = !!response.next_cursor && page.length > 0
     loadedOnce.value = true
