@@ -150,13 +150,11 @@ func (q *qdrantRepository) scalarQuantizationParams() *qdrant.ScalarQuantization
 		return nil
 	}
 	quantile := float32(0.99)
-	alwaysRAM := true
 	pinnedMemory := qdrant.Memory_Pinned
 	return &qdrant.ScalarQuantization{
-		Type:      qdrant.QuantizationType_Int8,
-		Quantile:  &quantile,
-		AlwaysRam: &alwaysRAM,
-		Memory:    &pinnedMemory,
+		Type:     qdrant.QuantizationType_Int8,
+		Quantile: &quantile,
+		Memory:   &pinnedMemory,
 	}
 }
 
@@ -174,9 +172,7 @@ func (q *qdrantRepository) vectorParams(dimension int) *qdrant.VectorParams {
 		Distance: qdrant.Distance_Cosine,
 	}
 	if q.vectorsOnDisk {
-		onDisk := true
 		coldMemory := qdrant.Memory_Cold
-		params.OnDisk = &onDisk
 		params.Memory = &coldMemory
 	}
 	return params
@@ -196,10 +192,8 @@ func (q *qdrantRepository) updateCollectionConfig(ctx context.Context, collectio
 		request.QuantizationConfig = qdrant.NewQuantizationDiffScalar(params)
 	}
 	if q.vectorsOnDisk {
-		onDisk := true
 		coldMemory := qdrant.Memory_Cold
 		request.VectorsConfig = qdrant.NewVectorsConfigDiff(&qdrant.VectorParamsDiff{
-			OnDisk: &onDisk,
 			Memory: &coldMemory,
 		})
 	}
