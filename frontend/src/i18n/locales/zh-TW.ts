@@ -1596,6 +1596,11 @@ export default {
     }
   },
   agentEditor: {
+    feishuReplyTitle: {
+      label: '飛書 / Lark 回覆卡片標題',
+      desc: '最多 100 字。清空後跟隨智慧體名稱，既有智慧體維持 WeKnora。',
+      placeholder: '使用智慧體名稱',
+    },
     builtinHint: '這是內建智慧代理，名稱和描述不可修改，但可以調整設定參數',
     fileTypes: {
       label: '支持的檔案類型',

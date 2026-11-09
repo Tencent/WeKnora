@@ -80,6 +80,8 @@ type IncomingMessage struct {
 	// Quote is the quoted/replied message, if any.
 	// Populated by adapters on platforms that support quote-reply.
 	Quote *QuotedMessage
+	// ReplyCardTitle is resolved by the service, never taken from the incoming event.
+	ReplyCardTitle string
 	// Extra holds platform-specific fields (e.g., WeCom stream ID).
 	Extra map[string]string
 }

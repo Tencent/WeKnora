@@ -32,6 +32,7 @@ export interface QuestionSuggestionConfig {
 }
 
 export interface CustomAgentConfig {
+  feishu_reply_title?: string | null;
   // ===== 基础设置 =====
   agent_mode?: 'quick-answer' | 'smart-reasoning';  // 运行模式：quick-answer=RAG模式, smart-reasoning=ReAct Agent模式
   // 智能推理模式下的类型预设，用于一键应用"系统提示词 + 工具 + KB 兼容性"组合

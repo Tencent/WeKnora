@@ -1596,6 +1596,11 @@ export default {
     }
   },
   agentEditor: {
+    feishuReplyTitle: {
+      label: '飞书 / Lark 回复卡片标题',
+      desc: '最多 100 字。清空后跟随智能体名称，已有智能体保持 WeKnora。',
+      placeholder: '使用智能体名称',
+    },
     builtinHint: '这是内置智能体，名称和描述不可修改，但可以调整配置参数',
     fileTypes: {
       label: '支持的文件类型',

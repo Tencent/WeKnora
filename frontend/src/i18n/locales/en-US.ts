@@ -7946,6 +7946,11 @@ export default {
     }
   },
   agentEditor: {
+    feishuReplyTitle: {
+      label: 'Feishu / Lark reply card title',
+      desc: 'Up to 100 characters. Clear to follow the agent name. Existing agents keep WeKnora.',
+      placeholder: 'Use the agent name',
+    },
     builtinHint: 'This is a built-in agent. Name and description cannot be modified, but configuration parameters can be adjusted.',
     navGroups: {
       basic: 'Basics',
