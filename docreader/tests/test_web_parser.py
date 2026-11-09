@@ -10,6 +10,7 @@ from docreader.parser.web_parser import (
     build_visible_text_fallback,
     extract_markdown_from_html,
     install_ssrf_route_guard,
+    normalize_wechat_article_html,
 )
 from docreader.utils.ssrf import is_ssrf_safe_url, reset_ssrf_whitelist_cache_for_test
 
@@ -41,6 +42,60 @@ class TestWebParserHelpers(unittest.TestCase):
         md = extract_markdown_from_html(html)
         self.assertIsNotNone(md)
         self.assertIn("Hello", md)
+
+    def test_extract_markdown_wechat_section_paragraphs(self):
+        # WeChat's editor emits <section><span leaf> blocks instead of <p>.
+        # Without normalization trafilatura finds no paragraphs inside
+        # #js_content and returns the popup/dialog text instead (#4513).
+        sections = "".join(
+            f'<section style="margin: 0px 8px;"><span leaf="">{line}</span></section>'
+            for line in (
+                "英文：Generic Object Oriented Substation Event。",
+                "中文：面向通用对象的变电站事件，属于 IEC61850 标准里的实时报文。",
+                "读音：英文单词 goose。",
+                (
+                    "它是IEC61850中的一种快速报文传输机制，用于传输变电站内IED之间重要的实时性信号。"
+                    "GOOSE采用网络信号代替了常规变电站装置之间硬接线的通信方式，大大简化了变电站二次电缆接线。"
+                ),
+                "过程层控制通道，传输开关位置、保护跳闸、联锁告警，负责设备分合闸与故障隔离。",
+                "≤4ms，满足继电保护的速断性要求。",
+                "ST采集断路器、隔刀、SF6告警、主变瓦斯、BMS热失控干接点，转换成GOOSE上传间隔层IED。",
+                "保护故障动作下发GOOSE至ST，驱动断路器跳闸隔离故障；后台遥控分合闸指令下发ST执行。",
+            )
+        )
+        html = f"""
+        <html><head><title>GOOSE 是什么</title></head><body id="activity-detail">
+        <div id="js_article" class="rich_media"><div class="rich_media_inner">
+        <div id="page-content" class="rich_media_area_primary">
+        <div class="rich_media_area_primary_inner"><div id="img-content" class="rich_media_wrp">
+        <h1 class="rich_media_title">GOOSE 是什么</h1>
+        <div class="rich_media_content js_underline_content" id="js_content" style="">
+        <section><h1><span leaf="">一、定义</span></h1></section>{sections}
+        </div></div></div></div></div></div>
+        <div class="weui-dialog"><div class="weui-dialog__bd">
+        <p>微信扫一扫 关注该公众号</p>
+        <p>当前内容可能存在未经审核的第三方商业营销信息，请确认是否继续访问。</p>
+        <p>你可以补充投诉原因</p></div></div>
+        </body></html>
+        """
+        md = extract_markdown_from_html(html)
+        self.assertIsNotNone(md)
+        self.assertIn("读音：英文单词 goose。", md)
+        self.assertIn("≤4ms", md)
+        self.assertNotIn("微信扫一扫", md)
+
+    def test_normalize_wechat_html_leaves_other_pages_untouched(self):
+        html = "<html><body><section><span>hello</span></section></body></html>"
+        self.assertEqual(normalize_wechat_article_html(html), html)
+
+    def test_normalize_wechat_html_keeps_container_sections(self):
+        html = (
+            '<html><body><div id="js_content">'
+            "<section><section><span>a</span></section><p>b</p></section>"
+            "</div></body></html>"
+        )
+        out = normalize_wechat_article_html(html)
+        self.assertIn("<section><p><span>a</span></p><p>b</p></section>", out)
 
     def test_build_fallback_too_short(self):
         self.assertIsNone(build_visible_text_fallback("short"))
