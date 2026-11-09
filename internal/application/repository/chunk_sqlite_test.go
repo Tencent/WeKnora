@@ -625,3 +625,21 @@ func TestCreateChunks_PreservesExplicitEnabledState(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateChunksPreservesExplicitFlags(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	chunks := []*types.Chunk{
+		makeChunk("kb", "knowledge", types.ChunkTypeFAQ),
+		makeChunk("kb", "knowledge", types.ChunkTypeFAQ),
+		makeChunk("kb", "knowledge", types.ChunkTypeText),
+	}
+	chunks[1].Flags = types.ChunkFlagRecommended
+	require.NoError(t, repo.CreateChunks(context.Background(), chunks))
+	for i, want := range []types.ChunkFlags{0, types.ChunkFlagRecommended, 0} {
+		var stored types.Chunk
+		require.NoError(t, db.First(&stored, "id = ?", chunks[i].ID).Error)
+		assert.Equal(t, want, stored.Flags)
+		assert.Equal(t, want, chunks[i].Flags)
+	}
+}
