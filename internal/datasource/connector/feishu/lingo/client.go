@@ -140,7 +140,7 @@ func (a *httpAPI) get(ctx context.Context, path string, query url.Values, out in
 			continue
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, lingoMaxResponseBytes+1))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read lingo response: %w", readErr)
 			continue
