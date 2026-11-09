@@ -37,6 +37,15 @@ except ValueError:
     logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
     WEKNORA_CHAT_TIMEOUT = 300
 
+# Timeout in seconds for the non-chat API requests (CRUD, search, uploads).
+# Without it requests waits forever, so a hung backend blocks the calling
+# tool indefinitely. Default 300s, matching the chat read timeout.
+try:
+    WEKNORA_API_TIMEOUT = int(os.getenv("WEKNORA_API_TIMEOUT", "300"))
+except ValueError:
+    logger.warning("WEKNORA_API_TIMEOUT is not a valid integer; falling back to 300s.")
+    WEKNORA_API_TIMEOUT = 300
+
 # Bound the data accumulated while waiting for an SSE event's blank line.
 MAX_SSE_EVENT_BYTES = 8 * 1024 * 1024
 
@@ -198,6 +207,9 @@ class WeKnoraClient:
             JSON response as dictionary
         """
         url = f"{self.base_url}{endpoint}"
+        # Bound the wait like the chat SSE path does; an explicit timeout
+        # passed by the caller still wins.
+        kwargs.setdefault("timeout", WEKNORA_API_TIMEOUT)
         try:
             # Execute HTTP request with the specified method
             response = self.session.request(method, url, **kwargs)
@@ -357,6 +369,7 @@ class WeKnoraClient:
                 files=files,
                 data=data,
                 verify=self.verify_ssl,
+                timeout=WEKNORA_API_TIMEOUT,
             )
             response.raise_for_status()
             return response.json()
