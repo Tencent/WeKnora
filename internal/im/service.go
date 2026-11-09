@@ -2317,7 +2317,7 @@ func imInitialSessionTitle(msg *IncomingMessage, identityTitle func(*IncomingMes
 }
 
 // resolveUserSession finds or creates a ChannelSession keyed by (platform, user_id, chat_id, tenant_id, agent_id).
-// This is the original session resolution strategy.
+// Only mappings with an empty thread_id belong to user mode.
 //
 // Invariant: a cache miss creates a brand-new session — we never attach a second
 // mapping to an existing session. The session-list source filter (repository
@@ -2325,7 +2325,9 @@ func imInitialSessionTitle(msg *IncomingMessage, identityTitle func(*IncomingMes
 // re-maps an existing session, that JOIN needs a one-row-per-session guard.
 func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, tenantID uint64, agentID string, imChannelID string) (*ChannelSession, error) {
 	var cs ChannelSession
-	result := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
+	result := s.db.Where(
+		"platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? "+
+			"AND agent_id = ? AND thread_id = '' AND deleted_at IS NULL",
 		string(msg.Platform), msg.UserID, msg.ChatID, tenantID, agentID).
 		First(&cs)
 
@@ -2369,7 +2371,9 @@ func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, 
 			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: %v", createdSession.ID, delErr)
 		}
 		var existing ChannelSession
-		if findErr := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
+		if findErr := s.db.Where(
+			"platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? "+
+				"AND agent_id = ? AND thread_id = '' AND deleted_at IS NULL",
 			string(msg.Platform), msg.UserID, msg.ChatID, tenantID, agentID).
 			First(&existing).Error; findErr != nil {
 			return nil, fmt.Errorf("create channel session: %w (lookup fallback: %v)", err, findErr)
