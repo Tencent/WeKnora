@@ -23,7 +23,9 @@ import (
 )
 
 // MinerU 4.0 replaced the synchronous /file_parse endpoint with the V1 API:
-// upload → parse job → poll → download artifacts. See
+// upload → parse job → poll → download artifacts. MinerU >= 4.1 replaced the
+// presigned upload session and parse-job endpoints with inline task uploads;
+// the client speaks both and falls back on 404. See
 // https://opendatalab.github.io/MinerU/usage/http_api/.
 
 const (
@@ -149,6 +151,33 @@ func minerUV1JobTerminal(status string) bool {
 	return false
 }
 
+type minerUV1TaskFile struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	Status   string `json:"status"`
+	Error    *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// minerUV1Task is a task-mode session (MinerU >= 4.1). The upload file id
+// doubles as the artifact id: once the task completes, GET
+// /v1/files/{file_id}/content serves the zip bundle.
+type minerUV1Task struct {
+	TaskID string             `json:"task_id"`
+	Status string             `json:"status"`
+	Files  []minerUV1TaskFile `json:"files"`
+}
+
+func minerUV1TaskTerminal(status string) bool {
+	switch status {
+	case "completed", "partial", "failed", "canceled":
+		return true
+	}
+	return false
+}
+
 // --- protocol detection ---
 
 // detectMinerUProtocol probes GET /v1/health. MinerU 4.0 answers 200 (or 503
@@ -264,6 +293,12 @@ func (c *minerUV1Client) ParseWithLayout(
 
 	fileID, err := c.upload(ctx, content, fileName)
 	if err != nil {
+		var apiErr *minerUV1APIError
+		if errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound {
+			// MinerU >= 4.1 dropped the presigned upload session in favor of
+			// inline task uploads; retry the whole parse in task mode.
+			return c.parseTaskWithLayout(ctx, content, fileName, opts)
+		}
 		return "", nil, nil, fmt.Errorf("upload: %w", err)
 	}
 
@@ -467,6 +502,169 @@ func minerUV1ZipOutput(job *minerUV1Job) (minerUV1FileRef, error) {
 		return minerUV1FileRef{}, fmt.Errorf("parse job %s completed without zip output", job.JobID)
 	}
 	return ref, nil
+}
+
+// parseTaskWithLayout runs the whole parse in task mode (MinerU >= 4.1).
+func (c *minerUV1Client) parseTaskWithLayout(
+	ctx context.Context,
+	content []byte,
+	fileName string,
+	opts minerUV1ParseOptions,
+) (string, []types.ImageRef, []byte, error) {
+	task, err := c.createTask(ctx, content, fileName, opts)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("create parse task: %w", err)
+	}
+	logger.Infof(ctx, "[%s] parse task created: task_id=%s file_id=%s tier=%q ocr_mode=%s",
+		c.logLabel, task.TaskID, task.Files[0].FileID, opts.Tier, opts.OCRMode)
+
+	final, err := c.waitTask(ctx, task.TaskID)
+	if err != nil {
+		c.cancelTask(task.TaskID)
+		return "", nil, nil, err
+	}
+
+	artifactID, err := minerUV1TaskArtifact(final)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	zipData, err := c.downloadFile(ctx, artifactID)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("download zip artifact: %w", err)
+	}
+
+	md, imageRefs, err := extractMarkdownZip(zipData, c.logLabel)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("extract zip artifact: %w", err)
+	}
+	return md, imageRefs, minerUContentListFromZip(zipData), nil
+}
+
+// createTask opens a task-mode session (MinerU >= 4.1): one POST creates the
+// task with inline file metadata, then the bytes go up on the task's own
+// upload slot.
+func (c *minerUV1Client) createTask(ctx context.Context, content []byte, fileName string, opts minerUV1ParseOptions) (*minerUV1Task, error) {
+	payload := map[string]interface{}{
+		"files": []map[string]interface{}{
+			{"file_name": fileName, "bytes": len(content)},
+		},
+		"output_formats": []string{"default"},
+	}
+	if opts.Tier != "" {
+		payload["tier"] = opts.Tier
+	}
+	if opts.OCRMode != "" {
+		payload["ocr_mode"] = opts.OCRMode
+	}
+
+	var task minerUV1Task
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/tasks", payload, &task); err != nil {
+		return nil, err
+	}
+	if task.TaskID == "" {
+		return nil, fmt.Errorf("response has no task_id")
+	}
+	if len(task.Files) == 0 || task.Files[0].FileID == "" {
+		return nil, fmt.Errorf("task %s created without an upload slot", task.TaskID)
+	}
+
+	if err := c.putTaskFile(ctx, task.TaskID, task.Files[0].FileID, content); err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// putTaskFile uploads the document bytes to the task's inline upload slot.
+// The URL is derived from the configured endpoint rather than taken from a
+// server response, so a compromised server cannot redirect the upload
+// elsewhere.
+func (c *minerUV1Client) putTaskFile(ctx context.Context, taskID, fileID string, content []byte) error {
+	path := "/v1/tasks/" + url.PathEscape(taskID) + "/uploads/" + url.PathEscape(fileID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+path, bytes.NewReader(content))
+	if err != nil {
+		return fmt.Errorf("create upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	c.setAuth(req)
+
+	resp, err := c.bulkClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload bytes: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("upload bytes status %d: %s", resp.StatusCode, truncateForLog(string(body), 300))
+	}
+	return nil
+}
+
+func (c *minerUV1Client) waitTask(ctx context.Context, taskID string) (*minerUV1Task, error) {
+	interval := c.pollInitial
+	for poll := 1; ; poll++ {
+		var task minerUV1Task
+		err := c.doJSON(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID), nil, &task)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, fmt.Errorf("parse task %s: %w", taskID, ctxErr)
+			}
+			var apiErr *minerUV1APIError
+			if errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound {
+				// Task state lives in process memory; a restarted server forgets it.
+				return nil, fmt.Errorf("parse task %s no longer exists (MinerU restarted?): %w", taskID, err)
+			}
+			logger.Warnf(ctx, "[%s] poll #%d for task %s failed: %v", c.logLabel, poll, taskID, err)
+		} else {
+			if poll == 1 || poll%10 == 0 || minerUV1TaskTerminal(task.Status) {
+				logger.Infof(ctx, "[%s] poll #%d: task=%s status=%s", c.logLabel, poll, taskID, task.Status)
+			}
+			if minerUV1TaskTerminal(task.Status) {
+				return &task, nil
+			}
+		}
+
+		sleepCtx(ctx, interval)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("parse task %s: %w", taskID, ctxErr)
+		}
+		interval *= 2
+		if interval > c.pollMax {
+			interval = c.pollMax
+		}
+	}
+}
+
+// cancelTask best-effort cancels a task we stopped waiting for so the server
+// does not keep burning GPU time on it. It runs on a fresh context because
+// the caller's context is usually already done.
+func (c *minerUV1Client) cancelTask(taskID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.cancelBudget)
+	defer cancel()
+	if err := c.doJSON(ctx, http.MethodDelete, "/v1/tasks/"+url.PathEscape(taskID), nil, nil); err != nil {
+		logger.Warnf(ctx, "[%s] cancel task %s: %v", c.logLabel, taskID, err)
+	}
+}
+
+// minerUV1TaskArtifact validates the terminal task and returns the file id
+// whose /v1/files/{id}/content download serves the zip artifact. Task mode
+// reuses the upload file id as the artifact id.
+func minerUV1TaskArtifact(task *minerUV1Task) (string, error) {
+	if len(task.Files) == 0 {
+		return "", fmt.Errorf("parse task %s ended %s without file results", task.TaskID, task.Status)
+	}
+	f := task.Files[0]
+	if f.Status != "completed" {
+		reason := task.Status
+		if f.Error != nil {
+			reason = firstNonEmpty(strings.TrimSpace(f.Error.Code+": "+f.Error.Message), task.Status)
+		}
+		return "", fmt.Errorf("parse task %s %s: %s", task.TaskID, task.Status, reason)
+	}
+	if f.FileID == "" {
+		return "", fmt.Errorf("parse task %s completed without artifact file id", task.TaskID)
+	}
+	return f.FileID, nil
 }
 
 func (c *minerUV1Client) downloadFile(ctx context.Context, fileID string) ([]byte, error) {

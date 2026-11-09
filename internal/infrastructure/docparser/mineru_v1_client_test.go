@@ -513,3 +513,171 @@ func TestMinerUV1MimeTypeXlsx(t *testing.T) {
 		}
 	}
 }
+
+// fakeMinerUV1413 is a minimal in-memory MinerU 4.1.3 task-mode api-server.
+type fakeMinerUV1413 struct {
+	t          *testing.T
+	apiKey     string
+	authHealth bool
+
+	mu             sync.Mutex
+	taskPayload    map[string]any
+	uploaded       []byte
+	putAuth        string
+	putContentType string
+	pollStatuses   []string // statuses returned by successive GET task calls
+	polls          int
+	deleteCalls    int
+	fileError      *struct{ Code, Message string }
+	zipData        []byte
+}
+
+func (f *fakeMinerUV1413) handler() http.Handler {
+	mux := http.NewServeMux()
+	writeJSON := func(w http.ResponseWriter, status int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(v)
+	}
+	authed := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if f.apiKey != "" && r.Header.Get("Authorization") != "Bearer "+f.apiKey {
+				writeJSON(w, http.StatusUnauthorized, map[string]any{
+					"error": map[string]string{"message": "bad key", "type": "auth_error", "code": "invalid_api_key"},
+				})
+				return
+			}
+			next(w, r)
+		}
+	}
+
+	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
+		if f.authHealth && f.apiKey != "" && r.Header.Get("Authorization") != "Bearer "+f.apiKey {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"error": map[string]string{"message": "bad key", "type": "auth_error", "code": "invalid_api_key"},
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": "4.1.3"})
+	})
+	mux.HandleFunc("GET /v1/tasks", authed(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"tasks": []any{}})
+	}))
+	mux.HandleFunc("POST /v1/tasks", authed(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(f.t, json.NewDecoder(r.Body).Decode(&body))
+		f.mu.Lock()
+		f.taskPayload = body
+		f.mu.Unlock()
+		fileName := ""
+		if files, ok := body["files"].([]any); ok && len(files) > 0 {
+			if m, ok := files[0].(map[string]any); ok {
+				fileName, _ = m["file_name"].(string)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"task_id": "task_1", "status": "waiting",
+			"files": []any{map[string]any{
+				"file_id": "file-1", "file_name": fileName, "status": "waiting",
+			}},
+		})
+	}))
+	mux.HandleFunc("PUT /v1/tasks/task_1/uploads/file-1", authed(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(f.t, err)
+		f.mu.Lock()
+		f.uploaded = body
+		f.putAuth = r.Header.Get("Authorization")
+		f.putContentType = r.Header.Get("Content-Type")
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"task_id": "task_1", "file_id": "file-1", "status": "pending",
+		})
+	}))
+	mux.HandleFunc("GET /v1/tasks/task_1", authed(func(w http.ResponseWriter, _ *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		status := "completed"
+		if len(f.pollStatuses) > 0 {
+			idx := f.polls
+			if idx >= len(f.pollStatuses) {
+				idx = len(f.pollStatuses) - 1
+			}
+			status = f.pollStatuses[idx]
+		}
+		f.polls++
+		file := map[string]any{"file_id": "file-1", "file_name": "report.pdf", "status": status}
+		switch status {
+		case "failed":
+			if f.fileError != nil {
+				file["error"] = map[string]any{"code": f.fileError.Code, "message": f.fileError.Message}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"task_id": "task_1", "status": status, "files": []any{file}})
+	}))
+	mux.HandleFunc("DELETE /v1/tasks/task_1", authed(func(w http.ResponseWriter, _ *http.Request) {
+		f.mu.Lock()
+		f.deleteCalls++
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	mux.HandleFunc("GET /v1/files/file-1/content", authed(func(w http.ResponseWriter, _ *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(f.zipData)
+	}))
+	return mux
+}
+
+func TestMinerUV1ClientFallsBackToTaskAPIOn404(t *testing.T) {
+	allowLoopbackSSRF(t)
+	fake := &fakeMinerUV1413{
+		t:            t,
+		apiKey:       "server-key",
+		pollStatuses: []string{"running", "completed"},
+		zipData:      v1TestZip(t),
+	}
+	legacyGone := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail": "Not Found"}`))
+	})
+	mux := fake.handler().(*http.ServeMux)
+	mux.Handle("POST /v1/uploads", legacyGone)    // 4.0 upload session absent
+	mux.Handle("POST /v1/parse/jobs", legacyGone) // 4.0 job creation absent
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := fastV1Client(server.URL, "server-key")
+	md, refs, err := client.Parse(context.Background(), []byte("%PDF-1.7 body"), "report.pdf",
+		minerUV1ParseOptions{Tier: "advanced"})
+	require.NoError(t, err)
+
+	assert.Equal(t, v1TestMarkdown, md)
+	require.Len(t, refs, 2)
+	assert.Equal(t, []byte("%PDF-1.7 body"), fake.uploaded)
+	assert.Equal(t, "advanced", fake.taskPayload["tier"])
+	assert.Zero(t, fake.deleteCalls)
+}
+
+func TestMinerUV1ClientTaskFailedReportsFileError(t *testing.T) {
+	allowLoopbackSSRF(t)
+	fake := &fakeMinerUV1413{
+		t:            t,
+		apiKey:       "k",
+		pollStatuses: []string{"failed"},
+		fileError:    &struct{ Code, Message string }{"unsupported_type", "office files need tier>=standard"},
+	}
+	mux := fake.handler().(*http.ServeMux)
+	mux.Handle("POST /v1/uploads", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	_, _, err := fastV1Client(server.URL, "k").Parse(context.Background(), []byte("x"), "a.docx",
+		minerUV1ParseOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported_type: office files need tier>=standard")
+}
