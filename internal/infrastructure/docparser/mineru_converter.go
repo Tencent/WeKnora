@@ -509,23 +509,34 @@ func pingMinerULegacy(ctx context.Context, client *http.Client, endpoint, apiKey
 // pingMinerUV1Auth hits an authenticated V1 endpoint: a server started with
 // --api-key answers 401 when the key is missing or wrong.
 func pingMinerUV1Auth(ctx context.Context, client *http.Client, endpoint, apiKey string) (bool, string) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/v1/parse/jobs?limit=1", nil)
-	if err != nil {
-		return false, fmt.Sprintf("构建请求失败: %v", err)
-	}
-	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized {
-		if apiKey == "" {
-			return false, "MinerU 服务已启用鉴权，请配置 API Key"
+	probe := func(path string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+path, nil)
+		if err != nil {
+			return nil, err
 		}
-		return false, "MinerU API Key 无效"
+		if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+		return client.Do(req)
+	}
+	// MinerU >= 4.1 only has the tasks endpoint; 4.0 only has parse jobs, so
+	// one probe falls through to the other on 404.
+	for _, path := range []string{"/v1/tasks?limit=1", "/v1/parse/jobs?limit=1"} {
+		resp, err := probe(path)
+		if err != nil {
+			return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
+		}
+		status := resp.StatusCode
+		_ = resp.Body.Close()
+		if status == http.StatusUnauthorized {
+			if apiKey == "" {
+				return false, "MinerU 服务已启用鉴权，请配置 API Key"
+			}
+			return false, "MinerU API Key 无效"
+		}
+		if status != http.StatusNotFound {
+			return true, ""
+		}
 	}
 	return true, ""
 }
