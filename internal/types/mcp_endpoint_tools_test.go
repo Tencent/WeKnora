@@ -28,6 +28,9 @@ func TestDefaultMCPEndpointToolsExcludesDestructive(t *testing.T) {
 	if _, ok := LookupMCPEndpointTool(MCPEndpointToolDeleteDocument); !ok {
 		t.Fatal("delete_document must be in the catalog")
 	}
+	if def, ok := LookupMCPEndpointTool(MCPEndpointToolUpdateKnowledgeBase); !ok || !def.Destructive {
+		t.Fatal("update_knowledge_base must be an opt-in write tool")
+	}
 }
 
 func TestMCPEndpointCapabilitiesForTools(t *testing.T) {
@@ -40,6 +43,7 @@ func TestMCPEndpointCapabilitiesForTools(t *testing.T) {
 		{"wiki only", []string{MCPEndpointToolWikiIndex}, []string{"retrieve"}},
 		{"ask", []string{MCPEndpointToolAsk}, []string{"retrieve", "chat", "read_agents"}},
 		{"ingest", []string{MCPEndpointToolAddDocument}, []string{"ingest"}},
+		{"manage KB", []string{MCPEndpointToolUpdateKnowledgeBase}, []string{"manage_kbs"}},
 		{"none", nil, []string{}},
 	}
 	for _, tc := range cases {
