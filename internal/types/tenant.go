@@ -42,6 +42,10 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: DorisRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: DorisRetrieverEngineType},
 	},
+	"oracle": {
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: OracleRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: OracleRetrieverEngineType},
+	},
 	"sqlite": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: SQLiteRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: SQLiteRetrieverEngineType},

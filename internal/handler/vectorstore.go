@@ -40,6 +40,9 @@ type CreateStoreRequest struct {
 // Only name is mutable — engine_type, connection_config, index_config are immutable.
 type UpdateStoreRequest struct {
 	Name string `json:"name" binding:"required"`
+	// Wallet replaces an Oracle store's wallet (base64 of Wallet_*.zip or
+	// cwallet.sso). Omit or leave empty to keep the current wallet.
+	Wallet string `json:"wallet,omitempty"`
 }
 
 // TestStoreRequest defines the body for testing raw credentials
@@ -224,7 +227,9 @@ func (h *VectorStoreHandler) GetStore(c *gin.Context) {
 
 // UpdateStore godoc
 // @Summary      Update vector store
-// @Description  Update a vector store (name only). Engine type, connection config, and index config are immutable. Env stores cannot be modified.
+// @Description  Update a vector store's name, and optionally replace an Oracle store's wallet
+// @Description  (omit wallet to keep the current one). Engine type, other connection settings,
+// @Description  and index config are immutable. Env stores cannot be modified.
 // @Tags         VectorStore
 // @Accept       json
 // @Produce      json
@@ -267,9 +272,10 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 	}
 
 	updated := &types.VectorStore{
-		ID:       id,
-		TenantID: tenantID,
-		Name:     req.Name,
+		ID:               id,
+		TenantID:         tenantID,
+		Name:             req.Name,
+		ConnectionConfig: types.ConnectionConfig{Wallet: req.Wallet},
 	}
 
 	if err := h.service.UpdateStore(ctx, updated); err != nil {

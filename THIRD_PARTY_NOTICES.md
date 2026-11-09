@@ -60,6 +60,14 @@ Windows installers place them next to the installed executable.
 - Copyright: 2019 Yusuke Inuzuka. Modifications by WeKnora: none.
 - Source: [upstream repository](https://github.com/yuin/goldmark/tree/v1.8.2).
 
+## go-ora
+
+- Component: `github.com/sijms/go-ora/v2`, version `v2.9.0`.
+- Pure-Go Oracle Database driver used by the Oracle AI Database vector store engine.
+- License: MIT, reproduced in [`licenses/go-ora-MIT.txt`](licenses/go-ora-MIT.txt).
+- Copyright: 2020 Samy Sultan. Modifications by WeKnora: none.
+- Source: [upstream repository](https://github.com/sijms/go-ora/tree/v2.9.0).
+
 ## Build-only component
 
 The Windows installer template in `cmd/desktop/build/windows/installer/project.nsi`

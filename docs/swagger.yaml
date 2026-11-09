@@ -2705,13 +2705,16 @@ definitions:
       database:
         description: |-
           Database name used by engines that support database-level namespaces
-          (currently Milvus, Tencent VectorDB, and Doris).
+          (currently Milvus, Tencent VectorDB, and Doris). Oracle stores its
+          service name (e.g. FREEPDB1) here.
         type: string
       grpc_address:
         description: Weaviate
         type: string
       host:
-        description: Qdrant
+        description: |-
+          Qdrant (Host/Port/UseTLS). UseTLS is also read by Oracle, where it
+          switches the connection to TCPS.
         type: string
       http_port:
         description: |-
@@ -2749,6 +2752,12 @@ definitions:
         description: |-
           Version is the detected server version (e.g., "7.10.1", "16.2", "1.12.6").
           Auto-populated by TestConnection on successful connectivity check.
+        type: string
+      wallet:
+        description: |-
+          Oracle (optional): uploaded auto-login wallet, stored as base64 of
+          cwallet.sso (AES-GCM encrypted at rest, masked in responses). Setting it
+          enables mTLS; UseTLS alone enables one-way TLS (TCPS).
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ContextCompressionStrategy:
@@ -7612,6 +7621,7 @@ definitions:
     - milvus
     - weaviate
     - doris
+    - oracle
     - sqlite
     - tencent_vectordb
     - opensearch
@@ -7625,6 +7635,7 @@ definitions:
     - MilvusRetrieverEngineType
     - WeaviateRetrieverEngineType
     - DorisRetrieverEngineType
+    - OracleRetrieverEngineType
     - SQLiteRetrieverEngineType
     - TencentVectorDBRetrieverEngineType
     - OpenSearchRetrieverEngineType
@@ -13679,6 +13690,11 @@ definitions:
   internal_handler.UpdateStoreRequest:
     properties:
       name:
+        type: string
+      wallet:
+        description: |-
+          Wallet replaces an Oracle store's wallet (base64 of Wallet_*.zip or
+          cwallet.sso). Omit or leave empty to keep the current wallet.
         type: string
     required:
     - name
@@ -30161,7 +30177,9 @@ paths:
     put:
       consumes:
       - application/json
-      description: Update a vector store (name only). Engine type, connection config,
+      description: |-
+        Update a vector store's name, and optionally replace an Oracle store's wallet
+        (omit wallet to keep the current one). Engine type, other connection settings,
         and index config are immutable. Env stores cannot be modified.
       parameters:
       - description: Vector store ID

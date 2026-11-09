@@ -169,7 +169,8 @@
       <t-form ref="formRef" :data="form" :rules="formRules" label-align="top" class="store-form">
         <!--
           Edit 模式特殊提示：engine_type / connection_config / index_config
-          创建后不可改，仅 name 可编辑。用 inline-alert 而不是大块 banner，
+          创建后不可改，仅 name 与文件字段（如 Oracle 钱包）可编辑，
+          有文件字段时提示文案相应切换。用 inline-alert 而不是大块 banner，
           视觉与其他抽屉的提示一致。
         -->
         <section v-if="editingStore" class="setting-drawer__section">
@@ -177,7 +178,9 @@
 
           <div class="inline-alert inline-alert--info">
             <t-icon name="info-circle-filled" class="inline-alert__icon" />
-            <span class="inline-alert__text">{{ t('vectorStoreSettings.immutableNotice') }}</span>
+            <span class="inline-alert__text">{{
+              t(fileFields.length ? 'vectorStoreSettings.immutableNoticeExceptFile' : 'vectorStoreSettings.immutableNotice')
+            }}</span>
           </div>
 
           <div class="form-item">
@@ -196,7 +199,10 @@
                 <div v-if="field.sensitive || form.connection_config[field.name]" class="readonly-row">
                   <span class="readonly-label">{{ fieldLabel(field.name) }}</span>
                   <span class="readonly-value">
-                    {{ field.sensitive ? '********' : form.connection_config[field.name] }}
+                    <template v-if="field.type === 'file'">
+                      {{ form.connection_config[field.name] ? t('vectorStoreSettings.fileUploaded') : t('vectorStoreSettings.fileNone') }}
+                    </template>
+                    <template v-else>{{ field.sensitive ? '********' : form.connection_config[field.name] }}</template>
                   </span>
                 </div>
               </template>
@@ -209,6 +215,25 @@
                 </div>
               </template>
             </template>
+          </div>
+
+          <!-- 文件字段（如 Oracle 钱包）创建后仍可替换；不选择新文件则继续使用当前文件 -->
+          <div v-for="field in fileFields" :key="'replace-' + field.name" class="form-item">
+            <label class="form-label">{{ fieldLabel(field.name) }}</label>
+            <div class="file-field">
+              <t-button variant="outline" size="small" @click="pickFile(field.name)">
+                {{ t('vectorStoreSettings.fileReplace') }}
+              </t-button>
+              <span class="file-field__name">{{ fileNames[field.name] || '' }}</span>
+              <input
+                :ref="(el) => setFileInput(field.name, el)"
+                type="file"
+                accept=".zip,.sso"
+                class="file-field__input"
+                @change="onFileSelected(field.name, $event)"
+              />
+            </div>
+            <p class="form-desc">{{ t('vectorStoreSettings.fileKeepCurrent') }}</p>
           </div>
         </section>
 
@@ -261,6 +286,24 @@
                 >
                   {{ t('vectorStoreSettings.insecureSkipVerifyWarning') }}
                 </p>
+              </template>
+
+              <!-- 文件字段（如 Oracle 钱包）：以 base64 随表单提交；选择一次即可用于测试连接与保存 -->
+              <template v-else-if="field.type === 'file'">
+                <div class="file-field">
+                  <t-button variant="outline" size="small" @click="pickFile(field.name)">
+                    {{ fileNames[field.name] ? t('vectorStoreSettings.fileReselect') : t('vectorStoreSettings.fileSelect') }}
+                  </t-button>
+                  <span class="file-field__name">{{ fileNames[field.name] || t('vectorStoreSettings.fileNone') }}</span>
+                  <input
+                    :ref="(el) => setFileInput(field.name, el)"
+                    type="file"
+                    accept=".zip,.sso"
+                    class="file-field__input"
+                    @change="onFileSelected(field.name, $event)"
+                  />
+                </div>
+                <p class="form-desc">{{ t('vectorStoreSettings.fileHint') }}</p>
               </template>
 
               <!-- 敏感字段（password / api key 等）：lock prefix + password -->
@@ -382,6 +425,52 @@ const saving = ref(false)
 const showAdvanced = ref(false)
 const formRef = ref<any>()
 
+// ---- File fields (e.g. Oracle wallet), sent as base64 ----
+// Create mode: the chosen file lives in form.connection_config and is reused by
+// "test connection" and "save" until another file is chosen.
+// Edit mode: only a newly chosen file is sent (replacedFiles); otherwise the
+// stored file keeps being used.
+const MAX_UPLOAD_BYTES = 1024 * 1024 // mirrors the backend limit
+const fileNames = ref<Record<string, string>>({})
+const replacedFiles = ref<Record<string, string>>({})
+const fileInputs: Record<string, HTMLInputElement | null> = {}
+
+const setFileInput = (name: string, el: unknown) => {
+  fileInputs[name] = el as HTMLInputElement | null
+}
+const pickFile = (name: string) => fileInputs[name]?.click()
+
+const readFileAsBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+
+const onFileSelected = async (name: string, event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // allow choosing the same file again
+  if (!file) return
+  if (file.size > MAX_UPLOAD_BYTES) {
+    MessagePlugin.warning(t('vectorStoreSettings.fileTooLarge'))
+    return
+  }
+  const base64 = await readFileAsBase64(file)
+  fileNames.value[name] = file.name
+  if (editingStore.value) {
+    replacedFiles.value[name] = base64
+  } else {
+    form.value.connection_config[name] = base64
+  }
+}
+
+const resetFileState = () => {
+  fileNames.value = {}
+  replacedFiles.value = {}
+}
+
 const form = ref<{
   name: string
   engine_type: string
@@ -410,6 +499,7 @@ watch(
 const envStores = computed(() => stores.value.filter(s => s.source === 'env'))
 const userStores = computed(() => stores.value.filter(s => s.source === 'user'))
 const selectedType = computed(() => storeTypes.value.find(st => st.type === form.value.engine_type))
+const fileFields = computed(() => selectedType.value?.connection_fields.filter((f) => f.type === 'file') || [])
 
 // Drawer header logo — 与列表 .store-card__badge 同源（providerLogo()），让
 // 列表卡 → 抽屉 hand-off 视觉连贯。
@@ -532,6 +622,7 @@ const badgeStyle = (engineType: string): Record<string, string> => {
 }
 
 const onEngineTypeChange = () => {
+  resetFileState()
   form.value.connection_config = {}
   form.value.index_config = {}
   showAdvanced.value = false
@@ -603,6 +694,7 @@ const loadStoreTypes = async () => {
 }
 
 const openAddDialog = () => {
+  resetFileState()
   editingStore.value = null
   showAdvanced.value = false
   form.value = {
@@ -635,6 +727,7 @@ const editStore = (store: VectorStoreEntity) => {
   if (store.source === 'env') {
     return
   }
+  resetFileState()
   editingStore.value = store
   showAdvanced.value = false
   form.value = {
@@ -664,7 +757,7 @@ const onDrawerConfirm = async () => {
   saving.value = true
   try {
     if (editingStore.value) {
-      await updateVectorStore(editingStore.value.id!, { name: form.value.name.trim() })
+      await updateVectorStore(editingStore.value.id!, { name: form.value.name.trim(), ...replacedFiles.value })
       MessagePlugin.success(t('vectorStoreSettings.toasts.storeUpdated'))
     } else {
       const data: Partial<VectorStoreEntity> = {
@@ -900,6 +993,9 @@ onMounted(async () => {
 .store-card--doris .store-card__badge {
   .provider-card-badge-color(#e55a00);
 }
+.store-card--oracle .store-card__badge {
+  .provider-card-badge-color(#c74634);
+}
 .store-card--sqlite .store-card__badge {
   .provider-card-badge-color(#464646);
 }
@@ -991,6 +1087,23 @@ onMounted(async () => {
     font-weight: 500;
     line-height: 1;
   }
+}
+
+.file-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  &__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-sm);
+  }
+
+  &__input { display: none; }
 }
 
 .form-desc {
@@ -1211,6 +1324,10 @@ onMounted(async () => {
 .vectorstore-drawer--doris .setting-drawer__header-icon {
   background: rgba(255, 90, 0, 0.12);
   color: #E55A00;
+}
+.vectorstore-drawer--oracle .setting-drawer__header-icon {
+  background: rgba(199, 70, 52, 0.12);
+  color: #C74634;
 }
 .vectorstore-drawer--sqlite .setting-drawer__header-icon {
   background: rgba(70, 70, 70, 0.1);
