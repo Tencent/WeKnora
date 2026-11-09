@@ -8,6 +8,7 @@ import logging
 import os
 import posixpath
 import tempfile
+from xml.etree import ElementTree
 from urllib.parse import unquote, urlsplit
 import uuid
 from typing import Dict
@@ -90,6 +91,7 @@ class EPUBParser(BaseParser):
                 return int(match.group(1)) if match else 999999
 
             html_files.sort(key=chapter_num)
+            html_files = self._fallback_reading_order(epub_zip, html_files)
 
             if self.extract_images:
                 img_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")
@@ -132,6 +134,46 @@ class EPUBParser(BaseParser):
         return Document(
             content="\n\n".join(markdown_parts), images=images, metadata=metadata
         )
+
+    @staticmethod
+    def _fallback_reading_order(archive, html_files: list[str]) -> list[str]:
+        """Use a recoverable package spine even when navigation is broken."""
+        try:
+            container = ElementTree.fromstring(archive.read("META-INF/container.xml"))
+            rootfile = container.find(".//{*}rootfile")
+            if rootfile is None:
+                return html_files
+            package_path = rootfile.get("full-path", "")
+            package = ElementTree.fromstring(archive.read(package_path))
+            manifest = package.find("{*}manifest")
+            spine = package.find("{*}spine")
+            if manifest is None or spine is None:
+                return html_files
+        except (KeyError, ElementTree.ParseError):
+            return html_files
+
+        available = set(html_files)
+        by_id = {}
+        for item in manifest.findall("{*}item"):
+            try:
+                href = urlsplit(item.get("href", ""))
+            except ValueError:
+                continue
+            if href.scheme or href.netloc:
+                continue
+            path = posixpath.normpath(posixpath.join(
+                posixpath.dirname(package_path), unquote(href.path)
+            ))
+            if path in available:
+                by_id[item.get("id")] = path
+        ordered = []
+        seen = set()
+        for itemref in spine.findall("{*}itemref"):
+            path = by_id.get(itemref.get("idref"))
+            if path is not None and path not in seen:
+                ordered.append(path)
+                seen.add(path)
+        return ordered + [path for path in html_files if path not in seen]
 
     def _extract_metadata(self, book) -> Dict[str, str]:
         metadata: Dict[str, str] = {}
