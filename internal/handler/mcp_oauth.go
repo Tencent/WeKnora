@@ -4,10 +4,12 @@ import (
 	"context"
 	stderrors "errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -30,6 +32,8 @@ type MCPOAuthHandler struct {
 	mcpManager *mcp.MCPManager
 	svc        interfaces.MCPServiceService
 	gate       *approval.Gate
+	// cfg supplies the SPA origin for subpath-aware redirect defaults.
+	cfg *config.Config
 }
 
 // NewMCPOAuthHandler constructs the handler.
@@ -38,8 +42,31 @@ func NewMCPOAuthHandler(
 	mcpManager *mcp.MCPManager,
 	svc interfaces.MCPServiceService,
 	gate *approval.Gate,
+	cfg *config.Config,
 ) *MCPOAuthHandler {
-	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate}
+	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate, cfg: cfg}
+}
+
+// mcpFrontendRedirectDefault derives the default post-authorization popup
+// target from the SPA base: "/<subpath>/" under subpath deployments, "/"
+// otherwise. Kept application-relative so it passes validateFrontendRedirect
+// without APP_EXTERNAL_URL.
+func mcpFrontendRedirectDefault(cfg *config.Config) string {
+	base := frontendBaseURLFor(cfg)
+	if base == "" {
+		return "/"
+	}
+	if u, err := url.Parse(base); err == nil && u.Host != "" {
+		if p := u.EscapedPath(); p != "" && p != "/" {
+			return strings.TrimRight(p, "/") + "/"
+		}
+		return "/"
+	}
+	// Path-only value (no scheme/host) normalizes to "/<subpath>/".
+	if strings.HasPrefix(base, "/") {
+		return strings.TrimRight(base, "/") + "/"
+	}
+	return "/"
 }
 
 func mcpOAuthPrincipalsFromContext(ctx *gin.Context) (tokenPrincipal types.Principal, gateUserID string) {
@@ -57,7 +84,8 @@ type mcpOAuthAuthorizeRequest struct {
 	// authorization server (e.g. https://host/api/v1/mcp-services/oauth/callback).
 	RedirectURI string `json:"redirect_uri"`
 	// FrontendRedirect is where the callback bounces the browser when done
-	// (e.g. the MCP settings page). Optional; defaults to "/".
+	// (e.g. the MCP settings page). Optional; defaults to the SPA base
+	// ("/" without a subpath).
 	FrontendRedirect string `json:"frontend_redirect"`
 }
 
@@ -96,7 +124,7 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		return
 	}
 	if req.FrontendRedirect == "" {
-		req.FrontendRedirect = "/"
+		req.FrontendRedirect = mcpFrontendRedirectDefault(h.cfg)
 	}
 
 	service, err := h.svc.GetMCPServiceByID(ctx, tenantID, serviceID)
@@ -247,7 +275,7 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 	code := strings.TrimSpace(c.Query("code"))
 	providerErr := strings.TrimSpace(c.Query("error"))
 
-	const fallbackRedirect = "/"
+	fallbackRedirect := mcpFrontendRedirectDefault(h.cfg)
 
 	if providerErr != "" {
 		c.Redirect(http.StatusFound, fallbackRedirect+"#mcp_oauth_error="+urlQueryEscape(providerErr))
