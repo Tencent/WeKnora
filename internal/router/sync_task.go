@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -24,6 +27,7 @@ import (
 type SyncTaskExecutor struct {
 	mu       sync.RWMutex
 	handlers map[string]func(context.Context, *asynq.Task) error
+	slots    map[string]chan struct{}
 	// onFinalFailure mirrors the asynq dead-letter callback: it runs once a
 	// task exhausts its retries, so a document whose task gave up is marked
 	// failed instead of spinning until the housekeeping sweep.
@@ -33,6 +37,7 @@ type SyncTaskExecutor struct {
 func NewSyncTaskExecutor() *SyncTaskExecutor {
 	return &SyncTaskExecutor{
 		handlers: make(map[string]func(context.Context, *asynq.Task) error),
+		slots:    make(map[string]chan struct{}),
 	}
 }
 
@@ -41,6 +46,15 @@ func (e *SyncTaskExecutor) RegisterHandler(pattern string, handler func(context.
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.handlers[pattern] = handler
+	// Separate classes prevent parent tasks waiting on their own children.
+	class := syncTaskClass(pattern)
+	if e.slots[class] == nil {
+		n := 2
+		if v, err := strconv.Atoi(os.Getenv("WEKNORA_LITE_TASK_CONCURRENCY")); err == nil && v > 0 {
+			n = v
+		}
+		e.slots[class] = make(chan struct{}, n)
+	}
 }
 
 // SetFinalFailureHook installs the callback run after a task's last failed
@@ -139,6 +153,7 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	e.mu.RLock()
 	handler, ok := e.handlers[task.Type()]
 	onFinalFailure := e.onFinalFailure
+	slots := e.slots[syncTaskClass(task.Type())]
 	e.mu.RUnlock()
 
 	if !ok {
@@ -159,6 +174,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		if options.delay > 0 {
 			time.Sleep(options.delay)
 		}
+
+		// Queue before starting the attempt deadline, not inside the provider gate.
+		slots <- struct{}{}
+		defer func() { <-slots }()
 
 		// Tag as a background worker execution so the per-model concurrency
 		// governor throttles Lite-mode ingestion/enrichment LLM calls, mirroring
@@ -267,4 +286,23 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeWikiFinalize, params.WikiIngest.Handle)
 	params.Executor.RegisterHandler(types.TypeMemoryExtract, params.MemoryService.Handle)
 	logger.Infof(context.Background(), "[SyncTask] All task handlers registered (Lite mode, no Redis)")
+}
+
+func syncTaskClass(taskType string) string {
+	switch taskType {
+	case types.TypeDocumentProcess, types.TypeManualProcess:
+		return "core"
+	case types.TypeKnowledgePostProcess:
+		return "postprocess"
+	case types.TypeSummaryGeneration:
+		return "summary"
+	case types.TypeQuestionGeneration:
+		return "question"
+	case types.TypeImageMultimodal:
+		return "image"
+	}
+	if strings.HasPrefix(taskType, "wiki:") {
+		return "wiki"
+	}
+	return taskType
 }
