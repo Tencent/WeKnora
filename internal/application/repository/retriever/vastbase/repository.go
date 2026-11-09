@@ -310,10 +310,10 @@ func (r *vastbaseRepository) batchInsertOnConflict(ctx context.Context, rows []*
 				sb.WriteString(", ")
 			}
 			base := i * 10
-			sb.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&sb,
 				"(CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
 				base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10,
-			))
+			)
 			vars = append(vars,
 				row.SourceID, row.SourceType, row.ChunkID, row.KnowledgeID,
 				row.KnowledgeBaseID, row.TagID, row.Content, row.Dimension,
