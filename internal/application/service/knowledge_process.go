@@ -401,6 +401,30 @@ type supersededChunkPurger interface {
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
+// releaseReplacedKnowledgeContent frees what the previous attempt of this
+// document left behind: its extracted images and the storage it accounted for.
+// The chunks, index rows and graph data are already replaced by processChunks,
+// right before it writes the new ones.
+//
+// It runs only when the document still accounts for previous content
+// (StorageSize > 0) and only once its replacement has been parsed, so a reparse
+// whose parse fails leaves the previous content in place instead of emptying the
+// document (#5002).
+func (s *knowledgeService) releaseReplacedKnowledgeContent(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	attempt int,
+) {
+	if attempt <= 0 || knowledge.StorageSize <= 0 {
+		return
+	}
+	if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
+		// Not fatal: the new content can still be written, and a leftover row
+		// is preferable to dropping the attempt.
+		logger.Warnf(ctx, "Failed to release the previous attempt's resources for %s: %v", knowledge.ID, err)
+	}
+}
+
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
@@ -3026,16 +3050,11 @@ func (s *knowledgeService) reparseKnowledge(
 			return nil, werrors.NewBadRequestError("无法获取手工知识内容")
 		}
 		manualContent = meta.Content
-	} else {
-		// Cleanup synchronously; manual knowledge is cleaned up by its worker.
-		logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-		if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"knowledge_id": knowledgeID,
-			})
-			return nil, err
-		}
 	}
+
+	// Nothing is deleted here. The previous content stays searchable until this
+	// document's own processing task has parsed its replacement, which is where
+	// the old chunks, index rows, images and graph data are released (#5002).
 
 	// Everything that can reject the reparse has run. From here on the
 	// previous run is superseded, so stop it before announcing the new one.
@@ -4116,6 +4135,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			EnableQuestionGeneration: payload.EnableQuestionGeneration,
 			QuestionCount:            payload.QuestionCount,
 		}
+		s.releaseReplacedKnowledgeContent(ctx, knowledge, payload.Attempt)
 		return s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts)
 	} else {
 		// File import
@@ -4346,6 +4366,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		time.Since(chunkStarted), knowledge.ID, len(convertResult.MarkdownContent), len(chunks))
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
+	s.releaseReplacedKnowledgeContent(ctx, knowledge, payload.Attempt)
 	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 }
 

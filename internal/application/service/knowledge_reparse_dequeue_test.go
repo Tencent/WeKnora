@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -22,15 +21,6 @@ type reparseScrubPendingRepo struct {
 func (r *reparseScrubPendingRepo) DeleteByDedupKey(_ context.Context, _, _, _, dedupKey, op string) error {
 	*r.events = append(*r.events, "scrub:"+op+":"+dedupKey)
 	return nil
-}
-
-type failingCleanupChunkRepo struct {
-	replaceFileChunks
-	err error
-}
-
-func (r failingCleanupChunkRepo) DeleteChunksByKnowledgeID(context.Context, uint64, string) error {
-	return r.err
 }
 
 // newReparseHarness reuses the replace-file harness (single-row repo, event
@@ -66,13 +56,6 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 			},
 			overrides: &types.KnowledgeProcessOverrides{},
 			wantErr:   "VLM",
-		},
-		{
-			name: "resource cleanup fails",
-			setup: func(h *replaceFileHarness) {
-				h.svc.chunkRepo = failingCleanupChunkRepo{err: errors.New("database unavailable")}
-			},
-			wantErr: "database unavailable",
 		},
 	}
 	for _, test := range tests {
