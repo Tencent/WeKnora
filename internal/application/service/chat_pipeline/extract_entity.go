@@ -444,7 +444,7 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 	// A stray null/string among valid objects must not discard the valid
 	// ones; only an array with no object at all is an error.
 	if len(itemsList) == 0 && skipped > 0 {
-		return nil, fmt.Errorf("each item in the sequence must be a mapping.")
+		return nil, fmt.Errorf("each item in the sequence must be a mapping")
 	}
 	if skipped > 0 {
 		logger.Warnf(ctx, "graph extraction: skipped %d non-object item(s), kept %d", skipped, len(itemsList))

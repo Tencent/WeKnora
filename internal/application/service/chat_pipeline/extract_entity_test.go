@@ -404,7 +404,8 @@ func TestFormater_ParseGraph_NonObjectItems(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if len(got.Node) != tc.wantNodes || len(got.Relation) != tc.wantRels {
-				t.Fatalf("got %d nodes %d relations, want %d/%d", len(got.Node), len(got.Relation), tc.wantNodes, tc.wantRels)
+				t.Fatalf("got %d nodes %d relations, want %d/%d",
+					len(got.Node), len(got.Relation), tc.wantNodes, tc.wantRels)
 			}
 		})
 	}
