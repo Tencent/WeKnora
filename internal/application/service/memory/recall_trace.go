@@ -243,6 +243,7 @@ func (s *Service) selectRecallWithTrace(
 
 	_, lexSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "memory.recall.lexical",
+		Type: langfuse.ObsTypeRetriever,
 		Input: map[string]interface{}{
 			"query":      langfuse.TruncateRunes(query, recallQueryPreviewRunes),
 			"candidates": len(candidates),
@@ -256,6 +257,7 @@ func (s *Service) selectRecallWithTrace(
 
 	vecCtx, vecSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "memory.recall.vector",
+		Type: langfuse.ObsTypeRetriever,
 		Input: map[string]interface{}{
 			"query":      langfuse.TruncateRunes(query, recallQueryPreviewRunes),
 			"candidates": len(candidates),

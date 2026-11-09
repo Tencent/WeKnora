@@ -411,6 +411,7 @@ func (e *AgentEngine) Execute(
 	}
 	spanCtx, agentSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "agent.execute",
+		Type: langfuse.ObsTypeAgent,
 		Input: map[string]interface{}{
 			"query":        truncateRunes(query, langfuseQueryPreview),
 			"query_len":    len(query),
@@ -796,7 +797,9 @@ loop:
 			tools = e.buildToolsForLLM()
 		}
 
-		// Each iteration runs inside an "agent.round.<N>" Langfuse span.
+		// Each iteration runs inside an "agent.round" Langfuse span; the round
+		// number is carried in the span input/metadata instead of the name so
+		// dashboards and evaluators can group every round under one operation.
 		// We execute the body in a closure so `defer span.Finish()` fires at
 		// every exit path (break/continue/next) without having to sprinkle
 		// manual finish calls throughout the many branches below.
@@ -870,9 +873,10 @@ func (e *AgentEngine) runReActIteration(
 
 	// Open the round-level Langfuse span. Any chat/tool calls made inside
 	// this iteration will attach under it via ctx, giving the UI a clean
-	// trace → agent.execute → agent.round.N → (chat + tools) structure.
+	// trace → agent.execute → agent.round → (chat + tools) structure.
 	ctx, roundSpan := langfuse.GetManager().StartSpan(parentCtx, langfuse.SpanOptions{
-		Name: fmt.Sprintf("agent.round.%d", round),
+		Name: "agent.round",
+		Type: langfuse.ObsTypeChain,
 		Input: map[string]interface{}{
 			"round":          round,
 			"message_count":  len(*messagesPtr),

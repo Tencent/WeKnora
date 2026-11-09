@@ -119,6 +119,7 @@ func (s *Service) enabledScope(ctx context.Context) (interfaces.MemoryScope, *ty
 func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRecall {
 	recallCtx, recallSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "memory.recall",
+		Type: langfuse.ObsTypeRetriever,
 		Input: map[string]interface{}{
 			"query": langfuse.TruncateRunes(query, recallQueryPreviewRunes),
 		},
@@ -1005,6 +1006,7 @@ const retrievalBackgroundRuneBudget = 240
 func (s *Service) RetrievalContextFor(ctx context.Context) interfaces.RetrievalContext {
 	condCtx, condSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "memory.retrieval_context",
+		Type: langfuse.ObsTypeRetriever,
 	})
 	scope, cfg, ok := s.enabledScope(condCtx)
 	if !ok || !cfg.RetrievalConditioningEnabled() {

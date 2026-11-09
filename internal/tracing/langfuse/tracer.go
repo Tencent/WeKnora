@@ -73,6 +73,9 @@ type GenerationOptions struct {
 	Input           interface{}
 	Metadata        map[string]interface{}
 	ModelParameters map[string]interface{}
+	// Type optionally selects a more specific Langfuse observation type
+	// (ObsTypeEmbedding / ObsTypeEvaluator). Empty means "generation".
+	Type string
 }
 
 // SpanOptions configures a new SPAN observation.
@@ -80,6 +83,10 @@ type SpanOptions struct {
 	Name     string
 	Input    interface{}
 	Metadata map[string]interface{}
+	// Type optionally selects a more specific Langfuse observation type
+	// (ObsTypeAgent / ObsTypeTool / ObsTypeChain / ObsTypeRetriever /
+	// ObsTypeEvaluator). Empty means "span".
+	Type string
 }
 
 // StartTrace opens a root span. When ctx carries a remote SpanContext (from a
@@ -116,14 +123,33 @@ func (m *Manager) StartTrace(ctx context.Context, opts TraceOptions) (context.Co
 	if rel != "" {
 		attrs = append(attrs, attribute.String(attrRelease, rel))
 	}
+	// Langfuse v4 no longer stores input/output on the trace record: the trace
+	// table derives them from the root observation. Write the same payload to
+	// both keys so v4 (observation) and v3/LiteFuse (trace) stay populated.
 	attrs = append(attrs, jsonAttr(attrTraceInput, opts.Input))
+	attrs = append(attrs, jsonAttr(attrObsInput, opts.Input))
 	attrs = append(attrs, jsonAttr(attrTraceMetadata, opts.Metadata))
+	attrs = append(attrs, jsonAttr(attrObsMetadata, opts.Metadata))
 	if len(opts.Tags) > 0 {
 		attrs = append(attrs, jsonAttr(attrTraceTags, opts.Tags))
 	}
 	ctx, span := m.tracer.Start(ctx, name, trace.WithTimestamp(time.Now()), trace.WithAttributes(attrs...))
 	t := &Trace{ID: span.SpanContext().TraceID().String(), span: span, manager: m, metadata: opts.Metadata}
 	return withTrace(ctx, t), t
+}
+
+// SetInput records the user-facing request on the root observation. The Gin
+// middleware starts the trace before the request body is decoded, so chat
+// handlers call this once the user query is known. Both the v4 observation key
+// and the deprecated trace key are written. Safe on a nil/disabled trace.
+func (t *Trace) SetInput(input interface{}) {
+	if t == nil || t.manager == nil || !t.manager.Enabled() || t.span == nil || input == nil {
+		return
+	}
+	t.span.SetAttributes(
+		jsonAttr(attrObsInput, input),
+		jsonAttr(attrTraceInput, input),
+	)
 }
 
 // Finish updates the trace with its final output and merges any finish-time
@@ -135,9 +161,15 @@ func (t *Trace) Finish(output interface{}, metadata map[string]interface{}) {
 	if t == nil || t.manager == nil || !t.manager.Enabled() || t.span == nil {
 		return
 	}
-	attrs := []attribute.KeyValue{jsonAttr(attrTraceOutput, output)}
+	attrs := []attribute.KeyValue{
+		jsonAttr(attrTraceOutput, output),
+		jsonAttr(attrObsOutput, output),
+	}
 	if merged := mergeMetadata(t.metadata, metadata); merged != nil {
-		attrs = append(attrs, jsonAttr(attrTraceMetadata, merged))
+		attrs = append(attrs,
+			jsonAttr(attrTraceMetadata, merged),
+			jsonAttr(attrObsMetadata, merged),
+		)
 	}
 	t.span.SetAttributes(attrs...)
 	t.span.End()
@@ -227,7 +259,7 @@ func (m *Manager) startSpan(ctx context.Context, opts SpanOptions, createTrace b
 		ctx, autoTrace = m.StartTrace(ctx, TraceOptions{Name: opts.Name})
 	}
 	attrs := []attribute.KeyValue{
-		attribute.String(attrObsType, obsTypeSpan),
+		attribute.String(attrObsType, spanObsType(opts.Type)),
 		jsonAttr(attrObsInput, opts.Input),
 		jsonAttr(attrObsMetadata, opts.Metadata),
 	}
@@ -283,7 +315,7 @@ func (m *Manager) StartGeneration(ctx context.Context, opts GenerationOptions) (
 		ctx, autoTrace = m.StartTrace(ctx, TraceOptions{Name: opts.Name})
 	}
 	attrs := []attribute.KeyValue{
-		attribute.String(attrObsType, obsTypeGeneration),
+		attribute.String(attrObsType, generationObsType(opts.Type)),
 		attribute.String(attrObsModel, opts.Model),
 		jsonAttr(attrObsInput, opts.Input),
 		jsonAttr(attrObsMetadata, opts.Metadata),
