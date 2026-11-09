@@ -645,7 +645,10 @@ func TestFindOperationsExplainsWithheldMatches(t *testing.T) {
 
 	readOnly := find(operations.Access{Level: types.AssistantAccessReadOnly}, "knowledge.delete")
 	require.Len(t, readOnly.Unavailable, 1)
-	assert.Contains(t, readOnly.Unavailable[0].Reason, "assistant settings")
+	assert.Contains(t, readOnly.Unavailable[0].Reason, "selector below the chat input")
+	assert.NotContains(t, readOnly.Unavailable[0].Reason, "assistant settings")
+	assert.Contains(t, approvalPolicy(types.AssistantAccessReadOnly), "selector below the chat input")
+	assert.NotContains(t, approvalPolicy(types.AssistantAccessReadOnly), "assistant settings")
 
 	contributor := find(operations.Access{Role: types.TenantRoleContributor, EnforceRole: true}, "knowledge.delete")
 	require.Len(t, contributor.Operations, 1)
