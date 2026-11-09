@@ -355,6 +355,16 @@ func (r *knowledgeRepository) RenameKnowledgeFolderPath(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+	if token, ok := types.DocumentGenerationFromContext(ctx, knowledge.TenantID, knowledge.ID); ok {
+		updated, err := (&taskPendingOpsRepository{db: r.db}).SaveDocumentGeneration(ctx, token, knowledge)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return types.ErrDocumentGenerationSuperseded
+		}
+		return nil
+	}
 	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
 	omit := omitFieldsOnUpdate
 	// Legacy/unit-test schemas created before custom_metadata should continue
@@ -598,6 +608,9 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	column string,
 	value interface{},
 ) error {
+	if _, _, ok := types.DocumentGenerationOwnerFromContext(ctx, id); ok {
+		return r.UpdateKnowledgeColumns(ctx, id, map[string]interface{}{column: value})
+	}
 	if column == "error_message" {
 		switch v := value.(type) {
 		case string:
@@ -629,6 +642,16 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 		case []byte:
 			values["error_message"] = common.CleanInvalidUTF8(string(v))
 		}
+	}
+	if tenantID, token, ok := types.DocumentGenerationOwnerFromContext(ctx, id); ok {
+		updated, err := (&taskPendingOpsRepository{db: r.db}).UpdateDocumentGeneration(ctx, tenantID, id, token, values)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return types.ErrDocumentGenerationSuperseded
+		}
+		return nil
 	}
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }

@@ -705,21 +705,12 @@ func (h *HousekeepingService) filterOutQueued(
 	for _, k := range candidates {
 		ids = append(ids, k.ID)
 	}
-	var durableIDs []string
-	if err := h.db.WithContext(ctx).
-		Model(&types.TaskPendingOp{}).
-		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
-			wikiTaskType, wikiTaskScope, WikiOpIngest, ids).
-		Distinct("dedup_key").
-		Pluck("dedup_key", &durableIDs).Error; err != nil {
+	durable, wikiDurable, err := h.durableQueuedKnowledge(ctx, ids)
+	if err != nil {
 		logger.Warnf(ctx,
 			"[Housekeeping] durable queue probe failed: %v (deferring %d candidate(s))",
 			err, len(candidates))
 		return candidates[:0], len(candidates), nil
-	}
-	durable := make(map[string]struct{}, len(durableIDs))
-	for _, id := range durableIDs {
-		durable[id] = struct{}{}
 	}
 
 	// One shared queue scan answers every candidate. Under a large backlog
@@ -739,7 +730,9 @@ func (h *HousekeepingService) filterOutQueued(
 	for _, k := range candidates {
 		if _, ok := durable[k.ID]; ok {
 			skipped++
-			wikiHeld = append(wikiHeld, k)
+			if _, wiki := wikiDurable[k.ID]; wiki {
+				wikiHeld = append(wikiHeld, k)
+			}
 			continue
 		}
 		if _, ok := queued[k.ID]; ok {
@@ -761,13 +754,8 @@ func (h *HousekeepingService) QueuedWork(ctx context.Context, ids []string) (map
 	if len(ids) == 0 {
 		return out, nil
 	}
-	var durableIDs []string
-	if err := h.db.WithContext(ctx).
-		Model(&types.TaskPendingOp{}).
-		Where("task_type = ? AND scope = ? AND op = ? AND dedup_key IN ?",
-			wikiTaskType, wikiTaskScope, WikiOpIngest, ids).
-		Distinct("dedup_key").
-		Pluck("dedup_key", &durableIDs).Error; err != nil {
+	durable, _, err := h.durableQueuedKnowledge(ctx, ids)
+	if err != nil {
 		return nil, fmt.Errorf("durable queue probe: %w", err)
 	}
 	queued, err := h.queuedSnapshot(ctx)
@@ -777,10 +765,39 @@ func (h *HousekeepingService) QueuedWork(ctx context.Context, ids []string) (map
 	for _, id := range ids {
 		_, out[id] = queued[id]
 	}
-	for _, id := range durableIDs {
+	for id := range durable {
 		out[id] = true
 	}
 	return out, nil
+}
+
+// durableQueuedKnowledge keeps document admission and Wiki work visible to
+// orphan detection. Only Wiki-backed rows should re-arm Wiki-specific triggers.
+func (h *HousekeepingService) durableQueuedKnowledge(
+	ctx context.Context, ids []string,
+) (map[string]struct{}, map[string]struct{}, error) {
+	var rows []struct {
+		DedupKey string
+		TaskType string
+	}
+	err := h.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Select("dedup_key, task_type").
+		Where("scope = ? AND dedup_key IN ?", types.TaskScopeKnowledgeBase, ids).
+		Where("(task_type = ? AND op = ?) OR (task_type = ? AND op = ?)",
+			wikiTaskType, WikiOpIngest, types.TypeDocumentProcess, "process").
+		Distinct().Find(&rows).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	durable := make(map[string]struct{}, len(rows))
+	wiki := make(map[string]struct{})
+	for _, row := range rows {
+		durable[row.DedupKey] = struct{}{}
+		if row.TaskType == wikiTaskType {
+			wiki[row.DedupKey] = struct{}{}
+		}
+	}
+	return durable, wiki, nil
 }
 
 // queuedSnapshot returns the knowledge IDs referenced by queued tasks. One

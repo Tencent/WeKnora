@@ -485,6 +485,10 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	// so we can dequeue them in one pass after marking.
 	var inFlightIDs []string
 	for _, knowledge := range knowledgeList {
+		pendingIDs, err := s.snapshotDocumentPending(ctx, knowledge.TenantID, knowledge.ID)
+		if err != nil {
+			return fmt.Errorf("snapshot document work before deletion: %w", err)
+		}
 		prev := knowledge.ParseStatus
 		before := *knowledge
 		knowledge.ParseStatus = types.ParseStatusDeleting
@@ -498,6 +502,7 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing {
 			inFlightIDs = append(inFlightIDs, knowledge.ID)
 		}
+		s.scrubDocumentPendingIDs(ctx, knowledge.TenantID, knowledge.ID, pendingIDs)
 	}
 	logger.Infof(ctx, "Marked %d knowledge entries as deleting", len(knowledgeList))
 

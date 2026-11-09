@@ -48,29 +48,30 @@ var (
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {
-	config          *config.Config
-	retrieveEngine  interfaces.RetrieveEngineRegistry
-	ownership       retriever.TenantStoreOwnership
-	repo            interfaces.KnowledgeRepository
-	kbService       interfaces.KnowledgeBaseService
-	tenantRepo      interfaces.TenantRepository
-	tenantService   interfaces.TenantService
-	documentReader  interfaces.DocumentReader
-	chunkService    interfaces.ChunkService
-	chunkRepo       interfaces.ChunkRepository
-	tagRepo         interfaces.KnowledgeTagRepository
-	tagService      interfaces.KnowledgeTagService
-	fileSvc         interfaces.FileService
-	storageResolver interfaces.StorageBackendResolver
-	resourceCatalog interfaces.ResourceCatalog
-	modelService    interfaces.ModelService
-	task            interfaces.TaskEnqueuer
-	taskInspector   interfaces.TaskInspector
-	graphEngine     interfaces.RetrieveGraphRepository
-	redisClient     *redis.Client
-	kbShareService  interfaces.KBShareService
-	imageResolver   *docparser.ImageResolver
-	taskPendingRepo interfaces.TaskPendingOpsRepository
+	config             *config.Config
+	retrieveEngine     interfaces.RetrieveEngineRegistry
+	ownership          retriever.TenantStoreOwnership
+	repo               interfaces.KnowledgeRepository
+	kbService          interfaces.KnowledgeBaseService
+	tenantRepo         interfaces.TenantRepository
+	tenantService      interfaces.TenantService
+	documentReader     interfaces.DocumentReader
+	chunkService       interfaces.ChunkService
+	chunkRepo          interfaces.ChunkRepository
+	tagRepo            interfaces.KnowledgeTagRepository
+	tagService         interfaces.KnowledgeTagService
+	fileSvc            interfaces.FileService
+	storageResolver    interfaces.StorageBackendResolver
+	resourceCatalog    interfaces.ResourceCatalog
+	modelService       interfaces.ModelService
+	task               interfaces.TaskEnqueuer
+	taskInspector      interfaces.TaskInspector
+	graphEngine        interfaces.RetrieveGraphRepository
+	redisClient        *redis.Client
+	kbShareService     interfaces.KBShareService
+	imageResolver      *docparser.ImageResolver
+	taskPendingRepo    interfaces.TaskPendingOpsRepository
+	documentDispatches documentDispatchLifecycle
 
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
@@ -205,7 +206,8 @@ func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID str
 // currentAttemptSuperseded reports whether a newer attempt has started than the
 // one this pipeline step runs under (see withAttempt).
 func (s *knowledgeService) currentAttemptSuperseded(ctx context.Context, knowledgeID string) bool {
-	return attemptSuperseded(ctx, s.tracker(), knowledgeID, attemptFromCtx(ctx))
+	return s.documentGenerationSuperseded(ctx, knowledgeID) ||
+		attemptSuperseded(ctx, s.tracker(), knowledgeID, attemptFromCtx(ctx))
 }
 
 // summaryStatusClosedExpr moves a summary that is still pending or processing
@@ -529,6 +531,9 @@ func (s *knowledgeService) isKnowledgeAborted(
 // changes file_path under a still-running ProcessDocument; the stale worker
 // must not Save() the old path back or write chunks from the replaced file.
 func (s *knowledgeService) isKnowledgeSourceReplaced(ctx context.Context, knowledge *types.Knowledge) bool {
+	if knowledge != nil && s.documentGenerationSuperseded(ctx, knowledge.ID) {
+		return true
+	}
 	if knowledge == nil || knowledge.ID == "" || knowledge.FilePath == "" {
 		return false
 	}

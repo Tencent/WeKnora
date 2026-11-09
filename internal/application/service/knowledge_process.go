@@ -1196,13 +1196,7 @@ func (s *knowledgeService) saveSummaryState(ctx context.Context, knowledge *type
 // configured attempt remaining. Calls outside an Asynq worker are terminal.
 // Despite the name it is not summary-specific; processChunks uses it too.
 func summaryTaskWillRetry(ctx context.Context) bool {
-	retried, retryOK := asynq.GetRetryCount(ctx)
-	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
-	if retryOK && maxRetryOK {
-		return retried < maxRetry
-	}
-	retried, maxRetry, ok := types.TaskRetryMetadataFromContext(ctx)
-	return ok && retried < maxRetry
+	return attemptStillHasRetry(ctx)
 }
 
 // checkSufficientSummaryContent returns errInsufficientSummaryContent if the
@@ -2986,7 +2980,7 @@ func (s *knowledgeService) reparseKnowledge(
 	knowledgeID string,
 	processOverrides *types.KnowledgeProcessOverrides,
 	tasksDequeued bool,
-) (*types.Knowledge, error) {
+) (_ *types.Knowledge, reparseErr error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
 	existing, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
@@ -2995,6 +2989,25 @@ func (s *knowledgeService) reparseKnowledge(
 		return nil, err
 	}
 
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, reparseFileTypes(existing)); err != nil {
+			return nil, err
+		}
+	}
+	ctx, err = s.beginDocumentGeneration(ctx, existing, existing.KnowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	failureAttempt := 0
+	if _, enabled := s.taskPendingRepo.(interfaces.DocumentGenerationRepository); enabled && !existing.IsManual() {
+		failureAttempt = s.tracker().LatestAttempt(ctx, existing.ID)
+	}
+	defer func() {
+		if reparseErr != nil {
+			s.failDocumentGeneration(ctx, existing, failureAttempt, reparseErr)
+		}
+	}()
+
 	tenantID := existing.TenantID
 
 	// When the caller supplies new overrides (e.g. via the reparse confirm
@@ -3002,14 +3015,12 @@ func (s *knowledgeService) reparseKnowledge(
 	// to metadata so both this call's enqueue and the worker re-read the same
 	// config. nil keeps whatever was stored at upload time.
 	if processOverrides != nil {
-		if err := ValidateProcessOverrides(ctx, kb, processOverrides, reparseFileTypes(existing)); err != nil {
-			return nil, err
-		}
 		if err := existing.SetProcessOverrides(processOverrides); err != nil {
 			logger.Errorf(ctx, "Failed to set process overrides on reparse: %v", err)
 			return nil, err
 		}
-		if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "metadata", existing.Metadata); err != nil {
+		if err := s.updateDocumentGenerationColumns(ctx, tenantID, existing.ID,
+			map[string]any{"metadata": existing.Metadata}); err != nil {
 			logger.Errorf(ctx, "Failed to persist process overrides on reparse: %v", err)
 			return nil, err
 		}
@@ -3037,8 +3048,9 @@ func (s *knowledgeService) reparseKnowledge(
 		}
 	}
 
-	// Everything that can reject the reparse has run. From here on the
-	// previous run is superseded, so stop it before announcing the new one.
+	// Generation ownership already supersedes the previous document run.
+	// Cleanup succeeded; stop its transport tasks before opening the new trace.
+	// Any later preparation error is settled by the generation-scoped defer.
 	//
 	// A reparse may land while the previous run is still in flight (batch
 	// reparse and the API do not gate on status). Its queued tasks would
@@ -3049,15 +3061,15 @@ func (s *knowledgeService) reparseKnowledge(
 		s.dequeueKnowledgeTasks(ctx, existing.ID)
 	}
 
-	// Allocate the new span tree attempt only now. Opening it earlier and
-	// then rejecting the reparse left the previous run's subtasks seeing a
-	// newer attempt: they skipped their drain as superseded and stranded the
-	// row in "finalizing". Opening it before the enqueue still means the UI
-	// shows the fresh attempt immediately and the worker does not allocate a
-	// second one.
+	// Allocate the new span tree after cleanup. Document state is already
+	// generation-fenced, and preparation failures settle that same generation.
+	// Atomic generation-aware span opening prevents a delayed producer from
+	// cancelling a newer root. Opening before enqueue lets the UI show the new
+	// attempt immediately and avoids a second allocation in the worker.
 	reparseAttempt := 0
 	if root, n, err := s.tracker().OpenAttempt(ctx, existing.ID, ""); err == nil && root != nil {
 		reparseAttempt = n
+		failureAttempt = n
 	} else if err != nil {
 		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
 	}
@@ -3082,11 +3094,12 @@ func (s *knowledgeService) reparseKnowledge(
 	if existing.IsManual() {
 		resetKnowledgeForReparse(existing, kb)
 
-		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+		if err := s.saveDocumentGeneration(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
 			return nil, err
 		}
-		if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "pending_subtasks_count", 0); err != nil {
+		if err := s.updateDocumentGenerationColumns(ctx, tenantID, existing.ID,
+			map[string]any{"pending_subtasks_count": 0}); err != nil {
 			logger.Errorf(ctx, "Failed to reset pending_subtasks_count before reparse: %v", err)
 			return nil, err
 		}
@@ -3104,11 +3117,12 @@ func (s *knowledgeService) reparseKnowledge(
 	// Step 2: Update knowledge status and metadata
 	resetKnowledgeForReparse(existing, kb)
 
-	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+	if err := s.saveDocumentGeneration(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
 		return nil, err
 	}
-	if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "pending_subtasks_count", 0); err != nil {
+	if err := s.updateDocumentGenerationColumns(ctx, tenantID, existing.ID,
+		map[string]any{"pending_subtasks_count": 0}); err != nil {
 		logger.Errorf(ctx, "Failed to reset pending_subtasks_count before reparse: %v", err)
 		return nil, err
 	}
@@ -3155,7 +3169,7 @@ func (s *knowledgeService) reparseKnowledge(
 			payloadBytes,
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocument(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, existing)
@@ -3209,7 +3223,7 @@ func (s *knowledgeService) reparseKnowledge(
 			payloadBytes,
 			documentProcessTaskOptions(s.config)...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocument(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, existing)
@@ -3260,7 +3274,7 @@ func (s *knowledgeService) reparseKnowledge(
 			payloadBytes,
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocument(ctx, task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
 			s.markKnowledgeEnqueueFailed(ctx, existing)
@@ -3275,7 +3289,7 @@ func (s *knowledgeService) reparseKnowledge(
 	logger.Warnf(ctx, "Knowledge %s has no parseable content (no file, URL, or manual content)", knowledgeID)
 	existing.ParseStatus = types.ParseStatusFailed
 	existing.ErrorMessage = "Knowledge has no parseable content"
-	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+	if err := s.saveDocumentGeneration(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to persist unparseable knowledge state for %s: %v",
 			secutils.SanitizeForLog(knowledgeID), err)
 	}
@@ -3319,6 +3333,12 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	ctx context.Context, knowledgeID string,
 ) (*types.Knowledge, error) {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	// Capture IDs before reading status, including the idempotent branch. A
+	// reparse enqueued while cancellation runs owns different immutable rows.
+	pendingIDs, err := s.snapshotDocumentPending(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot document work before cancellation: %w", err)
+	}
 	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "CancelKnowledgeParse: failed to load knowledge: %v", err)
@@ -3333,6 +3353,7 @@ func (s *knowledgeService) CancelKnowledgeParse(
 		// Idempotent — still attempt the dequeue in case earlier calls
 		// raced an enqueue, but skip the row update / span close path.
 		s.dequeueKnowledgeTasks(ctx, knowledgeID)
+		s.scrubDocumentPendingIDs(ctx, tenantID, knowledgeID, pendingIDs)
 		return existing, nil
 	case types.ParseStatusCompleted, types.ParseStatusFailed:
 		return nil, werrors.NewBadRequestError("解析已结束，无法取消")
@@ -3353,6 +3374,7 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	// update so a late subtask FinalizeSubtask call can't race-promote
 	// the row back to completed. Persisted partial data is left in
 	// place — the user can reuse it on the next reparse attempt.
+	cancelAttempt := s.tracker().LatestAttempt(ctx, knowledgeID)
 	now := time.Now()
 	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, map[string]interface{}{
 		"parse_status":           types.ParseStatusCancelled,
@@ -3382,8 +3404,8 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	// because workers exit via their abort-guard without ever calling
 	// FailSpan on their own subspan. Best-effort: nil tracker / missing
 	// attempt no-ops.
-	if attempt := s.tracker().LatestAttempt(ctx, knowledgeID); attempt > 0 {
-		s.tracker().AbortAttempt(ctx, knowledgeID, attempt,
+	if cancelAttempt > 0 {
+		s.tracker().AbortAttempt(ctx, knowledgeID, cancelAttempt,
 			"USER_CANCELLED", "用户已取消解析", "用户已取消解析")
 	}
 
@@ -3397,6 +3419,7 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	// doc the user already abandoned. The in-flight worker would skip it
 	// at isWikiKnowledgeAborted anyway, but scrubbing avoids waking the
 	// batch in the first place.
+	s.scrubDocumentPendingIDs(ctx, tenantID, knowledgeID, pendingIDs)
 	s.scrubWikiPendingIngest(ctx, existing.KnowledgeBaseID, knowledgeID, "cancel")
 	recordKBActivity(ctx, s.audit, tenantID, existing.KnowledgeBaseID, types.AuditActionKnowledgeParseCanceled,
 		"knowledge", existing.ID, types.AuditOutcomeCanceled,
@@ -3888,8 +3911,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// 检查任务状态 - 幂等性处理
-	if knowledge.ParseStatus == types.ParseStatusCompleted {
-		logger.Infof(ctx, "Document already completed, skipping: %s", payload.KnowledgeID)
+	if knowledge.ParseStatus == types.ParseStatusCompleted || knowledge.ParseStatus == types.ParseStatusFinalizing {
+		logger.Infof(ctx, "Document already completed or handed off, skipping: %s", payload.KnowledgeID)
 		return nil // 幂等：已完成的任务直接返回
 	}
 

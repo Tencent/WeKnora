@@ -212,6 +212,7 @@ type ServerConfig struct {
 
 // KnowledgeBaseConfig 知识库配置
 type KnowledgeBaseConfig struct {
+	DocumentTenantInflight int                    `yaml:"document_tenant_inflight" json:"document_tenant_inflight"`
 	ChunkSize              int                    `yaml:"chunk_size"       json:"chunk_size"`
 	ChunkOverlap           int                    `yaml:"chunk_overlap"    json:"chunk_overlap"`
 	SplitMarkers           []string               `yaml:"split_markers"    json:"split_markers"`
@@ -1216,4 +1217,13 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 // WebSearchConfig represents the web search configuration
 type WebSearchConfig struct {
 	Timeout int `yaml:"timeout" json:"timeout"` // 超时时间（秒）
+}
+
+// DocumentTenantInflightLimit returns the cluster-wide per-tenant document cap.
+// Non-positive values use the documented default of two.
+func DocumentTenantInflightLimit(cfg *Config) int {
+	if cfg != nil && cfg.KnowledgeBase != nil && cfg.KnowledgeBase.DocumentTenantInflight > 0 {
+		return cfg.KnowledgeBase.DocumentTenantInflight
+	}
+	return 2
 }
