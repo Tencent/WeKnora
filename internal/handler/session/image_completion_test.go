@@ -52,12 +52,34 @@ func TestQuickAnswerCompletionPersistsAfterGenerationCancellation(t *testing.T) 
 	h.completeQuickAnswerTurn(ctx, &sseStreamContext{
 		eventBus: bus, streamHandler: streamHandler, assistantMessage: message,
 		releaseTurn: func() { released = true },
-	}, "", "")
+	}, "", "", "")
 	require.NotNil(t, messages.saved)
 	require.Equal(t, "already streamed answer", messages.saved.Content)
 	require.Equal(t, uint64(1), messages.tenant)
 	require.True(t, released)
 	require.Equal(t, types.ResponseTypeComplete, stream.events[len(stream.events)-1].Type)
+}
+
+// The complete event must carry the model the pipeline actually ran so a
+// client can label the turn — the requested binding can differ when an
+// invalid per-request override falls back server-side.
+func TestQuickAnswerCompleteCarriesResolvedModel(t *testing.T) {
+	messages := &imageCompletionMessages{}
+	stream := &imageCompletionStream{}
+	h := &Handler{messageService: messages, streamManager: stream}
+	bus := event.NewEventBus()
+	message := &types.Message{
+		ID: "m", SessionID: "s", Role: "assistant", Content: "answer", AgentTenantID: 2,
+	}
+	ctx := types.WithExecutionTenant(context.Background(), 1)
+	streamHandler := h.setupStreamHandler(ctx, "s", "m", "req", 1, time.Now(), message, bus)
+	h.completeQuickAnswerTurn(ctx, &sseStreamContext{
+		eventBus: bus, streamHandler: streamHandler, assistantMessage: message,
+	}, "query", "u1", "model-actual")
+	require.NotEmpty(t, stream.events)
+	complete := stream.events[len(stream.events)-1]
+	require.Equal(t, types.ResponseTypeComplete, complete.Type)
+	require.Equal(t, "model-actual", complete.Data["model_id"])
 }
 
 type imageCompletionStream struct {
@@ -116,7 +138,7 @@ func TestSharedImageCompletionWaitsForPersistedReferences(t *testing.T) {
 					answer := "![host image](" + image + ")"
 					if quick {
 						message.Content = answer
-						h.completeQuickAnswerTurn(saveCtx, streamCtx, "", "")
+						h.completeQuickAnswerTurn(saveCtx, streamCtx, "", "", "")
 					} else {
 						require.NoError(t, bus.Emit(runCtx, event.Event{
 							Type: event.EventAgentComplete,

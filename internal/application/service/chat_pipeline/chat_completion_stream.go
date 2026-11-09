@@ -272,6 +272,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 							Content:   response.Content,
 							Done:      response.Done,
 							Truncated: truncated,
+							ModelID:   chatManage.ChatModelID,
 						},
 					})
 				}

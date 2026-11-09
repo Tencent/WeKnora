@@ -145,7 +145,7 @@ func TestQuickAnswerFallbackTruncationSurvivesCompletion(t *testing.T) {
 			require.Equal(t, true, stream.events[0].Data["is_fallback"])
 			h.completeQuickAnswerTurn(ctx, &sseStreamContext{
 				eventBus: bus, streamHandler: handler, assistantMessage: msg,
-			}, "", "")
+			}, "", "", "")
 			require.NotNil(t, messages.saved)
 			raw, err := json.Marshal(messages.saved)
 			require.NoError(t, err)

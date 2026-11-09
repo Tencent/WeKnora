@@ -282,3 +282,40 @@ func TestStreamReportsIncompleteAsError(t *testing.T) {
 		require.False(t, answer.Done, "a cut-off stream must not close the answer as complete")
 	}
 }
+
+// The final-answer Done marker carries the chat model the pipeline actually
+// ran, so the knowledge-QA completion metadata can label the turn with the
+// effective model rather than the requested binding.
+func TestStreamDoneMarkerCarriesChatModelID(t *testing.T) {
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "hello"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-model-id"
+	chatManage.ChatModelID = "model-effective"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	next := func() *PluginError { return nil }
+	require.Nil(t, plugin.OnEvent(context.Background(), types.CHAT_COMPLETION_STREAM, chatManage, next))
+
+	require.Eventually(t, func() bool {
+		bus.mu.Lock()
+		defer bus.mu.Unlock()
+		return len(bus.events) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	var done event.AgentFinalAnswerData
+	for _, evt := range bus.events {
+		if evt.Type == types.EventType(event.EventAgentFinalAnswer) {
+			if data, ok := evt.Data.(event.AgentFinalAnswerData); ok && data.Done {
+				done = data
+			}
+		}
+	}
+	require.Equal(t, "model-effective", done.ModelID)
+}
