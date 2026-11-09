@@ -4329,7 +4329,7 @@ export default {
       apiKeyOptional: 'API 키 (선택)',
       apiKeyPlaceholder: 'API 키 입력',
       customHeadersLabel: '사용자 정의 요청 헤더 (선택)',
-      customHeadersDesc: '원격 모델 API 호출 시 추가되는 HTTP 헤더입니다. 기업 게이트웨이 인증이나 추적 등에 사용할 수 있으며, Authorization / Content-Type 같은 예약 헤더는 무시됩니다.',
+      customHeadersDesc: '원격 모델 API 호출 시 추가되는 HTTP 헤더입니다. 기업 게이트웨이 인증이나 추적 등에 사용할 수 있으며, Authorization / Content-Type 같은 예약 헤더는 무시됩니다. 값에는 ${var} 플레이스홀더를 사용할 수 있고 현재 요청 컨텍스트에서 확장됩니다: user_id, user_name, user_email, tenant_id, tenant_name, session_id, request_id.',
       customHeadersAdd: '헤더 추가',
       customHeadersKeyPlaceholder: '헤더 이름',
       customHeadersValuePlaceholder: '헤더 값',

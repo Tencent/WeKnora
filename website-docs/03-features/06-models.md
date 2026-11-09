@@ -441,7 +441,7 @@ const (
 | `provider` | string | 空（按 BaseURL 自动检测） | 厂商 ID，取值见[内置厂商](#内置厂商) |
 | `extra_config` | map[string]string | nil | 厂商额外字段（见下节）；保留键 `api`（强制对话协议）、`remote_model_name`（远端模型名）、`thinking_control`（旧版思考参数格式） |
 | `spec` | object | nil | 单行目录覆盖：`api`、`reasoning`、`input`、`context_window`、`max_output_tokens`、`thinking_levels`、`compat`（协议相关的扁平 JSON） |
-| `custom_headers` | map[string]string | nil | 附加自定义 HTTP 请求头（类似 OpenAI SDK `extra_headers`；`Authorization`、`api-key` 等保留头在运行期被忽略） |
+| `custom_headers` | map[string]string | nil | 附加自定义 HTTP 请求头（类似 OpenAI SDK `extra_headers`；`Authorization`、`api-key` 等保留头在运行期被忽略）。取值支持 `${var}` 动态占位符，见[动态请求头](#动态请求头) |
 | `supports_vision` | bool | false | 对话模型是否接受图片多模态输入 |
 | `context_window` | int | 0（回落到 200000） | 对话/VLM 上下文窗口（token）。智能体按此上限加载与压缩历史；应填写服务实际支持的窗口大小，过高会导致压缩无法及时触发 |
 | `max_output_tokens` | int | 0（沿用目录默认） | 对话/VLM 单次回复的输出上限 |
@@ -451,6 +451,48 @@ const (
 模型级字段还包括 `name`（运行期实际调用的模型名）、`display_name`、`type`、`source`、`is_default`（同一 `(tenant_id, type)` 桶内唯一默认）、`is_builtin`、`managed_by`、`status`（`active` / `downloading` / `download_failed`）。
 
 远程对话和视觉模型的查询响应附带 `capabilities`（协议、是否可思考、可选思考等级、上下文窗口等），由服务端按目录解析得出。
+
+### 动态请求头
+
+`custom_headers` 的**取值**支持 `${var}` 占位符。占位符在每次请求真正发出之前，按当前请求上下文展开，因此同一份模型配置可以给不同调用方带上不同的身份信息——企业网关据此做鉴权、审计或路由。
+
+配置示例：
+
+```json
+{
+  "custom_headers": {
+    "X-User-Name": "${user_name}",
+    "X-User-Id": "${user_id}",
+    "X-Workspace": "${tenant_name}",
+    "X-Trace-Id": "${request_id}",
+    "X-Static-Route": "edge-cn"
+  }
+}
+```
+
+可用变量：
+
+| 变量 | 含义 | 取不到值的情况 |
+| --- | --- | --- |
+| `user_id` | 当前用户 ID | API Key / IM 机器人等非账号主体没有用户行，只有 `user_id` 可用 |
+| `user_name` | 当前用户用户名 | 仅有 `user_id` 时取不到 |
+| `user_email` | 当前用户邮箱 | 仅有 `user_id` 时取不到 |
+| `tenant_id` | 当前工作空间 ID | 无工作空间上下文时取不到 |
+| `tenant_name` | 当前工作空间名称 | 无工作空间上下文时取不到 |
+| `session_id` | 当前会话 ID | 无会话上下文时取不到 |
+| `request_id` | 当前请求 ID | 非 HTTP 请求触发的调用取不到 |
+
+展开规则：
+
+- **取不到值的变量展开为空字符串**，不会把 `${user_name}` 原样发出去。原样发出会让网关把 `${user_name}` 当成一个真的叫这串字符的用户名，比空值更难排查。服务端会记录一条告警日志指出是哪些变量没取到。
+- **只展开一次**。替换进来的文本如果本身含 `${...}`，它就是普通文本，不会被二次展开。
+- **变量名限定为字母或下划线开头**（`[A-Za-z_][A-Za-z0-9_]*`）。正文里的 `${金额}`、`${}` 不是变量，原样保留。
+- **展开结果会去掉 CR/LF**。占位符的取值来自用户资料，不能让它顺带变成一个新的请求头。
+
+适用范围：对话、向量、重排、视觉、语音五类模型调用都走这条路径（`internal/models/api/endpoint.go` 的 `newPost`）。WeKnora 云服务的 VLM 通道使用独立的签名请求，不注入 `custom_headers`。
+
+> [!NOTE]
+> 保留头（`Authorization`、`api-key`、`x-api-key`、`x-goog-api-key`、`Content-Type`、`Content-Length`、`Accept-Encoding`、`Host`、`Connection`、`Transfer-Encoding`）在运行期一律被忽略，因此无法用占位符给它们赋值。
 
 ### 厂商额外字段
 
