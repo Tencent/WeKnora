@@ -26,8 +26,7 @@ func TestWikiSearchLiteralPostgresUsesBoundEscapedPattern(t *testing.T) {
 		query   string
 		literal bool
 	}{
-		{`C++`, true}, {`a.b`, true}, {`dir\file`, true}, {`x' OR 1=1 --`, true},
-		{`stardust|skyvault`, false},
+		{`C++`, true}, {`a.b`, true}, {`dir\file`, true}, {`x' OR 1=1 --`, true}, {`stardust|skyvault`, false},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			pattern := tc.query
