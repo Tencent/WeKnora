@@ -501,13 +501,17 @@ docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=0 -t weknora-app .
 
 | 探测结果 | 协议 | 流程 |
 | --- | --- | --- |
-| `200` 且 `status=ok` | V1（MinerU ≥ 4.0，`mineru_v1_client.go`） | `POST /v1/uploads` → 按返回的 `upload_url` 上传字节 → `POST /v1/uploads/{id}/complete` → `POST /v1/parse/jobs`（只请求 `zip` 产物）→ 轮询 `GET /v1/parse/jobs/{id}` → `GET /v1/files/{id}/content` 下载 zip，取其中的 `markdown.md` 与 `images/` |
+| `200` 且 `status=ok` | V1（MinerU 4.0.x，`mineru_v1_client.go`） | `POST /v1/uploads` → 按返回的 `upload_url` 上传字节 → `POST /v1/uploads/{id}/complete` → `POST /v1/parse/jobs`（只请求 `zip` 产物）→ 轮询 `GET /v1/parse/jobs/{id}` → `GET /v1/files/{id}/content` 下载 zip，取其中的 `markdown.md` 与 `images/` |
 | `404` / `405` | 旧版（MinerU ≤ 3.x） | `POST /file_parse`，同步返回 Markdown 与 base64 图片 |
 | `503` 带错误结构 | V1，但服务未就绪 | 直接报错（常见于模型预加载失败），不回退旧协议 |
 
-升级 MinerU 不需要改 WeKnora 的配置。两套协议的参数对应关系：
+::: warning 自建 MinerU 4.1+ 暂不兼容
+当前 WeKnora 的 V1 客户端使用 MinerU 4.0.x 的 `/v1/parse/jobs` 接口。MinerU 4.1 起改用 [Tasks API（`/v1/tasks`）](https://opendatalab.github.io/MinerU/usage/http_api/)。即使 `/v1/health` 返回正常，解析仍会因旧任务接口不存在而失败。使用自建 V1 服务时，请选用 MinerU 4.0.x。
+:::
 
-| 设置项（`ParserEngineConfig`） | MinerU ≥ 4.0 | MinerU ≤ 3.x |
+两套协议的参数对应关系：
+
+| 设置项（`ParserEngineConfig`） | MinerU 4.0.x | MinerU ≤ 3.x |
 | --- | --- | --- |
 | `mineru_endpoint` | V1 服务地址（如 `http://mineru:8000`） | 同左 |
 | `mineru_server_api_key` | 服务以 `--api-key` 启动时作为 `Authorization: Bearer` 发送 | 不使用 |
