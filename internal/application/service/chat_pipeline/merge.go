@@ -107,33 +107,38 @@ func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.
 	if len(chatManage.RerankResult) > 0 {
 		return chatManage.RerankResult
 	}
-	result := chatManage.SearchResult
-	sort.SliceStable(result, func(i, j int) bool {
-		return result[i].Score > result[j].Score
-	})
-	if k := chatManage.RerankTopK; k > 0 && len(result) > k {
-		// Graph hits have no retrieval score (0) and would always fall
-		// below the cut; entity search already bounds how many it adds.
-		kept := result[:k:k]
-		for _, r := range result[k:] {
-			if r.MatchType == types.MatchTypeGraph {
-				kept = append(kept, r)
-			}
-		}
-		// This cut already hides candidates from the prompt, so record it
-		// here: with rerank skipped there is nothing left for FILTER_TOP_K to
-		// cut, and without the record the model would read a subset as the
-		// complete result set.
-		if len(kept) < len(result) {
-			chatManage.RecordRetrievalCut(types.RetrievalStageMerge, len(result))
-		}
-		result = kept
+	result := selectFallbackSearchResults(chatManage)
+	// Record the cut here rather than during web fetch: Merge owns this
+	// retrieval stage and its truncation diagnostics.
+	if len(result) < len(chatManage.SearchResult) {
+		chatManage.RecordRetrievalCut(types.RetrievalStageMerge, len(chatManage.SearchResult))
 	}
 	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
 		"reason":    "empty_rerank_result",
 		"input_cnt": len(chatManage.SearchResult),
 		"kept_cnt":  len(result),
 	})
+	return result
+}
+
+// selectFallbackSearchResults is shared by web fetch and merge so a skipped
+// or failed reranker still gets full web pages, without fetching candidates
+// that merge's top-k would discard. Keep the retrieval slice order intact.
+func selectFallbackSearchResults(chatManage *types.ChatManage) []*types.SearchResult {
+	result := append([]*types.SearchResult(nil), chatManage.SearchResult...)
+	sort.SliceStable(result, func(i, j int) bool {
+		return result[i].Score > result[j].Score
+	})
+	if k := chatManage.RerankTopK; k > 0 && len(result) > k {
+		// Graph hits have no retrieval score; entity search already bounds them.
+		kept := result[:k:k]
+		for _, r := range result[k:] {
+			if r.MatchType == types.MatchTypeGraph {
+				kept = append(kept, r)
+			}
+		}
+		result = kept
+	}
 	return result
 }
 
