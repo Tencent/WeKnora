@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -398,4 +399,130 @@ func runSkillPythonVerifier(
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	return stdout.String(), stderr.String(), runErr
+}
+
+// TOML is parsed by the interpreter used for the skill, never guessed with
+// regex. These are actual subprocess checks, including a missing-parser fault.
+func TestSkillPythonVerifierTOMLBoundary(t *testing.T) {
+	cases := []struct {
+		name, manifest, problem string
+		exit                    int
+	}{
+		{"invalid syntax", "[project]\ndependencies = [\"broken\"\n", "pyproject.toml has invalid TOML syntax", 1},
+		{"multiline basic-string dependency with extras", "[project]\nname='demo'\ndependencies=[\n \"\"\"totally_absent_package[extra]>=1.0\"\"\",\n]\n", "pyproject.toml declares totally_absent_package but it is not installed", 2},
+		{"multiline missing plain dependency", "[project]\nname='demo'\ndependencies=[\n 'totally_absent_package[extra]>=1.0', # nontrivial TOML syntax\n]\n", "pyproject.toml declares totally_absent_package but it is not installed", 2},
+		{"invalid dependency shape", "[project]\ndependencies={bad='shape'}\n", "project.dependencies must be an array of strings", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeSkillTree(t, map[string]string{"pyproject.toml": tc.manifest, "scripts/run.py": "pass\n"})
+			_, stderr, err := runSkillPythonVerifier(t, root, []string{"scripts/run.py"}, nil)
+			require.Error(t, err)
+			require.Contains(t, stderr, tc.problem)
+			var exit *exec.ExitError
+			require.ErrorAs(t, err, &exit)
+			require.Equal(t, tc.exit, exit.ExitCode())
+		})
+	}
+}
+func TestSkillPythonVerifierMissingTOMLParserFailsClosed(t *testing.T) {
+	root := writeSkillTree(t, map[string]string{"pyproject.toml": "[project]\ndependencies=['totally_absent_package']\n", "scripts/run.py": "pass\n"})
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err)
+	// Block all three real parser imports in this fresh subprocess only. No
+	// production flag/environment knob can disable verification.
+	blocker := `import builtins
+_original_import = builtins.__import__
+def _blocked_import(name, *args, **kwargs):
+    if name in ("tomllib", "tomli", "pip._vendor.tomli"):
+        raise ImportError("controlled missing parser")
+    return _original_import(name, *args, **kwargs)
+builtins.__import__ = _blocked_import
+`
+	cmd := exec.Command(python, "-", root, "scripts/run.py")
+	cmd.Stdin = strings.NewReader(blocker + skillPythonVerifier)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	require.Error(t, err)
+	require.Contains(t, stderr.String(), "cannot verify pyproject.toml: no TOML parser available")
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit)
+	require.Equal(t, 1, exit.ExitCode())
+}
+func TestSkillPythonVerifierDoesNotImportSkillAsTOMLParser(t *testing.T) {
+	root := writeSkillTree(t, map[string]string{"pyproject.toml": "[project]\ndependencies=[]\n", "scripts/run.py": "pass\n", "tomli.py": "open('parser-executed','w').write('unsafe')\nraise RuntimeError('skill module executed')\n", "tomllib.py": "open('parser-executed','w').write('unsafe')\nraise RuntimeError('skill module executed')\n"})
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err)
+	cmd := exec.Command(python, "-", root, "scripts/run.py")
+	cmd.Dir = root
+	cmd.Stdin = strings.NewReader(skillPythonVerifier)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	_, err = os.Stat(filepath.Join(root, "parser-executed"))
+	require.True(t, os.IsNotExist(err), "verifier executed skill-controlled parser")
+}
+
+func TestSkillPythonVerifierPython310PipVendoredParser(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err)
+	venv := filepath.Join(t.TempDir(), "venv")
+	output, err := exec.Command(python, "-m", "venv", venv).CombinedOutput()
+	require.NoError(t, err, string(output))
+	root := writeSkillTree(t, map[string]string{"pyproject.toml": "[project]\ndependencies=['totally_absent_package']\n", "scripts/run.py": "pass\n"})
+	blocker := `import builtins
+_original_import = builtins.__import__
+def _blocked_import(name, *args, **kwargs):
+    if name in ("tomllib", "tomli"):
+        raise ImportError("force vendored compatibility path")
+    return _original_import(name, *args, **kwargs)
+builtins.__import__ = _blocked_import
+`
+	cmd := exec.Command(filepath.Join(venv, "bin", "python3"), "-", root, "scripts/run.py")
+	cmd.Stdin = strings.NewReader(blocker + skillPythonVerifier)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	require.Error(t, err)
+	require.Contains(t, stderr.String(), "pyproject.toml declares totally_absent_package but it is not installed")
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit)
+	require.Equal(t, 2, exit.ExitCode())
+}
+
+func TestSkillPythonVerifierRejectsExternalPythonPathParser(t *testing.T) {
+	root := writeSkillTree(t, map[string]string{"pyproject.toml": "[project]\ndependencies=[]\n", "scripts/run.py": "pass\n"})
+	outside := t.TempDir()
+	marker := filepath.Join(outside, "parser-executed")
+	for _, name := range []string{"tomli.py", "tomllib.py"} {
+		require.NoError(t, os.WriteFile(filepath.Join(outside, name), []byte("open("+strconv.Quote(marker)+",'w').write('unsafe')\nraise RuntimeError('external parser executed')\n"), 0o644))
+	}
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err)
+	cmd := exec.Command(python, "-", root, "scripts/run.py")
+	cmd.Env = append(os.Environ(), "PYTHONPATH="+outside)
+	cmd.Stdin = strings.NewReader(skillPythonVerifier)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	_, err = os.Stat(marker)
+	require.True(t, os.IsNotExist(err), "external PYTHONPATH parser executed")
+}
+func TestSkillPythonVerifierRejectsCachedExternalParser(t *testing.T) {
+	root := writeSkillTree(t, map[string]string{"pyproject.toml": "[project]\ndependencies=[]\n", "scripts/run.py": "pass\n"})
+	outside := t.TempDir()
+	marker := filepath.Join(outside, "parser-executed")
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err)
+	prefix := "import sys,types\n" + "fake=types.ModuleType('tomllib')\n" + "fake.__file__=" + strconv.Quote(filepath.Join(outside, "tomllib.py")) + "\n" + "fake.loads=lambda data: open(" + strconv.Quote(marker) + ",'w').write('unsafe')\n" + "sys.modules['tomllib']=fake\n"
+	cmd := exec.Command(python, "-", root, "scripts/run.py")
+	cmd.Env = append(os.Environ(), "PYTHONPATH="+outside)
+	cmd.Stdin = strings.NewReader(prefix + skillPythonVerifier)
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	require.Contains(t, string(output), "untrusted cached TOML parser")
+	var exit *exec.ExitError
+	require.ErrorAs(t, err, &exit)
+	require.Equal(t, 1, exit.ExitCode())
+	_, err = os.Stat(marker)
+	require.True(t, os.IsNotExist(err), "cached external parser used")
 }

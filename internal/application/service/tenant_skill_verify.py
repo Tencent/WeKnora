@@ -139,15 +139,70 @@ def marker_applies(marker):
 
 
 def load_pyproject(path):
+    # Use real TOML parsers only. Python 3.10 may carry tomli directly or in
+    # pip's vendored runtime; absence is a verification failure, never success.
+    # Do not import a skill-controlled module from cwd/PYTHONPATH as a parser.
+    original_path = sys.path[:]
+    trusted_path = []
+    resolved_root = os.path.realpath(root)
+    explicit_pythonpath = {
+        os.path.realpath(entry or os.getcwd())
+        for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+        if entry
+    }
+    def untrusted_parser_path(path):
+        if not isinstance(path, str):
+            return True
+        resolved = os.path.realpath(path)
+        if resolved == resolved_root or resolved.startswith(resolved_root + os.sep):
+            return True
+        return any(resolved == entry or resolved.startswith(entry + os.sep)
+                   for entry in explicit_pythonpath)
+    for entry in original_path:
+        resolved = os.path.realpath(entry or os.getcwd())
+        if untrusted_parser_path(resolved):
+            continue
+        if not entry:
+            continue
+        trusted_path.append(entry)
+    parser = None
+    sys.path[:] = trusted_path
     try:
-        import tomllib
-    except ImportError:
+        for module in ("tomllib", "tomli", "pip._vendor.tomli"):
+            parts = module.split(".")
+            for count in range(1, len(parts) + 1):
+                cached = sys.modules.get(".".join(parts[:count]))
+                if cached is not None and untrusted_parser_path(getattr(cached, "__file__", root)):
+                    add_problem("cannot verify pyproject.toml: untrusted cached TOML parser")
+                    return None
+            try:
+                parser = __import__(module, fromlist=["loads"])
+            except ImportError:
+                continue
+            except Exception:
+                add_problem("cannot verify pyproject.toml: TOML parser import failed")
+                return None
+            if not callable(getattr(parser, "loads", None)):
+                add_problem("cannot verify pyproject.toml: invalid TOML parser")
+                return None
+            break
+        if parser is None:
+            add_problem("cannot verify pyproject.toml: no TOML parser available (tomllib, tomli or pip._vendor.tomli required)")
+            return None
+        try:
+            with open(path, "rb") as handle:
+                data = parser.loads(handle.read().decode("utf-8"))
+                if not isinstance(data, dict):
+                    add_problem("cannot verify pyproject.toml: invalid TOML parser output")
+                    return None
+                return data
+        except OSError:
+            add_problem("pyproject.toml cannot be read by the skill execution user")
+        except Exception:
+            add_problem("pyproject.toml has invalid TOML syntax or cannot be parsed")
         return None
-    try:
-        with open(path, "rb") as handle:
-            return tomllib.load(handle)
-    except Exception:
-        return None
+    finally:
+        sys.path[:] = original_path
 
 
 def declared_requirement_lines():
@@ -163,10 +218,25 @@ def declared_requirement_lines():
     data = load_pyproject(pyproject)
     if not data:
         return
-    for item in data.get("project", {}).get("dependencies") or []:
-        if isinstance(item, str):
-            yield "pyproject.toml", item
-    poetry = ((data.get("tool") or {}).get("poetry") or {}).get("dependencies") or {}
+    project = data.get("project", {})
+    tool = data.get("tool", {})
+    if not isinstance(project, dict) or not isinstance(tool, dict):
+        add_problem("pyproject.toml project/tool metadata must be tables")
+        return
+    dependencies = project.get("dependencies", [])
+    if not isinstance(dependencies, list) or any(not isinstance(item, str) for item in dependencies):
+        add_problem("pyproject.toml project.dependencies must be an array of strings")
+        return
+    for item in dependencies:
+        yield "pyproject.toml", item
+    poetry = tool.get("poetry", {})
+    if not isinstance(poetry, dict):
+        add_problem("pyproject.toml tool.poetry metadata must be a table")
+        return
+    poetry = poetry.get("dependencies", {})
+    if not isinstance(poetry, dict):
+        add_problem("pyproject.toml tool.poetry.dependencies must be a table")
+        return
     if isinstance(poetry, dict):
         for name, spec in poetry.items():
             if str(name).strip().lower() == "python":
