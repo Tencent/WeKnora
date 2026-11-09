@@ -713,6 +713,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 		if eventType != types.CHAT_COMPLETION_STREAM {
 			stageCtx, stageSpan = langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 				Name: "pipeline." + string(eventType),
+				Type: langfuse.ObsTypeChain,
 				Metadata: map[string]interface{}{
 					"event_type": string(eventType),
 					"session_id": chatManage.SessionID,

@@ -542,6 +542,13 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		resourceRewriter:      resourceRewriter,
 	}
 
+	// The Gin middleware opens the trace before the request body is decoded,
+	// so attach the user-facing query to the root observation now that it is
+	// known. Langfuse v4 derives the trace table's input from this observation.
+	if trace, ok := langfuse.TraceFromContext(ctx); ok {
+		trace.SetInput(strings.TrimSpace(request.Query))
+	}
+
 	return reqCtx, &request, nil
 }
 
