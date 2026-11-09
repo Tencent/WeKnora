@@ -510,6 +510,9 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
+	// CounterBatch identifies the fan-out that owns the pending image counter.
+	// Empty retains compatibility with tasks queued before batch fencing.
+	CounterBatch string `json:"counter_batch,omitempty"`
 	// ImagePipelineParams carries the tunables of the pipeline this task runs,
 	// resolved from the knowledge base at enqueue time. They are deliberately
 	// not payload fields of their own: two pipelines may each define a field

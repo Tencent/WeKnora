@@ -4634,21 +4634,14 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	attempt := attemptFromCtx(ctx)
 	lang := types.LanguageFromContextOrDefault(ctx)
 	redisKey := multimodalPendingKey(knowledge.ID)
+	counterBatch := uuid.NewString()
 	// The counter has to be seeded BEFORE the first task is enqueued: an image
 	// task that finishes early would otherwise decrement a key we are about to
 	// overwrite, and its slot would be counted twice. The cost of seeding
 	// first is that a slot whose task never reaches the queue has no owner to
 	// drain it — releaseUnownedMultimodalSlots settles that after the fan-out.
-	counterSeeded := false
-	if s.redisClient != nil {
-		if err := s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err(); err != nil {
-			logger.Warnf(ctx, "Failed to set multimodal pending count for %s: %v", knowledge.ID, err)
-		} else {
-			counterSeeded = true
-		}
-	} else {
-		liteMultimodalSet(redisKey, int64(len(images)))
-		counterSeeded = true
+	if err := seedMultimodalCounter(ctx, s.redisClient, redisKey, counterBatch, int64(len(images))); err != nil {
+		return fmt.Errorf("seed multimodal counter for %s: %w", knowledge.ID, err)
 	}
 
 	// Resolve the image pipeline settings once for the whole fan-out: the image
@@ -4695,6 +4688,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ImageSourceType:     imageSourceType,
 			Attempt:             attempt,
 			ImageIndex:          idx,
+			CounterBatch:        counterBatch,
 			SourceLocators:      img.SourceLocators,
 			ImageVectorEnabled:  &eff.ImageVectorEnabled,
 		}
@@ -4717,7 +4711,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	}
 
 	return s.releaseUnownedMultimodalSlots(
-		ctx, knowledge, redisKey, counterSeeded, len(images), enqueued,
+		ctx, knowledge, redisKey, counterBatch, len(images), enqueued,
 	)
 }
 
@@ -4735,8 +4729,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 func (s *knowledgeService) releaseUnownedMultimodalSlots(
 	ctx context.Context,
 	knowledge *types.Knowledge,
-	redisKey string,
-	counterSeeded bool,
+	redisKey, counterBatch string,
 	planned, enqueued int,
 ) error {
 	if enqueued == 0 {
@@ -4746,15 +4739,13 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 		logger.Warnf(ctx,
 			"[ImageMultimodal] No image task enqueued for %s (planned=%d); enqueueing post-process directly",
 			knowledge.ID, planned)
-		if counterSeeded {
-			// Detached like the shortfall path below: a cancelled parent
-			// context would otherwise leave the seeded key to expire on its
-			// own 24h TTL.
-			dctx, cancel := context.WithTimeout(
-				context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
-			s.delMultimodalCounter(dctx, redisKey)
-			cancel()
-		}
+		// Detached like the shortfall path below: a cancelled parent
+		// context would otherwise leave the seeded key to expire on its
+		// own 24h TTL.
+		dctx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+		deleteMultimodalCounter(dctx, s.redisClient, redisKey, counterBatch)
+		cancel()
 		return s.enqueueKnowledgePostProcessTask(ctx, knowledge)
 	}
 
@@ -4762,14 +4753,6 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 	if shortfall <= 0 {
 		return nil
 	}
-	if !counterSeeded {
-		// Seeding failed, so the key is absent and the first image to finish
-		// already drives post-process through the missing-key fallback in
-		// checkAndFinalizeAllImages. Decrementing here would only create the
-		// key below zero and finalize before the siblings are done.
-		return nil
-	}
-
 	logger.Warnf(ctx,
 		"[ImageMultimodal] Releasing %d un-enqueued image slot(s) for %s (planned=%d enqueued=%d)",
 		shortfall, knowledge.ID, planned, enqueued)
@@ -4778,7 +4761,7 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 	// cancelled mid-fan-out (graceful shutdown) must not skip the release.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
-	pending, err := s.decrMultimodalSlots(rctx, redisKey, int64(shortfall))
+	pending, current, err := s.decrMultimodalSlots(rctx, redisKey, counterBatch, int64(shortfall))
 	if err != nil {
 		// Giving up here puts the row back in the state this whole fix exists
 		// to remove: a counter no task can drain, recovered only by the
@@ -4790,26 +4773,16 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 			shortfall, knowledge.ID, multimodalSlotReleaseAttempts, err)
 		return nil
 	}
-	if pending <= 0 {
+	if current && pending <= 0 {
 		// Every enqueued sibling had already finished, so the release owns the
 		// finalize. Ordering is safe either way: the slots we just drained have
 		// no task behind them, so exactly one path reaches zero.
 		if err := s.enqueueKnowledgePostProcessTask(ctx, knowledge); err != nil {
 			return err
 		}
-		s.delMultimodalCounter(rctx, redisKey)
+		deleteMultimodalCounter(rctx, s.redisClient, redisKey, counterBatch)
 	}
 	return nil
-}
-
-// delMultimodalCounter removes the fan-in counter from Redis, or from the
-// in-process stand-in in Lite mode.
-func (s *knowledgeService) delMultimodalCounter(ctx context.Context, redisKey string) {
-	if s.redisClient == nil {
-		liteMultimodalDel(redisKey)
-		return
-	}
-	s.redisClient.Del(ctx, redisKey)
 }
 
 // multimodalSlotReleaseAttempts bounds the retry on the release decrement.
@@ -4834,16 +4807,13 @@ const multimodalSlotReleaseBackoff = 100 * time.Millisecond
 // decrMultimodalSlots decrements the fan-in counter by `by`, retrying transient
 // Redis failures, and returns the resulting count.
 func (s *knowledgeService) decrMultimodalSlots(
-	ctx context.Context, redisKey string, by int64,
-) (int64, error) {
-	if s.redisClient == nil {
-		return liteMultimodalDecrBy(redisKey, by), nil
-	}
+	ctx context.Context, redisKey, counterBatch string, by int64,
+) (int64, bool, error) {
 	var lastErr error
 	for attempt := 1; attempt <= multimodalSlotReleaseAttempts; attempt++ {
-		pending, err := s.redisClient.DecrBy(ctx, redisKey, by).Result()
+		pending, current, err := decrementMultimodalCounter(ctx, s.redisClient, redisKey, counterBatch, by)
 		if err == nil {
-			return pending, nil
+			return pending, current, nil
 		}
 		lastErr = err
 		if attempt == multimodalSlotReleaseAttempts {
@@ -4854,10 +4824,10 @@ func (s *knowledgeService) decrMultimodalSlots(
 		select {
 		case <-time.After(time.Duration(attempt) * multimodalSlotReleaseBackoff):
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return 0, false, ctx.Err()
 		}
 	}
-	return 0, lastErr
+	return 0, false, lastErr
 }
 
 // enqueueKnowledgePostProcessTask hands a knowledge to the post-process
