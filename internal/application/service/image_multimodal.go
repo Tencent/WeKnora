@@ -886,6 +886,7 @@ func (s *ImageMultimodalService) indexImageVector(
 		Content:         source.Content,
 		ChunkType:       types.ChunkTypeImageVector,
 		ParentChunkID:   payload.ChunkID,
+		SourceLocators:  payload.SourceLocators,
 		IsEnabled:       true,
 		Flags:           types.ChunkFlagRecommended,
 		ImageInfo:       source.ImageInfo,

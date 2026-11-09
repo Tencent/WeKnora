@@ -98,6 +98,42 @@ func (x *Index) LocatorsAt(pos int) types.SourceLocators {
 	return out
 }
 
+// NearestLocatorsAt returns the locators of the block containing rune offset
+// pos, falling back to the nearest preceding block and, failing that, to the
+// nearest following one.
+//
+// An image reference sits on its own line between two text blocks, so the
+// strict containment test in LocatorsAt finds nothing for it and the image
+// loses the page it was rendered from. LocatorsAt keeps that strict semantics
+// for callers that need exact coverage; image placement uses this instead.
+// The block that precedes an image is the text the image illustrates, which is
+// where a viewer should open the original.
+func (x *Index) NearestLocatorsAt(pos int) types.SourceLocators {
+	if out := x.LocatorsAt(pos); len(out) > 0 {
+		return out
+	}
+	if x == nil || len(x.blocks) == 0 || pos < 0 {
+		return nil
+	}
+	// Nearest block starting at or before pos: the text an image follows.
+	if i := sort.Search(len(x.blocks), func(k int) bool { return x.blocks[k].Start > pos }) - 1; i >= 0 {
+		return inheritedLocators(x.blocks[i])
+	}
+	// The image precedes all text: point at the first block instead.
+	return inheritedLocators(x.blocks[0])
+}
+
+// inheritedLocators copies the block's locator for an item that has no text of
+// its own. The page is exact, the region is not: BBox is dropped and Partial is
+// set so a viewer locates the page without pretending to know the position.
+func inheritedLocators(b types.SourceBlock) types.SourceLocators {
+	loc := b.Locator
+	loc.BBox = nil
+	loc.Quote = ""
+	loc.Partial = true
+	return types.SourceLocators{loc}
+}
+
 // AppendLocator appends loc to list, folding it into the last entry when both
 // point at the same place.
 func AppendLocator(list types.SourceLocators, loc types.SourceLocator) types.SourceLocators {
