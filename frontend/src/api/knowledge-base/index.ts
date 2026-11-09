@@ -635,6 +635,23 @@ export function reparseKnowledge(id: string, data?: { process_config?: Knowledge
 export function cancelKnowledgeParse(id: string) {
   return post(`/api/v1/knowledge/${id}/cancel-parse`);
 }
+/**
+ * Re-run image understanding (caption/OCR) for a document's already-stored
+ * images: no re-parse, no re-upload, the knowledge id never changes. Use for
+ * documents uploaded before the knowledge base enabled image processing.
+ */
+export function reprocessKnowledgeImages(id: string) {
+  return post(`/api/v1/knowledge/${id}/reprocess-images`);
+}
+
+/**
+ * Batch variant: offers documents an image reprocess run — every document
+ * of the KB when ids is empty, the named subset (the batch bar's selection)
+ * otherwise. The response accounts accepted vs skipped per reason.
+ */
+export function batchReprocessKnowledgeImages(kbId: string, ids?: string[]) {
+  return post(`/api/v1/knowledge-bases/${kbId}/reprocess-images`, ids?.length ? { ids } : {});
+}
 
 export function getKnowledgeSpans(id: string, attempt?: number) {
   const qs = attempt ? `?attempt=${attempt}` : '';

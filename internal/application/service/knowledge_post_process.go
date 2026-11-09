@@ -219,6 +219,18 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	willSpawnWiki := kb.IsWikiAutoGenerateEnabled() && len(textChunks) > 0
 	willSpawnAutoTag := kb.Type == types.KnowledgeBaseTypeDocument &&
 		kb.AutoTagConfig != nil && kb.AutoTagConfig.Enabled && len(textChunks) > 0
+	// An image-reprocess run hands off here with text chunks byte-identical
+	// to what enrichment already read: re-spawning summary / question / wiki /
+	// auto-tag would only duplicate content that is still current.
+	if payload.SkipEnrichment && (willSpawnSummary || willSpawnQuestion || willSpawnWiki || willSpawnAutoTag) {
+		logger.Infof(ctx,
+			"[KnowledgePostProcess] Skipping enrichment for %s: the run that finalized was image-only (trigger=%s).",
+			payload.KnowledgeID, types.ImageTaskTriggerReprocess)
+		willSpawnSummary = false
+		willSpawnQuestion = false
+		willSpawnWiki = false
+		willSpawnAutoTag = false
+	}
 	enqueuedAutoTag := false
 
 	// Question generation now fans out one subtask per plain text chunk
@@ -249,7 +261,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	questionBatchCount := (len(questionChunks) + questionGenChunkBatchSize - 1) / questionGenChunkBatchSize
 
 	graphChunkCount := 0
-	if eff.GraphEnabled {
+	if eff.GraphEnabled && !payload.SkipEnrichment {
 		graphChunkCount = len(graphChunks)
 	}
 	expectedSubtasks := 0

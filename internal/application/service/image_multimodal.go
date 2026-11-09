@@ -239,6 +239,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	}()
 	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
+		// Logged here because the asynq executor only surfaces the final
+		// attempt's error; without this line every retry fails invisibly
+		// (observed as "gallery stays empty" with no trace of why).
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": payload.KnowledgeID,
+			"kb_id":        payload.KnowledgeBaseID,
+			"image_url":    payload.ImageURL,
+		})
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
 	}
@@ -1128,6 +1136,10 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(
 		Language:        payload.Language,
 		// Lets post-process skip itself when a reparse superseded the run.
 		Attempt: payload.Attempt,
+		// An image-reprocess run changed nothing enrichment reads; its
+		// finalize must not re-spawn summary/question/wiki and duplicate
+		// content that is still current.
+		SkipEnrichment: payload.Trigger == types.ImageTaskTriggerReprocess,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
