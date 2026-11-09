@@ -89,11 +89,10 @@ func (h *Handler) UploadTemporaryDocument(c *gin.Context) {
 			}
 			options.ASRModelID = agent.Config.ASRModelID
 		}
-		// Resolve the parser engine from the agent's chat rules when the caller
-		// did not pass an explicit engine. Tenant-level rules remain the final
-		// fallback and are applied in the parse worker.
+		// Persist only an explicit agent rule. Tenant rules and the deployment
+		// default resolve in the parse worker.
 		if options.ParserEngine == "" || options.ParserEngine == "auto" {
-			if engine := agent.Config.ResolveChatParserEngine(ext); engine != "" {
+			if engine, ok := agent.Config.ExplicitChatParserEngine(ext); ok && engine != "" {
 				options.ParserEngine = engine
 			}
 		}

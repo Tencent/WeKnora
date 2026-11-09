@@ -52,8 +52,25 @@ func NewAttachmentProcessor(
 	}
 }
 
+// attachmentParserEngineResolver picks the engine per attachment: the agent's
+// chat rule, then the tenant's chat rules, then the deployment default.
+// tenantConfig is nil for shared agents, which must not use caller rules.
+func attachmentParserEngineResolver(
+	customAgent *types.CustomAgent, tenantConfig *types.ParserEngineConfig,
+) func(fileType string) string {
+	return func(fileType string) string {
+		if customAgent != nil {
+			if engine, ok := customAgent.Config.ExplicitChatParserEngine(fileType); ok && engine != "" {
+				return engine
+			}
+		}
+		return tenantConfig.ResolveChatParserEngine(fileType)
+	}
+}
+
 // ProcessAttachment validates, saves, and extracts content from a single uploaded file.
 // Content extraction is attempted for all supported types; errors are non-fatal (logged as warnings).
+// parserEngineFor picks the engine for this attachment; nil keeps the default routing.
 func (p *AttachmentProcessor) ProcessAttachment(
 	ctx context.Context,
 	data []byte,
@@ -61,6 +78,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	fileSize int64,
 	tenantID uint64,
 	asrModelID string, // optional; enables audio transcription when set
+	parserEngineFor func(fileType string) string,
 ) (*types.MessageAttachment, error) {
 	logger.Infof(ctx, "processing attachment: fileName=%s, fileSize=%d", secutils.SanitizeForLog(fileName), fileSize)
 
@@ -112,7 +130,9 @@ func (p *AttachmentProcessor) ProcessAttachment(
 			attachment.Content = fmt.Sprintf("<error><message>Failed to parse document</message><details>%v</details></error>", err)
 		}
 	} else {
-		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID); err != nil {
+		if err := p.processWithDocumentReader(
+			ctx, data, baseName, ext, attachment, tenantID, parserEngineFor,
+		); err != nil {
 			logger.Warnf(ctx, "DocumentReader failed: %v, keeping metadata only", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to read document</message><details>%v</details></error>", err)
 		}
@@ -237,6 +257,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	fileType string,
 	attachment *types.MessageAttachment,
 	tenantID uint64,
+	parserEngineFor func(fileType string) string,
 ) error {
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
@@ -245,10 +266,8 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	normalizedType := strings.TrimPrefix(fileType, ".")
 
 	parserEngine := ""
-	if v := ctx.Value(types.ChatParserEngineContextKey); v != nil {
-		if s, ok := v.(string); ok {
-			parserEngine = s
-		}
+	if parserEngineFor != nil {
+		parserEngine = parserEngineFor(normalizedType)
 	}
 	overrides := getParserEngineOverridesFromContext(ctx)
 
@@ -338,12 +357,11 @@ func isValidFileType(fileName string) bool {
 
 // getParserEngineOverridesFromContext returns parser engine overrides from tenant in context.
 func getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
-	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-			return tenant.ParserEngineConfig.ToOverridesMap()
-		}
+	var config *types.ParserEngineConfig
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok {
+		config = tenant.ParserEngineConfig
 	}
-	return nil
+	return types.ParserOverridesFor(config)
 }
 
 // DecodeBase64Attachment decodes a base64 attachment payload, stripping any data URI prefix.

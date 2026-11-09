@@ -176,7 +176,7 @@ func (s *temporaryDocumentService) supportsExtension(ctx context.Context, tenant
 	}
 	var overrides map[string]string
 	if tenant, err := s.tenantService.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
-		overrides = tenant.ParserEngineConfig.ToOverridesMap()
+		overrides = types.ParserOverridesFor(tenant.ParserEngineConfig)
 	}
 	engines, err := s.documentReader.ListEngines(ctx, overrides)
 	if err != nil {
