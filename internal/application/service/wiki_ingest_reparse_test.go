@@ -114,10 +114,14 @@ func TestWikiReparseSwapPreservesSourceAndDoesNotRequestRemovalNotice(t *testing
 		SlugTitleMany:               func(context.Context, []string) map[string]string { return nil },
 	}
 	updates := []SlugUpdate{
-		{Slug: page.Slug, Type: "retract", KnowledgeID: "kn-1",
-			RetractDocContent: "Previous certification requirements."},
-		{Slug: page.Slug, Type: types.WikiPageTypeEntity, KnowledgeID: "kn-1", SourceRef: "kn-1",
-			Item: extractedItem{Name: "PMP", Details: "Updated certification requirements."}},
+		{
+			Slug: page.Slug, Type: "retract", KnowledgeID: "kn-1",
+			RetractDocContent: "Previous certification requirements.",
+		},
+		{
+			Slug: page.Slug, Type: types.WikiPageTypeEntity, KnowledgeID: "kn-1", SourceRef: "kn-1",
+			Item: extractedItem{Name: "PMP", Details: "Updated certification requirements."},
+		},
 	}
 	changed, _, failed, deferred, err := svc.reduceSlugUpdates(
 		ctx, model, page.KnowledgeBaseID, page.Slug, updates, 1, batchCtx, nil)
