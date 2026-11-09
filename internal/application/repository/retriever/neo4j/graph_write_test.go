@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -47,9 +48,13 @@ type graphWriteTransaction struct {
 	failure       error
 	calls         int
 	consumed      int
+	queries       []string
+	payloads      []map[string]any
 }
 
-func (tx *graphWriteTransaction) Run(context.Context, string, map[string]any) (driver.Result, error) {
+func (tx *graphWriteTransaction) Run(_ context.Context, query string, params map[string]any) (driver.Result, error) {
+	tx.queries = append(tx.queries, query)
+	tx.payloads = append(tx.payloads, params)
 	tx.calls++
 	var err error
 	if tx.calls == tx.failStatement {
@@ -70,6 +75,83 @@ type graphWriteResult struct {
 func (r *graphWriteResult) Consume(context.Context) (driver.ResultSummary, error) {
 	r.tx.consumed++
 	return nil, r.err
+}
+
+func TestAddGraphUsesStableNodeAndRelationshipOrder(t *testing.T) {
+	graphA := &types.GraphData{
+		Node: []*types.GraphNode{{Name: "z"}, {Name: "a"}, nil},
+		Relation: []*types.GraphRelation{
+			{Node1: "z", Node2: "a", Type: "R"},
+			{Node1: "a", Node2: "z", Type: "R"},
+			nil,
+		},
+	}
+	graphB := &types.GraphData{
+		Node: []*types.GraphNode{{Name: "a"}, {Name: "z"}},
+		Relation: []*types.GraphRelation{
+			{Node1: "a", Node2: "z", Type: "R"},
+			{Node1: "z", Node2: "a", Type: "R"},
+		},
+	}
+	graphs := []*types.GraphData{graphA, graphB}
+	var firstNodes, firstRelations []string
+	for i, graph := range graphs {
+		t.Run(fmt.Sprintf("order-%d", i), func(t *testing.T) {
+			tx := &graphWriteTransaction{}
+			session := &graphWriteSession{tx: tx}
+			repo := NewNeo4jRepository(&graphWriteDriver{session: session})
+			require.NoError(t, repo.AddGraph(
+				context.Background(), types.NameSpace{Knowledge: "doc"}, []*types.GraphData{graph},
+			))
+			require.Len(t, tx.payloads, 2)
+			nodes, relations := nodeNames(tx.payloads[0]), relationKeys(tx.payloads[1])
+			assert.Equal(t, []string{"a", "z"}, nodes)
+			assert.Equal(t, []string{"a->z", "z->a"}, relations)
+			if firstNodes == nil {
+				firstNodes, firstRelations = nodes, relations
+			} else {
+				assert.Equal(t, firstNodes, nodes, "node write order must not depend on model output order")
+				assert.Equal(
+					t, firstRelations, relations,
+					"relationship write order must not depend on model output order",
+				)
+			}
+		})
+	}
+}
+
+func nodeNames(params map[string]any) []string {
+	rows := params["data"].([]map[string]interface{})
+	names := make([]string, len(rows))
+	for i, row := range rows {
+		names[i] = row["name"].(string)
+	}
+	return names
+}
+
+func relationKeys(params map[string]any) []string {
+	rows := params["data"].([]map[string]interface{})
+	keys := make([]string, len(rows))
+	for i, row := range rows {
+		keys[i] = row["source"].(string) + "->" + row["target"].(string)
+	}
+	return keys
+}
+
+func TestRelationshipQueryMergesEndpointsInCanonicalOrder(t *testing.T) {
+	tx := &graphWriteTransaction{}
+	session := &graphWriteSession{tx: tx}
+	repo := NewNeo4jRepository(&graphWriteDriver{session: session})
+	require.NoError(t, repo.AddGraph(context.Background(), types.NameSpace{Knowledge: "doc"}, []*types.GraphData{{
+		Relation: []*types.GraphRelation{{Node1: "z", Node2: "a", Type: "R"}},
+	}}))
+	require.Len(t, tx.queries, 2)
+	query := tx.queries[1]
+	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.source ELSE row.target END")
+	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.source_labels ELSE row.target_labels END")
+	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.target_labels ELSE row.source_labels END")
+	assert.Contains(t, query, "CASE WHEN row.source = first_name THEN first_node ELSE second_node END")
+	assert.Contains(t, query, "CASE WHEN row.target = first_name THEN first_node ELSE second_node END")
 }
 
 func TestAddGraphPreservesTransactionFailures(t *testing.T) {
