@@ -281,7 +281,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 31 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -309,6 +309,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
 | Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
+| Standard Compute | `standardcompute` | ✓ | | | ✓ | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -371,6 +372,31 @@ Runcrate 是提供 OpenAI 兼容推理 API 的 GPU 云，默认地址为 `https:
 
 思考强度通过 `reasoning_effort` 发送，关闭思考时发送 `none`；GLM-5.3、GLM-5.3 Flash、
 Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关闭」档位。
+
+### Standard Compute
+
+Standard Compute 是 OpenAI 兼容的模型路由服务，默认地址为 `https://api.stdcmpt.com/v1`，
+对话和视觉模型共用该地址，API Key 在用户设置中创建。默认对话模型 `StandardCompute` 为路由模型：
+每个请求发送到能处理该请求、且已启用的最便宜模型，并自动回退。也可以直接指定带厂商前缀的模型
+（如 `deepseek/deepseek-v4.1-flash`），模型列表见公开的 `GET /v1/models`。
+
+通过 `POST /api/v1/models` 创建对话模型时，请求体示例：
+
+```json
+{
+  "name": "StandardCompute",
+  "type": "KnowledgeQA",
+  "source": "remote",
+  "parameters": {
+    "provider": "standardcompute",
+    "base_url": "https://api.stdcmpt.com/v1",
+    "api_key": "your-standard-compute-api-key"
+  }
+}
+```
+
+思考强度通过 `reasoning_effort` 发送（minimal、low、medium、high）。本接入不提供向量、重排和语音模型，
+知识库需搭配其他厂商的向量模型。
 
 ## 设置空间默认模型 {#workspace-defaults}
 
