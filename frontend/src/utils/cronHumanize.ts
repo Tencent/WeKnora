@@ -6,16 +6,30 @@ const CRON_PRESET_MAP: Record<string, string> = {
   '0 0 * * * *': 'datasource.scheduleHuman.1h',
   '0 0 */6 * * *': 'datasource.scheduleHuman.6h',
   '0 0 */12 * * *': 'datasource.scheduleHuman.12h',
-  '0 0 2 * * *': 'datasource.scheduleHuman.24h',
 }
+
+// Read daily schedules that run at a fixed hour and minute in server time.
+export function parseDailySyncTime(cron: string): string | undefined {
+  const match = /^0\s+([0-5]?\d)\s+([01]?\d|2[0-3])\s+\*\s+\*\s+\*$/.exec(cron || '')
+  if (!match) return
+  const [, minute, hour] = match
+  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
+}
+
+// Custom hourly interval written by the "custom hours" picker.
+const CUSTOM_HOUR_RE = /^0 0 \*\/(\d{1,2}) \* \* \*$/
 
 /**
  * Convert a cron expression to a human-readable string.
  * Uses i18n translate function for known presets, raw expression otherwise.
  */
-export function humanizeCron(cron: string, t: (key: string) => string): string {
+export function humanizeCron(cron: string, t: (key: string, params?: Record<string, string | number>) => string): string {
   const key = CRON_PRESET_MAP[cron]
   if (key) return t(key)
+  const dailyTime = parseDailySyncTime(cron)
+  if (dailyTime) return t('datasource.scheduleHuman.24h', { time: dailyTime })
+  const m = CUSTOM_HOUR_RE.exec(cron || '')
+  if (m) return t('datasource.scheduleHours', { n: Number(m[1]) })
   return cron || '--'
 }
 

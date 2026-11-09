@@ -7,6 +7,7 @@ import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, h, nextTick, reactive, ref } from 'vue'
+import { parseDailySyncTime } from '../../../utils/cronHumanize'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./DataSourceEditorDialog.vue', import.meta.url))
@@ -31,6 +32,7 @@ async function fixture({
   settings = { projects: [{ project_id: '123', paths: [] }] },
   resources = [],
   dataSource = null,
+  syncSchedule = '0 0 */6 * * *',
 }: {
   configured?: boolean
   create?: boolean
@@ -38,6 +40,7 @@ async function fixture({
   settings?: Record<string, unknown>
   resources?: any[]
   dataSource?: any
+  syncSchedule?: string
 } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   const warnings: string[] = []
@@ -79,7 +82,7 @@ async function fixture({
       id: 'source-one', name: 'GitLab', type,
       credentials: { credentials: { configured } },
       config: { resource_ids: [], settings },
-      sync_schedule: '0 0 */6 * * *', sync_mode: 'incremental',
+      sync_schedule: syncSchedule, sync_mode: 'incremental',
       conflict_strategy: 'overwrite', sync_deletions: true,
     },
   })
@@ -91,6 +94,7 @@ async function fixture({
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning(msg: string) { warnings.push(msg) }, success() {}, error() {} } }
       if (name === '@/api/datasource') return api
+      if (name === '@/utils/cronHumanize') return { parseDailySyncTime }
       return { default: {} }
     },
     URL, console,
@@ -538,5 +542,67 @@ test('Confluence PAT replacement uses the credentials subresource and keeps the 
     const update = f.calls.find(c => c.method === 'updateDataSource')?.args[1]
     assert.deepEqual(update.config.credentials, {})
     assert.equal(update.config.settings.token, undefined)
+  } finally { f.close() }
+})
+
+test('custom sync hours serialize to a cron expression on submit', async () => {
+  const f = await fixture()
+  try {
+    f.vm.form.sync_schedule = 'custom'
+    f.vm.form.customHours = 3
+    await f.vm.handleSubmit()
+    const update = f.calls.find(call => call.method === 'updateDataSource')
+    assert.ok(update, 'updateDataSource should be called')
+    assert.equal(update.args[1].sync_schedule, '0 0 */3 * * *')
+  } finally { f.close() }
+})
+
+test('custom sync hours round-trip on edit rehydration', async () => {
+  const f = await fixture({
+    create: false,
+    dataSource: {
+      id: 'source-one', name: 'GitLab', type: 'gitlab',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [], settings: {} },
+      sync_schedule: '0 0 */3 * * *', sync_mode: 'incremental',
+      conflict_strategy: 'overwrite', sync_deletions: true,
+    },
+  })
+  try {
+    assert.equal(f.vm.form.sync_schedule, 'custom')
+    assert.equal(f.vm.form.customHours, 3)
+  } finally { f.close() }
+})
+
+test('editing a custom one-hour schedule restores the custom interval', async () => {
+  const f = await fixture({ syncSchedule: '0 0 */1 * * *' })
+  try {
+    assert.equal(f.vm.form.sync_schedule, 'custom')
+    assert.equal(f.vm.form.customHours, 1)
+    assert.equal(f.vm.serializeSyncSchedule(), '0 0 */1 * * *')
+  } finally { f.close() }
+})
+
+test('editing a legacy daily schedule keeps 02:00 until a new time is selected', async () => {
+  const f = await fixture({ syncSchedule: '0 0 2 * * *' })
+  try {
+    assert.equal(f.vm.form.sync_schedule, 'daily')
+    assert.equal(f.vm.dailySyncTime, '02:00')
+    assert.equal(f.vm.serializeSyncSchedule(), '0 0 2 * * *')
+
+    f.vm.dailySyncTime = '09:45'
+    await f.vm.handleSubmit()
+    const update = f.calls.find(call => call.method === 'updateDataSource')
+    assert.ok(update)
+    assert.equal(update.args[1].sync_schedule, '0 45 9 * * *')
+  } finally { f.close() }
+})
+
+test('editing a daily schedule preserves a minute previously configured through the API', async () => {
+  const f = await fixture({ syncSchedule: '0 7 0 * * *' })
+  try {
+    assert.equal(f.vm.form.sync_schedule, 'daily')
+    assert.equal(f.vm.dailySyncTime, '00:07')
+    assert.equal(f.vm.serializeSyncSchedule(), '0 7 0 * * *')
   } finally { f.close() }
 })
