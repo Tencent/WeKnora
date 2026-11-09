@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -28,15 +29,21 @@ func ValidateRow(modelName string, modelType types.ModelType, params *types.Mode
 			}
 		}
 	}
-	if _, err := Resolve(Ref{
+	resolved, err := Resolve(Ref{
 		Provider:  params.Provider,
 		Model:     modelName,
 		BaseURL:   params.BaseURL,
 		ModelType: modelType,
 		Extra:     params.ExtraConfig,
 		Override:  params.Spec,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("model parameters: %w", err)
+	}
+	missing := resolved.Vendor.MissingRequiredExtra(modelType, params.ExtraConfig, params.CustomHeaders)
+	if len(missing) > 0 {
+		return fmt.Errorf("model parameters: %s requires extra_config %s", resolved.Vendor.Name,
+			strings.Join(missing, ", "))
 	}
 	return nil
 }
