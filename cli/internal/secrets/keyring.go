@@ -3,6 +3,7 @@ package secrets
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -10,6 +11,16 @@ import (
 // keyringService is the namespace prefix passed to OS keyring backends.
 // Final keyring entries look like service="weknora:<profile>", account="<key>".
 const keyringService = "weknora"
+
+// keyringProbeTimeout bounds the availability probe. A backend that is present
+// but unusable — a locked GNOME keyring waiting for the unlock prompt, a DBus
+// socket that accepts the connection but never answers — blocks the probe
+// forever, and every command calls it before printing anything. The file store
+// is a working fallback, so waiting longer than this has no upside.
+const keyringProbeTimeout = 2 * time.Second
+
+// keyringGet is the probe seam; production reads through go-keyring.
+var keyringGet = keyring.Get
 
 // KeyringStore is the OS-backed credential store: macOS Keychain, GNOME
 // libsecret, KWallet, Windows Credential Manager. Falls back to ErrUnsupported
@@ -71,7 +82,22 @@ func NewBestEffortStore() (Store, error) {
 	k := NewKeyringStore()
 	// Use a sentinel profile/key that should not exist; we expect either
 	// ErrNotFound (backend works, just empty) or ErrUnsupported (no backend).
-	_, err := keyring.Get(k.service("__probe__"), "__probe__")
+	// The probe runs in its own goroutine so a stuck backend cannot hold the
+	// caller: the buffered channel lets that goroutine finish (and be collected)
+	// even after the timeout branch has returned.
+	probe := make(chan error, 1)
+	go func() {
+		_, err := keyringGet(k.service("__probe__"), "__probe__")
+		probe <- err
+	}()
+
+	var err error
+	select {
+	case err = <-probe:
+	case <-time.After(keyringProbeTimeout):
+		return NewFileStore()
+	}
+
 	if err == nil || errors.Is(err, keyring.ErrNotFound) {
 		return k, nil
 	}
