@@ -492,6 +492,17 @@ class MHTMLParser(BaseParser):
         image_aliases: Dict[str, str],
         base_location: str = "",
     ) -> None:
+        # HTML uses the first href-bearing base element, relative to the page.
+        base = soup.find("base", href=True)
+        if base is not None:
+            try:
+                resolved_base = urljoin(base_location, base["href"].strip())
+                if urlparse(resolved_base).scheme not in {"data", "javascript"}:
+                    base_location = resolved_base
+            except ValueError:
+                # An invalid base URL must not discard an otherwise usable page.
+                pass
+
         for img in soup.find_all("img"):
             src = (img.get("src") or "").strip()
             if not src:
