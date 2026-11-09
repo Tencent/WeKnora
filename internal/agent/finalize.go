@@ -79,7 +79,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			&chat.ChatOptions{
 				RuntimeNotice:       runtimeNotice,
 				Temperature:         e.config.Temperature,
-				MaxCompletionTokens: budget,
+				MaxCompletionTokens: e.wireCompletionBudget(budget),
 				PromptCacheKey:      sessionID,
 				ToolChoice:          "none",
 				Thinking:            new(false), // A nil preference can enable the provider's default thinking mode.

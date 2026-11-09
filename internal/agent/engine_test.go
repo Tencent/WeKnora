@@ -943,13 +943,15 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 }
 
 func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
-	t.Run("honors an explicit 4096 budget", func(t *testing.T) {
+	t.Run("honors an explicit 4096 budget under a known model limit", func(t *testing.T) {
 		mock := &mockChat{
 			responses: []mockResponse{
 				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
 			},
 		}
-		engine := newTestEngine(t, mock, withMaxCompletionTokens(4096))
+		engine := newTestEngine(t, mock, withMaxCompletionTokens(4096), func(cfg *types.AgentConfig) {
+			cfg.ModelMaxOutputTokens = 8192
+		})
 		_, err := engine.streamThinkingToEventBus(context.Background(),
 			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
 		require.NoError(t, err)
@@ -958,7 +960,9 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 		assert.Equal(t, 4096, mock.opts[0].MaxCompletionTokens)
 	})
 
-	t.Run("defaults when unset", func(t *testing.T) {
+	t.Run("no wire cap when the model output limit is unknown", func(t *testing.T) {
+		// The provider bounds output by the model; a fixed budget on an
+		// unknown model can exceed what it can emit and be rejected.
 		mock := &mockChat{
 			responses: []mockResponse{
 				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
@@ -970,10 +974,10 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, mock.opts, 1)
 		assert.Zero(t, mock.opts[0].MaxTokens)
-		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+		assert.Zero(t, mock.opts[0].MaxCompletionTokens)
 	})
 
-	t.Run("defaults to the write-file budget when a sandbox is bound", func(t *testing.T) {
+	t.Run("sandbox write budget also stays off the wire when the limit is unknown", func(t *testing.T) {
 		mock := &mockChat{
 			responses: []mockResponse{
 				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
@@ -987,16 +991,18 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, mock.opts, 1)
 		assert.Zero(t, mock.opts[0].MaxTokens)
-		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
+		assert.Zero(t, mock.opts[0].MaxCompletionTokens)
 	})
 
-	t.Run("preserves explicit higher budget", func(t *testing.T) {
+	t.Run("explicit budget under a known model limit is capped by the model", func(t *testing.T) {
 		mock := &mockChat{
 			responses: []mockResponse{
 				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
 			},
 		}
-		engine := newTestEngine(t, mock, withMaxCompletionTokens(64000))
+		engine := newTestEngine(t, mock, withMaxCompletionTokens(64000), func(cfg *types.AgentConfig) {
+			cfg.ModelMaxOutputTokens = 64000
+		})
 		_, err := engine.streamThinkingToEventBus(context.Background(),
 			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
 		require.NoError(t, err)
