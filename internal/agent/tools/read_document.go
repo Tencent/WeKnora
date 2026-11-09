@@ -28,9 +28,10 @@ var readDocumentTool = BaseTool{
 	description: "Read a document from the knowledge bases in scope: its metadata plus chunks in document order.\n" +
 		"id is a doc://N document handle (reads a page of chunks starting at offset) or a chunk://N chunk handle " +
 		"(reads that chunk; set context to include neighbouring chunks on each side).\n" +
-		"query finds passages inside the document: matching chunks come back with one chunk of context on each " +
-		"side. By default query is case-insensitive and split on whitespace: a chunk matches when it contains " +
-		"every word, in any order. Set regex=true to match query as one POSIX regular expression instead. " +
+		"query finds passages inside the document: matching chunks come back with up to one chunk of context on each " +
+		"side when it fits the output budget. By default query is case-insensitive and split on whitespace: " +
+		"a chunk matches when it contains every word, in any order. Set regex=true to match query as one " +
+		"POSIX regular expression instead. " +
 		"When a query result is truncated, repeat it with offset=next_offset to get the following matches.\n" +
 		"Page through long documents with offset and limit: offset counts chunks in reading order from 0 and is " +
 		"not a chunk index, so continue with the returned next_offset, and use id=chunk://N with context " +
@@ -425,10 +426,28 @@ func (t *ReadDocumentTool) readByQuery(
 	// rows in the middle; the header and tags take the remaining share.
 	budget := OutputBudget(ctx) * 4 / 5
 	used := 0
-	emit := func(row readChunkRow) {
+	// The model renders text in XML elements. Budget for the escaped
+	// strings, including markup-heavy content such as courseware tables.
+	escapedRunes := func(text string) int {
+		return utf8.RuneCountInString(xmlEscape(text))
+	}
+	chunkCost := func(chunk *types.Chunk, content string) int {
+		cost := escapedRunes(content) + readDocumentChunkOverhead
+		// FAQ answers render from metadata even with question-only indexing.
+		if chunk.ChunkType == types.ChunkTypeFAQ {
+			if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+				cost += escapedRunes(meta.StandardQuestion) + len("      <question></question>\n")
+				for _, answer := range meta.Answers {
+					cost += escapedRunes(answer) + len("      <answer></answer>\n")
+				}
+			}
+		}
+		return cost
+	}
+	emit := func(row readChunkRow, cost int) {
 		rows = append(rows, row)
 		emitted[row.chunk.ID] = true
-		used += utf8.RuneCountInString(row.chunk.Content) + readDocumentChunkOverhead
+		used += cost
 	}
 
 scan:
@@ -449,27 +468,34 @@ scan:
 				prev = c
 				continue
 			}
-			haystack := enrichChunkContent(c)
+			content := enrichChunkContent(c)
+			haystack := content
 			if q := faqStandardQuestion(c); q != "" {
 				haystack += "\n" + q
 			}
 			if matchesAll(matchers, haystack) {
-				if matchCount >= readDocumentMaxMatches || used >= budget {
+				snippet := extractChunkMatchSnippet(c, matchers)
+				cost := chunkCost(c, content) + escapedRunes(snippet)
+				// Keep the first match even if it is oversized so the cursor advances.
+				if matchCount >= readDocumentMaxMatches || (matchCount > 0 && used+cost > budget) {
 					truncated = true
 					nextOffset = position
 					break scan
 				}
 				matchCount++
 				if prev != nil && !emitted[prev.ID] {
-					emit(readChunkRow{chunk: prev, role: "context_before"})
+					prevCost := chunkCost(prev, enrichChunkContent(prev))
+					if used+prevCost+cost <= budget {
+						emit(readChunkRow{chunk: prev, role: "context_before"}, prevCost)
+					}
 				}
 				if !emitted[c.ID] {
-					emit(readChunkRow{chunk: c, role: "match", snippet: extractChunkMatchSnippet(c, matchers)})
+					emit(readChunkRow{chunk: c, role: "match", snippet: snippet}, cost)
 				}
 				forceNext = true
 			} else if forceNext {
-				if !emitted[c.ID] && used < budget {
-					emit(readChunkRow{chunk: c, role: "context_after"})
+				if cost := chunkCost(c, content); !emitted[c.ID] && used+cost <= budget {
+					emit(readChunkRow{chunk: c, role: "context_after"}, cost)
 				}
 				forceNext = false
 			}
