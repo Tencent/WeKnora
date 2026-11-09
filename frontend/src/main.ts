@@ -8,7 +8,7 @@ import "tdesign-vue-next/dist/tdesign.css";
 import "@/assets/theme/theme.css";
 import "@/assets/theme/tdesign-overrides.less";
 import "@/assets/dropdown-menu.less";
-import "@/components/css/chat-hljs-dark.less";
+import "@/components/css/chat-hljs-theme.less";
 import "@/components/css/assistant-page-fill.less";
 // vue-virtual-scroller ships its own tiny stylesheet — required for
 // RecycleScroller/DynamicScroller to size their viewport correctly.
