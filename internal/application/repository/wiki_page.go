@@ -95,7 +95,22 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 
 // Create inserts a new wiki page record
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
-	return r.db.WithContext(ctx).Create(page).Error
+	if types.WikiPageProgressCommitFromContext(ctx) != nil {
+		return r.withWikiPageProgressWrite(ctx, page, true, func(tx *gorm.DB) error {
+			return tx.Create(page).Error
+		})
+	}
+	originalSnapshot := page.ProgressSnapshot
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(page).Error; err != nil {
+			return err
+		}
+		return refreshWikiPageProgressSnapshot(tx, page)
+	})
+	if err != nil {
+		page.ProgressSnapshot = originalSnapshot
+	}
+	return err
 }
 
 // Update updates an existing wiki page record with optimistic locking.
@@ -119,7 +134,9 @@ func (r *wikiPageRepository) Update(ctx context.Context, page *types.WikiPage) e
 func (r *wikiPageRepository) UpdateWithRevision(
 	ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision,
 ) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	write := func(tx *gorm.DB) error {
+		// 进度路径已先锁定回执和页面；在同一事务内再核对本次模型读取的快照。
+		// 普通写入仍由外层短事务保护，不能让快照检查与正文保存分离。
 		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
 			return err
 		}
@@ -135,7 +152,11 @@ func (r *wikiPageRepository) UpdateWithRevision(
 			}
 		}
 		return updateWikiPageRow(tx, page)
-	})
+	}
+	if types.WikiPageProgressCommitFromContext(ctx) != nil {
+		return r.withWikiPageProgressWrite(ctx, page, false, write)
+	}
+	return r.db.WithContext(ctx).Transaction(write)
 }
 
 // updateWikiPageRow performs the versioned page write on the given handle
@@ -297,19 +318,64 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 
 // UpdateMeta 保存来源、状态和目录等元数据，不修改反链或版本。
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
-	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
-		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
-				return err
-			}
-			return updateWikiPageMeta(tx, page)
-		})
+	write := func(tx *gorm.DB) error {
+		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+			return err
+		}
+		return updateWikiPageMetaRow(tx, page)
 	}
-	return updateWikiPageMeta(r.db.WithContext(ctx), page)
+	if types.WikiPageProgressCommitFromContext(ctx) != nil {
+		// 只复用持久进度的事务，不另起事务或改变回执、页面的锁顺序。
+		return r.withWikiPageProgressWrite(ctx, page, false, write)
+	}
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		return r.db.WithContext(ctx).Transaction(write)
+	}
+	return updateWikiPageMetaRow(r.db.WithContext(ctx), page)
 }
 
-// updateWikiPageMeta 保留主线的窄字段写入；普通保存与快照保护的保存都不覆盖反链。
-func updateWikiPageMeta(db *gorm.DB, page *types.WikiPage) error {
+// PublishDraftPage 只发布身份仍匹配的草稿，不能把调用方的旧元数据快照写回。
+// 已发布或归档的存活页不再更新；回执版本过期时跳过，删除、替换或范围不符时返回未找到。
+func (r *wikiPageRepository) PublishDraftPage(
+	ctx context.Context, tenantID uint64, kbID, pageID, slug string,
+) error {
+	publication, guarded := types.WikiPagePublicationFromContext(ctx)
+	if guarded && (publication.TenantID != tenantID || publication.KnowledgeBaseID != kbID ||
+		publication.PageID != pageID || publication.Slug != slug || publication.PageVersion <= 0) {
+		return errors.New("invalid wiki page publication: identity or receipt version does not match")
+	}
+	identity := "tenant_id = ? AND knowledge_base_id = ? AND id = ? AND slug = ?"
+	query := r.db.WithContext(ctx).Model(&types.WikiPage{}).
+		Where(identity, tenantID, kbID, pageID, slug).
+		Where("status = ?", types.WikiPageStatusDraft)
+	if guarded {
+		// 版本由已提交回执授权；必须与状态在同一条 SQL 中比较，不能发布读取后保存的新草稿。
+		query = query.Where("version = ?", publication.PageVersion)
+	}
+	result := query.Updates(map[string]interface{}{
+		"status":     types.WikiPageStatusPublished,
+		"updated_at": time.Now(),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	// 保留相同身份和软删除条件，避免把已删除的旧页或同路径新页当作发布成功。
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
+		Where(identity, tenantID, kbID, pageID, slug).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrWikiPageNotFound
+	}
+	return nil
+}
+
+// updateWikiPageMetaRow 保持原有元数据写入语义，同时允许与持久进度共用一个事务。
+func updateWikiPageMetaRow(db *gorm.DB, page *types.WikiPage) error {
 	// 反链由专用原子操作维护，避免这份元数据快照覆盖并发添加的链接。
 	result := db.
 		Model(page).
@@ -347,6 +413,11 @@ func (r *wikiPageRepository) GetByID(ctx context.Context, id string) (*types.Wik
 		}
 		return nil, err
 	}
+	snapshot, err := types.WikiPageProgressSnapshot(&page)
+	if err != nil {
+		return nil, err
+	}
+	page.ProgressSnapshot = snapshot
 	return &page, nil
 }
 
@@ -361,6 +432,11 @@ func (r *wikiPageRepository) GetBySlug(ctx context.Context, kbID string, slug st
 		}
 		return nil, err
 	}
+	snapshot, err := types.WikiPageProgressSnapshot(&page)
+	if err != nil {
+		return nil, err
+	}
+	page.ProgressSnapshot = snapshot
 	return &page, nil
 }
 

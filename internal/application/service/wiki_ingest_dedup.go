@@ -296,6 +296,11 @@ func (s *wikiIngestService) claimWikiIdentitySlug(
 		return proposedSlug
 	}
 
+	if batchCtx != nil {
+		if frozen := batchCtx.frozenIdentityClaims[pageType+"\x00"+identity]; frozen != "" {
+			return frozen
+		}
+	}
 	claim := proposedSlug
 	usedRedis := false
 	claimKey := wikiIdentityClaimPrefix + kbID + ":" + pageType + ":" + identity

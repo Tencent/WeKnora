@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS task_pending_ops (
     payload     TEXT NOT NULL DEFAULT '{}',
     fail_count  INTEGER NOT NULL DEFAULT 0,
     enqueued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    claimed_at  DATETIME
+    claimed_at  DATETIME,
+    claim_epoch BIGINT NOT NULL DEFAULT 0
 );
 `
 
