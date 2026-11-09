@@ -116,3 +116,57 @@ test('valid leap days and times adjacent to transitions retain the requested wal
     assert.equal(zonedWallClock(iso, zone), local)
   }
 })
+
+test('editing an existing one-shot schedule preserves its exact instant', () => {
+  for (const trigger of [
+    { type: 'once' as const, at: '2027-04-10T08:15:42.123Z', timezone: 'UTC' },
+    { type: 'once' as const, at: '2027-04-10T16:15:42+08:00', timezone: 'Asia/Shanghai' },
+    // Both occurrences of 01:30 must survive the autumn clock change.
+    { type: 'once' as const, at: '2027-11-07T05:30:00Z', timezone: 'America/New_York' },
+    { type: 'once' as const, at: '2027-11-07T06:30:00Z', timezone: 'America/New_York' },
+    { type: 'once' as const, at: '2027-10-31T00:30:00Z', timezone: 'Europe/Berlin' },
+    { type: 'once' as const, at: '2027-10-31T01:30:00Z', timezone: 'Europe/Berlin' },
+  ]) {
+    const form = scheduleFormFromTrigger(trigger)
+    assert.deepEqual(triggerFromScheduleForm(form, trigger.timezone), trigger, trigger.at)
+  }
+})
+
+test('changing a one-shot date or timezone still changes its instant', () => {
+  const trigger = { type: 'once' as const, at: '2027-04-10T08:15:42.123Z', timezone: 'UTC' }
+  const form = scheduleFormFromTrigger(trigger)
+  assert.deepEqual(triggerFromScheduleForm({ ...form, at: '2027-04-11 09:20' }, 'UTC'), {
+    type: 'once', at: '2027-04-11T09:20:00.000Z', timezone: 'UTC',
+  })
+  assert.deepEqual(triggerFromScheduleForm(form, 'Asia/Shanghai'), {
+    type: 'once', at: '2027-04-10T00:15:00.000Z', timezone: 'Asia/Shanghai',
+  })
+})
+
+
+test('resetting the reused editor form clears the previous one-shot instant', () => {
+  const form = scheduleFormFromTrigger({
+    type: 'once', at: '2027-04-10T08:15:42.123Z', timezone: 'UTC',
+  })
+  // AutomationEditor reuses a reactive form through Object.assign.
+  Object.assign(form, defaultScheduleForm())
+  form.kind = 'once'
+  form.at = '2027-04-10 08:15'
+  assert.equal(triggerFromScheduleForm(form, 'UTC')?.at, '2027-04-10T08:15:00.000Z')
+})
+
+test('one-shot schedules without an explicit timezone preserve their UTC instant', () => {
+  const form = scheduleFormFromTrigger({ type: 'once', at: '2027-04-10T08:15:42.123Z' })
+  assert.deepEqual(triggerFromScheduleForm(form, ''), {
+    type: 'once', at: '2027-04-10T08:15:42.123Z', timezone: 'UTC',
+  })
+})
+
+test('editing a preserved one-shot into invalid or skipped wall time still fails', () => {
+  const form = scheduleFormFromTrigger({
+    type: 'once', at: '2027-03-14T06:30:42.123Z', timezone: 'America/New_York',
+  })
+  for (const at of ['', 'invalid', '2027-02-29 01:30', '2027-03-14 02:30']) {
+    assert.equal(triggerFromScheduleForm({ ...form, at }, 'America/New_York'), null, at)
+  }
+})
