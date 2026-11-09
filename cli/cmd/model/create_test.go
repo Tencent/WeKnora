@@ -20,6 +20,8 @@ type fakeCreateSvc struct {
 	resp      *sdk.Model
 	err       error
 	providers []sdk.ModelProvider // returned by ListModelProviders; nil → default catalog
+	kv        map[string]json.RawMessage
+	kvPuts    []json.RawMessage
 }
 
 func (f *fakeCreateSvc) CreateModel(_ context.Context, req *sdk.CreateModelRequest) (*sdk.Model, error) {
@@ -28,6 +30,26 @@ func (f *fakeCreateSvc) CreateModel(_ context.Context, req *sdk.CreateModelReque
 		f.resp = &sdk.Model{ID: "model_new", Name: req.Name, Type: req.Type, Source: req.Source}
 	}
 	return f.resp, f.err
+}
+
+func (f *fakeCreateSvc) GetTenantKV(_ context.Context, key string) (json.RawMessage, error) {
+	if raw, ok := f.kv[key]; ok {
+		return raw, nil
+	}
+	return json.RawMessage("null"), nil
+}
+
+func (f *fakeCreateSvc) UpdateTenantKV(_ context.Context, key string, value any) (json.RawMessage, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if f.kv == nil {
+		f.kv = map[string]json.RawMessage{}
+	}
+	f.kv[key] = raw
+	f.kvPuts = append(f.kvPuts, raw)
+	return raw, nil
 }
 
 func (f *fakeCreateSvc) ListModelProviders(_ context.Context, _ string) ([]sdk.ModelProvider, error) {
@@ -47,7 +69,7 @@ func TestModelCreate_BuildsRequest(t *testing.T) {
 	svc := &fakeCreateSvc{}
 	opts := &CreateOptions{
 		Name: "nomic-embed-text", Type: "Embedding", Source: "local",
-		BaseURL: "http://localhost:11434", Dimension: 768, Default: true,
+		BaseURL: "http://localhost:11434", Dimension: 768,
 	}
 	require.NoError(t, runCreate(context.Background(), opts,
 		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, map[string]any{"provider": "ollama"}))
@@ -56,7 +78,8 @@ func TestModelCreate_BuildsRequest(t *testing.T) {
 	assert.Equal(t, "nomic-embed-text", svc.got.Name)
 	assert.Equal(t, sdk.ModelTypeEmbedding, svc.got.Type)
 	assert.Equal(t, sdk.ModelSource("local"), svc.got.Source)
-	assert.True(t, svc.got.IsDefault)
+	assert.False(t, svc.got.IsDefault, "the model body carries no writable default")
+	assert.Empty(t, svc.kvPuts, "without --default the workspace settings stay untouched")
 	assert.Equal(t, "http://localhost:11434", svc.got.Parameters["base_url"])
 	assert.Equal(t, "ollama", svc.got.Parameters["provider"])
 	emb, ok := svc.got.Parameters["embedding_parameters"].(map[string]any)
@@ -114,6 +137,71 @@ func TestModelCreate_RemoteProviderValidatedAndBaseURLDefaulted(t *testing.T) {
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, cmdutil.CodeInputInvalidArgument, ce.Code)
 	assert.Nil(t, svc3.got, "must not create a model when --provider is unknown")
+}
+
+// TestModelCreate_DefaultUpdatesWorkspaceSettings: --default used to be sent
+// as is_default, which the server ignores. It must now update the workspace
+// default settings that model list responses project, preserving other slots.
+func TestModelCreate_DefaultUpdatesWorkspaceSettings(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{kv: map[string]json.RawMessage{
+		workspaceDefaultSettingsKey: json.RawMessage(
+			`{"chat_model_id":"chat-1","utility_model_id":"utility-1","embedding_model_id":"emb-old"}`),
+	}}
+	opts := &CreateOptions{
+		Name: "text-embedding-3-small", Type: "Embedding", Source: "remote",
+		Provider: "openai", Default: true,
+	}
+	require.NoError(t, runCreate(context.Background(), opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, nil))
+
+	require.Len(t, svc.kvPuts, 1, "one workspace default write")
+	var settings tenantDefaultSettings
+	require.NoError(t, json.Unmarshal(svc.kvPuts[0], &settings))
+	assert.Equal(t, "model_new", settings.EmbeddingModelID)
+	assert.Equal(t, "chat-1", settings.ChatModelID, "other slots are preserved")
+	assert.Equal(t, "utility-1", settings.UtilityModelID, "other slots are preserved")
+	assert.False(t, svc.got.IsDefault, "the ignored model-body field is not sent")
+	assert.True(t, svc.resp.IsDefault, "the response reflects the workspace default")
+}
+
+// TestModelCreate_DefaultWithoutExistingSettings: an empty GET body still
+// produces a complete settings object; unset slots mean deployment default.
+func TestModelCreate_DefaultWithoutExistingSettings(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{}
+	opts := &CreateOptions{
+		Name: "qwen", Type: string(sdk.ModelTypeKnowledgeQA), Source: "remote",
+		Provider: "openai", Default: true,
+	}
+	require.NoError(t, runCreate(context.Background(), opts,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, nil))
+
+	require.Len(t, svc.kvPuts, 1)
+	var settings tenantDefaultSettings
+	require.NoError(t, json.Unmarshal(svc.kvPuts[0], &settings))
+	assert.Equal(t, "model_new", settings.ChatModelID, "chat maps to KnowledgeQA")
+	assert.Empty(t, settings.EmbeddingModelID)
+}
+
+// TestModelCreate_DefaultCannotTargetADownloadingLocalModel: the workspace
+// default endpoint rejects a non-active model, so create refuses up front
+// rather than creating a model and silently dropping --default.
+func TestModelCreate_DefaultCannotTargetADownloadingLocalModel(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	opts := &CreateOptions{Name: "nomic-embed-text", Type: "Embedding", Source: "local", Default: true}
+	err := validateDefaultTarget(opts)
+	var ce *cmdutil.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, ce.Code)
+	assert.Contains(t, ce.Message, "Ollama pull")
+
+	svc := &fakeCreateSvc{}
+	require.NoError(t, validateDefaultTarget(&CreateOptions{Source: "local"}))
+	require.NoError(t, runCreate(context.Background(),
+		&CreateOptions{Name: "nomic-embed-text", Type: "Embedding", Source: "local"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, nil))
+	assert.Empty(t, svc.kvPuts, "a plain local create never touches workspace defaults")
 }
 
 func TestModelCreate_APIKeyStdinEmpty(t *testing.T) {
