@@ -55,7 +55,9 @@ func (c *Client) requestURL(stream bool) string {
 		if stream {
 			method = methodStreamGenerate
 		}
-		ep.URL = fmt.Sprintf("%s/models/%s:%s", base, ep.Model, method)
+		// models.list returns fully qualified names; callers may also use bare IDs.
+		model := strings.TrimPrefix(ep.Model, "models/")
+		ep.URL = fmt.Sprintf("%s/models/%s:%s", base, model, method)
 	} else if stream && strings.HasSuffix(ep.URL, ":"+methodGenerate) {
 		// A vendor-supplied full URL names the non-streaming method; adding
 		// alt=sse to it would still return one buffered JSON document.
