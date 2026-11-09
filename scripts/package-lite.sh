@@ -8,6 +8,7 @@ set -euo pipefail
 #   ./scripts/package-lite.sh              # 自动检测版本
 #   ./scripts/package-lite.sh v0.2.0       # 指定版本号
 #   SKIP_FRONTEND=1 ./scripts/package-lite.sh  # 跳过前端构建（使用已有 web/）
+#   ALLOW_HEADLESS_PACKAGE=1 permits an explicit headless release.
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -23,8 +24,14 @@ else
     VERSION="dev"
 fi
 
+# VERSION is used in directory names and rm -rf targets: accept a basename only.
+if [[ ! "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$ ]] || [[ "$VERSION" == *..* ]]; then
+    echo "Invalid package version (safe basename required)" >&2
+    exit 1
+fi
 GOOS=$(go env GOOS)
 GOARCH=$(go env GOARCH)
+[[ "$GOOS" =~ ^[a-z0-9]+$ && "$GOARCH" =~ ^[a-z0-9]+$ ]] || { echo "Invalid Go platform" >&2; exit 1; }
 ARCHIVE="WeKnora-lite_${VERSION}_${GOOS}_${GOARCH}"
 DIST_DIR="dist/${ARCHIVE}"
 
@@ -47,7 +54,11 @@ if [ "${SKIP_FRONTEND:-}" != "1" ]; then
 fi
 
 if [ ! -f web/index.html ]; then
-    echo "WARNING: web/index.html not found — package will not include frontend"
+    if [[ "${ALLOW_HEADLESS_PACKAGE:-0}" != "1" ]]; then
+        echo "Required frontend web/index.html missing; ALLOW_HEADLESS_PACKAGE=1 explicitly allows a headless package" >&2
+        exit 1
+    fi
+    echo "Headless package explicitly allowed"
 fi
 
 # ── Step 2: Build Go binary ──
@@ -87,7 +98,7 @@ fi
 
 # ── Step 4: Create tarball ──
 echo ">> Creating tarball..."
-(cd dist && tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}")
+(cd dist && COPYFILE_DISABLE=1 tar --no-xattrs -czf "${ARCHIVE}.tar.gz" "${ARCHIVE}")
 (cd dist && shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256")
 
 echo ""
