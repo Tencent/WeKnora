@@ -369,7 +369,9 @@ const sessionListCanScroll = ref(false);
 const visibleChannelBuckets = computed(() =>
     bucketOrder.value
         .map((key) => sessionBuckets.value[key])
-        .filter((bucket): bucket is SidebarSessionBucket => !!bucket && isChannelBucket(bucket) && bucketVisible(bucket)),
+        .filter((bucket): bucket is SidebarSessionBucket =>
+            !!bucket && isChannelBucket(bucket) && bucketVisible(bucket, activeSessionBucketKey.value),
+        ),
 );
 const showSessionSourceFilter = computed(() =>
     shouldShowSessionSourceFilter(visibleChannelBuckets.value.length),
