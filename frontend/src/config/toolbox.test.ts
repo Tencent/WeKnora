@@ -16,7 +16,7 @@ const access = (role: string | null, unsupported: string[] = [], superuser = fal
 })
 
 test('toolbox contains only the agreed tools; infrastructure and secrets stay in settings', () => {
-  assert.deepEqual(TOOLBOX_ITEMS.map((item) => item.key), ['skills', 'mcp', 'browserconnection'])
+  assert.deepEqual(TOOLBOX_ITEMS.map((item) => item.key), ['plugins', 'skills', 'mcp', 'browserconnection'])
   const lookup = (key: string) => key.split('.').reduce<any>((node, part) => node?.[part], zhCN)
   for (const item of TOOLBOX_ITEMS) {
     for (const key of [item.title, item.description, 'help' in item ? item.help : undefined,
@@ -31,11 +31,18 @@ test('toolbox contains only the agreed tools; infrastructure and secrets stay in
 
 test('toolbox preserves role and deployment gates, including workspace switches', () => {
   for (const role of ['viewer', 'contributor']) {
+    assert.equal(canAccessToolboxSection('plugins', access(role)), true)
     assert.equal(canAccessToolboxSection('skills', access(role)), false)
     assert.equal(canAccessToolboxSection('mcp', access(role)), false)
     assert.equal(canAccessToolboxSection('browserconnection', access(role)), true)
   }
+  const plugins = TOOLBOX_ITEMS.find((item) => item.key === 'plugins')
+  assert.equal(plugins && 'actionMinRole' in plugins && plugins.actionMinRole, 'admin')
   assert.equal(canAccessToolboxSection('skills', access('admin')), true)
+  assert.equal(canAccessToolboxSection('plugins', access('admin')), true)
+  // A deployment without sandboxes still installs MCP-only plugins.
+  assert.equal(canAccessToolboxSection('plugins', access('owner', ['settings.sandbox'])), true)
+  assert.equal(canAccessToolboxSection('plugins', access('owner', ['settings.mcp'])), false)
   assert.equal(canAccessToolboxSection('skills', access('owner', ['settings.sandbox'])), false)
   assert.equal(canAccessToolboxSection('mcp', access('owner', ['settings.mcp'])), false)
   assert.equal(canAccessToolboxSection('mcp', access(null)), false)

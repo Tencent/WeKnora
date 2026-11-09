@@ -74,6 +74,9 @@ export const SETTINGS_SECTION_CAPABILITY: Partial<Record<string, DeploymentCapab
   // Saved logins are filled into the remote sandbox browser; Lite has none.
   credentialvault: 'settings.sandbox.remote',
   mcp: 'settings.mcp',
+  // Plugins without skills still work on a deployment with no sandbox, so
+  // only the MCP gate applies; sandbox-requiring plugins are refused on install.
+  plugins: 'settings.mcp',
 }
 
 /**

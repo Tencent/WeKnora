@@ -397,7 +397,7 @@ func (s *sweepCountingTree) Sweep() error { s.sweeps++; return nil }
 func TestStartSweepsTheLocalSkillTree(t *testing.T) {
 	tree := &sweepCountingTree{fakeHostSkillTree: newFakeHostSkillTree(t.TempDir())}
 	svc := NewTenantSkillService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		liteHost(tree, &fakeHostSkillInstaller{}))
+		liteHost(tree, &fakeHostSkillInstaller{}), nil)
 	require.NoError(t, svc.Start(context.Background()))
 	defer svc.Stop()
 	require.Equal(t, 1, tree.sweeps)
