@@ -24,7 +24,7 @@ func TestHTMLEmbeddedTableWiring_ProducesChunkableOutput(t *testing.T) {
 			`<td colspan="1">结果</td></tr>` +
 			`<tr><td>拉伸强度</td><td>合格</td></tr></table>`,
 		"",
-		// colspan=6: a real merge -> cannot be GFM, but must stay splittable.
+		// colspan=6: a real merge must be expanded into a rectangular GFM table.
 		`<table><tr><td colspan="6" style="text-align:center">汇总</td></tr>` +
 			`<tr><td colspan="6">备注</td></tr></table>`,
 		"",
@@ -39,19 +39,13 @@ func TestHTMLEmbeddedTableWiring_ProducesChunkableOutput(t *testing.T) {
 	if !strings.Contains(got, "|") || !strings.Contains(got, "拉伸强度") {
 		t.Fatalf("expected colspan=1 table to become GFM, got:\n%s", got)
 	}
-	if !strings.Contains(got, "<table") {
-		t.Fatalf("expected colspan=6 table to remain HTML, got:\n%s", got)
+	if strings.Contains(got, "<table") {
+		t.Fatalf("expected colspan=6 table to be expanded into GFM, got:\n%s", got)
 	}
-	for i := 0; ; {
-		idx := strings.Index(got[i:], "<tr")
-		if idx < 0 {
-			break
+	for _, want := range []string{"汇总", "备注"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected expanded GFM table to retain %q, got:\n%s", want, got)
 		}
-		abs := i + idx
-		if abs == 0 || got[abs-1] != '\n' {
-			t.Fatalf("remaining <tr> at offset %d is not preceded by a newline:\n%s", abs, got)
-		}
-		i = abs + 1
 	}
 }
 
