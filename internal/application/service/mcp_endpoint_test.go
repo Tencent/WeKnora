@@ -131,6 +131,65 @@ func TestMCPEndpointCreateValidation(t *testing.T) {
 	}
 }
 
+func TestMCPEndpointNameLengthIsCountedInCharacters(t *testing.T) {
+	svc := newMCPEndpointServiceForTest(newStubMCPEndpointRepo(), nil)
+	tools := types.StringArray{types.MCPEndpointToolSearchKnowledge}
+
+	// 100 characters but 300 bytes: inside the varchar(255) column, so it has
+	// to be accepted. A byte-counted limit rejected it at 85 characters.
+	wide := strings.Repeat("知", 100)
+	if _, _, err := svc.Create(context.Background(), 1, &types.MCPEndpoint{
+		Name: wide, Tools: tools,
+	}); err != nil {
+		t.Fatalf("100-character name must be accepted: %v", err)
+	}
+
+	// ASCII is unaffected: 255 bytes is 255 characters.
+	if _, _, err := svc.Create(context.Background(), 1, &types.MCPEndpoint{
+		Name: strings.Repeat("a", mcpEndpointMaxNameLen), Tools: tools,
+	}); err != nil {
+		t.Fatalf("255-character ASCII name must be accepted: %v", err)
+	}
+
+	tooLong := strings.Repeat("知", mcpEndpointMaxNameLen+1)
+	if _, _, err := svc.Create(context.Background(), 1, &types.MCPEndpoint{
+		Name: tooLong, Tools: tools,
+	}); !isMCPEndpointBadRequest(err) {
+		t.Fatalf("256-character name must be a bad request, got %v", err)
+	}
+}
+
+func TestMCPEndpointUpdateAcceptsAMultibyteName(t *testing.T) {
+	svc := newMCPEndpointServiceForTest(newStubMCPEndpointRepo(), nil)
+	ep, _, err := svc.Create(context.Background(), 1, &types.MCPEndpoint{
+		Name: "endpoint", Tools: types.StringArray{types.MCPEndpointToolSearchKnowledge},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	wide := strings.Repeat("知", 100)
+	updated, err := svc.Update(context.Background(), 1, ep.ID, interfaces.MCPEndpointUpdate{Name: &wide})
+	if err != nil {
+		t.Fatalf("rename to 100 characters must be accepted: %v", err)
+	}
+	if updated.Name != wide {
+		t.Fatalf("rename not applied: %q", updated.Name)
+	}
+
+	tooLong := strings.Repeat("知", mcpEndpointMaxNameLen+1)
+	if _, err := svc.Update(context.Background(), 1, ep.ID, interfaces.MCPEndpointUpdate{
+		Name: &tooLong,
+	}); !isMCPEndpointBadRequest(err) {
+		t.Fatalf("rename to 256 characters must be a bad request, got %v", err)
+	}
+}
+
+func isMCPEndpointBadRequest(err error) bool {
+	appErr, ok := apperrors.IsAppError(err)
+	return ok && appErr.Code == apperrors.ErrBadRequest
+}
+
 func TestMCPEndpointDefaultAgentMustBelongToTenant(t *testing.T) {
 	foreign := &types.CustomAgent{ID: "agent-1", TenantID: 99}
 	svc := newMCPEndpointServiceForTest(newStubMCPEndpointRepo(), foreign)
