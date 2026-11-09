@@ -95,7 +95,7 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 			ds.Config = blob
 		}
 	}
-	if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+	if err := s.validateDataSourceConfig(ctx, ds, ds.Status == types.DataSourceStatusPaused); err != nil {
 		return nil, err
 	}
 
@@ -231,8 +231,20 @@ func (s *DataSourceService) updateDataSource(
 		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
 	}
 	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
-	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
-		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+	// A paused DingTalk draft may have passed discovery-only validation.
+	connectorType := ds.Type
+	if connectorType == "" {
+		connectorType = existing.Type
+	}
+	activatingDingTalk := connectorType == types.ConnectorTypeDingTalk &&
+		existing.Status == types.DataSourceStatusPaused && ds.Status == types.DataSourceStatusActive
+	if activatingDingTalk || hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
+		candidate := *ds
+		candidate.Type = connectorType
+		if len(candidate.Config) == 0 {
+			candidate.Config = existing.Config
+		}
+		if err := s.validateDataSourceConfig(ctx, &candidate, false); err != nil {
 			return nil, err
 		}
 	}
@@ -300,7 +312,7 @@ func (s *DataSourceService) UpdateDataSourceCredentials(
 	// Run live validation now that the credentials are in place — surfaces
 	// "wrong token" feedback immediately to the user instead of waiting for
 	// the next scheduled sync.
-	if err := s.validateDataSourceConfig(ctx, existing); err != nil {
+	if err := s.validateDataSourceConfig(ctx, existing, false); err != nil {
 		return nil, err
 	}
 	if err := s.dsRepo.Update(ctx, existing); err != nil {
@@ -1403,16 +1415,12 @@ func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorTy
 		Type:        connectorType,
 		Credentials: credentials,
 	}
-	if err := connector.Validate(ctx, config); err != nil {
-		return err
-	}
-
-	return nil
+	return datasource.ValidateCredentials(ctx, connector, config)
 }
 
 // Helper functions
 
-func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *types.DataSource) error {
+func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *types.DataSource, draft bool) error {
 	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
 		return err
@@ -1423,6 +1431,9 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 		return datasource.ErrInvalidConfig
 	}
 
+	if draft && config != nil && len(config.ResourceIDs) == 0 {
+		return datasource.ValidateCredentials(ctx, connector, config)
+	}
 	return connector.Validate(ctx, config)
 }
 
