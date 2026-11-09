@@ -544,7 +544,12 @@ func (c *minerUV1Client) parseTaskWithLayout(
 // createTask opens a task-mode session (MinerU >= 4.1): one POST creates the
 // task with inline file metadata, then the bytes go up on the task's own
 // upload slot.
-func (c *minerUV1Client) createTask(ctx context.Context, content []byte, fileName string, opts minerUV1ParseOptions) (*minerUV1Task, error) {
+func (c *minerUV1Client) createTask(
+	ctx context.Context,
+	content []byte,
+	fileName string,
+	opts minerUV1ParseOptions,
+) (*minerUV1Task, error) {
 	payload := map[string]interface{}{
 		"files": []map[string]interface{}{
 			{"file_name": fileName, "bytes": len(content)},
