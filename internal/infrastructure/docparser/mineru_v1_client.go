@@ -285,7 +285,12 @@ func (c *minerUV1Client) ParseWithLayout(
 // task with inline file metadata, then the bytes go up on the task's own
 // upload slot. MinerU 4.0 answered 404 here — its upload/parse-job split is
 // gone with it.
-func (c *minerUV1Client) createTask(ctx context.Context, content []byte, fileName string, opts minerUV1ParseOptions) (*minerUV1Task, error) {
+func (c *minerUV1Client) createTask(
+	ctx context.Context,
+	content []byte,
+	fileName string,
+	opts minerUV1ParseOptions,
+) (*minerUV1Task, error) {
 	payload := map[string]interface{}{
 		"files": []map[string]interface{}{
 			{"file_name": fileName, "bytes": len(content)},

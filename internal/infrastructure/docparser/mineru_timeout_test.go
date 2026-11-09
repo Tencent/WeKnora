@@ -48,7 +48,7 @@ func TestMinerUReaderHonorsConfiguredTimeout(t *testing.T) {
 		for i := range statuses {
 			statuses[i] = "running"
 		}
-		fake := &fakeMinerUV1{t: t, pollStatuses: statuses}
+		fake := &fakeMinerUV1413{t: t, pollStatuses: statuses}
 		server := httptest.NewServer(fake.handler())
 		defer server.Close()
 
@@ -58,7 +58,7 @@ func TestMinerUReaderHonorsConfiguredTimeout(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.NoError(t, ctx.Err(), "the configured timeout, not the caller's deadline, should stop the parse")
-		assert.True(t, fake.canceled, "abandoned job should be canceled on the server")
+		assert.True(t, fake.deleteCalls > 0, "abandoned task should be canceled on the server")
 	})
 
 	t.Run("legacy", func(t *testing.T) {
