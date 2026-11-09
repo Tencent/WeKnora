@@ -45,6 +45,7 @@ function fixture(generate: () => Promise<string> = async () => 'Query logs by mo
         },
         ...oauthApi,
       }
+      if (name === '@/utils/api-base') return { getApiBaseUrl: () => '/' }
       return { default: {} }
     },
     URL, console,

@@ -166,7 +166,7 @@ func newMCPOAuthTestEnv(t *testing.T) *mcpOAuthTestEnv {
 	env.repo = repo
 	env.oauth = oauth
 	env.manager = manager
-	env.handler = NewMCPOAuthHandler(oauth, manager, mcpOAuthTestServices{service: service}, nil)
+	env.handler = NewMCPOAuthHandler(oauth, manager, mcpOAuthTestServices{service: service}, nil, nil)
 	return env
 }
 
