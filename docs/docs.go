@@ -26734,7 +26734,15 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_models_providers.ExtraField": {
             "type": "object",
             "properties": {
+                "accept": {
+                    "description": "Accept lists the file types a \"file\" field offers (the HTML accept\nattribute, e.g. \".pem\"). The file's text content is the value.",
+                    "type": "string"
+                },
                 "default": {
+                    "type": "string"
+                },
+                "header": {
+                    "description": "Header, when set, sends the field's value as this HTTP header on every\nrequest (e.g. a project id the vendor reads from ` + "`" + `OpenAI-Project` + "`" + `).\nEmpty values send nothing; a user's custom header of the same name wins.",
                     "type": "string"
                 },
                 "key": {
@@ -26780,7 +26788,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "type": {
-                    "description": "\"string\", \"number\", \"boolean\", \"select\", \"password\"",
+                    "description": "\"string\", \"number\", \"boolean\", \"select\", \"password\", \"file\"",
                     "type": "string"
                 }
             }

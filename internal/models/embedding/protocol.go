@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/arkembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscopeembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/googleembeddings"
+	"github.com/Tencent/WeKnora/internal/models/api/ocigenai"
 	"github.com/Tencent/WeKnora/internal/models/api/openaiembeddings"
 	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
@@ -88,6 +89,14 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 		client = googleembeddings.New(googleembeddings.Config{
 			Endpoint: endpoint, Settings: settings, Dimensions: dimensions, Retry: retry,
 		})
+	case api.EmbeddingOCI:
+		// Signed with the row's OCI IAM credentials rather than a bearer key.
+		cfg, err := ocigenai.NewConfig(endpoint, config.APIKey, config.AppSecret, config.ExtraConfig)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Dimensions, cfg.Retry = dimensions, retry
+		client = ocigenai.NewEmbedder(cfg)
 	default:
 		return nil, fmt.Errorf("unsupported embedding api %q for provider %s", resolved.EmbeddingAPI, vendor.ID)
 	}

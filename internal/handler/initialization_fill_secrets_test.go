@@ -144,3 +144,23 @@ func TestFillSecretsFromStoredModel_ModelNotFoundNoop(t *testing.T) {
 		t.Fatalf("ExtraConfig changed on model lookup failure: %v", req.ExtraConfig)
 	}
 }
+
+// TestResolveTestCreds_RowSecretWins: a connection test hands the row's own
+// app_secret (here an OCI private key) to the client, like the production
+// path; the space's WeKnora Cloud secret is only the fallback.
+func TestResolveTestCreds_RowSecretWins(t *testing.T) {
+	tenant := &types.Tenant{Credentials: &types.CredentialsConfig{
+		WeKnoraCloud: &types.WeKnoraCloudCredentials{AppID: "cloud-id", AppSecret: "cloud-secret"},
+	}}
+	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, tenant)
+	h := &InitializationHandler{}
+
+	appID, secret, ok := h.resolveTestCreds(ctx, &ModelTestRequest{AppSecret: "-----BEGIN PRIVATE KEY-----"})
+	if !ok || appID != "cloud-id" || secret != "-----BEGIN PRIVATE KEY-----" {
+		t.Fatalf("row secret should win: ok=%v appID=%q secret=%q", ok, appID, secret)
+	}
+	_, secret, _ = h.resolveTestCreds(ctx, &ModelTestRequest{})
+	if secret != "cloud-secret" {
+		t.Fatalf("without a row secret the WeKnora Cloud one is used, got %q", secret)
+	}
+}

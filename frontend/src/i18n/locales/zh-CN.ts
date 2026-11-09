@@ -798,6 +798,8 @@ export default {
     update: '更换',
     remove: '移除',
     inputPlaceholder: '请输入',
+    uploadFile: '上传文件',
+    fileLoaded: '已读取：{name}',
     savedToast: '凭据已保存',
     saveFailed: '保存凭据失败',
     removedToast: '凭据已移除',

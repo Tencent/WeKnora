@@ -306,7 +306,9 @@ type Definition struct {
     RequiresAuth     bool
     Auth             AuthStyle          // bearer / api-key / x-api-key / x-goog-api-key / none / signed
     URLPatterns      []string           // 旧行未填 provider 时按 URL 识别
-    ExtraFields      []ExtraField       // 编辑器动态渲染的额外字段
+    ExtraFields      []ExtraField       // 编辑器动态渲染的额外字段；Header 非空时值作为该请求头发送，
+                                        // Required 且无 Default 的非 Secret 字段在保存时（ValidateRow）校验；
+                                        // type "file" 的 Secret 字段以文件上传，文件文本存为 app_secret
     CredentialLabels []CredentialLabel  // 重命名凭证输入框（签名类接口）
     Compat           VendorCompat       // 各协议的厂商级兼容默认值
     ThinkingLevels   api.ThinkingLevelMap
@@ -341,7 +343,7 @@ type Transcriber interface {
 
 ### 现有实现
 
-- **厂商**：`internal/models/providers/` 定义 31 个内置厂商，一个厂商一份（`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/<id>.svg`。
+- **厂商**：`internal/models/providers/` 定义 33 个内置厂商，一个厂商一份（`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/<id>.svg`。
 - **协议**：`internal/models/api/<protocol>`。对话 `openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；向量 `openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；重排 `cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`、`teirank`、`pineconerank`；语音 `openaitranscriptions`、`openaichataudio`。
 - **模型目录**：`internal/models/catalog/data/seed.json`（模型元数据）+ `overrides.json`（协议、思考映射与 compat 修正）→ 由脚本生成 `models.generated.json`，编译时嵌入。
 - **运行时**：`internal/models/runtime` 组合厂商定义与目录（`New()`），应用部署叠加 `config/models.json`，并为每个模型行解析出协议、端点和兼容设置。

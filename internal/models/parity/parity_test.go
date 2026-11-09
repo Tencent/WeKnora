@@ -497,10 +497,14 @@ func TestCatalogInvariants(t *testing.T) {
 			for _, field := range v.ExtraFields {
 				assert.NotEmpty(t, field.Key, "extra field without a key")
 				assert.NotEmpty(t, field.Label, "extra field %q without a label", field.Key)
-				assert.Contains(t, []string{"string", "number", "boolean", "select", "password"}, field.Type,
+				assert.Contains(t, []string{"string", "number", "boolean", "select", "password", "file"}, field.Type,
 					"extra field %q has an unsupported type", field.Key)
 				if field.Type == "select" {
 					assert.NotEmpty(t, field.Options, "select field %q without options", field.Key)
+				}
+				if field.Type == "file" {
+					// The file's text is stored as the app_secret credential.
+					assert.True(t, field.Secret, "file field %q must be secret", field.Key)
 				}
 			}
 
