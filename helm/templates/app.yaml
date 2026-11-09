@@ -37,6 +37,10 @@ spec:
     metadata:
       labels:
         {{- include "weknora.componentSelectorLabels" (dict "component" "app" "context" .) | nindent 8 }}
+      {{- with .Values.app.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       {{- include "weknora.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "weknora.serviceAccountName" . }}
