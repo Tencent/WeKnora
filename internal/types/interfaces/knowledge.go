@@ -278,7 +278,8 @@ type KnowledgeRepository interface {
 	// (for shared-KB resolution; callers check permissions on every row).
 	GetKnowledgeBatchByIDOnly(ctx context.Context, ids []string) ([]*types.Knowledge, error)
 	// CheckKnowledgeExists checks if knowledge already exists.
-	// For file types, check by fileHash or (fileName+fileSize).
+	// For files, check by fileHash or (fileName+fileSize) within the target folder,
+	// or within the source identity when DataSourceID and ExternalID are both set.
 	// For URL types, check by URL.
 	// Returns whether it exists, the existing knowledge object (if any), and possible error.
 	CheckKnowledgeExists(

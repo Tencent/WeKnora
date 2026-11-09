@@ -62,6 +62,75 @@ func TestCheckKnowledgeExists_FileHashIsScopedByFileType(t *testing.T) {
 	})
 }
 
+func TestCheckKnowledgeExists_FileFolderScope(t *testing.T) {
+	for _, tc := range []struct {
+		name, storedFolder, folder, status string
+		tenantID                           uint64
+		kbID                               string
+		want                               bool
+	}{
+		{"same folder", "docs/spec", "docs/spec", "completed", 1, "kb-1", true},
+		{"another folder", "docs/spec", "other", "completed", 1, "kb-1", false},
+		{"parent folder", "docs/spec", "docs", "completed", 1, "kb-1", false},
+		{"root to folder", "", "docs", "completed", 1, "kb-1", false},
+		{"folder to root", "docs", "", "completed", 1, "kb-1", false},
+		{"root duplicate", "", "", "completed", 1, "kb-1", true},
+		{"literal underscore", "docs_spec", "docsXspec", "completed", 1, "kb-1", false},
+		{"another tenant", "docs", "docs", "completed", 2, "kb-1", false},
+		{"another knowledge base", "docs", "docs", "completed", 1, "kb-2", false},
+		{"pending", "docs", "docs", "pending", 1, "kb-1", true},
+		{"processing", "docs", "docs", "processing", 1, "kb-1", true},
+		{"failed", "docs", "docs", "failed", 1, "kb-1", false},
+		{"deleting", "docs", "docs", "deleting", 1, "kb-1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db)
+			id := uuid.NewString()
+			require.NoError(t, db.Exec(`INSERT INTO knowledges
+				(id, tenant_id, knowledge_base_id, type, file_name, file_type, file_size,
+				file_hash, folder_path, parse_status)
+				VALUES (?, 1, 'kb-1', 'file', 'report.txt', 'txt', 5, 'same-hash', ?, ?)
+			`, id, tc.storedFolder, tc.status).Error)
+			for _, hash := range []string{"same-hash", ""} {
+				exists, existing, err := repo.CheckKnowledgeExists(context.Background(), tc.tenantID, tc.kbID,
+					&types.KnowledgeCheckParams{
+						Type: "file", FileName: "report.txt", FileSize: 5, FileHash: hash,
+						FileType: "txt", FolderPath: tc.folder,
+					})
+				require.NoError(t, err)
+				require.Equal(t, tc.want, exists, "hash=%q", hash)
+				if tc.want {
+					require.Equal(t, id, existing.ID)
+				} else {
+					require.Nil(t, existing)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckKnowledgeExists_SourceIdentitySurvivesFolderChange(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	id := uuid.NewString()
+	require.NoError(t, db.Exec(`INSERT INTO knowledges
+		(id, tenant_id, knowledge_base_id, type, file_name, file_type, file_size,
+		file_hash, folder_path, parse_status, metadata)
+		VALUES (?, 1, 'kb-1', 'file', 'report.txt', 'txt', 5, 'same-hash', 'old', 'completed', ?)
+	`, id, `{"datasource_id":"ds-1","external_id":"doc-1"}`).Error)
+	for _, hash := range []string{"same-hash", ""} {
+		exists, existing, err := repo.CheckKnowledgeExists(context.Background(), 1, "kb-1",
+			&types.KnowledgeCheckParams{
+				Type: "file", FileName: "report.txt", FileSize: 5, FileHash: hash, FileType: "txt",
+				FolderPath: "new", DataSourceID: "ds-1", ExternalID: "doc-1",
+			})
+		require.NoError(t, err)
+		require.True(t, exists)
+		require.Equal(t, id, existing.ID)
+	}
+}
+
 func TestCheckKnowledgeExists_FileSourceIdentity(t *testing.T) {
 	db := setupKnowledgeTestDB(t)
 	repo := NewKnowledgeRepository(db)
