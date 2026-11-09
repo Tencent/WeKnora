@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"github.com/Tencent/WeKnora/internal/types"
 
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 )
@@ -26,19 +27,41 @@ type concurrencyEmbedder struct {
 	inner Embedder
 	// limit is this model's configured per-model background cap; 0 falls back
 	// to the process-wide default (see limiter.GateN).
-	limit int
+	limit   int
+	gateKey string
 }
 
 func (w *concurrencyEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
-	defer release()
-	return w.inner.Embed(ctx, text)
+	key := w.gateKey
+	if key == "" {
+		key = w.inner.GetModelID()
+	}
+	release, err := limiter.AcquireCall(ctx, key, w.inner.GetModelName(), w.limit)
+	if err != nil {
+		return nil, err
+	}
+	if budget := types.ModelExecutionBudget(ctx); budget > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, budget)
+		defer cancel()
+	}
+	out, err := w.inner.Embed(ctx, text)
+	w.finish(release)
+	return out, err
 }
 
 func (w *concurrencyEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
-	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
-	defer release()
-	return w.inner.BatchEmbed(ctx, texts)
+	key := w.gateKey
+	if key == "" {
+		key = w.inner.GetModelID()
+	}
+	release, err := limiter.AcquireCall(ctx, key, w.inner.GetModelName(), w.limit)
+	if err != nil {
+		return nil, err
+	}
+	out, err := w.inner.BatchEmbed(ctx, texts)
+	w.finish(release)
+	return out, err
 }
 
 // BatchEmbedWithPool threads THIS wrapper down as the model so the pooler's
@@ -58,9 +81,17 @@ func (w *concurrencyEmbedder) GetModelID() string   { return w.inner.GetModelID(
 // wrapEmbeddingConcurrency installs the background concurrency governor directly
 // around the real embedder. Always applied; a cheap passthrough when no limiter
 // is installed or the call is interactive.
-func wrapEmbeddingConcurrency(e Embedder, limit int) Embedder {
+func wrapEmbeddingConcurrency(e Embedder, limit int, keys ...string) Embedder {
 	if e == nil {
 		return e
 	}
-	return &concurrencyEmbedder{inner: e, limit: limit}
+	key := e.GetModelID()
+	if len(keys) > 0 {
+		key = keys[0]
+	}
+	return &concurrencyEmbedder{inner: e, limit: limit, gateKey: key}
+}
+
+func (w *concurrencyEmbedder) finish(release func()) {
+	release()
 }

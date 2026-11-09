@@ -1718,15 +1718,27 @@ type RuntimeWorkerPool struct {
 }
 
 type RuntimeQueuesResponse struct {
-	Available             bool                       `json:"available"`
-	UpstreamConcurrency   int                        `json:"upstream_concurrency"`
-	ParseConcurrency      int                        `json:"parse_concurrency"` // compatibility alias for upstream_concurrency
-	WikiConcurrency       int                        `json:"wiki_concurrency"`  // compatibility field
-	Pools                 []RuntimeWorkerPool        `json:"pools"`
-	Queues                []types.QueueStat          `json:"queues"`
-	ModelLimiterAvailable bool                       `json:"model_limiter_available"`
-	Models                []modellimiter.RuntimeStat `json:"models"`
-	Timestamp             int64                      `json:"timestamp"`
+	Available             bool                        `json:"available"`
+	UpstreamConcurrency   int                         `json:"upstream_concurrency"`
+	ParseConcurrency      int                         `json:"parse_concurrency"` // compatibility alias for upstream_concurrency
+	WikiConcurrency       int                         `json:"wiki_concurrency"`  // compatibility field
+	Pools                 []RuntimeWorkerPool         `json:"pools"`
+	Queues                []types.QueueStat           `json:"queues"`
+	ModelLimiterAvailable bool                        `json:"model_limiter_available"`
+	Models                []modellimiter.RuntimeStat  `json:"models"`
+	SharedModelAdmission  RuntimeSharedModelAdmission `json:"shared_model_admission"`
+	Timestamp             int64                       `json:"timestamp"`
+}
+
+// Shared admission is a separate budget from the legacy background governor.
+// Endpoint group names are hashes; this payload contains no URLs or credentials.
+type RuntimeSharedModelAdmission struct {
+	Enabled    bool              `json:"enabled"`
+	Active     int               `json:"active"`
+	Waiting    int               `json:"waiting"`
+	Limit      int               `json:"limit"`
+	QueueLimit int               `json:"queue_limit"`
+	Groups     map[string][2]int `json:"groups"`
 }
 
 func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.WorkerServerStat) {
@@ -1843,6 +1855,11 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	}
 	resp.ModelLimiterAvailable = modelSupported
 	resp.Models = modelStats
+	shared := modellimiter.SharedRuntimeStats()
+	resp.SharedModelAdmission = RuntimeSharedModelAdmission{
+		Enabled: shared.Enabled, Active: shared.Active, Waiting: shared.Waiting,
+		Limit: shared.Limit, QueueLimit: shared.QueueLimit, Groups: shared.Groups,
+	}
 
 	c.JSON(http.StatusOK, resp)
 }

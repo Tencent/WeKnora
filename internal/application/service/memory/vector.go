@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -79,8 +80,14 @@ func (s *Service) embedText(
 		logger.Warnf(ctx, "memory: embedding model %s unavailable: %v", modelID, err)
 		return nil
 	}
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	callCtx := ctx
+	if limiter.HasResourceBudget(modelID) {
+		callCtx = types.WithModelExecutionBudget(ctx, timeout)
+	} else {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	vector, err := embedder.Embed(callCtx, text)
 	if err != nil {
 		logger.Warnf(ctx, "memory: embed failed: %v", err)

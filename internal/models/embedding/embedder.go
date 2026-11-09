@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/internal/admission"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -98,7 +99,11 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	// Innermost: gate the real provider round-trips (including the per-sub-batch
 	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
 	// concurrencyEmbedder for why this sits below the observability decorators.
-	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency)
+	key, err := admission.Register(config.ModelID, config.ModelName, config.BaseURL, config.Source)
+	if err != nil {
+		return nil, err
+	}
+	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency, key)
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}

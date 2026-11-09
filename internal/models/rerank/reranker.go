@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
+	"github.com/Tencent/WeKnora/internal/models/internal/admission"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 
 	// modelruntime.Resolve answers from the vendor catalog, which is empty until
@@ -110,14 +111,15 @@ func (d *DocumentInfo) UnmarshalJSON(data []byte) error {
 }
 
 type RerankerConfig struct {
-	APIKey      string
-	BaseURL     string
-	ModelName   string
-	Source      types.ModelSource
-	ModelID     string
-	Provider    string                   // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
-	Spec        *types.ModelSpecOverride `json:"spec,omitempty"`
-	ExtraConfig map[string]string
+	MaxConcurrency int
+	APIKey         string
+	BaseURL        string
+	ModelName      string
+	Source         types.ModelSource
+	ModelID        string
+	Provider       string                   // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
+	Spec           *types.ModelSpecOverride `json:"spec,omitempty"`
+	ExtraConfig    map[string]string
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
 	AppID         string
@@ -132,17 +134,18 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *RerankerConfig {
 		return nil
 	}
 	return &RerankerConfig{
-		ModelID:       m.ID,
-		APIKey:        m.Parameters.APIKey,
-		BaseURL:       m.Parameters.BaseURL,
-		ModelName:     m.Name,
-		Source:        m.Source,
-		Provider:      m.Parameters.Provider,
-		Spec:          m.Parameters.Spec,
-		ExtraConfig:   m.Parameters.ExtraConfig,
-		CustomHeaders: m.Parameters.CustomHeaders,
-		AppID:         appID,
-		AppSecret:     appSecret,
+		ModelID:        m.ID,
+		MaxConcurrency: m.Parameters.MaxConcurrency,
+		APIKey:         m.Parameters.APIKey,
+		BaseURL:        m.Parameters.BaseURL,
+		ModelName:      m.Name,
+		Source:         m.Source,
+		Provider:       m.Parameters.Provider,
+		Spec:           m.Parameters.Spec,
+		ExtraConfig:    m.Parameters.ExtraConfig,
+		CustomHeaders:  m.Parameters.CustomHeaders,
+		AppID:          appID,
+		AppSecret:      appSecret,
 	}
 }
 
@@ -155,6 +158,11 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 	if logger.LLMDebugEnabled() {
 		r = &debugReranker{inner: r}
 	}
+	key, err := admission.Register(config.ModelID, config.ModelName, config.BaseURL, config.Source)
+	if err != nil {
+		return nil, err
+	}
+	r = &concurrencyReranker{inner: r, key: key, limit: config.MaxConcurrency}
 	return wrapRerankerLangfuse(r, nil)
 }
 

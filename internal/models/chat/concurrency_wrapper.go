@@ -14,34 +14,44 @@ import (
 // asynq queue layer, whose weights are scheduling priority rather than
 // throttling.
 //
-// Only background (asynq worker) calls are throttled; interactive chat is left
-// untouched (see types.IsBackgroundTask), so a document-ingestion storm cannot
-// exhaust the provider yet user-facing latency is never gated behind the
-// semaphore. The governor singleton itself lives in the limiter package so chat
-// and vlm share the same limiter and per-model budget.
-
-// concurrencyChat throttles background LLM calls through a per-model
-// distributed semaphore. It is the outermost wrapper so the slot is held only
-// around the actual provider round-trip and the wait time is excluded from the
-// inner debug/langfuse timing.
+// The default governor limits background work per model. Shared admission
+// additionally bounds interactive and embedding requests under one
+// process-wide budget; excess calls fail before contacting the provider.
+// concurrencyChat is the outermost wrapper and holds admission for the whole
+// provider lifetime, including draining an abandoned stream.
 type concurrencyChat struct {
 	inner Chat
 	// limit is this model's configured per-model background cap; 0 falls back
 	// to the process-wide default (see limiter.GateN).
-	limit int
+	limit   int
+	gateKey string
 }
 
 func (w *concurrencyChat) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyChat) GetModelID() string   { return w.inner.GetModelID() }
 
 func (w *concurrencyChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
+	key := w.gateKey
+	if key == "" {
+		key = w.inner.GetModelID()
+	}
+	release, err := limiter.AcquireCall(ctx, key, w.inner.GetModelName(), w.limit)
+	if err != nil {
+		return nil, err
+	}
 	defer release()
 	return w.inner.Chat(ctx, messages, opts)
 }
 
 func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
-	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
+	key := w.gateKey
+	if key == "" {
+		key = w.inner.GetModelID()
+	}
+	release, err := limiter.AcquireCall(ctx, key, w.inner.GetModelName(), w.limit)
+	if err != nil {
+		return nil, err
+	}
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
 	if err != nil || ch == nil {
 		release()
@@ -50,8 +60,9 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 	// Hold the slot until the stream fully drains, then release. If the
 	// consumer abandons the stream (stops reading out) we would otherwise
 	// block forever on the send and never release the slot; select on
-	// ctx.Done() so a cancelled call frees its slot promptly, and drain the
-	// inner channel in the background so the upstream producer can exit.
+	// ctx.Done(), stop forwarding, and drain until the provider terminates.
+	// The lease remains held during that drain so cancellation cannot permit
+	// another request while the previous provider is still running.
 	out := make(chan types.StreamResponse)
 	go func() {
 		defer close(out)
@@ -60,10 +71,9 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 			select {
 			case out <- resp:
 			case <-ctx.Done():
-				go func() {
-					for range ch {
-					}
-				}()
+				// Keep admission until the provider has actually terminated.
+				for range ch {
+				}
 				return
 			}
 		}
@@ -71,12 +81,15 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 	return out, nil
 }
 
-// wrapChatConcurrency installs the background concurrency governor as the
-// outermost Chat decorator. It is always applied; when no limiter is installed
-// or the call is interactive, the wrapper is a cheap passthrough.
-func wrapChatConcurrency(c Chat, limit int, err error) (Chat, error) {
+// wrapChatConcurrency installs provider admission as the outermost decorator.
+// Shared admission is opt-in; otherwise legacy background limits apply.
+func wrapChatConcurrency(c Chat, limit int, err error, keys ...string) (Chat, error) {
 	if err != nil || c == nil {
 		return c, err
 	}
-	return &concurrencyChat{inner: c, limit: limit}, nil
+	key := c.GetModelID()
+	if len(keys) > 0 {
+		key = keys[0]
+	}
+	return &concurrencyChat{inner: c, limit: limit, gateKey: key}, nil
 }

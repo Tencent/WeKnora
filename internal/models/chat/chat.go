@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/googlegenai"
 	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
 	"github.com/Tencent/WeKnora/internal/models/api/openairesponses"
+	"github.com/Tencent/WeKnora/internal/models/internal/admission"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -133,7 +134,14 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	c, err = wrapChatLangfuse(c, err)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapChatConcurrency(c, config.MaxConcurrency, err)
+	if err != nil {
+		return c, err
+	}
+	key, err := admission.Register(config.ModelID, config.ModelName, config.BaseURL, config.Source)
+	if err != nil {
+		return nil, err
+	}
+	return wrapChatConcurrency(c, config.MaxConcurrency, nil, key)
 }
 
 // Resolve looks the configuration up in the catalog. It is exposed so the

@@ -746,16 +746,20 @@ func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSett
 // for Lite mode (no Redis). Lite runs a single process, so an in-process
 // semaphore is sufficient to keep a background ingestion storm from bursting
 // the whole worker pool against one provider.
-func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) {
+func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) error {
+	if err := configureSharedModelAdmission(ss); err != nil {
+		return err
+	}
 	limit := resolveModelMaxConcurrency(ss)
 	limiter.SetGovernor(limiter.NewLocalLimiter(), limit)
 	if limit <= 0 {
 		logger.Infof(context.Background(),
 			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
-		return
+		return nil
 	}
 	logger.Infof(context.Background(),
 		"[ModelLimiter] background model concurrency governed per-model, limit=%d (in-process, lite mode)", limit)
+	return nil
 }
 
 func initRedisClient() (*redis.Client, error) {
@@ -2032,4 +2036,30 @@ func startAuditLogRetention(
 		runner.StopWithin(cleanupStepTimeout)
 		return nil
 	})
+}
+
+// Shared admission is an explicit, opt-in, process-wide budget for deployments
+// where several models, users or endpoints share one physical resource.
+// Invalid budgets fail startup rather than silently disabling the protection.
+func configureSharedModelAdmission(ss interfaces.SystemSettingService) error {
+	if ss == nil {
+		return limiter.ConfigureSharedGate(limiter.SharedGateConfig{})
+	}
+	ctx := context.Background()
+	enabled := ss.GetBool(ctx, "model.shared_admission.enabled", "WEKNORA_SHARED_MODEL_ADMISSION", false)
+	cfg := limiter.SharedGateConfig{Enabled: enabled}
+	if enabled {
+		cfg.Concurrency = int(ss.GetInt(ctx, "model.shared_admission.concurrency", "WEKNORA_SHARED_MODEL_CONCURRENCY", 1))
+		cfg.MaxWaiting = int(ss.GetInt(ctx, "model.shared_admission.max_waiting", "WEKNORA_SHARED_MODEL_MAX_WAITING", 8))
+		cfg.InteractiveBurst = int(ss.GetInt(ctx, "model.shared_admission.interactive_burst", "WEKNORA_SHARED_MODEL_INTERACTIVE_BURST", 3))
+		seconds := ss.GetInt(ctx, "model.shared_admission.max_wait_seconds", "WEKNORA_SHARED_MODEL_MAX_WAIT_SECONDS", 30)
+		if seconds < 1 || seconds > 3600 {
+			return fmt.Errorf("invalid shared model wait budget")
+		}
+		cfg.MaxWait = time.Duration(seconds) * time.Second
+		if raw := strings.TrimSpace(os.Getenv("WEKNORA_SHARED_CPU_ENDPOINTS")); raw != "" {
+			cfg.ResourceGroups = map[string][]string{"shared-cpu": strings.Split(raw, ",")}
+		}
+	}
+	return limiter.ConfigureSharedGate(cfg)
 }
