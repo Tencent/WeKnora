@@ -597,8 +597,7 @@ const PRESET_SCHEDULES = new Set([
   '',
 ])
 
-// Custom hourly interval: "0 0 */N * * *" (N = 2..24). N = 1 is equivalent to
-// the every-hour preset, so it is excluded from the custom branch.
+// Preserve the custom picker for saved hourly intervals that do not match a preset.
 const CUSTOM_HOUR_RE = /^0 0 \*\/(\d{1,2}) \* \* \*$/
 
 // Serialize the custom-hours selection into the cron expression that the
@@ -625,7 +624,7 @@ function decodeSyncSchedule(cron: string): { kind: 'preset' | 'custom' | 'raw'; 
   if (PRESET_SCHEDULES.has(cron)) return { kind: 'preset' }
   const m = CUSTOM_HOUR_RE.exec(cron || '')
   const hours = m ? Number(m[1]) : 0
-  if (m && hours >= 2 && hours <= 24) return { kind: 'custom', hours }
+  if (m && hours >= 1 && hours <= 24) return { kind: 'custom', hours }
   return { kind: 'raw' }
 }
 

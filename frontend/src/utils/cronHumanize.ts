@@ -16,9 +16,7 @@ export function parseDailySyncTime(cron: string): string | undefined {
   return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
 }
 
-// Custom hourly interval: "0 0 */N * * *" (N = 2..24) written by the
-// "custom hours" picker. N = 1 is excluded on purpose: it is equivalent to the
-// "every hour" preset and should keep being displayed as such.
+// Custom hourly interval written by the "custom hours" picker.
 const CUSTOM_HOUR_RE = /^0 0 \*\/(\d{1,2}) \* \* \*$/
 
 /**

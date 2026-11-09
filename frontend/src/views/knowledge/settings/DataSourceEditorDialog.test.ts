@@ -574,6 +574,15 @@ test('custom sync hours round-trip on edit rehydration', async () => {
   } finally { f.close() }
 })
 
+test('editing a custom one-hour schedule restores the custom interval', async () => {
+  const f = await fixture({ syncSchedule: '0 0 */1 * * *' })
+  try {
+    assert.equal(f.vm.form.sync_schedule, 'custom')
+    assert.equal(f.vm.form.customHours, 1)
+    assert.equal(f.vm.serializeSyncSchedule(), '0 0 */1 * * *')
+  } finally { f.close() }
+})
+
 test('editing a legacy daily schedule keeps 02:00 until a new time is selected', async () => {
   const f = await fixture({ syncSchedule: '0 0 2 * * *' })
   try {
