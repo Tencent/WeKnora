@@ -362,6 +362,42 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	assert.Len(t, allChunks, 2)
 }
 
+func TestListPagedChunksByKnowledgeID_StableFAQOrdering(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+	updatedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+	chunks := []*types.Chunk{
+		makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ),
+		makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ),
+		makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ),
+	}
+	for i, chunk := range chunks {
+		chunk.ID = fmt.Sprintf("faq-%c", 'a'+i)
+		chunk.CreatedAt = updatedAt
+		chunk.UpdatedAt = updatedAt
+	}
+	require.NoError(t, db.Create(&chunks).Error)
+
+	listPage := func(pageNumber int, sortOrder string) []*types.Chunk {
+		page, total, err := repo.ListPagedChunksByKnowledgeID(
+			ctx, 1, "faq-knowledge", &types.Pagination{Page: pageNumber, PageSize: 1},
+			[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", sortOrder, types.KnowledgeTypeFAQ, nil,
+		)
+		require.NoError(t, err)
+		require.Equal(t, int64(3), total)
+		return page
+	}
+
+	assert.Equal(t, "faq-c", listPage(1, "")[0].ID)
+	assert.Equal(t, "faq-b", listPage(2, "")[0].ID)
+	assert.Equal(t, "faq-a", listPage(3, "")[0].ID)
+	assert.Equal(t, "faq-a", listPage(1, "asc")[0].ID)
+	assert.Equal(t, "faq-b", listPage(2, "asc")[0].ID)
+	assert.Equal(t, "faq-c", listPage(3, "asc")[0].ID)
+}
+
 func makeSuggestedFAQChunk(t *testing.T, kbID, knowledgeID, tagID, question string) *types.Chunk {
 	t.Helper()
 	chunk := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
