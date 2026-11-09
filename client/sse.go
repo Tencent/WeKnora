@@ -30,6 +30,7 @@ func incompleteSSEDataError(buffer string) error {
 // or the next event. Remember it only to swallow a following LF, even when
 // that LF arrives in a separate network read.
 func newSSELineSplitter() bufio.SplitFunc {
+	firstLine := true
 	skipLF := false
 	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		if skipLF && len(data) > 0 {
@@ -41,11 +42,18 @@ func newSSELineSplitter() bufio.SplitFunc {
 		}
 		if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
 			skipLF = data[i] == '\r'
-			return advance + i + 1, data[:i], nil
+			advance += i + 1
+			token = data[:i]
+		} else if atEOF && len(data) > 0 {
+			advance += len(data)
+			token = data
 		}
-		if atEOF && len(data) > 0 {
-			return advance + len(data), data, nil
+		// SSE ignores one BOM at the start of the stream. Wait for the
+		// first token so a BOM split across reads is handled the same way.
+		if firstLine && token != nil {
+			token = bytes.TrimPrefix(token, []byte("\ufeff"))
+			firstLine = false
 		}
-		return advance, nil, nil
+		return advance, token, nil
 	}
 }
