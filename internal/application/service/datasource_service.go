@@ -292,6 +292,19 @@ func (s *DataSourceService) UpdateDataSourceCredentials(
 		parsed = &types.DataSourceConfig{Type: existing.Type}
 	}
 	parsed.Credentials = credentials
+	// Confluence's public connection fields also live in settings. Keep them
+	// consistent when replacement credentials carry updated public fields,
+	// so validation uses the same connection the user just tested.
+	if existing.Type == types.ConnectorTypeConfluence {
+		if parsed.Settings == nil {
+			parsed.Settings = make(map[string]interface{})
+		}
+		for _, key := range []string{"edition", "base_url", "username"} {
+			if value, ok := credentials[key]; ok {
+				parsed.Settings[key] = value
+			}
+		}
+	}
 	parsed.StripNonSecretCredentials(existing.Type)
 	blob, err := parsed.ToJSON()
 	if err != nil {
@@ -454,6 +467,65 @@ func (s *DataSourceService) ListAvailableResources(
 	}
 
 	return resources, nil
+}
+
+// previewConnector applies the unsaved form only to this request. A nil map
+// keeps the stored value; a provided map replaces it, as the final save does.
+func (s *DataSourceService) previewConnector(
+	ctx context.Context, dsID string, preview *types.DataSourceConfig,
+) (datasource.Connector, *types.DataSourceConfig, error) {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return nil, nil, err
+	}
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return nil, nil, err
+	}
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return nil, nil, datasource.ErrInvalidConfig
+	}
+	if config == nil {
+		config = &types.DataSourceConfig{Type: ds.Type}
+	}
+	if preview != nil {
+		if preview.Credentials != nil {
+			config.Credentials = preview.Credentials
+		}
+		if preview.Settings != nil {
+			config.Settings = preview.Settings
+		}
+		if preview.ResourceIDs != nil {
+			config.ResourceIDs = preview.ResourceIDs
+		}
+	}
+	return connector, config, nil
+}
+
+// PreviewAvailableResources lists resources using request-local configuration.
+func (s *DataSourceService) PreviewAvailableResources(
+	ctx context.Context, dsID string, parentID string, preview *types.DataSourceConfig,
+) ([]types.Resource, error) {
+	connector, config, err := s.previewConnector(ctx, dsID, preview)
+	if err != nil {
+		return nil, err
+	}
+	return connector.ListResources(ctx, config, parentID)
+}
+
+// PreviewResourceAncestors resolves paths using request-local configuration.
+func (s *DataSourceService) PreviewResourceAncestors(
+	ctx context.Context, dsID string, resourceIDs []string, preview *types.DataSourceConfig,
+) ([]string, error) {
+	if len(resourceIDs) == 0 {
+		return []string{}, nil
+	}
+	connector, config, err := s.previewConnector(ctx, dsID, preview)
+	if err != nil {
+		return nil, err
+	}
+	return connector.ResolveResourceAncestors(ctx, config, resourceIDs)
 }
 
 // ResolveResourceAncestors resolves the ancestor ExternalIDs needed to reveal the

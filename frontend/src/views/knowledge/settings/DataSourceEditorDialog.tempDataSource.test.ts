@@ -61,6 +61,7 @@ async function fixture({
   // Resource listings are counted apart from the data source writes: the tests
   // assert which id a listing went through (and that a skipped load sent none).
   const resourceCalls: string[] = []
+  const previews: any[] = []
   // MessagePlugin.error texts, so "reported nothing" and "reported this" are
   // both assertions rather than assumptions.
   const messages: string[] = []
@@ -92,8 +93,9 @@ async function fixture({
     async updateDataSource(id: string, data: any) {
       calls.push({ method: 'updateDataSource', args: [id, JSON.parse(JSON.stringify(data))] })
     },
-    async listResources(id: string, parentId?: string) {
+    async listResources(id: string, parentId?: string, preview?: any) {
       resourceCalls.push(parentId ?? id)
+      previews.push(preview)
       if (state.listFails) throw state.listFails
       return { data: resources }
     },
@@ -152,7 +154,7 @@ async function fixture({
   // Let the oldest held create answer.
   const releaseCreate = () => { const resolve = held.shift(); if (resolve) resolve() }
   return {
-    vm, props, calls, resourceCalls, messages, warnings, deletes, state, creates,
+    vm, props, calls, resourceCalls, previews, messages, warnings, deletes, state, creates,
     releaseCreate, close: () => app.unmount(),
   }
 }
@@ -499,12 +501,9 @@ test('a Drive root load whose create answers without an id reports it and sends 
   }
 })
 
-test('a Drive root load in edit mode flushes the new folder token before listing', async () => {
+test('a Drive root load in edit mode previews the new folder without saving it', async () => {
   const f = await fixture({ resources: DRIVE_RESOURCES })
   try {
-    // Edit mode: the row already exists, so ensureTempDataSource must not skip
-    // the update — the listing reads the folder token from the stored row, and
-    // a skipped flush would list the old folder instead of the new one.
     f.props.dataSource = {
       id: 'source-one', type: 'feishu_drive', name: 'Drive',
       config: { resource_ids: ['oldToken'] },
@@ -518,9 +517,8 @@ test('a Drive root load in edit mode flushes the new folder token before listing
     f.vm.driveFolderToken = 'newToken'
     await f.vm.loadDriveRoot()
     assert.equal(f.creates(), 0)
-    assert.deepEqual(f.calls.map(call => call.method), ['updateDataSource'])
-    assert.equal(f.calls[0].args[0], 'source-one')
-    assert.equal(f.calls[0].args[1].config.resource_ids[0], 'newToken')
+    assert.deepEqual(f.calls, [])
+    assert.equal(f.previews[0].resource_ids[0], 'newToken')
     assert.deepEqual(f.resourceCalls, ['source-one'])
     assert.equal(f.vm.driveRootLoaded, true)
     assert.deepEqual(f.messages, [])
