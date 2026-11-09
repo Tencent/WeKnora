@@ -73,6 +73,23 @@ class NativePDFSourceTest(unittest.TestCase):
         self.assertGreater(boxed[1]["locator"]["bbox"][1], .45)
         self.assertIn(text.rstrip('.'), doc.content[boxed[1]["start"]:boxed[1]["end"]])
 
+    def test_reversed_cropbox_preserves_visible_text_and_clips_outside_text(self):
+        visible = "Visible text inside the crop boundary."
+        outside = "Outside note"
+        for crop in ("[100 700 500 100]", "[500 100 100 700]", "[500 700 100 100]"):
+            with self.subTest(crop=crop):
+                doc = self.parse([{
+                    "crop": f"/CropBox {crop}",
+                    "rotation": 90,
+                    "lines": [(visible, 150, 600), (outside, 10, 300)],
+                }])
+                self.assertIn(visible, doc.content)
+                self.assertNotIn(outside, doc.content)
+                locator = next(b["locator"] for b in doc.source_blocks if b["locator"].get("bbox"))
+                x0, y0, x1, y1 = locator["bbox"]
+                self.assertEqual(locator["page"], 1)
+                self.assertTrue(0.8 < x0 < x1 <= 1 and 0 <= y0 < y1 <= 1)
+
 
 if __name__ == "__main__":
     unittest.main()
