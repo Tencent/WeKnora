@@ -312,7 +312,13 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 // chunkSize is forwarded to splitBySeparators so recursive splitting can keep pieces
 // under the budget when one separator alone leaves a piece oversize.
 func buildUnitsWithProtection(text string, protected []span, separators []string, chunkSize int) []splitUnit {
-	const maxProtectedSize = 7500 // Maximum size for a protected unit (留余量给标题等)
+	// Protection preserves normal Markdown units, but cannot override the
+	// configured embedding budget. A fenced block may contain an entire
+	// document; keeping it atomic made a 500-char target emit 4900 chars.
+	maxProtectedSize := 7500
+	if chunkSize > 0 && chunkSize < maxProtectedSize {
+		maxProtectedSize = chunkSize
+	}
 
 	var units []splitUnit
 	bytePos := 0
@@ -405,7 +411,10 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 		return nil
 	}
 
-	const absoluteMaxSize = 7500
+	absoluteMaxSize := 7500
+	if chunkSize > 0 && 2*chunkSize < absoluteMaxSize {
+		absoluteMaxSize = 2 * chunkSize
+	}
 
 	ht := newHeaderTracker()
 
