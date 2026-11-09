@@ -2,15 +2,53 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestCSVSourceRowsSurviveChunking(t *testing.T) {
+	data := []byte("\xef\xbb\xbfitem,note,qty\n\nItem,--,3\n" +
+		"苹果,\"说明一\n说明二\",\"备注一\n备注二\"\n\nItem,--,3\nx,,1\n")
+	result, err := (&docparser.SimpleFormatReader{}).Read(context.Background(), &types.ReadRequest{
+		FileType: "csv", FileContent: data,
+	})
+	require.NoError(t, err)
+	blocks := append([]types.SourceBlock(nil), result.SourceBlocks...)
+	require.Len(t, blocks, 5)
+	attachStructureBlocks(context.Background(), "csv", data, result)
+	require.Equal(t, blocks, result.SourceBlocks, "keep converter mappings instead of text alignment")
+	final := docparser.NormalizeHTMLTables(chunker.NormalizeLineEndings(result.MarkdownContent))
+	index := buildSourceIndex(result.MarkdownContent, result.SourceBlocks, final, nil)
+	require.NotNil(t, index)
+	chunks := chunker.Split(final, chunker.SplitterConfig{ChunkSize: 64, ChunkOverlap: 0})
+	require.Greater(t, len(chunks), 1)
+	seen := make(map[int]bool)
+	for _, chunk := range chunks {
+		locators := index.Locators(chunk.Start, chunk.End)
+		require.NotEmpty(t, locators, "chunk %q lost its CSV source", chunk.Content)
+		for _, locator := range locators {
+			require.Equal(t, types.SourceLocatorSheet, locator.Type)
+			require.Equal(t, "exact", locator.Mapping)
+			require.False(t, locator.Partial, "chunk %q has unmapped content", chunk.Content)
+			for row := locator.RowStart; row <= locator.RowEnd; row++ {
+				seen[row] = true
+			}
+			if strings.Contains(locator.Quote, "说明一") {
+				require.LessOrEqual(t, locator.RowStart, 4)
+				require.GreaterOrEqual(t, locator.RowEnd, 4)
+			}
+		}
+	}
+	require.Equal(t, map[int]bool{1: true, 3: true, 4: true, 6: true, 7: true}, seen)
+}
 
 func TestAttachStructureBlocksForPassThroughText(t *testing.T) {
 	content := "# 标题\n\n正文一段\n\n正文二段"

@@ -64,11 +64,11 @@ func (b *SimpleFormatReader) Read(ctx context.Context, req *types.ReadRequest) (
 	case ft == "txt" || ft == "text":
 		return &types.ReadResult{MarkdownContent: string(decodeText(req.FileContent))}, nil
 	case ft == "csv":
-		md, err := csvToMarkdownContext(ctx, decodeText(req.FileContent), maxCSVMarkdownBytes)
+		result, err := csvToMarkdownResult(ctx, decodeText(req.FileContent), maxCSVMarkdownBytes)
 		if err != nil {
 			return nil, fmt.Errorf("csv conversion failed: %w", err)
 		}
-		return &types.ReadResult{MarkdownContent: md}, nil
+		return result, nil
 	case ft == "json":
 		md, err := jsonToMarkdown(req.FileContent)
 		if err != nil {
