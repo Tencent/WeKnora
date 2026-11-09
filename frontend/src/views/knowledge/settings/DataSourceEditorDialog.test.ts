@@ -540,3 +540,32 @@ test('Confluence PAT replacement uses the credentials subresource and keeps the 
     assert.equal(update.config.settings.token, undefined)
   } finally { f.close() }
 })
+
+test('custom sync hours serialize to a cron expression on submit', async () => {
+  const f = await fixture()
+  try {
+    f.vm.form.sync_schedule = 'custom'
+    f.vm.form.customHours = 3
+    await f.vm.handleSubmit()
+    const update = f.calls.find(call => call.method === 'updateDataSource')
+    assert.ok(update, 'updateDataSource should be called')
+    assert.equal(update.args[1].sync_schedule, '0 0 */3 * * *')
+  } finally { f.close() }
+})
+
+test('custom sync hours round-trip on edit rehydration', async () => {
+  const f = await fixture({
+    create: false,
+    dataSource: {
+      id: 'source-one', name: 'GitLab', type: 'gitlab',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [], settings: {} },
+      sync_schedule: '0 0 */3 * * *', sync_mode: 'incremental',
+      conflict_strategy: 'overwrite', sync_deletions: true,
+    },
+  })
+  try {
+    assert.equal(f.vm.form.sync_schedule, 'custom')
+    assert.equal(f.vm.form.customHours, 3)
+  } finally { f.close() }
+})

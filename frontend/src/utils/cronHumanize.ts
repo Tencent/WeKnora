@@ -9,13 +9,20 @@ const CRON_PRESET_MAP: Record<string, string> = {
   '0 0 2 * * *': 'datasource.scheduleHuman.24h',
 }
 
+// Custom hourly interval: "0 0 */N * * *" (N = 2..24) written by the
+// "custom hours" picker. N = 1 is excluded on purpose: it is equivalent to the
+// "every hour" preset and should keep being displayed as such.
+const CUSTOM_HOUR_RE = /^0 0 \*\/(\d{1,2}) \* \* \*$/
+
 /**
  * Convert a cron expression to a human-readable string.
  * Uses i18n translate function for known presets, raw expression otherwise.
  */
-export function humanizeCron(cron: string, t: (key: string) => string): string {
+export function humanizeCron(cron: string, t: (key: string, params?: Record<string, string | number>) => string): string {
   const key = CRON_PRESET_MAP[cron]
   if (key) return t(key)
+  const m = CUSTOM_HOUR_RE.exec(cron || '')
+  if (m) return t('datasource.scheduleHours', { n: Number(m[1]) })
   return cron || '--'
 }
 

@@ -200,6 +200,7 @@ const form = ref({
     settings: {} as Record<string, any>,
   },
   sync_schedule: '0 0 */6 * * *',
+  customHours: 6,
   sync_mode: 'incremental' as 'incremental' | 'full',
   conflict_strategy: 'overwrite' as 'overwrite' | 'skip',
   sync_deletions: true,
@@ -573,7 +574,53 @@ const schedulePresets = computed(() => [
   { label: t('datasource.schedule6h'), value: '0 0 */6 * * *' },
   { label: t('datasource.schedule12h'), value: '0 0 */12 * * *' },
   { label: t('datasource.schedule24h'), value: '0 0 2 * * *' },
+  { label: t('datasource.scheduleCustom'), value: 'custom' },
 ])
+
+// Sentinel value used to represent the "custom hours" picker inside the form;
+// it is serialized to a cron expression on submit (see hoursToCron).
+const CUSTOM_SCHEDULE = 'custom'
+
+// Cron expressions of the predefined presets. Decoding a stored schedule runs
+// preset matching first, so e.g. "0 0 */6 * * *" never falls through to the
+// custom-hours branch.
+const PRESET_SCHEDULES = new Set([
+  '0 */30 * * * *',
+  '0 0 * * * *',
+  '0 0 */6 * * *',
+  '0 0 */12 * * *',
+  '0 0 2 * * *',
+  '',
+])
+
+// Custom hourly interval: "0 0 */N * * *" (N = 2..24). N = 1 is equivalent to
+// the every-hour preset, so it is excluded from the custom branch.
+const CUSTOM_HOUR_RE = /^0 0 \*\/(\d{1,2}) \* \* \*$/
+
+// Serialize the custom-hours selection into the cron expression that the
+// backend scheduler actually runs.
+function hoursToCron(hours: number): string {
+  return `0 0 */${Math.min(Math.max(Math.floor(hours), 1), 24)} * * *`
+}
+
+// Resolve the schedule value sent to the backend: the custom-hours sentinel
+// is serialized to "0 0 */N * * *", everything else passes through as-is.
+function serializeSyncSchedule(): string {
+  return form.value.sync_schedule === CUSTOM_SCHEDULE
+    ? hoursToCron(form.value.customHours)
+    : form.value.sync_schedule
+}
+
+// Decode a stored cron schedule back into the editor state: a named preset,
+// the custom-hours picker, or the raw expression (kept as-is for anything
+// unrecognized, preserving the existing behavior).
+function decodeSyncSchedule(cron: string): { kind: 'preset' | 'custom' | 'raw'; hours?: number } {
+  if (PRESET_SCHEDULES.has(cron)) return { kind: 'preset' }
+  const m = CUSTOM_HOUR_RE.exec(cron || '')
+  const hours = m ? Number(m[1]) : 0
+  if (m && hours >= 2 && hours <= 24) return { kind: 'custom', hours }
+  return { kind: 'raw' }
+}
 
 // --- Connector definitions ---
 interface ConnectorDef {
@@ -859,6 +906,7 @@ watch(visible, async (v) => {
     refreshCredentialsStatus()
     testResult.value = credentialsConfigured.value ? 'success' : ''
     const editConfig = props.dataSource.config || {}
+    const decodedSchedule = decodeSyncSchedule(props.dataSource.sync_schedule)
     form.value = {
       name: props.dataSource.name,
       type: props.dataSource.type,
@@ -869,7 +917,8 @@ watch(visible, async (v) => {
           ? hydrateRssFeedUrlsFromConfig(editConfig)
           : { ...(editConfig.settings || {}) },
       },
-      sync_schedule: props.dataSource.sync_schedule,
+      sync_schedule: decodedSchedule.kind === 'custom' ? CUSTOM_SCHEDULE : props.dataSource.sync_schedule,
+      customHours: decodedSchedule.kind === 'custom' ? (decodedSchedule.hours as number) : 6,
       sync_mode: props.dataSource.sync_mode,
       conflict_strategy: props.dataSource.conflict_strategy,
       sync_deletions: props.dataSource.sync_deletions,
@@ -903,6 +952,7 @@ watch(visible, async (v) => {
       type: '',
       config: { credentials: {}, resource_ids: [], settings: {} },
       sync_schedule: '0 0 */6 * * *',
+      customHours: 6,
       sync_mode: 'incremental',
       conflict_strategy: 'overwrite',
       sync_deletions: true,
@@ -995,6 +1045,7 @@ async function testConnection() {
     if (isEdit.value && tempDsId.value && !needsConnectionTest()) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        sync_schedule: serializeSyncSchedule(),
         knowledge_base_id: props.kbId,
       } as any)
       await validateConnection(tempDsId.value)
@@ -1052,6 +1103,7 @@ async function ensureTempDataSource(persist = false): Promise<string> {
     if (persist || !isEdit.value) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        sync_schedule: serializeSyncSchedule(),
         knowledge_base_id: props.kbId,
       } as any)
     }
@@ -1079,6 +1131,7 @@ async function ensureTempDataSource(persist = false): Promise<string> {
     pending = (async () => {
       const res = await createDataSource({
         ...form.value,
+        sync_schedule: serializeSyncSchedule(),
         knowledge_base_id: props.kbId,
         status: 'paused',
       } as any)
@@ -1404,15 +1457,19 @@ async function handleSubmit() {
         submitting.value = false
         return
       }
+      const syncScheduleCron = serializeSyncSchedule()
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        sync_schedule: syncScheduleCron,
         config: buildConfigPayload(),
         knowledge_base_id: props.kbId,
         status: 'active',
       } as any)
     } else {
+      const syncScheduleCron = serializeSyncSchedule()
       const res = await createDataSource({
         ...form.value,
+        sync_schedule: syncScheduleCron,
         config: buildConfigPayload(),
         knowledge_base_id: props.kbId,
         status: 'active',
@@ -2102,6 +2159,18 @@ const drawerConfirmText = computed(() => {
         <t-select v-model="form.sync_schedule">
           <t-option v-for="p in schedulePresets" :key="p.value" :value="p.value" :label="p.label" />
         </t-select>
+
+        <div v-if="form.sync_schedule === CUSTOM_SCHEDULE" class="form-item form-item--flat" style="margin-top: 12px">
+          <label class="form-label">{{ t('datasource.scheduleCustomHoursLabel') }}</label>
+          <t-input-number
+            v-model="form.customHours"
+            :min="1"
+            :max="24"
+            :step="1"
+            :decimal-places="0"
+            theme="row"
+          />
+        </div>
       </section>
 
       <section class="setting-drawer__section">
