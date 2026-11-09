@@ -449,6 +449,12 @@ func (c *Connector) fetchStream(
 			if err := h.Emit(ctx, item); err != nil {
 				return nil, err
 			}
+			// The page may be edited between listing and the body request.
+			// Acknowledge the version actually ingested, not the older listing,
+			// so the next round does not replace the same body again.
+			if bodyVersion, known := pageVersion(full.page); known {
+				version = bodyVersion
+			}
 			next.SpacePages[resourceID][summary.ID] = version
 			if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
 				return nil, err
