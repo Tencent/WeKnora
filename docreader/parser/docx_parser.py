@@ -164,7 +164,11 @@ def table_to_gfm_markdown(table: Any) -> str:
     for row in table.rows:
         cells = [_gfm_cell_text(_cell_text(cell)) for cell in row.cells]
         if cells:
-            rows.append(cells)
+            # Omitted edge cells occupy grid positions but are absent from
+            # row.cells; retain them so values stay under the right headers.
+            rows.append(
+                [""] * row.grid_cols_before + cells + [""] * row.grid_cols_after
+            )
     if not rows:
         return ""
     width = max(len(row) for row in rows)

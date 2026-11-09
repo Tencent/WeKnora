@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -49,7 +50,13 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		}
 
 		var val interface{}
-		if err := json.Unmarshal(rawVal, &val); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(rawVal))
+		if targetType == "string" {
+			// A numeric identifier must reach the tool as the original literal,
+			// not a rounded float64 string. Keep other conversions unchanged.
+			decoder.UseNumber()
+		}
+		if err := decoder.Decode(&val); err != nil {
 			continue
 		}
 		// Integer literals already have the requested JSON representation. A
@@ -154,6 +161,8 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	case "string":
 		// Non-string values -> string (e.g., number or bool passed as non-string)
 		switch v := val.(type) {
+		case json.Number:
+			return v.String(), true
 		case bool:
 			if v {
 				return "true", true

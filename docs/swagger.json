@@ -889,7 +889,7 @@
                     "label_param": "name",
                     "risk": "write"
                 },
-                "x-agent-hint": "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update."
+                "x-agent-hint": "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update, including model_id and, for knowledge search, rerank_model_id. Creating an agent does not mean its model configuration is complete."
             }
         },
         "/agents/placeholders": {
@@ -1288,7 +1288,7 @@
                     "risk": "write",
                     "target": "agent.get"
                 },
-                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
+                "x-agent-hint": "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model) and rerank_model_id from a Rerank model in that list. Empty rerank_model_id clears the selection; omitting it preserves the saved value. For knowledge-search agents, report a missing chat or rerank model explicitly instead of claiming setup is complete. Take knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
             }
         },
         "/agents/{id}/copy": {
@@ -14657,6 +14657,58 @@
                                     }
                                 }
                             ]
+                        }
+                    }
+                }
+            }
+        },
+        "/messages/chat-history-index/clear": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "暂停消息索引，删除索引知识、分块和向量，保留原始会话和消息。失败后保持暂停，可重试。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "消息"
+                ],
+                "summary": "清空当前空间的历史消息索引",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChatHistoryKBStats"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "需要空间管理权限",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "500": {
+                        "description": "清理未完成，查看当前状态后可重试",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -28880,7 +28932,8 @@
                 },
                 "rerank_model_id": {
                     "description": "ReRank model ID for retrieval",
-                    "type": "string"
+                    "type": "string",
+                    "x-agent": true
                 },
                 "rerank_threshold": {
                     "description": "Rerank threshold",
@@ -40976,6 +41029,11 @@
                 },
                 "name": {
                     "description": "Agent name",
+                    "type": "string",
+                    "x-agent": true
+                },
+                "rerank_model_id": {
+                    "description": "Rerank model for knowledge retrieval; empty clears the selection",
                     "type": "string",
                     "x-agent": true
                 },

@@ -13,8 +13,7 @@ function escapeHtml(text: string): string {
 // Wiki pages keep marked's default code rendering; only ```mermaid fences are
 // emitted as a pending `<pre class="mermaid">` that renderMermaidInContainer
 // later swaps for the SVG, the same hook the chat answer uses.
-export function createWikiMarkdownRenderer(): Renderer {
-  const renderer = new Renderer()
+export function createWikiMarkdownRenderer(renderer: Renderer = new Renderer()): Renderer {
   renderer.code = function (this: Renderer, token: Tokens.Code): string {
     if ((token.lang || '').trim().split(/\s+/)[0] === 'mermaid') {
       return `<pre class="mermaid" data-mermaid="false"><code>${escapeHtml(token.text)}</code></pre>\n`

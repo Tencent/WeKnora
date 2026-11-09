@@ -319,6 +319,10 @@ func (c *Connector) walk(
 			item, outcome := fetchOneMedia(ctx, cli, kbID, key, f, folderPath)
 			switch outcome {
 			case fetchOK:
+				// Ingestion derives the knowledge folder from FileName, not metadata.
+				if dir := types.NormalizeKnowledgeFolderPath(f.FolderPath); dir != "" && item.FileName != "" {
+					item.FileName = dir + "/" + item.FileName
+				}
 				syncedLogical[key] = f.MediaID
 				out = append(out, item)
 			case fetchSkipped:

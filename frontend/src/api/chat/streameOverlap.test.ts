@@ -10,7 +10,7 @@ import { renderToString } from 'vue/server-renderer'
 
 type Call = {
   url: string
-  options: { signal: AbortSignal, onmessage: (ev: { data: string }) => void, onclose: () => void }
+  options: { signal: AbortSignal, onmessage: (ev: { data: string }) => void, onclose: () => void, onopen: (response: Response) => Promise<void> }
   resolve: () => void
   reject: (err: unknown) => void
 }
@@ -228,4 +228,81 @@ test('a silent broken proxy connection times out and resumes by GET; heartbeats 
   await run
   assert.equal(stream.isStreaming.value, false)
   assert.equal(stream.error.value, null)
+})
+
+
+test('a reopened turn recovers when its replay connection drops before the first event', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const chunks: unknown[] = []
+  stream.onChunk(data => chunks.push(data))
+  const base = transport.calls.length
+  const initial = stream.startStream({ session_id: 's', query: 'question', method: 'POST', url: '/api/v1/agent-chat' })
+  const post = await nextCall(base + 1)
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' }) })
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'tool_call', id: 'r1', data: { tool_call_id: 'call-1', tool_name: 'search', arguments: {} } }) })
+  post.options.onmessage({ data: JSON.stringify({ response_type: 'tool_result', id: 'r1', data: { tool_call_id: 'call-1', tool_name: 'search', success: true, output: 'found source' } }) })
+  assert.equal(chunks.length, 3)
+  // Route leave aborts only the browser stream. The server's turn continues.
+  stream.stopStream()
+  post.resolve()
+  await initial
+  const reopened = stream.startStream({ session_id: 's', query: 'a1', method: 'GET', url: '/api/v1/sessions/continue-stream', resume_pending_id: 'approved/a+b' })
+  const replay = await nextCall(base + 2)
+  await replay.options.onopen(new Response('', { status: 200 }))
+  replay.reject(new Error('connection reset before first replay event'))
+  await new Promise(resolve => setTimeout(resolve, 1050))
+  try {
+    const retry = await nextCall(base + 3)
+    assert.equal(retry.url, replay.url, 'reattach must preserve its approval segment')
+    assert.equal((retry.options as any).method, 'GET')
+    assert.equal((retry.options as any).body, null)
+    retry.options.onmessage({ data: JSON.stringify({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' }) })
+    retry.options.onmessage({ data: JSON.stringify({ response_type: 'tool_call', id: 'r1', data: { tool_call_id: 'call-1', tool_name: 'search', arguments: {} } }) })
+    retry.options.onmessage({ data: JSON.stringify({ response_type: 'tool_result', id: 'r1', data: { tool_call_id: 'call-1', tool_name: 'search', success: true, output: 'found source' } }) })
+    retry.options.onmessage({ data: JSON.stringify({ response_type: 'answer', id: 'r1', content: 'continued answer' }) })
+    retry.options.onmessage({ data: JSON.stringify({ response_type: 'complete', id: 'r1' }) })
+    retry.resolve()
+    await reopened
+    assert.equal(stream.error.value, null)
+    assert.equal(transport.calls.length, base + 3, 'recovery must not repeat the question POST')
+    assert.equal(chunks.length, 8)
+  } finally { stream.stopStream(); transport.calls.at(-1)?.resolve(); await reopened }
+})
+
+
+test('a reopened stream with no first event times out and keeps its approval segment', async (t) => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const base = transport.calls.length
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const run = stream.startStream({ session_id: 's', query: 'a1', method: 'GET', url: '/api/v1/sessions/continue-stream', resume_pending_id: 'pending-1' })
+  const replay = transport.calls[base]
+  await replay.options.onopen(new Response('', { status: 200 }))
+  t.mock.timers.tick(30001)
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  assert.equal(replay.options.signal.aborted, true)
+  t.mock.timers.tick(1000)
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  const retry = transport.calls[base + 1]
+  assert.ok(retry)
+  assert.equal(retry.url, replay.url)
+  retry.options.onmessage({ data: JSON.stringify({ response_type: 'complete' }) })
+  retry.resolve()
+  await run
+  assert.equal(stream.error.value, null)
+})
+
+test('an unavailable replay buffer still reports its initial HTTP error', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  const base = transport.calls.length
+  const run = stream.startStream({ session_id: 's', query: 'missing', method: 'GET', url: '/api/v1/sessions/continue-stream' })
+  const replay = await nextCall(base + 1)
+  await assert.rejects(replay.options.onopen(new Response('', { status: 404 })), /HTTP 404/)
+  replay.reject(new Error('HTTP 404'))
+  await run
+  assert.equal(transport.calls.length, base + 1)
+  assert.match(String(stream.error.value), /HTTP 404/)
+  assert.equal(stream.isStreaming.value, false)
 })

@@ -311,11 +311,16 @@ class MarkdownImageUtil:
 
     def __init__(self):
         # Pattern to match base64 embedded images
-        # Captures: (1) alt text, (2) image format, (3) base64 data
+        # Captures alt text, image format, base64 data, and an optional title.
         # Alt text uses .*? (non-greedy) to allow literal ] (e.g. Windows paths).
         # MIME subtype uses [^;]+ to handle types with hyphens like x-emf.
+        # Match the base64 run atomically to avoid backtracking on long images.
         self.b64_pattern = re.compile(
-            r"!\[(.*?)\]\(data:image/([^;]+);base64,([^\)]+)\)"
+            r"!\[(.*?)\]\(data:image/([^;]+);base64,"
+            r"(?:(?=(?P<data>[A-Za-z0-9+/= \t\r\n]+))(?P=data)"
+            r"(?:(?<=[ \t\r\n])(?P<title>"
+            r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\((?:\\.|[^()\\])*\)))?"
+            r"[ \t\r\n]*|(?P<raw>[^)]+))\)"
         )
         # Pattern to match regular image syntax (alt text allows ])
         self.image_pattern = re.compile(r"!\[(.*?)\]\(([^)]+)\)")
@@ -405,7 +410,8 @@ class MarkdownImageUtil:
             """Replacement function for each base64 image match."""
             title = match.group(1)  # Alt text
             img_ext = match.group(2)  # Image format (png, jpg, etc.)
-            img_b64 = match.group(3)  # Base64 encoded data
+            img_b64 = match.group("data") or match.group("raw")
+            image_title = match.group("title")
 
             # Decode base64 string to bytes
             image_byte = endecode.encode_image(img_b64, errors="ignore")
@@ -424,7 +430,8 @@ class MarkdownImageUtil:
                 return match.group(0)
 
             # Replace base64 data with file path reference
-            return f"![{title}]({image_path})"
+            suffix = f" {image_title}" if image_title else ""
+            return f"![{title}]({image_path}{suffix})"
 
         text = _transform_outside_fences(
             content, lambda prose: self.b64_pattern.sub(repl, prose)

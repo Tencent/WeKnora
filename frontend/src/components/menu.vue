@@ -198,15 +198,15 @@
         <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
             <div class="batch-footer-left">
                 <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                    @change="toggleBatchSelectAll">
+                    :disabled="batchDeleting" @change="toggleBatchSelectAll">
                     {{ t('batchManage.selectAll') }}
                 </t-checkbox>
             </div>
             <div class="batch-footer-right">
-                <t-button size="small" variant="text" @click="exitBatchMode">
+                <t-button size="small" variant="text" :disabled="batchDeleting" @click="exitBatchMode">
                     {{ t('batchManage.cancel') }}
                 </t-button>
-                <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                <t-button size="small" theme="danger" variant="base" :disabled="batchDeleting || batchSelectedIds.length === 0"
                     :loading="batchDeleting" @click="handleInlineBatchDelete">
                     {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
                 </t-button>
@@ -607,16 +607,19 @@ const mouseleaveBotDown = () => {
 }
 
 const enterBatchMode = () => {
+    if (batchDeleting.value) return
     batchMode.value = true
     batchSelectedIds.value = []
 }
 
 const exitBatchMode = () => {
+    if (batchDeleting.value) return
     batchMode.value = false
     batchSelectedIds.value = []
 }
 
 const toggleBatchSelect = (id: string) => {
+    if (batchDeleting.value) return
     const idx = batchSelectedIds.value.indexOf(id)
     if (idx > -1) {
         batchSelectedIds.value.splice(idx, 1)
@@ -626,13 +629,16 @@ const toggleBatchSelect = (id: string) => {
 }
 
 const toggleBatchSelectAll = (checked: boolean) => {
+    if (batchDeleting.value) return
     batchSelectedIds.value = checked ? [...allSessionIds.value] : []
 }
 
 const handleInlineBatchDelete = () => {
-    if (batchSelectedIds.value.length === 0) return
-    const isDeleteAll = isAllBatchSelected.value
-    const displayCount = batchDisplayCount.value
+    if (batchDeleting.value || batchSelectedIds.value.length === 0) return;
+    const selectedIds = [...batchSelectedIds.value];
+    const isDeleteAll = isAllBatchSelected.value;
+    const displayCount = batchDisplayCount.value;
+    let submitted = false;
     const confirmDialog = DialogPlugin.confirm({
         header: t('batchManage.deleteConfirmTitle'),
         body: isDeleteAll
@@ -641,15 +647,25 @@ const handleInlineBatchDelete = () => {
         confirmBtn: { content: t('batchManage.delete'), theme: 'danger' as const },
         cancelBtn: t('batchManage.cancel'),
         theme: 'warning',
+        confirmOnEnter: false,
+        onClose: () => {
+            if (!batchDeleting.value) confirmDialog.destroy();
+        },
         onConfirm: async () => {
-            batchDeleting.value = true
+            if (submitted || batchDeleting.value) return;
+            submitted = true;
+            batchDeleting.value = true;
             try {
-                let res: any
-                if (isDeleteAll) {
-                    res = await deleteAllSessions()
-                } else {
-                    res = await batchDelSessions([...batchSelectedIds.value])
-                }
+                confirmDialog.update({
+                    confirmLoading: true,
+                    closeOnEscKeydown: false,
+                    closeOnOverlayClick: false,
+                    closeBtn: false,
+                    cancelBtn: { content: t('batchManage.cancel'), disabled: true },
+                });
+                const res = isDeleteAll
+                    ? await deleteAllSessions()
+                    : await batchDelSessions(selectedIds);
                 if (res && res.success === true) {
                     if (isDeleteAll) {
                         usemenuStore.clearMenuArr();
@@ -657,30 +673,28 @@ const handleInlineBatchDelete = () => {
                         await getMessageList();
                     } else {
                         let next = sessionBuckets.value;
-                        for (const id of batchSelectedIds.value) {
-                            next = removeSessionFromBuckets(next, id);
-                        }
+                        for (const id of selectedIds) next = removeSessionFromBuckets(next, id);
                         sessionBuckets.value = next;
                         syncMenuStoreFromBuckets();
                     }
                     const currentChatId = route.params.chatid as string;
-                    if (currentChatId && (isDeleteAll || batchSelectedIds.value.includes(currentChatId))) {
+                    if (currentChatId && (isDeleteAll || selectedIds.includes(currentChatId)))
                         router.push('/platform/creatChat');
-                    }
-                    batchSelectedIds.value = []
-                    MessagePlugin.success(t('batchManage.deleteSuccess'))
-                    exitBatchMode()
+                    batchSelectedIds.value = [];
+                    batchMode.value = false;
+                    MessagePlugin.success(t('batchManage.deleteSuccess'));
                 } else {
-                    MessagePlugin.error(t('batchManage.deleteFailed'))
+                    MessagePlugin.error(t('batchManage.deleteFailed'));
                 }
             } catch {
-                MessagePlugin.error(t('batchManage.deleteFailed'))
+                MessagePlugin.error(t('batchManage.deleteFailed'));
+            } finally {
+                batchDeleting.value = false;
+                confirmDialog.destroy();
             }
-            batchDeleting.value = false
-            confirmDialog.destroy()
         },
-    })
-}
+    });
+};
 
 const handleSessionMenuClick = (data: { value: string }, item: any) => {
     if (data?.value === 'delete') {

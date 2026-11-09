@@ -41,6 +41,19 @@ func truncateForLangfuse(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// toolOutputPreviewBytes bounds the debug log preview of one tool result.
+const toolOutputPreviewBytes = 500
+
+// toolOutputPreview keeps that preview within the byte budget without cutting
+// a multi-byte character in half: tool output is frequently Chinese, and a
+// byte cut leaves invalid UTF-8 in the log sink.
+func toolOutputPreview(output string) string {
+	if len(output) <= toolOutputPreviewBytes {
+		return output
+	}
+	return common.TruncateUTF8Bytes(output, toolOutputPreviewBytes) + "... (truncated)"
+}
+
 // argKeys returns the sorted list of top-level keys in a tool's argument
 // map. Used when we choose not to send the raw arguments to Langfuse
 // (e.g. database_query's SQL) but still want to signal what was passed in.
@@ -689,10 +702,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	}
 
 	if toolCall.Result != nil && toolCall.Result.Output != "" {
-		preview := toolCall.Result.Output
-		if len(preview) > 500 {
-			preview = preview[:500] + "... (truncated)"
-		}
+		preview := toolOutputPreview(toolCall.Result.Output)
 		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {

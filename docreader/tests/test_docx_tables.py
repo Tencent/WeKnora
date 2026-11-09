@@ -76,6 +76,21 @@ def _docx_bytes(build):
     return buf.getvalue()
 
 
+def _omit_edge_cells(row, before=0, after=0):
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    for _ in range(before):
+        row._tr.remove(row._tr.tc_lst[0])
+    for _ in range(after):
+        row._tr.remove(row._tr.tc_lst[-1])
+    for name, count in (("gridBefore", before), ("gridAfter", after)):
+        if count:
+            element = OxmlElement("w:" + name)
+            element.set(qn("w:val"), str(count))
+            row._tr.get_or_add_trPr().append(element)
+
+
 class DocxTableContentTest(unittest.TestCase):
     """Regression test: DOCX tables must be kept in the parsed text.
 
@@ -168,6 +183,46 @@ class DocxTableContentTest(unittest.TestCase):
         document = _parse(_docx_bytes(build))
         self.assertIn("| merged | merged | right |", document.content)
         self.assertIn("| a | b | c |", document.content)
+
+    def test_omitted_leading_cell_keeps_values_under_their_headers(self):
+        def build(doc):
+            table = doc.add_table(rows=2, cols=3)
+            for cell, value in zip(table.rows[0].cells, ("Item", "Price", "Status")):
+                cell.text = value
+            table.cell(1, 1).text = "25"
+            table.cell(1, 2).text = "Ready"
+            _omit_edge_cells(table.rows[1], before=1)
+
+        document = _parse(_docx_bytes(build))
+        self.assertIn("| Item | Price | Status |", document.content)
+        self.assertIn("|  | 25 | Ready |", document.content)
+
+    def test_omitted_edges_keep_width_when_no_row_has_all_cells(self):
+        def build(doc):
+            table = doc.add_table(rows=2, cols=4)
+            table.cell(0, 1).text = "First"
+            table.cell(0, 2).text = "Second"
+            table.cell(1, 2).text = "Third"
+            table.cell(1, 3).text = "Fourth"
+            _omit_edge_cells(table.rows[0], before=1, after=1)
+            _omit_edge_cells(table.rows[1], before=2)
+
+        document = _parse(_docx_bytes(build))
+        self.assertIn("|  | First | Second |  |", document.content)
+        self.assertIn("| --- | --- | --- | --- |", document.content)
+        self.assertIn("|  |  | Third | Fourth |", document.content)
+
+    def test_omitted_cell_before_horizontal_merge_keeps_grid_positions(self):
+        def build(doc):
+            table = doc.add_table(rows=2, cols=4)
+            for cell, value in zip(table.rows[0].cells, ("A", "B", "C", "D")):
+                cell.text = value
+            table.cell(1, 1).merge(table.cell(1, 2)).text = "Merged"
+            table.cell(1, 3).text = "Right"
+            _omit_edge_cells(table.rows[1], before=1)
+
+        document = _parse(_docx_bytes(build))
+        self.assertIn("|  | Merged | Merged | Right |", document.content)
 
     def test_table_stays_between_paragraphs(self):
         def build(doc):
