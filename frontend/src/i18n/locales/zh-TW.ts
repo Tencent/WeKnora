@@ -1596,6 +1596,10 @@ export default {
     }
   },
   agentEditor: {
+    feishuGroupReplyRule: {
+      label: "自動回覆飛書 / Lark 新話題",
+      desc: "自動回覆話題首則訊息；話題內後續及一般群組仍需 {'@'} 目前機器人。需要接收全部群組訊息和讀取群組資訊的權限。",
+    },
     builtinHint: '這是內建智慧代理，名稱和描述不可修改，但可以調整設定參數',
     fileTypes: {
       label: '支持的檔案類型',

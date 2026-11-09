@@ -7946,6 +7946,10 @@ export default {
     }
   },
   agentEditor: {
+    feishuGroupReplyRule: {
+      label: "Feishu / Lark の新しいトピックに自動返信",
+      desc: "トピックの最初のメッセージに返信します。続きと通常グループではこのボットへの {'@'}メンションが必要です。全グループメッセージの受信とグループ情報の参照権限が必要です。",
+    },
     builtinHint: 'これは組み込みエージェントです。名前と説明は変更できませんが、設定パラメータは調整できます。',
     navGroups: {
       basic: '基本',

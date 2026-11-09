@@ -1175,6 +1175,8 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 		return fmt.Errorf("create adapter: %w", err)
 	}
 
+	s.configureTopicReplyPolicy(adapter, channel)
+
 	// Start leader renewal goroutine for WebSocket / long-poll channels.
 	var leaderCancel context.CancelFunc
 	if (channel.Mode == "websocket" || channel.Mode == "longpoll") && s.redis != nil {
