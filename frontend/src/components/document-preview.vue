@@ -103,6 +103,9 @@ const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const pdfData = shallowRef<ArrayBuffer | null>(null);
 const epubHtml = ref('');
+// Sanitized rendered view of a knowledge HTML document (source mode keeps
+// the hljs code view; artifact sources use the sandboxed iframe instead).
+const htmlDocHtml = ref('');
 let epubObjectUrls: string[] = [];
 let excelSheetNames: string[] = [];
 let previewExt = '';
@@ -486,7 +489,9 @@ async function loadPreview() {
   cleanup();
   loading.value = true;
   error.value = '';
-  htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
+  // Knowledge HTML documents also default to the rendered (sanitized) view —
+  // the citation locator matches rendered text, not the tagged source.
+  htmlViewMode.value = 'render';
 
   let ft = resolveFilePreviewExt(props.fileName, props.fileType);
   previewType.value = resolvePreviewKind(ft);
@@ -539,6 +544,12 @@ async function loadPreview() {
         if (allowsHtmlScriptPreview()) {
           const previewHtml = buildHtmlPreview(await blob.text());
           blobUrl.value = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html;charset=utf-8' }));
+        } else {
+          // Knowledge HTML renders as a sanitized page so citation locating
+          // matches the rendered text layer; the hljs code view stays
+          // available behind the render/source toggle.
+          htmlDocHtml.value = sanitizeHTML(await blob.text());
+          if (!htmlDocHtml.value) htmlViewMode.value = 'source';
         }
         await renderText(blob, ft || 'html');
         break;
@@ -848,7 +859,11 @@ function locateMarkdown(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
   const markdown = request.sourceMarkdown ?? request.scope ?? request.quotes[0] ?? '';
-  const match = findMarkdownSourceRange(box, markdown, request.sentence);
+  // Locator quotes are original-file text; when the chunk's markdown does
+  // not match the rendered original as a whole (prepended heading context,
+  // duplicated page chrome), they anchor the citation directly.
+  const locatorQuotes = [...new Set(request.locators.map((l) => l.quote).filter((q): q is string => !!q))].slice(0, 5);
+  const match = findMarkdownSourceRange(box, markdown, request.sentence, locatorQuotes);
   if (!match) return NOT_FOUND;
   commitMarks(match.ranges || [match.range], []);
   reveal(box, match.range);
@@ -907,8 +922,11 @@ function applyLocate() {
       case 'pptx': result = locatePptx(request); break;
       case 'excel': result = locateExcel(request); break;
       case 'epub': result = locateEpub(request); break;
-      case 'text':
-      case 'html': result = locateText(request); break;
+      case 'text': result = locateText(request); break;
+      // HTML chunks carry converter markdown; findMarkdownSourceRange renders
+      // that markdown to bridge into the rendered original page's text, so
+      // heading hashes and GFM pipes never block the match.
+      case 'html':
       case 'markdown': result = locateMarkdown(request); break;
       case 'image': result = locateImage(request); break;
       case 'audio': result = locateAudio(request); break;
@@ -942,7 +960,7 @@ onUnmounted(() => {
         <span v-if="isFullscreen" class="preview-toolbar-title" :title="fileName">{{ fileName }}</span>
         <div class="preview-toolbar-actions">
           <t-button
-            v-if="previewType === 'html' && allowsHtmlScriptPreview()"
+            v-if="previewType === 'html'"
             theme="default" variant="text" size="small" shape="square"
             :title="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
             :aria-label="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
@@ -1003,7 +1021,15 @@ onUnmounted(() => {
         referrerpolicy="no-referrer"
         @load="onPreviewFrameLoad"
       />
-      <pre v-else-if="!allowsHtmlScriptPreview() || htmlViewMode === 'source'" ref="previewContent" tabindex="0" :aria-label="fileName" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
+      <div
+        v-else-if="htmlViewMode === 'render' && htmlDocHtml"
+        ref="previewContent"
+        tabindex="0"
+        :aria-label="fileName"
+        class="html-doc-preview"
+        v-html="htmlDocHtml"
+      ></div>
+      <pre v-else ref="previewContent" tabindex="0" :aria-label="fileName" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
     </div>
 
     <!-- Image -->
@@ -1337,6 +1363,21 @@ onUnmounted(() => {
   min-height: 420px;
   display: flex;
   flex-direction: column;
+  .html-doc-preview {
+    .preview-container();
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 24px;
+    :deep(h1) { font-size: 1.5em; margin: 0.6em 0 0.4em; }
+    :deep(h2) { font-size: 1.3em; margin: 0.6em 0 0.4em; }
+    :deep(h3) { font-size: 1.12em; margin: 0.6em 0 0.35em; }
+    :deep(p) { margin: 0.45em 0; line-height: 1.75; }
+    :deep(table) { border-collapse: collapse; margin: 0.6em 0; }
+    :deep(th), :deep(td) { border: 1px solid @border-color; padding: 4px 10px; }
+    :deep(ul), :deep(ol) { padding-left: 1.6em; margin: 0.4em 0; }
+    :deep(img) { max-width: 100%; }
+  }
   .html-iframe {
     flex: 1;
     width: 100%;

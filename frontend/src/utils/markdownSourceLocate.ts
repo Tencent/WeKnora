@@ -7,14 +7,31 @@ import { sourceOverlapLength } from './fragmentedSource'
  * Markdown syntax and fence languages are not visible source text. Rendering
  * into an inert template also preserves code containing HTML-like text.
  */
-export function findMarkdownSourceRange(root: Element, markdown: string, sentence = ''): { range: Range; ranges?: Range[]; narrowed: boolean; exact: boolean } | null {
+export function findMarkdownSourceRange(root: Element, markdown: string, sentence = '', fallbackQuotes: string[] = []): { range: Range; ranges?: Range[]; narrowed: boolean; exact: boolean } | null {
   const template = root.ownerDocument.createElement('template')
   template.innerHTML = renderDocumentPreviewMarkdown(markdown)
   const source = buildTextIndex(template.content).text
   // Establish the complete source region before narrowing. A similar paragraph
   // elsewhere in the document cannot rescue a missing or ambiguous source.
   const region = findTextRange(root, source)
-  if (!region) return null
+  if (!region) {
+    // The full source can be absent from the rendered original even though
+    // the citation is legitimate: chunks carry a prepended heading context
+    // line the page itself does not repeat, and duplicated page chrome can
+    // make the whole-chunk text ambiguous. Fall back to anchored quotes —
+    // parse-time locator quotes first (original text, unique by
+    // construction), then the answer sentence's excerpt of the source.
+    for (const quote of fallbackQuotes) {
+      const anchored = findTextRange(root, quote)
+      if (anchored) return { range: anchored, narrowed: true, exact: false }
+    }
+    const excerpt = quotedSourceExcerpt(source, sentence) || sentence
+    if (excerpt) {
+      const exact = findTextRange(root, excerpt)
+      if (exact) return { range: exact, narrowed: true, exact: true }
+    }
+    return null
+  }
   const excerpt = quotedSourceExcerpt(source, sentence) || sentence
   if (excerpt && findInText(source, excerpt)) {
     const exact = findTextRange(root, excerpt)
