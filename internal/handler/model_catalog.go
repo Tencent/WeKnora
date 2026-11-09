@@ -295,7 +295,6 @@ func (h *ModelHandler) GetModelProvider(c *gin.Context) {
 // @Summary      解析模型的有效接入配置
 // @Description  根据厂商、模型名、Base URL 与 extra_config 返回目录解析结果（协议、思考等级、上下文等），供模型编辑器实时展示
 // @Tags         模型管理
-// @Accept       json
 // @Produce      json
 // @Param        provider    query     string  true   "厂商标识"
 // @Param        model       query     string  false  "模型名"
@@ -411,3 +410,27 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
+
+// resolveModelCatalogPost documents the POST form of /models/catalog/resolve.
+// The route itself is served by ResolveModelCatalog, which handles both
+// verbs on the same registration (issue #1909): GET keeps query-string
+// compatibility for old clients, POST carries the row spec — and optionally
+// a spec override for editor drafts not yet saved — as a JSON body. This
+// stub exists only so swag can give the POST operation its own body
+// contract instead of copying GET's query parameters, and is deliberately
+// never mounted.
+//
+// @Summary      解析模型的有效接入配置（JSON 请求体）
+// @Description  与 GET 同函数；参数走 JSON 请求体，支持可选 spec 覆盖
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      map[string]interface{}  true  "{provider, model?, base_url?, model_type?, spec?: {api?, reasoning?, input?, context_window?, max_output_tokens?, thinking_levels?, compat?}}"
+// @Success      200      {object}  handler.DataResponse  "解析结果"
+// @Failure      400      {object}  errors.AppError       "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/catalog/resolve [post]
+//
+//nolint:unused // documentation-only stub for the POST half of a dual-verb route
+func resolveModelCatalogPost() {}

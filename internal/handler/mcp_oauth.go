@@ -240,7 +240,7 @@ func (h *MCPOAuthHandler) AssertionGrant(c *gin.Context) {
 // @Param        state  query  string  false  "状态参数"
 // @Param        error  query  string  false  "授权错误码"
 // @Success      302
-// @Router       /mcp-services/oauth/callback [get]
+// @Router       /mcp-oauth/callback [get]
 func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 	ctx := c.Request.Context()
 	state := strings.TrimSpace(c.Query("state"))
