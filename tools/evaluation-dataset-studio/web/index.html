@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WeKnora Dataset Studio</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>WeKnora Dataset Studio</h1>
+      <p>本地维护评测数据集，导出 WeKnora 五文件 Parquet 数据包</p>
+    </div>
+    <nav class="workspace-nav" aria-label="工作区">
+      <button id="show-datasets-button" type="button" class="active">数据集</button>
+      <button id="show-config-button" type="button">配置中心</button>
+    </nav>
+    <div id="save-state" class="save-state">未打开数据集</div>
+  </header>
+
+  <div id="dataset-workspace" class="layout">
+    <aside class="sidebar">
+      <section>
+        <h2>数据集</h2>
+        <div id="dataset-list" class="dataset-list"></div>
+      </section>
+
+      <details class="panel compact" open>
+        <summary>新建数据集</summary>
+        <form id="create-form" class="stack-form">
+          <label>ID<input id="create-id" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="customer-service-eval"></label>
+          <label>名称<input id="create-name" required placeholder="客服知识库评测集"></label>
+          <label>版本<input id="create-version" value="0.1.0" required></label>
+          <button type="submit">创建并打开</button>
+        </form>
+      </details>
+
+      <section class="panel compact">
+        <h3>导入项目</h3>
+        <label class="file-button">导入 JSON 项目
+          <input id="import-file" type="file" accept="application/json,.json">
+        </label>
+        <label class="file-button sidebar-file">导入 WeKnora ZIP
+          <input id="weknora-import-file" type="file" accept="application/zip,.zip">
+        </label>
+        <p class="sidebar-hint">ZIP 必须包含五个标准 Parquet 文件，并会创建一个新的可编辑数据集。</p>
+      </section>
+    </aside>
+
+    <main>
+      <section id="empty-state" class="empty-state">
+        <h2>选择或创建一个数据集</h2>
+        <p>所有项目保存在本机 workspace，页面不会向外部发送数据。</p>
+      </section>
+
+      <div id="editor" hidden>
+        <section class="panel editor-header">
+          <form id="meta-form" class="meta-grid">
+            <label>名称<input id="meta-name" required></label>
+            <label>版本<input id="meta-version" required></label>
+            <label class="wide">描述<textarea id="meta-description" rows="2"></textarea></label>
+          </form>
+          <div class="toolbar">
+            <button id="save-button" type="button" class="primary">保存项目</button>
+            <button id="copy-button" type="button">复制数据集</button>
+            <a id="backup-link" class="button-link" href="#">下载项目 JSON</a>
+            <button id="delete-dataset-button" type="button" class="danger ghost">移入回收站</button>
+          </div>
+        </section>
+
+        <nav class="tabs" aria-label="编辑区域">
+          <button class="tab active" data-tab="passages" type="button">语料</button>
+          <button class="tab" data-tab="questions" type="button">问题与答案</button>
+          <button class="tab" data-tab="generation" type="button">AI生成</button>
+          <button class="tab" data-tab="validation" type="button">校验与导出</button>
+          <button class="tab" data-tab="evaluations" type="button">评测运行</button>
+        </nav>
+
+        <section id="tab-passages" class="tab-panel active">
+          <details id="weknora-source-import" class="panel source-import-panel">
+            <summary>从 WeKnora 已解析分块导入语料</summary>
+            <p class="secret-hint">使用配置中心保存的地址与 API Key 发送只读请求。导入只写入当前 Studio 数据集，不会修改远程知识库。</p>
+            <div class="source-import-controls">
+              <label>WeKnora 环境<select id="source-profile-select"><option value="">请选择支持分块读取的环境</option></select></label>
+              <button id="load-source-kbs" type="button">读取知识库</button>
+              <label>知识库<select id="source-kb-select" disabled><option value="">请先读取知识库</option></select></label>
+              <button id="load-source-documents" type="button" disabled>读取文档</button>
+              <label>已解析文档<select id="source-document-select" disabled><option value="">请先读取文档</option></select></label>
+              <button id="load-source-chunks" type="button" disabled>读取分块</button>
+            </div>
+            <div id="source-import-status" class="mode-hint">请选择环境；生产环境必须先通过只读分块契约检查。</div>
+            <div id="source-chunk-browser" hidden>
+              <div class="toolbar source-chunk-toolbar">
+                <button id="select-source-page" type="button">选择本页</button>
+                <button id="clear-source-selection" type="button">清空选择</button>
+                <span id="source-selection-count" class="muted-text">已选择 0 个分块</span>
+                <span class="toolbar-spacer"></span>
+                <button id="source-prev-page" type="button">上一页</button>
+                <span id="source-page-label" class="muted-text">第 1 页</span>
+                <button id="source-next-page" type="button">下一页</button>
+              </div>
+              <div class="table-wrap source-chunk-table">
+                <table>
+                  <thead><tr><th>选择</th><th>序号</th><th>文本预览</th><th>字符数</th><th>状态</th></tr></thead>
+                  <tbody id="source-chunk-table-body"></tbody>
+                </table>
+              </div>
+              <div class="source-import-actions">
+                <label>内容变化时
+                  <select id="source-changed-policy">
+                    <option value="skip">跳过，不覆盖现有语料</option>
+                    <option value="new">作为新语料导入</option>
+                  </select>
+                </label>
+                <button id="preview-source-import" type="button" class="primary">导入预检</button>
+                <button id="confirm-source-import" type="button" disabled>确认导入</button>
+                <button id="go-to-generation-after-import" type="button" hidden>用新增语料生成问题</button>
+              </div>
+              <div id="source-import-preview" class="compatibility-report muted">尚未运行导入预检</div>
+            </div>
+          </details>
+          <div class="split-grid">
+            <section class="panel">
+              <div class="section-title">
+                <h2>语料列表 <span id="passage-count" class="count"></span></h2>
+                <input id="passage-search" type="search" placeholder="搜索文本、来源或标签">
+              </div>
+              <details class="csv-import">
+                <summary>批量导入 CSV</summary>
+                <p>必填列：<code>text</code>。可选列：<code>id, source, tags, review_state</code>；多个标签用 <code>|</code> 分隔。</p>
+                <div class="toolbar">
+                  <label class="file-button">选择语料 CSV
+                    <input id="passage-csv-file" type="file" accept="text/csv,.csv">
+                  </label>
+                  <button id="passage-template-button" type="button">下载模板</button>
+                </div>
+              </details>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>ID</th><th>文本</th><th>来源</th><th>操作</th></tr></thead>
+                  <tbody id="passage-table"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel sticky-editor">
+              <h2 id="passage-form-title">新增语料</h2>
+              <form id="passage-form" class="stack-form">
+                <label>文本<textarea id="passage-text" rows="10" required></textarea></label>
+                <label>来源<input id="passage-source" placeholder="产品手册 / FAQ / 文档路径"></label>
+                <label>标签<input id="passage-tags" placeholder="使用英文逗号分隔"></label>
+                <label>审核状态
+                  <select id="passage-review-state">
+                    <option value="">未设置</option>
+                    <option value="draft">草稿</option>
+                    <option value="approved">已审核</option>
+                  </select>
+                </label>
+                <div class="toolbar">
+                  <button type="submit" class="primary">保存语料</button>
+                  <button id="passage-cancel" type="button">清空</button>
+                </div>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-questions" class="tab-panel">
+          <div class="split-grid">
+            <section class="panel">
+              <div class="section-title">
+                <h2>问题列表 <span id="question-count" class="count"></span></h2>
+                <input id="question-search" type="search" placeholder="搜索问题、答案或分类">
+              </div>
+              <details class="csv-import">
+                <summary>批量导入 CSV</summary>
+                <p>必填列：<code>text, answer, relevant_passage_ids</code>。扩展字段可通过模板导入；多值和过滤条件用 <code>|</code> 分隔。</p>
+                <div class="toolbar">
+                  <label class="file-button">选择问题 CSV
+                    <input id="question-csv-file" type="file" accept="text/csv,.csv">
+                  </label>
+                  <button id="question-template-button" type="button">下载模板</button>
+                </div>
+              </details>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>ID</th><th>问题</th><th>相关语料</th><th>操作</th></tr></thead>
+                  <tbody id="question-table"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel sticky-editor">
+              <h2 id="question-form-title">新增问题</h2>
+              <form id="question-form" class="stack-form">
+                <label>问题<textarea id="question-text" rows="3" required></textarea></label>
+                <label>标准答案<textarea id="question-answer" rows="6" required></textarea></label>
+                <div class="two-columns">
+                  <label>分类<input id="question-category"></label>
+                  <label>难度
+                    <select id="question-difficulty">
+                      <option value="">未设置</option>
+                      <option value="easy">简单</option>
+                      <option value="medium">中等</option>
+                      <option value="hard">困难</option>
+                    </select>
+                  </label>
+                </div>
+                <label>标签<input id="question-tags" placeholder="使用英文逗号分隔"></label>
+                <label>审核状态
+                  <select id="question-review-state">
+                    <option value="">未设置</option>
+                    <option value="draft">草稿</option>
+                    <option value="approved">已审核</option>
+                  </select>
+                </label>
+                <details class="question-metadata" open>
+                  <summary>评测扩展字段（仅保存在项目中）</summary>
+                  <p class="secret-hint">这些字段用于离线报告和失败分析，不会写入严格五 Parquet ZIP。</p>
+                  <label>答案核心要点<textarea id="question-answer-key-points" rows="3" placeholder="每行一个要点"></textarea></label>
+                  <div class="two-columns">
+                    <label>是否可回答
+                      <select id="question-answerable">
+                        <option value="">未设置</option>
+                        <option value="true">可回答</option>
+                        <option value="false">不可回答</option>
+                      </select>
+                    </label>
+                    <label>测试权限角色<input id="question-test-role" placeholder="普通用户 / 管理员 / 部门角色"></label>
+                  </div>
+                  <div class="two-columns">
+                    <label>期望召回文档<textarea id="question-expected-documents" rows="3" placeholder="每行一个文档标识或名称"></textarea></label>
+                    <label>禁止召回文档<textarea id="question-forbidden-documents" rows="3" placeholder="每行一个不应召回的文档"></textarea></label>
+                  </div>
+                  <label>检索过滤条件<textarea id="question-retrieval-filters" rows="3" placeholder="每行一个 key=value，例如 department=售后"></textarea></label>
+                  <div class="two-columns">
+                    <label>测试集版本<input id="question-dataset-version" placeholder="默认使用当前项目版本"></label>
+                    <label>标记来源<input id="question-annotation-source" placeholder="人工 / 业务专家 / 历史数据"></label>
+                  </div>
+                  <div id="question-feedback-provenance" class="feedback-provenance" hidden></div>
+                </details>
+                <fieldset>
+                  <legend>相关语料</legend>
+                  <input id="relation-search" type="search" placeholder="筛选语料">
+                  <div id="passage-choices" class="passage-choices"></div>
+                </fieldset>
+                <div class="toolbar">
+                  <button type="submit" class="primary">保存问题</button>
+                  <button id="question-cancel" type="button">清空</button>
+                </div>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-generation" class="tab-panel">
+          <section class="panel">
+            <div class="section-title">
+              <div>
+                <h2>AI 生成评测问题</h2>
+                <p>从已维护语料生成候选问题、标准答案和答案要点；候选必须人工审核后才会进入正式数据集。</p>
+              </div>
+              <button id="refresh-generation-button" type="button">刷新任务</button>
+            </div>
+
+            <div class="profile-binding">
+              <label>当前数据集生成配置<select id="dataset-generation-profile-select"><option value="">未绑定</option></select></label>
+              <div id="dataset-generation-profile-summary" class="profile-summary muted-text">尚未绑定生成模型配置</div>
+              <button class="open-config-center" type="button" data-config-section="generation">前往配置中心</button>
+            </div>
+
+            <details id="generation-configuration-panel" class="connection-panel" open>
+              <summary>生成模型配置（本机保存 API Key）</summary>
+              <div class="generation-connection-grid">
+                <label>已保存配置<select id="generation-connection-select"><option value="">新建配置</option></select></label>
+                <label>配置 ID<input id="generation-connection-id" pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="dashscope-qwen"></label>
+                <label>配置名称<input id="generation-connection-name" placeholder="千问生成模型"></label>
+                <label>OpenAI-compatible Base URL<input id="generation-base-url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"></label>
+                <label>API Key（保存到本机）<input id="generation-api-key" type="password" autocomplete="off" placeholder="sk-..."></label>
+                <label>模型名称<input id="generation-model" placeholder="qwen-plus"></label>
+                <label>测试提示词<input id="generation-test-prompt" maxlength="200" value="回复1" placeholder="回复1"></label>
+                <label>超时（秒）<input id="generation-timeout" type="number" min="5" max="300" value="60"></label>
+                <label>默认每段题数<input id="generation-default-count" type="number" min="1" max="5" value="1"></label>
+                <label>单次最大输出 token<input id="generation-max-output" type="number" min="256" value="1200"></label>
+                <label>任务 token 上限<input id="generation-max-total" type="number" min="256" value="20000"></label>
+                <label>输入价格/百万 token<input id="generation-input-price" type="number" min="0" step="0.0001" value="0"></label>
+                <label>输出价格/百万 token<input id="generation-output-price" type="number" min="0" step="0.0001" value="0"></label>
+              </div>
+              <p class="secret-hint">输出和任务 token 不设工具端固定上限，但仍受模型服务商限制；任务上限不能小于单次输出。“测试连接”默认发送“回复1”并限制输出 1 token，只验证模型可调用。API Key 仅保存在本机生成配置中，文件权限为 0600；不会进入数据集、快照、任务记录或导出 ZIP。</p>
+              <div class="toolbar">
+                <button id="new-generation-connection-button" type="button">新建</button>
+                <button id="save-generation-connection-button" type="button">保存生成配置</button>
+                <button id="test-generation-connection-button" type="button">测试连接</button>
+                <button id="delete-generation-connection-button" type="button" class="danger">删除配置</button>
+              </div>
+            </details>
+
+            <form id="generation-form" class="stack-form">
+              <fieldset>
+                <legend>选择来源语料</legend>
+                <div class="toolbar">
+                  <button id="select-all-generation-passages" type="button">全选</button>
+                  <button id="clear-generation-passages" type="button">清空</button>
+                  <span id="generation-passage-count" class="muted">已选择 0 条</span>
+                </div>
+                <div id="generation-passage-choices" class="generation-passage-choices"></div>
+              </fieldset>
+              <div class="generation-options-grid">
+                <label>每段生成题数<input id="generation-question-count" type="number" min="1" max="5" value="1"></label>
+                <label>期望分类<input id="generation-category" placeholder="操作指导类（可选）"></label>
+                <label>期望难度
+                  <select id="generation-difficulty">
+                    <option value="">由模型判断</option>
+                    <option value="easy">简单</option>
+                    <option value="medium">中等</option>
+                    <option value="hard">困难</option>
+                  </select>
+                </label>
+                <label class="wide">补充要求<textarea id="generation-guidance" rows="2" maxlength="1000" placeholder="例如：重点生成操作限制和异常场景问题"></textarea></label>
+              </div>
+              <label class="confirm-row"><input id="generation-regenerate" type="checkbox"><span>忽略缓存并重新调用模型（会产生新的 token 消耗）</span></label>
+              <div id="generation-estimate" class="generation-estimate muted">请选择生成配置和语料以查看任务规模。</div>
+              <button id="start-generation-button" type="submit" class="primary">生成候选问题</button>
+            </form>
+          </section>
+
+          <section class="panel generation-review-panel">
+            <div class="section-title">
+              <div>
+                <h2>生成任务与候选审核</h2>
+                <p>生成任务异步执行；可取消尚未发送的语料。候选通过确定性校验后才能批准入库。</p>
+              </div>
+            </div>
+            <div class="generation-job-controls">
+              <label>生成任务<select id="generation-job-select"><option value="">暂无任务</option></select></label>
+              <button id="load-generation-job-button" type="button">查看任务</button>
+              <button id="cancel-generation-job-button" type="button" class="danger" disabled>取消任务</button>
+            </div>
+            <div id="generation-job-summary" class="generation-job-summary muted">尚未选择生成任务</div>
+            <div id="generation-candidate-actions" class="toolbar" hidden>
+              <button id="select-pending-candidates-button" type="button">选择全部待审核</button>
+              <button id="approve-candidates-button" type="button" class="primary">批准所选</button>
+              <button id="reject-candidates-button" type="button">拒绝所选</button>
+            </div>
+            <div id="generation-candidates" class="generation-candidates"></div>
+          </section>
+        </section>
+
+        <section id="tab-validation" class="tab-panel">
+          <section class="panel">
+            <div class="section-title">
+              <div>
+                <h2>兼容校验</h2>
+                <p>正式导出前检查 WeKnora Schema、必填数据和引用完整性。</p>
+              </div>
+              <div class="toolbar">
+                <button id="validate-button" type="button">运行校验</button>
+                <button id="export-button" type="button" class="primary">导出 WeKnora ZIP</button>
+              </div>
+            </div>
+            <div id="validation-summary" class="validation-summary muted">尚未运行校验</div>
+            <div id="statistics" class="statistics" hidden></div>
+            <ul id="validation-issues" class="issue-list"></ul>
+          </section>
+          <div class="history-grid">
+            <section class="panel">
+              <div class="section-title">
+                <div>
+                  <h2>版本快照</h2>
+                  <p>保存当前可编辑项目，需要时可恢复。</p>
+                </div>
+                <button id="create-snapshot-button" type="button">创建快照</button>
+              </div>
+              <div id="snapshot-list" class="history-list"><p class="muted">暂无快照</p></div>
+            </section>
+            <section class="panel">
+              <div class="section-title">
+                <div>
+                  <h2>导出历史</h2>
+                  <p>每次导出都会保留独立记录，可重新下载。</p>
+                </div>
+                <button id="refresh-history-button" type="button">刷新</button>
+              </div>
+              <div id="export-history-list" class="history-list"><p class="muted">暂无导出记录</p></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="tab-evaluations" class="tab-panel">
+          <div class="evaluation-grid">
+            <section class="panel">
+              <div class="section-title">
+                <div>
+                  <h2 id="evaluation-mode-title">发起本地 WeKnora 评测</h2>
+                  <p id="evaluation-mode-description">数据包部署方式和 dataset ID 由目标环境配置与 Adapter 决定。启动前请核对导出包哈希。</p>
+                </div>
+              </div>
+              <div class="profile-binding">
+                <label>当前数据集评测环境<select id="dataset-evaluation-profile-select"><option value="">未绑定</option></select></label>
+                <div id="dataset-evaluation-profile-summary" class="profile-summary muted-text">尚未绑定 WeKnora 环境配置</div>
+                <button class="open-config-center" type="button" data-config-section="evaluation">前往配置中心</button>
+              </div>
+              <details id="evaluation-configuration-panel" class="connection-panel" open>
+                <summary id="connection-summary">目标环境配置（保存地址、资源 ID 与 API Key）</summary>
+                <div class="stack-form">
+                  <label>已保存配置<select id="connection-profile-select"><option value="">新建配置</option></select></label>
+                  <div class="two-columns">
+                    <label>配置 ID<input id="connection-profile-id" pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="local-dev"></label>
+                    <label>配置名称<input id="connection-profile-name" placeholder="本地开发"></label>
+                  </div>
+                  <div class="two-columns">
+                    <label>环境
+                      <select id="connection-environment">
+                        <option value="local">本地</option>
+                        <option value="staging">测试</option>
+                        <option value="production">生产</option>
+                      </select>
+                    </label>
+                    <label>Adapter
+                      <select id="connection-adapter">
+                        <option value="local-current">local-current（当前仓库契约）</option>
+                        <option value="manual-export">manual-export（仅手工导出）</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p id="production-adapter-warning" class="mode-hint warning" hidden>生产 WeKnora 自动对接当前已暂停。local-current 只匹配本地仓库契约；继续使用会向生产地址发送 API Key 和请求，仅限已确认接口完全一致的实验性操作。推荐改用 manual-export。</p>
+                  <label>dataset ID<input id="connection-dataset-id" value="default" required placeholder="default"></label>
+                  <label>部署说明<textarea id="connection-deployment-notes" rows="2" placeholder="数据包部署位置、审批单或操作说明；不要填写任何密钥"></textarea></label>
+                  <div class="toolbar">
+                    <button id="new-connection-button" type="button">新建</button>
+                    <button id="save-connection-button" type="button">保存环境配置</button>
+                    <button id="delete-connection-button" type="button" class="danger">删除配置</button>
+                    <button id="check-compatibility-button" type="button">只读检查兼容性</button>
+                    <button id="download-compatibility-button" type="button" disabled>下载脱敏报告</button>
+                  </div>
+                  <div id="compatibility-report" class="compatibility-report muted">尚未运行兼容性检查</div>
+                </div>
+              </details>
+              <form id="evaluation-form" class="stack-form">
+                <div id="remote-evaluation-fields" class="stack-form">
+                  <label>WeKnora API 地址<input id="evaluation-base-url" type="url" value="http://127.0.0.1:8080" required placeholder="http://127.0.0.1:8080"></label>
+                  <label>空间 API Key（保存到本机）<input id="evaluation-api-key" type="password" required autocomplete="off" placeholder="sk-..."></label>
+                  <p class="secret-hint">新配置点击“保存环境配置”后保存；已有配置修改 API Key 后会自动保存。留空更新其他字段不会清除已保存的 Key。API Key 不会写入数据集、快照或评测记录。</p>
+                  <div class="resource-loader">
+                    <button id="load-evaluation-resources-button" type="button">读取 WeKnora 资源</button>
+                    <span id="evaluation-resource-summary" class="muted">也可以继续手工填写下方 ID</span>
+                  </div>
+                  <label>知识库 ID<input id="evaluation-kb-id" list="evaluation-kb-options" required autocomplete="off" placeholder="选择或输入知识库 ID"></label>
+                  <datalist id="evaluation-kb-options"></datalist>
+                  <div class="two-columns">
+                    <label>对话模型 ID<input id="evaluation-chat-id" list="evaluation-chat-options" required autocomplete="off" placeholder="选择或输入模型 ID"></label>
+                    <label>重排模型 ID<input id="evaluation-rerank-id" list="evaluation-rerank-options" required autocomplete="off" placeholder="选择或输入模型 ID"></label>
+                  </div>
+                  <p class="secret-hint">知识库和模型 ID 会随目标环境配置保存；修改后请点击“保存环境配置”。</p>
+                  <datalist id="evaluation-chat-options"></datalist>
+                  <datalist id="evaluation-rerank-options"></datalist>
+                </div>
+                <p id="manual-evaluation-hint" class="mode-hint" hidden>手工导出模式不会访问 WeKnora，也不会使用 API 地址、密钥、知识库或模型 ID。这里只创建一条“等待外部结果”的本地记录。</p>
+                <label>对应导出版本<select id="evaluation-export" required><option value="">请先导出数据集</option></select></label>
+                <label class="confirm-row"><input id="evaluation-deployed" type="checkbox" required><span id="evaluation-confirm-text">我已按目标环境部署说明完成数据包部署，核对 ZIP SHA-256 与 dataset ID，并确认本次评测会调用模型、产生费用。</span></label>
+                <button id="start-evaluation-button" type="submit" class="primary">启动本地评测任务</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="section-title">
+                <div>
+                  <h2>评测记录</h2>
+                  <p>任务状态：等待、运行、成功或失败。</p>
+                </div>
+                <button id="poll-evaluations-button" type="button">更新远程任务（实验性）</button>
+              </div>
+              <div id="evaluation-run-list" class="history-list"><p class="muted">暂无评测记录</p></div>
+            </section>
+          </div>
+
+          <section id="external-result-panel" class="panel external-result-panel" hidden>
+            <div class="section-title">
+              <div>
+                <h2>导入外部评测结果</h2>
+                <p>支持汇总 JSON、逐题 JSON 和逐题 CSV；内容只作为数据解析，不会执行，也不会访问远程 WeKnora。</p>
+              </div>
+            </div>
+            <ol class="workflow-steps">
+              <li>创建一条“等待外部结果”的 <code>manual-export</code> 手工记录。</li>
+              <li>在外部系统实际执行评测并取得结果。</li>
+              <li>选择记录和格式，粘贴真实结果，先校验问题 ID 与导出版本，再确认保存。</li>
+            </ol>
+            <form id="external-result-form" class="stack-form">
+              <div class="two-columns">
+                <label>手工评测记录<select id="external-result-run" required><option value="">暂无手工评测记录</option></select></label>
+                <label>结果格式
+                  <select id="external-result-format">
+                    <option value="json">JSON（汇总或逐题）</option>
+                    <option value="csv">CSV（逐题）</option>
+                  </select>
+                </label>
+              </div>
+              <label><span id="external-result-content-label">真实结果 JSON</span><textarea id="external-result-json" rows="13" spellcheck="false" placeholder="粘贴外部评测系统实际生成的结果；此处内容不会被执行"></textarea></label>
+              <details class="result-example">
+                <summary>查看逐题 JSON 格式示例（示例不会自动填入）</summary>
+                <pre>{
+  "schema_version": 1,
+  "status": "success",
+  "summary": {
+    "total": 2,
+    "finished": 2,
+    "retrieval_metrics": {"precision": 0.75}
+  },
+  "items": [{
+    "question_id": 1,
+    "actual_answer": "外部系统生成的答案",
+    "retrieved_passage_ids": [0, 2],
+    "retrieved_documents": ["产品手册"],
+    "latency_ms": 1200,
+    "error_message": "",
+    "answer_judgement": "correct",
+    "answer_score": 1.0,
+    "assessment_source": "人工审核",
+    "review_comment": "覆盖全部答案要点"
+  }]
+}</pre>
+              </details>
+              <details class="result-example">
+                <summary>查看逐题 CSV 表头</summary>
+                <pre>question_id,actual_answer,retrieved_passage_ids,retrieved_documents,latency_ms,error_message,answer_judgement,answer_score,assessment_source,review_comment</pre>
+              </details>
+              <p class="secret-hint">旧版汇总 JSON 继续兼容。已完成记录再次导入时不会被覆盖，而会创建一条带来源关系的修订记录。</p>
+              <div class="toolbar">
+                <button id="validate-external-result-button" type="button">校验结果</button>
+                <button id="save-external-result-button" type="submit" class="primary" disabled>确认保存结果</button>
+              </div>
+              <div id="external-result-preview" class="result-preview muted">尚未校验结果</div>
+            </form>
+          </section>
+
+          <section id="external-result-mode-hint" class="panel external-result-panel mode-hint" hidden>
+            当前配置不是 <code>manual-export</code>，外部结果导入表单已隐藏。存在手工评测记录时，请切换到对应的 <code>manual-export</code> 环境配置后再导入结果。
+          </section>
+
+          <section class="panel report-panel">
+            <div class="section-title">
+              <div>
+                <h2>离线评测报告</h2>
+                <p>使用所选运行关联的导出 ZIP 和逐题召回结果计算 Precision、Recall、Hit 与 MRR；不会用答案字符串相等判断正确性。</p>
+              </div>
+            </div>
+            <div class="report-controls">
+              <label>评测记录<select id="report-run"><option value="">请选择</option></select></label>
+              <label>问题筛选
+                <select id="report-filter">
+                  <option value="all">全部问题</option>
+                  <option value="zero">零召回</option>
+                  <option value="low">低召回（小于 1）</option>
+                  <option value="failed">执行失败</option>
+                  <option value="missing">缺少结果</option>
+                  <option value="incorrect">答案错误或部分正确</option>
+                  <option value="unreviewed">答案未评价</option>
+                </select>
+              </label>
+              <button id="load-report-button" type="button" class="primary">生成报告</button>
+              <button id="toggle-report-button" type="button" hidden aria-expanded="true">收起报告</button>
+            </div>
+            <div id="report-output">
+            <div id="report-downloads" class="toolbar report-downloads" hidden>
+              <a id="report-json-link" class="button-link">下载 JSON 报告</a>
+              <a id="report-html-link" class="button-link">下载 HTML 报告</a>
+              <a id="report-csv-link" class="button-link">下载失败样本 CSV</a>
+            </div>
+            <div id="report-summary" class="report-summary muted">尚未生成报告</div>
+            <details id="report-groups-panel" class="report-groups" hidden>
+              <summary>查看分类、难度、可回答性、标签与来源分组</summary>
+              <div id="report-groups"></div>
+            </details>
+            <div class="table-wrap report-table-wrap">
+              <table id="report-table" hidden>
+                <thead><tr><th>选择</th><th>ID / 状态</th><th>问题与答案</th><th>答案评价</th><th>检索指标</th><th>黄金语料 / 实际召回</th><th>错误 / 耗时</th></tr></thead>
+                <tbody id="report-items"></tbody>
+              </table>
+            </div>
+            <form id="feedback-form" class="feedback-form" hidden>
+              <div>
+                <strong>失败样本回流</strong>
+                <p>勾选失败、缺失、不可计算或 Recall&lt;1 的问题，复制为新的可编辑数据集。黄金语料不完整时服务端会拒绝创建。</p>
+              </div>
+              <label>新数据集 ID<input id="feedback-id" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="dataset-feedback-v2"></label>
+              <label>名称<input id="feedback-name" required placeholder="失败样本回流集"></label>
+              <label>版本<input id="feedback-version" required placeholder="0.2.0"></label>
+              <button type="submit" class="primary">创建回流数据集</button>
+            </form>
+            </div>
+          </section>
+
+          <section class="panel comparison-panel">
+            <div class="section-title">
+              <div>
+                <h2>结果对比</h2>
+                <p>按逐题 Recall 比较两个运行，区分改善、退化、新增缺失和不可比样本。</p>
+              </div>
+            </div>
+            <div class="comparison-controls">
+              <label>基准任务<select id="comparison-base"><option value="">请选择</option></select></label>
+              <label>对比任务<select id="comparison-target"><option value="">请选择</option></select></label>
+              <button id="compare-evaluations-button" type="button">生成对比</button>
+              <button id="toggle-comparison-button" type="button" hidden aria-expanded="true">收起对比</button>
+            </div>
+            <div id="comparison-result" class="comparison-result muted">尚未选择评测结果</div>
+          </section>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <main id="configuration-workspace" class="configuration-workspace" hidden>
+    <section class="panel configuration-header">
+      <div>
+        <h2>配置中心</h2>
+        <p>统一维护生成模型和 WeKnora 环境。数据集只引用配置，不保存 API Key。</p>
+      </div>
+      <button id="back-to-datasets-button" type="button">返回数据集</button>
+    </section>
+    <section class="panel defaults-panel">
+      <div class="section-title">
+        <div>
+          <h2>新数据集默认配置</h2>
+          <p>新建数据集时自动绑定；已有数据集不会被批量改写。</p>
+        </div>
+      </div>
+      <div class="configuration-defaults-grid">
+        <label>默认生成模型<select id="default-generation-profile-select"><option value="">不设置</option></select></label>
+        <label>默认 WeKnora 环境<select id="default-evaluation-profile-select"><option value="">不设置</option></select></label>
+      </div>
+      <div class="toolbar"><button id="save-default-settings-button" type="button" class="primary">保存默认配置</button></div>
+    </section>
+    <section id="generation-configuration-section" class="panel configuration-section">
+      <div class="section-title"><div><h2>AI 生成模型配置</h2><p>供所有数据集的候选问题生成任务复用。</p></div></div>
+      <div id="generation-configuration-host"></div>
+    </section>
+    <section id="evaluation-configuration-section" class="panel configuration-section">
+      <div class="section-title"><div><h2>WeKnora 环境配置</h2><p>供评测运行和后续知识库分块读取复用。</p></div></div>
+      <div id="evaluation-configuration-host"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

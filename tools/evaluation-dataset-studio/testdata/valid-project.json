@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "sample-eval",
+  "name": "示例评测数据集",
+  "description": "用于验证 WeKnora 数据集导出契约",
+  "version": "0.1.0",
+  "created_at": "2026-09-17T00:00:00Z",
+  "updated_at": "2026-09-17T00:00:00Z",
+  "next_passage_id": 3,
+  "next_question_id": 2,
+  "passages": [
+    {
+      "id": 1,
+      "text": "长按重置键十秒可以恢复出厂设置。",
+      "source": "产品手册"
+    },
+    {
+      "id": 2,
+      "text": "恢复出厂设置会清除本地配置。",
+      "source": "产品手册"
+    }
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "text": "如何恢复出厂设置？",
+      "answer": "长按重置键十秒。",
+      "relevant_passage_ids": [1, 2]
+    }
+  ]
+}

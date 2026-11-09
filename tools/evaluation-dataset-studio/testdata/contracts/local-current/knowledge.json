@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "data": [
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "knowledge_base_id": "00000000-0000-4000-8000-000000000001",
+      "title": "Example Product Manual",
+      "file_name": "example-manual.pdf",
+      "parse_status": "completed",
+      "enable_status": "enabled"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 1
+}

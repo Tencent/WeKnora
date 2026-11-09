@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "status": "success",
+  "summary": {"total": 10, "finished": 10},
+  "items": [
+    {"question_id": 1, "actual_answer": "回答 1", "retrieved_passage_ids": [0], "latency_ms": 101},
+    {"question_id": 2, "actual_answer": "回答 2", "retrieved_passage_ids": [], "latency_ms": 102},
+    {"question_id": 3, "actual_answer": "回答 3", "retrieved_passage_ids": [2], "latency_ms": 103},
+    {"question_id": 4, "actual_answer": "回答 4", "retrieved_passage_ids": [], "latency_ms": 104},
+    {"question_id": 5, "actual_answer": "回答 5", "retrieved_passage_ids": [4], "latency_ms": 105},
+    {"question_id": 6, "actual_answer": "回答 6", "retrieved_passage_ids": [], "latency_ms": 106},
+    {"question_id": 7, "actual_answer": "回答 7", "retrieved_passage_ids": [6], "latency_ms": 107},
+    {"question_id": 8, "actual_answer": "回答 8", "retrieved_passage_ids": [], "latency_ms": 108},
+    {"question_id": 9, "actual_answer": "回答 9", "retrieved_passage_ids": [8], "latency_ms": 109},
+    {"question_id": 10, "error_message": "外部执行超时", "latency_ms": 30000}
+  ]
+}
