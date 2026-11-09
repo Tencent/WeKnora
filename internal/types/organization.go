@@ -392,6 +392,14 @@ type ShareKnowledgeBaseRequest struct {
 	Permission     OrgMemberRole `json:"permission" binding:"required"`
 }
 
+// BatchShareKnowledgeBasesRequest shares each KB with each target organization.
+// The endpoint deduplicates both lists and accepts at most 100 unique pairs.
+type BatchShareKnowledgeBasesRequest struct {
+	KnowledgeBaseIDs []string      `json:"kb_ids" binding:"required,min=1,max=100,dive,required,max=64"`
+	OrganizationIDs  []string      `json:"organization_ids" binding:"required,min=1,max=100,dive,required,max=64"`
+	Permission       OrgMemberRole `json:"permission" binding:"required"`
+}
+
 // UpdateSharePermissionRequest represents a request to update share permission
 type UpdateSharePermissionRequest struct {
 	Permission OrgMemberRole `json:"permission" binding:"required"`

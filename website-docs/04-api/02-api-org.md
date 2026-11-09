@@ -316,6 +316,46 @@ curl $BASE/api/v1/organizations/org-1/shared-agents -H "Authorization: Bearer $T
 
 API key：仅 full-access。Handler: `internal/handler/organization.go`
 
+### POST /api/v1/knowledge-bases/shares/batch
+
+用途：把多个知识库分别共享到多个组织，按 `kb_ids × organization_ids` 执行。
+JWT 调用者需 Contributor+，且对每个知识库分别校验创建者 OR Admin+；API key 仅允许 full-access。
+知识库必须属于调用者的工作空间，该空间在目标组织中必须具有 editor 或 admin 角色，与单项共享一致。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `kb_ids` | string[] | 是 | 知识库 ID，1–100 项；每项非空，最多 64 字符 |
+| `organization_ids` | string[] | 是 | 目标组织 ID，1–100 项；每项非空，最多 64 字符 |
+| `permission` | string | 是 | 共享权限：`viewer`、`editor` 或 `admin`，沿用单项共享语义 |
+
+请求体最多 64 KiB。两个列表分别按首次出现顺序去重，去重后的组合数最多 100；
+请求格式、权限值或数量不合法时整批返回 400，超过请求体上限返回 413，均不写入共享记录。
+
+合法请求返回 200，`success: true` 表示整批请求已处理，具体结果查看 `data.results`。
+结果按知识库优先、组织次序排列，每个组合返回一次；成功项 `status: 200` 并包含 `share`，
+失败项包含 `status` 和 `error`（`code`、`message`）。单项失败不回滚其他成功项。
+已存在的共享会更新权限，重复提交同一组合不会新增记录；调用方可以重试失败项。
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/shares/batch \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"kb_ids":["kb-1","kb-2"],"organization_ids":["org-1"],"permission":"viewer"}'
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "results": [
+      {"kb_id": "kb-1", "organization_id": "org-1", "status": 200,
+       "share": {"id": "share-1", "knowledge_base_id": "kb-1", "organization_id": "org-1", "permission": "viewer"}},
+      {"kb_id": "kb-2", "organization_id": "org-1", "status": 403,
+       "error": {"code": 1002, "message": "No permission to share this knowledge base"}}
+    ]
+  }
+}
+```
+
 ### POST /api/v1/knowledge-bases/:id/shares
 
 用途：把 KB 分享到组织。权限：KB 创建者 OR Admin+。

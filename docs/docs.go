@@ -19,6 +19,81 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/knowledge-bases/shares/batch": {
+            "post": {
+                "description": "去重后最多 100 个知识库与组织组合。逐项授权和执行，返回每项状态；已存在的共享更新权限。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库共享"
+                ],
+                "summary": "批量共享知识库到组织",
+                "parameters": [
+                    {
+                        "description": "批量共享信息",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.BatchShareKnowledgeBasesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.BatchShareKnowledgeBasesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ]
+            }
+        },
         "/admin/memory/subjects": {
             "get": {
                 "security": [
@@ -24822,6 +24897,66 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "github_com_Tencent_WeKnora_internal_types.BatchShareKnowledgeBasesRequest": {
+            "type": "object",
+            "required": [
+                "kb_ids",
+                "organization_ids",
+                "permission"
+            ],
+            "properties": {
+                "kb_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "organization_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "permission": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
+                }
+            }
+        },
+        "internal_handler.BatchShareKnowledgeBaseResult": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                },
+                "kb_id": {
+                    "type": "string"
+                },
+                "organization_id": {
+                    "type": "string"
+                },
+                "share": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShare"
+                },
+                "status": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler.BatchShareKnowledgeBasesResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.BatchShareKnowledgeBaseResult"
+                    }
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.MemorySubjectSummary": {
             "type": "object",
             "properties": {
