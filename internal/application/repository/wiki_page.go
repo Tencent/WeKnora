@@ -944,6 +944,33 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 // false so dead-link cleanup treats them as gone.
 //
 // Empty input returns nil, nil so callers can branch cheaply.
+// FindTitlesOnOtherPages returns the titles of live pages other than
+// excludeSlug that match any of the given strings, ignoring case.
+func (r *wikiPageRepository) FindTitlesOnOtherPages(
+	ctx context.Context,
+	kbID string,
+	excludeSlug string,
+	titles []string,
+) ([]string, error) {
+	if len(titles) == 0 {
+		return nil, nil
+	}
+	lowered := make([]string, 0, len(titles))
+	for _, title := range titles {
+		lowered = append(lowered, strings.ToLower(strings.TrimSpace(title)))
+	}
+	var found []string
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Where("knowledge_base_id = ? AND slug <> ? AND status <> ? AND LOWER(title) IN ?",
+			kbID, excludeSlug, types.WikiPageStatusArchived, lowered).
+		Distinct().
+		Pluck("title", &found).Error; err != nil {
+		return nil, err
+	}
+	return found, nil
+}
+
 func (r *wikiPageRepository) ExistsSlugs(
 	ctx context.Context,
 	kbID string,

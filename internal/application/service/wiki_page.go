@@ -142,6 +142,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, repository.ErrWikiPageConflict
 	}
 	stripWikiPageInlineChunkCitations(page)
+	if err := applyRejectedAliases(ctx, existing, page); err != nil {
+		return nil, fmt.Errorf("apply rejected aliases: %w", err)
+	}
 
 	// ── Truncation choke point ────────────────
 	//
@@ -1198,6 +1201,12 @@ func (s *wikiPageService) ListSlugsBySourceRef(ctx context.Context, kbID string,
 // for the requested slugs, in a single IN query. Used in place of the
 // pre-batch ListAllPages dump that historically pulled hundreds of MB
 // for KBs in the tens of thousands of pages.
+func (s *wikiPageService) FindTitlesOnOtherPages(
+	ctx context.Context, kbID, excludeSlug string, titles []string,
+) ([]string, error) {
+	return s.repo.FindTitlesOnOtherPages(ctx, kbID, excludeSlug, titles)
+}
+
 func (s *wikiPageService) ListBySlugs(ctx context.Context, kbID string, slugs []string) (map[string]*types.WikiPageLite, error) {
 	return s.repo.ListBySlugs(ctx, kbID, slugs)
 }
