@@ -1068,6 +1068,25 @@ func (r *wikiPageRepository) FindSimilarPages(
 
 	q := strings.ToLower(strings.TrimSpace(query))
 
+	if r.wikiDialect() == "sqlite" {
+		var rows []types.WikiPageLite
+		// SQLite has no pg_trgm. Use a bounded literal title prefilter; merge
+		// decisions still require the existing model review of candidate pages.
+		needle := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(q) + "%"
+		err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
+			Select("slug, title, page_type, status, aliases, out_links").
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) LIKE ? ESCAPE '!'", kbID, pageTypes, types.WikiPageStatusArchived, needle).
+			Order("CASE WHEN lower(title) = '" + strings.ReplaceAll(q, "'", "''") + "' THEN 0 ELSE 1 END, title, slug").Limit(limit).Scan(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*types.WikiPageLite, len(rows))
+		for i := range rows {
+			out[i] = &rows[i]
+		}
+		return out, nil
+	}
+
 	var rows []types.WikiPageLite
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
