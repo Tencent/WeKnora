@@ -481,7 +481,7 @@ class WeKnoraClient:
     # Session Management - Methods for managing chat sessions
     def create_session(
         self,
-        kb_id: str,
+        kb_id: str | None = None,
         max_rounds: int = 5,
         enable_rewrite: bool = True,
         fallback_response: str = "Sorry, I cannot answer this question.",
@@ -489,21 +489,20 @@ class WeKnoraClient:
         title: str = "",
         description: str = "",
     ) -> Dict:
-        """Create a new chat session with strategy configuration"""
-        strategy = {
-            "max_rounds": max_rounds,
-            "enable_rewrite": enable_rewrite,
-            "fallback_strategy": "FIXED_RESPONSE",
-            "fallback_response": fallback_response,
-            "embedding_top_k": 10,
-            "keyword_threshold": 0.5,
-            "vector_threshold": 0.7,
-            "summary_model_id": summary_model_id,
-        }
-        data = {
-            "knowledge_base_id": kb_id,
-            "session_strategy": strategy,
-        }
+        """Create a session, retaining the legacy payload when a KB is supplied."""
+        data: Dict[str, Any] = {}
+        if kb_id is not None:
+            data["knowledge_base_id"] = kb_id
+            data["session_strategy"] = {
+                "max_rounds": max_rounds,
+                "enable_rewrite": enable_rewrite,
+                "fallback_strategy": "FIXED_RESPONSE",
+                "fallback_response": fallback_response,
+                "embedding_top_k": 10,
+                "keyword_threshold": 0.5,
+                "vector_threshold": 0.7,
+                "summary_model_id": summary_model_id,
+            }
         if title:
             data["title"] = title
         if description:
@@ -944,7 +943,7 @@ def get_model(model_id: str) -> dict:
 
 @mcp.tool()
 def create_session(
-    kb_id: str,
+    kb_id: str | None = None,
     max_rounds: int = 5,
     enable_rewrite: bool = True,
     fallback_response: str = "Sorry, I cannot answer this question.",
@@ -952,12 +951,13 @@ def create_session(
     title: str = "",
     description: str = "",
 ) -> dict:
-    """Create a new chat session bound to a knowledge base with a retrieval strategy.
+    """Create a chat session. No knowledge base is required.
 
-    kb_id may be a UUID or a knowledge-base name (resolved automatically).
+    To retrieve from a knowledge base, pass knowledge_base_ids to chat or agent_chat.
+    Older servers can still receive kb_id (UUID or name) and the session strategy.
     """
     return client.create_session(
-        kb_id=client.resolve_kb_id(kb_id),
+        kb_id=client.resolve_kb_id(kb_id) if kb_id is not None else None,
         max_rounds=max_rounds,
         enable_rewrite=enable_rewrite,
         fallback_response=fallback_response,
