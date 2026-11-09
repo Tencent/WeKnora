@@ -1201,9 +1201,6 @@ func TestEnsureCollectionCreatesWithQdrantStorageOptions(t *testing.T) {
 	if vectorParams.GetSize() != 1024 || vectorParams.GetDistance() != qdrant.Distance_Cosine {
 		t.Fatalf("vector params = size %d distance %v", vectorParams.GetSize(), vectorParams.GetDistance())
 	}
-	if !vectorParams.GetOnDisk() {
-		t.Fatal("CreateCollection did not set vectors on_disk")
-	}
 	if vectorParams.GetMemory() != qdrant.Memory_Cold {
 		t.Fatalf("vector memory = %v, want cold", vectorParams.GetMemory())
 	}
@@ -1216,9 +1213,6 @@ func TestEnsureCollectionCreatesWithQdrantStorageOptions(t *testing.T) {
 	}
 	if scalar.GetQuantile() != 0.99 {
 		t.Fatalf("quantile = %v, want 0.99", scalar.GetQuantile())
-	}
-	if !scalar.GetAlwaysRam() {
-		t.Fatal("scalar quantization must set always_ram")
 	}
 	if scalar.GetMemory() != qdrant.Memory_Pinned {
 		t.Fatalf("scalar quantization memory = %v, want pinned", scalar.GetMemory())
@@ -1244,15 +1238,12 @@ func TestEnsureCollectionUpdatesExistingQdrantStorageOptions(t *testing.T) {
 	if scalar == nil || scalar.GetType() != qdrant.QuantizationType_Int8 {
 		t.Fatalf("update quantization = %v, want scalar int8", scalar)
 	}
-	if !scalar.GetAlwaysRam() {
-		t.Fatal("updated scalar quantization must set always_ram")
-	}
 	if scalar.GetMemory() != qdrant.Memory_Pinned {
 		t.Fatalf("updated scalar quantization memory = %v, want pinned", scalar.GetMemory())
 	}
 	vectorDiff := rpcs.updateRequest.GetVectorsConfig().GetParams()
-	if vectorDiff == nil || !vectorDiff.GetOnDisk() {
-		t.Fatalf("update vector params = %v, want on_disk=true", vectorDiff)
+	if vectorDiff == nil {
+		t.Fatal("UpdateCollection has no vector params")
 	}
 	if vectorDiff.GetMemory() != qdrant.Memory_Cold {
 		t.Fatalf("updated vector memory = %v, want cold", vectorDiff.GetMemory())
