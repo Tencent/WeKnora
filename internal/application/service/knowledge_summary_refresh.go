@@ -120,6 +120,7 @@ func enqueueSummaryRefresh(
 		Language:        language,
 		Attempt:         tracker.LatestAttempt(ctx, knowledge.ID),
 		Refresh:         true,
+		BypassCache:     processingCacheBypassed(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -142,6 +143,7 @@ func enqueueSummaryRefresh(
 func (s *knowledgeService) RequestKnowledgeSummaryRefresh(
 	ctx context.Context, knowledgeID string,
 ) error {
+	ctx = withProcessingCacheBypass(ctx)
 	tenantID := types.MustTenantIDFromContext(ctx)
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {

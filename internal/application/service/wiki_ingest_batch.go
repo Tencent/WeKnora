@@ -1367,6 +1367,7 @@ func (s *wikiIngestService) mapOneDocument(
 ) (*docIngestResult, []SlugUpdate, error) {
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
+	ctx = withWikiProcessingScope(ctx, knowledgeID, payload.KnowledgeBaseID)
 	lang := types.ResolveLanguageName(ctx, op.Language)
 
 	// Open a postprocess.wiki subspan under the parent attempt's
@@ -1497,6 +1498,7 @@ func (s *wikiIngestService) mapOneDocument(
 	for slug := range slugItems {
 		summaryExtractedPages = append(summaryExtractedPages, slug)
 	}
+	sort.Strings(summaryExtractedPages)
 	// Wiki summary slug is derived from the knowledge ID rather than the
 	// docTitle (which is typically the upload filename). Filename-based slugs
 	// like "summary/mx5280-pdf" expose the filename in cross-link contexts
@@ -1508,7 +1510,9 @@ func (s *wikiIngestService) mapOneDocument(
 		if item, ok := slugItems[slug]; ok {
 			aliases := ""
 			if len(item.Aliases) > 0 {
-				aliases = fmt.Sprintf(" (Aliases: %s)", strings.Join(item.Aliases, ", "))
+				sortedAliases := append([]string(nil), item.Aliases...)
+				sort.Strings(sortedAliases)
+				aliases = fmt.Sprintf(" (Aliases: %s)", strings.Join(sortedAliases, ", "))
 			}
 			slugListing += fmt.Sprintf("- [[%s]] = %s%s\n", slug, item.Name, aliases)
 		} else {
@@ -1834,20 +1838,8 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	// summary slugs are code-generated from the knowledge ID and never appear
 	// in the extraction output, so including them just wastes tokens and risks
 	// confusing the model.
-	var prevSlugsText string
-	if len(oldPageSlugs) > 0 {
-		var sb strings.Builder
-		for slug := range oldPageSlugs {
-			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
-				continue
-			}
-			fmt.Fprintf(&sb, "- %s\n", slug)
-		}
-		prevSlugsText = sb.String()
-	}
-	if prevSlugsText == "" {
-		prevSlugsText = "(none — this is a new document)"
-	}
+	ctx = withWikiProcessingScope(ctx, processingDocument(ctx), kbID)
+	prevSlugsText := s.wikiPreviousSlugInput(ctx, chatModel, oldPageSlugs)
 
 	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
 		"Content":            content,

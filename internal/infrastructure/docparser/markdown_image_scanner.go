@@ -66,6 +66,54 @@ func StripMarkdownImages(markdown string) string {
 	return b.String()
 }
 
+// MaskMarkdownImageDestinations retains image descriptions while removing locations.
+func MaskMarkdownImageDestinations(markdown, replacement string) string {
+	return RewriteMarkdownImageDestinations(markdown, func(string) string { return replacement })
+}
+
+// RewriteMarkdownImageDestinations rewrites only destinations, retaining alt
+// text and title suffixes. Angle brackets and escapes stay in the destination
+// supplied to rewrite, so reversible substitutions can restore exact syntax.
+// Returning an empty destination removes the entire image construct.
+func RewriteMarkdownImageDestinations(markdown string, rewrite func(string) string) string {
+	var b strings.Builder
+	last := 0
+	for _, span := range scanMarkdownImageTargets(markdown) {
+		raw := strings.TrimSpace(markdown[span.TargetStart:span.TargetEnd])
+		destination, title := raw, ""
+		if start, ok := parseMarkdownImageTitleSuffix(raw); ok {
+			destination = strings.TrimSpace(raw[:start])
+			title = raw[len(destination):]
+		}
+		rewritten := rewrite(destination)
+		if rewritten == "" {
+			b.WriteString(markdown[last:span.ImageStart])
+			last = span.TargetEnd + 1
+			continue
+		}
+		b.WriteString(markdown[last:span.TargetStart])
+		b.WriteString(rewritten)
+		b.WriteString(title)
+		last = span.TargetEnd
+	}
+	b.WriteString(markdown[last:])
+	return b.String()
+}
+
+// RewriteOutsideMarkdownImages protects complete image constructs while
+// rewriting surrounding prose, including images with parentheses and titles.
+func RewriteOutsideMarkdownImages(markdown string, rewrite func(string) string) string {
+	var b strings.Builder
+	last := 0
+	for _, span := range scanMarkdownImageTargets(markdown) {
+		b.WriteString(rewrite(markdown[last:span.ImageStart]))
+		b.WriteString(markdown[span.ImageStart : span.TargetEnd+1])
+		last = span.TargetEnd + 1
+	}
+	b.WriteString(rewrite(markdown[last:]))
+	return b.String()
+}
+
 func findMarkdownImageAltEnd(markdown string, start int) int {
 	for i := start; i+1 < len(markdown); i++ {
 		if markdown[i] == ']' && markdown[i+1] == '(' && !isEscaped(markdown, i) {

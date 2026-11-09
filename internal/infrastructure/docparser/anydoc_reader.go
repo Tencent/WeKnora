@@ -75,7 +75,11 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 			req.FileName, converted.AssetsError)
 	}
 
-	return &types.ReadResult{
+	return anydocReadResult(converted, format), nil
+}
+
+func anydocReadResult(converted *anydoc.Result, format string) *types.ReadResult {
+	result := &types.ReadResult{
 		MarkdownContent: converted.Markdown,
 		ImageRefs:       imageRefsFromAssets(converted.Assets),
 		Metadata: map[string]string{
@@ -83,7 +87,11 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 			"anydoc_version": anydoc.Version(),
 			"source_format":  format,
 		},
-	}, nil
+	}
+	if converted.AssetsError != nil {
+		result.Metadata["processing_cache_incomplete"] = "image extraction failed"
+	}
+	return result
 }
 
 // Inspect only the ZIP directory: no media decompression or filesystem writes

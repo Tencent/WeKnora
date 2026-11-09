@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -81,16 +82,17 @@ func buildVLMOCRPrompt(sourceType string, _ types.VLMConfig) string {
 // It reads images from storage (via FileService for provider:// URLs),
 // performs OCR and VLM caption, and creates child chunks.
 type ImageMultimodalService struct {
-	chunkService   interfaces.ChunkService
-	modelService   interfaces.ModelService
-	kbService      interfaces.KnowledgeBaseService
-	knowledgeRepo  interfaces.KnowledgeRepository
-	tenantRepo     interfaces.TenantRepository
-	retrieveEngine interfaces.RetrieveEngineRegistry
-	ownership      retriever.TenantStoreOwnership
-	ollamaService  *ollama.OllamaService
-	taskEnqueuer   interfaces.TaskEnqueuer
-	redisClient    *redis.Client
+	processingCache *processingcache.Runtime
+	chunkService    interfaces.ChunkService
+	modelService    interfaces.ModelService
+	kbService       interfaces.KnowledgeBaseService
+	knowledgeRepo   interfaces.KnowledgeRepository
+	tenantRepo      interfaces.TenantRepository
+	retrieveEngine  interfaces.RetrieveEngineRegistry
+	ownership       retriever.TenantStoreOwnership
+	ollamaService   *ollama.OllamaService
+	taskEnqueuer    interfaces.TaskEnqueuer
+	redisClient     *redis.Client
 	// fileSvc is the globally configured default FileService used as a fallback
 	// when the tenant-scoped storage config cannot produce a usable service
 	// (e.g. images were saved using the global MINIO_* env vars while the
@@ -375,17 +377,18 @@ func (s *ImageMultimodalService) processImage(
 	// action-loop layout did (a failed OCR fails the .ocr subspan and the
 	// outcome summary, without failing or retrying the whole image).
 	rc := &runContext{
-		payload:    payload,
-		pipelineID: string(pipeline.ID()),
-		params:     payload.ImagePipelineParams,
-		declared:   pipeline.Fields(),
-		model:      vlmModel,
-		imageBytes: imgBytes,
-		vlmCfg:     vlmCfg,
-		imageInfo:  &imageInfo,
-		out:        out,
-		tracker:    tracker,
-		imgSpan:    imgSpan,
+		processingCache: s.processingCache,
+		payload:         payload,
+		pipelineID:      string(pipeline.ID()),
+		params:          payload.ImagePipelineParams,
+		declared:        pipeline.Fields(),
+		model:           vlmModel,
+		imageBytes:      imgBytes,
+		vlmCfg:          vlmCfg,
+		imageInfo:       &imageInfo,
+		out:             out,
+		tracker:         tracker,
+		imgSpan:         imgSpan,
 		// The preprocess action asks this to straighten the page. Nil is fine:
 		// the action reports "unavailable" and OCR reads the original bytes.
 		preprocessor: s.docReader,
@@ -861,7 +864,7 @@ func (s *ImageMultimodalService) indexImageVector(
 		logger.Warnf(ctx, "[ImageMultimodal] Image %s not embeddable: %v", payload.ImageURL, err)
 		return "failed: " + err.Error()
 	}
-	vectors, err := imageModel.BatchEmbedImages(ctx, []embedding.Image{prepared})
+	vectors, err := s.cachedImageVector(ctx, payload, model, imageModel, prepared)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Image embedding failed for %s: %v", payload.ImageURL, err)
 		return "failed: " + err.Error()

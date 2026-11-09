@@ -189,35 +189,36 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 		return nil, err
 	}
 
+	cacheID := remoteCacheIdentity(config, resolved, endpoint)
 	switch resolved.API {
 	case api.APIOpenAICompletions:
-		return openaicompletions.New(openaicompletions.Config{
+		return &cacheCompletions{Client: openaicompletions.New(openaicompletions.Config{
 			Endpoint:       endpoint,
 			Settings:       resolved.OpenAICompletions,
 			ThinkingLevels: resolved.ThinkingLevels,
 			Reasoning:      resolved.Spec.Reasoning,
-		}), nil
+		}), cacheIdentity: cacheID}, nil
 	case api.APIOpenAIResponses:
-		return openairesponses.New(openairesponses.Config{
+		return &cacheResponses{Client: openairesponses.New(openairesponses.Config{
 			Endpoint:       endpoint,
 			Settings:       resolved.OpenAIResponses,
 			ThinkingLevels: resolved.ThinkingLevels,
 			Reasoning:      resolved.Spec.Reasoning,
-		}), nil
+		}), cacheIdentity: cacheID}, nil
 	case api.APIAnthropicMessages:
-		return anthropicmessages.New(anthropicmessages.Config{
+		return &cacheAnthropic{Client: anthropicmessages.New(anthropicmessages.Config{
 			Endpoint:       endpoint,
 			Settings:       resolved.AnthropicMessages,
 			ThinkingLevels: resolved.ThinkingLevels,
 			Reasoning:      resolved.Spec.Reasoning,
-		}), nil
+		}), cacheIdentity: cacheID}, nil
 	case api.APIGoogleGenerativeAI:
-		return googlegenai.New(googlegenai.Config{
+		return &cacheGoogle{Client: googlegenai.New(googlegenai.Config{
 			Endpoint:       endpoint,
 			Settings:       resolved.GoogleGenerativeAI,
 			ThinkingLevels: resolved.ThinkingLevels,
 			Reasoning:      resolved.Spec.Reasoning,
-		}), nil
+		}), cacheIdentity: cacheID}, nil
 	default:
 		return nil, fmt.Errorf("unsupported chat api %q for provider %s", resolved.API, vendor.ID)
 	}
