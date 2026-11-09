@@ -19,6 +19,7 @@ from ebooklib import epub
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.mhtml_parser import MHTMLParser
+from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +110,7 @@ class EPUBParser(BaseParser):
 
             for html_file in html_files:
                 try:
-                    html_content = epub_zip.read(html_file).decode(
-                        "utf-8", errors="ignore"
-                    )
+                    html_content = endecode.decode_bytes(epub_zip.read(html_file))
                     chapter_md = self._html_to_markdown(
                         html_content,
                         image_aliases=image_aliases,
@@ -211,7 +210,9 @@ class EPUBParser(BaseParser):
         image_aliases: Dict[str, str] | None = None,
     ) -> str:
         try:
-            html_content = html_item.get_content()
+            # EpubHtml's serializer parses its input as UTF-8. Read the original
+            # item bytes so BeautifulSoup can honor a Unicode byte order mark.
+            html_content = epub.EpubItem.get_content(html_item)
             soup = BeautifulSoup(html_content, "lxml")
             title_tag = soup.find(["h1", "h2"])
             if title_tag:
