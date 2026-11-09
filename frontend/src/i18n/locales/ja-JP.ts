@@ -8666,6 +8666,7 @@ export default {
     schedule6h: '6時間ごと',
     schedule12h: '12時間ごと',
     schedule24h: '毎日',
+    scheduleDailyTime: '開始時刻',
     scheduleCustom: 'カスタム（時間）',
     scheduleCustomHoursLabel: 'カスタム間隔（時間）',
     scheduleHours: '毎{n}時間',
@@ -8674,7 +8675,7 @@ export default {
       '1h': '1時間ごと',
       '6h': '6時間ごと',
       '12h': '12時間ごと',
-      '24h': '毎日'
+      '24h': '毎日 {time}'
     },
     resourceType: {
       wikiSpace: 'Wikiスペース',

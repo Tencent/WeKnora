@@ -17,6 +17,7 @@ import {
   type Resource,
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { parseDailySyncTime } from '@/utils/cronHumanize'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
 
@@ -189,6 +190,10 @@ function enterReplaceCredentials() {
   testResult.value = ''
   testErrorMsg.value = ''
 }
+
+const DAILY_SCHEDULE = 'daily'
+const DEFAULT_DAILY_SYNC_TIME = '02:00'
+const dailySyncTime = ref(DEFAULT_DAILY_SYNC_TIME)
 
 // Form data
 const form = ref({
@@ -573,7 +578,7 @@ const schedulePresets = computed(() => [
   { label: t('datasource.schedule1h'), value: '0 0 * * * *' },
   { label: t('datasource.schedule6h'), value: '0 0 */6 * * *' },
   { label: t('datasource.schedule12h'), value: '0 0 */12 * * *' },
-  { label: t('datasource.schedule24h'), value: '0 0 2 * * *' },
+  { label: t('datasource.schedule24h'), value: DAILY_SCHEDULE },
   { label: t('datasource.scheduleCustom'), value: 'custom' },
 ])
 
@@ -589,7 +594,6 @@ const PRESET_SCHEDULES = new Set([
   '0 0 * * * *',
   '0 0 */6 * * *',
   '0 0 */12 * * *',
-  '0 0 2 * * *',
   '',
 ])
 
@@ -603,9 +607,12 @@ function hoursToCron(hours: number): string {
   return `0 0 */${Math.min(Math.max(Math.floor(hours), 1), 24)} * * *`
 }
 
-// Resolve the schedule value sent to the backend: the custom-hours sentinel
-// is serialized to "0 0 */N * * *", everything else passes through as-is.
+// Convert the form-only options to cron before sending the schedule.
 function serializeSyncSchedule(): string {
+  if (form.value.sync_schedule === DAILY_SCHEDULE) {
+    const [hour, minute] = dailySyncTime.value.split(':').map(Number)
+    return `0 ${minute} ${hour} * * *`
+  }
   return form.value.sync_schedule === CUSTOM_SCHEDULE
     ? hoursToCron(form.value.customHours)
     : form.value.sync_schedule
@@ -880,6 +887,7 @@ watch(visible, async (v) => {
     return
   }
   step.value = isEdit.value ? 1 : 0
+  dailySyncTime.value = DEFAULT_DAILY_SYNC_TIME
   testResult.value = ''
   testErrorMsg.value = ''
   tempDsId.value = ''
@@ -906,6 +914,8 @@ watch(visible, async (v) => {
     refreshCredentialsStatus()
     testResult.value = credentialsConfigured.value ? 'success' : ''
     const editConfig = props.dataSource.config || {}
+    const savedDailyTime = parseDailySyncTime(props.dataSource.sync_schedule)
+    if (savedDailyTime) dailySyncTime.value = savedDailyTime
     const decodedSchedule = decodeSyncSchedule(props.dataSource.sync_schedule)
     form.value = {
       name: props.dataSource.name,
@@ -917,7 +927,9 @@ watch(visible, async (v) => {
           ? hydrateRssFeedUrlsFromConfig(editConfig)
           : { ...(editConfig.settings || {}) },
       },
-      sync_schedule: decodedSchedule.kind === 'custom' ? CUSTOM_SCHEDULE : props.dataSource.sync_schedule,
+      sync_schedule: savedDailyTime
+        ? DAILY_SCHEDULE
+        : decodedSchedule.kind === 'custom' ? CUSTOM_SCHEDULE : props.dataSource.sync_schedule,
       customHours: decodedSchedule.kind === 'custom' ? (decodedSchedule.hours as number) : 6,
       sync_mode: props.dataSource.sync_mode,
       conflict_strategy: props.dataSource.conflict_strategy,
@@ -2160,7 +2172,23 @@ const drawerConfirmText = computed(() => {
           <t-option v-for="p in schedulePresets" :key="p.value" :value="p.value" :label="p.label" />
         </t-select>
 
-        <div v-if="form.sync_schedule === CUSTOM_SCHEDULE" class="form-item form-item--flat" style="margin-top: 12px">
+        <div
+          v-if="form.sync_schedule === DAILY_SCHEDULE"
+          class="form-item form-item--flat"
+          style="margin-top: 12px"
+          role="group"
+          aria-labelledby="datasource-daily-sync-time-label"
+        >
+          <span id="datasource-daily-sync-time-label" class="form-label">{{ t('datasource.scheduleDailyTime') }}</span>
+          <t-time-picker
+            v-model="dailySyncTime"
+            format="HH:mm"
+            :steps="[1, 15, 1]"
+            :allow-input="false"
+            :clearable="false"
+          />
+        </div>
+        <div v-else-if="form.sync_schedule === CUSTOM_SCHEDULE" class="form-item form-item--flat" style="margin-top: 12px">
           <label class="form-label">{{ t('datasource.scheduleCustomHoursLabel') }}</label>
           <t-input-number
             v-model="form.customHours"

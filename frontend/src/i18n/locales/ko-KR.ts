@@ -1395,6 +1395,7 @@ export default {
     schedule6h: '6시간마다',
     schedule12h: '12시간마다',
     schedule24h: '매일',
+    scheduleDailyTime: '시작 시간',
     scheduleCustom: '사용자 지정（시간）',
     scheduleCustomHoursLabel: '사용자 지정 간격（시간）',
     scheduleHours: '매 {n}시간',
@@ -1414,7 +1415,7 @@ export default {
       '1h': '매시간',
       '6h': '6시간마다',
       '12h': '12시간마다',
-      '24h': '매일'
+      '24h': '매일 {time}'
     },
     field: {
       appId: 'App ID',

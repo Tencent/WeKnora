@@ -8666,6 +8666,7 @@ export default {
     schedule6h: 'Every 6 hours',
     schedule12h: 'Every 12 hours',
     schedule24h: 'Daily',
+    scheduleDailyTime: 'Start time',
     scheduleCustom: 'Custom interval (hours)',
     scheduleCustomHoursLabel: 'Custom interval (hours)',
     scheduleHours: 'Every {n} hours',
@@ -8674,7 +8675,7 @@ export default {
       '1h': 'Hourly',
       '6h': 'Every 6 hours',
       '12h': 'Every 12 hours',
-      '24h': 'Daily'
+      '24h': 'Daily at {time}'
     },
     resourceType: {
       wikiSpace: 'Wiki Space',
