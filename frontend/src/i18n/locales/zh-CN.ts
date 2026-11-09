@@ -2727,6 +2727,11 @@ export default {
       systemDefault: '系统默认',
       immutableHint: '创建后不可更改。如需迁移，请创建一个绑定到目标存储的新 KB 并重新索引。',
       immutableEdit: '向量存储绑定在创建后无法更改。',
+      retrievalLabel: '检索引擎',
+      retrievalDesc: '各检索方式配置的引擎。',
+      vectorRetrieval: '向量检索',
+      keywordRetrieval: '关键词检索',
+      retrievalDisabled: '未启用',
       unavailableHint: '绑定的向量存储当前不可用，请在设置 → 向量存储中检查其连接配置。',
       goGlobalSettings: '前往向量存储设置'
     }
@@ -7175,6 +7180,12 @@ export default {
     readOnly: '仅空间管理员可以修改，你可以查看当前生效的默认值。',
     modelGroup: '模型',
     webSearchGroup: '网络搜索',
+    knowledgeGroup: '知识库',
+    vectorStore: {
+      label: '默认向量存储',
+      description: '新建知识库时默认选中的向量存储。已有知识库不受影响；通过 API 创建且未指定时仍使用系统默认。',
+      stale: '已设置的向量存储不存在或不可用，新建知识库将使用系统默认。',
+    },
     unsetPlaceholder: '未设置（使用系统默认）',
     followChatPlaceholder: '未设置（跟随默认对话模型）',
     slots: {

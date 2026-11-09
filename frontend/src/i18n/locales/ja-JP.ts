@@ -2877,6 +2877,12 @@ export default {
     readOnly: '変更できるのはワークスペース管理者のみです。現在有効な既定値は確認できます。',
     modelGroup: 'モデル',
     webSearchGroup: 'ウェブ検索',
+    knowledgeGroup: 'ナレッジベース',
+    vectorStore: {
+      label: '既定のベクトルストア',
+      description: 'ナレッジベース作成時に最初から選択されるベクトルストアです。既存のナレッジベースには影響しません。API で指定せずに作成した場合はシステム既定を使います。',
+      stale: '設定したベクトルストアが存在しないか利用できません。新しいナレッジベースはシステム既定を使います。',
+    },
     unsetPlaceholder: '未設定（システム既定）',
     followChatPlaceholder: '未設定（既定のチャットモデルに従う）',
     slots: {
@@ -7204,6 +7210,11 @@ export default {
       systemDefault: 'システムデフォルト',
       immutableHint: '作成後は変更できません。後から移行するには、目的のストアに紐づけた新しいナレッジベースを作成し、インデックスを再作成してください。',
       immutableEdit: 'ベクトルストアの紐づけは作成後に変更できません。',
+      retrievalLabel: '検索エンジン',
+      retrievalDesc: '検索方式ごとに設定されているエンジンです。',
+      vectorRetrieval: 'ベクトル検索',
+      keywordRetrieval: 'キーワード検索',
+      retrievalDisabled: '無効',
       unavailableHint: '紐づけられたベクトルストアは現在利用できません。設定 → ベクトルストアで接続設定を確認してください。',
       goGlobalSettings: 'ベクトルストア設定へ移動'
     },

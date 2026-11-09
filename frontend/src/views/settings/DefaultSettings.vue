@@ -44,6 +44,33 @@
       </div>
     </div>
 
+    <template v-if="vectorStoreSupported">
+      <h3 class="group-title">{{ t('defaultSettings.knowledgeGroup') }}</h3>
+      <div class="settings-group">
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ t('defaultSettings.vectorStore.label') }}</label>
+            <p class="desc">{{ t('defaultSettings.vectorStore.description') }}</p>
+            <p v-if="settingsLoaded && vectorStoreStale" class="desc hint warn">
+              {{ t('defaultSettings.vectorStore.stale') }}
+            </p>
+          </div>
+          <div class="setting-control model-control">
+            <t-select
+              :value="settings.vector_store_id"
+              :options="vectorStoreOptions"
+              :disabled="!canEdit || saving || !settingsLoaded"
+              :loading="vectorStoresLoading"
+              :placeholder="t('defaultSettings.unsetPlaceholder')"
+              clearable
+              style="width: 100%"
+              @change="onVectorStoreChange"
+            />
+          </div>
+        </div>
+      </div>
+    </template>
+
     <template v-if="webSearchSupported">
       <h3 class="group-title">{{ t('defaultSettings.webSearchGroup') }}</h3>
       <div class="settings-group">
@@ -83,6 +110,7 @@ import {
   type DefaultSettings,
 } from '@/api/default-settings'
 import { patchWebSearchProvider } from '@/api/web-search-provider'
+import { listVectorStores, type VectorStoreEntity } from '@/api/vector-store'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -94,7 +122,7 @@ import {
   type EffectiveDefault,
 } from './defaultSettingsState'
 
-type ModelField = keyof DefaultSettings
+type ModelField = Exclude<keyof DefaultSettings, 'vector_store_id'>
 
 interface ModelSlot {
   field: ModelField
@@ -129,6 +157,7 @@ const settings = reactive<DefaultSettings>({
   rerank_model_id: '',
   vlm_model_id: '',
   asr_model_id: '',
+  vector_store_id: '',
 })
 
 const models = computed<ModelConfig[]>(() => chatResources.allModels.filter((m) => m.status === 'active'))
@@ -180,6 +209,7 @@ const loadSettings = async () => {
     for (const slot of modelSlots) {
       settings[slot.field] = response.data[slot.field] || ''
     }
+    settings.vector_store_id = response.data.vector_store_id || ''
     settingsLoaded.value = true
   } catch (error) {
     settingsLoadFailed.value = true
@@ -201,6 +231,54 @@ const onModelChange = async (field: ModelField, id: string) => {
     MessagePlugin.success(t('defaultSettings.toasts.saveSuccess'))
   } catch (error: any) {
     settings[field] = previous
+    MessagePlugin.error(t('defaultSettings.toasts.saveFailed', { message: error?.message || '' }))
+  } finally {
+    saving.value = false
+  }
+}
+
+const vectorStoreSupported = computed(() => deploymentCapabilities.isSupported('settings.vectorstore'))
+// Registered stores only: the env store is what "unset" already means.
+const vectorStores = ref<VectorStoreEntity[]>([])
+const vectorStoresLoading = ref(false)
+const vectorStoresLoaded = ref(false)
+const vectorStoreOptions = computed(() =>
+  vectorStores.value
+    .filter((s) => s.source === 'user' && s.id)
+    .map((s) => ({ label: `${s.name} (${s.engine_type})`, value: s.id as string })),
+)
+// A default whose store was deleted is ignored by the create dialog; say so.
+const vectorStoreStale = computed(() =>
+  vectorStoresLoaded.value && !!settings.vector_store_id &&
+  !vectorStoreOptions.value.some((o) => o.value === settings.vector_store_id),
+)
+
+const loadVectorStores = async () => {
+  vectorStoresLoading.value = true
+  try {
+    const resp = await listVectorStores()
+    if (resp.success) {
+      vectorStores.value = resp.data || []
+      vectorStoresLoaded.value = true
+    }
+  } catch (error) {
+    console.error('Failed to load vector stores:', error)
+  } finally {
+    vectorStoresLoading.value = false
+  }
+}
+
+const onVectorStoreChange = async (value: unknown) => {
+  const id = typeof value === 'string' ? value : ''
+  if (!canEdit.value || !settingsLoaded.value || saving.value || settings.vector_store_id === id) return
+  const previous = settings.vector_store_id
+  settings.vector_store_id = id
+  saving.value = true
+  try {
+    await updateTenantDefaultSettings({ ...settings })
+    MessagePlugin.success(t('defaultSettings.toasts.saveSuccess'))
+  } catch (error: any) {
+    settings.vector_store_id = previous
     MessagePlugin.error(t('defaultSettings.toasts.saveFailed', { message: error?.message || '' }))
   } finally {
     saving.value = false
@@ -265,6 +343,7 @@ const openModels = (type: DefaultModelType) => {
 onMounted(() => {
   void chatResources.ensureModels(true).catch(() => {})
   void loadSettings()
+  if (vectorStoreSupported.value) void loadVectorStores()
   if (webSearchSupported.value) void loadWebSearchProviders()
 })
 </script>

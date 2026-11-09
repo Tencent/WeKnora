@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,6 +33,25 @@ type defaultSettingsTenantService struct {
 func (s *defaultSettingsTenantService) UpdateTenant(_ context.Context, tenant *types.Tenant) (*types.Tenant, error) {
 	s.saved = tenant
 	return tenant, nil
+}
+
+// defaultSettingsStores knows one registered store, "store-1"; the env
+// store resolves as env, "broken" fails the lookup and everything else is
+// unavailable.
+type defaultSettingsStores struct {
+	interfaces.VectorStoreService
+}
+
+func (defaultSettingsStores) ResolveStoreView(_ context.Context, _ uint64, id string) (types.StoreDisplay, error) {
+	switch id {
+	case "store-1":
+		return types.StoreDisplay{Source: types.StoreSourceUser}, nil
+	case "__env_postgres__":
+		return types.StoreDisplay{Source: types.StoreSourceEnv}, nil
+	case "broken":
+		return types.UnavailableStoreDisplay(), errors.New("database is down")
+	}
+	return types.UnavailableStoreDisplay(), nil
 }
 
 func TestUpdateDefaultSettingsRepairsStaleSlotsIndividually(t *testing.T) {
@@ -74,17 +94,36 @@ func TestUpdateDefaultSettingsRepairsStaleSlotsIndividually(t *testing.T) {
 			name: "inactive models cannot be selected", next: types.DefaultSettings{ChatModelID: "downloading"},
 			wantError: "model is not active",
 		},
+		{name: "registered vector store is accepted", next: types.DefaultSettings{VectorStoreID: "store-1"}},
+		{
+			name: "env store is not a default choice", next: types.DefaultSettings{VectorStoreID: "__env_postgres__"},
+			wantError: "vector store not found",
+		},
+		{
+			name: "unknown vector store is rejected", next: types.DefaultSettings{VectorStoreID: "missing"},
+			wantError: "vector store not found",
+		},
+		{
+			name: "vector store lookup failure is a server error", next: types.DefaultSettings{VectorStoreID: "broken"},
+			wantError: "Failed to validate vector store",
+		},
+		{
+			name:     "deleted default store may stay while another slot changes",
+			previous: types.DefaultSettings{VectorStoreID: "deleted"},
+			next:     types.DefaultSettings{VectorStoreID: "deleted", ChatModelID: "chat"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tenants := &defaultSettingsTenantService{}
-			h := &TenantHandler{service: tenants, modelService: &defaultSettingsModelsService{models: []*types.Model{
+			h := &TenantHandler{service: tenants, vectorStoreService: defaultSettingsStores{}}
+			h.modelService = &defaultSettingsModelsService{models: []*types.Model{
 				{ID: "chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
 				{
 					ID: "vision-chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive,
 					Parameters: types.ModelParameters{SupportsVision: true},
 				},
 				{ID: "downloading", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusDownloading},
-			}}}
+			}}
 			body, err := json.Marshal(tc.next)
 			require.NoError(t, err)
 			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))

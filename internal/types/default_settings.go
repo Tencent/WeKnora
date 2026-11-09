@@ -27,6 +27,11 @@ type DefaultSettings struct {
 	VLMModelID string `json:"vlm_model_id"`
 	// ASRModelID is the default ASR model.
 	ASRModelID string `json:"asr_model_id"`
+	// VectorStoreID is the registered vector store the knowledge base create
+	// dialog pre-selects. Empty means the env store ("System default"). It
+	// only pre-fills the dialog: creating a knowledge base through the API
+	// without vector_store_id still uses the env store.
+	VectorStoreID string `json:"vector_store_id"`
 }
 
 // Normalize trims every ID.
@@ -37,6 +42,7 @@ func (c *DefaultSettings) Normalize() {
 	c.RerankModelID = strings.TrimSpace(c.RerankModelID)
 	c.VLMModelID = strings.TrimSpace(c.VLMModelID)
 	c.ASRModelID = strings.TrimSpace(c.ASRModelID)
+	c.VectorStoreID = strings.TrimSpace(c.VectorStoreID)
 }
 
 // ModelSlots maps each model-type slot to the capability its model must support. The

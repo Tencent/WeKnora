@@ -53,6 +53,12 @@ export function listKnowledgeBases(params?: {
   return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
 }
 
+export interface VectorStoreRetriever {
+  type: 'vector' | 'keywords' | string;
+  engine_type: string;
+  label: string;
+}
+
 // Read-only vector-store binding metadata enriched onto every KB
 // response (list, create, get, update, pin). Source carries where the
 // binding points; status reports whether that target is currently
@@ -319,6 +325,9 @@ export interface KnowledgeBaseStoreView {
   vector_store_engine_type?: string;
   vector_store_source?: VectorStoreSource;
   vector_store_status?: VectorStoreStatus;
+  // The engine behind each retrieval type ("pgvector", "Oracle Text"),
+  // computed by the server; absent for shared and unavailable stores.
+  vector_store_retrievers?: VectorStoreRetriever[];
 }
 
 export function createKnowledgeBase(data: {

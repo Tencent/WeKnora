@@ -1474,3 +1474,31 @@ func TestOpenSearchRetrieverEngineType_DistinctFromExisting(t *testing.T) {
 			"OpenSearch wire value must not collide with %s", e)
 	}
 }
+
+func TestEngineRetrievers(t *testing.T) {
+	t.Setenv("RETRIEVE_DRIVER", "postgres")
+	assert.Equal(t, []RetrieverDisplay{
+		{Type: VectorRetrieverType, EngineType: "postgres", Label: "pgvector"},
+		{Type: KeywordsRetrieverType, EngineType: "postgres", Label: "ParadeDB (BM25)"},
+	}, EngineRetrievers(GetDefaultRetrieverEngines()))
+
+	// Vector on PostgreSQL, keyword configured on both: one row per
+	// retrieval type listing every configured engine.
+	t.Setenv("RETRIEVE_DRIVER", "postgres,elasticsearch_v7")
+	assert.Equal(t, []RetrieverDisplay{
+		{Type: VectorRetrieverType, EngineType: "postgres", Label: "pgvector"},
+		{
+			Type: KeywordsRetrieverType, EngineType: "postgres,elasticsearch",
+			Label: "ParadeDB (BM25) / Elasticsearch (BM25)",
+		},
+	}, EngineRetrievers(GetDefaultRetrieverEngines()))
+
+	// Engines without a technique label fall back to their display name;
+	// a store that only serves keyword retrieval lists only that.
+	assert.Equal(t, []RetrieverDisplay{
+		{Type: VectorRetrieverType, EngineType: "qdrant", Label: "Qdrant"},
+	}, RetrieverDisplays(QdrantRetrieverEngineType, []RetrieverType{VectorRetrieverType}))
+	assert.Equal(t, []RetrieverDisplay{
+		{Type: KeywordsRetrieverType, EngineType: "elasticsearch", Label: "Elasticsearch (BM25)"},
+	}, RetrieverDisplays(ElasticsearchRetrieverEngineType, []RetrieverType{KeywordsRetrieverType}))
+}

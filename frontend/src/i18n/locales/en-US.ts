@@ -2877,6 +2877,12 @@ export default {
     readOnly: 'Only workspace admins can change these. You can see which defaults are in effect.',
     modelGroup: 'Models',
     webSearchGroup: 'Web search',
+    knowledgeGroup: 'Knowledge bases',
+    vectorStore: {
+      label: 'Default vector store',
+      description: 'Pre-selected when creating a knowledge base. Existing knowledge bases are not affected; creating one through the API without a store still uses the system default.',
+      stale: 'The selected vector store no longer exists or is unavailable; new knowledge bases will use the system default.',
+    },
     unsetPlaceholder: 'Not set (system default)',
     followChatPlaceholder: 'Not set (follow default chat model)',
     slots: {
@@ -7204,6 +7210,11 @@ export default {
       systemDefault: 'System default',
       immutableHint: 'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
       immutableEdit: 'Vector store binding cannot be changed after creation.',
+      retrievalLabel: 'Retrieval engines',
+      retrievalDesc: 'The engines configured for each retrieval type.',
+      vectorRetrieval: 'Vector retrieval',
+      keywordRetrieval: 'Keyword retrieval',
+      retrievalDisabled: 'Disabled',
       unavailableHint: 'The bound vector store is currently unavailable; check its connection configuration in Settings → Vector Stores.',
       goGlobalSettings: 'Go to Vector Store Settings'
     },

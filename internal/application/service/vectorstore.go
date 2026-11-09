@@ -280,15 +280,15 @@ func (s *vectorStoreService) SaveDetectedVersion(ctx context.Context, store *typ
 // active env store's engine type when one is configured. Exposed
 // separately from ResolveStoreView so list paths can fill the
 // env-bound entries without invoking the single-KB resolver.
-func (s *vectorStoreService) EnvDefaultStoreView(_ context.Context) types.StoreDisplay {
-	return s.defaultStoreDisplay()
+func (s *vectorStoreService) EnvDefaultStoreView(ctx context.Context) types.StoreDisplay {
+	return s.defaultStoreDisplay(ctx)
 }
 
 func (s *vectorStoreService) ResolveStoreView(
 	ctx context.Context, tenantID uint64, storeID string,
 ) (types.StoreDisplay, error) {
 	if storeID == "" {
-		return s.defaultStoreDisplay(), nil
+		return s.defaultStoreDisplay(ctx), nil
 	}
 	store, err := s.repo.GetByID(ctx, tenantID, storeID)
 	if err != nil {
@@ -300,6 +300,7 @@ func (s *vectorStoreService) ResolveStoreView(
 			Source:     types.StoreSourceUser,
 			EngineType: string(store.EngineType),
 			Status:     "available",
+			Retrievers: s.storeRetrievers(store.ID, store.EngineType),
 		}, nil
 	}
 	for _, env := range s.envStores {
@@ -309,6 +310,7 @@ func (s *vectorStoreService) ResolveStoreView(
 				Source:     types.StoreSourceEnv,
 				EngineType: string(env.EngineType),
 				Status:     "available",
+				Retrievers: s.storeRetrievers(env.ID, env.EngineType),
 			}, nil
 		}
 	}
@@ -360,6 +362,7 @@ func (s *vectorStoreService) BatchResolveStoreView(
 					Source:     types.StoreSourceUser,
 					EngineType: string(st.EngineType),
 					Status:     "available",
+					Retrievers: s.storeRetrievers(st.ID, st.EngineType),
 				}
 			}
 		}
@@ -373,6 +376,7 @@ func (s *vectorStoreService) BatchResolveStoreView(
 					Source:     types.StoreSourceEnv,
 					EngineType: string(env.EngineType),
 					Status:     "available",
+					Retrievers: s.storeRetrievers(env.ID, env.EngineType),
 				}
 			}
 		}
@@ -382,7 +386,7 @@ func (s *vectorStoreService) BatchResolveStoreView(
 	// sentinel so callers can rely on a key for every requested ID.
 	for _, id := range storeIDs {
 		if id == "" {
-			out[id] = s.defaultStoreDisplay()
+			out[id] = s.defaultStoreDisplay(ctx)
 			continue
 		}
 		if _, ok := out[id]; !ok {
@@ -397,12 +401,36 @@ func (s *vectorStoreService) BatchResolveStoreView(
 // fully populated StoreDisplay so UIs can render the same badge shape for
 // env-bound and user-bound KBs (e.g. "postgres" vs "qdrant") without
 // branching on Source.
-func (s *vectorStoreService) defaultStoreDisplay() types.StoreDisplay {
+//
+// Retrievers come from the workspace's effective engines, which may differ
+// per retrieval type (RETRIEVE_DRIVER=postgres,elasticsearch_v7).
+func (s *vectorStoreService) defaultStoreDisplay(ctx context.Context) types.StoreDisplay {
 	d := types.DefaultStoreDisplay()
 	if len(s.envStores) > 0 {
 		d.EngineType = string(s.envStores[0].EngineType)
 	}
+	engines := types.GetDefaultRetrieverEngines()
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok && tenant != nil {
+		engines = tenant.GetEffectiveEngines()
+	}
+	d.Retrievers = types.EngineRetrievers(engines)
 	return d
+}
+
+// storeRetrievers lists what a store serves. A loaded engine answers for
+// itself (an Elasticsearch 7 store serves keyword retrieval only);
+// otherwise every retrieval type is assumed, as every registrable engine
+// serves both.
+func (s *vectorStoreService) storeRetrievers(
+	storeID string, engine types.RetrieverEngineType,
+) []types.RetrieverDisplay {
+	supported := []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType}
+	if s.storeRegistry != nil {
+		if svc, err := s.storeRegistry.GetByStoreID(storeID); err == nil && svc != nil {
+			supported = svc.Support()
+		}
+	}
+	return types.RetrieverDisplays(engine, supported)
 }
 
 // registerInRegistry creates an engine service and registers it in the registry.

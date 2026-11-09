@@ -8,15 +8,19 @@ import type { WebSearchProviderEntity } from '../../api/web-search-provider'
 
 const initial: DefaultSettings = {
   chat_model_id: 'chat', utility_model_id: 'utility', embedding_model_id: 'embed',
-  rerank_model_id: 'rerank', vlm_model_id: 'vision', asr_model_id: 'asr',
+  rerank_model_id: 'rerank', vlm_model_id: 'vision', asr_model_id: 'asr', vector_store_id: '',
 }
 
-function setup(t: TestContext, read = async () => ({ data: { ...initial } })) {
+function setup(t: TestContext, read = async () => ({ data: { ...initial } }), unsupported: string[] = []) {
   const f = fixture(t)
   const api = {
     getTenantDefaultSettings: t.mock.fn(read),
     updateTenantDefaultSettings: t.mock.fn(async (_settings: DefaultSettings) => ({})),
     patchWebSearchProvider: t.mock.fn(async (_id: string, _patch: { is_default: boolean }) => ({})),
+    listVectorStores: t.mock.fn(async () => ({ success: true, data: [
+      { id: '__env_postgres__', name: 'PostgreSQL', engine_type: 'postgres', source: 'env' },
+      { id: 'oracle-1', name: 'Oracle ADB', engine_type: 'oracle', source: 'user' },
+    ] })),
   }
   const store = reactive({
     allModels: [], webSearchProviders: [{ id: 'search', name: 'Search', is_default: false }] as WebSearchProviderEntity[],
@@ -28,10 +32,13 @@ function setup(t: TestContext, read = async () => ({ data: { ...initial } })) {
     'tdesign-vue-next': { MessagePlugin: { success() {}, error() {} } },
     '@/api/default-settings': api,
     '@/api/web-search-provider': api,
+    '@/api/vector-store': api,
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/stores/ui': { useUIStore: () => ({}) },
     '@/stores/chatResources': { useChatResourcesStore: () => store },
-    '@/stores/deploymentCapabilities': { useDeploymentCapabilitiesStore: () => ({ isSupported: () => true }) },
+    '@/stores/deploymentCapabilities': { useDeploymentCapabilitiesStore: () => ({
+      isSupported: (key: string) => !unsupported.includes(key),
+    }) },
   })
   return { vm, store, api }
 }
@@ -84,4 +91,25 @@ test('saving and clearing web search updates the state consumed by chat', async 
   assert.equal(isTenantWebSearchReady(store.webSearchProviders), false)
   assert.equal(api.patchWebSearchProvider.mock.callCount(), 2)
   assert.equal(store.ensureWebSearchProviders.mock.callCount(), 3)
+})
+
+test('the default vector store lists registered stores only and flags a deleted one', async t => {
+  const { vm, api } = setup(t, async () => ({ data: { ...initial, vector_store_id: 'deleted' } }))
+  await flush()
+  assert.deepEqual(vm.vectorStoreOptions.map((o: { value: string }) => o.value), ['oracle-1'])
+  assert.equal(vm.vectorStoreStale, true)
+  await vm.onVectorStoreChange('oracle-1')
+  assert.equal(vm.vectorStoreStale, false)
+  const saved = api.updateTenantDefaultSettings.mock.calls[0].arguments[0]
+  assert.deepEqual({ ...saved }, { ...initial, vector_store_id: 'oracle-1' })
+  // Clearing returns to the system default.
+  await vm.onVectorStoreChange(undefined)
+  assert.equal(vm.settings.vector_store_id, '')
+})
+
+test('the default vector store follows the vector store deployment capability', async t => {
+  const { vm, api } = setup(t, undefined, ['settings.vectorstore'])
+  await flush()
+  assert.equal(vm.vectorStoreSupported, false)
+  assert.equal(api.listVectorStores.mock.callCount(), 0)
 })

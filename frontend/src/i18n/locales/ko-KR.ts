@@ -2725,6 +2725,11 @@ export default {
       systemDefault: '시스템 기본값',
       immutableHint: '생성 후 변경할 수 없습니다. 다른 스토어로 옮기려면 원하는 스토어에 바인딩된 새 KB를 만들고 다시 인덱싱하세요.',
       immutableEdit: '벡터 스토어 바인딩은 생성 후 변경할 수 없습니다.',
+      retrievalLabel: '검색 엔진',
+      retrievalDesc: '검색 방식별로 설정된 엔진입니다.',
+      vectorRetrieval: '벡터 검색',
+      keywordRetrieval: '키워드 검색',
+      retrievalDisabled: '사용 안 함',
       unavailableHint: '바인딩된 벡터 스토어가 현재 사용할 수 없는 상태입니다. 설정 → 벡터 스토어에서 연결 상태를 확인하세요.',
       goGlobalSettings: '벡터 스토어 설정으로 이동'
     }
@@ -7174,6 +7179,12 @@ export default {
     readOnly: '워크스페이스 관리자만 변경할 수 있습니다. 현재 적용 중인 기본값은 확인할 수 있습니다.',
     modelGroup: '모델',
     webSearchGroup: '웹 검색',
+    knowledgeGroup: '지식 베이스',
+    vectorStore: {
+      label: '기본 벡터 스토어',
+      description: '지식 베이스를 만들 때 기본으로 선택되는 벡터 스토어입니다. 기존 지식 베이스에는 영향이 없으며, API로 지정 없이 만들면 시스템 기본값을 사용합니다.',
+      stale: '설정한 벡터 스토어가 없거나 사용할 수 없습니다. 새 지식 베이스는 시스템 기본값을 사용합니다.',
+    },
     unsetPlaceholder: '설정 안 함(시스템 기본값)',
     followChatPlaceholder: '설정 안 함(기본 대화 모델 따름)',
     slots: {

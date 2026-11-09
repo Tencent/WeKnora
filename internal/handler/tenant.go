@@ -38,6 +38,8 @@ type TenantHandler struct {
 	systemSettingSvc interfaces.SystemSettingService
 	// modelService validates the models chosen as workspace defaults.
 	modelService interfaces.ModelService
+	// vectorStoreService validates the default vector store.
+	vectorStoreService interfaces.VectorStoreService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -66,16 +68,18 @@ func NewTenantHandler(
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
 	modelService interfaces.ModelService,
+	vectorStoreService interfaces.VectorStoreService,
 ) *TenantHandler {
 	return &TenantHandler{
-		service:          service,
-		apiKeyService:    apiKeyService,
-		userService:      userService,
-		memberService:    memberService,
-		kbService:        kbService,
-		config:           config,
-		systemSettingSvc: systemSettingSvc,
-		modelService:     modelService,
+		service:            service,
+		apiKeyService:      apiKeyService,
+		userService:        userService,
+		memberService:      memberService,
+		kbService:          kbService,
+		config:             config,
+		systemSettingSvc:   systemSettingSvc,
+		modelService:       modelService,
+		vectorStoreService: vectorStoreService,
 	}
 }
 

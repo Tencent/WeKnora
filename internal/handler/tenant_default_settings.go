@@ -10,9 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetTenantDefaultSettings returns the workspace's default model choices.
-// Members read it to see which model a feature falls back to; it holds model
-// IDs only, never connection details.
+// GetTenantDefaultSettings returns the workspace's default model and vector
+// store choices. Members read it to see which model a feature falls back to;
+// it holds IDs only, never connection details.
 func (h *TenantHandler) GetTenantDefaultSettings(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant, _ := types.TenantInfoFromContext(ctx)
@@ -106,6 +106,13 @@ func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 		}
 	}
 
+	if cfg.VectorStoreID != "" && cfg.VectorStoreID != previous.VectorStoreID {
+		if err := h.validateDefaultVectorStore(c, tenant.ID, cfg.VectorStoreID); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+
 	updated := *tenant
 	updated.DefaultSettings = &cfg
 	updatedTenant, err := h.service.UpdateTenant(ctx, &updated)
@@ -123,4 +130,24 @@ func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 		"data":    updatedTenant.DefaultSettings,
 		"message": "Default settings updated successfully",
 	})
+}
+
+// validateDefaultVectorStore accepts only a registered store this workspace
+// owns. It checks ownership in the database only, not whether the store is
+// reachable. The env store is not a choice: it is what an empty value
+// already means.
+func (h *TenantHandler) validateDefaultVectorStore(c *gin.Context, tenantID uint64, storeID string) error {
+	if h.vectorStoreService == nil {
+		return errors.NewServiceUnavailableError("Vector store service is unavailable")
+	}
+	ctx := c.Request.Context()
+	view, err := h.vectorStoreService.ResolveStoreView(ctx, tenantID, storeID)
+	if err != nil {
+		logger.Error(ctx, "Failed to resolve default vector store", err)
+		return errors.NewInternalServerError("Failed to validate vector store")
+	}
+	if view.Source != types.StoreSourceUser {
+		return errors.NewBadRequestError("vector_store_id: vector store not found")
+	}
+	return nil
 }

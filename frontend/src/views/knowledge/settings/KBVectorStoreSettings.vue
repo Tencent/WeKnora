@@ -88,6 +88,20 @@
           </p>
         </div>
       </div>
+      <!-- Which engine serves each retrieval type (labels come from the server). -->
+      <div v-if="retrievalRows.length" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('kbSettings.vectorStore.retrievalLabel') }}</label>
+          <p class="desc">{{ $t('kbSettings.vectorStore.retrievalDesc') }}</p>
+        </div>
+        <div class="setting-control">
+          <div v-for="row in retrievalRows" :key="row.type" class="retrieval-row">
+            <span class="retrieval-type">{{ row.title }}</span>
+            <span v-if="row.enabled" class="retrieval-engine">{{ row.label }}</span>
+            <span v-else class="retrieval-engine disabled">{{ $t('kbSettings.vectorStore.retrievalDisabled') }}</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -97,10 +111,10 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import { listVectorStores, type VectorStoreEntity } from '@/api/vector-store'
-import type { VectorStoreSource, VectorStoreStatus } from '@/api/knowledge-base'
+import type { VectorStoreRetriever, VectorStoreSource, VectorStoreStatus } from '@/api/knowledge-base'
 import VectorStoreBadge from '@/components/VectorStoreBadge.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   mode: 'create' | 'edit'
   // create mode — current selection (empty string for env-default)
   vectorStoreId?: string
@@ -109,7 +123,16 @@ const props = defineProps<{
   boundName?: string
   boundEngineType?: string
   boundStatus?: VectorStoreStatus
-}>()
+  // edit mode — engine per retrieval type, and whether the KB indexes for it
+  boundRetrievers?: VectorStoreRetriever[]
+  vectorEnabled?: boolean
+  keywordEnabled?: boolean
+}>(), {
+  // Boolean props default to false when omitted; an unknown indexing
+  // strategy must not read as "Disabled".
+  vectorEnabled: true,
+  keywordEnabled: true,
+})
 
 const emit = defineEmits<{
   (e: 'update:vectorStoreId', id: string): void
@@ -137,6 +160,19 @@ const envEngineType = computed(() => {
   const envStore = allStores.value.find((s) => s.source === 'env')
   return envStore?.engine_type || ''
 })
+
+// One row per retrieval type the store serves. A type the KB's indexing
+// strategy turns off reads "Disabled" rather than naming an idle engine.
+const retrievalRows = computed(() =>
+  (props.boundRetrievers || []).map((r) => ({
+    type: r.type,
+    label: r.label,
+    title: r.type === 'keywords'
+      ? t('kbSettings.vectorStore.keywordRetrieval')
+      : t('kbSettings.vectorStore.vectorRetrieval'),
+    enabled: r.type === 'keywords' ? props.keywordEnabled : props.vectorEnabled,
+  })),
+)
 
 watch(
   () => props.vectorStoreId,
@@ -181,6 +217,26 @@ onMounted(async () => {
 <style lang="less" scoped>
 .kb-vector-store-settings {
   width: 100%;
+}
+
+.retrieval-row {
+  display: flex;
+  gap: 12px;
+  font-size: var(--app-text-base);
+  line-height: 1.9;
+
+  .retrieval-type {
+    min-width: 96px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .retrieval-engine {
+    color: var(--td-text-color-primary);
+
+    &.disabled {
+      color: var(--td-text-color-placeholder);
+    }
+  }
 }
 
 .section-header {

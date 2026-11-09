@@ -242,3 +242,50 @@ func TestListKB_GracefullyDegradesWhenBatchResolveFails(t *testing.T) {
 		t.Errorf("expected fallback source=unavailable, got %v", envelope.Data[0]["vector_store_source"])
 	}
 }
+
+// An unbound KB falls back to the env store, whose retrievers are the
+// caller's workspace engines. A KB shared from another tenant must not
+// carry them: the owner's engines may differ.
+func TestListKB_SharedUnboundKBHasNoRetrievers(t *testing.T) {
+	env := types.DefaultStoreDisplay()
+	env.Retrievers = []types.RetrieverDisplay{
+		{Type: types.KeywordsRetrieverType, EngineType: "postgres", Label: "ParadeDB (BM25)"},
+	}
+	kbs := []*types.KnowledgeBase{
+		{ID: "kb-own", Name: "own", TenantID: 1},
+		{ID: "kb-shared", Name: "shared", TenantID: 99},
+	}
+	vss := &stubVectorStoreService{envView: env}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-bases", nil)
+	newListKBRouter(t, &stubListKBService{kbs: kbs}, vss).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var envelope struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode: %v body=%s", err, w.Body.String())
+	}
+	byID := map[string]map[string]interface{}{}
+	for _, row := range envelope.Data {
+		byID[row["id"].(string)] = row
+	}
+	if _, ok := byID["kb-own"]["vector_store_retrievers"]; !ok {
+		t.Errorf("own unbound KB: expected vector_store_retrievers, got %v", byID["kb-own"])
+	}
+	if v, ok := byID["kb-shared"]["vector_store_retrievers"]; ok {
+		t.Errorf("shared unbound KB must not carry vector_store_retrievers, got %v", v)
+	}
+
+	// The single-KB path applies the same rule.
+	h := &KnowledgeBaseHandler{vectorStoreService: vss}
+	if got := h.resolveKBStoreView(context.Background(), kbs[1], 1); len(got.Retrievers) != 0 {
+		t.Errorf("single shared unbound KB: expected no retrievers, got %v", got.Retrievers)
+	}
+	if got := h.resolveKBStoreView(context.Background(), kbs[0], 1); len(got.Retrievers) != 1 {
+		t.Errorf("single own unbound KB: expected retrievers, got %v", got.Retrievers)
+	}
+}

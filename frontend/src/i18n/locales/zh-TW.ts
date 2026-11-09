@@ -2727,6 +2727,11 @@ export default {
       systemDefault: '系統預設',
       immutableHint: '建立後不可更改。如需遷移，請建立一個綁定到目標存儲的新 KB 並重新索引。',
       immutableEdit: '向量存儲綁定在建立後無法更改。',
+      retrievalLabel: '檢索引擎',
+      retrievalDesc: '各檢索方式設定的引擎。',
+      vectorRetrieval: '向量檢索',
+      keywordRetrieval: '關鍵詞檢索',
+      retrievalDisabled: '未啟用',
       unavailableHint: '綁定的向量存儲當前不可用，請在設定 → 向量存儲中檢查其連結設定。',
       goGlobalSettings: '前往向量存儲設定'
     }
@@ -7175,6 +7180,12 @@ export default {
     readOnly: '僅空間管理員可以修改，你可以查看目前生效的預設值。',
     modelGroup: '模型',
     webSearchGroup: '網路搜尋',
+    knowledgeGroup: '知識庫',
+    vectorStore: {
+      label: '預設向量儲存',
+      description: '新建知識庫時預設選中的向量儲存。既有知識庫不受影響；透過 API 建立且未指定時仍使用系統預設。',
+      stale: '已設定的向量儲存不存在或無法使用，新建知識庫將使用系統預設。',
+    },
     unsetPlaceholder: '未設定（使用系統預設）',
     followChatPlaceholder: '未設定（跟隨預設對話模型）',
     slots: {

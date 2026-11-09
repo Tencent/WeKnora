@@ -140,6 +140,9 @@ func buildKBResponse(
 	if storeView.Status != "" {
 		m["vector_store_status"] = storeView.Status
 	}
+	if len(storeView.Retrievers) > 0 {
+		m["vector_store_retrievers"] = storeView.Retrievers
+	}
 	for k, v := range extras {
 		m[k] = v
 	}
@@ -153,7 +156,8 @@ func buildKBResponse(
 // resolveKBStoreView would otherwise be N+1.
 //
 // Caller-vs-owner semantics match the single-KB path:
-//   - KB has no binding         → DefaultStoreDisplay()
+//   - KB has no binding         → DefaultStoreDisplay(), without retrievers
+//     when another tenant owns the KB (see envStoreViewFor)
 //   - KB is owned by another tenant (cross-tenant shared) → SharedStoreDisplay()
 //   - KB is own-tenant bound    → look up in the batch result; misses
 //     fall back to UnavailableStoreDisplay()
@@ -170,7 +174,7 @@ func (h *KnowledgeBaseHandler) buildKBListResponse(
 		var view types.StoreDisplay
 		switch {
 		case !kb.HasVectorStore():
-			view = defaultView
+			view = envStoreViewFor(defaultView, kb, callerTenantID)
 		case kb.TenantID != callerTenantID:
 			view = types.SharedStoreDisplay()
 		default:
@@ -234,6 +238,18 @@ func (h *KnowledgeBaseHandler) envDefaultStoreView(ctx context.Context) types.St
 	return h.vectorStoreService.EnvDefaultStoreView(ctx)
 }
 
+// envStoreViewFor adapts the env-fallback view to the caller. Its
+// retrievers are the caller's workspace engines, which need not match the
+// owner's, so a KB shared from another tenant carries none.
+func envStoreViewFor(
+	view types.StoreDisplay, kb *types.KnowledgeBase, callerTenantID uint64,
+) types.StoreDisplay {
+	if kb.TenantID != callerTenantID {
+		view.Retrievers = nil
+	}
+	return view
+}
+
 // batchResolveKBStoreViews collects the unique own-tenant store IDs across
 // the KB slice and resolves them in one BatchResolveStoreView call.
 // Cross-tenant shared KBs never enter the batch — they always render
@@ -276,7 +292,8 @@ func (h *KnowledgeBaseHandler) batchResolveKBStoreViews(
 // response. It applies two policies on top of the service-level resolver:
 //
 //   - When the KB does not have a DB-managed vector store binding,
-//     the env-fallback display is returned without touching the service.
+//     the env-fallback display is returned without touching the service
+//     (without retrievers when the caller is not the owner).
 //   - When the caller is not the KB owner (shared access), the underlying
 //     store's name and engine are suppressed so operator-chosen names do
 //     not leak across tenants. The Source value is set to "shared".
@@ -287,7 +304,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 	ctx context.Context, kb *types.KnowledgeBase, callerTenantID uint64,
 ) types.StoreDisplay {
 	if !kb.HasVectorStore() {
-		return h.envDefaultStoreView(ctx)
+		return envStoreViewFor(h.envDefaultStoreView(ctx), kb, callerTenantID)
 	}
 	if kb.TenantID != callerTenantID {
 		return types.SharedStoreDisplay()
@@ -323,6 +340,9 @@ type KnowledgeBaseView struct {
 	VectorStoreSource     string `json:"vector_store_source,omitempty"`
 	VectorStoreEngineType string `json:"vector_store_engine_type,omitempty"`
 	VectorStoreStatus     string `json:"vector_store_status,omitempty"`
+	// VectorStoreRetrievers lists the engines configured for each retrieval
+	// type. Omitted for shared and unavailable stores.
+	VectorStoreRetrievers []types.RetrieverDisplay `json:"vector_store_retrievers,omitempty"`
 	// MyPermission is the caller's role on a knowledge base shared from
 	// another workspace; GET /knowledge-bases/{id} sets it.
 	MyPermission string `json:"my_permission,omitempty" enums:"admin,editor,viewer" extensions:"x-agent"`
