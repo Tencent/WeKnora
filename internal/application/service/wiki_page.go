@@ -1270,7 +1270,9 @@ func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query st
 }
 
 // SearchPagesLiteral treats the query as literal text on every database.
-func (s *wikiPageService) SearchPagesLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
+func (s *wikiPageService) SearchPagesLiteral(
+	ctx context.Context, kbID string, query string, limit int,
+) ([]*types.WikiPage, error) {
 	return s.repo.SearchLiteral(ctx, kbID, query, limit)
 }
 

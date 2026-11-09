@@ -16,7 +16,7 @@ func TestWikiSearchLiteralPostgresUsesBoundEscapedPattern(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -26,15 +26,20 @@ func TestWikiSearchLiteralPostgresUsesBoundEscapedPattern(t *testing.T) {
 		query   string
 		literal bool
 	}{
-		{`C++`, true}, {`a.b`, true}, {`dir\file`, true}, {`x' OR 1=1 --`, true}, {`stardust|skyvault`, false},
+		{`C++`, true}, {`a.b`, true}, {`dir\file`, true}, {`x' OR 1=1 --`, true},
+		{`stardust|skyvault`, false},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			pattern := tc.query
 			if tc.literal {
 				pattern = regexp.QuoteMeta(pattern)
 			}
-			args := []driver.Value{pattern, pattern, pattern, pattern, "kb-1", pattern, pattern, pattern, pattern, "archived", int64(10)}
-			mock.ExpectQuery(`SELECT .*~\* \$1`).WithArgs(args...).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			args := []driver.Value{
+				pattern, pattern, pattern, pattern, "kb-1",
+				pattern, pattern, pattern, pattern, "archived", int64(10),
+			}
+			expected := mock.ExpectQuery(`SELECT .*~\* \$1`).WithArgs(args...)
+			expected.WillReturnRows(sqlmock.NewRows([]string{"id"}))
 			if tc.literal {
 				_, err = repo.SearchLiteral(context.Background(), "kb-1", tc.query, 10)
 			} else {
