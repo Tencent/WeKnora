@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,6 +118,60 @@ func (c *captureSaveBytes) CopyFile(context.Context, string, uint64, string) (st
 }
 
 var _ interfaces.FileService = (*captureSaveBytes)(nil)
+
+func TestResolveAndStoreFiltersCompactMetafilesByDimensions(t *testing.T) {
+	// Windows GDI generated these rectangle diagrams and icons.
+	// Every payload is below the icon heuristic's byte-size fallback.
+	for _, tc := range []struct {
+		name, ext, encoded string
+		keep               bool
+	}{
+		{"compact-wmf", "x-wmf", "d7cdc69a0000000000008016e010a00500000000d1540100090000031c000000000007000000" +
+			"00000400000003010800050000000c02e0108016070000001b04681008167800780003000000" +
+			"0000", true},
+		{"compact-emf", "x-emf", "010000006c00000000000000000000001f010000d70000000000000000000000b0270000c41d" +
+			"000020454d4600000100980000000300000001000000000000000000000000000000e0060000" +
+			"de030000200200002f010000000000000000000000000000004d0800989f04002b0000001800" +
+			"000000000000000000001f010000d70000000e00000014000000000000001000000014000000", true},
+		{"icon-wmf", "x-wmf", "d7cdc69a000000000000e0016801a0050000000039520100090000031c000000000007000000" +
+			"00000400000003010800050000000c026801e001070000001b045901d1010f000f0003000000" +
+			"0000", false},
+		{"icon-emf", "x-emf", "010000006c00000000000000000000001f0000001700000000000000000000004f0300007b02" +
+			"000020454d4600000100980000000300000001000000000000000000000000000000e0060000" +
+			"de030000200200002f010000000000000000000000000000004d0800989f04002b0000001800" +
+			"000000000000000000001f000000170000000e00000014000000000000001000000014000000", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			diagram, err := hex.DecodeString(tc.encoded)
+			require.NoError(t, err)
+			require.Less(t, len(diagram), minImageBytes)
+			name := "diagram." + tc.ext
+			path := "images/" + name
+			result := &types.ReadResult{
+				MarkdownContent: "![](" + path + ")",
+				ImageRefs: []types.ImageRef{
+					{Filename: name, OriginalRef: path, MimeType: "application/octet-stream", ImageData: diagram},
+				},
+			}
+			storage := &captureSaveBytes{}
+			markdown, images, err := NewImageResolver().ResolveAndStore(t.Context(), result, storage, 1)
+			require.NoError(t, err)
+			if !tc.keep {
+				require.Empty(t, images)
+				require.Empty(t, storage.saved)
+				require.Equal(t, result.MarkdownContent, markdown)
+				return
+			}
+			require.Len(t, images, 1)
+			require.Equal(t, [][]byte{diagram}, storage.saved)
+			require.Contains(t, markdown, images[0].ServingURL)
+
+			// Removing the EOF record leaves recognizable bounds but an
+			// incomplete payload that should still be filtered.
+			require.True(t, isIconImage(diagram[:len(diagram)-6]))
+		})
+	}
+}
 
 func TestResolveDataURIImages(t *testing.T) {
 	png := createTestPNG(200, 150)
