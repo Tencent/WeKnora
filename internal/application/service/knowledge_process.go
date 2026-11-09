@@ -932,6 +932,9 @@ func validateSummaryOutput(response *types.ChatResponse) (string, error) {
 	if response == nil {
 		return "", errEmptySummaryOutput
 	}
+	if response.FinishReason == "length" || response.FinishReason == types.FinishReasonIncomplete {
+		return "", fmt.Errorf("summary response incomplete: %s", response.FinishReason)
+	}
 	content := strings.TrimSpace(response.Content)
 	if content == "" {
 		return "", errEmptySummaryOutput
@@ -4119,6 +4122,13 @@ func (s *knowledgeService) convert(
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 	}
 	sanitizeReadResult(result)
+	// Preserve explicit parser errors; guard nil/normal results before any
+	// downstream chunk/index work. Configuration checks are not OCR readiness.
+	if result == nil || result.Error == "" {
+		if err := s.guardScannedPDFOCR(ctx, payload, knowledge, eff, result); err != nil {
+			return nil, err
+		}
+	}
 	if result.Error != "" {
 		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
 			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
@@ -4139,6 +4149,9 @@ func (s *knowledgeService) convert(
 		"text_length":  len(result.MarkdownContent),
 		"images_found": len(result.ImageRefs),
 		"is_audio":     result.IsAudio,
+	}
+	if source := result.Metadata["scanned_page_count_source"]; source != "" {
+		docOutput["scanned_page_count_source"] = source
 	}
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages
