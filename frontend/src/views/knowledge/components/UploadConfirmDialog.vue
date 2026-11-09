@@ -27,6 +27,10 @@
                   </div>
                 </div>
 
+                <div v-if="mode === 'file'" class="destination-knowledge-base">
+                  <span class="destination-crumb__label">{{ t('common.knowledgeBase') }}</span>
+                  <span class="destination-knowledge-base__name" :title="kbInfo?.name || ''">{{ kbInfo?.name || '' }}</span>
+                </div>
                 <div v-if="mode === 'file'" class="destination-row">
                   <t-popup
                     v-model:visible="destinationPickerVisible"
@@ -53,6 +57,7 @@
                         <FolderPickerMenu
                           :options="pickerFolderOptions"
                           :current-path="localTargetFolder"
+                          :pending-anchors="pendingFolderAnchors"
                           allow-reselect
                           @create="onDestinationCreated"
                           @confirm="onDestinationPicked"
@@ -832,10 +837,12 @@ const uiState = ref<UploadUIState>(createDefaultUIState())
 // Destination folder for this batch. Pre-filled from the sidebar tree, but
 // editable here so browsing a folder never silently decides where files land.
 const localTargetFolder = ref('')
+const localExistingFolderAnchor = ref('')
 const destinationPickerVisible = ref(false)
 // Folders created in this dialog before upload; the server tree only gains them
 // once files land, so keep them here across picker open/close cycles.
 const pendingFolderPaths = ref<string[]>([])
+const pendingFolderAnchors = ref<Record<string, string>>({})
 
 const pickerFolderOptions = computed(() => {
   const byPath = new Map<string, FolderOption>()
@@ -878,13 +885,15 @@ function fileDisplayTitle(file: File): string {
   return relativePath || file.name
 }
 
-function onDestinationCreated(path: string) {
+function onDestinationCreated(path: string, existingFolderAnchor: string) {
   if (!path || pendingFolderPaths.value.includes(path)) return
   pendingFolderPaths.value = [...pendingFolderPaths.value, path]
+  pendingFolderAnchors.value = { ...pendingFolderAnchors.value, [path]: existingFolderAnchor }
 }
 
-function onDestinationPicked(path: string) {
+function onDestinationPicked(path: string, existingFolderAnchor: string) {
   localTargetFolder.value = path
+  localExistingFolderAnchor.value = existingFolderAnchor
   destinationPickerVisible.value = false
 }
 
@@ -1521,7 +1530,10 @@ watch(
     localUrls.value = props.mode === 'file' ? [...(props.urls || [])] : []
     selectedTagIds.value = props.mode === 'reparse' ? [] : [...(props.tagIds || [])]
     localTargetFolder.value = props.mode === 'file' ? (props.targetFolder || '') : ''
+    // Freeze the directory the user entered from, even if it later disappears.
+    localExistingFolderAnchor.value = localTargetFolder.value
     pendingFolderPaths.value = []
+    pendingFolderAnchors.value = {}
     destinationPickerVisible.value = false
     initFromKbInfo(props.kbInfo)
     if (props.mode === 'reparse') {
@@ -1672,6 +1684,7 @@ const handleConfirm = () => {
       files: [...localFiles.value],
       urls: [...localUrls.value],
       targetFolder: localTargetFolder.value,
+      existingFolderAnchor: localExistingFolderAnchor.value,
     })
   }
   emit('update:visible', false)
@@ -1927,6 +1940,26 @@ const handleConfirm = () => {
 }
 
 // Destination sits under the title inside the header block.
+.destination-knowledge-base {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 4px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 18px;
+}
+
+.destination-knowledge-base__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--td-text-color-primary);
+  font-weight: 500;
+}
+
 .destination-row {
   flex-shrink: 0;
   padding: 0;

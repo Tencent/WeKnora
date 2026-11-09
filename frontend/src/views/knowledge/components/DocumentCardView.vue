@@ -75,7 +75,7 @@ const emit = defineEmits<{
   (e: 'action', action: 'download' | 'edit' | 'view-trace' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'batch-manage' | 'delete', item: KnowledgeCard): void;
   (e: 'tags-changed', payload?: { deletedTagId?: string }): void;
   (e: 'open-folder', path: string): void;
-  (e: 'move-to-folder', item: KnowledgeCard, folderPath: string): void;
+  (e: 'move-to-folder', item: KnowledgeCard, folderPath: string, existingFolderAnchor: string): void;
   // Move sub-flow emits
   (e: 'move-select-target', kb: any): void;
   (e: 'move-back'): void;
@@ -302,11 +302,11 @@ const onOpenFolder = (path: string) => {
   emit('open-folder', path);
 };
 
-const onFolderPicked = (item: KnowledgeCard, path: string) => {
+const onFolderPicked = (item: KnowledgeCard, path: string, existingFolderAnchor: string) => {
   folderPickerItemId.value = null;
   if (item.isMore !== undefined) item.isMore = false;
   activeMenuIndex.value = -1;
-  emit('move-to-folder', item, path);
+  emit('move-to-folder', item, path, existingFolderAnchor);
 };
 
 const editTags = (item: KnowledgeCard) => {
@@ -419,7 +419,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
                   :current-path="item.folder_path || ''"
                   show-back
                   @back="folderPickerItemId = null"
-                  @confirm="(path: string) => onFolderPicked(item, path)"
+                  @confirm="(path: string, anchor: string) => onFolderPicked(item, path, anchor)"
                 />
               </div>
 

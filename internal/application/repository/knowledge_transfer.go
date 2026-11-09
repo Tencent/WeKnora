@@ -22,7 +22,11 @@ func (r *knowledgeRepository) UpdateKnowledgeForTransfer(ctx context.Context, be
 	// checkpoint identical to storage so the next CAS in this task can match it.
 	after.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 	var storedUpdatedAt time.Time
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// The ownership checkpoint changes directory membership in both KBs. Use
+	// the same locks as folder create/rename/delete, acquired in a stable order
+	// by the helper, before evaluating the original compare-and-swap.
+	kbIDs := []string{before.KnowledgeBaseID, after.KnowledgeBaseID}
+	err := r.withKnowledgeFolderMutations(ctx, before.TenantID, kbIDs, func(tx *gorm.DB) error {
 		result := tx.Model(&types.Knowledge{}).
 			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND parse_status = ? AND "+
 				"updated_at = ?",

@@ -24,7 +24,7 @@ const emit = defineEmits<{
   (e: 'delete'): void;
   (e: 'reparse'): void;
   (e: 'batchTag'): void;
-  (e: 'moveToFolder', folderPath: string): void;
+  (e: 'moveToFolder', folderPath: string, existingFolderAnchor: string): void;
   (e: 'download'): void;
   (e: 'selectLoaded'): void;
 }>();
@@ -90,7 +90,7 @@ const folderPickerVisible = ref(false);
             <template #content>
               <div class="card-menu">
                 <FolderPickerMenu :options="folderOptions || []"
-                  @confirm="(path: string) => { folderPickerVisible = false; emit('moveToFolder', path) }" />
+                  @confirm="(path: string, anchor: string) => { folderPickerVisible = false; emit('moveToFolder', path, anchor) }" />
               </div>
             </template>
           </t-popup>

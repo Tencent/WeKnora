@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,7 @@ func folderPathOf(t *testing.T, db *gorm.DB, id string) string {
 func TestUpdateKnowledgeFolderPath(t *testing.T) {
 	db := setupKnowledgeTestDB(t)
 	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
-	ctx := context.Background()
+	ctx := types.WithKnowledgeFolderAnchor(context.Background(), "")
 
 	const tenantID = uint64(1)
 	kbID := uuid.New().String()
@@ -46,7 +47,7 @@ func TestUpdateKnowledgeFolderPath(t *testing.T) {
 
 	// A row in another knowledge base is never touched, even when its ID is passed.
 	affected, err = repo.UpdateKnowledgeFolderPath(ctx, tenantID, kbID, []string{foreign}, "leaked")
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrKnowledgeFolderChanged)
 	assert.Equal(t, int64(0), affected)
 	assert.Equal(t, "docs", folderPathOf(t, db, foreign))
 

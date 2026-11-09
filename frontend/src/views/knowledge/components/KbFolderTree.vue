@@ -111,6 +111,7 @@
                   class="kb-folder-row__more"
                   :class="{ 'is-open': menuOpenPath === row.path }"
                   :aria-label="t('knowledgeBase.columnActions')"
+                  :disabled="!!busyPath"
                   @click.stop
                 >
                   <t-icon name="more" />
@@ -121,6 +122,15 @@
                       <t-icon name="edit" class="menu-icon" />
                       <span>{{ t('knowledgeBase.folderTree.rename') }}</span>
                     </div>
+                    <t-popconfirm v-if="canDeleteEmptyDocumentFolder(row, canEdit)"
+                      :content="t('knowledgeBase.folderDelete.confirm', { name: row.name })" theme="warning"
+                      :confirm-btn="{ content: t('knowledgeBase.folderDelete.action'), theme: 'danger' }"
+                      :cancel-btn="{ content: t('common.cancel') }" placement="right" @confirm="onFolderMenuDelete(row)">
+                      <button type="button" class="popup-menu-item danger kb-folder-delete-trigger" :disabled="!!busyPath" @click.stop>
+                        <t-icon name="delete" class="menu-icon" />
+                        <span>{{ t('knowledgeBase.folderDelete.action') }}</span>
+                      </button>
+                    </t-popconfirm>
                   </div>
                 </template>
               </t-popup>
@@ -136,6 +146,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { KnowledgeFolderTree } from '@/api/knowledge-base/index'
+import { canDeleteEmptyDocumentFolder } from '../folderDeleteState'
 import {
   buildFolderRows,
   folderAncestorPaths,
@@ -152,16 +163,19 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   collapsed?: boolean
   canEdit?: boolean
+  busyPath?: string
 }>(), {
   loading: false,
   collapsed: false,
   canEdit: false,
+  busyPath: '',
 })
 
 const emit = defineEmits<{
   select: [path: string]
   'update:collapsed': [collapsed: boolean]
   rename: [payload: { from: string; to: string }]
+  'delete-empty': [path: string]
 }>()
 
 const { t } = useI18n()
@@ -208,6 +222,11 @@ const onFolderMenuRename = async (row: FolderRow) => {
   await startRename(row)
 }
 
+const onFolderMenuDelete = (row: FolderRow) => {
+  menuOpenPath.value = null
+  if (!props.busyPath && canDeleteEmptyDocumentFolder(row, props.canEdit)) emit('delete-empty', row.path)
+}
+
 const cancelRename = () => {
   renamingPath.value = null
   renameValue.value = ''
@@ -251,6 +270,15 @@ watch(
 </script>
 
 <style scoped lang="less">
+.kb-folder-delete-trigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  &:hover { background: var(--td-bg-color-container-hover); }
+  &:disabled { cursor: default; opacity: 0.5; }
+}
 .kb-folder-tree {
   /* Cap indent so a 8–10 level path still has room for the folder name.
      Past this depth the chevron already shows the parent/child relation. */

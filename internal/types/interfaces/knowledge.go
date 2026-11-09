@@ -89,10 +89,13 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
-	// ListKnowledgeFolderTree returns the folder hierarchy derived from the
-	// folder_path of every knowledge entry in a knowledge base, with per-folder
-	// document counts. It powers the document sidebar tree.
+	// ListKnowledgeFolderTree combines explicit directories and file-derived
+	// paths, with document counts. Explicit empty folders survive reloads.
 	ListKnowledgeFolderTree(ctx context.Context, kbID string) (*types.KnowledgeFolderTree, error)
+	// CreateKnowledgeFolder persists an empty folder under an existing parent.
+	CreateKnowledgeFolder(ctx context.Context, kbID, parentPath, name string) (*types.KnowledgeFolderNode, error)
+	// DeleteKnowledgeFolder removes only a folder without files or children.
+	DeleteKnowledgeFolder(ctx context.Context, kbID, path string) error
 	// MoveKnowledgeToFolder re-files knowledge entries under the given folder
 	// path (empty means the knowledge base top level). Folders are derived from
 	// the stored paths, so a path that does not exist yet is created implicitly.
@@ -134,8 +137,8 @@ type KnowledgeService interface {
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
 	// ReplaceKnowledgeFile replaces the source file of an existing file knowledge
-	// while preserving its ID, then re-parses it. A path-qualified customFileName
-	// also sets the folder; a bare filename keeps the current folder. Metadata
+	// while preserving its ID and current folder, then re-parses it. A qualified
+	// filename may repeat the current folder; other paths must use the move API. Metadata
 	// entries are merged into the stored metadata. Identical content on this
 	// same path returns a DuplicateKnowledgeError without re-parsing.
 	ReplaceKnowledgeFile(
@@ -253,6 +256,20 @@ type KnowledgeRepository interface {
 	ReplaceKnowledge(ctx context.Context, before, after *types.Knowledge, tagIDs []string) error
 
 	CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// Folder snapshots are captured before slow I/O and revalidated at insert.
+	SnapshotKnowledgeFolderPath(
+		ctx context.Context, tenantID uint64, kbID, path string,
+	) (*types.KnowledgeFolderPathSnapshot, error)
+	CreateKnowledgeWithFolderSnapshot(
+		ctx context.Context, knowledge *types.Knowledge, snapshot *types.KnowledgeFolderPathSnapshot,
+	) error
+	// Source replacement and compensation compare the previously loaded source.
+	UpdateKnowledgeSourceIfCurrent(
+		ctx context.Context, before *types.Knowledge, values map[string]interface{},
+	) (*types.Knowledge, error)
+	// Reparse must claim the original source and KB before destructive cleanup.
+	ClaimKnowledgeForReparse(ctx context.Context, before *types.Knowledge, allowPending bool) (*types.Knowledge, error)
+	FailKnowledgeReparseClaim(ctx context.Context, claim *types.Knowledge, message string) (*types.Knowledge, error)
 	GetKnowledgeByID(ctx context.Context, tenantID uint64, id string) (*types.Knowledge, error)
 	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
@@ -287,13 +304,16 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
-	// ListKnowledgeFolderCounts aggregates the number of knowledge entries
-	// stored directly in each folder_path of a knowledge base.
+	// ListKnowledgeFolderCounts combines document aggregates with zero-count
+	// rows for explicitly created directories of the same tenant and KB.
 	ListKnowledgeFolderCounts(
 		ctx context.Context,
 		tenantID uint64,
 		kbID string,
 	) ([]*types.KnowledgeFolderCount, error)
+	CreateKnowledgeFolder(ctx context.Context, tenantID uint64, kbID, path string) error
+	DeleteKnowledgeFolder(ctx context.Context, tenantID uint64, kbID, path string) error
+	DeleteKnowledgeFolders(ctx context.Context, tenantID uint64, kbID string) error
 	// UpdateKnowledgeFolderPath files the given entries under folderPath.
 	UpdateKnowledgeFolderPath(
 		ctx context.Context,

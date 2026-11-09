@@ -23,6 +23,7 @@ export const useUploadTasksStore = defineStore('uploadTasks', () => {
       {
         file: payload.file,
         fileName: payload.fileName,
+        existing_folder_anchor: batch.existingFolderAnchor,
         tag_ids: batch.tagIds,
         process_config: batch.processConfig,
       },

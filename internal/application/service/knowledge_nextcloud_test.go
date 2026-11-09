@@ -10,6 +10,7 @@ import (
 
 func TestCreateKnowledgeFromFileNextcloudPreservesSourcePaths(t *testing.T) {
 	db := setupKnowledgeSharedAccessDB(t)
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeFolder{}))
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })

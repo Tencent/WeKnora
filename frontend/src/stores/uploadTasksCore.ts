@@ -35,6 +35,7 @@ export interface EnqueueUploadsInput {
   kbId: string
   kbName: string
   targetFolder?: string
+  existingFolderAnchor?: string
   tagIds?: string[]
   processConfig?: KnowledgeProcessOverrides
   uploads: UploadPayload[]
@@ -88,6 +89,7 @@ export function createUploadTasks(deps: UploadTasksDeps) {
       kbId: input.kbId,
       kbName: input.kbName,
       targetFolder: input.targetFolder || '',
+      existingFolderAnchor: input.existingFolderAnchor,
       tagIds: input.tagIds && input.tagIds.length > 0 ? [...input.tagIds] : undefined,
       processConfig: input.processConfig,
     }, input.uploads)
