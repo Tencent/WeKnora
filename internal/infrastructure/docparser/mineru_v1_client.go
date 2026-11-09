@@ -3,8 +3,6 @@ package docparser
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,8 +20,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-// MinerU 4.0 replaced the synchronous /file_parse endpoint with the V1 API:
-// upload → parse job → poll → download artifacts. See
+// MinerU >= 4.1 replaced the synchronous /file_parse endpoint with the V1
+// task API: create task → upload bytes → poll → download artifacts. See
 // https://opendatalab.github.io/MinerU/usage/http_api/.
 
 const (
@@ -34,7 +32,7 @@ const (
 	mineruV1CancelBudget = 10 * time.Second
 )
 
-// MinerU V1 tiers accepted by POST /v1/parse/jobs. An empty tier means the
+// MinerU V1 tiers accepted by POST /v1/tasks. An empty tier means the
 // server's default selection policy (standard → basic for PDF/image).
 var mineruV1Tiers = map[string]struct{}{
 	"flash":    {},
@@ -47,7 +45,7 @@ type minerUProtocol int
 
 const (
 	minerUProtocolLegacy minerUProtocol = iota // MinerU <= 3.x: POST /file_parse
-	minerUProtocolV1                           // MinerU >= 4.0: /v1/*
+	minerUProtocolV1                           // MinerU >= 4.1: /v1/*
 )
 
 // minerUV1Client talks to any MinerU V1 deployment (self-hosted api-server or
@@ -105,40 +103,31 @@ type minerUV1File struct {
 	ID string `json:"id"`
 }
 
-type minerUV1Upload struct {
-	ID            string            `json:"id"`
-	Status        string            `json:"status"`
-	UploadURL     string            `json:"upload_url"`
-	UploadMethod  string            `json:"upload_method"`
-	UploadHeaders map[string]string `json:"upload_headers"`
-	File          *minerUV1File     `json:"file"`
-}
-
-type minerUV1FileRef struct {
-	FileID string `json:"file_id"`
-	Bytes  int64  `json:"bytes"`
-}
-
-type minerUV1JobFile struct {
-	Name        string                     `json:"name"`
-	Status      string                     `json:"status"`
-	OutputFiles map[string]minerUV1FileRef `json:"output_files"`
-	Error       *struct {
+type minerUV1TaskFile struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	Status   string `json:"status"`
+	Error    *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-	Parse *struct {
-		ModelUsed     string `json:"model_used"`
-		DurationMS    int64  `json:"duration_ms"`
-		ParserVersion string `json:"parser_version"`
-	} `json:"parse"`
 }
 
-type minerUV1Job struct {
-	JobID  string            `json:"job_id"`
-	Status string            `json:"status"`
-	Tier   string            `json:"tier"`
-	Files  []minerUV1JobFile `json:"files"`
+// minerUV1Task is a task-mode session (MinerU >= 4.1). The upload file id
+// doubles as the artifact id: once the task completes, GET
+// /v1/files/{file_id}/content serves the zip bundle.
+type minerUV1Task struct {
+	TaskID string             `json:"task_id"`
+	Status string             `json:"status"`
+	Files  []minerUV1TaskFile `json:"files"`
+}
+
+func minerUV1TaskTerminal(status string) bool {
+	switch status {
+	case "completed", "partial", "failed", "canceled":
+		return true
+	}
+	return false
 }
 
 func minerUV1JobTerminal(status string) bool {
@@ -239,7 +228,7 @@ func rawResponsePreview(raw string) string {
 
 // --- parse flow ---
 
-// Parse uploads content, runs a parse job and returns the markdown and
+// Parse uploads content, runs a parse task and returns the markdown and
 // images extracted from the job's zip artifact.
 func (c *minerUV1Client) Parse(
 	ctx context.Context,
@@ -262,30 +251,25 @@ func (c *minerUV1Client) ParseWithLayout(
 	ctx, cancel := context.WithTimeout(ctx, c.jobTimeout)
 	defer cancel()
 
-	fileID, err := c.upload(ctx, content, fileName)
+	task, err := c.createTask(ctx, content, fileName, opts)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("upload: %w", err)
+		return "", nil, nil, fmt.Errorf("create parse task: %w", err)
 	}
+	logger.Infof(ctx, "[%s] parse task created: task_id=%s file_id=%s tier=%q ocr_mode=%s",
+		c.logLabel, task.TaskID, task.Files[0].FileID, opts.Tier, opts.OCRMode)
 
-	jobID, err := c.createJob(ctx, fileID, opts)
+	final, err := c.waitTask(ctx, task.TaskID)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("create parse job: %w", err)
-	}
-	logger.Infof(ctx, "[%s] parse job created: job_id=%s file_id=%s tier=%q ocr_mode=%s",
-		c.logLabel, jobID, fileID, opts.Tier, opts.OCRMode)
-
-	job, err := c.waitJob(ctx, jobID)
-	if err != nil {
-		c.cancelJob(jobID)
+		c.cancelTask(task.TaskID)
 		return "", nil, nil, err
 	}
 
-	zipRef, err := minerUV1ZipOutput(job)
+	artifactID, err := minerUV1TaskArtifact(final)
 	if err != nil {
 		return "", nil, nil, err
 	}
 
-	zipData, err := c.downloadFile(ctx, zipRef.FileID)
+	zipData, err := c.downloadFile(ctx, artifactID)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("download zip artifact: %w", err)
 	}
@@ -297,74 +281,53 @@ func (c *minerUV1Client) ParseWithLayout(
 	return md, imageRefs, minerUContentListFromZip(zipData), nil
 }
 
-func (c *minerUV1Client) upload(ctx context.Context, content []byte, fileName string) (string, error) {
-	sum := sha256.Sum256(content)
-	sha := hex.EncodeToString(sum[:])
-
-	var created minerUV1Upload
-	err := c.doJSON(ctx, http.MethodPost, "/v1/uploads", map[string]interface{}{
-		"filename":  fileName,
-		"bytes":     len(content),
-		"mime_type": minerUV1MimeType(fileName),
-		"purpose":   "parse",
-		"sha256sum": sha,
-	}, &created)
-	if err != nil {
-		return "", err
+// createTask opens a task-mode session (MinerU >= 4.1): one POST creates the
+// task with inline file metadata, then the bytes go up on the task's own
+// upload slot. MinerU 4.0 answered 404 here — its upload/parse-job split is
+// gone with it.
+func (c *minerUV1Client) createTask(ctx context.Context, content []byte, fileName string, opts minerUV1ParseOptions) (*minerUV1Task, error) {
+	payload := map[string]interface{}{
+		"files": []map[string]interface{}{
+			{"file_name": fileName, "bytes": len(content)},
+		},
+		"output_formats": []string{"default"},
+	}
+	if opts.Tier != "" {
+		payload["tier"] = opts.Tier
+	}
+	if opts.OCRMode != "" {
+		payload["ocr_mode"] = opts.OCRMode
 	}
 
-	switch created.Status {
-	case "completed":
-		// Same bytes already stored on the server: no transfer needed.
-		if created.File == nil || created.File.ID == "" {
-			return "", fmt.Errorf("upload completed without file id")
-		}
-		return created.File.ID, nil
-	case "pending":
-	default:
-		return "", fmt.Errorf("unexpected upload status %q", created.Status)
+	var task minerUV1Task
+	if err := c.doJSON(ctx, http.MethodPost, "/v1/tasks", payload, &task); err != nil {
+		return nil, err
 	}
-	if created.ID == "" || created.UploadURL == "" {
-		return "", fmt.Errorf("pending upload missing id or upload_url")
+	if task.TaskID == "" {
+		return nil, fmt.Errorf("response has no task_id")
+	}
+	if len(task.Files) == 0 || task.Files[0].FileID == "" {
+		return nil, fmt.Errorf("task %s created without an upload slot", task.TaskID)
 	}
 
-	if err := c.putBytes(ctx, &created, content); err != nil {
-		return "", err
+	if err := c.putTaskFile(ctx, task.TaskID, task.Files[0].FileID, content); err != nil {
+		return nil, err
 	}
-
-	var completed minerUV1Upload
-	err = c.doJSON(ctx, http.MethodPost, "/v1/uploads/"+url.PathEscape(created.ID)+"/complete",
-		map[string]string{"sha256sum": sha}, &completed)
-	if err != nil {
-		return "", fmt.Errorf("complete upload: %w", err)
-	}
-	if completed.File == nil || completed.File.ID == "" {
-		return "", fmt.Errorf("complete upload returned no file id (status %q)", completed.Status)
-	}
-	return completed.File.ID, nil
+	return &task, nil
 }
 
-// putBytes sends the file to the URL returned by POST /v1/uploads. The MinerU
-// API key is attached only when that URL is same-origin with the configured
-// endpoint: the official API hands out pre-signed object-storage URLs that
-// carry their own authorization and must never receive our key.
-func (c *minerUV1Client) putBytes(ctx context.Context, up *minerUV1Upload, content []byte) error {
-	target, err := c.resolveURL(up.UploadURL)
-	if err != nil {
-		return fmt.Errorf("invalid upload_url: %w", err)
-	}
-	method := strings.ToUpper(stringOr(up.UploadMethod, http.MethodPut))
-
-	req, err := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(content))
+// putTaskFile uploads the document bytes to the task's inline upload slot.
+// The URL is derived from the configured endpoint rather than taken from a
+// server response, so a compromised server cannot redirect the upload
+// elsewhere.
+func (c *minerUV1Client) putTaskFile(ctx context.Context, taskID, fileID string, content []byte) error {
+	path := "/v1/tasks/" + url.PathEscape(taskID) + "/uploads/" + url.PathEscape(fileID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+path, bytes.NewReader(content))
 	if err != nil {
 		return fmt.Errorf("create upload request: %w", err)
 	}
-	for k, v := range up.UploadHeaders {
-		req.Header.Set(k, v)
-	}
-	if c.sameOrigin(target) {
-		c.setAuth(req)
-	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	c.setAuth(req)
 
 	resp, err := c.bulkClient.Do(req)
 	if err != nil {
@@ -378,57 +341,33 @@ func (c *minerUV1Client) putBytes(ctx context.Context, up *minerUV1Upload, conte
 	return nil
 }
 
-func (c *minerUV1Client) createJob(ctx context.Context, fileID string, opts minerUV1ParseOptions) (string, error) {
-	payload := map[string]interface{}{
-		"files": []map[string]interface{}{
-			{"source": map[string]string{"type": "file_id", "file_id": fileID}},
-		},
-		"output_formats": []string{"zip"},
-	}
-	if opts.Tier != "" {
-		payload["tier"] = opts.Tier
-	}
-	if opts.OCRMode != "" {
-		payload["ocr_mode"] = opts.OCRMode
-	}
-
-	var job minerUV1Job
-	if err := c.doJSON(ctx, http.MethodPost, "/v1/parse/jobs", payload, &job); err != nil {
-		return "", err
-	}
-	if job.JobID == "" {
-		return "", fmt.Errorf("response has no job_id")
-	}
-	return job.JobID, nil
-}
-
-func (c *minerUV1Client) waitJob(ctx context.Context, jobID string) (*minerUV1Job, error) {
+func (c *minerUV1Client) waitTask(ctx context.Context, taskID string) (*minerUV1Task, error) {
 	interval := c.pollInitial
 	for poll := 1; ; poll++ {
-		var job minerUV1Job
-		err := c.doJSON(ctx, http.MethodGet, "/v1/parse/jobs/"+url.PathEscape(jobID), nil, &job)
+		var task minerUV1Task
+		err := c.doJSON(ctx, http.MethodGet, "/v1/tasks/"+url.PathEscape(taskID), nil, &task)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, fmt.Errorf("parse job %s: %w", jobID, ctxErr)
+				return nil, fmt.Errorf("parse task %s: %w", taskID, ctxErr)
 			}
 			var apiErr *minerUV1APIError
 			if errors.As(err, &apiErr) && apiErr.status == http.StatusNotFound {
-				// Job state lives in process memory; a restarted server forgets it.
-				return nil, fmt.Errorf("parse job %s no longer exists (MinerU restarted?): %w", jobID, err)
+				// Task state lives in process memory; a restarted server forgets it.
+				return nil, fmt.Errorf("parse task %s no longer exists (MinerU restarted?): %w", taskID, err)
 			}
-			logger.Warnf(ctx, "[%s] poll #%d for job %s failed: %v", c.logLabel, poll, jobID, err)
+			logger.Warnf(ctx, "[%s] poll #%d for task %s failed: %v", c.logLabel, poll, taskID, err)
 		} else {
-			if poll == 1 || poll%10 == 0 || minerUV1JobTerminal(job.Status) {
-				logger.Infof(ctx, "[%s] poll #%d: job=%s status=%s", c.logLabel, poll, jobID, job.Status)
+			if poll == 1 || poll%10 == 0 || minerUV1TaskTerminal(task.Status) {
+				logger.Infof(ctx, "[%s] poll #%d: task=%s status=%s", c.logLabel, poll, taskID, task.Status)
 			}
-			if minerUV1JobTerminal(job.Status) {
-				return &job, nil
+			if minerUV1TaskTerminal(task.Status) {
+				return &task, nil
 			}
 		}
 
 		sleepCtx(ctx, interval)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, fmt.Errorf("parse job %s: %w", jobID, ctxErr)
+			return nil, fmt.Errorf("parse task %s: %w", taskID, ctxErr)
 		}
 		interval *= 2
 		if interval > c.pollMax {
@@ -437,36 +376,36 @@ func (c *minerUV1Client) waitJob(ctx context.Context, jobID string) (*minerUV1Jo
 	}
 }
 
-// cancelJob best-effort cancels a job we stopped waiting for so the server
-// does not keep burning GPU time on it. It runs on a fresh context because the
-// caller's context is usually already done.
-func (c *minerUV1Client) cancelJob(jobID string) {
+// cancelTask best-effort cancels a task we stopped waiting for so the server
+// does not keep burning GPU time on it. It runs on a fresh context because
+// the caller's context is usually already done.
+func (c *minerUV1Client) cancelTask(taskID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cancelBudget)
 	defer cancel()
-	if err := c.doJSON(ctx, http.MethodDelete, "/v1/parse/jobs/"+url.PathEscape(jobID), nil, nil); err != nil {
-		logger.Warnf(ctx, "[%s] cancel job %s: %v", c.logLabel, jobID, err)
+	if err := c.doJSON(ctx, http.MethodDelete, "/v1/tasks/"+url.PathEscape(taskID), nil, nil); err != nil {
+		logger.Warnf(ctx, "[%s] cancel task %s: %v", c.logLabel, taskID, err)
 	}
 }
 
-// minerUV1ZipOutput returns the zip artifact of the single submitted file, or
-// the per-file error when parsing did not succeed.
-func minerUV1ZipOutput(job *minerUV1Job) (minerUV1FileRef, error) {
-	if len(job.Files) == 0 {
-		return minerUV1FileRef{}, fmt.Errorf("parse job %s ended %s without file results", job.JobID, job.Status)
+// minerUV1TaskArtifact validates the terminal task and returns the file id
+// whose /v1/files/{id}/content download serves the zip artifact. Task mode
+// reuses the upload file id as the artifact id.
+func minerUV1TaskArtifact(task *minerUV1Task) (string, error) {
+	if len(task.Files) == 0 {
+		return "", fmt.Errorf("parse task %s ended %s without file results", task.TaskID, task.Status)
 	}
-	f := job.Files[0]
+	f := task.Files[0]
 	if f.Status != "completed" {
-		reason := job.Status
+		reason := task.Status
 		if f.Error != nil {
-			reason = firstNonEmpty(strings.TrimSpace(f.Error.Code+": "+f.Error.Message), job.Status)
+			reason = firstNonEmpty(strings.TrimSpace(f.Error.Code+": "+f.Error.Message), task.Status)
 		}
-		return minerUV1FileRef{}, fmt.Errorf("parse job %s %s: %s", job.JobID, job.Status, reason)
+		return "", fmt.Errorf("parse task %s %s: %s", task.TaskID, task.Status, reason)
 	}
-	ref, ok := f.OutputFiles["zip"]
-	if !ok || ref.FileID == "" {
-		return minerUV1FileRef{}, fmt.Errorf("parse job %s completed without zip output", job.JobID)
+	if f.FileID == "" {
+		return "", fmt.Errorf("parse task %s completed without artifact file id", task.TaskID)
 	}
-	return ref, nil
+	return f.FileID, nil
 }
 
 func (c *minerUV1Client) downloadFile(ctx context.Context, fileID string) ([]byte, error) {

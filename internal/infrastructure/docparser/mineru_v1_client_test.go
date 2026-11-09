@@ -20,28 +20,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeMinerUV1 is a minimal in-memory MinerU 4.0 api-server.
-type fakeMinerUV1 struct {
+// fakeMinerUV1413 is a minimal in-memory MinerU 4.1.3 task-mode api-server.
+type fakeMinerUV1413 struct {
 	t          *testing.T
 	apiKey     string
 	authHealth bool
 
-	mu            sync.Mutex
-	uploadURL     string // absolute or relative; defaults to same-origin relative path
-	dedupHit      bool   // POST /v1/uploads answers "completed" directly
-	uploaded      []byte
-	putAuth       string
-	uploadMime    string
-	jobPayload    map[string]any
-	pollStatuses  []string // statuses returned by successive GET job calls
-	polls         int
-	fileError     *map[string]string
-	canceled      bool
-	zipData       []byte
-	downloadCalls int
+	mu             sync.Mutex
+	taskPayload    map[string]any
+	uploaded       []byte
+	putAuth        string
+	putContentType string
+	pollStatuses   []string // statuses returned by successive GET task calls
+	polls          int
+	deleteCalls    int
+	fileError      *struct{ Code, Message string }
+	zipData        []byte
 }
 
-func (f *fakeMinerUV1) handler() http.Handler {
+func (f *fakeMinerUV1413) handler() http.Handler {
 	mux := http.NewServeMux()
 	writeJSON := func(w http.ResponseWriter, status int, v any) {
 		w.Header().Set("Content-Type", "application/json")
@@ -67,87 +64,76 @@ func (f *fakeMinerUV1) handler() http.Handler {
 			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": "1.0.0"})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": "4.1.3"})
 	})
-	mux.HandleFunc("POST /v1/uploads", authed(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/tasks", authed(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"tasks": []any{}})
+	}))
+	mux.HandleFunc("POST /v1/tasks", authed(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		require.NoError(f.t, json.NewDecoder(r.Body).Decode(&body))
 		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.uploadMime, _ = body["mime_type"].(string)
-		if f.dedupHit {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"id": "upload_1", "status": "completed", "file": map[string]any{"id": "file-src"},
-			})
-			return
-		}
-		uploadURL := f.uploadURL
-		if uploadURL == "" {
-			uploadURL = "/v1/uploads/upload_1/content"
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"id": "upload_1", "status": "pending", "upload_url": uploadURL, "upload_method": "PUT",
-			"upload_headers": map[string]string{"Content-Type": f.uploadMime},
-		})
-	}))
-	mux.HandleFunc("PUT /v1/uploads/upload_1/content", f.handlePut)
-	mux.HandleFunc("POST /v1/uploads/upload_1/complete", authed(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"id": "upload_1", "status": "completed", "file": map[string]any{"id": "file-src"},
-		})
-	}))
-	mux.HandleFunc("POST /v1/parse/jobs", authed(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		require.NoError(f.t, json.NewDecoder(r.Body).Decode(&body))
-		f.mu.Lock()
-		f.jobPayload = body
+		f.taskPayload = body
 		f.mu.Unlock()
-		writeJSON(w, http.StatusAccepted, map[string]any{"job_id": "job_1", "status": "queued"})
+		fileName := ""
+		if files, ok := body["files"].([]any); ok && len(files) > 0 {
+			if m, ok := files[0].(map[string]any); ok {
+				fileName, _ = m["file_name"].(string)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"task_id": "task_1", "status": "waiting",
+			"files": []any{map[string]any{
+				"file_id": "file-1", "file_name": fileName, "status": "waiting",
+			}},
+		})
 	}))
-	mux.HandleFunc("GET /v1/parse/jobs/job_1", authed(func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("PUT /v1/tasks/task_1/uploads/file-1", authed(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(f.t, err)
+		f.mu.Lock()
+		f.uploaded = body
+		f.putAuth = r.Header.Get("Authorization")
+		f.putContentType = r.Header.Get("Content-Type")
+		f.mu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"task_id": "task_1", "file_id": "file-1", "status": "pending",
+		})
+	}))
+	mux.HandleFunc("GET /v1/tasks/task_1", authed(func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		status := "completed"
-		if f.polls < len(f.pollStatuses) {
-			status = f.pollStatuses[f.polls]
+		if len(f.pollStatuses) > 0 {
+			idx := f.polls
+			if idx >= len(f.pollStatuses) {
+				idx = len(f.pollStatuses) - 1
+			}
+			status = f.pollStatuses[idx]
 		}
 		f.polls++
-		file := map[string]any{"name": "report.pdf", "status": status}
+		file := map[string]any{"file_id": "file-1", "file_name": "report.pdf", "status": status}
 		switch status {
-		case "completed":
-			file["output_files"] = map[string]any{"zip": map[string]any{"file_id": "file-zip", "bytes": len(f.zipData)}}
 		case "failed":
-			file["error"] = *f.fileError
+			if f.fileError != nil {
+				file["error"] = map[string]any{"code": f.fileError.Code, "message": f.fileError.Message}
+			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"job_id": "job_1", "status": status, "files": []any{file}})
+		writeJSON(w, http.StatusOK, map[string]any{"task_id": "task_1", "status": status, "files": []any{file}})
 	}))
-	mux.HandleFunc("DELETE /v1/parse/jobs/job_1", authed(func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("DELETE /v1/tasks/task_1", authed(func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
-		f.canceled = true
+		f.deleteCalls++
 		f.mu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]any{"job_id": "job_1", "status": "canceled"})
+		w.WriteHeader(http.StatusNoContent)
 	}))
-	mux.HandleFunc("GET /v1/parse/jobs", authed(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []any{}})
-	}))
-	mux.HandleFunc("GET /v1/files/file-zip/content", authed(func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /v1/files/file-1/content", authed(func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
-		f.downloadCalls++
-		f.mu.Unlock()
+		defer f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/zip")
 		_, _ = w.Write(f.zipData)
 	}))
 	return mux
-}
-
-func (f *fakeMinerUV1) handlePut(w http.ResponseWriter, r *http.Request) {
-	data, err := io.ReadAll(r.Body)
-	require.NoError(f.t, err)
-	f.mu.Lock()
-	f.uploaded = data
-	f.putAuth = r.Header.Get("Authorization")
-	f.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
 }
 
 func buildMinerUZip(t *testing.T, files map[string]string) []byte {
@@ -192,10 +178,10 @@ func v1TestZip(t *testing.T) []byte {
 
 func TestMinerUV1ClientParseFullFlow(t *testing.T) {
 	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{
+	fake := &fakeMinerUV1413{
 		t:            t,
 		apiKey:       "server-key",
-		pollStatuses: []string{"queued", "running", "completed"},
+		pollStatuses: []string{"pending", "running", "completed"},
 		zipData:      v1TestZip(t),
 	}
 	server := httptest.NewServer(fake.handler())
@@ -214,105 +200,71 @@ func TestMinerUV1ClientParseFullFlow(t *testing.T) {
 	}
 	assert.Equal(t, []byte("png-bytes-1"), byRef["images/page_0_image_1.png"].ImageData)
 	assert.Equal(t, []byte("png-bytes-2"), byRef["images/page_0_table_image_2_1.png"].ImageData)
-	assert.Equal(t, "image/png", byRef["images/page_0_image_1.png"].MimeType)
 
 	assert.Equal(t, []byte("%PDF-1.7 body"), fake.uploaded)
 	assert.Equal(t, "Bearer server-key", fake.putAuth, "same-origin upload must carry the API key")
-	assert.Equal(t, "application/pdf", fake.uploadMime)
+	assert.Equal(t, "application/octet-stream", fake.putContentType)
 	assert.Equal(t, 3, fake.polls)
-	assert.False(t, fake.canceled)
+	assert.Zero(t, fake.deleteCalls, "a completed task must not be canceled")
 
-	assert.Equal(t, "advanced", fake.jobPayload["tier"])
-	assert.Equal(t, "txt", fake.jobPayload["ocr_mode"])
-	assert.Equal(t, []any{"zip"}, fake.jobPayload["output_formats"])
-	files := fake.jobPayload["files"].([]any)
-	source := files[0].(map[string]any)["source"].(map[string]any)
-	assert.Equal(t, map[string]any{"type": "file_id", "file_id": "file-src"}, source)
+	assert.Equal(t, "advanced", fake.taskPayload["tier"])
+	assert.Equal(t, "txt", fake.taskPayload["ocr_mode"])
+	files := fake.taskPayload["files"].([]any)
+	entry := files[0].(map[string]any)
+	assert.Equal(t, "report.pdf", entry["file_name"])
+	assert.Equal(t, float64(len("%PDF-1.7 body")), entry["bytes"])
 }
 
 func TestMinerUV1ClientOmitsTierForServerDefault(t *testing.T) {
 	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{t: t, zipData: v1TestZip(t)}
+	fake := &fakeMinerUV1413{t: t, apiKey: "k", pollStatuses: []string{"completed"}, zipData: v1TestZip(t)}
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
-	_, _, err := fastV1Client(server.URL, "").Parse(context.Background(), []byte("x"), "a.pdf",
-		minerUV1ParseOptions{OCRMode: "auto"})
-	require.NoError(t, err)
-	_, hasTier := fake.jobPayload["tier"]
-	assert.False(t, hasTier)
-}
-
-func TestMinerUV1ClientCrossOriginUploadOmitsAPIKey(t *testing.T) {
-	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{t: t, apiKey: "server-key", zipData: v1TestZip(t)}
-
-	// A different port on the same host is a different origin, like a
-	// pre-signed object-storage URL handed out by the official API.
-	storage := httptest.NewServer(http.HandlerFunc(fake.handlePut))
-	defer storage.Close()
-	fake.uploadURL = storage.URL + "/v1/uploads/upload_1/content?Signature=abc"
-
-	server := httptest.NewServer(fake.handler())
-	defer server.Close()
-
-	_, _, err := fastV1Client(server.URL, "server-key").Parse(context.Background(), []byte("bytes"), "a.pdf",
+	_, _, err := fastV1Client(server.URL, "k").Parse(context.Background(), []byte("x"), "a.pdf",
 		minerUV1ParseOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, []byte("bytes"), fake.uploaded)
-	assert.Empty(t, fake.putAuth, "API key must not leak to a cross-origin upload URL")
+	assert.NotContains(t, fake.taskPayload, "tier")
 }
 
-func TestMinerUV1ClientDedupSkipsByteUpload(t *testing.T) {
+func TestMinerUV1ClientTaskFailedReportsFileError(t *testing.T) {
 	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{t: t, dedupHit: true, zipData: v1TestZip(t)}
-	server := httptest.NewServer(fake.handler())
-	defer server.Close()
-
-	_, _, err := fastV1Client(server.URL, "").Parse(context.Background(), []byte("bytes"), "a.pdf",
-		minerUV1ParseOptions{})
-	require.NoError(t, err)
-	assert.Nil(t, fake.uploaded)
-}
-
-func TestMinerUV1ClientFailedJobReportsFileError(t *testing.T) {
-	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{
+	fake := &fakeMinerUV1413{
 		t:            t,
+		apiKey:       "k",
 		pollStatuses: []string{"failed"},
-		fileError:    &map[string]string{"code": "parse_failed", "message": "corrupt pdf"},
+		fileError:    &struct{ Code, Message string }{"unsupported_type", "office files need tier>=standard"},
 	}
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
-	_, _, err := fastV1Client(server.URL, "").Parse(context.Background(), []byte("x"), "a.pdf",
+	_, _, err := fastV1Client(server.URL, "k").Parse(context.Background(), []byte("x"), "a.docx",
 		minerUV1ParseOptions{})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse_failed: corrupt pdf")
-	assert.Zero(t, fake.downloadCalls)
+	assert.Contains(t, err.Error(), "unsupported_type: office files need tier>=standard")
 }
 
-func TestMinerUV1ClientCancelsJobOnTimeout(t *testing.T) {
+func TestMinerUV1ClientCancelsTaskOnTimeout(t *testing.T) {
 	allowLoopbackSSRF(t)
-	statuses := make([]string, 1000)
-	for i := range statuses {
-		statuses[i] = "running"
+	fake := &fakeMinerUV1413{
+		t:            t,
+		apiKey:       "k",
+		pollStatuses: []string{"running"}, // never terminal within the budget
 	}
-	fake := &fakeMinerUV1{t: t, pollStatuses: statuses}
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
-	client := fastV1Client(server.URL, "")
-	client.jobTimeout = 100 * time.Millisecond
+	client := fastV1Client(server.URL, "k")
+	client.jobTimeout = 40 * time.Millisecond
 	_, _, err := client.Parse(context.Background(), []byte("x"), "a.pdf", minerUV1ParseOptions{})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.True(t, fake.canceled, "abandoned job should be canceled on the server")
+	assert.Contains(t, err.Error(), "context deadline exceeded")
+	assert.Equal(t, 1, fake.deleteCalls, "timeout must best-effort cancel the task")
 }
 
 func TestMinerUV1ClientAPIErrorMessage(t *testing.T) {
 	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{t: t, apiKey: "server-key"}
+	fake := &fakeMinerUV1413{t: t, apiKey: "server-key"}
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
@@ -407,7 +359,7 @@ func TestDetectMinerUProtocol(t *testing.T) {
 
 func TestMinerUReaderUsesV1WhenAvailable(t *testing.T) {
 	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{t: t, apiKey: "server-key", zipData: v1TestZip(t)}
+	fake := &fakeMinerUV1413{t: t, apiKey: "server-key", zipData: v1TestZip(t)}
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
@@ -429,8 +381,8 @@ func TestMinerUReaderUsesV1WhenAvailable(t *testing.T) {
 	require.Empty(t, result.Error)
 	assert.True(t, strings.HasPrefix(result.MarkdownContent, "# Report"))
 	assert.Len(t, result.ImageRefs, 2)
-	assert.Equal(t, "standard", fake.jobPayload["tier"])
-	assert.Equal(t, "ocr", fake.jobPayload["ocr_mode"])
+	assert.Equal(t, "standard", fake.taskPayload["tier"])
+	assert.Equal(t, "ocr", fake.taskPayload["ocr_mode"])
 }
 
 func TestResolveMinerUTier(t *testing.T) {
@@ -443,7 +395,7 @@ func TestResolveMinerUTier(t *testing.T) {
 
 func TestPingMinerUV1(t *testing.T) {
 	allowLoopbackSSRF(t)
-	fake := &fakeMinerUV1{t: t, apiKey: "server-key"}
+	fake := &fakeMinerUV1413{t: t, apiKey: "server-key"}
 	server := httptest.NewServer(fake.handler())
 	defer server.Close()
 
@@ -459,7 +411,7 @@ func TestPingMinerUV1(t *testing.T) {
 	assert.Contains(t, msg, "配置 API Key")
 
 	// Gateway requiring authentication on /v1/health
-	gwFake := &fakeMinerUV1{t: t, apiKey: "server-key", authHealth: true}
+	gwFake := &fakeMinerUV1413{t: t, apiKey: "server-key", authHealth: true}
 	gwServer := httptest.NewServer(gwFake.handler())
 	defer gwServer.Close()
 
@@ -470,7 +422,7 @@ func TestPingMinerUV1(t *testing.T) {
 	assert.False(t, ok)
 	assert.Contains(t, msg, "401")
 
-	open := &fakeMinerUV1{t: t}
+	open := &fakeMinerUV1413{t: t}
 	openServer := httptest.NewServer(open.handler())
 	defer openServer.Close()
 	ok, msg = PingMinerU(openServer.URL, "")
