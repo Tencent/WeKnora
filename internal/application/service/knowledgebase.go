@@ -1250,7 +1250,15 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		}
 		if s.graphEngine != nil && len(namespaces) > 0 {
 			if err := s.graphEngine.DelGraph(ctx, namespaces); err != nil {
-				logger.Warnf(ctx, "Failed to delete knowledge graph: %v", err)
+				// The KB row is already soft-deleted; keep the cleanup intent
+				// in a retryable task instead of silently orphaning graph nodes.
+				if enqueueErr := enqueueGraphCleanup(ctx, s.asynqClient, tenantID, namespaces); enqueueErr != nil {
+					logger.Errorf(ctx,
+						"Failed to delete knowledge graph and could not schedule retry: cleanup=%v enqueue=%v",
+						err, enqueueErr)
+				} else {
+					logger.Warnf(ctx, "Failed to delete knowledge graph; scheduled an independent retry: %v", err)
+				}
 			}
 		}
 

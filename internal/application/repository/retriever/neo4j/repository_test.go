@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/stretchr/testify/assert"
@@ -221,4 +222,26 @@ func TestDecodeGraphSearchReportsInvalidRecordsAndStreamErrors(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	assert.Empty(t, graph.Node[0].Attributes)
+}
+
+func TestGraphCleanupQueriesAreBatchedAndSerial(t *testing.T) {
+	relations, nodes := graphCleanupQueries("ENTITY_kb:ENTITY_doc")
+	for _, query := range []string{relations, nodes} {
+		assert.Contains(t, query, "apoc.periodic.iterate")
+		assert.Contains(t, query, "batchSize: 1000")
+		assert.Contains(t, query, "parallel: false")
+		assert.NotContains(t, query, "parallel: true")
+		assert.Contains(t, query, "{kg: $knowledge_id}")
+		assert.Contains(t, query, "ENTITY_kb:ENTITY_doc")
+	}
+	assert.Contains(t, relations, "DELETE r")
+	assert.Contains(t, nodes, "DELETE n")
+}
+
+func TestGraphCleanupTimeoutConfig(t *testing.T) {
+	assert.Equal(t, defaultGraphCleanupTimeout, graphCleanupTimeout())
+	t.Setenv("NEO4J_CLEANUP_TIMEOUT", "45s")
+	assert.Equal(t, 45*time.Second, graphCleanupTimeout())
+	t.Setenv("NEO4J_CLEANUP_TIMEOUT", "not-a-duration")
+	assert.Equal(t, defaultGraphCleanupTimeout, graphCleanupTimeout())
 }

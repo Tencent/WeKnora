@@ -83,6 +83,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+		TypeGraphCleanup,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
 }
@@ -243,6 +244,7 @@ const (
 	TypeKnowledgeListDelete      = "knowledge:list_delete"      // 批量删除知识任务
 	TypeKnowledgeListReparse     = "knowledge:list_reparse"     // 批量重解析知识任务
 	TypeKnowledgeMove            = "knowledge:move"             // 知识移动任务
+	TypeGraphCleanup             = "graph:cleanup"              // 图谱资源清理重试任务
 	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
 	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
 	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
@@ -449,6 +451,16 @@ type KnowledgeListDeletePayload struct {
 	KnowledgeIDs    []string      `json:"knowledge_ids"`
 	Initiator       TaskInitiator `json:"initiator,omitempty"`
 	KnowledgeBaseID string        `json:"knowledge_base_id,omitempty"`
+}
+
+// GraphCleanupPayload carries a retryable Neo4j graph cleanup. The namespaces
+// are persisted in the task payload because the knowledge rows may already be
+// gone by the time the worker runs.
+type GraphCleanupPayload struct {
+	TracingContext
+	TenantID   uint64        `json:"tenant_id"`
+	Namespaces []NameSpace   `json:"namespaces"`
+	Initiator  TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload

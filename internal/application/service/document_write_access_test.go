@@ -473,8 +473,10 @@ func TestDeleteTaskScopeRejectsMovedDocumentsBeforeAnyMutation(t *testing.T) {
 	f.requireNoWrites(t)
 }
 
-func TestDeleteTaskRetriesAfterPartialCleanupAndAlreadyDeletedRows(t *testing.T) {
+func TestDeleteTaskCompletesWhenGraphCleanupFails(t *testing.T) {
 	f := newDocumentWriteFixture(t)
+	queue := &graphCleanupQueue{}
+	f.svc.task = queue
 	require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").Update("file_path", "local://doc").Error)
 	task := deleteDocumentTask(
 		t,
@@ -485,25 +487,25 @@ func TestDeleteTaskRetriesAfterPartialCleanupAndAlreadyDeletedRows(t *testing.T)
 		},
 	)
 	f.graph.err = errors.New("graph unavailable")
-	err := f.svc.ProcessKnowledgeListDelete(context.Background(), task)
-	require.ErrorContains(t, err, "graph unavailable")
-	require.NotErrorIs(t, err, asynq.SkipRetry)
-	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
-	require.NoError(t, err)
-	require.Equal(t, types.ParseStatusDeleting, row.ParseStatus)
-	require.Empty(t, f.files.deleted)
-	require.Empty(t, f.tenants.adjustments)
-	f.graph.err = nil
-	f.files.beforeDelete = func() { _, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc"); require.Error(t, err) }
+
+	// Neo4j is an auxiliary index: deletion must still commit all primary data.
 	require.NoError(t, f.svc.ProcessKnowledgeListDelete(context.Background(), task))
 	require.Equal(t, []string{"local://doc"}, f.files.deleted)
 	require.Equal(t, []int64{-5}, f.tenants.adjustments)
-	// A completed task does not need live KB metadata or current user grants.
-	delete(f.kbs.values, "kb")
-	writes, calls := f.repo.writes, f.graph.calls
-	require.NoError(t, f.svc.ProcessKnowledgeListDelete(context.Background(), task))
-	require.Equal(t, writes, f.repo.writes)
-	require.Equal(t, calls, f.graph.calls)
+	_, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.Error(t, err)
+
+	// The failed graph deletion is retried independently, after rows are gone.
+	require.Len(t, queue.tasks, 1)
+	require.Equal(t, types.TypeGraphCleanup, queue.tasks[0].Type())
+	var payload types.GraphCleanupPayload
+	require.NoError(t, json.Unmarshal(queue.tasks[0].Payload(), &payload))
+	require.Equal(t, uint64(7), payload.TenantID)
+	require.Equal(t, []types.NameSpace{{KnowledgeBase: "kb", Knowledge: "doc"}}, payload.Namespaces)
+	require.ErrorContains(t, f.svc.ProcessGraphCleanup(context.Background(), queue.tasks[0]), "graph unavailable")
+	f.graph.err = nil
+	require.NoError(t, f.svc.ProcessGraphCleanup(context.Background(), queue.tasks[0]))
+	require.Equal(t, 3, f.graph.calls)
 }
 
 func TestKnowledgeCleanupScopeCannotAuthorizeGeneralWritesOrExtraIDs(t *testing.T) {
