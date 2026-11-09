@@ -38,6 +38,16 @@ type OwnershipDecision struct {
 // created before being demoted.
 const CreatorRoleFloor = types.TenantRoleContributor
 
+// RoleAllowsMCPEndpointTool reports whether a member with role may call the
+// tool through a personal endpoint. Write tools share CreatorRoleFloor, the
+// lowest role the web write routes let mutate anything.
+func RoleAllowsMCPEndpointTool(role types.TenantRole, def types.MCPEndpointToolDefinition) bool {
+	if def.Destructive {
+		return role.HasPermission(CreatorRoleFloor)
+	}
+	return role.HasPermission(types.TenantRoleViewer)
+}
+
 // CheckOwnershipOrRole performs no resource lookup when API-key authorization,
 // role, superuser status, or the RBAC rollout policy already settles the gate.
 // The lookup must enforce tenant visibility before returning a creator ID.

@@ -80,8 +80,12 @@ func mcpEndpointTokenHint(token string) string {
 }
 
 func (s *mcpEndpointService) Create(
-	ctx context.Context, tenantID uint64, ep *types.MCPEndpoint,
+	ctx context.Context, owner types.MCPEndpointOwner, ep *types.MCPEndpoint,
 ) (*types.MCPEndpoint, string, error) {
+	tenantID := owner.TenantID
+	if err := validateMCPEndpointOwner(owner); err != nil {
+		return nil, "", err
+	}
 	if ep == nil {
 		return nil, "", apperrors.NewBadRequestError("endpoint is required")
 	}
@@ -96,6 +100,9 @@ func (s *mcpEndpointService) Create(
 	if len(tools) == 0 {
 		return nil, "", apperrors.NewBadRequestError("at least one tool must be enabled")
 	}
+	if err := requireRoleCoversTools(ctx, owner, tools); err != nil {
+		return nil, "", err
+	}
 	kbIDs, err := s.validateKnowledgeBases(ctx, tenantID, ep.KnowledgeBaseIDs)
 	if err != nil {
 		return nil, "", err
@@ -104,9 +111,13 @@ func (s *mcpEndpointService) Create(
 	if err != nil {
 		return nil, "", err
 	}
-	rate, err := normalizeMCPEndpointRate(ep.RateLimitPerMinute)
-	if err != nil {
-		return nil, "", err
+	// A personal endpoint draws on the workspace-wide personal quota, so its
+	// own column is never consulted and keeps the default.
+	rate := types.DefaultMCPEndpointRateLimitPerMinute
+	if owner.Kind == types.MCPEndpointKindSpace {
+		if rate, err = normalizeMCPEndpointRate(ep.RateLimitPerMinute); err != nil {
+			return nil, "", err
+		}
 	}
 	token, err := generateMCPEndpointToken()
 	if err != nil {
@@ -114,6 +125,8 @@ func (s *mcpEndpointService) Create(
 	}
 	row := &types.MCPEndpoint{
 		TenantID:           tenantID,
+		Kind:               owner.Kind,
+		UserID:             owner.UserID,
 		Name:               name,
 		Description:        strings.TrimSpace(ep.Description),
 		Enabled:            ep.Enabled,
@@ -133,18 +146,24 @@ func (s *mcpEndpointService) Create(
 	return row, token, nil
 }
 
-func (s *mcpEndpointService) Get(ctx context.Context, tenantID uint64, id string) (*types.MCPEndpoint, error) {
-	return s.getOwned(ctx, tenantID, id)
+func (s *mcpEndpointService) Get(
+	ctx context.Context, owner types.MCPEndpointOwner, id string,
+) (*types.MCPEndpoint, error) {
+	return s.getOwned(ctx, owner, id)
 }
 
-func (s *mcpEndpointService) List(ctx context.Context, tenantID uint64) ([]*types.MCPEndpoint, error) {
-	return s.repo.ListByTenant(ctx, tenantID)
+func (s *mcpEndpointService) List(ctx context.Context, owner types.MCPEndpointOwner) ([]*types.MCPEndpoint, error) {
+	if err := validateMCPEndpointOwner(owner); err != nil {
+		return nil, err
+	}
+	return s.repo.List(ctx, owner)
 }
 
 func (s *mcpEndpointService) Update(
-	ctx context.Context, tenantID uint64, id string, upd interfaces.MCPEndpointUpdate,
+	ctx context.Context, owner types.MCPEndpointOwner, id string, upd interfaces.MCPEndpointUpdate,
 ) (*types.MCPEndpoint, error) {
-	ep, err := s.getOwned(ctx, tenantID, id)
+	tenantID := owner.TenantID
+	ep, err := s.getOwned(ctx, owner, id)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +188,9 @@ func (s *mcpEndpointService) Update(
 		if len(tools) == 0 {
 			return nil, apperrors.NewBadRequestError("at least one tool must be enabled")
 		}
+		if err := requireRoleCoversTools(ctx, owner, tools); err != nil {
+			return nil, err
+		}
 		ep.Tools = types.StringArray(tools)
 	}
 	if upd.KnowledgeBaseIDs != nil {
@@ -185,7 +207,7 @@ func (s *mcpEndpointService) Update(
 		}
 		ep.DefaultAgentID = agentID
 	}
-	if upd.RateLimitPerMinute != nil {
+	if upd.RateLimitPerMinute != nil && owner.Kind == types.MCPEndpointKindSpace {
 		rate, err := normalizeMCPEndpointRate(*upd.RateLimitPerMinute)
 		if err != nil {
 			return nil, err
@@ -201,17 +223,17 @@ func (s *mcpEndpointService) Update(
 	return ep, nil
 }
 
-func (s *mcpEndpointService) Delete(ctx context.Context, tenantID uint64, id string) error {
-	if _, err := s.getOwned(ctx, tenantID, id); err != nil {
+func (s *mcpEndpointService) Delete(ctx context.Context, owner types.MCPEndpointOwner, id string) error {
+	if _, err := s.getOwned(ctx, owner, id); err != nil {
 		return err
 	}
-	return s.repo.Delete(ctx, tenantID, id)
+	return s.repo.Delete(ctx, owner.TenantID, id)
 }
 
 func (s *mcpEndpointService) RotateToken(
-	ctx context.Context, tenantID uint64, id string,
+	ctx context.Context, owner types.MCPEndpointOwner, id string,
 ) (*types.MCPEndpoint, string, error) {
-	ep, err := s.getOwned(ctx, tenantID, id)
+	ep, err := s.getOwned(ctx, owner, id)
 	if err != nil {
 		return nil, "", err
 	}
@@ -287,15 +309,84 @@ func (s *mcpEndpointService) Authenticate(
 	return ep, nil
 }
 
-func (s *mcpEndpointService) getOwned(ctx context.Context, tenantID uint64, id string) (*types.MCPEndpoint, error) {
+func (s *mcpEndpointService) getOwned(
+	ctx context.Context, owner types.MCPEndpointOwner, id string,
+) (*types.MCPEndpoint, error) {
+	if err := validateMCPEndpointOwner(owner); err != nil {
+		return nil, err
+	}
 	ep, err := s.repo.GetByID(ctx, strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
 	}
-	if ep == nil || ep.TenantID != tenantID {
+	if !owner.Owns(ep) {
 		return nil, ErrMCPEndpointNotFound
 	}
 	return ep, nil
+}
+
+func validateMCPEndpointOwner(owner types.MCPEndpointOwner) error {
+	if owner.TenantID == 0 {
+		return apperrors.NewBadRequestError("workspace is required")
+	}
+	switch owner.Kind {
+	case types.MCPEndpointKindSpace:
+		return nil
+	case types.MCPEndpointKindPersonal:
+		if strings.TrimSpace(owner.UserID) == "" {
+			return apperrors.NewForbiddenError("personal endpoints require a signed-in member")
+		}
+		return nil
+	}
+	return apperrors.NewBadRequestError("unknown endpoint kind")
+}
+
+// requireRoleCoversTools keeps a member from saving a personal endpoint with
+// write tools their role cannot use. The MCP server checks the role again on
+// every call because it may be lowered after the endpoint is saved.
+func requireRoleCoversTools(ctx context.Context, owner types.MCPEndpointOwner, tools []string) error {
+	if owner.Kind != types.MCPEndpointKindPersonal {
+		return nil
+	}
+	role := types.CallerFromContext(ctx).Role
+	for _, name := range tools {
+		if def, ok := types.LookupMCPEndpointTool(name); ok && !access.RoleAllowsMCPEndpointTool(role, def) {
+			return apperrors.NewForbiddenError("your role cannot use the " + name + " tool")
+		}
+	}
+	return nil
+}
+
+func (s *mcpEndpointService) GetSettings(ctx context.Context, tenantID uint64) (*types.MCPEndpointSettings, error) {
+	settings, err := s.repo.GetSettings(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if settings == nil {
+		settings = &types.MCPEndpointSettings{
+			TenantID:                   tenantID,
+			PersonalRateLimitPerMinute: types.DefaultMCPEndpointRateLimitPerMinute,
+		}
+	}
+	return settings, nil
+}
+
+func (s *mcpEndpointService) UpdateSettings(
+	ctx context.Context, tenantID uint64, personalRateLimitPerMinute int,
+) (*types.MCPEndpointSettings, error) {
+	rate, err := normalizeMCPEndpointRate(personalRateLimitPerMinute)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.GetSettings(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	settings.PersonalRateLimitPerMinute = rate
+	if err := s.repo.SaveSettings(ctx, settings); err != nil {
+		return nil, err
+	}
+	return settings, nil
 }
 
 // validateKnowledgeBases confirms every ID names a knowledge base the

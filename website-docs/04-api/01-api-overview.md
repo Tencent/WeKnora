@@ -64,7 +64,7 @@ Authorization: Embed <publish_token 或 session_token>
 Authorization: Bearer <endpoint_token>
 ```
 
-令牌在「设置 → 发布集成 → MCP Server」创建端点时一次性展示，可轮换。请求以端点所属空间的机器主体执行，权限限定在端点勾选的工具和知识库范围内。端点管理接口为 `/api/v1/mcp-endpoints`（Viewer+ 读取、Admin+ 变更，API Key 需 `manage_channels`），用法见 [MCP 集成](../03-features/08-mcp.md)。
+令牌在「设置 → 发布集成 → MCP Server」创建端点时一次性展示，可轮换。空间端点的请求以端点所属空间的机器主体执行；个人端点以创建它的成员本人及其当前角色执行。两者的权限都限定在端点勾选的工具和知识库范围内。空间端点管理接口为 `/api/v1/mcp-endpoints`（Viewer+ 读取、Admin+ 变更，API Key 需 `manage_channels`），个人端点为 `/api/v1/mcp-personal-endpoints`（成员管理自己的端点，不接受 API Key），用法见 [MCP 集成](../03-features/08-mcp.md)。
 
 ### 认证流程图
 

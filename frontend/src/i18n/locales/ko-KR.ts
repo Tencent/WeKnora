@@ -1110,7 +1110,12 @@ export default {
     mcpserver: {
       title: 'MCP 서버',
       subtitle: '이 워크스페이스를 MCP 서버로 게시하여 Claude Desktop, Cursor, Claude Code 등 MCP 클라이언트가 직접 연결하게 합니다. 엔드포인트마다 별도의 토큰, 지식 베이스 범위, 도구 목록을 가집니다.',
-      listTitle: '게시된 엔드포인트',
+      listTitle: '스페이스 엔드포인트',
+      personalTitle: '개인 엔드포인트',
+      personalRateLimitLabel: '개인 엔드포인트 분당 총 호출 수',
+      personalRateLimitHint: '스페이스 내 모든 멤버의 개인 엔드포인트가 이 한도를 공유합니다.',
+      writeToolNeedsRole: '현재 역할로는 쓰기 도구를 사용할 수 없습니다',
+      settingsSaved: '설정이 저장되었습니다',
       empty: '아직 MCP 엔드포인트가 없습니다',
       disabled: '비활성',
       cardSummary: '도구 {tools}개 · {scope}',

@@ -193,7 +193,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// Workspace MCP server surface (/mcp/:endpoint_id): bearer-token auth per
 	// endpoint, so it must precede the global Auth middleware.
-	RegisterMCPServerRoutes(r, params.MCPServer, params.MCPEndpointService, params.TenantService)
+	RegisterMCPServerRoutes(
+		r, params.MCPServer, params.MCPEndpointService, params.TenantService,
+		params.TenantMemberService, params.UserService,
+	)
 
 	// Short-lived capability URLs for IM and other clients that cannot attach
 	// WeKnora authentication headers.

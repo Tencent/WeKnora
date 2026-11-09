@@ -1,19 +1,41 @@
 <template>
   <div class="mcp-server-panel">
-    <div class="channels-section">
+    <section class="settings-band">
+      <div class="row">
+        <div class="row-info">
+          <label>{{ $t('integrations.mcpserver.personalRateLimitLabel') }}</label>
+          <p>{{ $t('integrations.mcpserver.personalRateLimitHint') }}</p>
+        </div>
+        <div class="row-control">
+          <t-input-number
+            v-model="personalRateLimit"
+            class="form-number"
+            :min="1"
+            :max="6000"
+            theme="column"
+            :disabled="!isAdmin"
+          />
+          <t-button v-if="isAdmin" size="small" theme="primary" :loading="settingsSaving" @click="saveSettings">
+            {{ $t('common.save') }}
+          </t-button>
+        </div>
+      </div>
+    </section>
+
+    <div v-for="section in sections" :key="section.kind" class="channels-section">
       <div class="channels-header">
-        <span class="channels-title">{{ $t('integrations.mcpserver.listTitle') }}</span>
-        <span class="channels-count">{{ endpoints.length }}</span>
+        <span class="channels-title">{{ section.title }}</span>
+        <span class="channels-count">{{ section.endpoints.length }}</span>
       </div>
 
       <t-loading :loading="loading" size="small" class="channels-loading-wrap">
-        <div v-if="!loading && endpoints.length === 0 && !isAdmin" class="channels-empty">
+        <div v-if="!loading && section.endpoints.length === 0 && !section.canManage" class="channels-empty">
           <t-empty :description="$t('integrations.mcpserver.empty')" />
         </div>
 
         <div v-else-if="!loading" class="channel-grid">
           <button
-            v-for="ep in endpoints"
+            v-for="ep in section.endpoints"
             :key="ep.id"
             type="button"
             class="channel-card channel-card--clickable"
@@ -33,7 +55,7 @@
                 {{ $t('integrations.mcpserver.cardSummary', { tools: ep.tools.length, scope: scopeLabel(ep) }) }}
               </span>
             </div>
-            <div v-if="isAdmin" class="channel-card__actions" @click.stop>
+            <div v-if="section.canManage" class="channel-card__actions" @click.stop>
               <t-dropdown
                 trigger="click"
                 placement="bottom-right"
@@ -61,7 +83,7 @@
             </div>
           </button>
 
-          <button v-if="isAdmin" type="button" class="channel-card channel-card--add" @click="openCreate">
+          <button v-if="section.canManage" type="button" class="channel-card channel-card--add" @click="openCreate(section.kind)">
             <span class="channel-card__badge" aria-hidden="true">
               <t-icon name="add" />
             </span>
@@ -86,7 +108,7 @@
       width="600px"
       :confirm-loading="saving"
       :confirm-text="drawerConfirmText"
-      :hide-footer="!isAdmin"
+      :hide-footer="!canManageEditing"
       :close-on-overlay-click="!freshToken"
       @confirm="handleDrawerConfirm"
       @cancel="closeDrawer"
@@ -156,19 +178,29 @@
             <div v-for="group in groupedTools" :key="group.group" class="tool-group">
               <div class="tool-group__header">
                 <span class="tool-group__name">{{ $t(`integrations.mcpserver.groups.${group.group}`) }}</span>
-                <t-button size="small" variant="text" @click="toggleGroup(group, !groupAllSelected(group))">
+                <t-button
+                  size="small"
+                  variant="text"
+                  :disabled="group.tools.every(toolLocked)"
+                  @click="toggleGroup(group, !groupAllSelected(group))"
+                >
                   {{ groupAllSelected(group) ? $t('integrations.mcpserver.clearGroup') : $t('integrations.mcpserver.selectGroup') }}
                 </t-button>
               </div>
               <div class="tool-group__items">
                 <div v-for="tool in group.tools" :key="tool.name" class="tool-item" :class="{ 'tool-item--danger': tool.destructive }">
-                  <t-checkbox :model-value="toolSelections[tool.name] === true" @change="(v: boolean) => setToolSelected(tool.name, v)">
+                  <t-checkbox
+                    :model-value="toolSelections[tool.name] === true"
+                    :disabled="toolLocked(tool)"
+                    @change="(v: boolean) => setToolSelected(tool.name, v)"
+                  >
                     <span class="tool-item__label">
                       {{ $t(`integrations.mcpserver.tools.${tool.name}`) }}
                       <code class="tool-item__code">{{ tool.name }}</code>
                     </span>
                   </t-checkbox>
                   <p class="form-desc">{{ $t(`integrations.mcpserver.tools.${tool.name}Desc`) }}</p>
+                  <p v-if="toolLocked(tool)" class="form-desc">{{ $t('integrations.mcpserver.writeToolNeedsRole') }}</p>
                 </div>
               </div>
             </div>
@@ -192,7 +224,7 @@
           </div>
         </section>
 
-        <section class="setting-drawer__section">
+        <section v-if="editingKind === 'space'" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionLimits') }}</h4>
           <div class="form-item">
             <label class="form-label">{{ $t('integrations.mcpserver.rateLimitLabel') }}</label>
@@ -266,13 +298,17 @@ import { useOrganizationStore } from '@/stores/organization'
 import {
   createMcpEndpoint,
   deleteMcpEndpoint,
+  getMcpEndpointSettings,
   getMcpEndpointToolCatalog,
   listMcpEndpoints,
   rotateMcpEndpointToken,
   updateMcpEndpoint,
+  updateMcpEndpointSettings,
   type McpEndpoint,
+  type McpEndpointKind,
   type McpEndpointPayload,
   type McpEndpointToolCatalog,
+  type McpEndpointToolDefinition,
 } from '@/api/mcp-endpoint'
 import {
   buildClaudeCodeCommand,
@@ -289,10 +325,31 @@ const chatResources = useChatResourcesStore()
 const orgStore = useOrganizationStore()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
 
+// Mirrors types.DefaultMCPEndpointRateLimitPerMinute on the server.
+const DEFAULT_RATE_LIMIT_PER_MINUTE = 60
+
 const isAdmin = computed(() => authStore.hasRole('admin'))
+const canWrite = computed(() => authStore.hasRole('contributor'))
 
 const loading = ref(false)
-const endpoints = ref<McpEndpoint[]>([])
+const spaceEndpoints = ref<McpEndpoint[]>([])
+const personalEndpoints = ref<McpEndpoint[]>([])
+const sections = computed(() => [
+  {
+    kind: 'space' as McpEndpointKind,
+    title: t('integrations.mcpserver.listTitle'),
+    endpoints: spaceEndpoints.value,
+    canManage: isAdmin.value,
+  },
+  {
+    kind: 'personal' as McpEndpointKind,
+    title: t('integrations.mcpserver.personalTitle'),
+    endpoints: personalEndpoints.value,
+    canManage: true,
+  },
+])
+const personalRateLimit = ref(DEFAULT_RATE_LIMIT_PER_MINUTE)
+const settingsSaving = ref(false)
 const catalog = ref<McpEndpointToolCatalog>({ groups: [], tools: [], default_tools: [] })
 
 const kbLoading = ref(false)
@@ -307,6 +364,8 @@ const agentOptions = computed(() => agents.value.map((a) => ({ label: a.name, va
 const showDrawer = ref(false)
 const saving = ref(false)
 const editing = ref<McpEndpoint | null>(null)
+const editingKind = ref<McpEndpointKind>('space')
+const canManageEditing = computed(() => editingKind.value === 'personal' || isAdmin.value)
 const wizardStep = ref(0)
 const snippetTab = ref('http')
 // Plaintext token from the create / rotate response; shown once on step 2.
@@ -362,16 +421,24 @@ function scopeLabel(ep: McpEndpoint): string {
   return t('integrations.mcpserver.scopeCount', { count: ep.knowledge_base_ids.length })
 }
 
+// The server rejects write tools on a personal endpoint whose owner is below
+// Contributor; an already-selected one stays enabled so it can be unchecked.
+function toolLocked(tool: McpEndpointToolDefinition) {
+  return editingKind.value === 'personal' && tool.destructive && !canWrite.value && !toolSelections[tool.name]
+}
+
 function setToolSelected(name: string, selected: boolean) {
   toolSelections[name] = selected
 }
 
-function groupAllSelected(group: { tools: { name: string }[] }) {
-  return group.tools.every((tl) => toolSelections[tl.name])
+function groupAllSelected(group: { tools: McpEndpointToolDefinition[] }) {
+  return group.tools.every((tl) => toolLocked(tl) || toolSelections[tl.name])
 }
 
-function toggleGroup(group: { tools: { name: string }[] }, selected: boolean) {
-  for (const tl of group.tools) toolSelections[tl.name] = selected
+function toggleGroup(group: { tools: McpEndpointToolDefinition[] }, selected: boolean) {
+  for (const tl of group.tools) {
+    if (!toolLocked(tl)) toolSelections[tl.name] = selected
+  }
 }
 
 function resetForm(ep: McpEndpoint | null) {
@@ -389,9 +456,16 @@ function resetForm(ep: McpEndpoint | null) {
 async function load() {
   loading.value = true
   try {
-    const [epRes, catRes] = await Promise.all([listMcpEndpoints(), getMcpEndpointToolCatalog()])
-    endpoints.value = epRes?.data ?? []
+    const [spaceRes, personalRes, catRes, settingsRes] = await Promise.all([
+      listMcpEndpoints('space'),
+      listMcpEndpoints('personal'),
+      getMcpEndpointToolCatalog(),
+      getMcpEndpointSettings(),
+    ])
+    spaceEndpoints.value = spaceRes?.data ?? []
+    personalEndpoints.value = personalRes?.data ?? []
     catalog.value = catRes?.data ?? { groups: [], tools: [], default_tools: [] }
+    personalRateLimit.value = settingsRes?.data?.personal_rate_limit_per_minute || DEFAULT_RATE_LIMIT_PER_MINUTE
   } catch (err: any) {
     MessagePlugin.error(err?.message || t('integrations.mcpserver.loadFailed'))
   } finally {
@@ -428,7 +502,21 @@ async function loadOptions() {
   }
 }
 
-function openCreate() {
+async function saveSettings() {
+  settingsSaving.value = true
+  try {
+    const res = await updateMcpEndpointSettings({ personal_rate_limit_per_minute: personalRateLimit.value })
+    personalRateLimit.value = res?.data?.personal_rate_limit_per_minute || personalRateLimit.value
+    MessagePlugin.success(t('integrations.mcpserver.settingsSaved'))
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('integrations.mcpserver.saveFailed'))
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
+function openCreate(kind: McpEndpointKind) {
+  editingKind.value = kind
   editing.value = null
   freshToken.value = ''
   wizardStep.value = 0
@@ -438,6 +526,7 @@ function openCreate() {
 }
 
 function openEdit(ep: McpEndpoint, step: 0 | 1 = 0, token = '') {
+  editingKind.value = ep.kind || 'space'
   editing.value = ep
   freshToken.value = token
   wizardStep.value = step
@@ -467,15 +556,16 @@ function handleDrawerConfirm() {
 }
 
 function buildPayload(): McpEndpointPayload {
-  return {
+  const payload: McpEndpointPayload = {
     name: form.name.trim(),
     description: form.description.trim(),
     enabled: form.enabled,
     knowledge_base_ids: [...form.knowledge_base_ids],
     tools: [...selectedToolNames.value],
     default_agent_id: askSelected.value ? form.default_agent_id : '',
-    rate_limit_per_minute: form.rate_limit_per_minute,
   }
+  if (editingKind.value === 'space') payload.rate_limit_per_minute = form.rate_limit_per_minute
+  return payload
 }
 
 async function saveForm() {
@@ -491,12 +581,12 @@ async function saveForm() {
   try {
     const payload = buildPayload()
     if (editing.value) {
-      await updateMcpEndpoint(editing.value.id, payload)
+      await updateMcpEndpoint(editing.value.id, payload, editingKind.value)
       MessagePlugin.success(t('integrations.mcpserver.updated'))
       showDrawer.value = false
       await load()
     } else {
-      const res = await createMcpEndpoint(payload)
+      const res = await createMcpEndpoint(payload, editingKind.value)
       MessagePlugin.success(t('integrations.mcpserver.created'))
       await load()
       // Stay in the drawer and move to the connection step so the one-time
@@ -512,7 +602,7 @@ async function saveForm() {
 
 async function removeEndpoint(ep: McpEndpoint) {
   try {
-    await deleteMcpEndpoint(ep.id)
+    await deleteMcpEndpoint(ep.id, ep.kind)
     MessagePlugin.success(t('integrations.mcpserver.deleted'))
     await load()
   } catch (err: any) {
@@ -522,7 +612,7 @@ async function removeEndpoint(ep: McpEndpoint) {
 
 async function rotateToken(ep: McpEndpoint) {
   try {
-    const res = await rotateMcpEndpointToken(ep.id)
+    const res = await rotateMcpEndpointToken(ep.id, ep.kind)
     MessagePlugin.success(t('integrations.mcpserver.rotated'))
     await load()
     if (res?.data) openEdit(res.data, 1, res.data.token || '')
@@ -533,7 +623,7 @@ async function rotateToken(ep: McpEndpoint) {
 
 async function toggleEnabled(ep: McpEndpoint) {
   try {
-    await updateMcpEndpoint(ep.id, { enabled: !ep.enabled })
+    await updateMcpEndpoint(ep.id, { enabled: !ep.enabled }, ep.kind)
     MessagePlugin.success(ep.enabled ? t('integrations.mcpserver.disabledToast') : t('integrations.mcpserver.enabledToast'))
     await load()
   } catch (err: any) {
@@ -576,6 +666,50 @@ onMounted(() => {
 .mcp-server-panel {
   display: flex;
   flex-direction: column;
+  gap: 24px;
+}
+
+.settings-band {
+  border-top: 1px solid var(--td-component-stroke);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1fr);
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+@media (max-width: 780px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.row-info {
+  label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-lg);
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-md);
+    line-height: 1.5;
+  }
+}
+
+.row-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
 }
 
 .form-item {

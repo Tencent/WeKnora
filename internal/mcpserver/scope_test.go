@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -279,5 +280,40 @@ func TestAskToolHasNoAgentParameter(t *testing.T) {
 	add := addDocumentTool()
 	if add.Annotations.DestructiveHint == nil || !*add.Annotations.DestructiveHint {
 		t.Fatal("add_document must advertise a mutation")
+	}
+}
+
+func TestPersonalEndpointWritesFollowKBOwnership(t *testing.T) {
+	s := &Server{cfg: &config.Config{Tenant: &config.TenantConfig{}}}
+	personal := &types.MCPEndpoint{ID: "ep", TenantID: 1, Kind: types.MCPEndpointKindPersonal, UserID: "u1"}
+	space := &types.MCPEndpoint{ID: "ep", TenantID: 1, Kind: types.MCPEndpointKindSpace}
+	ownKB := &types.KnowledgeBase{ID: "kb-own", TenantID: 1, CreatorID: "u1"}
+	otherKB := &types.KnowledgeBase{ID: "kb-other", TenantID: 1, CreatorID: "u2"}
+	sharedKB := &types.KnowledgeBase{ID: "kb-shared", TenantID: 2, CreatorID: "u3"}
+
+	cases := []struct {
+		name    string
+		ep      *types.MCPEndpoint
+		role    types.TenantRole
+		kb      *types.KnowledgeBase
+		allowed bool
+	}{
+		{"contributor writes own kb", personal, types.TenantRoleContributor, ownKB, true},
+		{"contributor writes others kb", personal, types.TenantRoleContributor, otherKB, false},
+		{"viewer writes own kb", personal, types.TenantRoleViewer, ownKB, false},
+		{"admin writes others kb", personal, types.TenantRoleAdmin, otherKB, true},
+		{"shared kb left to share permission", personal, types.TenantRoleContributor, sharedKB, true},
+		{"space endpoint unchanged", space, types.TenantRoleViewer, otherKB, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), types.MCPEndpointContextKey, tc.ep)
+			ctx = types.WithTenantAPIKeyScope(ctx, types.MCPEndpointScope(tc.ep))
+			ctx = types.WithCaller(ctx, types.Caller{TenantID: 1, UserID: tc.ep.UserID, Role: tc.role})
+			err := s.requireOwnerKBWrite(ctx, tc.kb)
+			if tc.allowed != (err == nil) {
+				t.Fatalf("allowed=%v, err=%v", tc.allowed, err)
+			}
+		})
 	}
 }

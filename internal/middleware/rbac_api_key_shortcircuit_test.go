@@ -116,6 +116,32 @@ func TestEvaluateOwnershipOrRole_ShortCircuitsAPIKey(t *testing.T) {
 	}
 }
 
+// A personal MCP endpoint scope only narrows its owner's request, so the role
+// and ownership guards still judge the owner like a web session.
+func TestMemberScopeDoesNotShortCircuit(t *testing.T) {
+	scope := types.TenantAPIKeyScope{
+		Capabilities: types.StringArray{string(types.APIKeyCapabilityIngest)},
+		ActsAsMember: true,
+	}
+	w := apiKeyRBACHarness(scope, types.TenantRoleViewer, RequireRole(types.TenantRoleAdmin, cfgRBAC(true)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("member scope must not short-circuit RequireRole, got %d", w.Code)
+	}
+
+	ctx := types.WithTenantAPIKeyScope(context.Background(), scope)
+	ctx = types.WithCaller(ctx, types.Caller{TenantID: 1, UserID: "u1", Role: types.TenantRoleContributor})
+	if err := EvaluateOwnershipOrRole(ctx, cfgRBAC(true), types.TenantRoleAdmin, func() (string, error) {
+		return "u2", nil
+	}); err == nil {
+		t.Fatal("member scope must not write a resource another member created")
+	}
+	if err := EvaluateOwnershipOrRole(ctx, cfgRBAC(true), types.TenantRoleAdmin, func() (string, error) {
+		return "u1", nil
+	}); err != nil {
+		t.Fatalf("member scope should write its own resource, got %v", err)
+	}
+}
+
 // Sanity: a JWT Viewer with a foreign creator is still forbidden — the
 // short-circuit must be scoped to API-key principals only.
 func TestEvaluateOwnershipOrRole_JWTViewerStillDenied(t *testing.T) {

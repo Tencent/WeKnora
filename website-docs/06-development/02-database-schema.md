@@ -106,6 +106,7 @@ migrations/
 | 000130 | 会话沙箱分配与用户共享机器 |
 | 000131–000133 | 自动化执行时长、模型覆盖、统一由助手执行 |
 | 000134 | `tenants.default_settings`（JSONB），保存空间默认模型 ID；未设置时保留部署默认回退行为 |
+| 000137 | `mcp_endpoints.kind` / `user_id`（个人 MCP 端点），`mcp_endpoint_settings` 表；down 迁移删除个人端点 |
 
 SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 
@@ -138,6 +139,7 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | 000045–000047 | 自动化、会话认证来源、沙箱分配（对应 000128–000130） |
 | 000048–000050 | 自动化执行时长、模型覆盖、助手执行（对应 000131–000133） |
 | 000051 | `tenants.default_settings`（TEXT，存储 JSON；对应 000134） |
+| 000053 | 个人 MCP 端点（对应 000137） |
 
 PostgreSQL 的 000099、000112、000115、000118、000123 没有 SQLite 对应版本。
 
@@ -196,7 +198,8 @@ v0.8.3 新增的 `model_catalog_configs` 保存部署级管理员覆盖（单行
 | `custom_agents` | 自定义 Agent | **复合主键 (`id`,`tenant_id`)**、`name`、`is_builtin`、`created_by`（FK→users）、`runnable_by_viewer`、`config`（JSONB：模式/模型/工具/知识范围） |
 | `mcp_services` | MCP 服务配置 | `id`、`tenant_id`、`name`、`enabled`、`transport_type`（stdio/sse/…）、`url`/`headers`/`auth_config`/`advanced_config`/`stdio_config`/`env_vars`（JSONB）、`is_builtin`、`usage_instructions`（本地维护的使用说明，000092） |
 | `mcp_metadata` | MCP 工具目录快照（000092） | PK（`tenant_id`,`service_id`,`principal`），静态认证时 `principal` 为空串、OAuth 服务按用户主体分行；`config_fingerprint`、`tools`（JSONB）、`instructions`、`server_name`/`server_version`/`server_description`、`synced_at`；随服务删除级联 |
-| `mcp_endpoints` | 空间对外发布的 MCP 端点（000102） | `tenant_id`、`name`/`description`、`enabled`、`token_hash`（Bearer token 的 SHA-256，未删除行唯一，明文只显示一次）/`token_hint`、`knowledge_base_ids`（JSONB，空数组表示全部知识库）、`tools`（JSONB 白名单）、`default_agent_id`、`rate_limit_per_minute`（默认 60）、`last_used_at` |
+| `mcp_endpoints` | 空间对外发布的 MCP 端点（000102） | `tenant_id`、`name`/`description`、`enabled`、`token_hash`（Bearer token 的 SHA-256，未删除行唯一，明文只显示一次）/`token_hint`、`knowledge_base_ids`（JSONB，空数组表示全部知识库）、`tools`（JSONB 白名单）、`default_agent_id`、`rate_limit_per_minute`（默认 60，个人端点不使用）、`last_used_at`；`kind`（`space` / `personal`）与 `user_id`（个人端点所属成员）（000137） |
+| `mcp_endpoint_settings` | 空间级 MCP 端点设置（000137） | PK `tenant_id`、`personal_rate_limit_per_minute`（默认 60，所有个人端点共用） |
 | `mcp_tool_approvals` | MCP 工具审批策略（000042） | (`tenant_id`,`service_id`,`tool_name`) 唯一、`require_approval`、`enabled`（默认 true） |
 | `mcp_oauth_clients` | MCP OAuth 客户端（000062） | (`tenant_id`,`service_id`) 唯一、`client_id`/`client_secret`/`redirect_uri` |
 | `mcp_oauth_tokens` | MCP OAuth 令牌 | (`tenant_id`,`principal_type`,`principal_id`,`service_id`) 唯一（000064 起按主体，原按 `user_id`）、`access_token`/`refresh_token`、`expires_at`、`refresh_lease_id`/`refresh_lease_until`（000074，防并发刷新） |

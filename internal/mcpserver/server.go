@@ -14,10 +14,12 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
@@ -143,7 +145,8 @@ func endpointFromContext(ctx context.Context) (*types.MCPEndpoint, error) {
 	return ep, nil
 }
 
-// filterTools hides catalog entries the endpoint did not enable.
+// filterTools hides catalog entries the endpoint did not enable, and on a
+// personal endpoint the ones its owner's current role cannot call.
 func (s *Server) filterTools(ctx context.Context, all []mcp.Tool) []mcp.Tool {
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
@@ -151,11 +154,39 @@ func (s *Server) filterTools(ctx context.Context, all []mcp.Tool) []mcp.Tool {
 	}
 	out := make([]mcp.Tool, 0, len(all))
 	for _, t := range all {
-		if ep.HasTool(t.Name) {
+		if ep.HasTool(t.Name) && ownerRoleAllowsTool(ctx, ep, t.Name) {
 			out = append(out, t)
 		}
 	}
 	return out
+}
+
+// ownerRoleAllowsTool bounds a personal endpoint by its owner's role, which
+// MCPEndpointAuth resolves fresh on every request. Space endpoints are bounded
+// by their allowlist alone.
+func ownerRoleAllowsTool(ctx context.Context, ep *types.MCPEndpoint, name string) bool {
+	if !ep.IsPersonal() {
+		return true
+	}
+	def, ok := types.LookupMCPEndpointTool(name)
+	return ok && access.RoleAllowsMCPEndpointTool(types.CallerFromContext(ctx).Role, def)
+}
+
+// allowCall applies the rate limit. Personal endpoints share one workspace
+// bucket sized by the admin setting, so opening more endpoints adds no quota.
+func (s *Server) allowCall(ctx context.Context, ep *types.MCPEndpoint) bool {
+	if !ep.IsPersonal() {
+		return s.limiter.Allow(ctx, ep.ID, ep.RateLimitPerMinute)
+	}
+	limit := types.DefaultMCPEndpointRateLimitPerMinute
+	if s.endpointRepo != nil {
+		if settings, err := s.endpointRepo.GetSettings(ctx, ep.TenantID); err != nil {
+			logger.Warnf(ctx, "[mcp-endpoint] load settings for tenant %d: %v", ep.TenantID, err)
+		} else if settings != nil {
+			limit = settings.PersonalRateLimitPerMinute
+		}
+	}
+	return s.limiter.Allow(ctx, fmt.Sprintf("personal:%d", ep.TenantID), limit)
 }
 
 // guardTool enforces the allowlist and rate limit on every tools/call, so a
@@ -169,7 +200,14 @@ func (s *Server) guardTool(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 		if !ep.HasTool(req.Params.Name) {
 			return mcp.NewToolResultErrorf("tool %q is not enabled on this endpoint", req.Params.Name), nil
 		}
-		if !s.limiter.Allow(ctx, ep.ID, ep.RateLimitPerMinute) {
+		if !ownerRoleAllowsTool(ctx, ep, req.Params.Name) {
+			return mcp.NewToolResultErrorf("your workspace role does not allow the %q tool", req.Params.Name), nil
+		}
+		if !s.allowCall(ctx, ep) {
+			if ep.IsPersonal() {
+				return mcp.NewToolResultError("rate limit exceeded: personal endpoints in this workspace " +
+					"share one per-minute quota, retry shortly"), nil
+			}
 			return mcp.NewToolResultError("rate limit exceeded for this endpoint, retry shortly"), nil
 		}
 		s.touchLastUsed(ctx, ep.ID)

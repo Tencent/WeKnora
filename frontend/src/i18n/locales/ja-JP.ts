@@ -8723,7 +8723,12 @@ export default {
     mcpserver: {
       title: 'MCP サーバー',
       subtitle: 'このワークスペースを MCP サーバーとして公開し、Claude Desktop、Cursor、Claude Code などの MCP クライアントから直接接続できます。エンドポイントごとにトークン、ナレッジベース範囲、ツール一覧を設定します。',
-      listTitle: '公開中のエンドポイント',
+      listTitle: 'スペースエンドポイント',
+      personalTitle: '個人エンドポイント',
+      personalRateLimitLabel: '個人エンドポイントの 1 分あたり合計呼び出し回数',
+      personalRateLimitHint: 'スペース内の全メンバーの個人エンドポイントでこの上限を共有します。',
+      writeToolNeedsRole: 'あなたのロールでは書き込みツールを使用できません',
+      settingsSaved: '設定を保存しました',
       empty: 'MCP エンドポイントはまだありません',
       disabled: '停止中',
       cardSummary: '{tools} 個のツール · {scope}',

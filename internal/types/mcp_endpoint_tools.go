@@ -158,6 +158,7 @@ func MCPEndpointScope(ep *MCPEndpoint) TenantAPIKeyScope {
 		FullAccess:       false,
 		KnowledgeBaseIDs: kbIDs,
 		Capabilities:     StringArray(MCPEndpointCapabilitiesForTools(ep.Tools)),
+		ActsAsMember:     ep.IsPersonal(),
 	}
 }
 

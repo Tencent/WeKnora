@@ -2,9 +2,13 @@ import { get, post, put, del } from '@/utils/request'
 
 export type McpEndpointToolGroup = 'retrieve' | 'chat' | 'wiki' | 'ingest'
 
+/** Space endpoints are admin-published; personal endpoints act as their owner. */
+export type McpEndpointKind = 'space' | 'personal'
+
 export interface McpEndpoint {
   id: string
   tenant_id: number
+  kind: McpEndpointKind
   name: string
   description: string
   enabled: boolean
@@ -49,26 +53,42 @@ interface Envelope<T> {
   data: T
 }
 
-export function listMcpEndpoints() {
-  return get<Envelope<McpEndpoint[]>>('/api/v1/mcp-endpoints')
+export interface McpEndpointSettings {
+  personal_rate_limit_per_minute: number
+}
+
+function basePath(kind: McpEndpointKind) {
+  return kind === 'personal' ? '/api/v1/mcp-personal-endpoints' : '/api/v1/mcp-endpoints'
+}
+
+export function listMcpEndpoints(kind: McpEndpointKind = 'space') {
+  return get<Envelope<McpEndpoint[]>>(basePath(kind))
 }
 
 export function getMcpEndpointToolCatalog() {
   return get<Envelope<McpEndpointToolCatalog>>('/api/v1/mcp-endpoints/tools')
 }
 
-export function createMcpEndpoint(data: McpEndpointPayload) {
-  return post<Envelope<McpEndpoint>>('/api/v1/mcp-endpoints', data)
+export function createMcpEndpoint(data: McpEndpointPayload, kind: McpEndpointKind = 'space') {
+  return post<Envelope<McpEndpoint>>(basePath(kind), data)
 }
 
-export function updateMcpEndpoint(id: string, data: McpEndpointPayload) {
-  return put<Envelope<McpEndpoint>>(`/api/v1/mcp-endpoints/${id}`, data)
+export function updateMcpEndpoint(id: string, data: McpEndpointPayload, kind: McpEndpointKind = 'space') {
+  return put<Envelope<McpEndpoint>>(`${basePath(kind)}/${id}`, data)
 }
 
-export function deleteMcpEndpoint(id: string) {
-  return del(`/api/v1/mcp-endpoints/${id}`)
+export function deleteMcpEndpoint(id: string, kind: McpEndpointKind = 'space') {
+  return del(`${basePath(kind)}/${id}`)
 }
 
-export function rotateMcpEndpointToken(id: string) {
-  return post<Envelope<McpEndpoint>>(`/api/v1/mcp-endpoints/${id}/rotate-token`, {})
+export function rotateMcpEndpointToken(id: string, kind: McpEndpointKind = 'space') {
+  return post<Envelope<McpEndpoint>>(`${basePath(kind)}/${id}/rotate-token`, {})
+}
+
+export function getMcpEndpointSettings() {
+  return get<Envelope<McpEndpointSettings>>('/api/v1/mcp-endpoints/settings')
+}
+
+export function updateMcpEndpointSettings(data: McpEndpointSettings) {
+  return put<Envelope<McpEndpointSettings>>('/api/v1/mcp-endpoints/settings', data)
 }

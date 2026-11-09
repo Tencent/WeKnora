@@ -8723,7 +8723,12 @@ export default {
     mcpserver: {
       title: 'MCP Server',
       subtitle: 'Publish this workspace as an MCP server that Claude Desktop, Cursor, Claude Code and other MCP clients connect to directly. Each endpoint has its own token, knowledge-base scope and tool list.',
-      listTitle: 'Published endpoints',
+      listTitle: 'Space endpoints',
+      personalTitle: 'Personal endpoints',
+      personalRateLimitLabel: 'Personal endpoint calls per minute',
+      personalRateLimitHint: 'Shared by the personal endpoints of every member in this space.',
+      writeToolNeedsRole: 'Your role cannot use write tools',
+      settingsSaved: 'Settings saved',
       empty: 'No MCP endpoints yet',
       disabled: 'Disabled',
       cardSummary: '{tools} tools · {scope}',

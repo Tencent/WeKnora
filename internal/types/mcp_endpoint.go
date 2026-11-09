@@ -15,12 +15,16 @@ import (
 // single WeKnora deployment can serve several narrowly scoped MCP servers
 // without running a separate process per workspace.
 //
-// The endpoint is the unit of trust: everything a connected client may do is
-// derived from this row (see MCPEndpointScope), and the token authenticates
-// the endpoint rather than a person.
+// A space endpoint is the unit of trust: everything a connected client may do
+// is derived from this row (see MCPEndpointScope), and the token authenticates
+// the endpoint rather than a person. A personal endpoint additionally acts as
+// its owning member, so calls are bounded by that member's current role too.
 type MCPEndpoint struct {
-	ID          string `json:"id"          gorm:"type:varchar(36);primaryKey"`
-	TenantID    uint64 `json:"tenant_id"   gorm:"not null;index:idx_mcp_endpoints_tenant"`
+	ID       string          `json:"id"          gorm:"type:varchar(36);primaryKey"`
+	TenantID uint64          `json:"tenant_id"   gorm:"not null;index:idx_mcp_endpoints_tenant"`
+	Kind     MCPEndpointKind `json:"kind"        gorm:"type:varchar(16);not null;default:'space'"`
+	// UserID owns a personal endpoint; empty for space endpoints.
+	UserID      string `json:"user_id"     gorm:"type:varchar(36);not null;default:''"`
 	Name        string `json:"name"        gorm:"type:varchar(255);not null;default:''"`
 	Description string `json:"description" gorm:"type:text;not null;default:''"`
 	Enabled     bool   `json:"enabled"     gorm:"not null;default:true"`
@@ -51,6 +55,61 @@ type MCPEndpoint struct {
 // TableName returns the storage table.
 func (MCPEndpoint) TableName() string { return "mcp_endpoints" }
 
+// MCPEndpointKind separates admin-published space endpoints from endpoints a
+// member creates for their own use.
+type MCPEndpointKind string
+
+// Endpoint kinds stored in mcp_endpoints.kind.
+const (
+	MCPEndpointKindSpace    MCPEndpointKind = "space"
+	MCPEndpointKindPersonal MCPEndpointKind = "personal"
+)
+
+// MCPEndpointOwner selects the endpoints a management call may see: the
+// workspace's space endpoints, or one member's personal endpoints.
+type MCPEndpointOwner struct {
+	TenantID uint64
+	Kind     MCPEndpointKind
+	UserID   string
+}
+
+// SpaceMCPEndpointOwner addresses the workspace's space endpoints.
+func SpaceMCPEndpointOwner(tenantID uint64) MCPEndpointOwner {
+	return MCPEndpointOwner{TenantID: tenantID, Kind: MCPEndpointKindSpace}
+}
+
+// PersonalMCPEndpointOwner addresses userID's personal endpoints.
+func PersonalMCPEndpointOwner(tenantID uint64, userID string) MCPEndpointOwner {
+	return MCPEndpointOwner{TenantID: tenantID, Kind: MCPEndpointKindPersonal, UserID: userID}
+}
+
+// Owns reports whether ep belongs to this owner.
+func (o MCPEndpointOwner) Owns(ep *MCPEndpoint) bool {
+	if ep == nil || ep.TenantID != o.TenantID || ep.Kind != o.Kind {
+		return false
+	}
+	return o.Kind != MCPEndpointKindPersonal || (o.UserID != "" && ep.UserID == o.UserID)
+}
+
+// IsPersonal reports whether the endpoint acts as its owning member.
+func (e *MCPEndpoint) IsPersonal() bool {
+	return e != nil && e.Kind == MCPEndpointKindPersonal
+}
+
+// MCPEndpointSettings holds workspace-wide MCP endpoint settings that only an
+// admin may change.
+type MCPEndpointSettings struct {
+	TenantID uint64 `json:"tenant_id" gorm:"primaryKey;autoIncrement:false"`
+	// PersonalRateLimitPerMinute bounds tool calls per minute across every
+	// personal endpoint in the workspace combined.
+	PersonalRateLimitPerMinute int       `json:"personal_rate_limit_per_minute" gorm:"not null;default:60"`
+	CreatedAt                  time.Time `json:"created_at"`
+	UpdatedAt                  time.Time `json:"updated_at"`
+}
+
+// TableName returns the storage table.
+func (MCPEndpointSettings) TableName() string { return "mcp_endpoint_settings" }
+
 // DefaultMCPEndpointRateLimitPerMinute bounds tool calls per endpoint per
 // minute when the row does not say otherwise.
 const DefaultMCPEndpointRateLimitPerMinute = 60
@@ -63,6 +122,9 @@ const MCPEndpointTokenPrefix = "mcp_"
 func (e *MCPEndpoint) BeforeCreate(_ *gorm.DB) error {
 	if e.ID == "" {
 		e.ID = uuid.New().String()
+	}
+	if e.Kind == "" {
+		e.Kind = MCPEndpointKindSpace
 	}
 	if e.RateLimitPerMinute <= 0 {
 		e.RateLimitPerMinute = DefaultMCPEndpointRateLimitPerMinute
