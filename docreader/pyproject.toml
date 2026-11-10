@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10.18"
 dependencies = [
     "beautifulsoup4>=4.14.2",
+    "charset-normalizer>=3.4.0",
     "ebooklib>=0.18",
     "grpcio>=1.78.0",
     "grpcio-health-checking>=1.78.0",
