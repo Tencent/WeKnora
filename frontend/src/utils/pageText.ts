@@ -34,7 +34,8 @@ function findOnce(value: string, needle: string, what: string): number {
     throw new PageFillError(`${what} "${preview(needle)}" was not found; read the field again, the text may differ in spacing or have changed`)
   }
   let count = 1
-  for (let at = value.indexOf(needle, first + needle.length); at >= 0; at = value.indexOf(needle, at + needle.length)) {
+  // Overlapping occurrences are ambiguous too; advance by one, not the match length.
+  for (let at = value.indexOf(needle, first + 1); at >= 0; at = value.indexOf(needle, at + 1)) {
     count++
   }
   if (count > 1) {
