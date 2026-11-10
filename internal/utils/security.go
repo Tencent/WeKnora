@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -523,6 +524,18 @@ var AllowedStdioCommands = map[string]bool{
 	"npx": true, // Node.js package runner
 }
 
+// allowedStdioCommandsString returns the sorted, comma-separated list of
+// allowed stdio commands, derived from AllowedStdioCommands so the error
+// message can never drift from the actual whitelist.
+func allowedStdioCommandsString() string {
+	names := make([]string, 0, len(AllowedStdioCommands))
+	for name := range AllowedStdioCommands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // DangerousArgPatterns contains patterns that indicate potentially dangerous arguments
 var DangerousArgPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^-c$`),                                   // Shell command execution flag
@@ -574,7 +587,7 @@ func ValidateStdioCommand(command string) error {
 
 	// Check against whitelist
 	if !AllowedStdioCommands[baseCommand] {
-		return fmt.Errorf("command '%s' is not in the allowed list. Allowed commands: uvx, npx, node, python, python3, deno, bun", baseCommand)
+		return fmt.Errorf("command '%s' is not in the allowed list. Allowed commands: %s", baseCommand, allowedStdioCommandsString())
 	}
 
 	// Additional check: command should not contain path traversal
