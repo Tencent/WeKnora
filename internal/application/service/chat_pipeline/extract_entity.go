@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -51,8 +50,8 @@ func (p *PluginExtractEntity) ActivationEvents() []types.EventType {
 func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
-		logger.Debugf(ctx, "skipping extract entity, neo4j is disabled")
+	if !types.GraphStoreEnabled() {
+		logger.Debugf(ctx, "skipping extract entity, graph store is disabled")
 		return next()
 	}
 	// QUERY_UNDERSTAND has already classified the turn. Entities only feed the
