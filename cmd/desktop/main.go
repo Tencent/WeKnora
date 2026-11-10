@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -428,6 +429,15 @@ func main() {
 }
 
 func configureDesktopStorage(execPath string) {
+	switch runtime.GOOS {
+	case "darwin":
+		configureDarwinDesktopStorage(execPath)
+	case "windows":
+		configureWindowsDesktopStorage(execPath)
+	}
+}
+
+func configureDarwinDesktopStorage(execPath string) {
 	if execPath == "" || !strings.Contains(execPath, ".app/Contents/MacOS") {
 		return
 	}
@@ -449,6 +459,49 @@ func configureDesktopStorage(execPath string) {
 	}
 
 	_ = os.Setenv("DB_PATH", dbPath)
+}
+
+// configureWindowsDesktopStorage redirects the relative data paths of a
+// packaged Windows install (installer or portable layout: config/ next to the
+// exe, no go.mod above it) to the per-user application data directory, e.g.
+// %APPDATA%\WeKnora Lite. An installed location under Program Files is not
+// writable, and the directory a shortcut launches from must not decide where
+// the database lives. wails dev trees keep the repo-relative ./data.
+func configureWindowsDesktopStorage(execPath string) {
+	configRoot, hasConfigRoot := desktopConfigRoot(execPath)
+	if !hasConfigRoot || hasGoMod(configRoot) {
+		return
+	}
+
+	appDataDir, err := windowsDesktopAppDataDir()
+	if err != nil {
+		logger.Warnf(context.Background(), "Failed to resolve desktop data dir: %v", err)
+		return
+	}
+
+	targetDataDir := filepath.Join(appDataDir, "data")
+	migrateLegacyDesktopData(filepath.Join(configRoot, "data"), targetDataDir)
+
+	dbPath := resolveDesktopDataPath(os.Getenv("DB_PATH"), filepath.Join("data", "weknora.db"), appDataDir)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		logger.Warnf(context.Background(), "Failed to create desktop DB directory %s: %v", filepath.Dir(dbPath), err)
+	}
+
+	logger.Infof(context.Background(), "Desktop data directory: %s", appDataDir)
+	_ = os.Setenv("DB_PATH", dbPath)
+}
+
+func hasGoMod(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "go.mod"))
+	return err == nil
+}
+
+func windowsDesktopAppDataDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "WeKnora Lite"), nil
 }
 
 // configureDesktopFileStorage points Lite file uploads at ~/.weknora/data/files.

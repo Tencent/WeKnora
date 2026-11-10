@@ -95,7 +95,21 @@ Section
     File "..\..\..\..\..\THIRD_PARTY_NOTICES.md"
     SetOutPath "$INSTDIR\licenses"
     File /r "..\..\..\..\..\licenses\*"
+
+    ; Runtime resources the embedded backend resolves next to the executable:
+    ; the SPA is served from .\web, config/ and migrations/sqlite are read at
+    ; startup, and .env carries the Lite defaults (DB_DRIVER=sqlite etc.).
+    ; .env.lite.example ships with empty secrets - the desktop app generates
+    ; and persists its own signing/JWT keys on first run. A missing web/ or
+    ; config/ fails the installer build on purpose: shipping the exe alone
+    ; would produce a blank window.
     SetOutPath $INSTDIR
+    File /oname=.env "..\..\..\..\..\.env.lite.example"
+    File /r "..\..\..\..\..\config"
+    SetOutPath "$INSTDIR\migrations"
+    File /r "..\..\..\..\..\migrations\sqlite"
+    SetOutPath $INSTDIR
+    File /r "..\..\..\..\..\web"
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"

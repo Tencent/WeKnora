@@ -1,9 +1,9 @@
 name: Release Lite Binaries
 
 on:
-  # push:
-  #   tags:
-  #     - "v*"
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.26"
   NODE_VERSION: "22"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -137,6 +137,7 @@ jobs:
 
   # ── 2b. Build Desktop APP per platform (Wails) ──
   build-desktop-app:
+    needs: build-frontend
     strategy:
       fail-fast: false
       matrix:
@@ -177,6 +178,13 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      # 桌面端不内嵌前端：嵌入式后端从可执行文件旁的 ./web 提供 SPA，
+      # 缺失时窗口空白。三个平台的打包步骤都会把 web/ 带进产物。
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: web/
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -264,6 +272,8 @@ jobs:
           if [ -d config ]; then
             cp -r config/* "${RESOURCES}/config/"
           fi
+          test -f web/index.html || { echo "::error::web/ frontend build is missing; the app window would be blank"; exit 1; }
+          cp -r web "${RESOURCES}/web"
 
           DMG_NAME="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
 
@@ -298,10 +308,13 @@ jobs:
             mkdir -p "${ARCHIVE}/migrations/sqlite"
             cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
           fi
+          test -f web/index.html || { echo "::error::web/ frontend build is missing; the app window would be blank"; exit 1; }
+          cp -r web "${ARCHIVE}/web"
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
-      # ── Windows: NSIS installer includes licenses and corresponding source ──
+      # ── Windows: NSIS installer bundles web/config/migrations/.env via
+      #    cmd/desktop/build/windows/installer/project.nsi ──
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
@@ -450,3 +463,33 @@ jobs:
             git commit -m "formula: update weknora-lite to ${{ steps.ver.outputs.version }}"
             git push origin main
           fi
+
+  # ── 5. (Planned) 银河麒麟 V10 SP1 aarch64 桌面 deb ──
+  # 只能在 GitHub 构建，且必须用与麒麟 V10 SP1 同源的基线（Ubuntu 20.04 focal，
+  # glibc 2.31）：ubuntu-latest (glibc 2.39) 构建的产物在 glibc 2.31 的麒麟上
+  # 启动即报 GLIBC not found；AppImage 不内置 glibc，同样救不了基线问题。
+  # 落地要点（后续扩展时取消注释并补全）：
+  #   runs-on: ubuntu-24.04-arm + container: ubuntu:20.04（多架构镜像，arm 变体
+  #   与 V10 SP1 的 glibc 2.31 / 包名一致）；容器内 apt 必须配
+  #   Acquire::http(s)::Timeout=30、timeout 包裹、DEBIAN_FRONTEND=noninteractive、
+  #   azure.archive.ubuntu.com 镜像与 Check-Valid-Until=false（focal 已过期）。
+  #   Go 与 wails 在容器内安装；CGO_ENABLED=1 构建 wails 桌面端需要
+  #   libgtk-3-dev libwebkit2gtk-4.0-dev（focal 无 4.1，构建标签用默认 webkit2，
+  #   勿加 webkit2_41）。
+  #   deb 常规包 Depends 只声明真正的 ELF 依赖；离线包依赖闭包按 ldd 反查 +
+  #   递归展开，只装目标机缺失的包，绝不升级系统组件，黑名单
+  #   glibc(systemd*|dbus*|libpam*|udev|login|passwd) 永不进闭包；
+  #   构建后 dpkg-deb -c 断言载荷；真实容器里 dpkg -i + ldd 门禁 + 装包前后
+  #   dpkg -l 快照零升级断言。
+  #   桌面入口：/usr/bin/weknora-lite 包装脚本追加 --password-store=basic
+  #   （麒麟/UOS 常无运行中的 gnome-keyring，防止启动弹系统钥匙串解锁框；
+  #   这是 Chromium/Electron 开关，Wails/WebKitGTK 下为无害占位，真机仍需验证
+  #   WebKitGTK 的密钥环行为），.desktop 的 Exec 行经由此包装脚本启动；按需
+  #   同时导出 WEBKIT_DISABLE_COMPOSITING_MODE=1（麒麟部分 GPU 上 WebKitGTK
+  #   空白窗口的已知规避）。
+  # kylin-v10-sp1-aarch64-deb:
+  #   runs-on: ubuntu-24.04-arm
+  #   container: ubuntu:20.04
+  #   steps:
+  #     # checkout → 安装 go/wails/node → 构建 web/ → wails build
+  #     # （linux/arm64，tags "sqlite_fts5"）→ dpkg-deb 打包 → 上传 artifact
