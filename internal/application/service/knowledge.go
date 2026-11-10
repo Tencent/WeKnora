@@ -28,8 +28,11 @@ import (
 
 // Error definitions for knowledge service operations
 var (
-	// ErrInvalidFileType is returned when an unsupported file type is provided
-	ErrInvalidFileType = errors.New("unsupported file type")
+	// ErrInvalidFileType is returned when an unsupported file type is provided.
+	// It is a client error and the upload handlers forward it to the HTTP layer
+	// unchanged, so it has to be an AppError: a plain error would fall into the
+	// handler's catch-all branch and be reported as HTTP 500.
+	ErrInvalidFileType = werrors.NewBadRequestError("unsupported file type")
 	// ErrInvalidURL is returned when an invalid URL is provided
 	ErrInvalidURL = errors.New("invalid URL")
 	// ErrChunkNotFound is returned when a requested chunk cannot be found.
