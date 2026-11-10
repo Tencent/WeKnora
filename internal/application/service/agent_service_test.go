@@ -758,6 +758,42 @@ func (s *countingAgentKnowledgeBaseService) GetKnowledgeBaseByIDOnly(
 	return s.GetKnowledgeBaseByID(ctx, id)
 }
 
+func TestAgentEngineKBLookupsKeepPerItemFallbackWhenBatchFails(t *testing.T) {
+	const tenantID = uint64(7)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+	kb := &types.KnowledgeBase{ID: "kb-1", Name: "One", TenantID: tenantID}
+	kb.IndexingStrategy.VectorEnabled = true
+	kbService := &failingBatchAgentKBService{countingAgentKnowledgeBaseService{
+		fakeAgentKnowledgeBaseService: &fakeAgentKnowledgeBaseService{},
+		kbs:                           map[string]*types.KnowledgeBase{"kb-1": kb},
+	}}
+	service := &agentService{
+		knowledgeBaseService: kbService,
+		knowledgeService:     &fakeAgentKnowledgeService{},
+	}
+	config := &types.AgentConfig{
+		KnowledgeBases: []string{"kb-1", "missing"},
+		SearchTargets: types.SearchTargets{
+			{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: tenantID},
+			{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "missing", TenantID: tenantID},
+		},
+		AllowedTools: []string{tools.ToolSearchKnowledge},
+	}
+
+	snapshot := loadAgentKnowledgeBaseSnapshot(ctx, kbService, []string{"kb-1", "missing"})
+	registry := tools.NewToolRegistry()
+	require.NoError(t, service.registerTools(ctx, registry, config, nil, nil, "s", snapshot))
+	kbInfos, _ := service.resolveKBAndDocInfos(ctx, config, snapshot)
+
+	require.True(t, toolRegistered(registry, tools.ToolSearchKnowledge))
+	require.Len(t, kbInfos, 2)
+	require.Equal(t, "One", kbInfos[0].Name)
+	require.Equal(t, "missing", kbInfos[1].Name,
+		"a missing KB must get the same ID-only placeholder as the old per-item path")
+	require.Equal(t, 1, kbService.batches)
+	require.Equal(t, 1, kbService.singles, "the successful fallback read is reused")
+}
+
 func TestAgentEngineKBLookupsAreBatchedOnceForToolAndPromptMetadata(t *testing.T) {
 	const tenantID = uint64(7)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)

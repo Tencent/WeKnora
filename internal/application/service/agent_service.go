@@ -612,16 +612,8 @@ func (s *agentService) resolveKBAndDocInfos(
 	kbIDs, kbTenantMap := knowledgeBaseScopesForPrompt(config)
 	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs, kbTenantMap, snapshot)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
+		logger.Warnf(ctx, "Failed to get knowledge base details: %v", err)
 		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(kbIDs))
-		for _, kbID := range kbIDs {
-			kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{
-				ID:          kbID,
-				Name:        kbID,
-				Description: "",
-				DocCount:    0,
-			})
-		}
 	}
 
 	selectedDocs, err := s.getSelectedDocumentInfos(ctx, config.KnowledgeIDs)
