@@ -835,8 +835,10 @@ type ExtractConfig struct {
 	// CustomInstructions adds domain guidance. The graph output format stays fixed.
 	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=extract_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 	// MaxGraphChunksPerDocument bounds per-document graph-extraction fan-out.
-	// Zero preserves the historical unbounded behavior.
-	MaxGraphChunksPerDocument int `yaml:"max_graph_chunks_per_document,omitempty" json:"max_graph_chunks_per_document,omitempty" extensions:"x-agent=extract_max_chunks,x-agent-detail"`
+	// Nil or zero preserves the historical unbounded behavior. A pointer keeps
+	// an explicit 0 distinguishable from an omitted override so one upload can
+	// restore "unlimited" over a KB default.
+	MaxGraphChunksPerDocument *int `yaml:"max_graph_chunks_per_document,omitempty" json:"max_graph_chunks_per_document,omitempty" extensions:"x-agent=extract_max_chunks,x-agent-detail"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value

@@ -279,6 +279,8 @@ func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {
 	require.Equal(t, "custom", eff.ChunkingConfig.ParserEngineRules[0].Engine)
 }
 
+func processConfigIntPtr(v int) *int { return &v }
+
 func TestResolveProcessConfig_EnableMultimodelOverride(t *testing.T) {
 	t.Parallel()
 
@@ -300,21 +302,27 @@ func TestResolveProcessConfig_ExtractConfigFieldMerge(t *testing.T) {
 			Enabled:                   true,
 			Text:                      "base text",
 			Tags:                      []string{"base-tag"},
-			MaxGraphChunksPerDocument: 2000,
+			MaxGraphChunksPerDocument: processConfigIntPtr(2000),
 		},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
 		ExtractConfig: &types.ExtractConfig{
 			Enabled:                   true,
 			Tags:                      []string{"override-tag"},
-			MaxGraphChunksPerDocument: 500,
+			MaxGraphChunksPerDocument: processConfigIntPtr(500),
 		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.True(t, eff.ExtractConfig.Enabled)
 	require.Equal(t, "base text", eff.ExtractConfig.Text)
 	require.Equal(t, []string{"override-tag"}, eff.ExtractConfig.Tags)
-	require.Equal(t, 500, eff.ExtractConfig.MaxGraphChunksPerDocument)
+	require.Equal(t, 500, *eff.ExtractConfig.MaxGraphChunksPerDocument)
+
+	explicitUnlimited := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ExtractConfig: &types.ExtractConfig{MaxGraphChunksPerDocument: processConfigIntPtr(0)},
+	})
+	require.NotNil(t, explicitUnlimited.ExtractConfig.MaxGraphChunksPerDocument)
+	require.Equal(t, 0, *explicitUnlimited.ExtractConfig.MaxGraphChunksPerDocument)
 }
 
 func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testing.T) {

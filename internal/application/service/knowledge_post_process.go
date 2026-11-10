@@ -197,7 +197,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 
 	graphChunks := selectGraphChunks(textChunks)
-	graphChunks = boundGraphChunks(graphChunks, eff.ExtractConfig.MaxGraphChunksPerDocument)
+	graphChunkLimit := 0
+	if eff.ExtractConfig.MaxGraphChunksPerDocument != nil {
+		graphChunkLimit = *eff.ExtractConfig.MaxGraphChunksPerDocument
+	}
+	graphChunks = boundGraphChunks(graphChunks, graphChunkLimit)
 
 	// 3. Compute the enrichment subtask count up front so we can flip to
 	//    "finalizing" with the right counter BEFORE spawning any subtasks.
