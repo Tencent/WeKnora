@@ -666,6 +666,9 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // finishes successfully must not keep displaying a failure from a
 // previous attempt.
 //
+// A positive attempt fences the release against newer parse attempts; zero
+// preserves legacy tasks that predate attempt tracking.
+//
 // Returns (newCount, promoted, error). promoted is true iff this caller
 // was the one whose UPDATE flipped 'finalizing'→'completed'.
 //
@@ -677,10 +680,27 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // Both run in one transaction: a promote that failed after its decrement
 // committed left the counter at zero with nobody left to promote the row.
 func (r *knowledgeRepository) FinalizeSubtask(
-	ctx context.Context, id string,
+	ctx context.Context, id string, attempt int,
 ) (int, bool, error) {
 	var promoted bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Take the same write lock as SetFinalizing before reading the latest
+		// attempt. A separate tracker check would race a newer counter seed.
+		// The no-op UPDATE also acquires SQLite's writer lock before any read.
+		if attempt > 0 {
+			if err := tx.Model(&types.Knowledge{}).Where("id = ?", id).
+				UpdateColumn("pending_subtasks_count", gorm.Expr("pending_subtasks_count")).Error; err != nil {
+				return err
+			}
+			var latest int
+			if err := tx.Model(&types.KnowledgeProcessingSpan{}).Where("knowledge_id = ?", id).
+				Select("COALESCE(MAX(attempt), 0)").Scan(&latest).Error; err != nil {
+				return err
+			}
+			if latest > attempt {
+				return nil
+			}
+		}
 		var err error
 		promoted, err = finalizeSubtask(tx, id)
 		return err
