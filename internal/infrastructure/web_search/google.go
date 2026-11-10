@@ -3,6 +3,7 @@ package web_search
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/api/customsearch/v1"
@@ -21,13 +22,16 @@ type GoogleProvider struct {
 }
 
 // NewGoogleProvider creates a new Google provider from parameters (no environment variables).
-// The API endpoint is the official Google Custom Search endpoint — not tenant-configurable.
 func NewGoogleProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Google provider")
 	}
 	if params.EngineID == "" {
 		return nil, fmt.Errorf("engine ID is required for Google provider")
+	}
+	base := strings.TrimSpace(params.BaseURL)
+	if err := ValidateOptionalSearchBaseURL(base); err != nil {
+		return nil, err
 	}
 
 	httpClient, err := NewSearchHTTPClient(30*time.Second, params.ProxyURL)
@@ -37,6 +41,9 @@ func NewGoogleProvider(params types.WebSearchProviderParameters) (interfaces.Web
 	clientOpts := []option.ClientOption{
 		option.WithAPIKey(params.APIKey),
 		option.WithHTTPClient(httpClient),
+	}
+	if base != "" {
+		clientOpts = append(clientOpts, option.WithEndpoint(strings.TrimRight(base, "/")+"/"))
 	}
 	srv, err := customsearch.NewService(context.Background(), clientOpts...)
 	if err != nil {

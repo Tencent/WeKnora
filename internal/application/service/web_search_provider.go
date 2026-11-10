@@ -158,12 +158,18 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 		if params.APIKey == "" {
 			return fmt.Errorf("API key is required for Bing provider")
 		}
+		if err := infra_web_search.ValidateOptionalSearchBaseURL(params.BaseURL); err != nil {
+			return err
+		}
 	case types.WebSearchProviderTypeGoogle:
 		if params.APIKey == "" {
 			return fmt.Errorf("API key is required for Google provider")
 		}
 		if params.EngineID == "" {
 			return fmt.Errorf("engine ID is required for Google provider")
+		}
+		if err := infra_web_search.ValidateOptionalSearchBaseURL(params.BaseURL); err != nil {
+			return err
 		}
 	case types.WebSearchProviderTypeTavily:
 		if params.APIKey == "" {

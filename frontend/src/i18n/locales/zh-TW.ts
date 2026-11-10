@@ -7356,6 +7356,7 @@ export default {
     apiKeyOptionalLabel: 'API 金鑰（可選）',
     baseUrlLabel: '實例地址',
     baseUrlPlaceholder: 'https://searxng.example.com',
+    customSearchEndpointHint: '選填。Bing 請填完整搜尋端點；Google 請填 API 基礎網址，系統會附加 customsearch/v1。',
     apiKeyPlaceholder: '請輸入 API 金鑰',
     clients: {
       label: '搜尋與網頁讀取',
