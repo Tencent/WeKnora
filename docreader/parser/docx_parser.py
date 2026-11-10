@@ -366,45 +366,21 @@ class DocxParser(BaseParser):
             )
             text_parts = []
 
-            # Extract paragraph text
-            para_count = len(doc.paragraphs)
-            logger.info(f"Extracting text from {para_count} paragraphs")
-            para_with_text = 0
-            for i, para in enumerate(doc.paragraphs):
-                if i % 100 == 0:
-                    logger.info(f"Processing paragraph {i + 1}/{para_count}")
-                if para.text.strip():
-                    text_parts.append(para.text.strip())
-                    para_with_text += 1
-
-            logger.info(f"Extracted text from {para_with_text}/{para_count} paragraphs")
-
-            # Extract table text
-            table_count = len(doc.tables)
-            logger.info(f"Extracting text from {table_count} tables")
-            tables_with_content = 0
-            rows_processed = 0
-            for i, table in enumerate(doc.tables):
-                if i % 10 == 0:
-                    logger.info(f"Processing table {i + 1}/{table_count}")
-
-                table_has_content = False
-                for row in table.rows:
-                    rows_processed += 1
-                    row_text = " | ".join(
-                        [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                    )
-                    if row_text:
-                        text_parts.append(row_text)
-                        table_has_content = True
-
-                if table_has_content:
-                    tables_with_content += 1
-
-            logger.info(
-                f"Extracted content from {tables_with_content}/{table_count} tables, "
-                f"processed {rows_processed} rows"
-            )
+            # Walk the body once: separate paragraph/table collections reorder
+            # interleaved content and omit blocks inside content controls.
+            for element, _ in _block_children(doc.element.body):
+                if element.tag == _W_P:
+                    text = _paragraph_text(element).strip()
+                else:
+                    table = Table(element, doc._body)
+                    if not any(
+                        _cell_text(cell).strip()
+                        for row in table.rows for cell in row.cells
+                    ):
+                        continue
+                    text = table_to_gfm_markdown(table).strip()
+                if text:
+                    text_parts.append(text)
 
             # Combine text
             result_text = "\n\n".join(text_parts)
