@@ -45,7 +45,17 @@ export function useChatScrollFollow(
       rememberPosition()
     })
   }
-  const resume = () => { reading.value = false; scrollToBottom() }
+  const resume = () => {
+    gesture = false
+    reading.value = false
+    scrollToBottom()
+  }
+  watch(reading, (isReading) => {
+    if (!isReading) {
+      gesture = false
+      rememberPosition()
+    }
+  }, { flush: 'sync' })
   const intent = (up: boolean) => {
     if (!active.value) return
     gesture = true

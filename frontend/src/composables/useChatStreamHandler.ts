@@ -949,6 +949,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
               thinking: true,
             }
             stream.push(thinkingEvent)
+            thinkingEvent = stream[stream.length - 1] || thinkingEvent
             if (eventId) eventMap.set(eventId, thinkingEvent)
           }
           if (data.content) {
@@ -1212,7 +1213,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
               pending: true,
             }
             stream.push(newToolCallEvent)
-            pending.set(toolCallId, newToolCallEvent)
+            pending.set(toolCallId, stream[stream.length - 1] || newToolCallEvent)
           }
         }
         break
@@ -1373,7 +1374,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             }
             row.content = recomposeAgentAnswer(row)
           }
-          answerEvent = eventMap.get(eventId) || stream.find(e => e.event_id === eventId)
+          answerEvent = stream.find(e => e.event_id === eventId) || eventMap.get(eventId)
           if (answerEvent) {
             Object.assign(answerEvent, { type: 'answer', content: '', done: false, superseded: false })
             eventMap.set(eventId, answerEvent)
@@ -1387,6 +1388,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         if (!answerEvent) {
           answerEvent = { type: 'answer', event_id: eventId, content: '', done: false }
           stream.push(answerEvent)
+          answerEvent = stream[stream.length - 1] || answerEvent
           if (eventId) eventMap.set(eventId, answerEvent)
         }
         if (replaceAnswer) answerEvent.protocol_replaced = true
