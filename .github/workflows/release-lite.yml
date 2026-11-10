@@ -443,12 +443,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.ver.outputs.version }}" \
-            --title "WeKnora Lite ${{ steps.ver.outputs.version }}" \
-            --notes-file notes.md \
-            WeKnora-lite_*.tar.gz \
-            WeKnora-lite_*.tar.gz.sha256 \
-            WeKnora-Lite-App_* || true
+          # 文件清单：排除目录（历史教训：暂存目录混进 glob 会让 gh 报
+          # "is a directory" 并中止上传）
+          FILES=$(find . -maxdepth 1 -type f \
+            \( -name 'WeKnora-lite_*.tar.gz' -o -name 'WeKnora-lite_*.tar.gz.sha256' \
+               -o -name 'WeKnora-Lite-App_*_setup.exe' -o -name 'WeKnora-Lite-App_*_setup.exe.sha256' \
+               -o -name 'WeKnora-Lite-App_*.tar.gz' -o -name 'WeKnora-Lite-App_*.tar.gz.sha256' \
+               -o -name 'weknora-lite_*_arm64.deb' -o -name 'weknora-lite_*_arm64.deb.sha256' \) \
+            | sed 's|^\./||' | sort)
+          echo "assets to publish:"; echo "$FILES"
+          if [ -z "$FILES" ]; then echo "::error::no release assets found"; exit 1; fi
+          if gh release view "${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            # 已有 Release：追加/覆盖资产（重复发布同一 tag 的场景）
+            gh release upload "${{ steps.ver.outputs.version }}" $FILES --clobber
+          else
+            gh release create "${{ steps.ver.outputs.version }}" \
+              --title "WeKnora Lite ${{ steps.ver.outputs.version }}" \
+              --notes-file notes.md \
+              $FILES || true
+          fi
 
   # ── 4. Update Homebrew Formula ──
   update-homebrew:
@@ -642,8 +655,9 @@ jobs:
           CONTROL
 
           # 载荷自检：deb 里必须真的有应用本体
-          dpkg-deb --root-owner-group --build "$ROOT"
+          # 显式指定输出文件：默认生成在输入目录旁（debroot/）会让校验扑空
           DEB="weknora-lite_${DEBVER}_arm64.deb"
+          dpkg-deb --root-owner-group --build "$ROOT" "$DEB"
           dpkg-deb -c "$DEB" | grep -q "opt/weknora-lite/weknora-lite" || {
             echo "::error::deb 载荷缺失应用本体"; exit 1; }
           sha256sum "$DEB" > "$DEB.sha256"
