@@ -33,13 +33,9 @@ function findOnce(value: string, needle: string, what: string): number {
   if (first < 0) {
     throw new PageFillError(`${what} "${preview(needle)}" was not found; read the field again, the text may differ in spacing or have changed`)
   }
-  let count = 1
-  // Overlapping occurrences are ambiguous too; advance by one, not the match length.
-  for (let at = value.indexOf(needle, first + 1); at >= 0; at = value.indexOf(needle, at + 1)) {
-    count++
-  }
-  if (count > 1) {
-    throw new PageFillError(`${what} "${preview(needle)}" occurs ${count} times; include more surrounding text so it occurs once`)
+  // A second match is enough to reject ambiguity, including overlapping matches.
+  if (value.indexOf(needle, first + 1) >= 0) {
+    throw new PageFillError(`${what} "${preview(needle)}" occurs more than once; include more surrounding text so it occurs once`)
   }
   return first
 }
