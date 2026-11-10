@@ -160,8 +160,9 @@ func agentKnowledgeBaseIDsForEngine(config *types.AgentConfig) []string {
 
 // resolve returns the snapshot copy of id. tenantScoped selects the same
 // lookup path the caller used before this cache existed: prompt metadata uses
-// the tenant-scoped reader, while tool capability detection is explicitly
-// cross-tenant because SearchTargets was already authorized upstream.
+// GetKnowledgeBaseByID while tool capability detection uses the explicitly
+// cross-tenant ByIDOnly variant because SearchTargets was already authorized
+// upstream. Both methods serve the same already-authorized KB ID set.
 func (s *agentKnowledgeBaseSnapshot) resolve(
 	ctx context.Context, id string, tenantScoped bool,
 ) (*types.KnowledgeBase, error) {
