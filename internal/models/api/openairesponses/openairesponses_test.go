@@ -228,8 +228,13 @@ func TestBuildRequestBodyImagesAndAuto(t *testing.T) {
 		t.Fatalf("parts = %v", parts)
 	}
 	img := parts[1].(map[string]any)
-	if img["type"] != "input_image" || img["image_url"] != "https://example.com/a.png" || img["detail"] != "auto" {
+	if img["type"] != "input_image" || img["image_url"] != "https://example.com/a.png" {
 		t.Errorf("image part = %v", img)
+	}
+	// Unset caller detail stays unset on the wire (#3451): strict
+	// OpenAI-compatible endpoints reject the hardcoded "auto".
+	if _, ok := img["detail"]; ok {
+		t.Errorf("image part carries detail=%v, want omitted", img["detail"])
 	}
 	reasoning := got["reasoning"].(map[string]any)
 	if _, ok := reasoning["effort"]; ok {
