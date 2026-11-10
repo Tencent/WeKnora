@@ -95,6 +95,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	page.LastEditSource = types.WikiEditSourceFromContext(ctx)
 	page.LastEditorID, _ = types.UserIDFromContext(ctx)
 	stripWikiPageInlineChunkCitations(page)
+	normalizeWikiPageRelativeLinks(page)
 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
@@ -139,6 +140,7 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, repository.ErrWikiPageConflict
 	}
 	stripWikiPageInlineChunkCitations(page)
+	normalizeWikiPageRelativeLinks(page)
 
 	// ── Truncation choke point ────────────────
 	//
@@ -317,7 +319,7 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 
 	oldOutLinks := existing.OutLinks
 
-	existing.Content = stripWikiInlineChunkCitations(page.Content)
+	existing.Content = normalizeWikiRelativeLinks(stripWikiInlineChunkCitations(page.Content))
 	existing.OutLinks = s.parseOutLinks(existing.Content)
 	existing.UpdatedAt = time.Now()
 

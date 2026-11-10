@@ -13,13 +13,15 @@ import (
 // WikiLintIssueType defines the type of lint issue
 type WikiLintIssueType string
 
+// Supported Wiki lint findings.
 const (
-	LintIssueOrphanPage      WikiLintIssueType = "orphan_page"
-	LintIssueBrokenLink      WikiLintIssueType = "broken_link"
-	LintIssueStaleRef        WikiLintIssueType = "stale_ref"
-	LintIssueMissingCrossRef WikiLintIssueType = "missing_cross_ref"
-	LintIssueEmptyContent    WikiLintIssueType = "empty_content"
-	LintIssueDuplicateSlug   WikiLintIssueType = "duplicate_slug"
+	LintIssueOrphanPage           WikiLintIssueType = "orphan_page"
+	LintIssueBrokenLink           WikiLintIssueType = "broken_link"
+	LintIssueStaleRef             WikiLintIssueType = "stale_ref"
+	LintIssueMissingCrossRef      WikiLintIssueType = "missing_cross_ref"
+	LintIssueEmptyContent         WikiLintIssueType = "empty_content"
+	LintIssueDuplicateSlug        WikiLintIssueType = "duplicate_slug"
+	LintIssueRelativeMarkdownLink WikiLintIssueType = "relative_markdown_link"
 )
 
 // WikiLintIssueSeverity defines the severity of a lint issue
@@ -144,6 +146,14 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			break
 		}
 		for _, page := range pages {
+			if normalizeWikiRelativeLinks(page.Content) != page.Content ||
+				normalizeWikiRelativeLinks(page.Summary) != page.Summary {
+				issues = append(issues, WikiLintIssue{
+					Type: LintIssueRelativeMarkdownLink, Severity: SeverityWarning,
+					PageSlug: page.Slug, AutoFixable: true,
+					Description: "Source-relative Markdown document links have no Wiki route",
+				})
+			}
 			// Track entity/concept titles for the second pass.
 			if page.PageType == types.WikiPageTypeEntity || page.PageType == types.WikiPageTypeConcept {
 				entitySlugs[page.Slug] = page.Title
@@ -358,6 +368,25 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 		}
 
 		switch issue.Type {
+		case LintIssueRelativeMarkdownLink:
+			// Repair existing data through the normal versioned write path,
+			// without re-ingesting source documents or overwriting concurrent edits.
+			readCtx := context.WithValue(ctx, wikiPageRawReadKey{}, true)
+			page, err := s.wikiService.GetPageBySlug(readCtx, kbID, issue.PageSlug)
+			if err != nil {
+				return fixed, fmt.Errorf("read wiki page for relative-link repair: %w", err)
+			}
+			writeCtx := types.WithWikiPageWriteSnapshot(ctx, page)
+			content, summary := page.Content, page.Summary
+			normalizeWikiPageRelativeLinks(page)
+			if page.Content == content && page.Summary == summary {
+				continue
+			}
+			if _, err := s.wikiService.UpdatePage(writeCtx, page); err != nil {
+				return fixed, fmt.Errorf("repair relative links on wiki page %s: %w", page.Slug, err)
+			}
+			fixed++
+
 		case LintIssueBrokenLink:
 			// Replace [[broken-slug]] with plain text so the reference text is
 			// preserved but no longer renders as a dangling wiki link.
