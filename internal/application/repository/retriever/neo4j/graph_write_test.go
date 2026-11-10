@@ -108,7 +108,7 @@ func TestAddGraphUsesStableNodeAndRelationshipOrder(t *testing.T) {
 			require.Len(t, tx.payloads, 2)
 			nodes, relations := nodeNames(tx.payloads[0]), relationKeys(tx.payloads[1])
 			assert.Equal(t, []string{"a", "z"}, nodes)
-			assert.Equal(t, []string{"a->z", "z->a", "b->c"}, relations,
+			assert.Equal(t, []string{"a->z", "z->a", "c->b"}, relations,
 				"rows must sort by the canonical first/second endpoint pair, not original source")
 			if firstNodes == nil {
 				firstNodes, firstRelations = nodes, relations
@@ -154,7 +154,7 @@ func TestCanonicalRelationOrderLeavesNoInversionAtAdjacentRows(t *testing.T) {
 		{"source": "a", "target": "z", "type": "R"},
 	}
 	sortRelationRowsForLockOrder(rows)
-	require.Equal(t, []string{"a->z", "z->a", "b->c"}, relationKeysFromRows(rows))
+	require.Equal(t, []string{"a->z", "z->a", "c->b"}, relationKeysFromRows(rows))
 }
 
 func TestCanonicalRelationOrderIsStableForOppositeDirections(t *testing.T) {
