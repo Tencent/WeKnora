@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -360,7 +361,7 @@ func projectSkillFileContent(rel string, body []byte) *SkillFileContent {
 		}
 	}
 	if len(body) > skillFileTextLimit {
-		out.Content = string(body[:skillFileTextLimit])
+		out.Content = common.TruncateUTF8Bytes(string(body), skillFileTextLimit)
 		out.Truncated = true
 		return out
 	}
