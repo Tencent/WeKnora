@@ -160,7 +160,7 @@ func TestFinalizeSubtask_Concurrent_ExactlyOnePromote(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, promoted, ferr := repo.FinalizeSubtask(ctx, id)
+			_, promoted, ferr := repo.FinalizeSubtask(ctx, id, 0)
 			if ferr != nil {
 				t.Errorf("FinalizeSubtask: %v", ferr)
 				return
@@ -194,7 +194,7 @@ func TestFinalizeSubtask_PartialDecrement_StaysFinalizing(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < 2; i++ {
-		_, promoted, ferr := repo.FinalizeSubtask(ctx, id)
+		_, promoted, ferr := repo.FinalizeSubtask(ctx, id, 0)
 		require.NoError(t, ferr)
 		assert.False(t, promoted, "promote must not fire while count > 0")
 	}
@@ -218,13 +218,13 @@ func TestFinalizeSubtask_DecrementClampedAtZero(t *testing.T) {
 	require.NoError(t, err)
 
 	// First decrement drains the only slot and promotes.
-	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+	_, promoted, err := repo.FinalizeSubtask(ctx, id, 0)
 	require.NoError(t, err)
 	assert.True(t, promoted)
 
 	// Subsequent decrements must be no-ops, not underflow.
 	for i := 0; i < 3; i++ {
-		_, promoted, err := repo.FinalizeSubtask(ctx, id)
+		_, promoted, err := repo.FinalizeSubtask(ctx, id, 0)
 		require.NoError(t, err)
 		assert.False(t, promoted)
 	}
@@ -244,7 +244,7 @@ func TestFinalizeSubtask_NonFinalizingRowOnlyDecrements(t *testing.T) {
 			id := insertKnowledgeWithStatus(t, db, status, false)
 			require.NoError(t, db.Exec(`UPDATE knowledges SET pending_subtasks_count = 1 WHERE id = ?`, id).Error)
 
-			count, promoted, err := repo.FinalizeSubtask(context.Background(), id)
+			count, promoted, err := repo.FinalizeSubtask(context.Background(), id, 0)
 
 			require.NoError(t, err)
 			assert.False(t, promoted)
@@ -273,7 +273,7 @@ func TestFinalizeSubtask_FailedPromoteRollsBackDecrement(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'promote refused'); END
 	`).Error)
 
-	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+	_, promoted, err := repo.FinalizeSubtask(ctx, id, 0)
 
 	require.ErrorContains(t, err, "promote refused")
 	assert.False(t, promoted)
@@ -282,7 +282,7 @@ func TestFinalizeSubtask_FailedPromoteRollsBackDecrement(t *testing.T) {
 	assert.Equal(t, 1, count, "the decrement must roll back with the failed promote")
 
 	require.NoError(t, db.Exec(`DROP TRIGGER refuse_promote`).Error)
-	_, promoted, err = repo.FinalizeSubtask(ctx, id)
+	_, promoted, err = repo.FinalizeSubtask(ctx, id, 0)
 	require.NoError(t, err)
 	assert.True(t, promoted, "the retried release drains and promotes")
 	status, count = reloadKnowledgeRow(t, db, id)
@@ -318,7 +318,7 @@ func TestSetFinalizingAndFinalizeSubtask_ClearStaleErrorMessage(t *testing.T) {
 		"stale finalizing failure",
 		id,
 	).Error)
-	_, promoted, err := repo.FinalizeSubtask(ctx, id)
+	_, promoted, err := repo.FinalizeSubtask(ctx, id, 0)
 	require.NoError(t, err)
 	require.True(t, promoted)
 	assert.Empty(t, reloadKnowledgeErrorMessage(t, db, id),
@@ -351,7 +351,7 @@ func TestUpdateKnowledge_DoesNotClobberPendingCounter(t *testing.T) {
 	require.Equal(t, 5, loaded.PendingSubtasksCount)
 
 	// Step 3: an enrichment subtask decrements concurrently.
-	_, _, err = repo.FinalizeSubtask(ctx, id)
+	_, _, err = repo.FinalizeSubtask(ctx, id, 0)
 	require.NoError(t, err)
 
 	// Step 4: caller A persists an unrelated change. The in-memory copy

@@ -40,7 +40,7 @@ func (r *summaryColumnsRepo) UpdateKnowledgeColumns(_ context.Context, _ string,
 	return nil
 }
 
-func (r *summaryColumnsRepo) FinalizeSubtask(context.Context, string) (int, bool, error) {
+func (r *summaryColumnsRepo) FinalizeSubtask(context.Context, string, int) (int, bool, error) {
 	return 0, false, nil
 }
 

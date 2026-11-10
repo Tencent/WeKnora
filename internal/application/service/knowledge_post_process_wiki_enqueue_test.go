@@ -43,6 +43,7 @@ func (r *wikiEnqueueFailureKnowledgeRepo) SetFinalizing(
 func (r *wikiEnqueueFailureKnowledgeRepo) FinalizeSubtask(
 	context.Context,
 	string,
+	int,
 ) (int, bool, error) {
 	return 0, false, nil
 }
