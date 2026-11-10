@@ -16,6 +16,7 @@ import secrets
 import sys
 import threading
 from typing import Any, Dict, Iterator
+from urllib.parse import quote
 
 import urllib3
 import requests
@@ -709,7 +710,8 @@ class WeKnoraClient:
 
     def wiki_read_page(self, kb_id: str, slug: str) -> Dict:
         """Read a wiki page by slug, returns full markdown + metadata + links"""
-        return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{slug}")
+        encoded_slug = quote(slug, safe="/")
+        return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{encoded_slug}")
 
     def wiki_index_view(self, kb_id: str, limit: int = 50) -> Dict:
         """Get structured wiki index with per-type directory groups"""
