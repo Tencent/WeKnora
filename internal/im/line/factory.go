@@ -9,7 +9,11 @@ import (
 
 // NewFactory returns an im.AdapterFactory for LINE bot channels.
 func NewFactory() im.AdapterFactory {
-	return func(factoryCtx context.Context, channel *im.IMChannel, msgHandler func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
+	return func(
+		_ context.Context,
+		channel *im.IMChannel,
+		_ func(context.Context, *im.IncomingMessage) error,
+	) (im.Adapter, context.CancelFunc, error) {
 		creds, err := im.ParseCredentials(channel.Credentials)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse line credentials: %w", err)

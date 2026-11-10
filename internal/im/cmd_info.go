@@ -19,7 +19,10 @@ func newInfoCommand(kbService interfaces.KnowledgeBaseService) *InfoCommand {
 	return &InfoCommand{kbService: kbService}
 }
 
-func (c *InfoCommand) Name() string        { return "info" }
+// Name returns the command keyword.
+func (c *InfoCommand) Name() string { return "info" }
+
+// Description returns the one-line summary shown in the help listing.
 func (c *InfoCommand) Description() string { return "查看當前智能體的信息與能力" }
 
 func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []string) (*CommandResult, error) {
@@ -65,7 +68,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 			for _, kb := range kbs {
 				sb.WriteString(fmt.Sprintf("  · %s\n", kb.Name))
 			}
-			sb.WriteString(fmt.Sprintf("  共 %d 個（全部啟用）\n", len(kbs)))
+			fmt.Fprintf(&sb, "  共 %d 個（全部啟用）\n", len(kbs))
 		} else {
 			sb.WriteString("  全部啟用\n")
 		}
@@ -84,7 +87,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 				sb.WriteString(fmt.Sprintf("  · %s\n", label))
 			}
 		} else {
-			sb.WriteString(fmt.Sprintf("  已選擇 %d 個\n", len(cfg.KnowledgeBases)))
+			fmt.Fprintf(&sb, "  已選擇 %d 個\n", len(cfg.KnowledgeBases))
 		}
 	} else {
 		sb.WriteString("  未配置\n")
@@ -107,7 +110,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 	if cfg.MCPSelectionMode == "all" {
 		sb.WriteString("  全部接入\n")
 	} else if cfg.MCPSelectionMode == "selected" && len(cfg.MCPServices) > 0 {
-		sb.WriteString(fmt.Sprintf("  已接入 %d 個服務\n", len(cfg.MCPServices)))
+		fmt.Fprintf(&sb, "  已接入 %d 個服務\n", len(cfg.MCPServices))
 	} else {
 		sb.WriteString("  未配置\n")
 	}
@@ -125,7 +128,7 @@ func (c *InfoCommand) Execute(ctx context.Context, cmdCtx *CommandContext, _ []s
 	if cmdCtx.ChannelOutputMode == "full" {
 		outputLabel = "完整輸出"
 	}
-	sb.WriteString(fmt.Sprintf("\n⚙️ **輸出模式**\n  %s\n", outputLabel))
+	fmt.Fprintf(&sb, "\n⚙️ **輸出模式**\n  %s\n", outputLabel)
 	sb.WriteString("\n---\n發送 `/help` 查看所有可用指令")
 
 	return &CommandResult{Content: sb.String()}, nil

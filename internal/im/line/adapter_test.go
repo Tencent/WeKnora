@@ -39,9 +39,9 @@ func TestVerifySignatureHMAC(t *testing.T) {
 	expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
 	cases := []struct {
-		name       string
-		signature  string
-		wantErr    bool
+		name      string
+		signature string
+		wantErr   bool
 	}{
 		{"valid signature", expected, false},
 		{"missing header", "", true},
@@ -119,7 +119,12 @@ func TestParseCallbackChatMessage(t *testing.T) {
 				"type": "message",
 				"source": {"type": "group", "userId": "", "groupId": "G-42"},
 				"replyToken": "rtk-g",
-			"message": {"type": "Text", "id": "msg-g", "text": "ping", "mention": {"mentionees": [{"index": 0, "type": "bot"}]}}
+				"message": {
+					"type": "Text",
+					"id": "msg-g",
+					"text": "ping",
+					"mention": {"mentionees": [{"index": 0, "type": "bot"}]}
+				}
 			}
 		]
 	}`
@@ -221,7 +226,12 @@ func TestParseCallbackGroupMentionStripsBotName(t *testing.T) {
 				"type": "message",
 				"source": {"type": "group", "userId": "U-abc", "groupId": "G-42"},
 				"replyToken": "rtk-g",
-				"message": {"type": "Text", "id": "msg-g", "text": "@LINE_Bot can you help?", "mention": {"mentionees": [{"index": 0, "type": "bot", "id": "BOT"}]}}
+				"message": {
+					"type": "Text",
+					"id": "msg-g",
+					"text": "@LINE_Bot can you help?",
+					"mention": {"mentionees": [{"index": 0, "type": "bot", "id": "BOT"}]}
+				}
 			}
 		]
 	}`

@@ -1,3 +1,6 @@
+// Package line implements the LINE Messaging API adapter for WeKnora IM
+// channels: webhook signature verification, event dispatch, and replies in
+// either plain text or Flex Message cards.
 package line
 
 import (
@@ -550,8 +553,8 @@ func polishInline(s string) string {
 // multi-flex wraps bubbles in an array.
 func flexMessage(text string) map[string]interface{} {
 	return map[string]interface{}{
-		"type":    "flex",
-		"altText": "RAG 回答",
+		"type":     "flex",
+		"altText":  "RAG 回答",
 		"contents": bubbleContainer(text),
 	}
 }
@@ -575,9 +578,9 @@ func bubbleContainer(text string) map[string]interface{} {
 			},
 		},
 		"body": map[string]interface{}{
-			"type":    "box",
-			"layout":  "vertical",
-			"spacing": "md",
+			"type":     "box",
+			"layout":   "vertical",
+			"spacing":  "md",
 			"contents": append(markdownToFlexComponents(text), sourceTag()),
 		},
 	}
@@ -699,9 +702,9 @@ func isListItem(s string) bool {
 func listItemComponent(s string) map[string]interface{} {
 	body := strings.TrimPrefix(strings.TrimPrefix(s, "- "), "* ")
 	return map[string]interface{}{
-		"type":     "box",
-		"layout":   "horizontal",
-		"spacing":  "sm",
+		"type":    "box",
+		"layout":  "horizontal",
+		"spacing": "sm",
 		"contents": []interface{}{
 			map[string]interface{}{"type": "text", "text": "•", "size": "sm", "color": "#1DB446"},
 			map[string]interface{}{"type": "text", "text": body, "wrap": true},
@@ -839,7 +842,7 @@ func (a *Adapter) callAPI(ctx context.Context, url string, body interface{}) err
 	if err != nil {
 		return fmt.Errorf("line api request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the full body up front so LINE's error payload
 	// ({"message":..., "details":[...]}) is visible even on HTTP 4xx/5xx,

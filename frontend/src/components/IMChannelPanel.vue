@@ -1326,11 +1326,11 @@ onUnmounted(() => {
   height: 100%;
   padding: 0 8px;
   box-sizing: border-box;
-  border: 1px solid var(--td-border-color, #e2e2e2);
+  border: 1px solid var(--td-component-border);
   border-right: 0;
-  border-radius: var(--td-radius-medium, 4px) 0 0 var(--td-radius-medium, 4px);
-  background: var(--td-bg-color-secondary, #f3f3f3);
-  color: var(--td-text-color-secondary, #777777);
+  border-radius: var(--td-radius-medium) 0 0 var(--td-radius-medium);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   font: inherit;
   font-size: 14px;
   line-height: 32px;
@@ -1338,7 +1338,7 @@ onUnmounted(() => {
 }
 
 .slash-input__field :deep(input) {
-  border-radius: 0 var(--td-radius-medium, 4px) var(--td-radius-medium, 4px) 0;
+  border-radius: 0 var(--td-radius-medium) var(--td-radius-medium) 0;
 }
 
 .callback-url-input {

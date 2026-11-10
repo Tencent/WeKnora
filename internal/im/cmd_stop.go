@@ -10,7 +10,10 @@ type StopCommand struct{}
 
 func newStopCommand() *StopCommand { return &StopCommand{} }
 
-func (c *StopCommand) Name() string        { return "stop" }
+// Name returns the command keyword.
+func (c *StopCommand) Name() string { return "stop" }
+
+// Description returns the one-line summary shown in the help listing.
 func (c *StopCommand) Description() string { return "中止當前正在進行的回答" }
 
 func (c *StopCommand) Execute(_ context.Context, _ *CommandContext, _ []string) (*CommandResult, error) {

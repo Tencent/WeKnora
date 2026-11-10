@@ -103,7 +103,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("🔍 **搜尋「%s」** — 找到 %d 條結果\n\n", query, len(results)))
+	fmt.Fprintf(&sb, "🔍 **搜尋「%s」** — 找到 %d 條結果\n\n", query, len(results))
 
 	for i, r := range shown {
 		// Trim content to a readable length.
@@ -129,7 +129,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 	}
 
 	if len(results) > searchMaxResults {
-		sb.WriteString(fmt.Sprintf("_（僅顯示前 %d 條，共 %d 條）_", searchMaxResults, len(results)))
+		fmt.Fprintf(&sb, "_（僅顯示前 %d 條，共 %d 條）_", searchMaxResults, len(results))
 	}
 
 	return &CommandResult{Content: sb.String()}, nil
