@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -125,6 +126,7 @@ func TestCSVPreparationLifecycle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "source.csv")
 	outputDir := t.TempDir()
 	t.Setenv("TMPDIR", outputDir)
+	t.Setenv("TMP", outputDir)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +139,10 @@ func TestCSVPreparationLifecycle(t *testing.T) {
 		t.Fatal("legacy input must use a separate file")
 	}
 	info, err := os.Stat(converted)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("temporary CSV must be private: info=%v err=%v", info, err)
 	}
 	cleanup()
