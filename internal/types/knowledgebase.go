@@ -896,14 +896,16 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	} else if kb.AutoTagConfig != nil {
 		kb.AutoTagConfig.Normalize()
 	}
-	// Set defaults for FAQ
+	// Set defaults for FAQ. This must not return early: the indexing strategy
+	// defaults below are what a FAQ knowledge base is retrieved with, and a
+	// fresh KB created through the API arrives without FAQConfig, exactly the
+	// branch that used to skip them.
 	if kb.Type == KnowledgeBaseTypeFAQ {
 		if kb.FAQConfig == nil {
 			kb.FAQConfig = &FAQConfig{
 				IndexMode:         FAQIndexModeQuestionAnswer,
 				QuestionIndexMode: FAQQuestionIndexModeCombined,
 			}
-			return
 		}
 		if kb.FAQConfig.IndexMode == "" {
 			kb.FAQConfig.IndexMode = FAQIndexModeQuestionAnswer
