@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -162,8 +163,8 @@ func TestAgentA2UIGuidanceRoundTripsThroughOurParser(t *testing.T) {
 // (conformance/test_data/prompts/direct_json/allowed_messages.txt: "The 'root'
 // component MUST be the FIRST element. Parent components MUST appear before
 // their child components."). The Button-label exception is not my reading: the
-// official protocol example (specification/v0_9/docs/a2ui_protocol.md:292, the
-// contact form) defines submit_button_label at list index 23 and submit_button
+// official protocol example (specification/v0_9/docs/a2ui_protocol.md, the contact
+// form) defines submit_button_label at list index 23 and submit_button
 // at 24, and form_container.children lists submit_button only. Following that
 // example keeps the teaching a strict instance of the official shape instead of
 // a third, self-invented one.
@@ -282,5 +283,57 @@ func TestAgentA2UIGuidanceTeachesConfirm(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Errorf("A2UI output section is missing %q", want)
 		}
+	}
+}
+
+// TestAgentA2UIGuidanceTeachesForm pins the form-card teaching: the five input
+// controls, the binding shape, the replay/reject contract, the composition
+// header, and the hard caps — all as literals, because this file is the
+// producer-side contract and a drift in any of these lines silently breaks
+// whatever the model was taught to emit.
+func TestAgentA2UIGuidanceTeachesForm(t *testing.T) {
+	output := outputSection(t)
+	for _, want := range []string{
+		"TextField",
+		"CheckBox",
+		"ChoicePicker",
+		"Slider",
+		"DateTimeInput",
+		`"value":{"path":"/name"}`,
+		`"name":{"path":"/name"}`,
+		"At most 8 input fields per card.",
+		"Never use the obscured (password) variant",
+		"Never attach inputs to a noop button",
+		"the literal 未填写",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("A2UI output section is missing %q", want)
+		}
+	}
+	// The taught form card must exist as a JSON array in the output and must
+	// be parseable into the same button spec the executor re-derives from
+	// persisted content. The output section also contains bracket pairs from
+	// other guidance (e.g. ![alt](url)), so identify the card by its button
+	// rather than by array index; the parser needs the <a2ui-json> wrapper.
+	arrays := extractJSONArrays(output)
+	var btn *types.A2uiResolvedButton
+	for _, arr := range arrays {
+		candidate := types.FindA2UIButton(types.A2UITagOpen+"\n"+arr+"\n"+types.A2UITagClose, "s1", "b1")
+		if candidate != nil && candidate.ActionName == "confirm" {
+			btn = candidate
+			break
+		}
+	}
+	if btn == nil {
+		t.Fatalf("taught form button s1/b1 not re-derivable from the taught form card; arrays: %d", len(arrays))
+	}
+	if btn.ActionName != "confirm" {
+		t.Errorf("taught form button action = %q, want %q", btn.ActionName, "confirm")
+	}
+	if got := fmt.Sprint(btn.BoundInputPaths); got != "[/name /room]" {
+		t.Errorf("taught form button BoundInputPaths = %s, want %s", got, "[/name /room]")
+	}
+	if len(btn.FieldLabels) != 2 {
+		t.Errorf("taught form button FieldLabels has %d entries, want 2", len(btn.FieldLabels))
 	}
 }

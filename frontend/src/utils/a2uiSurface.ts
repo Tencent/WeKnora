@@ -87,7 +87,7 @@ export function a2uiPendingCardHtml(): string {
 /**
  * Official A2UI direct_json wrapper tags — the literals the official SDK writes
  * into the prompt it generates and parses with (a2ui/constants.py
- * A2UI_OPEN_TAG/A2UI_CLOSE_TAG, blocks.py:24-27). This is the form the WeKnora
+ * A2UI_OPEN_TAG/A2UI_CLOSE_TAG, mirrored in blocks.py). This is the form the WeKnora
  * agent prompt has always emitted; the ```a2ui fence below is an earlier
  * self-contained approach and stays accepted for messages already stored.
  */
@@ -95,7 +95,7 @@ export const A2UI_TAG_OPEN = '<a2ui-json>'
 export const A2UI_TAG_CLOSE = '</a2ui-json>'
 
 // Copied from the official parser, so the tolerance is theirs and not ours:
-// blocks.py:26 OPEN_TAG_RE, :27 CLOSE_TAG_RE, :31-32 _LEADING/TRAILING_FENCE_RE.
+// blocks.py: OPEN_TAG_RE, CLOSE_TAG_RE, _LEADING_FENCE_RE, _TRAILING_FENCE_RE.
 const a2uiOpenTagRE = /<a2ui-json(?:\s[^>]*)?>/i
 const a2uiCloseTagRE = /<\/a2ui-json\s*>/i
 const a2uiLeadingFenceRE = /^```[a-zA-Z-]*\s*/
@@ -316,11 +316,15 @@ function renderA2uiFallback(el: HTMLElement, raw: string): void {
  * live A2UI surface into each. Called from botmsg / AgentStreamDisplay once the
  * typewriter has fully revealed the answer, so the fence body is complete.
  * The a2ui-vue module is imported lazily so it only loads when a card exists.
+ * An optional actionClient is forwarded to every A2uiCard so an embed host can
+ * route clicks through /api/v1/embed/... (see A2uiCard.vue); hosts that pass
+ * nothing keep the default tenant executor.
  */
 export async function mountA2uiSurfaces(
   root: HTMLElement | null | undefined,
   sessionId: string,
   messageId: string,
+  actionClient?: (payload: Record<string, unknown>) => Promise<unknown>,
 ): Promise<void> {
   if (!root) return
   // Claim the placeholders synchronously, in the same tick as the query and
@@ -368,7 +372,7 @@ export async function mountA2uiSurfaces(
       continue
     }
     try {
-      const app = createApp(A2uiCard, { frames, sessionId, messageId })
+      const app = createApp(A2uiCard, { frames, sessionId, messageId, actionClient })
       provideA2UI({
         app,
         catalog,

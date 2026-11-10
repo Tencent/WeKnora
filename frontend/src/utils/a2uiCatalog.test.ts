@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { CatalogEntry, VueComponentNode } from 'a2ui-vue'
 
-import { a2uiButtonClass, weknoraCatalog } from './a2uiCatalog.ts'
+import { a2uiButtonClass, a2uiTextFieldInputType, weknoraCatalog } from './a2uiCatalog.ts'
 
 // A literal stand-in for the official catalog (shape copied from DEFAULT_CATALOG in dist/index-BwIwZ7ky.js:
 // every component is { type: loader, props: node => ({...}) }). Again no import of the library itself — a static
@@ -25,6 +25,10 @@ const BASE_CATALOG = {
   Button: {
     type: () => Promise.resolve({ name: 'A2UIButton' }),
     props: () => ({ action: undefined, variant: undefined }),
+  },
+  TextField: {
+    type: () => Promise.resolve({ name: 'A2UITextField' }),
+    props: () => ({ label: undefined, variant: undefined, value: undefined }),
   },
 }
 
@@ -62,20 +66,21 @@ test('白名单外的 variant 落 default，不能把任意串拼进 class', () 
   assert.equal(a2uiButtonClass('constructor'), 'a2ui-btn a2ui-btn--default')
 })
 
-test('覆盖只动 Button，其余组件原样传过去', () => {
+test('覆盖只动 Button 与 TextField，其余组件原样传过去', () => {
   const catalog = weknoraCatalog(BASE_CATALOG)
-  assert.deepEqual(Object.keys(catalog).sort(), ['Button', 'Card', 'Column', 'Text'])
+  assert.deepEqual(Object.keys(catalog).sort(), ['Button', 'Card', 'Column', 'Text', 'TextField'])
   assert.equal(catalog.Text, BASE_CATALOG.Text)
   assert.equal(catalog.Card, BASE_CATALOG.Card)
   assert.equal(catalog.Column, BASE_CATALOG.Column)
   assert.notEqual(catalog.Button, BASE_CATALOG.Button)
+  assert.notEqual(catalog.TextField, BASE_CATALOG.TextField)
 })
 
 test('覆盖不就地改传入的 catalog', () => {
   weknoraCatalog(BASE_CATALOG)
   // The original entry's props still behave the original way (returns action/variant, no class).
   assert.deepEqual(BASE_CATALOG.Button.props(), { action: undefined, variant: undefined })
-  assert.deepEqual(Object.keys(BASE_CATALOG).sort(), ['Button', 'Card', 'Column', 'Text'])
+  assert.deepEqual(Object.keys(BASE_CATALOG).sort(), ['Button', 'Card', 'Column', 'Text', 'TextField'])
 })
 
 test('自家 Button 的 props 只从节点里取 action 与 variant', () => {
@@ -103,4 +108,27 @@ test('节点连 properties 都没有时不抛，两个读数都是 undefined', (
   // Should never happen at the protocol layer, but the renderer is lenient toward components with unregistered schemas — this layer must not crash along with it.
   assert.deepEqual(entry.props(node(undefined)), { action: undefined, variant: undefined })
   assert.deepEqual(entry.props({} as VueComponentNode), { action: undefined, variant: undefined })
+})
+
+test('自家 TextField 的 props 只转发 variant，label/value 一概不抄', () => {
+  const entry = entryOf(weknoraCatalog(BASE_CATALOG).TextField)
+  assert.equal(typeof entry.type, 'function')
+  assert.deepEqual(
+    entry.props(node({ variant: 'number', label: { path: '/x' }, value: { path: '/name' } })),
+    { variant: 'number' },
+  )
+  assert.deepEqual(Object.keys(entry.props(node(undefined))).sort(), ['variant'])
+  assert.equal(entry.props(node(undefined)).variant, undefined)
+})
+
+test('输入类型白名单：未知/伪造 variant 一律退 text，prototype 键不算命中', () => {
+  assert.equal(a2uiTextFieldInputType('number'), 'number')
+  assert.equal(a2uiTextFieldInputType('obscured'), 'password')
+  assert.equal(a2uiTextFieldInputType('longText'), 'text') // 多行走 textarea，不进 input type
+  assert.equal(a2uiTextFieldInputType('shortText'), 'text')
+  assert.equal(a2uiTextFieldInputType(undefined), 'text')
+  assert.equal(a2uiTextFieldInputType('constructor'), 'text')
+  assert.equal(a2uiTextFieldInputType('__proto__'), 'text')
+  assert.equal(a2uiTextFieldInputType('number; x'), 'text')
+  assert.equal(a2uiTextFieldInputType(3), 'text')
 })

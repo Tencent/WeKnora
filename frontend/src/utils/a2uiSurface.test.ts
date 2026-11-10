@@ -206,13 +206,14 @@ test('markA2uiTagBlocks turns an official tag block into the fence placeholder',
 })
 
 test('the tag rewriter has exactly the official tolerances, and no more', () => {
-  // blocks.py:26 — case-insensitive, attributes allowed on the open tag.
+  // OPEN_TAG_RE (blocks.py) — case-insensitive, attributes allowed on the open tag.
   assert.ok(
     markA2uiTagBlocks(`<A2UI-JSON data-source="weknora">${CJK_FRAMES}</A2UI-JSON>`)
       .includes(a2uiPlaceholderHtml(CJK_FRAMES)),
     'uppercase tag / attributed open tag must be accepted (official OPEN_TAG_RE)',
   )
-  // blocks.py:31-32 — a fence wrapped around the payload inside the tags is noise.
+  // _LEADING/_TRAILING_FENCE_RE (blocks.py) — a fence wrapped around the payload
+  // inside the tags is noise.
   assert.ok(
     markA2uiTagBlocks(`${TAG_OPEN}\n\`\`\`json\n${CJK_FRAMES}\n\`\`\`\n${TAG_CLOSE}`)
       .includes(a2uiPlaceholderHtml(CJK_FRAMES)),

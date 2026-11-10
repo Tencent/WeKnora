@@ -17,6 +17,18 @@ export function a2uiButtonClass(variant: unknown): string {
   return `a2ui-btn a2ui-btn--${v}`
 }
 
+// a2uiTextFieldInputType maps the official TextField variant onto an HTML
+// input type; anything outside the published enum stays a plain text box.
+const A2UI_INPUT_TYPES = new Map<string, string>([
+  ['number', 'number'],
+  ['obscured', 'password'],
+])
+
+export function a2uiTextFieldInputType(variant: unknown): string {
+  return A2UI_INPUT_TYPES.get(String(variant)) ?? 'text'
+}
+
+
 // Override the Button in the official basic catalog; every other component is left to a2ui-vue unchanged.
 //
 // It must be a **function** taking the base catalog as a parameter: that way this module never statically imports 'a2ui-vue'.
@@ -39,6 +51,12 @@ export function weknoraCatalog(base: Catalog): Catalog {
       type: () => import('@/views/chat/components/a2ui/A2uiButton.vue').then((m) => m.default),
       props: (node) => ({
         action: node.properties?.action,
+        variant: node.properties?.variant,
+      }),
+    },
+    TextField: {
+      type: () => import('@/views/chat/components/a2ui/A2uiTextField.vue').then((m) => m.default),
+      props: (node) => ({
         variant: node.properties?.variant,
       }),
     },

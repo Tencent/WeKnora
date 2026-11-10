@@ -83,7 +83,10 @@ const (
 	// emitting these literals is what makes an external A2UI client able to find
 	// our frames at all. The teaching in internal/agent/prompts.go interpolates
 	// them; the prompt/guidance test asserts the emitted text carries them.
-	A2UITagOpen  = "<a2ui-json>"
+	A2UITagOpen = "<a2ui-json>"
+	// A2UITagClose closes the block A2UITagOpen opened. A card whose closing
+	// tag is missing or mistyped yields no frames at all, which is why the two
+	// tags are emitted as literals rather than assembled.
 	A2UITagClose = "</a2ui-json>"
 	// A2UIMessageVersion is the protocol version every frame carries; frames
 	// with any other version are dropped (a wrong-version frame has no defined
@@ -138,6 +141,8 @@ type A2uiDeleteSurface struct {
 // content. Text is the one display field we keep: a Button's label is
 // resolved from its child Text component's text, for audit/response text
 // only.
+// The form round adds value/label, read only for the replay whitelist and
+// composer labels — see the field comments.
 type A2uiComponent struct {
 	ID        string `json:"id"`
 	Component string `json:"component"`
@@ -145,6 +150,17 @@ type A2uiComponent struct {
 	// Button only: id of the Text component that renders its label.
 	Child  string      `json:"child,omitempty"`
 	Action *A2uiAction `json:"action,omitempty"`
+	// Input controls only (TextField/CheckBox/ChoicePicker/Slider/DateTimeInput):
+	// the raw `value` property and the raw `label` property. They are read
+	// solely to build BoundInputPaths and FieldLabels in FindA2UIButton — the
+	// form whitelist and the composer's typesetting table. Neither field ever
+	// grants or alters execution: the action decision still comes from
+	// id/component/child/action.event.name alone, and both raws are re-derived
+	// from PERSISTED content, so the decoder-boundary rule ("re-derivation
+	// never depends on decorative content") is extended only by content that
+	// narrows trust, never widens it.
+	Value json.RawMessage `json:"value,omitempty"`
+	Label json.RawMessage `json:"label,omitempty"`
 }
 
 // A2uiAction is the official `oneOf [event, functionCall]`. Only `event` is
@@ -224,8 +240,8 @@ var agentA2UIMessageFenceRE = regexp.MustCompile(
 	"(?sm)^ {0,3}\x60\x60\x60" + AgentCardFenceLang +
 		"[ \t]*\r?\n(.*?)\r?\n {0,3}\x60\x60\x60[ \t]*(?:\r?\n|$)")
 
-// The tag regexes below are the official ones, copied: blocks.py:26 OPEN_TAG_RE
-// and :27 CLOSE_TAG_RE. The tolerance is theirs, not ours — case-insensitive,
+// The tag regexes below are the official ones, copied from the A2UI parser's
+// blocks.py (OPEN_TAG_RE, CLOSE_TAG_RE). The tolerance is theirs, not ours — case-insensitive,
 // attributes allowed on the open tag, whitespace allowed before the close tag.
 // Nothing here interprets the payload as HTML, so a card whose text contains
 // "<script>" stays data.
@@ -235,8 +251,8 @@ var (
 )
 
 // agentA2UIInner{Open,Close}FenceRE strip a markdown fence that wraps the
-// payload INSIDE the tags — blocks.py:31-32 _LEADING_FENCE_RE/_TRAILING_FENCE_RE
-// copied. Models do this even when told not to, and the official parser absorbs
+// payload INSIDE the tags — the same parser's _LEADING_FENCE_RE/_TRAILING_FENCE_RE
+// in blocks.py, copied. Models do this even when told not to, and the official parser absorbs
 // it, so we must too: a card we reject here is a card the official renderer
 // would have shown. Anchored, so a fence inside a component's text is untouched.
 var (
@@ -409,6 +425,18 @@ type A2uiResolvedButton struct {
 	// button carries none. The confirm executor is its only v0 reader; the
 	// client-request copy of this field is never consulted.
 	Context map[string]json.RawMessage
+	// FieldLabels maps a button-context BINDING key to the literal label of
+	// the input component bound to the same path — the composer's typesetting
+	// table. Keys whose input has no literal label (binding label, absent
+	// input, other surface) are absent; the composer falls back to the key
+	// name. Populated only by FindA2UIButton.
+	FieldLabels map[string]string
+	// BoundInputPaths is the sorted, deduplicated set of {"path":…} bindings
+	// declared by input-component `value` properties ON THIS SURFACE. It is
+	// the replay whitelist: a context binding key may only name one of these
+	// paths (form_path_unbound). Deterministic order: inputs are walked by
+	// component id, last write wins per path.
+	BoundInputPaths []string
 }
 
 // ExtractA2UIMessages parses every A2UI block from assistant markdown — in
@@ -469,6 +497,45 @@ func parseA2UIMessages(body string) []A2uiMessage {
 	return out
 }
 
+// a2uiInputComponents is the form-control whitelist: the
+// five official basic-catalog components whose `value` carries user input.
+var a2uiInputComponents = map[string]bool{
+	"TextField": true, "CheckBox": true, "ChoicePicker": true,
+	"Slider": true, "DateTimeInput": true,
+}
+
+// a2uiBindingPath reports whether raw is EXACTLY the official binding shape
+// {"path":"<string>"} (one property, string payload) and returns the path.
+// Anything else — bare literals, {"call":…} objects, {"path":123} — is not a
+// binding for our purposes.
+func a2uiBindingPath(raw json.RawMessage) (string, bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) != 1 {
+		return "", false
+	}
+	v, ok := obj["path"]
+	if !ok {
+		return "", false
+	}
+	var p string
+	if err := json.Unmarshal(v, &p); err != nil {
+		return "", false
+	}
+	return p, true
+}
+
+// sortedA2UIContextKeys keeps every per-key walk of a context map
+// deterministic — map order would otherwise make deny reasons and label
+// collection depend on hash luck.
+func sortedA2UIContextKeys(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // FindA2UIButton re-derives a clicked button from the persisted component
 // tree. Components from every updateComponents frame of the surface are
 // merged with the official semantics — last write wins per component id, so
@@ -504,6 +571,53 @@ func FindA2UIButton(content, surfaceID, componentID string) *A2uiResolvedButton 
 	if c.Child != "" {
 		if t, ok := merged[c.Child]; ok && t.Component == "Text" {
 			btn.Label = t.Text
+		}
+	}
+
+	// Form round: collect the surface's input bindings in one more walk,
+	// deterministically (ids sorted). Only {"path":"…"} values count; a
+	// from the whitelist. label is kept only when it is a plain string
+	// literal — a {path} label would put data-model text into the composer's
+	// typesetting, which the teaching forbids and the replay never promised.
+	pathToLabel := map[string]string{}
+	boundSeen := map[string]bool{}
+	ids := make([]string, 0, len(merged))
+	for id := range merged {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		comp := merged[id]
+		if !a2uiInputComponents[comp.Component] {
+			continue
+		}
+		p, ok := a2uiBindingPath(comp.Value)
+		if !ok {
+			continue
+		}
+		if !boundSeen[p] {
+			boundSeen[p] = true
+			btn.BoundInputPaths = append(btn.BoundInputPaths, p)
+		}
+		var lbl string
+		if json.Unmarshal(comp.Label, &lbl) == nil { // literal string label only
+			pathToLabel[p] = lbl
+		} else {
+			delete(pathToLabel, p)
+		}
+	}
+	sort.Strings(btn.BoundInputPaths)
+
+	for _, key := range sortedA2UIContextKeys(btn.Context) {
+		p, ok := a2uiBindingPath(btn.Context[key])
+		if !ok {
+			continue
+		}
+		if lbl, has := pathToLabel[p]; has && lbl != "" {
+			if btn.FieldLabels == nil {
+				btn.FieldLabels = map[string]string{}
+			}
+			btn.FieldLabels[key] = lbl
 		}
 	}
 	return btn

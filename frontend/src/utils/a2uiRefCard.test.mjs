@@ -4,8 +4,8 @@ import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Acceptance assertions for the definition-confirmation reference card style (an internal
-// HTML mock-up). Reference-card facts: white card, 14px radius + an extremely light shadow;
+// Acceptance assertions for the definition-confirmation reference card style. Reference-card
+// facts: white card, 14px radius + an extremely light shadow;
 // body text 13.5~14px / line-height 1.72; the primary button is solid green (we keep
 // --td-brand-color) with 8px radius, 33px height, 13px type, 500 weight and a green shadow;
 // the default button is white with a border. The spec table replicates the reference card's

@@ -898,6 +898,7 @@ import {
   mountA2uiSurfaces,
   unmountA2uiSurfaces,
 } from '@/utils/a2uiSurface';
+import { executeEmbedAgentAction } from '@/api/embed/action';
 import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
@@ -2882,6 +2883,20 @@ const onRootKeydown = (e: KeyboardEvent) => {
 const a2uiSessionId = (): string => props.sessionId || '';
 let a2uiMountId: string | null = null;
 
+const embedActionClient = computed(() => {
+  if (!props.embedToken || !props.embedChannelId || !props.embedSessionSig) return undefined;
+  return (payload: Record<string, unknown>) =>
+    executeEmbedAgentAction(
+      props.embedChannelId as string,
+      props.embedToken as string,
+      props.sessionId as string,
+      props.embedSessionSig as string,
+      props.embedVisitorId ?? '',
+      payload,
+    );
+});
+
+
 // Mount timing. Two entry points: onMounted covers "a history session was opened and never re-rendered
 // afterwards", onUpdated covers the moment streaming finishes. The mount function flips the placeholder from
 // pending to mounting before awaiting, so both entries running at once still mount one app each. The segment
@@ -2889,11 +2904,11 @@ let a2uiMountId: string | null = null;
 // fence body always fails. Embedded hosts get no placeholder from createSurfaceAwareCodeRenderer at all, so
 // the early return here only saves querying rootElement on every re-render.
 function mountA2uiSurfacesIfDone(): void {
-  if (props.embeddedMode || !isSegmentDone.value) return;
+  if (!isSegmentDone.value) return;
   if (a2uiMountId === null) {
     a2uiMountId = persistedAssistantId(props.session) || String(props.session?.id || '');
   }
-  void mountA2uiSurfaces(rootElement.value, a2uiSessionId(), a2uiMountId);
+  void mountA2uiSurfaces(rootElement.value, a2uiSessionId(), a2uiMountId, embedActionClient.value);
 }
 
 // Unmount. Vue only honours app.unmount(): if the host component is destroyed and the nested apps are merely
@@ -3019,8 +3034,7 @@ const renderAgentMarkdown = (
     prepareMarkdown: prepareAgentMarkdown,
     injectCachedMermaidSvg,
     entityLinkLabels: entityLinkLabels.value,
-    // Official <a2ui-json> tag form. Skipped when embedded — same plane rule as the code renderer.
-    markA2uiTags: props.embeddedMode ? undefined : markA2uiTagBlocks,
+    markA2uiTags: markA2uiTagBlocks,
   });
 };
 

@@ -12,6 +12,11 @@ const props = defineProps<{
     frames: A2uiMessage[]
     sessionId: string
     messageId: string
+    // Optional embed-channel executor, injected by mountA2uiSurfaces so an
+    // iframe host posts to /api/v1/embed/... with the Embed auth headers
+    // instead of @/utils/request's default auth (which would leak a locally
+    // logged-in user's weknora_token into channel calls). Undefined = main chat.
+    actionClient?: (payload: Record<string, unknown>) => Promise<unknown>
 }>()
 
 const processor = useMessageProcessor()
@@ -39,7 +44,7 @@ const framesJson = computed(() => JSON.stringify(props.frames, null, 2))
 // ({ version:'v0.9', action:{ name, surfaceId, sourceComponentId, timestamp,
 // context } }). We forward it to the server-side executor, which re-derives
 // the action from the persisted component tree and refuses anything the model
-// did not offer (route-B security model). The post() helper attaches the auth
+// did not offer. The post() helper attaches the auth
 // token + tenant header via the global axios interceptors.
 // The path must keep the /api/v1 prefix: the axios instance's baseURL is
 // getApiBaseUrl() = import.meta.env.BASE_URL, which is "/" in the Docker build
@@ -48,14 +53,19 @@ const framesJson = computed(() => JSON.stringify(props.frames, null, 2))
 // no auth, no audit row, dead button (live-tested 2026-11-05).
 const unsubscribe = processor.onEvent((evt) => {
     const a = evt.message.action
-    void post('/api/v1/agent/actions/execute', {
+    const payload = {
         session_id: props.sessionId,
         message_id: props.messageId,
         surface_id: a.surfaceId,
         source_component_id: a.sourceComponentId,
         action_name: a.name,
         context: a.context ?? {},
-    }).then((res) => {
+    }
+    // Injected embed executor wins; the default keeps the tenant endpoint
+    // (post() attaches the auth token + tenant header via the interceptors).
+    const send: (p: Record<string, unknown>) => Promise<any> =
+        props.actionClient ?? ((p) => post('/api/v1/agent/actions/execute', p))
+    void send(payload).then((res) => {
         // The interceptor resolves to the response PAYLOAD, not the axios
         // response object; res?.data is the {status,...} object (?? res
         // tolerates a stub/post shape carrying the inner object directly).

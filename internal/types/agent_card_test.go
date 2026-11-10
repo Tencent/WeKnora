@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -12,7 +13,8 @@ import (
 // label each, and a root Card. Double-quoted strings on purpose: a raw
 // backtick string cannot contain the ``` fence markers.
 const a2uiTestContent = "前置说明\n```a2ui\n" +
-	`[{"version":"v0.9","createSurface":{"surfaceId":"s1","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
+	`[{"version":"v0.9","createSurface":{"surfaceId":"s1",` +
+	`"catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
 	`{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[` +
 	`{"id":"root","component":"Card","child":"col1"},` +
 	`{"id":"col1","component":"Column","children":["t1","go_lbl","go","bad_lbl","bad"]},` +
@@ -95,8 +97,13 @@ func TestFindA2UIButtonResolvesEventAndLabel(t *testing.T) {
 // model finally emitted.
 func TestFindA2UIButtonMergeLastWriteWins(t *testing.T) {
 	content := "```a2ui\n" +
-		`[{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[{"id":"b","component":"Button","child":"l","action":{"event":{"name":"drop_database"}}}]}}` +
-		`,{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[{"id":"b","component":"Button","child":"l","action":{"event":{"name":"noop"}}},{"id":"l","component":"Text","text":"ok"}]}}]` +
+		`[{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[{"id":"b","component":"Button",` +
+		`"child":"l",` +
+		`"action":{"event":{"name":"drop_database"}}}]}}` +
+		`,{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[{"id":"b","component":"Button",` +
+		`"child":"l","action":{"event":{"name":"noop"}}},` +
+		`{"id":"l","component":"Text",` +
+		`"text":"ok"}]}}]` +
 		"\n```\n"
 	btn := FindA2UIButton(content, "s1", "b")
 	if btn == nil {
@@ -166,7 +173,8 @@ const (
 	// a2uiTestFrames is the payload used by the fence tests above, verbatim, so
 	// "the tag form yields the same frames as the fence form" compares forms and
 	// not two different cards.
-	a2uiTestFrames = `[{"version":"v0.9","createSurface":{"surfaceId":"s1","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
+	a2uiTestFrames = `[{"version":"v0.9","createSurface":{"surfaceId":"s1",` +
+		`"catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
 		`{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[` +
 		`{"id":"root","component":"Card","child":"col1"},` +
 		`{"id":"col1","component":"Column","children":["t1","go_lbl","go"]},` +
@@ -295,11 +303,14 @@ func TestExtractA2UIMessagesDoesNotDoubleCountNestedBlocks(t *testing.T) {
 // expectation is a literal (nil), not a re-read of the implementation.
 func TestFindA2UIButtonCarriesEventContext(t *testing.T) {
 	content := "确认卡\n```a2ui\n" +
-		`[{"version":"v0.9","createSurface":{"surfaceId":"s3","catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
+		`[{"version":"v0.9","createSurface":{"surfaceId":"s3",` +
+		`"catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
 		`{"version":"v0.9","updateComponents":{"surfaceId":"s3","components":[` +
-		`{"id":"root","component":"Card","child":"col1"},{"id":"col1","component":"Column","children":["ok_lbl","ok","plain_lbl","plain"]},` +
+		`{"id":"root","component":"Card","child":"col1"},` +
+		`{"id":"col1","component":"Column","children":["ok_lbl","ok","plain_lbl","plain"]},` +
 		`{"id":"ok_lbl","component":"Text","text":"确定"},` +
-		`{"id":"ok","component":"Button","child":"ok_lbl","variant":"primary","action":{"event":{"name":"confirm","context":{"message":"用户已确认，请按方案继续执行后续操作"}}}},` +
+		`{"id":"ok","component":"Button","child":"ok_lbl","variant":"primary",` +
+		`"action":{"event":{"name":"confirm","context":{"message":"用户已确认，请按方案继续执行后续操作"}}}},` +
 		`{"id":"plain_lbl","component":"Text","text":"知道了"},` +
 		`{"id":"plain","component":"Button","child":"plain_lbl","action":{"event":{"name":"noop"}}}` +
 		`]}}]` + "\n```\n"
@@ -326,5 +337,60 @@ func TestFindA2UIButtonCarriesEventContext(t *testing.T) {
 	}
 	if plain.Context != nil {
 		t.Fatalf("a button without context must resolve to a nil Context, got %v", plain.Context)
+	}
+}
+
+const a2uiFormCardForTypes = "<a2ui-json>\n" +
+	`[{"version":"v0.9","createSurface":{"surfaceId":"s1",` +
+	`"catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
+	`{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[` +
+	`{"id":"root","component":"Card","child":"col"},` +
+	`{"id":"col","component":"Column","children":["f_name","f_pick","f_amb","btn"]},` +
+	`{"id":"f_name","component":"TextField","label":"姓名","value":{"path":"/name"}},` +
+	`{"id":"f_pick","component":"ChoicePicker","label":{"path":"/lbl"},` +
+	`"options":[{"label":"甲","value":"a"}],"value":{"path":"/room"}},` +
+	`{"id":"f_amb","component":"TextField","label":"备注","value":"写字没处去"},` +
+	`{"id":"btn_lbl","component":"Text","text":"提交"},` +
+	`{"id":"btn","component":"Button","child":"btn_lbl","action":{"event":{"name":"confirm","context":{` +
+	`"message":"继续办理。","name":{"path":"/name"},"room":{"path":"/room"},"ghost":{"path":"/ghost"}}}}}` +
+	`]}}]` + "\n</a2ui-json>"
+
+func TestFindA2UIButtonCollectsFormLabelsAndBoundPaths(t *testing.T) {
+	btn := FindA2UIButton(a2uiFormCardForTypes, "s1", "btn")
+	if btn == nil {
+		t.Fatal("form button s1/b1 not re-derivable")
+	}
+	wantPaths := []string{"/name", "/room"}
+	if got, want := fmt.Sprint(btn.BoundInputPaths), fmt.Sprint(wantPaths); got != want {
+		t.Errorf("BoundInputPaths = %v, want %v (dedup+sorted; 字面量 value 与别个 surface 的输入都不收)",
+			btn.BoundInputPaths, wantPaths)
+	}
+	if len(btn.FieldLabels) != 1 {
+		t.Fatalf("FieldLabels = %v, want exactly 1 entry", btn.FieldLabels)
+	}
+	if btn.FieldLabels["name"] != "姓名" {
+		t.Errorf(`FieldLabels["name"] = %q, want %q`, btn.FieldLabels["name"], "姓名")
+	}
+}
+
+func TestFindA2UIButtonLegacyCardCollectsNothing(t *testing.T) {
+	content := "<a2ui-json>\n" +
+		`[{"version":"v0.9","createSurface":{"surfaceId":"s1",` +
+		`"catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},` +
+		`{"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[` +
+		`{"id":"root","component":"Card","child":"b1_lbl"},` +
+		`{"id":"b1_lbl","component":"Text","text":"确定"},` +
+		`{"id":"b1","component":"Button","child":"b1_lbl",` +
+		`"action":{"event":{"name":"confirm","context":{"message":"继续。"}}}}]}}]` +
+		"\n</a2ui-json>"
+	btn := FindA2UIButton(content, "s1", "b1")
+	if btn == nil {
+		t.Fatal("legacy confirm button not re-derivable")
+	}
+	if len(btn.BoundInputPaths) != 0 {
+		t.Errorf("BoundInputPaths = %v, want empty for a card without inputs", btn.BoundInputPaths)
+	}
+	if len(btn.FieldLabels) != 0 {
+		t.Errorf("FieldLabels = %v, want empty for a card without bindings", btn.FieldLabels)
 	}
 }

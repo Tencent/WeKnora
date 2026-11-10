@@ -10,7 +10,7 @@
  *     36px back to the 24px of markdown in the same bubble;
  *  4) give the "rehydration failed, degraded to the raw fence" state a decent look (before this, the two
  *     .chat-a2ui-* classes had zero hits across all 43 CSS artifacts, so the degradation was a bare <pre>);
- *  5) bring in the visual language of the definition-confirmation reference card (an internal HTML mock-up):
+ *  5) bring in the visual language of the definition-confirmation reference card:
  *     14px card radius (--app-radius-xxl) + an ultra-light two-layer shadow, body 14px / line-height 1.72;
  *     buttons 33px tall / 8px radius / 13px / weight 500, the primary button keeping the solid brand green
  *     with a green shadow. The spec table replicates the reference card's .specs/.spec verbatim: the model
@@ -26,8 +26,8 @@
  *
  * Token choices follow the ratchet in assets/theme/styleGuard.test.mjs: radii / font sizes use our own
  * --app-*, and only what exists solely in TDesign (container background, border, text colors) uses --td-*
- * with no fallback — that rule's baseline is 0, and the :root:root at theme.css:1 already guarantees
- * --td-* exist.
+ * with no fallback — that rule's baseline is 0, and the :root:root rule at the top of theme.css already
+ * guarantees --td-* exist.
  */
 
 /* 1) Color-scale tokens.
@@ -51,8 +51,9 @@
  * So this place must also use absolute scales, not values that "flip with the theme" — relative values
  * would get flipped twice (once by our tokens, once again by the library's mirror), landing exactly
  * inverted in dark mode. The color-scheme that light-dark() uses to judge light vs dark **follows our own
- * theme** on this deployment: useTheme.ts:32 and index.html:27 both write color-scheme as an inline style
- * on <html>, which outranks the html{color-scheme:light dark} rule at App.vue:291 and then inherits down.
+ * theme**: the boot script in index.html and useTheme.ts's Wails sync both write color-scheme as an
+ * inline style on <html>, which outranks the html{color-scheme:light dark} rule in App.vue and then
+ * inherits down.
  *
  * The steps and the formula copy the library's own primaryColor chain (100/99/98/95/90/80/70/60/50/40/35/30/25/20/
  * 15/10/5/0), with the primary taken from --brand-main (light #07c05f / dark #06b04d — both are mid-tones, so
@@ -129,7 +130,7 @@
  *
  *    Background and radius are written on both layers: color-bgc-n100 sits on the **inner** section, so
  *    overriding only the outer layer would be covered by it. The border is given to the inner layer alone:
- *    measured on the live page, outer rectW=952 and inner rectW=950, so two 1px borders would sit exactly
+ *    measured in the rendered DOM, outer rectW=952 and inner rectW=950, so two 1px borders would sit exactly
  *    adjacent and the same color stacked reads as one 2px line, while card borders elsewhere in the app are
  *    1px (e.g. .audio-player-section). After the removal the border still lands on the original outer edge
  *    (the inner layer is width:100% with border-box), and the content width actually gains 2px. */
@@ -203,8 +204,9 @@
 /* Heading font sizes. The library writes heading sizes on the <section> wrapping Text (measured live: the h1
  * layer is 24px, the h2 layer is 22px), but what actually sizes the <h1> is **our own** compiled markdown rule:
  *   .answer-event .answer-content.markdown-content[data-v-*] h1{font-size:1.5em;…}
- * (source = components/css/chat-markdown.less:445-468, compiled into AgentStreamDisplay-*.css; selector
- * 0-4-1, so no host-layer rule like .chat-a2ui-surface h1 (0-1-1) can outrank it — measured: after injecting
+ * (source = the :deep(h1) and :deep(h2) rules of the .chat-markdown-typography() mixin in
+ * components/css/chat-markdown.less, compiled into AgentStreamDisplay-*.css; selector 0-4-1, so no
+ * host-layer rule like .chat-a2ui-surface h1 (0-1-1) can outrank it — measured: after injecting
  * .chat-a2ui-surface h1{font-size:17px} live, the computed value was still 36px.)
  * That rule itself is not wrong; what is wrong is the em baseline: inside a card the h1's parent is the
  * library's 24px layer, so 1.5em = 36px, half again as large as the markdown h1 in the same bubble
@@ -243,8 +245,8 @@
  * does not stack into a double line with the container's bottom edge.
  *
  * **Selectors must not nest :has() inside :has().** Chrome 134's stylesheet parser silently drops the whole
- * rule when it sees a nested :has (no error, no degradation): injecting that rule into a <style> in the live
- * page and reading the CSSOM yielded 0 rules, while all 42 non-nested :has rules in the same document were
+ * rule when it sees a nested :has (no error, no degradation): injecting that rule into a <style> in the browser
+ * and reading the CSSOM yielded 0 rules, while all 42 non-nested :has rules in the same document were
  * present. The previous version here used exactly the nested form, and the entire rule never took effect —
  * it showed up as "the spec table has no background and no border" while the rule was verifiably present in
  * the build bytes (not a build problem). So below it is split into three parallel functional pseudo-classes,

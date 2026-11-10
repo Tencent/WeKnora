@@ -602,8 +602,8 @@ type SystemPromptSection struct {
 // spec (a2ui-project/a2ui, specification/v0_9/catalogs/basic/catalog.json).
 const a2uiBasicCatalogID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
 
-// agentA2UIGuidance teaches the official A2UI v0.9 wire format (route B —
-// upstream issue #3017). WeKnora is the producer: the model emits official
+// agentA2UIGuidance teaches the official A2UI v0.9 wire format, the one
+// upstream issue #3017 is about. WeKnora is the producer: the model emits official
 // server→client frames (createSurface + updateComponents) wrapped in the
 // official <a2ui-json> tags — the wrapper the official SDK's generated prompt
 // mandates and its parser requires, which is what makes an external A2UI client
@@ -642,13 +642,15 @@ func agentA2UIGuidance() string {
 		"between them:\n" +
 		"  " + types.A2UITagOpen + "\n" +
 		"  [\n" +
-		"    {\"version\":\"v0.9\",\"createSurface\":{\"surfaceId\":\"s1\",\"catalogId\":\"" + a2uiBasicCatalogID + "\"}},\n" +
+		"    {\"version\":\"v0.9\",\"createSurface\":{\"surfaceId\":\"s1\"," +
+		"\"catalogId\":\"" + a2uiBasicCatalogID + "\"}},\n" +
 		"    {\"version\":\"v0.9\",\"updateComponents\":{\"surfaceId\":\"s1\",\"components\":[" +
 		"{\"id\":\"root\",\"component\":\"Card\",\"child\":\"col1\"}," +
 		"{\"id\":\"col1\",\"component\":\"Column\",\"children\":[\"t1\",\"b1\"]}," +
 		"{\"id\":\"t1\",\"component\":\"Text\",\"text\":\"...\",\"variant\":\"h2\"}," +
 		"{\"id\":\"b1_lbl\",\"component\":\"Text\",\"text\":\"...\"}," +
-		"{\"id\":\"b1\",\"component\":\"Button\",\"child\":\"b1_lbl\",\"variant\":\"primary\",\"action\":{\"event\":{\"name\":\"noop\"}}}]}}\n" +
+		"{\"id\":\"b1\",\"component\":\"Button\",\"child\":\"b1_lbl\"," +
+		"\"variant\":\"primary\",\"action\":{\"event\":{\"name\":\"noop\"}}}]}}\n" +
 		"  ]\n" +
 		"  " + types.A2UITagClose + "\n" +
 		"  - Every frame carries version \"v0.9\"; a wrong version is dropped.\n" +
@@ -673,6 +675,57 @@ func agentA2UIGuidance() string {
 		"same chat and the reply streams like a normal answer. Buttons that " +
 		"only display or acknowledge stay \"noop\". A confirm button runs " +
 		"exactly once; later clicks are answered as already executed.\n" +
+		"  - Form input round: a confirm card may collect user input through " +
+		"the five official input controls — TextField (single-line text; " +
+		"\"variant\":\"number\" for digits, \"variant\":\"longText\" for " +
+		"multiline), CheckBox (a boolean), ChoicePicker (choices from an " +
+		"\"options\" list, each option an object with \"label\" and \"value\"; " +
+		"the submitted value binds as a list of strings even for a single " +
+		"choice — set \"variant\":\"mutuallyExclusive\"), Slider (a number; " +
+		"\"max\" is required) and DateTimeInput (set \"enableDate\" and/or " +
+		"\"enableTime\").\n" +
+		"  - An input's value MUST be the official binding form " +
+		"\"value\":{\"path\":\"/name\"} with the field name after the slash — " +
+		"a literal value has nowhere to receive the user's typing. On the " +
+		"submit Button every context key except \"message\" must be a binding " +
+		"pointing at one of the card's own inputs, e.g. " +
+		"\"name\":{\"path\":\"/name\"}; \"message\" stays a literal string. " +
+		"The server replays the submission against the persisted card and " +
+		"refuses the whole click on any mismatch — a forged key, a tampered " +
+		"message echo or an unvettable value is a 400, nothing partial " +
+		"survives.\n" +
+		"  - Accepted values are appended to the next user message under the " +
+		"fixed header line 用户提交的表单：, one \"- label: value\" line per " +
+		"field in key order — write each input's \"label\" as a plain literal " +
+		"string in the user's language; it typesets that line (a non-literal " +
+		"label falls back to the key name). A field the user leaves blank — " +
+		"absent or empty — comes back as the literal 未填写; treat it as " +
+		"missing information and never invent a value for it.\n" +
+		"  - At most 8 input fields per card. Put the submit Button's " +
+		"\"checks\" on the Button that consumes the form, never on the " +
+		"inputs. Never use the obscured (password) variant of TextField. " +
+		"Never attach inputs to a noop button — only confirm consumes them. " +
+		"Form card example:\n" +
+		"  " + types.A2UITagOpen + "\n" +
+		"  [\n" +
+		"    {\"version\":\"v0.9\",\"createSurface\":{\"surfaceId\":\"s1\"," +
+		"\"catalogId\":\"" + a2uiBasicCatalogID + "\"}},\n" +
+		"    {\"version\":\"v0.9\",\"updateComponents\":{\"surfaceId\":\"s1\",\"components\":[" +
+		"{\"id\":\"root\",\"component\":\"Card\",\"child\":\"col1\"}," +
+		"{\"id\":\"col1\",\"component\":\"Column\",\"children\":[\"t1\",\"f1\",\"f2\",\"b1\"]}," +
+		"{\"id\":\"t1\",\"component\":\"Text\",\"text\":\"...\",\"variant\":\"h2\"}," +
+		"{\"id\":\"f1\",\"component\":\"TextField\",\"label\":\"...\",\"value\":{\"path\":\"/name\"}}," +
+		"{\"id\":\"f2\",\"component\":\"ChoicePicker\",\"label\":\"...\",\"variant\":\"mutuallyExclusive\"," +
+		"\"options\":[{\"label\":\"...\",\"value\":\"a\"}],\"value\":{\"path\":\"/room\"}}," +
+		"{\"id\":\"b1_lbl\",\"component\":\"Text\",\"text\":\"...\"}," +
+		"{\"id\":\"b1\",\"component\":\"Button\",\"child\":\"b1_lbl\",\"variant\":\"primary\"," +
+		"\"checks\":[{\"condition\":{\"call\":\"required\",\"args\":" +
+		"{\"value\":{\"path\":\"/name\"}},\"returnType\":\"boolean\"},\"message\":\"...\"}]," +
+		"\"action\":{\"event\":{\"name\":\"confirm\",\"context\":{\"message\":\"...\"," +
+		"\"name\":{\"path\":\"/name\"},\"room\":{\"path\":\"/room\"}}}}}]}}\n" +
+		"  ]\n" +
+		"  " + types.A2UITagClose + "\n" +
+
 		"  - At most 6 Button components per surface.\n" +
 		"  - The block is machine-read: put all human-readable explanation in " +
 		"markdown OUTSIDE the " + types.A2UITagOpen + " block, never inside it.\n"

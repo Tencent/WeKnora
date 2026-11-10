@@ -49,13 +49,16 @@ type executeAgentCardActionRequest struct {
 	// value (btn.ActionName) is authoritative; a mismatch is refused.
 	ActionName string `json:"action_name"`
 	// Context carries the resolved data-binding values the client reports.
-	// v0 ignores it; kept on the wire so the official action shape is intact.
+	// The confirm executor reads it to VETO: the persisted button context is
+	// the spec, the submission is replayed against it (ReplayA2UIForm), and
+	// every mismatch is a 400 denial. Accepted values are composed into the
+	// follow-up text — the client never injects arbitrary text.
 	Context json.RawMessage `json:"context,omitempty"`
 }
 
 // ExecuteAgentCardAction handles POST /api/v1/agent/actions/execute —
-// upstream issue #3017's controlled button-action endpoint (route B, official
-// A2UI v0.9).
+// upstream issue #3017's controlled button-action endpoint for the official
+// A2UI v0.9 wire format.
 //
 // Defense layers, in order: session ownership (GetOwnedSession enforces
 // owner+tenant with no Admin+ read fallback, foreign/unknown → 404), content
@@ -70,8 +73,10 @@ type executeAgentCardActionRequest struct {
 // (500), failed message lookup (404/500) and a nil message (404). An audit
 // row fires on: success (both executors), the unresolved-button 404
 // (component absent, not a Button, or no event action), the name-mismatch
-// 404, the whitelist 403, the RBAC 403, and — confirm only — the five denial
-// reasons context_missing, already_executed, run_in_progress,
+// 404, the whitelist 403, the RBAC 403, and — confirm only — eleven denial
+// reasons: the six replay rejections form_value_unsupported, form_path_unbound,
+// form_keys_mismatch, form_literal_mismatch, form_value_invalid and
+// form_too_large, plus context_missing, already_executed, run_in_progress,
 // session_rewinding and agent_unresolvable. The already_executed denial row
 // is written BY DESIGN (next to the idempotent 200) so the one-shot history
 // stays reconstructable. Recorded tolerance: any caller holding their own
@@ -85,12 +90,12 @@ func (h *Handler) ExecuteAgentCardAction(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req executeAgentCardActionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError("invalid request body").WithDetails(err.Error()))
+		_ = c.Error(apperrors.NewBadRequestError("invalid request body").WithDetails(err.Error()))
 		return
 	}
 	if req.SessionID == "" || req.MessageID == "" || req.SurfaceID == "" ||
 		req.SourceComponentID == "" || req.ActionName == "" {
-		c.Error(apperrors.NewBadRequestError(
+		_ = c.Error(apperrors.NewBadRequestError(
 			"session_id, message_id, surface_id, source_component_id and action_name are required"))
 		return
 	}
@@ -98,11 +103,11 @@ func (h *Handler) ExecuteAgentCardAction(c *gin.Context) {
 	session, err := h.sessionService.GetOwnedSession(ctx, req.SessionID)
 	if err != nil {
 		if stderrors.Is(err, apperrors.ErrSessionNotFound) {
-			c.Error(apperrors.NewNotFoundError(err.Error()))
+			_ = c.Error(apperrors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	msg, err := h.messageService.GetMessage(ctx, req.SessionID, req.MessageID)
@@ -114,15 +119,15 @@ func (h *Handler) ExecuteAgentCardAction(c *gin.Context) {
 		if stderrors.Is(err, apperrors.ErrSessionNotFound) || stderrors.Is(err, gorm.ErrRecordNotFound) {
 			logger.Warnf(ctx, "Card action: session or message not found, session ID: %s, message ID: %s",
 				req.SessionID, req.MessageID)
-			c.Error(apperrors.NewNotFoundError(err.Error()))
+			_ = c.Error(apperrors.NewNotFoundError(err.Error()))
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	if msg == nil {
-		c.Error(apperrors.NewNotFoundError("message not found"))
+		_ = c.Error(apperrors.NewNotFoundError("message not found"))
 		return
 	}
 
@@ -133,8 +138,8 @@ func (h *Handler) ExecuteAgentCardAction(c *gin.Context) {
 	btn := types.FindA2UIButton(msg.Content, req.SurfaceID, req.SourceComponentID)
 	if btn == nil {
 		h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
-			req, req.SurfaceID, req.SourceComponentID, "unresolved", "", "")
-		c.Error(apperrors.NewNotFoundError("card or button not found in message"))
+			req, req.SurfaceID, req.SourceComponentID, "unresolved", "", "", "")
+		_ = c.Error(apperrors.NewNotFoundError("card or button not found in message"))
 		return
 	}
 	// The official action message always carries the action name. A client
@@ -144,22 +149,22 @@ func (h *Handler) ExecuteAgentCardAction(c *gin.Context) {
 	if req.ActionName != btn.ActionName {
 		h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
 			req, req.SurfaceID, req.SourceComponentID,
-			"action_name_mismatch:"+btn.ActionName, "", "")
-		c.Error(apperrors.NewNotFoundError("card or button not found in message"))
+			"action_name_mismatch:"+btn.ActionName, "", "", "")
+		_ = c.Error(apperrors.NewNotFoundError("card or button not found in message"))
 		return
 	}
 	if !types.AgentCardActionAllowed(btn.ActionName) {
 		h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
 			req, req.SurfaceID, req.SourceComponentID,
-			"action_name_not_allowed:"+btn.ActionName, "", "")
-		c.Error(apperrors.NewForbiddenError("this card action is not enabled"))
+			"action_name_not_allowed:"+btn.ActionName, "", "", "")
+		_ = c.Error(apperrors.NewForbiddenError("this card action is not enabled"))
 		return
 	}
 	required := types.AgentCardRequiredRole(btn.ActionName)
 	if role := types.TenantRoleFromContext(ctx); !role.HasPermission(required) {
 		h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
-			req, req.SurfaceID, req.SourceComponentID, "insufficient_role", required, "")
-		c.Error(apperrors.NewForbiddenError("insufficient workspace role for this card action"))
+			req, req.SurfaceID, req.SourceComponentID, "insufficient_role", required, "", "")
+		_ = c.Error(apperrors.NewForbiddenError("insufficient workspace role for this card action"))
 		return
 	}
 
@@ -187,13 +192,13 @@ func (h *Handler) ExecuteAgentCardAction(c *gin.Context) {
 		// audit still fires so a refusal never goes unrecorded. Distinct reason
 		// string from the whitelist refusal above so the two 403s stay separable.
 		h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
-			req, req.SurfaceID, req.SourceComponentID, "action_name_not_supported", "", "")
-		c.Error(apperrors.NewForbiddenError("this card action is not enabled"))
+			req, req.SurfaceID, req.SourceComponentID, "action_name_not_supported", "", "", "")
+		_ = c.Error(apperrors.NewForbiddenError("this card action is not enabled"))
 		return
 	}
 
 	h.emitAgentCardAudit(c, types.AuditActionAgentCardExecuted, types.AuditOutcomeSuccess,
-		req, req.SurfaceID, req.SourceComponentID, "", "", btn.ActionName)
+		req, req.SurfaceID, req.SourceComponentID, "", "", "", btn.ActionName)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
@@ -236,17 +241,20 @@ var kickConfirmRun = func(h *Handler, followUp *qaRequestContext) {
 // context becomes a user message, and the agent continues in the same
 // session as a server-started run.
 //
-// Order matters and is pinned by the tests: (1) persisted context only —
-// the client request body's context is never read; (2) one-shot dedup
-// against the audit log, lookup failure degrades to proceed (the exclusive
-// claim below is the real backstop); (3) live-run / rewind guards BEFORE any
-// row is written (skipSSE makes executeQA's own guards log-only, so a late
-// refusal would orphan the turn); (4) request context rebuilt from the
+// Order matters and is pinned by the tests: (1) the persisted context is the
+// SPEC — the client submission is replayed against it (ReplayA2UIForm, six
+// form_* rejections) and the accepted values compose into the follow-up text
+// (ComposeConfirmFollowUp; byte-identical for a bindless confirm); (2) one-shot
+// dedup against the audit log, lookup failure degrades to proceed (the
+// exclusive claim below is the real backstop); (3) live-run / rewind guards
+// BEFORE any row is written (skipSSE makes executeQA's own guards log-only, so
+// a late refusal would orphan the turn); (4) request context rebuilt from the
 // persisted input-bar state (LastRequestState), the same helpers parseQA
 // Request uses; (5) persist then exclusive SetLiveRun — ErrLiveRunExists
 // rolls the turn back and 409s (ClaimLiveRun is WRONG here: it overwrites
 // unconditionally, see the interface doc in internal/stream); (6) success
-// audit BEFORE the kick so a racing second click sees it; (7) respond.
+// audit (with the sorted form_keys) BEFORE the kick so a racing second click
+// sees it; (7) respond.
 func (h *Handler) executeConfirmAction(
 	c *gin.Context,
 	req executeAgentCardActionRequest,
@@ -257,16 +265,34 @@ func (h *Handler) executeConfirmAction(
 	ctx := c.Request.Context()
 	deny := func(reason string, httpErr error) {
 		h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
-			req, surfaceID, componentID, reason, "", "")
-		c.Error(httpErr)
+			req, surfaceID, componentID, reason, "", "", "")
+		_ = c.Error(httpErr)
 	}
 
-	// (1) PERSISTED context only; the client context is never trusted.
+	// (1) PERSISTED context only; the client context is read and VETOED, never
+	// trusted. The persisted button spec is the whitelist: every binding must
+	// appear in the submission, the key sets must match, literal values must
+	// survive a DeepEqual round-trip, bound values must stay scalar-shaped and
+	// under the size caps. Accepted bindings compose into the follow-up text
+	// with the persisted labels — the client never chooses what it echoes.
 	var msgText string
+	var formValues map[string]json.RawMessage
 	if raw, ok := btn.Context["message"]; ok {
 		_ = json.Unmarshal(raw, &msgText)
 	}
 	msgText = strings.TrimSpace(msgText)
+	followUpText := msgText
+	if msgText != "" {
+		var replayReason string
+		formValues, replayReason = types.ReplayA2UIForm(
+			btn.Context, req.Context, btn.BoundInputPaths)
+		if replayReason != "" {
+			deny(replayReason, apperrors.NewBadRequestError(
+				"the submitted form does not match this card (reason: "+replayReason+")"))
+			return
+		}
+		followUpText = types.ComposeConfirmFollowUp(msgText, formValues, btn.FieldLabels)
+	}
 	if msgText == "" {
 		deny("context_missing", apperrors.NewBadRequestError(
 			"this confirm button has no follow-up instruction (action.event.context.message)"))
@@ -287,7 +313,7 @@ func (h *Handler) executeConfirmAction(
 					agentCardAuditTargetID(surfaceID, componentID), err)
 			} else if executed {
 				h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
-					req, surfaceID, componentID, "already_executed", "", "")
+					req, surfaceID, componentID, "already_executed", "", "", "")
 				c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
 					"status":      "already_executed",
 					"action_name": btn.ActionName,
@@ -302,7 +328,7 @@ func (h *Handler) executeConfirmAction(
 	liveID, _, err := h.streamManager.GetLiveRun(ctx, req.SessionID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": req.SessionID})
-		c.Error(apperrors.NewServiceUnavailableError("failed to look up the running turn"))
+		_ = c.Error(apperrors.NewServiceUnavailableError("failed to look up the running turn"))
 		return
 	}
 	if liveID != "" {
@@ -348,8 +374,8 @@ func (h *Handler) executeConfirmAction(
 		sessionID:   req.SessionID,
 		requestID:   requestID,
 		receivedAt:  time.Now(),
-		query:       msgText,
-		userInput:   msgText,
+		query:       followUpText,
+		userInput:   followUpText,
 		session:     session,
 		customAgent: customAgent,
 		assistantMessage: &types.Message{
@@ -384,29 +410,33 @@ func (h *Handler) executeConfirmAction(
 	if err := h.persistTurnMessages(followUp.ctx, followUp); err != nil {
 		logger.ErrorWithFields(followUp.ctx, err, map[string]interface{}{"session_id": req.SessionID})
 		h.rollbackTurnMessages(followUp.ctx, followUp, true, true)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 	if followUp.userMessageID == "" || followUp.assistantMessage == nil || followUp.assistantMessage.ID == "" {
 		h.rollbackTurnMessages(followUp.ctx, followUp, true, true)
-		c.Error(apperrors.NewInternalServerError("failed to persist the confirm turn"))
+		_ = c.Error(apperrors.NewInternalServerError("failed to persist the confirm turn"))
 		return
 	}
-	if err := h.streamManager.SetLiveRun(followUp.ctx, req.SessionID, followUp.assistantMessage.ID, requestID); err != nil {
+	if err := h.streamManager.SetLiveRun(followUp.ctx, req.SessionID,
+		followUp.assistantMessage.ID, requestID); err != nil {
 		h.rollbackTurnMessages(followUp.ctx, followUp, true, true)
 		if stderrors.Is(err, stream.ErrLiveRunExists) {
 			h.emitAgentCardAudit(c, types.AuditActionAgentCardDenied, types.AuditOutcomeDenied,
-				req, surfaceID, componentID, "run_in_progress", "", "")
-			c.Error(apperrors.NewConflictError("another turn is already running in this session"))
+				req, surfaceID, componentID, "run_in_progress", "", "", "")
+			_ = c.Error(apperrors.NewConflictError("another turn is already running in this session"))
 		} else {
-			c.Error(apperrors.NewServiceUnavailableError("failed to publish the running turn"))
+			_ = c.Error(apperrors.NewServiceUnavailableError("failed to publish the running turn"))
 		}
 		return
 	}
 
 	// (6) Success audit BEFORE the kick so a racing second click sees it.
+	// form_keys is the ONE deterministic key order (the same sort the composer
+	// used) — values never reach the audit, keys only.
 	h.emitAgentCardAudit(c, types.AuditActionAgentCardExecuted, types.AuditOutcomeSuccess,
-		req, surfaceID, componentID, "", "", btn.ActionName)
+		req, surfaceID, componentID, "", "",
+		strings.Join(types.SortedA2UIFormKeys(formValues), ","), btn.ActionName)
 	kickConfirmRun(h, followUp)
 
 	// (7) The echo of the persisted message lets the frontend render the
@@ -415,7 +445,7 @@ func (h *Handler) executeConfirmAction(
 		"status":               "started",
 		"action_name":          btn.ActionName,
 		"label":                btn.Label,
-		"message":              msgText,
+		"message":              followUpText,
 		"message_id":           followUp.userMessageID,
 		"assistant_message_id": followUp.assistantMessage.ID,
 	}})
@@ -423,8 +453,16 @@ func (h *Handler) executeConfirmAction(
 
 // emitAgentCardAudit is best-effort: audit failure must never change the
 // business outcome. Same idiom as the RBAC denial audits in
-// internal/middleware/rbac.go (nil-check the context-injected service,
-// discard Log's error). AuditServiceProvider is installed globally, so the
+// internal/middleware/rbac.go (nil-check the context-injected service). Unlike
+// those, a rejected row is reported: Log's error was discarded, and that is how
+// the embed plane lost every card-action row without a trace — the synthetic
+// "embed-<channel UUID>" actor (42 chars) did not fit audit_logs.actor_user_id
+// at its original VARCHAR(36), so the EXECUTED row that the confirm-once dedup
+// (CardActionAlreadyExecuted) reads never existed and a second click re-ran the
+// action. The error is therefore warned, never returned, and the actor is
+// deliberately NOT clipped to fit: a clipped id would merge two embed channels
+// whose UUIDs share a prefix, which is worse than a loudly lost row.
+// AuditServiceProvider is installed globally, so the
 // service is present on every /api/v1 route. It must also never panic: a
 // panic here would reach gin's Recovery and turn the caller's 403 into a 500
 // while losing the audit row, so tenant lookup uses the non-panicking context
@@ -442,6 +480,7 @@ func (h *Handler) emitAgentCardAudit(
 	componentID string,
 	reason string,
 	requiredRole types.TenantRole,
+	formKeys string,
 	actionName string,
 ) {
 	audit := middleware.AuditServiceFromContext(c)
@@ -474,10 +513,13 @@ func (h *Handler) emitAgentCardAudit(
 	if requiredRole != "" {
 		details["required_role"] = string(requiredRole)
 	}
+	if formKeys != "" {
+		details["form_keys"] = common.TruncateUTF8Bytes(formKeys, agentCardDetailsMaxLen)
+	}
 	// 31 + 1 + 31 fits target_id VARCHAR(64); see agentCardTargetIDPartMaxLen.
 	targetID := agentCardAuditTargetID(surfaceID, componentID)
 	detailsJSON, _ := json.Marshal(details)
-	_ = audit.Log(ctx, &types.AuditLog{
+	if err := audit.Log(ctx, &types.AuditLog{
 		TenantID:      tenantID,
 		ActorUserID:   actorUserID,
 		ActorRole:     string(types.TenantRoleFromContext(ctx)),
@@ -488,5 +530,8 @@ func (h *Handler) emitAgentCardAudit(
 		RequestMethod: c.Request.Method,
 		RequestPath:   c.Request.URL.Path,
 		Details:       types.JSON(detailsJSON),
-	})
+	}); err != nil {
+		logger.Warnf(ctx, "a2ui card-action audit row rejected: action=%s outcome=%s tenant=%d actor=%q: %v",
+			action, outcome, tenantID, actorUserID, err)
+	}
 }

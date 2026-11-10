@@ -4,11 +4,11 @@ import vm from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
 
-// The click → POST leg of route B, exercised without a browser: the onEvent
+// The click → POST leg of the card-action path, without a browser: the onEvent
 // callback is sliced out of <script setup>, transpiled and run against a stub
 // post(). Same idiom as SkillInstallTimeline.test.mjs (no jsdom in this repo).
 //
-// Why this file exists at all: the first live run in a real deployment
+// Why this file exists at all: the first time this ran in a browser
 // (2026-11-05) posted to "/agent/actions/execute" — the axios instance's
 // baseURL is import.meta.env.BASE_URL, "/" in the Docker build, so a bare path
 // lands on the SPA origin and nginx answers 405 for POST. Nothing in the unit
@@ -199,4 +199,32 @@ test('a 409 while a run is in progress is not a card failure', async () => {
   assert.equal(h.events.length, 0, 'no attach event on a refused click')
   assert.equal(h.sandbox.reflowFailed.value, false, 'a busy session is not a reflow failure')
   assert.equal(h.errors.length, 0, 'a 409 must not log a reflow error')
+})
+
+test('uses the injected actionClient instead of the tenant post() when provided', async () => {
+  const posts = []
+  const clients = []
+  const h = harness({
+    props: {
+      sessionId: 'sess-1',
+      messageId: 'msg-1',
+      actionClient: (p) => {
+        clients.push(JSON.parse(JSON.stringify(p)))
+        return Promise.resolve({ status: 'started', message: 'ok', message_id: 'u1', assistant_message_id: 'a1' })
+      },
+    },
+    post: async (url, body) => { posts.push({ url, body }); return {} },
+  })
+  await h.captured.handler(CONFIRM_ENVELOPE)
+  // The handler does not await the request; drain the microtask queue.
+  await new Promise((resolve) => { setTimeout(resolve, 0) })
+
+  assert.equal(posts.length, 0, 'embed mode must never touch @/utils/request post()')
+  assert.equal(clients.length, 1)
+  assert.equal(clients[0].session_id, 'sess-1')
+  assert.equal(clients[0].action_name, 'confirm')
+  // The attach event still fires from the injected client's response
+  // (res?.data ?? res tolerates the inner object coming directly).
+  assert.equal(h.events.length, 1)
+  assert.equal(h.events[0].detail.status, 'started')
 })

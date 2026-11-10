@@ -62,11 +62,12 @@ function onClick() {
 /* Modelled on the .btn of the reference confirm-card mock (33px high / 8px radius / 13px text / 500 weight),
    with only its blue primary swapped for the brand green (--td-brand-color).
    font-family must be set here: the UA default for <button> is the system button font, which does not
-   inherit from the app — that is why the button text did not line up with the body text on the real device.
+   inherit from the app, so without it the label renders in a different face than the body text beside it.
    Token choices follow the ratchet in assets/theme/styleGuard.test.mjs: radius / font size / duration always
    use our own --app-* (--app-radius-md=8, --app-text-md=13, --app-motion-fast=150ms);
    --td-* only for component sizes that only TDesign defines, and never with a fallback — that rule's baseline is 0,
-   the :root:root in theme.css:1 guarantees --td-* always exists, and a fallback would only hide a misspelled name.
+   the :root:root rule at the top of assets/theme/theme.css guarantees --td-* always exists, and a
+   fallback would only hide a misspelled name.
    33px has no token (the app's medium is 32px); height is not in the ratchet, so it copies the reference card. */
 .a2ui-btn-host {
     display: block;

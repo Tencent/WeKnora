@@ -1,3 +1,5 @@
+// Package agent holds the agent runtime. This file pins the official A2UI
+// v0.9 producer schema that the prompt teaches the model to emit.
 package agent
 
 import (
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -80,7 +83,7 @@ func (l *a2uiSpecLoader) Load(rawURL string) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			return jsonschema.UnmarshalJSON(f)
 		}
 	}
@@ -136,6 +139,48 @@ func extractFirstJSONArray(s string) string {
 	return ""
 }
 
+// extractJSONArrays returns every balanced top-level JSON array in s. It
+// re-scans from just past the end of the previous array, so the prose between
+// the two taught example cards is never scanned as candidate array content —
+// which is what makes bracket-free prose safe to interleave.
+func extractJSONArrays(s string) []string {
+	var out []string
+	for {
+		start := strings.Index(s, "[")
+		if start < 0 {
+			return out
+		}
+		depth := 0
+		inStr := false
+		for i := start; i < len(s); i++ {
+			switch ch := s[i]; ch {
+			case '"':
+				if !inStr {
+					inStr = true
+				} else if i > 0 && s[i-1] != '\\' {
+					inStr = false
+				}
+			case '[':
+				if !inStr {
+					depth++
+				}
+			case ']':
+				if !inStr {
+					depth--
+					if depth == 0 {
+						out = append(out, s[start:i+1])
+						s = s[i+1:]
+						i = len(s) // break the for by advancing past end
+					}
+				}
+			}
+			if depth == 0 && i >= start {
+				break
+			}
+		}
+	}
+}
+
 // TestA2UIProducerFramesValidateAgainstOfficialSchema is the core acceptance
 // check: it extracts, verbatim, the JSON frame that agentA2UIGuidance()
 // teaches the model to emit (extractFirstJSONArray takes the array by bracket
@@ -150,23 +195,25 @@ func extractFirstJSONArray(s string) string {
 // keys" constraint).
 func TestA2UIProducerFramesValidateAgainstOfficialSchema(t *testing.T) {
 	guidance := agentA2UIGuidance()
-	arrayJSON := extractFirstJSONArray(guidance)
-	if arrayJSON == "" {
-		t.Fatal("no JSON array found in A2UI guidance — producer contract is empty")
-	}
-
-	var frames []map[string]any
-	if err := jsonUnmarshalStrict(arrayJSON, &frames); err != nil {
-		t.Fatalf("guidance A2UI array is not valid JSON: %v\n%s", err, arrayJSON)
-	}
-	if len(frames) < 2 {
-		t.Fatalf("expected >=2 frames (createSurface + updateComponents), got %d", len(frames))
+	arrays := extractJSONArrays(guidance)
+	if len(arrays) < 2 {
+		t.Fatalf("expected >=2 JSON arrays (noop example + form example), got %d", len(arrays))
 	}
 
 	s2c := compileA2UISchema(t, "server_to_client.json")
-	for i, frame := range frames {
-		if err := s2c.Validate(frame); err != nil {
-			t.Errorf("producer frame %d fails official server_to_client schema:\n%v\nframe: %v", i, err, frame)
+	for arrIdx, arrayJSON := range arrays {
+		var frames []map[string]any
+		if err := jsonUnmarshalStrict(arrayJSON, &frames); err != nil {
+			t.Fatalf("guidance A2UI array %d is not valid JSON: %v\n%s", arrIdx, err, arrayJSON)
+		}
+		if len(frames) < 2 {
+			t.Fatalf("array %d: expected >=2 frames (createSurface + updateComponents), got %d", arrIdx, len(frames))
+		}
+		for i, frame := range frames {
+			if err := s2c.Validate(frame); err != nil {
+				t.Errorf("array %d, frame %d fails official server_to_client schema:\n%v\nframe: %v",
+					arrIdx, i, err, frame)
+			}
 		}
 	}
 }
@@ -209,10 +256,71 @@ func TestA2UITaughtComponentsExistInBasicCatalog(t *testing.T) {
 	if !ok {
 		t.Fatal("catalog.json has no components map")
 	}
-	taught := []string{"Card", "Column", "Row", "Text", "Button"}
+	taught := []string{
+		"Card", "Column", "Row", "Text", "Button", "TextField",
+		"CheckBox", "ChoicePicker", "Slider", "DateTimeInput",
+	}
 	for _, name := range taught {
 		if _, present := comps[name]; !present {
 			t.Errorf("component %q used by WeKnora A2UI guidance is not in the official basic catalog", name)
 		}
+	}
+}
+
+// TestA2UISpecFormExampleValidatesAgainstOfficialSchema validates the
+// verbatim reference form card against the official server-to-client schema.
+// This is the "external consumer can read our output" proof for the form
+// card shape: every input control, binding, and confirm action the model is
+// taught to emit must satisfy the official schema, not just our own parser.
+func TestA2UISpecFormExampleValidatesAgainstOfficialSchema(t *testing.T) {
+	specCard := `[
+  {"version":"v0.9","createSurface":{"surfaceId":"s1",
+    "catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}},
+  {"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[
+    {"id":"root","component":"Card","child":"col"},
+    {"id":"col","component":"Column","children":["head","f_name","f_room","btn"]},
+    {"id":"head","component":"Text","text":"请填写会议预约信息","variant":"h3"},
+    {"id":"f_name","component":"TextField","label":"姓名","value":{"path":"/name"}},
+    {"id":"f_room","component":"ChoicePicker","label":"会议室","variant":"mutuallyExclusive",
+     "options":[{"label":"3F 大会议室","value":"3f-hall"},{"label":"5F 视频室","value":"5f-video"}],
+     "value":{"path":"/room"}},
+    {"id":"btn_lbl","component":"Text","text":"提交"},
+    {"id":"btn","component":"Button","child":"btn_lbl","variant":"primary",
+     "checks":[
+       {"condition":{"call":"required","args":{"value":{"path":"/name"}},"returnType":"boolean"},"message":"姓名不能为空"},
+       {"condition":{"call":"required","args":{"value":{"path":"/room"}},"returnType":"boolean"},"message":"请选择会议室"}],
+     "action":{"event":{"name":"confirm","context":{
+       "message":"根据下面用户提交的会议信息继续办理预约。",
+       "name":{"path":"/name"},
+       "room":{"path":"/room"}}}}}
+  ]}}
+]`
+	var frames []map[string]any
+	if err := jsonUnmarshalStrict(specCard, &frames); err != nil {
+		t.Fatalf("reference card card is not valid JSON: %v", err)
+	}
+	if len(frames) < 2 {
+		t.Fatalf("reference card card has %d frames, want >=2", len(frames))
+	}
+	s2c := compileA2UISchema(t, "server_to_client.json")
+	for i, frame := range frames {
+		if err := s2c.Validate(frame); err != nil {
+			t.Fatalf("reference card frame %d fails official server_to_client schema:\n%v", i, err)
+		}
+	}
+	// Anchor: our own parser must also accept this card, and the button must
+	// be re-derivable with the correct action and bindings. The parser
+	// routes through ExtractA2UIMessages, which requires the <a2ui-json>
+	// tag wrapper, so wrap the bare spec array before the lookup.
+	wrapped := types.A2UITagOpen + "\n" + specCard + "\n" + types.A2UITagClose
+	btn := types.FindA2UIButton(wrapped, "s1", "btn")
+	if btn == nil {
+		t.Fatal("reference card button not re-derivable by our parser")
+	}
+	if btn.ActionName != "confirm" {
+		t.Errorf("reference card button action = %q, want confirm", btn.ActionName)
+	}
+	if len(btn.BoundInputPaths) != 2 {
+		t.Errorf("reference card button has %d bound paths, want 2", len(btn.BoundInputPaths))
 	}
 }
