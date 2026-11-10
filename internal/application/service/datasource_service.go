@@ -639,14 +639,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	logger.Infof(ctx, "processing data source sync: ds=%s syncLog=%s", payload.DataSourceID, payload.SyncLogID)
 
-	// Get data source
-	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
-	sourceMissing := errors.Is(err, datasource.ErrDataSourceNotFound)
-	if err != nil && !sourceMissing {
-		return fmt.Errorf("read data source for sync: %w", err)
-	}
-
-	// Get sync log
+	// Get sync log. It is loaded before the data source so that a redelivery of
+	// an already finished round is recognised even when the data source has been
+	// deleted in the meantime, instead of having its log rewritten to canceled.
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
 	if errors.Is(err, datasource.ErrSyncLogNotFound) {
 		return nil
@@ -654,14 +649,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	if err != nil {
 		return fmt.Errorf("read sync log: %w", err)
 	}
-	if sourceMissing {
-		logger.Warnf(ctx, "data source not found, cancelling sync: ds=%s", payload.DataSourceID)
-		syncLog.Status = types.SyncLogStatusCanceled
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = "data source has been deleted"
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		return nil
-	}
+
 	// An asynq retry (or redelivery) can arrive after the round already reached
 	// a terminal state. Do not replay it: success/partial are finished, and
 	// canceled was stopped on purpose. failed must fall through because the
@@ -671,6 +659,21 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	case types.SyncLogStatusSuccess, types.SyncLogStatusPartial, types.SyncLogStatusCanceled:
 		logger.Infof(ctx, "sync log already finished, skipping replay: ds=%s syncLog=%s status=%s",
 			payload.DataSourceID, payload.SyncLogID, syncLog.Status)
+		return nil
+	}
+
+	// Get data source
+	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
+	sourceMissing := errors.Is(err, datasource.ErrDataSourceNotFound)
+	if err != nil && !sourceMissing {
+		return fmt.Errorf("read data source for sync: %w", err)
+	}
+	if sourceMissing {
+		logger.Warnf(ctx, "data source not found, cancelling sync: ds=%s", payload.DataSourceID)
+		syncLog.Status = types.SyncLogStatusCanceled
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = "data source has been deleted"
+		_ = s.syncLogRepo.Update(ctx, syncLog)
 		return nil
 	}
 
