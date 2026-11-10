@@ -198,6 +198,8 @@ func detectMinerUProtocol(
 			}
 			return minerUProtocolTasks, fmt.Errorf("MinerU Tasks does not advertise default output")
 		}
+		// A missing capability list is not evidence of a Jobs-only server: some
+		// 4.1 health responses expose only the release version used below.
 		parts := strings.Split(strings.TrimPrefix(health.Version, "v"), ".")
 		if len(parts) >= 2 {
 			major, majorErr := strconv.Atoi(parts[0])
