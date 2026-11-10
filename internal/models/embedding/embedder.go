@@ -105,9 +105,13 @@ type Config struct {
 	Provider                  string            `json:"provider"`
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
 	// back to the process-wide default (see limiter.GateN).
-	MaxConcurrency int                      `json:"max_concurrency"`
-	Spec           *types.ModelSpecOverride `json:"spec,omitempty"`
-	ExtraConfig    map[string]string        `json:"extra_config"`
+	MaxConcurrency int `json:"max_concurrency"`
+	// MaxRPS / MaxBurst pace every call (including per-sub-batch pool calls)
+	// to the provider's request-rate quota; 0 disables pacing.
+	MaxRPS      float64                  `json:"max_rps"`
+	MaxBurst    int                      `json:"max_burst"`
+	Spec        *types.ModelSpecOverride `json:"spec,omitempty"`
+	ExtraConfig map[string]string        `json:"extra_config"`
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string `json:"custom_headers"`
 	AppID         string
@@ -132,6 +136,8 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 		TruncatePromptTokens:      m.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:                  m.Parameters.Provider,
 		MaxConcurrency:            m.Parameters.MaxConcurrency,
+		MaxRPS:                    m.Parameters.MaxRPS,
+		MaxBurst:                  m.Parameters.MaxBurst,
 		Spec:                      m.Parameters.Spec,
 		ExtraConfig:               m.Parameters.ExtraConfig,
 		CustomHeaders:             m.Parameters.CustomHeaders,
@@ -152,7 +158,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	// Innermost: gate the real provider round-trips (including the per-sub-batch
 	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
 	// concurrencyEmbedder for why this sits below the observability decorators.
-	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency)
+	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency, config.MaxRPS, config.MaxBurst)
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}
