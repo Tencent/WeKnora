@@ -40,6 +40,15 @@ type CompositeRetrieveEngine struct {
 func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 	retrieveParams []types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
+	// Fail closed before fan-out: an unscoped param would otherwise reach an
+	// engine whose filter then degrades to "scan every knowledge base", and a
+	// param with no registered engine would surface only a routing error.
+	for _, param := range retrieveParams {
+		if err := param.ValidateScope(); err != nil {
+			return nil, err
+		}
+	}
+
 	var partialMu sync.Mutex
 	var partialErrs []error
 	results, err := concurrentRetrieve(ctx, retrieveParams,

@@ -236,6 +236,9 @@ func (r *repository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[
 }
 
 func (r *repository) Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	switch params.RetrieverType {
 	case types.VectorRetrieverType:
 		return r.VectorRetrieve(ctx, params)
