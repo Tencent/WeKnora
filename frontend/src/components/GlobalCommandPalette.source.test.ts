@@ -90,6 +90,8 @@ async function fixture(options: { kbId?: string; unsupported?: boolean; missingK
         if (name === './GlobalCommandPalette/ResultItem.vue') return ResultItem
         if (name === './GlobalCommandPalette/ResultGroup.vue') return passSlots
         if (name === './ChatReferenceSourceView.vue') return component('./ChatReferenceSourceView.vue')
+        // The real source view resolves the KB name through the shared cache.
+        if (name === '@/stores/chatResources') return { useChatResourcesStore: () => ({ fetchKnowledgeBaseById: async () => ({ name: 'Travel knowledge base' }) }) }
         if (name === '@/components/document-preview.vue') return Preview
         if (name === '@/api/knowledge-base/index') return {
           getKnowledgeDetails: async (id: string) => {
