@@ -99,7 +99,7 @@ function setup(t: TestContext, mode: 'ordinary' | 'quick-timeline' | 'agent') {
     handler.processStreamChunk({ id: 'request', response_type, content, done, data })
   }
   return {
-    message, loading, isReplying, currentAssistantMessageId, replies, turns, errors, img, requests, answer, send, revealed,
+    message, messagesList, loading, isReplying, currentAssistantMessageId, replies, turns, errors, img, requests, answer, send, revealed,
     persist: () => { persisted = true },
     render: () => hydrateProtectedFileImages(root, access()),
     flush: async () => {
@@ -109,6 +109,29 @@ function setup(t: TestContext, mode: 'ordinary' | 'quick-timeline' | 'agent') {
     },
   }
 }
+
+test('a continuation created during replay renders each answer chunk before completion', async t => {
+  const h = setup(t, 'agent')
+  h.send('agent_query')
+  h.send('user_message_injected', '', false, { steer_id: 'steer', content: 'Please continue' })
+  const continuation = h.messagesList[2]
+  assert.equal(continuation.role, 'assistant')
+
+  const rendered: string[] = []
+  const stop = vue.watchEffect(() => {
+    const text = continuation.agentEventStream[0]?.content
+    if (text) rendered.push(text)
+  })
+  t.after(stop)
+
+  h.send('answer', 'First', false, { event_id: 'answer' })
+  await vue.nextTick()
+  assert.deepEqual(rendered, ['First'])
+  h.send('answer', ' chunk', false, { event_id: 'answer' })
+  await vue.nextTick()
+  assert.deepEqual(rendered, ['First', 'First chunk'])
+  assert.equal(continuation.is_completed, false)
+})
 
 for (const mode of ['ordinary', 'quick-timeline', 'agent'] as const) {
   test(`${mode}: answer.done → persistence → complete retries the image exactly once`, async t => {
