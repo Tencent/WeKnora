@@ -300,6 +300,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | 七牛云 | `qiniu` | ✓ | | | | |
 | 美团 LongCat | `longcat` | ✓ | | | | |
 | 腾讯云 LKEAP | `lkeap` | ✓ | | ✓ | | |
+| 讯飞星辰 MaaS | `iflytek` | ✓ | | | | |
 | DeepSeek | `deepseek` | ✓ | | | | |
 | OpenAI | `openai` | ✓ | ✓ | | ✓ | ✓ |
 | Azure OpenAI | `azure_openai` | ✓ | ✓ | | ✓ | |
