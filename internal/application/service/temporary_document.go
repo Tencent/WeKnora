@@ -320,10 +320,19 @@ func (s *temporaryDocumentService) CleanupExpired(ctx context.Context) error {
 		if len(documents) == 0 {
 			return nil
 		}
+		var firstDeleteErr error
 		for _, document := range documents {
 			if err := s.Delete(ctx, document.TenantID, document.SessionID, document.ID); err != nil {
 				logger.Warnf(ctx, "cleanup temporary document failed: document_id=%s err=%v", document.ID, err)
+				if firstDeleteErr == nil {
+					firstDeleteErr = fmt.Errorf("delete temporary document %s: %w", document.ID, err)
+				}
 			}
+		}
+		// A full batch of failed deletes would otherwise fetch the same rows
+		// immediately forever. Return to the scheduler and retry on its next tick.
+		if firstDeleteErr != nil {
+			return firstDeleteErr
 		}
 		if len(documents) < 100 {
 			return nil
