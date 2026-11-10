@@ -576,6 +576,7 @@ jobs:
           test -f build/bin/weknora-lite
 
       - name: Assemble deb (常规包：Depends 只声明真正的 ELF 依赖)
+        shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ steps.ver.outputs.version }}"
@@ -649,6 +650,7 @@ jobs:
 
       # 在同源 focal 容器里安装验证：ldd 门禁（零 not found）+ 零升级断言
       - name: Verify deb in focal container
+        shell: bash
         run: |
           set -euo pipefail
           DEB=$(ls weknora-lite_*_arm64.deb | head -1)
