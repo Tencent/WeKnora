@@ -336,6 +336,7 @@ for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
       f.vm.formData.customHeaders = [{ key: ' X-Test ', value: ' draft ' }]
       await f.vm.checkRemoteAPI()
       assert.equal(f.requests[0].modelName, 'draft-model')
+      assert.equal(f.requests[0].modelType, type === 'vllm' ? 'VLLM' : undefined)
       assert.equal(f.requests[0].apiKey, 'draft-key')
       assert.equal(f.requests[0].customHeaders['X-Test'], 'draft')
       assert.equal(f.saves.length, 0)
