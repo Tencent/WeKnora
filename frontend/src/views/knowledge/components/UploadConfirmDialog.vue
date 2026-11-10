@@ -755,6 +755,7 @@ interface UploadUIState {
     nodes: Array<{ name: string; attributes: string[] }>
     relations: Array<{ node1: string; node2: string; type: string }>
     customInstructions?: string
+    maxGraphChunksPerDocument?: number
   }
   graphEnabled: boolean
   pdfForceScanned: boolean
@@ -1315,6 +1316,7 @@ function initFromKbInfo(kb: any) {
       })),
       relations: kb.extract_config?.relations || [],
       customInstructions: kb.extract_config?.custom_instructions || '',
+      maxGraphChunksPerDocument: kb.extract_config?.max_graph_chunks_per_document || 0,
     },
     graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,
     pdfForceScanned: false,
@@ -1381,6 +1383,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       nodes: state.nodeExtractConfig.nodes,
       relations: state.nodeExtractConfig.relations,
       custom_instructions: state.nodeExtractConfig.customInstructions,
+      max_graph_chunks_per_document: state.nodeExtractConfig.maxGraphChunksPerDocument || 0,
     },
   }
 
@@ -1465,6 +1468,7 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (ec.nodes) s.nodeExtractConfig.nodes = ec.nodes.map(n => ({ name: n.name, attributes: n.attributes || [] }))
     if (ec.relations) s.nodeExtractConfig.relations = ec.relations
     if (ec.custom_instructions != null) s.nodeExtractConfig.customInstructions = ec.custom_instructions
+    if (ec.max_graph_chunks_per_document != null) s.nodeExtractConfig.maxGraphChunksPerDocument = ec.max_graph_chunks_per_document
   }
   if (o.graph_enabled != null) s.graphEnabled = o.graph_enabled
   s.nodeExtractConfig.enabled = s.nodeExtractConfig.enabled && s.graphEnabled

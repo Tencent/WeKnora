@@ -6865,6 +6865,8 @@ export default {
     next: '다음'
   },
   graphSettings: {
+    maxGraphChunksLabel: "문서당 그래프 청크 최대값",
+    maxGraphChunksDescription: "문서 하나의 그래프 추출 LLM 작업 수를 제한합니다. 0은 무제한이며, 매우 큰 표에는 1000–5000을 권장합니다.",
     title: '지식 그래프 설정',
     description: '엔티티-관계 추출 기능을 구성하여 텍스트에서 자동으로 엔티티와 관계를 추출하여 지식 그래프를 구축합니다 (참고: Wiki의 \'페이지 링크 그래프\'와는 다릅니다. 후자는 Wiki 페이지 간의 참조 관계를 보여주며, 이쪽은 LLM이 추출한 엔티티-관계 그래프입니다)',
     enableLabel: '엔티티 관계 추출 활성화',

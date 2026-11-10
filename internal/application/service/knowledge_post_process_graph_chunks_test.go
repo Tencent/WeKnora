@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -66,6 +67,36 @@ func TestSelectGraphChunks(t *testing.T) {
 		gotIDs[i] = c.ID
 	}
 	assert.Equal(t, []string{"ocr-scanned", "text-prose", "ocr-orphan"}, gotIDs)
+}
+
+func TestBoundGraphChunks(t *testing.T) {
+	t.Parallel()
+	chunks := make([]*types.Chunk, 80000)
+	for i := range chunks {
+		chunks[i] = &types.Chunk{ID: fmt.Sprintf("chunk-%05d", i), ChunkIndex: i}
+	}
+	t.Run("zero keeps all", func(t *testing.T) {
+		require.Len(t, boundGraphChunks(chunks, 0), len(chunks))
+	})
+	t.Run("limit caps fan-out and spans the document", func(t *testing.T) {
+		got := boundGraphChunks(chunks, 1000)
+		require.Len(t, got, 1000)
+		assert.Same(t, chunks[0], got[0])
+		assert.Same(t, chunks[len(chunks)-1], got[len(got)-1])
+		for i := 1; i < len(got); i++ {
+			assert.Greater(t, got[i].ChunkIndex, got[i-1].ChunkIndex)
+		}
+	})
+	t.Run("one keeps the first chunk", func(t *testing.T) {
+		got := boundGraphChunks(chunks, 1)
+		require.Len(t, got, 1)
+		assert.Same(t, chunks[0], got[0])
+	})
+	t.Run("small input is unchanged", func(t *testing.T) {
+		got := boundGraphChunks(chunks[:10], 20)
+		require.Same(t, chunks[0], got[0])
+		require.Len(t, got, 10)
+	})
 }
 
 func TestWikiIngestKeepsScannedPageOCR(t *testing.T) {

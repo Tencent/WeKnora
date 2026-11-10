@@ -52,6 +52,16 @@
         </div>
       </div>
 
+      <div v-if="localGraphExtract.enabled" class="setting-row">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.maxGraphChunksLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.maxGraphChunksDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-input-number v-model="localGraphExtract.maxGraphChunksPerDocument" :min="0" :step="100" :max="100000" theme="normal" @change="handleConfigChange" />
+        </div>
+      </div>
+
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.customInstructionsLabel') }}</label>
@@ -353,6 +363,7 @@ interface GraphExtractConfig {
   nodes: Node[]
   relations: Relation[]
   customInstructions?: string
+  maxGraphChunksPerDocument?: number
 }
 
 interface Props {

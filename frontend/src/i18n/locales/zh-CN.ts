@@ -6866,6 +6866,8 @@ export default {
     next: '下一步'
   },
   graphSettings: {
+    maxGraphChunksLabel: "单文档图谱分块上限",
+    maxGraphChunksDescription: "限制单个文档触发的图谱抽取 LLM 任务数。0 表示不限制；超大表格建议 1000–5000。",
     title: '知识图谱配置',
     description: '配置实体-关系提取功能，自动从文本中抽取实体和关系构建知识图谱（注意：这与 Wiki 知识库中的「页面链接图谱」是两回事——前者是基于 LLM 的实体-关系图，后者是 Wiki 页面之间的引用关系图）',
     enableLabel: '启用实体关系提取',

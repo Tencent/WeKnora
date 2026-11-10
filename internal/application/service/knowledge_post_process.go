@@ -197,6 +197,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 
 	graphChunks := selectGraphChunks(textChunks)
+	graphChunkLimit := 0
+	if eff.ExtractConfig.MaxGraphChunksPerDocument != nil {
+		graphChunkLimit = *eff.ExtractConfig.MaxGraphChunksPerDocument
+	}
+	graphChunks = boundGraphChunks(graphChunks, graphChunkLimit)
 
 	// 3. Compute the enrichment subtask count up front so we can flip to
 	//    "finalizing" with the right counter BEFORE spawning any subtasks.
@@ -729,6 +734,42 @@ func selectGraphChunks(chunks []*types.Chunk) []*types.Chunk {
 				out = append(out, c)
 			}
 		}
+	}
+	return out
+}
+
+// boundGraphChunks caps per-document graph fan-out while preserving coverage
+// across the whole document. A zero limit keeps the historical unbounded
+// behavior. When a limit is set, samples are evenly spaced and include the
+// first and last eligible chunk; this avoids biasing every graph toward only
+// the document's opening pages.
+func boundGraphChunks(chunks []*types.Chunk, limit int) []*types.Chunk {
+	if limit <= 0 || len(chunks) <= limit {
+		return chunks
+	}
+	out := make([]*types.Chunk, 0, limit)
+	if limit == 1 {
+		return append(out, chunks[0])
+	}
+	// Use the midpoint of each equal-width bucket so the sample spans the
+	// entire source document. Integer arithmetic keeps the result deterministic.
+	for i := 0; i < limit; i++ {
+		index := (2*i + 1) * len(chunks) / (2 * limit)
+		if index >= len(chunks) {
+			index = len(chunks) - 1
+		}
+		if len(out) > 0 && out[len(out)-1] == chunks[index] {
+			continue
+		}
+		out = append(out, chunks[index])
+	}
+	// Bucket midpoints cover both ends for normal inputs, but pin the edges
+	// explicitly if rounding or duplicate chunks collapsed a boundary sample.
+	if out[0] != chunks[0] {
+		out[0] = chunks[0]
+	}
+	if out[len(out)-1] != chunks[len(chunks)-1] {
+		out[len(out)-1] = chunks[len(chunks)-1]
 	}
 	return out
 }
