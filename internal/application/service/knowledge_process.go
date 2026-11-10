@@ -3696,6 +3696,34 @@ func (s *knowledgeService) UpdateImageInfo(
 	return nil
 }
 
+// settleKnowledgeBaseReadFailure decides what a parse task does when its
+// knowledge base cannot be loaded. A missing KB is permanent: settle the row
+// as failed and acknowledge the task. Any other read error is transient:
+// return it so the queue retries, instead of turning a database blip into a
+// permanently failed document. The datasource sync path makes the same
+// distinction for its metadata reads.
+func (s *knowledgeService) settleKnowledgeBaseReadFailure(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	readErr error,
+	logPrefix string,
+) error {
+	if !errors.Is(readErr, repository.ErrKnowledgeBaseNotFound) {
+		logger.Errorf(ctx, "%s: failed to read knowledge base: %v", logPrefix, readErr)
+		return fmt.Errorf("read knowledge base %s: %w", knowledge.KnowledgeBaseID, readErr)
+	}
+	logger.Warnf(ctx, "%s: knowledge base %s no longer exists, settling knowledge %s as failed",
+		logPrefix, knowledge.KnowledgeBaseID, knowledge.ID)
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", readErr)
+	knowledge.UpdatedAt = time.Now()
+	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		// Retry: acknowledging now would leave the terminal state unwritten.
+		return fmt.Errorf("mark knowledge %s failed: %w", knowledge.ID, err)
+	}
+	return nil
+}
+
 // ProcessManualUpdate handles Asynq manual knowledge update tasks.
 // It performs cleanup of old indexes/chunks (when NeedCleanup is true) and re-indexes the content.
 func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Task) error {
@@ -3754,12 +3782,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
-		logger.Errorf(ctx, "ProcessManualUpdate: failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		return nil
+		return s.settleKnowledgeBaseReadFailure(ctx, knowledge, err, "ProcessManualUpdate")
 	}
 	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
 		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
@@ -3915,12 +3938,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// 获取知识库信息
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		return nil
+		return s.settleKnowledgeBaseReadFailure(ctx, knowledge, err, "ProcessDocument")
 	}
 	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
 		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
