@@ -328,6 +328,8 @@ func (o *driveOps) List(ctx context.Context, client *core.Client, resourceID str
 	return files, nil, err
 }
 
+func (o *driveOps) NodeURL(n core.DriveFile) string { return n.URL }
+
 func (o *driveOps) Token(n core.DriveFile) string   { return n.Token }
 func (o *driveOps) Title(n core.DriveFile) string   { return n.Name }
 func (o *driveOps) ObjType(n core.DriveFile) string { return n.Type }

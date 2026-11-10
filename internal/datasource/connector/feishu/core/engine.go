@@ -67,6 +67,15 @@ type NodeOps[N any] interface {
 	EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor
 }
 
+// nodeURL preserves an enumerated source link even when fetching content fails.
+// Adapters without source links remain compatible with the shared engine.
+func nodeURL[N any](ops NodeOps[N], node N) string {
+	if provider, ok := ops.(interface{ NodeURL(N) string }); ok {
+		return provider.NodeURL(node)
+	}
+	return ""
+}
+
 // CollectHandler is the StreamHandler used by FetchAll / FetchIncremental to
 // gather every Emitted item into a slice instead of streaming. Checkpoint is a
 // no-op: those paths return a single cursor at the end.
@@ -195,6 +204,7 @@ func runSync[N any](
 				if eerr := h.Emit(ctx, types.FetchedItem{
 					ExternalID:       tok,
 					Title:            ops.Title(node),
+					URL:              nodeURL(ops, node),
 					SourceResourceID: resourceID,
 					Metadata:         FeishuErrorItemMeta(ferr, nil),
 				}); eerr != nil {
