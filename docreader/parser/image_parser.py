@@ -1,6 +1,7 @@
 import base64
 import logging
-import os
+import re
+import uuid
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
@@ -17,12 +18,23 @@ class ImageParser(BaseParser):
     """
 
     def parse_into_text(self, content: bytes) -> Document:
-        logger.info("Parsing image file=%s, size=%d bytes", self.file_name, len(content))
+        logger.info(
+            "Parsing image file=%s, size=%d bytes", self.file_name, len(content)
+        )
 
-        ext = os.path.splitext(self.file_name)[1].lower() or ".png"
-        ref_path = f"images/{self.file_name}"
+        name = self.file_name
+        # A filename is not necessarily a valid bare Markdown destination.
+        # Keep ordinary refs stable; use an opaque name for syntax/whitespace.
+        if not name or any(c.isspace() or c in "\\()[]<>" for c in name):
+            ext = "." + self.file_type.lstrip(".").lower()
+            if not re.fullmatch(r"\.[a-z0-9]+", ext):
+                ext = ".png"
+            name = f"{uuid.uuid4().hex}{ext}"
+        ref_path = f"images/{name}"
 
-        text = f"![{self.file_name}]({ref_path})"
+        alt = " ".join(self.file_name.splitlines())
+        alt = re.sub(r"([\\\[\]<>`*_])", r"\\\1", alt)
+        text = f"![{alt}]({ref_path})"
         images = {ref_path: base64.b64encode(content).decode()}
 
         return Document(content=text, images=images)
