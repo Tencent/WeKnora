@@ -23,6 +23,8 @@ import { historyHasMoreAfterAttempt } from '@/utils/historyPagination'
 import { useI18n } from 'vue-i18n'
 import { useChatStreamHandler, isPromptCard } from '@/composables/useChatStreamHandler'
 import { resumeSuspendedRunKey } from '@/utils/suspendedRun'
+import { persistedAssistantId } from '@/utils/steerStreamFork'
+import { A2UI_CONFIRM_EVENT } from '@/views/chat/components/a2ui/a2uiEvents'
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize'
 
 export function useEmbedChatSession(options: {
@@ -352,22 +354,52 @@ export function useEmbedChatSession(options: {
     })
   }
 
-  // Embed has no stream to re-attach to, so a resumed run is followed by
-  // polling history until its message settles, then reloading it.
+  // Polling schedule for the follow-ups that trail a run the embed page never
+  // POSTed. Attaching to the run's replay stream is the primary way to watch one
+  // (see attachEmbedRun below); this is the fallback, and for the ask_user /
+  // tool-approval resume leg it is still the only one.
   let resumePoll: ReturnType<typeof setTimeout> | null = null
   const stopResumePoll = () => {
     if (resumePoll) clearTimeout(resumePoll)
     resumePoll = null
   }
-  const followResumedRun = (pendingId: string) => {
+  // While an attach is in flight, a failed attempt is expected (the run is kicked
+  // in a goroutine, so its replay buffer may not exist yet) and must not toast.
+  // Same guard the main plane uses for its own re-attach loops.
+  let attachingFollowUpRun = false
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+  // EMBED_A2UI_RESUME_BEGIN — the pair of functions below is the slice window
+  // for embedA2uiResume.test.mjs. The markers and the function names are test
+  // anchors: change one, change the other.
+
+  //
+  //
+  const followResumedRun = async (pendingId: string) => {
     const sid = options.sessionId.value
     const message = messagesList.find((m) => m.role === 'assistant' && ((m.agentEventStream as Record<string, unknown>[] | undefined) || []).some(
       (e) => isPromptCard(e) && e.pending_id === pendingId,
     ))
-    const messageId = String(message?.id || '')
-    if (!message || !sid || !messageId || isReplying.value) return
+    const messageId = persistedAssistantId(message)
+    if (!message || !sid || !messageId) {
+      console.warn('[embed-a2ui] resume attach refused', {
+        pendingId, hasMessage: Boolean(message), hasSession: Boolean(sid), hasMessageId: Boolean(messageId),
+      })
+      return
+    }
     prepareResumedMessage(message, pendingId)
     isReplying.value = true
+    stopResumePoll()
+    currentAssistantMessageId.value = messageId
+    loading.value = true
+    attachingFollowUpRun = true
+    const attached = await attachEmbedRun(messageId, pendingId)
+    attachingFollowUpRun = false
+    if (attached) return // 之后这条消息归流管
+    pollResumedRun(messageId)
+  }
+
+  const pollResumedRun = (messageId: string) => {
+    const sid = options.sessionId.value
     stopResumePoll()
     const deadline = Date.now() + 30 * 60 * 1000
     const poll = async () => {
@@ -388,15 +420,108 @@ export function useEmbedChatSession(options: {
     }
     resumePoll = setTimeout(poll, 1000)
   }
+  // EMBED_A2UI_RESUME_END
   provide(resumeSuspendedRunKey, followResumedRun)
 
-  watch(error, (newError) => {
-    if (newError) {
-      embedToast(newError)
-      isReplying.value = false
-      loading.value = false
-      currentAssistantMessageId.value = ''
+  // EMBED_A2UI_CONFIRM_BEGIN — the functions below are the slice window for
+  // embedA2uiConfirm.test.mjs. The markers and the function names are test
+  // anchors: change one, change the other.
+
+  //
+  const attachEmbedRun = async (assistantMessageId: string, resumePendingId?: string) => {
+    const sid = options.sessionId.value
+    for (let attempt = 0; attempt < 60; attempt++) {
+      await sleep(500)
+      if (options.sessionId.value !== sid) return true // 切走了就别再打旧会话
+      await startStream({
+        session_id: sid,
+        query: assistantMessageId,
+        method: 'GET',
+        url: `/api/v1/embed/${options.channelId}/sessions`,
+        path_suffix: '/continue-stream',
+        embed_token: options.token,
+        embed_session_sig: options.sessionSig.value,
+        embed_visitor_id: options.visitorId.value,
+        ...(resumePendingId ? { resume_pending_id: resumePendingId } : {}),
+      })
+      if (!error.value) return true
     }
+    return false
+  }
+
+  const pollConfirmRun = (assistantMessageId: string) => {
+    const sid = options.sessionId.value
+    stopResumePoll()
+    const deadline = Date.now() + 30 * 60 * 1000
+    const poll = async () => {
+      if (options.sessionId.value !== sid) return
+      try {
+        const res = await getEmbedMessageList(
+          options.channelId, options.token, sid, limit.value, undefined, options.sessionSig.value,
+        )
+        const latest = (res?.data as Record<string, unknown>[] | undefined)?.find((m) => m.id === assistantMessageId)
+        if (latest && (latest.is_completed || latest.run_state === 'awaiting_input' || Date.now() > deadline)) {
+          resetAndLoad(sid)
+          return
+        }
+      } catch (err) {
+        console.error('Failed to poll confirm follow-up run:', err)
+      }
+      resumePoll = setTimeout(poll, 2000)
+    }
+    resumePoll = setTimeout(poll, 1000)
+  }
+
+  const followConfirmRun = async (assistantMessageId: string) => {
+    stopResumePoll()
+    loading.value = true
+    attachingFollowUpRun = true
+    const attached = await attachEmbedRun(assistantMessageId)
+    attachingFollowUpRun = false
+    if (attached) return // 之后这条消息归流管，complete 事件会自己收尾
+    pollConfirmRun(assistantMessageId)
+  }
+
+  const handleA2uiConfirm = (event: Event) => {
+    const detail = (event as CustomEvent).detail as {
+      status?: string; sessionId?: string; messageId?: string; assistantMessageId?: string; text?: string
+    } | undefined
+    if (!detail || detail.sessionId !== options.sessionId.value) return
+    if (detail.status === 'already_executed') {
+      embedToast('已确认，无需重复操作', 'info')
+      return
+    }
+    if (detail.status !== 'started') return
+    if (isReplying.value) {
+      embedToast('请等本轮回答结束后再确认')
+      return
+    }
+    messagesList.push({
+      id: detail.messageId,
+      content: detail.text,
+      role: 'user',
+      channel: 'a2ui',
+      created_at: new Date().toISOString(),
+    })
+    userHasScrolledUp.value = false
+    scrollToBottom(true)
+    isReplying.value = true
+    currentAssistantMessageId.value = detail.assistantMessageId || ''
+    followConfirmRun(detail.assistantMessageId || '')
+  }
+  // EMBED_A2UI_CONFIRM_END
+  window.addEventListener(A2UI_CONFIRM_EVENT, handleA2uiConfirm)
+
+  watch(error, (newError) => {
+    // An attach attempt that 404s is expected: the run is kicked in a goroutine,
+    // so its replay buffer may not exist yet. Those failures must not toast, and
+    // must not clear the in-flight state either -- the attach loop, or the poll
+    // fallback it hands over to, still owns this follow-up.
+    if (!newError || attachingFollowUpRun) return
+    embedToast(newError)
+    isReplying.value = false
+    loading.value = false
+    currentAssistantMessageId.value = ''
   })
 
   onChunk((data) => {
@@ -442,6 +567,7 @@ export function useEmbedChatSession(options: {
   })
 
   onUnmounted(() => {
+    window.removeEventListener(A2UI_CONFIRM_EVENT, handleA2uiConfirm)
     stopResumePoll()
     stopStream()
     fullContent.value = ''

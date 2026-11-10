@@ -597,6 +597,140 @@ type SystemPromptSection struct {
 	Content string
 }
 
+// a2uiBasicCatalogID is the official A2UI v0.9 basic-catalog identifier that
+// every createSurface message must reference. Keep in sync with the official
+// spec (a2ui-project/a2ui, specification/v0_9/catalogs/basic/catalog.json).
+const a2uiBasicCatalogID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+
+// agentA2UIGuidance teaches the official A2UI v0.9 wire format, the one
+// upstream issue #3017 is about. WeKnora is the producer: the model emits official
+// server→client frames (createSurface + updateComponents) wrapped in the
+// official <a2ui-json> tags — the wrapper the official SDK's generated prompt
+// mandates and its parser requires, which is what makes an external A2UI client
+// (Angular/Lit/Vue/Flutter renderer) able to consume our answers at all.
+// WeKnora persists the block verbatim, so what the model emitted is what an
+// external consumer and history replay see.
+//
+// The block form is the official tag form, not a markdown fence: the fence was
+// our own earlier invention, and the official parser yields zero parts for
+// fence-only content (it treats a fence as noise to strip inside the tags).
+// types.ExtractA2UIMessages still accepts the fence so stored messages keep
+// working. The tag literals come from types.A2UITagOpen/A2UITagClose so the
+// teaching and the parser cannot drift, and the guidance test pins both ends
+// against literals — a test that compared the guidance only to the constants
+// would pass while both said something the official format rejects.
+//
+// This is a narrow literal contract, re-validated server-side
+// (ExtractA2UIMessages parsing + ExecuteAgentCardAction whitelist/RBAC). Keep
+// the taught action names and the taught wrapper in sync with
+// types.agentCardActionPolicy and types.A2UITagOpen/A2UITagClose — a taught
+// action the server does not execute, or a wrapper the parser does not accept,
+// would silently mislead the client. v0 whitelists "noop" and "confirm".
+//
+// The example's component order is the official protocol example's order
+// (specification/v0_9/docs/a2ui_protocol.md, the contact-form updateComponents):
+// root first, every container before the ids in its children, and a Button's
+// label Text defined just before the Button and left out of the container's
+// children. The guidance test asserts the example obeys exactly that.
+func agentA2UIGuidance() string {
+	return "\n- Interactive A2UI card (only when the user's flow truly needs a " +
+		"confirmable follow-up action — never decorate a plain answer with one):\n" +
+		"  wrap the card in the literal " + types.A2UITagOpen + " and " + types.A2UITagClose +
+		" tags — always include both the opening and the closing tag, do NOT wrap them " +
+		"in backticks and do NOT replace the opening tag with a markdown code fence — " +
+		"and put the card's JSON array of official A2UI v0.9 server-to-client frames " +
+		"between them:\n" +
+		"  " + types.A2UITagOpen + "\n" +
+		"  [\n" +
+		"    {\"version\":\"v0.9\",\"createSurface\":{\"surfaceId\":\"s1\"," +
+		"\"catalogId\":\"" + a2uiBasicCatalogID + "\"}},\n" +
+		"    {\"version\":\"v0.9\",\"updateComponents\":{\"surfaceId\":\"s1\",\"components\":[" +
+		"{\"id\":\"root\",\"component\":\"Card\",\"child\":\"col1\"}," +
+		"{\"id\":\"col1\",\"component\":\"Column\",\"children\":[\"t1\",\"b1\"]}," +
+		"{\"id\":\"t1\",\"component\":\"Text\",\"text\":\"...\",\"variant\":\"h2\"}," +
+		"{\"id\":\"b1_lbl\",\"component\":\"Text\",\"text\":\"...\"}," +
+		"{\"id\":\"b1\",\"component\":\"Button\",\"child\":\"b1_lbl\"," +
+		"\"variant\":\"primary\",\"action\":{\"event\":{\"name\":\"noop\"}}}]}}\n" +
+		"  ]\n" +
+		"  " + types.A2UITagClose + "\n" +
+		"  - Every frame carries version \"v0.9\"; a wrong version is dropped.\n" +
+		"  - updateComponents must include an id \"root\" component; build the card " +
+		"from basic-catalog components (Card/Column/Row/Text/Button). Card takes a " +
+		"SINGLE child: wrap several elements in a Column/Row and point Card.child " +
+		"at that container's id — never a children list on the Card itself.\n" +
+		"  - Top-Down Component Ordering: inside the components list the \"root\" " +
+		"component MUST be FIRST and every container (Card/Column/Row) MUST appear " +
+		"before the components listed in its children — a streaming renderer paints " +
+		"the card in exactly that order as it arrives.\n" +
+		"  - A Button's label is a separate Text component referenced by its child " +
+		"field: define that label Text BEFORE the Button, and do NOT also list the " +
+		"label id in the container's children (the Button renders its own label). " +
+		"Follow the official protocol example, which does exactly this.\n" +
+		"  - A Button's action.event.name must be one of: noop, confirm. Do not " +
+		"invent other action names — unknown names are refused server-side.\n" +
+		"  - Use \"confirm\" only when the user must approve a plan and the agent " +
+		"should continue after they approve: put the exact follow-up " +
+		"instruction — a non-empty string in the user's language — into " +
+		"action.event.context.message; the server sends it to the agent in the " +
+		"same chat and the reply streams like a normal answer. Buttons that " +
+		"only display or acknowledge stay \"noop\". A confirm button runs " +
+		"exactly once; later clicks are answered as already executed.\n" +
+		"  - Form input round: a confirm card may collect user input through " +
+		"the five official input controls — TextField (single-line text; " +
+		"\"variant\":\"number\" for digits, \"variant\":\"longText\" for " +
+		"multiline), CheckBox (a boolean), ChoicePicker (choices from an " +
+		"\"options\" list, each option an object with \"label\" and \"value\"; " +
+		"the submitted value binds as a list of strings even for a single " +
+		"choice — set \"variant\":\"mutuallyExclusive\"), Slider (a number; " +
+		"\"max\" is required) and DateTimeInput (set \"enableDate\" and/or " +
+		"\"enableTime\").\n" +
+		"  - An input's value MUST be the official binding form " +
+		"\"value\":{\"path\":\"/name\"} with the field name after the slash — " +
+		"a literal value has nowhere to receive the user's typing. On the " +
+		"submit Button every context key except \"message\" must be a binding " +
+		"pointing at one of the card's own inputs, e.g. " +
+		"\"name\":{\"path\":\"/name\"}; \"message\" stays a literal string. " +
+		"The server replays the submission against the persisted card and " +
+		"refuses the whole click on any mismatch — a forged key, a tampered " +
+		"message echo or an unvettable value is a 400, nothing partial " +
+		"survives.\n" +
+		"  - Accepted values are appended to the next user message under the " +
+		"fixed header line 用户提交的表单：, one \"- label: value\" line per " +
+		"field in key order — write each input's \"label\" as a plain literal " +
+		"string in the user's language; it typesets that line (a non-literal " +
+		"label falls back to the key name). A field the user leaves blank — " +
+		"absent or empty — comes back as the literal 未填写; treat it as " +
+		"missing information and never invent a value for it.\n" +
+		"  - At most 8 input fields per card. Put the submit Button's " +
+		"\"checks\" on the Button that consumes the form, never on the " +
+		"inputs. Never use the obscured (password) variant of TextField. " +
+		"Never attach inputs to a noop button — only confirm consumes them. " +
+		"Form card example:\n" +
+		"  " + types.A2UITagOpen + "\n" +
+		"  [\n" +
+		"    {\"version\":\"v0.9\",\"createSurface\":{\"surfaceId\":\"s1\"," +
+		"\"catalogId\":\"" + a2uiBasicCatalogID + "\"}},\n" +
+		"    {\"version\":\"v0.9\",\"updateComponents\":{\"surfaceId\":\"s1\",\"components\":[" +
+		"{\"id\":\"root\",\"component\":\"Card\",\"child\":\"col1\"}," +
+		"{\"id\":\"col1\",\"component\":\"Column\",\"children\":[\"t1\",\"f1\",\"f2\",\"b1\"]}," +
+		"{\"id\":\"t1\",\"component\":\"Text\",\"text\":\"...\",\"variant\":\"h2\"}," +
+		"{\"id\":\"f1\",\"component\":\"TextField\",\"label\":\"...\",\"value\":{\"path\":\"/name\"}}," +
+		"{\"id\":\"f2\",\"component\":\"ChoicePicker\",\"label\":\"...\",\"variant\":\"mutuallyExclusive\"," +
+		"\"options\":[{\"label\":\"...\",\"value\":\"a\"}],\"value\":{\"path\":\"/room\"}}," +
+		"{\"id\":\"b1_lbl\",\"component\":\"Text\",\"text\":\"...\"}," +
+		"{\"id\":\"b1\",\"component\":\"Button\",\"child\":\"b1_lbl\",\"variant\":\"primary\"," +
+		"\"checks\":[{\"condition\":{\"call\":\"required\",\"args\":" +
+		"{\"value\":{\"path\":\"/name\"}},\"returnType\":\"boolean\"},\"message\":\"...\"}]," +
+		"\"action\":{\"event\":{\"name\":\"confirm\",\"context\":{\"message\":\"...\"," +
+		"\"name\":{\"path\":\"/name\"},\"room\":{\"path\":\"/room\"}}}}}]}}\n" +
+		"  ]\n" +
+		"  " + types.A2UITagClose + "\n" +
+
+		"  - At most 6 Button components per surface.\n" +
+		"  - The block is machine-read: put all human-readable explanation in " +
+		"markdown OUTSIDE the " + types.A2UITagOpen + " block, never inside it.\n"
+}
+
 // BuildSystemPromptSections is the single assembly path, also usable by diagnostics.
 // Custom templates replace only the base section; tool scope and runtime contracts
 // always come from the active engine, never from editable template text.
@@ -660,7 +794,7 @@ func BuildSystemPromptSections(
 	}
 	sections = append(sections, SystemPromptSection{"sources", sources},
 		SystemPromptSection{"tools", formatToolGuidanceWithDesktop(names, skillInstallMode, layout, desktop)},
-		SystemPromptSection{"output", types.SourcedAnswerOutputPrompt})
+		SystemPromptSection{"output", types.SourcedAnswerOutputPrompt + agentA2UIGuidance()})
 	if options != nil {
 		if !skillInstallMode && slices.Contains(names, "read_file") && len(options.SkillsMetadata) > 0 {
 			sections = append(sections, SystemPromptSection{

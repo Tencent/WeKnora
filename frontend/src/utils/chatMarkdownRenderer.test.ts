@@ -21,6 +21,7 @@ import {
   resolveCitationChunkId,
   stripIncompleteCitationTag,
 } from './citationMarkdown.ts'
+import { markA2uiTagBlocks } from './a2uiSurface.ts'
 
 const SAMPLE_DOC = 'example-report.docx'
 const SAMPLE_CHUNK_A = '00000001-0000-4000-8000-000000000001'
@@ -887,4 +888,38 @@ test('caller-provided code renderer receives the exact code and language', () =>
     })
     assert.equal(stripFadeTail(html), '<pre>diagram</pre>')
   }
+})
+
+// The official wrapper tags, spelled out (not imported), so a rewrite of the
+// rewriter's own literals turns this red instead of moving both sides together.
+const A2UI_CARD_MD = '说明\n<a2ui-json>\n'
+  + '[{"version":"v0.9","createSurface":{"surfaceId":"s1",'
+  + '"catalogId":"https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"}}]\n'
+  + '</a2ui-json>\n尾注'
+
+test('renderChatMarkdown marks official a2ui tags on the chat plane only', () => {
+  const renderer = createChatMarkdownRenderer()
+  const base = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (value: string) => value,
+    streaming: false,
+  }
+  const html = renderChatMarkdown(A2UI_CARD_MD, { ...base, markA2uiTags: markA2uiTagBlocks })
+  assert.match(
+    html,
+    /<div class="chat-a2ui-surface" data-a2ui-frames="[A-Za-z0-9+/=]+" data-a2ui-state="pending">/,
+  )
+  // The card's JSON must be inside the base64 attribute, never loose in the html:
+  // that is why the rewrite runs before the math/emphasis/sanitizer steps.
+  assert.doesNotMatch(html, /createSurface|a2ui-json/)
+  assert.match(html, /说明/)
+  assert.match(html, /尾注/)
+
+  // The embed plane passes nothing, so no placeholder is produced and the
+  // payload stays plain text: the action endpoint is member-JWT gated, and a
+  // card whose every button answers 401 is worse than visible source.
+  const embed = renderChatMarkdown(A2UI_CARD_MD, base)
+  assert.doesNotMatch(embed, /chat-a2ui-surface/)
+  assert.match(embed, /createSurface/)
 })
