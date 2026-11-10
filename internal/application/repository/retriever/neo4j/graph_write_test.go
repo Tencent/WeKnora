@@ -109,7 +109,7 @@ func TestAddGraphUsesStableNodeAndRelationshipOrder(t *testing.T) {
 			nodes, relations := nodeNames(tx.payloads[0]), relationKeys(tx.payloads[1])
 			assert.Equal(t, []string{"a", "z"}, nodes)
 			assert.Equal(t, []string{"a->z", "z->a", "c->b"}, relations,
-				"rows must sort by the canonical first/second endpoint pair, not original source")
+				"rows sort by canonical endpoints, but every edge keeps its original direction")
 			if firstNodes == nil {
 				firstNodes, firstRelations = nodes, relations
 			} else {
