@@ -112,6 +112,7 @@ const channelLabelMap: Record<string, string> = {
   seafile: 'knowledgeBase.channelSeafile',
   nextcloud: 'knowledgeBase.channelNextcloud',
   confluence: 'knowledgeBase.channelConfluence',
+  jira: 'knowledgeBase.channelJira',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
