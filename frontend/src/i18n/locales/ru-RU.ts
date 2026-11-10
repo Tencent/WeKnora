@@ -5864,11 +5864,14 @@ export default {
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
+        sourcePage: 'Страница {page}',
         attr: {
           builtin_caption: 'Описание',
           builtin_caption_description: 'Описание изображения, сгенерированное моделью.',
           builtin_ocr_text: 'OCR-текст',
           builtin_ocr_text_description: 'Текст, извлечённый из изображения OCR.',
+          builtin_page: 'Страница документа',
+          builtin_page_description: 'Группировка по исходному документу, затем по странице PDF; изображения без номера страницы идут в конце документа.',
           builtin_created_at: 'Время создания',
           builtin_created_at_description: 'Когда был создан фрагмент исходного документа.',
           builtin_updated_at: 'Время изменения',
@@ -7276,9 +7279,16 @@ export default {
     statsIndexedMessages: 'Проиндексированные сообщения',
     statsNotConfigured: 'Индексация сообщений не настроена',
     statsNotConfiguredDesc: 'Включите и выберите модель Embedding для автоматической индексации сообщений',
+    clearIndexLabel: 'Очистить индекс сообщений',
+    clearIndexDescription: 'Приостановить индексацию и очистить поисковый индекс сообщений этого рабочего пространства. Чаты и сообщения сохранятся.',
+    clearIndexButton: 'Очистить индекс',
+    clearIndexConfirm: 'Очистить индекс сообщений всех участников этого рабочего пространства? Индексация будет приостановлена. Чаты и сообщения не будут удалены, старые сообщения не будут автоматически проиндексированы заново. Это действие нельзя отменить.',
     toasts: {
       saveSuccess: 'Конфигурация управления сообщениями сохранена',
-      saveFailed: 'Не удалось сохранить конфигурацию: {message}'
+      saveFailed: 'Не удалось сохранить конфигурацию: {message}',
+      loadFailed: 'Не удалось загрузить настройки или статистику индекса сообщений',
+      clearSuccess: 'Индекс сообщений очищен. Индексация приостановлена до повторного включения.',
+      clearFailed: 'Очистка индекса не завершена. Проверьте текущее состояние и повторите попытку: {message}'
     }
   },
   vectorStoreSettings: {

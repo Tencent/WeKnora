@@ -4272,6 +4272,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			storedImages = append(storedImages, remoteImages...)
 		}
 
+		// 本地和远程图片分批收集，合并后恢复文档顺序供图片任务编号。
+		storedImages = docparser.SortImagesByPosition(convertResult.MarkdownContent, storedImages)
+
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
@@ -4484,7 +4487,11 @@ func (s *knowledgeService) convert(
 	}
 	if err != nil {
 		code, message := docReaderFailure(err)
-		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
+		if engineMessage := parseFailureMessageForEngine(parserEngine, err); engineMessage != "" {
+			message = engineMessage
+		}
+		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s engine=%s code=%s: %v",
+			knowledge.ID, parserEngine, code, err)
 		result, taskErr := s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 		s.failStageWithRetry(ctx, knowledge.ID, types.StageDocReader,
 			code, message, err, taskErr != nil)

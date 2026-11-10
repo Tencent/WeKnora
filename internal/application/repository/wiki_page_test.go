@@ -536,6 +536,42 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	assert.Equal(t, int64(1), got)
 }
 
+func TestCountOrphans_CountsJSONNullInLinks(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var db *gorm.DB
+			if backend == "postgres" {
+				db = setupWikiSnapshotPostgresDB(t)
+			} else {
+				db = setupWikiPagesTestDB(t)
+			}
+			repo := NewWikiPageRepository(db)
+			ctx := context.Background()
+
+			const kbID = "kb-null-links"
+			entity, published := types.WikiPageTypeEntity, types.WikiPageStatusPublished
+			nullLinks := makeWikiPage(kbID, "entity/null", entity, published)
+			emptyLinks := makeWikiPage(kbID, "entity/empty", entity, published)
+			emptyLinks.InLinks = types.StringArray{}
+			linked := makeWikiPage(kbID, "entity/linked", entity, published)
+			linked.InLinks = types.StringArray{"entity/null"}
+			for _, p := range []*types.WikiPage{nullLinks, emptyLinks, linked} {
+				require.NoError(t, repo.Create(ctx, p))
+			}
+
+			var stored string
+			require.NoError(t, db.Raw(
+				"SELECT CAST(in_links AS TEXT) FROM wiki_pages WHERE id = ?", nullLinks.ID,
+			).Scan(&stored).Error)
+			require.Equal(t, "null", stored)
+
+			got, err := repo.CountOrphans(ctx, kbID)
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), got)
+		})
+	}
+}
+
 func TestWikiStatsQueriesExcludeArchivedPages(t *testing.T) {
 	db := setupWikiPagesTestDB(t)
 	repo := NewWikiPageRepository(db)

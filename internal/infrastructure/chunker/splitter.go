@@ -291,6 +291,15 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 		chunkOverlap = 0
 	}
 
+	// An explicit token limit is a hard upper bound across every splitting
+	// path, including separator exhaustion and protected spans. ChunkSize may
+	// be larger than the token budget, so clamp the merge window and split any
+	// unit that would otherwise bypass the budget.
+	tokenBudget := tokenRuneBudget(cfg)
+	if tokenBudget > 0 && tokenBudget < chunkSize {
+		chunkSize = tokenBudget
+	}
+
 	// Step 1: Find protected spans
 	protected := protectedSpans(text)
 
@@ -298,6 +307,9 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 	// chunkSize is forwarded so splitBySeparators can recursively apply lower-priority
 	// separators to oversize pieces (Python-parity recursive split).
 	units := buildUnitsWithProtection(text, protected, separators, chunkSize)
+	if tokenBudget > 0 {
+		units = splitOversizeUnits(units, tokenBudget)
+	}
 
 	// Step 3: Merge units into chunks with overlap
 	return mergeUnits(units, chunkSize, chunkOverlap)
@@ -872,8 +884,12 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 	var newParents []Chunk
 	var children []ChildChunk
 	childSeq := 0
+	budget := tokenRuneBudget(childCfg)
 	for _, parent := range parents {
 		subs := mapChildrenToSource(parent, SplitText(parent.Content, childCfg))
+		if budget > 0 {
+			subs = enforceChunkBudget(subs, budget)
+		}
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {

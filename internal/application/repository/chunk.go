@@ -313,10 +313,11 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	// Determine sort order based on knowledge type
 	var orderClause string
 	if knowledgeType == types.KnowledgeTypeFAQ {
-		// FAQ: sort by updated_at
-		orderClause = "updated_at DESC"
+		// FAQ: sort by updated_at, then ID to keep pagination stable when
+		// bulk imports give multiple entries the same timestamp.
+		orderClause = "updated_at DESC, id DESC"
 		if sortOrder == "asc" {
-			orderClause = "updated_at ASC"
+			orderClause = "updated_at ASC, id ASC"
 		}
 	} else {
 		// Document: sort by chunk_index

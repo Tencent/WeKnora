@@ -14,7 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -639,28 +641,35 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	// Get data source
 	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
-	if err != nil {
-		logger.Warnf(ctx, "data source not found (likely deleted), cancelling sync: ds=%s err=%v", payload.DataSourceID, err)
-		if syncLog, slErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID); slErr == nil && syncLog != nil {
-			syncLog.Status = types.SyncLogStatusCanceled
-			syncLog.FinishedAt = timePtr(time.Now().UTC())
-			syncLog.ErrorMessage = "data source has been deleted"
-			_ = s.syncLogRepo.Update(ctx, syncLog)
-		}
-		return nil
+	sourceMissing := errors.Is(err, datasource.ErrDataSourceNotFound)
+	if err != nil && !sourceMissing {
+		return fmt.Errorf("read data source for sync: %w", err)
 	}
 
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
+	if errors.Is(err, datasource.ErrSyncLogNotFound) {
+		return nil
+	}
 	if err != nil {
-		logger.Errorf(ctx, "failed to get sync log: %v", err)
+		return fmt.Errorf("read sync log: %w", err)
+	}
+	if sourceMissing {
+		logger.Warnf(ctx, "data source not found, cancelling sync: ds=%s", payload.DataSourceID)
+		syncLog.Status = types.SyncLogStatusCanceled
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = "data source has been deleted"
+		_ = s.syncLogRepo.Update(ctx, syncLog)
 		return nil
 	}
 
 	kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
 	if kbErr != nil {
-		logger.Warnf(ctx, "knowledge base not found (likely deleted), cancelling sync: kb=%s ds=%s err=%v",
-			ds.KnowledgeBaseID, payload.DataSourceID, kbErr)
+		if !errors.Is(kbErr, apprepo.ErrKnowledgeBaseNotFound) {
+			return fmt.Errorf("read knowledge base for sync: %w", kbErr)
+		}
+		logger.Warnf(ctx, "knowledge base not found, cancelling sync: kb=%s ds=%s",
+			ds.KnowledgeBaseID, payload.DataSourceID)
 		syncLog.Status = types.SyncLogStatusCanceled
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = "knowledge base has been deleted"
@@ -846,7 +855,11 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 				"; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
 		}
 	}
-	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused)
+	if err := s.updateSyncRunResult(
+		ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused,
+	); err != nil {
+		return err
+	}
 
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
@@ -1008,6 +1021,22 @@ func (s *DataSourceService) applyFetchedItem(
 			})
 			return false, err
 		default:
+			var appErr *werrors.AppError
+			if errors.As(err, &appErr) && appErr.Code == werrors.ErrImportPrerequisiteMissing {
+				// A missing VLM/ASR prerequisite can never succeed on replay:
+				// the file waits for the operator to configure a model.
+				// Classify it as a permanent rejection — visible in the sync
+				// log, stream keeps going, cursor advances past it — so one
+				// image cannot abort the round and force every later sync to
+				// re-fetch the same items again (Tencent/WeKnora#4712).
+				result.Failed++
+				recordSyncError(result, types.SyncItemError{
+					Title:   item.Title,
+					Code:    "prerequisite_not_configured",
+					Message: appErr.Message,
+				})
+				return true, nil
+			}
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
@@ -1290,7 +1319,9 @@ func (s *DataSourceService) processSyncStreaming(
 			errMsg += fmt.Sprintf("; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
 		}
 	}
-	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused)
+	if err := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused); err != nil {
+		return err
+	}
 	// The upgraded full pass succeeded (success or partial — per-document
 	// failures are a normal retryable condition): retire the marker so it
 	// never fires again. Failed runs returned earlier and keep it.
@@ -1311,7 +1342,7 @@ func (s *DataSourceService) updateSyncRunResult(
 	status string,
 	errorMessage string,
 	wasPaused bool,
-) {
+) error {
 	syncLog.ItemsTotal = result.Total
 	syncLog.ItemsCreated = result.Created
 	syncLog.ItemsUpdated = result.Updated
@@ -1322,8 +1353,9 @@ func (s *DataSourceService) updateSyncRunResult(
 	syncLog.FinishedAt = timePtr(time.Now().UTC())
 	syncLog.ErrorMessage = errorMessage
 	syncLog.Result = resultJSON
-	if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "failed to update sync log: %v", err)
+	logErr := s.syncLogRepo.UpdateResult(ctx, syncLog)
+	if logErr != nil {
+		logger.Errorf(ctx, "failed to update sync log: %v", logErr)
 	}
 
 	if status == types.SyncLogStatusFailed {
@@ -1337,8 +1369,12 @@ func (s *DataSourceService) updateSyncRunResult(
 	}
 	ds.ErrorMessage = errorMessage
 	ds.LastSyncResult = resultJSON
-	if err := s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to update data source: %v", err)
+	sourceErr := s.dsRepo.UpdateSyncState(ctx, ds)
+	if sourceErr != nil {
+		logger.Errorf(ctx, "failed to update data source: %v", sourceErr)
+	}
+	if err := errors.Join(logErr, sourceErr); err != nil {
+		return fmt.Errorf("persist sync result: %w", err)
 	}
 	action := types.AuditActionDataSourceSyncCompleted
 	outcome := types.AuditOutcomeSuccess
@@ -1355,6 +1391,7 @@ func (s *DataSourceService) updateSyncRunResult(
 			"total": result.Total, "created": result.Created, "updated": result.Updated,
 			"deleted": result.Deleted, "skipped": result.Skipped, "failed": result.Failed,
 		})
+	return nil
 }
 
 func allFetchedItemsFailedError(result *types.SyncResult, nonBlockingFailures int) error {

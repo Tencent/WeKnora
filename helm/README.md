@@ -300,6 +300,7 @@ pre-existing Service name does not automatically transfer its ownership to Helm.
 | `app.extraEnv` | Additional env vars | `[]` |
 | `app.extraVolumes` | Additional Pod volumes (rendered verbatim into `spec.template.spec.volumes`) | `[]` |
 | `app.extraVolumeMounts` | Additional volume mounts for the app container (names must match `extraVolumes`) | `[]` |
+| `app.podAnnotations` | Extra annotations for the app Pod template metadata (not the Deployment metadata); rendered verbatim into `spec.template.metadata.annotations` | `{}` |
 
 ### Data Files Storage
 

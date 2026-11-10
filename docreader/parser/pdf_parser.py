@@ -25,6 +25,7 @@ import os
 import re
 import statistics
 import threading
+from decimal import Decimal, ROUND_CEILING
 from typing import Iterator
 
 from docreader.config import CONFIG
@@ -740,15 +741,15 @@ def _point_in_boxes(x: float, y: float, boxes: list) -> bool:
     return False
 
 
-def _page_chars(
-    textpage, page, raw, loose: bool = False, *, return_filter_info: bool = False
-) -> tuple:
+def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tuple:
     """Return ``(chars, page_width)`` with hidden/off-page glyphs filtered.
 
     Working at the glyph level (instead of pdfium rect segments) keeps mixed
     CJK + Latin/number lines in their true left-to-right order, which the
-    rect-level ``get_text_bounded`` API scrambles. ``loose`` boxes span the
-    font's ascent to descent, so every glyph of a line shares one height.
+    rect-level ``get_text_bounded`` API scrambles. Each glyph keeps its tight
+    horizontal extent (for word-gap inference) but takes its vertical extent
+    from the loose box, which spans the font's ascent to descent, so every
+    glyph of a line shares one height and lines do not split by letter shape.
 
     When ``return_filter_info`` is true, a third value reports whether any
     source glyph was intentionally filtered as hidden or off-page. Callers
@@ -762,6 +763,10 @@ def _page_chars(
     # rotated dimensions and would discard valid text on cropped/rotated pages.
     try:
         crop_left, crop_bottom, crop_right, crop_top = page.get_cropbox()
+        # Some converters write reversed corners. Compare glyphs against the
+        # normalized bounds, as PageGeometry does for source locators.
+        crop_left, crop_right = min(crop_left, crop_right), max(crop_left, crop_right)
+        crop_bottom, crop_top = min(crop_bottom, crop_top), max(crop_bottom, crop_top)
     except Exception:
         width, height = page.get_size()
         crop_left, crop_bottom, crop_right, crop_top = 0, 0, width, height
@@ -773,12 +778,13 @@ def _page_chars(
     filtered_count = 0
     for i in range(n):
         try:
+            left, _, right, _ = textpage.get_charbox(i)
             try:
-                left, bottom, right, top = textpage.get_charbox(i, loose=loose)
+                _, bottom, _, top = textpage.get_charbox(i, loose=True)
             except TypeError:
                 # Keep compatibility with the small PDFium test doubles and
                 # older pypdfium2 releases that do not expose ``loose``.
-                left, bottom, right, top = textpage.get_charbox(i)
+                _, bottom, _, top = textpage.get_charbox(i)
         except Exception:
             source_count += 1
             continue
@@ -1416,9 +1422,7 @@ def _page_line_boxes(page, raw) -> list:
     textpage = None
     try:
         textpage = page.get_textpage()
-        # Tight glyph boxes put "a" and "d" at different heights, which splits
-        # one line of text into fragments by letter shape.
-        chars, width = _page_chars(textpage, page, raw, loose=True)
+        chars, width = _page_chars(textpage, page, raw)
         if not chars:
             return []
         heights = [c["y1"] - c["y0"] for c in chars if c["y1"] - c["y0"] > 0]
@@ -1824,7 +1828,12 @@ def _select_embedded_images(
     for m in meta:
         hash_pages[m["hash"]].add(m["page"])
 
-    repeat_threshold = max(2, int(num_text_pages * repeat_frac)) if num_text_pages else 2
+    # A fraction is a minimum share: rounding down would classify an image
+    # as repeated even when it appears on fewer pages than configured.
+    repeat_threshold = (
+        max(2, int((Decimal(str(repeat_frac)) * num_text_pages).to_integral_value(rounding=ROUND_CEILING)))
+        if num_text_pages else 2
+    )
     banned = {h for h, pages in hash_pages.items() if len(pages) >= repeat_threshold}
 
     kept: list = []
