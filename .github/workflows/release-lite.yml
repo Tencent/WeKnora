@@ -220,6 +220,20 @@ jobs:
           go build -p 1 -buildvcs=false -tags "desktop,sqlite_fts5,production" -o _prebuild_tmp.exe . || true
           rm -f _prebuild_tmp.exe
 
+      # sqlite-vec-go-bindings 的 cgo 不自带 sqlite3.h，Windows runner 也没有系统
+      # 头文件。上一步预编译已把模块下载进 GOMODCACHE（sqlite-vec 编译失败被
+      # || true 容忍），这里把钉版本的 amalgamation 头注入模块缓存，供正式构建使用。
+      - name: Provide sqlite3.h (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSL -o /tmp/sqlite-amalg.zip "https://www.sqlite.org/2025/sqlite-amalgamation-3490100.zip"
+          mkdir -p /tmp/sqlite-amalg && cd /tmp/sqlite-amalg
+          unzip -o ../sqlite-amalg.zip >/dev/null
+          VEC_DIR="$(go env GOMODCACHE)/github.com/asg017/sqlite-vec-go-bindings@v0.1.6/cgo"
+          test -d "$VEC_DIR"
+          cp sqlite-amalgamation-*/sqlite3.h "$VEC_DIR/"
+
       - name: Build desktop app
         shell: bash
         run: |

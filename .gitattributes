@@ -1,5 +1,10 @@
 *.sh text eol=lf
 
+# License manifest checksums are hex compared line-by-line by
+# scripts/check-license-bundle.sh; CRLF on Windows checkouts would append \r
+# to the checksum field and fail the ^[0-9a-f]{64}$ match.
+*.tsv -text
+
 # Force LF on Go source + JSON golden fixtures so Windows checkouts
 # (with default core.autocrlf=true) don't trip byte-equal comparisons in
 # acceptance/contract envelope tests.
