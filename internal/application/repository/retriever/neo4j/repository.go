@@ -76,6 +76,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		// Node import query
 		node_import_query := `
 			UNWIND $data AS row
+			WITH row ORDER BY row.name ASC, row.knowledge_id ASC
 			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
 			SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
 			RETURN distinct 'done' AS result
@@ -114,6 +115,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		// Relationship import query
 		rel_import_query := `
 			UNWIND $data AS row
+			WITH row ORDER BY row.source ASC, row.target ASC, row.type ASC
 			WITH row,
 			     CASE WHEN row.source <= row.target THEN row.source ELSE row.target END AS first_name,
 			     CASE WHEN row.source <= row.target THEN row.source_labels ELSE row.target_labels END AS first_labels,

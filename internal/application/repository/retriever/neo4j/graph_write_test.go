@@ -147,6 +147,8 @@ func TestRelationshipQueryMergesEndpointsInCanonicalOrder(t *testing.T) {
 	}}))
 	require.Len(t, tx.queries, 2)
 	query := tx.queries[1]
+	assert.Contains(t, query, "WITH row ORDER BY row.source ASC, row.target ASC, row.type ASC",
+		"the database, not just the Go slice, must establish relationship lock order")
 	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.source ELSE row.target END")
 	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.source_labels ELSE row.target_labels END")
 	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.target_labels ELSE row.source_labels END")
