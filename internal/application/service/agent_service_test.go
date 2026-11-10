@@ -791,7 +791,8 @@ func TestAgentEngineKBLookupsKeepPerItemFallbackWhenBatchFails(t *testing.T) {
 	require.Equal(t, "missing", kbInfos[1].Name,
 		"a missing KB must get the same ID-only placeholder as the old per-item path")
 	require.Equal(t, 1, kbService.batches)
-	require.Equal(t, 1, kbService.singles, "the successful fallback read is reused")
+	require.Equal(t, 3, kbService.singles,
+		"kb-1 is read once and reused; the missing KB keeps the old two-consumer lookup behavior")
 }
 
 func TestAgentEngineKBLookupsAreBatchedOnceForToolAndPromptMetadata(t *testing.T) {
