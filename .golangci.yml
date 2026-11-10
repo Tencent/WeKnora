@@ -1,0 +1,24 @@
+version: "2"
+linters:
+  enable:
+    - lll           # 控制行宽
+    - govet
+    - revive
+  settings:
+    lll:
+      line-length: 120
+      tab-width: 4
+  exclusions:
+    paths:
+      # swag embeds OpenAPI as single-line JSON strings; line-length is not meaningful.
+      - docs/docs\.go$
+    rules:
+      # swag annotations and struct tags cannot wrap, so a parameter with its
+      # enum list, a composed response type or a field's swag tags have to
+      # stay on one line.
+      - linters: [lll]
+        source: '^\s*// @(Param|Success|Failure|x-)|(swaggertype|extensions):"'
+formatters:
+  enable:
+    - gofmt
+    - gofumpt

@@ -1,0 +1,2 @@
+# Preserve PDF byte offsets and fixed-width xref records from upstream fixtures.
+*.pdf binary
