@@ -1,0 +1,104 @@
+package service
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+func TestIsValidFileTypeHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     bool
+	}{
+		{name: "html", filename: "index.html", want: true},
+		{name: "uppercase html", filename: "INDEX.HTML", want: true},
+		{name: "htm", filename: "legacy.htm", want: true},
+		{name: "xmind", filename: "architecture.xmind", want: true},
+		{name: "uppercase xmind", filename: "ARCHITECTURE.XMIND", want: true},
+		{name: "unsupported", filename: "payload.exe", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidFileType(tt.filename); got != tt.want {
+				t.Fatalf("isValidFileType(%q) = %v, want %v", tt.filename, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsSupportedImportExtension(t *testing.T) {
+	tests := []struct {
+		name string
+		ext  string
+		want bool
+	}{
+		{name: "xlsx", ext: "xlsx", want: true},
+		{name: "xls", ext: "xls", want: true},
+		{name: "csv", ext: "csv", want: true},
+		{name: "dot prefix", ext: ".xlsx", want: true},
+		{name: "uppercase", ext: "XLSX", want: true},
+		{name: "surrounding space", ext: " xlsx ", want: true},
+		{name: "pdf", ext: "pdf", want: true},
+		{name: "xmind", ext: "xmind", want: true},
+		{name: "uppercase xmind", ext: "XMIND", want: true},
+		{name: "unsupported", ext: "exe", want: false},
+		{name: "video", ext: "mp4", want: false},
+		{name: "empty", ext: "", want: false},
+		{name: "unknown sentinel", ext: unknownFileType, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSupportedImportExtension(tt.ext); got != tt.want {
+				t.Fatalf("isSupportedImportExtension(%q) = %v, want %v", tt.ext, got, tt.want)
+			}
+		})
+	}
+}
+
+// Direct upload and URL import must agree on the accepted extension set,
+// otherwise #2447 (xlsx accepted on upload, rejected on URL import) regresses.
+// The set is pinned so moving it to internal/utils cannot silently change it.
+func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
+	want := []string{
+		"bmp", "csv", "doc", "docm", "docx", "epub", "flac", "gif", "htm", "html", "jpeg", "jpg",
+		"json", "m4a", "markdown", "md", "mhtml", "mp3", "odp", "ods", "odt", "ogg", "pdf", "png", "ppt",
+		"pptm", "pptx", "rtf", "tiff", "txt", "wav", "webp", "xls", "xlsm", "xlsx", "xmind",
+	}
+	exts := secutils.SupportedImportExtensions()
+	if !slices.Equal(exts, want) {
+		t.Fatalf("SupportedImportExtensions() = %v, want %v", exts, want)
+	}
+	for _, ext := range exts {
+		t.Run(ext, func(t *testing.T) {
+			for _, variant := range []string{ext, strings.ToUpper(ext)} {
+				if !isValidFileType("file." + variant) {
+					t.Errorf("isValidFileType rejects supported extension %q", variant)
+				}
+				for _, input := range []string{variant, " ." + variant + " "} {
+					if err := validateImportFileType(input); err != nil {
+						t.Errorf("validateImportFileType(%q) = %v, want nil", input, err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestIsDataTableFileType(t *testing.T) {
+	for _, ext := range []string{"csv", "xlsx", "xls", ".XLSX"} {
+		if !isDataTableFileType(ext) {
+			t.Errorf("isDataTableFileType(%q) = false, want true", ext)
+		}
+	}
+	for _, ext := range []string{"pdf", "png", "", unknownFileType} {
+		if isDataTableFileType(ext) {
+			t.Errorf("isDataTableFileType(%q) = true, want false", ext)
+		}
+	}
+}

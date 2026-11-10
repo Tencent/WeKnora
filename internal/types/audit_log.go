@@ -1,0 +1,250 @@
+package types
+
+import (
+	"time"
+)
+
+// AuditAction names a single audited action class. Action constants are
+// dot-namespaced (`<area>.<event>`) so future PRs can plug in their own
+// areas (e.g. `kb.shared`, `agent.copied`) without colliding with the
+// RBAC events PR 6 ships.
+type AuditAction string
+
+const (
+	// AuditActionMemorySubjectsListed 记录管理员分页查看租户主体摘要，仅包含分页和数量。
+	AuditActionMemorySubjectsListed AuditAction = "memory.subjects_listed"
+	// AuditActionMemorySubjectInspected 记录管理员查看目标主体记忆列表，不包含正文。
+	AuditActionMemorySubjectInspected AuditAction = "memory.subject_inspected"
+	// AuditActionMemoryItemConfirmed 记录管理员确认待审核记忆。
+	AuditActionMemoryItemConfirmed AuditAction = "memory.item_confirmed"
+	// AuditActionMemoryItemRejected 记录管理员否决待审核记忆。
+	AuditActionMemoryItemRejected AuditAction = "memory.item_rejected"
+	// AuditActionMemorySubjectCleared 记录管理员清空主体记忆。
+	AuditActionMemorySubjectCleared AuditAction = "memory.subject_cleared"
+	// AuditActionMemorySubjectSettingsUpdated 记录管理员修改主体记忆开关。
+	AuditActionMemorySubjectSettingsUpdated AuditAction = "memory.subject_settings_updated"
+
+	// AuditActionMemberAdded fires when a tenant Owner / Admin adds a
+	// new tenant_members row. The actor is the inviter; the target is
+	// the invited user.
+	AuditActionMemberAdded AuditAction = "rbac.member_added"
+	// AuditActionMemberRemoved fires when an Owner / Admin removes a
+	// tenant_members row. Distinct from MemberLeft so an audit reader
+	// can tell "kicked out" from "left voluntarily".
+	AuditActionMemberRemoved AuditAction = "rbac.member_removed"
+	// AuditActionMemberRoleChanged fires for promote/demote operations.
+	// The Details payload carries old_role and new_role.
+	AuditActionMemberRoleChanged AuditAction = "rbac.member_role_changed"
+	// AuditActionMemberLeft fires on POST /tenants/:id/leave — the
+	// actor and target are the same user.
+	AuditActionMemberLeft AuditAction = "rbac.member_left"
+	// AuditActionAccessDenied fires when middleware/rbac.go's
+	// RequireRole or RequireOwnershipOrRole rejects a request under
+	// EnableRBAC=true. Subject to 1-minute sliding-window dedup so a
+	// probing client cannot fill the table.
+	AuditActionAccessDenied AuditAction = "rbac.access_denied"
+	// AuditActionInvitationSent fires when an Owner issues a new
+	// tenant invitation. Actor is the inviter, TargetUserID is the
+	// invitee. Note: AuditActionMemberAdded only fires when the
+	// invitee actually accepts and the tenant_members row is created.
+	AuditActionInvitationSent AuditAction = "rbac.invitation_sent"
+	// AuditActionInvitationAccepted fires when the invitee accepts a
+	// pending invitation. Actor is the invitee (acting on their own
+	// inbox); the matching rbac.member_added is emitted in the same
+	// transaction.
+	AuditActionInvitationAccepted AuditAction = "rbac.invitation_accepted"
+	// AuditActionInvitationDeclined fires when the invitee rejects a
+	// pending invitation. Actor and target are the same user.
+	AuditActionInvitationDeclined AuditAction = "rbac.invitation_declined"
+	// AuditActionInvitationRevoked fires when a tenant Owner cancels
+	// a still-pending invitation before the invitee acts. Actor is
+	// the Owner; target is the invitee.
+	AuditActionInvitationRevoked AuditAction = "rbac.invitation_revoked"
+	// AuditActionInvitationExpired fires when the lazy sweep transitions
+	// an overdue pending row to expired. Actor is empty (system).
+	AuditActionInvitationExpired AuditAction = "rbac.invitation_expired"
+
+	// VectorStore lifecycle actions. Emitted by VectorStoreService.
+	// Cover both env-store-derived (__env_*) and DB store create /
+	// update / delete paths. Details payload identifies the store_id
+	// and the changed key set; secret values (Password, APIKey,
+	// connection_config encrypted blob) MUST NOT appear in details.
+
+	// AuditActionVectorStoreCreated fires when a new VectorStore row
+	// is committed to the DB (Phase 1 CRUD path). Actor is the tenant
+	// user; resource is the VectorStore.
+	AuditActionVectorStoreCreated AuditAction = "vector_store.created"
+	// AuditActionVectorStoreUpdated fires on UPDATE of any VectorStore
+	// mutable field. Details payload carries the changed key set
+	// (never the secret values themselves — only the field names).
+	AuditActionVectorStoreUpdated AuditAction = "vector_store.updated"
+	// AuditActionVectorStoreDeleted fires when a VectorStore is
+	// (soft-)deleted. Phase 2's delete guard already prevents deletion
+	// of stores with bound KBs; the audit row records the actor and
+	// the store_id for forensic traceability.
+	AuditActionVectorStoreDeleted AuditAction = "vector_store.deleted"
+
+	// OpenSearch-specific actions emitted by the driver shipped in
+	// Phase 3. The OpenSearch index is a derived resource of the
+	// VectorStore — these events capture cluster-side side effects
+	// (PUT /<index>, DELETE /<index>, POST /_reindex) that operators
+	// may need to correlate with VectorStore lifecycle events.
+
+	// AuditActionOpenSearchIndexCreated fires when the OpenSearch
+	// driver lazily creates a per-dimension index (the first time a
+	// KB with a given embedding dim binds to the store). Details
+	// payload: index name, alias name, dimension.
+	AuditActionOpenSearchIndexCreated AuditAction = "opensearch.index_created"
+	// AuditActionOpenSearchIndexDeleted fires when the OpenSearch
+	// driver drops an index (e.g. cascade from VectorStore delete).
+	AuditActionOpenSearchIndexDeleted AuditAction = "opensearch.index_deleted"
+	// AuditActionOpenSearchReindexExecuted fires when CopyIndices
+	// initiates a _reindex (sync or async). Details payload: source
+	// KB id, target KB id, sync-or-async, doc count if known.
+	AuditActionOpenSearchReindexExecuted AuditAction = "opensearch.reindex_executed"
+
+	// AuditActionSystemSettingChanged fires when a SystemAdmin updates
+	// a row in the platform-wide system_settings table via
+	// PUT /api/v1/system/admin/settings/:key. Details payload carries
+	// {key, value_type, old_value, new_value} — sensitive values are
+	// redacted server-side before logging when is_secret=true (P3+;
+	// for now no setting is marked secret). Audit rows always have
+	// tenant_id=0 because the change is system-scope, not workspace-scoped.
+	AuditActionSystemSettingChanged AuditAction = "system.setting_changed"
+
+	// AuditActionSystemAdminPromoted fires when a SystemAdmin grants
+	// system-administrator privileges to another user via
+	// POST /api/v1/system/admin/promote. ActorUserID is the promoter,
+	// TargetUserID is the user being promoted. Details payload carries
+	// {target_email, target_username, idempotent} — `idempotent=true`
+	// means the user was already a system admin and no row was written
+	// (we still emit the row so probing the endpoint leaves a trail).
+	// TenantID=0 because the change is system-scope.
+	AuditActionSystemAdminPromoted AuditAction = "system.admin_promoted"
+	// AuditActionSystemAdminRevoked fires when a SystemAdmin removes
+	// system-administrator privileges from another user via
+	// POST /api/v1/system/admin/revoke. Details payload carries
+	// {target_email, target_username, changed} — `changed=false` covers
+	// the idempotent path (target was already not an admin) so an audit
+	// reader can distinguish a real revoke from a noop attempt.
+	// TenantID=0 because the change is system-scope.
+	AuditActionSystemAdminRevoked AuditAction = "system.admin_revoked"
+
+	// AuditActionSystemUserPasswordReset fires when a SystemAdmin replaces
+	// another user's local password. Details identify the target and record
+	// session revocation, but never contain the old or new password.
+	AuditActionSystemUserPasswordReset AuditAction = "system.user_password_reset"
+
+	// AuditActionSystemUserCreated fires when a SystemAdmin provisions a
+	// new local user via POST /api/v1/system/admin/users/create. Details
+	// carry {target_email, target_username, password_generated, idempotent}
+	// password_generated=true only on the create path, idempotent=true
+	// marks a no-op hit on an already-existing identity.
+	// TenantID=0 (system-scope).
+	AuditActionSystemUserCreated   AuditAction = "system.user_created"
+	AuditActionSystemAPIKeyCreated AuditAction = "system.api_key_created"
+	AuditActionSystemAPIKeyRevoked AuditAction = "system.api_key_revoked"
+
+	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
+	// archived task can repeat its original side effects; deleting one removes
+	// the Redis failure record. Both must leave a platform audit trail.
+	AuditActionSystemQueueTaskRetried   AuditAction = "system.queue_task_retried"
+	AuditActionSystemQueueTaskDeleted   AuditAction = "system.queue_task_deleted"
+	AuditActionSystemQueueTaskRunNow    AuditAction = "system.queue_task_run_now"
+	AuditActionSystemQueueTaskCancelled AuditAction = "system.queue_task_cancelled"
+	// AuditActionSystemQueueArchivedPurged fires when an operator clears every
+	// archived (finally-failed) task in one queue in a single action. The
+	// detail payload records the queue and how many records were removed.
+	AuditActionSystemQueueArchivedPurged AuditAction = "system.queue_archived_purged"
+
+	// Knowledge-base activity actions. These rows use scope_type=knowledge_base
+	// and scope_id=<kb id>; TargetType/TargetID identify the concrete child
+	// resource when the operation is about a document, tag, data source, or share.
+	AuditActionKBCreated        AuditAction = "kb.created"
+	AuditActionKBUpdated        AuditAction = "kb.updated"
+	AuditActionKBDeleted        AuditAction = "kb.deleted"
+	AuditActionKBDuplicated     AuditAction = "kb.duplicated"
+	AuditActionKBCloneStarted   AuditAction = "kb.clone_started"
+	AuditActionKBCloneCompleted AuditAction = "kb.clone_completed"
+	AuditActionKBCloneFailed    AuditAction = "kb.clone_failed"
+
+	AuditActionKnowledgeCreated        AuditAction = "knowledge.created"
+	AuditActionKnowledgeUpdated        AuditAction = "knowledge.updated"
+	AuditActionKnowledgeDeleted        AuditAction = "knowledge.deleted"
+	AuditActionKnowledgeBatchDeleted   AuditAction = "knowledge.batch_deleted"
+	AuditActionKnowledgeReparseStarted AuditAction = "knowledge.reparse_started"
+	AuditActionKnowledgeParseCanceled  AuditAction = "knowledge.parse_canceled"
+	AuditActionKnowledgeMoveStarted    AuditAction = "knowledge.move_started"
+	AuditActionKnowledgeMoveCompleted  AuditAction = "knowledge.move_completed"
+	AuditActionKnowledgeMoveFailed     AuditAction = "knowledge.move_failed"
+
+	AuditActionTagCreated AuditAction = "tag.created"
+	AuditActionTagUpdated AuditAction = "tag.updated"
+	AuditActionTagDeleted AuditAction = "tag.deleted"
+
+	AuditActionDataSourceCreated       AuditAction = "datasource.created"
+	AuditActionDataSourceUpdated       AuditAction = "datasource.updated"
+	AuditActionDataSourceDeleted       AuditAction = "datasource.deleted"
+	AuditActionDataSourceSyncStarted   AuditAction = "datasource.sync_started"
+	AuditActionDataSourceSyncCompleted AuditAction = "datasource.sync_completed"
+	AuditActionDataSourceSyncFailed    AuditAction = "datasource.sync_failed"
+	AuditActionDataSourcePaused        AuditAction = "datasource.paused"
+	AuditActionDataSourceResumed       AuditAction = "datasource.resumed"
+
+	AuditActionKBShareAdded             AuditAction = "kb.share_added"
+	AuditActionKBSharePermissionChanged AuditAction = "kb.share_permission_changed"
+	AuditActionKBShareRemoved           AuditAction = "kb.share_removed"
+	AuditActionWikiContentChanged       AuditAction = "wiki.content_changed"
+
+	AuditActionFAQImportStarted   AuditAction = "faq.import_started"
+	AuditActionFAQImportCompleted AuditAction = "faq.import_completed"
+	AuditActionFAQImportFailed    AuditAction = "faq.import_failed"
+)
+
+// AuditOutcome separates asynchronous acceptance from terminal business
+// results and middleware-level rejections. The UI can therefore avoid
+// presenting a queued operation as already completed.
+type AuditOutcome string
+
+const (
+	AuditOutcomeSuccess AuditOutcome = "success"
+	// Accepted means the durable request was created and asynchronous work was
+	// submitted, but the background operation has not reached a terminal state.
+	AuditOutcomeAccepted AuditOutcome = "accepted"
+	AuditOutcomeDenied   AuditOutcome = "denied"
+	AuditOutcomeFailed   AuditOutcome = "failed"
+	AuditOutcomePartial  AuditOutcome = "partial"
+	AuditOutcomeCanceled AuditOutcome = "canceled"
+)
+
+// AuditLog is a single immutable audit event. The schema is intentionally
+// generic: PR 6 wires only RBAC events, but TargetType / TargetID /
+// Details are set up to absorb KB / agent / datasource events in
+// follow-up PRs without another migration. Knowledge-base task events use a
+// bounded convention inside Details: task_id, trigger, processing_status,
+// source/target ids, aggregate counts, and operation-specific mode/attempt.
+//
+// Rows are append-only — no UpdatedAt, no soft-delete column. The
+// monotonic ID acts as both primary key and pagination cursor (newest-
+// first is `WHERE id < AfterID ORDER BY id DESC`).
+type AuditLog struct {
+	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement;index:idx_audit_logs_tenant_scope_desc,priority:4,sort:desc" extensions:"x-agent=event_id"`
+	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1;index:idx_audit_logs_tenant_scope_desc,priority:1"`
+	ActorUserID   string       `json:"actor_user_id"  gorm:"type:varchar(64);default:'';index:idx_audit_logs_actor"`
+	ActorRole     string       `json:"actor_role"     gorm:"type:varchar(32);default:''" extensions:"x-agent"`
+	Action        AuditAction  `json:"action"         gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2" extensions:"x-agent"`
+	ScopeType     string       `json:"scope_type"     gorm:"type:varchar(32);default:'';index:idx_audit_logs_tenant_scope_desc,priority:2"`
+	ScopeID       string       `json:"scope_id"       gorm:"type:varchar(64);default:'';index:idx_audit_logs_tenant_scope_desc,priority:3"`
+	TargetType    string       `json:"target_type"    gorm:"type:varchar(32);default:''" extensions:"x-agent"`
+	TargetID      string       `json:"target_id"      gorm:"type:varchar(64);default:''"`
+	TargetUserID  string       `json:"target_user_id" gorm:"type:varchar(36);default:''"`
+	RequestPath   string       `json:"request_path"   gorm:"type:varchar(512);default:''"`
+	RequestMethod string       `json:"request_method" gorm:"type:varchar(16);default:''"`
+	Outcome       AuditOutcome `json:"outcome"        gorm:"type:varchar(16);default:success" extensions:"x-agent"`
+	Details       JSON         `json:"details"        gorm:"type:jsonb;default:'{}'" extensions:"x-agent,x-agent-keys=title|trigger|via|processing_status"`
+	CreatedAt     time.Time    `json:"created_at"     gorm:"index:idx_audit_logs_tenant_id_desc,priority:2,sort:desc" extensions:"x-agent"`
+}
+
+// TableName pins the table name even if a future GORM convention
+// pluralisation refactor would otherwise rename it.
+func (AuditLog) TableName() string { return "audit_logs" }

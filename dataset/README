@@ -1,0 +1,275 @@
+# QA Dataset Sampling Tool
+
+A comprehensive tool for sampling QA datasets and generating answers using OpenAI's GPT models. This tool helps you create high-quality question-answering datasets from large-scale collections like MS MARCO.
+
+## Features
+
+- **Smart Sampling**: Intelligently sample queries, documents, and relevance judgments from large datasets
+- **Answer Generation**: Automatically generate high-quality answers using OpenAI's GPT models
+- **Resume Support**: Continue interrupted answer generation from where it left off
+- **Progress Tracking**: Real-time progress updates and statistics
+- **Result Visualization**: Easy-to-read display of generated QA pairs with context
+
+## Installation
+
+### Prerequisites
+
+- Python 3.7+
+- OpenAI API key
+
+### Install Dependencies
+
+```bash
+pip install pandas pyarrow openai
+```
+
+### Set Environment Variables
+
+```bash
+export OPENAI_API_KEY="your-openai-api-key"
+# Optional: Use custom OpenAI endpoint
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+```
+
+### Parpare dataset
+
+We provide pre-processed samples from popular QA datasets:
+
+MarkrAI/msmarco_sample_autorag
+
+## Quick Start
+
+### 1. Sample Data from Large Dataset
+
+First, sample a subset of queries, documents, and relevance judgments from your full dataset:
+
+```bash
+python dataset/qa_dataset.py sample \
+  --queries ~/dataset/mmarco-queries.parquet \
+  --corpus ~/dataset/mmarco-corpus.parquet \
+  --qrels ~/dataset/mmarco-qrels.parquet \
+  --nq 100 \
+  --output_dir ./dataset/samples
+```
+
+### 2. Generate Answers
+
+Use OpenAI's GPT model to generate answers for the sampled questions:
+
+```bash
+python dataset/qa_dataset.py generate \
+  --input_dir ./dataset/samples \
+  --output_dir ./dataset/samples
+```
+
+The script uses `gpt-5.6-sol` by default.
+
+### 3. View Results
+
+Display the generated QA pairs with their context:
+
+```bash
+python dataset/qa_dataset.py show \
+  --input_dir ./dataset/samples \
+  -n 5
+```
+
+## Detailed Usage
+
+### Sample Command
+
+Create a representative sample from your full dataset.
+
+```bash
+python dataset/qa_dataset.py sample [OPTIONS]
+```
+
+**Required Parameters:**
+- `--queries`: Path to queries parquet file (columns: `id`, `text`)
+- `--corpus`: Path to corpus parquet file (columns: `id`, `text`)
+- `--qrels`: Path to qrels parquet file (columns: `qid`, `pid`)
+
+**Optional Parameters:**
+- `--nq`: Number of queries to sample (default: 1000)
+- `--output_dir`: Output directory for sampled data (default: ./save)
+
+**Example:**
+```bash
+python dataset/qa_dataset.py sample \
+  --queries data/queries.parquet \
+  --corpus data/corpus.parquet \
+  --qrels data/qrels.parquet \
+  --nq 500 \
+  --output_dir ./my_sample
+```
+
+### Generate Command
+
+Generate answers for sampled questions using OpenAI API.
+
+```bash
+python dataset/qa_dataset.py generate [OPTIONS]
+```
+
+**Required Parameters:**
+- `--input_dir`: Directory containing sampled data (queries.parquet, corpus.parquet, qrels.parquet)
+
+**Optional Parameters:**
+- `--output_dir`: Output directory for generated answers (default: ./save)
+
+**Features:**
+- **Resume Support**: Automatically continues from where it left off if interrupted
+- **Error Handling**: Retries failed API calls up to 3 times
+- **Progress Saving**: Saves progress after each successful answer generation
+
+**Example:**
+```bash
+python dataset/qa_dataset.py generate \
+  --input_dir ./my_sample \
+  --output_dir ./my_sample
+```
+
+### Show Command
+
+Display generated QA pairs with full context.
+
+```bash
+python dataset/qa_dataset.py show [OPTIONS]
+```
+
+**Required Parameters:**
+- `--input_dir`: Directory containing QA data (queries.parquet, corpus.parquet, qrels.parquet, qas.parquet, answers.parquet)
+
+**Optional Parameters:**
+- `-n`: Number of results to display (default: 5)
+
+**Example:**
+```bash
+python dataset/qa_dataset.py show \
+  --input_dir ./my_sample \
+  -n 3
+```
+
+## Input Data Format
+
+### Queries File (queries.parquet)
+| Column | Type | Description |
+|--------|------|-------------|
+| id | string | Unique query identifier |
+| text | string | The actual question text |
+
+### Corpus File (corpus.parquet)
+| Column | Type | Description |
+|--------|------|-------------|
+| id | string | Unique passage/document identifier |
+| text | string | The passage/document content |
+
+### Qrels File (qrels.parquet)
+| Column | Type | Description |
+|--------|------|-------------|
+| qid | string | Query ID (matches queries.id) |
+| pid | string | Passage ID (matches corpus.id) |
+
+## Output Files
+
+After running all commands, your output directory will contain:
+
+### Sampled Data
+- `queries.parquet`: Sampled queries subset
+- `corpus.parquet`: Sampled documents subset
+- `qrels.parquet`: Sampled relevance judgments
+
+### Generated Answers
+- `answers.parquet`: Generated answers with unique IDs
+- `qas.parquet`: Question-answer mapping (qid → aid)
+
+## Advanced Usage
+
+### Custom OpenAI Configuration
+
+You can use different OpenAI models or endpoints:
+
+```bash
+# Use GPT-4 Turbo
+export OPENAI_API_KEY="your-key"
+python dataset/qa_dataset.py generate --input_dir ./samples
+
+# Use Azure OpenAI
+export OPENAI_API_KEY="azure-key"
+export OPENAI_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/gpt-4"
+python dataset/qa_dataset.py generate --input_dir ./samples
+```
+
+### Large Dataset Sampling
+
+For very large datasets, consider sampling in batches:
+
+```bash
+# First batch
+python dataset/qa_dataset.py sample --nq 1000 --output_dir ./batch1
+python dataset/qa_dataset.py generate --input_dir ./batch1
+
+# Second batch
+python dataset/qa_dataset.py sample --nq 1000 --output_dir ./batch2
+python dataset/qa_dataset.py generate --input_dir ./batch2
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**1. OpenAI API Errors**
+- Ensure your API key is set correctly: `echo $OPENAI_API_KEY`
+- Check your API quota and billing status
+- Verify network connectivity to OpenAI
+
+**2. Memory Issues with Large Datasets**
+- Reduce `--nq` parameter for smaller samples
+- Ensure sufficient RAM for pandas operations
+- Consider using smaller parquet files
+
+**3. File Not Found Errors**
+- Verify all input file paths are correct
+- Ensure parquet files have correct column names
+- Check file permissions
+
+### Debug Mode
+
+Enable verbose output by adding print statements or using Python debugger:
+
+```bash
+python -m pdb dataset/qa_dataset.py sample --queries ...
+```
+
+## Example Workflow
+
+```bash
+# 1. Setup environment
+export OPENAI_API_KEY="sk-..."
+
+# 2. Sample 200 queries from MS MARCO
+python dataset/qa_dataset.py sample \
+  --queries ~/mmarco/queries.parquet \
+  --corpus ~/mmarco/corpus.parquet \
+  --qrels ~/mmarco/qrels.parquet \
+  --nq 200 \
+  --output_dir ./marco_sample
+
+# 3. Generate answers (may take time depending on API rate limits)
+python dataset/qa_dataset.py generate \
+  --input_dir ./marco_sample \
+  --output_dir ./marco_sample
+
+# 4. Review results
+python dataset/qa_dataset.py show \
+  --input_dir ./marco_sample \
+  -n 10
+```
+
+## Contributing
+
+Feel free to submit issues and enhancement requests!
+
+## License
+
+MIT License - feel free to use this tool for your research and projects.

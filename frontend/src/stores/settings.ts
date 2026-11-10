@@ -1,0 +1,671 @@
+import { defineStore } from "pinia";
+import { nextTick } from "vue";
+import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
+import { getApiBaseUrl } from "@/utils/api-base";
+import { isAgentStreamAgentId } from "@/utils/agent-mode";
+import { loadAndReconcileSettings } from "@/stores/settingsStorage";
+import { isReasoningLevel, type ReasoningLevel } from "@/utils/reasoningEffort";
+
+// 定义设置接口
+interface Settings {
+  endpoint: string;
+  apiKey: string;
+  knowledgeBaseId: string;
+  isAgentEnabled: boolean;
+  agentConfig: AgentConfig;
+  selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
+  selectedFiles: string[]; // 当前选中的文件ID列表
+  selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
+  selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
+  selectedMCPServices: string[];
+  selectedSkills: string[];
+  selectedTools?: string[];
+  modelConfig: ModelConfig;  // 模型配置
+  ollamaConfig: OllamaConfig;  // Ollama配置
+  localBrowserEnabled: boolean; // Explicit source preference; composer activates it only while the extension is online
+  webSearchEnabled: boolean;  // 网络搜索是否启用
+  conversationModels: ConversationModels;
+  selectedAgentId: string;  // 当前选中的智能体ID
+  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
+  autoCheckUpdate?: boolean; // 是否自动检查并下载更新
+}
+
+// Agent 配置接口
+interface AgentConfig {
+  maxIterations: number;
+  temperature: number;
+  allowedTools: string[];
+  system_prompt?: string;  // Unified system prompt (uses {{web_search_status}} placeholder)
+}
+
+interface ConversationModels {
+  summaryModelId: string;
+  rerankModelId: string;
+  selectedChatModelId: string;  // 用户当前选择的对话模型ID
+}
+
+// 单个模型项接口
+interface ModelItem {
+  id: string;  // 唯一ID
+  name: string;  // 显示名称
+  source: 'local' | 'remote';  // 模型来源
+  modelName: string;  // 模型标识
+  baseUrl?: string;  // 远程API URL
+  apiKey?: string;  // 远程API Key
+  dimension?: number;  // Embedding专用：向量维度
+  interfaceType?: 'ollama' | 'openai';  // VLLM专用：接口类型
+  isDefault?: boolean;  // 是否为默认模型
+}
+
+// 模型配置接口 - 支持多模型
+interface ModelConfig {
+  chatModels: ModelItem[];
+  embeddingModels: ModelItem[];
+  rerankModels: ModelItem[];
+  vllmModels: ModelItem[];  // VLLM视觉模型
+}
+
+// Ollama 配置接口
+interface OllamaConfig {
+  baseUrl: string;  // Ollama 服务地址
+  enabled: boolean;  // 是否启用
+}
+
+// 默认设置
+const defaultSettings: Settings = {
+  endpoint: getApiBaseUrl(),
+  apiKey: "",
+  knowledgeBaseId: "",
+  isAgentEnabled: false,
+  agentConfig: {
+    maxIterations: 5,
+    temperature: 0.7,
+    allowedTools: [],  // 默认为空，需要通过 API 从后端加载
+    system_prompt: "",
+  },
+  selectedKnowledgeBases: [],  // 默认为空数组
+  selectedFiles: [], // 默认为空数组
+  selectedFileKbMap: {},  // 文件ID -> 知识库ID
+  selectedTags: [],
+  selectedMCPServices: [],
+  selectedSkills: [],
+  modelConfig: {
+    chatModels: [],
+    embeddingModels: [],
+    rerankModels: [],
+    vllmModels: []
+  },
+  ollamaConfig: {
+    baseUrl: "http://localhost:11434",
+    enabled: true
+  },
+  localBrowserEnabled: false,
+  webSearchEnabled: false,  // 默认关闭网络搜索
+  conversationModels: {
+    summaryModelId: "",
+    rerankModelId: "",
+    selectedChatModelId: "",  // 用户当前选择的对话模型ID
+  },
+  selectedAgentId: BUILTIN_QUICK_ANSWER_ID,  // 默认选中快速问答模式
+  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源空间 ID
+  autoCheckUpdate: true,
+};
+
+export const useSettingsStore = defineStore("settings", {
+  state: () => ({
+    // 从本地存储加载设置，如果没有则使用默认设置
+    settings: loadAndReconcileSettings(defaultSettings),
+    // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
+    // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
+    _defaultsSnapshot: null as Settings | null,
+    // 全局搜索可为下一次新对话显式指定 KB/文件；仅供一次路由跳转使用。
+    _pendingNewChatReferences: null as { kbIds: string[]; fileIds: string[] } | null,
+    /** 正在从 session.last_request_state 恢复输入栏，避免 agent 切换 watch 覆盖 KB 选择 */
+    _isApplyingSessionState: false,
+    // Session-only preference: never written into global settings/localStorage.
+    reasoningEffortOverride: '' as ReasoningLevel | '',
+  }),
+
+  getters: {
+    // Agent 是否启用
+    isAgentEnabled: (state) => state.settings.isAgentEnabled || false,
+
+    // 当前是否为内置快速问答（优先看 selectedAgentId，避免与 isAgentEnabled 漂移）
+    isQuickAnswerMode: (state) =>
+      (state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID) === BUILTIN_QUICK_ANSWER_ID,
+
+    // 是否走 Agent 流式管线（智能推理 / 自定义 Agent）；快速问答走 RAG 管线
+    isAgentStreamMode: (state) =>
+      isAgentStreamAgentId(
+        state.settings.selectedAgentId,
+        state.settings.isAgentEnabled || false,
+      ),
+    
+    // Agent 是否就绪（配置完整）
+    // 需要满足：1) 配置了允许的工具 2) 设置了对话模型 3) 设置了重排模型
+    isAgentReady: (state) => {
+      const config = state.settings.agentConfig || defaultSettings.agentConfig
+      const models = state.settings.conversationModels || defaultSettings.conversationModels
+      return Boolean(
+        config.allowedTools && config.allowedTools.length > 0 &&
+        models.summaryModelId && models.summaryModelId.trim() !== '' &&
+        models.rerankModelId && models.rerankModelId.trim() !== ''
+      )
+    },
+    
+    // 普通模式（快速回答）是否就绪
+    // 需要满足：1) 设置了对话模型 2) 设置了重排模型
+    isNormalModeReady: (state) => {
+      const models = state.settings.conversationModels || defaultSettings.conversationModels
+      return Boolean(
+        models.summaryModelId && models.summaryModelId.trim() !== '' &&
+        models.rerankModelId && models.rerankModelId.trim() !== ''
+      )
+    },
+    
+    // 获取 Agent 配置
+    agentConfig: (state) => state.settings.agentConfig || defaultSettings.agentConfig,
+
+    conversationModels: (state) => state.settings.conversationModels || defaultSettings.conversationModels,
+    
+    // 获取模型配置
+    modelConfig: (state) => state.settings.modelConfig || defaultSettings.modelConfig,
+    
+    // 本轮查询来源
+    isLocalBrowserEnabled: (state) => state.settings.localBrowserEnabled === true,
+    isWebSearchEnabled: (state) => state.settings.webSearchEnabled || false,
+    
+    // 是否自动检查并下载更新
+    isAutoCheckUpdateEnabled: (state) => state.settings.autoCheckUpdate ?? true,
+
+    // 当前选中的智能体ID
+    selectedAgentId: (state) => state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
+    // 共享智能体来源空间 ID（可选）
+    selectedAgentSourceTenantId: (state) => state.settings.selectedAgentSourceTenantId ?? null,
+  },
+
+  actions: {
+    // 保存设置
+    saveSettings(settings: Settings) {
+      this.settings = { ...settings };
+      // 保存到localStorage
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // 获取设置
+    getSettings(): Settings {
+      return this.settings;
+    },
+
+    // 获取API端点
+    getEndpoint(): string {
+      return this.settings.endpoint || defaultSettings.endpoint;
+    },
+
+    // 获取API Key
+    getApiKey(): string {
+      return this.settings.apiKey;
+    },
+
+    // 获取知识库ID
+    getKnowledgeBaseId(): string {
+      return this.settings.knowledgeBaseId;
+    },
+    
+    // 启用/禁用 Agent
+    toggleAgent(enabled: boolean) {
+      this.settings.isAgentEnabled = enabled;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 更新 Agent 配置
+    updateAgentConfig(config: Partial<AgentConfig>) {
+      this.settings.agentConfig = { ...this.settings.agentConfig, ...config };
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    updateConversationModels(models: Partial<ConversationModels>) {
+      const current = this.settings.conversationModels || defaultSettings.conversationModels;
+      this.settings.conversationModels = { ...current, ...models };
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 更新模型配置
+    updateModelConfig(config: Partial<ModelConfig>) {
+      this.settings.modelConfig = { ...this.settings.modelConfig, ...config };
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 添加模型
+    addModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: ModelItem) {
+      const key = `${type}Models` as keyof ModelConfig;
+      const models = [...this.settings.modelConfig[key]] as ModelItem[];
+      // 如果设为默认，取消其他模型的默认状态
+      if (model.isDefault) {
+        models.forEach(m => m.isDefault = false);
+      }
+      // 如果是第一个模型，自动设为默认
+      if (models.length === 0) {
+        model.isDefault = true;
+      }
+      models.push(model);
+      this.settings.modelConfig[key] = models as any;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 更新模型
+    updateModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', modelId: string, updates: Partial<ModelItem>) {
+      const key = `${type}Models` as keyof ModelConfig;
+      const models = [...this.settings.modelConfig[key]] as ModelItem[];
+      const index = models.findIndex(m => m.id === modelId);
+      if (index !== -1) {
+        // 如果要设为默认，取消其他模型的默认状态
+        if (updates.isDefault) {
+          models.forEach(m => m.isDefault = false);
+        }
+        models[index] = { ...models[index], ...updates };
+        this.settings.modelConfig[key] = models as any;
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+    
+    // 删除模型
+    deleteModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', modelId: string) {
+      const key = `${type}Models` as keyof ModelConfig;
+      let models = [...this.settings.modelConfig[key]] as ModelItem[];
+      const deletedModel = models.find(m => m.id === modelId);
+      models = models.filter(m => m.id !== modelId);
+      // 如果删除的是默认模型，设置第一个为默认
+      if (deletedModel?.isDefault && models.length > 0) {
+        models[0].isDefault = true;
+      }
+      this.settings.modelConfig[key] = models as any;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 设置默认模型
+    setDefaultModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', modelId: string) {
+      const key = `${type}Models` as keyof ModelConfig;
+      const models = [...this.settings.modelConfig[key]] as ModelItem[];
+      models.forEach(m => m.isDefault = (m.id === modelId));
+      this.settings.modelConfig[key] = models as any;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 更新 Ollama 配置
+    updateOllamaConfig(config: Partial<OllamaConfig>) {
+      this.settings.ollamaConfig = { ...this.settings.ollamaConfig, ...config };
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 选择知识库（替换整个列表）
+    selectKnowledgeBases(kbIds: string[]) {
+      this.settings.selectedKnowledgeBases = kbIds;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 添加单个知识库
+    addKnowledgeBase(kbId: string) {
+      if (!this.settings.selectedKnowledgeBases.includes(kbId)) {
+        this.settings.selectedKnowledgeBases.push(kbId);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+    
+    // 移除单个知识库
+    removeKnowledgeBase(kbId: string) {
+      this.settings.selectedKnowledgeBases = 
+        this.settings.selectedKnowledgeBases.filter((id: string) => id !== kbId);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 清空知识库选择
+    clearKnowledgeBases() {
+      this.settings.selectedKnowledgeBases = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 获取选中的知识库列表
+    getSelectedKnowledgeBases(): string[] {
+      return this.settings.selectedKnowledgeBases || [];
+    },
+    
+    // 本机浏览器与联网搜索可独立选择。
+    toggleLocalBrowser(enabled: boolean) {
+      this.settings.localBrowserEnabled = enabled;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    toggleWebSearch(enabled: boolean) {
+      this.settings.webSearchEnabled = enabled;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // 启用/禁用自动检查更新
+    toggleAutoCheckUpdate(enabled: boolean) {
+      this.settings.autoCheckUpdate = enabled;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // File selection actions
+    addFile(fileId: string) {
+      if (!this.settings.selectedFiles) this.settings.selectedFiles = [];
+      if (!this.settings.selectedFiles.includes(fileId)) {
+        this.settings.selectedFiles.push(fileId);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeFile(fileId: string) {
+      if (!this.settings.selectedFiles) return;
+      this.settings.selectedFiles = this.settings.selectedFiles.filter((id: string) => id !== fileId);
+      if (this.settings.selectedFileKbMap) delete this.settings.selectedFileKbMap[fileId];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFiles() {
+      this.settings.selectedFiles = [];
+      this.settings.selectedFileKbMap = {};
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // 新对话从空的 @ 引用开始，避免上一个会话的检索范围成为新会话默认值。
+    clearChatReferences() {
+      this.settings.selectedKnowledgeBases = [];
+      this.settings.selectedFiles = [];
+      this.settings.selectedFileKbMap = {};
+      this.settings.selectedTags = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // 搜索结果发起的新对话有明确范围，覆盖旧引用而非追加到旧引用。
+    setNewChatReferences(kbIds: string[], fileIds: string[]) {
+      this.clearChatReferences();
+      this.settings.selectedKnowledgeBases = [...kbIds];
+      this.settings.selectedFiles = [...fileIds];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    prepareNewChatReferences(kbIds: string[], fileIds: string[]) {
+      this._pendingNewChatReferences = { kbIds: [...kbIds], fileIds: [...fileIds] };
+      this.setNewChatReferences(kbIds, fileIds);
+    },
+
+    consumeNewChatReferences() {
+      const pending = this._pendingNewChatReferences;
+      this._pendingNewChatReferences = null;
+      return pending;
+    },
+
+    addTag(tag: { id: string; name: string; kbId: string; kbName?: string }) {
+      if (!this.settings.selectedTags) this.settings.selectedTags = [];
+      if (!this.settings.selectedTags.some(t => t.id === tag.id && t.kbId === tag.kbId)) {
+        this.settings.selectedTags.push(tag);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeTag(tagId: string, kbId?: string) {
+      if (!this.settings.selectedTags) return;
+      this.settings.selectedTags = this.settings.selectedTags.filter(t => !(t.id === tagId && (!kbId || t.kbId === kbId)));
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearTags() {
+      this.settings.selectedTags = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    addMCPService(serviceId: string) {
+      if (!this.settings.selectedMCPServices) this.settings.selectedMCPServices = [];
+      if (!this.settings.selectedMCPServices.includes(serviceId)) {
+        this.settings.selectedMCPServices.push(serviceId);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeMCPService(serviceId: string) {
+      if (!this.settings.selectedMCPServices) return;
+      this.settings.selectedMCPServices = this.settings.selectedMCPServices.filter(id => id !== serviceId);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    addSkill(skillName: string) {
+      if (!this.settings.selectedSkills) this.settings.selectedSkills = [];
+      if (!this.settings.selectedSkills.includes(skillName)) {
+        this.settings.selectedSkills.push(skillName);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeSkill(skillName: string) {
+      if (!this.settings.selectedSkills) return;
+      this.settings.selectedSkills = this.settings.selectedSkills.filter(name => name !== skillName);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    setFileKbMap(updates: Record<string, string>) {
+      if (!this.settings.selectedFileKbMap) this.settings.selectedFileKbMap = {};
+      Object.assign(this.settings.selectedFileKbMap, updates);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    removeFileKbId(fileId: string) {
+      if (this.settings.selectedFileKbMap) delete this.settings.selectedFileKbMap[fileId];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    getSelectedFiles(): string[] {
+      return this.settings.selectedFiles || [];
+    },
+
+    /**
+     * Scope for suggested-questions API (KB / file / tag @mentions).
+     * Leave `limit` undefined to let the backend apply the agent's configured
+     * starter count; pass a number only to request a specific count.
+     */
+    getSuggestedQuestionsParams(limit?: number) {
+      const selectedKBs = this.getSelectedKnowledgeBases();
+      const selectedFiles = this.getSelectedFiles();
+      const tags = this.settings.selectedTags || [];
+      const tagScopes = Object.entries(tags.reduce<Record<string, string[]>>((scopes, tag) => {
+        if (!tag.id || !tag.kbId) return scopes;
+        (scopes[tag.kbId] ||= []).push(tag.id);
+        return scopes;
+      }, {})).map(([knowledge_base_id, ids]) => ({
+        knowledge_base_id,
+        tag_ids: [...new Set(ids)],
+      }));
+      return {
+        // A tag's parent KB is only an ownership hint, not an explicit whole-KB
+        // selection. Keep it in tag_scopes so the backend cannot widen a tag to
+        // every document in that KB.
+        knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
+        knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
+        tag_scopes: tagScopes.length > 0 ? tagScopes : undefined,
+        limit,
+      };
+    },
+    
+    // 选择智能体（sourceTenantId 仅在使用共享智能体时传入）
+    selectAgent(agentId: string, sourceTenantId?: string | null) {
+      this.reasoningEffortOverride = '';
+      this.settings.selectedAgentId = agentId;
+      this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
+      // 智能体配置只决定是否具备网络搜索能力，不替用户决定是否在本轮使用。
+      // 每次选择智能体都默认关闭，之后只能由用户从输入框主动开启。
+      this.settings.webSearchEnabled = false;
+      this.settings.localBrowserEnabled = false;
+      // 根据智能体类型自动切换 Agent 模式
+      if (agentId === BUILTIN_QUICK_ANSWER_ID) {
+        this.settings.isAgentEnabled = false;
+      } else if (agentId === BUILTIN_SMART_REASONING_ID) {
+        this.settings.isAgentEnabled = true;
+      }
+      // 自定义智能体需要根据其配置来决定
+      
+      // 切换智能体时重置知识库和文件选择状态
+      // 因为不同智能体关联的知识库不同，需要清空用户之前的选择
+      this.settings.selectedKnowledgeBases = [];
+      this.settings.selectedFiles = [];
+      this.settings.selectedFileKbMap = {};
+      this.settings.selectedTags = [];
+      this.settings.selectedMCPServices = [];
+      this.settings.selectedSkills = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    // 获取选中的智能体ID
+    getSelectedAgentId(): string {
+      return this.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID;
+    },
+
+    // —— 会话级输入态恢复 —— //
+    //
+    // 输入栏的 agent / 模型 / KB / 联网 / MCP 等选择由本 store 持有，跨会话共享。
+    // 但用户的诉求是：点开旧会话时，能看到当时发起请求的那一套状态。
+    // 实现策略：进入会话时把"当前的全局默认"暂存到一个非持久化的 `_defaultsSnapshot`
+    // 字段里，然后用 session.last_request_state 覆盖 store；离开会话时从快照还原。
+    // 快照不写 localStorage，因为它只在「正处于某个旧会话」这段路由期内有意义；
+    // 刷新页面相当于"重新进入会话" → 重新拍快照 + 覆盖，不会丢失用户的全局默认。
+
+    // 拍下当前 settings 作为"离开会话后要还原回去的默认"。
+    // 已存在快照时不覆盖，避免会话间切换（B→B'）把已恢复的 store 错当成默认。
+    snapshotAsDefaultsIfNeeded() {
+      if (this._defaultsSnapshot) return;
+      this._defaultsSnapshot = JSON.parse(JSON.stringify(this.settings));
+    },
+
+    // 还原默认（如果有快照），用于离开会话或跨会话切换时。
+    restoreDefaultsIfSnapshotted() {
+      this.reasoningEffortOverride = '';
+      if (!this._defaultsSnapshot) return;
+      this.settings = this._defaultsSnapshot;
+      this._defaultsSnapshot = null;
+      // 不写 localStorage：默认值在快照之前已经写过 localStorage，这里恢复
+      // 的就是 localStorage 中既有的值，再写一次只会增加无意义的 IO。
+    },
+
+    // 新会话首条发送沿用 createChat 的输入态，不能被异步返回的空/旧记录覆盖。
+    // preserveDraft 必须在请求 session 详情之前捕获，而不是响应返回时读取。
+    hydrateSessionInputState(state: SessionLastRequestStatePayload | null | undefined, preserveDraft = false) {
+      if (!state || preserveDraft) return;
+      this.snapshotAsDefaultsIfNeeded();
+      this.applyLastRequestState(state);
+    },
+
+    // 根据 session.last_request_state 覆盖输入栏相关字段。
+    // 只触碰本次记录的字段，**不**清空 store 中其它无关字段（如模型列表）。
+    // 按字段语义恢复，不将会话选择写入用户默认设置。
+    applyLastRequestState(state: SessionLastRequestStatePayload | null | undefined) {
+      if (!state) return;
+      this._isApplyingSessionState = true;
+      try {
+        this.reasoningEffortOverride = isReasoningLevel(state.reasoning_effort) ? state.reasoning_effort : '';
+        if (typeof state.agent_enabled === "boolean") {
+          this.settings.isAgentEnabled = state.agent_enabled;
+        }
+        if (typeof state.agent_id === "string" && state.agent_id) {
+          this.settings.selectedAgentId = state.agent_id;
+          // 上次记录是自有 agent 还是共享 agent，目前服务端不区分回传 sourceTenantId。
+          // 与 selectAgent() 不同，这里**不**重置 KB/文件选择 —— 因为我们紧接着
+          // 就要用 state 里的 KB/文件覆盖，不需要先清空再写。
+        }
+        if (state.model_id !== undefined) {
+          const current = this.settings.conversationModels || defaultSettings.conversationModels;
+          this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
+        }
+        // 后端会用 omitempty 省略空列表，所以缺失值表示“本会话没有 KB 范围”，
+        // 而不是“保留上一个会话的选择”。后者会把过期的 @KB 继续发给服务端。
+        this.settings.selectedKnowledgeBases = Array.isArray(state.knowledge_base_ids)
+          ? [...state.knowledge_base_ids]
+          : [];
+        // 服务端省略空的选择项列表；保留现值会把其它会话或全局默认的
+        // 文件、标签和工具选择带入本会话。
+        this.settings.selectedFiles = Array.isArray(state.knowledge_ids) ? [...state.knowledge_ids] : [];
+        // 保留仍选中文件的已知 KB 归属（共享文件需要它）；其它文件的缓存不跨会话带入。
+        this.settings.selectedFileKbMap = Object.fromEntries(
+          Object.entries(this.settings.selectedFileKbMap || {})
+            .filter(([id]) => this.settings.selectedFiles.includes(id))
+        );
+        if (Array.isArray(state.mentioned_items)) {
+          const fromMentions = state.mentioned_items
+            .filter(item => item.type === "tag" && item.id && item.kb_id)
+            .filter(item => !Array.isArray(state.tag_ids) || state.tag_ids.includes(item.id))
+            .map(item => ({ id: item.id, name: item.name || item.id, kbId: item.kb_id!, kbName: item.kb_name }));
+          const covered = new Set(fromMentions.map(t => t.id));
+          const orphanTagIds = (state.tag_ids || []).filter(id => id && !covered.has(id));
+          if (orphanTagIds.length > 0 && Array.isArray(state.knowledge_base_ids) && state.knowledge_base_ids.length === 1) {
+            const kbId = state.knowledge_base_ids[0];
+            orphanTagIds.forEach(id => {
+              fromMentions.push({ id, name: id, kbId, kbName: undefined });
+            });
+          }
+          this.settings.selectedTags = fromMentions;
+        } else if (Array.isArray(state.tag_ids)) {
+          const existing = this.settings.selectedTags || [];
+          this.settings.selectedTags = existing.filter(tag => state.tag_ids?.includes(tag.id));
+        } else {
+          this.settings.selectedTags = [];
+        }
+        if (Array.isArray(state.mcp_service_ids)) {
+          this.settings.selectedMCPServices = [...state.mcp_service_ids];
+        } else if (Array.isArray(state.mentioned_items)) {
+          this.settings.selectedMCPServices = state.mentioned_items
+            .filter(item => item.type === "mcp" && item.id)
+            .map(item => item.id);
+        } else {
+          this.settings.selectedMCPServices = [];
+        }
+        if (Array.isArray(state.skill_names)) {
+          this.settings.selectedSkills = [...state.skill_names];
+        } else if (Array.isArray(state.mentioned_items)) {
+          this.settings.selectedSkills = state.mentioned_items
+            .filter(item => item.type === "skill" && item.id)
+            .map(item => item.skill_name || item.id);
+        } else {
+          this.settings.selectedSkills = [];
+        }
+        this.settings.localBrowserEnabled = state.local_browser_enabled === true;
+        if (typeof state.web_search_enabled === "boolean") {
+          this.settings.webSearchEnabled = state.web_search_enabled;
+        }
+      } finally {
+        // 复位必须延后到下一次 flush 之后：监听 selectedAgentId 的 watcher 默认
+        // flush:'pre'，是异步执行的；若在此处同步复位，watcher 真正运行时标志早已
+        // 为 false，守卫形同虚设、恢复出来的 KB 仍会被 agent 配置覆盖。放到 nextTick
+        // 可保证本次状态变更触发的 watcher 在标志仍为 true 时执行。
+        nextTick(() => {
+          this._isApplyingSessionState = false;
+        });
+      }
+      // 注意：故意不写 localStorage —— 旧会话的状态不应污染"用户默认"。
+      // 离开会话时 restoreDefaultsIfSnapshotted 会把 localStorage 里那份完整
+      // 的默认值再次同步回 this.settings。
+    },
+  },
+});
+
+// 后端 sessions.last_request_state JSON 形状（与 SessionLastRequestState 对齐）。
+// 字段全部可选——历史会话或新建会话首发前的请求没有这条记录。
+export interface SessionLastRequestStatePayload {
+  reasoning_effort?: string;
+  agent_id?: string;
+  agent_enabled?: boolean;
+  model_id?: string;
+  knowledge_base_ids?: string[];
+  knowledge_ids?: string[];
+  tag_ids?: string[];
+  mcp_service_ids?: string[];
+  skill_names?: string[];
+  mentioned_items?: Array<{
+    id: string;
+    name?: string;
+    type: string;
+    kb_id?: string;
+    kb_name?: string;
+    skill_name?: string;
+  }>;
+  local_browser_enabled?: boolean;
+  web_search_enabled?: boolean;
+}

@@ -1,0 +1,14 @@
+# The configuration layer this bundle contributes when a profile lists it.
+# Override the row from the profile's own cordis.patch.yml to point the plugin
+# at your deployment; every field is documented in README.md.
+- insert:
+    - id: weknora
+      # Must be the published package name — the loader imports this specifier.
+      # Quoted because YAML reserves a leading '@' in plain scalars.
+      name: "@wxg-prc-cpg/dsh-weknora"
+      config:
+        baseUrl: !!js process.env.WEKNORA_BASE_URL ?? 'http://localhost:8080/api/v1'
+        apiKey: !!js process.env.WEKNORA_API_KEY
+        knowledgeBaseIds: !!js (process.env.WEKNORA_KNOWLEDGE_BASE_IDS ?? '').split(',').filter(Boolean)
+        agentId: !!js process.env.WEKNORA_AGENT_ID
+        resourceUrls: !!js process.env.WEKNORA_RESOURCE_URLS || 'public'

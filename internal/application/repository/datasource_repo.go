@@ -1,0 +1,410 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"gorm.io/gorm"
+)
+
+// DataSourceRepository provides data access for data sources
+type DataSourceRepository struct {
+	db *gorm.DB
+}
+
+// NewDataSourceRepository creates a new data source repository
+func NewDataSourceRepository(db *gorm.DB) interfaces.DataSourceRepository {
+	return &DataSourceRepository{db: db}
+}
+
+// Create inserts a new data source record
+func (r *DataSourceRepository) Create(ctx context.Context, ds *types.DataSource) error {
+	if ds == nil {
+		return errors.New("data source is nil")
+	}
+	// GORM treats false as the zero value of bool. For a field tagged
+	// default:true it replaces both the INSERT value and the in-memory field
+	// with true, so a caller-selected false would be lost. Capture it, force
+	// the column write, then restore the struct so Create's return value (and
+	// the HTTP 201 body) match the database.
+	syncDeletions := ds.SyncDeletions
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(ds).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.DataSource{}).
+			Where("id = ?", ds.ID).
+			UpdateColumn("sync_deletions", syncDeletions).Error
+	})
+	ds.SyncDeletions = syncDeletions
+	return err
+}
+
+// FindByID retrieves a data source by ID
+func (r *DataSourceRepository) FindByID(ctx context.Context, id string) (*types.DataSource, error) {
+	if id == "" {
+		return nil, errors.New("id is empty")
+	}
+	var ds types.DataSource
+	if err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		First(&ds).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, datasource.ErrDataSourceNotFound
+		}
+		return nil, err
+	}
+	return &ds, nil
+}
+
+// FindByKnowledgeBase lists all data sources for a knowledge base
+func (r *DataSourceRepository) FindByKnowledgeBase(ctx context.Context, kbID string) ([]*types.DataSource, error) {
+	if kbID == "" {
+		return nil, errors.New("knowledge base id is empty")
+	}
+	var dataSources []*types.DataSource
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ?", kbID).
+		Where("deleted_at IS NULL").
+		Order("created_at DESC").
+		Find(&dataSources).Error; err != nil {
+		return nil, err
+	}
+	return dataSources, nil
+}
+
+// Update updates an existing data source
+func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource) error {
+	if ds == nil {
+		return errors.New("data source is nil")
+	}
+	if ds.ID == "" {
+		return errors.New("data source id is empty")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(ds).Updates(ds).Error; err != nil {
+			return err
+		}
+		// GORM Updates(struct) deliberately skips zero values, which would make
+		// a user-selected sync_deletions=false or manual-only schedule impossible to persist.
+		return tx.Model(&types.DataSource{}).
+			Where("id = ?", ds.ID).
+			UpdateColumns(map[string]interface{}{
+				"sync_deletions": ds.SyncDeletions,
+				"sync_schedule":  ds.SyncSchedule,
+			}).Error
+	})
+}
+
+// UpdateSyncState updates only fields managed by sync execution. GORM's
+// Updates(struct) skips zero values, so use a map here to persist cleared error
+// messages without broadening the generic Update method.
+func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.DataSource) error {
+	if ds == nil {
+		return errors.New("data source is nil")
+	}
+	if ds.ID == "" {
+		return errors.New("data source id is empty")
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.DataSource{}).
+		Where("id = ?", ds.ID).
+		Updates(map[string]interface{}{
+			"status":           ds.Status,
+			"last_sync_at":     ds.LastSyncAt,
+			"last_sync_cursor": ds.LastSyncCursor,
+			"last_sync_result": ds.LastSyncResult,
+			"error_message":    ds.ErrorMessage,
+			"updated_at":       time.Now().UTC(),
+		}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// Delete performs a soft delete
+func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
+	if id == "" {
+		return errors.New("id is empty")
+	}
+	if err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		Delete(&types.DataSource{}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// FindActive retrieves all active data sources (used for scheduling)
+func (r *DataSourceRepository) FindActive(ctx context.Context) ([]*types.DataSource, error) {
+	var dataSources []*types.DataSource
+	if err := r.db.WithContext(ctx).
+		Where("status = ?", types.DataSourceStatusActive).
+		Where("deleted_at IS NULL").
+		Where("sync_schedule != ''").
+		Order("created_at DESC").
+		Find(&dataSources).Error; err != nil {
+		return nil, err
+	}
+	return dataSources, nil
+}
+
+// SyncLogRepository provides data access for sync logs
+type SyncLogRepository struct {
+	db *gorm.DB
+}
+
+// NewSyncLogRepository creates a new sync log repository
+func NewSyncLogRepository(db *gorm.DB) interfaces.SyncLogRepository {
+	return &SyncLogRepository{db: db}
+}
+
+// Create inserts a new sync log entry
+func (r *SyncLogRepository) Create(ctx context.Context, log *types.SyncLog) error {
+	if log == nil {
+		return errors.New("sync log is nil")
+	}
+	if err := r.db.WithContext(ctx).Create(log).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// FindByID retrieves a sync log by ID
+func (r *SyncLogRepository) FindByID(ctx context.Context, id string) (*types.SyncLog, error) {
+	if id == "" {
+		return nil, errors.New("id is empty")
+	}
+	var log types.SyncLog
+	if err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&log).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, datasource.ErrSyncLogNotFound
+		}
+		return nil, err
+	}
+	return &log, nil
+}
+
+// FindByDataSource lists sync logs for a data source with pagination
+func (r *SyncLogRepository) FindByDataSource(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error) {
+	if dsID == "" {
+		return nil, errors.New("data source id is empty")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var logs []*types.SyncLog
+	if err := r.db.WithContext(ctx).
+		Where("data_source_id = ?", dsID).
+		Order("started_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+// FindLatest retrieves the most recent sync log for a data source
+func (r *SyncLogRepository) FindLatest(ctx context.Context, dsID string) (*types.SyncLog, error) {
+	if dsID == "" {
+		return nil, errors.New("data source id is empty")
+	}
+	var log types.SyncLog
+	if err := r.db.WithContext(ctx).
+		Where("data_source_id = ?", dsID).
+		Order("started_at DESC").
+		Limit(1).
+		First(&log).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &log, nil
+}
+
+// HasRunningSync checks if a data source has any sync currently in "running" status.
+func (r *SyncLogRepository) HasRunningSync(ctx context.Context, dsID string) (bool, error) {
+	if dsID == "" {
+		return false, errors.New("data source id is empty")
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&types.SyncLog{}).
+		Where("data_source_id = ?", dsID).
+		Where("status = ?", types.SyncLogStatusRunning).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// Update updates an existing sync log entry
+func (r *SyncLogRepository) Update(ctx context.Context, log *types.SyncLog) error {
+	if log == nil {
+		return errors.New("sync log is nil")
+	}
+	if log.ID == "" {
+		return errors.New("sync log id is empty")
+	}
+	if err := r.db.WithContext(ctx).
+		Model(log).
+		Updates(log).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateResult updates only fields produced by sync execution. Use an explicit
+// map so empty error messages are written when a later sync succeeds.
+func (r *SyncLogRepository) UpdateResult(ctx context.Context, log *types.SyncLog) error {
+	if log == nil {
+		return errors.New("sync log is nil")
+	}
+	if log.ID == "" {
+		return errors.New("sync log id is empty")
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.SyncLog{}).
+		Where("id = ?", log.ID).
+		Updates(map[string]interface{}{
+			"status":        log.Status,
+			"finished_at":   log.FinishedAt,
+			"items_total":   log.ItemsTotal,
+			"items_created": log.ItemsCreated,
+			"items_updated": log.ItemsUpdated,
+			"items_deleted": log.ItemsDeleted,
+			"items_skipped": log.ItemsSkipped,
+			"items_failed":  log.ItemsFailed,
+			"error_message": log.ErrorMessage,
+			"result":        log.Result,
+			"updated_at":    time.Now().UTC(),
+		}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// CancelPendingByDataSource marks all non-terminal sync logs for a data source as canceled.
+func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID string) error {
+	if dsID == "" {
+		return errors.New("data source id is empty")
+	}
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).
+		Model(&types.SyncLog{}).
+		Where("data_source_id = ?", dsID).
+		Where("status IN ?", []string{types.SyncLogStatusRunning, "pending"}).
+		Updates(map[string]interface{}{
+			"status":        types.SyncLogStatusCanceled,
+			"finished_at":   &now,
+			"error_message": "data source deleted",
+		}).Error
+}
+
+// CleanupOldLogs applies each source's retention policy, including soft-deleted
+// sources. Missing sources and non-positive policies use the default (normally
+// 30 days). Failed logs of live sources may still be retried by Asynq.
+func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, defaultRetentionDays int) error {
+	if defaultRetentionDays <= 0 {
+		defaultRetentionDays = 30
+	}
+	var periods []int
+	if err := r.db.WithContext(ctx).Unscoped().Model(&types.DataSource{}).
+		Where("sync_log_retention_days > 0 AND sync_log_retention_days <> ?", defaultRetentionDays).
+		Distinct().Pluck("sync_log_retention_days", &periods).Error; err != nil {
+		return err
+	}
+	periods = append(periods, defaultRetentionDays)
+	now := time.Now().UTC()
+	sourceByID := "data_sources.id = sync_logs.data_source_id"
+	sourceMatch := sourceByID + " AND data_sources.tenant_id = sync_logs.tenant_id"
+	liveSource := r.db.WithContext(ctx).Model(&types.DataSource{}).Select("1").Where(sourceByID)
+	terminal := r.db.WithContext(ctx).
+		Where("status IN ?", []string{
+			types.SyncLogStatusSuccess, types.SyncLogStatusPartial, types.SyncLogStatusCanceled,
+		}).
+		Or("status = ? AND NOT EXISTS (?)", types.SyncLogStatusFailed, liveSource)
+	for _, days := range periods {
+		// A very large user policy must not overflow a time.Duration and turn
+		// into a recent cutoff. No valid log can predate year 1.
+		if days > now.Year()*366 {
+			continue
+		}
+		cutoff := now.AddDate(0, 0, -days)
+		if cutoff.Year() < 1 {
+			continue
+		}
+		sources := r.db.WithContext(ctx).Unscoped().Model(&types.DataSource{}).
+			Select("1")
+		policy := "EXISTS (?)"
+		if days == defaultRetentionDays {
+			// Also retire orphan logs after the default horizon instead of
+			// keeping them forever once their source has been removed.
+			policy = "NOT EXISTS (?)"
+			sources = sources.Where(sourceByID).
+				Where("sync_log_retention_days > 0 AND sync_log_retention_days <> ?", days)
+		} else {
+			sources = sources.Where(sourceMatch).
+				Where("sync_log_retention_days = ?", days)
+		}
+		if err := r.db.WithContext(ctx).
+			Where(terminal).
+			Where("COALESCE(finished_at, started_at) < ?", cutoff).
+			Where(policy, sources).
+			Delete(&types.SyncLog{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PatchSyncSettings never writes runtime state or fields omitted by the request.
+func (r *DataSourceRepository) PatchSyncSettings(
+	ctx context.Context, ds *types.DataSource, expectedConfig types.JSON, fields []string,
+) error {
+	if ds == nil || ds.ID == "" || ds.TenantID == 0 || len(fields) == 0 {
+		return errors.New("data source identity and settings are required")
+	}
+	values := map[string]any{}
+	query := r.db.WithContext(ctx).Model(&types.DataSource{}).
+		Where("id = ? AND tenant_id = ?", ds.ID, ds.TenantID)
+	for _, field := range fields {
+		switch field {
+		case "sync_schedule":
+			values[field] = ds.SyncSchedule
+		case "sync_mode":
+			values[field] = ds.SyncMode
+		case "conflict_strategy":
+			values[field] = ds.ConflictStrategy
+		case "sync_deletions":
+			values[field] = ds.SyncDeletions
+		case "config":
+			values[field] = ds.Config
+			// Config includes credentials and connector settings. Refuse to replace
+			// them if another request changed them while selection was being edited.
+			query = query.Where("config = ?", expectedConfig)
+		default:
+			return errors.New("unsupported sync setting")
+		}
+	}
+	result := query.Updates(values)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return types.ErrDataSourceSettingsConflict
+	}
+	return nil
+}

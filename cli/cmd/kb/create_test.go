@@ -1,0 +1,210 @@
+package kb
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+// fakeCreateSvc captures the request and returns canned responses.
+type fakeCreateSvc struct {
+	resp *sdk.KnowledgeBase
+	err  error
+	got  *sdk.KnowledgeBase
+}
+
+func (f *fakeCreateSvc) CreateKnowledgeBase(_ context.Context, kb *sdk.KnowledgeBase) (*sdk.KnowledgeBase, error) {
+	f.got = kb
+	return f.resp, f.err
+}
+
+func TestCreate_Success_Text(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{
+		ID:               "kb_new",
+		Name:             "Marketing",
+		Description:      "team docs",
+		EmbeddingModelID: "model_x",
+	}}
+	opts := &CreateOptions{
+		Name:           "Marketing",
+		Description:    "team docs",
+		EmbeddingModel: "model_x",
+	}
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+
+	// Body sent to SDK matches flags.
+	require.NotNil(t, svc.got)
+	assert.Equal(t, "Marketing", svc.got.Name)
+	assert.Equal(t, "team docs", svc.got.Description)
+	assert.Equal(t, "model_x", svc.got.EmbeddingModelID)
+
+	got := out.String()
+	for _, want := range []string{"✓", "Created", "Marketing", "kb_new"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestCreate_Success_OmitsEmbeddingModelWhenEmpty(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
+	opts := &CreateOptions{Name: "n"}
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+
+	require.NotNil(t, svc.got)
+	assert.Equal(t, "", svc.got.EmbeddingModelID, "embedding-model unset ⇒ empty in request")
+}
+
+// A KB created without an embedding model can never retrieve; the create result
+// must hand the agent the fix (kb config set) instead of a silent unusable KB.
+func TestCreate_HintsWhenNoEmbeddingModel(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
+	require.NoError(t, runCreate(context.Background(), &CreateOptions{Name: "n"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	var env struct {
+		Meta struct {
+			Hint string `json:"hint"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	assert.Contains(t, env.Meta.Hint, "kb config set", "unconfigured KB must hint the retrieval-readiness fix")
+}
+
+// A retrieval-ready KB (embedding model bound) carries no such hint — no noise.
+func TestCreate_NoHintWhenEmbeddingModelBound(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n", EmbeddingModelID: "emb_1"}}
+	require.NoError(t, runCreate(context.Background(), &CreateOptions{Name: "n", EmbeddingModel: "emb_1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	var env struct {
+		Meta *struct {
+			Hint string `json:"hint"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	if env.Meta != nil {
+		assert.Empty(t, env.Meta.Hint, "retrieval-ready KB must not emit a readiness hint")
+	}
+}
+
+// TestCreate_ChatModelSetsSummaryModelID: --chat-model rides the create request
+// as summary_model_id, so a KB can be born retrieval-ready in one step.
+func TestCreate_ChatModelSetsSummaryModelID(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
+	opts := &CreateOptions{Name: "n", EmbeddingModel: "emb_x", ChatModel: "chat_x"}
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+
+	require.NotNil(t, svc.got)
+	assert.Equal(t, "emb_x", svc.got.EmbeddingModelID)
+	assert.Equal(t, "chat_x", svc.got.SummaryModelID, "--chat-model must set summary_model_id on the create request")
+}
+
+func TestCreate_NameRequired(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{}
+	err := runCreate(context.Background(), &CreateOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	require.Error(t, err)
+
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Nil(t, svc.got, "service must not be called when name is missing")
+}
+
+func TestCreate_NameWhitespaceOnly(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{}
+	err := runCreate(context.Background(), &CreateOptions{Name: "   "}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	require.Error(t, err)
+
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+}
+
+func TestCreate_HTTPError_500(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{err: errors.New("HTTP error 500: internal")}
+	err := runCreate(context.Background(), &CreateOptions{Name: "x"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	require.Error(t, err)
+
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
+}
+
+func TestCreate_HTTPError_409Conflict(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{err: errors.New("HTTP error 409: name exists")}
+	err := runCreate(context.Background(), &CreateOptions{Name: "dup"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	require.Error(t, err)
+
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeResourceAlreadyExists, typed.Code)
+}
+
+func TestCreate_JSONOutput(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_99", Name: "Eng"}}
+	opts := &CreateOptions{Name: "Eng"}
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+
+	got := out.String()
+	var env struct {
+		OK   bool              `json:"ok"`
+		Data sdk.KnowledgeBase `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Equal(t, "kb_99", env.Data.ID, "envelope.data.id must be kb_99")
+	assert.Contains(t, got, `"name":"Eng"`)
+}
+
+func TestCreate_StorageProvider_InjectsRequest(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_s", Name: "n"}}
+	opts := &CreateOptions{Name: "n", StorageProvider: "Local"}
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+
+	require.NotNil(t, svc.got.StorageProviderConfig)
+	assert.Equal(t, "local", svc.got.StorageProviderConfig.Provider, "value should be lowercased + trimmed before send")
+}
+
+func TestCreate_StorageProvider_InvalidValueReturnsInputError(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{}
+	opts := &CreateOptions{Name: "n", StorageProvider: "azure"}
+	err := runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	require.Error(t, err)
+
+	// A bad enum *value* (cobra accepted the string; the app rejected it) is an
+	// app-level input error → exit 5, consistent with every other enum flag
+	// (model --type, agent --agent-mode, message search --mode).
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Equal(t, 5, cmdutil.ExitCode(err), "invalid --storage-provider must exit 5 (app-level input validation)")
+	assert.Contains(t, err.Error(), "--storage-provider")
+	assert.Nil(t, svc.got, "SDK must not be called when input validation fails")
+}
+
+func TestCreate_StorageProvider_OmittedWhenEmpty(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_n", Name: "n"}}
+	opts := &CreateOptions{Name: "n"} // no --storage-provider
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+
+	assert.Nil(t, svc.got.StorageProviderConfig, "empty flag must omit StorageProviderConfig (let server pick default)")
+}

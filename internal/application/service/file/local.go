@@ -1,0 +1,349 @@
+package file
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+// localFileService implements the FileService interface for local file system storage
+type localFileService struct {
+	baseDir     string // Base directory for file storage
+	externalURL string // External URL base for presigned URL generation (empty = return local:// paths)
+}
+
+const localScheme = "local://"
+
+// CheckConnectivity verifies the local storage directory exists and is accessible.
+func (s *localFileService) CheckConnectivity(ctx context.Context) error {
+	info, err := os.Stat(s.baseDir)
+	if err != nil {
+		return fmt.Errorf("storage directory not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("storage path is not a directory: %s", s.baseDir)
+	}
+	return nil
+}
+
+// NewLocalFileService creates a new local file service instance.
+// externalURL is the externally-reachable base URL (e.g. "https://weknora.example.com");
+// when set, GetFileURL returns presigned HTTP URLs instead of local:// paths.
+func NewLocalFileService(baseDir, externalURL string) interfaces.FileService {
+	return &localFileService{
+		baseDir:     baseDir,
+		externalURL: strings.TrimRight(externalURL, "/"),
+	}
+}
+
+// SaveFile stores an uploaded file to the local file system
+// The file is stored in a directory structure: baseDir/tenantID/knowledgeID/filename
+// Returns the full file path or an error if saving fails
+func (s *localFileService) SaveFile(ctx context.Context,
+	file *multipart.FileHeader, tenantID uint64, knowledgeID string,
+) (string, error) {
+	logger.Info(ctx, "Starting to save file locally")
+	logger.Infof(ctx, "File information: name=%s, size=%d, tenant ID=%d, knowledge ID=%s",
+		file.Filename, file.Size, tenantID, knowledgeID)
+
+	// Create storage directory with tenant and knowledge ID
+	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), knowledgeID)
+	if _, err := secutils.SafePathUnderBase(s.baseDir, dir); err != nil {
+		logger.Errorf(ctx, "Path traversal denied for SaveFile dir: %v", err)
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	logger.Infof(ctx, "Creating directory: %s", dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		logger.Errorf(ctx, "Failed to create directory: %v", err)
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Generate unique filename using timestamp
+	ext := filepath.Ext(file.Filename)
+	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+	filePath := filepath.Join(dir, filename)
+	logger.Infof(ctx, "Generated file path: %s", filePath)
+
+	// Open source file for reading
+	logger.Info(ctx, "Opening source file")
+	src, err := file.Open()
+	if err != nil {
+		logger.Errorf(ctx, "Failed to open source file: %v", err)
+		return "", fmt.Errorf("failed to open file: %w", err)
+	}
+	defer src.Close()
+
+	// Create destination file for writing
+	logger.Info(ctx, "Creating destination file")
+	dst, err := os.Create(filePath)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create destination file: %v", err)
+		return "", fmt.Errorf("failed to create file: %w", err)
+	}
+	defer dst.Close()
+
+	// Copy content from source to destination
+	logger.Info(ctx, "Copying file content")
+	if _, err := io.Copy(dst, src); err != nil {
+		logger.Errorf(ctx, "Failed to copy file content: %v", err)
+		return "", fmt.Errorf("failed to save file: %w", err)
+	}
+
+	logger.Infof(ctx, "File saved successfully: %s", filePath)
+	// Return provider:// path format: local://{relative_path}
+	relPath, _ := filepath.Rel(s.baseDir, filePath)
+	return localScheme + filepath.ToSlash(relPath), nil
+}
+
+// GetFile retrieves a file from the local file system by its path
+// Returns a ReadCloser for reading the file content
+// Supports both provider scheme: local://{relative_path} and legacy absolute paths.
+// 路径必须在 baseDir 下，防止路径遍历（如 ../../）
+func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+	logger.Infof(ctx, "Getting file: %s", filePath)
+
+	candidate := s.normalizePathForBase(filePath)
+	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
+	if err != nil {
+		logger.Errorf(ctx, "Path traversal denied for GetFile: %v", err)
+		return nil, fmt.Errorf("invalid file path: %w", err)
+	}
+
+	file, err := os.Open(resolved)
+	if err != nil {
+		// baseDir/resolved are logged so a storage base-dir mismatch (e.g.
+		// writer and reader started with different LOCAL_STORAGE_BASE_DIR)
+		// is immediately visible instead of just "no such file or directory".
+		logger.Errorf(ctx, "Failed to open file: baseDir=%s resolvedPath=%s err=%v", s.baseDir, resolved, err)
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+
+	logger.Info(ctx, "File opened successfully")
+	return file, nil
+}
+
+// DeleteFile removes a file from the local file system
+// Returns an error if deletion fails
+// 路径必须在 baseDir 下，防止路径遍历（如 ../../）
+func (s *localFileService) DeleteFile(ctx context.Context, filePath string) error {
+	logger.Infof(ctx, "Deleting file: %s", filePath)
+
+	candidate := s.normalizePathForBase(filePath)
+	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
+	if err != nil {
+		logger.Errorf(ctx, "Path traversal denied for DeleteFile: %v", err)
+		return fmt.Errorf("invalid file path: %w", err)
+	}
+
+	err = os.Remove(resolved)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to delete file: %v", err)
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	logger.Info(ctx, "File deleted successfully")
+	return nil
+}
+
+// CopyFile copies an existing local object to a new knowledge-owned object.
+// The destination uses the same layout as SaveFile (baseDir/{tenantID}/{knowledgeID}/{unique}{ext}),
+// and the copy is a real byte-for-byte copy (no hardlink) so deleting the source
+// never affects it. Returns ErrCrossBackendCopy when srcPath is not a local path.
+func (s *localFileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	// Only local paths are accepted. A provider scheme other than local://
+	// (e.g. s3://, minio://) means a cross-backend copy, which this service
+	// does not support. Legacy bare/absolute paths have no scheme and pass.
+	if i := strings.Index(srcPath, "://"); i >= 0 && srcPath[:i+3] != localScheme {
+		return "", fmt.Errorf("local file service cannot copy %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+
+	// Validate and resolve the source path under baseDir (same guard as GetFile).
+	srcCandidate := s.normalizePathForBase(srcPath)
+	srcResolved, err := secutils.SafePathUnderBase(s.baseDir, srcCandidate)
+	if err != nil {
+		logger.Errorf(ctx, "Path traversal denied for CopyFile src: %v", err)
+		return "", fmt.Errorf("invalid source path: %w", err)
+	}
+
+	// Build destination path with the knowledge-owned layout.
+	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), knowledgeID)
+	if _, err := secutils.SafePathUnderBase(s.baseDir, dir); err != nil {
+		logger.Errorf(ctx, "Path traversal denied for CopyFile dir: %v", err)
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	ext := filepath.Ext(srcPath)
+	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+	dstPath := filepath.Join(dir, filename)
+
+	src, err := os.Open(srcResolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return "", fmt.Errorf("failed to copy file content: %w", err)
+	}
+
+	relPath, _ := filepath.Rel(s.baseDir, dstPath)
+	newPath := localScheme + filepath.ToSlash(relPath)
+	logger.Infof(ctx, "Copied local file %s to %s", srcPath, newPath)
+	return newPath, nil
+}
+
+// SaveBytes saves bytes data to a file and returns the file path
+// temp parameter is ignored for local storage (no auto-expiration support)
+// fileName 仅允许安全文件名，禁止路径遍历（如 ../../）
+func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+	logger.Infof(ctx, "Saving bytes data: fileName=%s, size=%d, tenantID=%d, temp=%v", fileName, len(data), tenantID, temp)
+
+	safeName, err := secutils.SafeFileName(fileName)
+	if err != nil {
+		logger.Errorf(ctx, "Invalid fileName for SaveBytes: %v", err)
+		return "", fmt.Errorf("invalid file name: %w", err)
+	}
+
+	// Create storage directory with tenant ID
+	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), "exports")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		logger.Errorf(ctx, "Failed to create directory: %v", err)
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Generate unique filename using timestamp
+	ext := filepath.Ext(safeName)
+	baseName := safeName[:len(safeName)-len(ext)]
+	uniqueFileName := fmt.Sprintf("%s_%d%s", baseName, time.Now().UnixNano(), ext)
+	filePath := filepath.Join(dir, uniqueFileName)
+
+	// Write data to file
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		logger.Errorf(ctx, "Failed to write file: %v", err)
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	logger.Infof(ctx, "Bytes data saved successfully: %s", filePath)
+	relPath, _ := filepath.Rel(s.baseDir, filePath)
+	return localScheme + filepath.ToSlash(relPath), nil
+}
+
+// GetFileURL returns a download URL for the file.
+// When externalURL is configured, returns a presigned HTTP URL suitable for external access.
+// Otherwise returns the local://... path for backward compatibility.
+func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+	// Normalize to provider:// format.
+	normalized := filePath
+	if !strings.HasPrefix(filePath, localScheme) {
+		relPath, err := filepath.Rel(s.baseDir, filePath)
+		if err != nil {
+			normalized = filePath
+		} else {
+			normalized = localScheme + filepath.ToSlash(relPath)
+		}
+	}
+
+	// If external URL is configured, generate a presigned HTTP URL.
+	if s.externalURL != "" {
+		// Tenant ID is parsed from the storage path, which encodes the
+		// resource owner's tenant (not the caller's). The verifier on
+		// /api/v1/files/presigned uses this ID to look up the owning
+		// tenant's StorageEngineConfig — using the caller's tenant would
+		// break cross-tenant shared resources (e.g. shared KB images).
+		tenantID := secutils.ParseTenantIDFromStoragePath(normalized)
+		presignedURL, err := secutils.SignFileURL(s.externalURL, normalized, tenantID, 0)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to generate presigned URL for %s: %v, returning local:// path", normalized, err)
+			return normalized, nil
+		}
+		return presignedURL, nil
+	}
+
+	return normalized, nil
+}
+
+// storageScopePrefixes matches the storage://<backend-id>/ scope wrapper that
+// backend-scoped file services prepend to every persisted path
+// (types.BuildStorageBackendPath). On chains assembled without the scoped
+// wrapper (e.g. the process-wide default file service used by KB deletion),
+// these scoped paths reach the raw local provider, where they used to fall
+// through to the relative-path branch, get joined under baseDir, and produce a
+// nonexistent path — silently leaking the physical file on delete. Path
+// normalization (filepath.Clean) may also collapse "storage://" into
+// "storage:/", so both forms are accepted.
+const storageScheme = "storage:"
+
+// trimStorageScope strips a leading "storage://<backend-id>/" (or the cleaned
+// "storage:/<backend-id>/") scope wrapper and returns the inner provider path.
+// Paths without the wrapper are returned unchanged.
+func trimStorageScope(path string) string {
+	if !strings.HasPrefix(path, storageScheme) {
+		return path
+	}
+	rest := strings.TrimPrefix(path, storageScheme)
+	// Tolerate "storage://", "storage:/" and even a bare "storage:" prefix —
+	// filepath.Clean collapses "//" to "/", so cleaned paths arrive single-slashed.
+	rest = strings.TrimLeft(rest, "/")
+	// Skip the backend-id segment; the remainder is the provider path.
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return rest[i+1:]
+	}
+	return ""
+}
+
+// normalizePathForBase keeps backward compatibility for legacy file paths:
+// - storage-backend scope: "storage://<backend-id>/local://tenant/.." → baseDir/tenant/..
+// - provider scheme: "local://tenant/.." → baseDir/tenant/..
+// - absolute path: "/data/files/tenant/.."
+// - path under base dir: "tenant/.."
+// - legacy relative with base prefix: "data/files/tenant/.."
+func (s *localFileService) normalizePathForBase(filePath string) string {
+	// Strip a storage-backend scope wrapper first: some chains (KB deletion
+	// uses the process-wide default file service) hand scoped paths straight
+	// to this provider, and the scoped prefix is not a filesystem component.
+	filePath = trimStorageScope(strings.TrimSpace(filePath))
+
+	// Handle provider scheme: local://{relPath}. Also tolerate the cleaned
+	// "local:/" single-slash form for the same reason as trimStorageScope.
+	if strings.HasPrefix(filePath, "local:") {
+		relPath := strings.TrimLeft(strings.TrimPrefix(filePath, "local:"), "/")
+		return filepath.Join(s.baseDir, filepath.FromSlash(relPath))
+	}
+
+	clean := filepath.Clean(strings.TrimSpace(filePath))
+	if clean == "." || clean == "" {
+		return clean
+	}
+	if filepath.IsAbs(clean) {
+		return clean
+	}
+
+	// Strip duplicated base prefix in legacy relative paths, e.g. "data/files/..."
+	baseClean := filepath.Clean(s.baseDir)
+	baseNoSlash := strings.Trim(baseClean, string(filepath.Separator))
+	cleanNoDot := strings.TrimPrefix(clean, "."+string(filepath.Separator))
+	if strings.HasPrefix(cleanNoDot, baseNoSlash+string(filepath.Separator)) {
+		cleanNoDot = strings.TrimPrefix(cleanNoDot, baseNoSlash+string(filepath.Separator))
+	}
+	return filepath.Join(baseClean, cleanNoDot)
+}

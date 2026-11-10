@@ -1,0 +1,263 @@
+package docparser
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+const (
+	PathRead        = "/read"
+	PathListEngines = "/list-engines"
+)
+
+// --- JSON DTOs ---
+
+type httpReadConfig struct {
+	ParserEngine          string            `json:"parser_engine,omitempty"`
+	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
+}
+
+type httpReadRequest struct {
+	FileContent string          `json:"file_content,omitempty"` // base64
+	FileName    string          `json:"file_name,omitempty"`
+	FileType    string          `json:"file_type,omitempty"`
+	URL         string          `json:"url,omitempty"`
+	Title       string          `json:"title,omitempty"`
+	Config      *httpReadConfig `json:"config,omitempty"`
+	RequestID   string          `json:"request_id,omitempty"`
+}
+
+type httpImageRef struct {
+	Filename    string `json:"filename"`
+	OriginalRef string `json:"original_ref"`
+	MimeType    string `json:"mime_type"`
+	StorageKey  string `json:"storage_key,omitempty"`
+	ImageData   []byte `json:"image_data,omitempty"`
+}
+
+type httpReadResponse struct {
+	MarkdownContent string            `json:"markdown_content"`
+	ImageRefs       []httpImageRef    `json:"image_refs,omitempty"`
+	ImageDirPath    string            `json:"image_dir_path,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	SourceBlocks    []wireSourceBlock `json:"source_blocks,omitempty"`
+}
+
+// HTTPDocumentReader implements DocumentReader over HTTP/JSON.
+type HTTPDocumentReader struct {
+	mu      sync.RWMutex
+	baseURL string
+	client  *http.Client
+}
+
+func NewHTTPDocumentReader(baseURL string) (*HTTPDocumentReader, error) {
+	baseURL = strings.TrimSuffix(strings.TrimSpace(baseURL), "/")
+	if baseURL != "" {
+		if err := secutils.ValidateURLForSSRF(baseURL); err != nil {
+			return nil, fmt.Errorf("docreader address failed SSRF validation: %w", err)
+		}
+	}
+	clientCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	clientCfg.Timeout = 5 * time.Minute
+	p := &HTTPDocumentReader{
+		baseURL: baseURL,
+		client:  secutils.NewSSRFSafeHTTPClient(clientCfg),
+	}
+	if p.baseURL != "" {
+		logger.Infof(context.Background(), "INFO: HTTP docreader base URL: %s", p.baseURL)
+	}
+	return p, nil
+}
+
+func (p *HTTPDocumentReader) base() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.baseURL
+}
+
+func (p *HTTPDocumentReader) Reconnect(addr string) error {
+	addr = strings.TrimSuffix(strings.TrimSpace(addr), "/")
+	if addr != "" {
+		if err := secutils.ValidateURLForSSRF(addr); err != nil {
+			return fmt.Errorf("docreader address failed SSRF validation: %w", err)
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.baseURL = addr
+	logger.Infof(context.Background(), "INFO: HTTP docreader base URL set to %s", p.baseURL)
+	return nil
+}
+
+func (p *HTTPDocumentReader) IsConnected() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.baseURL != ""
+}
+
+func (p *HTTPDocumentReader) Close() error { return nil }
+
+type httpListEnginesRequest struct {
+	ConfigOverrides map[string]string `json:"config_overrides,omitempty"`
+}
+
+type httpParserEngineInfo struct {
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	FileTypes         []string `json:"file_types"`
+	Available         bool     `json:"available"`
+	UnavailableReason string   `json:"unavailable_reason,omitempty"`
+}
+
+type httpListEnginesResponse struct {
+	Engines []httpParserEngineInfo `json:"engines"`
+}
+
+func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
+	base := p.base()
+	if base == "" {
+		return nil, errNotConnected
+	}
+	if err := secutils.ValidateURLForSSRF(base); err != nil {
+		return nil, fmt.Errorf("docreader address failed SSRF validation: %w", err)
+	}
+
+	body := httpListEnginesRequest{ConfigOverrides: overrides}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("http marshal list-engines request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+PathListEngines, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("http new request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http list-engines failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		preview := readErrorPreview(resp.Body)
+		return nil, fmt.Errorf("http list-engines status %d: %s", resp.StatusCode, preview)
+	}
+
+	bodyBytes, err := readCapped(resp.Body, maxJSONResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("http list-engines response: %w", err)
+	}
+	var out httpListEnginesResponse
+	if err := json.Unmarshal(bodyBytes, &out); err != nil {
+		return nil, fmt.Errorf("http decode list-engines response: %w", err)
+	}
+
+	result := make([]types.ParserEngineInfo, 0, len(out.Engines))
+	for _, e := range out.Engines {
+		result = append(result, types.ParserEngineInfo{
+			Name:              e.Name,
+			Description:       e.Description,
+			FileTypes:         e.FileTypes,
+			Available:         e.Available,
+			UnavailableReason: e.UnavailableReason,
+		})
+	}
+	return result, nil
+}
+
+func fromHTTPReadResponse(resp *httpReadResponse) *types.ReadResult {
+	result := &types.ReadResult{
+		MarkdownContent: resp.MarkdownContent,
+		ImageDirPath:    resp.ImageDirPath,
+		Metadata:        resp.Metadata,
+		Error:           resp.Error,
+		SourceBlocks:    sourceBlocksFromWire(resp.SourceBlocks),
+	}
+	for _, ref := range resp.ImageRefs {
+		result.ImageRefs = append(result.ImageRefs, types.ImageRef{
+			Filename:    ref.Filename,
+			OriginalRef: ref.OriginalRef,
+			MimeType:    ref.MimeType,
+			StorageKey:  ref.StorageKey,
+			ImageData:   ref.ImageData,
+		})
+	}
+	return result
+}
+
+func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	base := p.base()
+	if base == "" {
+		return nil, errNotConnected
+	}
+	if err := secutils.ValidateURLForSSRF(base); err != nil {
+		return nil, fmt.Errorf("docreader address failed SSRF validation: %w", err)
+	}
+
+	body := httpReadRequest{
+		FileName:  req.FileName,
+		FileType:  req.FileType,
+		URL:       req.URL,
+		Title:     req.Title,
+		RequestID: req.RequestID,
+		Config: &httpReadConfig{
+			ParserEngine:          req.ParserEngine,
+			ParserEngineOverrides: req.ParserEngineOverrides,
+		},
+	}
+	if len(req.FileContent) > 0 {
+		body.FileContent = base64.StdEncoding.EncodeToString(req.FileContent)
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("http marshal read request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+PathRead, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("http new request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.ContentLength = int64(len(jsonBody))
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("http read failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		preview := readErrorPreview(resp.Body)
+		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, preview)
+	}
+	bodyBytes, err := readCapped(resp.Body, maxResultResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("http read response: %w", err)
+	}
+	var out httpReadResponse
+	if err := json.Unmarshal(bodyBytes, &out); err != nil {
+		return nil, fmt.Errorf("http decode read response: %w", err)
+	}
+	return fromHTTPReadResponse(&out), nil
+}
+
+// PreprocessImage is not offered over the HTTP transport: page straightening
+// lives in the docreader service, and this reader speaks to a different
+// surface. It reports that as a verdict — fallback=true, no error — so the
+// caller's single fallback (OCR the original bytes) is the only outcome, with
+// nothing logged that looks like a failure.
+func (p *HTTPDocumentReader) PreprocessImage(_ context.Context, _ []byte) ([]byte, bool, error) {
+	return nil, true, nil
+}

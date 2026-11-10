@@ -1,0 +1,317 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// sessionSandboxPinReader is the pin lookup used to choose the manager that
+// owns a session's binding. *SessionSandboxPinner is the production
+// implementation; tests use a stub so this does not need a database.
+type sessionSandboxPinReader interface {
+	Read(ctx context.Context, sessionID string) (SandboxPin, error)
+}
+
+// PinnedSessionSandbox resolves the session's pinned sandbox manager at
+// request time. The process-wide sandbox.Manager is DisabledManager, so
+// checkpoint and BoundSandboxID must go through the same pin + tenant
+// resolver path ArtifactCollector and SandboxTerminalService already use.
+type PinnedSessionSandbox struct {
+	pinner   sessionSandboxPinReader
+	resolver sandbox.TenantSandboxResolver
+	fallback sandbox.Manager
+	host     *HostSessionResolver
+}
+
+// NewPinnedSessionSandbox wires request-time sandbox access. Any dependency
+// may be nil; BoundSandboxID then reports ok=false and ExecShellCommand
+// fails, which WorkspaceCheckpointer treats as "no checkpoint".
+//
+// host is consulted only by VersionsWorkspace. manager() must not fall back
+// to it: that would hand WorkspaceCheckpointer a live ExecShellCommand and
+// start committing the user's real project.
+func NewPinnedSessionSandbox(
+	pinner sessionSandboxPinReader,
+	resolver sandbox.TenantSandboxResolver,
+	fallback sandbox.Manager,
+	host *HostSessionResolver,
+) *PinnedSessionSandbox {
+	return &PinnedSessionSandbox{
+		pinner:   pinner,
+		resolver: resolver,
+		fallback: fallback,
+		host:     host,
+	}
+}
+
+func (a *PinnedSessionSandbox) manager(ctx context.Context, sessionID string) sandbox.Manager {
+	if a == nil || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	if a.pinner == nil {
+		return nil
+	}
+	pin, err := a.pinner.Read(ctx, sessionID)
+	if err != nil || pin.IsZero() {
+		return nil
+	}
+	// The workspace comes from the pin, not the request. Fork runs from a plain
+	// POST as the session owner, while a shared agent's sandbox lives on the
+	// lending workspace's config — reading it as the session owner found
+	// nothing and silently degraded the fork to SNAPSHOT_UNSUPPORTED.
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, a.resolver, a.fallback, pin.TenantOr(sessionTenantID), pin.ConfigID, nil,
+	)
+	if err != nil {
+		return nil
+	}
+	return mgr
+}
+
+// BackendIsDocker reports whether the session's pinned manager is the Docker
+// backend. The container id is not a backend name, so callers must not infer
+// this from the sandbox id. A missing pin is not Docker.
+func (a *PinnedSessionSandbox) BackendIsDocker(ctx context.Context, sessionID string) bool {
+	mgr := a.manager(ctx, sessionID)
+	if mgr == nil {
+		return false
+	}
+	return mgr.GetType() == sandbox.SandboxTypeDocker
+}
+
+// BoundSandboxID reports the sandbox currently bound to sessionID without
+// provisioning one. A session with no pin or no live binding reports
+// ok=false.
+func (a *PinnedSessionSandbox) BoundSandboxID(ctx context.Context, sessionID string) (string, bool) {
+	mgr := a.manager(ctx, sessionID)
+	type lookup interface {
+		BoundSandboxID(context.Context, string) (string, bool)
+	}
+	if l, ok := mgr.(lookup); ok {
+		return l.BoundSandboxID(ctx, sessionID)
+	}
+	return "", false
+}
+
+// ExecShellCommand runs a command on the session's pinned sandbox manager.
+func (a *PinnedSessionSandbox) ExecShellCommand(
+	ctx context.Context,
+	sessionID, command, workDir string,
+	timeout time.Duration,
+	env map[string]string,
+) (*sandbox.ExecuteResult, error) {
+	mgr := a.manager(ctx, sessionID)
+	runner, ok := mgr.(SandboxShellRunner)
+	if !ok || runner == nil {
+		return nil, errors.New("sandbox: no shell runner for session")
+	}
+	return runner.ExecShellCommand(ctx, sessionID, command, workDir, timeout, env)
+}
+
+// ExecShellCommandWithOptions forwards maintenance options to the pinned
+// manager, preserving lookup-only execution and the expected sandbox identity.
+func (a *PinnedSessionSandbox) ExecShellCommandWithOptions(
+	ctx context.Context, sessionID, command string, opts sandbox.ShellExecOptions,
+) (*sandbox.ExecuteResult, error) {
+	mgr := a.manager(ctx, sessionID)
+	runner, ok := mgr.(sandbox.SessionInstallShellExecutor)
+	if !ok || runner == nil {
+		return nil, errors.New("sandbox: no maintenance shell runner for session")
+	}
+	return runner.ExecShellCommandWithOptions(ctx, sessionID, command, opts)
+}
+
+// HasActiveTurn reports whether the session's pinned manager currently holds a
+// turn lease. Managers that do not expose the method are treated as not busy.
+func (a *PinnedSessionSandbox) HasActiveTurn(ctx context.Context, sessionID string) (bool, error) {
+	mgr := a.manager(ctx, sessionID)
+	type turnChecker interface {
+		HasActiveTurn(context.Context, string) (bool, error)
+	}
+	if checker, ok := mgr.(turnChecker); ok {
+		return checker.HasActiveTurn(ctx, sessionID)
+	}
+	return false, nil
+}
+
+// KeepAliveSession refreshes the provider idle timer of the session's pinned
+// sandbox. Managers without the method (host, disabled) have nothing to keep
+// alive and report (0, nil).
+func (a *PinnedSessionSandbox) KeepAliveSession(ctx context.Context, sessionID string) (time.Duration, error) {
+	mgr := a.manager(ctx, sessionID)
+	type keepAliver interface {
+		KeepAliveSession(context.Context, string) (time.Duration, error)
+	}
+	if k, ok := mgr.(keepAliver); ok {
+		return k.KeepAliveSession(ctx, sessionID)
+	}
+	return 0, nil
+}
+
+// KeepAliveSessionExpected refreshes the provider timer of the bound sandbox
+// only when it still is expectedID. Managers without the method have nothing
+// to refresh and report (0, nil).
+func (a *PinnedSessionSandbox) KeepAliveSessionExpected(
+	ctx context.Context, sessionID, expectedID string,
+) (time.Duration, error) {
+	mgr := a.manager(ctx, sessionID)
+	type expectedKeepAliver interface {
+		KeepAliveSessionExpected(context.Context, string, string) (time.Duration, error)
+	}
+	if k, ok := mgr.(expectedKeepAliver); ok {
+		return k.KeepAliveSessionExpected(ctx, sessionID, expectedID)
+	}
+	return 0, nil
+}
+
+// ListSessionFiles walks dir in the session sandbox. A manager without the
+// method reports an error so callers skip output-file inspection.
+func (a *PinnedSessionSandbox) ListSessionFiles(
+	ctx context.Context, sessionID, dir string,
+) ([]sandbox.RemoteDirEntry, error) {
+	mgr := a.manager(ctx, sessionID)
+	type lister interface {
+		ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error)
+	}
+	files, ok := mgr.(lister)
+	if !ok || files == nil {
+		return nil, errors.New("sandbox: session files cannot be listed")
+	}
+	return files.ListSessionFiles(ctx, sessionID, dir)
+}
+
+// TryLockRewind locks rewind through the session's pinned manager. A manager
+// that can take the session exclusively returns the context to reset with;
+// one with only the rewind lock keeps ctx; others succeed as a no-op.
+func (a *PinnedSessionSandbox) TryLockRewind(ctx context.Context, sessionID string) (context.Context, func(), error) {
+	mgr := a.manager(ctx, sessionID)
+	type exclusiveLocker interface {
+		LockRewindSession(context.Context, string) (context.Context, func(), error)
+	}
+	if l, ok := mgr.(exclusiveLocker); ok {
+		return l.LockRewindSession(ctx, sessionID)
+	}
+	type locker interface {
+		TryLockRewind(context.Context, string) (func(), error)
+	}
+	if l, ok := mgr.(locker); ok {
+		unlock, err := l.TryLockRewind(ctx, sessionID)
+		return ctx, unlock, err
+	}
+	return ctx, func() {}, nil
+}
+
+// HasRewindLock reports whether rewind currently holds the session on the
+// pinned manager. Managers that do not expose the method are treated as free.
+func (a *PinnedSessionSandbox) HasRewindLock(ctx context.Context, sessionID string) (bool, error) {
+	mgr := a.manager(ctx, sessionID)
+	type rewindLockReader interface {
+		HasRewindLock(context.Context, string) (bool, error)
+	}
+	if reader, ok := mgr.(rewindLockReader); ok {
+		return reader.HasRewindLock(ctx, sessionID)
+	}
+	return false, nil
+}
+
+// BeginWorkspaceFork opens a shared-machine fork through the session's
+// pinned manager. Backends without shared machines cannot.
+func (a *PinnedSessionSandbox) BeginWorkspaceFork(
+	ctx context.Context, sourceSessionID string,
+) (sandbox.WorkspaceFork, error) {
+	mgr := a.manager(ctx, sourceSessionID)
+	starter, ok := mgr.(interface {
+		BeginWorkspaceFork(context.Context, string) (sandbox.WorkspaceFork, error)
+	})
+	if !ok {
+		return nil, sandbox.ErrSharedSandbox
+	}
+	return starter.BeginWorkspaceFork(ctx, sourceSessionID)
+}
+
+// CreateForkSnapshot snapshots the session's already-bound sandbox through the
+// pinned manager. Managers that do not expose the method return an error so
+// fork can degrade to SNAPSHOT_UNSUPPORTED.
+func (a *PinnedSessionSandbox) CreateForkSnapshot(
+	ctx context.Context, sessionID, name string,
+) (string, error) {
+	mgr := a.manager(ctx, sessionID)
+	type snapshotter interface {
+		CreateForkSnapshot(context.Context, string, string) (string, error)
+	}
+	if s, ok := mgr.(snapshotter); ok {
+		return s.CreateForkSnapshot(ctx, sessionID, name)
+	}
+	return "", errors.New("sandbox: fork snapshot is not supported")
+}
+
+// DeleteForkSnapshot removes a fork snapshot through the session's pinned
+// manager. Managers that do not expose the method return an error so the
+// caller can keep the lease for the reaper.
+func (a *PinnedSessionSandbox) DeleteForkSnapshot(
+	ctx context.Context, sessionID, snapshotID string,
+) error {
+	mgr := a.manager(ctx, sessionID)
+	type deleter interface {
+		DeleteForkSnapshot(context.Context, string, string) error
+	}
+	if d, ok := mgr.(deleter); ok {
+		return d.DeleteForkSnapshot(ctx, sessionID, snapshotID)
+	}
+	type snapshotDeleter interface {
+		DeleteSnapshot(context.Context, string) error
+	}
+	if d, ok := mgr.(snapshotDeleter); ok {
+		return d.DeleteSnapshot(ctx, snapshotID)
+	}
+	return errors.New("sandbox: fork snapshot delete is not supported")
+}
+
+// SessionWorkspaceLayout forwards the pinned manager's layout. manager does
+// not return the lookup error (it degrades to nil), so a missing pin keeps
+// the /workspace contract instead of failing the checkpoint closed.
+func (a *PinnedSessionSandbox) SessionWorkspaceLayout(
+	ctx context.Context, sessionID string,
+) (sandbox.WorkspaceLayout, error) {
+	mgr := a.manager(ctx, sessionID)
+	if provider, ok := mgr.(sandbox.SessionWorkspaceLayoutProvider); ok && provider != nil {
+		return provider.SessionWorkspaceLayout(ctx, sessionID)
+	}
+	return sandbox.RemoteWorkspaceLayout(), nil
+}
+
+// VersionsWorkspace reports whether this session's backend keeps a git history
+// of the sandbox workspace. Host sessions return false: the workspace is a
+// real directory, often shared across sessions, and must not be auto-committed
+// or reset. Sessions without a host backend return true so fork keeps the
+// remote degrade chain rather than pretending the session is on host.
+func (a *PinnedSessionSandbox) VersionsWorkspace(ctx context.Context, sessionID string) bool {
+	if a == nil {
+		return true
+	}
+	if a.host != nil && a.host.HostManagerFor(ctx, sessionID) != nil {
+		return false
+	}
+	if mgr := a.manager(ctx, sessionID); mgr != nil && mgr.GetType() == sandbox.SandboxTypeHost {
+		return false
+	}
+	return true
+}
+
+var _ SandboxShellRunner = (*PinnedSessionSandbox)(nil)
+
+var _ SessionForkSandboxPort = (*PinnedSessionSandbox)(nil)
+
+var _ SessionRewindSandboxPort = (*PinnedSessionSandbox)(nil)
+
+var _ WorkspaceVersioning = (*PinnedSessionSandbox)(nil)
+
+var _ sandbox.SessionWorkspaceLayoutProvider = (*PinnedSessionSandbox)(nil)
+
+var _ SessionForkSandboxPort = (*sandbox.SessionBoundManager)(nil)

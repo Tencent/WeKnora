@@ -1,0 +1,423 @@
+package event
+
+import (
+	"encoding/json"
+	"time"
+)
+
+// EventData contains common event data structures for different stages
+
+// QueryData represents query-related event data
+type QueryData struct {
+	OriginalQuery  string                 `json:"original_query"`
+	RewrittenQuery string                 `json:"rewritten_query,omitempty"`
+	SessionID      string                 `json:"session_id"`
+	UserID         string                 `json:"user_id,omitempty"`
+	Extra          map[string]interface{} `json:"extra,omitempty"`
+}
+
+// RetrievalData represents retrieval event data
+type RetrievalData struct {
+	Query           string                 `json:"query"`
+	KnowledgeBaseID string                 `json:"knowledge_base_id"`
+	TopK            int                    `json:"top_k"`
+	Threshold       float64                `json:"threshold"`
+	RetrievalType   string                 `json:"retrieval_type"` // vector, keyword, entity
+	ResultCount     int                    `json:"result_count"`
+	Results         interface{}            `json:"results,omitempty"`
+	Duration        int64                  `json:"duration_ms,omitempty"` // 检索耗时（毫秒）
+	Extra           map[string]interface{} `json:"extra,omitempty"`
+}
+
+// RerankData represents reranking event data
+type RerankData struct {
+	Query       string                 `json:"query"`
+	InputCount  int                    `json:"input_count"`  // 输入的候选数量
+	OutputCount int                    `json:"output_count"` // 输出的结果数量
+	ModelID     string                 `json:"model_id"`
+	Threshold   float64                `json:"threshold"`
+	Results     interface{}            `json:"results,omitempty"`
+	Duration    int64                  `json:"duration_ms,omitempty"` // 排序耗时（毫秒）
+	Extra       map[string]interface{} `json:"extra,omitempty"`
+}
+
+// MergeData represents merge event data
+type MergeData struct {
+	InputCount  int                    `json:"input_count"`
+	OutputCount int                    `json:"output_count"`
+	MergeType   string                 `json:"merge_type"` // dedup, fusion, etc.
+	Results     interface{}            `json:"results,omitempty"`
+	Duration    int64                  `json:"duration_ms,omitempty"`
+	Extra       map[string]interface{} `json:"extra,omitempty"`
+}
+
+// ChatData represents chat completion event data
+type ChatData struct {
+	Query       string                 `json:"query"`
+	ModelID     string                 `json:"model_id"`
+	Response    string                 `json:"response,omitempty"`
+	StreamChunk string                 `json:"stream_chunk,omitempty"`
+	TokenCount  int                    `json:"token_count,omitempty"`
+	Duration    int64                  `json:"duration_ms,omitempty"`
+	IsStream    bool                   `json:"is_stream"`
+	Extra       map[string]interface{} `json:"extra,omitempty"`
+}
+
+// ErrorData represents error event data
+type ErrorData struct {
+	Error     string                 `json:"error"`
+	ErrorCode string                 `json:"error_code,omitempty"`
+	Stage     string                 `json:"stage"` // 错误发生的阶段
+	SessionID string                 `json:"session_id"`
+	Query     string                 `json:"query,omitempty"`
+	Extra     map[string]interface{} `json:"extra,omitempty"`
+}
+
+// NewEvent creates a new Event with metadata
+func NewEvent(eventType EventType, data interface{}) Event {
+	return Event{
+		Type:     eventType,
+		Data:     data,
+		Metadata: make(map[string]interface{}),
+	}
+}
+
+// WithSessionID sets the session ID for the event
+func (e Event) WithSessionID(sessionID string) Event {
+	e.SessionID = sessionID
+	return e
+}
+
+// WithRequestID sets the request ID for the event
+func (e Event) WithRequestID(requestID string) Event {
+	e.RequestID = requestID
+	return e
+}
+
+// WithMetadata adds metadata to the event
+func (e Event) WithMetadata(key string, value interface{}) Event {
+	if e.Metadata == nil {
+		e.Metadata = make(map[string]interface{})
+	}
+	e.Metadata[key] = value
+	return e
+}
+
+// AgentPlanData represents agent planning event data
+type AgentPlanData struct {
+	Query    string   `json:"query"`
+	Plan     []string `json:"plan"` // Step descriptions
+	Duration int64    `json:"duration_ms,omitempty"`
+}
+
+// AgentStepData represents agent step event data
+type AgentStepData struct {
+	Iteration int         `json:"iteration"`
+	Thought   string      `json:"thought"`
+	ToolCalls interface{} `json:"tool_calls"` // []types.ToolCall
+	Duration  int64       `json:"duration_ms"`
+}
+
+// AgentActionData represents agent tool execution event data
+type AgentActionData struct {
+	Iteration  int                    `json:"iteration"`
+	ToolName   string                 `json:"tool_name"`
+	ToolInput  map[string]interface{} `json:"tool_input"`
+	ToolOutput string                 `json:"tool_output"`
+	Success    bool                   `json:"success"`
+	Error      string                 `json:"error,omitempty"`
+	Duration   int64                  `json:"duration_ms"`
+}
+
+// AgentQueryData represents agent query event data
+type AgentQueryData struct {
+	SessionID string                 `json:"session_id"`
+	Query     string                 `json:"query"`
+	RequestID string                 `json:"request_id,omitempty"`
+	Extra     map[string]interface{} `json:"extra,omitempty"`
+}
+
+// AgentCompleteData represents agent completion event data
+type AgentCompleteData struct {
+	// Artifacts contains runtime-delivered child files (types.MessageArtifacts).
+	// Internal only: stream handlers publish sanitized metadata after persistence.
+	Artifacts       interface{}            `json:"-"`
+	SessionID       string                 `json:"session_id"`
+	TotalSteps      int                    `json:"total_steps"`
+	FinalAnswer     string                 `json:"final_answer"`
+	KnowledgeRefs   []interface{}          `json:"knowledge_refs,omitempty"` // []*types.SearchResult
+	AgentSteps      interface{}            `json:"agent_steps,omitempty"`    // []types.AgentStep - detailed execution steps
+	Usage           interface{}            `json:"usage,omitempty"`          // *types.TokenUsage - LLM token usage aggregated over the turn
+	ModelID         string                 `json:"model_id,omitempty"`       // Chat model whose calls produced Usage
+	TotalDurationMs int64                  `json:"total_duration_ms"`
+	MessageID       string                 `json:"message_id,omitempty"` // Assistant message ID
+	RequestID       string                 `json:"request_id,omitempty"`
+	Extra           map[string]interface{} `json:"extra,omitempty"`
+	// Suspended is set (*types.PromptSuspension) when the run ended waiting
+	// on a user prompt; the message is then not complete.
+	Suspended interface{} `json:"suspended,omitempty"`
+}
+
+// === Streaming Event Data Structures ===
+// These are used for real-time streaming feedback to clients
+
+// AgentThoughtData represents agent thought streaming data
+type AgentThoughtData struct {
+	Content   string `json:"content"`
+	Iteration int    `json:"iteration"`
+	Done      bool   `json:"done"`
+}
+
+// AgentProgressData is a complete user-facing update, separate from reasoning.
+// ID identifies the update across stream replay; Content is a snapshot, not a delta.
+type AgentProgressData struct {
+	Content   string `json:"content"`
+	Iteration int    `json:"iteration"`
+}
+
+// AgentToolCallData represents agent tool call notification data
+type AgentToolCallData struct {
+	ToolCallID string         `json:"tool_call_id"` // Tool call ID for tracking
+	ToolName   string         `json:"tool_name"`
+	Arguments  map[string]any `json:"arguments,omitempty"`
+	Iteration  int            `json:"iteration"`
+	Hint       string         `json:"hint,omitempty"` // Human-readable tool hint, e.g. `web_search("query")`
+}
+
+// AgentToolResultData represents agent tool execution result data
+type AgentToolResultData struct {
+	ToolCallID string                 `json:"tool_call_id"` // Tool call ID for tracking
+	ToolName   string                 `json:"tool_name"`
+	Output     string                 `json:"output"`
+	Error      string                 `json:"error,omitempty"`
+	Success    bool                   `json:"success"`
+	Duration   int64                  `json:"duration_ms,omitempty"`
+	Iteration  int                    `json:"iteration"`
+	Data       map[string]interface{} `json:"data,omitempty"` // Structured data from tool result (e.g., display_type, formatted results)
+}
+
+// AgentReferencesData represents knowledge references data
+type AgentReferencesData struct {
+	References interface{} `json:"references"` // []*types.SearchResult
+	Iteration  int         `json:"iteration"`
+}
+
+// MemoryRecalledData carries the long-term memories injected into this turn.
+// Memories is []types.UsedMemory, kept as interface{} for the same reason
+// AgentReferencesData does: the event package stays free of a types import.
+type MemoryRecalledData struct {
+	Memories interface{} `json:"memories"`
+}
+
+// AgentFinalAnswerData represents final answer streaming data
+type AgentFinalAnswerData struct {
+	// Replace retracts only this event ID after explicit provider protocol evidence.
+	Replace    bool   `json:"replace,omitempty"`
+	Content    string `json:"content"`
+	Done       bool   `json:"done"`
+	IsFallback bool   `json:"is_fallback,omitempty"` // True when response is a fallback (no knowledge base match)
+	// Truncated marks an answer the provider cut off at the completion-token
+	// cap. The text is what the model had produced when the cap hit, not a
+	// finished answer, so a client should say so rather than present it as
+	// complete. Carried on both the content event and the Done marker,
+	// because a live-streamed answer only learns of the cap at the close.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// ContextCompactedData reports that older conversation was replaced by a
+// summary. Compaction changes what the agent remembers, so it is shown rather
+// than hidden: an answer that forgets an earlier instruction is otherwise
+// indistinguishable from the model ignoring it.
+type ContextCompactedData struct {
+	Reason         string `json:"reason"` // threshold | overflow
+	Round          int    `json:"round"`
+	TokensBefore   int    `json:"tokens_before"`
+	TokensAfter    int    `json:"tokens_after"`
+	MessagesBefore int    `json:"messages_before"`
+	MessagesAfter  int    `json:"messages_after"`
+	Summary        string `json:"summary"`
+	// Degraded marks a summary that came from the mechanical archive because
+	// the summarizer failed.
+	Degraded bool `json:"degraded,omitempty"`
+	// SplitTurn marks a cut that landed inside a single turn.
+	SplitTurn bool `json:"split_turn,omitempty"`
+}
+
+// UserMessageInjectedData reports that a message the user appended while the
+// run was in flight was accepted into the running turn: a user-role row has
+// been persisted under the run's request ID and the text was appended to the
+// agent's message list, so the next LLM call already sees it.
+type UserMessageInjectedData struct {
+	SteerID       string `json:"steer_id"`   // Correlates with the queued steer event
+	Content       string `json:"content"`    // The injected text, as sent to the model
+	MessageID     string `json:"message_id"` // Durable assistant message of the run
+	UserMessageID string `json:"user_message_id,omitempty"`
+}
+
+// AgentReflectionData represents agent reflection data
+type AgentReflectionData struct {
+	ToolCallID string `json:"tool_call_id"` // Tool call ID for tracking
+	Content    string `json:"content"`
+	Iteration  int    `json:"iteration"`
+	Done       bool   `json:"done"` // Whether streaming is complete
+}
+
+// SessionTitleData represents session title update data
+type SessionTitleData struct {
+	SessionID string `json:"session_id"`
+	Title     string `json:"title"`
+}
+
+// StopData represents stop generation request data
+type StopData struct {
+	SessionID string `json:"session_id"`
+	MessageID string `json:"message_id"`
+	Reason    string `json:"reason,omitempty"` // Optional reason for stopping
+}
+
+// ToolApprovalRequiredData is emitted when an MCP tool marked dangerous is about to run.
+type ToolApprovalRequiredData struct {
+	PendingID          string      `json:"pending_id"`
+	TenantID           uint64      `json:"tenant_id"`
+	SessionID          string      `json:"session_id"`
+	AssistantMessageID string      `json:"assistant_message_id"`
+	ServiceID          string      `json:"service_id"`
+	ServiceName        string      `json:"service_name"`
+	MCPToolName        string      `json:"mcp_tool_name"`
+	RegisteredToolName string      `json:"registered_tool_name"`
+	Description        string      `json:"description"`
+	Args               interface{} `json:"args,omitempty"`
+	ArgsJSON           string      `json:"args_json,omitempty"`
+	TimeoutSeconds     int         `json:"timeout_seconds"`
+	// HotWaitSeconds equals TimeoutSeconds; when Suspendable, the run is
+	// suspended rather than rejected once it elapses.
+	HotWaitSeconds  int    `json:"hot_wait_seconds"`
+	Suspendable     bool   `json:"suspendable"`
+	RequestedAtUnix int64  `json:"requested_at"`
+	ToolCallID      string `json:"tool_call_id"`
+	RequestID       string `json:"request_id,omitempty"`
+	// GrantScope, when set, offers to allow calls like this one for the rest
+	// of the session, and describes which calls that covers.
+	GrantScope string `json:"grant_scope,omitempty"`
+	// GrantLapsed, when set, is why an earlier grant for this call no longer
+	// applies; see types.ToolApprovalPromptRequest.
+	GrantLapsed string `json:"grant_lapsed,omitempty"`
+	// Kind is empty for MCP approvals and "host_command" for Lite host commands.
+	Kind string               `json:"kind,omitempty"`
+	Host *HostApprovalPayload `json:"host,omitempty"`
+}
+
+// ToolApprovalResolvedData confirms the user decision (or timeout/cancel).
+type ToolApprovalResolvedData struct {
+	PendingID string `json:"pending_id"`
+	Approved  bool   `json:"approved"`
+	Reason    string `json:"reason,omitempty"`
+	TimedOut  bool   `json:"timed_out,omitempty"`
+	Canceled  bool   `json:"canceled,omitempty"`
+	// Scope is "once" or "session" for host approvals.
+	Scope     string `json:"scope,omitempty"`
+	RiskLevel string `json:"risk_level,omitempty"`
+}
+
+// HostApprovalPayload describes a Lite host action waiting for approval, by
+// the user or by the review model.
+type HostApprovalPayload struct {
+	Reason string `json:"reason"`
+	// Reviewer is "user" (a card) or "model" (auto review, no card).
+	Reviewer        string `json:"reviewer,omitempty"`
+	RiskLevel       string `json:"risk_level,omitempty"`
+	Tool            string `json:"tool,omitempty"`
+	Command         string `json:"command,omitempty"`
+	Cwd             string `json:"cwd,omitempty"`
+	GrantPath       string `json:"grant_path,omitempty"`
+	GrantAccess     string `json:"grant_access,omitempty"`
+	DenialSnippet   string `json:"denial_snippet,omitempty"`
+	FirstAttemptRan bool   `json:"first_attempt_ran,omitempty"`
+	AllowSession    bool   `json:"allow_session"`
+	// SessionRules is what "allow for this session" remembers for a delete.
+	SessionRules []string `json:"session_rules,omitempty"`
+	// FilePath, WriteMode, WriteBytes and WritePreview describe a file tool
+	// write. WritePreview is the content or diff, capped for the card.
+	FilePath     string `json:"file_path,omitempty"`
+	WriteMode    string `json:"write_mode,omitempty"`
+	WriteBytes   int    `json:"write_bytes,omitempty"`
+	WritePreview string `json:"write_preview,omitempty"`
+	// Env, SkillName, Stdin and Scripts are what the command runs with besides
+	// its own text. Env values under a secret-looking name are masked.
+	Env       map[string]string `json:"env,omitempty"`
+	SkillName string            `json:"skill_name,omitempty"`
+	Stdin     string            `json:"stdin,omitempty"`
+	Scripts   []HostScript      `json:"scripts,omitempty"`
+}
+
+// HostScript is a script a host command runs, shown on its approval card.
+type HostScript struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// AgentPromptRequiredData asks the user a question of the given kind.
+// Request is the kind's request JSON, e.g. types.AskUserPromptRequest.
+type AgentPromptRequiredData struct {
+	PendingID          string          `json:"pending_id"`
+	Kind               string          `json:"kind"`
+	SessionID          string          `json:"session_id"`
+	AssistantMessageID string          `json:"assistant_message_id"`
+	Request            json.RawMessage `json:"request"`
+	TimeoutSeconds     int             `json:"timeout_seconds"`
+	HotWaitSeconds     int             `json:"hot_wait_seconds"`
+	Suspendable        bool            `json:"suspendable"`
+	RequestedAtUnix    int64           `json:"requested_at"`
+	ToolCallID         string          `json:"tool_call_id"`
+	RequestID          string          `json:"request_id,omitempty"`
+}
+
+// AgentPromptResolvedData reports how a prompt ended. Response is the
+// answer JSON when Answered.
+type AgentPromptResolvedData struct {
+	PendingID string          `json:"pending_id"`
+	Kind      string          `json:"kind"`
+	Answered  bool            `json:"answered"`
+	Response  json.RawMessage `json:"response,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	TimedOut  bool            `json:"timed_out,omitempty"`
+	Canceled  bool            `json:"canceled,omitempty"`
+}
+
+// MCPOAuthRequiredData is emitted when an OAuth-enabled MCP service is invoked
+// during a conversation but the current user has not authorized it yet. The
+// UI surfaces an "Authorize" card; the agent pauses until the user authorizes.
+type MCPOAuthRequiredData struct {
+	PendingID          string `json:"pending_id"`
+	TenantID           uint64 `json:"tenant_id"`
+	SessionID          string `json:"session_id"`
+	AssistantMessageID string `json:"assistant_message_id"`
+	ServiceID          string `json:"service_id"`
+	ServiceName        string `json:"service_name"`
+	MCPToolName        string `json:"mcp_tool_name"`
+	TimeoutSeconds     int    `json:"timeout_seconds"`
+	RequestedAtUnix    int64  `json:"requested_at"`
+	ToolCallID         string `json:"tool_call_id"`
+	RequestID          string `json:"request_id,omitempty"`
+}
+
+// MCPOAuthResolvedData confirms the outcome of an in-conversation OAuth prompt
+// (authorized / timeout / cancel).
+type MCPOAuthResolvedData struct {
+	PendingID  string `json:"pending_id"`
+	ServiceID  string `json:"service_id"`
+	Authorized bool   `json:"authorized"`
+	Reason     string `json:"reason,omitempty"`
+	TimedOut   bool   `json:"timed_out,omitempty"`
+	Canceled   bool   `json:"canceled,omitempty"`
+}
+
+// CommandOutputData is a cumulative tail, so reconnect/replay needs no
+// byte offsets and a missed update does not corrupt the displayed log.
+type CommandOutputData struct {
+	ToolCallID string    `json:"tool_call_id"`
+	Command    string    `json:"command"`
+	StartedAt  time.Time `json:"started_at"`
+	Output     string    `json:"output"`
+	Done       bool      `json:"done"`
+}

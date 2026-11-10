@@ -1,0 +1,236 @@
+package chatpipeline
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPluginFilterTopKSortsMergeResultsBeforeTruncation(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 3},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "low", KnowledgeID: "doc-c", Score: 0.2},
+				{ID: "high", KnowledgeID: "doc-a", Score: 0.9},
+				{ID: "medium", KnowledgeID: "doc-b", Score: 0.5},
+				{ID: "second", KnowledgeID: "doc-d", Score: 0.8},
+			},
+		},
+	}
+
+	plugin := &PluginFilterTopK{}
+	err := plugin.OnEvent(
+		context.Background(),
+		types.FILTER_TOP_K,
+		chatManage,
+		func() *PluginError { return nil },
+	)
+
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 3)
+	assert.Equal(t, []string{"high", "second", "medium"}, searchResultIDs(chatManage.MergeResult))
+}
+
+func TestPluginFilterTopKUsesDeterministicTieBreakers(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 10},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "chunk-b", KnowledgeID: "doc-b", ChunkType: "text", StartAt: 10, EndAt: 20, Score: 0.8},
+				{ID: "chunk-c", KnowledgeID: "doc-a", ChunkType: "summary", StartAt: 0, EndAt: 10, Score: 0.8},
+				{ID: "chunk-a", KnowledgeID: "doc-a", ChunkType: "text", StartAt: 0, EndAt: 10, Score: 0.8},
+			},
+		},
+	}
+
+	plugin := &PluginFilterTopK{}
+	err := plugin.OnEvent(
+		context.Background(),
+		types.FILTER_TOP_K,
+		chatManage,
+		func() *PluginError { return nil },
+	)
+
+	require.Nil(t, err)
+	assert.Equal(t, []string{"chunk-c", "chunk-a", "chunk-b"}, searchResultIDs(chatManage.MergeResult))
+}
+
+// Truncation is the evidence that the prompt context is a subset: it must be
+// recorded exactly when results were dropped, naming the stage and the pool it
+// cut.
+func TestPluginFilterTopKRecordsTruncation(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "first", KnowledgeID: "doc-a", Score: 0.9},
+				{ID: "second", KnowledgeID: "doc-b", Score: 0.8},
+				{ID: "third", KnowledgeID: "doc-c", Score: 0.7},
+				{ID: "fourth", KnowledgeID: "doc-d", Score: 0.6},
+			},
+		},
+	}
+
+	plugin := &PluginFilterTopK{}
+	err := plugin.OnEvent(
+		context.Background(),
+		types.FILTER_TOP_K,
+		chatManage,
+		func() *PluginError { return nil },
+	)
+
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	require.NotNil(t, chatManage.Truncation)
+	assert.Equal(t, types.RetrievalTruncation{
+		Stage:      types.RetrievalStageFilterTopK,
+		Candidates: 4,
+	}, *chatManage.Truncation)
+}
+
+// An earlier, wider cut is the one the prompt must report: a later
+// FILTER_TOP_K cut only removes passages from the pool the model was already
+// told about, and restating the pool as the narrower number would understate
+// what retrieval produced.
+func TestPluginFilterTopKKeepsEarlierTruncationPool(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{
+			Truncation: &types.RetrievalTruncation{
+				Stage:      types.RetrievalStageRerank,
+				Candidates: 40,
+			},
+			MergeResult: []*types.SearchResult{
+				{ID: "first", KnowledgeID: "doc-a", Score: 0.9},
+				{ID: "second", KnowledgeID: "doc-b", Score: 0.8},
+				{ID: "third", KnowledgeID: "doc-c", Score: 0.7},
+			},
+		},
+	}
+
+	plugin := &PluginFilterTopK{}
+	err := plugin.OnEvent(
+		context.Background(),
+		types.FILTER_TOP_K,
+		chatManage,
+		func() *PluginError { return nil },
+	)
+
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	assert.Equal(t, types.RetrievalTruncation{
+		Stage:      types.RetrievalStageRerank,
+		Candidates: 40,
+	}, *chatManage.Truncation)
+}
+
+// A prompt that saw every candidate must not carry the subset caveat, so the
+// field stays nil when the result count is at or below topK.
+func TestPluginFilterTopKLeavesTruncationNilWhenNothingDropped(t *testing.T) {
+	for _, topK := range []int{2, 5} {
+		t.Run(fmt.Sprintf("topK=%d", topK), func(t *testing.T) {
+			chatManage := &types.ChatManage{
+				PipelineRequest: types.PipelineRequest{RerankTopK: topK},
+				PipelineState: types.PipelineState{
+					MergeResult: []*types.SearchResult{
+						{ID: "first", KnowledgeID: "doc-a", Score: 0.9},
+						{ID: "second", KnowledgeID: "doc-b", Score: 0.8},
+					},
+				},
+			}
+
+			plugin := &PluginFilterTopK{}
+			err := plugin.OnEvent(
+				context.Background(),
+				types.FILTER_TOP_K,
+				chatManage,
+				func() *PluginError { return nil },
+			)
+
+			require.Nil(t, err)
+			require.Len(t, chatManage.MergeResult, 2)
+			assert.Nil(t, chatManage.Truncation)
+		})
+	}
+}
+
+func searchResultIDs(results []*types.SearchResult) []string {
+	ids := make([]string, 0, len(results))
+	for _, result := range results {
+		ids = append(ids, result.ID)
+	}
+	return ids
+}
+
+// Sibling children of one parent must occupy a single top-k slot, and that
+// slot must carry the parent body plus the matched child ids (#4739).
+func TestPluginFilterTopKCollapsesSameParentIntoOneSlot(t *testing.T) {
+	parent := &types.SearchResult{
+		ID: "p1", KnowledgeID: "doc-a", Content: "whole table",
+		MatchType: types.MatchTypeParentChunk, Score: 0.1,
+	}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2, ParentSlotAggregation: true},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+			parent,
+			{ID: "c1", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.9},
+			{ID: "c2", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.8},
+			{ID: "c3", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.7},
+			{ID: "other", KnowledgeID: "doc-b", Score: 0.6},
+		}},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		context.Background(), types.FILTER_TOP_K, chatManage, func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	assert.Equal(t, []string{"p1", "other"}, searchResultIDs(chatManage.MergeResult))
+	assert.Equal(t, "whole table", chatManage.MergeResult[0].Content)
+	assert.Equal(t, 0.9, chatManage.MergeResult[0].Score, "the parent inherits its best child's score")
+	assert.ElementsMatch(t, []string{"c1", "c2", "c3"}, chatManage.MergeResult[0].SubChunkID)
+}
+
+// When the merge stage did not resolve a parent body, the best child represents
+// the group and still carries the sibling ids.
+func TestPluginFilterTopKParentSlotWithoutResolvedParentKeepsBestChild(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2, ParentSlotAggregation: true},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+			{ID: "c1", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.9},
+			{ID: "c2", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.8},
+			{ID: "other", KnowledgeID: "doc-b", Score: 0.6},
+		}},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		context.Background(), types.FILTER_TOP_K, chatManage, func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	assert.Equal(t, []string{"c1", "other"}, searchResultIDs(chatManage.MergeResult))
+	assert.Equal(t, []string{"c2"}, chatManage.MergeResult[0].SubChunkID)
+}
+
+// Opting out keeps the historical one-slot-per-child behaviour.
+func TestPluginFilterTopKWithoutParentSlotAggregationKeepsChildren(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+			{ID: "c1", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.9},
+			{ID: "c2", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.8},
+			{ID: "other", KnowledgeID: "doc-b", Score: 0.6},
+		}},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		context.Background(), types.FILTER_TOP_K, chatManage, func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	assert.Equal(t, []string{"c1", "c2"}, searchResultIDs(chatManage.MergeResult))
+}

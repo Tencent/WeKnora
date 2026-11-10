@@ -1,0 +1,597 @@
+package agent
+
+// WikiTaxonomyPlanPrompt assigns a directory path (category) to every entity /
+// concept page produced by ONE ingest batch in a single call, so the whole set
+// lands on one coherent tree that reuses existing folders — instead of each page
+// inventing its own folders in parallel (which diverges worst on the founding
+// batch, when the KB still has no folders to anchor on). The result is applied
+// in reduce only to pages that don't already have a category, so user edits and
+// previously-filed pages are never churned.
+const WikiTaxonomyPlanPrompt = `You are organizing a wiki knowledge base into a navigation directory. Assign each item below to a directory path (category) so the whole set lands on ONE coherent tree.
+
+<existing_folders>
+{{.ExistingTaxonomy}}
+</existing_folders>
+
+<items>
+{{.Items}}
+</items>
+
+<instructions>
+For every item, output a category path: an array of folder labels from broad to narrow (at most 2 levels). The category classifies WHAT the item fundamentally IS (the stable library "shelf" it always sits on), never the role it plays in one document.
+
+How to choose a path for each item:
+1. If an existing folder in <existing_folders> fits, REUSE its EXACT label (character-for-character). Do NOT invent a synonym folder (e.g. do NOT create "春节习俗" when "春节 / 传统习俗" already fits).
+2. If NO existing folder fits, CREATE a new, broad, durable folder for it (e.g. an organization → "组织", a legal idea → "法律概念", a place → "地点"). The directory does not have to stay small — most items DO have a natural home, so coin a sensible top-level folder rather than leaving them unfiled. Group items of the SAME kind under the SAME new folder so the tree stays coherent.
+3. Only give an empty path [] when an item genuinely belongs to NO durable subject at all. This must be RARE. The absence of a matching existing folder is NOT a reason for []; create a folder instead.
+
+Other rules:
+- Group items of the SAME kind under the SAME folder at the SAME depth. Do not file one equivalent item a level deeper than its siblings (e.g. avoid "地点 / 地址 / Address1" next to "地点 / Address2" — pick one consistent depth for equivalent items).
+- Prefer a single broad top-level folder; add a second level only for a genuinely durable sub-domain shared by several items.
+- Do NOT use the item type ("entity"/"concept") as a folder. Do NOT put slashes inside a single label.
+- Every item slug in <items> MUST appear exactly once in the output.
+- Write ALL folder labels in {{.Language}}.
+
+### JSON Formatting Rules
+- Output ONLY valid JSON, no preamble.
+- Do NOT use literal newlines inside JSON string values.
+</instructions>
+
+Output format:
+{
+  "assignments": [
+    {"slug": "entity/zhang-san", "path": ["人物"]},
+    {"slug": "concept/spring-festival", "path": ["节日", "传统节日"]}
+  ]
+}`
+
+// Wiki ingest prompt templates for LLM-powered wiki page generation.
+// These prompts are used by the wiki ingest pipeline to extract structured
+// knowledge from raw documents and build/update wiki pages.
+
+// WikiSummaryPrompt generates a summary page for a newly ingested document.
+//
+// Filename and title are intentionally NOT passed to the LLM: documents
+// uploaded to WeKnora often carry filenames that say nothing about the
+// content (e.g. scanned PDFs named after the scanner model "MX5280.pdf"),
+// and feeding such filenames to the model invites hallucinated summaries
+// when the actual extracted content is thin. The model must rely solely on
+// the document content provided below.
+const WikiSummaryPrompt = `You are a wiki editor. Given the following document content, create a structured wiki summary page in Markdown format.
+
+<document>
+<content>
+{{.Content}}
+</content>
+</document>
+
+<available_wiki_pages>
+{{.ExtractedSlugs}}
+</available_wiki_pages>
+
+<instructions>
+1. The FIRST line of your output MUST be: SUMMARY: {one sentence, 15-40 words, describing what this document is about — for wiki index listing}
+2. After the SUMMARY line, write a comprehensive summary of the document in Markdown format.
+3. Include the key facts, arguments, and conclusions.
+4. Use proper heading hierarchy (## for sections, ### for subsections).
+5. **Wiki-link rule**: The available_wiki_pages list above maps slugs to display names and their aliases (format: "[[slug]] = display name (Aliases: a, b)"). Whenever you mention a name or alias that matches a listed entry, you MUST write it as [[slug|display name]] (e.g. [[entity/zhong-guo|中国]]), NOT as bold (**name**) or bare [[slug]]. Use the EXACT slugs provided — do NOT invent new slugs.
+6. **Image rule**: If the document contains <images> tags with <image> elements, you SHOULD include the relevant images in your summary using the Markdown syntax: ![caption](url). Place the images where they are contextually relevant to the text. The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
+7. At the end, include a "## Key Takeaways" section with bullet points.
+8. Write in {{.Language}}.
+9. Keep the summary concise but thorough (500-1500 words depending on document length).
+10. **Empty content rule**: If the <content> block above is empty, contains only image references with no extracted text, or otherwise carries no substantive information, output exactly: "SUMMARY: No textual content was extractable from this document." followed by a brief note explaining that the document could not be summarised. Do NOT invent a topic, do NOT guess from any other clue.
+</instructions>
+
+Output the SUMMARY line first, then the Markdown content. Do not include any other preamble.`
+
+// WikiKnowledgeExtractPrompt extracts both entities and concepts in a single LLM call.
+// Returns a JSON object with "entities" and "concepts" arrays.
+// This replaces the former separate WikiEntityExtractPrompt and WikiConceptExtractPrompt.
+const WikiKnowledgeExtractPrompt = `You are a knowledge extraction system. Analyze the following document and extract all significant entities AND key concepts.
+
+<document>
+<content>
+{{.Content}}
+</content>
+</document>
+
+<previous_slugs>
+{{.PreviousSlugs}}
+</previous_slugs>
+
+<instructions>
+Return a JSON object with two arrays: "entities" and "concepts".
+**IMPORTANT: Write ALL names, descriptions, and details in {{.Language}}**.
+
+If the <content> block above is empty, contains only image references with no extracted text, or otherwise carries no substantive information, return {"entities": [], "concepts": []}. Do NOT invent entities or concepts from any other source.
+
+### Slug Continuity Rules
+If previous slugs are provided above, you MUST follow these rules:
+- If an entity or concept from the previous extraction still exists in the current document, **reuse its exact slug** from the previous list. Do NOT generate a new slug for the same thing.
+- If an entity or concept no longer appears in the document, **do NOT include it** in the output.
+- Only generate new slugs for entities/concepts that are genuinely new (not present in the previous list).
+- This ensures slug stability across document updates.
+
+### Entities (people, organizations, products, places, technologies, events, etc.)
+Each entity should have:
+- "name": The entity name in {{.Language}} (human-readable)
+- "slug": URL-friendly slug, format "entity/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the entity was extracted before.**
+- "aliases": An array of strings representing names that refer to THE EXACT SAME entity. Only include: official abbreviations (e.g. "IBM" for "International Business Machines"), full/short name variants (e.g. "腾讯" for "腾讯控股有限公司"), translations (e.g. "Apple" for "苹果公司"), and well-known alternate names (e.g. "Alphabet" for "Google母公司"). Do NOT include parent categories, related products, generic terms, or broader concepts. Provide [] if none.
+- "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Describes WHAT this entity IS and its role in the document. Must be self-contained (understandable without reading the full page). This will be displayed in the wiki index.
+- "details": A 2-5 sentence summary in {{.Language}} of key facts from the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url). The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
+
+Only include entities that are substantively discussed (mentioned at least twice or described in detail). Do NOT include generic terms.
+
+### Concepts (topics, themes, methodologies, theories, etc.)
+Each concept should have:
+- "name": The concept name in {{.Language}} (human-readable)
+- "slug": URL-friendly slug, format "concept/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the concept was extracted before.**
+- "aliases": An array of strings representing names that refer to THE EXACT SAME concept. Only include: official abbreviations (e.g. "RAG" for "Retrieval-Augmented Generation"), full/short name variants, and well-known synonyms used interchangeably in the field. Do NOT include sub-topics, related techniques, broader categories, or implementation details. Provide [] if none.
+- "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Defines WHAT this concept IS. Must be self-contained (understandable without reading the full page). This will be displayed in the wiki index.
+- "details": A 2-5 sentence explanation in {{.Language}} as discussed in the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url). The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
+
+Only include concepts that are substantively discussed. Skip trivial or overly generic concepts.
+
+### Deduplication Rules
+- If something is a specific named thing (person, company, product, place), put it ONLY in "entities".
+- If something is an abstract idea, methodology, or theory, put it ONLY in "concepts".
+- Never duplicate items across the two arrays.
+
+### JSON Formatting Rules
+- **CRITICAL**: Do NOT use literal newline characters inside JSON string values. If you need a newline in a string, you MUST use the escaped sequence \n.
+</instructions>
+
+Output ONLY valid JSON. Example:
+{
+  "entities": [
+    {
+      "name": "Acme Corp",
+      "slug": "entity/acme-corp",
+      "aliases": ["Acme", "Acme Corporation"],
+      "description": "A technology company specializing in AI solutions.",
+      "details": "Acme Corp was founded in 2020 and has grown to 500 employees. They focus on enterprise AI products and recently launched their flagship RAG platform."
+    }
+  ],
+  "concepts": [
+    {
+      "name": "Retrieval-Augmented Generation",
+      "slug": "concept/retrieval-augmented-generation",
+      "aliases": ["RAG"],
+      "description": "A technique that combines information retrieval with language model generation.",
+      "details": "RAG works by first retrieving relevant documents from a knowledge base using vector similarity search, then feeding those documents as context to an LLM for answer generation."
+    }
+  ]
+}`
+
+// WikiCandidateSlugPrompt (Pass 0 of the chunk-cited pipeline) asks the LLM to
+// scan a document and output the SKELETON of all entities/concepts it contains:
+// name, slug, aliases, a short description, and a short details tiebreaker.
+// The heavy lifting — linking each slug to concrete supporting chunks — is
+// done in a second pass (see WikiChunkCitationPrompt). Because this prompt no
+// longer has to carry full facts per item, it stays cheap even for long docs.
+const WikiCandidateSlugPrompt = `You are a knowledge extraction system. Analyze the following document and list all significant entities AND key concepts as a lightweight candidate set. Another pass will later attach concrete supporting chunks to each item, so you do NOT need to write exhaustive per-item facts here.
+
+<document>
+<content>
+{{.Content}}
+</content>
+</document>
+
+<previous_slugs>
+{{.PreviousSlugs}}
+</previous_slugs>
+
+<instructions>
+Return a JSON object with two arrays: "entities" and "concepts".
+**IMPORTANT: Write ALL names, descriptions, and details in {{.Language}}**.
+
+If the <content> block above is empty, contains only image references with no extracted text, or otherwise carries no substantive information, return {"entities": [], "concepts": []}. Do NOT invent entities or concepts from any other source.
+
+### Extraction Scope (Granularity: {{.Granularity}})
+{{.GranularityGuidance}}
+
+### Slug Continuity Rules
+If previous slugs are provided above, you MUST follow these rules:
+- If an entity or concept from the previous extraction still exists in the current document, **reuse its exact slug** from the previous list. Do NOT generate a new slug for the same thing.
+- If an entity or concept no longer appears in the document, **do NOT include it** in the output.
+- Only generate new slugs for entities/concepts that are genuinely new (not present in the previous list).
+- This ensures slug stability across document updates.
+
+### Entities (people, organizations, products, places, technologies, events, etc.)
+Each entity should have:
+- "name": The entity name in {{.Language}} (human-readable).
+- "slug": URL-friendly slug, format "entity/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the entity was extracted before.**
+- "aliases": An array of strings representing names that refer to THE EXACT SAME entity. Only include: official abbreviations (e.g. "IBM" for "International Business Machines"), full/short name variants (e.g. "腾讯" for "腾讯控股有限公司"), translations, and well-known alternate names. Do NOT include parent categories, related products, generic terms, or broader concepts. Provide [] if none.
+- "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Describes WHAT this entity IS and its role in the document. Must be self-contained. This will be displayed in the wiki index.
+- "details": A short 1-3 sentence fallback summary in {{.Language}}. This is ONLY used when chunk-level citation fails downstream, so it does NOT need to be exhaustive. Keep it under 300 characters.
+
+Apply the Extraction Scope rules above. Never promote trivially-mentioned names into entities.
+
+### Concepts (topics, themes, methodologies, theories, etc.)
+Each concept should have:
+- "name": The concept name in {{.Language}} (human-readable).
+- "slug": URL-friendly slug, format "concept/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the concept was extracted before.**
+- "aliases": An array of strings representing names that refer to THE EXACT SAME concept. Only include: official abbreviations (e.g. "RAG" for "Retrieval-Augmented Generation"), full/short name variants, and well-known synonyms used interchangeably in the field. Do NOT include sub-topics, related techniques, broader categories, or implementation details. Provide [] if none.
+- "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Defines WHAT this concept IS. Must be self-contained.
+- "details": A short 1-3 sentence fallback summary in {{.Language}}. Keep it under 300 characters.
+
+Apply the Extraction Scope rules above. Skip concepts that are merely name-dropped without discussion.
+
+### Deduplication Rules
+- If something is a specific named thing (person, company, product, place), put it ONLY in "entities".
+- If something is an abstract idea, methodology, or theory, put it ONLY in "concepts".
+- Never duplicate items across the two arrays.
+
+### JSON Formatting Rules
+- **CRITICAL**: Do NOT use literal newline characters inside JSON string values. If you need a newline in a string, you MUST use the escaped sequence \n.
+</instructions>
+
+Output ONLY valid JSON. Example:
+{
+  "entities": [
+    {
+      "name": "Acme Corp",
+      "slug": "entity/acme-corp",
+      "aliases": ["Acme", "Acme Corporation"],
+      "description": "A technology company specializing in AI solutions.",
+      "details": "Founded in 2020, focuses on enterprise AI products."
+    }
+  ],
+  "concepts": [
+    {
+      "name": "Retrieval-Augmented Generation",
+      "slug": "concept/retrieval-augmented-generation",
+      "aliases": ["RAG"],
+      "description": "A technique that combines information retrieval with language model generation.",
+      "details": "Retrieves documents, then feeds them as context to an LLM."
+    }
+  ]
+}`
+
+// WikiChunkCitationPrompt (Pass 1..N of the chunk-cited pipeline) asks the LLM
+// to read a batch of chunks and, for each candidate entity/concept, list the
+// chunk IDs that substantively discuss it. This keeps per-slug "facts" in
+// their verbatim form (the chunk text) instead of asking the LLM to paraphrase.
+// Block order matters for provider prefix caching: the static rules,
+// output schema and the per-document-stable <candidate_slugs> are placed
+// BEFORE the per-batch <chunks> block. Within one document only ChunksXML
+// changes between batches, so every batch after the first shares the long
+// [rules | candidate_slugs] prefix and avoids re-billing the static rules.
+const WikiChunkCitationPrompt = `You are a precise citation system. Your job is to scan a batch of document chunks and decide, for each candidate entity/concept below, which chunks substantively discuss it.
+
+<instructions>
+**IMPORTANT: Write ALL names, descriptions, and details in {{.Language}}**.
+
+### Primary task
+For each candidate slug (listed in <candidate_slugs> below), select the chunk IDs (from the <chunks> block below) that **substantively discuss** that entity/concept. "Substantively" means the chunk states at least one concrete fact, attribute, step, date, number, relationship, or other useful piece of information about the candidate — not a passing mention.
+
+- Only cite chunks that appear in the <chunks> block below.
+- Use the "id" attribute of each <c> element verbatim (e.g. "c003").
+- If a candidate is not meaningfully discussed in ANY chunk in this batch, omit it from the output (do not include empty arrays).
+- A chunk CAN be cited by multiple candidates if it genuinely discusses multiple of them.
+- If a chunk is overly long or mixes unrelated topics, still cite it for every candidate it discusses.
+
+### Secondary task: new slugs
+If this batch reveals a significant entity/concept that is **NOT** in <candidate_slugs>, you may add it under "new_slugs" so it gets incorporated. Only add genuinely new, substantively-discussed items. Do NOT rediscover items already listed in <candidate_slugs> — reuse their slug if they are already candidates.
+
+Each new slug must include:
+- "type": "entity" or "concept"
+- "name", "slug", "aliases", "description", "details" (same semantics as the candidate list)
+- "source_chunks": list of chunk IDs in the current batch that discuss it
+
+### JSON Formatting Rules
+- **CRITICAL**: Do NOT use literal newline characters inside JSON string values. If needed, use \n.
+- Output ONLY valid JSON, no preamble.
+</instructions>
+
+Output format:
+{
+  "citations": {
+    "entity/xxx": ["c001", "c003"],
+    "concept/yyy": ["c002"]
+  },
+  "new_slugs": [
+    {
+      "type": "entity",
+      "name": "Example",
+      "slug": "entity/example",
+      "aliases": [],
+      "description": "...",
+      "details": "...",
+      "source_chunks": ["c005"]
+    }
+  ]
+}
+
+If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": []}
+
+<candidate_slugs>
+{{.CandidateSlugs}}
+</candidate_slugs>
+
+<chunks>
+{{.ChunksXML}}
+</chunks>
+
+Now apply the instructions above to the chunks and output ONLY the JSON.`
+
+// WikiPageModifySystemPrompt contains only rules shared by every page update.
+// Keeping page identity and source data out of this message gives providers a
+// long byte-stable prefix to cache across a reduce batch.
+const WikiPageModifySystemPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process NEW information to add and/or deleted documents whose exclusive contributions must be removed.
+
+### SOURCE GROUNDING & MERGE RULES (CRITICAL):
+1. **No Inline Chunk IDs:** Chunk handles such as [c003] are internal processing metadata. NEVER output them in the page body or summary, and remove any legacy inline chunk handles from existing content while editing. Source associations are stored separately by the system.
+2. **Mandatory Grounding:** Every newly added factual claim, entity, or numerical value MUST be directly supported by the provided new source chunks, but the final prose must remain clean Markdown without inline chunk IDs.
+3. **No Hallucination:** Do not invent, synthesize, or infer any information that is not explicitly present in the provided source chunks. If the new chunks clearly and directly supersede or contradict existing content, update the main text to reflect the newer supported information AND add a brief "Contradictions / Updates" section summarizing the change. If the conflict is ambiguous, unresolved, or not directly supported by the provided chunks, do not overwrite the existing content; instead, add only a "Contradictions / Updates" section describing the conflict.
+4. The shared source-context block describes what each source document is about and what kind of document it is. Use it only to calibrate scope, attribution, and tone. Never copy source-context wording into the page as factual evidence.
+5. Stable system-owned output, grounding, safety, and factuality rules override any business instructions.
+
+### EDITING AND OUTPUT RULES:
+1. You are a COMPILER, not a creative writer. Stay close to the verbatim source wording. You may lightly reorder, deduplicate, and join related sentences, but must not rephrase for style, expand short statements, or invent transitions.
+2. Do not over-structure. Introduce a section heading only if the source or existing page uses it. Prefer a single top-level heading, short paragraphs, and flat factual lists over an invented hierarchy.
+3. Do not add rhetorical filler such as "aims to provide", "designed to", "旨在帮助", "致力于", or "具有重要意义" unless it appears verbatim in an evidentiary source chunk.
+4. Keep self-reported claims scoped and attributed. Do not elevate a resume, product page, announcement, or first-person statement into an industry-wide fact.
+5. Preserve existing information that remains valid and on-topic. Maintain the existing page's structure and formatting style where possible.
+6. Keep a [[slug|name]] link only when its slug is present in the supplied valid-link list. Never invent a slug and never link a page to itself.
+7. Images may be included only from supplied new information. Treat each Markdown image URL as an opaque token and reproduce it exactly without altering, shortening, or normalizing it.
+8. The first output line must be "SUMMARY: {one sentence, 15-40 words}", followed immediately by clean Markdown page content.
+
+Output the SUMMARY line first, followed by the updated Markdown content, with no other preamble.`
+
+// WikiPageModifyUserPrompt contains the per-batch and per-page data. The document-
+// level source context deliberately comes first: all pages generated from one
+// source then share the longest possible prefix before page metadata diverges.
+const WikiPageModifyUserPrompt = `{{if .HasAdditions}}<shared_source_contexts>
+{{.SharedSourceContexts}}</shared_source_contexts>
+{{end}}
+
+<page_metadata>
+  <slug>{{.PageSlug}}</slug>
+  <title>{{.PageTitle}}</title>
+  <type>{{.PageType}}</type>{{if .PageAliases}}
+  <aliases>{{.PageAliases}}</aliases>{{end}}
+</page_metadata>
+
+This wiki page is specifically about **{{.PageTitle}}** (a {{.PageType}}). Every statement on the page MUST be directly about this exact {{.PageType}} — not about related, adjacent, or similarly-named things.
+
+<existing_page_content>
+{{.ExistingContent}}
+</existing_page_content>
+
+{{if .HasAdditions}}
+<new_information>
+{{.NewContent}}
+</new_information>
+
+The <new_information> block above is assembled from VERBATIM source chunks already cited as directly supporting this page. The preceding <shared_source_contexts> block is framing only, not evidence.
+{{end}}
+
+{{if .HasRetractions}}
+<deleted_documents>
+{{.DeletedContent}}
+</deleted_documents>
+
+<remaining_source_documents>
+{{.RemainingSourcesContent}}
+</remaining_source_documents>
+{{end}}
+
+<valid_wiki_links>
+{{.AvailableSlugs}}
+</valid_wiki_links>
+
+<instructions>
+1. The FIRST line of your output MUST be: SUMMARY: {one sentence, 15-40 words, describing what this page is about after the update — for wiki index listing}
+{{if .HasRetractions}}
+2. REMOVE facts/claims that were ONLY sourced from the <deleted_documents> and are NOT present in any <remaining_source_documents> or <new_information>.
+{{end}}
+{{if .HasAdditions}}
+3. ADD and MERGE the facts from <new_information> into the page. You are a COMPILER, not a writer:
+   - **CRITICAL CONFLICT CHECK**: First verify that the <new_information> is actually about **{{.PageTitle}}** (as declared in <page_metadata>). If a piece of new info clearly belongs to a DIFFERENT but related thing (e.g., this page is about "Hunyuan Model" but the new info is about "Qwen3"; or this page is about "居民身份证" but the new info is about "工作居住证"), you MUST REJECT that part of the new information and DO NOT add it.
+   - If it is genuinely about {{.PageTitle}} and contradicts old content, prefer the newer information.
+{{end}}
+4. Preserve existing information that is still valid and still about {{.PageTitle}}.
+5. Keep [[slug|name]] wiki-link references ONLY if the slug appears in the <valid_wiki_links> list above. Remove any [[slug|name]] whose slug is NOT in that list. Do NOT invent new wiki-link slugs. The page's own slug ({{.PageSlug}}) MUST NOT appear as a [[...]] link inside its own content.
+6. Maintain the existing page structure and formatting style. Use "# {{.PageTitle}}" as the top-level heading if the page does not already have one. Do NOT introduce new heading levels beyond what the source or existing page justifies.
+{{if .HasRetractions}}
+7. If after removing deleted content the page becomes nearly empty and there is no new information to add, output just: "SUMMARY: (empty page)\n# {{.PageTitle}}\n\n*This page's primary source document was removed.*"
+{{end}}
+8. Write in {{.Language}}.
+</instructions>
+
+Output the SUMMARY line first, then the updated Markdown content. Do not include any other preamble.`
+
+// WikiPageModifyContinuationPrompt resumes a page rewrite that the provider cut
+// off at the completion budget (finish_reason=length). Long enumerations are the
+// shape that hits the cap: a certificate ledger with a hundred-plus holder rows
+// is emitted row by row, and the provider stops the model mid-table, so the page
+// is persisted one third short. The partial page is replayed as an assistant
+// turn and this prompt asks for the remainder — WITHOUT the replay the model
+// answers the original question again from the top, which is the #3446 spiral
+// the agent loop works around.
+const WikiPageModifyContinuationPrompt = `Your previous message was cut off because it reached the ` +
+	`output length limit, so the page is incomplete.
+
+Continue the SAME message from exactly where it stopped:
+1. Do NOT repeat anything you already wrote — not the SUMMARY line, not the headings, not the ` +
+	`rows, not the opening of the row you were in the middle of.
+2. Your reply is appended verbatim to what you already wrote. Its first characters must be exactly ` +
+	`the characters that follow the last character of your previous message. If you stopped in the ` +
+	`middle of a Markdown table row, finish that row first.
+3. Keep the same structure, formatting, ordering, and language as the part you already wrote.
+4. Output the continuation ONLY: no preamble, no apology, no explanation, no closing code fence.
+5. If the page was in fact already complete, reply with exactly: (complete)`
+
+// WikiIndexIntroPrompt generates the introduction for a NEW index page (first time only).
+const WikiIndexIntroPrompt = `You are a wiki editor. Write a brief introduction for a wiki knowledge base index page.
+
+<document_summaries>
+{{.DocumentSummaries}}
+</document_summaries>
+
+<instructions>
+1. Write a title line starting with "# " that reflects the knowledge domain.
+2. Follow with 2-3 sentences describing what this wiki covers, based on the document summaries above.
+3. Keep it concise — this is just the header section, the directory listing will be added separately below.
+4. Write in {{.Language}}.
+</instructions>
+
+Output ONLY the title and introduction paragraph. Do NOT generate any directory listings or page links.`
+
+// WikiIndexIntroUpdatePrompt incrementally updates an existing index introduction.
+const WikiIndexIntroUpdatePrompt = `You are a wiki editor. Update the introduction section of a wiki index page to reflect recent changes.
+
+<current_introduction>
+{{.ExistingIntro}}
+</current_introduction>
+
+<changes>
+{{.ChangeDescription}}
+</changes>
+
+<document_summaries>
+{{.DocumentSummaries}}
+</document_summaries>
+
+<instructions>
+1. Update the introduction to accurately reflect the current state of the wiki.
+2. If documents were added, mention the new topics if they significantly change the wiki's scope.
+3. If documents were removed, remove references to those topics if they no longer apply.
+4. Keep the same tone, style, and title format as the existing introduction.
+5. Keep it concise — 1 title line + 2-3 sentences.
+6. Write in {{.Language}}.
+</instructions>
+
+Output ONLY the updated title and introduction paragraph. Do NOT generate any directory listings or page links.`
+
+// WikiDeduplicationPrompt asks the LLM to identify duplicate entities/concepts
+// between newly extracted items and existing wiki pages.
+const WikiDeduplicationPrompt = `You are a strict deduplication system. You are given a list of newly extracted items. Each item carries its OWN short list of existing wiki pages that are surface-similar to it (its <candidates>). For each item, decide whether it refers to the **exact same** real-world entity or concept as ONE of its own candidates.
+
+<items>
+{{.Candidates}}
+</items>
+
+<instructions>
+### How to read the input
+Each <item> is a newly extracted entity/concept. The <candidates> nested inside it are the ONLY existing pages you may merge that item into — they were pre-selected as similar to that specific item. A page listed under one item tells you NOTHING about any other item.
+
+### How to use names and aliases
+Each item and candidate page has a <name> and may include one or more <alias> values. Consider the primary name and all provided aliases on BOTH sides when deciding whether they refer to the same entity or concept.
+
+Compare name-to-name, name-to-alias, alias-to-name, and alias-to-alias. Do not reject a match solely because the primary names differ.
+
+Aliases are supporting evidence, NOT unique identifiers. A shared alias or acronym alone does not prove that two entries refer to the same thing. Do not treat related entities, related concepts, or broader/narrower concepts as aliases.
+
+### Hard constraints — a merge is only valid when ALL hold:
+- The target slug is one of the candidate <page> slugs listed **inside that same item**. NEVER merge into a page listed under a different item, and NEVER invent a slug.
+- The types are compatible: entities merge with entities, concepts merge with concepts. **Never merge an entity into a concept or vice versa.**
+
+### Merge criteria — ALL must be true:
+1. The new item and the candidate page refer to the **same real-world thing** (same person, same organization, same specific concept).
+2. Their names and/or provided aliases support a **name-variation match**, such as an abbreviation and its full form, a translation, a minor spelling difference, or an explicitly provided alternative name. The primary names do not need to match.
+3. The provided information does not indicate different identities, versions, or scopes. If a shared alias or acronym is ambiguous and the available information is insufficient to establish identity with high confidence, **do NOT merge**.
+
+### Examples of CORRECT merges:
+- "Acme Corp" → "Acme Corporation" (same company, abbreviation)
+- "RAG" → "Retrieval-Augmented Generation" (same concept, acronym)
+- "苹果公司" → "Apple Inc." (same entity, translation)
+- New item: name="IBM", no aliases. Candidate: name="International Business Machines", alias="IBM". Merge: the new name matches the candidate's explicitly provided acronym, and both refer to the same organization.
+- New item: name="Retrieval Augmented Generation", alias="RAG". Candidate: name="检索增强生成", alias="RAG". Merge: the names are translations of the same concept, supported by the shared alias.
+
+### Examples of INCORRECT merges — do NOT merge these:
+- New item: name="Alpha Research Center", alias="ARC". Candidate: name="Advanced Robotics Company", alias="ARC". Do NOT merge: the shared acronym does not establish that these are the same organization.
+- "Hunyuan Model" → "Qwen Model" (competing products in the same category are DIFFERENT entities, do not merge them)
+- "iPhone 15" → "Huawei Mate 60" (different specific instances in the same category)
+- "GPT-4" → "GPT-3.5" (different versions of a product are distinct entities)
+- "AI Safety" → "Content Review Mechanism" (related topics, but different concepts)
+- "Athlete Registration" → "Degree Verification" (both involve verification, but completely different domains)
+- "Competition Categories" → "Age Groups" (age groups are one aspect of categories, not the same concept)
+- "Performance Standard" → "Competition Rounds" (both relate to competitions, but are different concepts)
+- "Machine Learning" → "Neural Networks" (neural networks are a subset of ML, not the same concept)
+- "居民身份证 / Resident ID Card" → "工作居住证 / Work Residence Permit" (both are government-issued documents but completely different credentials)
+- "驾驶证 / Driver's License" → "行驶证 / Vehicle Registration" (both are car-related certificates but different documents)
+- "学位证 / Degree Certificate" → "毕业证 / Graduation Certificate" (both educational documents but distinct)
+
+### Key principle: **related ≠ same**. Two items sharing a few characters in their name, or belonging to the same domain / document family / industry, is NOT a reason to merge. **ABSOLUTELY DO NOT** merge different products, different companies, different versions, or different certificates/documents just because they belong to the same category. When in doubt, do NOT merge. It is far better to have two separate pages for the same thing than to wrongly merge two different things.
+
+Return a JSON object with a "merges" map. The key is the NEW item's slug, the value is the EXISTING page's slug that it should merge into. Only include items where you are highly confident they are the same thing.
+
+If no items match any existing pages, return: {"merges": {}}
+
+### JSON Formatting Rules
+- **CRITICAL**: Do NOT use literal newline characters inside JSON string values. If you need a newline in a string, you MUST use the escaped sequence \n.
+</instructions>
+
+Output ONLY valid JSON. Example:
+{"merges": {"entity/acme-corporation": "entity/acme-corp", "concept/rag": "concept/retrieval-augmented-generation"}}`
+
+// Granularity guidance blocks injected into WikiCandidateSlugPrompt. The
+// pipeline resolves a KnowledgeBase's configured granularity to one of these
+// strings via WikiGranularityGuidance().
+//
+// The three levels form a spectrum from "only the document's main subjects"
+// to "every named thing you see". Moving down the list monotonically
+// increases the candidate slug count, the downstream chunk-citation cost,
+// and the noise-to-signal ratio of the wiki index.
+const (
+	WikiGranularityGuidanceFocused = `**FOCUSED mode — aggressive pruning.**
+Extract ONLY the document's primary subjects: the handful of entities/concepts that this document is fundamentally ABOUT.
+
+INCLUDE:
+- The document's main subject(s) — e.g. for a resume: the person and their named projects; for an announcement: the announcing organization and the event/product being announced; for a product page: the product itself and its maker.
+- At most 3-7 items total across entities and concepts combined.
+
+EXCLUDE (even if named explicitly):
+- Technology stacks / libraries / frameworks mentioned in passing (e.g. a resume listing "Spring Boot, MySQL, Redis" — do NOT extract these).
+- Generic concepts and methodologies that are merely referenced (e.g. "microservices", "async processing", "stateless authentication", "streaming response" mentioned as an implementation detail).
+- Places, schools, or organizations mentioned only as background (e.g. alma mater of a resume owner, unless the document is ABOUT the school itself).
+- Anything that would normally get a one-sentence description because there is not enough content to say more.
+
+If you are unsure whether an item belongs, LEAVE IT OUT. A clean, focused index is more valuable than a comprehensive but noisy one.`
+
+	WikiGranularityGuidanceStandard = `**STANDARD mode — balanced (default).**
+Extract the document's main subjects PLUS entities/concepts that are substantively discussed — meaning they have a dedicated paragraph, multiple bullet points, or at least 2-3 sentences of context.
+
+INCLUDE:
+- The document's main subject(s).
+- Secondary entities/concepts that receive a concrete block of content (a paragraph, a multi-point list, or a dedicated sub-section).
+- Named methodologies, architectures, or techniques when the document explains HOW the subject uses them — not merely names them.
+
+EXCLUDE:
+- Items mentioned only in a comma-separated list of technologies without any further explanation (e.g. "Tech stack: A, B, C, D" — none of A/B/C/D are extracted unless they each also receive their own paragraph elsewhere).
+- One-off mentions, parenthetical references, and generic infrastructure nouns.
+- Items whose entire contribution to the document would fit in a single short sentence.
+
+Aim for a tight, curated index. When in doubt about a marginal item, prefer to EXCLUDE it.`
+
+	WikiGranularityGuidanceExhaustive = `**EXHAUSTIVE mode — maximum recall.**
+Extract every named entity and every recognizable concept, including technologies, tools, standards, and methodologies mentioned even once by name, provided they are concrete and well-known (not generic terms like "database" or "function").
+
+INCLUDE:
+- All main and secondary subjects.
+- All named technologies, libraries, frameworks, databases, services, protocols, or standards.
+- All recognizable concepts and methodologies that have widely-used names (e.g. RAG, microservices, async processing, SSE, JWT).
+
+EXCLUDE ONLY:
+- Truly generic terms (e.g. "server", "function", "data").
+- Items that appear only inside URL paths or reference citations.
+
+Use this mode when the knowledge base functions as a technical glossary rather than a curated narrative wiki.`
+)
+
+// WikiGranularityGuidance returns the guidance text to inject into the
+// WikiCandidateSlugPrompt template for the given granularity. Accepts the
+// raw string value stored in WikiConfig.ExtractionGranularity; callers do
+// NOT need to Normalize() first — unknown values fall through to standard.
+func WikiGranularityGuidance(granularity string) string {
+	switch granularity {
+	case "focused":
+		return WikiGranularityGuidanceFocused
+	case "exhaustive":
+		return WikiGranularityGuidanceExhaustive
+	default:
+		return WikiGranularityGuidanceStandard
+	}
+}

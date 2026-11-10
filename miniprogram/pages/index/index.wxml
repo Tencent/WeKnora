@@ -1,0 +1,43 @@
+<view class="page">
+  <view class="card hero">
+    <view class="title">{{knowledgeTitle}}</view>
+    <view class="muted">{{knowledgeSubtitle}}</view>
+  </view>
+
+  <view class="card section">
+    <view wx:if="{{needsSettings}}" class="notice">
+      <view>{{needsSettingsText}}</view>
+      <button bindtap="openSettings" class="secondary">{{openSettingsText}}</button>
+    </view>
+
+    <view class="field">
+      <text class="label">{{knowledgeBaseLabel}}</text>
+      <picker range="{{knowledgeBaseNames}}" value="{{selectedIndex}}" bindchange="onKnowledgeBaseChange">
+        <view class="picker-value">{{displayKnowledgeBaseName}}</view>
+      </picker>
+      <view wx:if="{{statusMessage}}" class="status-message">{{statusMessage}}</view>
+      <view wx:if="{{knowledgeBaseNames.length}}" class="knowledge-list">
+        <view
+          wx:for="{{knowledgeBaseNames}}"
+          wx:key="*this"
+          data-index="{{index}}"
+          bindtap="onKnowledgeBaseTap"
+          class="knowledge-item {{index == selectedIndex ? 'active' : ''}}"
+        >
+          {{item}}
+        </view>
+      </view>
+    </view>
+
+    <button bindtap="loadKnowledgeBases" loading="{{loading}}">{{refreshText}}</button>
+  </view>
+
+  <view class="card section">
+    <view class="field">
+      <text class="label">{{urlLabel}}</text>
+      <input value="{{url}}" placeholder="{{urlPlaceholder}}" bindinput="onUrlInput" />
+    </view>
+
+    <button bindtap="importURL" loading="{{importing}}" disabled="{{!selectedKnowledgeBaseId || !url}}">{{importUrlText}}</button>
+  </view>
+</view>

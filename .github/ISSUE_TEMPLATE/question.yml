@@ -1,0 +1,103 @@
+name: ❓ Question
+description: Ask a question about WeKnora or seek help
+title: "[Question]: "
+labels: ["question", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Welcome! Please provide enough information so we can help you effectively.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Question Category
+      description: Select the category of your question
+      options:
+        - Installation & Deployment
+        - Configuration
+        - Usage
+        - Performance
+        - Integration
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question Description
+      description: Please describe your question in detail
+      placeholder: "What problem did you encounter? What help do you need?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Please provide relevant context
+      placeholder: |
+        - What are you trying to do?
+        - What outcome do you expect?
+        - What have you tried so far?
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: The operating system you are using
+      placeholder: "e.g., macOS 13.0, Ubuntu 20.04, Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Other Environment Info
+      description: Please provide other relevant environment information
+      placeholder: |
+        - WeKnora App Version: [concrete version from Settings → System Info, e.g., v0.6.0 — NOT "latest"]
+        - WeKnora UI Version: [concrete version from Settings → System Info, e.g., v0.6.0]
+        - Deployment: [e.g., Docker, build from source]
+        - Other relevant info...
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 📋 Log Collection Guide (if needed)
+
+        If the issue involves errors or requires debugging, please collect logs:
+
+        ```bash
+        docker compose logs -f --tail=1000 app docreader postgres
+        ```
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste relevant logs or error messages here if available
+      placeholder: "Paste logs or error messages..."
+      render: shell
+
+  - type: textarea
+    id: research
+    attributes:
+      label: Resources Already Checked
+      description: List the docs, issues or other resources you've already checked
+      placeholder: |
+        - Docs checked: [e.g., README.md, API.md]
+        - Issues checked: [e.g., #123, #456]
+        - Other resources: [e.g., official docs, Stack Overflow]
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues and documentation
+          required: true
+        - label: I have provided enough information to help understand the question
+          required: true

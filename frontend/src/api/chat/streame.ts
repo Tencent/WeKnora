@@ -1,0 +1,388 @@
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+import { ref, onUnmounted } from 'vue';
+import { generateRandomString } from '@/utils/index';
+import i18n from '@/i18n';
+import { getApiBaseUrl } from '@/utils/api-base';
+import type { AssistantAccessLevel } from '@/api/assistant';
+export type { CollaborationStatus, CollaborationTaskStatus, CollaborationProgress,
+  CollaborationStatusStreamEvent, ProgressStreamEvent, AgentStepRecord, ChatHistoryMessage } from './streamTypes';
+import {
+  sanitizeStreamRequestBody,
+  type StreamRequestMeta,
+} from '@/utils/chatRequestDebug';
+import {
+  StreamAuthError,
+  isStreamAuthError,
+  refreshAccessTokenShared,
+  runStreamWithAuthRetry,
+} from '@/utils/authRefresh';
+
+/** The WeKnora page the user has open; agent-chat only. */
+export interface PageContextPayload {
+  page?: string
+  section?: string
+  agent_id?: string
+  knowledge_base_id?: string
+  knowledge_id?: string
+  wiki_slug?: string
+  wiki_issue_ids?: string[]
+  model_id?: string
+  mcp_service_id?: string
+  session_id?: string
+  message_id?: string
+  /** The page's name as the sidebar shows it. */
+  title?: string
+  /** The dialog or drawer open over the page. */
+  view?: string
+  selection?: PageSelectionPayload
+}
+
+export interface PageSelectionPayload {
+  text: string
+  field?: string
+  ref?: string
+  start_line?: number
+  end_line?: number
+}
+
+interface StreamOptions {
+  // 请求方法 (默认POST)
+  method?: 'GET' | 'POST'
+  // 请求头
+  headers?: Record<string, string>
+  // 请求体自动序列化
+  body?: Record<string, any>
+  // 流式渲染间隔 (ms)
+  chunkInterval?: number
+}
+
+export function useStream() {
+  // 响应式状态
+  const output = ref('')              // 显示内容
+  const isStreaming = ref(false)      // 流状态
+  const isLoading = ref(false)        // 初始加载
+  const error = ref<string | null>(null)// 错误信息
+  const lastStreamRequest = ref<StreamRequestMeta | null>(null)
+  let controller = new AbortController()
+  let streamGeneration = 0
+
+  // 流式渲染缓冲
+  let buffer: string[] = []
+  let renderTimer: number | null = null
+
+  // 启动流式请求
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; local_browser_enabled?: boolean; summary_model_id?: string; reasoning_effort?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; question_origin?: { knowledge_base_id: string; knowledge_id?: string }; page_context?: PageContextPayload; assistant_access?: AssistantAccessLevel; method: string; url: string; resume_pending_id?: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
+    const myGeneration = ++streamGeneration
+    const streamAbort = controller
+    // 重置状态
+    output.value = '';
+    error.value = null;
+    isStreaming.value = true;
+    isLoading.value = true;
+
+    // 获取API配置
+    const apiUrl = getApiBaseUrl();
+    
+    const embedToken = params.embed_token;
+    const token = embedToken || localStorage.getItem('weknora_token');
+    if (!token) {
+      error.value = i18n.global.t('error.tokenNotFound');
+      stopStream();
+      return;
+    }
+
+    // 跨空间访问请求头：只要 setSelectedTenant 写过激活空间，就附
+    // X-Tenant-ID。早期版本会 short-circuit "selectedTenantId ===
+    // defaultTenantId 时不附" 来减少 header 体积，但任何把 weknora_tenant
+    // 写成激活空间的代码（OIDC 同步 / UserMenu loadUserInfo / router
+    // hydrate）都会让两者相等，使得后续流式请求悄悄丢 header、落到
+    // home 空间上，导致 SSE 接口返回 404。直接附即可——后端
+    // IsTenantAccessible 也允许 header 指向自家空间。
+    const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
+    const tenantIdHeader: string | null = selectedTenantId || null;
+
+    // TTFB instrumentation: record the moment we kick off the request so
+    // we can compare it with the first answer chunk we receive from the
+    // server. This makes it possible to correlate the frontend-observed
+    // latency with the backend "TTFB:first_answer_chunk" log line by
+    // matching on X-Request-ID.
+    const sentAt = performance.now();
+    const requestID = generateRandomString(12);
+    let firstAnswerLogged = false;
+    let receivedAssistantId = '';
+    let receivedTerminal = false;
+    let reconnectAttempts = 0;
+    let streamMethod = params.method;
+    // Never repeat an accepted POST: recovery attaches to its persisted message.
+    const canReconnect = () => !embedToken && receivedAssistantId && !receivedTerminal &&
+      (params.url === '/api/v1/agent-chat' || params.url === '/api/v1/sessions/continue-stream') &&
+      myGeneration === streamGeneration && !streamAbort.signal.aborted;
+
+
+    try {
+      let url =
+        params.method == "POST"
+          ? `${apiUrl}${params.url}/${params.session_id}`
+          : `${apiUrl}${params.url}/${params.session_id}?message_id=${params.query}`;
+      if (params.method === "GET" && params.resume_pending_id) {
+        url += `&resume_pending_id=${encodeURIComponent(params.resume_pending_id)}`;
+      }
+      console.log(`[TTFB] request:start request_id=${requestID} url=${url} sent_at=${Date.now()}`);
+      
+      // Prepare POST body with required fields for agent-chat
+      // knowledge_base_ids array and agent_enabled can update Session's SessionAgentConfig
+      const postBody: any = { 
+        query: params.query,
+        agent_enabled: params.agent_enabled !== undefined ? params.agent_enabled : true
+      };
+      // Always include knowledge_base_ids for agent-chat (already validated above)
+      if (params.knowledge_base_ids !== undefined && params.knowledge_base_ids.length > 0) {
+        postBody.knowledge_base_ids = params.knowledge_base_ids;
+      }
+      // Include knowledge_ids if provided
+      if (params.knowledge_ids !== undefined && params.knowledge_ids.length > 0) {
+        postBody.knowledge_ids = params.knowledge_ids;
+      }
+      // Include agent_id if provided (backend resolves shared agent and tenant from share relation)
+      if (params.agent_id) {
+        postBody.agent_id = params.agent_id;
+      }
+      if (params.agent_source_tenant_id) {
+        postBody.agent_source_tenant_id = Number(params.agent_source_tenant_id);
+      }
+      // Include web_search_enabled if provided
+      if (params.web_search_enabled !== undefined) {
+        postBody.web_search_enabled = params.web_search_enabled;
+      }
+      // Preserve the explicit browser choice when rebuilding the HTTP body.
+      if (params.local_browser_enabled !== undefined) {
+        postBody.local_browser_enabled = params.local_browser_enabled;
+      }
+      // Include summary_model_id if provided (for non-Agent mode)
+      if (params.summary_model_id) {
+        postBody.summary_model_id = params.summary_model_id;
+      }
+      // Omit inheritance so the agent's current default remains authoritative.
+      if (params.reasoning_effort) {
+        postBody.reasoning_effort = params.reasoning_effort;
+      }
+      // Include mcp_service_ids if provided (for Agent mode)
+      if (params.mcp_service_ids !== undefined && params.mcp_service_ids.length > 0) {
+        postBody.mcp_service_ids = params.mcp_service_ids;
+      }
+      if (params.skill_names !== undefined && params.skill_names.length > 0) {
+        postBody.skill_names = params.skill_names;
+      }
+      if (params.tag_ids !== undefined && params.tag_ids.length > 0) {
+        postBody.tag_ids = params.tag_ids;
+      }
+      // Include mentioned_items if provided (for displaying @mentions in chat)
+      if (params.mentioned_items !== undefined && params.mentioned_items.length > 0) {
+        postBody.mentioned_items = params.mentioned_items;
+      }
+      // Include images if provided (base64 data URIs for multimodal chat)
+      if (params.images !== undefined && params.images.length > 0) {
+        postBody.images = params.images;
+      }
+      // Include attachment_uploads if provided (documents, audio, etc.)
+      if (params.attachment_uploads !== undefined && params.attachment_uploads.length > 0) {
+        postBody.attachment_uploads = params.attachment_uploads;
+      }
+	  if (params.attachment_ids !== undefined && params.attachment_ids.length > 0) {
+		postBody.attachment_ids = params.attachment_ids;
+	  }
+      if (params.suggestion_attribution) {
+        postBody.suggestion_attribution = params.suggestion_attribution;
+      }
+      if (params.question_origin) {
+        postBody.question_origin = params.question_origin;
+      }
+      if (params.page_context) {
+        postBody.page_context = params.page_context;
+      }
+      if (params.assistant_access) {
+        postBody.assistant_access = params.assistant_access;
+      }
+      postBody.channel = embedToken ? "embed" : "web";
+
+      lastStreamRequest.value = {
+        requestId: requestID,
+        url,
+        method: params.method,
+        body: params.method === 'POST' ? sanitizeStreamRequestBody(postBody) : null,
+        sentAt: Date.now(),
+      };
+      
+      // Wrapped so an expired access token can be refreshed and the request
+      // replayed once. Nothing has been streamed to the UI yet when the
+      // handshake 401s, so the replay is invisible to the user.
+      const runStream = async (authToken: string) => {
+        const connection = new AbortController();
+        const abortConnection = () => connection.abort();
+        streamAbort.signal.addEventListener('abort', abortConnection, { once: true });
+        let idleTimer: ReturnType<typeof setTimeout>;
+        let rejectIdle: (reason: Error) => void;
+        const idle = new Promise<never>((_, reject) => { rejectIdle = reject; });
+        const armIdle = () => {
+          clearTimeout(idleTimer);
+          if (!canReconnect()) return;
+          idleTimer = setTimeout(() => {
+            rejectIdle(new Error('stream heartbeat timed out'));
+            connection.abort();
+          }, 30000);
+        };
+        armIdle();
+        try {
+          await Promise.race([idle, fetchEventSource(url, {
+        method: streamMethod,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${authToken}`,
+          "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
+          "X-Request-ID": requestID,
+          ...(!embedToken && tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
+          ...(params.embed_session_sig ? { "X-Embed-Session": params.embed_session_sig } : {}),
+          ...(params.embed_visitor_id ? { "X-Embed-Visitor": params.embed_visitor_id } : {}),
+        },
+        body:
+          streamMethod == "POST"
+            ? JSON.stringify(postBody)
+            : null,
+        signal: connection.signal,
+        openWhenHidden: true,
+
+        onopen: async (res) => {
+          // 401 is recoverable (refresh + replay); everything else is not.
+          if (res.status === 401) throw new StreamAuthError(res.status);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          // A reopened turn already knows its persisted message ID. Arm
+          // recovery before the first replay event can be interrupted.
+          if (params.method === 'GET' && params.url === '/api/v1/sessions/continue-stream') {
+            receivedAssistantId = String(params.query || '');
+            armIdle();
+          }
+          console.log(`[TTFB] response:headers request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
+          if (myGeneration === streamGeneration) isLoading.value = false;
+        },
+
+        onmessage: (ev) => {
+          if (myGeneration !== streamGeneration) return
+          const parsed = JSON.parse(ev.data);
+          reconnectAttempts = 0;
+          if (parsed?.response_type === 'agent_query' && typeof parsed.assistant_message_id === 'string') {
+            receivedAssistantId = parsed.assistant_message_id;
+          }
+          if (['complete', 'stop', 'error'].includes(parsed?.response_type)) receivedTerminal = true;
+          armIdle();
+          if (parsed?.response_type === 'heartbeat') return;
+          // Log first answer chunk for end-to-end TTFB measurement.
+          // Filter by event type so non-answer events (references, tool
+          // calls, etc.) don't count as the "first token" arrival.
+          if (!firstAnswerLogged && (parsed?.response_type === 'answer' || parsed?.type === 'answer')) {
+            firstAnswerLogged = true;
+            console.log(`[TTFB] response:first_answer request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
+          }
+          buffer.push(parsed); // 数据存入缓冲
+          // 执行自定义处理
+          if (chunkHandler) {
+            chunkHandler(parsed);
+          }
+        },
+
+        onerror: (err) => {
+          if (isStreamAuthError(err)) throw err;
+          throw new Error(`${i18n.global.t('error.streamFailed')}: ${err}`);
+        },
+
+        onclose: () => {
+          // A queued follow-up attaches via continue-stream while the previous
+          // POST may still be open waiting for the session title. Both share one
+          // controller, so only the current stream may stop it; otherwise the
+          // old connection closing cuts the follow-up off mid-answer.
+          if (canReconnect()) throw new Error('stream closed before the turn completed');
+          if (myGeneration === streamGeneration) stopStream();
+        },
+          })]);
+        } finally {
+          clearTimeout(idleTimer!);
+          streamAbort.signal.removeEventListener('abort', abortConnection);
+          connection.abort();
+        }
+      };
+
+      while (myGeneration === streamGeneration && !streamAbort.signal.aborted) {
+        try {
+          await runStreamWithAuthRetry({
+            run: runStream,
+            initialToken: token,
+            isEmbed: Boolean(embedToken),
+            isCurrent: () => myGeneration === streamGeneration && !streamAbort.signal.aborted,
+            refreshAccessToken: () => refreshAccessTokenShared({
+              messages: {
+                pleaseRelogin: i18n.global.t('error.pleaseRelogin'),
+                tokenRefreshFailed: i18n.global.t('error.tokenRefreshFailed'),
+              },
+            }),
+            reloginMessage: i18n.global.t('error.pleaseRelogin'),
+          });
+          break;
+        } catch (err) {
+          if (!canReconnect() || isStreamAuthError(err) || reconnectAttempts >= 8) throw err;
+          reconnectAttempts++;
+          // The server may still be restarting. A stop/new turn invalidates
+          // this retry before it can attach or change visible state.
+          await new Promise<void>((resolve) => {
+            const done = () => {
+              clearTimeout(timer);
+              streamAbort.signal.removeEventListener('abort', done);
+              resolve();
+            };
+            const timer = setTimeout(done, Math.min(1000 * 2 ** (reconnectAttempts - 1), 5000));
+            streamAbort.signal.addEventListener('abort', done, { once: true });
+          });
+          if (myGeneration !== streamGeneration || streamAbort.signal.aborted) return;
+          if (streamMethod !== 'GET') {
+            streamMethod = 'GET';
+            url = `${apiUrl}/api/v1/sessions/continue-stream/${encodeURIComponent(params.session_id)}?message_id=${encodeURIComponent(receivedAssistantId)}`;
+          }
+        }
+      }
+    } catch (err) {
+      // A superseded stream failing must not surface as the current error or
+      // abort the stream that replaced it (see onclose).
+      if (myGeneration !== streamGeneration) return
+      error.value = err instanceof Error ? err.message : String(err)
+      stopStream()
+    }
+  }
+
+  let chunkHandler: ((data: any) => void) | null = null
+  // 注册块处理器
+  const onChunk = (handler: (data: any) => void) => {
+    chunkHandler = handler
+  }
+
+
+  // 停止流
+  const stopStream = () => {
+    streamGeneration++
+    controller.abort();
+    controller = new AbortController(); // 重置控制器（如需重新发起）
+    isStreaming.value = false;
+    isLoading.value = false;
+  }
+
+  // 组件卸载时自动清理
+  onUnmounted(stopStream)
+
+  return {
+    output,          // 显示内容
+    isStreaming,     // 是否在流式传输中
+    isLoading,       // 初始连接状态
+    error,
+    lastStreamRequest,
+    onChunk,
+    startStream,     // 启动流
+    stopStream       // 手动停止
+  }
+}

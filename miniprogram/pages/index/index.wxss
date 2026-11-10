@@ -1,0 +1,62 @@
+.hero {
+  background: linear-gradient(135deg, #0d3b2a 0%, #05a04f 54%, #07c05f 100%);
+  color: #ffffff;
+}
+
+.hero .muted {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.section {
+  margin-top: 28rpx;
+}
+
+.notice {
+  box-sizing: border-box;
+  padding: 24rpx;
+  border: 1rpx solid #d0f2de;
+  border-radius: 18rpx;
+  background: #e9f8ec;
+  color: #1f5a3f;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.picker-value {
+  color: #1a1a1a;
+}
+
+.status-message {
+  margin-top: 12rpx;
+  color: #6b7280;
+  font-size: 24rpx;
+}
+
+.knowledge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.knowledge-item {
+  padding: 18rpx 20rpx;
+  border: 1rpx solid #dcdcdc;
+  border-radius: 14rpx;
+  background: #ffffff;
+  color: #1a1a1a;
+  font-size: 26rpx;
+}
+
+.knowledge-item.active {
+  border-color: #07c05f;
+  background: #e9f8ec;
+  color: #05a04f;
+  font-weight: 600;
+}
+
+.secondary {
+  background: #ffffff;
+  color: #07c05f;
+  border: 1rpx solid #b8ebcc;
+}

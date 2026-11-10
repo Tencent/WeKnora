@@ -1,0 +1,658 @@
+package service
+
+import (
+	"context"
+	"strconv"
+	"strings"
+	"testing"
+
+	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
+)
+
+func processConfigBoolPtr(v bool) *bool {
+	return &v
+}
+
+func testKBWithGraphEnabled(enabled bool) *types.KnowledgeBase {
+	return &types.KnowledgeBase{
+		IndexingStrategy: types.IndexingStrategy{GraphEnabled: enabled},
+		ExtractConfig:    &types.ExtractConfig{Enabled: enabled},
+	}
+}
+
+func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 2048},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.Equal(t, 2048, eff.ChunkingConfig.ChunkSize)
+	require.Equal(t, 50, eff.ChunkingConfig.ChunkOverlap)
+}
+
+func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
+	t.Parallel()
+
+	// KB has parent-child on; override snapshot turns it off.
+	kbOn := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+	}
+	effOff := ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+	})
+	require.False(t, effOff.ChunkingConfig.EnableParentChild)
+
+	// KB has parent-child off; override snapshot turns it on.
+	kbOff := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+	}
+	effOn := ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+	})
+	require.True(t, effOn.ChunkingConfig.EnableParentChild)
+}
+
+// The attribute-observed pipeline switch follows the knowledge base until a
+// single upload overrides it, either way. The default is off: a knowledge base
+// that never heard of attribute observation keeps describing and OCR-ing every
+// image exactly as it did before the pipeline existed.
+func TestResolveProcessConfig_ImageAttrsOverride(t *testing.T) {
+	t.Parallel()
+
+	kbOff := &types.KnowledgeBase{}
+	kbOn := &types.KnowledgeBase{}
+	kbOn.ImageProcessingConfig.ImageAttrsEnabled = true
+
+	require.False(t, ResolveProcessConfig(kbOff, nil).ImageAttrsEnabled,
+		"attribute observation must be off for a knowledge base that never enabled it")
+	require.True(t, ResolveProcessConfig(kbOn, nil).ImageAttrsEnabled,
+		"the knowledge base's switch must survive a nil override")
+
+	require.True(t, ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
+		ImageAttrsEnabled: processConfigBoolPtr(true),
+	}).ImageAttrsEnabled, "a single upload must be able to turn attribute observation on")
+
+	require.False(t, ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
+		ImageAttrsEnabled: processConfigBoolPtr(false),
+	}).ImageAttrsEnabled, "a single upload must be able to turn attribute observation off")
+}
+
+func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
+	t.Parallel()
+
+	kb := testKBWithGraphEnabled(true)
+	overrides := &types.KnowledgeProcessOverrides{GraphEnabled: processConfigBoolPtr(false)}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.False(t, eff.GraphEnabled)
+}
+
+func TestResolveProcessConfig_GraphRequiresExtractEnabled(t *testing.T) {
+	t.Parallel()
+
+	kb := testKBWithGraphEnabled(true)
+	overrides := &types.KnowledgeProcessOverrides{
+		GraphEnabled:  processConfigBoolPtr(true),
+		ExtractConfig: &types.ExtractConfig{Enabled: false},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.False(t, eff.ExtractConfig.Enabled)
+	require.False(t, eff.GraphEnabled)
+}
+
+func TestResolveProcessConfig_NilOverridesUsesKBDefaults(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50},
+		VLMConfig:      types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		ASRConfig:      types.ASRConfig{Enabled: true, ModelID: "asr-1"},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled:       true,
+			QuestionCount: 3,
+		},
+		IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
+		ExtractConfig:    &types.ExtractConfig{Enabled: true, Tags: []string{"tag-a"}},
+	}
+
+	eff := ResolveProcessConfig(kb, nil)
+
+	require.Equal(t, 512, eff.ChunkingConfig.ChunkSize)
+	require.Equal(t, 50, eff.ChunkingConfig.ChunkOverlap)
+	require.True(t, eff.EnableMultimodel)
+	require.Equal(t, "vlm-1", eff.VLMConfig.ModelID)
+	require.Equal(t, "asr-1", eff.ASRConfig.ModelID)
+	require.True(t, eff.QuestionGenerationConfig.Enabled)
+	require.Equal(t, 3, eff.QuestionGenerationConfig.QuestionCount)
+	require.True(t, eff.GraphEnabled)
+	require.True(t, eff.ExtractConfig.Enabled)
+	require.Equal(t, []string{"tag-a"}, eff.ExtractConfig.Tags)
+}
+
+func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50, Strategy: "token"},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+
+	require.Equal(t, 1500, cfg.ChunkSize)
+	require.Equal(t, 120, cfg.ChunkOverlap)
+	require.Equal(t, "character", cfg.Strategy)
+}
+
+func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) {
+	t.Parallel()
+
+	xlsxFirstRowAsHeader := true
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{
+			ParserEngineRules: []types.ParserEngineRule{
+				{FileTypes: []string{"pdf"}, Engine: "builtin"},
+			},
+		},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ParserEngineRules: []types.ParserEngineRule{
+			{FileTypes: []string{"pdf"}, Engine: "mineru"},
+			{
+				FileTypes:            []string{"xlsx", "xls"},
+				Engine:               "builtin",
+				XLSXFirstRowAsHeader: &xlsxFirstRowAsHeader,
+			},
+		},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.Equal(t, "mineru", eff.ChunkingConfig.ResolveParserEngine("pdf"))
+	xlsxRule := eff.ChunkingConfig.ResolveParserEngineRule("xlsx")
+	require.NotNil(t, xlsxRule)
+	require.Equal(t, "builtin", xlsxRule.Engine)
+	require.Equal(t, &xlsxFirstRowAsHeader, xlsxRule.XLSXFirstRowAsHeader)
+}
+
+func TestApplyParserRuleOverrides_XLSXFirstRowAsHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{true, false} {
+		enabled := enabled
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			config := types.ChunkingConfig{
+				ParserEngineRules: []types.ParserEngineRule{{
+					FileTypes:            []string{"xlsx", "xls"},
+					Engine:               "builtin",
+					XLSXFirstRowAsHeader: &enabled,
+				}},
+			}
+			overrides := map[string]string{"tenant_option": "preserved"}
+
+			applyParserRuleOverrides(overrides, config, "xlsx")
+
+			require.Equal(t, strconv.FormatBool(enabled), overrides[xlsxFirstRowAsHeaderOverride])
+			require.Equal(t, "preserved", overrides["tenant_option"])
+		})
+	}
+}
+
+func TestApplyParserRuleOverrides_XLSFileType(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx", "xls"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xls")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_NormalizesFileTypeCase(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "builtin",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, ".XLSX")
+
+	require.Equal(t, "true", overrides[xlsxFirstRowAsHeaderOverride])
+}
+
+func TestApplyParserRuleOverrides_SkipsNonBuiltinEngine(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	config := types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{{
+			FileTypes:            []string{"xlsx"},
+			Engine:               "markitdown",
+			XLSXFirstRowAsHeader: &enabled,
+		}},
+	}
+	overrides := map[string]string{}
+
+	applyParserRuleOverrides(overrides, config, "xlsx")
+
+	require.NotContains(t, overrides, xlsxFirstRowAsHeaderOverride)
+}
+
+func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{
+			ParserEngineRules: []types.ParserEngineRule{
+				{FileTypes: []string{"pdf"}, Engine: "builtin"},
+			},
+		},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ParserEngineRules: []types.ParserEngineRule{
+			{FileTypes: []string{"docx"}, Engine: "custom"},
+		},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.Len(t, eff.ChunkingConfig.ParserEngineRules, 1)
+	require.Equal(t, []string{"docx"}, eff.ChunkingConfig.ParserEngineRules[0].FileTypes)
+	require.Equal(t, "custom", eff.ChunkingConfig.ParserEngineRules[0].Engine)
+}
+
+func TestResolveProcessConfig_EnableMultimodelOverride(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		EnableMultimodel: processConfigBoolPtr(false),
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.False(t, eff.EnableMultimodel)
+}
+
+func TestResolveProcessConfig_ExtractConfigFieldMerge(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ExtractConfig: &types.ExtractConfig{
+			Enabled: true,
+			Text:    "base text",
+			Tags:    []string{"base-tag"},
+		},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ExtractConfig: &types.ExtractConfig{
+			Enabled: true,
+			Tags:    []string{"override-tag"},
+		},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.True(t, eff.ExtractConfig.Enabled)
+	require.Equal(t, "base text", eff.ExtractConfig.Text)
+	require.Equal(t, []string{"override-tag"}, eff.ExtractConfig.Tags)
+}
+
+func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{TableMetadataInstructions: "table context"},
+		VLMConfig: types.VLMConfig{
+			Enabled: true, ModelID: "vlm-1", DescriptionLanguage: "English", CustomInstructions: "read labels",
+		},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled: true, QuestionCount: 3, CustomInstructions: "customer questions",
+		},
+		ExtractConfig: &types.ExtractConfig{Enabled: true, CustomInstructions: "contract entities"},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ChunkingConfig:           &types.ChunkingConfig{ChunkSize: 256},
+		VLMConfig:                &types.VLMConfig{Enabled: true, ModelID: "vlm-2"},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 5},
+		ExtractConfig:            &types.ExtractConfig{Enabled: true},
+	}
+
+	eff := ResolveProcessConfig(kb, overrides)
+	require.Equal(t, "table context", eff.ChunkingConfig.TableMetadataInstructions)
+	require.Equal(t, "English", eff.VLMConfig.DescriptionLanguage)
+	require.Equal(t, "read labels", eff.VLMConfig.CustomInstructions)
+	require.Equal(t, "customer questions", eff.QuestionGenerationConfig.CustomInstructions)
+	require.Equal(t, "contract entities", eff.ExtractConfig.CustomInstructions)
+}
+
+func TestValidateProcessOverrides_RejectsOversizedInstructions(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	overrides := &types.KnowledgeProcessOverrides{
+		VLMConfig: &types.VLMConfig{
+			CustomInstructions: strings.Repeat("x", types.MaxCustomPromptInstructionsLength+1),
+		},
+	}
+	err := ValidateProcessOverrides(context.Background(), kb, overrides, []string{"txt"})
+	require.Error(t, err)
+	var badReq *werrors.AppError
+	require.ErrorAs(t, err, &badReq)
+}
+
+func TestValidateProcessOverrides_NilOverrides(t *testing.T) {
+	t.Parallel()
+
+	err := ValidateProcessOverrides(context.Background(), &types.KnowledgeBase{}, nil, []string{"png"})
+	require.NoError(t, err)
+}
+
+func TestValidateProcessOverrides_ImageRequiresVLM(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	err := ValidateProcessOverrides(context.Background(), kb, &types.KnowledgeProcessOverrides{}, []string{"png"})
+	require.Error(t, err)
+	var badReq *werrors.AppError
+	require.ErrorAs(t, err, &badReq)
+}
+
+func TestValidateProcessOverrides_ImageWithEffectiveVLM(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+	err := ValidateProcessOverrides(context.Background(), kb, overrides, []string{"jpg"})
+	require.NoError(t, err)
+}
+
+func TestValidateProcessOverrides_AudioRequiresASR(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ASRConfig: types.ASRConfig{Enabled: false},
+	}
+	err := ValidateProcessOverrides(context.Background(), kb, &types.KnowledgeProcessOverrides{}, []string{"mp3"})
+	require.Error(t, err)
+}
+
+func TestValidateProcessOverrides_AudioWithEffectiveASR(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ASRConfig: types.ASRConfig{Enabled: false},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ASRConfig: &types.ASRConfig{Enabled: true, ModelID: "asr-1"},
+	}
+	err := ValidateProcessOverrides(context.Background(), kb, overrides, []string{"wav"})
+	require.NoError(t, err)
+}
+
+func TestValidateProcessOverrides_NonMediaFileTypes(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	err := ValidateProcessOverrides(context.Background(), kb, &types.KnowledgeProcessOverrides{}, []string{"pdf", "txt"})
+	require.NoError(t, err)
+}
+
+func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{
+		StorageEngineConfig: &types.StorageEngineConfig{
+			COS: &types.COSEngineConfig{SecretID: "id"},
+		},
+	})
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+	kb.SetStorageProvider("cos")
+
+	err := ValidateProcessOverrides(ctx, kb, &types.KnowledgeProcessOverrides{}, []string{"png"})
+	require.NoError(t, err)
+}
+
+func TestResolveFileImportProcessConfig_ImageRequiresVLM(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "png", nil, nil)
+	require.Error(t, err)
+	var badReq *werrors.AppError
+	require.ErrorAs(t, err, &badReq)
+}
+
+func TestResolveFileImportProcessConfig_AudioRequiresASR(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ASRConfig: types.ASRConfig{Enabled: false},
+	}
+	_, err := resolveFileImportProcessConfig(context.Background(), kb, "mp3", nil, nil)
+	require.Error(t, err)
+}
+
+// The regression behind #2447: spreadsheets must clear the shared import gate
+// even when the caller sends no per-import overrides.
+func TestResolveFileImportProcessConfig_SpreadsheetAllowedWithoutOverrides(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{ChunkSize: 512}}
+	for _, ext := range []string{"xlsx", "xls", "csv"} {
+		eff, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.NoErrorf(t, err, "ext=%s", ext)
+		require.Equal(t, 512, eff.ChunkingConfig.ChunkSize)
+	}
+}
+
+func TestResolveFileImportProcessConfig_RejectsUnsupportedAndUndeterminable(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	for _, ext := range []string{"exe", "mp4", "", unknownFileType} {
+		_, err := resolveFileImportProcessConfig(context.Background(), kb, ext, nil, nil)
+		require.Errorf(t, err, "ext=%s should be rejected", ext)
+	}
+}
+
+// ApplyKnowledgeProcessOverrides stays scoped to overrides: import-time file
+// type gating belongs to resolveFileImportProcessConfig, so callers that pass
+// no overrides (reparse, connector sync) keep their existing behaviour.
+func TestApplyKnowledgeProcessOverrides_NoOverridesSkipsImportGate(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: false},
+	}
+	knowledge := &types.Knowledge{}
+	_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge, nil, []string{"png"}, nil)
+	require.NoError(t, err)
+}
+
+func TestMergeParserEngineOverrides(t *testing.T) {
+	t.Parallel()
+
+	// 1. Both nil/empty
+	merged := MergeParserEngineOverrides(nil, nil)
+	require.Empty(t, merged)
+
+	// 2. Tenant only
+	merged = MergeParserEngineOverrides(map[string]string{"k1": "v1"}, nil)
+	require.Equal(t, map[string]string{"k1": "v1"}, merged)
+
+	// 3. Upload only
+	merged = MergeParserEngineOverrides(nil, map[string]string{"k2": "v2"})
+	require.Equal(t, map[string]string{"k2": "v2"}, merged)
+
+	// 4. Overlap priority (upload override should take priority over tenant config)
+	tenant := map[string]string{"k1": "tenant_val", "k2": "v2"}
+	upload := map[string]string{"k1": "upload_val", "k3": "v3"}
+	merged = MergeParserEngineOverrides(tenant, upload)
+	require.Equal(t, map[string]string{
+		"k1": "upload_val",
+		"k2": "v2",
+		"k3": "v3",
+	}, merged)
+}
+
+func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
+	t.Parallel()
+
+	base := chunker.SplitterConfig{
+		ChunkSize:    1000,
+		ChunkOverlap: 100,
+		Separators:   []string{"\n\n", "\n"},
+		Strategy:     chunker.StrategyAuto,
+	}
+	cc := types.ChunkingConfig{
+		EnableParentChild: true,
+		ParentChunkSize:   4096,
+		ChildChunkSize:    512,
+	}
+
+	parent, child := buildParentChildConfigs(cc, base)
+
+	require.Equal(t, chunker.StrategyAuto, parent.Strategy,
+		"parent splitting must honour the configured strategy; empty resolves to the legacy tier")
+	require.Equal(t, chunker.StrategyAuto, child.Strategy,
+		"child splitting must honour the configured strategy; empty resolves to the legacy tier")
+	require.Equal(t, 4096, parent.ChunkSize)
+	require.Equal(t, 512, child.ChunkSize)
+	require.Equal(t, base.ChunkOverlap, parent.ChunkOverlap)
+	require.Equal(t, 512/5, child.ChunkOverlap)
+	require.Equal(t, base.Separators, parent.Separators)
+	require.Equal(t, base.Separators, child.Separators)
+}
+
+// A knowledge base can override the OCR action wholesale, and a single upload
+// can override it again on top of what the knowledge base already decided. The
+// built-in action table is complete, so a knowledge base that only flips one
+// condition stays a small configuration.
+//
+// The table is the attribute conditions and nothing else: the clause for an
+// image whose attributes were not observed is the scheduling pipeline's own
+// setting, so it is put and read through ImagePipelineParams.
+func TestResolveProcessConfig_ImageActionsOverride(t *testing.T) {
+	t.Parallel()
+
+	kbActions := &types.ImageActionsConfig{
+		OCR: types.ImageOCRAction{
+			On: []types.ImageAttrCondition{
+				{Prop: "contain.text", Is: "not_none"},
+			},
+		},
+	}
+	kb := &types.KnowledgeBase{
+		ImageProcessingConfig: types.ImageProcessingConfig{
+			ImageAttrsEnabled: true,
+			ImageActions:      kbActions,
+		},
+	}
+
+	// nil override: the knowledge base's custom action wins.
+	eff := ResolveProcessConfig(kb, nil)
+	require.True(t, eff.ImageAttrsEnabled)
+	require.Equal(t, kbActions.OCR.On, eff.ImageActions.OCR.On,
+		"the knowledge base's action must override the built-in default")
+
+	// An upload override rewrites the OCR action wholesale.
+	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ImageActions: &types.ImageActionsConfig{
+			OCR: types.ImageOCRAction{
+				On: []types.ImageAttrCondition{{Prop: "contain.text", Is: "block"}},
+			},
+		},
+	})
+	require.Len(t, eff.ImageActions.OCR.On, 1,
+		"the upload's OCR.On replaces the knowledge base's list")
+
+	// The settings that live in the pipeline slot are read from that slot, and
+	// the upload's params replace the knowledge base's wholesale — so the value
+	// the run will read is the upload's, through the same lookup the run uses.
+	smartOCR := types.ImagePipelineSmartOCR
+	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ImagePipelineID: &smartOCR,
+		ImagePipelineParams: map[string]any{
+			"smartocr.ocr_on_unobserved": false,
+		},
+	})
+	require.Equal(t, map[string]any{"smartocr.ocr_on_unobserved": false}, eff.ImagePipelineParams)
+	got, ok := types.ImagePipelineParam(eff.ImagePipelineParams, string(eff.ImagePipelineID), "ocr_on_unobserved")
+	require.True(t, ok, "the upload's clause must be readable from the slot that will run")
+	require.Equal(t, false, got)
+	// The attribute table is untouched by a params override: they are different
+	// containers, and one must not be able to speak for the other.
+	require.Equal(t, kbActions.OCR.On, eff.ImageActions.OCR.On)
+
+	// With neither a KB config nor an override, the resolved action is the
+	// complete built-in default.
+	eff = ResolveProcessConfig(&types.KnowledgeBase{}, nil)
+	require.Equal(t, types.DefaultImageActions(), eff.ImageActions,
+		"the resolved action table must stay complete with no input")
+	require.False(t, eff.ImageAttrsEnabled)
+}
+
+func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {
+	kb := &types.KnowledgeBase{}
+	require.True(t, ResolveProcessConfig(kb, nil).SummaryEnabled)
+	for _, tc := range []struct {
+		name  string
+		value *bool
+		want  bool
+	}{
+		{"omitted", nil, true},
+		{"enabled", processConfigBoolPtr(true), true},
+		{"disabled", processConfigBoolPtr(false), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			knowledge := &types.Knowledge{}
+			_, err := ApplyKnowledgeProcessOverrides(context.Background(), kb, knowledge,
+				&types.KnowledgeProcessOverrides{SummaryEnabled: tc.value}, nil, nil)
+			require.NoError(t, err)
+			overrides, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			require.Equal(t, tc.want, ResolveProcessConfig(kb, overrides).SummaryEnabled)
+		})
+	}
+}
+
+func TestBuildSplitterConfigFromChunking_PreservesWikiOnlyZeroOverlap(t *testing.T) {
+	t.Parallel()
+
+	// Mirrors frontend WIKI_ONLY_CHUNKING_PRESET (chunkSize 2048, chunkOverlap 0).
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 2048, ChunkOverlap: 0},
+	}
+	eff := ResolveProcessConfig(kb, nil)
+	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+
+	require.Equal(t, 2048, cfg.ChunkSize)
+	require.Equal(t, 0, cfg.ChunkOverlap)
+}

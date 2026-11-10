@@ -1,0 +1,494 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	stderrors "errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageurl"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+const (
+	// defaultMessagesPageSize is the page size used when a client omits the
+	// limit or sends a non-positive one.
+	defaultMessagesPageSize = 20
+	// maxMessagesPageSize bounds the client-supplied page size of the message
+	// read endpoints. Without an upper bound a single request can ask for an
+	// arbitrarily large page; the search path additionally multiplies the
+	// forwarded value for a bounded over-fetch.
+	maxMessagesPageSize = 200
+)
+
+// clampMessagesPageSize bounds a client-supplied page size to
+// [1, maxMessagesPageSize], substituting defaultMessagesPageSize for
+// non-positive input. Callers must clamp at the edge: the repository only
+// guards `limit <= 0` upstream and GORM omits the LIMIT clause entirely for
+// negative values, so an unclamped -1 reads the whole table.
+func clampMessagesPageSize(limit int) int {
+	if limit < 1 {
+		return defaultMessagesPageSize
+	}
+	if limit > maxMessagesPageSize {
+		return maxMessagesPageSize
+	}
+	return limit
+}
+
+// MessageHandler handles HTTP requests related to messages within chat sessions
+// It provides endpoints for loading and managing message history
+type MessageHandler struct {
+	MessageService interfaces.MessageService // Service that implements message business logic
+	// FileService and StorageResolver back the optional `resource_urls=public`
+	// mode, which returns loadable HTTP URLs instead of internal
+	// `resource://` handles. Both may be nil, in which case only the default
+	// handle mode is available.
+	FileService     interfaces.FileService
+	StorageResolver interfaces.StorageBackendResolver
+	// Prompts supplies the pending prompt of messages awaiting input. May be
+	// nil, in which case such messages carry none.
+	Prompts               interfaces.AgentPromptRepository
+	DelegatedPrompts      func(context.Context, string) (map[string][]*types.PendingPromptView, error)
+	CollaborationStatuses func(context.Context, string, []string) (map[string]json.RawMessage, error)
+}
+
+// NewMessageHandler creates a new message handler instance with the required service
+// Parameters:
+//   - messageService: Service that implements message business logic
+//   - fileService: Storage access used to sign public resource URLs
+//   - storageResolver: Resolves per-tenant storage backends for those URLs
+//
+// Returns a pointer to a new MessageHandler
+func NewMessageHandler(
+	messageService interfaces.MessageService,
+	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	prompts interfaces.AgentPromptRepository,
+) *MessageHandler {
+	return &MessageHandler{
+		MessageService:  messageService,
+		FileService:     fileService,
+		StorageResolver: storageResolver,
+		Prompts:         prompts,
+	}
+}
+
+// attachPendingPrompts restores timeline history and the current open prompt. Only
+// prompts raised for the caller are shown; the messages themselves were
+// already scoped to the caller's session.
+func (h *MessageHandler) attachPendingPrompts(ctx context.Context, sessionID string, messages []*types.Message) {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		ids = append(ids, m.ID)
+	}
+	if h.CollaborationStatuses != nil {
+		if rows, err := h.CollaborationStatuses(ctx, sessionID, ids); err == nil {
+			for _, m := range messages {
+				m.CollaborationStatus = rows[m.ID]
+			}
+		}
+	}
+	if h.DelegatedPrompts != nil {
+		if rows, err := h.DelegatedPrompts(ctx, sessionID); err == nil {
+			for _, m := range messages {
+				m.DelegatedPrompts = rows[m.ID]
+			}
+		}
+	}
+	if h.Prompts == nil {
+		return
+	}
+	var rows []*types.AgentPrompt
+	var err error
+	// Load only the prompts of this page; history covers every prompt status.
+	if byPage, ok := h.Prompts.(interface {
+		ListByMessages(context.Context, string, []string, []string) ([]*types.AgentPrompt, error)
+	}); ok {
+		rows, err = byPage.ListByMessages(ctx, sessionID, ids, types.AgentPromptHistoryStatuses)
+	} else {
+		rows, err = h.Prompts.ListBySession(ctx, sessionID, types.AgentPromptHistoryStatuses)
+	}
+	if err != nil {
+		logger.Warnf(ctx, "list prompts of session %s: %v", sessionID, err)
+		return
+	}
+	principal, _ := types.PrincipalFromContext(ctx)
+	caller := principal.StorageID()
+	tenantID := types.CallerFromContext(ctx).TenantID
+	byMessage := make(map[string]*types.Message, len(messages))
+	for _, m := range messages {
+		m.PromptHistory, m.PendingPrompt = nil, nil
+		byMessage[m.ID] = m
+	}
+	for _, p := range rows {
+		m := byMessage[p.AssistantMessageID]
+		if m == nil || p.TenantID != tenantID || (p.UserID != "" && p.UserID != caller) {
+			continue
+		}
+		if p.Kind != types.AgentPromptKindToolApproval && p.Kind != types.AgentPromptKindAskUser {
+			continue
+		}
+		m.PromptHistory = append(m.PromptHistory, p.TimelineView())
+		if p.IsOpen() && m.RunState == types.MessageRunStateAwaitingInput {
+			m.PendingPrompt = p.TimelineView()
+		}
+	}
+}
+
+// resolveResourceRewriter builds the storage-reference rewriter for one response
+// from the request's `resource_urls` parameter, falling back to the deployment
+// default. The returned error is already an AppError the caller can hand to
+// c.Error: a rejected scope is a 403, a typo in the parameter is a 400.
+func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Rewriter, error) {
+	ctx := c.Request.Context()
+	mode, err := storageurl.ResolveMode(ctx, c.Query(storageurl.QueryParam))
+	if err != nil {
+		if stderrors.Is(err, storageurl.ErrPublicModeForbidden) {
+			return nil, errors.NewForbiddenError(err.Error())
+		}
+		return nil, errors.NewBadRequestError(err.Error())
+	}
+	return storageurl.NewRequestRewriter(ctx, mode, h.FileService, h.StorageResolver), nil
+}
+
+// LoadMessages godoc
+// @Summary      加载消息历史
+// @Description  加载会话的消息历史，支持分页和时间筛选
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        session_id     path      string  true   "会话ID"  extensions(x-agent)
+// @Param        limit          query     int     false  "返回数量"  default(20)  minimum(1)  extensions(x-agent,x-agent-maximum=20)
+// @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"  extensions(x-agent)
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
+// @Success      200            {object}  handler.DataResponse{data=[]types.Message}  "消息列表"
+// @Failure      400          {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"message.list","risk":"read"}
+// @x-agent-hint "The latest messages of one of the user's conversations, oldest first. For earlier ones, pass the created_at of the first message as before_time."
+// @Router       /messages/{session_id}/load [get]
+func (h *MessageHandler) LoadMessages(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Start loading messages")
+
+	// Get path parameters and query parameters
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	limit := secutils.SanitizeForLog(c.DefaultQuery("limit", strconv.Itoa(defaultMessagesPageSize)))
+	beforeTimeStr := secutils.SanitizeForLog(c.DefaultQuery("before_time", ""))
+
+	logger.Infof(ctx, "Loading messages params, session ID: %s, limit: %s, before time: %s",
+		sessionID, limit, beforeTimeStr)
+
+	rewriter, err := h.resolveResourceRewriter(c)
+	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
+		return
+	}
+
+	// Parse limit parameter with fallback to default, then clamp it. A
+	// non-positive value must not reach the repository: GORM only emits a
+	// LIMIT clause for `limit >= 0`, so `limit=-1` would load the entire
+	// session history (and attach artifacts for every row) in one request.
+	limitInt, convErr := strconv.Atoi(limit)
+	if convErr != nil {
+		// Note: on out-of-range input Atoi returns the boundary value rather
+		// than zero, so the default has to be assigned explicitly here.
+		logger.Warnf(ctx, "Invalid limit value, using default value %d, input: %s", defaultMessagesPageSize, limit)
+		limitInt = defaultMessagesPageSize
+	}
+	limitInt = clampMessagesPageSize(limitInt)
+
+	// If no beforeTime is provided, retrieve the most recent messages
+	if beforeTimeStr == "" {
+		logger.Infof(ctx, "Getting recent messages for session, session ID: %s, limit: %d", sessionID, limitInt)
+		messages, err := h.MessageService.GetRecentMessagesBySession(ctx, sessionID, limitInt)
+		if err != nil {
+			if stderrors.Is(err, errors.ErrSessionNotFound) {
+				// PR #1309 plumbed user-scope into the message service's
+				// session existence check; non-owner / wrong-tenant lookups
+				// surface as ErrSessionNotFound. Map to 404 so clients can
+				// tell "wrong URL" from a real 5xx.
+				logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+				c.Error(errors.NewNotFoundError(err.Error()))
+				return
+			}
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError(err.Error()))
+			return
+		}
+
+		logger.Infof(
+			ctx,
+			"Successfully retrieved recent messages, session ID: %s, message count: %d",
+			sessionID, len(messages),
+		)
+		h.attachPendingPrompts(ctx, sessionID, messages)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
+		})
+		return
+	}
+
+	// If beforeTime is provided, parse the timestamp (RFC3339Nano or RFC3339).
+	beforeTime, err := parseMessageBeforeTime(beforeTimeStr)
+	if err != nil {
+		logger.Errorf(
+			ctx,
+			"Invalid time format, please use RFC3339/RFC3339Nano format, err: %v, beforeTimeStr: %s",
+			err, beforeTimeStr,
+		)
+		c.Error(errors.NewBadRequestError("Invalid time format, please use RFC3339 or RFC3339Nano format"))
+		return
+	}
+
+	// Retrieve messages before the specified timestamp
+	logger.Infof(ctx, "Getting messages before specific time, session ID: %s, before time: %s, limit: %d",
+		sessionID, beforeTime.Format(time.RFC3339Nano), limitInt)
+	messages, err := h.MessageService.GetMessagesBySessionBeforeTime(ctx, sessionID, beforeTime, limitInt)
+	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			// See note on the GetRecentMessagesBySession path above.
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(
+		ctx,
+		"Successfully retrieved messages before time, session ID: %s, message count: %d",
+		sessionID, len(messages),
+	)
+	h.attachPendingPrompts(ctx, sessionID, messages)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
+	})
+}
+
+// DeleteMessage godoc
+// @Summary      删除消息
+// @Description  从会话中删除指定消息
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        session_id  path      string  true  "会话ID"
+// @Param        id          path      string  true  "消息ID"
+// @Success      200         {object}  handler.MessageResponse  "删除成功"
+// @Failure      500         {object}  errors.AppError         "服务器错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/{session_id}/{id} [delete]
+func (h *MessageHandler) DeleteMessage(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Start deleting message")
+
+	// Get path parameters for session and message identification
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+
+	logger.Infof(ctx, "Deleting message, session ID: %s, message ID: %s", sessionID, messageID)
+
+	// Delete the message using the message service
+	if err := h.MessageService.DeleteMessage(ctx, sessionID, messageID); err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			// See note on LoadMessages above — message-service operations
+			// surface ErrSessionNotFound when the caller can't see the
+			// owning session (post-#1309 user scope).
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			// The message_id doesn't exist under this session — a client error,
+			// not a server fault. 404 so callers read resource.not_found (a
+			// permanent condition, not retryable) instead of a 5xx. Mirrors the
+			// ContinueStream / kb / doc / chunk not-found handling.
+			logger.Warnf(ctx, "Message not found, session ID: %s, message ID: %s", sessionID, messageID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Message deleted successfully, session ID: %s, message ID: %s", sessionID, messageID)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Message deleted successfully",
+	})
+}
+
+// SearchMessages godoc
+// @Summary      搜索历史对话
+// @Description  通过关键词和/或向量相似度搜索历史对话记录，支持关键词、向量、混合三种模式
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        request  body      SearchMessagesRequest  true  "搜索请求"
+// @Success      200      {object}  handler.DataResponse{data=types.MessageSearchResult}  "搜索结果"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"message.search","risk":"probe","root":"data.items","max_items":20}
+// @x-agent-hint "Finds exchanges in the user's own past conversations by what was said, each with its session_id. Matching is by meaning only when message indexing is on (see message.chat_history_stats); otherwise words must appear verbatim, so retry with the user's exact wording before concluding nothing matches."
+// @Router       /messages/search [post]
+func (h *MessageHandler) SearchMessages(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Start searching messages")
+
+	var request SearchMessagesRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		logger.Error(ctx, "Failed to parse search request", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	if request.Query == "" {
+		logger.Error(ctx, "Query content is empty")
+		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
+		return
+	}
+
+	// Clamp the requested page size before it reaches the service. The
+	// service later applies a bounded over-fetch (limit*3) to the keyword
+	// search so it has enough candidates to rank; that multiplier is
+	// intentional and is left untouched, so the SQL LIMIT is at most
+	// 3*maxMessagesPageSize. Without this clamp an unbounded request would
+	// inflate the query by the same factor.
+	request.Limit = clampMessagesPageSize(request.Limit)
+
+	params := &types.MessageSearchParams{
+		Query:      request.Query,
+		Mode:       types.MessageSearchMode(request.Mode),
+		Limit:      request.Limit,
+		SessionIDs: request.SessionIDs,
+	}
+
+	logger.Infof(ctx, "Searching messages with params: query=%s, mode=%s, limit=%d, session_ids=%v",
+		secutils.SanitizeForLog(params.Query), secutils.SanitizeForLog(string(params.Mode)), params.Limit,
+		secutils.SanitizeForLogArray(params.SessionIDs))
+
+	result, err := h.MessageService.SearchMessages(ctx, params)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Message search completed, found %d results", result.Total)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// SearchMessagesRequest defines the request structure for searching messages
+type SearchMessagesRequest struct {
+	// Query text for search
+	Query string `json:"query" binding:"required" extensions:"x-agent"`
+	// Search mode: "keyword", "vector", "hybrid" (default: "hybrid")
+	Mode string `json:"mode"`
+	// Maximum number of results to return (default: 20)
+	Limit int `json:"limit" minimum:"1" extensions:"x-agent,x-agent-maximum=20"`
+	// Filter by specific session IDs (optional)
+	SessionIDs []string `json:"session_ids"`
+}
+
+// ClearChatHistoryIndex godoc
+// @Summary      清空当前空间的历史消息索引
+// @Description  暂停消息索引，删除索引知识、分块和向量，保留原始会话和消息。失败后保持暂停，可重试。
+// @Tags         消息
+// @Produce      json
+// @Success      200  {object}  handler.DataResponse{data=types.ChatHistoryKBStats}
+// @Failure      403  {object}  errors.AppError  "需要空间管理权限"
+// @Failure      500  {object}  errors.AppError  "清理未完成，查看当前状态后可重试"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/chat-history-index/clear [post]
+func (h *MessageHandler) ClearChatHistoryIndex(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
+	defer cancel()
+	stats, err := h.MessageService.ClearChatHistoryIndex(ctx)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			_ = c.Error(errors.NewInternalServerError(
+				"Failed to clear chat history index; check its current state before retrying"))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
+}
+
+// GetChatHistoryKBStats godoc
+// @Summary      获取聊天历史知识库统计
+// @Description  获取聊天历史知识库的统计信息（已索引消息数、知识库大小等）
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  handler.DataResponse{data=types.ChatHistoryKBStats}  "统计信息"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"message.chat_history_stats","risk":"read"}
+// @x-agent-hint "Whether the workspace indexes conversations for search by meaning, and how many messages are indexed. When it is off, message.search only matches exact words; the setting is under settings section chathistory."
+// @Router       /messages/chat-history-stats [get]
+func (h *MessageHandler) GetChatHistoryKBStats(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Getting chat history KB stats")
+
+	stats, err := h.MessageService.GetChatHistoryKBStats(ctx)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
+	})
+}
+
+// parseMessageBeforeTime parses the `before_time` query used by LoadMessages.
+// Frontend cursors may be RFC3339 (no fractional seconds) or RFC3339Nano.
+func parseMessageBeforeTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, stderrors.New("empty before_time")
+	}
+	layouts := []string{time.RFC3339Nano, time.RFC3339}
+	var lastErr error
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, nil
+		} else {
+			lastErr = err
+		}
+	}
+	return time.Time{}, lastErr
+}

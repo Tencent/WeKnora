@@ -1,0 +1,1083 @@
+package notion
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+const (
+	contentTypeMarkdown  = "text/markdown"
+	objectTypePage       = "page"
+	objectTypeDatabase   = "database"
+	objectTypeAttachment = "attachment"
+	defaultUntitledName  = "Untitled"
+)
+
+// Connector implements the datasource.Connector interface for Notion.
+type Connector struct{}
+
+// NewConnector creates a new Notion connector.
+func NewConnector() *Connector {
+	return &Connector{}
+}
+
+// Type returns the connector type identifier.
+func (c *Connector) Type() string {
+	return types.ConnectorTypeNotion
+}
+
+// Validate verifies that the Notion configuration is valid by testing connectivity.
+func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
+	notionCfg, err := parseNotionConfig(config)
+	if err != nil {
+		return err
+	}
+
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return err
+	}
+	return client.Ping(ctx)
+}
+
+// ResolveResourceAncestors has nothing to do for Notion: ListResources already
+// returns the full tree with parent links, so any pre-existing selection is
+// already present and revealed by the picker without on-demand loading.
+func (c *Connector) ResolveResourceAncestors(
+	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+) ([]string, error) {
+	return []string{}, nil
+}
+
+// ListResources lists all accessible Notion pages and databases as selectable resources.
+// Returns all objects with parent-child relationships populated, allowing the frontend
+// to render a tree view. Root objects have empty ParentID.
+func (c *Connector) ListResources(
+	ctx context.Context, config *types.DataSourceConfig, parentID string,
+) ([]types.Resource, error) {
+	// Notion returns the full hierarchy (with parent_id populated) in a single
+	// call, so children are already delivered with the root listing. Lazy-load
+	// requests for a specific parent therefore have nothing extra to return.
+	if parentID != "" {
+		return []types.Resource{}, nil
+	}
+
+	notionCfg, err := parseNotionConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, err
+	}
+	pages, err := client.SearchPages(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("search notion pages: %w", err)
+	}
+
+	allIDs := make(map[string]bool, len(pages))
+	for _, p := range pages {
+		allIDs[p.ID] = true
+	}
+
+	// Precompute effective parent for each page.
+	// data_source objects need database_parent (their `parent` points at the
+	// database container, not the workspace location); see resolveParentID.
+	parentOf := make(map[string]string, len(pages))
+	for _, p := range pages {
+		if p.InTrash {
+			continue
+		}
+		parentOf[p.ID] = resolveParentID(p, allIDs)
+	}
+
+	childrenCount := make(map[string]int)
+	for _, pid := range parentOf {
+		if pid != "" {
+			childrenCount[pid]++
+		}
+	}
+
+	var resources []types.Resource
+	for _, p := range pages {
+		if p.InTrash {
+			continue
+		}
+
+		resourceType := objectTypePage
+		if p.isDatabase() {
+			resourceType = objectTypeDatabase
+		}
+
+		resources = append(resources, types.Resource{
+			ExternalID:  p.ID,
+			Name:        p.Title,
+			Type:        resourceType,
+			URL:         p.URL,
+			ParentID:    parentOf[p.ID],
+			HasChildren: childrenCount[p.ID] > 0,
+		})
+	}
+
+	return resources, nil
+}
+
+// FetchAll performs a full sync of all documents from the specified resources.
+func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
+	notionCfg, err := parseNotionConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, err
+	}
+	visited := c.excludedSetFromListResources(ctx, config, resourceIDs)
+	var allItems []types.FetchedItem
+
+	for _, resourceID := range resourceIDs {
+		page, err := client.GetPage(ctx, resourceID)
+		if err == nil {
+			pageItems, _, err := c.fetchPage(ctx, client, page, visited)
+			if err != nil {
+				return nil, err
+			}
+			allItems = append(allItems, pageItems...)
+			continue
+		}
+		// Not a page — treat as database/data_source.
+		// fetchDatabase handles both data_source IDs (from search) and
+		// database container IDs (from child_database blocks).
+		items, _ := c.fetchDatabase(ctx, client, resourceID, visited)
+		if len(items) == 0 {
+			logger.Warnf(ctx, "[Notion] failed to fetch resource %s as page or database", resourceID)
+		}
+		allItems = append(allItems, items...)
+	}
+
+	return allItems, nil
+}
+
+// FetchIncremental performs an incremental sync based on cursor state.
+// On first sync (nil cursor), delegates to FetchAll for efficiency (no discovery needed).
+func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+	notionCfg, err := parseNotionConfig(config)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resourceIDs := config.ResourceIDs
+	if len(resourceIDs) == 0 {
+		return nil, nil, fmt.Errorf("no resource IDs configured")
+	}
+
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Parse previous cursor
+	var prevCursor notionCursor
+	if cursor != nil && cursor.ConnectorCursor != nil {
+		cursorBytes, _ := json.Marshal(cursor.ConnectorCursor)
+		_ = json.Unmarshal(cursorBytes, &prevCursor)
+	}
+
+	// First sync: use FetchAll then build cursor from Search API (one call, no block traversal)
+	isFirstSync := len(prevCursor.PageEditTimes) == 0
+	if isFirstSync {
+		logger.Infof(ctx, "[Notion] first sync, using FetchAll for %d resources", len(resourceIDs))
+		items, err := c.FetchAll(ctx, config, resourceIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Build cursor from fetched items' UpdatedAt timestamps.
+		// Record-level edit times are tracked individually (object_type == "page").
+		// Database container IDs are also added so incremental sync can detect
+		// whether a database actually changed, avoiding full record queries every cycle.
+		newEditTimes := make(map[string]time.Time)
+		for _, item := range items {
+			if item.Metadata["object_type"] == objectTypePage {
+				newEditTimes[item.ExternalID] = item.UpdatedAt
+			}
+		}
+		// Ensure all selected resourceIDs appear in the cursor.
+		// Pages already appear via their items; databases need explicit entries.
+		for _, rid := range resourceIDs {
+			if _, ok := newEditTimes[rid]; !ok {
+				newEditTimes[rid] = time.Now()
+			}
+		}
+
+		return items, buildCursor(newEditTimes), nil
+	}
+
+	// Subsequent syncs: discover all pages, diff against cursor, fetch only changes
+	logger.Infof(ctx, "[Notion] incremental sync, discovering pages")
+	pages, fetchVisited, err := c.discoverAllResources(ctx, client, resourceIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	logger.Infof(ctx, "[Notion] discovered %d pages", len(pages))
+
+	newEditTimes := make(map[string]time.Time)
+	pageByID := make(map[string]*notionPage, len(pages))
+	for i := range pages {
+		newEditTimes[pages[i].ID] = pages[i].LastEditedTime
+		pageByID[pages[i].ID] = &pages[i]
+	}
+
+	var changedItems []types.FetchedItem
+	changedCount := 0
+	// queryTruncated records whether any query this round came back capped by a
+	// vendor limit. A capped query only reports a prefix of its records, so the
+	// deletion pass must be skipped for the whole round.
+	var queryTruncated bool
+
+	for pageID, newTime := range newEditTimes {
+		prevTime, existed := prevCursor.PageEditTimes[pageID]
+		if existed && newTime.Equal(prevTime) {
+			continue
+		}
+		if fetchVisited[pageID] {
+			continue
+		}
+		changedCount++
+		pg := pageByID[pageID]
+		if pg == nil {
+			continue
+		}
+		logger.Debugf(ctx, "[Notion] changed: %s (%s, %s)", pg.Title, pg.ID, pg.Object)
+		if pg.isDatabase() {
+			// Incremental database sync: query records, diff against cursor,
+			// only fetch blocks for records whose edit time actually changed.
+			items, recordEditTimes, truncated := c.fetchDatabaseIncremental(
+				ctx, client, pg.ID, prevCursor.PageEditTimes, fetchVisited)
+			queryTruncated = queryTruncated || truncated
+			changedItems = append(changedItems, items...)
+			// Merge record-level edit times into the cursor
+			for rid, rt := range recordEditTimes {
+				newEditTimes[rid] = rt
+			}
+		} else {
+			items, truncated, err := c.fetchPage(ctx, client, pg, fetchVisited)
+			if err != nil {
+				return nil, nil, err
+			}
+			queryTruncated = queryTruncated || truncated
+			changedItems = append(changedItems, items...)
+		}
+	}
+
+	// Detect deletions. Only emit IsDeleted for pages that previously belonged
+	// to a selected resource and have actually disappeared at source. Pages that
+	// are still visible but no longer reachable from any selected root (i.e. the
+	// user deselected their ancestor) live in fetchVisited as the "excluded" set
+	// returned by discoverAllResources, and must NOT be reported as deletions.
+	//
+	// A truncated query reports only a prefix of its records, so a record absent
+	// from it is not evidence of a source-side deletion. When any query this
+	// round hit a vendor limit, skip deletion detection entirely instead of
+	// deleting live documents (same direction as aborting incremental sync when
+	// resource discovery fails, #3682).
+	if queryTruncated {
+		logger.Warnf(ctx, "[Notion] skipping deletion detection: at least one query was truncated at the vendor limit")
+	} else {
+		for pageID := range prevCursor.PageEditTimes {
+			if _, exists := newEditTimes[pageID]; exists {
+				continue
+			}
+			if fetchVisited[pageID] {
+				continue
+			}
+			changedItems = append(changedItems, types.FetchedItem{
+				ExternalID: pageID,
+				IsDeleted:  true,
+				Metadata:   map[string]string{"channel": types.ChannelNotion},
+			})
+		}
+	}
+
+	if queryTruncated {
+		logger.Warnf(ctx, "[Notion] incremental: %d changed, %d total items, result set truncated by the vendor",
+			changedCount, len(changedItems))
+	} else {
+		logger.Infof(ctx, "[Notion] incremental: %d changed, %d total items", changedCount, len(changedItems))
+	}
+
+	return changedItems, buildCursor(newEditTimes), nil
+}
+
+func buildCursor(editTimes map[string]time.Time) *types.SyncCursor {
+	now := time.Now()
+	cursorData := notionCursor{
+		PageEditTimes: editTimes,
+	}
+	cursorBytes, _ := json.Marshal(cursorData)
+	var cursorMap map[string]interface{}
+	_ = json.Unmarshal(cursorBytes, &cursorMap)
+
+	return &types.SyncCursor{
+		LastSyncTime:    now,
+		ConnectorCursor: cursorMap,
+	}
+}
+
+// --- Internal methods ---
+
+// fetchPage fetches a single page's content and attachments.
+// If page is nil, it will be fetched from the API.
+// The second result reports whether any query issued for this page (including
+// child databases) was truncated at a vendor limit.
+// A page block fetch error aborts the round without acknowledging its edit time.
+func (c *Connector) fetchPage(
+	ctx context.Context, client *notionClient, page *notionPage, visited map[string]bool,
+) ([]types.FetchedItem, bool, error) {
+	if page == nil {
+		return nil, false, nil
+	}
+	if visited[page.ID] {
+		return nil, false, nil
+	}
+	visited[page.ID] = true
+
+	if page.InTrash {
+		return nil, false, nil
+	}
+
+	// Database records store content in properties, not blocks — delegate to
+	// buildRecordItem so they aren't dropped as empty pages. Record parent.type
+	// can be either "database_id" (older GetPage responses) or "data_source_id"
+	// (search API and 2025-09-03+ workspaces); accept both.
+	if page.Parent.Type == parentTypeDatabaseID || page.Parent.Type == parentTypeDataSourceID {
+		dbTitle := ""
+		if dbInfo, err := getDatabaseOrDataSourceInfo(ctx, client, page.Parent.GetParentID()); err != nil {
+			logger.Debugf(ctx, "[Notion] failed to resolve parent db title for record %s: %v", page.ID, err)
+		} else {
+			dbTitle = dbInfo.Page.Title
+		}
+		propNames := extractPropertySchema(*page)
+		if item := c.buildRecordItem(ctx, client, *page, propNames, dbTitle); item != nil {
+			return []types.FetchedItem{*item}, false, nil
+		}
+		return nil, false, nil
+	}
+
+	blocks, err := client.GetBlockChildrenAll(ctx, page.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("get blocks for notion page %s: %w", page.ID, err)
+	}
+
+	if err := resolveFileUploads(ctx, client, blocks); err != nil {
+		return nil, false, fmt.Errorf("resolve file uploads for notion page %s: %w", page.ID, err)
+	}
+
+	markdown, attachmentList := BlocksToMarkdown(blocks)
+	// A successfully cleared page still exists. Keep its title as content so
+	// ingestion replaces stale text instead of silently acknowledging the edit.
+	if len(blocks) == 0 {
+		title := strings.TrimSpace(page.Title)
+		if title == "" {
+			title = defaultUntitledName
+		}
+		markdown = "# " + title + "\n"
+	}
+
+	var items []types.FetchedItem
+
+	// Do not replace unreadable blocks or attachment-only pages with a title.
+	if strings.TrimSpace(markdown) != "" {
+		fileName := page.Title + ".md"
+		if page.Title == "" {
+			fileName = defaultUntitledName + ".md"
+		}
+
+		items = append(items, types.FetchedItem{
+			ExternalID:  page.ID,
+			Title:       page.Title,
+			Content:     []byte(markdown),
+			ContentType: contentTypeMarkdown,
+			FileName:    fileName,
+			URL:         page.URL,
+			UpdatedAt:   page.LastEditedTime,
+			Metadata: map[string]string{
+				"channel":     types.ChannelNotion,
+				"object_type": objectTypePage,
+			},
+		})
+	}
+
+	// Download file attachments (PDF, documents, etc.)
+	// Skip images — they're already referenced in Markdown as ![](url),
+	// and downloading them as separate items requires VLM to process.
+	for _, att := range attachmentList {
+		if att.URL == "" || att.Type == "image" {
+			continue
+		}
+		data, err := client.DownloadFile(ctx, att.URL)
+		if err != nil {
+			// The page cannot be stored completely: acknowledging its edit time
+			// here would drop the attachment until a full re-sync. Abort the
+			// round like a block fetch failure so the page is retried.
+			return nil, false, fmt.Errorf("%w: download attachment %s for notion page %s: %w",
+				datasource.ErrFetchFailed, att.FileName, page.ID, err)
+		}
+		items = append(items, types.FetchedItem{
+			ExternalID:       fmt.Sprintf("%s:%s", page.ID, att.FileName),
+			Title:            att.FileName,
+			Content:          data,
+			ContentType:      mimeTypeForAttachment(att.Type),
+			FileName:         att.FileName,
+			SourceResourceID: page.ID,
+			Metadata: map[string]string{
+				"channel":     types.ChannelNotion,
+				"object_type": objectTypeAttachment,
+			},
+		})
+	}
+
+	truncated := false
+	for _, block := range blocks {
+		switch block.Type {
+		case "child_page":
+			childPage, err := client.GetPage(ctx, block.ID)
+			if err != nil {
+				logger.Warnf(ctx, "[Notion] failed to get child page %s: %v", block.ID, err)
+				continue
+			}
+			childItems, childTruncated, err := c.fetchPage(ctx, client, childPage, visited)
+			if err != nil {
+				return nil, truncated || childTruncated, err
+			}
+			truncated = truncated || childTruncated
+			items = append(items, childItems...)
+		case "child_database":
+			dbItems, dbTruncated := c.fetchDatabase(ctx, client, block.ID, visited)
+			truncated = truncated || dbTruncated
+			items = append(items, dbItems...)
+		}
+	}
+
+	return items, truncated, nil
+}
+
+// fetchDatabase syncs each database record as an individual knowledge item (full sync).
+// Accepts either a data_source_id (from search) or database_id (from child_database blocks).
+// The second result reports whether the record query was truncated at a vendor limit.
+func (c *Connector) fetchDatabase(
+	ctx context.Context, client *notionClient, id string, visited map[string]bool,
+) ([]types.FetchedItem, bool) {
+	if visited[id] {
+		return nil, false
+	}
+	visited[id] = true
+
+	records, dbTitle, queryID, truncated, err := c.queryDatabaseRecords(ctx, client, id)
+	if err != nil {
+		return nil, false
+	}
+	if len(records) == 0 {
+		return nil, truncated
+	}
+	if queryID != "" && queryID != id {
+		if visited[queryID] {
+			return nil, truncated
+		}
+		visited[queryID] = true
+	}
+
+	for _, record := range records {
+		visited[record.ID] = true // Mark records as visited to avoid duplicate fetchPage calls
+	}
+
+	if truncated {
+		logger.Warnf(ctx, "[Notion] database %s full sync used a truncated record set (%d records): "+
+			"records past the vendor query limit are missing from this run", id, len(records))
+	}
+
+	item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
+	if item != nil {
+		return []types.FetchedItem{*item}, truncated
+	}
+	return nil, truncated
+}
+
+// fetchDatabaseIncremental syncs only changed records by comparing edit times against cursor.
+// Returns fetched items, a map of record_id → edit_time for cursor update, and whether the
+// record query was truncated at a vendor limit (in which case absence proves nothing).
+func (c *Connector) fetchDatabaseIncremental(
+	ctx context.Context, client *notionClient, id string, prevEditTimes map[string]time.Time, visited map[string]bool,
+) ([]types.FetchedItem, map[string]time.Time, bool) {
+	if visited[id] {
+		return nil, nil, false
+	}
+	visited[id] = true
+
+	records, dbTitle, queryID, truncated, err := c.queryDatabaseRecords(ctx, client, id)
+	if err != nil {
+		return nil, nil, false
+	}
+	if queryID != "" && queryID != id {
+		if visited[queryID] {
+			return nil, nil, truncated
+		}
+		visited[queryID] = true
+	}
+
+	recordEditTimes := make(map[string]time.Time, len(records))
+	changedCount := 0
+
+	for _, record := range records {
+		visited[record.ID] = true // Mark records as visited to avoid duplicate fetchPage calls
+
+		if record.InTrash {
+			continue
+		}
+		recordEditTimes[record.ID] = record.LastEditedTime
+
+		prevTime, existed := prevEditTimes[record.ID]
+		if !existed || !record.LastEditedTime.Equal(prevTime) {
+			changedCount++
+		}
+	}
+
+	if truncated {
+		logger.Warnf(ctx, "[Notion] database %s incremental: %d changed out of %d records "+
+			"(truncated at the vendor query limit: result set incomplete)", id, changedCount, len(records))
+	} else {
+		logger.Infof(ctx, "[Notion] database %s incremental: %d changed out of %d records",
+			id, changedCount, len(records))
+	}
+
+	// Rebuild the entire database table if any record changed, or if we don't have previous times (first sync)
+	if changedCount > 0 || len(prevEditTimes) == 0 {
+		item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
+		if item != nil {
+			return []types.FetchedItem{*item}, recordEditTimes, truncated
+		}
+	}
+
+	return nil, recordEditTimes, truncated
+}
+
+// queryDatabaseRecords resolves the database ID and queries all records.
+// Records are read through created_time windows, so a data source holding more
+// rows than one vendor query can return is still read in full.
+// Returns the records, the database title, the canonical data_source_id used for the
+// query, whether the result set is incomplete, and an error. An incomplete result
+// still returns the rows fetched so far, with truncated set and a nil error, because
+// the partial data remains usable as long as callers do not read absence as deletion.
+// Truncation is only reported when windowed reading cannot complete (see
+// notionClient.queryDataSourceAll).
+func (c *Connector) queryDatabaseRecords(
+	ctx context.Context, client *notionClient, id string,
+) ([]notionPage, string, string, bool, error) {
+	dbInfo, err := getDatabaseOrDataSourceInfo(ctx, client, id)
+	if err != nil {
+		logger.Warnf(ctx, "[Notion] failed to get database/data_source info %s: %v", id, err)
+		return nil, "", "", false, err
+	}
+
+	queryID := dbInfo.DataSourceID
+	if queryID == "" {
+		queryID = id
+	}
+	records, err := client.QueryDatabaseAll(ctx, queryID)
+	truncated := errors.Is(err, errQueryResultTruncated)
+	if err != nil && !truncated {
+		logger.Warnf(ctx, "[Notion] failed to query database %s: %v", id, err)
+		return nil, "", "", false, err
+	}
+
+	if truncated {
+		logger.Warnf(ctx, "[Notion] database %s (%s): %d records, the vendor query limit was hit and the "+
+			"created_time window could not advance: result set incomplete", id, dbInfo.Page.Title, len(records))
+	} else {
+		logger.Infof(ctx, "[Notion] database %s (%s): %d records", id, dbInfo.Page.Title, len(records))
+	}
+	return records, dbInfo.Page.Title, queryID, truncated, nil
+}
+
+// buildRecordItem converts a single database record into a FetchedItem
+// with properties as header and block content as body.
+func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, record notionPage, propNames []string, dbTitle string) *types.FetchedItem {
+	var content strings.Builder
+	title := record.Title
+	if title == "" {
+		title = defaultUntitledName
+	}
+	content.WriteString("# " + title + "\n\n")
+
+	if record.RawProperties != nil {
+		var props map[string]interface{}
+		json.Unmarshal(record.RawProperties, &props)
+		for _, name := range propNames {
+			if propMap, ok := props[name].(map[string]interface{}); ok {
+				val := propertyToString(propMap)
+				if val != "" {
+					content.WriteString("- **" + name + "**: " + val + "\n")
+				}
+			}
+		}
+	}
+
+	// Database records may contain page-style block content beyond their properties
+	blocks, err := client.GetBlockChildrenAll(ctx, record.ID)
+	if err != nil {
+		logger.Warnf(ctx, "[Notion] failed to get blocks for record %s: %v", record.ID, err)
+	} else if len(blocks) > 0 {
+		// Database records are ingested through their properties: their block
+		// files are not downloaded as attachments, so resolution here stays
+		// best-effort (matching the GetBlockChildrenAll handling above).
+		if err := resolveFileUploads(ctx, client, blocks); err != nil {
+			logger.Warnf(ctx, "[Notion] failed to resolve file uploads for record %s: %v", record.ID, err)
+		}
+		markdown, _ := BlocksToMarkdown(blocks)
+		if strings.TrimSpace(markdown) != "" {
+			content.WriteString("\n" + markdown)
+		}
+	}
+
+	bodyStr := strings.TrimSpace(content.String())
+	if bodyStr == "" {
+		return nil
+	}
+
+	return &types.FetchedItem{
+		ExternalID:  record.ID,
+		Title:       title,
+		Content:     []byte(bodyStr),
+		ContentType: contentTypeMarkdown,
+		FileName:    title + ".md",
+		URL:         record.URL,
+		UpdatedAt:   record.LastEditedTime,
+		Metadata: map[string]string{
+			"channel":     types.ChannelNotion,
+			"object_type": objectTypePage,
+			"database":    dbTitle,
+		},
+	}
+}
+
+// buildDatabaseItem converts a database into a single Markdown table document.
+func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient, id string, dbTitle string, records []notionPage) *types.FetchedItem {
+	if len(records) == 0 {
+		return nil
+	}
+
+	propNames := extractPropertySchema(records[0])
+
+	var content strings.Builder
+	title := dbTitle
+	if title == "" {
+		title = defaultUntitledName
+	}
+	content.WriteString("# " + title + "\n\n")
+
+	// Table header
+	content.WriteString("| Title ")
+	for _, name := range propNames {
+		content.WriteString("| " + strings.ReplaceAll(name, "|", "\\|") + " ")
+	}
+	content.WriteString("|\n|")
+	content.WriteString("---|")
+	for range propNames {
+		content.WriteString("---|")
+	}
+	content.WriteString("\n")
+
+	var extraContent strings.Builder
+
+	// Table rows
+	for _, record := range records {
+		if record.InTrash {
+			continue
+		}
+
+		recordTitle := record.Title
+		if recordTitle == "" {
+			recordTitle = defaultUntitledName
+		}
+
+		content.WriteString("| " + strings.ReplaceAll(recordTitle, "|", "\\|") + " ")
+
+		if record.RawProperties != nil {
+			var props map[string]interface{}
+			json.Unmarshal(record.RawProperties, &props)
+			for _, name := range propNames {
+				val := ""
+				if propMap, ok := props[name].(map[string]interface{}); ok {
+					val = propertyToString(propMap)
+				}
+				val = strings.ReplaceAll(val, "\n", "<br>")
+				val = strings.ReplaceAll(val, "|", "\\|")
+				content.WriteString("| " + val + " ")
+			}
+		}
+		content.WriteString("|\n")
+
+		// Fetch blocks for the record, in case it has page content
+		blocks, err := client.GetBlockChildrenAll(ctx, record.ID)
+		if err == nil && len(blocks) > 0 {
+			if resolveErr := resolveFileUploads(ctx, client, blocks); resolveErr != nil {
+				logger.Warnf(ctx, "[Notion] failed to resolve file uploads for record %s: %v", record.ID, resolveErr)
+			}
+			markdown, _ := BlocksToMarkdown(blocks)
+			if strings.TrimSpace(markdown) != "" {
+				extraContent.WriteString("\n## " + recordTitle + " 内容\n\n" + markdown + "\n")
+			}
+		}
+	}
+
+	if extraContent.Len() > 0 {
+		content.WriteString("\n" + extraContent.String())
+	}
+
+	bodyStr := strings.TrimSpace(content.String())
+	if bodyStr == "" {
+		return nil
+	}
+
+	updatedAt := time.Now()
+	if len(records) > 0 {
+		updatedAt = records[0].LastEditedTime
+	}
+
+	return &types.FetchedItem{
+		ExternalID:  id,
+		Title:       title,
+		Content:     []byte(bodyStr),
+		ContentType: contentTypeMarkdown,
+		FileName:    title + ".md",
+		URL:         fmt.Sprintf("https://notion.so/%s", strings.ReplaceAll(id, "-", "")),
+		UpdatedAt:   updatedAt,
+		Metadata: map[string]string{
+			"channel":     types.ChannelNotion,
+			"object_type": objectTypeDatabase,
+		},
+	}
+}
+
+// discoverAllResources uses the Search API to find all pages and data_sources,
+// then filters by parent chain via BFS from the selected resource IDs.
+// Returns the included pages plus the excluded set (visible pages NOT under any
+// selected root) so callers can seed `visited` for child-block recursion without
+// a second SearchPages round-trip.
+func (c *Connector) discoverAllResources(
+	ctx context.Context, client *notionClient, resourceIDs []string,
+) (included []notionPage, excluded map[string]bool, err error) {
+	allPages, err := client.SearchPages(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("discover notion resources: %w", err)
+	}
+
+	// data_source objects use database_parent for workspace hierarchy.
+	allIDs := make(map[string]bool, len(allPages))
+	pageByID := make(map[string]notionPage, len(allPages))
+	for _, p := range allPages {
+		allIDs[p.ID] = true
+		pageByID[p.ID] = p
+	}
+
+	childrenOf := make(map[string][]string)
+	for _, p := range allPages {
+		if p.InTrash {
+			continue
+		}
+		parentID := resolveParentID(p, allIDs)
+		if parentID != "" {
+			childrenOf[parentID] = append(childrenOf[parentID], p.ID)
+		}
+	}
+
+	// BFS from each resource root to collect all descendants
+	includedSet := make(map[string]bool)
+	queue := make([]string, 0, len(resourceIDs))
+	for _, id := range resourceIDs {
+		if _, ok := pageByID[id]; ok {
+			includedSet[id] = true
+			queue = append(queue, id)
+		}
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, childID := range childrenOf[current] {
+			if !includedSet[childID] {
+				includedSet[childID] = true
+				queue = append(queue, childID)
+			}
+		}
+	}
+
+	included = make([]notionPage, 0, len(includedSet))
+	for id := range includedSet {
+		included = append(included, pageByID[id])
+	}
+	excluded = make(map[string]bool, len(allPages)-len(includedSet))
+	for id := range allIDs {
+		if !includedSet[id] {
+			excluded[id] = true
+		}
+	}
+	return included, excluded, nil
+}
+
+// --- File upload resolution ---
+
+// resolveFileUploads walks the block tree and resolves file_upload type files
+// by re-fetching the block to get a temporary download URL.
+// This mutates blocks in place, replacing file_upload RawContent with resolved URLs.
+// A resolution failure is returned: an unresolved file_upload leaves the file URL
+// empty, which silently drops the file the same way a failed download does.
+func resolveFileUploads(ctx context.Context, client *notionClient, blocks []notionBlock) error {
+	for i := range blocks {
+		if isFileBlock(blocks[i].Type) && blocks[i].RawContent != nil {
+			var file notionFile
+			json.Unmarshal(blocks[i].RawContent, &file)
+			if file.GetFileUploadID() != "" {
+				resolved, err := client.ResolveBlock(ctx, blocks[i].ID)
+				if err != nil {
+					return fmt.Errorf("%w: resolve file upload in block %s: %w",
+						datasource.ErrFetchFailed, blocks[i].ID, err)
+				}
+				blocks[i].RawContent = resolved.RawContent
+			}
+		}
+		if len(blocks[i].Children) > 0 {
+			if err := resolveFileUploads(ctx, client, blocks[i].Children); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func isFileBlock(blockType string) bool {
+	switch blockType {
+	case "image", "file", "pdf", "video", "audio":
+		return true
+	}
+	return false
+}
+
+// --- Property extraction ---
+
+// propertyToString recursively extracts a string value from a Notion property.
+// Follows the type chain generically, handling all 22 property types without hardcoding.
+func propertyToString(value map[string]interface{}) string {
+	if value == nil {
+		return ""
+	}
+
+	typeName, _ := value["type"].(string)
+	if typeName == "" {
+		return extractLeafValue(value)
+	}
+
+	inner, exists := value[typeName]
+	if !exists || inner == nil {
+		return ""
+	}
+
+	return extractValue(inner)
+}
+
+func extractValue(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		if val == float64(int64(val)) {
+			return fmt.Sprintf("%d", int64(val))
+		}
+		return fmt.Sprintf("%g", val)
+	case bool:
+		return fmt.Sprintf("%t", val)
+	case map[string]interface{}:
+		return extractLeafValue(val)
+	case []interface{}:
+		var parts []string
+		for _, item := range val {
+			s := extractValue(item)
+			if s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, ", ")
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func extractLeafValue(m map[string]interface{}) string {
+	if name, ok := m["name"].(string); ok {
+		return name
+	}
+	if content, ok := m["content"].(string); ok {
+		return content
+	}
+	if pt, ok := m["plain_text"].(string); ok {
+		return pt
+	}
+	if start, ok := m["start"].(string); ok {
+		if end, ok := m["end"].(string); ok && end != "" {
+			return start + " ~ " + end
+		}
+		return start
+	}
+	if expr, ok := m["expression"].(string); ok {
+		return expr
+	}
+	// Recurse if there's a type field
+	if typeName, ok := m["type"].(string); ok {
+		if inner, ok := m[typeName]; ok {
+			return extractValue(inner)
+		}
+	}
+	return ""
+}
+
+// extractPropertySchema extracts non-title property names from a record.
+// Names are sorted alphabetically to ensure deterministic order
+// (prevents false-positive content changes on incremental sync due to map iteration randomness).
+func extractPropertySchema(record notionPage) (propNames []string) {
+	if record.RawProperties == nil {
+		return nil
+	}
+	var props map[string]json.RawMessage
+	if err := json.Unmarshal(record.RawProperties, &props); err != nil {
+		return nil
+	}
+	for name, propRaw := range props {
+		var prop struct {
+			Type string `json:"type"`
+		}
+		json.Unmarshal(propRaw, &prop)
+		if prop.Type != "title" {
+			propNames = append(propNames, name)
+		}
+	}
+	sort.Strings(propNames)
+	return
+}
+
+// resolveParentID determines where a page/data_source sits in the workspace hierarchy.
+// For data_source objects, uses database_parent which points directly at the
+// containing page; the regular `parent` field on a data_source points at its
+// database container, not at the workspace location, so it's the wrong source.
+func resolveParentID(p notionPage, allIDs map[string]bool) string {
+	// Data sources: use database_parent which shows the workspace location
+	// (e.g., which page contains this database), not the database container ID.
+	if p.isDatabase() && p.DatabaseParent != nil {
+		pid := p.DatabaseParent.GetParentID()
+		if pid != "" && allIDs[pid] {
+			return pid
+		}
+		return ""
+	}
+	// Pages: use direct parent
+	if p.Parent.Type == parentTypeWorkspace {
+		return ""
+	}
+	pid := p.Parent.GetParentID()
+	if pid != "" && allIDs[pid] {
+		return pid
+	}
+	return ""
+}
+
+// getDatabaseOrDataSourceInfo retrieves metadata for a database or data_source.
+// Tries GET /v1/data_sources/{id} first (search returns data_source IDs),
+// falls back to GET /v1/databases/{id} (child_database blocks use database IDs).
+func getDatabaseOrDataSourceInfo(ctx context.Context, client *notionClient, id string) (*databaseInfo, error) {
+	ds, err := client.GetDataSourceInfo(ctx, id)
+	if err == nil {
+		return &databaseInfo{Page: *ds, DataSourceID: id}, nil
+	}
+	return client.GetDatabaseInfo(ctx, id)
+}
+
+// computeExcludedSet returns IDs the user has explicitly deselected: visible in
+// the picker but neither selected nor a descendant of a selected node. Used to
+// seed `visited` so recursive child_page/child_database traversal skips them.
+// Pages the user has never seen (e.g. added after the last config save) are
+// not excluded, so a selected parent still picks them up automatically.
+func computeExcludedSet(visibleIDs []string, parentOf map[string]string, selectedIDs []string) map[string]bool {
+	selected := make(map[string]bool, len(selectedIDs))
+	for _, id := range selectedIDs {
+		selected[id] = true
+	}
+	excluded := make(map[string]bool, len(visibleIDs))
+	for _, id := range visibleIDs {
+		hasSelectedAncestor := false
+		for cur := id; cur != ""; cur = parentOf[cur] {
+			if selected[cur] {
+				hasSelectedAncestor = true
+				break
+			}
+		}
+		if !hasSelectedAncestor {
+			excluded[id] = true
+		}
+	}
+	return excluded
+}
+
+// excludedSetFromListResources fetches the picker hierarchy via ListResources
+// and computes the deselected set. Used by FetchAll where no other code path
+// already has the page list in hand.
+func (c *Connector) excludedSetFromListResources(ctx context.Context, config *types.DataSourceConfig, selectedIDs []string) map[string]bool {
+	visible, err := c.ListResources(ctx, config, "")
+	if err != nil {
+		logger.Warnf(ctx, "[Notion] failed to list visible resources for exclusion: %v", err)
+		return map[string]bool{}
+	}
+	ids := make([]string, 0, len(visible))
+	parentOf := make(map[string]string, len(visible))
+	for _, r := range visible {
+		ids = append(ids, r.ExternalID)
+		parentOf[r.ExternalID] = r.ParentID
+	}
+	return computeExcludedSet(ids, parentOf, selectedIDs)
+}
+
+// --- Helpers ---
+
+func extractBaseURL(config *types.DataSourceConfig) string {
+	if config.Settings != nil {
+		if url, ok := config.Settings["base_url"].(string); ok && url != "" {
+			return url
+		}
+	}
+	return DefaultBaseURL
+}
+
+func mimeTypeForAttachment(attType string) string {
+	switch attType {
+	case "image":
+		return "image/png"
+	case "pdf":
+		return "application/pdf"
+	case "video":
+		return "video/mp4"
+	case "audio":
+		return "audio/mpeg"
+	default:
+		return "application/octet-stream"
+	}
+}

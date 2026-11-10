@@ -1,0 +1,153 @@
+import { ref } from 'vue'
+import { fetchEventSource } from '@microsoft/fetch-event-source'
+import {
+  configSkillInstallEventsUrl,
+  type ConfigSkillInstallEvent,
+} from '@/api/system'
+import i18n from '@/i18n'
+import { generateRandomString } from '@/utils'
+import { getApiBaseUrl } from '@/utils/api-base'
+import {
+  installRunFinished,
+  liveInstallPercent,
+  progressKey,
+  type SkillInstallProgressTarget,
+} from './skillInstallProgress'
+
+export type { SkillInstallProgressTarget } from './skillInstallProgress'
+export {
+  clampInstallPercent,
+  formatBusyInstallStatus,
+  installRunFinished,
+  liveInstallPercent,
+  progressKey,
+} from './skillInstallProgress'
+
+export function useConfigSkillInstallProgress(options?: {
+  onDone?: (target: SkillInstallProgressTarget, event: ConfigSkillInstallEvent) => void
+  /** Detail panels retain terminal errors until an explicit retry or reset. */
+  retainProgress?: boolean
+}) {
+  const progressByKey = ref<Record<string, ConfigSkillInstallEvent>>({})
+  const abortByKey = new Map<string, AbortController>()
+
+  function eventOf(configId: string, skillId: string): ConfigSkillInstallEvent | undefined {
+    return progressByKey.value[progressKey(configId, skillId)]
+  }
+
+  function percentOf(configId: string, skillId: string): number | null {
+    return liveInstallPercent(eventOf(configId, skillId))
+  }
+
+  function forgetKey(key: string) {
+    if (!(key in progressByKey.value)) return
+    const next = { ...progressByKey.value }
+    delete next[key]
+    progressByKey.value = next
+  }
+
+  function stop(key: string) {
+    const controller = abortByKey.get(key)
+    if (!controller) return
+    controller.abort()
+    abortByKey.delete(key)
+  }
+
+  function stopAll() {
+    for (const key of [...abortByKey.keys()]) stop(key)
+  }
+
+  function reset() {
+    stopAll()
+    progressByKey.value = {}
+  }
+
+  function forget(configId: string, skillId: string) {
+    const key = progressKey(configId, skillId)
+    stop(key)
+    forgetKey(key)
+  }
+
+  function setEvent(configId: string, skillId: string, event: ConfigSkillInstallEvent) {
+    progressByKey.value = { ...progressByKey.value, [progressKey(configId, skillId)]: event }
+  }
+
+  function follow(configId: string, skillId: string) {
+    const key = progressKey(configId, skillId)
+    if (!configId || !skillId || abortByKey.has(key)) return
+    // abortByKey is the in-flight guard. A finished event for this key is
+    // either status lag or a new run of the same skill id (retry); skipping
+    // reconnect would leave the drawer showing the previous 100%.
+    if (!options?.retainProgress) forgetKey(key)
+    const controller = new AbortController()
+    abortByKey.set(key, controller)
+    const isCurrent = () => abortByKey.get(key) === controller
+    const stopCurrent = () => { if (isCurrent()) stop(key) }
+
+    const token = localStorage.getItem('weknora_token')
+    const tenantId = localStorage.getItem('weknora_selected_tenant_id')
+    const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(configId, skillId)}`
+
+    void fetchEventSource(url, {
+      method: 'GET',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+        'Accept-Language': i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
+        'X-Request-ID': generateRandomString(12),
+        ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
+      },
+      signal: controller.signal,
+      openWhenHidden: true,
+      onmessage(ev) {
+        if (!isCurrent() || !ev.data) return
+        let parsed: ConfigSkillInstallEvent
+        try {
+          parsed = JSON.parse(ev.data) as ConfigSkillInstallEvent
+        } catch {
+          return
+        }
+        if (!parsed || typeof parsed !== 'object') return
+        setEvent(configId, skillId, parsed)
+        if (parsed.done) {
+          stopCurrent()
+          // done is also set when the stream gives up while the skill is still
+          // installing. Reloading then resubscribes immediately, and on Lite
+          // that frame arrives on every connection.
+          if (installRunFinished(parsed)) {
+            options?.onDone?.({ configId, skillId }, parsed)
+          } else if (parsed.stage === 'detached') {
+            // The server stopped following at its cap while the run goes on.
+            // Keep following; the cap bounds how often this reconnects.
+            follow(configId, skillId)
+          }
+        }
+      },
+      onerror() {
+        stopCurrent()
+        throw new Error('skill install stream closed')
+      },
+    }).catch(() => {}).finally(stopCurrent)
+  }
+
+  function sync(targets: SkillInstallProgressTarget[]) {
+    const wanted = new Set<string>()
+    for (const target of targets) {
+      const configId = target.configId.trim()
+      const skillId = target.skillId.trim()
+      if (!configId || !skillId) continue
+      const key = progressKey(configId, skillId)
+      wanted.add(key)
+      follow(configId, skillId)
+    }
+    for (const key of [...abortByKey.keys()]) {
+      if (!wanted.has(key)) stop(key)
+    }
+    if (!options?.retainProgress) {
+      for (const key of Object.keys(progressByKey.value)) {
+        if (!wanted.has(key)) forgetKey(key)
+      }
+    }
+  }
+
+  return { progressByKey, eventOf, percentOf, follow, sync, stopAll, reset, forget, setEvent }
+}

@@ -1,0 +1,890 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { marked } from 'marked'
+
+import {
+  applyStreamingTailFade,
+  closeDanglingStreamingEmphasis,
+  createChatMarkdownRenderer,
+  markStandaloneStrongParagraphs,
+  normalizeFullwidthMarkdownImageParentheses,
+  normalizeLegacyImageContextMarkup,
+  preprocessMathDelimiters,
+  renderChatMarkdown,
+  replaceIncompleteImageWithPlaceholder,
+  stripTrailingStreamingHorizontalRule,
+  stripTrailingStreamingListMarker,
+} from './chatMarkdownRenderer.ts'
+import {
+  collapseStandaloneCitationParagraphs,
+  joinCitationTagsToPreviousLine,
+  resolveCitationChunkId,
+  stripIncompleteCitationTag,
+} from './citationMarkdown.ts'
+
+const SAMPLE_DOC = 'example-report.docx'
+const SAMPLE_CHUNK_A = '00000001-0000-4000-8000-000000000001'
+const SAMPLE_CHUNK_B = '00000002-0000-4000-8000-000000000002'
+const SAMPLE_CHUNK_C = '00000003-0000-4000-8000-000000000003'
+const SAMPLE_CHUNK_PRESERVE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+
+/** Remove the streaming tail-fade wrapper so structural assertions stay focused. */
+function stripFadeTail(html: string): string {
+  return html.replace(/<span class="stream-fade-tail">([\s\S]*?)<\/span>/g, '$1')
+}
+
+test('preprocessMathDelimiters converts escaped math delimiters for marked-katex', () => {
+  assert.equal(
+    preprocessMathDelimiters('inline \\(a+b\\) and block \\[x^2\\]'),
+    'inline $a+b$ and block $$x^2$$',
+  )
+})
+
+test('replaceIncompleteImageWithPlaceholder hides an unfinished streaming image', () => {
+  assert.equal(
+    replaceIncompleteImageWithPlaceholder('before ![chart](local://bucket/path'),
+    'before <span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>',
+  )
+})
+
+test('normalizeFullwidthMarkdownImageParentheses repairs localized image delimiters', () => {
+  const ref = 'resource://yB7V7wE1gls7h9WonCDq5Q'
+  assert.equal(
+    normalizeFullwidthMarkdownImageParentheses(`![]（${ref}）`),
+    `![](${ref})`,
+  )
+  assert.equal(
+    normalizeFullwidthMarkdownImageParentheses(`![流程图]（${ref}）`),
+    `![流程图](${ref})`,
+  )
+  assert.equal(
+    normalizeFullwidthMarkdownImageParentheses(`普通中文（说明）和 ![示例]（unknown://value）`),
+    `普通中文（说明）和 ![示例]（unknown://value）`,
+  )
+})
+
+test('normalizeFullwidthMarkdownImageParentheses preserves literal examples in code', () => {
+  const code = '`![]（resource://example）`\n```md\n![]（resource://example）\n```'
+  assert.equal(normalizeFullwidthMarkdownImageParentheses(code), code)
+})
+
+test('renderChatMarkdown safely renders an image with fullwidth parentheses', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: (href) => href.startsWith('resource://'),
+  })
+  const html = renderChatMarkdown('![]（resource://yB7V7wE1gls7h9WonCDq5Q）', {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+  })
+
+  assert.match(html, /<img src="resource:\/\/yB7V7wE1gls7h9WonCDq5Q" alt="">/)
+  assert.doesNotMatch(html, /（|）/)
+})
+
+test('renderChatMarkdown skips an image with an empty destination', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    invalidImageHtml: () => '<p>invalid</p>',
+    isValidImageUrl: (href) => Boolean(href),
+  })
+  const html = renderChatMarkdown('![根目录示例文件]()', {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+  })
+
+  assert.doesNotMatch(html, /<img/)
+  assert.doesNotMatch(html, /invalid/)
+})
+
+test('renderChatMarkdown hides an unfinished fullwidth-parenthesis image while streaming', () => {
+  const renderer = createChatMarkdownRenderer()
+  const html = renderChatMarkdown('before ![流程图]（resource://yB7V7wE1gls7h9WonCDq5Q', {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: true,
+  })
+
+  assert.match(html, /streaming-image-loading/)
+  assert.doesNotMatch(html, /resource:\/\/|（/)
+})
+
+test('normalizeLegacyImageContextMarkup converts copied image XML to Markdown', () => {
+  const input = [
+    'before',
+    '<image url="resource://AbCdEfGhIjKlMnOpQrStUv">',
+    '<image_caption>目标说话人提取的流程图 [测试]</image_caption>',
+    '<image_ocr>目标说话人提取</image_ocr>',
+    '</image>',
+    'after',
+  ].join('\n')
+
+  const output = normalizeLegacyImageContextMarkup(input)
+  assert.ok(
+    output.includes('![目标说话人提取的流程图 \\[测试\\]](resource://AbCdEfGhIjKlMnOpQrStUv)'),
+  )
+  assert.doesNotMatch(output, /<image|image_caption|image_ocr/)
+  assert.match(output, /before[\s\S]*after/)
+})
+
+test('normalizeLegacyImageContextMarkup keeps original Markdown when present', () => {
+  const input = [
+    '<images>',
+    '<image url="resource://AbCdEfGhIjKlMnOpQrStUv">',
+    '<image_original>![原图](resource://AbCdEfGhIjKlMnOpQrStUv)</image_original>',
+    '<image_caption>description</image_caption>',
+    '</image>',
+    '</images>',
+  ].join('\n')
+
+  assert.equal(
+    normalizeLegacyImageContextMarkup(input).trim(),
+    '![原图](resource://AbCdEfGhIjKlMnOpQrStUv)',
+  )
+})
+
+test('normalizeLegacyImageContextMarkup hides an unfinished XML block while streaming', () => {
+  const prefix = '测试阶段主要流程\n\n'
+  for (const partial of [
+    '<ima',
+    '<image url="resource://AbCdEfGhIjKlMnOpQrStUv">',
+    '<image url="resource://AbCdEfGhIjKlMnOpQrStUv">\n<image_caption>流程图',
+  ]) {
+    const output = normalizeLegacyImageContextMarkup(prefix + partial, true)
+    assert.equal(output, prefix + '<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>')
+    assert.doesNotMatch(output, /resource:\/\/|image_caption|<ima/)
+  }
+})
+
+test('normalizeLegacyImageContextMarkup preserves literal image XML in code', () => {
+  const code = '```xml\n<image url="resource://example">\n</image>\n```'
+  assert.equal(normalizeLegacyImageContextMarkup(code, true), code)
+  assert.equal(normalizeLegacyImageContextMarkup(code, false), code)
+  assert.equal(normalizeLegacyImageContextMarkup('ordinary <input', true), 'ordinary <input')
+})
+
+test('renderChatMarkdown renders leaked legacy image XML through the safe image renderer', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: (href) => href.startsWith('resource://'),
+  })
+  const html = renderChatMarkdown(
+    '<image url="resource://AbCdEfGhIjKlMnOpQrStUv"><image_caption>流程图</image_caption></image>',
+    {
+      renderer,
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (value) => value,
+      streaming: false,
+    },
+  )
+
+  assert.match(html, /<img src="resource:\/\/AbCdEfGhIjKlMnOpQrStUv" alt="流程图">/)
+  assert.doesNotMatch(html, /image_caption|&lt;image/)
+})
+
+test('stripIncompleteCitationTag hides only an unfinished streaming citation tail', () => {
+  const prefix = 'Source '
+  const complete = '<kb doc="2.jpg" chunk_id="3c67efd5-f2ff-4e26-9032-9e44e6861178" />'
+
+  for (const partial of ['<', '<k', '<kb', '<kb ', '<kb doc="2.jpg"', '<w', '<we', '<web url="https://example.com"']) {
+    assert.equal(stripIncompleteCitationTag(prefix + partial), prefix)
+  }
+
+  assert.equal(stripIncompleteCitationTag(prefix + complete), prefix + complete)
+  assert.equal(stripIncompleteCitationTag('Value < 5'), 'Value < 5')
+})
+
+test('stripTrailingStreamingHorizontalRule hides an ambiguous trailing rule only mid-stream', () => {
+  for (const rule of ['---', '* * *', '___']) {
+    assert.equal(stripTrailingStreamingHorizontalRule(`- item\n\n${rule}`), '- item\n\n')
+  }
+  assert.equal(stripTrailingStreamingHorizontalRule('- item\n\n---\nnext'), '- item\n\n---\nnext')
+
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+  }
+  const source = '- item\n\n---'
+  assert.doesNotMatch(renderChatMarkdown(source, { ...options, streaming: true }), /<hr>/)
+  assert.match(renderChatMarkdown(source, { ...options, streaming: false }), /<hr>/)
+})
+
+test('closeDanglingStreamingEmphasis closes unfinished inline markers without false positives', () => {
+  assert.equal(closeDanglingStreamingEmphasis('**平台地址：example.com'), '**平台地址：example.com**')
+  assert.equal(closeDanglingStreamingEmphasis('前文 *斜体'), '前文 *斜体*')
+  assert.equal(closeDanglingStreamingEmphasis('前文 ~~删除'), '前文 ~~删除~~')
+  assert.equal(closeDanglingStreamingEmphasis('***又粗又斜'), '***又粗又斜***')
+  assert.equal(closeDanglingStreamingEmphasis('运行 `npm run'), '运行 `npm run`')
+  assert.equal(closeDanglingStreamingEmphasis('正文\n``'), '正文\n``')
+  assert.equal(closeDanglingStreamingEmphasis('运行 ``a`b'), '运行 ``a`b``')
+
+  // A trailing marker run with no content after it is ambiguous (e.g. the start
+  // of the next `**` in a bold list) and is hidden until content arrives, rather
+  // than rendered as a literal `*`/`**` that flickers a frame later.
+  assert.equal(closeDanglingStreamingEmphasis('4. **朝阳实验**\n5. *'), '4. **朝阳实验**\n5. ')
+  assert.equal(closeDanglingStreamingEmphasis('5. **'), '5. ')
+  assert.equal(closeDanglingStreamingEmphasis('3. **泳燃游泳*'), '3. **泳燃游泳**')
+
+  // No dangling markers / structural markers must be left untouched.
+  assert.equal(closeDanglingStreamingEmphasis('正文 **加粗** 收尾'), '正文 **加粗** 收尾')
+  assert.equal(closeDanglingStreamingEmphasis('* 列表项一'), '* 列表项一')
+  assert.equal(closeDanglingStreamingEmphasis('普通文本没有标记'), '普通文本没有标记')
+  // Markers inside an open fenced code block are literal, not emphasis.
+  assert.equal(
+    closeDanglingStreamingEmphasis('```js\nconst x = **y'),
+    '```js\nconst x = **y',
+  )
+})
+
+test('renderChatMarkdown renders an unfinished bold line as bold immediately while streaming', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+  }
+  const partial = '**平台访问地址：chatbot.weixin.qq.com'
+  // Streaming: optimistically bold so no raw `**` and no late layout jump.
+  assert.match(
+    stripFadeTail(renderChatMarkdown(partial, { ...options, streaming: true })),
+    /<p class="md-strong-title"><strong>平台访问地址：chatbot\.weixin\.qq\.com<\/strong><\/p>/,
+  )
+  // Completed: a genuinely unterminated marker stays literal (we never invent
+  // content for the final, authoritative render).
+  assert.match(
+    renderChatMarkdown(partial, { ...options, streaming: false }),
+    /<p>\*\*平台访问地址/,
+  )
+})
+
+function assertChatMarkdown(source: string, expected: string) {
+  const native = marked.parse(expected, { async: false, breaks: true }) as string
+  assert.equal(renderEmphasisSample(source), markStandaloneStrongParagraphs(native), source)
+}
+
+test('chat Markdown bolds punctuation-adjacent emphasis CommonMark would drop', () => {
+  // Closing delimiter sits between punctuation and a letter -> CommonMark rejects
+  // it; the chat tokenizer recognizes the blocked pair.
+  assertChatMarkdown('**XBRL（语言）**是一种', '<strong>XBRL（语言）</strong>是一种')
+  assertChatMarkdown('**a)**b', '<strong>a)</strong>b')
+  assertChatMarkdown('~~删除）~~文字', '<del>删除）</del>文字')
+  assertChatMarkdown('*斜体）*文字', '<em>斜体）</em>文字')
+
+  // Opening delimiter sits between a letter/number and punctuation -> CommonMark
+  // refuses to open emphasis even though the closer is valid; we bold it too.
+  assertChatMarkdown(
+    '知识库中**《xxx》学程手册**整理',
+    '知识库中<strong>《xxx》学程手册</strong>整理',
+  )
+  assertChatMarkdown('在**《书名》**', '在<strong>《书名》</strong>')
+  assertChatMarkdown('看到~~《删》文字~~后面', '看到<del>《删》文字</del>后面')
+
+  // Cases marked already handles, literal markers, and code must be untouched.
+  assertChatMarkdown('**中文**后面', '**中文**后面')
+  assertChatMarkdown('**中文）** 后面', '**中文）** 后面')
+  assertChatMarkdown('正文 **加粗** 收尾', '正文 **加粗** 收尾')
+  assertChatMarkdown('`**a)**b`', '`**a)**b`')
+  assertChatMarkdown('2 ** 3 ** 4', '2 ** 3 ** 4')
+  assertChatMarkdown('价格 3 * 5 * 7 元', '价格 3 * 5 * 7 元')
+  // Exponent / glob markers stay literal: the opener is followed by a number or
+  // path content, not an emphasis-opening punctuation run.
+  assertChatMarkdown('x**2 + y**2', 'x**2 + y**2')
+  assertChatMarkdown('2**3**4', '2**3**4')
+})
+
+function renderEmphasisSample(source: string, streaming = false): string {
+  return stripFadeTail(
+    renderChatMarkdown(source, {
+      renderer: createChatMarkdownRenderer(),
+      escapeMarkdown: (value) => value,
+      sanitizeHtml: (value) => value,
+      streaming,
+    }),
+  )
+}
+
+test('adjacent complete bold pairs never reuse the first closing delimiter as an opener', () => {
+  const source = '合计为 **甲**（记录显示为 **-乙**）。'
+  assertChatMarkdown(source, source)
+  assertChatMarkdown(
+    source.replace('为 **-', '为**-'),
+    '合计为 **甲**（记录显示为<strong>-乙</strong>）。',
+  )
+})
+
+test('adjacent complete strike pairs keep explanatory text outside deletion', () => {
+  const source = '结束~~旧值~~（说明为 ~~新值~~）。'
+  assertChatMarkdown(source, source)
+  assertChatMarkdown(source.replace('为 ~~', '为~~'), source.replace('为 ~~', '为~~'))
+})
+
+test('adjacent bold spans render independently in streaming and final answers', () => {
+  for (const gap of ['', ' ']) {
+    const source = `合计为 **甲**（记录显示为${gap}**-乙**）。`
+    for (const streaming of [false, true]) {
+      assert.equal(
+        renderEmphasisSample(source, streaming),
+        `<p>合计为 <strong>甲</strong>（记录显示为${gap}<strong>-乙</strong>）。</p>\n`,
+      )
+    }
+  }
+})
+
+test('adjacent strikethrough spans render independently in streaming and final answers', () => {
+  for (const gap of ['', ' ']) {
+    for (const streaming of [false, true]) {
+      assert.equal(
+        renderEmphasisSample(`结束~~旧值~~（说明为${gap}~~新值~~）。`, streaming),
+        `<p>结束<del>旧值</del>（说明为${gap}<del>新值</del>）。</p>\n`,
+      )
+    }
+  }
+})
+
+test('a completed first span remains isolated through every later streaming prefix', () => {
+  const source = '合计为 **甲**（记录显示为 **-乙**）。'
+  const firstEnd = source.indexOf('**（') + 2
+  for (let end = firstEnd; end <= source.length; end++) {
+    const html = renderEmphasisSample(source.slice(0, end), true)
+    assert.match(html, /<strong>甲<\/strong>/, source.slice(0, end))
+    assert.doesNotMatch(html, /<strong>甲<strong>/)
+  }
+})
+
+test('an unfinished later span stays literal in the final answer without extending the first', () => {
+  assert.equal(
+    renderEmphasisSample('合计为 **甲**（记录为 **未完成'),
+    '<p>合计为 <strong>甲</strong>（记录为 **未完成</p>\n',
+  )
+})
+
+test('existing punctuation repairs coexist with normal pairs in one answer', () => {
+  const html = renderEmphasisSample(
+    '正常 **甲**，知识库中**《手册》**整理，**XBRL（语言）**是一种格式。',
+  )
+  assert.equal(
+    html,
+    '<p>正常 <strong>甲</strong>，知识库中<strong>《手册》</strong>整理，<strong>XBRL（语言）</strong>是一种格式。</p>\n',
+  )
+})
+
+test('punctuation repair keeps Unicode letter boundaries outside the BMP', () => {
+  assertChatMarkdown('𠮷**《字》**尾', '𠮷<strong>《字》</strong>尾')
+  assertChatMarkdown('**字）**𠮷', '<strong>字）</strong>𠮷')
+})
+
+test('existing combined strong and italic delimiter runs remain supported', () => {
+  assertChatMarkdown('前**《甲》***斜体*', '前<strong>《甲》</strong>*斜体*')
+  assertChatMarkdown('***粗斜体***', '***粗斜体***')
+})
+
+test('code and literal arithmetic/glob markers retain their existing interpretation', () => {
+  for (const source of [
+    '`合计为 **甲**（记录显示为 **-乙**）。`',
+    '```text\n结束~~旧值~~（说明为 ~~新值~~）。\n```',
+    '2**3**4 与 x**2 和 **/*.js',
+    String.raw`\*\*普通标记\*\*`,
+  ])
+    assertChatMarkdown(source, source)
+})
+
+test('emphasis pairing keeps existing inline and display math rendering', () => {
+  for (const source of [
+    '$x^2 + y^2 = z^2$',
+    '$$\n\\frac{1}{2}+\\sqrt{4}\n$$',
+    '\\(x + y\\)',
+    '\\[E=mc^2\\]',
+  ]) {
+    const html = renderEmphasisSample(source)
+    assert.match(html, /class="katex/)
+    assert.doesNotMatch(html, /katex-error/)
+  }
+})
+
+test('escaped delimiters stay literal while even backslashes retain normal repair', () => {
+  for (const source of [
+    String.raw`\**《字》**文`,
+    String.raw`**字）\**文`,
+    String.raw`\~~《删》~~文`,
+    String.raw`~~删）\~~文`,
+  ]) {
+    assertChatMarkdown(source, source)
+  }
+  assertChatMarkdown(String.raw`\\**字）**文`, String.raw`\\<strong>字）</strong>文`)
+  assertChatMarkdown(String.raw`\\*字）*文`, String.raw`\\<em>字）</em>文`)
+})
+
+test('triple emphasis and escaped markers render through the normal Markdown parser', () => {
+  const html = renderEmphasisSample('***粗斜体*** 与 \\*\\*普通标记\\*\\*')
+  assert.match(html, /<em><strong>粗斜体<\/strong><\/em>/)
+  assert.match(html, /\*\*普通标记\*\*/)
+  assert.doesNotMatch(html, /<em>\*<\/em>/)
+})
+
+test('ordinary adjacent italic pairs are not converted into a larger span', () => {
+  const source = '*甲*（说明为 *乙*）。'
+  assertChatMarkdown(source, source)
+  assert.equal(renderEmphasisSample(source), '<p><em>甲</em>（说明为 <em>乙</em>）。</p>\n')
+})
+
+test('formatted currency spans remain separate from explanatory text and math', () => {
+  for (const gap of ['', ' ']) {
+    for (const streaming of [false, true]) {
+      const html = renderEmphasisSample(
+        `金额 **$12.34 USD**（显示为${gap}**-$12.34**）。`,
+        streaming,
+      )
+      assert.equal(
+        html,
+        `<p>金额 <strong>$12.34 USD</strong>（显示为${gap}<strong>-$12.34</strong>）。</p>\n`,
+      )
+      assert.doesNotMatch(html, /katex/)
+    }
+  }
+})
+
+test('renderChatMarkdown bolds punctuation-adjacent emphasis both mid-stream and when complete', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+  }
+  const text = '**XBRL（语言）**是一种标准'
+  for (const streaming of [true, false]) {
+    assert.match(
+      stripFadeTail(renderChatMarkdown(text, { ...options, streaming })),
+      /<strong>XBRL（语言）<\/strong>是一种标准/,
+    )
+  }
+})
+
+test('stripTrailingStreamingListMarker hides a content-less trailing list/underline marker', () => {
+  assert.equal(stripTrailingStreamingListMarker('1. **AAAAA**\n   - '), '1. **AAAAA**\n')
+  assert.equal(stripTrailingStreamingListMarker('文本\n1. '), '文本\n')
+  assert.equal(stripTrailingStreamingListMarker('标题\n=='), '标题\n')
+  // A lone trailing number is the start of an ordered marker (no `.` yet).
+  assert.equal(stripTrailingStreamingListMarker('文本\n1'), '文本\n')
+  // A marker with content after it is a real list item and must stay.
+  assert.equal(stripTrailingStreamingListMarker('- 项目'), '- 项目')
+  assert.equal(stripTrailingStreamingListMarker('1. 内容'), '1. 内容')
+  // An in-sentence number must not be touched.
+  assert.equal(stripTrailingStreamingListMarker('值是 1'), '值是 1')
+})
+
+test('renderChatMarkdown does not flash a setext heading when a nested bullet dash streams in', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+    streaming: true,
+  }
+  // A must stay a plain bold item through the whole lead-up to B: the bare dash
+  // must not flash <h2>, and the next bullet's `*`/`**` (before its text) must
+  // not flash an empty nested <li> under A.
+  for (const partial of ['1. **AAAAA**\n   - ', '1. **AAAAA**\n   - *', '1. **AAAAA**\n   - **']) {
+    const html = stripFadeTail(renderChatMarkdown(partial, options))
+    assert.doesNotMatch(html, /<h2/)
+    assert.doesNotMatch(html, /<ul>/)
+    assert.match(html, /<ol>\s*<li><strong>AAAAA<\/strong><\/li>\s*<\/ol>/)
+  }
+})
+
+test('renderChatMarkdown streams a bold ordered list without literal-marker flicker', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+    streaming: true,
+  }
+  // Next item's marker has arrived but its content/closing ** has not.
+  const html = stripFadeTail(renderChatMarkdown('1. **速游**\n2. *', options))
+  assert.doesNotMatch(html, /<li>\*+<\/li>/)
+  assert.match(html, /<li><strong>速游<\/strong><\/li>/)
+})
+
+test('markStandaloneStrongParagraphs tags only paragraphs that are entirely one bold run', () => {
+  // A model emitting **小节标题** as a pseudo-heading: should be tagged.
+  assert.equal(
+    markStandaloneStrongParagraphs('<p><strong>小节标题：</strong></p>'),
+    '<p class="md-strong-title"><strong>小节标题：</strong></p>',
+  )
+
+  // Mid-stream body paragraph with one completed bold run plus body text must
+  // NOT be tagged (this is the streaming spacing-jump regression).
+  for (const html of [
+    '<p>正文 <strong>加粗部分</strong> 与 **</p>',
+    '<p>正文 <strong>A</strong> 与 <strong>B</strong> 收尾</p>',
+    '<p><strong>加粗</strong> 后续文字</p>',
+  ]) {
+    assert.equal(markStandaloneStrongParagraphs(html), html)
+  }
+
+  // A bold list item (loose list wraps content in <p>) is list text, not a
+  // subtitle: it must keep the list's own margins, not gain a 1.25em top margin.
+  assert.equal(
+    markStandaloneStrongParagraphs('<ol><li><p><strong>AAA</strong></p></li></ol>'),
+    '<ol><li><p><strong>AAA</strong></p></li></ol>',
+  )
+})
+
+test('renderChatMarkdown does not give a text-heavy paragraph the strong-title margin mid-stream', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+    streaming: true,
+  }
+  const head = '#### **总结与建议**\n\n'
+  // One bold run closed inside an otherwise text-heavy body paragraph.
+  const midStream = head + '总体来看，体现在 **"补短板"（高端核心部件）** 与 **'
+  const html = renderChatMarkdown(midStream, options)
+  assert.doesNotMatch(html, /<p class="md-strong-title">总体来看/)
+  assert.match(html, /<h4><strong>总结与建议<\/strong><\/h4>/)
+})
+
+test('renderChatMarkdown preserves citations, math, and sanitized output through one shared pipeline', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, title, text }) =>
+      `<img src="${href}" alt="${text}" title="${title || ''}" class="markdown-image">`,
+    isValidImageUrl: (href) => href.startsWith('https://'),
+  })
+
+  const html = renderChatMarkdown(
+    [
+      'See <kb doc="sample-product-guide.pdf" chunk_id="chunk-1" kb_id="kb-1"/>',
+      '',
+      'Formula: \\(E=mc^2\\)',
+      '',
+      '| A | B |',
+      '| --- | --- |',
+      '| 1 | 2 |',
+      '',
+      '![ok](https://example.com/a.png "图")',
+      '',
+      '![bad](javascript:alert(1))',
+    ].join('\n'),
+    {
+      renderer,
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (html) => html.replace(/javascript:alert\(1\)/g, ''),
+    },
+  )
+
+  assert.match(html, /class="citation citation-kb"/)
+  assert.match(html, /data-chunk-id="chunk-1"/)
+  assert.match(html, /katex/)
+  assert.match(html, /<div class="chat-markdown-table"><table>/)
+  assert.match(html, /<img src="https:\/\/example\.com\/a\.png"/)
+  assert.doesNotMatch(html, /javascript:alert/)
+})
+
+test('resolveCitationChunkId maps context index to retrieval chunk UUID', () => {
+  const refs = [
+    { id: 'uuid-chunk-1', knowledge_title: 'Doc A', chunk_type: 'faq' },
+    { id: 'uuid-chunk-2', knowledge_title: 'FAQ TEST - FAQ', chunk_type: 'faq' },
+  ]
+
+  assert.equal(
+    resolveCitationChunkId('2', { doc: 'FAQ TEST - FAQ' }, refs),
+    'uuid-chunk-2',
+  )
+  assert.equal(
+    resolveCitationChunkId('FAQ-2', { doc: 'FAQ TEST - FAQ' }, refs),
+    'uuid-chunk-2',
+  )
+  assert.equal(
+    resolveCitationChunkId('uuid-chunk-1', { doc: 'Doc A' }, refs),
+    'uuid-chunk-1',
+  )
+})
+
+test('renderChatMarkdown preserves chunk UUIDs when escapeMarkdown strips UUIDs from prose', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: () => true,
+  })
+  const chunkId = SAMPLE_CHUNK_PRESERVE
+  const stripUuids = (text: string) => text.replace(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+    '',
+  )
+
+  const html = renderChatMarkdown(
+    `Sample text <kb doc="sample-topic.pdf" chunk_id="${chunkId}" />`,
+    {
+      renderer,
+      escapeMarkdown: stripUuids,
+      sanitizeHtml: (html) => html,
+    },
+  )
+
+  assert.match(html, /class="citation citation-kb"/)
+  assert.match(html, new RegExp(`data-chunk-id="${chunkId}"`))
+})
+
+test('renderChatMarkdown resolves indexed chunk_id when knowledge references are provided', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: () => true,
+  })
+
+  const html = renderChatMarkdown(
+    'See <kb doc="Sample FAQ" chunk_id="2" />',
+    {
+      renderer,
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (html) => html,
+      knowledgeReferences: [
+        { id: 'resolved-chunk-id', knowledge_title: 'Sample FAQ', chunk_type: 'faq' },
+        { id: 'other-chunk', knowledge_title: 'Other FAQ', chunk_type: 'faq' },
+      ],
+    },
+  )
+
+  assert.match(html, /data-chunk-id="resolved-chunk-id"/)
+  assert.doesNotMatch(html, /data-chunk-id="2"/)
+})
+
+test('joinCitationTagsToPreviousLine removes blank lines before citation tags', () => {
+  const input = 'Setup is complete.\n\n<kb doc="faq.pdf" chunk_id="1" />'
+  assert.equal(joinCitationTagsToPreviousLine(input), 'Setup is complete. <kb doc="faq.pdf" chunk_id="1" />')
+})
+
+test('joinCitationTagsToPreviousLine inlines consecutive citation tags across single newlines', () => {
+  const tag1 = `<kb doc="${SAMPLE_DOC}" chunk_id="${SAMPLE_CHUNK_A}" />`
+  const tag2 = `<kb doc="${SAMPLE_DOC}" chunk_id="${SAMPLE_CHUNK_B}" />`
+  const tag3 = `<kb doc="${SAMPLE_DOC}" chunk_id="${SAMPLE_CHUNK_C}" />`
+  const input = `${tag1}\n${tag2}\n${tag3}`
+  assert.equal(joinCitationTagsToPreviousLine(input), `${tag1} ${tag2} ${tag3}`)
+})
+
+test('renderChatMarkdown inlines consecutive citation tags across newlines', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: () => true,
+  })
+  const html = renderChatMarkdown(
+    [
+      `<kb doc="${SAMPLE_DOC}" chunk_id="${SAMPLE_CHUNK_A}" />`,
+      `<kb doc="${SAMPLE_DOC}" chunk_id="${SAMPLE_CHUNK_B}" />`,
+      `<kb doc="${SAMPLE_DOC}" chunk_id="${SAMPLE_CHUNK_C}" />`,
+    ].join('\n'),
+    {
+      renderer,
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (html) => html,
+    },
+  )
+
+  assert.equal((html.match(/citation-kb/g) || []).length, 3)
+  assert.doesNotMatch(html, /<\/p>\s*<p>\s*<span class="citation citation-kb"/)
+})
+
+test('joinCitationTagsToPreviousLine appends an indented citation to the preceding list item', () => {
+  const tag = '<kb doc="阅读之星全国青少年阅读风采展示活动.pdf" chunk_id="chunk-1" />'
+  const input = [
+    '#### 5️⃣ 阅读之星培养基地',
+    '- 每个组别冠亚季军及前十强所在的学校，将获得 **"阅读之星培养基地"** 奖牌',
+    '',
+    `  ${tag}`,
+  ].join('\n')
+  assert.equal(
+    joinCitationTagsToPreviousLine(input),
+    [
+      '#### 5️⃣ 阅读之星培养基地',
+      `- 每个组别冠亚季军及前十强所在的学校，将获得 **"阅读之星培养基地"** 奖牌 ${tag}`,
+    ].join('\n'),
+  )
+})
+
+test('renderChatMarkdown renders a citation after a list item inline in that item', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: () => true,
+  })
+  const tag = '<kb doc="阅读之星全国青少年阅读风采展示活动.pdf" chunk_id="chunk-1" />'
+  const html = renderChatMarkdown(`- 培养基地奖牌\n\n  ${tag}`, {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+  })
+
+  assert.match(html, /<li>培养基地奖牌 <span class="citation citation-kb"/)
+  assert.doesNotMatch(html, /<\/ul>\s*<p>\s*<span class="citation citation-kb"/)
+})
+
+test('joinCitationTagsToPreviousLine does not merge citations onto fenced code closing delimiter', () => {
+  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
+  const input = '```bash\nunzip setup.zip\n```\n\n' + tag
+  assert.equal(joinCitationTagsToPreviousLine(input), '```bash\nunzip setup.zip\n```\n\n' + tag)
+})
+
+test('joinCitationTagsToPreviousLine does not merge citations onto an unlabeled closing fence on a single newline', () => {
+  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
+  const input = '```\nAPR = principal\n```\n' + tag
+  assert.equal(joinCitationTagsToPreviousLine(input), '```\nAPR = principal\n```\n' + tag)
+})
+
+test('applyStreamingTailFade wraps the trailing text run', () => {
+  const out = applyStreamingTailFade('<p>Great, that narrows it down a lot. Two more quick</p>')
+  assert.match(out, /<span class="stream-fade-tail">[^<]*Two more quick<\/span><\/p>$/)
+})
+
+test('applyStreamingTailFade skips whitespace-only runs and fades the last list item', () => {
+  const out = applyStreamingTailFade('<ol>\n<li>第一项</li>\n<li>正在生成的第二项</li>\n</ol>')
+  assert.match(out, /<li><span class="stream-fade-tail">正在生成的第二项<\/span><\/li>/)
+})
+
+test('applyStreamingTailFade is a no-op for empty content', () => {
+  assert.equal(applyStreamingTailFade(''), '')
+  assert.equal(applyStreamingTailFade('<p></p>'), '<p></p>')
+})
+
+test('renderChatMarkdown adds the tail fade only while streaming', () => {
+  const renderer = createChatMarkdownRenderer()
+  const opts = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+  }
+  const streamed = renderChatMarkdown('正在生成中的回答内容', { ...opts, streaming: true })
+  assert.match(streamed, /stream-fade-tail/)
+  const settled = renderChatMarkdown('正在生成中的回答内容', { ...opts, streaming: false })
+  assert.doesNotMatch(settled, /stream-fade-tail/)
+})
+
+test('renderChatMarkdown keeps an unlabeled fenced code block closed when a citation immediately follows', () => {
+  const renderer = createChatMarkdownRenderer()
+  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
+  const html = renderChatMarkdown(
+    ['```', 'APR = principal', '```', tag, '', '### 重要性'].join('\n'),
+    {
+      renderer,
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (html) => html,
+    },
+  )
+
+  assert.doesNotMatch(html, /### 重要性/)
+  assert.match(html, /<h3>重要性<\/h3>/)
+  assert.equal((html.match(/<pre>/g) || []).length, 1)
+})
+
+test('renderChatMarkdown keeps fenced code blocks closed when citations follow', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: () => true,
+  })
+  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
+  const html = renderChatMarkdown(
+    ['```bash', 'unzip setup.zip', '```', '', tag, '', '#### Next step'].join('\n'),
+    {
+      renderer,
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (html) => html,
+    },
+  )
+
+  assert.doesNotMatch(html, /#### Next step/)
+  assert.match(html, /<h4>Next step<\/h4>/)
+  assert.equal((html.match(/<pre>/g) || []).length, 1)
+})
+
+test('collapseStandaloneCitationParagraphs merges citations across empty paragraphs', () => {
+  const html = '<p>Steps:</p><p></p><p><span class="citation citation-kb" data-chunk-id="x">doc</span></p>'
+  const out = collapseStandaloneCitationParagraphs(html)
+  assert.match(out, /Steps:.*citation-kb/s)
+  assert.doesNotMatch(out, /<p><\/p>/)
+})
+
+test('renderChatMarkdown keeps ~~strikethrough~~ while leaving single tildes literal', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+    streaming: false,
+  }
+  const html = renderChatMarkdown('~~a~~ and ~b~ and 2020~2035, 8:00~12:00.', options)
+  assert.equal((html.match(/<del>/g) || []).length, 1)
+  assert.match(html, /<del>a<\/del>/)
+  assert.match(html, /~b~/)
+  assert.match(html, /2020~2035/)
+  assert.match(html, /8:00~12:00/)
+})
+
+test('streaming and settled emphasis leave literal code intact', () => {
+  const literal = '**字）**文 ~~删）~~文'
+  for (const source of [
+    '``' + literal + '``',
+    '~~~txt\n' + literal + '\n~~~',
+    '````txt\n' + literal + '\n```',
+    '> ~~~\n> ' + literal + '\n> ~~~',
+    '- ~~~\n  ' + literal + '\n  ~~~',
+    '    ' + literal,
+  ]) {
+    for (const streaming of [true, false]) {
+      const html = renderEmphasisSample(source, streaming)
+      assert.match(html, /<code[^>]*>\*\*字）\*\*文 ~~删）~~文/, source)
+      assert.doesNotMatch(html, /&lt;(?:strong|del)|文~~/, source)
+    }
+  }
+})
+
+test('every fence prefix keeps its literal body and prose resumes after the fence', () => {
+  const source = '~~~txt\n**字）**文\n***\n~~~'
+  for (let end = source.indexOf('\n') + 1; end <= source.length; end++) {
+    const prefix = source.slice(0, end)
+    assert.equal(renderEmphasisSample(prefix, true), renderEmphasisSample(prefix), prefix)
+  }
+  assert.match(renderEmphasisSample(source + '\n**字）**文', true), /<strong>字）<\/strong>文/)
+})
+
+test('inline code and link destinations stay literal inside surrounding markup', () => {
+  for (const streaming of [true, false]) {
+    const html = renderEmphasisSample('**before ``literal * ~~`` after**', streaming)
+    assert.match(html, /<strong>before <code>literal \* ~~<\/code> after<\/strong>/)
+    assert.doesNotMatch(html, /<\/strong>\*/)
+    const link = renderEmphasisSample('[doc](https://example.org/**字）**文)', streaming)
+    assert.match(link, /href="https:\/\/example.org\//)
+    assert.doesNotMatch(link, /strong/)
+  }
+})
+
+test('native code and links inside a punctuation-blocked pair retain their own delimiters', () => {
+  const html = renderEmphasisSample('**[docs](https://example.org/a**b) 和 `**字）**文`）**之后')
+  assert.match(
+    html,
+    /<strong><a href="https:\/\/example.org\/a\*\*b">docs<\/a> 和 <code>\*\*字）\*\*文<\/code>）<\/strong>之后/,
+  )
+})
+
+test('caller-provided code renderer receives the exact code and language', () => {
+  const renderer = createChatMarkdownRenderer({
+    codeRenderer(token) {
+      assert.equal(token.lang, 'mermaid')
+      assert.equal(token.text, 'A[**字）**文] --> B')
+      return '<pre>diagram</pre>'
+    },
+  })
+  for (const streaming of [false, true]) {
+    const html = renderChatMarkdown('~~~mermaid\nA[**字）**文] --> B\n~~~', {
+      renderer,
+      streaming,
+      escapeMarkdown: String,
+      sanitizeHtml: String,
+    })
+    assert.equal(stripFadeTail(html), '<pre>diagram</pre>')
+  }
+})

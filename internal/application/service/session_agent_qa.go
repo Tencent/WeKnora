@@ -1,0 +1,1030 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/collaboration"
+	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/rerank"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+// modelMaxOutputTokens returns the configured or cataloged output limit of a
+// chat model, or zero when neither declares one.
+func modelMaxOutputTokens(m *types.Model) int {
+	if m.Parameters.MaxOutputTokens > 0 {
+		return m.Parameters.MaxOutputTokens
+	}
+	if m.Source != types.ModelSourceRemote {
+		return 0
+	}
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: m.Parameters.Provider, Model: m.Name, BaseURL: m.Parameters.BaseURL,
+		ModelType: types.ModelTypeKnowledgeQA, Extra: m.Parameters.ExtraConfig, Override: m.Parameters.Spec,
+	})
+	if err != nil {
+		return 0
+	}
+	return resolved.Capabilities().MaxOutputTokens
+}
+
+// AgentQA performs agent-based question answering with conversation history and streaming support
+// customAgent is optional - if provided, uses custom agent configuration instead of tenant defaults
+// summaryModelID is optional - if provided, overrides the model from customAgent config
+func (s *sessionService) AgentQA(
+	ctx context.Context,
+	req *types.QARequest,
+	eventBus *event.EventBus,
+) error {
+	sessionID := req.Session.ID
+	if req.Session.Kind == types.SessionKindAgentDelegated {
+		b := collaboration.FromContext(ctx)
+		if b == nil || b.Child == nil || b.Child.Member.SessionID != sessionID {
+			return errors.New("delegated conversations require a scheduler-owned execution")
+		}
+		if err := b.Runtime.CheckOwner(ctx, *b.Child); err != nil {
+			return err
+		}
+	}
+	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
+	// bind script execution to a per-session MicroVM instance.
+	ctx = types.WithSessionID(ctx, sessionID)
+	ctx = types.WithRunMode(ctx, req.Mode)
+	sessionJSON, err := json.Marshal(req.Session)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
+		return fmt.Errorf("failed to marshal session: %w", err)
+	}
+
+	// customAgent is required for AgentQA (handler has already done permission check for shared agent)
+	if req.CustomAgent == nil {
+		logger.Warnf(ctx, "Custom agent not provided for session: %s", sessionID)
+		return errors.New("custom agent configuration is required for agent QA")
+	}
+
+	// Resolve retrieval tenant using shared helper
+	agentTenantID := s.resolveRetrievalTenantID(ctx, req)
+	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
+		sessionID, agentTenantID, req.Query, string(sessionJSON))
+
+	var tenantInfo *types.Tenant
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		tenantInfo, _ = v.(*types.Tenant)
+	}
+	// When agent belongs to another tenant (shared agent), use agent's tenant for KB/model scope; load tenantInfo if needed
+	if tenantInfo == nil || tenantInfo.ID != agentTenantID {
+		if s.tenantService != nil {
+			if agentTenant, err := s.tenantService.GetTenantByID(ctx, agentTenantID); err == nil && agentTenant != nil {
+				tenantInfo = agentTenant
+				logger.Infof(ctx, "Using agent tenant info for retrieval scope, tenant ID: %d", agentTenantID)
+			}
+		}
+	}
+	if tenantInfo == nil {
+		logger.Warnf(ctx, "Tenant info not available for agent tenant %d, proceeding with defaults", agentTenantID)
+		tenantInfo = &types.Tenant{ID: agentTenantID}
+	}
+
+	// Ensure defaults are set
+	req.CustomAgent.EnsureDefaults()
+
+	// Build AgentConfig from custom agent and tenant info
+	agentConfig, err := s.buildAgentConfig(ctx, req, tenantInfo, agentTenantID)
+	if err != nil {
+		return err
+	}
+	if delegated, err := delegatedConfigFromBinding(ctx); err != nil {
+		return err
+	} else if delegated != nil {
+		agentConfig.AssistantAccess = delegated.level(tenantInfo)
+		if agentConfig.AssistantAccess == types.AssistantAccessReadOnly {
+			agentConfig.WritableKBIDs = nil
+		}
+	}
+	ctx = types.WithAccessLevel(ctx, agentConfig.AssistantAccess)
+	if _, scoped := types.GrantScopeFromContext(ctx); !scoped {
+		// Grants given anywhere in a conversation, including by its delegated
+		// children, belong to the root conversation.
+		grantSessionID := req.GrantSessionID
+		if grantSessionID == "" {
+			grantSessionID = sessionID
+		}
+		ctx = types.WithGrantScope(ctx, types.GrantScope{Scope: types.AgentGrantScopeSession, ScopeID: grantSessionID})
+	}
+
+	// Set VLM model ID for tool result image analysis (runtime-only field)
+	if req.CustomAgent != nil && req.CustomAgent.Config.VLMModelID != "" {
+		agentConfig.VLMModelID = req.CustomAgent.Config.VLMModelID
+	}
+
+	// Resolve model ID using shared helper (AgentQA requires a model, so error if not found)
+	effectiveModelID, modelTenantID, err := s.resolveChatModelID(
+		ctx, req, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs,
+	)
+	if err != nil {
+		return err
+	}
+	if effectiveModelID == "" {
+		logger.Warnf(ctx, "No summary model configured for custom agent %s", req.CustomAgent.ID)
+		return errors.New("summary model (model_id) is not configured in custom agent settings")
+	}
+
+	modelCtx := types.WithExecutionTenant(ctx, modelTenantID)
+	summaryModel, err := s.modelService.GetChatModel(modelCtx, effectiveModelID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to get chat model: %v", err)
+		return fmt.Errorf("failed to get chat model: %w", err)
+	}
+
+	// The model's own metadata decides two things the agent cannot guess: how
+	// much history fits before compaction, and whether images can be passed
+	// through. Resolve it once, before the engine is built — the engine sizes
+	// its memory consolidator from MaxContextTokens at construction.
+	var agentModelSupportsVision bool
+	modelContextWindow := 0
+	if effectiveModelID != "" {
+		if modelInfo, err := s.modelService.GetModelByID(modelCtx, effectiveModelID); err == nil && modelInfo != nil {
+			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
+			modelContextWindow = modelInfo.Parameters.ContextWindow
+			agentConfig.ModelMaxOutputTokens = modelMaxOutputTokens(modelInfo)
+		}
+	}
+	agentConfig.ChatModelSupportsVision = agentModelSupportsVision
+	agentConfig.MaxContextTokens = types.AgentMaxContextTokens(
+		agentConfig.MaxContextTokens, modelContextWindow,
+	)
+	logger.Infof(ctx, "Agent context window: %d tokens (model %s declares %d)",
+		agentConfig.MaxContextTokens, effectiveModelID, modelContextWindow)
+
+	// Get rerank model from custom agent config only when knowledge_search can
+	// actually run. A disabled KB scope makes all KB tools ineffective, so it
+	// must not force users to configure an otherwise-unused rerank model.
+	var rerankModel rerank.Reranker
+	if agentRequiresRerankModel(req.CustomAgent) {
+		// Rerank model is resolved purely from the agent config now.
+		// We used to fall back to ConversationConfig.RerankModelID at
+		// the tenant level, but that path encouraged "leave rerank
+		// blank on the agent and inherit silently" which made debugging
+		// retrieval quality a guessing game across tenant settings vs
+		// agent settings. Forcing the agent to declare its own rerank
+		// model puts the configuration where the user actually edits
+		// the agent. If a Wiki-only agent doesn't need reranking,
+		// agentRequiresRerankModel() below already lets it pass.
+		rerankModelID := req.CustomAgent.Config.RerankModelID
+		if rerankModelID == "" && types.UsesWorkspaceModelFallback(req.CustomAgent) {
+			// Nobody can set a rerank model on an internal agent, so it takes
+			// the workspace's; search_knowledge keeps retrieval order without one.
+			models, listErr := s.modelService.ListModels(ctx)
+			if listErr != nil {
+				logger.Warnf(ctx, "Failed to list models for internal agent %s rerank fallback: %v",
+					req.CustomAgent.ID, listErr)
+			}
+			rerankModelID = pickWorkspaceRerankModelID(models)
+			if rerankModelID == "" {
+				logger.Infof(ctx, "No rerank model in the workspace, internal agent %s searches without reranking",
+					req.CustomAgent.ID)
+			}
+		} else if rerankModelID == "" {
+			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
+			return errors.New("rerank model is not configured: please set rerank_model_id on the agent")
+		}
+
+		if rerankModelID != "" {
+			rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)
+			if err != nil {
+				logger.Warnf(ctx, "Failed to get rerank model: %v", err)
+				return fmt.Errorf("failed to get rerank model: %w", err)
+			}
+		}
+	} else {
+		logger.Infof(ctx, "knowledge_search is unavailable for the effective agent scope, skipping rerank model initialization")
+	}
+
+	// Load multi-turn history directly from DB (the single source of truth).
+	// AgentSteps on each historical assistant message are expanded into proper
+	// assistant_with_tool_calls + tool messages so the model can see what was
+	// tried last turn — except final_answer, which is replayed as the trailing
+	// canonical assistant message. History is sized by the window, not by a
+	// turn count: compaction and its persisted checkpoints keep it in bounds.
+	var llmContext []chat.Message
+	if agentConfig.MultiTurnEnabled {
+		budget := agent.HistoryTokenBudget(agentConfig)
+		llmContext, agentConfig.ContextTokenScale, err = LoadAgentHistory(
+			ctx, s.messageRepo, sessionID, budget, agentConfig.RetainRetrievalHistory,
+		)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to load agent history from DB: %v, continuing without history", err)
+			llmContext = []chat.Message{}
+		}
+		logger.Infof(ctx, "Loaded %d history messages from DB (budget=%d tokens, token scale=%.2f)",
+			len(llmContext), budget, agentConfig.ContextTokenScale)
+	} else {
+		logger.Infof(ctx, "Multi-turn disabled for this agent, running without history")
+		llmContext = []chat.Message{}
+	}
+
+	// Hold the sandbox across this turn so an install that finishes while we
+	// are running cannot rebuild the VM between tool calls. Staging below is
+	// the first resolve: if the previous turn left a stale mark, that is
+	// where the new image is picked up. HTTP send already holds the lease it
+	// took before persisting the turn, so only direct callers take one here.
+	if !req.TurnLeaseHeld {
+		turnCtx, releaseTurn, err := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+		if err != nil {
+			return err
+		}
+		defer releaseTurn()
+		ctx = turnCtx
+	}
+
+	// Reconcile all durable session attachments into the session's remote
+	// sandbox before the model can request shell or skill execution. The
+	// durable storage URL — not the ephemeral sandbox path — remains the
+	// source of truth. Gated on the sandbox manager advertising a session
+	// filesystem capability so provider-neutral remote wiring stays here.
+	var stagedAttachments []stagedSessionAttachment
+	stager, ok := s.agentService.(sessionAttachmentStager)
+	if !ok {
+		return errors.New("agent service does not support session attachment staging")
+	}
+	// Probe the backend this session's sandbox actually runs on. Gating on the
+	// process-wide manager instead could inspect a different backend than the
+	// named workspace config selected by this agent.
+	inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
+	if storeErr != nil {
+		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
+	}
+	mgr, _, layoutErr := resolveSandboxForExecution(
+		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+		req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
+		withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop),
+	)
+	layout := sessionWorkspaceLayout(
+		ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
+	)
+	if inputStore != nil && strings.TrimSpace(layout.InputDir) != "" {
+		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
+		if loadErr != nil {
+			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+		}
+		stagedAttachments, err = stager.stageSessionAttachments(
+			ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments, layout,
+		)
+		if err != nil {
+			return fmt.Errorf("restore session attachments into sandbox: %w", err)
+		}
+		for _, staged := range stagedAttachments {
+			if staged.AttachmentPath == "" {
+				continue
+			}
+			if agentConfig.AttachmentSandboxCopies == nil {
+				agentConfig.AttachmentSandboxCopies = make(map[string]string, len(stagedAttachments))
+			}
+			agentConfig.AttachmentSandboxCopies[staged.Path] = staged.AttachmentPath
+		}
+	}
+
+	pin, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
+	if err != nil {
+		return fmt.Errorf("read sandbox scope for child tasks: %w", err)
+	}
+	ctx = context.WithValue(ctx, childSourceKey{}, childSource{
+		Agent: req.CustomAgent, ModelID: effectiveModelID, SandboxConfigID: pin.ConfigID,
+	})
+
+	// Create agent engine with EventBus
+	logger.Info(ctx, "Creating agent engine")
+	engine, err := s.agentService.CreateAgentEngine(
+		ctx,
+		agentConfig,
+		summaryModel,
+		rerankModel,
+		eventBus,
+		sessionID,
+		req.AssistantMessageID,
+	)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create agent engine: %v", err)
+		return err
+	}
+
+	// Recall long-term memory for this turn. Like the RAG path this is a
+	// no-model read, and an agent may opt out of it entirely.
+	memoryCtx := types.ApplyAgentMemoryPreference(ctx, agentConfig.MemoryEnabled)
+	if s.memoryService != nil {
+		recall := s.memoryService.Recall(memoryCtx, req.Query)
+		if recall.Prompt != "" {
+			engine.SetMemoryPrompt(recall.Prompt)
+			used := types.UsedMemoriesFromItems(recall.Items)
+			if err := eventBus.Emit(ctx, event.Event{
+				Type:      event.EventMemoryRecalled,
+				SessionID: sessionID,
+				Data:      event.MemoryRecalledData{Memories: used},
+			}); err != nil {
+				logger.Warnf(ctx, "Failed to emit memory recalled event: %v", err)
+			}
+			logger.Infof(ctx, "Injected %d long-term memories into agent context", len(used))
+		}
+	}
+
+	// Mid-run steering: when the caller supplied a sink, the engine will drain
+	// user-appended messages at every round boundary and persist accepted ones
+	// through it. Nil (IM/embed) keeps the old behaviour untouched.
+	if req.SteerSink != nil {
+		engine.SetSteerSink(req.SteerSink)
+	}
+
+	engine.SetRunMode(req.Mode)
+	if req.RunNote != "" {
+		if noted, ok := engine.(interface{ SetRunNote(string) }); ok {
+			noted.SetRunNote(req.RunNote)
+		}
+	}
+	collaborating := false
+	if bound, ok := engine.(interface{ HasCollaboration() bool }); ok {
+		collaborating = bound.HasCollaboration()
+	}
+	promptSuspend := s.cfg != nil && s.cfg.Agent.PromptSuspend()
+	if req.Suspendable && (promptSuspend || collaborating) {
+		if request, err := json.Marshal(resumableAgentRequest(ctx, req)); err != nil {
+			logger.Warnf(ctx, "Run cannot be suspended, encoding its request failed: %v", err)
+		} else {
+			engine.EnableSuspension(request)
+			// Scheduler-owned children always suspend on prompts: their approvals
+			// are forwarded to the parent and resumed by the scheduler.
+			if b := collaboration.FromContext(ctx); !promptSuspend && (b == nil || b.Child == nil) {
+				if restricted, ok := engine.(interface{ RestrictSuspensionToCollaboration() }); ok {
+					restricted.RestrictSuspensionToCollaboration()
+				}
+			}
+		}
+	}
+
+	// A compaction that ends on a stored turn is written back onto it, so the
+	// next turn loads the summary instead of summarizing the same history
+	// again. Without multi-turn there is no stored history to end on.
+	if agentConfig.MultiTurnEnabled {
+		engine.SetContextCheckpointSink(messageCheckpointSink{repo: s.messageRepo, sessionID: sessionID})
+	}
+
+	var agentQuery string
+	var agentImageURLs []string
+	if req.Resume == nil {
+		agentQuery, agentImageURLs = composeAgentImageQuery(
+			ctx, req.Query, req.ImageDescription, agentModelSupportsVision, req.ImageURLs,
+			agentImageDescriber(engine),
+		)
+		if agentModelSupportsVision && len(agentImageURLs) > 0 {
+			logger.Infof(ctx, "Agent model supports vision, passing %d image(s) directly", len(agentImageURLs))
+		} else if len(req.ImageURLs) > 0 && strings.Contains(agentQuery, "[用户上传图片内容]") {
+			logger.Infof(ctx, "Agent model does not support vision, appending image description")
+		} else if len(req.ImageURLs) > 0 {
+			logger.Warnf(ctx, "Agent model cannot view %d image(s) and no description was produced", len(req.ImageURLs))
+		}
+		if req.QuotedContext != "" {
+			agentQuery += "\n\n" + req.QuotedContext
+		}
+		// Stored documents are listed for read_file rather than pasted in;
+		// inline uploads without a stored document still carry their content.
+		if len(req.Attachments) > 0 {
+			agentQuery += req.Attachments.BuildAgentPrompt()
+			logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
+		}
+		if manifest := buildSandboxAttachmentsPrompt(stagedAttachments, layout); manifest != "" {
+			agentQuery += manifest
+			logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
+		}
+	}
+
+	// Scope envelopes (runtime_context / must_use) are injected per LLM call inside
+	// the agent engine only; we intentionally do not persist them on user messages
+	// so multi-turn history stays clean and is not skewed by stale @mention scope.
+
+	// Execute agent with streaming (asynchronously)
+	// Events will be emitted to EventBus and handled by the Handler layer
+	logger.Info(ctx, "Executing agent with streaming")
+	if req.Resume != nil {
+		_, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext,
+			req.Resume.Snapshot, req.Resume.Prompt)
+	} else {
+		_, err = engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
+	}
+	if err != nil {
+		logger.Errorf(ctx, "Agent execution failed: %v", err)
+		// Emit error event to the EventBus used by this agent
+		eventBus.Emit(ctx, event.Event{
+			Type:      event.EventError,
+			SessionID: sessionID,
+			Data: event.ErrorData{
+				Error:     err.Error(),
+				Stage:     "agent_execution",
+				SessionID: sessionID,
+			},
+		})
+	}
+	// Return empty - events will be handled by Handler via EventBus subscription
+	return nil
+}
+
+type dataURIImageDescriber interface {
+	DescribeDataURIImages(context.Context, []string) []string
+}
+
+func agentImageDescriber(engine any) func(context.Context, []string) []string {
+	describer, ok := engine.(dataURIImageDescriber)
+	if !ok || describer == nil {
+		return nil
+	}
+	return func(ctx context.Context, urls []string) []string {
+		imageCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		return describer.DescribeDataURIImages(imageCtx, urls)
+	}
+}
+
+// composeAgentImageQuery keeps images on the query when the chat model can
+// see them. Otherwise it uses an existing description, or asks the VLM
+// describer, so a text-only agent still receives the upload.
+func composeAgentImageQuery(
+	ctx context.Context,
+	query, description string,
+	vision bool,
+	urls []string,
+	describe func(context.Context, []string) []string,
+) (string, []string) {
+	if vision && len(urls) > 0 {
+		return query, urls
+	}
+	text := strings.TrimSpace(description)
+	if text == "" && len(urls) > 0 && describe != nil {
+		var kept []string
+		for _, part := range describe(ctx, urls) {
+			if part = strings.TrimSpace(part); part != "" {
+				kept = append(kept, part)
+			}
+		}
+		text = strings.Join(kept, "\n")
+	}
+	if text != "" {
+		return query + "\n\n[用户上传图片内容]\n" + text, nil
+	}
+	return query, nil
+}
+
+// resumableAgentRequest keeps the durable part of req needed to rebuild the
+// run elsewhere. Session, attachments and images are reloaded from storage.
+func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.ResumableAgentRequest {
+	r := types.ResumableAgentRequest{
+		ActingVia:           types.ActingViaFromContext(ctx),
+		Query:               req.Query,
+		SummaryModelID:      req.SummaryModelID,
+		ReasoningEffort:     req.ReasoningEffort,
+		SharedAgentReadOnly: req.SharedAgentReadOnly,
+		KnowledgeBaseIDs:    req.KnowledgeBaseIDs,
+		KnowledgeIDs:        req.KnowledgeIDs,
+		TagScopes:           req.TagScopes,
+		MCPServiceIDs:       req.MCPServiceIDs,
+		SkillNames:          req.SkillNames,
+		WebSearchEnabled:    req.WebSearchEnabled,
+		QuestionOrigin:      req.QuestionOrigin,
+		PageContext:         req.PageContext,
+		AssistantAccess:     req.AssistantAccess,
+		UserMessageID:       req.UserMessageID,
+		Language:            types.LanguageFromContextOrDefault(ctx),
+	}
+	if req.CustomAgent != nil {
+		r.AgentID, r.AgentTenantID = req.CustomAgent.ID, req.CustomAgent.TenantID
+	}
+	return r
+}
+
+// buildAgentConfig creates a runtime AgentConfig from the QARequest's custom agent configuration,
+// tenant info, and resolved knowledge bases / search targets.
+func (s *sessionService) buildAgentConfig(
+	ctx context.Context,
+	req *types.QARequest,
+	tenantInfo *types.Tenant,
+	agentTenantID uint64,
+) (*types.AgentConfig, error) {
+	if inherited, err := inheritedConfigFromBinding(ctx); err != nil {
+		return nil, err
+	} else if inherited != nil {
+		return s.restoreInheritedConfig(ctx, inherited, tenantInfo)
+	}
+	customAgent := req.CustomAgent
+	agentConfig := &types.AgentConfig{
+		MaxIterations:                 customAgent.Config.MaxIterations,
+		Temperature:                   customAgent.Config.Temperature,
+		WebSearchEnabled:              customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
+		LocalBrowserEnabled:           req.LocalBrowserEnabled,
+		WebSearchMaxResults:           customAgent.Config.WebSearchMaxResults,
+		WebSearchProviderID:           customAgent.Config.WebSearchProviderID,
+		MultiTurnEnabled:              customAgent.Config.MultiTurnEnabled,
+		MemoryEnabled:                 customAgent.Config.MemoryEnabled,
+		MCPSelectionMode:              customAgent.Config.MCPSelectionMode,
+		MCPServices:                   customAgent.Config.MCPServices,
+		MCPAuthWaitTimeout:            customAgent.Config.MCPAuthWaitTimeout,
+		AttachmentParseWaitTimeoutSec: customAgent.Config.AttachmentParseWaitTimeoutSec,
+		Thinking:                      customAgent.Config.Thinking,
+		ReasoningEffort:               customAgent.Config.ReasoningEffort,
+		CitationEnabled:               customAgent.Config.CitationEnabled,
+		RetrieveKBOnlyWhenMentioned:   customAgent.Config.RetrieveKBOnlyWhenMentioned,
+		LLMCallTimeout:                customAgent.Config.LLMCallTimeout,
+		MaxCompletionTokens:           customAgent.Config.MaxCompletionTokens,
+		RetainRetrievalHistory:        customAgent.Config.RetainRetrievalHistory,
+		SharedAgentReadOnly:           req.SharedAgentReadOnly,
+		AssistantAccess:               types.CapAccessLevel(req.AssistantAccess, customAgent.Config.AccessLevel),
+		// The model is always told it may call tools in parallel; without
+		// this the engine still ran them one by one, so three searches in
+		// one reply cost three sequential embed/retrieve/rerank rounds.
+		// Only read-only tools overlap (agenttools.CanRunConcurrently);
+		// anything else is a barrier that runs alone, in model order.
+		ParallelToolCalls: true,
+	}
+	applyRequestReasoningEffort(req.ReasoningEffort, &agentConfig.Thinking, &agentConfig.ReasoningEffort)
+	// An unset MCP mode means "all" at runtime, but the share scope and the
+	// agent UI both present it as none. A shared run must not hand receivers
+	// every MCP service (with the owner's credentials) that its owner believes
+	// is off.
+	if req.SharedAgentReadOnly && agentConfig.MCPSelectionMode == "" {
+		agentConfig.MCPSelectionMode = "none"
+	}
+
+	// Falls back to global configuration if no specific timeout is set for the agent.
+	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {
+		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
+	}
+
+	// Configure skills based on CustomAgentConfig
+	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
+
+	// Then add the skills installed into the sandbox config this run boots.
+	//
+	// The workspace is the one on the context rather than the agent's owner,
+	// because that is where resolveSandboxForExecution reads it; skillsForRun
+	// picks the config the same way the sandbox resolution does.
+	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
+	var (
+		skillConfigID string
+		tenantSkills  []*types.TenantSkillEntity
+	)
+	if s.hostDesktop {
+		skillConfigID, tenantSkills = hostSkillsForRun(ctx, s.tenantSkillRepo, s.hostSkillTree, sandboxTenantID)
+	} else {
+		skillConfigID, tenantSkills = skillsForRun(
+			ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
+			sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
+		)
+	}
+	agentConfig.TenantSkills = tenantSkills
+	if len(tenantSkills) > 0 {
+		// The config named here is the one the skills came from, which is the
+		// pinned one whenever it differs from the agent's - the only case the
+		// line is worth reading.
+		logger.Infof(ctx, "Sandbox config %s offers %d installed skill(s) to this run",
+			skillConfigID, len(tenantSkills))
+	}
+
+	// Resolve knowledge bases using shared helper
+	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	agentConfig.KnowledgeBases = kbIDs
+	agentConfig.KnowledgeIDs = knowledgeIDs
+
+	// An unset list selects the default tools; an empty one means none.
+	agentConfig.AllowedTools = tools.EffectiveAllowedTools(customAgent.Config.AllowedTools)
+	// Apply per-turn @Skill / @MCP scope. Each helper narrows the agent's
+	// whitelist to the mentioned items and records the pinned set used for the
+	// <must_use> hint, keeping all scope logic in one place per resource type.
+	isSharedAgent := req.SharedAgentReadOnly
+	applyPerRequestSkillScope(ctx, agentConfig, customAgent.Config.SkillsSelectionMode, req.SkillNames)
+	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
+
+	// Use custom agent's system prompt if specified
+	if systemPrompt, _ := s.cfg.ResolveCustomAgentPrompts(customAgent); systemPrompt != "" {
+		agentConfig.UseCustomSystemPrompt = true
+		agentConfig.SystemPrompt = systemPrompt
+	}
+
+	logger.Infof(ctx, "Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v, WebSearchEnabled=%v",
+		agentConfig.MaxIterations, agentConfig.Temperature, agentConfig.AllowedTools, agentConfig.WebSearchEnabled)
+
+	// Set web search max results from tenant config if not set (default: 5)
+	if agentConfig.WebSearchMaxResults == 0 {
+		agentConfig.WebSearchMaxResults = 5
+		if tenantInfo.WebSearchConfig != nil && tenantInfo.WebSearchConfig.MaxResults > 0 {
+			agentConfig.WebSearchMaxResults = tenantInfo.WebSearchConfig.MaxResults
+		}
+	}
+
+	// Resolve web search provider ID: agent-level > tenant default (is_default=true)
+	if agentConfig.WebSearchProviderID == "" {
+		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantInfo.ID); err == nil && defaultProvider != nil {
+			agentConfig.WebSearchProviderID = defaultProvider.ID
+		}
+	}
+
+	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
+
+	// Log knowledge bases if present
+	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 {
+		if len(agentConfig.KnowledgeBases) > 0 {
+			logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
+				len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
+		} else {
+			logger.Infof(ctx, "Agent configured with %d tag-scoped search target(s)", len(req.TagScopes))
+		}
+	} else {
+		logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
+	}
+
+	// Build search targets using agent's tenant (handler has validated access for shared agent)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	if err != nil {
+		return nil, fmt.Errorf("build search targets: %w", err)
+	}
+	agentConfig.SearchTargets = searchTargets
+	if !req.SharedAgentReadOnly {
+		roleEnforced := s.cfg != nil && s.cfg.Tenant.IsRBACEnforced()
+		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets, roleEnforced)
+		if types.GrantsOperationCatalog(req.CustomAgent) {
+			agentConfig.OperationsAgentID = req.CustomAgent.ID
+			agentConfig.AssistantAccess = tenantInfo.AssistantConfig.EffectiveAccessLevel(req.AssistantAccess)
+			if cfg := tenantInfo.AssistantConfig; cfg != nil {
+				agentConfig.AssistantName = strings.TrimSpace(cfg.DisplayName)
+			}
+		}
+		if agentConfig.AssistantAccess == types.AssistantAccessReadOnly {
+			// Wiki tools write outside the catalog; read-only covers them too.
+			agentConfig.WritableKBIDs = nil
+		}
+	}
+	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)
+	agentConfig.PageContext = pageContextInTargets(ctx, req.PageContext, searchTargets)
+	agentConfig.ProductDocs = types.GrantsProductDocs(req.CustomAgent)
+	// Document tags are stored in knowledge_tag_relations, so document-KB tag
+	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
+	// those resolved IDs as this turn's pinned documents as well: otherwise the
+	// Agent tools are correctly constrained behind the scenes, but the model only
+	// sees a bound KB and does not know which documents the user explicitly chose.
+	if len(req.TagScopes) > 0 {
+		agentConfig.KnowledgeIDs = mergeResolvedTagKnowledgeIDs(
+			agentConfig.KnowledgeIDs,
+			searchTargets,
+			req.TagScopes,
+		)
+	}
+	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
+
+	// MaxContextTokens is deliberately left unset here. The caller fills it
+	// from the resolved model's declared window, which is not known yet.
+
+	return agentConfig, nil
+}
+
+func mergeResolvedTagKnowledgeIDs(
+	existing []string,
+	searchTargets types.SearchTargets,
+	tagScopes []types.TagScope,
+) []string {
+	tagKBs := make(map[string]bool, len(tagScopes))
+	for _, scope := range tagScopes {
+		if scope.KnowledgeBaseID != "" && len(scope.TagIDs) > 0 {
+			tagKBs[scope.KnowledgeBaseID] = true
+		}
+	}
+	if len(tagKBs) == 0 {
+		return uniqueNonEmptyStrings(existing)
+	}
+
+	merged := append([]string(nil), existing...)
+	for _, target := range searchTargets {
+		if target == nil || !tagKBs[target.KnowledgeBaseID] || target.Type != types.SearchTargetTypeKnowledge {
+			continue
+		}
+		merged = append(merged, target.KnowledgeIDs...)
+	}
+	return uniqueNonEmptyStrings(merged)
+}
+
+// applyPerRequestSkillScope records the @Skill mentions for this turn as the
+// pinned set that drives the <must_use> hint. It deliberately does NOT narrow
+// the allow-gate: an agent whose prompt requires a skill the user did not
+// @mention must still be able to read and execute it. Mentioning a skill only
+// prioritizes it, it never revokes access to the agent's configured set.
+//
+// It is a no-op when no skills were mentioned or skills are disabled.
+func applyPerRequestSkillScope(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	skillsMode string,
+	requested []string,
+) {
+	if len(requested) == 0 {
+		return
+	}
+	if skillsMode == "none" || skillsMode == "" {
+		logger.Warnf(ctx, "Ignoring @skill mention: agent skills selection is disabled (mode=%s)", skillsMode)
+		return
+	}
+	if !agentConfig.SkillsEnabled {
+		return
+	}
+	// PinnedSkillNames carries only mentioned skills that are currently
+	// allowed, so the <must_use> hint never directs the model at a skill it
+	// cannot load. An empty AllowedSkills means all skills are allowed,
+	// matching Manager.isSkillAllowed, so every mention is pinned in that case.
+	agentConfig.PinnedSkillNames = pinPreservingRequestOrder(requested, agentConfig.AllowedSkills)
+	logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v pinned=%v",
+		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
+}
+
+// applyPerRequestMCPScope pins authorized @MCP mentions for the <must_use> hint,
+// preserving access to the rest of the agent's configured services. It is a
+// no-op when no services were mentioned or MCP selection is disabled.
+func applyPerRequestMCPScope(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	agentPresetMCPs []string,
+	isSharedAgent bool,
+	requested []string,
+) {
+	if len(requested) == 0 {
+		return
+	}
+	if agentConfig.MCPSelectionMode == "none" {
+		logger.Warnf(ctx, "Ignoring @MCP mention: agent MCP selection is disabled (mode=none)")
+		return
+	}
+	mentioned := dedupPreservingOrder(requested)
+	effective, _ := resolvePerRequestMCPScope(
+		mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent,
+	)
+	if len(effective) == 0 {
+		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
+			requested, agentPresetMCPs, isSharedAgent)
+		return
+	}
+	agentConfig.PinnedMCPServiceIDs = effective
+	logger.Infof(ctx, "Applied per-request @MCP priority: requested=%v mode=%s pinned=%v",
+		requested, agentConfig.MCPSelectionMode, effective)
+}
+
+// resolvePerRequestMCPScope selects authorized mentions for per-turn priority.
+// It does not modify the registration scope. Shared agents may only pin services
+// in the agent preset, and selectionMode "none" rejects all mentions.
+func resolvePerRequestMCPScope(
+	mentioned, agentMCPs []string,
+	selectionMode string,
+	isSharedAgent bool,
+) (effective []string, mode string) {
+	if len(mentioned) == 0 {
+		return nil, selectionMode
+	}
+	if isSharedAgent {
+		mentioned = intersectPreservingRequestOrder(mentioned, agentMCPs)
+		if len(mentioned) == 0 {
+			return nil, selectionMode
+		}
+	}
+	switch selectionMode {
+	case "none":
+		return nil, selectionMode
+	case "selected":
+		effective = intersectPreservingRequestOrder(mentioned, agentMCPs)
+	case "all", "":
+		effective = mentioned
+	default:
+		effective = mentioned
+	}
+	if len(effective) == 0 {
+		return nil, selectionMode
+	}
+	return effective, "selected"
+}
+
+func intersectPreservingRequestOrder(requested []string, allowed []string) []string {
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		if value != "" {
+			allowedSet[value] = true
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, value := range requested {
+		if value == "" || seen[value] || !allowedSet[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+// pinPreservingRequestOrder returns the requested skills that are allowed,
+// preserving request order. Unlike intersectPreservingRequestOrder, an empty
+// allowed list is treated as "all skills allowed" (matching
+// Manager.isSkillAllowed), so every requested skill is pinned.
+func pinPreservingRequestOrder(requested []string, allowed []string) []string {
+	allowedAll := len(allowed) == 0
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		if value != "" {
+			allowedSet[value] = true
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, value := range requested {
+		if value == "" || seen[value] {
+			continue
+		}
+		if !allowedAll && !allowedSet[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func dedupPreservingOrder(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+// configureSkillsFromAgent turns the agent's skill picker into runtime flags.
+// The skills themselves come from the sandbox image (TenantSkills), not from
+// a host skill directory — that copy is not what shell_exec would find
+// inside the sandbox.
+func (s *sessionService) configureSkillsFromAgent(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	customAgent *types.CustomAgent,
+) {
+	if customAgent == nil {
+		return
+	}
+	agentConfig.SandboxConfigID = customAgent.Config.SandboxConfigID
+	switch customAgent.Config.SkillsSelectionMode {
+	case "all":
+		agentConfig.SkillsEnabled = true
+		agentConfig.AllowedSkills = nil
+		logger.Infof(ctx, "SkillsSelectionMode=all: using installed sandbox skills")
+	case "selected":
+		if len(customAgent.Config.SelectedSkills) > 0 {
+			agentConfig.SkillsEnabled = true
+			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
+			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
+				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
+		} else {
+			agentConfig.SkillsEnabled = false
+			logger.Infof(ctx, "SkillsSelectionMode=selected but no skills selected: skills disabled")
+		}
+	case "none", "":
+		agentConfig.SkillsEnabled = false
+		logger.Infof(ctx, "SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
+	default:
+		agentConfig.SkillsEnabled = false
+		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
+	}
+}
+
+// questionOriginInTargets keeps a suggested question's origin only when this
+// turn's search targets reach it, so the hint never points the model at
+// anything the tools cannot read. The base must be searched this turn (a whole
+// base, or a document/tag scope inside it); the document is kept only when a
+// target for that base covers it.
+func questionOriginInTargets(
+	ctx context.Context, origin *types.QuestionOrigin, targets types.SearchTargets,
+) *types.QuestionOrigin {
+	if origin == nil {
+		return nil
+	}
+	kbID := strings.TrimSpace(origin.KnowledgeBaseID)
+	if kbID == "" {
+		return nil
+	}
+	if !targets.ContainsKB(kbID) {
+		logger.Infof(ctx, "Ignoring question origin: knowledge base %s is outside this turn's search targets",
+			secutils.SanitizeForLog(kbID))
+		return nil
+	}
+	kept := &types.QuestionOrigin{KnowledgeBaseID: kbID}
+	if docID := strings.TrimSpace(origin.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
+		kept.KnowledgeID = docID
+	}
+	return kept
+}
+
+// pageContextInTargets keeps the page the user has open only when this turn's
+// search targets reach its knowledge base, and its document only when a
+// target covers it. The Wiki slug and issue IDs are kept as given (trimmed,
+// deduplicated and bounded); the agent service checks they exist in that base
+// before showing them to the model. Resources outside knowledge bases (agent,
+// model, MCP service, chat message) and a known page identifier are kept as
+// given; the agent service verifies them.
+func pageContextInTargets(
+	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
+) *types.PageContext {
+	if page == nil {
+		return nil
+	}
+	kept := &types.PageContext{
+		AgentID:      strings.TrimSpace(page.AgentID),
+		ModelID:      strings.TrimSpace(page.ModelID),
+		MCPServiceID: strings.TrimSpace(page.MCPServiceID),
+		Title:        types.NormalizePageView(page.Title),
+		View:         types.NormalizePageView(page.View),
+		Selection:    page.Selection.Normalize(),
+	}
+	if p := strings.TrimSpace(page.Page); types.IsPageContextPage(p) {
+		kept.Page = p
+		if section := strings.TrimSpace(page.Section); types.IsPageContextSection(section) {
+			kept.Section = section
+		}
+	}
+	if sessionID, messageID := strings.TrimSpace(page.SessionID), strings.TrimSpace(page.MessageID); sessionID != "" {
+		kept.SessionID = sessionID
+		kept.MessageID = messageID
+	}
+	kbID := strings.TrimSpace(page.KnowledgeBaseID)
+	if kbID == "" || !targets.ContainsKB(kbID) {
+		if kbID != "" {
+			logger.Infof(ctx, "Ignoring page context: knowledge base %s is outside this turn's search targets",
+				secutils.SanitizeForLog(kbID))
+		}
+		if kept.Page == "" && kept.AgentID == "" && kept.ModelID == "" &&
+			kept.MCPServiceID == "" && kept.SessionID == "" && kept.Title == "" && kept.View == "" &&
+			kept.Selection == nil {
+			return nil
+		}
+		return kept
+	}
+	kept.KnowledgeBaseID = kbID
+	kept.WikiSlug = strings.TrimSpace(page.WikiSlug)
+	if docID := strings.TrimSpace(page.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
+		kept.KnowledgeID = docID
+	}
+	seen := make(map[string]struct{}, len(page.WikiIssueIDs))
+	for _, id := range page.WikiIssueIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if len(kept.WikiIssueIDs) == types.MaxPageContextIssues {
+			break
+		}
+		seen[id] = struct{}{}
+		kept.WikiIssueIDs = append(kept.WikiIssueIDs, id)
+	}
+	return kept
+}
+
+// targetsCoverDocument reports whether a target for kbID can read docID: an
+// unfiltered whole-base target, or a document scope that lists it. A
+// tag-filtered base cannot be checked per document here, so it does not count.
+func targetsCoverDocument(targets types.SearchTargets, kbID, docID string) bool {
+	for _, t := range targets {
+		if t == nil || t.KnowledgeBaseID != kbID {
+			continue
+		}
+		switch t.Type {
+		case types.SearchTargetTypeKnowledgeBase:
+			if len(t.TagIDs) == 0 {
+				return true
+			}
+		case types.SearchTargetTypeKnowledge:
+			if slices.Contains(t.KnowledgeIDs, docID) {
+				return true
+			}
+		}
+	}
+	return false
+}

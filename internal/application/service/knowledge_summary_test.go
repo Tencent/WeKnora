@@ -1,0 +1,403 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// TestCheckSufficientSummaryContent verifies the gate that prevents getSummary
+// from calling the LLM (and ProcessSummaryGeneration from creating a summary
+// chunk) when the document has no usable text. This is the entry point for
+// the errInsufficientSummaryContent → SummaryStatusFailed flow that the
+// caller in ProcessSummaryGeneration relies on.
+func TestCheckSufficientSummaryContent(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		content   string
+		wantError bool
+	}{
+		{
+			name:      "empty content rejected",
+			content:   "",
+			wantError: true,
+		},
+		{
+			name:      "only whitespace rejected",
+			content:   "   \n\n\t  ",
+			wantError: true,
+		},
+		{
+			name:      "below threshold rejected",
+			content:   "hi",
+			wantError: true,
+		},
+		{
+			name: "scanned PDF with no OCR (image-only) rejected",
+			content: "![MX5280_page_1.png](images/MX5280_page_1.png)\n" +
+				"![MX5280_page_2.png](images/MX5280_page_2.png)",
+			wantError: true,
+		},
+		{
+			name:      "scanned PDF with empty <image> wrapper rejected",
+			content:   `<image url="x"><image_original>![a](x)</image_original></image>`,
+			wantError: true,
+		},
+		{
+			name:      "short legitimate note above threshold accepted",
+			content:   "Meeting at 3pm tomorrow.",
+			wantError: false,
+		},
+		{
+			name: "scanned PDF with successful VLM OCR accepted",
+			content: `<image url="images/p1.png">
+<image_original>![p1](images/p1.png)</image_original>
+<image_caption>scanned letter</image_caption>
+<image_ocr>Sehr geehrter Herr Mustermann, in der Sache 4711/2024 ...</image_ocr>
+</image>`,
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkSufficientSummaryContent(ctx, "test-knowledge-id", tt.content)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("expected errInsufficientSummaryContent, got nil")
+					return
+				}
+				if !errors.Is(err, errInsufficientSummaryContent) {
+					t.Errorf("expected errInsufficientSummaryContent sentinel, got %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected nil error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckSufficientSummaryContent_ThresholdOverride verifies that
+// minTextContentRunes is a `var` (not const) so tests and future runtime
+// configuration can adjust the threshold without a rebuild.
+func TestCheckSufficientSummaryContent_ThresholdOverride(t *testing.T) {
+	ctx := context.Background()
+	content := "Meeting at 3pm." // 15 runes
+
+	originalThreshold := minTextContentRunes
+	t.Cleanup(func() { minTextContentRunes = originalThreshold })
+
+	// With default threshold (10), this content passes.
+	if err := checkSufficientSummaryContent(ctx, "kid", content); err != nil {
+		t.Fatalf("default threshold: expected pass, got %v", err)
+	}
+
+	// With a tighter threshold (50), the same content is rejected.
+	minTextContentRunes = 50
+	err := checkSufficientSummaryContent(ctx, "kid", content)
+	if !errors.Is(err, errInsufficientSummaryContent) {
+		t.Fatalf("tightened threshold: expected errInsufficientSummaryContent, got %v", err)
+	}
+}
+
+// validateSummaryOutput is the content-only contract shared by every caller
+// that just wants "did the model return text". A provider that stopped at the
+// completion budget still returned text, so the finish reason alone must not
+// turn it into an error here.
+func TestValidateSummaryOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  *types.ChatResponse
+		want      string
+		wantError bool
+	}{
+		{name: "nil response rejected", response: nil, wantError: true},
+		{name: "empty response rejected", response: &types.ChatResponse{}, wantError: true},
+		{
+			name:      "whitespace response rejected",
+			response:  &types.ChatResponse{Content: " \n\t "},
+			wantError: true,
+		},
+		{
+			name:     "valid response is trimmed",
+			response: &types.ChatResponse{Content: "  useful summary \n"},
+			want:     "useful summary",
+		},
+		{
+			name:      "think-only response rejected",
+			response:  &types.ChatResponse{Content: "<think>\nreasoning\n</think>\n"},
+			wantError: true,
+		},
+		{
+			name:     "inline think block is stripped",
+			response: &types.ChatResponse{Content: "<think>\nreasoning\n</think>\nuseful summary"},
+			want:     "useful summary",
+		},
+		{
+			name:     "a normal stop is accepted",
+			response: &types.ChatResponse{Content: "useful summary", FinishReason: "stop"},
+			want:     "useful summary",
+		},
+		{
+			// The table/column description callers rely on this: a description
+			// cut off at 512/2048 tokens is still worth indexing.
+			name:     "plain text at the budget is accepted",
+			response: &types.ChatResponse{Content: "partial", FinishReason: "max_tokens"},
+			want:     "partial",
+		},
+		{
+			name:     "JSON at the budget is accepted here, rejected by the caller",
+			response: &types.ChatResponse{Content: `{"summary": "half a doc`, FinishReason: "length"},
+			want:     `{"summary": "half a doc`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateSummaryOutput(tt.response)
+			if tt.wantError {
+				if !errors.Is(err, errEmptySummaryOutput) {
+					t.Fatalf("expected %v, got %v", errEmptySummaryOutput, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("summary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// validateStructuredSummaryDocument is the document-summary gate: it only adds
+// the truncation verdict for replies that are actually producing structured
+// JSON, so a plain-text template that hits the budget keeps the legacy
+// fallback instead of failing the task.
+func TestValidateStructuredSummaryDocument(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  *types.ChatResponse
+		want      string
+		wantError bool
+		wantErr   error // checked when set; otherwise wantError means errEmptySummaryOutput
+	}{
+		{name: "nil response rejected", response: nil, wantError: true},
+		{name: "empty response rejected", response: &types.ChatResponse{}, wantError: true},
+		{
+			name: "plain text at the budget is not an error",
+			response: &types.ChatResponse{
+				Content:      "This document explains the leave policy and the twenty days",
+				FinishReason: "length",
+			},
+			want: "This document explains the leave policy and the twenty days",
+		},
+		{
+			name: "plain text with max_tokens is not an error",
+			response: &types.ChatResponse{
+				Content:      "partial prose summary",
+				FinishReason: "max_tokens",
+			},
+			want: "partial prose summary",
+		},
+		{
+			name: "bracketed prose at the budget is not an error",
+			response: &types.ChatResponse{
+				Content:      "[文档摘要] 本文件说明请假制度与年度额度",
+				FinishReason: "length",
+			},
+			want: "[文档摘要] 本文件说明请假制度与年度额度",
+		},
+		{
+			name: "numbered prose at the budget is not an error",
+			response: &types.ChatResponse{
+				Content:      "[1] 本文件说明请假制度与年度额度",
+				FinishReason: "length",
+			},
+			want: "[1] 本文件说明请假制度与年度额度",
+		},
+		{
+			name: "truncated JSON object is rejected",
+			response: &types.ChatResponse{
+				Content:      `{"summary": "half a doc`,
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "complete but malformed JSON at the budget is rejected",
+			response: &types.ChatResponse{
+				Content:      "{\"summary\": \"line one\nline two\"}",
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "truncated fenced JSON is rejected",
+			response: &types.ChatResponse{
+				Content:      "```json\n{\"summary\": \"half a doc",
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "BOM-prefixed truncated JSON is rejected",
+			response: &types.ChatResponse{
+				Content:      "\uFEFF{\"summary\": \"half a doc",
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "truncated JSON array of objects is rejected",
+			response: &types.ChatResponse{
+				Content:      `[{"summary": "half a doc`,
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "malformed JSON without a length stop is left to the parser",
+			response: &types.ChatResponse{
+				Content: "{\"summary\": \"line one\nline two\"}",
+			},
+			want: "{\"summary\": \"line one\nline two\"}",
+		},
+		{
+			name: "structured JSON with a normal stop is accepted",
+			response: &types.ChatResponse{
+				Content:      `{"summary": "Two sentences."}`,
+				FinishReason: "stop",
+			},
+			want: `{"summary": "Two sentences."}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateStructuredSummaryDocument(tt.response)
+			if tt.wantError {
+				wantErr := tt.wantErr
+				if wantErr == nil {
+					wantErr = errEmptySummaryOutput
+				}
+				if !errors.Is(err, wantErr) {
+					t.Fatalf("expected %v, got %v", wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("summary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFirstTextChunkSummaryFallback(t *testing.T) {
+	t.Run("uses only the first chunk", func(t *testing.T) {
+		got := firstTextChunkSummaryFallback([]*types.Chunk{
+			{Content: "  first chunk  "},
+			{Content: "second chunk"},
+		})
+		if got != "first chunk" {
+			t.Fatalf("fallback = %q, want first chunk", got)
+		}
+	})
+
+	t.Run("does not skip an empty first chunk", func(t *testing.T) {
+		got := firstTextChunkSummaryFallback([]*types.Chunk{
+			{Content: " \n\t "},
+			{Content: "second chunk"},
+		})
+		if got != "" {
+			t.Fatalf("fallback = %q, want empty", got)
+		}
+	})
+
+	t.Run("caps unicode content by runes", func(t *testing.T) {
+		got := firstTextChunkSummaryFallback([]*types.Chunk{{
+			Content: strings.Repeat("摘", summaryFallbackMaxRunes+25),
+		}})
+		if len([]rune(got)) != summaryFallbackMaxRunes {
+			t.Fatalf("fallback rune count = %d, want %d", len([]rune(got)), summaryFallbackMaxRunes)
+		}
+	})
+
+	t.Run("empty input stays empty", func(t *testing.T) {
+		if got := firstTextChunkSummaryFallback(nil); got != "" {
+			t.Fatalf("fallback = %q, want empty", got)
+		}
+	})
+}
+
+func TestApplyRetryableSummaryFailureState(t *testing.T) {
+	chunks := []*types.Chunk{{Content: "first body chunk"}}
+
+	t.Run("retry keeps existing description", func(t *testing.T) {
+		knowledge := &types.Knowledge{
+			Description:   "previous summary",
+			SummaryStatus: types.SummaryStatusProcessing,
+		}
+		fallback := applyRetryableSummaryFailureState(knowledge, chunks, true)
+		if fallback != "" {
+			t.Fatalf("retry fallback = %q, want empty", fallback)
+		}
+		if knowledge.Description != "previous summary" {
+			t.Fatalf("retry changed description to %q", knowledge.Description)
+		}
+		if knowledge.SummaryStatus != types.SummaryStatusPending {
+			t.Fatalf("retry status = %q, want pending", knowledge.SummaryStatus)
+		}
+	})
+
+	t.Run("terminal failure publishes fallback and fails summary", func(t *testing.T) {
+		knowledge := &types.Knowledge{
+			Description:   "previous summary",
+			SummaryStatus: types.SummaryStatusProcessing,
+		}
+		fallback := applyRetryableSummaryFailureState(knowledge, chunks, false)
+		if fallback != "first body chunk" {
+			t.Fatalf("terminal fallback = %q", fallback)
+		}
+		if knowledge.Description != fallback {
+			t.Fatalf("description = %q, want %q", knowledge.Description, fallback)
+		}
+		if knowledge.SummaryStatus != types.SummaryStatusFailed {
+			t.Fatalf("terminal status = %q, want failed", knowledge.SummaryStatus)
+		}
+	})
+}
+
+func TestSummaryRetryStateSupportsLiteExecutorContext(t *testing.T) {
+	retryCtx := types.WithTaskRetryMetadata(context.Background(), 1, 3)
+	if !summaryTaskWillRetry(retryCtx) {
+		t.Fatal("attempt 1 of maxRetry 3 should have another retry")
+	}
+	if isFinalAsynqAttempt(retryCtx) {
+		t.Fatal("attempt 1 of maxRetry 3 should not be final")
+	}
+
+	finalCtx := types.WithTaskRetryMetadata(context.Background(), 3, 3)
+	if summaryTaskWillRetry(finalCtx) {
+		t.Fatal("attempt 3 of maxRetry 3 should not retry")
+	}
+	if !isFinalAsynqAttempt(finalCtx) {
+		t.Fatal("attempt 3 of maxRetry 3 should be final")
+	}
+}

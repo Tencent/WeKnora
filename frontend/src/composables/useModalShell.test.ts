@@ -1,0 +1,320 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { runInNewContext } from 'node:vm'
+import test from 'node:test'
+import { compileScript, parse } from '@vue/compiler-sfc'
+import ts from 'typescript'
+import * as vue from 'vue'
+
+const require = createRequire(import.meta.url)
+const renderer = vue.createRenderer<any, any>({
+  createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
+  insert() {}, remove() {}, setElementText() {}, setText() {}, patchProp() {},
+  parentNode: () => null, nextSibling: () => null,
+})
+
+function fixture() {
+  const dialogs: any[] = []
+  const warnings: string[] = []
+  const window = Object.assign(new EventTarget(), { setInterval, clearInterval })
+  const errors: unknown[][] = []
+  const ui = vue.reactive({ showSettingsModal: false })
+  const resources = {
+    agentTypePresets: [], promptTemplates: null, storageStatus: [], skillCatalog: [],
+    parserEngines: [
+      { Name: 'builtin', Available: true, FileTypes: ['pdf', 'xlsx'] },
+      { Name: 'anydoc', Available: true, FileTypes: ['pdf', 'xlsx'] },
+    ],
+    async prefetchAgentEditorDeps() {}, async ensureSkills() {}, async ensureSkillCatalog() {},
+    async ensureParserEngines(_force = false) {},
+  }
+  const chat = {
+    allModels: [{ id: 'model', type: 'KnowledgeQA', is_default: true, capabilities: { thinking_levels: ['auto', 'high'] } }],
+    rawKnowledgeBases: [], webSearchProviders: [], sandboxConfigs: [],
+    async ensureModels() {}, async ensureKnowledgeBases() {},
+    async ensureWebSearchProviders() {}, async ensureSandboxConfigs() {},
+  }
+  const modules: Record<string, any> = {
+    vue,
+    'vue-i18n': { useI18n: () => ({ t: (key: string) => key, locale: vue.ref('en') }) },
+    'vue-router': { useRouter: () => ({}) },
+    pinia: { storeToRefs: vue.toRefs },
+    'tdesign-vue-next': {
+      DialogPlugin: { confirm: (options: any) => { dialogs.push(options); return { destroy() {} } } },
+      MessagePlugin: { success() {}, error() {}, warning(message: string) { warnings.push(message) } },
+    },
+    '@/stores/ui': { useUIStore: () => ui },
+    '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
+    '@/stores/organization': { useOrganizationStore: () => ({ sharedKnowledgeBases: [] }) },
+    '@/stores/chatResources': { useChatResourcesStore: () => chat },
+    '@/stores/editorResources': { useEditorResourcesStore: () => resources },
+    '@/stores/deploymentCapabilities': {
+      useDeploymentCapabilitiesStore: () => ({ isSupported: () => true, async ensureLoaded() {} }),
+    },
+    '@/api/agent': { listIMChannels: async () => ({ data: [] }) },
+    '@/api/assistant': { ASSISTANT_ACCESS_LEVELS: ['read_only', 'confirm', 'auto_write'] },
+    '@/api/embed': { listEmbedChannels: async () => ({ data: [] }) },
+    '@/api/skill': {},
+    '@/api/system': { isNamedSandboxBackend: () => true },
+    '@/utils/clipboard': { copyWithToast() {} },
+  }
+  function evaluate(code: string) {
+    const exports: any = {}
+    const compiled = ts.transpileModule(code, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText
+    runInNewContext(compiled, {
+      exports, setTimeout, clearTimeout, CustomEvent,
+      console: { ...console, error: (...args: unknown[]) => errors.push(args) },
+      window,
+      require(name: string) {
+        if (modules[name]) return modules[name]
+        if (name.endsWith('.vue')) return { default: {} }
+        if (name.startsWith('@/')) return require('../' + name.slice(2))
+        return require(name)
+      },
+    })
+    return exports
+  }
+  modules['@/composables/useAssistantPageContext'] = { useAssistantPageContext() {} }
+  modules['@/composables/useModalShell'] = evaluate(readFileSync(new URL('./useModalShell.ts', import.meta.url), 'utf8'))
+  modules['@/utils/assistantDataChange'] = evaluate(readFileSync(new URL('../utils/assistantDataChange.ts', import.meta.url), 'utf8'))
+  function mount(path: string, props: Record<string, any>) {
+    const { descriptor } = parse(readFileSync(new URL(path, import.meta.url), 'utf8'))
+    const script = compileScript(descriptor, { id: 'dirty-test' }).content
+      .replace('__expose();', '')
+      .replace('return __returned__', '__expose(__returned__); return __returned__')
+    const component = evaluate(script).default
+    component.render = () => null
+    const instance = vue.ref<any>()
+    const app = renderer.createApp({ render: () => vue.h(component, { ...props, ref: instance }) })
+    app.mount({})
+    return { vm: instance.value, unmount: () => { app.unmount(); assert.deepEqual(errors, []) } }
+  }
+  return { mount, dialogs, resources, chat, ui, warnings, emit: modules['@/utils/assistantDataChange'].emitAssistantDataChange }
+}
+
+async function settle() {
+  // Drain asynchronous resource loading plus the Vue watchers it triggers.
+  await new Promise<void>(resolve => setImmediate(resolve))
+  await vue.nextTick()
+}
+
+test('agent creation prefills vision and ASR defaults without enabling uploads or replacing explicit choices', async () => {
+  const f = fixture()
+  f.chat.allModels.push(
+    { id: 'vision', type: 'VLLM', is_default: true, capabilities: { thinking_levels: [] } },
+    { id: 'asr', type: 'ASR', is_default: true, capabilities: { thinking_levels: [] } },
+  )
+  const props = vue.reactive({ visible: false, mode: 'create' })
+  const { vm, unmount } = f.mount('../views/agent/AgentEditorModal.vue', props)
+  try {
+    props.visible = true
+    await settle()
+    assert.equal(vm.formData.config.vlm_model_id, 'vision')
+    assert.equal(vm.formData.config.asr_model_id, 'asr')
+    assert.ok(!vm.formData.config.image_upload_enabled)
+    assert.ok(!vm.formData.config.audio_upload_enabled)
+    vm.formData.config.vlm_model_id = 'explicit-vision'
+    vm.formData.config.asr_model_id = 'explicit-asr'
+    vm.applyDefaultModelsIfEmpty()
+    assert.equal(vm.formData.config.vlm_model_id, 'explicit-vision')
+    assert.equal(vm.formData.config.asr_model_id, 'explicit-asr')
+  } finally { unmount() }
+})
+
+for (const mode of ['edit', 'create'] as const) {
+  test(`${mode}: initialization stays clean, while real edits require confirmation`, async () => {
+    const f = fixture()
+    const props = vue.reactive({
+      visible: false, mode,
+      agent: { id: 'agent', name: 'Original', config: { model_id: 'model', thinking: false } },
+      'onUpdate:visible': (value: boolean) => { props.visible = value },
+    })
+    const { vm, unmount } = f.mount('../views/agent/AgentEditorModal.vue', props)
+    try {
+      props.visible = true
+      await settle()
+      assert.equal(vm.editorInitializing, false)
+      assert.equal(vm.formData.config.reasoning_effort, 'auto', 'always-on model normalizes the initial off value')
+      assert.equal(vm.modalShell.isDirty(), false)
+      vm.modalShell.requestClose()
+      assert.equal(props.visible, false)
+      assert.equal(f.dialogs.length, 0)
+      await settle()
+      props.visible = true
+      await settle()
+      const name = vm.formData.name
+      vm.formData.name = 'Changed'
+      await vue.nextTick()
+      vm.modalShell.requestClose()
+      assert.equal(f.dialogs.length, 1)
+      assert.equal(props.visible, true)
+      f.dialogs[0].onClose()
+      vm.formData.name = name
+      await vue.nextTick()
+      assert.equal(vm.modalShell.isDirty(), false, 'reverting an edit restores the clean state')
+      vm.formData.config.temperature += 0.1
+      vm.modalShell.requestClose()
+      assert.equal(f.dialogs.length, 2)
+      f.dialogs[1].onConfirm()
+      assert.equal(props.visible, false)
+    } finally { unmount() }
+  })
+}
+
+test('closing during initialization does not warn or let a stale load replace the next baseline', async () => {
+  const f = fixture()
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  f.resources.ensureSkills = () => pending
+  const props = vue.reactive({
+    visible: false, mode: 'edit', agent: { id: 'agent', name: 'Original', config: { model_id: 'model' } },
+    'onUpdate:visible': (value: boolean) => { props.visible = value },
+  })
+  const { vm, unmount } = f.mount('../views/agent/AgentEditorModal.vue', props)
+  try {
+    props.visible = true
+    await settle()
+    assert.equal(vm.editorInitializing, true)
+    vm.modalShell.requestClose()
+    assert.equal(props.visible, false)
+    assert.equal(f.dialogs.length, 0)
+    await settle()
+    f.resources.ensureSkills = async () => {}
+    props.visible = true
+    await settle()
+    vm.formData.name = 'Keep this edit'
+    release()
+    await settle()
+    assert.equal(vm.modalShell.isDirty(), true)
+  } finally { release(); unmount() }
+})
+
+for (const savedRules of [[], [{ file_types: ['xlsx'], engine: 'builtin', xlsx_first_row_as_header: true }]]) {
+  test(`parser loading and refresh preserve ${savedRules.length ? 'partial' : 'empty'} saved rules`, async () => {
+    const f = fixture()
+    let release!: () => void
+    f.resources.ensureParserEngines = () => new Promise<void>(resolve => { release = resolve })
+    const updates: any[] = []
+    const props = vue.reactive({
+      parserEngineRules: savedRules,
+      'onUpdate:parserEngineRules': (rules: any[]) => { updates.push(rules); props.parserEngineRules = rules },
+    })
+    const { vm, unmount } = f.mount('../views/knowledge/settings/KBParserSettings.vue', props)
+    try {
+      release()
+      await settle()
+      assert.equal(vm.getEngineForGroup(['pdf']), 'builtin', 'defaults are still displayed')
+      assert.equal(updates.length, 0, 'loading must not mutate the parent form')
+      f.ui.showSettingsModal = true
+      await vue.nextTick()
+      f.ui.showSettingsModal = false
+      await vue.nextTick()
+      release()
+      await settle()
+      assert.equal(updates.length, 0, 'refreshing available engines is not a user edit')
+      vm.handleEngineChange(['pdf'], 'builtin')
+      await vue.nextTick()
+      assert.equal(updates.length, 1)
+      assert.equal(updates[0].find((r: any) => r.file_types.includes('pdf')).engine, 'builtin')
+      if (savedRules.length) {
+        assert.equal(updates[0].find((r: any) => r.file_types.includes('xlsx')).xlsx_first_row_as_header, true)
+      }
+      vm.handleXLSXFirstRowAsHeaderChange(['xlsx'], false)
+      assert.equal(updates.length, 2)
+      assert.equal(updates[1].find((r: any) => r.file_types.includes('xlsx')).xlsx_first_row_as_header, false)
+    } finally { unmount() }
+  })
+}
+
+// Engine FileTypes copied from internal/infrastructure/docparser/engines.go, so
+// a drift between the registry and the frontend default routing shows up here
+// rather than as a "(default)" badge that fails on upload.
+const registryEngines = [
+  {
+    Name: 'builtin', Available: true,
+    FileTypes: ['docx', 'doc', 'pdf', 'md', 'markdown', 'xlsx', 'xls', 'pptx', 'ppt', 'epub',
+      'html', 'htm', 'mhtml', 'xmind', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+      'mp3', 'wav', 'm4a', 'flac', 'ogg'],
+  },
+  {
+    Name: 'simple', Available: true,
+    FileTypes: ['md', 'markdown', 'txt', 'csv', 'json', 'jpg', 'jpeg', 'png', 'gif', 'bmp',
+      'tiff', 'webp', 'mp3', 'wav', 'm4a', 'flac', 'ogg'],
+  },
+  { Name: 'anydoc', Available: true, FileTypes: ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'pdf'] },
+  { Name: 'markitdown', Available: true, FileTypes: ['docx', 'pptx', 'ppt'] },
+]
+
+async function mountParserSettings(engines: any[]) {
+  const f = fixture()
+  f.resources.parserEngines = engines
+  const props = vue.reactive({ parserEngineRules: [], 'onUpdate:parserEngineRules': () => {} })
+  const { vm, unmount } = f.mount('../views/knowledge/settings/KBParserSettings.vue', props)
+  await settle()
+  return { vm, unmount }
+}
+
+test('the default engine badge follows the backend per-type routing', async () => {
+  const { vm, unmount } = await mountParserSettings(registryEngines)
+  try {
+    // PDF is the case anydoc cannot model: engines.go keeps it on builtin.
+    assert.equal(vm.getEngineForGroup(['pdf']), 'builtin')
+    for (const group of [['md', 'markdown'], ['txt'], ['csv'], ['json'], ['jpg', 'jpeg', 'png']]) {
+      assert.equal(vm.getEngineForGroup(group), 'simple', `${group} stays on the Go reader`)
+    }
+    for (const group of [['docx', 'doc'], ['xlsx', 'xls'], ['pptx', 'ppt']]) {
+      assert.equal(vm.getEngineForGroup(group), 'anydoc', `${group} prefers anydoc`)
+    }
+    assert.equal(vm.getEngineForGroup(['mhtml']), 'builtin', 'anydoc does not claim mhtml')
+  } finally { unmount() }
+})
+
+test('with anydoc unavailable only ppt/pptx leave builtin for a pinned engine', async () => {
+  const { vm, unmount } = await mountParserSettings(
+    registryEngines.map(e => (e.Name === 'anydoc' ? { ...e, Available: false } : e)),
+  )
+  try {
+    assert.equal(vm.getEngineForGroup(['pdf']), 'builtin')
+    assert.equal(vm.getEngineForGroup(['pptx', 'ppt']), 'markitdown', 'knowledgebase.go pins ppt/pptx')
+    assert.equal(vm.getEngineForGroup(['docx', 'doc']), 'builtin')
+    assert.equal(vm.getEngineForGroup(['xlsx', 'xls']), 'builtin')
+    assert.equal(vm.getEngineForGroup(['md', 'markdown']), 'simple')
+  } finally { unmount() }
+})
+
+test('assistant changes warn without overwriting unsaved agent settings', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const f = fixture()
+  const props = vue.reactive({
+    visible: false, mode: 'edit',
+    agent: { id: 'agent', name: 'Original', config: { model_id: 'model' } },
+  })
+  const { vm, unmount } = f.mount('../views/agent/AgentEditorModal.vue', props)
+  t.after(unmount)
+  props.visible = true
+  await settle()
+  vm.formData.name = 'unsaved draft'
+  const emit = (operation: string, agentIds: string[]) => f.emit({
+    operation, area: 'agent', ids: { agent_id: agentIds },
+  })
+  emit('agent.update', ['other'])
+  emit('agent.copy', ['agent', 'copy'])
+  t.mock.timers.tick(300)
+  assert.deepEqual(f.warnings, [])
+  emit('agent.update', ['agent'])
+  t.mock.timers.tick(300)
+  assert.deepEqual(f.warnings, ['agent.editor.assistantChanged'])
+  emit('agent.delete', ['agent'])
+  t.mock.timers.tick(300)
+  assert.deepEqual(f.warnings, ['agent.editor.assistantChanged', 'agent.editor.assistantDeleted'])
+  assert.equal(vm.formData.name, 'unsaved draft')
+  assert.equal(vm.modalShell.isDirty(), true)
+  props.visible = false
+  await settle()
+  emit('agent.update', ['agent'])
+  t.mock.timers.tick(300)
+  assert.equal(f.warnings.length, 2)
+})

@@ -1,0 +1,742 @@
+import { get, post, put } from '../../utils/request';
+import { getApiBaseUrl } from '../../utils/api-base';
+import i18n from '@/i18n'
+import type { ModelCapabilities, ModelSpecOverride, ReasoningEffortLevel } from '../model'
+
+const t = (key: string) => i18n.global.t(key)
+
+// GET /initialization/config/:kbId exposes credential presence, not values.
+export interface ModelCredentialStatus {
+    apiKey?: boolean;
+}
+
+export interface COSCredentialStatus {
+    secretId?: boolean;
+    secretKey?: boolean;
+}
+
+// 初始化配置数据类型
+export interface InitializationConfig {
+    llm: {
+        source: string;
+        modelName: string;
+        baseUrl?: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
+        apiKey?: string;
+        credentials?: ModelCredentialStatus;
+    };
+    embedding: {
+        source: string;
+        modelName: string;
+        baseUrl?: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
+        apiKey?: string;
+        dimension?: number; // 添加embedding维度字段
+        credentials?: ModelCredentialStatus;
+    };
+    rerank: {
+        modelName: string;
+        baseUrl: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
+        apiKey?: string;
+        enabled: boolean;
+        credentials?: ModelCredentialStatus;
+    };
+    multimodal: {
+        enabled: boolean;
+        storageType: 'cos' | 'minio';
+        vlm?: {
+            modelName: string;
+            baseUrl: string;
+            /** @deprecated Use credentials.apiKey from GET responses */
+            apiKey?: string;
+            interfaceType?: string; // "ollama" or "openai"
+            credentials?: ModelCredentialStatus;
+        };
+        cos?: {
+            region: string;
+            bucketName: string;
+            appId: string;
+            pathPrefix?: string;
+            /** @deprecated Use credentials from GET responses */
+            secretId?: string;
+            /** @deprecated Use credentials from GET responses */
+            secretKey?: string;
+            credentials?: COSCredentialStatus;
+        };
+        minio?: {
+            bucketName: string;
+            pathPrefix?: string;
+        };
+    };
+    documentSplitting: {
+        chunkSize: number;
+        chunkOverlap: number;
+        separators: string[];
+        // Adaptive chunking strategy. Empty / "legacy" = classic recursive splitter.
+        // "auto" lets the backend profiler pick a tier; "heading" / "heuristic"
+        // pin the tier explicitly. See backend chunker package for details.
+        strategy?: string;
+        // Cap chunk size in approx tokens. 0 = char-based budget only.
+        tokenLimit?: number;
+        // Language hints for heuristic patterns ("de", "en", "zh"). Empty = auto-detect.
+        languages?: string[];
+    };
+    // Frontend-only hint for storage selection UI
+    storageType?: 'cos' | 'minio';
+    nodeExtract: {
+        enabled: boolean,
+        text: string,
+        tags: string[],
+        nodes: Node[],
+        relations: Relation[]
+    }
+}
+
+// 下载任务状态类型
+export interface DownloadTask {
+    id: string;
+    modelName: string;
+    status: 'pending' | 'downloading' | 'completed' | 'failed';
+    progress: number;
+    message: string;
+    startTime: string;
+    endTime?: string;
+}
+
+// 简化版知识库配置更新接口（只传模型ID）
+export interface KBModelConfigRequest {
+    llmModelId: string
+    embeddingModelId: string
+    vlm_config?: {
+        enabled: boolean
+        model_id?: string
+        description_language?: string
+        custom_instructions?: string
+    }
+    asr_config?: {
+        enabled: boolean
+        model_id?: string
+        language?: string
+    }
+    documentSplitting: {
+        chunkSize: number
+        chunkOverlap: number
+        separators: string[]
+        parserEngineRules?: {
+            file_types: string[]
+            engine: string
+            xlsx_first_row_as_header?: boolean
+        }[]
+        enableParentChild?: boolean
+        parentChunkSize?: number
+        childChunkSize?: number
+        // Adaptive chunking strategy ("auto" | "heading" | "heuristic" | "legacy").
+        // The backend uses pointer-based DTOs for these three fields:
+        // - undefined / not set in payload → no change on server
+        // - "" / 0 / [] explicitly sent     → clears the value
+        // Send the field whenever the user has opened the editor — even
+        // empty values — so the user can always reset back to defaults.
+        strategy?: string
+        // Approximate token budget per chunk; 0 = char-based.
+        tokenLimit?: number
+        // Language hints for heuristic patterns. Empty array = auto-detect.
+        languages?: string[]
+        tableMetadataInstructions?: string
+    }
+    multimodal: {
+        enabled: boolean
+    }
+    /** 存储引擎选择："local" | "minio" | "cos" | "obs" 等，影响文档上传与文档内图片存储 */
+    storageBackendId?: string
+    storageProvider?: string
+    nodeExtract: {
+        enabled: boolean
+        text: string
+        tags: string[]
+        nodes: Node[]
+        relations: Relation[]
+        customInstructions?: string
+    }
+    questionGeneration?: {
+        modelId?: string
+        enabled: boolean
+        questionCount: number
+        customInstructions?: string
+    }
+}
+
+export function updateKBConfig(kbId: string, config: KBModelConfigRequest): Promise<any> {
+    return new Promise((resolve, reject) => {
+        console.log('Starting KB config update (simplified)...', kbId, config);
+        put(`/api/v1/initialization/config/${kbId}`, config)
+            .then((response: any) => {
+                console.log('KB config update completed', response);
+                resolve(response);
+            })
+            .catch((error: any) => {
+                console.error('Failed to update KB config:', error);
+                reject(error.error || error);
+            });
+    });
+}
+
+// 根据知识库ID执行配置更新（旧版，保留兼容性）
+export function initializeSystemByKB(kbId: string, config: InitializationConfig): Promise<any> {
+    return new Promise((resolve, reject) => {
+        console.log('Starting KB config update...', kbId, config);
+        post(`/api/v1/initialization/initialize/${kbId}`, config)
+            .then((response: any) => {
+                console.log('KB config update completed', response);
+                resolve(response);
+            })
+            .catch((error: any) => {
+                console.error('Failed to update KB config:', error);
+                reject(error.error || error);
+            });
+    });
+}
+
+// 检查Ollama服务状态
+export function checkOllamaStatus(): Promise<{ available: boolean; version?: string; error?: string; baseUrl?: string }> {
+    return new Promise((resolve, reject) => {
+        get('/api/v1/initialization/ollama/status')
+            .then((response: any) => {
+                resolve(response.data || { available: false });
+            })
+            .catch((error: any) => {
+                console.error('Failed to check Ollama status:', error);
+                resolve({ available: false, error: error.message || t('error.initialization.checkFailed') });
+            });
+    });
+}
+
+// Ollama 模型详细信息接口
+export interface OllamaModelInfo {
+    name: string;
+    size: number;
+    digest: string;
+    modified_at: string;
+}
+
+// 列出已安装的 Ollama 模型（详细信息）
+export function listOllamaModels(): Promise<OllamaModelInfo[]> {
+    return new Promise((resolve, reject) => {
+        get('/api/v1/initialization/ollama/models')
+            .then((response: any) => {
+                resolve((response.data && response.data.models) || []);
+            })
+            .catch((error: any) => {
+                console.error('Failed to list Ollama models:', error);
+                resolve([]);
+            });
+    });
+}
+
+// 检查Ollama模型状态
+export function checkOllamaModels(models: string[]): Promise<{ models: Record<string, boolean> }> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/ollama/models/check', { models })
+            .then((response: any) => {
+                resolve(response.data || { models: {} });
+            })
+            .catch((error: any) => {
+                console.error('Failed to check Ollama models:', error);
+                reject(error);
+            });
+    });
+}
+
+// 启动Ollama模型下载（异步）
+export function downloadOllamaModel(modelName: string): Promise<{ taskId: string; modelName: string; status: string; progress: number }> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/ollama/models/download', { modelName })
+            .then((response: any) => {
+                resolve(response.data || { taskId: '', modelName, status: 'failed', progress: 0 });
+            })
+            .catch((error: any) => {
+                console.error('Failed to start Ollama model download:', error);
+                reject(error);
+            });
+    });
+}
+
+// 查询下载进度
+export function getDownloadProgress(taskId: string): Promise<DownloadTask> {
+    return new Promise((resolve, reject) => {
+        get(`/api/v1/initialization/ollama/download/progress/${taskId}`)
+            .then((response: any) => {
+                resolve(response.data);
+            })
+            .catch((error: any) => {
+                console.error('Failed to get download progress:', error);
+                reject(error);
+            });
+    });
+}
+
+// 获取所有下载任务
+export function listDownloadTasks(): Promise<DownloadTask[]> {
+    return new Promise((resolve, reject) => {
+        get('/api/v1/initialization/ollama/download/tasks')
+            .then((response: any) => {
+                resolve(response.data || []);
+            })
+            .catch((error: any) => {
+                console.error('Failed to list download tasks:', error);
+                reject(error);
+            });
+    });
+}
+
+
+export function getCurrentConfigByKB(kbId: string): Promise<InitializationConfig & { hasFiles: boolean }> {
+    return new Promise((resolve, reject) => {
+        get(`/api/v1/initialization/config/${kbId}`)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('Failed to get KB config:', error);
+                reject(error);
+            });
+    });
+}
+
+// 所有"测试连接"接口共用的通用可选参数。
+// customHeaders / extraConfig / interfaceType 对应后端 ModelTestRequest 里的同名字段，
+// 会被透传给真正的模型装配流程，保证测试连接与生产调用走完全相同的路径。
+interface BaseModelTestPayload {
+    spec?: ModelSpecOverride;
+    customHeaders?: Record<string, string>;
+    extraConfig?: Record<string, string>;
+    interfaceType?: string;
+    /** 第二段密钥（如 LKEAP Rerank 的腾讯云 SecretKey） */
+    appSecret?: string;
+}
+
+// 检查远程API模型
+export function checkRemoteModel(modelConfig: {
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+    // 编辑已存在模型时传 modelId，后端会自动从存储中带出 apiKey
+    // （前端不再回显明文密钥，所以测试连接必须用这个回填路径）
+    modelId?: string;
+} & BaseModelTestPayload): Promise<{
+    available: boolean;
+    message?: string;
+}> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/remote/check', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('Failed to check remote model:', error);
+                reject(error);
+            });
+    });
+}
+
+// 测试 Embedding 模型（本地/远程）是否可用
+export function testEmbeddingModel(modelConfig: {
+    source: 'local' | 'remote';
+    modelName: string;
+    baseUrl?: string;
+    apiKey?: string;
+    dimension?: number;
+    supportsDimensionOverride?: boolean;
+    provider?: string;
+    modelId?: string;
+} & BaseModelTestPayload): Promise<{ available: boolean; message?: string; dimension?: number }> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/embedding/test', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('Failed to test Embedding model:', error);
+                reject(error);
+            });
+    });
+}
+
+
+export function checkRerankModel(modelConfig: {
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+    modelId?: string;
+} & BaseModelTestPayload): Promise<{
+    available: boolean;
+    message?: string;
+}> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/rerank/check', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('Failed to check Rerank model:', error);
+                reject(error);
+            });
+    });
+}
+
+// 检查 ASR 模型连接（通过 /v1/audio/transcriptions 端点测试）
+export function checkASRModel(modelConfig: {
+    modelName: string;
+    baseUrl: string;
+    apiKey?: string;
+    provider?: string;
+    modelId?: string;
+} & BaseModelTestPayload): Promise<{
+    available: boolean;
+    message?: string;
+}> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/asr/check', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('Failed to check ASR model:', error);
+                reject(error);
+            });
+    });
+}
+
+export function testMultimodalFunction(testData: {
+    image: File;
+    vlm_model: string;
+    vlm_base_url: string;
+    vlm_api_key?: string;
+    vlm_interface_type?: string;
+    storage_type?: 'cos' | 'minio';
+    // COS optional fields (required only when storage_type === 'cos')
+    cos_secret_id?: string;
+    cos_secret_key?: string;
+    cos_region?: string;
+    cos_bucket_name?: string;
+    cos_app_id?: string;
+    cos_path_prefix?: string;
+    // MinIO optional fields
+    minio_bucket_name?: string;
+    minio_path_prefix?: string;
+    chunk_size: number;
+    chunk_overlap: number;
+    separators: string[];
+}): Promise<{
+    success: boolean;
+    caption?: string;
+    ocr?: string;
+    processing_time?: number;
+    message?: string;
+}> {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('image', testData.image);
+        formData.append('vlm_model', testData.vlm_model);
+        formData.append('vlm_base_url', testData.vlm_base_url);
+        if (testData.vlm_api_key) {
+            formData.append('vlm_api_key', testData.vlm_api_key);
+        }
+        if (testData.vlm_interface_type) {
+            formData.append('vlm_interface_type', testData.vlm_interface_type);
+        }
+        if (testData.storage_type) {
+            formData.append('storage_type', testData.storage_type);
+        }
+        // Append COS fields only when storage_type is COS
+        if (testData.storage_type === 'cos') {
+            if (testData.cos_secret_id) formData.append('cos_secret_id', testData.cos_secret_id);
+            if (testData.cos_secret_key) formData.append('cos_secret_key', testData.cos_secret_key);
+            if (testData.cos_region) formData.append('cos_region', testData.cos_region);
+            if (testData.cos_bucket_name) formData.append('cos_bucket_name', testData.cos_bucket_name);
+            if (testData.cos_app_id) formData.append('cos_app_id', testData.cos_app_id);
+            if (testData.cos_path_prefix) formData.append('cos_path_prefix', testData.cos_path_prefix);
+        }
+        // MinIO fields
+        if (testData.minio_bucket_name) formData.append('minio_bucket_name', testData.minio_bucket_name);
+        if (testData.minio_path_prefix) formData.append('minio_path_prefix', testData.minio_path_prefix);
+        formData.append('chunk_size', testData.chunk_size.toString());
+        formData.append('chunk_overlap', testData.chunk_overlap.toString());
+        formData.append('separators', JSON.stringify(testData.separators));
+
+        // 获取鉴权Token
+        const token = localStorage.getItem('weknora_token');
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        // 跨空间访问请求头：直接附，避免 short-circuit "selectedTenantId
+        // === defaultTenantId 时不附" 在某些边角下让 header 静默丢失。
+        // 与 utils/request.ts、api/chat/streame.ts 行为一致。
+        const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
+        if (selectedTenantId) {
+            headers['X-Tenant-ID'] = selectedTenantId;
+        }
+
+        // 使用原生fetch因为需要发送FormData
+        fetch(`${getApiBaseUrl()}/api/v1/initialization/multimodal/test`, {
+            method: 'POST',
+            headers,
+            body: formData
+        })
+            .then(response => response.json())
+            .then((data: any) => {
+                if (data.success) {
+                    resolve(data.data || {});
+                } else {
+                    resolve({ success: false, message: data.message || t('error.initialization.testFailed') });
+                }
+            })
+            .catch((error: any) => {
+                console.error('Failed multimodal test:', error);
+                reject(error);
+            });
+    });
+}
+
+// 文本内容关系提取接口
+export interface TextRelationExtractionRequest {
+    text: string;
+    tags: string[];
+    model_id: string;
+}
+
+export interface Node {
+    name: string;
+    attributes: string[];
+}
+
+export interface Relation {
+    node1: string;
+    node2: string;
+    type: string;
+}
+
+export interface TextRelationExtractionResponse {
+    nodes: Node[];
+    relations: Relation[];
+}
+
+// 文本内容关系提取
+export function extractTextRelations(request: TextRelationExtractionRequest): Promise<TextRelationExtractionResponse> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/extract/text-relation', request, { timeout: 60000 })
+            .then((response: any) => {
+                resolve(response.data || { nodes: [], relations: [] });
+            })
+            .catch((error: any) => {
+                console.error('Failed to extract text relations:', error);
+                reject(error);
+            });
+    });
+}
+
+export interface FabriTextRequest {
+    tags: string[];
+    model_id: string;
+}
+
+export interface FabriTextResponse {
+    text: string;
+}
+
+// 文本内容生成
+export function fabriText(request: FabriTextRequest): Promise<FabriTextResponse> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/extract/fabri-text', request)
+            .then((response: any) => {
+                resolve(response.data || { text: '' });
+            })
+            .catch((error: any) => {
+                console.error('Failed to generate text:', error);
+                reject(error);
+            });
+    });
+}
+
+export interface FabriTagRequest {
+}
+
+export interface FabriTagResponse {
+    tags: string[];
+}
+
+// 标签生成
+export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/extract/fabri-tag', request)
+            .then((response: any) => {
+                resolve(response.data || { tags: [] as string[] });
+            })
+            .catch((error: any) => {
+                console.error('Failed to generate tags:', error);
+                reject(error);
+            });
+    });
+}
+
+// 厂商额外配置字段（Azure api_version、LKEAP secret_key 等）。
+// Mirrors internal/models/catalog.ExtraField.
+export interface ModelProviderExtraFieldOption {
+    label: string;
+    labels?: Record<string, string>;
+    value: string;
+}
+
+/**
+ * Renames the primary credential input for vendors whose API does not take a
+ * plain API key. LKEAP and Volcengine sign their rerank requests with a
+ * CAM / IAM key pair, so the first field is a SecretId / Access Key ID.
+ * The vendor declares the wording so the editor needs no vendor table.
+ */
+export interface ModelProviderCredentialLabel {
+    label: string;
+    labels?: Record<string, string>;
+    placeholder?: string;
+    placeholders?: Record<string, string>;
+    hint?: string;
+    hints?: Record<string, string>;
+    // Backend model types ("KnowledgeQA", "Rerank", ...); empty = all.
+    model_types?: string[];
+    required?: boolean;
+}
+
+export interface ModelProviderExtraField {
+    key: string;
+    label: string;
+    labels?: Record<string, string>;
+    type: 'string' | 'number' | 'boolean' | 'select' | 'password' | string;
+    required?: boolean;
+    default?: string;
+    placeholder?: string;
+    placeholders?: Record<string, string>;
+    options?: ModelProviderExtraFieldOption[];
+    // Backend model types ("KnowledgeQA", "Embedding", "Rerank", "VLLM", "ASR"); empty = all.
+    model_types?: string[];
+    // Secret values are never echoed back; they are stored as the app_secret credential.
+    secret?: boolean;
+}
+
+// 厂商内置模型目录条目。Mirrors handler.ModelCatalogEntryDTO.
+export interface ModelCatalogEntry {
+    id: string;
+    name: string;
+    type: string;
+    api?: string;
+    reasoning?: boolean;
+    input?: string[];
+    context_window?: number;
+    max_output_tokens?: number;
+    dimension?: number;
+    thinking_levels?: ReasoningEffortLevel[];
+    cost?: Record<string, unknown>;
+    // Vendor page these facts came from, for the "read the docs" link.
+    source?: string;
+}
+
+export interface ModelProviderThinking {
+    format: string;
+    levels: ReasoningEffortLevel[];
+}
+
+// 模型厂商信息类型。Mirrors handler.ModelProviderDTO — the frontend keeps no
+// vendor table of its own; everything rendered for a vendor comes from here.
+export interface ModelProviderOption {
+    value: string;        // provider 标识符
+    label: string;        // 显示名称（英文 / 默认）
+    labels?: Record<string, string>;  // 按 locale 的显示名称
+    description: string;  // 描述
+    descriptions?: Record<string, string>;
+    website?: string;
+    icon?: string;        // data:image/svg+xml;base64,... 可直接用于 <img src>
+    api?: string;
+    auth?: string;
+    requiresAuth?: boolean;
+    defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
+    modelTypes: string[]; // 支持的模型类型
+    extraFields?: ModelProviderExtraField[];
+    credentialLabels?: ModelProviderCredentialLabel[];
+    models?: ModelCatalogEntry[];
+    thinking?: ModelProviderThinking;
+    order?: number;
+}
+
+// 获取模型厂商列表。
+//
+// 失败时 reject（不再吞成空数组）：唯一的调用方 stores/modelProviders 需要
+// 区分「后端真的没有厂商」和「这次请求挂了」——把失败当成空列表缓存下来，
+// 会让厂商下拉在整个会话里一直空着，直到用户刷新页面。
+export function listModelProviders(modelType?: string): Promise<ModelProviderOption[]> {
+    const url = modelType
+        ? `/api/v1/models/providers?model_type=${encodeURIComponent(modelType)}`
+        : '/api/v1/models/providers';
+    return get(url).then((response: any) => {
+        const data = response?.data;
+        // Reject rather than coerce: the store distinguishes "this vendor list
+        // is genuinely empty" (cacheable) from "the request did not produce a
+        // list" (retry on the next mount). Returning [] here would make a
+        // malformed 200 look like the former and blank the vendor dropdown and
+        // every card icon for the rest of the session.
+        if (!Array.isArray(data)) {
+            return Promise.reject(new Error('model providers response is not a list'));
+        }
+        return data as ModelProviderOption[];
+    });
+}
+
+export interface ResolveModelCatalogParams {
+    spec?: ModelSpecOverride;
+    provider: string;
+    model?: string;
+    base_url?: string;
+    model_type?: string;
+    api?: string;
+    thinking_control?: string;
+    remote_model_name?: string;
+    // Vendor-declared non-secret extra fields (Azure api_version, ...) are
+    // forwarded by key so the preview resolves the same request the runtime
+    // will make. The backend only accepts keys the vendor declares.
+    [extraField: string]: string | ModelSpecOverride | undefined;
+}
+
+// 目录解析结果。Mirrors handler.ResolveModelCatalog response data.
+export interface ResolvedModelCatalog {
+    provider: string;
+    api: string;
+    // base_url and url are only returned to callers who may configure
+    // integrations; a viewer gets the capability answer without the endpoint.
+    base_url?: string;
+    // url is the endpoint the row will actually call, and only vendors that
+    // compute their own URL report one (Azure, whose api_version picks
+    // between the v1 data plane and the dated deployments path).
+    url?: string;
+    remote_model: string;
+    cataloged: boolean;
+    model: Record<string, unknown>;
+    capabilities: ModelCapabilities;
+}
+
+// 解析模型的有效接入配置（协议、思考等级、上下文窗口等），供编辑器实时展示。
+export function resolveModelCatalog(params: ResolveModelCatalogParams): Promise<ResolvedModelCatalog> {
+    return new Promise((resolve, reject) => {
+        post(`/api/v1/models/catalog/resolve`, params)
+            .then((response: any) => {
+                if (response?.success && response?.data) {
+                    resolve(response.data as ResolvedModelCatalog);
+                } else {
+                    reject(new Error(response?.message || 'resolve failed'));
+                }
+            })
+            .catch((error: any) => {
+                reject(error?.error || error);
+            });
+    });
+}

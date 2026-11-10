@@ -1,0 +1,379 @@
+package types
+
+import (
+	"database/sql/driver"
+	"encoding/json"
+)
+
+// SearchTargetType represents the type of search target
+type SearchTargetType string
+
+const (
+	// SearchTargetTypeKnowledgeBase - search entire knowledge base
+	SearchTargetTypeKnowledgeBase SearchTargetType = "knowledge_base"
+	// SearchTargetTypeKnowledge - search specific knowledge files within a knowledge base
+	SearchTargetTypeKnowledge SearchTargetType = "knowledge"
+)
+
+// TagScope represents a tag-constrained retrieval scope inside one knowledge base.
+type TagScope struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	TagIDs          []string `json:"tag_ids"`
+}
+
+// SearchTarget represents a unified search target
+// Either search an entire knowledge base, or specific knowledge files within a knowledge base
+type SearchTarget struct {
+	// Type of search target
+	Type SearchTargetType `json:"type"`
+	// KnowledgeBaseID is the ID of the knowledge base to search
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// TenantID is the tenant ID that owns this knowledge base
+	// Required for cross-tenant shared KB queries
+	TenantID uint64 `json:"tenant_id"`
+	// KnowledgeIDs is the list of specific knowledge IDs to search within the knowledge base
+	// Only used when Type is SearchTargetTypeKnowledge
+	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
+	// TagIDs limits retrieval to chunks/documents carrying any of these KB-local tags.
+	TagIDs []string `json:"tag_ids,omitempty"`
+	// ScopeTagIDs records the logical tag scope selected by the user. For
+	// document KBs this is kept for tracing after the relation-table lookup has
+	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
+	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
+	// DisableRecallThresholds keeps recall broad inside an already constrained,
+	// user-selected scope. The reranker still orders candidates, but vector and
+	// keyword thresholds cannot erase the whole explicit scope before reranking.
+	DisableRecallThresholds bool `json:"disable_recall_thresholds,omitempty"`
+}
+
+// SearchTargets is a list of search targets, pre-computed at request entry point
+type SearchTargets []*SearchTarget
+
+// RecallThresholds returns the effective recall thresholds for this target.
+func (st *SearchTarget) RecallThresholds(vectorThreshold, keywordThreshold float64) (float64, float64) {
+	if st != nil && st.DisableRecallThresholds {
+		return 0, 0
+	}
+	return vectorThreshold, keywordThreshold
+}
+
+// HasRecallThresholdOverride reports whether any target represents an
+// authoritative scope whose candidates must reach reranking before filtering.
+func (st SearchTargets) HasRecallThresholdOverride() bool {
+	for _, target := range st {
+		if target != nil && target.DisableRecallThresholds {
+			return true
+		}
+	}
+	return false
+}
+
+// HasKnowledgeRetrievalScope reports whether a request has any effective
+// knowledge retrieval scope. SearchTargets are the unified runtime form and
+// must be considered alongside the legacy/raw KB and knowledge ID fields so
+// tag-only mentions are not mistaken for pure chat.
+func HasKnowledgeRetrievalScope(
+	searchTargets SearchTargets,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+) bool {
+	for _, id := range knowledgeBaseIDs {
+		if id != "" {
+			return true
+		}
+	}
+	for _, id := range knowledgeIDs {
+		if id != "" {
+			return true
+		}
+	}
+	for _, target := range searchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		if target.Type == SearchTargetTypeKnowledgeBase || len(target.KnowledgeIDs) > 0 ||
+			len(target.TagIDs) > 0 || len(target.ScopeTagIDs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// GetAllKnowledgeBaseIDs returns all unique knowledge base IDs from the search targets
+func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, t := range st {
+		if t == nil || t.KnowledgeBaseID == "" {
+			continue
+		}
+		if !seen[t.KnowledgeBaseID] {
+			seen[t.KnowledgeBaseID] = true
+			result = append(result, t.KnowledgeBaseID)
+		}
+	}
+	return result
+}
+
+// GetKBTenantMap returns a map from knowledge base ID to tenant ID
+func (st SearchTargets) GetKBTenantMap() map[string]uint64 {
+	result := make(map[string]uint64)
+	for _, t := range st {
+		if t != nil && t.KnowledgeBaseID != "" {
+			result[t.KnowledgeBaseID] = t.TenantID
+		}
+	}
+	return result
+}
+
+// GetTenantIDForKB returns the tenant ID for a given knowledge base ID
+// Returns 0 if not found
+func (st SearchTargets) GetTenantIDForKB(kbID string) uint64 {
+	for _, t := range st {
+		if t != nil && t.KnowledgeBaseID == kbID {
+			return t.TenantID
+		}
+	}
+	return 0
+}
+
+// ContainsKB checks if the search targets contain a given knowledge base ID
+func (st SearchTargets) ContainsKB(kbID string) bool {
+	for _, t := range st {
+		if t != nil && t.KnowledgeBaseID == kbID {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchedImage retains an image vector hit's identity before context expansion
+// replaces ImageInfo with all images in a surrounding text chunk.
+type MatchedImage struct {
+	ChunkID         string `json:"chunk_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	URL             string `json:"url"`
+}
+
+// SearchResult represents the search result
+type SearchResult struct {
+	// CitationSources retains independently citeable bodies after context expansion.
+	CitationSources []*SearchResult `json:"-" gorm:"-"`
+	// ID
+	ID string `gorm:"column:id"              json:"id" extensions:"x-agent=chunk_id"`
+	// Content
+	Content string `gorm:"column:content"         json:"content" extensions:"x-agent,x-agent-max-runes=600"`
+	// Knowledge ID
+	KnowledgeID string `gorm:"column:knowledge_id"    json:"knowledge_id" extensions:"x-agent"`
+	// Chunk index
+	ChunkIndex int `gorm:"column:chunk_index"     json:"chunk_index" extensions:"x-agent"`
+	// Knowledge title
+	KnowledgeTitle string `gorm:"column:knowledge_title" json:"knowledge_title" extensions:"x-agent"`
+	// Start at
+	StartAt int `gorm:"column:start_at"        json:"start_at"`
+	// End at
+	EndAt int `gorm:"column:end_at"          json:"end_at"`
+	// Seq
+	Seq int `gorm:"column:seq"             json:"seq"`
+	// Score
+	Score float64 `                              json:"score" extensions:"x-agent"`
+	// VectorScore is the engine's own similarity of a vector hit, before
+	// fusion replaced Score with a rank-based one; 0 for other hits. See
+	// IndexWithScore.VectorScore.
+	VectorScore float64 `json:"-"`
+	// Match type
+	MatchType MatchType `                              json:"match_type" extensions:"x-agent"`
+	// SubChunkIndex
+	SubChunkID []string `                              json:"sub_chunk_id"`
+	// Metadata
+	Metadata map[string]string `                              json:"metadata"`
+
+	// Chunk 类型
+	ChunkType string `json:"chunk_type" extensions:"x-agent"`
+	// 父 Chunk ID
+	ParentChunkID string `json:"parent_chunk_id"`
+	// 图片信息 (JSON 格式)
+	ImageInfo string `json:"image_info"`
+	// MatchedImages survives merging, deduplication and stored reference replay.
+	// It contains storage references, never image bytes.
+	MatchedImages []MatchedImage `json:"matched_images,omitempty" gorm:"-"`
+
+	// Knowledge file name
+	// Used for file type knowledge, contains the original file name
+	KnowledgeFilename string `json:"knowledge_filename"`
+
+	// Knowledge source
+	// Used to indicate the source of the knowledge, such as "url"
+	KnowledgeSource string `json:"knowledge_source"`
+
+	// KnowledgeChannel indicates through which channel the knowledge was ingested (web, api, wechat, etc.)
+	KnowledgeChannel string `json:"knowledge_channel"`
+
+	// ChunkMetadata stores chunk-level metadata (e.g., generated questions)
+	ChunkMetadata JSON `json:"chunk_metadata,omitempty"`
+	// SkipGeneratedQuestions keeps generated questions out of the rerank
+	// passage. Search sets it when the knowledge base's question generation
+	// switch is off, including bases that were turned off before the index
+	// rows were disabled.
+	SkipGeneratedQuestions bool `json:"-" gorm:"-"`
+	// ContextHeader is the chunk's heading breadcrumb, part of what was
+	// embedded (Chunk.EmbeddingContent) but not of Content. Internal only.
+	ContextHeader string `json:"-"`
+
+	// MatchedContent is the actual content that was matched in vector search
+	// For FAQ: this is the matched question text (standard or similar question)
+	MatchedContent string `json:"matched_content,omitempty"`
+
+	// KnowledgeDescription is the description of the knowledge document
+	KnowledgeDescription string `json:"knowledge_description,omitempty"`
+
+	// KnowledgeCustomMetadata is user-authored context safe to expose to models.
+	KnowledgeCustomMetadata string `json:"knowledge_custom_metadata,omitempty"`
+
+	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+
+	// SourceLocators point back into the original file for citation
+	// navigation. Merged results carry the union of their chunks' locators.
+	SourceLocators SourceLocators `json:"source_locators,omitempty"`
+
+	// ContentRevision is the chunk edit revision at retrieval time.
+	// Internal only: used by the merge pipeline to decide whether source
+	// coordinates are still trustworthy.
+	//
+	// Zero means "never edited", so any construction path that forgets to carry
+	// it over fails open to the position path. Results rebuilt from JSON (stored
+	// message references) always land on zero because the field is not
+	// serialized; the length invariant in chunkTrusted is the remaining guard
+	// there. Keep the gorm column explicit so direct row scans populate it.
+	ContentRevision int `gorm:"column:content_revision" json:"-"`
+
+	// ContentRewritten reports that the merge pipeline replaced Content
+	// (parent or neighbor expansion) after retrieval, so StartAt/EndAt no
+	// longer describe the body. Internal only: used by the merge pipeline,
+	// never serialized.
+	ContentRewritten bool `json:"-"`
+}
+
+// SearchParams represents the search parameters
+type SearchParams struct {
+	// QueryText is required unless query_embedding is provided, keyword matching is disabled,
+	// and vector matching remains enabled.
+	QueryText      string    `json:"query_text" extensions:"x-agent,x-agent-required"`
+	QueryEmbedding []float32 `json:"query_embedding,omitempty"`
+	// Minimum vector similarity a hit needs; 0 keeps every vector hit.
+	VectorThreshold float64 `json:"vector_threshold" extensions:"x-agent"`
+	// Minimum keyword score a hit needs; 0 keeps every keyword hit.
+	KeywordThreshold float64 `json:"keyword_threshold" extensions:"x-agent"`
+	// Number of chunks to return; 0 uses the default.
+	MatchCount int `json:"match_count" extensions:"x-agent,x-agent-maximum=30"`
+	// Turns keyword matching off, leaving vector matching only.
+	DisableKeywordsMatch bool `json:"disable_keywords_match" extensions:"x-agent"`
+	// Turns vector matching off, leaving keyword matching only.
+	DisableVectorMatch bool `json:"disable_vector_match" extensions:"x-agent"`
+	// Limits the search to these documents of the knowledge base.
+	KnowledgeIDs    []string `json:"knowledge_ids" extensions:"x-agent,x-agent-maximum=20"`
+	TagIDs          []string `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	ScopeTagIDs     []string `json:"scope_tag_ids,omitempty"`
+	OnlyRecommended bool     `json:"only_recommended"`
+	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
+	// allowing a single retrieval call to span multiple KBs that share the
+	// same embedding model. When empty, HybridSearch uses its own id parameter.
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+	// SkipContextEnrichment skips fetching parent, nearby, and relation chunks
+	// in processSearchResults. Used by the chat pipeline where context assembly
+	// is handled separately in the merge stage.
+	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+	// Rerank, when present and enabled, reranks the fused candidates before
+	// truncating to MatchCount. Only the hybrid-search API reads it; internal
+	// callers rerank on their own.
+	Rerank *RerankOptions `json:"rerank,omitempty"`
+}
+
+// Value implements the driver.Valuer interface, used to convert SearchResult to database value
+func (c SearchResult) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+// Scan implements the sql.Scanner interface, used to convert database value to SearchResult
+func (c *SearchResult) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+// Pagination represents the pagination parameters
+type Pagination struct {
+	// Page
+	Page int `form:"page"      json:"page"      binding:"omitempty,min=1"`
+	// Page size
+	PageSize int `form:"page_size" json:"page_size" binding:"omitempty,min=1,max=1000"`
+}
+
+// GetPage gets the page number, default is 1
+func (p *Pagination) GetPage() int {
+	if p.Page < 1 {
+		return 1
+	}
+	return p.Page
+}
+
+// GetPageSize gets the page size, default is 20
+func (p *Pagination) GetPageSize() int {
+	if p.PageSize < 1 {
+		return 20
+	}
+	if p.PageSize > 1000 {
+		return 1000
+	}
+	return p.PageSize
+}
+
+// Offset gets the offset for database query
+func (p *Pagination) Offset() int {
+	return (p.GetPage() - 1) * p.GetPageSize()
+}
+
+// Limit gets the limit for database query
+func (p *Pagination) Limit() int {
+	return p.GetPageSize()
+}
+
+// PageResult represents the pagination query result
+type PageResult struct {
+	Total    int64       `json:"total"`     // Total number of records
+	Page     int         `json:"page"`      // Current page number
+	PageSize int         `json:"page_size"` // Page size
+	Data     interface{} `json:"data"`      // Data
+}
+
+// NewPageResult creates a new pagination result
+func NewPageResult(total int64, page *Pagination, data interface{}) *PageResult {
+	return &PageResult{
+		Total:    total,
+		Page:     page.GetPage(),
+		PageSize: page.GetPageSize(),
+		Data:     data,
+	}
+}
+
+// SearchResult metadata for results that rest on an image matched by its own
+// vector (an image_vector hit).
+const (
+	// MetadataKeptBy names why a result was kept other than by its rerank
+	// score. A kept result rides outside the ranked top-k: truncating to
+	// top-k must not drop it.
+	MetadataKeptBy = "kept_by"
+	// KeptByImageVector: a pictorial image hit a text reranker rejected and
+	// its vector still vouched for.
+	KeptByImageVector = "image_vector"
+	// MetadataImageVectorMatch marks a result that stands in for an
+	// image_vector hit de-duplication dropped as a copy of it, so the image
+	// still reaches a model that can see it.
+	MetadataImageVectorMatch = "image_vector_match"
+)

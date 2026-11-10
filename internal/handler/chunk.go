@@ -1,0 +1,520 @@
+package handler
+
+import (
+	stderrors "errors"
+	"net/http"
+
+	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/gin-gonic/gin"
+)
+
+// ChunkHandler defines HTTP handlers for chunk operations.
+//
+// All KB-access checks (own / org-shared / via shared agent) are now
+// performed by the route-level g.KBAccessRead*FromKnowledgeIDParam /
+// g.KBAccessWrite*FromKnowledgeIDParam / g.KBAccess*FromChunkIDParam
+// guards in router.go — the guard rewrites c.Request.Context() to
+// carry the effective tenant ID, so the handler reads tenant from
+// context the way it always did.
+//
+// kgService is retained because the route-level *creator-ownership*
+// lookup KBCreatorLookupFromKnowledgeIDParam still walks
+// knowledge_id -> kb_id to resolve creator_id (separate axis from
+// access — that lookup answers "is the caller the creator of THIS
+// resource", not "does the caller's tenant have access").
+type ChunkHandler struct {
+	service   interfaces.ChunkService
+	kgService interfaces.KnowledgeService
+}
+
+// NewChunkHandler creates a new chunk handler.
+func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService) *ChunkHandler {
+	return &ChunkHandler{service: service, kgService: kgService}
+}
+
+// GetChunkByIDOnly godoc
+// @Summary      通过ID获取分块
+// @Description  仅通过分块ID获取分块详情（不需要knowledge_id）；支持共享知识库下的分块访问
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "分块ID" extensions(x-agent=chunk_id)
+// @Success      200  {object}  handler.DataResponse{data=handler.AgentChunkDetail}  "分块详情"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      404  {object}  errors.AppError         "分块不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent {"id":"chunk.get","risk":"read"}
+// @x-agent-hint "Read a chunk before editing. knowledge_id identifies its parent document; content_revision is required as expected_revision for changes. If truncated, do not reconstruct missing content."
+// @Router       /chunks/by-id/{id} [get]
+func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start retrieving chunk by ID only")
+
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		logger.Error(ctx, "Chunk ID is empty")
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+
+	// Get chunk by ID without tenant filter (chunk may belong to shared
+	// KB; the route-level KB-access guard already verified read
+	// permission against the parent KB before we got here).
+	chunk, err := h.service.GetChunkByIDOnly(ctx, chunkID)
+	if err != nil {
+		if err == service.ErrChunkNotFound {
+			logger.Warnf(ctx, "Chunk not found, chunk ID: %s", chunkID)
+			c.Error(errors.NewNotFoundError("Chunk not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    chunk,
+	})
+}
+
+// ListKnowledgeChunks godoc
+// @Summary      获取知识分块列表
+// @Description  获取指定知识下的所有分块列表，支持分页。chunk_type 可重复，缺省 text
+// @Description  取值 text, parent_text, image_ocr, image_caption, image_vector, summary, entity,
+// @Description  relationship, faq, web_search, table_summary, table_column, wiki_page
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        knowledge_id  path      string  true   "知识ID"  extensions(x-agent)
+// @Param        page          query     int     false  "页码"  default(1)  minimum(1)  extensions(x-agent,x-agent-maximum=10000)
+// @Param        page_size     query     int     false  "每页数量"  default(10)  minimum(1)  maximum(100)  extensions(x-agent,x-agent-maximum=20)
+// @Param        chunk_type    query     []string  false  "分块类型，可重复，缺省 text"  collectionFormat(multi)  Enums(text,parent_text,image_ocr,image_caption,image_vector,summary,entity,relationship,faq,web_search,table_summary,table_column,wiki_page)  extensions(x-agent)
+// @Success      200           {object}  handler.PageResponse{data=[]types.Chunk}  "分块列表"
+// @Failure      400           {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"chunk.list","risk":"read"}
+// @x-agent-hint "The chunks a document was split into, in order; use it to check how a document was parsed. meta.total counts every chunk."
+// @Router       /chunks/{knowledge_id} [get]
+func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start retrieving knowledge chunks list")
+
+	knowledgeID := secutils.SanitizeForLog(c.Param("knowledge_id"))
+	if knowledgeID == "" {
+		logger.Error(ctx, "Knowledge ID is empty")
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	// Parse pagination parameters
+	var pagination types.Pagination
+	if err := c.ShouldBindQuery(&pagination); err != nil {
+		logger.Errorf(ctx, "Failed to parse pagination parameters: %s", secutils.SanitizeForLog(err.Error()))
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if pagination.Page < 1 {
+		pagination.Page = 1
+	}
+	if pagination.PageSize < 1 {
+		pagination.PageSize = 10
+	}
+	if pagination.PageSize > 100 {
+		pagination.PageSize = 100
+	}
+
+	// Default to text chunks; callers may override via ?chunk_type=image_caption etc.
+	chunkType := []types.ChunkType{types.ChunkTypeText}
+	if queryTypes := c.QueryArray("chunk_type"); len(queryTypes) > 0 {
+		chunkType = make([]types.ChunkType, 0, len(queryTypes))
+		for _, qt := range queryTypes {
+			chunkType = append(chunkType, types.ChunkType(qt))
+		}
+	}
+
+	// The route-level guard has rewritten the request's tenant context
+	// to the effective tenant for shared KBs.
+	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"data":      result.Data,
+		"total":     result.Total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
+	})
+}
+
+// UpdateChunkRequest defines the request structure for updating a chunk
+type UpdateChunkRequest struct {
+	// Complete replacement content; omitted keeps the existing content.
+	Content *string `json:"content" extensions:"x-agent,x-agent-max-bytes=32000"`
+	// Whether this chunk participates in retrieval; omitted keeps its state.
+	IsEnabled *bool `json:"is_enabled" extensions:"x-agent"`
+	// Current content_revision from chunk.get; a stale value fails with HTTP 409.
+	ExpectedRevision *int `json:"expected_revision" minimum:"0" extensions:"x-agent,x-agent-required"`
+}
+
+// fetchChunkAndVerifyOwnership fetches a chunk by ID and verifies it
+// belongs to the URL :knowledge_id (defence in depth: the route-level
+// KB-access guard already ensured the caller has write access to the
+// KB; this check stops a same-tenant attacker from passing one
+// knowledge_id while addressing a chunk owned by a different
+// knowledge in the same KB).
+func (h *ChunkHandler) fetchChunkAndVerifyOwnership(c *gin.Context) (*types.Chunk, string, error) {
+	ctx := c.Request.Context()
+
+	knowledgeID := secutils.SanitizeForLog(c.Param("knowledge_id"))
+	if knowledgeID == "" {
+		logger.Error(ctx, "Knowledge ID is empty")
+		return nil, "", errors.NewBadRequestError("Knowledge ID cannot be empty")
+	}
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Chunk ID is empty")
+		return nil, knowledgeID, errors.NewBadRequestError("Chunk ID cannot be empty")
+	}
+	chunk, err := h.service.GetChunkByID(ctx, id)
+	if err != nil {
+		if err == service.ErrChunkNotFound {
+			logger.Warnf(ctx, "Chunk not found, knowledge ID: %s, chunk ID: %s", knowledgeID, id)
+			return nil, knowledgeID, errors.NewNotFoundError("Chunk not found")
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		return nil, knowledgeID, errors.NewInternalServerError(err.Error())
+	}
+	if chunk.KnowledgeID != knowledgeID {
+		logger.Warnf(ctx, "Chunk does not belong to knowledge, knowledge ID: %s, chunk ID: %s", knowledgeID, id)
+		return nil, knowledgeID, errors.NewForbiddenError("No permission to access this chunk")
+	}
+	return chunk, knowledgeID, nil
+}
+
+// UpdateChunk godoc
+// @Summary      更新分块
+// @Description  更新指定分块的内容和属性
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        knowledge_id  path      string              true  "知识ID" extensions(x-agent)
+// @Param        id            path      string              true  "分块ID" extensions(x-agent=chunk_id)
+// @Param        request       body      UpdateChunkRequest  true  "更新请求"
+// @Success      200           {object}  handler.UpdateChunkResponse  "更新后的分块"
+// @Failure      400           {object}  errors.AppError         "请求参数错误"
+// @Failure      404           {object}  errors.AppError         "分块不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent {"id":"chunk.update","risk":"write","target":"chunk.get","label":"chunk_id","require_complete_target":true}
+// @x-agent-hint "Edit the complete content of a document chunk or set is_enabled; omitted fields stay unchanged. Read chunk.get first and pass its content_revision as expected_revision. Do not edit truncated content. A conflict requires rereading and reconciling edits. Reindexes affected content and preserves revision history; FAQ and wiki chunks use their own editors."
+// @Router       /chunks/{knowledge_id}/{id} [put]
+func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start updating knowledge chunk")
+
+	chunk, knowledgeID, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var req UpdateChunkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Errorf(ctx, "Failed to parse request parameters: %s", secutils.SanitizeForLog(err.Error()))
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	chunk, err = h.service.UpdateDocumentChunk(ctx, chunk.ID, req.Content, req.IsEnabled, req.ExpectedRevision)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+			c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+			return
+		}
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge chunk updated successfully, knowledge ID: %s, chunk ID: %s",
+		secutils.SanitizeForLog(knowledgeID), secutils.SanitizeForLog(chunk.ID))
+	knowledge, getErr := h.kgService.GetKnowledgeByID(ctx, knowledgeID)
+	if getErr != nil {
+		logger.Warnf(ctx, "Chunk updated but failed to reload summary status for %s: %v", knowledgeID, getErr)
+	}
+	response := gin.H{"success": true, "data": chunk}
+	if knowledge != nil {
+		response["summary_status"] = knowledge.SummaryStatus
+		response["description"] = knowledge.Description
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+// ListChunkRevisions godoc
+// @Summary 获取分块历史版本
+// @Tags 分块管理
+// @Accept json
+// @Produce json
+// @Param knowledge_id path string true "知识ID" extensions(x-agent)
+// @Param id path string true "分块ID" extensions(x-agent=chunk_id)
+// @Success 200 {object} handler.DataResponse{data=[]types.ChunkRevision}
+// @Security Bearer
+// @Security ApiKeyAuth
+// @x-agent {"id":"chunk.list_revisions","risk":"read"}
+// @x-agent-hint "Read saved earlier revisions of a document chunk. Current revision is returned by chunk.get."
+// @Router /chunks/{knowledge_id}/{id}/revisions [get]
+func (h *ChunkHandler) ListChunkRevisions(c *gin.Context) {
+	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	items, err := h.service.ListChunkRevisions(c.Request.Context(), chunk.ID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
+}
+
+type RevertChunkRequest struct {
+	// Historical revision number from chunk.list_revisions to restore.
+	Revision *int `json:"revision" binding:"required" minimum:"0" extensions:"x-agent"`
+	// Current content_revision from chunk.get; a stale value fails with HTTP 409.
+	ExpectedRevision *int `json:"expected_revision" minimum:"0" extensions:"x-agent,x-agent-required"`
+}
+
+// RevertChunk godoc
+// @Summary 恢复分块历史版本
+// @Tags 分块管理
+// @Accept json
+// @Produce json
+// @Param knowledge_id path string true "知识ID" extensions(x-agent)
+// @Param id path string true "分块ID" extensions(x-agent=chunk_id)
+// @Param request body RevertChunkRequest true "恢复请求"
+// @Success 200 {object} handler.DataResponse{data=types.Chunk}
+// @Security Bearer
+// @Security ApiKeyAuth
+// @x-agent {"id":"chunk.revert","risk":"write","target":"chunk.get","label":"chunk_id"}
+// @x-agent-hint "Restore content and enabled state from a saved revision, creating a new revision and reindexing. Get revision from chunk.list_revisions and expected_revision from chunk.get; on conflict reread before retrying."
+// @Router /chunks/{knowledge_id}/{id}/revert [post]
+func (h *ChunkHandler) RevertChunk(c *gin.Context) {
+	chunk, knowledgeID, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var req RevertChunkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.Revision == nil || *req.Revision < 0 {
+		c.Error(errors.NewBadRequestError("revision must be a non-negative integer"))
+		return
+	}
+	updated, err := h.service.RevertDocumentChunk(c.Request.Context(), chunk.ID, *req.Revision, req.ExpectedRevision)
+	if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+		c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+		return
+	}
+	if err != nil {
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+		}
+		return
+	}
+	knowledge, getErr := h.kgService.GetKnowledgeByID(c.Request.Context(), knowledgeID)
+	if getErr != nil {
+		logger.Warnf(c.Request.Context(), "Chunk reverted but failed to reload summary status for %s: %v", knowledgeID, getErr)
+	}
+	response := gin.H{"success": true, "data": updated}
+	if knowledge != nil {
+		response["summary_status"] = knowledge.SummaryStatus
+		response["description"] = knowledge.Description
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+type UpsertGeneratedQuestionRequest struct {
+	QuestionID string `json:"question_id"`
+	Question   string `json:"question" binding:"required"`
+}
+
+func (h *ChunkHandler) UpsertGeneratedQuestion(c *gin.Context) {
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID is required"))
+		return
+	}
+	var req UpsertGeneratedQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	item, err := h.service.UpsertGeneratedQuestion(c.Request.Context(), chunkID, req.QuestionID, req.Question)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
+}
+
+func (h *ChunkHandler) RegenerateGeneratedQuestions(c *gin.Context) {
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID is required"))
+		return
+	}
+	items, err := h.kgService.RegenerateChunkQuestions(c.Request.Context(), chunkID)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
+}
+
+// DeleteChunk godoc
+// @Summary      删除分块
+// @Description  删除指定的分块
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        knowledge_id  path      string  true  "知识ID"
+// @Param        id            path      string  true  "分块ID"
+// @Success      200           {object}  handler.MessageResponse  "删除成功"
+// @Failure      400           {object}  errors.AppError         "请求参数错误"
+// @Failure      404           {object}  errors.AppError         "分块不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/{knowledge_id}/{id} [delete]
+func (h *ChunkHandler) DeleteChunk(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start deleting knowledge chunk")
+
+	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	if err := h.service.DeleteChunk(ctx, chunk.ID); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Chunk deleted",
+	})
+}
+
+// DeleteChunksByKnowledgeID godoc
+// @Summary      删除知识下所有分块
+// @Description  删除指定知识下的所有分块
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        knowledge_id  path      string  true  "知识ID"
+// @Success      200           {object}  handler.MessageResponse  "删除成功"
+// @Failure      400           {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/{knowledge_id} [delete]
+func (h *ChunkHandler) DeleteChunksByKnowledgeID(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start deleting all chunks under knowledge")
+
+	knowledgeID := secutils.SanitizeForLog(c.Param("knowledge_id"))
+	if knowledgeID == "" {
+		logger.Error(ctx, "Knowledge ID is empty")
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	if err := h.service.DeleteChunksByKnowledgeID(ctx, knowledgeID); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "All chunks under knowledge deleted",
+	})
+}
+
+// DeleteGeneratedQuestion godoc
+// @Summary      删除生成的问题
+// @Description  删除分块中生成的问题
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                       true  "分块ID"
+// @Param        request  body      object{question_id=string}   true  "问题ID"
+// @Success      200      {object}  handler.MessageResponse       "删除成功"
+// @Failure      400      {object}  errors.AppError              "请求参数错误"
+// @Failure      404      {object}  errors.AppError              "分块不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/by-id/{id}/questions [delete]
+func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start deleting generated question from chunk")
+
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		logger.Error(ctx, "Chunk ID is empty")
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+
+	var req struct {
+		QuestionID string `json:"question_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Errorf(ctx, "Failed to parse request parameters: %s", secutils.SanitizeForLog(err.Error()))
+		c.Error(errors.NewBadRequestError("Question ID is required"))
+		return
+	}
+
+	if err := h.service.DeleteGeneratedQuestion(ctx, chunkID, req.QuestionID); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Generated question deleted successfully, chunk ID: %s, question ID: %s",
+		secutils.SanitizeForLog(chunkID), secutils.SanitizeForLog(req.QuestionID))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Generated question deleted",
+	})
+}
+
+// AgentChunkDetail describes the same chunk JSON with a larger detail projection.
+// Lists keep their compact content preview; edits require a complete detail read.
+type AgentChunkDetail struct {
+	types.Chunk
+	Content string `json:"content" extensions:"x-agent,x-agent-max-runes=8000"`
+}

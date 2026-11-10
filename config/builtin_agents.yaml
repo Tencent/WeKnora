@@ -1,0 +1,337 @@
+# Built-in Agent Configuration with i18n support
+# Each agent has localized name, description, avatar, and config overrides per language.
+# The "default" locale is used as fallback when the user's language is not found.
+
+builtin_agents:
+  - id: "builtin-quick-answer"
+    avatar: ""
+    is_builtin: true
+    i18n:
+      default:
+        name: "Quick Answer"
+        description: "Knowledge base RAG Q&A for fast and accurate answers"
+      zh-CN:
+        name: "快速问答"
+        description: "基于知识库的 RAG 问答，快速准确地回答问题"
+      zh-TW:
+        name: "快速問答"
+        description: "基於知識庫的 RAG 問答，快速準確地回答問題"
+      ja-JP:
+        name: "クイック回答"
+        description: "ナレッジベース RAG Q&A による迅速で正確な回答"
+      ko-KR:
+        name: "빠른 답변"
+        description: "지식 베이스 RAG Q&A를 통한 빠르고 정확한 답변"
+    config:
+      agent_mode: "quick-answer"
+      system_prompt_id: "default_kb"
+      context_template_id: "default_context"
+      temperature: 0.7
+      max_completion_tokens: 0
+      web_search_enabled: true
+      web_search_max_results: 5
+      multi_turn_enabled: true
+      history_turns: 5
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      faq_priority_enabled: true
+      faq_direct_answer_threshold: 0.9
+      faq_score_boost: 1.2
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+      enable_query_expansion: true
+      enable_rewrite: true
+      fallback_strategy: "model"
+
+  - id: "builtin-smart-reasoning"
+    avatar: ""
+    is_builtin: true
+    i18n:
+      default:
+        name: "Smart Reasoning"
+        description: "ReAct reasoning framework with multi-step thinking and tool calling"
+      zh-CN:
+        name: "智能推理"
+        description: "ReAct 推理框架，支持多步思考与工具调用"
+      zh-TW:
+        name: "智能推理"
+        description: "ReAct 推理框架，支援多步思考與工具呼叫"
+      ja-JP:
+        name: "スマート推論"
+        description: "ReAct 推論フレームワーク、マルチステップ思考とツール呼び出し対応"
+      ko-KR:
+        name: "스마트 추론"
+        description: "ReAct 추론 프레임워크, 다단계 사고 및 도구 호출 지원"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "rag-qa"
+      system_prompt: ""
+      temperature: 0.7
+      max_completion_tokens: 0
+      max_iterations: 50
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      allowed_tools:
+        - "search_knowledge"
+        - "read_document"
+        - "list_documents"
+        - "query_knowledge_graph"
+        - "ask_user"
+      web_search_enabled: true
+      web_search_max_results: 5
+      reflection_enabled: false
+      multi_turn_enabled: true
+      faq_priority_enabled: true
+      faq_direct_answer_threshold: 0.9
+      faq_score_boost: 1.2
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+
+  - id: "builtin-data-analyst"
+    avatar: "📊"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Data Analyst"
+        description: "Professional data analysis agent with SQL query and statistical analysis for CSV/Excel files"
+      zh-CN:
+        name: "数据分析师"
+        description: "专业的数据分析智能体，支持对 CSV/Excel 文件进行 SQL 查询和统计分析"
+      zh-TW:
+        name: "數據分析師"
+        description: "專業的數據分析智能體，支援對 CSV/Excel 檔案進行 SQL 查詢和統計分析"
+      ja-JP:
+        name: "データアナリスト"
+        description: "CSV/Excel ファイルの SQL クエリと統計分析に対応するプロフェッショナルなデータ分析エージェント"
+      ko-KR:
+        name: "데이터 분석가"
+        description: "CSV/Excel 파일에 대한 SQL 쿼리 및 통계 분석을 지원하는 전문 데이터 분석 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "data-analysis"
+      system_prompt_id: "data_analyst"
+      temperature: 0.3
+      max_completion_tokens: 0
+      max_iterations: 30
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      supported_file_types:
+        - "csv"
+        - "xlsx"
+      allowed_tools:
+        - "data_schema"
+        - "data_analysis"
+        - "ask_user"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: true
+      multi_turn_enabled: true
+      embedding_top_k: 5
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 5
+      rerank_threshold: 0.3
+
+  - id: "builtin-wiki-researcher"
+    avatar: "📚"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Wiki Questioner"
+        description: "Specialized agent for answering questions based on Wiki knowledge bases"
+      zh-CN:
+        name: "维基问答"
+        description: "专注于在 Wiki 知识库中回答问题的智能体"
+      zh-TW:
+        name: "維基問答"
+        description: "專注於在 Wiki 知識庫中回答問題的智能體"
+      ja-JP:
+        name: "Wiki 問答"
+        description: "Wikiナレッジベースでの回答問題に特化したエージェント"
+      ko-KR:
+        name: "위키 질문"
+        description: "위키 지식 베이스에서 답변하는 데 특화된 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "wiki-qa"
+      system_prompt_id: "wiki_researcher"
+      temperature: 0.7
+      max_completion_tokens: 0
+      max_iterations: 30
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      allowed_tools:
+        - "wiki_search"
+        - "wiki_read_page"
+        - "read_document"
+        - "wiki_flag_issue"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+
+  - id: "builtin-wiki-fixer"
+    avatar: "🔧"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Wiki Fixer"
+        description: "Specialized agent for revising Wiki pages based on inspection issues"
+      zh-CN:
+        name: "维基修订"
+        description: "专门用于根据巡检问题修订 Wiki 页面的智能体"
+      zh-TW:
+        name: "維基修訂"
+        description: "專門用於根據巡檢問題修訂 Wiki 頁面的智能體"
+      ja-JP:
+        name: "Wiki 修訂"
+        description: "検査の問題に基づいてWikiページを修復および最適化するための専用エージェント"
+      ko-KR:
+        name: "위키 수정"
+        description: "검사 문제를 기반으로 Wiki 페이지를 修復하고 最適化하는 전용 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "custom"
+      system_prompt_id: "wiki_fixer"
+      temperature: 0.7
+      max_completion_tokens: 0
+      max_iterations: 30
+      kb_selection_mode: "selected"
+      retrieve_kb_only_when_mentioned: false
+      retain_retrieval_history: true
+      allowed_tools:
+        - "wiki_search"
+        - "wiki_read_page"
+        - "read_document"
+        - "wiki_write_page"
+        - "wiki_replace_text"
+        - "wiki_rename_page"
+        - "wiki_delete_page"
+        - "wiki_read_issue"
+        - "wiki_update_issue"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+
+  - id: "builtin-skill-installer"
+    avatar: "📦"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Skill Installer"
+        description: "Internal agent that installs an uploaded skill and its dependencies into the sandbox image"
+      zh-CN:
+        name: "技能安装器"
+        description: "把上传的技能及其依赖装进沙箱镜像的内部智能体"
+      zh-TW:
+        name: "技能安裝器"
+        description: "把上傳的技能及其相依套件裝進沙箱鏡像的內部智能體"
+      ja-JP:
+        name: "スキルインストーラー"
+        description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールする内部エージェント"
+      ko-KR:
+        name: "스킬 설치 도구"
+        description: "업로드된 스킬과 의존성을 샌드박스 이미지에 설치하는 내부 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "custom"
+      system_prompt_id: "skill_installer"
+      temperature: 0.2
+      max_completion_tokens: 24576
+      max_iterations: 30
+      kb_selection_mode: "none"
+      retrieve_kb_only_when_mentioned: false
+      # The install path unions these three in regardless of what is written
+      # here: an install that cannot write its own skill directory cannot
+      # record what it did. They are listed for accuracy, not as the source of
+      # truth. write_skill_file / edit_skill_file reach only the one skill
+      # being installed and are never offered to a tenant-editable agent.
+      allowed_tools:
+        - "shell_exec"
+        - "write_skill_file"
+        - "edit_skill_file"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+
+
+  - id: "builtin-weknora-assistant"
+    avatar: "🧭"
+    is_builtin: true
+    i18n:
+      default:
+        name: "WeKnora Assistant"
+        description: "Answers how WeKnora works and manages your workspace: document parsing, knowledge base activity, Wiki health and repairs"
+      zh-CN:
+        name: "WeKnora 助手"
+        description: "解答 WeKnora 用法，查看和管理你的空间：文档解析、知识库动态、Wiki 健康与修订"
+      zh-TW:
+        name: "WeKnora 助手"
+        description: "解答 WeKnora 用法，檢視和管理你的空間：文件解析、知識庫動態、Wiki 健康與修訂"
+      ja-JP:
+        name: "WeKnora アシスタント"
+        description: "WeKnora の使い方に答え、ワークスペースを確認・管理：ドキュメント解析、ナレッジベースの履歴、Wiki の健全性と修正"
+      ko-KR:
+        name: "WeKnora 어시스턴트"
+        description: "WeKnora 사용법 안내와 워크스페이스 확인 및 관리: 문서 파싱, 지식 베이스 활동, Wiki 상태 점검과 수정"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "custom"
+      system_prompt_id: "weknora_assistant"
+      temperature: 0.3
+      max_completion_tokens: 24576
+      max_iterations: -1
+      # The workspace assistant can read the caller's accessible bases. Explicit
+      # mentions still narrow a turn; the current page is only contextual data.
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      retain_retrieval_history: true
+      # find_operations / run_operation and search_weknora_docs /
+      # read_weknora_doc are not listed: they are granted to this agent by ID
+      # at run time (types.GrantsOperationCatalog, types.GrantsProductDocs) and
+      # can never be selected on a tenant-editable agent.
+      allowed_tools:
+        - "ask_user"
+        - "todo_write"
+        - "search_knowledge"
+        - "read_document"
+        - "list_documents"
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_write_page"
+        - "wiki_replace_text"
+        - "wiki_rename_page"
+        - "wiki_delete_page"
+        - "wiki_flag_issue"
+        - "wiki_read_issue"
+        - "wiki_update_issue"
+      # web_search / web_fetch let it find a skill's or MCP service's source
+      # from a description. They follow this switch rather than allowed_tools,
+      # and web_search still needs a provider configured in the workspace.
+      web_search_enabled: true
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3

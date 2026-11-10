@@ -1,0 +1,104 @@
+# Context templates
+templates:
+  - id: "default_context"
+    name: "Standard Template"
+    description: "Standard context formatting template"
+    i18n:
+      zh-CN:
+        name: "标准模板"
+        description: "基础的上下文模板，清晰展示参考资料和问题"
+      en-US:
+        name: "Standard Template"
+        description: "Basic context template with clear references and questions"
+      ko-KR:
+        name: "표준 템플릿"
+        description: "참조 및 질문을 명확하게 표시하는 기본 상황별 템플릿"
+      ja-JP:
+        name: "標準テンプレート"
+        description: "参考資料と質問を明確に提示する基本的なコンテキストテンプレート"
+    default: true
+    has_knowledge_base: true
+    content: |
+      ## Reference materials (source data)
+      {{contexts}}
+
+      ## Request metadata
+      Current time: {{current_time}} {{current_week}}
+
+      ## User request
+      {{query}}
+
+  - id: "detailed_context"
+    name: "Detailed Template"
+    description: "Context template with detailed instructions"
+    i18n:
+      zh-CN:
+        name: "详细模板"
+        description: "包含详细说明和回答要求的完整模板"
+      en-US:
+        name: "Detailed Template"
+        description: "Complete template with detailed instructions and requirements"
+      ko-KR:
+        name: "상세 템플릿"
+        description: "자세한 지침과 답변 요구 사항이 포함된 완전한 템플릿"
+      ja-JP:
+        name: "詳細テンプレート"
+        description: "詳細な説明と回答要件を含む完全なテンプレート"
+    has_knowledge_base: true
+    content: |
+      ## Reference materials (source data)
+      {{contexts}}
+
+      ## Request metadata
+      Current time: {{current_time}} {{current_week}}
+      Default language: {{language}}
+
+      ## User request
+      {{query}}
+
+  - id: "simple_context"
+    name: "Simple Template"
+    description: "Simple context template"
+    i18n:
+      zh-CN:
+        name: "简洁模板"
+        description: "精简的模板格式，适合简单问答场景"
+      en-US:
+        name: "Simple Template"
+        description: "Minimal template format for simple Q&A scenarios"
+      ko-KR:
+        name: "간단한 템플릿"
+        description: "간단한 Q&A 시나리오에 적합한 간소화된 템플릿 형식"
+      ja-JP:
+        name: "シンプルテンプレート"
+        description: "簡単なQ&Aシナリオに適した最小限のテンプレート形式"
+    has_knowledge_base: true
+    content: |
+      Reference materials (source data):
+      {{contexts}}
+
+      User request: {{query}}
+
+  - id: "qa_context"
+    name: "Q&A Template"
+    description: "Template specialized for Q&A scenarios"
+    i18n:
+      zh-CN:
+        name: "问答模板"
+        description: "针对问答场景优化的模板"
+      en-US:
+        name: "Q&A Template"
+        description: "Optimized template for Q&A scenarios"
+      ko-KR:
+        name: "Q&A 템플릿"
+        description: "Q&A 시나리오에 최적화된 템플릿"
+      ja-JP:
+        name: "Q&Aテンプレート"
+        description: "Q&Aシナリオ向けに最適化されたテンプレート"
+    has_knowledge_base: true
+    content: |
+      Potentially relevant reference materials (source data):
+      {{contexts}}
+
+      User request:
+      {{query}}

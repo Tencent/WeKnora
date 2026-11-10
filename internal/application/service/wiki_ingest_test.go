@@ -1,0 +1,672 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+func TestWikiInflightSlotReleasedWhenTaskContextCanceled(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	svc := &wikiIngestService{redisClient: rdb}
+	ctx, cancel := context.WithCancel(context.Background())
+	release, granted := svc.reserveInflightSlot(ctx, "kb-1", 1)
+	require.True(t, granted)
+	t.Cleanup(release)
+	require.Equal(t, int64(1), rdb.ZCard(context.Background(), wikiInflightPrefix+"kb-1").Val())
+
+	cancel()
+
+	require.Eventually(t, func() bool {
+		return rdb.ZCard(context.Background(), wikiInflightPrefix+"kb-1").Val() == 0
+	}, time.Second, 10*time.Millisecond, "canceled tasks must not retain an inflight slot")
+}
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Hello World", "hello-world"},
+		{"Acme Corp", "acme-corp"},
+		{"  spaces  ", "spaces"},
+		{"under_score", "under-score"},
+		{"Already-Good", "already-good"},
+		{"Special!@#Chars", "specialchars"},
+		{"CamelCase", "camelcase"},
+		{"", ""},
+		{"a/b/c", "a/b/c"},               // preserve slashes for hierarchical slugs
+		{"中文标题", "中文标题"},                 // preserve CJK
+		{"Mix 中英文 Test", "mix-中英文-test"}, // mixed
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := slugify(tt.input)
+			if got != tt.want {
+				t.Errorf("slugify(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppendUnique(t *testing.T) {
+	arr := types.StringArray{"a", "b"}
+
+	// Add new
+	result := appendUnique(arr, "c")
+	if len(result) != 3 {
+		t.Errorf("Expected 3 items, got %d", len(result))
+	}
+
+	// Add duplicate
+	result = appendUnique(result, "b")
+	if len(result) != 3 {
+		t.Errorf("Expected 3 items (no dup), got %d", len(result))
+	}
+}
+
+func TestReconstructContent(t *testing.T) {
+	chunks := []*types.Chunk{
+		{ChunkIndex: 2, ChunkType: types.ChunkTypeText, Content: "Third paragraph."},
+		{ChunkIndex: 0, ChunkType: types.ChunkTypeText, Content: "First paragraph."},
+		{ChunkIndex: 1, ChunkType: types.ChunkTypeText, Content: "Second paragraph."},
+		{ChunkIndex: 3, ChunkType: types.ChunkTypeImageOCR, Content: "OCR text should be excluded."},
+	}
+
+	content := reconstructContent(chunks)
+
+	// Should be sorted by ChunkIndex and exclude non-text chunks
+	if content == "" {
+		t.Fatal("reconstructContent should not be empty")
+	}
+
+	// Verify order: first, second, third
+	if len(content) == 0 {
+		t.Fatal("empty content")
+	}
+
+	// The first characters should be "First"
+	if content[:5] != "First" {
+		t.Errorf("Expected content to start with 'First', got: %s", content[:20])
+	}
+}
+
+func TestReconstructContentEmpty(t *testing.T) {
+	content := reconstructContent(nil)
+	if content != "" {
+		t.Errorf("Empty chunks should produce empty content, got %q", content)
+	}
+}
+
+func TestStripImageMarkup(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain text untouched", "Hello world.", "Hello world."},
+		{"single markdown image removed", "![alt](images/page_1.png)", ""},
+		{
+			"scanned-pdf style page references all stripped",
+			"![MX5280_page_1.png](images/MX5280_page_1.png)\n\n![MX5280_page_2.png](images/MX5280_page_2.png)",
+			"\n\n",
+		},
+		{"mixed text and image keeps text", "Intro paragraph.\n![fig](a.png)\nConclusion.", "Intro paragraph.\n\nConclusion."},
+		{"html img tag stripped", `Before <img src="x.png" alt="y"/> after`, "Before  after"},
+		{
+			// Regression guard: an earlier version stripped the WHOLE
+			// <image>...</image> block (including <image_ocr> content),
+			// silently destroying successful VLM OCR results. The fix must
+			// preserve the inner OCR / caption text.
+			"enriched <image> block keeps inner OCR + caption text",
+			`<image url="images/page_1.png">
+<image_original>![p1](images/page_1.png)</image_original>
+<image_caption>scanned letter on letterhead</image_caption>
+<image_ocr>SEHR GEEHRTER HERR MUSTERMANN, ...</image_ocr>
+</image>`,
+			"\n\nscanned letter on letterhead\nSEHR GEEHRTER HERR MUSTERMANN, ...\n",
+		},
+		{
+			"empty <image> block (OCR failed) reduces to whitespace",
+			`<image url="x"><image_original>![a](x)</image_original></image>`,
+			"",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripImageMarkup(tt.input)
+			if got != tt.want {
+				t.Errorf("stripImageMarkup(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasSufficientTextContent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"empty string", "", false},
+		{"only whitespace", "   \n\n\t  ", false},
+		{
+			"only image references (scanned PDF without OCR)",
+			"![MX5280_page_1.png](images/MX5280_page_1.png)\n![MX5280_page_2.png](images/MX5280_page_2.png)",
+			false,
+		},
+		{"too-short text below 10-rune threshold", "hi", false},
+		{
+			"short legitimate note above threshold",
+			"Meeting at 3pm tomorrow.",
+			true,
+		},
+		{
+			"image-only with successful VLM OCR (the fix)",
+			`<image url="images/p1.png">
+<image_original>![p1](images/p1.png)</image_original>
+<image_caption>scanned letter</image_caption>
+<image_ocr>Sehr geehrter Herr Mustermann, in der Sache 4711/2024 ...</image_ocr>
+</image>`,
+			true,
+		},
+		{
+			"image-only with failed VLM OCR (still rejected)",
+			`<image url="images/p1.png">
+<image_original>![p1](images/p1.png)</image_original>
+</image>`,
+			false,
+		},
+		{
+			"sufficient text mixed with images still passes",
+			"![cover](cover.png)\nDie Beklagte hat die Klage anerkannt.\n![sig](sig.png)",
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasSufficientTextContent(tt.input)
+			if got != tt.want {
+				t.Errorf("hasSufficientTextContent(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMaskImageURLs(t *testing.T) {
+	const urlA = "minio://kb/10000/exports/4135-aaaa-bbbb-cccc/page_1.jpg"
+	const urlB = "local://kb/10000/exports/9999-dddd-eeee-ffff/page_2.png"
+
+	t.Run("single markdown image round trips exact URL", func(t *testing.T) {
+		input := "Intro ![alt text](" + urlA + ") outro"
+		masked, urlMap := maskImageURLs(input)
+
+		if masked != "Intro ![alt text](wkimg:0001) outro" {
+			t.Fatalf("masked = %q", masked)
+		}
+		if got := urlMap["wkimg:0001"]; got != urlA {
+			t.Fatalf("urlMap[wkimg:0001] = %q, want %q", got, urlA)
+		}
+		if got := unmaskImageURLs(masked, urlMap); got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("enriched image attribute and original markdown share token", func(t *testing.T) {
+		input := `<image url="` + urlA + `">
+<image_original>![page](` + urlA + `)</image_original>
+<image_caption>caption text</image_caption>
+</image>`
+		masked, urlMap := maskImageURLs(input)
+
+		if len(urlMap) != 1 {
+			t.Fatalf("len(urlMap) = %d, want 1", len(urlMap))
+		}
+		if strings.Count(masked, "wkimg:0001") != 2 {
+			t.Fatalf("masked should contain the same placeholder twice: %q", masked)
+		}
+		if strings.Contains(masked, urlA) {
+			t.Fatalf("masked still contains real URL: %q", masked)
+		}
+		if got := unmaskImageURLs(masked, urlMap); got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("same URL repeated and distinct URLs map correctly", func(t *testing.T) {
+		input := "![a](" + urlA + ")\n![again](" + urlA + ")\n![b](" + urlB + ")"
+		masked, urlMap := maskImageURLs(input)
+
+		if strings.Count(masked, "wkimg:0001") != 2 {
+			t.Fatalf("same URL should reuse wkimg:0001: %q", masked)
+		}
+		if strings.Count(masked, "wkimg:0002") != 1 {
+			t.Fatalf("second URL should use wkimg:0002: %q", masked)
+		}
+		if got := unmaskImageURLs(masked, urlMap); got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("caption is preserved even when it resembles a placeholder", func(t *testing.T) {
+		input := "![wkimg:0001](" + urlA + ")"
+		masked, urlMap := maskImageURLs(input)
+		got := unmaskImageURLs(masked, urlMap)
+
+		if got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("non image text is unchanged", func(t *testing.T) {
+		input := "slug: entity/example\nlanguage: zh"
+		masked, urlMap := maskImageURLs(input)
+
+		if masked != input {
+			t.Fatalf("maskImageURLs() = %q, want %q", masked, input)
+		}
+		if len(urlMap) != 0 {
+			t.Fatalf("len(urlMap) = %d, want 0", len(urlMap))
+		}
+	})
+}
+
+func TestUnmaskImageURLsDropsUnknownPlaceholders(t *testing.T) {
+	urlMap := map[string]string{"wkimg:0001": "minio://kb/exports/real.jpg"}
+	input := `{"details":"keep ![ok](wkimg:0001) drop ![bad](wkimg:001) and wkimg:9999"}`
+	got := unmaskImageURLs(input, urlMap)
+
+	if !strings.Contains(got, "![ok](minio://kb/exports/real.jpg)") {
+		t.Fatalf("known placeholder was not restored: %q", got)
+	}
+	if strings.Contains(got, "wkimg:") || strings.Contains(got, "![bad]") {
+		t.Fatalf("unknown placeholders should be dropped: %q", got)
+	}
+}
+
+// The synthesis model sometimes rewrites wkimg:0010 with another separator
+// (a slash in #4294). The digits still identify the image, so the token must
+// be restored — or dropped when the index is unknown — instead of reaching
+// storage as a broken image link.
+func TestUnmaskImageURLsNormalisesPlaceholderSeparators(t *testing.T) {
+	const page1 = "minio://kb/exports/page_1.jpg"
+	const page10 = "minio://kb/exports/page_10.jpg"
+	urlMap := map[string]string{
+		"wkimg:0001": page1,
+		"wkimg:0010": page10,
+	}
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"slash", "![p](wkimg/0010)", "![p](" + page10 + ")"},
+		{"underscore", "![p](wkimg_0001)", "![p](" + page1 + ")"},
+		{"dash", "![p](wkimg-0001)", "![p](" + page1 + ")"},
+		{"space", "![p](wkimg 0001)", "![p](" + page1 + ")"},
+		{"full width colon", "![p](wkimg：0010)", "![p](" + page10 + ")"},
+		{"uppercase", "![p](WKIMG:0001)", "![p](" + page1 + ")"},
+		{"outside markdown", "see wkimg/0010 here", "see " + page10 + " here"},
+		{"unknown index", "![p](wkimg/9999)", ""},
+		{"non placeholder url", "![p](https://example.com/wkimg.png)", "![p](https://example.com/wkimg.png)"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := unmaskImageURLs(tc.input, urlMap); got != tc.want {
+				t.Fatalf("unmaskImageURLs(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
+	const realURL = "minio://kb/10000/exports/4135-aaaa-bbbb-cccc/page_1.jpg"
+	model := &templateCaptureChatModel{
+		response: `{"details":"Model kept ![caption](wkimg:0001)"}`,
+	}
+	service := &wikiIngestService{}
+
+	got, err := service.generateWithTemplate(
+		context.Background(),
+		model,
+		`Content={{.Content}} Existing={{.ExistingContent}}`,
+		map[string]string{
+			"Content":         "new ![alt](" + realURL + ")",
+			"ExistingContent": "old ![same](" + realURL + ")",
+		},
+	)
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if strings.Contains(model.prompt, realURL) {
+		t.Fatalf("LLM prompt contains real URL: %q", model.prompt)
+	}
+	if strings.Count(model.prompt, "wkimg:0001") != 2 {
+		t.Fatalf("same URL across fields should share wkimg:0001: %q", model.prompt)
+	}
+	if strings.Contains(got, "wkimg:") {
+		t.Fatalf("returned content still contains placeholder: %q", got)
+	}
+	if !strings.Contains(got, realURL) {
+		t.Fatalf("returned content does not contain restored real URL: %q", got)
+	}
+}
+
+type templateCaptureChatModel struct {
+	prompt   string
+	response string
+	messages []chat.Message
+	options  chat.ChatOptions
+	purpose  string
+	prefix   string
+}
+
+func (m *templateCaptureChatModel) Chat(
+	ctx context.Context,
+	messages []chat.Message,
+	opts *chat.ChatOptions,
+) (*types.ChatResponse, error) {
+	if len(messages) > 0 {
+		m.prompt = messages[0].Content
+	}
+	m.messages = append([]chat.Message(nil), messages...)
+	if opts != nil {
+		m.options = *opts
+	}
+	m.purpose, m.prefix = types.LLMCallMetadataFromContext(ctx)
+	return &types.ChatResponse{Content: m.response}, nil
+}
+
+func (m *templateCaptureChatModel) ChatStream(
+	context.Context,
+	[]chat.Message,
+	*chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	return nil, nil
+}
+
+func (m *templateCaptureChatModel) GetModelName() string { return "capture" }
+func (m *templateCaptureChatModel) GetModelID() string   { return "capture" }
+
+func TestGenerateWikiPageModifyUsesCacheableMessageLayout(t *testing.T) {
+	model := &templateCaptureChatModel{response: "SUMMARY: page\n# Alpha"}
+	service := &wikiIngestService{}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	_, err := service.generateWithTemplate(ctx, model, agent.WikiPageModifyUserPrompt, map[string]string{
+		"HasAdditions":         "1",
+		"SharedSourceContexts": "<document><context>shared source summary</context></document>\n",
+		"PageSlug":             "concept/alpha",
+		"PageTitle":            "Alpha",
+		"PageType":             "concept",
+		"ExistingContent":      "(New page)",
+		"NewContent":           "page-specific evidence",
+		"AvailableSlugs":       "concept/beta (Beta)",
+		"Language":             "English",
+		"InstructionScope":     "wiki_content",
+	})
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if len(model.messages) != 2 || model.messages[0].Role != "system" || model.messages[1].Role != "user" {
+		t.Fatalf("unexpected message layout: %#v", model.messages)
+	}
+	if !strings.Contains(model.messages[0].Content, "SOURCE GROUNDING & MERGE RULES") {
+		t.Fatalf("system prompt missing stable rules: %q", model.messages[0].Content)
+	}
+	if !strings.HasPrefix(model.messages[1].Content, "<shared_source_contexts>") {
+		t.Fatalf("shared source context must lead user message: %q", model.messages[1].Content)
+	}
+	if model.purpose != "wiki_page_modify" || model.prefix == "" {
+		t.Fatalf("missing cache metadata: purpose=%q prefix=%q", model.purpose, model.prefix)
+	}
+}
+
+func TestAwaitWikiPromptWarmupBlocksFollowersUntilLeaderCompletes(t *testing.T) {
+	service := &wikiIngestService{}
+	release, err := service.awaitWikiPromptWarmup(context.Background(), "same-prefix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	followerDone := make(chan error, 1)
+	go func() {
+		_, followErr := service.awaitWikiPromptWarmup(context.Background(), "same-prefix")
+		followerDone <- followErr
+	}()
+	select {
+	case <-followerDone:
+		t.Fatal("follower passed warmup gate before leader completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	release()
+	select {
+	case followErr := <-followerDone:
+		if followErr != nil {
+			t.Fatal(followErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("follower did not resume after leader completed")
+	}
+}
+
+type blockingTemplateChatModel struct {
+	calls   atomic.Int32
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (m *blockingTemplateChatModel) Chat(
+	context.Context,
+	[]chat.Message,
+	*chat.ChatOptions,
+) (*types.ChatResponse, error) {
+	m.calls.Add(1)
+	m.once.Do(func() { close(m.started) })
+	<-m.release
+	return &types.ChatResponse{Content: "shared result"}, nil
+}
+
+func (m *blockingTemplateChatModel) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+	return nil, nil
+}
+
+func (m *blockingTemplateChatModel) GetModelName() string { return "blocking" }
+func (m *blockingTemplateChatModel) GetModelID() string   { return "blocking" }
+
+func TestGenerateWithTemplateCoalescesIdenticalConcurrentRequests(t *testing.T) {
+	model := &blockingTemplateChatModel{started: make(chan struct{}), release: make(chan struct{})}
+	service := &wikiIngestService{}
+	result := make(chan error, 2)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	call := func() {
+		_, err := service.generateWithTemplate(ctx, model, "same {{.Value}}", map[string]string{"Value": "input"})
+		result <- err
+	}
+	go call()
+	<-model.started
+	go call()
+	time.Sleep(20 * time.Millisecond)
+	if got := model.calls.Load(); got != 1 {
+		t.Fatalf("identical requests reached provider %d times before release", got)
+	}
+	close(model.release)
+	for range 2 {
+		if err := <-result; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := model.calls.Load(); got != 1 {
+		t.Fatalf("identical requests reached provider %d times, want 1", got)
+	}
+}
+
+func TestWikiIngestCleanupContextDetachedFromCancelledParent(t *testing.T) {
+	parent := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))
+	ctx, cancel := context.WithCancel(parent)
+	cancel()
+
+	cleanupCtx, cleanupCancel := wikiIngestCleanupContext(ctx)
+	defer cleanupCancel()
+
+	repo := &wikiPendingRepoForCleanupTest{}
+	svc := &wikiIngestService{pendingRepo: repo}
+	if err := svc.trimPendingList(cleanupCtx, []int64{7}); err != nil {
+		t.Fatalf("trimPendingList() error = %v", err)
+	}
+	if repo.deleteCtxErr != nil {
+		t.Fatalf("cleanup context should be detached from parent cancellation, got %v", repo.deleteCtxErr)
+	}
+	if got := cleanupCtx.Value(types.TenantIDContextKey); got != uint64(42) {
+		t.Fatalf("cleanup context lost tenant value: %v", got)
+	}
+}
+
+func TestTrimPendingListReturnsDeleteError(t *testing.T) {
+	wantErr := errors.New("delete failed")
+	repo := &wikiPendingRepoForCleanupTest{deleteErr: wantErr}
+	svc := &wikiIngestService{pendingRepo: repo}
+
+	err := svc.trimPendingList(context.Background(), []int64{1, 2, 3})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("trimPendingList() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestRequeueFailedOpsReturnsReleaseError(t *testing.T) {
+	wantErr := errors.New("release failed")
+	repo := &wikiPendingRepoForCleanupTest{incrCount: 1, releaseErr: wantErr}
+	svc := &wikiIngestService{pendingRepo: repo}
+
+	err := svc.requeueFailedOps(context.Background(), WikiIngestPayload{}, []WikiPendingOp{{
+		Op:          WikiOpIngest,
+		KnowledgeID: "k1",
+		DocTitle:    "doc",
+		dbID:        99,
+	}})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("requeueFailedOps() error = %v, want %v", err, wantErr)
+	}
+}
+
+type wikiPendingRepoForCleanupTest struct {
+	deleteErr     error
+	releaseErr    error
+	incrErr       error
+	incrCount     int
+	deleteCtxErr  error
+	releaseCtxErr error
+	incrCtxErr    error
+}
+
+func (r *wikiPendingRepoForCleanupTest) Enqueue(context.Context, *types.TaskPendingOp) error {
+	return nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) PeekBatch(
+	context.Context,
+	string,
+	string,
+	string,
+	int,
+) ([]*types.TaskPendingOp, error) {
+	return nil, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) ClaimBatch(
+	context.Context,
+	string,
+	string,
+	string,
+	int,
+	time.Time,
+) ([]*types.TaskPendingOp, error) {
+	return nil, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) ReleaseByIDs(ctx context.Context, _ []int64) error {
+	r.releaseCtxErr = ctx.Err()
+	if r.releaseErr != nil {
+		return r.releaseErr
+	}
+	return nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) DeleteByIDs(ctx context.Context, _ []int64) error {
+	r.deleteCtxErr = ctx.Err()
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
+	return nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) IncrFailCount(ctx context.Context, _ int64) (int, error) {
+	r.incrCtxErr = ctx.Err()
+	if r.incrErr != nil {
+		return 0, r.incrErr
+	}
+	if r.incrCount == 0 {
+		r.incrCount = 1
+	}
+	return r.incrCount, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) PendingCount(
+	context.Context,
+	string,
+	string,
+	string,
+) (int64, error) {
+	return 0, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) DeleteByDedupKey(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+	string,
+) error {
+	return nil
+}
+
+// TestGenerateWithTemplateSetsMaxTokens is a regression for #2604: without an
+// explicit MaxTokens, DeepSeek-class providers default to 8192 completion
+// tokens and truncate combined wiki extraction JSON mid-field.
+func TestGenerateWithTemplateSetsMaxTokens(t *testing.T) {
+	model := &templateCaptureChatModel{response: `{"entities":[],"concepts":[]}`}
+	service := &wikiIngestService{}
+	_, err := service.generateWithTemplate(
+		context.Background(),
+		model,
+		`Content={{.Content}}`,
+		map[string]string{"Content": "hello"},
+	)
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if model.options.MaxTokens != wikiLLMMaxTokens {
+		t.Fatalf("MaxTokens = %d, want %d", model.options.MaxTokens, wikiLLMMaxTokens)
+	}
+	if model.options.Thinking == nil || *model.options.Thinking {
+		t.Fatalf("Thinking should be non-nil false, got %#v", model.options.Thinking)
+	}
+}

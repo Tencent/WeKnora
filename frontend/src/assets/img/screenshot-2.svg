@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0FDF4"/>
+      <stop offset="100%" stop-color="#D1FAE5"/>
+    </linearGradient>
+    <linearGradient id="brand2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <filter id="soft2" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#065F46" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="800" height="600" fill="url(#bg2)"/>
+  <circle cx="120" cy="90" r="120" fill="#10B981" opacity="0.05"/>
+  <circle cx="700" cy="520" r="140" fill="#34D399" opacity="0.06"/>
+
+  <text x="64" y="84" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#065F46">Hybrid Search Strategy</text>
+  <text x="64" y="116" font-family="Arial, sans-serif" font-size="15" fill="#059669">Keyword + vector semantics + knowledge graph, fused for the best result</text>
+
+  <g filter="url(#soft2)">
+    <rect x="64" y="148" width="672" height="396" rx="20" fill="#FFFFFF"/>
+  </g>
+
+  <!-- BM25 -->
+  <g transform="translate(96, 184)">
+    <rect width="184" height="220" rx="14" fill="#FFFBEB" stroke="#FCD34D" stroke-width="1.5"/>
+    <rect width="184" height="48" rx="14" fill="#FEF3C7"/>
+    <rect y="34" width="184" height="14" fill="#FEF3C7"/>
+    <text x="92" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#92400E" text-anchor="middle">BM25 Keyword</text>
+    <g font-family="Arial, sans-serif" font-size="12.5" fill="#78350F">
+      <rect x="20" y="70" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#FDE68A"/><text x="92" y="90" text-anchor="middle">TF-IDF weights</text>
+      <rect x="20" y="110" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#FDE68A"/><text x="92" y="130" text-anchor="middle">Term frequency</text>
+      <rect x="20" y="150" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#FDE68A"/><text x="92" y="170" text-anchor="middle">Exact match</text>
+    </g>
+    <text x="92" y="206" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#B45309" text-anchor="middle">Strong on terms</text>
+  </g>
+
+  <!-- Vector -->
+  <g transform="translate(308, 184)">
+    <rect width="184" height="220" rx="14" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5"/>
+    <rect width="184" height="48" rx="14" fill="#DBEAFE"/>
+    <rect y="34" width="184" height="14" fill="#DBEAFE"/>
+    <text x="92" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1E40AF" text-anchor="middle">Vector Semantic</text>
+    <g font-family="Arial, sans-serif" font-size="12.5" fill="#1E3A8A">
+      <rect x="20" y="70" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#BFDBFE"/><text x="92" y="90" text-anchor="middle">Embedding</text>
+      <rect x="20" y="110" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#BFDBFE"/><text x="92" y="130" text-anchor="middle">Cosine similarity</text>
+      <rect x="20" y="150" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#BFDBFE"/><text x="92" y="170" text-anchor="middle">ANN search</text>
+    </g>
+    <text x="92" y="206" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#2563EB" text-anchor="middle">Understands meaning</text>
+  </g>
+
+  <!-- Graph -->
+  <g transform="translate(520, 184)">
+    <rect width="184" height="220" rx="14" fill="#ECFDF5" stroke="#6EE7B7" stroke-width="1.5"/>
+    <rect width="184" height="48" rx="14" fill="#D1FAE5"/>
+    <rect y="34" width="184" height="14" fill="#D1FAE5"/>
+    <text x="92" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#065F46" text-anchor="middle">Knowledge Graph</text>
+    <g font-family="Arial, sans-serif" font-size="12.5" fill="#064E3B">
+      <rect x="20" y="70" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#A7F3D0"/><text x="92" y="90" text-anchor="middle">Entity recognition</text>
+      <rect x="20" y="110" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#A7F3D0"/><text x="92" y="130" text-anchor="middle">Relation paths</text>
+      <rect x="20" y="150" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#A7F3D0"/><text x="92" y="170" text-anchor="middle">Subgraph match</text>
+    </g>
+    <text x="92" y="206" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#059669" text-anchor="middle">Reasons over links</text>
+  </g>
+
+  <g stroke="#10B981" stroke-width="2.5" fill="none" stroke-linecap="round">
+    <path d="M188 412 V446 H400 V470" marker-end="url(#arr2)"/>
+    <path d="M400 412 V470" marker-end="url(#arr2)"/>
+    <path d="M612 412 V446 H400" />
+  </g>
+
+  <g transform="translate(220, 478)">
+    <rect width="360" height="50" rx="14" fill="url(#brand2)" filter="url(#soft2)"/>
+    <text x="180" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#FFFFFF" text-anchor="middle">RRF fusion ranking -&gt; best result</text>
+  </g>
+
+  <defs>
+    <marker id="arr2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 9 3, 0 6" fill="#10B981"/>
+    </marker>
+  </defs>
+</svg>

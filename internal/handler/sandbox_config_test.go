@@ -1,0 +1,428 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	stderrors "errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// Responses must never carry plaintext credentials, no matter which path
+// produced them.
+func TestSandboxConfigResponseMasksSecrets(t *testing.T) {
+	cfg := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B:         &types.E2BSandboxConfig{APIKey: "super-secret"},
+		EnvVars:     map[string]string{"TOKEN": "also-secret"},
+	}
+	entity := &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		Name:        "primary",
+		SandboxType: "e2b",
+		Config:      cfg,
+		CreatedAt:   time.Unix(1, 0),
+		UpdatedAt:   time.Unix(2, 0),
+	}
+
+	body, err := json.Marshal(toSandboxConfigResponse(entity))
+	require.NoError(t, err)
+
+	require.NotContains(t, string(body), "super-secret")
+	require.NotContains(t, string(body), "also-secret")
+	require.Contains(t, string(body), types.RedactedSecretPlaceholder)
+}
+
+// The 409 must be machine-readable: the UI renders "release N sandboxes first"
+// from it rather than parsing a message string.
+func TestSandboxesStillLiveMapsTo409WithCounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.PUT("/sandbox-configs/:id", func(c *gin.Context) {
+		respondSandboxesStillLive(c, service.SandboxInventory{
+			SandboxCount: 3,
+			SessionIDs:   []string{"s-1", "s-2"},
+			AgentNames:   []string{"数据分析"},
+		})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/sandbox-configs/cfg-a",
+		strings.NewReader(`{}`))
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+			Data struct {
+				SandboxCount int      `json:"sandbox_count"`
+				SessionIDs   []string `json:"session_ids"`
+				AgentNames   []string `json:"agent_names"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Equal(t, "sandboxes_still_live", payload.Error.Code)
+	require.Equal(t, 3, payload.Error.Data.SandboxCount)
+	require.Len(t, payload.Error.Data.SessionIDs, 2)
+	require.Equal(t, []string{"数据分析"}, payload.Error.Data.AgentNames)
+}
+
+func TestSandboxInventoryUnverifiableMapsToDistinct409(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.DELETE("/sandbox-configs/:id", func(c *gin.Context) {
+		respondSandboxInventoryUnverifiable(c)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Equal(t, "sandbox_inventory_unverifiable", payload.Error.Code)
+	require.Contains(t, payload.Error.Message, "无法连接")
+}
+
+func TestSkillSnapshotReleaseFailedMapsTo409WithRemaining(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.DELETE("/sandbox-configs/:id", func(c *gin.Context) {
+		if !respondSandboxConfigRefusal(c, &service.SkillSnapshotReleaseFailedError{
+			Remaining: []string{"snap-2"},
+		}) {
+			t.Fatal("expected snapshot release failure to map as a refusal")
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+			Data struct {
+				SnapshotIDs []string `json:"snapshot_ids"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Equal(t, "skill_snapshot_release_failed", payload.Error.Code)
+	require.Equal(t, []string{"snap-2"}, payload.Error.Data.SnapshotIDs)
+}
+
+func TestSkillSnapshotBlocksTemplateMapsTo409(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/sandbox-configs/templates/query", func(c *gin.Context) {
+		if !respondSandboxConfigRefusal(c, service.ErrSkillSnapshotBlocksTemplateChange) {
+			t.Fatal("expected skill snapshot template lock to map as a refusal")
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/templates/query", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Equal(t, "skill_snapshot_blocks_template", payload.Error.Code)
+	require.Contains(t, payload.Error.Message, "不能更换连接")
+}
+
+func TestSandboxConfigDeletePassesForceQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	svc := &fakeSandboxConfigService{}
+	h := &SandboxConfigHandler{service: svc}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(types.TenantIDContextKey.String(), uint64(42))
+		c.Next()
+	})
+	router.DELETE("/sandbox-configs/:id", h.Delete)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a?force=true", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, uint64(42), svc.deleteTenantID)
+	require.Equal(t, "cfg-a", svc.deleteID)
+	require.True(t, svc.deleteForce)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-b", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "cfg-b", svc.deleteID)
+	require.False(t, svc.deleteForce)
+}
+
+// Bad input must not surface as a 500. The sentinels are matched with errors.Is
+// so rewording a message cannot silently reclassify these.
+func TestSandboxConfigValidationSentinelsMapTo400(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"missing name", service.ErrSandboxConfigNameRequired},
+		{"named backend unsupported", service.ErrNamedSandboxBackendUnsupported},
+		{"unknown backend", fmt.Errorf("%w %q", sandbox.ErrUnsupportedSandboxType, "quantum")},
+		{"unsafe endpoint", fmt.Errorf("%w: host is private", sandbox.ErrUnsafeOutboundURL)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			respondSandboxConfigServiceError(c, tc.err)
+
+			require.Len(t, c.Errors, 1)
+			var appErr *apperrors.AppError
+			require.ErrorAs(t, c.Errors[0].Err, &appErr)
+			require.Equal(t, http.StatusBadRequest, appErr.HTTPCode)
+		})
+	}
+}
+
+// An unexpected failure must keep its original error so the middleware can map
+// it, rather than being flattened into a 400.
+func TestSandboxConfigUnexpectedErrorIsNotDowngraded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	boom := stderrors.New("database is on fire")
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	respondSandboxConfigServiceError(c, boom)
+
+	require.Len(t, c.Errors, 1)
+	require.ErrorIs(t, c.Errors[0].Err, boom)
+}
+
+type fakeSandboxConfigService struct {
+	deleteTenantID uint64
+	deleteID       string
+	deleteForce    bool
+
+	machines      []service.UserMachineView
+	listErr       error
+	releaseErr    error
+	releaseTenant uint64
+	releaseConfig string
+	releaseDigest string
+}
+
+func (s *fakeSandboxConfigService) Create(
+	context.Context,
+	uint64,
+	service.CreateSandboxConfigInput,
+) (*types.TenantSandboxConfigEntity, error) {
+	return nil, nil
+}
+
+func (s *fakeSandboxConfigService) List(
+	context.Context,
+	uint64,
+) ([]*types.TenantSandboxConfigEntity, error) {
+	return nil, nil
+}
+
+func (s *fakeSandboxConfigService) Get(
+	context.Context,
+	uint64,
+	string,
+) (*types.TenantSandboxConfigEntity, error) {
+	return nil, nil
+}
+
+func (s *fakeSandboxConfigService) Update(
+	context.Context,
+	uint64,
+	string,
+	service.UpdateSandboxConfigInput,
+) (*types.TenantSandboxConfigEntity, error) {
+	return nil, nil
+}
+
+func (s *fakeSandboxConfigService) Delete(
+	_ context.Context,
+	tenantID uint64,
+	id string,
+	force bool,
+) error {
+	s.deleteTenantID = tenantID
+	s.deleteID = id
+	s.deleteForce = force
+	return nil
+}
+
+func (s *fakeSandboxConfigService) Inventory(
+	context.Context,
+	uint64,
+	string,
+) (service.SandboxInventory, error) {
+	return service.SandboxInventory{}, nil
+}
+
+func (s *fakeSandboxConfigService) ListUserMachines(
+	context.Context, uint64, string,
+) ([]service.UserMachineView, error) {
+	return s.machines, s.listErr
+}
+
+func (s *fakeSandboxConfigService) ReleaseUserMachine(
+	_ context.Context, tenantID uint64, configID, digest string,
+) error {
+	s.releaseTenant = tenantID
+	s.releaseConfig = configID
+	s.releaseDigest = digest
+	return s.releaseErr
+}
+
+func (s *fakeSandboxConfigService) WorkspaceScriptsDisabled(
+	context.Context,
+	uint64,
+) (bool, error) {
+	return false, nil
+}
+
+func (s *fakeSandboxConfigService) SetWorkspaceScriptsDisabled(
+	context.Context,
+	uint64,
+	bool,
+) error {
+	return nil
+}
+
+func (s *fakeSandboxConfigService) QueryTemplates(
+	context.Context,
+	uint64,
+	service.SandboxTemplateQueryInput,
+) (*service.SandboxTemplateCatalog, error) {
+	return &service.SandboxTemplateCatalog{}, nil
+}
+
+func newSandboxConfigTestRouter(h *SandboxConfigHandler) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/sandbox-configs", h.List)
+	r.POST("/sandbox-configs", h.Create)
+	return r
+}
+
+func TestSandboxConfigRoutesAreHiddenOnLiteDesktop(t *testing.T) {
+	h := &SandboxConfigHandler{service: &fakeSandboxConfigService{}, desktop: true}
+	r := newSandboxConfigTestRouter(h)
+	r.PUT("/sandbox-configs/workspace-policy", h.SetWorkspacePolicy)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sandbox-configs", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"success":true,"data":[],"workspace_scripts_disabled":false}`, w.Body.String())
+
+	// The script switch still governs the host sandbox, so it stays reachable.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/sandbox-configs/workspace-policy",
+		strings.NewReader(`{"scripts_disabled":false}`)))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs", strings.NewReader(`{"name":"x"}`)))
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestListAndReleaseUserSandboxes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &fakeSandboxConfigService{machines: []service.UserMachineView{{
+		Digest: "d-1", OwnerTenantID: 7, OwnerID: "u-1", LiveSessions: 2,
+	}}}
+	h := &SandboxConfigHandler{service: svc}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(types.TenantIDContextKey.String(), uint64(7))
+		c.Next()
+	})
+	r.GET("/sandbox-configs/:id/user-sandboxes", h.ListUserSandboxes)
+	r.POST("/sandbox-configs/:id/user-sandboxes/:digest/release", h.ReleaseUserSandbox)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sandbox-configs/cfg-a/user-sandboxes", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"digest":"d-1"`)
+	require.Contains(t, w.Body.String(), `"owner_id":"u-1"`)
+
+	svc.releaseErr = service.ErrUserSandboxBusy
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/user-sandboxes/d-1/release", nil))
+	require.Equal(t, http.StatusConflict, w.Code)
+	require.JSONEq(t, `{"success":false,"error":"USER_SANDBOX_BUSY"}`, w.Body.String())
+	require.Equal(t, uint64(7), svc.releaseTenant)
+	require.Equal(t, "cfg-a", svc.releaseConfig)
+	require.Equal(t, "d-1", svc.releaseDigest)
+
+	svc.releaseErr = nil
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/user-sandboxes/d-1/release", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"success":true}`, w.Body.String())
+}
+
+func TestCordonAndInFlightCreateMapToLocked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, err := range []error{
+		repository.ErrSandboxConfigCordoned,
+		service.ErrSandboxConfigCreatesInFlight,
+	} {
+		router := gin.New()
+		router.DELETE("/sandbox-configs/:id", func(c *gin.Context) {
+			if !respondSandboxConfigRefusal(c, err) {
+				t.Fatal("expected a locked refusal")
+			}
+		})
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a", nil))
+		require.Equal(t, http.StatusLocked, w.Code)
+		var payload struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+		require.Equal(t, "sandbox_config_cordoned", payload.Error.Code)
+	}
+}

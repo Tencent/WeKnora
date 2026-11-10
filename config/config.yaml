@@ -1,0 +1,116 @@
+# Server configuration
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+# Conversation service configuration
+# NOTE: Prompt content is resolved from prompt_templates/ YAML files via xxx_id fields.
+# Set the _id to the template ID you want; the system will load its content at startup.
+conversation:
+  max_rounds: 5
+  keyword_threshold: 0.3
+  embedding_top_k: 30
+  vector_threshold: 0.2
+  rerank_threshold: 0.3
+  rerank_top_k: 30
+  fallback_strategy: "model"
+  fallback_response: "Sorry, I am unable to answer this question."
+  fallback_prompt_id: "default_fallback_prompt"  # from prompt_templates/fallback.yaml (mode: "model")
+  enable_rewrite: true
+  enable_query_expansion: true
+  enable_rerank: true
+  rewrite_prompt_id: "default_rewrite"  # from prompt_templates/rewrite.yaml (content + user fields)
+  generate_summary_prompt_id: "default_summary"  # from prompt_templates/generate_summary.yaml
+  generate_kb_description_prompt_id: "default_kb_description"  # from prompt_templates/generate_kb_description.yaml
+  generate_session_title_prompt_id: "default_session_title"  # from prompt_templates/generate_session_title.yaml
+  summary:
+    # Document profiles need the head of the document, not the whole body:
+    # 8k characters is enough to name the topic, the type and one question.
+    max_input_chars: 8192
+    repeat_penalty: 1.0
+    temperature: 0.3
+    max_completion_tokens: 1024
+    no_match_prefix: |-
+      <think>
+      </think>
+      NO_MATCH
+    prompt_id: "default_kb"  # from prompt_templates/system_prompt.yaml
+    context_template_id: "default_context"  # from prompt_templates/context_template.yaml
+  extract_entities_prompt_id: "default_extract_entities"          # from prompt_templates/graph_extraction.yaml
+  extract_relationships_prompt_id: "default_extract_relationships"  # from prompt_templates/graph_extraction.yaml
+  generate_questions_prompt_id: "default_generate_questions"        # from prompt_templates/generate_questions.yaml
+
+# Knowledge base configuration
+knowledge_base:
+  chunk_size: 512
+  chunk_overlap: 50
+  split_markers: ["\n\n", "\n", "。"]
+  document_process_timeout: 2h
+  image_processing:
+    enable_multimodal: true
+
+extract:
+  extract_graph:
+    description: |
+      Based on the given text, complete the information extraction task following these steps, ensuring clear logic and complete, accurate information:
+
+      ## Step 1: Entity Extraction and Attribute Enrichment
+      1. **Extract core entities**: Read through the text and extract all core entities relevant to the task in logical order (such as narrative order or entity association closeness).
+      2. **Enrich entity attributes**: For each extracted entity, comprehensively supplement its detailed attributes explicitly mentioned in the text, ensuring no key attributes are omitted.
+
+      ## Step 2: Relationship Extraction and Verification
+      1. **Identify relationship types**: Select corresponding types only from the specified relationship list. Allowed relationship types are: %s.
+      2. **Extract valid relationships**: Based on the extracted entities and attributes, identify relationships that genuinely exist in the text, ensuring relationships are factually accurate with no false associations.
+      3. **Clarify relationship subjects**: For each extracted relationship, clearly annotate the two associated entities to avoid subject confusion.
+      4. **Supplement related attributes**: If the text contains supplementary information directly related to a relationship, include it as a related attribute of the relationship.
+    tags:
+      - "Author"
+      - "Alias"
+    examples:
+      - text: |
+          "Romeo and Juliet" is a tragedy written by William Shakespeare early in his career about the romance between two Italian youths from feuding families.
+          It was among Shakespeare's most popular plays during his lifetime. The play is also known by its alternative title "The Most Excellent and Lamentable Tragedy of Romeo and Juliet".
+          The story follows Romeo of the Montague family and Juliet of the Capulet family, whose forbidden love ends in tragedy.
+        node:
+          - name: "Romeo and Juliet"
+            attributes:
+              - "A tragedy by William Shakespeare"
+              - "Also known as 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet'"
+              - "Among Shakespeare's most popular plays"
+          - name: "The Most Excellent and Lamentable Tragedy of Romeo and Juliet"
+            attributes:
+              - "Alternative title for Romeo and Juliet"
+          - name: "William Shakespeare"
+            attributes:
+              - "Playwright"
+              - "Author of Romeo and Juliet, written early in his career"
+        relation:
+          - node1: "Romeo and Juliet"
+            node2: "William Shakespeare"
+            type: "Author"
+          - node1: "Romeo and Juliet"
+            node2: "The Most Excellent and Lamentable Tragedy of Romeo and Juliet"
+            type: "Alias"
+  extract_entity:
+    description: |
+      Based on the user's question, process the key information extraction task following these steps:
+      1. Analyze logical connections: First, fully analyze the text content, identify its core logical relationships, and briefly annotate the core logic type;
+      2. Extract key entities: Based on the identified logical relationships, precisely extract key information from the text and classify it into clear entities, ensuring no core information is omitted and no redundant content is added;
+      3. Prioritize entities: Sort by the closeness of each entity's association with the core topic of the text, presenting the most important entities for understanding the main idea first;
+    examples:
+      - text: "'Romeo and Juliet' is a tragedy written by William Shakespeare early in his career, and is one of the most frequently performed plays in world literature."
+        node:
+          - name: "Romeo and Juliet"
+          - name: "William Shakespeare"
+          - name: "world literature"
+  fabri_text:
+    with_tag: |
+      Please randomly generate a text related to %s, with a word count between [50-200], and try to include some professional terms or typical elements related to these tags to make the text more targeted and relevant.
+    with_no_tag: |
+      Please randomly generate a text with freely chosen content, with a word count between [50-200].
+
+
+# Tenant configuration
+tenant:
+  # Enable cross-tenant access (can be enabled for intranet environments)
+  enable_cross_tenant_access: false

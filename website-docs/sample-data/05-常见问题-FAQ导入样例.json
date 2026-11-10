@@ -1,0 +1,72 @@
+[
+  {
+    "tag_name": "售后",
+    "standard_question": "智能家居中控保修多久？",
+    "similar_questions": ["保修期几年", "质保多长时间"],
+    "negative_questions": [],
+    "answers": ["整机保修 24 个月，电池类配件 12 个月。人为拆解、进水不在保修范围。"]
+  },
+  {
+    "tag_name": "产品",
+    "standard_question": "断网后语音还能用吗？",
+    "similar_questions": ["没有网络能语音控制吗", "离线能用语音吗"],
+    "negative_questions": [],
+    "answers": ["若语音走云端识别，断外网后仅支持 App 与本地触摸屏；配置本地语音包后可继续使用基础指令。"]
+  },
+  {
+    "tag_name": "产品",
+    "standard_question": "一个账号能绑几台中控？",
+    "similar_questions": ["最多添加多少台中控", "账号设备数量限制"],
+    "negative_questions": [],
+    "answers": ["个人版最多 3 台；企业版按合同授权，默认 50 台。"]
+  },
+  {
+    "tag_name": "人事",
+    "standard_question": "一线城市住宿报销上限是多少？",
+    "similar_questions": ["北上广深酒店报销额度", "住宿标准"],
+    "negative_questions": [],
+    "answers": ["一线城市（北上广深）每晚上限 600 元/晚（含税），超标部分个人承担。"]
+  },
+  {
+    "tag_name": "人事",
+    "standard_question": "出差餐饮怎么报？",
+    "similar_questions": ["餐费能报销吗", "吃饭费用"],
+    "negative_questions": [],
+    "answers": ["出差期间餐饮费不单独报销，按天数领取差旅补贴：一线城市 150 元/天，其他城市 120 元/天。"]
+  },
+  {
+    "tag_name": "项目",
+    "standard_question": "Q1 知识库 POC 什么时候上线？",
+    "similar_questions": ["售后知识库什么时候验收", "POC 交付日期"],
+    "negative_questions": [],
+    "answers": ["目标 2024-03-01 前完成内网演示，由张明负责技术交付。"]
+  },
+  {
+    "tag_name": "项目",
+    "standard_question": "谁负责售后知识库 POC？",
+    "similar_questions": ["知识库项目负责人是谁", "POC 技术负责人"],
+    "negative_questions": [],
+    "answers": ["技术负责人是研发部张明，产品对接人是李薇，测试负责人是赵磊。"]
+  },
+  {
+    "tag_name": "产品",
+    "standard_question": "中控 Pro 支持哪些协议？",
+    "similar_questions": ["能连哪些智能设备协议", "Matter 支持吗"],
+    "negative_questions": [],
+    "answers": ["支持 Matter、Zigbee 3.0、Wi-Fi 与蓝牙 Mesh；固件 3.5 计划完成 Matter 1.2 认证。"]
+  },
+  {
+    "tag_name": "人事",
+    "standard_question": "年假 10 年工龄有多少天？",
+    "similar_questions": ["工作满十年年假", "工龄年假天数"],
+    "negative_questions": [],
+    "answers": ["工龄 1–10 年为 10 天年假，10 年以上为 15 天；按入职日期计算。"]
+  },
+  {
+    "tag_name": "项目",
+    "standard_question": "Matter 认证计划什么时候完成？",
+    "similar_questions": ["Matter 1.2 什么时候过认证", "固件 3.5 发布时间"],
+    "negative_questions": [],
+    "answers": ["计划在 2024 年 3 月底前发布固件 3.5 灰度，完成 Matter 1.2 认证。"]
+  }
+]

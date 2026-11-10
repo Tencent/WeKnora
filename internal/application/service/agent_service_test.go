@@ -1,0 +1,1011 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/operations"
+	"github.com/Tencent/WeKnora/internal/agent/skills"
+	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type fakeAgentKnowledgeBaseService struct {
+	interfaces.KnowledgeBaseService
+	kb *types.KnowledgeBase
+}
+
+func (s *fakeAgentKnowledgeBaseService) GetKnowledgeBaseByID(context.Context, string) (*types.KnowledgeBase, error) {
+	if s.kb == nil {
+		return nil, errors.New("knowledge base not found")
+	}
+	return s.kb, nil
+}
+
+type fakeAgentKnowledgeService struct {
+	interfaces.KnowledgeService
+	knowledges []*types.Knowledge
+	lastFilter types.KnowledgeListFilter
+	lastTenant uint64
+}
+
+type fakeAgentChatModel struct {
+	lastToolNames        []string
+	lastToolDescriptions map[string]string
+	lastSystemPrompt     string
+}
+
+func (*fakeAgentChatModel) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+	return &types.ChatResponse{}, nil
+}
+
+func (m *fakeAgentChatModel) ChatStream(
+	_ context.Context, messages []chat.Message, opts *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	m.lastToolNames = nil
+	m.lastToolDescriptions = map[string]string{}
+	m.lastSystemPrompt = ""
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			m.lastSystemPrompt = msg.Content
+			break
+		}
+	}
+	if opts != nil {
+		for _, tool := range opts.Tools {
+			m.lastToolNames = append(m.lastToolNames, tool.Function.Name)
+			m.lastToolDescriptions[tool.Function.Name] = tool.Function.Description
+		}
+	}
+
+	ch := make(chan types.StreamResponse, 1)
+	ch <- types.StreamResponse{
+		ResponseType: types.ResponseTypeAnswer,
+		Content:      "ok",
+		Done:         true,
+		FinishReason: "stop",
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (*fakeAgentChatModel) GetModelName() string { return "fake-chat" }
+func (*fakeAgentChatModel) GetModelID() string   { return "fake-chat-id" }
+
+type stubSessionFileStore struct{}
+
+func (stubSessionFileStore) EnsureSessionDir(context.Context, string, string) error { return nil }
+func (stubSessionFileStore) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
+	return nil, nil
+}
+
+func (stubSessionFileStore) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
+	return nil, nil
+}
+
+func (stubSessionFileStore) ReadSessionFile(context.Context, string, string) ([]byte, error) {
+	return nil, nil
+}
+
+func (stubSessionFileStore) WriteSessionInputFile(context.Context, string, string, []byte) error {
+	return nil
+}
+
+func (stubSessionFileStore) WriteSessionWorkspaceFile(context.Context, string, string, []byte) error {
+	return nil
+}
+
+func (stubSessionFileStore) WriteSessionWorkspaceFiles(context.Context, string, []sandbox.SessionWorkspaceFile) error {
+	return nil
+}
+func (stubSessionFileStore) RemoveSessionInputPath(context.Context, string, string) error { return nil }
+
+func (s *fakeAgentKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
+	ctx context.Context,
+	_ string,
+	page *types.Pagination,
+	filter types.KnowledgeListFilter,
+) (*types.PageResult, error) {
+	s.lastFilter = filter
+	s.lastTenant, _ = types.TenantIDFromContext(ctx)
+
+	filtered := make([]*types.Knowledge, 0, len(s.knowledges))
+	for _, knowledge := range s.knowledges {
+		if filter.ParseStatus != "" && knowledge.ParseStatus != filter.ParseStatus {
+			continue
+		}
+		filtered = append(filtered, knowledge)
+	}
+	return types.NewPageResult(int64(len(filtered)), page, filtered), nil
+}
+
+func toolRegistered(registry *tools.ToolRegistry, name string) bool {
+	_, err := registry.GetTool(name)
+	return err == nil
+}
+
+func toolOffered(names []string, name string) bool {
+	for _, got := range names {
+		if got == name {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode pins the skill
+// gate on the skill installer alone for shell_exec. shell_exec follows
+// SkillsEnabled (or install mode). list/read/write/edit sandbox file tools
+// follow SessionFileStore for ordinary agents, including when skills are
+// disabled, but are withheld from the installer: those tools only accept
+// /workspace, and the installer must write the skill tree via shell_exec.
+func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	t.Run("install-mode config gets shell_exec without skill tools", func(t *testing.T) {
+		chatModel := &fakeAgentChatModel{}
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{
+					typ:   sandbox.SandboxTypeCube,
+					shell: &stubShellExecutor{},
+					// The manager advertises a session file store, the way
+					// every real remote backend does. The installer still
+					// must not receive those tools: they only write /workspace.
+					files:        stubSessionFileStore{},
+					installShell: &stubInstallShellExecutor{},
+				},
+			},
+		}
+		config := &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   false,
+			AllowedTools:    []string{tools.ToolShellExec},
+		}
+		config.EnableSkillInstallMode(types.BuiltinSkillInstallerID, sandbox.SkillsImageRoot+"/pptx")
+
+		engine, err := svc.CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1", "msg-1")
+
+		require.NoError(t, err)
+		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+		require.NoError(t, err)
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles),
+			"session file tools only accept /workspace; the installer must write the skill tree via shell_exec")
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
+	})
+
+	t.Run("an ordinary agent with skills off gets no shell but keeps file tools", func(t *testing.T) {
+		chatModel := &fakeAgentChatModel{}
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{
+					typ:          sandbox.SandboxTypeCube,
+					shell:        &stubShellExecutor{},
+					files:        stubSessionFileStore{},
+					installShell: &stubInstallShellExecutor{},
+				},
+			},
+		}
+
+		engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   false,
+			AllowedTools:    []string{tools.ToolShellExec, tools.ToolThinking},
+		}, chatModel, nil, nil, "sess-1", "msg-1")
+
+		require.NoError(t, err)
+		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+		require.NoError(t, err)
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec),
+			"shell_exec follows SkillsEnabled; an agent with skills off gets no shell")
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
+	})
+
+	t.Run("skills disabled without skills or install mode gets no shell or skill tools but keeps file tools", func(t *testing.T) {
+		chatModel := &fakeAgentChatModel{}
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{
+					typ:   sandbox.SandboxTypeCube,
+					shell: &stubShellExecutor{},
+					files: stubSessionFileStore{},
+				},
+			},
+		}
+
+		engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   false,
+			AllowedTools:    []string{tools.ToolThinking},
+		}, chatModel, nil, nil, "sess-1", "msg-1")
+
+		require.NoError(t, err)
+		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+		require.NoError(t, err)
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
+	})
+
+	t.Run("skills enabled with skill dirs keeps existing behavior", func(t *testing.T) {
+		chatModel := &fakeAgentChatModel{}
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{
+					typ:   sandbox.SandboxTypeCube,
+					shell: &stubShellExecutor{},
+					files: stubSessionFileStore{},
+				},
+			},
+		}
+
+		engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{t.TempDir()},
+		}, chatModel, nil, nil, "sess-1", "msg-1")
+
+		require.NoError(t, err)
+		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+		require.NoError(t, err)
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+		require.NotNil(t, engine.(*agent.AgentEngine).GetSkillsManager())
+	})
+
+	t.Run("skills enabled with tenant skills and no host dirs still offers skill tools", func(t *testing.T) {
+		chatModel := &fakeAgentChatModel{}
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{
+					typ:   sandbox.SandboxTypeCube,
+					shell: &stubShellExecutor{},
+					files: stubSessionFileStore{},
+				},
+			},
+		}
+
+		engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, chatModel, nil, nil, "sess-1", "msg-1")
+
+		require.NoError(t, err)
+		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+		require.NoError(t, err)
+		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+		mgr := engine.(*agent.AgentEngine).GetSkillsManager()
+		require.NotNil(t, mgr)
+		var names []string
+		for _, meta := range mgr.GetAllMetadata() {
+			names = append(names, meta.Name)
+		}
+		require.Equal(t, []string{"pdf-tools"}, names)
+	})
+}
+
+func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
+	t.Run("skills disabled: initializeSkillsManager registers no skill tools or shell", func(t *testing.T) {
+		registry := tools.NewToolRegistry()
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{typ: sandbox.SandboxTypeCube, shell: &stubShellExecutor{}},
+			},
+		}
+		ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+		_, err := svc.initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   false,
+			AllowedTools:    []string{tools.ToolShellExec},
+		}, registry)
+
+		require.NoError(t, err)
+		require.False(t, toolRegistered(registry, tools.LegacyToolReadSkill))
+		require.False(t, toolRegistered(registry, tools.LegacyToolExecuteSkillScript))
+		require.False(t, toolRegistered(registry, tools.ToolShellExec),
+			"shell_exec is registered by registerSandboxShellIfAllowed, not initializeSkillsManager")
+	})
+
+	t.Run("skills enabled: skill tools without shell", func(t *testing.T) {
+		registry := tools.NewToolRegistry()
+		svc := &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{typ: sandbox.SandboxTypeCube, shell: &stubShellExecutor{}},
+			},
+		}
+		ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+		_, err := svc.initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{t.TempDir()},
+		}, registry)
+
+		require.NoError(t, err)
+		require.True(t, toolRegistered(registry, tools.ToolReadFile))
+		require.False(t, toolRegistered(registry, tools.LegacyToolReadSkill))
+		require.False(t, toolRegistered(registry, tools.LegacyToolExecuteSkillScript))
+		require.False(t, toolRegistered(registry, tools.ToolShellExec),
+			"shell_exec is registered separately from the skills manager")
+	})
+}
+
+// shell_exec can execute skill scripts, so it follows SkillsEnabled rather
+// than the presence of a ready skill. An agent whose skills are enabled but
+// whose sandbox currently carries no ready skill must still receive the shell,
+// otherwise it has no way to inspect a fresh or still-installing sandbox.
+func TestCreateAgentEngineShellFollowsSkillsEnabledWithoutInstalledSkills(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	chatModel := &fakeAgentChatModel{}
+	svc := &agentService{
+		sandboxResolver: stubSandboxResolver{
+			mgr: &capableManager{
+				typ:          sandbox.SandboxTypeCube,
+				shell:        &stubShellExecutor{},
+				files:        stubSessionFileStore{},
+				installShell: &stubInstallShellExecutor{},
+			},
+		},
+	}
+
+	engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+		SandboxConfigID: "cfg-remote",
+		SkillsEnabled:   true,
+		// No SkillDirs and no TenantSkills: skills are enabled, but the sandbox
+		// image carries none.
+	}, chatModel, nil, nil, "sess-1", "msg-1")
+
+	require.NoError(t, err)
+	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+	require.NoError(t, err)
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec),
+		"an agent with skills enabled must have shell_exec even when no ready skill exists yet")
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill),
+		"an empty sandbox must not be offered skill tools that cannot succeed")
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+	require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+	require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
+}
+
+// Whether an installed skill is invocable is decided when the AgentConfig is
+// built (effectiveTenantSkills). This is the other half of that contract: the
+// manager the model is described from must carry exactly the rows it was
+// handed, and nothing when it was handed none.
+func TestSkillsManagerOffersTheInjectedInstalledSkills(t *testing.T) {
+	newSvc := func() *agentService {
+		return &agentService{
+			sandboxResolver: stubSandboxResolver{
+				mgr: &capableManager{typ: sandbox.SandboxTypeCube, shell: &stubShellExecutor{}},
+			},
+		}
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	skillNamesOf := func(mgr *skills.Manager) []string {
+		var names []string
+		for _, meta := range mgr.GetAllMetadata() {
+			names = append(names, meta.Name)
+		}
+		return names
+	}
+
+	t.Run("injected rows are offered without a host skill directory", func(t *testing.T) {
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr))
+	})
+
+	t.Run("host skills are not offered beside the sandbox image", func(t *testing.T) {
+		dir := t.TempDir()
+		skillDir := filepath.Join(dir, "document-analyzer")
+		require.NoError(t, os.MkdirAll(skillDir, 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(skillDir, "SKILL.md"),
+			[]byte("---\nname: document-analyzer\ndescription: old host copy\n---\n"),
+			0o644,
+		))
+
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{dir},
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr),
+			"a host skill directory is not what the sandbox image carries")
+	})
+
+	t.Run("injected rows are offered", func(t *testing.T) {
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{t.TempDir()},
+			TenantSkills: []*types.TenantSkillEntity{{
+				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-remote",
+				Name: "pdf-tools", Description: "PDF helpers",
+				Status: types.SkillStatusReady, Enabled: true,
+			}},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"pdf-tools"}, skillNamesOf(mgr))
+	})
+
+	t.Run("an unusable image injects no rows and offers no skills", func(t *testing.T) {
+		mgr, err := newSvc().initializeSkillsManager(ctx, "sess-1", &types.AgentConfig{
+			SandboxConfigID: "cfg-remote",
+			SkillsEnabled:   true,
+			SkillDirs:       []string{t.TempDir()},
+		}, tools.NewToolRegistry())
+
+		require.NoError(t, err)
+		require.Empty(t, skillNamesOf(mgr),
+			"a skill the model is told about but cannot invoke burns turns for nothing")
+	})
+}
+
+func TestSkillInstallerIsHiddenFromThePicker(t *testing.T) {
+	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
+
+	require.True(t, types.IsBuiltinAgentID(types.BuiltinSkillInstallerID),
+		"the server must still be able to resolve it by ID")
+	require.NotContains(t, types.GetBuiltinAgentIDs(), types.BuiltinSkillInstallerID,
+		"it must not clutter the tenant's agent picker")
+}
+
+func TestWeKnoraAssistantIsAHiddenBuiltinWithOperations(t *testing.T) {
+	require.NoError(t, types.LoadBuiltinAgentsConfig(filepath.Join("..", "..", "..", "config")))
+
+	agent := types.GetBuiltinAgent(types.BuiltinWeKnoraAssistantID, 1)
+	require.NotNil(t, agent)
+	require.NotContains(t, types.GetBuiltinAgentIDs(), types.BuiltinWeKnoraAssistantID)
+	require.True(t, types.GrantsOperationCatalog(agent))
+	require.True(t, types.UsesWorkspaceModelFallback(agent))
+	require.Equal(t, "weknora_assistant", agent.Config.SystemPromptID)
+	require.Equal(t, "all", agent.Config.KBSelectionMode)
+	require.Equal(t, 24576, agent.Config.MaxCompletionTokens)
+	require.Equal(t, types.UnlimitedMaxIterations, agent.Config.MaxIterations)
+	require.NotContains(t, agent.Config.AllowedTools, tools.ToolRunOperation,
+		"operations are granted by ID, never through the editable allowlist")
+	for _, def := range tools.AvailableToolDefinitions() {
+		require.NotEqual(t, tools.ToolRunOperation, def.Name)
+		require.NotEqual(t, tools.ToolFindOperations, def.Name)
+	}
+
+	require.True(t, types.GrantsProductDocs(agent))
+	require.NotContains(t, agent.Config.AllowedTools, tools.ToolSearchWeKnoraDocs)
+	for _, def := range tools.AvailableToolDefinitions() {
+		require.NotEqual(t, tools.ToolSearchWeKnoraDocs, def.Name)
+		require.NotEqual(t, tools.ToolReadWeKnoraDoc, def.Name)
+	}
+
+	stored := *agent
+	stored.IsBuiltin = false
+	require.False(t, types.GrantsOperationCatalog(&stored))
+	require.False(t, types.GrantsProductDocs(&stored))
+}
+
+// The documentation is public, so the grant alone decides: no signed-in user
+// is needed, and a shared read-only run still gets it.
+func TestRegisterProductDocToolsFollowsTheGrant(t *testing.T) {
+	registered := func(cfg *types.AgentConfig) []string {
+		registry := tools.NewToolRegistry()
+		registerProductDocTools(context.Background(), registry, cfg)
+		return registry.ListTools()
+	}
+	require.ElementsMatch(t, []string{tools.ToolSearchWeKnoraDocs, tools.ToolReadWeKnoraDoc},
+		registered(&types.AgentConfig{ProductDocs: true, SharedAgentReadOnly: true}))
+	require.Empty(t, registered(&types.AgentConfig{}))
+	require.Empty(t, registered(nil))
+}
+
+func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{operationDispatcher: operations.NewHandlerDispatcher()}
+	registered := func(ctx context.Context, cfg *types.AgentConfig) []string {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(ctx, registry, cfg)
+		return registry.ListTools()
+	}
+
+	granted := &types.AgentConfig{OperationsAgentID: types.BuiltinWeKnoraAssistantID}
+	require.ElementsMatch(t, []string{tools.ToolFindOperations, tools.ToolRunOperation, tools.ToolOpenPage},
+		registered(webUser, granted))
+	require.Empty(t, registered(webUser, &types.AgentConfig{}))
+	require.Empty(t, registered(webUser, &types.AgentConfig{
+		OperationsAgentID: types.BuiltinWeKnoraAssistantID, SharedAgentReadOnly: true,
+	}))
+	apiKey := types.WithTenantAPIKeyScope(webUser, types.TenantAPIKeyScope{KeyID: 1})
+	require.Empty(t, registered(apiKey, granted))
+}
+
+func TestRegisterOperationToolsOffersPageToolsByAccessLevel(t *testing.T) {
+	webUser := types.WithCaller(types.WithPrincipal(context.Background(),
+		types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+		types.Caller{TenantID: 7, UserID: "u1"})
+	svc := &agentService{
+		operationDispatcher: operations.NewHandlerDispatcher(),
+		toolApprovalGate:    approval.NewGate(nil, nil, nil),
+	}
+	for level, wantFill := range map[types.AssistantAccessLevel]bool{
+		types.AssistantAccessReadOnly:  false,
+		types.AssistantAccessConfirm:   true,
+		types.AssistantAccessAutoWrite: true,
+	} {
+		registry := tools.NewToolRegistry()
+		svc.registerOperationTools(webUser, registry, &types.AgentConfig{
+			OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: level,
+		})
+		_, err := registry.GetTool(tools.ToolReadPage)
+		assert.NoError(t, err, "reading the page is offered at every level")
+		_, err = registry.GetTool(tools.ToolViewPage)
+		assert.NoError(t, err, "viewing a page is offered at every level")
+		_, err = registry.GetTool(tools.ToolSelectTab)
+		assert.NoError(t, err, "selecting a tab is offered at every level")
+		_, err = registry.GetTool(tools.ToolFillPage)
+		assert.Equal(t, wantFill, err == nil, level)
+	}
+}
+
+func TestRegisterOperationToolsHonorsSuperuserBypass(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		crossTenant bool
+		superuser   bool
+		level       types.AssistantAccessLevel
+		wantAllowed bool
+	}{
+		{"superuser", true, true, types.AssistantAccessConfirm, true},
+		{"ordinary viewer", true, false, types.AssistantAccessConfirm, false},
+		{"cross-tenant access disabled", false, true, types.AssistantAccessConfirm, false},
+		{"superuser stays read-only", true, true, types.AssistantAccessReadOnly, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enforce := true
+			ctx := types.WithCaller(types.WithPrincipal(context.Background(),
+				types.Principal{Type: types.PrincipalWebUser, ID: "u1"}),
+				types.Caller{TenantID: 7, UserID: "u1", Role: types.TenantRoleViewer})
+			ctx = context.WithValue(ctx, types.UserContextKey, &types.User{
+				ID: "u1", CanAccessAllTenants: tc.superuser,
+			})
+			svc := &agentService{
+				cfg: &config.Config{Tenant: &config.TenantConfig{
+					EnableRBAC: &enforce, EnableCrossTenantAccess: tc.crossTenant,
+				}},
+				operationDispatcher: operations.NewHandlerDispatcher(),
+			}
+			registry := tools.NewToolRegistry()
+			svc.registerOperationTools(ctx, registry, &types.AgentConfig{
+				OperationsAgentID: types.BuiltinWeKnoraAssistantID, AssistantAccess: tc.level,
+			})
+			find, err := registry.GetTool(tools.ToolFindOperations)
+			require.NoError(t, err)
+			res, err := find.Execute(ctx, []byte(`{"query":"knowledge.delete"}`))
+			require.NoError(t, err)
+			require.True(t, res.Success)
+			if tc.wantAllowed {
+				assert.NotContains(t, res.Output, `"unavailable"`)
+			} else {
+				assert.Contains(t, res.Output, `"unavailable"`)
+			}
+			// Exercise run_operation too: an allowed call reaches the approval
+			// gate, while a withheld one is refused before requesting approval.
+			run, err := registry.GetTool(tools.ToolRunOperation)
+			require.NoError(t, err)
+			res, err = run.Execute(ctx, []byte(`{"operation":"knowledge.delete","params":{"knowledge_id":"k1"}}`))
+			require.NoError(t, err)
+			if tc.wantAllowed {
+				assert.Contains(t, res.Error, "confirmation")
+				assert.NotContains(t, res.Error, "unavailable")
+			} else {
+				assert.Contains(t, res.Error, "unavailable")
+			}
+		})
+	}
+}
+
+func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T) {
+	const (
+		receiverTenantID = uint64(7)
+		sourceTenantID   = uint64(42)
+	)
+	now := time.Now()
+	knowledgeService := &fakeAgentKnowledgeService{
+		knowledges: []*types.Knowledge{
+			{
+				ID:              "shared-doc",
+				KnowledgeBaseID: "shared-kb",
+				Title:           "shared document",
+				ParseStatus:     types.ParseStatusCompleted,
+				CreatedAt:       now,
+			},
+		},
+	}
+	service := &agentService{
+		knowledgeBaseService: &fakeAgentKnowledgeBaseService{
+			kb: &types.KnowledgeBase{
+				ID:       "shared-kb",
+				Name:     "Shared KB",
+				Type:     types.KnowledgeBaseTypeDocument,
+				TenantID: sourceTenantID,
+			},
+		},
+		knowledgeService: knowledgeService,
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, receiverTenantID)
+
+	infos, err := service.getKnowledgeBaseInfos(ctx, []string{"shared-kb"}, map[string]uint64{"shared-kb": sourceTenantID})
+
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, 1, infos[0].DocCount)
+	require.Len(t, infos[0].RecentDocs, 1)
+	assert.Equal(t, "shared-doc", infos[0].RecentDocs[0].KnowledgeID)
+	assert.Equal(t, sourceTenantID, knowledgeService.lastTenant)
+}
+
+func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
+	now := time.Now()
+	knowledgeService := &fakeAgentKnowledgeService{
+		knowledges: []*types.Knowledge{
+			{
+				ID:              "doc-processing",
+				KnowledgeBaseID: "kb-1",
+				Title:           "still parsing",
+				FileName:        "processing.pdf",
+				FileType:        "pdf",
+				ParseStatus:     types.ParseStatusProcessing,
+				CreatedAt:       now,
+			},
+			{
+				ID:              "doc-completed",
+				KnowledgeBaseID: "kb-1",
+				Title:           "ready document",
+				FileName:        "ready.pdf",
+				FileType:        "pdf",
+				ParseStatus:     types.ParseStatusCompleted,
+				CreatedAt:       now.Add(-time.Minute),
+			},
+		},
+	}
+	service := &agentService{
+		knowledgeBaseService: &fakeAgentKnowledgeBaseService{
+			kb: &types.KnowledgeBase{
+				ID:       "kb-1",
+				Name:     "KB",
+				Type:     types.KnowledgeBaseTypeDocument,
+				TenantID: 1,
+			},
+		},
+		knowledgeService: knowledgeService,
+	}
+
+	infos, err := service.getKnowledgeBaseInfos(context.Background(), []string{"kb-1"}, nil)
+
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, types.ParseStatusCompleted, knowledgeService.lastFilter.ParseStatus)
+	assert.Equal(t, 1, infos[0].DocCount)
+	require.Len(t, infos[0].RecentDocs, 1)
+	assert.Equal(t, "doc-completed", infos[0].RecentDocs[0].KnowledgeID)
+}
+
+func TestRegisterSandboxShellIfAllowedHostIgnoresSkillsGate(t *testing.T) {
+	registry := tools.NewToolRegistry()
+	svc := &agentService{
+		hostSandbox: &capableManager{
+			typ:   sandbox.SandboxTypeHost,
+			shell: &stubShellExecutor{},
+		},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	svc.registerSandboxShellIfAllowed(ctx, registry, "sess-1", &types.AgentConfig{
+		SkillsEnabled: false,
+	}, tools.HostApprovals{})
+
+	require.True(t, toolRegistered(registry, tools.ToolShellExec),
+		"the host backend is the Lite feature and must not wait on SkillsEnabled")
+}
+
+type hostLayoutManager struct {
+	capableManager
+	layout sandbox.WorkspaceLayout
+}
+
+func (m *hostLayoutManager) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	layout := m.layout
+	if layout.Origin == sandbox.WorkspaceOriginUnspecified {
+		layout.Origin = sandbox.WorkspaceOriginHost
+	}
+	return layout, nil
+}
+
+func TestCreateAgentEngineInjectsHostWorkspaceIntoPromptAndTools(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	root := "/Users/dev/My Project"
+	layout := sandbox.WorkspaceLayout{
+		Origin:     sandbox.WorkspaceOriginHost,
+		Root:       root,
+		WriteRoots: []string{root},
+		ReadRoots:  []string{root},
+		Hint:       root,
+	}
+	chatModel := &fakeAgentChatModel{}
+	svc := &agentService{
+		hostSandbox: &hostLayoutManager{
+			capableManager: capableManager{
+				typ:   sandbox.SandboxTypeHost,
+				shell: &stubShellExecutor{layout: layout},
+				files: stubSessionFileStore{},
+			},
+			layout: layout,
+		},
+	}
+
+	engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+		SkillsEnabled: false,
+		AllowedTools:  []string{tools.ToolShellExec},
+	}, chatModel, nil, nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+	require.NoError(t, err)
+
+	require.Contains(t, chatModel.lastSystemPrompt, root)
+	require.NotContains(t, chatModel.lastSystemPrompt, "Session workspace: /workspace")
+	require.NotContains(t, chatModel.lastSystemPrompt, "There is no /workspace")
+	require.Contains(t, chatModel.lastToolDescriptions[tools.ToolShellExec], root)
+	require.NotContains(t, chatModel.lastToolDescriptions[tools.ToolShellExec], sandbox.SessionWorkspaceRoot)
+}
+
+func TestLookupSessionWorkspaceLayoutFailsClosedWhenHostPinReadFails(t *testing.T) {
+	db := newPinTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	svc := &agentService{
+		hostSandbox:   &capableManager{typ: sandbox.SandboxTypeHost},
+		sandboxPinner: NewSessionSandboxPinner(db),
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{})
+
+	require.Equal(t, sandbox.FailedHostWorkspaceLayout(), layout)
+	require.NotEqual(t, sandbox.RemoteWorkspaceLayout().Root, layout.Root)
+}
+
+func TestLookupSessionWorkspaceLayoutFailsClosedWhenHostScriptsDisabled(t *testing.T) {
+	svc := &agentService{
+		hostSandbox:   &capableManager{typ: sandbox.SandboxTypeHost},
+		sandboxPolicy: disabledPolicy{},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{})
+
+	require.Equal(t, sandbox.FailedHostWorkspaceLayout(), layout)
+}
+
+func TestLookupSessionWorkspaceLayoutStaysRemoteWithoutHostSandbox(t *testing.T) {
+	layout := (&agentService{}).lookupSessionWorkspaceLayout(
+		context.Background(), "sess-1", &types.AgentConfig{},
+	)
+	require.Equal(t, sandbox.RemoteWorkspaceLayout(), layout)
+}
+
+func TestLookupSessionWorkspaceLayoutKeepsRemoteWhenNamedConfigFails(t *testing.T) {
+	svc := &agentService{
+		hostSandbox: &capableManager{typ: sandbox.SandboxTypeHost},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	layout := svc.lookupSessionWorkspaceLayout(ctx, "sess-1", &types.AgentConfig{
+		SandboxConfigID: "cfg-cube",
+	})
+
+	require.Equal(t, sandbox.RemoteWorkspaceLayout(), layout)
+}
+
+func TestRegisterSandboxShellIfAllowedRemoteKeepsSkillsGate(t *testing.T) {
+	registry := tools.NewToolRegistry()
+	svc := &agentService{
+		sandboxResolver: stubSandboxResolver{
+			mgr: &capableManager{
+				typ:   sandbox.SandboxTypeE2B,
+				shell: &stubShellExecutor{},
+			},
+		},
+		hostSandbox: &capableManager{
+			typ:   sandbox.SandboxTypeHost,
+			shell: &stubShellExecutor{},
+		},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	svc.registerSandboxShellIfAllowed(ctx, registry, "sess-1", &types.AgentConfig{
+		SandboxConfigID: "cfg-1",
+		SkillsEnabled:   false,
+	}, tools.HostApprovals{})
+
+	require.False(t, toolRegistered(registry, tools.ToolShellExec),
+		"a remote shell still exists only to serve skill scripts")
+}
+
+func TestValidateConfigMaxIterationsUnlimited(t *testing.T) {
+	s := &agentService{}
+
+	unlimited := &types.AgentConfig{MaxIterations: -1}
+	require.NoError(t, s.ValidateConfig(unlimited))
+	assert.Equal(t, types.UnlimitedMaxIterations, unlimited.MaxIterations)
+
+	normalized := &types.AgentConfig{MaxIterations: -9}
+	require.NoError(t, s.ValidateConfig(normalized))
+	assert.Equal(t, types.UnlimitedMaxIterations, normalized.MaxIterations)
+
+	unset := &types.AgentConfig{}
+	require.NoError(t, s.ValidateConfig(unset))
+	assert.Equal(t, 5, unset.MaxIterations)
+
+	tooHigh := &types.AgentConfig{MaxIterations: MAX_ITERATIONS + 1}
+	require.Error(t, s.ValidateConfig(tooHigh))
+}
+
+func TestValidInstallDirUsesTheHostVersionsRoot(t *testing.T) {
+	versions := "/Users/dev/.weknora/skills/.versions"
+	s := &agentService{hostSkillVersionsRoot: versions}
+
+	host := &types.AgentConfig{SandboxConfigID: sandbox.HostSkillTargetID}
+	host.EnableSkillInstallMode(types.BuiltinSkillInstallerID, versions+"/pdf-2")
+	dir, ok := s.validInstallDir(host)
+	require.True(t, ok)
+	require.Equal(t, versions+"/pdf-2", dir)
+
+	escaped := &types.AgentConfig{SandboxConfigID: sandbox.HostSkillTargetID}
+	escaped.EnableSkillInstallMode(types.BuiltinSkillInstallerID, "/Users/dev/My Project")
+	_, ok = s.validInstallDir(escaped)
+	require.False(t, ok)
+
+	remote := &types.AgentConfig{SandboxConfigID: "cfg-1"}
+	remote.EnableSkillInstallMode(types.BuiltinSkillInstallerID, sandbox.SkillsImageRoot+"/pdf")
+	dir, ok = s.validInstallDir(remote)
+	require.True(t, ok)
+	require.Equal(t, sandbox.SkillsImageRoot+"/pdf", dir)
+
+	noRoot := &agentService{}
+	_, ok = noRoot.validInstallDir(host)
+	require.False(t, ok)
+}
+
+// TestSwitchManagedToolsIgnoreTheAllowlist pins tools.SwitchManagedTools to
+// what registerTools does: with every switch off, naming those tools in the
+// allowlist must not offer any of them. The agent editor relies on this list
+// to tell users that such stored entries have no effect. It covers the
+// allowlist path only: registering a listed tool from the allowlist, or no
+// longer stripping a web or memory tool, fails it. The code that registers
+// sandbox, skill and MCP tools from their own settings is tested elsewhere.
+func TestSwitchManagedToolsIgnoreTheAllowlist(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	allowed := []string{tools.ToolThinking}
+	allowed = append(allowed, tools.SwitchManagedTools()...)
+	chatModel := &fakeAgentChatModel{}
+	config := &types.AgentConfig{AllowedTools: allowed}
+
+	engine, err := (&agentService{}).CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+	require.NoError(t, err)
+
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolThinking), "the run must have offered tools at all")
+	for _, managed := range tools.SwitchManagedTools() {
+		require.False(t, toolOffered(chatModel.lastToolNames, managed),
+			"%s follows another agent setting, not the allowlist", managed)
+	}
+}
+
+func TestRegisterOperationToolsKeepsSystemAdminIndependentOfWorkspaceRole(t *testing.T) {
+	for _, enforce := range []bool{true, false} {
+		for _, isAdmin := range []bool{true, false} {
+			ctx := types.WithCaller(types.WithPrincipal(
+				context.Background(),
+				types.Principal{
+					Type: types.PrincipalWebUser,
+					ID:   "u1",
+				},
+			),
+				types.Caller{TenantID: 7, UserID: "u1", Role: types.TenantRoleOwner})
+			ctx = context.WithValue(ctx, types.SystemAdminContextKey, isAdmin)
+			ctx = context.WithValue(ctx, types.UserContextKey, &types.User{ID: "u1", CanAccessAllTenants: true})
+			svc := &agentService{
+				cfg: &config.Config{
+					Tenant: &config.TenantConfig{
+						EnableRBAC:              &enforce,
+						EnableCrossTenantAccess: true,
+					},
+				},
+				operationDispatcher: operations.NewHandlerDispatcher(),
+			}
+			registry := tools.NewToolRegistry()
+			svc.registerOperationTools(
+				ctx,
+				registry,
+				&types.AgentConfig{
+					OperationsAgentID: types.BuiltinWeKnoraAssistantID,
+					AssistantAccess:   types.AssistantAccessReadOnly,
+				},
+			)
+			find, err := registry.GetTool(tools.ToolFindOperations)
+			require.NoError(t, err)
+			result, err := find.Execute(ctx, []byte(`{"query":"system_admin.list_users"}`))
+			require.NoError(t, err)
+			if isAdmin {
+				assert.NotContains(t, result.Output, `"unavailable"`)
+			} else {
+				assert.Contains(t, result.Output, "Requires system administrator permission")
+			}
+		}
+	}
+}

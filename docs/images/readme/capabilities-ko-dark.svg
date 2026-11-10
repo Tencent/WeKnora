@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 600" width="1600" height="600" role="img">
+<rect x="1.0" y="1" width="512.6666666666666" height="598" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="40.0" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(52.0 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M8 8h5M8 11h3"/></g>
+<text x="474.66666666666663" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">01 / RAG</text>
+<text x="40.0" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">근거 있는 답변</text>
+<text x="40.0" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">시맨틱 검색과 키워드 검색으로 관련 자료를</text>
+<text x="40.0" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">찾고, 답변에 출처를 표시합니다. 원문을</text>
+<text x="40.0" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">열어 확인할 수 있습니다.</text>
+<rect x="40.0" y="466" width="163.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="56.0" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">하이브리드 검색</text>
+<rect x="213.6" y="466" width="145.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="229.6" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">멀티모달 파싱</text>
+<rect x="40.0" y="516" width="109.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="56.0" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">원문 인용</text>
+<rect x="543.6666666666666" y="1" width="512.6666666666666" height="598" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="582.6666666666666" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(594.6666666666666 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="13" rx="3"/><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6"/><circle cx="12" cy="2.5" r=".5"/></g>
+<text x="1017.3333333333333" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">02 / AGENT</text>
+<text x="582.6666666666666" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">지식과 도구로 작업 완료</text>
+<text x="582.6666666666666" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">에이전트가 작업에 맞춰 지식베이스와 웹을</text>
+<text x="582.6666666666666" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">검색하고 MCP 도구와 스킬을 호출하며,</text>
+<text x="582.6666666666666" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">샌드박스에서 파일을 처리하고 스크립트를</text>
+<text x="582.6666666666666" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">실행하고, 사용자 컴퓨터의 브라우저도</text>
+<text x="582.6666666666666" y="360" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">조작합니다. 확인한 선호는 세션을 넘어</text>
+<text x="582.6666666666666" y="400" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">기억합니다.</text>
+<rect x="582.6666666666666" y="466" width="127.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">다단계 추론</text>
+<rect x="720.2666666666667" y="466" width="163.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="736.2666666666667" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">스킬과 샌드박스</text>
+<rect x="582.6666666666666" y="516" width="145.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="598.6666666666666" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">로컬 브라우저</text>
+<rect x="738.2666666666667" y="516" width="118.0" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="754.2666666666667" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">MCP 도구</text>
+<rect x="866.2666666666667" y="516" width="127.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="882.2666666666667" y="542" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">장기 메모리</text>
+<rect x="1086.3333333333333" y="1" width="512.6666666666666" height="598" rx="18" fill="#101a2b" stroke="rgba(190,208,232,.14)" stroke-width="2"/>
+<rect x="1125.3333333333333" y="40" width="56" height="56" rx="12" fill="#1a2436"/>
+<g transform="translate(1137.3333333333333 52) scale(1.3333333333333333)" fill="none" stroke="#d9a94f" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>
+<text x="1560.0" y="74" text-anchor="end" font-family="'JetBrains Mono', SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="19" letter-spacing="2" fill="#d9a94f">03 / WIKI</text>
+<text x="1125.3333333333333" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="33" font-weight="600" fill="#e6ecf5">문서를 Wiki로 정리</text>
+<text x="1125.3333333333333" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">원본 문서에서 상호 연결된 Wiki 페이지와</text>
+<text x="1125.3333333333333" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">지식 그래프를 생성하고, 탐색·편집·버전</text>
+<text x="1125.3333333333333" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="24" fill="#a9b6c9">롤백을 지원합니다.</text>
+<rect x="1125.3333333333333" y="466" width="109.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1141.3333333333333" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">자동 정리</text>
+<rect x="1244.9333333333332" y="466" width="127.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1260.9333333333332" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">지식 그래프</text>
+<rect x="1382.533333333333" y="466" width="109.6" height="38" rx="7" fill="#161f30" stroke="#685638" stroke-width="1.5"/>
+<text x="1398.533333333333" y="492" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', sans-serif" font-size="20" fill="#e8c176">버전 롤백</text>
+</svg>

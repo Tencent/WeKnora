@@ -1,0 +1,49 @@
+use_default_settings: true
+
+general:
+  instance_name: "WeKnora SearXNG"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+server:
+  # Override via env SEARXNG_SECRET; the entrypoint script substitutes ultrasecretkey.
+  secret_key: "ultrasecretkey"
+  base_url: false
+  image_proxy: true
+  http_protocol_version: "1.0"
+  method: "GET"
+  # Disabled so WeKnora's backend can call /search without IP-based throttling.
+  # Re-enable and add WeKnora's egress IP to a limiter allowlist if you expose
+  # this instance to the public internet.
+  limiter: false
+  public_instance: false
+
+ui:
+  static_use_hash: true
+  default_locale: ""
+  query_in_title: false
+  infinite_scroll: false
+  center_alignment: false
+  theme_args:
+    simple_style: auto
+  search_on_category_select: true
+  hotkeys: default
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 10.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true

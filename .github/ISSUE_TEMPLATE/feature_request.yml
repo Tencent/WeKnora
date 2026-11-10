@@ -1,0 +1,88 @@
+name: ✨ Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the feature request! Please describe your idea in detail so we can better understand your needs.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: Select the component related to this request
+      options:
+        - Frontend UI
+        - Backend Service & API
+        - Document Reader Service
+        - Vector Database
+        - Model Service
+        - Configuration Management
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Description
+      description: Describe the problem or limitation of the current feature
+      placeholder: "What is wrong or missing today?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature or improvement you would like to see
+      placeholder: "How would you like to solve it?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Describe alternative solutions you have considered
+      placeholder: "Any alternatives you considered?"
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected by the absence of this feature?
+      options:
+        - Just me / a personal preference
+        - My team or a small group
+        - Many users would benefit
+        - Blocking adoption of WeKnora
+    validations:
+      required: true
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use Case
+      description: Describe the specific use case for this feature
+      placeholder: "When would you use this feature?"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Information
+      description: Any other context, screenshots, or links
+      placeholder: "Add any other relevant information..."
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues and confirmed this is a new request
+          required: true
+        - label: I understand this request may need discussion and evaluation
+          required: true

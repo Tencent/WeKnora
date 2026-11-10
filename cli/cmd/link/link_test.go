@@ -1,0 +1,148 @@
+package linkcmd
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/config"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/projectlink"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	prev, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
+func fakeKBServer(t *testing.T, kbs []sdk.KnowledgeBase) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/knowledge-bases", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sdk.KnowledgeBaseListResponse{Success: true, Data: kbs})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func newFactory(currentCtx string, client *sdk.Client) *cmdutil.Factory {
+	cfg := &config.Config{
+		CurrentProfile: currentCtx,
+		Profiles: map[string]config.Profile{
+			currentCtx: {Host: "https://example"},
+		},
+	}
+	return &cmdutil.Factory{
+		Config: func() (*config.Config, error) { return cfg, nil },
+		Client: func() (*sdk.Client, error) {
+			if client == nil {
+				return nil, errors.New("client not configured")
+			}
+			return client, nil
+		},
+	}
+}
+
+func TestLink_ByID(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	out, _ := iostreams.SetForTest(t)
+
+	f := newFactory("default", nil)
+	opts := &Options{KB: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+	require.NoError(t, runLink(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f))
+
+	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
+	p, err := projectlink.Load(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", p.KBID)
+	assert.Equal(t, "default", p.Profile)
+	assert.Contains(t, out.String(), "✓")
+}
+
+func TestLink_ByName(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	_, _ = iostreams.SetForTest(t)
+
+	srv := fakeKBServer(t, []sdk.KnowledgeBase{
+		{ID: "kb_a", Name: "foo"},
+		{ID: "kb_b", Name: "bar"},
+	})
+	cli := sdk.NewClient(srv.URL)
+	f := newFactory("default", cli)
+	opts := &Options{KB: "foo"}
+	require.NoError(t, runLink(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f))
+
+	p, err := projectlink.Load(filepath.Join(dir, ".weknora", "project.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "kb_a", p.KBID)
+}
+
+func TestLink_KBNotFound(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	_, _ = iostreams.SetForTest(t)
+
+	srv := fakeKBServer(t, []sdk.KnowledgeBase{{ID: "kb_a", Name: "foo"}})
+	cli := sdk.NewClient(srv.URL)
+	f := newFactory("default", cli)
+	opts := &Options{KB: "missing"}
+	err := runLink(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeKBNotFound, typed.Code)
+}
+
+func TestLink_OverwritesExisting(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	_, _ = iostreams.SetForTest(t)
+
+	// Pre-existing link.
+	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
+	require.NoError(t, projectlink.Save(linkPath, &projectlink.Project{
+		Profile: "default", KBID: "11111111-1111-4111-8111-111111111111",
+	}))
+
+	f := newFactory("default", nil)
+	opts := &Options{KB: "22222222-2222-4222-8222-222222222222"}
+	require.NoError(t, runLink(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f))
+
+	p, err := projectlink.Load(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, "22222222-2222-4222-8222-222222222222", p.KBID, "link should overwrite silently")
+}
+
+// TestLink_NonInteractive_NoKB exercises the non-TTY-without-flag error path.
+// SetForTest gives us a non-TTY iostreams, so omitting --kb must error rather
+// than hang on a prompt.
+func TestLink_NonInteractive_NoKB(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	_, _ = iostreams.SetForTest(t)
+
+	f := newFactory("default", nil)
+	opts := &Options{} // no KB
+	err := runLink(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeKBIDRequired, typed.Code)
+}

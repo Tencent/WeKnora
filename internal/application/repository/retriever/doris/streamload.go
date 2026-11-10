@@ -1,0 +1,542 @@
+package doris
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+// Stream Load 相关常量。
+const (
+	// 单批 Stream Load 的 JSON body 上限（保守值，远小于 Doris 默认 streaming_load_max_mb=10240）。
+	// 主要目的是控制单次 HTTP 请求的尾延迟，超过则自动拆批。
+	streamLoadMaxBatchBytes = 1 << 20 // 1 MiB
+
+	// maxStreamLoadResponseBytes 是 Stream Load 结果体的解析上限。
+	//
+	// Doris 正常只回几百字节控制 JSON（TxnId/Label/Status/计数），即便
+	// "Publish Timeout" 也只是同量级。1 MiB 远高于合法响应，同时避免一个
+	// 行为异常的 FE/BE（或被代理改写的响应）让进程按对方意愿分配内存。
+	maxStreamLoadResponseBytes = 1 << 20
+
+	// maxStreamLoadErrorPreviewBytes 限制失败响应被回显进错误与日志的字节数。
+	//
+	// 失败体来自对端，内容不可控；整段拼进 error 会被调用方记入日志，
+	// 因此只保留预览，并按 rune 边界收敛（common.TruncateUTF8Bytes）。
+	maxStreamLoadErrorPreviewBytes = 4 << 10
+
+	// HTTP 头 Authorization 用 Basic auth；Stream Load 也支持 token，
+	// 这里走最常用的用户名/密码方案与 MySQL 协议保持一致。
+	headerAuthorization = "Authorization"
+	headerExpect        = "Expect"
+	headerContentType   = "Content-Type"
+)
+
+// readStreamLoadResponse 读取成功的 Stream Load 结果体，超过上限即拒绝。
+func readStreamLoadResponse(body io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxStreamLoadResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read stream load response: %w", err)
+	}
+	if len(data) > maxStreamLoadResponseBytes {
+		return nil, fmt.Errorf("stream load response exceeds %d bytes", maxStreamLoadResponseBytes)
+	}
+	return data, nil
+}
+
+// streamLoadResponse 是 Doris FE/BE 返回的 Stream Load 结果体。
+//
+// 关键字段：Status 应为 "Success" 或 "Publish Timeout"（后者表示数据已写入但发布事务超时，
+// 仍视为成功）。其它状态都视为失败。
+type streamLoadResponse struct {
+	TxnId                  int64  `json:"TxnId"`
+	Label                  string `json:"Label"`
+	Status                 string `json:"Status"`
+	Message                string `json:"Message"`
+	NumberTotalRows        int64  `json:"NumberTotalRows"`
+	NumberLoadedRows       int64  `json:"NumberLoadedRows"`
+	NumberFilteredRows     int64  `json:"NumberFilteredRows"`
+	NumberUnselectedRows   int64  `json:"NumberUnselectedRows"`
+	LoadBytes              int64  `json:"LoadBytes"`
+	LoadTimeMs             int64  `json:"LoadTimeMs"`
+	BeginTxnTimeMs         int64  `json:"BeginTxnTimeMs"`
+	StreamLoadPutTimeMs    int64  `json:"StreamLoadPutTimeMs"`
+	ReadDataTimeMs         int64  `json:"ReadDataTimeMs"`
+	WriteDataTimeMs        int64  `json:"WriteDataTimeMs"`
+	CommitAndPublishTimeMs int64  `json:"CommitAndPublishTimeMs"`
+	ErrorURL               string `json:"ErrorURL"`
+}
+
+// streamLoadURL 拼装某张表的 Stream Load HTTP 端点。
+func (r *dorisRepository) streamLoadURL(table string) string {
+	return fmt.Sprintf("%s/api/%s/%s/_stream_load",
+		r.feHTTPBase, url.PathEscape(r.database), url.PathEscape(table))
+}
+
+// newDorisStreamLoadHTTPClient protects both the initial FE request and every
+// FE -> BE redirect at connection time. Doris requires Basic auth to survive
+// the 307 redirect, so redirect targets on another host must be explicitly
+// trusted through the SSRF whitelist before credentials are forwarded.
+func newDorisStreamLoadHTTPClient() *http.Client {
+	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	// Stream Load calls carry their own context deadline. Preserve the previous
+	// client behaviour instead of imposing the generic 30-second HTTP timeout.
+	cfg.Timeout = 0
+
+	client := secutils.NewSSRFSafeHTTPClient(cfg)
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= cfg.MaxRedirects {
+			return fmt.Errorf("stopped after %d redirects", cfg.MaxRedirects)
+		}
+		if len(via) == 0 {
+			return nil
+		}
+
+		// Stream Load deliberately replays PUT bodies to a BE. Keep this
+		// exception local to Doris; generic clients must not replay requests
+		// across origins. Every cross-origin destination must be trusted.
+		source := via[0].URL
+		sameOrigin := strings.EqualFold(source.Scheme, req.URL.Scheme) &&
+			strings.EqualFold(source.Host, req.URL.Host)
+		if !sameOrigin && !secutils.IsSSRFWhitelisted(req.URL.Hostname()) {
+			return fmt.Errorf("%w: stream load target host %q is not trusted to receive credentials",
+				secutils.ErrSSRFRedirectBlocked, req.URL.Hostname())
+		}
+		if strings.EqualFold(source.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+			return fmt.Errorf("%w: stream load HTTPS downgrade is forbidden", secutils.ErrSSRFRedirectBlocked)
+		}
+		if err := secutils.ValidateURLForSSRF(req.URL.String()); err != nil {
+			return fmt.Errorf("%w: %w", secutils.ErrSSRFRedirectBlocked, err)
+		}
+
+		// The shared transport still validates each URL and connection. Preserve
+		// load options and restore Basic auth only after checking the destination.
+		req.Header.Set(headerAuthorization, via[0].Header.Get(headerAuthorization))
+		return nil
+	}
+	return client
+}
+
+// partialUpdateRows 把若干行通过 Stream Load 的 partial update 模式写回目标表。
+//
+// columns 是参与本次 partial update 的列（必须包含 UNIQUE KEY 列，即 "id"）。
+// rows 中每一项是一个与 columns 等长的字段值数组。
+//
+// 实现要点：
+//  1. 用 JSON 数组的 body 形式，header 加 strip_outer_array=true。
+//  2. 设置 partial_columns=true、merge_type=APPEND，触发 Doris 的 partial update 模式
+//     (Doris 4.1 + UNIQUE KEY MoW 表的标准玩法)。
+//  3. 按 streamLoadMaxBatchBytes 自动拆批，避免单次过大。
+//  4. 处理 307：Doris 的 FE 会 redirect 到 BE，net/http 默认会跟随；
+//     这里需要保证 GetBody 可重发（已通过 bytes.NewReader 构造 Body 满足）。
+func (r *dorisRepository) partialUpdateRows(ctx context.Context,
+	table string, columns []string, rows []map[string]any,
+) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	for _, batch := range chunkRows(rows, streamLoadMaxBatchBytes) {
+		if err := r.streamLoadOnce(ctx, table, columns, batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// streamLoadOnce 发出一次 Stream Load HTTP 请求。
+func (r *dorisRepository) streamLoadOnce(ctx context.Context,
+	table string, columns []string, rows []map[string]any,
+) error {
+	log := logger.GetLogger(ctx)
+	if len(rows) == 0 {
+		return nil
+	}
+
+	body, err := json.Marshal(rows)
+	if err != nil {
+		return fmt.Errorf("marshal stream load body: %w", err)
+	}
+
+	url := r.streamLoadURL(table)
+	// Validate at the final outbound boundary as well as when user-supplied
+	// vector-store configuration is created. This covers stored/env configs and
+	// keeps the tainted value from reaching http.Client.Do unchecked.
+	if err := secutils.ValidateURLForSSRF(url); err != nil {
+		return fmt.Errorf("stream load URL blocked by SSRF validation: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build stream load request: %w", err)
+	}
+
+	// GetBody 让 redirect 时可以重新读 body（FE -> BE 的 307 需要重发 PUT body）。
+	bodyCopy := append([]byte(nil), body...)
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodyCopy)), nil
+	}
+	req.ContentLength = int64(len(body))
+
+	auth := base64.StdEncoding.EncodeToString([]byte(r.username + ":" + r.password))
+	req.Header.Set(headerAuthorization, "Basic "+auth)
+	req.Header.Set(headerExpect, "100-continue")
+	req.Header.Set(headerContentType, "application/json")
+	req.Header.Set("format", "json")
+	req.Header.Set("strip_outer_array", "true")
+	req.Header.Set("partial_columns", "true")
+	req.Header.Set("columns", strings.Join(columns, ","))
+	req.Header.Set("merge_type", "APPEND")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("stream load HTTP: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, maxStreamLoadErrorPreviewBytes+1))
+		return fmt.Errorf("stream load HTTP %d: %s", resp.StatusCode,
+			common.TruncateUTF8Bytes(string(preview), maxStreamLoadErrorPreviewBytes))
+	}
+
+	respBody, err := readStreamLoadResponse(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var result streamLoadResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("decode stream load response: %w (raw=%s)", err,
+			common.TruncateUTF8Bytes(string(respBody), maxStreamLoadErrorPreviewBytes))
+	}
+
+	switch result.Status {
+	case "Success", "Publish Timeout":
+		log.Infof("[Doris] Stream load %s OK: rows=%d, loaded=%d, label=%s",
+			table, result.NumberTotalRows, result.NumberLoadedRows, result.Label)
+		return nil
+	default:
+		return fmt.Errorf("stream load failed: status=%s msg=%s err_url=%s",
+			result.Status, result.Message, result.ErrorURL)
+	}
+}
+
+// chunkRows 把行按累积 JSON 体大小切分，每段不超过 maxBytes。
+//
+// 注意：JSON 序列化的实际开销大约是 marshal 后的字节数，而单行 marshal
+// 加上逗号 + 数组括号约等于本估算。这里用粗略估计避免每段都 marshal。
+func chunkRows(rows []map[string]any, maxBytes int) [][]map[string]any {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	var (
+		out    [][]map[string]any
+		curr   []map[string]any
+		size   int
+		header = 2 // "[" + "]"
+	)
+
+	for _, row := range rows {
+		raw, err := json.Marshal(row)
+		if err != nil {
+			// marshal 失败时把这一行单独成段，由上层 streamLoadOnce 再次 marshal 报错。
+			if len(curr) > 0 {
+				out = append(out, curr)
+			}
+			out = append(out, []map[string]any{row})
+			curr = nil
+			size = 0
+			continue
+		}
+		// 加上逗号位（除第一行之外）。
+		need := len(raw)
+		if len(curr) > 0 {
+			need++
+		}
+		if size+need+header > maxBytes && len(curr) > 0 {
+			out = append(out, curr)
+			curr = nil
+			size = 0
+		}
+		curr = append(curr, row)
+		size += need
+	}
+	if len(curr) > 0 {
+		out = append(out, curr)
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// 业务面方法：BatchUpdateChunkEnabledStatus / BatchUpdateChunkTagID
+// ---------------------------------------------------------------------------
+
+// BatchUpdateChunkEnabledStatus 批量更新 chunk 的 is_enabled 字段。
+// legacy 模式走 Stream Load partial update；inner_product_duplicate 模式改为读整行后 replaceRows 写回。
+func (r *dorisRepository) BatchUpdateChunkEnabledStatus(ctx context.Context,
+	chunkStatusMap map[string]bool,
+) error {
+	if len(chunkStatusMap) == 0 {
+		return nil
+	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return err
+	}
+	if !compatMode.usesRewriteChunkUpdates() {
+		return r.batchUpdateChunkEnabledStatusLegacy(ctx, chunkStatusMap)
+	}
+
+	chunkIDs := make([]string, 0, len(chunkStatusMap))
+	for id := range chunkStatusMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	return r.rewriteChunkRows(ctx, chunkIDs, func(row *DorisVectorEmbedding) bool {
+		enabled, ok := chunkStatusMap[row.ChunkID]
+		if !ok || row.IsEnabled == enabled {
+			return false
+		}
+		row.IsEnabled = enabled
+		return true
+	}, "rewrite is_enabled")
+}
+
+// BatchUpdateChunkTagID 批量更新 chunk 的 tag_id 字段。逻辑与 EnabledStatus 一致。
+func (r *dorisRepository) BatchUpdateChunkTagID(ctx context.Context,
+	chunkTagMap map[string]string,
+) error {
+	if len(chunkTagMap) == 0 {
+		return nil
+	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return err
+	}
+	if !compatMode.usesRewriteChunkUpdates() {
+		return r.batchUpdateChunkTagIDLegacy(ctx, chunkTagMap)
+	}
+
+	chunkIDs := make([]string, 0, len(chunkTagMap))
+	for id := range chunkTagMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	return r.rewriteChunkRows(ctx, chunkIDs, func(row *DorisVectorEmbedding) bool {
+		tagID, ok := chunkTagMap[row.ChunkID]
+		if !ok || row.TagID == tagID {
+			return false
+		}
+		row.TagID = tagID
+		return true
+	}, "rewrite tag_id")
+}
+
+func (r *dorisRepository) rewriteChunkRows(ctx context.Context,
+	chunkIDs []string,
+	mutate func(*DorisVectorEmbedding) bool,
+	action string,
+) error {
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+
+	tables, err := r.listEmbeddingTables(ctx)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+
+	for _, table := range tables {
+		rows, err := r.loadRowsByChunkIDs(ctx, table, chunkIDs)
+		if err != nil {
+			return fmt.Errorf("load chunk rows from %s: %w", table, err)
+		}
+
+		updated := make([]*DorisVectorEmbedding, 0, len(rows))
+		for _, row := range rows {
+			if !mutate(row) {
+				continue
+			}
+			updated = append(updated, row)
+		}
+		if len(updated) == 0 {
+			continue
+		}
+
+		if err := r.replaceRows(ctx, table, updated); err != nil {
+			return fmt.Errorf("%s in %s: %w", action, table, err)
+		}
+	}
+	return nil
+}
+
+func (r *dorisRepository) batchUpdateChunkEnabledStatusLegacy(ctx context.Context,
+	chunkStatusMap map[string]bool,
+) error {
+	chunkIDs := make([]string, 0, len(chunkStatusMap))
+	for id := range chunkStatusMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	mapping, err := r.lookupChunkRowKeys(ctx, chunkIDs)
+	if err != nil {
+		return err
+	}
+
+	byTable := make(map[string][]map[string]any)
+	for chunkID, locations := range mapping {
+		enabled, ok := chunkStatusMap[chunkID]
+		if !ok {
+			continue
+		}
+		for _, loc := range locations {
+			byTable[loc.table] = append(byTable[loc.table], map[string]any{
+				fieldID:        loc.id,
+				fieldIsEnabled: enabled,
+			})
+		}
+	}
+	for table, rows := range byTable {
+		if err := r.partialUpdateRows(ctx, table, []string{fieldID, fieldIsEnabled}, rows); err != nil {
+			return fmt.Errorf("partial update is_enabled in %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func (r *dorisRepository) batchUpdateChunkTagIDLegacy(ctx context.Context,
+	chunkTagMap map[string]string,
+) error {
+	chunkIDs := make([]string, 0, len(chunkTagMap))
+	for id := range chunkTagMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	mapping, err := r.lookupChunkRowKeys(ctx, chunkIDs)
+	if err != nil {
+		return err
+	}
+
+	byTable := make(map[string][]map[string]any)
+	for chunkID, locations := range mapping {
+		tagID, ok := chunkTagMap[chunkID]
+		if !ok {
+			continue
+		}
+		for _, loc := range locations {
+			byTable[loc.table] = append(byTable[loc.table], map[string]any{
+				fieldID:    loc.id,
+				fieldTagID: tagID,
+			})
+		}
+	}
+	for table, rows := range byTable {
+		if err := r.partialUpdateRows(ctx, table, []string{fieldID, fieldTagID}, rows); err != nil {
+			return fmt.Errorf("partial update tag_id in %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func (r *dorisRepository) loadRowsByChunkIDs(ctx context.Context,
+	table string, chunkIDs []string,
+) ([]*DorisVectorEmbedding, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(chunkIDs))
+	args := make([]any, len(chunkIDs))
+	for i, v := range chunkIDs {
+		placeholders[i] = "?"
+		args[i] = v
+	}
+
+	stmt := fmt.Sprintf(
+		"SELECT %s FROM `%s` WHERE %s IN (%s)",
+		strings.Join(columnsForCopy, ", "),
+		table,
+		fieldChunkID,
+		strings.Join(placeholders, ", "),
+	)
+	rows, err := r.db.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	batch, err := scanCopyRows(rows)
+	_ = rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+// rowLocation 表示某行在哪个表里、主键 id 是什么。
+type rowLocation struct {
+	table string
+	id    string
+}
+
+// lookupChunkRowKeys 查询给定的 chunkIDs 在所有 <base>_<dim> 表中的物理位置：
+//   - key：chunk_id
+//   - value：[(table, id), ...]，因为同一 chunk 可能在多个维度的表里都有副本。
+//
+// 跨表查询使用 listEmbeddingTables 列出的所有匹配表；每张表执行一次
+// SELECT id, chunk_id FROM <table> WHERE chunk_id IN (?, ?, ...)。
+func (r *dorisRepository) lookupChunkRowKeys(ctx context.Context,
+	chunkIDs []string,
+) (map[string][]rowLocation, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+	tables, err := r.listEmbeddingTables(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list tables: %w", err)
+	}
+	if len(tables) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(chunkIDs))
+	args := make([]any, len(chunkIDs))
+	for i, v := range chunkIDs {
+		placeholders[i] = "?"
+		args[i] = v
+	}
+
+	out := make(map[string][]rowLocation)
+	for _, table := range tables {
+		stmt := fmt.Sprintf(
+			"SELECT %s, %s FROM `%s` WHERE %s IN (%s)",
+			fieldID, fieldChunkID, table, fieldChunkID, strings.Join(placeholders, ", "),
+		)
+		rows, err := r.db.QueryContext(ctx, stmt, args...)
+		if err != nil {
+			return nil, fmt.Errorf("lookup chunk row keys in %s: %w", table, err)
+		}
+		for rows.Next() {
+			var id, chunkID string
+			if err := rows.Scan(&id, &chunkID); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan row keys: %w", err)
+			}
+			out[chunkID] = append(out[chunkID], rowLocation{table: table, id: id})
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
+	}
+	return out, nil
+}

@@ -1,0 +1,333 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+// MCPTransportType represents the transport type for MCP service
+type MCPTransportType string
+
+const (
+	MCPTransportSSE            MCPTransportType = "sse"
+	MCPTransportHTTPStreamable MCPTransportType = "http-streamable"
+	MCPTransportStdio          MCPTransportType = "stdio"
+)
+
+// MCPService represents an MCP service configuration
+type MCPService struct {
+	ID                string             `json:"id"`
+	TenantID          uint64             `json:"tenant_id"`
+	Name              string             `json:"name"`
+	Description       string             `json:"description"`
+	UsageInstructions string             `json:"usage_instructions,omitempty"`
+	Enabled           bool               `json:"enabled"`
+	TransportType     MCPTransportType   `json:"transport_type"`
+	URL               *string            `json:"url,omitempty"`
+	Headers           map[string]string  `json:"headers"`
+	AuthConfig        *MCPAuthConfig     `json:"auth_config"`
+	AdvancedConfig    *MCPAdvancedConfig `json:"advanced_config"`
+	StdioConfig       *MCPStdioConfig    `json:"stdio_config,omitempty"`
+	EnvVars           map[string]string  `json:"env_vars,omitempty"`
+	IsBuiltin         bool               `json:"is_builtin"`
+	CreatedAt         string             `json:"created_at"`
+	UpdatedAt         string             `json:"updated_at"`
+	Catalog           *MCPCatalogSummary `json:"catalog,omitempty"`
+}
+
+// MCPCatalogSummary is the list-card view of a saved MCP directory.
+type MCPCatalogSummary struct {
+	ToolCount int    `json:"tool_count"`
+	Stale     bool   `json:"stale"`
+	SyncedAt  string `json:"synced_at"`
+}
+
+// MCPAuthConfig represents authentication configuration for MCP service.
+//
+// Secret fields (APIKey, Token) are accepted on create but are never returned
+// by the server. To mutate credentials on an existing service, use the
+// dedicated /credentials subresource — see the MCP credentials API for the
+// PUT / DELETE shape. Sending secret fields in a main PUT body is silently
+// ignored server-side.
+type MCPAuthConfig struct {
+	APIKey        string            `json:"api_key,omitempty"`
+	Token         string            `json:"token,omitempty"`
+	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+}
+
+// MCPAdvancedConfig represents advanced configuration for MCP service
+type MCPAdvancedConfig struct {
+	Timeout    int `json:"timeout"`
+	RetryCount int `json:"retry_count"`
+	RetryDelay int `json:"retry_delay"`
+}
+
+// MCPStdioConfig represents stdio transport configuration
+type MCPStdioConfig struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+// MCPTool represents a tool exposed by an MCP service
+type MCPTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+// MCPResource represents a resource exposed by an MCP service
+type MCPResource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
+// MCPTestResult represents the result of testing an MCP service connection
+type MCPTestResult struct {
+	Success     bool           `json:"success"`
+	Message     string         `json:"message,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Tools       []*MCPTool     `json:"tools,omitempty"`
+	Resources   []*MCPResource `json:"resources,omitempty"`
+}
+
+// CreateMCPService creates a new MCP service
+func (c *Client) CreateMCPService(ctx context.Context, service *MCPService) (*MCPService, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/mcp-services", service, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool        `json:"success"`
+		Data    *MCPService `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// ListMCPServices lists all MCP services for the current tenant
+func (c *Client) ListMCPServices(ctx context.Context) ([]*MCPService, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/mcp-services", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool          `json:"success"`
+		Data    []*MCPService `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// GetMCPService gets an MCP service by ID
+func (c *Client) GetMCPService(ctx context.Context, serviceID string) (*MCPService, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/mcp-services/%s", serviceID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool        `json:"success"`
+		Data    *MCPService `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// UpdateMCPService updates an MCP service
+func (c *Client) UpdateMCPService(ctx context.Context, serviceID string, updates map[string]interface{}) (*MCPService, error) {
+	resp, err := c.doRequest(ctx, http.MethodPut, fmt.Sprintf("/api/v1/mcp-services/%s", serviceID), updates, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool        `json:"success"`
+		Data    *MCPService `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// DeleteMCPService deletes an MCP service
+func (c *Client) DeleteMCPService(ctx context.Context, serviceID string) error {
+	resp, err := c.doRequest(ctx, http.MethodDelete, fmt.Sprintf("/api/v1/mcp-services/%s", serviceID), nil, nil)
+	if err != nil {
+		return err
+	}
+	return parseResponse(resp, nil)
+}
+
+// TestMCPService tests an MCP service connection
+func (c *Client) TestMCPService(ctx context.Context, serviceID string) (*MCPTestResult, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/mcp-services/%s/test", serviceID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool           `json:"success"`
+		Data    *MCPTestResult `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// GetMCPServiceTools gets the tools provided by an MCP service
+func (c *Client) GetMCPServiceTools(ctx context.Context, serviceID string) ([]*MCPTool, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/mcp-services/%s/tools", serviceID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool       `json:"success"`
+		Data    []*MCPTool `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// MCPMetadata is a persisted MCP tool directory. A nil result from GetMCPMetadata
+// means the service has never been synchronized. Stale is true when the saved
+// connection no longer matches the current configuration.
+type MCPMetadata struct {
+	ServiceID         string     `json:"service_id"`
+	Tools             []*MCPTool `json:"tools"`
+	Instructions      string     `json:"instructions"`
+	ServerName        string     `json:"server_name"`
+	ServerVersion     string     `json:"server_version"`
+	ServerDescription string     `json:"server_description"`
+	SyncedAt          string     `json:"synced_at"`
+	Stale             bool       `json:"stale"`
+}
+
+// GetMCPMetadata reads the saved tool directory without connecting upstream.
+// Server route: GET /api/v1/mcp-services/{id}/metadata.
+func (c *Client) GetMCPMetadata(ctx context.Context, serviceID string) (*MCPMetadata, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/mcp-services/%s/metadata", serviceID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Success bool         `json:"success"`
+		Data    *MCPMetadata `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// RefreshMCPMetadata connects upstream and atomically replaces the saved directory.
+// OAuth services store a snapshot for the calling user (Viewer+). Static-auth
+// services write a tenant-wide snapshot and require Admin, or an API key that
+// can manage MCP services.
+// Server route: POST /api/v1/mcp-services/{id}/metadata/refresh.
+func (c *Client) RefreshMCPMetadata(ctx context.Context, serviceID string) (*MCPMetadata, error) {
+	path := fmt.Sprintf("/api/v1/mcp-services/%s/metadata/refresh", serviceID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Success bool         `json:"success"`
+		Data    *MCPMetadata `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// GetMCPServiceResources gets the resources provided by an MCP service
+func (c *Client) GetMCPServiceResources(ctx context.Context, serviceID string) ([]*MCPResource, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/mcp-services/%s/resources", serviceID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool           `json:"success"`
+		Data    []*MCPResource `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// ResolveToolApprovalRequest is the body for resolving a pending tool-approval
+// raised during an agent run (session ask). Decision is "approve" or "reject".
+// ModifiedArgs optionally replaces the tool call arguments on approve; it must
+// be a JSON object when present.
+type ResolveToolApprovalRequest struct {
+	Decision     string          `json:"decision"`
+	Reason       string          `json:"reason,omitempty"`
+	ModifiedArgs json.RawMessage `json:"modified_args,omitempty"`
+}
+
+// ResolveToolApproval resolves a pending tool approval by id.
+// Server route: POST /api/v1/agent/tool-approvals/{pending_id}.
+func (c *Client) ResolveToolApproval(ctx context.Context, pendingID string, req *ResolveToolApprovalRequest) error {
+	path := fmt.Sprintf("/api/v1/agent/tool-approvals/%s", pendingID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, req, nil)
+	if err != nil {
+		return err
+	}
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message,omitempty"`
+	}
+	return parseResponse(resp, &response)
+}
+
+// ResolveAgentPromptRequest answers a prompt an agent run is waiting on. Kind
+// must match the prompt ("ask_user" or "tool_approval"); Response is the
+// kind's answer, e.g. {"text": "..."} or {"selected": ["..."]} for ask_user,
+// {"approved": true} or {"approved": false, "reason": "..."} for
+// tool_approval (approval may add "modified_args": {...}). Unknown fields are
+// rejected.
+type ResolveAgentPromptRequest struct {
+	Kind     string          `json:"kind"`
+	Response json.RawMessage `json:"response"`
+}
+
+// ResolveAgentPrompt answers a pending agent prompt by id. Resumed reports
+// that the run had been suspended and now continues in the background; its
+// output lands in the same assistant message.
+// Server route: POST /api/v1/agent/prompts/{prompt_id}.
+func (c *Client) ResolveAgentPrompt(
+	ctx context.Context, promptID string, req *ResolveAgentPromptRequest,
+) (resumed bool, err error) {
+	path := fmt.Sprintf("/api/v1/agent/prompts/%s", promptID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, req, nil)
+	if err != nil {
+		return false, err
+	}
+	var response struct {
+		Success bool `json:"success"`
+		Resumed bool `json:"resumed"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return false, err
+	}
+	return response.Resumed, nil
+}

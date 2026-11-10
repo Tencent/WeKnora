@@ -1,0 +1,620 @@
+package docparser
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
+)
+
+// defaultMinerUTimeout bounds one self-hosted parse; WEKNORA_MINERU_TIMEOUT
+// overrides it for documents that take longer.
+const defaultMinerUTimeout = 1000 * time.Second // large docs can take a while
+
+var (
+	b64DataURIPattern     = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
+	minerUFileTypePattern = regexp.MustCompile(`^[a-z0-9]+$`)
+)
+
+// MinerUReader calls a self-hosted MinerU API to read/convert documents.
+// MinerU >= 4.0 is driven through the V1 API; older servers through the
+// legacy /file_parse endpoint. The protocol is detected per request, so an
+// in-place MinerU upgrade needs no configuration change.
+type MinerUReader struct {
+	endpoint string
+	timeout  time.Duration
+	apiKey   string // server --api-key (V1), or the gateway key when a legacy endpoint sits behind auth
+	tier     string // V1 only: flash, basic, standard, advanced; "" = server default
+	// Legacy (<= 3.x) only; MinerU 4.0 dropped these request parameters.
+	backend       string // "pipeline", "vlm-*", "hybrid-*"
+	effort        string // legacy hybrid: medium or high; "" = server default
+	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
+	formulaEnable bool
+	tableEnable   bool
+	language      string
+	// Shared: legacy parse_method / V1 ocr_mode take the same values.
+	parseMethod string
+}
+
+// NewMinerUReader creates a reader from ParserEngineOverrides.
+func NewMinerUReader(overrides map[string]string) *MinerUReader {
+	var legacyOCREnabled *bool
+	if raw, ok := overrides["mineru_enable_ocr"]; ok {
+		value := parseBoolOr(raw, true)
+		legacyOCREnabled = &value
+	}
+
+	c := &MinerUReader{
+		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
+		timeout:       requestTimeoutFromEnv("WEKNORA_MINERU_TIMEOUT", defaultMinerUTimeout),
+		apiKey:        strings.TrimSpace(overrides["mineru_server_api_key"]),
+		tier:          resolveMinerUTier(overrides["mineru_tier"]),
+		backend:       stringOr(overrides["mineru_model"], "pipeline"),
+		effort:        resolveMinerUEffort(overrides["mineru_effort"]),
+		vlmServerURL:  overrides["mineru_vlm_server_url"],
+		formulaEnable: parseBoolOr(overrides["mineru_enable_formula"], true),
+		tableEnable:   parseBoolOr(overrides["mineru_enable_table"], true),
+		parseMethod:   types.ResolveMinerUParseMethod(overrides["mineru_parse_method"], legacyOCREnabled),
+		language:      stringOr(overrides["mineru_language"], "ch"),
+	}
+	return c
+}
+
+// resolveMinerUTier keeps only tiers MinerU 4.0 understands; anything else
+// falls back to the server's default selection.
+func resolveMinerUTier(raw string) string {
+	tier := strings.ToLower(strings.TrimSpace(raw))
+	if _, ok := mineruV1Tiers[tier]; ok {
+		return tier
+	}
+	return ""
+}
+
+func resolveMinerUEffort(raw string) string {
+	switch effort := strings.ToLower(strings.TrimSpace(raw)); effort {
+	case "medium", "high":
+		return effort
+	default:
+		return ""
+	}
+}
+
+func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	if c.endpoint == "" {
+		return &types.ReadResult{Error: "MinerU endpoint is not configured"}, nil
+	}
+	if err := validateMinerUOutboundURL(c.endpoint); err != nil {
+		return &types.ReadResult{Error: err.Error()}, nil
+	}
+	if c.vlmServerURL != "" {
+		if err := validateMinerUOutboundURL(c.vlmServerURL); err != nil {
+			return &types.ReadResult{Error: err.Error()}, nil
+		}
+	}
+
+	content := req.FileContent
+	if len(content) == 0 {
+		return &types.ReadResult{Error: "no file content provided"}, nil
+	}
+
+	protocol, err := detectMinerUProtocol(ctx, utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+		Timeout:      mineruV1APITimeout,
+		MaxRedirects: 5,
+	}), c.endpoint, c.apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("MinerU protocol detection: %w", err)
+	}
+
+	if protocol == minerUProtocolV1 {
+		logger.Infof(ctx, "[MinerU] Parsing file=%s size=%d via %s (V1 API)", req.FileName, len(content), c.endpoint)
+		return c.readV1(ctx, req)
+	}
+
+	logger.Infof(ctx, "[MinerU] Parsing file=%s size=%d via %s (legacy /file_parse)",
+		req.FileName, len(content), c.endpoint)
+
+	mdContent, imagesB64, contentList, err := c.callFileParse(ctx, content, req.FileName, req.FileType)
+	if err != nil {
+		return nil, fmt.Errorf("MinerU file_parse: %w", err)
+	}
+
+	// MinerU already returns markdown with embedded HTML blocks (e.g. <table>, <details>).
+	// Re-running the whole document through html-to-markdown corrupts valid markdown
+	// by escaping headings and image syntax. Only apply narrow compatibility fixes.
+	mdContent = normalizeMinerUMarkdown(mdContent)
+
+	// Process images: decode base64, build ImageRef list, replace refs in markdown
+	imageRefs, mdContent := c.processImages(mdContent, imagesB64)
+
+	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+
+	logger.Infof(context.Background(), "[MinerU] Parsed successfully, markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
+
+	return &types.ReadResult{
+		MarkdownContent: mdContent,
+		ImageRefs:       imageRefs,
+		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
+	}, nil
+}
+
+func (c *MinerUReader) readV1(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	client := newMinerUV1Client(c.endpoint, c.apiKey, c.timeout)
+	mdContent, imageRefs, contentList, err := client.ParseWithLayout(ctx, req.FileContent,
+		minerUUploadFileName(req.FileName, req.FileType),
+		minerUV1ParseOptions{Tier: c.tier, OCRMode: c.parseMethod})
+	if err != nil {
+		return nil, fmt.Errorf("MinerU V1: %w", err)
+	}
+
+	mdContent = normalizeMinerUMarkdown(mdContent)
+	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+
+	logger.Infof(ctx, "[MinerU] Parsed successfully (V1), markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
+
+	return &types.ReadResult{
+		MarkdownContent: mdContent,
+		ImageRefs:       imageRefs,
+		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
+	}, nil
+}
+
+type mineruFileEntry struct {
+	MDContent string            `json:"md_content"`
+	Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+	// ContentList is the layout block list (page and box per block), as a
+	// JSON array or a string holding one depending on the MinerU version.
+	ContentList json.RawMessage `json:"content_list"`
+}
+
+func minerUCleanFileType(fileType string) string {
+	cleanType := strings.ToLower(strings.TrimSpace(fileType))
+	cleanType = strings.TrimPrefix(cleanType, ".")
+	if minerUFileTypePattern.MatchString(cleanType) {
+		return cleanType
+	}
+	return ""
+}
+
+func minerUUploadFileName(fileName, fileType string) string {
+	cleanName := strings.TrimSpace(fileName)
+	cleanName = strings.ReplaceAll(cleanName, `\`, "/")
+	cleanName = path.Base(cleanName)
+	cleanName = strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == 0 {
+			return -1
+		}
+		return r
+	}, cleanName)
+	cleanName = strings.TrimSpace(cleanName)
+	if cleanName != "" && cleanName != "." && cleanName != ".." && cleanName != "/" {
+		if filepath.Ext(cleanName) == "" {
+			if cleanType := minerUCleanFileType(fileType); cleanType != "" {
+				return cleanName + "." + cleanType
+			}
+		}
+		return cleanName
+	}
+
+	if cleanType := minerUCleanFileType(fileType); cleanType != "" {
+		return "document." + cleanType
+	}
+	return "document"
+}
+
+// minerUResultStem mirrors MinerU's upload.stem: the basename without extension.
+func minerUResultStem(uploadFileName string) string {
+	stem := strings.TrimSuffix(path.Base(uploadFileName), filepath.Ext(uploadFileName))
+	if stem == "" || stem == "." {
+		return ""
+	}
+	return stem
+}
+
+func minerUResultLookupKeys(uploadFileName string) []string {
+	keys := make([]string, 0, 3)
+	if stem := minerUResultStem(uploadFileName); stem != "" {
+		keys = append(keys, stem)
+	}
+	return append(keys, "document", "files")
+}
+
+func parseMinerUFileParseResponse(respBody []byte, uploadFileName string) (string, map[string]string, string, error) {
+	var envelope struct {
+		Results map[string]mineruFileEntry `json:"results"`
+	}
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return "", nil, "", fmt.Errorf("decode response: %w", err)
+	}
+	if len(envelope.Results) == 0 {
+		return "", nil, "", nil
+	}
+
+	for _, key := range minerUResultLookupKeys(uploadFileName) {
+		if entry, ok := envelope.Results[key]; ok {
+			if entry.MDContent != "" || len(entry.Images) > 0 {
+				return entry.MDContent, entry.Images, key, nil
+			}
+		}
+	}
+
+	for key, entry := range envelope.Results {
+		if entry.MDContent != "" || len(entry.Images) > 0 {
+			return entry.MDContent, entry.Images, key, nil
+		}
+	}
+	return "", nil, "", nil
+}
+
+// minerUFileParseContentList returns the content_list of the result entry
+// that supplied the markdown.
+func minerUFileParseContentList(respBody []byte, resultKey string) json.RawMessage {
+	var envelope struct {
+		Results map[string]mineruFileEntry `json:"results"`
+	}
+	if json.Unmarshal(respBody, &envelope) != nil {
+		return nil
+	}
+	return envelope.Results[resultKey].ContentList
+}
+
+func (c *MinerUReader) callFileParse(
+	ctx context.Context,
+	content []byte,
+	fileName string,
+	fileType string,
+) (string, map[string]string, json.RawMessage, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	// Form fields
+	fields := map[string]string{
+		"return_md":           "true",
+		"return_images":       "true",
+		"table_enable":        fmt.Sprintf("%v", c.tableEnable),
+		"formula_enable":      fmt.Sprintf("%v", c.formulaEnable),
+		"parse_method":        c.parseMethod,
+		"start_page_id":       "0",
+		"end_page_id":         "99999",
+		"backend":             c.backend,
+		"response_format_zip": "false",
+		"return_middle_json":  "false",
+		"return_model_output": "false",
+		"return_content_list": "true",
+	}
+	if c.language != "" {
+		fields["lang_list"] = c.language
+	}
+	if c.effort != "" && strings.HasPrefix(c.backend, "hybrid-") {
+		fields["effort"] = c.effort
+	}
+	if c.vlmServerURL != "" && (strings.HasPrefix(c.backend, "vlm-http-client") || strings.HasPrefix(c.backend, "hybrid-http-client")) {
+		fields["server_url"] = c.vlmServerURL
+	}
+	for k, v := range fields {
+		_ = writer.WriteField(k, v)
+	}
+
+	uploadFileName := minerUUploadFileName(fileName, fileType)
+
+	// File part
+	part, err := writer.CreateFormFile("files", uploadFileName)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		return "", nil, nil, fmt.Errorf("write file content: %w", err)
+	}
+	writer.Close()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint+"/file_parse", &body)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	// Legacy MinerU servers (<= 3.x) do not require an API key themselves, but
+	// deployments commonly sit behind an authenticating gateway (NewAPI/OneAPI
+	// etc.). When a key is configured, attach it so the request survives the
+	// gateway, matching the V1 path's behaviour.
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+		Timeout:      c.timeout,
+		MaxRedirects: 5,
+	})
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		preview := readErrorPreview(resp.Body)
+		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, preview)
+	}
+
+	respBody, err := readCapped(resp.Body, maxResultResponseBytes)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("read response body: %w", err)
+	}
+
+	// Dump raw response for debugging (truncate if too large)
+	rawStr := string(respBody)
+	if len(rawStr) > rawResponseLogBytes {
+		logger.Infof(
+			context.Background(),
+			"[MinerU] Raw response (truncated to %d chars): %s",
+			rawResponseLogBytes, rawResponsePreview(rawStr),
+		)
+	} else {
+		logger.Infof(context.Background(), "[MinerU] Raw response: %s", rawStr)
+	}
+
+	// Also pretty-print the top-level structure (without large base64 blobs)
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(respBody, &rawMap); err == nil {
+		c.logMinerUResponseStructure(rawMap, "")
+	}
+
+	mdContent, imagesB64, resultKey, err := parseMinerUFileParseResponse(respBody, uploadFileName)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if resultKey != "" {
+		logger.Infof(context.Background(), "[MinerU] Using response path: results.%s", resultKey)
+		return mdContent, imagesB64, minerUFileParseContentList(respBody, resultKey), nil
+	}
+
+	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results")
+	return "", nil, nil, nil
+}
+
+// processImages decodes base64 images from MinerU response and returns ImageRef list.
+// It also replaces image references in the markdown content.
+func (c *MinerUReader) processImages(mdContent string, imagesB64 map[string]string) ([]types.ImageRef, string) {
+	var refs []types.ImageRef
+
+	for ipath, b64Str := range imagesB64 {
+		matchedRefs := mineruImageOriginalRefs(mdContent, ipath)
+		if len(matchedRefs) == 0 {
+			continue
+		}
+
+		var imgBytes []byte
+		var ext string
+
+		if m := b64DataURIPattern.FindStringSubmatch(b64Str); len(m) == 3 {
+			ext = m[1]
+			decoded, err := base64.StdEncoding.DecodeString(m[2])
+			if err != nil {
+				logger.Errorf(context.Background(), "[MinerU] Failed to decode base64 image %s: %v", ipath, err)
+				continue
+			}
+			imgBytes = decoded
+		} else {
+			// raw base64 without data URI prefix
+			decoded, err := base64.StdEncoding.DecodeString(b64Str)
+			if err != nil {
+				logger.Errorf(context.Background(), "[MinerU] Failed to decode raw base64 image %s: %v", ipath, err)
+				continue
+			}
+			imgBytes = decoded
+			ext = strings.TrimPrefix(filepath.Ext(ipath), ".")
+			if ext == "" {
+				ext = "png"
+			}
+		}
+
+		mimeType := mime.TypeByExtension("." + ext)
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+
+		for _, originalRef := range matchedRefs {
+			refs = append(refs, types.ImageRef{
+				Filename:    ipath,
+				OriginalRef: originalRef,
+				MimeType:    mimeType,
+				ImageData:   imgBytes,
+			})
+		}
+	}
+
+	return refs, mdContent
+}
+
+// logMinerUResponseStructure logs the structure of the MinerU API response.
+func (c *MinerUReader) logMinerUResponseStructure(obj interface{}, prefix string) {
+	logResponseStructure("MinerU", obj, prefix)
+}
+
+// validateMinerUOutboundURL rejects MinerU endpoints that would reach private
+// or otherwise restricted hosts when parsed or probed from the app server.
+func validateMinerUOutboundURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil
+	}
+	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
+		return fmt.Errorf("MinerU URL blocked by SSRF check: %v", err)
+	}
+	return nil
+}
+
+// PingMinerU checks if the self-hosted MinerU service is reachable. For
+// MinerU 4.0 it also verifies the configured API key, since /v1/health itself
+// is served without authentication unless sitting behind an authenticating gateway.
+func PingMinerU(endpoint, apiKey string) (bool, string) {
+	endpoint = strings.TrimRight(endpoint, "/")
+	if endpoint == "" {
+		return false, "未配置 MinerU 端点"
+	}
+	if err := validateMinerUOutboundURL(endpoint); err != nil {
+		return false, err.Error()
+	}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+		Timeout:      5 * time.Second,
+		MaxRedirects: 5,
+	})
+	ctx := context.Background()
+
+	protocol, err := detectMinerUProtocol(ctx, client, endpoint, apiKey)
+	if err != nil {
+		return false, fmt.Sprintf("MinerU 服务不可用: %v", err)
+	}
+	if protocol == minerUProtocolV1 {
+		return pingMinerUV1Auth(ctx, client, endpoint, apiKey)
+	}
+
+	resp, err := pingMinerULegacy(ctx, client, endpoint, apiKey)
+	if err != nil {
+		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return false, fmt.Sprintf("MinerU 服务返回状态 %d", resp.StatusCode)
+	}
+	return true, ""
+}
+
+// pingMinerULegacy probes a legacy MinerU server's /docs endpoint. Like the
+// V1 probe, it attaches the configured API key so a server sitting behind an
+// authenticating gateway is still reachable.
+func pingMinerULegacy(ctx context.Context, client *http.Client, endpoint, apiKey string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/docs", nil)
+	if err != nil {
+		return nil, fmt.Errorf("构建请求失败: %v", err)
+	}
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	return client.Do(req)
+}
+
+// pingMinerUV1Auth hits an authenticated V1 endpoint: a server started with
+// --api-key answers 401 when the key is missing or wrong.
+func pingMinerUV1Auth(ctx context.Context, client *http.Client, endpoint, apiKey string) (bool, string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/v1/parse/jobs?limit=1", nil)
+	if err != nil {
+		return false, fmt.Sprintf("构建请求失败: %v", err)
+	}
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		if apiKey == "" {
+			return false, "MinerU 服务已启用鉴权，请配置 API Key"
+		}
+		return false, "MinerU API Key 无效"
+	}
+	return true, ""
+}
+
+// escapedImageSyntaxPattern matches markdown image references whose `[` was
+// over-escaped to `\[` by html-to-markdown. The URL group mirrors the
+// downstream image-extraction regex so escapes are only stripped for actual
+// image references.
+var escapedImageSyntaxPattern = regexp.MustCompile(`!\\\[(.*?)\\?\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`)
+
+// escapedHeadingPattern restores markdown headings that were over-escaped to
+// \# Heading. We only touch line-leading heading markers to avoid rewriting
+// body text that intentionally contains escaped # characters.
+var escapedHeadingPattern = regexp.MustCompile(`(?m)^\\(#{1,6})(\s+)`)
+
+// unescapeMarkdownImageSyntax restores `![alt](url)` from html-to-markdown's
+// over-escaped `!\[alt\](url)` form. Without this, the downstream image regex
+// in ImageResolver fails to match and images are never persisted.
+func unescapeMarkdownImageSyntax(content string) string {
+	return escapedImageSyntaxPattern.ReplaceAllString(content, "![$1]($2)")
+}
+
+func normalizeEscapedMarkdownHeadings(content string) string {
+	return escapedHeadingPattern.ReplaceAllString(content, `$1$2`)
+}
+
+func normalizeMinerUMarkdown(content string) string {
+	content = unescapeMarkdownImageSyntax(content)
+	content = normalizeEscapedMarkdownHeadings(content)
+	return content
+}
+
+func mineruImageOriginalRefs(mdContent, imagePath string) []string {
+	normalizedTarget := normalizeMinerUImagePath(imagePath)
+	if normalizedTarget == "" {
+		return nil
+	}
+
+	referenced := extractImageRefsFromContent(mdContent)
+	seen := make(map[string]struct{}, len(referenced))
+	var matched []string
+	for _, refPath := range referenced {
+		if normalizeMinerUImagePath(refPath) != normalizedTarget {
+			continue
+		}
+		if _, ok := seen[refPath]; ok {
+			continue
+		}
+		matched = append(matched, refPath)
+		seen[refPath] = struct{}{}
+	}
+
+	return matched
+}
+
+// imgMarkdownPatternAllowSpaces matches markdown image syntax while allowing
+// spaces in the URL group, so that paths like "images/第 1 页.jpg" produced by
+// MinerU on Chinese documents are still detected as image references.
+var imgMarkdownPatternAllowSpaces = regexp.MustCompile(
+	`!\[(.*?)\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`,
+)
+
+func extractImageRefsFromContent(content string) []string {
+	var refs []string
+
+	for _, match := range imgMarkdownPatternAllowSpaces.FindAllStringSubmatch(content, -1) {
+		if len(match) >= 3 {
+			refs = append(refs, strings.TrimSpace(match[2]))
+		}
+	}
+	for _, match := range imgHTMLSrc.FindAllStringSubmatch(content, -1) {
+		if len(match) >= 3 {
+			refs = append(refs, match[2])
+		}
+	}
+
+	return refs
+}
+
+func normalizeMinerUImagePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if decoded, err := url.PathUnescape(p); err == nil && decoded != "" {
+		p = decoded
+	}
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimPrefix(p, "images/")
+	return p
+}

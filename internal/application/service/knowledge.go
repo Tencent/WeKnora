@@ -1,0 +1,1223 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"reflect"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/config"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+// Error definitions for knowledge service operations
+var (
+	// ErrInvalidFileType is returned when an unsupported file type is provided
+	ErrInvalidFileType = errors.New("unsupported file type")
+	// ErrInvalidURL is returned when an invalid URL is provided
+	ErrInvalidURL = errors.New("invalid URL")
+	// ErrChunkNotFound is returned when a requested chunk cannot be found.
+	// Aliases the repository sentinel so a chunk-not-found from the repo
+	// errors.Is-matches at the service and middleware layers (a single
+	// identity instead of two string-equal-but-distinct errors).
+	ErrChunkNotFound = repository.ErrChunkNotFound
+	// ErrDuplicateFile is returned when trying to add a file that already exists
+	ErrDuplicateFile = errors.New("file already exists")
+	// ErrDuplicateURL is returned when trying to add a URL that already exists
+	ErrDuplicateURL = errors.New("URL already exists")
+	// ErrImageNotParse is returned when trying to update image information without enabling multimodel
+	ErrImageNotParse = errors.New("image not parse without enable multimodel")
+)
+
+// knowledgeService implements the knowledge service interface
+// service 实现知识服务接口
+type knowledgeService struct {
+	config          *config.Config
+	retrieveEngine  interfaces.RetrieveEngineRegistry
+	ownership       retriever.TenantStoreOwnership
+	repo            interfaces.KnowledgeRepository
+	kbService       interfaces.KnowledgeBaseService
+	tenantRepo      interfaces.TenantRepository
+	tenantService   interfaces.TenantService
+	documentReader  interfaces.DocumentReader
+	chunkService    interfaces.ChunkService
+	chunkRepo       interfaces.ChunkRepository
+	tagRepo         interfaces.KnowledgeTagRepository
+	tagService      interfaces.KnowledgeTagService
+	fileSvc         interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
+	resourceCatalog interfaces.ResourceCatalog
+	modelService    interfaces.ModelService
+	task            interfaces.TaskEnqueuer
+	taskInspector   interfaces.TaskInspector
+	graphEngine     interfaces.RetrieveGraphRepository
+	redisClient     *redis.Client
+	kbShareService  interfaces.KBShareService
+	imageResolver   *docparser.ImageResolver
+	taskPendingRepo interfaces.TaskPendingOpsRepository
+
+	// In-memory fallbacks for Lite mode (no Redis)
+	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
+	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
+	wikiRepo            interfaces.WikiPageRepository
+	wikiService         interfaces.WikiPageService
+
+	// spanTracker records the per-attempt span tree for the parsing
+	// pipeline. Best-effort: a nil tracker (test harness) is safely
+	// handled because the public surface is the SpanTracker interface,
+	// which has a no-op fallback. See knowledge_span_tracker.go.
+	spanTracker SpanTracker
+	audit       interfaces.AuditLogService
+}
+
+const (
+	manualContentMaxLength = 200000
+	manualFileExtension    = ".md"
+	faqImportBatchSize     = 50 // 每批处理的FAQ条目数
+)
+
+// NewKnowledgeService creates a new knowledge service instance
+func NewKnowledgeService(
+	config *config.Config,
+	repo interfaces.KnowledgeRepository,
+	documentReader interfaces.DocumentReader,
+	kbService interfaces.KnowledgeBaseService,
+	tenantRepo interfaces.TenantRepository,
+	tenantService interfaces.TenantService,
+	chunkService interfaces.ChunkService,
+	chunkRepo interfaces.ChunkRepository,
+	tagRepo interfaces.KnowledgeTagRepository,
+	tagService interfaces.KnowledgeTagService,
+	fileSvc interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+	modelService interfaces.ModelService,
+	task interfaces.TaskEnqueuer,
+	taskInspector interfaces.TaskInspector,
+	graphEngine interfaces.RetrieveGraphRepository,
+	retrieveEngine interfaces.RetrieveEngineRegistry,
+	ownership retriever.TenantStoreOwnership,
+	redisClient *redis.Client,
+	kbShareService interfaces.KBShareService,
+	imageResolver *docparser.ImageResolver,
+	wikiRepo interfaces.WikiPageRepository,
+	wikiService interfaces.WikiPageService,
+	taskPendingRepo interfaces.TaskPendingOpsRepository,
+	spanTracker SpanTracker,
+	audit interfaces.AuditLogService,
+) (interfaces.KnowledgeService, error) {
+	return &knowledgeService{
+		config:          config,
+		repo:            repo,
+		kbService:       kbService,
+		tenantRepo:      tenantRepo,
+		tenantService:   tenantService,
+		documentReader:  documentReader,
+		chunkService:    chunkService,
+		chunkRepo:       chunkRepo,
+		tagRepo:         tagRepo,
+		tagService:      tagService,
+		fileSvc:         fileSvc,
+		storageResolver: storageResolver,
+		resourceCatalog: resourceCatalog,
+		modelService:    modelService,
+		task:            task,
+		taskInspector:   taskInspector,
+		graphEngine:     graphEngine,
+		retrieveEngine:  retrieveEngine,
+		ownership:       ownership,
+		redisClient:     redisClient,
+		kbShareService:  kbShareService,
+		imageResolver:   imageResolver,
+		wikiRepo:        wikiRepo,
+		wikiService:     wikiService,
+		taskPendingRepo: taskPendingRepo,
+		spanTracker:     spanTracker,
+		audit:           audit,
+	}, nil
+}
+
+// tracker returns a usable SpanTracker — falls back to a no-op when the
+// service was constructed without one (test harness, lite mode w/o repo).
+// All pipeline call sites go through this so they never need a nil check.
+func (s *knowledgeService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
+	}
+	return s.spanTracker
+}
+
+// attemptCtxKey scopes the per-task attempt number to a single execution.
+// Set once at the start of ProcessDocument / ProcessManualUpdate /
+// KnowledgePostProcess so every nested tracker call within the same task
+// can locate the right attempt without threading it through signatures.
+type attemptCtxKey struct{}
+
+// withAttempt returns a child ctx tagged with the given attempt number.
+// Pass through every call site that may invoke the tracker.
+func withAttempt(ctx context.Context, attempt int) context.Context {
+	if attempt <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, attemptCtxKey{}, attempt)
+}
+
+// attemptFromCtx extracts the attempt number stored by withAttempt;
+// returns 0 when missing (legacy paths or tests). Tracker call sites
+// treat 0 as "skip recording" since we have no attempt to anchor under.
+func attemptFromCtx(ctx context.Context) int {
+	if v, ok := ctx.Value(attemptCtxKey{}).(int); ok {
+		return v
+	}
+	return 0
+}
+
+// attemptSuperseded reports whether a newer parse attempt has started for the
+// knowledge since this enrichment subtask was enqueued. Stale subtasks from a
+// previous upload/edit/reparse that is still draining must NOT touch the new
+// attempt's chunks or decrement its pending_subtasks_count — doing so would
+// race-promote the row to completed before the new attempt finishes. An attempt
+// of 0 predates attempt tracking (or tracking is disabled) and is never treated
+// as superseded.
+func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID string, attempt int) bool {
+	if attempt <= 0 || knowledgeID == "" {
+		return false
+	}
+	return tracker.LatestAttempt(ctx, knowledgeID) > attempt
+}
+
+// currentAttemptSuperseded reports whether a newer attempt has started than the
+// one this pipeline step runs under (see withAttempt).
+func (s *knowledgeService) currentAttemptSuperseded(ctx context.Context, knowledgeID string) bool {
+	return attemptSuperseded(ctx, s.tracker(), knowledgeID, attemptFromCtx(ctx))
+}
+
+// summaryStatusClosedExpr moves a summary that is still pending or processing
+// to closed, and leaves a finished one alone. For writes that end a parse run:
+// the run's summary task no longer exists to settle the status itself.
+func summaryStatusClosedExpr(closed string) clause.Expr {
+	return gorm.Expr("CASE WHEN summary_status IN (?, ?) THEN ? ELSE summary_status END",
+		types.SummaryStatusPending, types.SummaryStatusProcessing, closed)
+}
+
+// isInFlightParseStatus reports whether a parse run may still own queued or
+// running tasks for a knowledge in this status.
+func isInFlightParseStatus(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	}
+	return false
+}
+
+// finalizeSubtaskDetachedTimeout bounds the detached decrement so a wedged DB
+// connection can't hang a worker goroutine forever in its terminal defer.
+const finalizeSubtaskDetachedTimeout = 10 * time.Second
+
+// finalizeSubtaskDetached evaluates the drain decision for a subtask's
+// terminal exit and — when the subtask should drain — decrements
+// pending_subtasks_count using a context DETACHED from the caller's
+// cancellation.
+//
+// Decision: a subtask drains exactly once, on its terminal exit, UNLESS a newer
+// attempt superseded it. "Terminal" means either the handler succeeded
+// (retErr == nil) or it's the final asynq attempt (final). A non-final failure
+// returns without draining because asynq will retry.
+//
+// Why detach: the decrement runs after the handler body, often as the very
+// last thing a worker does. If it rode the task ctx, a cancelled ctx (graceful
+// shutdown, a worker being preempted, or the task being interrupted under
+// load) would make the DB UPDATE fail. That failure is only logged and
+// swallowed, and because enrichment handlers frequently still return success
+// (per-chunk LLM errors are tolerated, not propagated), asynq never retries —
+// so the slot is never drained and the parent knowledge is stranded in
+// "finalizing" forever with a non-zero counter. Detaching keeps the counter
+// correct across cancellation; a bounded timeout guards against a wedged DB.
+//
+// source is a free-form tag (e.g. "question_batch[3]", "summary", "wiki")
+// used to attribute a decrement failure to a specific subtask in logs.
+func finalizeSubtaskDetached(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	knowledgeID, source string,
+	retErr error,
+	superseded, final bool,
+) {
+	willDrain := repo != nil && knowledgeID != "" && !superseded && (retErr == nil || final)
+	if !willDrain {
+		return
+	}
+	if err := releaseSubtaskSlot(ctx, repo, knowledgeID); err != nil {
+		logger.Errorf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v; "+
+			"row will be left to the housekeeping sweep", source, knowledgeID, err)
+	}
+}
+
+// subtaskSlotReleaseAttempts bounds the retry of one slot release. The
+// release is the only thing that drains the slot — the task has already
+// finished — so one transient DB error must not strand the row in
+// "finalizing". The decrement and promote commit together, so a failed
+// attempt rolled back and retrying it cannot drain twice.
+const (
+	subtaskSlotReleaseAttempts = 3
+	subtaskSlotReleaseBackoff  = 200 * time.Millisecond
+)
+
+// releaseSubtaskSlot releases one finalizing slot on a context detached from
+// the caller's cancellation (see finalizeSubtaskDetached), retrying transient
+// failures within finalizeSubtaskDetachedTimeout.
+func releaseSubtaskSlot(ctx context.Context, repo interfaces.KnowledgeRepository, knowledgeID string) error {
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
+	var lastErr error
+	for attempt := 1; attempt <= subtaskSlotReleaseAttempts; attempt++ {
+		_, _, err := repo.FinalizeSubtask(dctx, knowledgeID)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt == subtaskSlotReleaseAttempts {
+			break
+		}
+		select {
+		case <-time.After(time.Duration(attempt) * subtaskSlotReleaseBackoff):
+		case <-dctx.Done():
+			return fmt.Errorf("%w (last error: %v)", dctx.Err(), lastErr)
+		}
+	}
+	return lastErr
+}
+
+// beginStage / endStage / failStage / skipStage are the by-name shims
+// the pipeline uses so call sites don't have to thread *Span values
+// through the existing function signatures. Each helper looks up the
+// stage from (kid, attempt-from-ctx, stageName) at write time — costs
+// one extra DB read per terminal transition (≤ a dozen per knowledge),
+// which is dwarfed by the work the stages themselves do.
+func (s *knowledgeService) beginStage(ctx context.Context, kid, name string, input types.JSONMap) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	s.tracker().BeginStage(ctx, kid, a, name, input)
+}
+
+func (s *knowledgeService) endStage(ctx context.Context, kid, name string, output types.JSONMap) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	span := s.tracker().LookupStage(ctx, kid, a, name)
+	if span == nil {
+		return
+	}
+	s.tracker().EndSpan(ctx, span, output)
+}
+
+func (s *knowledgeService) failStage(ctx context.Context, kid, name, code, msg string, err error) {
+	s.failStageWithRetry(ctx, kid, name, code, msg, err, false)
+}
+
+// failStageRetryable is for failures returned to the task runner. Remaining
+// retry budget alone is insufficient: terminal failures acknowledge the task.
+func (s *knowledgeService) failStageRetryable(ctx context.Context, kid, name, code, msg string, err error) {
+	s.failStageWithRetry(ctx, kid, name, code, msg, err, true)
+}
+
+func (s *knowledgeService) failStageWithRetry(
+	ctx context.Context, kid, name, code, msg string, err error, retryable bool,
+) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	span := s.tracker().LookupStage(ctx, kid, a, name)
+	if span == nil {
+		return
+	}
+	if retryable {
+		s.tracker().FailSpanRetryable(ctx, span, code, msg, err)
+	} else {
+		s.tracker().FailSpan(ctx, span, code, msg, err)
+	}
+}
+
+func (s *knowledgeService) skipStage(ctx context.Context, kid, name, reason string) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	span := s.tracker().LookupStage(ctx, kid, a, name)
+	if span == nil {
+		// No begin recorded — synthesize a span row for skipped state.
+		// Use BeginStage with no input then SkipSpan to keep schema
+		// invariants (started_at / kind set).
+		span = s.tracker().BeginStage(ctx, kid, a, name, nil)
+	}
+	s.tracker().SkipSpan(ctx, span, reason)
+}
+
+// beginPostprocessSubspan opens a subspan beneath the postprocess stage
+// span for (kid, attempt). Async post-pipeline tasks (summary, question,
+// graph, wiki) call this on entry so their actual processing time shows
+// up in the trace tree under postprocess instead of the stage looking
+// like an instant ~10ms enqueue.
+//
+// Returns nil when:
+//   - attempt <= 0 (legacy in-flight task without span tracking)
+//   - the postprocess stage span is missing (parse predates tracker, or
+//     the upstream BeginStage call failed)
+//
+// Callers must tolerate nil — pair every begin with a deferred
+// endPostprocessSubspan / failPostprocessSubspan that no-ops on nil.
+func (s *knowledgeService) beginPostprocessSubspan(
+	ctx context.Context, knowledgeID string, attempt int, name string, input types.JSONMap,
+) *Span {
+	if attempt <= 0 || knowledgeID == "" || name == "" {
+		return nil
+	}
+	parent := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
+	if parent == nil {
+		return nil
+	}
+	return s.tracker().BeginSubSpan(ctx, parent, name, types.SpanKindSubSpan, input)
+}
+
+// beginQuestionBatchSubspan opens a per-batch question subspan under the
+// "postprocess.question" grouping span created by the orchestrator, falling
+// back to the postprocess stage when the group span isn't found (legacy
+// in-flight tasks or a tracker that skipped it). Mirrors beginPostprocessSubspan
+// but resolves the grouping parent first.
+func (s *knowledgeService) beginQuestionBatchSubspan(
+	ctx context.Context, knowledgeID string, attempt int, name string, input types.JSONMap,
+) *Span {
+	if attempt <= 0 || knowledgeID == "" || name == "" {
+		return nil
+	}
+	parent := s.tracker().LookupSpanByName(ctx, knowledgeID, attempt, postprocessQuestionGroupSpanName)
+	if parent == nil {
+		parent = s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
+	}
+	if parent == nil {
+		return nil
+	}
+	return s.tracker().BeginSubSpan(ctx, parent, name, types.SpanKindSubSpan, input)
+}
+
+func (s *knowledgeService) endPostprocessSubspan(ctx context.Context, span *Span, output types.JSONMap) {
+	if span == nil {
+		return
+	}
+	s.tracker().EndSpan(ctx, span, output)
+}
+
+func (s *knowledgeService) failPostprocessSubspan(
+	ctx context.Context, span *Span, code, msg string, err error,
+) {
+	if span == nil {
+		return
+	}
+	s.tracker().FailSpan(ctx, span, code, msg, err)
+}
+
+// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).
+// Used when building document ReadRequest so UI-configured values take precedence over env.
+func (s *knowledgeService) getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			return tenant.ParserEngineConfig.ToOverridesMap()
+		}
+	}
+	return nil
+}
+
+// GetRepository gets the knowledge repository
+// Parameters:
+//   - ctx: Context with authentication and request information
+//
+// Returns:
+//   - interfaces.KnowledgeRepository: Knowledge repository
+func (s *knowledgeService) GetRepository() interfaces.KnowledgeRepository {
+	return s.repo
+}
+
+// isKnowledgeDeleting checks if a knowledge entry is being deleted.
+// This is used to prevent async tasks from conflicting with deletion operations.
+func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uint64, knowledgeID string) bool {
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		// If we can't find the knowledge, assume it's deleted
+		logger.Warnf(ctx, "Failed to check knowledge deletion status (assuming deleted): %v", err)
+		return true
+	}
+	if knowledge == nil {
+		return true
+	}
+	return knowledge.ParseStatus == types.ParseStatusDeleting
+}
+
+// Pseudo-statuses isKnowledgeAborted reports when it could not learn the
+// row's state: the worker's context is done, or the read failed. The caller
+// must stop without cleaning up or writing its in-memory row back (a full-row
+// Save would clobber a cancel it never saw), and hand abortRetryErr to asynq.
+const (
+	abortStatusInterrupted = "interrupted"
+	abortStatusUnreadable  = "unreadable"
+)
+
+// abortRetryErr is what a pipeline step returns after bailing on status:
+// nil for a settled abort (cancelled / deleting), an error for an unknown
+// state so the task is retried instead of acked with the row in flight.
+func abortRetryErr(ctx context.Context, knowledgeID, status string) error {
+	switch status {
+	case abortStatusInterrupted:
+		return fmt.Errorf("knowledge %s: interrupted: %w", knowledgeID, context.Cause(ctx))
+	case abortStatusUnreadable:
+		return fmt.Errorf("knowledge %s: abort check could not read the row", knowledgeID)
+	}
+	return nil
+}
+
+// isKnowledgeAborted returns (true, status) when the knowledge has been
+// marked as deleting OR cancelled so async pipeline workers should bail
+// out. Status is returned so callers can branch on cleanup behavior:
+// deleting → existing cleanup of partial chunks/index applies;
+// cancelled → keep partially written data per user expectation.
+//
+// Only a row that is really gone reads as deleting. A transient read error
+// must not — callers would wipe a live document's chunks and index — nor may
+// it read as "not aborted", or the caller's later full-row Save could
+// overwrite a cancel it failed to see. It reports abortStatusUnreadable.
+func (s *knowledgeService) isKnowledgeAborted(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (bool, string) {
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	switch {
+	case err == nil && knowledge == nil, errors.Is(err, repository.ErrKnowledgeNotFound):
+		return true, types.ParseStatusDeleting
+	case err != nil && ctx.Err() != nil:
+		return true, abortStatusInterrupted
+	case err != nil:
+		logger.Warnf(ctx, "Failed to check knowledge abort status for %s: %v", knowledgeID, err)
+		return true, abortStatusUnreadable
+	}
+	switch knowledge.ParseStatus {
+	case types.ParseStatusDeleting, types.ParseStatusCancelled:
+		return true, knowledge.ParseStatus
+	}
+	return false, knowledge.ParseStatus
+}
+
+// isKnowledgeSourceReplaced reports whether the stored source file no longer
+// matches the in-memory knowledge this worker loaded. ReplaceKnowledgeFile
+// changes file_path under a still-running ProcessDocument; the stale worker
+// must not Save() the old path back or write chunks from the replaced file.
+func (s *knowledgeService) isKnowledgeSourceReplaced(ctx context.Context, knowledge *types.Knowledge) bool {
+	if knowledge == nil || knowledge.ID == "" || knowledge.FilePath == "" {
+		return false
+	}
+	current, err := s.repo.GetKnowledgeByID(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil || current == nil {
+		return false
+	}
+	return current.FilePath != "" && current.FilePath != knowledge.FilePath
+}
+
+// updateKnowledgeUnlessSourceReplaced persists processing state only when this
+// worker still owns the source file. A no-op skip is preferred over rolling
+// file_path back to a blob ReplaceKnowledgeFile may already have deleted.
+func (s *knowledgeService) updateKnowledgeUnlessSourceReplaced(ctx context.Context, knowledge *types.Knowledge) error {
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Skip knowledge update for %s: source file was replaced", knowledge.ID)
+		return nil
+	}
+	return s.repo.UpdateKnowledge(ctx, knowledge)
+}
+
+// checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured
+// (either at the KB level or via the tenant default).
+//
+// 内部版兜底语义：当 KB 与空间都未配置 storage provider 时，如果服务实例持有
+// 全局 FileService（由容器按 STORAGE_TYPE 注入，默认 local），允许直接落到该
+// 全局 fileSvc 上，不再硬性阻断。这与 resolveFileService / resolveFileServiceForPath
+// 在 provider 为空时回退到 s.fileSvc 的行为保持一致，避免上层闸门和下游解析口径不一。
+// 仅当 KB/空间/全局三处都拿不到任何可用 FileService 时才报错。
+func (s *knowledgeService) checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) error {
+	provider := kb.GetStorageProvider()
+	if provider == "" {
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if tenant != nil && tenant.StorageEngineConfig != nil {
+			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		}
+	}
+	if provider != "" {
+		return nil
+	}
+	if s != nil && s.fileSvc != nil {
+		logger.Warnf(ctx,
+			"[storage] checkStorageEngineConfigured: no KB/tenant provider, fallback to global fileSvc (kb=%s)",
+			kbIDOrEmpty(kb))
+		return nil
+	}
+	return werrors.NewBadRequestError("请先为知识库选择存储引擎，再上传内容。请前往知识库设置页面进行配置。")
+}
+
+func kbIDOrEmpty(kb *types.KnowledgeBase) string {
+	if kb == nil {
+		return ""
+	}
+	return kb.ID
+}
+
+func defaultChannel(ch string) string {
+	if ch == "" {
+		return types.ChannelWeb
+	}
+	return ch
+}
+
+// GetKnowledgeByID retrieves a knowledge entry by its ID
+func (s *knowledgeService) GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": id,
+			"tenant_id":    tenantID,
+		})
+		return nil, err
+	}
+
+	// Load tags for this knowledge
+	tagMap, err := s.repo.GetKnowledgeTags(ctx, []string{knowledge.ID})
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load tags for knowledge %s: %v", knowledge.ID, err)
+	} else if tags, ok := tagMap[knowledge.ID]; ok {
+		knowledge.Tags = tags
+	}
+
+	logger.Infof(ctx, "Knowledge retrieved successfully, ID: %s, type: %s", knowledge.ID, knowledge.Type)
+	return knowledge, nil
+}
+
+// GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
+func (s *knowledgeService) GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error) {
+	return s.repo.GetKnowledgeByIDOnly(ctx, id)
+}
+
+// GetOwningKBCreatorID walks knowledge_id -> kb_id -> KB.CreatorID for
+// the per-KB ownership lookups in handler/rbac_lookups.go (PR 5, #1303).
+// Both fetches are tenant-scoped (GetKnowledgeByID reads tenant from
+// ctx; GetKnowledgeBaseByID is then constrained to the same tenant by
+// the KB service), so a cross-tenant id surfaces as the underlying
+// "not found" error and the caller maps it to ErrResourceNotFound. The
+// KB row itself is not returned so callers can't accidentally widen
+// their scope past "needed the creator id".
+func (s *knowledgeService) GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error) {
+	// Resolve via the repository directly: ownership only needs the
+	// knowledge -> kb_id link, so we deliberately skip the service-level
+	// GetKnowledgeByID (which also eagerly loads tags) to keep this lookup
+	// minimal and tenant-scoped.
+	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		return "", werrors.NewUnauthorizedError("Workspace ID not found in context")
+	}
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return "", err
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	if err != nil {
+		return "", err
+	}
+	if kb == nil {
+		return "", repository.ErrKnowledgeBaseNotFound
+	}
+	return kb.CreatorID, nil
+}
+
+// ListKnowledgeByKnowledgeBaseID returns all knowledge entries in a knowledge base
+func (s *knowledgeService) ListKnowledgeByKnowledgeBaseID(ctx context.Context,
+	kbID string,
+) ([]*types.Knowledge, error) {
+	return s.repo.ListKnowledgeByKnowledgeBaseID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), kbID)
+}
+
+// ListPagedKnowledgeByKnowledgeBaseID returns paginated knowledge entries in a knowledge base
+func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
+	kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
+) (*types.PageResult, error) {
+	knowledges, total, err := s.repo.ListPagedKnowledgeByKnowledgeBaseID(ctx,
+		ctx.Value(types.TenantIDContextKey).(uint64), kbID, page, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Batch load tags for all knowledge entries
+	if len(knowledges) > 0 {
+		ids := make([]string, len(knowledges))
+		for i, k := range knowledges {
+			ids[i] = k.ID
+		}
+		tagMap, err := s.repo.GetKnowledgeTags(ctx, ids)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to load tags for knowledge list: %v", err)
+			// Non-fatal: continue without tags
+		} else {
+			for _, k := range knowledges {
+				if tags, ok := tagMap[k.ID]; ok {
+					k.Tags = tags
+				}
+			}
+		}
+	}
+
+	return types.NewPageResult(total, page, knowledges), nil
+}
+
+// ListKnowledgeFolderTree returns the folder hierarchy of a knowledge base with
+// per-folder document counts, derived from the folder_path stored on each
+// knowledge entry.
+func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
+	kbID string,
+) (*types.KnowledgeFolderTree, error) {
+	counts, err := s.repo.ListKnowledgeFolderCounts(ctx,
+		ctx.Value(types.TenantIDContextKey).(uint64), kbID)
+	if err != nil {
+		return nil, err
+	}
+	return types.BuildKnowledgeFolderTree(counts), nil
+}
+
+// MoveKnowledgeToFolder re-files knowledge entries under folderPath. Since
+// folders are derived from the stored paths, a folder that does not exist yet is
+// created by this call; a folder whose last entry moves away disappears.
+func (s *knowledgeService) MoveKnowledgeToFolder(ctx context.Context,
+	kbID string, ids []string, folderPath string,
+) (int64, error) {
+	if len(ids) == 0 {
+		return 0, werrors.NewBadRequestError("knowledge_ids cannot be empty")
+	}
+	normalized, err := normalizeTargetFolderPath(ctx, folderPath)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := loadKnowledgeWriteBatch(ctx, s.repo, s.kbService, ids)
+	if err != nil {
+		return 0, err
+	}
+	ids = make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.KnowledgeBaseID != kbID {
+			return 0, werrors.NewForbiddenError("knowledge outside target KB")
+		}
+		ids = append(ids, row.ID)
+	}
+	tenantID := rows[0].TenantID
+	affected, err := s.repo.UpdateKnowledgeFolderPath(ctx, tenantID, kbID, ids, normalized)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to move knowledge to folder %q: %v", normalized, err)
+		return 0, err
+	}
+	logger.Infof(ctx, "Moved %d knowledge entries to folder %q in kb %s", affected, normalized, kbID)
+	return affected, nil
+}
+
+// RenameKnowledgeFolder moves a folder and its whole subtree to a new path.
+// Renaming onto an existing folder merges them, which is the same outcome the
+// user would get by moving the documents one by one.
+func (s *knowledgeService) RenameKnowledgeFolder(ctx context.Context,
+	kbID string, from string, to string,
+) (int64, error) {
+	source := types.NormalizeKnowledgeFolderPath(from)
+	if source == "" {
+		return 0, werrors.NewBadRequestError("源文件夹路径不能为空")
+	}
+	target, err := normalizeTargetFolderPath(ctx, to)
+	if err != nil {
+		return 0, err
+	}
+	if target == "" {
+		return 0, werrors.NewBadRequestError("目标文件夹路径不能为空")
+	}
+	if target == source {
+		return 0, nil
+	}
+	// Moving a folder inside itself would make its own subtree unreachable.
+	if strings.HasPrefix(target, source+"/") {
+		return 0, werrors.NewBadRequestError("不能将文件夹移动到它自己的子目录下")
+	}
+
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return 0, err
+	}
+	if kb == nil || kb.ID != kbID {
+		return 0, werrors.NewNotFoundError("knowledge base not found")
+	}
+	ctx, err = requireKBWrite(ctx, kb)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := kb.TenantID
+	affected, err := s.repo.RenameKnowledgeFolderPath(ctx, tenantID, kbID, source, target)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to rename folder %q to %q: %v", source, target, err)
+		return 0, err
+	}
+	logger.Infof(ctx, "Renamed folder %q to %q in kb %s, %d entries affected",
+		source, target, kbID, affected)
+	return affected, nil
+}
+
+// normalizeTargetFolderPath canonicalizes a caller-supplied destination folder
+// and applies the same input validation as the upload path, since the value ends
+// up rendered as sidebar tree labels.
+func normalizeTargetFolderPath(ctx context.Context, folderPath string) (string, error) {
+	trimmed := strings.TrimSpace(folderPath)
+	if trimmed == "" {
+		return "", nil
+	}
+	safe, valid := secutils.ValidateInput(trimmed)
+	if !valid {
+		logger.Errorf(ctx, "Invalid folder path: %s", secutils.SanitizeForLog(trimmed))
+		return "", werrors.NewValidationError("文件夹路径包含非法字符")
+	}
+	return types.NormalizeKnowledgeFolderPath(safe), nil
+}
+
+// GetKnowledgeFile retrieves the physical file associated with a knowledge entry
+func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
+	// Get knowledge record
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Manual knowledge stores content in Metadata — stream it directly as a .md file.
+	if knowledge.IsManual() {
+		meta, err := knowledge.ManualMetadata()
+		if err != nil {
+			return nil, "", err
+		}
+		// ManualMetadata returns (nil, nil) when Metadata column is empty; treat as empty content.
+		content := ""
+		if meta != nil {
+			content = meta.Content
+		}
+		filename := sanitizeManualDownloadFilename(knowledge.Title)
+		return io.NopCloser(strings.NewReader(content)), filename, nil
+	}
+
+	// Resolve KB-level file service with FilePath fallback protection
+	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	file, err := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath).GetFile(ctx, knowledge.FilePath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return file, knowledge.FileName, nil
+}
+
+func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+	if knowledge == nil {
+		return werrors.NewBadRequestError("knowledge cannot be nil")
+	}
+	record, _, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledge.ID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge record: %v", err)
+		return err
+	}
+	// if need other fields update, please add here
+	if knowledge.Title != "" {
+		record.Title = knowledge.Title
+	}
+	if knowledge.DescriptionSpecified {
+		record.Description = knowledge.Description
+		if record.Description != "" {
+			record.SummaryStatus = types.SummaryStatusCompleted
+		} else {
+			record.SummaryStatus = types.SummaryStatusNone
+		}
+	} else if knowledge.Description != "" {
+		record.Description = knowledge.Description
+	}
+	metadataChanged := false
+	if knowledge.CustomMetadata != nil {
+		var custom map[string]interface{}
+		if err := json.Unmarshal(knowledge.CustomMetadata, &custom); err != nil {
+			return fmt.Errorf("custom_metadata must be a JSON object: %w", err)
+		}
+		if len(custom) > 20 {
+			return fmt.Errorf("custom_metadata supports at most 20 fields")
+		}
+		for key, value := range custom {
+			if len(strings.TrimSpace(key)) == 0 || len(key) > 64 || len(fmt.Sprint(value)) > 1000 {
+				return fmt.Errorf("invalid custom_metadata field %q", key)
+			}
+			switch value.(type) {
+			case string, float64, bool, nil:
+			default:
+				return fmt.Errorf("custom_metadata field %q must be a string, number, boolean, or null", key)
+			}
+		}
+		existing := make(map[string]interface{})
+		if len(record.CustomMetadata) > 0 {
+			_ = json.Unmarshal(record.CustomMetadata, &existing)
+		}
+		metadataChanged = !reflect.DeepEqual(existing, custom)
+		record.CustomMetadata = knowledge.CustomMetadata
+	}
+
+	// Update knowledge record in the repository
+	if err := s.repo.UpdateKnowledge(ctx, record); err != nil {
+		logger.Errorf(ctx, "Failed to update knowledge: %v", err)
+		return err
+	}
+	if metadataChanged && record.SummaryStatus != "" && record.SummaryStatus != types.SummaryStatusNone {
+		if err := enqueueSummaryRefresh(ctx, s.repo, s.task, s.kbService, s.tracker(), record); err != nil {
+			logger.Warnf(ctx, "Metadata saved but summary refresh enqueue failed for %s: %v", record.ID, err)
+		} else {
+			logger.Infof(ctx, "Enqueued summary refresh after metadata update, knowledge ID: %s", record.ID)
+		}
+	}
+	logger.Infof(ctx, "Knowledge updated successfully, ID: %s", knowledge.ID)
+	return nil
+}
+
+// GetKnowledgeBatch retrieves multiple knowledge entries by their IDs
+func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
+	tenantID uint64, ids []string,
+) ([]*types.Knowledge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+}
+
+// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs, including items from shared KBs the user has access to.
+// Used when building search targets so that @mentioned files from shared KBs are included.
+func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context,
+	tenantID uint64, ids []string,
+) ([]*types.Knowledge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	permissions := kbReadPermissions(ctx, s.kbShareService)
+	rows, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	ownList := make([]*types.Knowledge, 0, len(rows))
+	foundSet := make(map[string]bool)
+	appendAllowed := func(k *types.Knowledge) {
+		if k == nil || foundSet[k.ID] {
+			return
+		}
+		allowed, err := permissions.Check(k.KnowledgeBaseID, k.TenantID, types.OrgRoleViewer)
+		if err == nil && allowed {
+			ownList = append(ownList, k)
+			foundSet[k.ID] = true
+		}
+	}
+	for _, k := range rows {
+		appendAllowed(k)
+		if k != nil {
+			foundSet[k.ID] = true
+		}
+	}
+	for _, id := range ids {
+		if foundSet[id] {
+			continue
+		}
+		k, err := s.repo.GetKnowledgeByIDOnly(ctx, id)
+		if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
+			return nil, err
+		}
+		if err == nil {
+			appendAllowed(k)
+		}
+		foundSet[id] = true
+	}
+	return ownList, nil
+}
+
+// SetKnowledgeTags replaces all tags for a single knowledge entry.
+func (s *knowledgeService) SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error {
+	return s.UpdateKnowledgeTag(ctx, knowledgeID, tagIDs)
+}
+
+// ListKnowledgeIDsByTagIDs returns document knowledge IDs carrying any of the
+// specified KB-local tags.
+func (s *knowledgeService) ListKnowledgeIDsByTagIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) ([]string, error) {
+	return s.repo.ListIDsByTagIDs(ctx, tenantID, kbID, tagIDs)
+}
+
+// validateKnowledgeTagIDs ensures every tag exists and belongs to the given knowledge base.
+func (s *knowledgeService) validateKnowledgeTagIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) error {
+	unique := make([]string, 0, len(tagIDs))
+	seen := make(map[string]struct{}, len(tagIDs))
+	for _, tagID := range tagIDs {
+		if tagID == "" {
+			continue
+		}
+		if _, dup := seen[tagID]; dup {
+			continue
+		}
+		seen[tagID] = struct{}{}
+		unique = append(unique, tagID)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+
+	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, unique)
+	if err != nil {
+		return err
+	}
+	tagMap := make(map[string]*types.KnowledgeTag, len(tags))
+	for _, tag := range tags {
+		tagMap[tag.ID] = tag
+	}
+	for _, tagID := range unique {
+		tag, ok := tagMap[tagID]
+		if !ok {
+			return werrors.NewBadRequestError(fmt.Sprintf("标签 %s 不存在", tagID))
+		}
+		if tag.KnowledgeBaseID != kbID {
+			return werrors.NewBadRequestError("标签不属于当前知识库")
+		}
+	}
+	return nil
+}
+
+// attachTagsToKnowledge populates knowledge.Tags from the join table.
+func (s *knowledgeService) attachTagsToKnowledge(ctx context.Context, knowledge *types.Knowledge) {
+	if knowledge == nil {
+		return
+	}
+	tagMap, err := s.repo.GetKnowledgeTags(ctx, []string{knowledge.ID})
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load tags for knowledge %s: %v", knowledge.ID, err)
+		return
+	}
+	if tags, ok := tagMap[knowledge.ID]; ok {
+		knowledge.Tags = tags
+	}
+}
+
+// setAndAttachKnowledgeTags validates, persists, and populates tags on a knowledge entry.
+func (s *knowledgeService) setAndAttachKnowledgeTags(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	knowledge *types.Knowledge,
+	tagIDs []string,
+) error {
+	if err := s.validateKnowledgeTagIDs(ctx, tenantID, kbID, tagIDs); err != nil {
+		return err
+	}
+	if len(tagIDs) > 0 {
+		if err := s.repo.SetKnowledgeTags(ctx, knowledge.ID, tagIDs); err != nil {
+			return err
+		}
+	}
+	s.attachTagsToKnowledge(ctx, knowledge)
+	return nil
+}
+
+// GetKnowledgeTags returns tags for multiple knowledge IDs.
+func (s *knowledgeService) GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error) {
+	return s.repo.GetKnowledgeTags(ctx, knowledgeIDs)
+}
+
+// UpdateKnowledgeTag updates the tags assigned to a knowledge document.
+func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID string, tagIDs []string) error {
+	knowledge, _, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
+	if err != nil {
+		return err
+	}
+	tenantID := knowledge.TenantID
+
+	// Validate all tag IDs
+	if err := s.validateKnowledgeTagIDs(ctx, tenantID, knowledge.KnowledgeBaseID, tagIDs); err != nil {
+		return err
+	}
+
+	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
+}
+
+// UpdateKnowledgeTagBatch updates tags for document knowledge items in batch.
+// authorizedKBID restricts all updates to knowledge items belonging to this KB;
+// an empty value allows multiple KBs only when every KB has an explicit write grant.
+func (s *knowledgeService) UpdateKnowledgeTagBatch(
+	ctx context.Context,
+	authorizedKBID string,
+	updates map[string][]string,
+) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	knowledgeIDs := make([]string, 0, len(updates))
+	for id := range updates {
+		knowledgeIDs = append(knowledgeIDs, id)
+	}
+	sort.Strings(knowledgeIDs)
+	knowledgeList, err := loadKnowledgeWriteBatch(ctx, s.repo, s.kbService, knowledgeIDs)
+	if err != nil {
+		return err
+	}
+	tenantID := knowledgeList[0].TenantID
+
+	// Validate all requested IDs were found and belong to the authorized KB
+	if authorizedKBID != "" {
+		if len(knowledgeList) != len(updates) {
+			return werrors.NewForbiddenError("some knowledge IDs are not accessible in the authorized scope")
+		}
+		for _, k := range knowledgeList {
+			if k.KnowledgeBaseID != authorizedKBID {
+				return werrors.NewForbiddenError(
+					fmt.Sprintf("knowledge %s does not belong to authorized knowledge base", k.ID))
+			}
+		}
+	}
+
+	// Collect all unique tag IDs for validation
+	tagIDSet := make(map[string]bool)
+	for _, tagIDs := range updates {
+		for _, tagID := range tagIDs {
+			if tagID != "" {
+				tagIDSet[tagID] = true
+			}
+		}
+	}
+
+	// Validate all tags exist and belong to the correct KB
+	tagMap := make(map[string]*types.KnowledgeTag)
+	if len(tagIDSet) > 0 {
+		tagIDList := make([]string, 0, len(tagIDSet))
+		for tagID := range tagIDSet {
+			tagIDList = append(tagIDList, tagID)
+		}
+		tags, err := s.tagRepo.GetByIDs(ctx, tenantID, tagIDList)
+		if err != nil {
+			return err
+		}
+		for _, tag := range tags {
+			tagMap[tag.ID] = tag
+		}
+	}
+
+	// Validate tag ownership per knowledge
+	for _, knowledge := range knowledgeList {
+		tagIDs, exists := updates[knowledge.ID]
+		if !exists {
+			continue
+		}
+		for _, tagID := range tagIDs {
+			if tagID == "" {
+				continue
+			}
+			tag, ok := tagMap[tagID]
+			if !ok {
+				return werrors.NewBadRequestError(fmt.Sprintf("标签 %s 不存在", tagID))
+			}
+			if tag.TenantID != tenantID || tag.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+				return werrors.NewBadRequestError(fmt.Sprintf("标签 %s 不属于知识库 %s", tagID, knowledge.KnowledgeBaseID))
+			}
+		}
+	}
+
+	// Set tags for each knowledge
+	for _, knowledgeID := range knowledgeIDs {
+		if err := s.repo.SetKnowledgeTags(ctx, knowledgeID, updates[knowledgeID]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// SearchKnowledge searches knowledge items by keyword across the tenant and shared knowledge bases.
+// fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
+func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
+	caller := types.CallerFromContext(ctx)
+	tenantID := caller.TenantID
+	if tenantID == 0 {
+		return nil, false, 0, werrors.NewUnauthorizedError("Workspace ID not found in context")
+	}
+	ctx = types.WithExecutionTenant(ctx, tenantID)
+
+	scopes := make([]types.KnowledgeSearchScope, 0)
+
+	// Own tenant: document-type knowledge bases
+	ownKBs, err := s.kbService.ListKnowledgeBases(ctx)
+	if err == nil {
+		for _, kb := range ownKBs {
+			if kb != nil && kb.Type == types.KnowledgeBaseTypeDocument {
+				scopes = append(scopes, types.KnowledgeSearchScope{TenantID: tenantID, KBID: kb.ID})
+			}
+		}
+	}
+
+	// Shared knowledge bases (document type only). Plan 3 of #1303 keys
+	// the share lookup on (tenantID, callerTenantRole); userID is no
+	// longer load-bearing for org-share access.
+	if s.kbShareService != nil {
+		if caller.UserID != "" {
+			callerTenantRole := caller.Role
+			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
+			if err == nil {
+				for _, info := range sharedList {
+					if info != nil && info.KnowledgeBase != nil && info.KnowledgeBase.Type == types.KnowledgeBaseTypeDocument {
+						scopes = append(scopes, types.KnowledgeSearchScope{
+							TenantID: info.SourceTenantID,
+							KBID:     info.KnowledgeBase.ID,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	if len(scopes) == 0 {
+		return nil, false, 0, nil
+	}
+	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+}
+
+// SearchKnowledgeForScopes searches knowledge within the given scopes (e.g. for shared agent context).
+func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
+	if len(scopes) == 0 {
+		return nil, false, 0, nil
+	}
+	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+}

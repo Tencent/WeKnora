@@ -1,0 +1,9 @@
+<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <title>Local storage</title>
+  <rect x="3" y="4" width="18" height="7" rx="2" fill="#5C6678"/>
+  <rect x="3" y="13" width="18" height="7" rx="2" fill="#434C5E"/>
+  <rect x="5.5" y="7.1" width="13" height="0.8" rx="0.4" fill="#8A94A6"/>
+  <rect x="5.5" y="16.1" width="13" height="0.8" rx="0.4" fill="#8A94A6"/>
+  <circle cx="7.2" cy="7.5" r="0.9" fill="#6B7280"/>
+  <circle cx="7.2" cy="16.5" r="0.9" fill="#6B7280"/>
+</svg>

@@ -1,0 +1,308 @@
+<template>
+  <div v-if="interactive" class="prompt-panel" @click.stop>
+    <div class="prompt-question">{{ $t('agentStream.mcpOAuth.dockQuestion', { target: targetLabel }) }}</div>
+    <div class="prompt-desc">{{ $t('agentStream.mcpOAuth.desc') }}</div>
+
+    <div class="prompt-footer">
+      <div class="prompt-footer-meta">
+        <span v-if="secondsLeft >= 0" class="action-timer" :class="timerClass">{{ formatCountdown(secondsLeft) }}</span>
+      </div>
+      <div class="prompt-footer-actions">
+        <button type="button" class="prompt-btn" :disabled="canceling || authorizing" @click="skip">
+          {{ $t('agentStream.mcpOAuth.skip') }}
+        </button>
+        <button type="button" class="prompt-btn is-primary" :disabled="authorizing || canceling" @click="authorize">
+          {{ $t('agentStream.mcpOAuth.authorize') }}<span class="prompt-btn-key" aria-hidden="true">↵</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div v-else class="action-card interaction-inline" :class="{ 'action-pending': !resolved }">
+    <div class="action-header no-results">
+      <div class="action-title">
+        <ChatTimelineIcon class="action-title-icon" :name="headerIcon" :active="open" />
+        <span class="action-name">{{ mainTitle }}</span>
+      </div>
+    </div>
+    <div class="interaction-status-summary">
+      <div class="results-summary-text">
+        <template v-if="awaitingInDock">
+          <span class="status-label">{{ $t('agentStream.promptDock.waiting') }}</span>
+          <span class="inline-dot">·</span>
+          <button type="button" class="inline-action is-primary" @click.stop="dock?.focus(pendingId)">
+            {{ $t('agentStream.promptDock.handle') }}
+          </button>
+        </template>
+        <span v-else class="status-label">{{ statusLine }}</span>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { MessagePlugin } from 'tdesign-vue-next'
+import { useI18n } from 'vue-i18n'
+import {
+  cancelMCPOAuth,
+  getMCPOAuthAuthorizeURL,
+  getMCPOAuthStatus,
+  resolveMCPOAuth,
+  refreshMCPMetadata,
+  MCP_OAUTH_CALLBACK_PATH,
+} from '@/api/mcp-service'
+import {
+  cancelEmbedMCPOAuth,
+  getEmbedMCPOAuthAuthorizeURL,
+  getEmbedMCPOAuthStatus,
+  resolveEmbedMCPOAuth,
+} from '@/api/embed'
+import { markPromptSubmitted, promptSubmission, usePromptDock } from '@/composables/usePromptDock'
+import { isSubmitKey } from '@/utils/promptKeys'
+
+const props = defineProps<{
+  pendingId: string
+  // dock: the authorize prompt, shown above the composer. inline: the timeline row.
+  variant?: 'dock' | 'inline'
+  serviceId: string
+  serviceName: string
+  mcpToolName?: string
+  timeoutSeconds?: number
+  requestedAt?: number
+  resolved?: boolean
+  authorized?: boolean
+  resolveReason?: string
+  timedOut?: boolean
+  canceled?: boolean
+  embeddedMode?: boolean
+  embedChannelId?: string
+  embedToken?: string
+  embedSessionId?: string
+  embedSessionSig?: string
+  embedVisitorId?: string
+}>()
+
+const useEmbedOAuth = () =>
+  props.embeddedMode
+  && props.embedChannelId
+  && props.embedToken
+  && props.embedSessionId
+  && props.embedSessionSig
+  && props.embedVisitorId
+
+const { t } = useI18n()
+const dock = usePromptDock()
+
+const submission = computed(() => promptSubmission(props.pendingId))
+const open = computed(() => !props.resolved && !submission.value)
+// Without a dock (a view that does not provide one) the row stays answerable.
+const interactive = computed(() => open.value && (props.variant === 'dock' || !dock))
+const awaitingInDock = computed(() => open.value && props.variant !== 'dock' && Boolean(dock?.isDocked(props.pendingId)))
+
+const authorizing = ref(false)
+const canceling = ref(false)
+const now = ref(Date.now())
+let clock: number | null = null
+let poll: number | null = null
+
+const deadline = computed(() => {
+  const base = (props.requestedAt || 0) * 1000
+  const add = (props.timeoutSeconds || 600) * 1000
+  return base + add
+})
+
+const secondsLeft = computed(() => {
+  if (props.resolved) return -1
+  return Math.max(0, Math.floor((deadline.value - now.value) / 1000))
+})
+
+const timerClass = computed(() => {
+  if (secondsLeft.value <= 30) return 'timer-critical'
+  if (secondsLeft.value <= 120) return 'timer-warning'
+  return ''
+})
+
+const headerIcon = computed(() => {
+  if (!props.resolved) return 'lock-on'
+  if (props.authorized) return 'check-circle'
+  return 'close-circle'
+})
+
+const targetLabel = computed(() => (
+  props.mcpToolName
+    ? t('agentStream.mcpOAuth.targetWithTool', { service: props.serviceName, tool: props.mcpToolName })
+    : props.serviceName
+))
+
+const mainTitle = computed(() => {
+  if (!props.resolved) {
+    return t('agentStream.mcpOAuth.waiting', { target: targetLabel.value })
+  }
+  return props.mcpToolName
+    ? t('agentStream.mcpOAuth.titleWithTool', { service: props.serviceName, tool: props.mcpToolName })
+    : t('agentStream.mcpOAuth.titleWithService', { service: props.serviceName })
+})
+
+const statusLine = computed(() => {
+  if (!props.resolved) {
+    if (submission.value?.authorized) return t('agentStream.mcpOAuth.authorizedTag')
+    if (submission.value) return t('agentStream.mcpOAuth.canceledTag')
+    return t('agentStream.mcpOAuth.waitingStatus')
+  }
+  if (props.authorized) return t('agentStream.mcpOAuth.authorizedTag')
+  if (props.timedOut) return t('agentStream.mcpOAuth.timedOutTag')
+  return t('agentStream.mcpOAuth.canceledTag')
+})
+
+function formatCountdown(s: number): string {
+  if (s < 60) return t('agentStream.mcpOAuth.countdownShort', { seconds: s })
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return `${m}:${r.toString().padStart(2, '0')}`
+}
+
+function stopPoll() {
+  if (poll) {
+    window.clearInterval(poll)
+    poll = null
+  }
+}
+
+const skip = async () => {
+  if (props.resolved || canceling.value) return
+  canceling.value = true
+  try {
+    if (useEmbedOAuth()) {
+      await cancelEmbedMCPOAuth(
+        props.embedChannelId!,
+        props.embedToken!,
+        props.embedSessionId!,
+        props.embedSessionSig!,
+        props.embedVisitorId!,
+        props.pendingId,
+      )
+    } else {
+      await cancelMCPOAuth(props.pendingId)
+    }
+    markPromptSubmitted(props.pendingId, { authorized: false })
+  } catch (e: any) {
+    const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.mcpOAuth.skipFailed')
+    MessagePlugin.error(msg)
+  } finally {
+    canceling.value = false
+  }
+}
+
+const authorize = async () => {
+  if (props.resolved || authorizing.value) return
+  authorizing.value = true
+  try {
+    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
+    const frontendRedirect = useEmbedOAuth()
+      ? window.location.pathname + window.location.search
+      : '/'
+    const authorization = useEmbedOAuth()
+      ? await getEmbedMCPOAuthAuthorizeURL(
+        props.embedChannelId!,
+        props.embedToken!,
+        props.embedSessionId!,
+        props.embedSessionSig!,
+        props.embedVisitorId!,
+        props.serviceId,
+        { redirect_uri: redirectUri, frontend_redirect: frontendRedirect },
+      )
+      : await getMCPOAuthAuthorizeURL(props.serviceId, {
+        redirect_uri: redirectUri,
+        frontend_redirect: frontendRedirect,
+      })
+    if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
+      MessagePlugin.error(t('agentStream.mcpOAuth.startFailed'))
+      authorizing.value = false
+      return
+    }
+    const popup = window.open(authorization.authorizationUrl, 'mcp_oauth', 'width=600,height=720')
+    poll = window.setInterval(async () => {
+      const closed = !popup || popup.closed
+      let ok = false
+      try {
+        ok = useEmbedOAuth()
+          ? await getEmbedMCPOAuthStatus(
+            props.embedChannelId!,
+            props.embedToken!,
+            props.embedSessionId!,
+            props.embedSessionSig!,
+            props.embedVisitorId!,
+            props.serviceId,
+            authorization.authorizationAttempt,
+          )
+          : await getMCPOAuthStatus(props.serviceId, authorization.authorizationAttempt)
+      } catch {
+        /* transient; keep polling */
+      }
+      if (ok) {
+        stopPoll()
+        try { popup?.close() } catch { /* cross-origin close may throw */ }
+        try {
+          if (useEmbedOAuth()) {
+            await resolveEmbedMCPOAuth(
+              props.embedChannelId!,
+              props.embedToken!,
+              props.embedSessionId!,
+              props.embedSessionSig!,
+              props.embedVisitorId!,
+              props.pendingId,
+              { service_id: props.serviceId, decision: 'authorize' },
+            )
+          } else {
+            await resolveMCPOAuth(props.pendingId, { service_id: props.serviceId, decision: 'authorize' })
+            try {
+              await refreshMCPMetadata(props.serviceId)
+            } catch {
+              /* next describe/list will live-fill this user's directory */
+            }
+          }
+          markPromptSubmitted(props.pendingId, { authorized: true })
+          MessagePlugin.success(t('agentStream.mcpOAuth.authorizedToast'))
+        } catch (e: any) {
+          const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.mcpOAuth.resumeFailed')
+          MessagePlugin.error(msg)
+        }
+        authorizing.value = false
+      } else if (closed) {
+        stopPoll()
+        authorizing.value = false
+      }
+    }, 1500)
+  } catch (e: any) {
+    const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.mcpOAuth.startFailed')
+    MessagePlugin.error(msg)
+    authorizing.value = false
+  }
+}
+
+onMounted(() => {
+  clock = window.setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+})
+
+onBeforeUnmount(() => {
+  if (clock) window.clearInterval(clock)
+  stopPoll()
+})
+
+/** Enter starts authorization while docked. */
+const handleKey = (e: KeyboardEvent): boolean => {
+  if (!interactive.value || !isSubmitKey(e) || authorizing.value || canceling.value) return false
+  void authorize()
+  return true
+}
+
+defineExpose({ handleKey })
+</script>
+
+<style scoped lang="less">
+@import './agent-interaction-card.less';
+</style>

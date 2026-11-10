@@ -1,0 +1,259 @@
+package web_search
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+// DuckDuckGoProvider implements web search using DuckDuckGo (HTML first, API fallback)
+type DuckDuckGoProvider struct {
+	client *http.Client
+}
+
+// NewDuckDuckGoProvider creates a new DuckDuckGo provider.
+// DuckDuckGo is free and requires no API key; optional ProxyURL tunnels requests via an HTTP/HTTPS proxy.
+func NewDuckDuckGoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
+	client, err := NewSearchHTTPClient(30*time.Second, params.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	return &DuckDuckGoProvider{client: client}, nil
+}
+
+// Name returns the provider name
+func (p *DuckDuckGoProvider) Name() string {
+	return "duckduckgo"
+}
+
+// Search performs a web search using DuckDuckGo HTML endpoint with API fallback
+func (p *DuckDuckGoProvider) Search(
+	ctx context.Context,
+	request types.WebSearchRequest,
+) ([]*types.WebSearchResult, error) {
+	query, maxResults := request.Query, request.MaxResults
+	if maxResults <= 0 {
+		maxResults = 5
+	}
+	// Try HTML scraping first (more reliable for general results)
+	htmlResults, err := p.searchHTML(ctx, query, maxResults)
+	if err == nil && len(htmlResults) > 0 {
+		return htmlResults, nil
+	}
+	// Fallback to Instant Answer API
+	apiResults, apiErr := p.searchAPI(ctx, query, maxResults)
+	if apiErr == nil && len(apiResults) > 0 {
+		return apiResults, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("duckduckgo HTML search failed: %w", err)
+	}
+	return nil, fmt.Errorf("duckduckgo API search failed: %w", apiErr)
+}
+
+// searchHTML performs a web search using DuckDuckGo HTML endpoint
+func (p *DuckDuckGoProvider) searchHTML(
+	ctx context.Context,
+	query string,
+	maxResults int,
+) ([]*types.WebSearchResult, error) {
+	baseURL := "https://html.duckduckgo.com/html/"
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("kl", "cn-zh")
+
+	reqURL := baseURL + "?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set(
+		"User-Agent",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	)
+
+	curlCommand := fmt.Sprintf(
+		"curl -X GET '%s' -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'",
+		req.URL.String(),
+	)
+	logger.Infof(ctx, "Curl of request: %s", secutils.SanitizeForLog(curlCommand))
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to perform request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return nil, fmt.Errorf("duckduckgo HTML returned status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	results := make([]*types.WebSearchResult, 0, maxResults)
+	doc.Find(".web-result").Each(func(i int, s *goquery.Selection) {
+		if len(results) >= maxResults {
+			return
+		}
+		titleNode := s.Find(".result__a")
+		title := strings.TrimSpace(titleNode.Text())
+		var link string
+		if href, exists := titleNode.Attr("href"); exists {
+			link = cleanDDGURL(href)
+		}
+		snippet := strings.TrimSpace(s.Find(".result__snippet").Text())
+		if title != "" && link != "" {
+			results = append(results, &types.WebSearchResult{
+				Title:   title,
+				URL:     link,
+				Snippet: snippet,
+				Source:  "duckduckgo",
+			})
+		}
+	})
+
+	logger.Infof(ctx, "DuckDuckGo HTML search returned %d results for query: %s", len(results), query)
+	return results, nil
+}
+
+// searchAPI performs a web search using DuckDuckGo API endpoint
+func (p *DuckDuckGoProvider) searchAPI(
+	ctx context.Context,
+	query string,
+	maxResults int,
+) ([]*types.WebSearchResult, error) {
+	baseURL := "https://api.duckduckgo.com/"
+	params := url.Values{}
+	params.Set("q", query)
+	params.Set("format", "json")
+	params.Set("no_html", "1")
+	params.Set("skip_disambig", "1")
+
+	reqURL := baseURL + "?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "WeKnora/1.0")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to perform request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		preview := readErrorPreview(resp.Body)
+		return nil, fmt.Errorf("duckduckgo API returned status %d: %s", resp.StatusCode, preview)
+	}
+
+	bodyBytes, err := readCapped(resp.Body, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var apiResponse struct {
+		AbstractText  string `json:"AbstractText"`
+		AbstractURL   string `json:"AbstractURL"`
+		Heading       string `json:"Heading"`
+		RelatedTopics []struct {
+			FirstURL string `json:"FirstURL"`
+			Text     string `json:"Text"`
+		} `json:"RelatedTopics"`
+		Results []struct {
+			FirstURL string `json:"FirstURL"`
+			Text     string `json:"Text"`
+		} `json:"Results"`
+	}
+	if err := json.Unmarshal(bodyBytes, &apiResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode API response: %w", err)
+	}
+
+	results := make([]*types.WebSearchResult, 0, maxResults)
+	if apiResponse.AbstractText != "" && apiResponse.AbstractURL != "" {
+		results = append(results, &types.WebSearchResult{
+			Title:   apiResponse.Heading,
+			URL:     apiResponse.AbstractURL,
+			Snippet: apiResponse.AbstractText,
+			Source:  "duckduckgo",
+		})
+	}
+	for _, topic := range apiResponse.RelatedTopics {
+		if len(results) >= maxResults {
+			break
+		}
+		if topic.Text != "" && topic.FirstURL != "" {
+			results = append(results, &types.WebSearchResult{
+				Title:   extractTitle(topic.Text),
+				URL:     topic.FirstURL,
+				Snippet: topic.Text,
+				Source:  "duckduckgo",
+			})
+		}
+	}
+	for _, r := range apiResponse.Results {
+		if len(results) >= maxResults {
+			break
+		}
+		if r.Text != "" && r.FirstURL != "" {
+			results = append(results, &types.WebSearchResult{
+				Title:   extractTitle(r.Text),
+				URL:     r.FirstURL,
+				Snippet: r.Text,
+				Source:  "duckduckgo",
+			})
+		}
+	}
+
+	logger.Infof(ctx, "DuckDuckGo API search returned %d results for query: %s", len(results), query)
+	return results, nil
+}
+
+// cleanDDGURL cleans the URL from DuckDuckGo HTML endpoint
+func cleanDDGURL(urlStr string) string {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil || parsedURL.Host != "duckduckgo.com" || parsedURL.Path != "/l/" ||
+		(parsedURL.Scheme != "" && parsedURL.Scheme != "https") {
+		return urlStr
+	}
+	// uddg is a query parameter. Tracking fields are optional and unordered;
+	// decode the destination exactly once for both absolute and network-path URLs.
+	if target := parsedURL.Query().Get("uddg"); target != "" {
+		return target
+	}
+	return urlStr
+}
+
+// extractTitle extracts the title from the text
+func extractTitle(text string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 {
+		title := strings.TrimSpace(lines[0])
+		const maxTitleBytes = 100
+		if len(title) > maxTitleBytes {
+			// Back off to a rune boundary: titles are often Chinese, and a partial
+			// rune is invalid UTF-8 that the knowledge base's title column rejects.
+			// Same rule as #4555 / #4583.
+			cut := maxTitleBytes
+			for cut > 0 && !utf8.RuneStart(title[cut]) {
+				cut--
+			}
+			title = title[:cut] + "..."
+		}
+		return title
+	}
+	return strings.TrimSpace(text)
+}

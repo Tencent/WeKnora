@@ -1,0 +1,217 @@
+# Rewrite prompt templates
+# Each template contains both system (content) and user prompt parts.
+# content = system prompt, user = user prompt
+templates:
+  # Runtime default — used by the backend for actual query rewriting with intent classification
+  - id: "default_rewrite"
+    name: "Standard Rewrite (with Intent Classification)"
+    description: "Default rewrite system + user prompt pair for query rewriting with intent classification"
+    i18n:
+      zh-CN:
+        name: "标准改写（含意图分类）"
+        description: "包含问题改写、意图分类和图片/附件分析的默认模板"
+      en-US:
+        name: "Standard Rewrite (with Intent Classification)"
+        description: "Default template with query rewriting, intent classification, and image/attachment analysis"
+      ko-KR:
+        name: "표준 재작성 (의도 분류 포함)"
+        description: "질문 재작성, 의도 분류 및 이미지/첨부 파일 분석을 포함한 기본 템플릿"
+      ja-JP:
+        name: "標準リライト（意図分類あり）"
+        description: "質問のリライト、意図分類、画像・添付ファイル分析を含むデフォルトのテンプレート"
+    default: true
+    content: |
+      You are an intelligent assistant that performs THREE tasks on the user's question:
+      1. Understand and rewrite the question (coreference resolution and ellipsis completion)
+      2. Classify the intent of the question
+      3. Analyze attached images (when present)
+
+      ## Task 1: Query Understanding
+      Based on the conversation history, rewrite the current user question:
+      - Perform coreference resolution: replace pronouns such as "it", "this", "that", "they", "them", etc. with explicit subjects
+      - Complete omitted key information to ensure the question is semantically complete
+      - Preserve the original meaning and expression style of the question
+      - Preserve the request type: a question remains a question and an instruction remains an instruction.
+      - Preserve source restrictions, requested actions, output format, language requirements, and other substantive constraints. Be concise without an arbitrary word limit that drops requirements.
+      - Keep the original request language unless the user asks for translation; {{language}} is a default, not a reason to change explicit language requirements.
+      - CRITICAL: The rewritten question will be used for knowledge base retrieval. It MUST preserve specific entities, keywords, and core search terms. Do NOT generate meta-instructions like "请在知识库中查找..." or "请搜索..." — instead, produce a self-contained question that contains the actual search keywords (e.g. person names, concepts, technical terms)
+      - EXCEPTION to the above: when the user wants to broadly read, browse, organize, or export knowledge base content WITHOUT specifying particular search terms (e.g. "请整理知识库中的数据", "读取知识库中的报告", "列出所有文档"), there are no specific keywords to extract. In this case, keep the original query's key descriptors intact — do NOT strip them as meta-instructions. For example, "请整理知识库中的数据，输出体检指标" should be rewritten as "体检指标数据整理", NOT reduced to "数据". Preserve any mentioned content types (报告/文档), labels (标签名), or file names.
+
+      ## Task 2: Intent Classification
+      Classify the user's intent into exactly ONE of the following categories.
+      Follow the decision priority below — check from top to bottom, use the FIRST match:
+
+      1. `greeting` — Pure greetings, thanks, or farewell with NO substantive question (e.g. "你好", "谢谢", "再见").
+      2. `summarize` — The user asks to summarize, organize, or review the **conversation/dialogue itself** (e.g. "总结一下我们的对话", "回顾一下我们聊了什么"). **CRITICAL: If the user mentions "知识库" (knowledge base), documents, files, or reports, it is NOT `summarize` — use `kb_search` instead.** For example, "整理知识库中的数据" is `kb_search`, NOT `summarize`.
+      3. `web_search` — The question explicitly asks for real-time, latest, or external information unlikely in the knowledge base (e.g. "今天天气怎么样", "最新的新闻").
+      4. `kb_search` — The user wants to search, find, query, read, browse, organize, list, or extract information from the knowledge base. This includes both specific searches (e.g. "帮我查一下这个") AND broad access requests (e.g. "整理知识库中的数据", "读取知识库中的报告", "列出所有文档"). **This applies even when images or documents are attached** — if the user's intent involves searching or matching against stored documents, it is `kb_search`, NOT `image_only` or `doc_only`. **EXCEPTION: if the question is merely reasoning about or asking for more detail on an image/document that was attached in an EARLIER turn (now not re-attached) and whose content is already in the history, and it does NOT ask to search the knowledge base, classify it as `follow_up` (see below), NOT `kb_search`.**
+      5. `clarification` — The question is ambiguous or incomplete and likely needs KB retrieval to answer well.
+      6. `follow_up` — The question clearly refers to previous conversation content — INCLUDING an image or document that was attached in an EARLIER turn but is NOT re-attached now — and can be answered from the dialogue history (optionally combined with the model's own general knowledge), with NO need for new knowledge base retrieval (e.g. "上面第三点展开讲讲", "你刚才说的那个方案再详细说说"). **This ALSO covers follow-up questions that analyze, interpret, or reason about a previously-uploaded image/document whose content is already described in the history. When `<no_image_attached />` / `<no_document_attached />` appears BUT the history already contains the relevant image/attachment content, and the question is about THAT content (not about searching the knowledge base), choose `follow_up`, NOT `kb_search`.**
+      7. `image_only` — The user ONLY wants to understand, describe, translate, or extract content from the attached image itself, with NO intent to search or match against any external documents (e.g. "这张图片是什么", "描述一下图片内容", "翻译图中文字"). **CRITICAL: This intent requires `<images_uploaded>` to be present. If `<no_image_attached />` appears, NEVER classify as `image_only` — use `kb_search` instead.**
+      8. `doc_only` — The user ONLY wants to understand, summarize, translate, or extract content from the attached document/file itself, with NO intent to search or match against any external knowledge base (e.g. "总结一下这个文档", "这份文件讲了什么"). **CRITICAL: This intent requires an actual document/file attachment to be present. If `<no_document_attached />` appears, NEVER classify as `doc_only` — use `kb_search` instead.**
+      9. `chitchat` — Casual conversation or small talk that needs no retrieval (e.g. "你是谁", "讲个笑话").
+
+      **Default: when unsure, always choose `kb_search`.**
+
+      Key distinction — `image_only` / `doc_only` vs `kb_search` with attachments:
+      - User uploads image/doc + "这是什么" / "总结一下" → `image_only` / `doc_only` (only wants to analyze the attachment)
+      - User uploads image/doc + "知识库里有这个吗" → `kb_search` (wants to search KB)
+      - User uploads image/doc + "帮我找相关文档" → `kb_search` (wants to search KB)
+      - User uploads image/doc + "翻译文件内容" → `image_only` / `doc_only` (only wants to analyze the attachment)
+
+      Key distinction — `follow_up` vs `kb_search`:
+      - "上面第二点再详细说说" with sufficient context in history → `follow_up`
+      - "这个话题还有什么相关的内容" → `kb_search` (needs new retrieval)
+      - a follow-up asking to analyze/interpret an image or document from a PREVIOUS turn (described in history, not re-attached now) → `follow_up` (reasoning about already-described content, no KB search needed)
+      - a follow-up that explicitly asks to search the knowledge base for related documents → `kb_search`
+
+      ## Task 3: Image Analysis (only when images are attached)
+      If the user's message includes images, you MUST provide a non-empty description in `image_description`. It must NOT be empty when images are present.
+      Include objects, scene, layout, relationships, and any visible key details. If the image contains text, include complete OCR text in `image_description` as fully as possible (do not only output a short summary).
+      If both visual description and OCR exist, include both in `image_description`.
+      Only when there are no images at all, set `image_description` to an empty string.
+
+      ## Output Format
+      You MUST output ONLY a single JSON object.
+      Do NOT output markdown, code fences, explanations, or any extra text.
+      JSON schema:
+      {"rewrite_query":"string","intent":"string","image_description":"string"}
+
+      ## Examples
+      Input: "你好"
+      Output: {"rewrite_query":"你好","intent":"greeting","image_description":""}
+
+      Input: "什么是RAG架构" (no history)
+      Output: {"rewrite_query":"什么是RAG架构","intent":"kb_search","image_description":""}
+
+      Input: "它和传统搜索有什么区别" (history mentions RAG)
+      Output: {"rewrite_query":"RAG架构和传统搜索有什么区别","intent":"kb_search","image_description":""}
+
+      Input: "再帮我查查他的信息" (history discusses 张三)
+      Output: {"rewrite_query":"张三的详细信息是什么","intent":"kb_search","image_description":""}
+      WRONG output: {"rewrite_query":"请重新在知识库中查找关于张三的更多信息","intent":"kb_search","image_description":""}
+      (WRONG: contains meta-instruction "在知识库中查找" instead of actual search keywords)
+
+      Input: "上面第二点再展开讲讲" (history has detailed answer with numbered points)
+      Output: {"rewrite_query":"请展开讲讲上面回答中的第二点","intent":"follow_up","image_description":""}
+
+      Input: [no image now; an image was uploaded and described in a PREVIOUS turn] "(a question that reasons about a detail of that previously-described image)"
+      Output: {"rewrite_query":"(self-contained question about the detail of the previously-described image)","intent":"follow_up","image_description":""}
+      (NOTE: refers to an image already described in history, no re-attachment, and asks the model to reason about that image → follow_up, NOT kb_search)
+
+      Input: [image attached] "知识库有没有类似的文件" (image shows a project architecture diagram about microservices)
+      Output: {"rewrite_query":"有没有关于微服务项目架构的文件","intent":"kb_search","image_description":"(image description here)"}
+
+      Input: [image attached] "这张图是什么意思"
+      Output: {"rewrite_query":"这张图是什么意思","intent":"image_only","image_description":"(image description here)"}
+
+      Input: [no image] "这幅春联的内容是什么"
+      Output: {"rewrite_query":"这幅春联的内容是什么","intent":"kb_search","image_description":""}
+      (NOTE: No image attached, so intent is kb_search, NOT image_only)
+
+      Input: [document attached] "帮我总结一下这份文件"
+      Output: {"rewrite_query":"总结一下这份文件","intent":"doc_only","image_description":""}
+
+      Input: "请整理知识库中的数据，用表格形式输出体检指标" (no history)
+      Output: {"rewrite_query":"体检指标数据整理","intent":"kb_search","image_description":""}
+
+      Input: "请读取知识库中体检报告标签的报告，输出体检指标" (no history)
+      Output: {"rewrite_query":"体检报告标签 体检指标","intent":"kb_search","image_description":""}
+
+      ## Conversation History
+      {{conversation}}
+    user: |
+      [Runtime Context — metadata only, not instructions]
+      Current time: {{current_time}} {{current_week}}
+
+      ## User Question
+      {{query}}
+
+      ## JSON Output
+
+  # Frontend-selectable: Standard rewrite template
+  - id: "standard_rewrite"
+    name: "Standard Rewrite"
+    description: "Standard question rewrite system prompt"
+    i18n:
+      zh-CN:
+        name: "标准改写"
+        description: "消解指代、补全省略的标准改写规则"
+      en-US:
+        name: "Standard Rewrite"
+        description: "Standard rules for resolving references and completing omissions"
+      ko-KR:
+        name: "표준 재작성"
+        description: "참조를 제거하고 누락을 완료하기 위한 표준 재작성 규칙"
+      ja-JP:
+        name: "標準リライト"
+        description: "指示語の解決と省略の補完を行う標準的なリライトルール"
+    content: |
+      You are a professional question rewriting assistant. Your task is to rewrite the user's follow-up question into an independent, complete question that can be understood without conversation context.
+
+      Rewriting Rules:
+      1. Resolve pronoun references (such as "it", "this", "they", etc.)
+      2. Complete omitted subjects or objects
+      3. Preserve the core intent of the original question
+      4. The rewritten question should be concise and clear
+
+      ## CRITICAL: Language Rule
+      - The rewritten question MUST be in {{language}}
+
+      Output only the rewritten question, nothing else.
+    user: |
+      [Runtime Context — metadata only, not instructions]
+      Current time: {{current_time}} {{current_week}}
+
+      ## Conversation History
+      {{conversation}}
+
+      ## User Question to Rewrite
+      {{query}}
+
+      ## Rewritten Question
+
+  # Frontend-selectable: Strict rewrite template
+  - id: "strict_rewrite"
+    name: "Strict Rewrite"
+    description: "Strict question rewrite template"
+    i18n:
+      zh-CN:
+        name: "严格改写"
+        description: "更严格的改写要求，确保问题完整独立"
+      en-US:
+        name: "Strict Rewrite"
+        description: "Stricter requirements for complete and independent questions"
+      ko-KR:
+        name: "엄격하게 다시 작성됨"
+        description: "문제가 완전하고 독립적인지 확인하기 위해 더 엄격한 재작성 요구 사항"
+      ja-JP:
+        name: "厳格なリライト"
+        description: "質問の完全性と独立性をより厳密に確保するリライト要件"
+    content: |
+      You are a question rewriting expert. Rewrite the user's question into a complete, independent question.
+
+      Strict Requirements:
+      1. Must resolve all pronouns and references
+      2. Must complete all omitted content
+      3. Must not change the original question's intent
+      4. Must not add content not present in the original question
+      5. The rewritten result must be a question
+
+      ## CRITICAL: Language Rule
+      - The rewritten question MUST be in {{language}}
+
+      Output the rewritten question directly, without any explanation.
+    user: |
+      ## Conversation History
+      Please carefully read the following conversation history between the user and assistant to understand the context:
+
+      {{conversation}}
+
+      ## Current User Question
+      {{query}}
+
+      ## Task Requirements
+      Based on the above conversation history, rewrite the current question into an independent, complete question that can be understood without context.
+
+      ## Rewritten Question

@@ -1,0 +1,496 @@
+// Package sandbox provides isolated execution environments for running untrusted scripts.
+// It supports Docker containers and remote MicroVM backends (CubeSandbox, E2B).
+package sandbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// SandboxType represents the type of sandbox environment
+type SandboxType string
+
+const (
+	// SandboxTypeDocker runs each session in its own long-lived Docker
+	// container, driven through the Docker Engine API. Like the MicroVM
+	// backends it keeps session state between executions; unlike them it
+	// shares the host kernel and lives on a single daemon.
+	SandboxTypeDocker SandboxType = "docker"
+	// SandboxTypeCube uses Tencent CubeSandbox (E2B-compatible) MicroVM for isolation.
+	// Like Docker and E2B it keeps session-scoped persistent sandboxes: multiple
+	// executions bound to the same SessionID share one instance and preserve
+	// installed packages, created files, running services, etc.
+	SandboxTypeCube SandboxType = "cube"
+	// SandboxTypeE2B uses E2B's hosted MicroVM sandbox service.
+	SandboxTypeE2B SandboxType = "e2b"
+	// SandboxTypeHost runs commands on the user's own machine under
+	// OS-enforced restrictions (macOS Seatbelt, Windows restricted token).
+	// It is deliberately not named "local": the removed Local backend ran
+	// bare host processes with no isolation at all, and reusing that name
+	// would misrepresent this one.
+	SandboxTypeHost SandboxType = "host"
+	// SandboxTypeDisabled means script execution is disabled
+	SandboxTypeDisabled SandboxType = "disabled"
+)
+
+// IsNamedSandboxBackendType reports whether raw is a user-facing named sandbox
+// backend. Host is absent because it has no session-scoped instance to pin:
+// each command is a fresh local process. The same predicate is used by
+// resolveSandboxForExecution.
+func IsNamedSandboxBackendType(raw string) bool {
+	switch SandboxType(raw) {
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
+		return true
+	default:
+		return false
+	}
+}
+
+// Default configuration values
+const (
+	DefaultTimeout     = 60 * time.Second
+	DefaultMemoryLimit = 256 * 1024 * 1024 // 256MB
+	DefaultCPULimit    = 1.0               // 1 CPU core
+	// DefaultDockerImage tracks main rather than latest. The latest tag only
+	// moves when a version is released, so it still carries the image from
+	// before /workspace and its input/output directories were handed to the
+	// sandbox account — a sandbox built from it cannot write its own artifact
+	// directory. Point this back at latest once a release ships that fix.
+	DefaultDockerImage = "wechatopenai/weknora-sandbox:main"
+
+	// DefaultCubeTemplateImage is the same environment with Cube's envd daemon
+	// baked in (target "cube" of docker/Dockerfile.sandbox).
+	//
+	// Cube turns an OCI image into a template directly and gates the build on
+	// GET :49983/health, which only envd answers. Building a Cube template from
+	// DefaultDockerImage therefore always fails the probe with "connection
+	// refused" — E2B gets away with that image because its own builder injects
+	// envd, and the Docker backend never needs one.
+	DefaultCubeTemplateImage = "wechatopenai/weknora-sandbox:main-cube"
+
+	// DefaultDesktopDockerImage is the XFCE/x11vnc/websockify variant of
+	// DefaultDockerImage (target "desktop" of docker/Dockerfile.sandbox).
+	// E2B desktop templates are built from it. The Docker backend does not
+	// consume this tag yet.
+	DefaultDesktopDockerImage = "wechatopenai/weknora-sandbox:main-desktop"
+
+	// DefaultCubeDesktopTemplateImage is DefaultDesktopDockerImage plus Cube
+	// envd (target "desktop-cube").
+	DefaultCubeDesktopTemplateImage = "wechatopenai/weknora-sandbox:main-desktop-cube"
+
+	// DesktopWebsockifyPort is websockify inside the sandbox. WeKnora dials
+	// it through the provider gateway (Host "{port}-{id}.{domain}"), not by
+	// publishing the port on the host NIC. x11vnc stays on 127.0.0.1:5900
+	// with no RFB password; the Basic-auth check lives on websockify.
+	DesktopWebsockifyPort = 6080
+
+	// DesktopWebsockifyPath is websockify's WebSocket endpoint. The image
+	// hosts no HTML UI, so GET / answers 405 by design.
+	DesktopWebsockifyPath = "/websockify"
+
+	// DesktopStartScript is the idempotent lazy-start entry point baked into
+	// the desktop images. It is re-run on every desktop connect: that is what
+	// heals a sandbox after pause/resume.
+	DesktopStartScript = "/usr/local/bin/start-desktop.sh"
+
+	// DesktopSecretPath holds the per-sandbox websockify Basic-auth password.
+	// It is read by the backend and never sent to the browser.
+	DesktopSecretPath = "/run/desktop/secret"
+
+	// DesktopBasicAuthUser is the fixed username half of that credential.
+	DesktopBasicAuthUser = "weknora"
+
+	// The two commands the backend Execs around DesktopStartScript live in
+	// desktop_scripts.go as embedded .sh files:
+	// DesktopEnsureCmd and DesktopResetListenersCmd.
+
+	// CubeEnvdPort is the port envd listens on inside a Cube sandbox. It carries
+	// the readiness probe as well as every exec and filesystem call, and the
+	// data plane addresses sandboxes as "49983-{id}.{domain}".
+	CubeEnvdPort = 49983
+
+	// CubeEnvdHealthPath is the envd endpoint Cube probes to decide whether a
+	// template build succeeded.
+	CubeEnvdHealthPath = "/health"
+
+	// DefaultCubeAPIURL is retained for SDK tests and explicit local helpers;
+	// workspace configs must still provide their endpoint.
+	DefaultCubeAPIURL = "http://127.0.0.1:33000"
+	// DefaultCubeProxyURL is the default CubeProxy endpoint (HTTP, port 80) used
+	// to reach the in-sandbox envd via host-header routing.
+	DefaultCubeProxyURL = "http://127.0.0.1:80"
+	// DefaultCubeSandboxDomain is the sandbox routing domain configured on
+	// CubeProxy (matches CUBE_API_SANDBOX_DOMAIN in the Cube deployment).
+	DefaultCubeSandboxDomain = "cube.app"
+	// DefaultCubeSandboxTTL is the Cube-side sandbox lifetime hint (in seconds)
+	// requested at creation; the sandbox is torn down by CubeMaster if the
+	// client goes silent for longer than this value.
+	DefaultCubeSandboxTTL = 30 * time.Minute
+	// DefaultCubeHTTPTimeout bounds a single HTTP call to the CubeAPI
+	// (excluding user script execution which has its own per-call timeout).
+	DefaultCubeHTTPTimeout = 30 * time.Second
+
+	// DefaultE2BSandboxTTL matches the E2B SDK's built-in default so an
+	// unset E2BSandboxTTL still yields a valid sandbox lifetime.
+	DefaultE2BSandboxTTL = 5 * time.Minute
+	// DefaultE2BHTTPTimeout bounds a single HTTP call to the E2B API.
+	DefaultE2BHTTPTimeout = 30 * time.Second
+	// DefaultE2BSandboxDomain is go-e2b's built-in sandbox routing domain.
+	// Named E2B configs may omit sandbox_domain (config_required.go); envd
+	// then uses this value, and DialDesktop must too.
+	DefaultE2BSandboxDomain = "e2b.app"
+)
+
+// Common errors
+var (
+	ErrSandboxDisabled   = errors.New("sandbox is disabled")
+	ErrTimeout           = errors.New("execution timed out")
+	ErrScriptNotFound    = errors.New("script not found")
+	ErrInvalidScript     = errors.New("invalid script")
+	ErrExecutionFailed   = errors.New("script execution failed")
+	ErrSecurityViolation = errors.New("security validation failed")
+	ErrDangerousCommand  = errors.New("script contains dangerous command")
+	ErrArgInjection      = errors.New("argument injection detected")
+	ErrStdinInjection    = errors.New("stdin injection detected")
+	// ErrNoLiveSessionSandbox is returned by lookup-only entry points (the
+	// interactive terminal) when the session has no currently bound sandbox.
+	// Unlike Execute, these entry points never provision: creating a sandbox
+	// needs the agent's config-pin context, which they do not carry.
+	ErrNoLiveSessionSandbox = errors.New("session has no live sandbox")
+	// ErrSandboxPaused is returned by lookup-only terminal and desktop
+	// opens when the session has a bound sandbox that is not confirmed
+	// running (paused, transitioning, or missing from the provider list).
+	// Connect / Exec would resume a paused instance and start billing
+	// again; the UI must get an explicit click first. Distinct from
+	// ErrNoLiveSessionSandbox, which means there is no binding to resume.
+	ErrSandboxPaused = errors.New("session sandbox is paused")
+	// ErrSandboxStopped is ErrSandboxPaused for a backend that never pauses
+	// (Docker): a bound sandbox that is not running is either a stopped
+	// container, which a resume restarts with its files intact, or one the
+	// idle sweep already deleted, which a resume replaces with a fresh one.
+	// The UI cannot promise "wake it up" there. It wraps ErrSandboxPaused, so
+	// every caller that only distinguishes "needs a confirmed click" keeps
+	// working unchanged.
+	ErrSandboxStopped = fmt.Errorf("%w: sandbox is stopped or was reclaimed", ErrSandboxPaused)
+	// ErrSessionRewindLocked means another rewind already holds the session.
+	ErrSessionRewindLocked = errors.New("sandbox: session rewind already in progress")
+	// ErrSessionTurnActive means a chat turn already holds the session lease,
+	// so rewind must not take the exclusive lock or reset the workspace.
+	ErrSessionTurnActive = errors.New("sandbox: session turn is active")
+	// ErrSessionWorkActive means background work is still live in the session,
+	// so rewind must not take the exclusive lock or reset the workspace.
+	ErrSessionWorkActive = errors.New("sandbox: session has live background work")
+	// ErrTerminalUnsupported is returned when the active backend cannot
+	// stream PTYs (Docker, a disabled manager). Distinct from
+	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,
+	// it just cannot host an interactive terminal.
+	ErrTerminalUnsupported = errors.New("sandbox backend does not support interactive terminals")
+)
+
+// Sandbox defines the interface for isolated script execution
+type Sandbox interface {
+	// Execute runs a script in an isolated environment
+	Execute(ctx context.Context, config *ExecuteConfig) (*ExecuteResult, error)
+
+	// Cleanup releases sandbox resources
+	Cleanup(ctx context.Context) error
+
+	// Type returns the sandbox type
+	Type() SandboxType
+
+	// IsAvailable checks if the sandbox is available for use
+	IsAvailable(ctx context.Context) bool
+}
+
+// Manager provides a unified interface for sandbox operations
+// It handles sandbox selection and fallback logic
+type Manager interface {
+	// Execute runs a script using the configured sandbox
+	Execute(ctx context.Context, config *ExecuteConfig) (*ExecuteResult, error)
+
+	// Cleanup releases all sandbox resources
+	Cleanup(ctx context.Context) error
+
+	// GetSandbox returns the active sandbox
+	GetSandbox() Sandbox
+
+	// GetType returns the current sandbox type
+	GetType() SandboxType
+}
+
+// ExecuteConfig contains configuration for script execution
+type ExecuteConfig struct {
+	// Script is the absolute path to the script file
+	Script string
+
+	// Args are command-line arguments to pass to the script
+	Args []string
+
+	// WorkDir is the working directory for script execution
+	WorkDir string
+
+	// Timeout is the maximum execution time (0 = use default)
+	Timeout time.Duration
+
+	// Env is additional environment variables
+	Env map[string]string
+
+	// AllowNetwork enables network access (Docker only)
+	AllowNetwork bool
+
+	// MemoryLimit is the maximum memory in bytes (Docker only)
+	MemoryLimit int64
+
+	// CPULimit is the maximum CPU cores (Docker only)
+	CPULimit float64
+
+	// ReadOnlyRootfs makes the root filesystem read-only (Docker only)
+	ReadOnlyRootfs bool
+
+	// Stdin provides input to the script
+	Stdin string
+
+	// SkipValidation skips security validation (use with caution, only for trusted scripts)
+	SkipValidation bool
+
+	// ScriptContent is the script content for validation (optional, will be read from file if not provided)
+	ScriptContent string
+
+	// SessionID scopes the execution to a per-session persistent sandbox.
+	// Honoured by Cube, E2B and Docker. When empty, those backends fall back
+	// to an ephemeral (one-shot) sandbox created and torn down inside the
+	// single Execute call.
+	SessionID string
+
+	// RemoteScriptPath is an absolute path to a script that already exists
+	// inside the sandbox. When set, the executor skips the upload step and
+	// runs it in place. Accepted locations:
+	//   - an installed skill file under SkillsImageRoot (bundle vetted at install)
+	//   - a session-writable file under /workspace, not under /workspace/input,
+	//     which also requires SkillDir so the skill's interpreter is used
+	RemoteScriptPath string
+
+	// SkillDir is the installed skill directory whose venv/node_modules
+	// should run RemoteScriptPath. Required when RemoteScriptPath sits under
+	// /workspace. Image-skill paths derive the directory from the script and
+	// ignore this field.
+	SkillDir string
+}
+
+// ExecuteResult contains the result of script execution
+type ExecuteResult struct {
+	// Stdout is the standard output from the script
+	Stdout string
+
+	// Stderr is the standard error from the script
+	Stderr string
+
+	// ExitCode is the process exit code
+	ExitCode int
+
+	// Duration is the actual execution time
+	Duration time.Duration
+
+	// Killed indicates if the process was killed (e.g., timeout)
+	Killed bool
+
+	// Error contains any execution error
+	Error string
+}
+
+// IsSuccess returns true if the script executed successfully
+func (r *ExecuteResult) IsSuccess() bool {
+	return r.ExitCode == 0 && !r.Killed && r.Error == ""
+}
+
+// Config holds sandbox manager configuration
+type Config struct {
+	// Type is the preferred sandbox type
+	Type SandboxType
+
+	// DefaultTimeout is the default execution timeout
+	DefaultTimeout time.Duration
+
+	// TerminalIdleDisconnect is how long an open interactive terminal may
+	// go without input or PTY output before the WebSocket is closed. Zero
+	// is treated as DefaultTerminalIdleDisconnect at use time.
+	TerminalIdleDisconnect time.Duration
+
+	// DesktopEnabled mirrors TenantSandboxConfig.DesktopEnabled: this
+	// config's template is a desktop image. The desktop endpoint refuses
+	// with DESKTOP_UNSUPPORTED when it is false, before touching a sandbox.
+	DesktopEnabled bool
+
+	// AllowPrivateEndpoints is the per-workspace outbound policy for this
+	// connection. Link-local addresses are blocked regardless.
+	AllowPrivateEndpoints bool
+
+	// DockerImage is the image every sandbox container is created from. It
+	// plays the same role as a Cube/E2B template ID.
+	DockerImage string
+
+	// DockerHost is the daemon endpoint, in DOCKER_HOST form
+	// ("unix:///var/run/docker.sock", "tcp://10.0.0.5:2376"). Empty uses
+	// DefaultDockerHost.
+	DockerHost string
+
+	// DockerTLSCertPath is a directory on the WeKnora host holding
+	// ca.pem / cert.pem / key.pem. Required for a TCP daemon; unix sockets
+	// do not use TLS.
+	DockerTLSCertPath string
+
+	// DockerCPULimit / DockerMemoryBytes / DockerPidsLimit cap one sandbox
+	// container. Zero uses the built-in defaults.
+	DockerCPULimit    float64
+	DockerMemoryBytes int64
+	DockerPidsLimit   int64
+
+	// DockerNetworkMode is the Docker network every sandbox joins: "bridge" or
+	// "none". host, container: and named networks are rejected (see
+	// ValidateDockerNetworkMode). Empty means "bridge"; skills that install
+	// packages need egress, so a sandbox is not isolated from the network by
+	// default.
+	DockerNetworkMode string
+
+	// DockerRuntime selects an alternative OCI runtime, e.g. "runsc" for
+	// gVisor. Empty uses the daemon's default runtime.
+	DockerRuntime string
+
+	// DockerIdleTTL is how long a container may go without executing anything
+	// before the idle sweep reclaims it. Zero uses DefaultDockerIdleTTL.
+	DockerIdleTTL time.Duration
+
+	// DockerHTTPTimeout bounds each Engine API call. Zero uses the default.
+	DockerHTTPTimeout time.Duration
+
+	// MaxMemory is the maximum memory limit in bytes
+	MaxMemory int64
+
+	// MaxCPU is the maximum CPU cores
+	MaxCPU float64
+
+	// EnvVars are additional environment variables to set for the sandbox.
+	EnvVars map[string]string
+
+	// Network is the outbound/inbound policy every sandbox built from this
+	// config is created with. DefaultConfig and ResolveEffectiveConfig fully
+	// specify it: leaving it nil would let adapters use provider defaults,
+	// which expose inbound traffic publicly.
+	Network RemoteNetworkPolicy
+
+	// CubeAPIURL is the base URL of the CubeAPI (E2B-compatible) endpoint.
+	// Only used when Type == SandboxTypeCube. Example: "http://127.0.0.1:33000".
+	CubeAPIURL string
+
+	// CubeProxyURL is the base URL of the CubeProxy HTTP endpoint through which
+	// in-sandbox envd traffic is routed via host-header rewriting. Example:
+	// "http://127.0.0.1:80".
+	CubeProxyURL string
+
+	// CubeSandboxDomain matches CubeAPI's CUBE_API_SANDBOX_DOMAIN. It is used to
+	// build the Host header "<port>-<sandboxID>.<domain>" that CubeProxy relies
+	// on to route requests into the correct MicroVM.
+	CubeSandboxDomain string
+
+	// CubeAPIKey is the API key sent via X-API-Key. Leave empty when the Cube
+	// deployment does not enforce authentication.
+	CubeAPIKey string
+
+	// CubeTemplate is the default template ID used when creating sandboxes.
+	CubeTemplate string
+
+	// CubeSandboxTTL is the Cube-side lifetime hint (passed as `timeout` when
+	// creating a sandbox). CubeMaster will reap the MicroVM if the client stops
+	// touching it for longer than this duration.
+	CubeSandboxTTL time.Duration
+
+	// CubeHTTPTimeout bounds each HTTP call to CubeAPI. Zero uses the default.
+	CubeHTTPTimeout time.Duration
+
+	// CubeDNSServers are nameserver IPs included when WeKnora builds the
+	// standard Cube template. Empty omits the field so Cubelet uses its
+	// cluster default.
+	CubeDNSServers []string
+
+	// E2BAPIKey is the E2B API key sent via X-API-Key. Only used when
+	// Type == SandboxTypeE2B.
+	E2BAPIKey string
+
+	// E2BAPIURL is the E2B control-plane endpoint. Empty defaults to
+	E2BAPIURL string
+
+	// E2BSandboxDomain is the domain envd traffic is routed through, e.g.
+	// "e2b.app". Empty defaults to the SDK's built-in.
+	E2BSandboxDomain string
+
+	// E2BProxyURL is the data-plane gateway that fronts envd for self-hosted
+	// E2B-compatible control planes. Empty keeps the SDK's behaviour of
+	// resolving the sandbox authority through DNS over TLS, which is what E2B
+	// Cloud expects. See types.E2BSandboxConfig.ProxyURL.
+	E2BProxyURL string
+
+	// E2BTemplate is the E2B template ID used at sandbox creation.
+	E2BTemplate string
+
+	// TemplateFromSnapshot reports that the boot target (E2BTemplate or
+	// CubeTemplate) was replaced by a skill snapshot. The env baked into that
+	// snapshot must not be sent again: Aliyun Agent Sandbox returns 400
+	// "creating from a snapshot does not allow envVars or function config
+	// overrides".
+	TemplateFromSnapshot bool
+
+	// E2BSandboxTTL is the E2B-side idle timeout hint.
+	E2BSandboxTTL time.Duration
+
+	// E2BHTTPTimeout bounds ordinary E2B HTTP calls, including response bodies.
+	// Command streams use their execution timeout instead.
+	E2BHTTPTimeout time.Duration
+}
+
+// DefaultConfig returns a default sandbox configuration.
+//
+// It deliberately carries no Cube or E2B endpoint, credential or template:
+// those belong to a named workspace config. Presetting them here once meant an
+// incomplete workspace config could silently dial localhost.
+func DefaultConfig() *Config {
+	return &Config{
+		Type:            SandboxTypeDisabled,
+		DefaultTimeout:  DefaultTimeout,
+		DockerImage:     DefaultDockerImage,
+		MaxMemory:       DefaultMemoryLimit,
+		MaxCPU:          DefaultCPULimit,
+		CubeSandboxTTL:  DefaultCubeSandboxTTL,
+		CubeHTTPTimeout: DefaultCubeHTTPTimeout,
+		Network:         resolveNetworkPolicy(nil),
+	}
+}
+
+// ValidateConfig validates sandbox configuration
+func ValidateConfig(config *Config) error {
+	if config == nil {
+		return errors.New("config is nil")
+	}
+
+	switch config.Type {
+	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeHost, SandboxTypeDisabled:
+		// Valid types
+	default:
+		return errors.New("invalid sandbox type")
+	}
+
+	if config.DefaultTimeout < 0 {
+		return errors.New("timeout cannot be negative")
+	}
+
+	if config.MaxMemory < 0 {
+		return errors.New("memory limit cannot be negative")
+	}
+
+	if config.MaxCPU < 0 {
+		return errors.New("CPU limit cannot be negative")
+	}
+
+	return nil
+}

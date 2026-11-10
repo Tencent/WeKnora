@@ -1,0 +1,430 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+func init() {
+	_ = os.Setenv("JWT_SECRET", "test-jwt-secret-for-user-auth-token-tests")
+}
+
+type stubAuthTokenRepo struct {
+	tokens         map[string]*types.AuthToken
+	revokedUserIDs []string
+	// getErr, when set, is returned by every GetTokenByValue call, standing in
+	// for a database error rather than for a missing row.
+	getErr error
+	// createErrs, when non-empty, is returned by the matching CreateToken call
+	// (1-based); calls past the end succeed. A nil entry means "this one
+	// succeeds", so a test can fail only the refresh-token write.
+	createErrs  []error
+	createCalls int
+}
+
+func (s *stubAuthTokenRepo) CreateToken(_ context.Context, token *types.AuthToken) error {
+	s.createCalls++
+	if s.createCalls <= len(s.createErrs) {
+		if err := s.createErrs[s.createCalls-1]; err != nil {
+			return err
+		}
+	}
+	if s.tokens != nil && token != nil {
+		s.tokens[token.Token] = token
+	}
+	return nil
+}
+
+func (s *stubAuthTokenRepo) GetTokenByValue(_ context.Context, tokenValue string) (*types.AuthToken, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	token, ok := s.tokens[tokenValue]
+	if !ok {
+		return nil, errors.New("token not found")
+	}
+	return token, nil
+}
+
+func (s *stubAuthTokenRepo) GetTokenByID(_ context.Context, id string) (*types.AuthToken, error) {
+	for _, token := range s.tokens {
+		if token != nil && token.ID == id {
+			return token, nil
+		}
+	}
+	return nil, errors.New("token not found")
+}
+func (s *stubAuthTokenRepo) GetTokensByUserID(context.Context, string) ([]*types.AuthToken, error) {
+	return nil, nil
+}
+func (s *stubAuthTokenRepo) UpdateToken(context.Context, *types.AuthToken) error { return nil }
+func (s *stubAuthTokenRepo) DeleteToken(context.Context, string) error           { return nil }
+func (s *stubAuthTokenRepo) DeleteExpiredTokens(context.Context) error           { return nil }
+func (s *stubAuthTokenRepo) RevokeTokensByUserID(_ context.Context, userID string) error {
+	s.revokedUserIDs = append(s.revokedUserIDs, userID)
+	return nil
+}
+
+type stubUserRepoForAuth struct {
+	users       map[string]*types.User
+	updateCalls int
+}
+
+func (s *stubUserRepoForAuth) CreateUser(context.Context, *types.User) error { return nil }
+func (s *stubUserRepoForAuth) GetUserByID(_ context.Context, id string) (*types.User, error) {
+	user, ok := s.users[id]
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+	return user, nil
+}
+func (s *stubUserRepoForAuth) GetUsersByIDs(context.Context, []string) (map[string]*types.User, error) {
+	return nil, nil
+}
+func (s *stubUserRepoForAuth) GetUserByEmail(_ context.Context, email string) (*types.User, error) {
+	for _, user := range s.users {
+		if user != nil && user.Email == email {
+			return user, nil
+		}
+	}
+	return nil, errors.New("user not found")
+}
+
+func (s *stubUserRepoForAuth) GetUserByUsername(context.Context, string) (*types.User, error) {
+	return nil, nil
+}
+func (s *stubUserRepoForAuth) GetUserByTenantID(context.Context, uint64) (*types.User, error) {
+	return nil, nil
+}
+func (s *stubUserRepoForAuth) UpdateUser(context.Context, *types.User) error {
+	s.updateCalls++
+	return nil
+}
+func (s *stubUserRepoForAuth) DeleteUser(context.Context, string) error { return nil }
+func (s *stubUserRepoForAuth) ListUsers(context.Context, int, int) ([]*types.User, error) {
+	return nil, nil
+}
+func (s *stubUserRepoForAuth) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
+	return nil, 0, nil
+}
+func (s *stubUserRepoForAuth) RevokeSystemAdmin(context.Context, string, string) (*types.User, error) {
+	return nil, nil
+}
+func (s *stubUserRepoForAuth) SearchUsers(context.Context, string, int) ([]*types.User, error) {
+	return nil, nil
+}
+
+func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
+	return &userService{
+		userRepo: &stubUserRepoForAuth{
+			users: map[string]*types.User{
+				"user-1": {ID: "user-1", TenantID: 1, IsActive: true},
+			},
+		},
+		tokenRepo: tokenRepo,
+	}
+}
+
+func signTestJWT(claims jwt.MapClaims) string {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(getJwtSecret()))
+	if err != nil {
+		panic(err)
+	}
+	return signed
+}
+
+func TestValidateTokenRejectsRefreshToken(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	refreshJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "refresh",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[refreshJWT] = &types.AuthToken{
+		UserID:    "user-1",
+		Token:     refreshJWT,
+		TokenType: "refresh_token",
+	}
+
+	_, _, err := svc.ValidateToken(ctx, refreshJWT)
+	if err == nil || err.Error() != "refresh token cannot be used as access token" {
+		t.Fatalf("ValidateToken(refresh JWT) err = %v, want refresh rejection", err)
+	}
+
+	legacyRefresh := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[legacyRefresh] = &types.AuthToken{
+		UserID:    "user-1",
+		Token:     legacyRefresh,
+		TokenType: "refresh_token",
+	}
+
+	_, _, err = svc.ValidateToken(ctx, legacyRefresh)
+	if err == nil || err.Error() != "refresh token cannot be used as access token" {
+		t.Fatalf("ValidateToken(legacy refresh in DB) err = %v, want refresh rejection", err)
+	}
+}
+
+func TestValidateTokenRejectsSandboxTerminalTicket(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	ticket := signTestJWT(jwt.MapClaims{
+		"user_id":    "user-1",
+		"tenant_id":  1,
+		"session_id": "sess",
+		"token_id":   "tok-1",
+		"type":       sandboxTerminalTicketType,
+		"exp":        time.Now().Add(time.Minute).Unix(),
+	})
+
+	_, _, err := svc.ValidateToken(ctx, ticket)
+	if err == nil || err.Error() != "terminal ticket cannot be used as access token" {
+		t.Fatalf("ValidateToken(terminal ticket) err = %v, want terminal ticket rejection", err)
+	}
+}
+
+func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	refreshJWT := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "refresh",
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	})
+	tokenRepo.tokens[refreshJWT] = &types.AuthToken{
+		UserID:    "user-1",
+		Token:     refreshJWT,
+		TokenType: "access_token",
+	}
+
+	_, _, err := svc.RefreshToken(ctx, refreshJWT)
+	if err == nil || err.Error() != "not a refresh token" {
+		t.Fatalf("RefreshToken(access token record) err = %v, want not a refresh token", err)
+	}
+}
+
+func TestLogoutRevokesAllUserTokens(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	expiredAccess := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "access",
+		"exp":     time.Now().Add(-time.Hour).Unix(),
+	})
+
+	if err := svc.Logout(ctx, expiredAccess); err != nil {
+		t.Fatalf("Logout(expired access token) err = %v", err)
+	}
+	if len(tokenRepo.revokedUserIDs) != 1 || tokenRepo.revokedUserIDs[0] != "user-1" {
+		t.Fatalf("RevokeTokensByUserID calls = %v, want [user-1]", tokenRepo.revokedUserIDs)
+	}
+}
+
+func TestAdminResetPasswordHashesPasswordAndRevokesSessions(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	repo := svc.userRepo.(*stubUserRepoForAuth)
+
+	if err := svc.AdminResetPassword(ctx, "user-1", "NewSecure9"); err != nil {
+		t.Fatalf("AdminResetPassword() err = %v", err)
+	}
+	if repo.updateCalls != 1 {
+		t.Fatalf("UpdateUser calls = %d, want 1", repo.updateCalls)
+	}
+	user := repo.users["user-1"]
+	if user.PasswordHash == "NewSecure9" || user.PasswordHash == "" {
+		t.Fatalf("password was not stored as a hash")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte("NewSecure9")); err != nil {
+		t.Fatalf("stored hash does not match new password: %v", err)
+	}
+	if len(tokenRepo.revokedUserIDs) != 1 || tokenRepo.revokedUserIDs[0] != "user-1" {
+		t.Fatalf("RevokeTokensByUserID calls = %v, want [user-1]", tokenRepo.revokedUserIDs)
+	}
+}
+
+func TestAdminResetPasswordRejectsWeakPasswordBeforeWrite(t *testing.T) {
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	repo := svc.userRepo.(*stubUserRepoForAuth)
+
+	err := svc.AdminResetPassword(context.Background(), "user-1", "password")
+	if !errors.Is(err, ErrPasswordPolicy) {
+		t.Fatalf("AdminResetPassword() err = %v, want ErrPasswordPolicy", err)
+	}
+	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+		t.Fatalf("weak password caused side effects: updates=%d revocations=%v",
+			repo.updateCalls, tokenRepo.revokedUserIDs)
+	}
+}
+
+func TestChangePasswordRequiresPolicyAndRevokesSessions(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	repo := svc.userRepo.(*stubUserRepoForAuth)
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte("OldSecure9"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	repo.users["user-1"].PasswordHash = string(hashed)
+
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "weak"); !errors.Is(err, ErrPasswordPolicy) {
+		t.Fatalf("ChangePassword(weak) err = %v, want ErrPasswordPolicy", err)
+	}
+	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+		t.Fatalf("weak password caused side effects: updates=%d revocations=%v",
+			repo.updateCalls, tokenRepo.revokedUserIDs)
+	}
+
+	if err := svc.ChangePassword(ctx, "user-1", "wrong-pass", "NewSecure9"); !errors.Is(err, ErrInvalidOldPassword) {
+		t.Fatalf("ChangePassword(wrong old) err = %v, want ErrInvalidOldPassword", err)
+	}
+
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "NewSecure9"); err != nil {
+		t.Fatalf("ChangePassword() err = %v", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(repo.users["user-1"].PasswordHash), []byte("NewSecure9")); err != nil {
+		t.Fatalf("stored hash does not match new password: %v", err)
+	}
+	if len(tokenRepo.revokedUserIDs) != 1 || tokenRepo.revokedUserIDs[0] != "user-1" {
+		t.Fatalf("revoked users = %v, want [user-1]", tokenRepo.revokedUserIDs)
+	}
+}
+
+func TestChangePasswordRejectsSamePassword(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	repo := svc.userRepo.(*stubUserRepoForAuth)
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte("OldSecure9"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	repo.users["user-1"].PasswordHash = string(hashed)
+
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "OldSecure9"); !errors.Is(err, ErrSamePassword) {
+		t.Fatalf("ChangePassword(same) err = %v, want ErrSamePassword", err)
+	}
+	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+		t.Fatalf("same password caused side effects: updates=%d revocations=%v", repo.updateCalls, tokenRepo.revokedUserIDs)
+	}
+}
+
+func TestChangePasswordHonoursRuntimeComplexPolicy(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.systemSettingSvc = &stubComplexPasswordSettings{enabled: true}
+	repo := svc.userRepo.(*stubUserRepoForAuth)
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte("OldSecure9"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	repo.users["user-1"].PasswordHash = string(hashed)
+
+	if err := svc.ChangePassword(ctx, "user-1", "wrong-pass", "weak"); !errors.Is(err, ErrInvalidOldPassword) {
+		t.Fatalf("ChangePassword(wrong old, weak new) err = %v, want ErrInvalidOldPassword", err)
+	}
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "NewSecure9"); !errors.Is(err, ErrComplexPasswordPolicy) {
+		t.Fatalf("ChangePassword(simple new) err = %v, want ErrComplexPasswordPolicy", err)
+	}
+	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+		t.Fatalf("complex-policy reject caused side effects: updates=%d revocations=%v",
+			repo.updateCalls, tokenRepo.revokedUserIDs)
+	}
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "NewSecure9!"); err != nil {
+		t.Fatalf("ChangePassword(complex new) err = %v", err)
+	}
+}
+
+func TestUserIDFromSignedTokenAcceptsExpiredToken(t *testing.T) {
+	expired := signTestJWT(jwt.MapClaims{
+		"user_id": "user-1",
+		"type":    "access",
+		"exp":     time.Now().Add(-time.Hour).Unix(),
+	})
+
+	userID, err := userIDFromSignedToken(expired)
+	if err != nil {
+		t.Fatalf("userIDFromSignedToken(expired) err = %v", err)
+	}
+	if userID != "user-1" {
+		t.Fatalf("userIDFromSignedToken(expired) = %q, want user-1", userID)
+	}
+}
+
+func TestGetAccessTokenLookupsRedactJWT(t *testing.T) {
+	ctx := context.Background()
+	raw := "jwt-secret-value"
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{
+		raw: {
+			ID:        "tok-1",
+			UserID:    "user-1",
+			Token:     raw,
+			TokenType: "access_token",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	byValue, err := svc.GetAccessTokenByValue(ctx, raw)
+	if err != nil {
+		t.Fatalf("GetAccessTokenByValue: %v", err)
+	}
+	if byValue.ID != "tok-1" || byValue.Token != "" {
+		t.Fatalf("GetAccessTokenByValue = %+v, want id tok-1 with redacted token", byValue)
+	}
+
+	byID, err := svc.GetAccessTokenByID(ctx, "tok-1")
+	if err != nil {
+		t.Fatalf("GetAccessTokenByID: %v", err)
+	}
+	if byID.ID != "tok-1" || byID.Token != "" {
+		t.Fatalf("GetAccessTokenByID = %+v, want id tok-1 with redacted token", byID)
+	}
+}
+
+func (s *stubUserRepoForAuth) SetUserActive(context.Context, string, string, bool) (*types.User, error) {
+	panic("unexpected SetUserActive call")
+}
+
+func TestValidateTokenRejectsDisabledAccount(t *testing.T) {
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	user := svc.userRepo.(*stubUserRepoForAuth).users["user-1"]
+	access := signTestJWT(jwt.MapClaims{"user_id": user.ID, "type": "access", "exp": time.Now().Add(time.Hour).Unix()})
+	tokenRepo.tokens[access] = &types.AuthToken{UserID: user.ID, Token: access, TokenType: "access_token"}
+	if _, _, err := svc.ValidateToken(context.Background(), access); err != nil {
+		t.Fatalf("active account rejected: %v", err)
+	}
+	user.IsActive = false
+	_, _, err := svc.ValidateToken(context.Background(), access)
+	if err == nil || err.Error() != "account is disabled" {
+		t.Fatalf("disabled account with unrevoked token: got %v", err)
+	}
+}

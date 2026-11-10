@@ -1,0 +1,23 @@
+[Unit]
+Description=WeKnora Lite - Knowledge Base Management System
+After=network.target
+
+[Service]
+Type=simple
+User=weknora
+Group=weknora
+WorkingDirectory=/opt/weknora
+EnvironmentFile=/opt/weknora/.env.lite
+ExecStart=/opt/weknora/WeKnora-lite
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/weknora/data
+
+[Install]
+WantedBy=multi-user.target

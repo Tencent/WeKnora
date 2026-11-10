@@ -1,0 +1,1970 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	stderrors "errors"
+	"io"
+	"maps"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/errors"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/storageurl"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
+)
+
+// KnowledgeBaseHandler defines the HTTP handler for knowledge base operations
+type KnowledgeBaseHandler struct {
+	cfg                *config.Config
+	service            interfaces.KnowledgeBaseService
+	profileService     interfaces.KnowledgeBaseProfileService
+	knowledgeService   interfaces.KnowledgeService
+	kbShareService     interfaces.KBShareService
+	agentShareService  interfaces.AgentShareService
+	asynqClient        interfaces.TaskEnqueuer
+	vectorStoreService interfaces.VectorStoreService // enriches KB responses with bound store display
+	// userService 仅在 list 类接口里用于批量回填 creator_name；
+	// 真正的鉴权由 RBAC 中间件 + Lookup 完成，这里不参与决策。
+	userService interfaces.UserService
+	// fileService and storageResolver back the optional `resource_urls=public`
+	// mode on hybrid-search. Both may be nil in tests, in which case only the
+	// default handle mode is available.
+	fileService     interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
+}
+
+// NewKnowledgeBaseHandler creates a new knowledge base handler instance
+func NewKnowledgeBaseHandler(
+	cfg *config.Config,
+	service interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
+	kbShareService interfaces.KBShareService,
+	agentShareService interfaces.AgentShareService,
+	asynqClient interfaces.TaskEnqueuer,
+	vectorStoreService interfaces.VectorStoreService,
+	userService interfaces.UserService,
+	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	profileService interfaces.KnowledgeBaseProfileService,
+) *KnowledgeBaseHandler {
+	return &KnowledgeBaseHandler{
+		cfg:                cfg,
+		profileService:     profileService,
+		service:            service,
+		knowledgeService:   knowledgeService,
+		kbShareService:     kbShareService,
+		agentShareService:  agentShareService,
+		asynqClient:        asynqClient,
+		vectorStoreService: vectorStoreService,
+		userService:        userService,
+		fileService:        fileService,
+		storageResolver:    storageResolver,
+	}
+}
+
+// resolveResourceRewriter builds the storage-reference rewriter for one response
+// from the request's `resource_urls` parameter, falling back to the deployment
+// default. The returned error is already an AppError the caller can hand to
+// c.Error: a rejected scope is a 403, a typo in the parameter is a 400.
+func (h *KnowledgeBaseHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Rewriter, error) {
+	ctx := c.Request.Context()
+	mode, err := storageurl.ResolveMode(ctx, c.Query(storageurl.QueryParam))
+	if err != nil {
+		if stderrors.Is(err, storageurl.ErrPublicModeForbidden) {
+			return nil, apperrors.NewForbiddenError(err.Error())
+		}
+		return nil, apperrors.NewBadRequestError(err.Error())
+	}
+	return storageurl.NewRequestRewriter(ctx, mode, h.fileService, h.storageResolver), nil
+}
+
+// buildKBResponse turns a knowledge base into a JSON-ready response shape,
+// merging the bound vector store's display metadata and any caller-supplied
+// extras (e.g., my_permission for shared KBs). Returns the kb pointer
+// unchanged on serialization failure so the request still succeeds.
+//
+// The map-merge approach (rather than a wrapper struct embedding the kb)
+// is deliberate: KnowledgeBase has a custom MarshalJSON, and embedding
+// would promote it to any wrapper struct and silently swallow the extra
+// fields. The same pattern is already used by GetKnowledgeBase to add the
+// my_permission field for shared knowledge bases.
+//
+// Shared-KB suppression: when storeView.Source == StoreSourceShared (the
+// caller is not the KB owner), the raw vector_store_id UUID is stripped
+// from the response so the owner-tenant's store inventory cannot be
+// correlated across multiple shared KBs. Name / engine type / status are
+// already empty in the SharedStoreDisplay payload; suppressing the UUID
+// completes the cross-tenant metadata hiding.
+func buildKBResponse(
+	kb *types.KnowledgeBase,
+	storeView types.StoreDisplay,
+	extras map[string]interface{},
+) interface{} {
+	b, err := json.Marshal(kb)
+	if err != nil {
+		return kb
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil || m == nil {
+		return kb
+	}
+	if storeView.Source == types.StoreSourceShared {
+		delete(m, "vector_store_id")
+	}
+	if storeView.Name != "" {
+		m["vector_store_name"] = storeView.Name
+	}
+	if storeView.Source != "" {
+		m["vector_store_source"] = storeView.Source
+	}
+	if storeView.EngineType != "" {
+		m["vector_store_engine_type"] = storeView.EngineType
+	}
+	if storeView.Status != "" {
+		m["vector_store_status"] = storeView.Status
+	}
+	for k, v := range extras {
+		m[k] = v
+	}
+	return m
+}
+
+// buildKBListResponse turns a slice of knowledge bases into a JSON-ready
+// slice that mirrors the single-KB enrichment in buildKBResponse. Store
+// views are batch-resolved once via BatchResolveStoreView to keep the
+// list endpoint O(1) in vector-store service calls — the per-KB
+// resolveKBStoreView would otherwise be N+1.
+//
+// Caller-vs-owner semantics match the single-KB path:
+//   - KB has no binding         → DefaultStoreDisplay()
+//   - KB is owned by another tenant (cross-tenant shared) → SharedStoreDisplay()
+//   - KB is own-tenant bound    → look up in the batch result; misses
+//     fall back to UnavailableStoreDisplay()
+//
+// Resolver failures degrade gracefully: every own-tenant bound KB renders
+// as unavailable instead of breaking the list response.
+func (h *KnowledgeBaseHandler) buildKBListResponse(
+	ctx context.Context, kbs []*types.KnowledgeBase, callerTenantID uint64,
+) []interface{} {
+	defaultView := h.envDefaultStoreView(ctx)
+	storeViews := h.batchResolveKBStoreViews(ctx, kbs, callerTenantID)
+	out := make([]interface{}, 0, len(kbs))
+	for _, kb := range kbs {
+		var view types.StoreDisplay
+		switch {
+		case !kb.HasVectorStore():
+			view = defaultView
+		case kb.TenantID != callerTenantID:
+			view = types.SharedStoreDisplay()
+		default:
+			v, ok := storeViews[*kb.VectorStoreID]
+			if !ok || v.Source == "" {
+				view = types.UnavailableStoreDisplay()
+			} else {
+				view = v
+			}
+		}
+		out = append(out, buildKBResponse(kb, view, nil))
+	}
+	return out
+}
+
+// sharedKBRow projects a SharedKnowledgeBaseInfo into a response payload
+// that respects the cross-tenant strip rule: the embedded KnowledgeBase
+// row runs through buildKBResponse with SharedStoreDisplay() so its
+// vector_store_id and any owner-tenant store metadata never reach the
+// wire. The share-record fields (share_id, organization_id, etc.) are
+// kept intact alongside the stripped KB. Callers can pass extras to
+// merge view-specific keys such as is_mine or source_from_agent.
+//
+// Always uses SharedStoreDisplay() regardless of whether the caller is
+// the owner; the cross-tenant share endpoints serve mixed audiences and
+// the owner's "rich" view of their own bindings is already served by
+// ListKnowledgeBases / single-KB GET on the standard knowledge-base
+// routes. Trying to enrich own-row entries here would either require
+// threading the vector-store service through the organization handler
+// or duplicating the lookup logic — both larger than the security fix
+// warrants and easy to follow up on once needed.
+func sharedKBRow(
+	info *types.SharedKnowledgeBaseInfo, extras map[string]interface{},
+) map[string]interface{} {
+	kbView := buildKBResponse(info.KnowledgeBase, types.SharedStoreDisplay(), nil)
+	row := map[string]interface{}{
+		"knowledge_base":   kbView,
+		"share_id":         info.ShareID,
+		"organization_id":  info.OrganizationID,
+		"org_name":         info.OrgName,
+		"permission":       info.Permission,
+		"source_tenant_id": info.SourceTenantID,
+		"shared_at":        info.SharedAt,
+	}
+	for k, v := range extras {
+		row[k] = v
+	}
+	return row
+}
+
+// envDefaultStoreView returns the env-fallback store display enriched with
+// the configured env-store engine type when the service is available. The
+// service path populates EngineType so the caller can show "postgres" or
+// "qdrant" on the env-default badge instead of leaving it blank. A nil
+// service (e.g. in narrow unit-test setups) falls back to the bare default
+// display rather than failing the list response.
+func (h *KnowledgeBaseHandler) envDefaultStoreView(ctx context.Context) types.StoreDisplay {
+	if h.vectorStoreService == nil {
+		return types.DefaultStoreDisplay()
+	}
+	return h.vectorStoreService.EnvDefaultStoreView(ctx)
+}
+
+// batchResolveKBStoreViews collects the unique own-tenant store IDs across
+// the KB slice and resolves them in one BatchResolveStoreView call.
+// Cross-tenant shared KBs never enter the batch — they always render
+// via SharedStoreDisplay, which deliberately suppresses the owner
+// tenant's store name and engine type so cross-tenant viewers cannot
+// correlate the owner's store inventory from KB responses alone.
+func (h *KnowledgeBaseHandler) batchResolveKBStoreViews(
+	ctx context.Context, kbs []*types.KnowledgeBase, callerTenantID uint64,
+) map[string]types.StoreDisplay {
+	if h.vectorStoreService == nil {
+		return nil
+	}
+	storeIDs := make([]string, 0, len(kbs))
+	seen := make(map[string]bool, len(kbs))
+	for _, kb := range kbs {
+		if !kb.HasVectorStore() || kb.TenantID != callerTenantID {
+			continue
+		}
+		sid := *kb.VectorStoreID
+		if !seen[sid] {
+			seen[sid] = true
+			storeIDs = append(storeIDs, sid)
+		}
+	}
+	if len(storeIDs) == 0 {
+		return nil
+	}
+	views, err := h.vectorStoreService.BatchResolveStoreView(ctx, callerTenantID, storeIDs)
+	if err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"tenant_id":   callerTenantID,
+			"store_count": len(storeIDs),
+		}, "[kb.list] batch store view resolve failed; rendering bound KBs as unavailable")
+		return nil
+	}
+	return views
+}
+
+// resolveKBStoreView returns the store display payload to embed in the KB
+// response. It applies two policies on top of the service-level resolver:
+//
+//   - When the KB does not have a DB-managed vector store binding,
+//     the env-fallback display is returned without touching the service.
+//   - When the caller is not the KB owner (shared access), the underlying
+//     store's name and engine are suppressed so operator-chosen names do
+//     not leak across tenants. The Source value is set to "shared".
+//
+// On resolution error, an unavailable display is returned and the failure
+// is logged for ops; the request itself still succeeds.
+func (h *KnowledgeBaseHandler) resolveKBStoreView(
+	ctx context.Context, kb *types.KnowledgeBase, callerTenantID uint64,
+) types.StoreDisplay {
+	if !kb.HasVectorStore() {
+		return h.envDefaultStoreView(ctx)
+	}
+	if kb.TenantID != callerTenantID {
+		return types.SharedStoreDisplay()
+	}
+	if h.vectorStoreService == nil {
+		return types.UnavailableStoreDisplay()
+	}
+	view, err := h.vectorStoreService.ResolveStoreView(ctx, kb.TenantID, *kb.VectorStoreID)
+	if err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"kb_id":     secutils.SanitizeForLog(kb.ID),
+			"tenant_id": kb.TenantID,
+		}, "[kb.view] vector store resolve failed; returning unavailable")
+		return types.UnavailableStoreDisplay()
+	}
+	return view
+}
+
+// KnowledgeBaseJSON is the encoding/json form of a knowledge base: the struct
+// fields plus the computed capabilities object added by MarshalJSON.
+// Doc-only; handlers still serialize *types.KnowledgeBase directly.
+type KnowledgeBaseJSON struct {
+	types.KnowledgeBase
+	Capabilities types.KBCapabilities `json:"capabilities"`
+}
+
+// KnowledgeBaseView is KnowledgeBaseJSON plus the optional vector-store
+// display fields buildKBResponse merges in. Shared responses omit
+// vector_store_id; owned responses include it via the embedded struct.
+type KnowledgeBaseView struct {
+	KnowledgeBaseJSON
+	VectorStoreName       string `json:"vector_store_name,omitempty"`
+	VectorStoreSource     string `json:"vector_store_source,omitempty"`
+	VectorStoreEngineType string `json:"vector_store_engine_type,omitempty"`
+	VectorStoreStatus     string `json:"vector_store_status,omitempty"`
+	// MyPermission is the caller's role on a knowledge base shared from
+	// another workspace; GET /knowledge-bases/{id} sets it.
+	MyPermission string `json:"my_permission,omitempty" enums:"admin,editor,viewer" extensions:"x-agent"`
+}
+
+// HybridSearchResponse is the hybrid-search body. meta is set only when the
+// request enabled rerank.
+type HybridSearchResponse struct {
+	Success bool                  `json:"success" example:"true"`
+	Data    []*types.SearchResult `json:"data"`
+	Meta    *types.RetrievalMeta  `json:"meta,omitempty"`
+}
+
+// DuplicateKnowledgeBaseData is the data object of POST /knowledge-bases/{id}/duplicate.
+type DuplicateKnowledgeBaseData struct {
+	SourceID      string            `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID      string            `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Message       string            `json:"message" extensions:"x-agent"`
+	KnowledgeBase KnowledgeBaseView `json:"knowledge_base"`
+}
+
+// ImageAttrSchemaData is the data object of GET /image-attrs/schema.
+type ImageAttrSchemaData struct {
+	Version        string                   `json:"version"`
+	Prompt         string                   `json:"prompt"`
+	Attributes     []types.AttrSpec         `json:"attributes"`
+	DefaultActions types.ImageActionsConfig `json:"default_actions"`
+}
+
+// HybridSearch godoc
+// @Summary      混合搜索
+// @Description  底层召回：向量+关键词混合检索，默认不 rerank（可用 rerank 字段开启）；一般检索请用 /knowledge-search。推荐 POST，GET 带 JSON 体仅兼容旧客户端。
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id             path      string             true   "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        request        body      types.SearchParams true   "搜索参数"
+// @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
+// @Success      200            {object}  handler.HybridSearchResponse  "搜索结果"
+// @Failure      400            {object}  errors.AppError               "请求参数错误"
+// @Failure      404            {object}  errors.AppError               "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.search","risk":"probe","method":"post","max_items":30}
+// @x-agent-hint "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
+// @Router       /knowledge-bases/{id}/hybrid-search [post]
+// @Router       /knowledge-bases/{id}/hybrid-search [get]
+func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Start hybrid search")
+
+	// Validate and check permission for knowledge base access
+	_, id, effectiveTenantID, _, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	// Parse request body
+	limitJSONBody(c, hybridSearchJSONMaxBytes)
+	var req types.SearchParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	precomputedVectorOnly := len(req.QueryEmbedding) > 0 && req.DisableKeywordsMatch && !req.DisableVectorMatch
+	if strings.TrimSpace(req.QueryText) == "" && !precomputedVectorOnly {
+		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
+		return
+	}
+	if err := req.Rerank.Validate(); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.Rerank.IsEnabled() && strings.TrimSpace(req.QueryText) == "" {
+		// The rerank model scores passages against the query text.
+		_ = c.Error(apperrors.NewBadRequestError("query_text is required when rerank is enabled"))
+		return
+	}
+
+	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
+		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
+
+	// Resolve before retrieving so a typo or a rejected scope costs nothing.
+	rewriter, err := h.resolveResourceRewriter(c)
+	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
+		return
+	}
+
+	// Execute hybrid search. Without a rerank object this is the raw recall
+	// primitive it has always been; with one, the response carries meta.
+	// Note: For shared KBs, the service uses effectiveTenantID internally via context
+	var retrieval *types.RetrievalResult
+	if req.Rerank != nil {
+		retrieval, err = h.service.HybridSearchWithRerank(c.Request.Context(), id, req)
+	} else {
+		var results []*types.SearchResult
+		results, err = h.service.HybridSearch(c.Request.Context(), id, req)
+		retrieval = &types.RetrievalResult{Results: results}
+	}
+	if err != nil {
+		// Service-layer typed AppErrors (e.g. ErrVectorStoreBindingInvalid,
+		// ErrVectorStoreUnavailable, BadRequest from multi-store fan-out)
+		// must reach the client with their original code rather than be
+		// downgraded to InternalServerError. Mirrors the pattern used in
+		// CreateKnowledgeBase.
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Hybrid search completed, knowledge base ID: %s, result count: %d",
+		secutils.SanitizeForLog(id), len(retrieval.Results))
+	response := gin.H{
+		"success": true,
+		"data":    rewriter.CopyReferences(ctx, retrieval.Results),
+	}
+	if retrieval.Meta.Rerank != nil {
+		response["meta"] = retrieval.Meta
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+// CreateKnowledgeBase godoc
+// @Summary      创建知识库
+// @Description  创建新的知识库
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.KnowledgeBase  true  "知识库信息"
+// @Success      201      {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "创建的知识库"
+// @Failure      400      {object}  errors.AppError                                      "请求参数错误"
+// @Failure      500      {object}  errors.AppError                                      "服务器错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.create","risk":"write","label_param":"name"}
+// @x-agent-hint "Creates a knowledge base owned by the user. Omit type for document. Omit indexing flags for vector and keyword search. Set embedding_model_id and summary_model_id from model.list. vector_store_id can be chosen only now. A field you leave out keeps its default."
+// @Router       /knowledge-bases [post]
+func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Start creating knowledge base")
+
+	// Parse request body
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	var req types.KnowledgeBase
+	if err := json.Unmarshal(body, &req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		_ = c.Error(apperrors.NewBadRequestError("name cannot be empty"))
+		return
+	}
+	// A partial indexing_strategy must not turn the omitted pipelines off.
+	// Missing flags keep the defaults: vector and keyword on, wiki and graph off.
+	fillOmittedIndexingFlags(body, &req)
+	if err := validateExtractConfig(req.ExtractConfig); err != nil {
+		logger.Error(ctx, "Invalid extract configuration", err)
+		c.Error(err)
+		return
+	}
+	types.NormalizeKnowledgeBasePromptInstructions(&req)
+	if err := validateKnowledgeBasePromptInstructions(&req); err != nil {
+		c.Error(err)
+		return
+	}
+	provider := strings.ToLower(strings.TrimSpace(req.GetStorageProvider()))
+	if provider != "" && !isStorageProviderAllowed(provider) {
+		c.Error(apperrors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
+		return
+	}
+
+	logger.Infof(ctx, "Creating knowledge base, name: %s", secutils.SanitizeForLog(req.Name))
+	// Create knowledge base using the service
+	kb, err := h.service.CreateKnowledgeBase(ctx, &req)
+	if err != nil {
+		// Surface typed AppErrors (notably the 400-class codes
+		// ErrVectorStoreBindingInvalid and ErrVectorStoreUnavailable
+		// returned by validateVectorStoreBinding) instead of wrapping them
+		// into a generic 500. The middleware renders the original code and
+		// HTTP status verbatim. Falls through to 500 only for raw infra
+		// errors that the service did not classify.
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s",
+		secutils.SanitizeForLog(kb.ID), secutils.SanitizeForLog(kb.Name))
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+	})
+}
+
+// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base.
+// Enforces per-API-key KB scope before tenant/share/agent resolution.
+// Returns the knowledge base, knowledge base ID, effective tenant ID for embedding, permission level, and any errors encountered
+// For owned KBs, effectiveTenantID is the caller's tenant ID
+// For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
+func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(
+	c *gin.Context,
+) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
+	id := secutils.SanitizeForLog(c.Param("id"))
+	grant, err := resolveHandlerKBAccess(c, id, h.service, h.kbShareService, h.agentShareService)
+	if err != nil {
+		return nil, id, 0, "", err
+	}
+	return grant.KnowledgeBase, id, grant.EffectiveTenantID, grant.Permission, nil
+}
+
+// GetKnowledgeBase godoc
+// @Summary      获取知识库详情
+// @Description  根据ID获取知识库详情。当使用共享智能体时，可传 agent_id 以校验该智能体是否有权访问该知识库。
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id         path      string  true   "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        agent_id   query     string  false  "共享智能体 ID（用于校验智能体是否有权访问该知识库）"
+// @Success      200  {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "知识库详情"
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Failure      403  {object}  errors.AppError  "无权访问知识库"
+// @Failure      404  {object}  errors.AppError  "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.get","risk":"read"}
+// @x-agent-hint "Check which indexes are enabled (vector, keyword, Wiki, graph) and whether documents are processing."
+// @Router       /knowledge-bases/{id} [get]
+func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
+	// Validate and get the knowledge base
+	kb, _, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	// Fill counts (knowledge_count, chunk_count, is_processing) so hover/detail shows correct numbers
+	if fillErr := h.service.FillKnowledgeBaseCounts(c.Request.Context(), kb); fillErr != nil {
+		logger.Warnf(c.Request.Context(), "Failed to fill KB counts for %s: %v", kb.ID, fillErr)
+	}
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	storeView := h.resolveKBStoreView(c.Request.Context(), kb, tenantID)
+	var extras map[string]interface{}
+	if kb.TenantID != tenantID && permission != "" {
+		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
+		extras = map[string]interface{}{"my_permission": permission}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
+}
+
+// ListKnowledgeBases godoc
+// @Summary      获取知识库列表
+// @Description  获取当前空间的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        agent_id  query     string  false  "共享智能体 ID（传入时返回该智能体可用的知识库）"
+// @Param        creator   query     string  false  "按创建者过滤，仅 mine 与 others 生效"  Enums(mine, others)
+// @Success      200       {object}  handler.DataResponse{data=[]handler.KnowledgeBaseView}  "知识库列表"
+// @Failure      400       {object}  errors.AppError                                         "请求参数错误"
+// @Failure      500       {object}  errors.AppError                                         "服务器错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.list","risk":"read","max_items":200}
+// @x-agent-hint "The workspace's own knowledge bases, up to 200. Ones shared from other workspaces are in knowledge_base.list_shared."
+// @Router       /knowledge-bases [get]
+func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	agentID := c.Query("agent_id")
+	if agentID != "" {
+		agent, err := resolveSharedAgentForRequest(c, agentID, h.agentShareService)
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+		currentTenantID := middleware.KBAccessRequest(c).Caller.TenantID
+		scope := types.NewSharedAgentKBScope(agent)
+		if scope.IsEmpty() {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": []interface{}{}})
+			return
+		}
+		kbs, err := h.service.ListKnowledgeBasesByTenantID(ctx, agent.TenantID)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(apperrors.NewInternalServerError(err.Error()))
+			return
+		}
+		kbs = filterKnowledgeBasesForSharedAgent(kbs, agent)
+		kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    h.buildKBListResponse(ctx, kbs, currentTenantID),
+		})
+		return
+	}
+
+	// Get all knowledge bases for this tenant
+	kbs, err := h.service.ListKnowledgeBases(ctx)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	// Optional creator filter — drives the [All | Mine | Others] segmented
+	// control on the list page. We filter in-process rather than pushing
+	// down into SQL because the tenant-bounded KB list is small (typically
+	// <100 rows) and adding a creator predicate to ListKnowledgeBases would
+	// ripple through every other caller (chat pipeline, agent editor, …).
+	// Rows with empty CreatorID predate the RBAC migration (PR 5); we treat
+	// them as "not anyone in particular" so they never appear under "mine"
+	// or "others" — they fall out of both filters cleanly.
+	creatorFilter := strings.ToLower(strings.TrimSpace(c.Query("creator")))
+	if creatorFilter == "mine" || creatorFilter == "others" {
+		callerUserID, _ := c.Get(types.UserIDContextKey.String())
+		callerUserIDStr, _ := callerUserID.(string)
+		filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+		for _, kb := range kbs {
+			if kb.CreatorID == "" {
+				continue
+			}
+			if creatorFilter == "mine" && kb.CreatorID == callerUserIDStr {
+				filtered = append(filtered, kb)
+			} else if creatorFilter == "others" && kb.CreatorID != callerUserIDStr {
+				filtered = append(filtered, kb)
+			}
+		}
+		kbs = filtered
+	}
+	kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
+
+	// Get share counts for all knowledge bases
+	if len(kbs) > 0 && h.kbShareService != nil {
+		kbIDs := make([]string, len(kbs))
+		for i, kb := range kbs {
+			kbIDs[i] = kb.ID
+		}
+
+		shareCounts, err := h.kbShareService.CountSharesByKnowledgeBaseIDs(ctx, kbIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to get share counts: %v", err)
+		} else {
+			for _, kb := range kbs {
+				if count, ok := shareCounts[kb.ID]; ok {
+					kb.ShareCount = count
+				}
+			}
+		}
+	}
+
+	// 批量回填 creator_name，让前端列表能区分「我创建」与「同空间其他成员创建」。
+	// 仅在 list 接口里回填，详情 / 编辑场景不依赖这个字段；解析失败（用户已删除、
+	// CreatorID 为空的老数据）就让字段为空，前端按 fallback 渲染。
+	enrichKBCreatorNames(ctx, h.userService, kbs)
+
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    h.buildKBListResponse(ctx, kbs, callerTenantID),
+	})
+}
+
+func filterKnowledgeBasesForAPIKeyScope(ctx context.Context, kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || len(scope.KnowledgeBaseIDs) == 0 {
+		return kbs
+	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil && scope.AllowsKnowledgeBase(kb.ID) {
+			filtered = append(filtered, kb)
+		}
+	}
+	return filtered
+}
+
+// enrichKBCreatorNames 把 KB 列表里的 CreatorID 批量解析成展示名（username
+// 优先，退化到 email）。任意一步失败都吞掉错误：creator_name 缺失只会影响
+// 卡片右下角的徽章展示，不该影响列表本身可用。
+func enrichKBCreatorNames(ctx context.Context, userSvc interfaces.UserService, kbs []*types.KnowledgeBase) {
+	if userSvc == nil || len(kbs) == 0 {
+		return
+	}
+	idSet := make(map[string]struct{}, len(kbs))
+	for _, kb := range kbs {
+		if kb.CreatorID != "" {
+			idSet[kb.CreatorID] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	users, err := userSvc.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve KB creator names: %v", err)
+		return
+	}
+	for _, kb := range kbs {
+		if kb.CreatorID == "" {
+			continue
+		}
+		u, ok := users[kb.CreatorID]
+		if !ok || u == nil {
+			continue
+		}
+		kb.CreatorName = pickUserDisplayName(u)
+	}
+}
+
+// pickUserDisplayName picks the field most users will recognise: Username
+// if present (it's required at registration), Email as a fallback. Used by
+// both KB and Agent list enrichment so the badge text stays consistent.
+func pickUserDisplayName(u *types.User) string {
+	if u == nil {
+		return ""
+	}
+	if u.Username != "" {
+		return u.Username
+	}
+	return u.Email
+}
+
+// TogglePinKnowledgeBase godoc
+// @Summary      置顶/取消置顶知识库
+// @Description  切换知识库的置顶状态
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id  path      string  true  "知识库ID"
+// @Success      200  {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "更新后的知识库"
+// @Failure      400  {object}  errors.AppError                                      "请求参数错误"
+// @Failure      404  {object}  errors.AppError                                      "知识库不存在"
+// @Failure      500  {object}  errors.AppError                                      "服务器错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/pin [put]
+func (h *KnowledgeBaseHandler) TogglePinKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := c.Param("id")
+	if id == "" {
+		c.Error(apperrors.NewBadRequestError("knowledge base ID is required"))
+		return
+	}
+
+	kb, err := h.service.TogglePinKnowledgeBase(ctx, id)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(apperrors.NewNotFoundError("knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+	})
+}
+
+// UpdateKnowledgeBaseRequest defines the request body structure for updating a knowledge base
+type UpdateKnowledgeBaseRequest struct {
+	Name        string                     `json:"name"        binding:"required"`
+	Description string                     `json:"description"`
+	Config      *types.KnowledgeBaseConfig `json:"config"`
+	// VLMConfig updates the knowledge base's multimodal (vision) config.
+	// Optional: nil means "no change", mirroring how CreateKnowledgeBase
+	// accepts a top-level vlm_config.
+	VLMConfig             *types.VLMConfig `json:"vlm_config"`
+	questionModelProvided bool
+}
+
+// UnmarshalJSON retains whether an older client supplied the question-model binding.
+func (r *UpdateKnowledgeBaseRequest) UnmarshalJSON(data []byte) error {
+	type plain UpdateKnowledgeBaseRequest
+	if err := json.Unmarshal(data, (*plain)(r)); err != nil {
+		return err
+	}
+	var payload struct {
+		Config struct {
+			Questions map[string]json.RawMessage `json:"question_generation_config"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	_, r.questionModelProvided = payload.Config.Questions["model_id"]
+	return nil
+}
+
+// UpdateKnowledgeBase godoc
+// @Summary      更新知识库
+// @Description  更新知识库的名称、描述和配置
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                     true  "知识库ID"
+// @Param        request  body      UpdateKnowledgeBaseRequest true  "更新请求"
+// @Success      200      {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "更新后的知识库"
+// @Failure      400      {object}  errors.AppError                                      "请求参数错误"
+// @Failure      403      {object}  errors.AppError                                      "无权限"
+// @Failure      404      {object}  errors.AppError                                      "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id} [put]
+func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start updating knowledge base")
+
+	// Validate and get the knowledge base
+	currentKB, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	// Only admin/editor can update knowledge base
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+
+	// Parse request body
+	var req UpdateKnowledgeBaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	if !req.questionModelProvided && req.Config != nil && req.Config.QuestionGenerationConfig != nil &&
+		currentKB.QuestionGenerationConfig != nil {
+		req.Config.QuestionGenerationConfig.ModelID = currentKB.QuestionGenerationConfig.ModelID
+	}
+	if err := validateKnowledgeBaseSettingsUpdate(c, currentKB, req.Config, req.VLMConfig); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if req.Config != nil {
+		probe := &types.KnowledgeBase{
+			ChunkingConfig: req.Config.ChunkingConfig,
+			WikiConfig:     req.Config.WikiConfig,
+			ProfileConfig:  req.Config.ProfileConfig,
+		}
+		if req.Config.ImageProcessingConfig != nil {
+			probe.ImageProcessingConfig = *req.Config.ImageProcessingConfig
+		}
+		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
+			c.Error(err)
+			return
+		}
+	}
+
+	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s",
+		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
+
+	// Update the knowledge base
+	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config, req.VLMConfig)
+	if err != nil {
+		// A rejected vlm_config is the caller's mistake, not a server failure.
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+	})
+}
+
+// validateKnowledgeBaseSettingsUpdate applies the same settings permissions to
+// PUT and PATCH. Shared editors may edit content, while model settings require
+// an admin share. Only the owner workspace may change the storage binding.
+func validateKnowledgeBaseSettingsUpdate(
+	c *gin.Context, kb *types.KnowledgeBase, cfg *types.KnowledgeBaseConfig, vlm *types.VLMConfig,
+) error {
+	settings := vlm != nil || cfg != nil && (cfg.EmbeddingModelID != nil || cfg.SummaryModelID != nil ||
+		cfg.StorageBackendID != nil || cfg.ASRConfig != nil ||
+		questionModelBindingChanged(kb, cfg.QuestionGenerationConfig))
+	if !settings {
+		return nil
+	}
+	ownWorkspace, err := kbSettingsAccess(c, kb)
+	if err != nil {
+		return err
+	}
+	if !ownWorkspace && cfg != nil && cfg.StorageBackendID != nil &&
+		kbStorageBindingChanged(kb, *cfg.StorageBackendID, "") {
+		return apperrors.NewForbiddenError("只有知识库所属空间可以修改存储配置")
+	}
+	return nil
+}
+
+func questionModelBindingChanged(kb *types.KnowledgeBase, next *types.QuestionGenerationConfig) bool {
+	if next == nil {
+		return false
+	}
+	previous := ""
+	if kb.QuestionGenerationConfig != nil {
+		previous = kb.QuestionGenerationConfig.ModelID
+	}
+	return strings.TrimSpace(next.ModelID) != strings.TrimSpace(previous)
+}
+
+// PatchKnowledgeBaseRequest changes the settings it carries. A field left
+// out stays as it is, including fields inside chunking, indexing and models.
+type PatchKnowledgeBaseRequest struct {
+	// New name. Omit to keep the current one.
+	Name *string `json:"name" extensions:"x-agent"`
+	// New description. Omit to keep it; an empty string clears it.
+	Description *string `json:"description" extensions:"x-agent"`
+	// Embedding model. Cannot change after the knowledge base has documents.
+	EmbeddingModelID *string `json:"embedding_model_id" extensions:"x-agent=embedding_model_id"`
+	// Summary model. model.list returns the ids.
+	SummaryModelID *string `json:"summary_model_id" extensions:"x-agent=summary_model_id"`
+	// Storage instance to bind. Omit to keep the current one.
+	StorageBackendID *string `json:"storage_backend_id" extensions:"x-agent=storage_backend_id"`
+	// File extensions whose parser routing should change, e.g. ["pdf", "docx"]. Other file types keep their rules.
+	ParserFileTypes []string `json:"parser_file_types,omitempty" extensions:"x-agent,x-agent-maximum=20"`
+	// Engine name from knowledge_base.list_parser_engines; empty removes explicit routing for parser_file_types.
+	ParserEngine *string `json:"parser_engine,omitempty" extensions:"x-agent"`
+	// Treat the first XLSX row as headers. Requires parser_file_types including xlsx and an explicit parser_engine.
+	ParserXLSXFirstRowAsHeader *bool `json:"parser_xlsx_first_row_as_header,omitempty" extensions:"x-agent"`
+	// Run image captions in the default image pipeline. Set image_pipeline=default to select that pipeline.
+	ImageCaptionEnabled *bool `json:"image_caption_enabled,omitempty" extensions:"x-agent"`
+	// Run OCR in the default image pipeline. At least one of captions or OCR must stay enabled.
+	ImageOCREnabled *bool `json:"image_ocr_enabled,omitempty" extensions:"x-agent"`
+	// Chunking settings. Only the fields present are changed.
+	Chunking *types.ChunkingConfig `json:"chunking_config"`
+	// Indexing pipelines. A flag left out stays as it is.
+	Indexing *types.IndexingStrategy `json:"indexing_strategy"`
+	// Image description settings.
+	Image *types.ImageProcessingConfig `json:"image_processing_config"`
+	// FAQ indexing. Only for an FAQ knowledge base.
+	FAQ *types.FAQConfig `json:"faq_config"`
+	// Wiki page settings.
+	Wiki *types.WikiConfig `json:"wiki_config"`
+	// Automatic tagging.
+	AutoTag *types.AutoTagConfig `json:"auto_tag_config"`
+	// AI description of the knowledge base.
+	Profile *types.KnowledgeBaseProfileConfig `json:"profile_config"`
+	// Image captions.
+	VLM *types.VLMConfig `json:"vlm_config"`
+	// Speech transcription.
+	ASR *types.ASRConfig `json:"asr_config"`
+	// Graph extraction. Node types stay in the knowledge base editor.
+	Extract *types.ExtractConfig `json:"extract_config"`
+	// Generated questions for each chunk.
+	Questions *types.QuestionGenerationConfig `json:"question_generation_config"`
+}
+
+// knowledgeBaseUpdate is the merged result of a partial knowledge base edit.
+type knowledgeBaseUpdate struct {
+	Name        string
+	Description string
+	Config      *types.KnowledgeBaseConfig
+	VLM         *types.VLMConfig
+}
+
+// applyKnowledgeBasePatch overlays the JSON sections that are present onto
+// the stored knowledge base. Omitted flags and nested fields stay.
+func applyKnowledgeBasePatch(
+	kb *types.KnowledgeBase, patch PatchKnowledgeBaseRequest, sections map[string]json.RawMessage,
+) (knowledgeBaseUpdate, error) {
+	out := knowledgeBaseUpdate{Name: kb.Name, Description: kb.Description}
+	if patch.Name != nil {
+		out.Name = strings.TrimSpace(*patch.Name)
+		if out.Name == "" {
+			return out, apperrors.NewBadRequestError("name cannot be empty")
+		}
+	}
+	if patch.Description != nil {
+		out.Description = *patch.Description
+	}
+
+	cfg := &types.KnowledgeBaseConfig{ChunkingConfig: kb.ChunkingConfig}
+	used := false
+	merge := func(key string, dest any) error {
+		raw, ok := sections[key]
+		if !ok || len(raw) == 0 || string(raw) == "null" {
+			return nil
+		}
+		if err := json.Unmarshal(raw, dest); err != nil {
+			return apperrors.NewBadRequestError("invalid " + key).WithDetails(err.Error())
+		}
+		used = true
+		return nil
+	}
+
+	chunking := kb.ChunkingConfig
+	if err := merge("chunking_config", &chunking); err != nil {
+		return out, err
+	}
+	if patch.ParserFileTypes != nil || patch.ParserEngine != nil || patch.ParserXLSXFirstRowAsHeader != nil {
+		if err := applyParserRoutingPatch(&chunking, patch, sections); err != nil {
+			return out, err
+		}
+		used = true
+	}
+	cfg.ChunkingConfig = chunking
+
+	strategy := kb.IndexingStrategy
+	before := len(sections["indexing_strategy"])
+	if err := merge("indexing_strategy", &strategy); err != nil {
+		return out, err
+	}
+	if before > 0 && string(sections["indexing_strategy"]) != "null" {
+		cfg.IndexingStrategy = &strategy
+	}
+
+	image := kb.ImageProcessingConfig
+	image.ImagePipelineParams = maps.Clone(image.ImagePipelineParams)
+	if err := merge("image_processing_config", &image); err != nil {
+		return out, err
+	}
+	if patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
+		if types.ResolveImagePipelineID(&image) != types.ImagePipelineDefault {
+			return out, apperrors.NewBadRequestError(
+				"image_caption_enabled and image_ocr_enabled require image_pipeline=default",
+			)
+		}
+		if image.ImagePipelineParams == nil {
+			image.ImagePipelineParams = map[string]any{}
+		}
+		// The switch is stored under the slot of the pipeline that declares it,
+		// and nowhere else: a second spelling would be a setting with two homes,
+		// and the run reads only the slot. The keys come from the pipeline's own
+		// declaration rather than being spelled here, so a rename cannot leave
+		// this call site writing something nothing reads.
+		for key, value := range map[string]*bool{
+			service.ImageCaptionSwitchKey: patch.ImageCaptionEnabled,
+			service.ImageOCRSwitchKey:     patch.ImageOCREnabled,
+		} {
+			if value != nil {
+				image.ImagePipelineParams[types.SlotKey(string(types.ImagePipelineDefault), key)] = *value
+			}
+		}
+		used = true
+	}
+	if (len(
+		sections["image_processing_config"],
+	) > 0 && string(
+		sections["image_processing_config"],
+	) != "null") || patch.ImageCaptionEnabled != nil || patch.ImageOCREnabled != nil {
+		cfg.ImageProcessingConfig = &image
+	}
+
+	faq := types.FAQConfig{}
+	if kb.FAQConfig != nil {
+		faq = *kb.FAQConfig
+	}
+	if err := merge("faq_config", &faq); err != nil {
+		return out, err
+	}
+	if _, ok := sections["faq_config"]; ok && string(sections["faq_config"]) != "null" {
+		cfg.FAQConfig = &faq
+	}
+
+	wiki := types.WikiConfig{}
+	if kb.WikiConfig != nil {
+		wiki = *kb.WikiConfig
+	}
+	if err := merge("wiki_config", &wiki); err != nil {
+		return out, err
+	}
+	if _, ok := sections["wiki_config"]; ok && string(sections["wiki_config"]) != "null" {
+		cfg.WikiConfig = &wiki
+	}
+
+	autoTag := types.AutoTagConfig{}
+	if kb.AutoTagConfig != nil {
+		autoTag = *kb.AutoTagConfig
+	}
+	if err := merge("auto_tag_config", &autoTag); err != nil {
+		return out, err
+	}
+	if _, ok := sections["auto_tag_config"]; ok && string(sections["auto_tag_config"]) != "null" {
+		cfg.AutoTagConfig = &autoTag
+	}
+
+	profile := types.KnowledgeBaseProfileConfig{}
+	if kb.ProfileConfig != nil {
+		profile = *kb.ProfileConfig
+	}
+	if err := merge("profile_config", &profile); err != nil {
+		return out, err
+	}
+	if _, ok := sections["profile_config"]; ok && string(sections["profile_config"]) != "null" {
+		cfg.ProfileConfig = &profile
+	}
+
+	asr := kb.ASRConfig
+	if err := merge("asr_config", &asr); err != nil {
+		return out, err
+	}
+	if _, ok := sections["asr_config"]; ok && string(sections["asr_config"]) != "null" {
+		cfg.ASRConfig = &asr
+	}
+
+	extract := types.ExtractConfig{}
+	if kb.ExtractConfig != nil {
+		extract = *kb.ExtractConfig
+	}
+	if err := merge("extract_config", &extract); err != nil {
+		return out, err
+	}
+	if _, ok := sections["extract_config"]; ok && string(sections["extract_config"]) != "null" {
+		if err := validateExtractConfig(&extract); err != nil {
+			return out, err
+		}
+		cfg.ExtractConfig = &extract
+	}
+
+	questions := types.QuestionGenerationConfig{}
+	if kb.QuestionGenerationConfig != nil {
+		questions = *kb.QuestionGenerationConfig
+	}
+	if err := merge("question_generation_config", &questions); err != nil {
+		return out, err
+	}
+	if _, ok := sections["question_generation_config"]; ok && string(sections["question_generation_config"]) != "null" {
+		cfg.QuestionGenerationConfig = &questions
+	}
+
+	vlm := kb.VLMConfig
+	if err := merge("vlm_config", &vlm); err != nil {
+		return out, err
+	}
+	if _, ok := sections["vlm_config"]; ok && string(sections["vlm_config"]) != "null" {
+		out.VLM = &vlm
+	}
+
+	if patch.EmbeddingModelID != nil {
+		cfg.EmbeddingModelID = patch.EmbeddingModelID
+		used = true
+	}
+	if patch.SummaryModelID != nil {
+		cfg.SummaryModelID = patch.SummaryModelID
+		used = true
+	}
+	if patch.StorageBackendID != nil {
+		cfg.StorageBackendID = patch.StorageBackendID
+		used = true
+	}
+	if used {
+		out.Config = cfg
+	}
+	return out, nil
+}
+
+// fillOmittedIndexingFlags keeps DefaultIndexingStrategy for flags the
+// create body did not mention.
+func fillOmittedIndexingFlags(raw []byte, kb *types.KnowledgeBase) {
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return
+	}
+	strategyRaw, ok := body["indexing_strategy"]
+	if !ok || len(strategyRaw) == 0 || string(strategyRaw) == "null" {
+		return
+	}
+	var present map[string]json.RawMessage
+	if err := json.Unmarshal(strategyRaw, &present); err != nil {
+		return
+	}
+	defaults := types.DefaultIndexingStrategy()
+	if _, ok := present["vector_enabled"]; !ok {
+		kb.IndexingStrategy.VectorEnabled = defaults.VectorEnabled
+	}
+	if _, ok := present["keyword_enabled"]; !ok {
+		kb.IndexingStrategy.KeywordEnabled = defaults.KeywordEnabled
+	}
+	if _, ok := present["wiki_enabled"]; !ok {
+		kb.IndexingStrategy.WikiEnabled = defaults.WikiEnabled
+	}
+	if _, ok := present["graph_enabled"]; !ok {
+		kb.IndexingStrategy.GraphEnabled = defaults.GraphEnabled
+	}
+}
+
+// PatchKnowledgeBase godoc
+// @Summary      部分更新知识库
+// @Description  修改请求里出现的设置。未出现的字段保持不变，包括分块、索引和模型里没写到的项。
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                            true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        request  body      handler.PatchKnowledgeBaseRequest true  "要修改的字段"
+// @Success      200      {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "更新后的知识库"
+// @Failure      400      {object}  errors.AppError                                      "请求参数错误"
+// @Failure      403      {object}  errors.AppError                                      "无权限"
+// @Failure      404      {object}  errors.AppError                                      "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.update","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Changes the settings you send; a field left out is kept, including one indexing flag or one chunking field. Model ids come from model.list. embedding_model_id cannot change after documents exist. vector_store_id cannot be changed. Parsing settings (strategy, enable_parent_child, parent_chunk_size, child_chunk_size, VLM/ASR and question_generation_enabled/question_count) affect future parses; existing documents need an explicit knowledge.reparse or knowledge.batch_reparse. Read current settings first. For parser routing send parser_file_types and parser_engine from knowledge_base.list_parser_engines; empty parser_engine restores defaults. Use image_pipeline=smartocr for adaptive OCR, or default plus image_caption_enabled/image_ocr_enabled for manual image processing. Graph node types stay in the knowledge base editor."
+// @Router       /knowledge-bases/{id} [patch]
+func (h *KnowledgeBaseHandler) PatchKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	currentKB, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+	limitJSONBody(c, knowledgeBaseJSONMaxBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(apperrors.NewBadRequestError("request body is too large"))
+			return
+		}
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	var patch PatchKnowledgeBaseRequest
+	if err := json.Unmarshal(body, &patch); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(body, &sections); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	update, err := applyKnowledgeBasePatch(currentKB, patch, sections)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if err := validateKnowledgeBaseSettingsUpdate(c, currentKB, update.Config, update.VLM); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if update.Config != nil || update.VLM != nil {
+		probe := &types.KnowledgeBase{ChunkingConfig: currentKB.ChunkingConfig, VLMConfig: currentKB.VLMConfig}
+		if update.Config != nil {
+			probe.ChunkingConfig = update.Config.ChunkingConfig
+			probe.WikiConfig = update.Config.WikiConfig
+			probe.ProfileConfig = update.Config.ProfileConfig
+			if update.Config.ImageProcessingConfig != nil {
+				probe.ImageProcessingConfig = *update.Config.ImageProcessingConfig
+			}
+		}
+		if update.VLM != nil {
+			probe.VLMConfig = *update.VLM
+		}
+		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+	kb, err := h.service.UpdateKnowledgeBase(ctx, id, update.Name, update.Description, update.Config, update.VLM)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+	})
+}
+
+// GenerateKnowledgeBaseProfile godoc
+// @Summary      生成知识库描述
+// @Description  基于文档画像聚合，立即重新生成知识库的 AI 描述（不覆盖手写描述）
+// @Tags         知识库
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Success      200  {object}  handler.DataResponse{data=types.KnowledgeBaseProfile}  "生成的知识库画像"
+// @Failure      400  {object}  errors.AppError                                       "知识库类型不支持或未配置模型"
+// @Failure      403  {object}  errors.AppError                                       "无权限"
+// @Failure      404  {object}  errors.AppError                                       "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.generate_profile","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Regenerates the AI summary of what the knowledge base covers, with one model call. A description the user wrote is kept."
+// @Router       /knowledge-bases/{id}/profile/generate [post]
+func (h *KnowledgeBaseHandler) GenerateKnowledgeBaseProfile(c *gin.Context) {
+	ctx := c.Request.Context()
+	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+	if h.profileService == nil {
+		_ = c.Error(apperrors.NewInternalServerError("knowledge base profile service unavailable"))
+		return
+	}
+	genCtx, cancel := context.WithTimeout(ctx, knowledgeBaseProfileRequestTimeout)
+	defer cancel()
+	profile, err := h.profileService.GenerateKnowledgeBaseProfile(genCtx, kb, true)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_base_id": id})
+		switch {
+		case stderrors.Is(err, types.ErrKnowledgeBaseProfileUnsupported),
+			stderrors.Is(err, types.ErrKnowledgeBaseProfileModelNotConfigured):
+			_ = c.Error(apperrors.NewBadRequestError(err.Error()))
+		default:
+			_ = c.Error(apperrors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": profile})
+}
+
+// knowledgeBaseProfileRequestTimeout bounds the synchronous regeneration a
+// user triggers from the settings dialog: one aggregation plus one small
+// model call.
+const knowledgeBaseProfileRequestTimeout = 2 * time.Minute
+
+// DeleteKnowledgeBase godoc
+// @Summary      删除知识库
+// @Description  删除指定的知识库及其所有内容
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
+// @Failure      400  {object}  errors.AppError          "请求参数错误"
+// @Failure      403  {object}  errors.AppError          "仅所有者可删除"
+// @Failure      404  {object}  errors.AppError          "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.delete","risk":"destructive","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Deletes the knowledge base and every document in it. Cannot be undone. Only the owner can delete it."
+// @Router       /knowledge-bases/{id} [delete]
+func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start deleting knowledge base")
+
+	// Validate and get the knowledge base
+	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	// Only owner (admin with matching tenant) can delete knowledge base
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	if kb.TenantID != tenantID.(uint64) || permission != types.OrgRoleAdmin {
+		c.Error(apperrors.NewForbiddenError("Only knowledge base owner can delete"))
+		return
+	}
+
+	logger.Infof(ctx, "Deleting knowledge base, ID: %s, name: %s",
+		secutils.SanitizeForLog(id), secutils.SanitizeForLog(kb.Name))
+
+	// Delete the knowledge base
+	if err := h.service.DeleteKnowledgeBase(ctx, id); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge base deleted successfully, ID: %s",
+		secutils.SanitizeForLog(id))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge base deleted successfully",
+	})
+}
+
+type CopyKnowledgeBaseRequest struct {
+	TaskID string `json:"task_id"`
+	// Source knowledge base ID; the assistant always copies to a new knowledge base.
+	SourceID string `json:"source_id" binding:"required" extensions:"x-agent=knowledge_base_id"`
+	TargetID string `json:"target_id"`
+}
+
+// CopyKnowledgeBaseResponse defines the response for copy knowledge base
+type CopyKnowledgeBaseResponse struct {
+	TaskID   string `json:"task_id" extensions:"x-agent"`
+	SourceID string `json:"source_id" extensions:"x-agent=source_knowledge_base_id"`
+	TargetID string `json:"target_id" extensions:"x-agent=knowledge_base_id"`
+	Message  string `json:"message" extensions:"x-agent"`
+}
+
+type DuplicateKnowledgeBaseResponse struct {
+	SourceID      string      `json:"source_id"`
+	TargetID      string      `json:"target_id"`
+	Message       string      `json:"message"`
+	KnowledgeBase interface{} `json:"knowledge_base"`
+}
+
+// CopyKnowledgeBase godoc
+// @Summary      复制知识库
+// @Description  将一个知识库的内容复制到另一个知识库（异步任务）
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CopyKnowledgeBaseRequest   true  "复制请求"
+// @Success      200      {object}  handler.DataResponse{data=handler.CopyKnowledgeBaseResponse}  "任务ID"
+// @Failure      400      {object}  errors.AppError                                              "请求参数错误"
+// @Failure      401      {object}  errors.AppError                                              "未认证"
+// @Failure      403      {object}  errors.AppError                                              "无权限"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent {"id":"knowledge_base.copy","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Copy content into a NEW knowledge base in the same workspace. Starts a background job; follow knowledge_base.get_copy_progress until completed before claiming success. Existing destination replacement is not supported."
+// @Router       /knowledge-bases/copy [post]
+func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req CopyKnowledgeBaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	caller := types.CallerFromContext(ctx)
+	if caller.TenantID == 0 {
+		_ = c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	tenantID := caller.TenantID
+	sourceGrant, err := resolveHandlerKBAccessFor(c, req.SourceID, h.service, nil, nil, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	sourceKB := sourceGrant.KnowledgeBase
+	if sourceKB.TenantID != caller.TenantID {
+		_ = c.Error(errors.NewForbiddenError("No permission to copy this knowledge base"))
+		return
+	}
+	taskID := req.TaskID
+	if taskID == "" {
+		taskID = utils.GenerateTaskID("kb_clone", caller.TenantID, req.SourceID)
+	} else if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	create := req.TargetID == ""
+	targetKB := &types.KnowledgeBase{ID: uuid.NewString(), TenantID: caller.TenantID}
+	if create {
+		if !types.IsSyntheticUserID(caller.UserID) {
+			targetKB.CreatorID = caller.UserID
+		}
+	} else {
+		targetGrant, err := resolveHandlerKBAccessFor(c, req.TargetID, h.service, nil, nil, types.OrgRoleEditor)
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+		targetKB = targetGrant.KnowledgeBase
+		if targetKB.TenantID != caller.TenantID {
+			c.Error(errors.NewForbiddenError("No permission to copy to this knowledge base"))
+			return
+		}
+		if err := middleware.EvaluateOwnershipOrRole(c.Request.Context(),
+			h.cfg,
+			types.TenantRoleAdmin,
+			func() (string,
+				error,
+			) {
+				return targetKB.CreatorID,
+					nil
+			}); err != nil {
+			_ = c.Error(errors.NewForbiddenError("No permission to replace this knowledge base's contents"))
+			return
+		}
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if err := access.ValidateKBTransferCompatibility(sourceKB,
+			targetKB,
+			access.KBTransferClone,
+			"",
+			tenant); err != nil {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+	}
+	ctx, err = access.WithKBTransfer(c.Request.Context(), sourceKB, targetKB, access.KBTransferClone, taskID, create)
+	if err != nil {
+		_ = c.Error(kbAccessHTTPError(err))
+		return
+	}
+	// Reserve the destination in the payload; enqueue failures do not leave
+	// empty KBs and every worker delivery creates/resumes the same destination.
+	req.TargetID = targetKB.ID
+
+	// Create KB clone payload
+	payload := types.KBClonePayload{
+		TenantID:     tenantID,
+		TaskID:       taskID,
+		SourceID:     req.SourceID,
+		TargetID:     req.TargetID,
+		CreateTarget: create,
+		CreatorID:    targetKB.CreatorID,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
+	}
+	langfuse.InjectTracing(ctx, &payload)
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal KB clone payload: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to create task"))
+		return
+	}
+
+	// Enqueue KB clone task to Asynq
+	task := asynq.NewTask(types.TypeKBClone, payloadBytes,
+		asynq.TaskID(taskID), asynq.Queue(types.QueueMaintenance),
+		asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue KB clone task: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to enqueue task"))
+		return
+	}
+
+	logger.Infof(ctx, "KB clone task enqueued: %s, asynq task ID: %s, source: %s, target: %s",
+		taskID, info.ID, secutils.SanitizeForLog(req.SourceID), secutils.SanitizeForLog(req.TargetID))
+
+	// Save initial progress to Redis so frontend can query immediately
+	initialProgress := &types.KBCloneProgress{
+		TaskID:    taskID,
+		SourceID:  req.SourceID,
+		TargetID:  req.TargetID,
+		Status:    types.KBCloneStatusPending,
+		Progress:  0,
+		Message:   "Task queued, waiting to start...",
+		CreatedAt: time.Now().Unix(),
+		UpdatedAt: time.Now().Unix(),
+	}
+	if err := h.knowledgeService.SaveKBCloneProgress(ctx, initialProgress); err != nil {
+		logger.Warnf(ctx, "Failed to save initial KB clone progress: %v", err)
+		// Don't fail the request, task is already enqueued
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": CopyKnowledgeBaseResponse{
+			TaskID:   taskID,
+			SourceID: req.SourceID,
+			TargetID: req.TargetID,
+			Message:  "Knowledge base copy task started",
+		},
+	})
+}
+
+// DuplicateKnowledgeBase godoc
+// @Summary      创建知识库副本
+// @Description  创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "源知识库 ID" extensions(x-agent=knowledge_base_id)
+// @Success      201      {object}  handler.DataResponse{data=handler.DuplicateKnowledgeBaseData}  "创建后的知识库副本"
+// @Failure      400      {object}  errors.AppError                                               "请求参数错误"
+// @Failure      403      {object}  errors.AppError                                               "无权限"
+// @Failure      404      {object}  errors.AppError                                               "知识库不存在"
+// @Security     Bearer
+// @x-agent {"id":"knowledge_base.duplicate","risk":"write","target":"knowledge_base.get","label":"name"}
+// @x-agent-hint "Create an empty knowledge base with the source settings only. Does NOT copy documents, FAQ, chunks, indexes, wiki, sharing or pins. To copy content use knowledge_base.copy instead. Rename the new knowledge_base_id with knowledge_base.update if needed."
+// @Router       /knowledge-bases/{id}/duplicate [post]
+func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	sourceID := c.Param("id")
+	if sourceID == "" {
+		c.Error(apperrors.NewBadRequestError("Knowledge base ID cannot be empty"))
+		return
+	}
+
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, sourceID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != callerTenantID {
+		logger.Warnf(ctx,
+			"Knowledge base duplicate rejected: source belongs to another tenant, source_id: %s, caller_tenant: %d, kb_tenant: %d",
+			secutils.SanitizeForLog(sourceID), callerTenantID, sourceKB.TenantID)
+		c.Error(errors.NewForbiddenError("No permission to duplicate this knowledge base"))
+		return
+	}
+
+	targetKB, err := h.service.DuplicateKnowledgeBase(ctx, sourceID)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge base duplicate created, source: %s, target: %s",
+		secutils.SanitizeForLog(sourceID), secutils.SanitizeForLog(targetKB.ID))
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data": DuplicateKnowledgeBaseResponse{
+			SourceID:      sourceID,
+			TargetID:      targetKB.ID,
+			Message:       "Knowledge base duplicate created",
+			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil),
+		},
+	})
+}
+
+// GetKBCloneProgress godoc
+// @Summary      获取知识库复制进度
+// @Description  获取知识库复制任务的进度
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        task_id  path      string  true  "任务ID" extensions(x-agent)
+// @Success      200      {object}  handler.DataResponse{data=types.KBCloneProgress}  "进度信息"
+// @Failure      400      {object}  errors.AppError                                  "请求参数错误"
+// @Failure      404      {object}  errors.AppError                                  "任务不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent {"id":"knowledge_base.get_copy_progress","risk":"read"}
+// @x-agent-hint "Read a task_id from knowledge_base.copy; distinguish queued/running work from a completed or failed copy."
+// @Router       /knowledge-bases/copy/progress/{task_id} [get]
+func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		logger.Error(ctx, "Task ID is empty")
+		c.Error(apperrors.NewBadRequestError("Task ID cannot be empty"))
+		return
+	}
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		c.Error(err)
+		return
+	}
+
+	progress, err := h.knowledgeService.GetKBCloneProgress(ctx, taskID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    progress,
+	})
+}
+
+// validateExtractConfig validates the graph configuration parameters
+func validateExtractConfig(config *types.ExtractConfig) error {
+	if config == nil {
+		return nil
+	}
+	if !config.Enabled {
+		config.Enabled = false
+		return nil
+	}
+	// Validate text field
+	if config.Text == "" {
+		return apperrors.NewBadRequestError("text cannot be empty")
+	}
+
+	// Validate tags field
+	if len(config.Tags) == 0 {
+		return apperrors.NewBadRequestError("tags cannot be empty")
+	}
+	for i, tag := range config.Tags {
+		if tag == "" {
+			return apperrors.NewBadRequestError("tag cannot be empty at index " + strconv.Itoa(i))
+		}
+	}
+
+	// Validate nodes
+	if len(config.Nodes) == 0 {
+		return apperrors.NewBadRequestError("nodes cannot be empty")
+	}
+	nodeNames := make(map[string]bool)
+	for i, node := range config.Nodes {
+		if node.Name == "" {
+			return apperrors.NewBadRequestError("node name cannot be empty at index " + strconv.Itoa(i))
+		}
+		// Check for duplicate node names
+		if nodeNames[node.Name] {
+			return apperrors.NewBadRequestError("duplicate node name: " + node.Name)
+		}
+		nodeNames[node.Name] = true
+	}
+
+	if len(config.Relations) == 0 {
+		return apperrors.NewBadRequestError("relations cannot be empty")
+	}
+	// Validate relations
+	for i, relation := range config.Relations {
+		if relation.Node1 == "" {
+			return apperrors.NewBadRequestError("relation node1 cannot be empty at index " + strconv.Itoa(i))
+		}
+		if relation.Node2 == "" {
+			return apperrors.NewBadRequestError("relation node2 cannot be empty at index " + strconv.Itoa(i))
+		}
+		if relation.Type == "" {
+			return apperrors.NewBadRequestError("relation type cannot be empty at index " + strconv.Itoa(i))
+		}
+		// Check if referenced nodes exist
+		if !nodeNames[relation.Node1] {
+			return apperrors.NewBadRequestError("relation references non-existent node1: " + relation.Node1)
+		}
+		if !nodeNames[relation.Node2] {
+			return apperrors.NewBadRequestError("relation references non-existent node2: " + relation.Node2)
+		}
+	}
+
+	return nil
+}
+
+func validateKnowledgeBasePromptInstructions(kb *types.KnowledgeBase) error {
+	if err := types.ValidateKnowledgeBasePromptInstructions(kb); err != nil {
+		return apperrors.NewBadRequestError(err.Error())
+	}
+	return nil
+}
+
+// ListMoveTargets returns knowledge bases eligible as move targets for the given source KB.
+// Filters: same Type, same EmbeddingModelID, different ID, not temporary.
+//
+// ListMoveTargets godoc
+// @Summary      获取可移动目标知识库列表
+// @Description  返回与源知识库 Type 一致、EmbeddingModelID 一致、非临时且不是自身的目标知识库列表
+// @Tags         知识库
+// @Produce      json
+// @Param        id   path      string                  true  "源知识库 ID"  extensions(x-agent=knowledge_base_id)
+// @Success      200  {object}  handler.DataResponse{data=[]types.KnowledgeBase}  "可移动目标列表"
+// @Failure      400  {object}  errors.AppError                                   "请求参数错误"
+// @Failure      401  {object}  errors.AppError                                   "未认证"
+// @Failure      403  {object}  errors.AppError                                   "无权限"
+// @Failure      404  {object}  errors.AppError                                   "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.list_move_targets","risk":"read"}
+// @x-agent-hint "Knowledge bases the documents of this one can be moved to: same type and embedding model."
+// @Router       /knowledge-bases/{id}/move-targets [get]
+func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	sourceKBID := c.Param("id")
+	if sourceKBID == "" {
+		c.Error(apperrors.NewBadRequestError("Knowledge base ID is required"))
+		return
+	}
+
+	tenantID, exists := c.Get(types.TenantIDContextKey.String())
+	if !exists {
+		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+
+	// Get source knowledge base
+	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, sourceKBID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != tenantID.(uint64) {
+		c.Error(errors.NewForbiddenError("No permission to access this knowledge base"))
+		return
+	}
+
+	// Get all knowledge bases
+	allKBs, err := h.service.ListKnowledgeBases(ctx)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	// Filter eligible targets
+	targets := make([]*types.KnowledgeBase, 0)
+	for _, kb := range allKBs {
+		if kb.ID == sourceKBID {
+			continue
+		}
+		if kb.IsTemporary {
+			continue
+		}
+		if kb.Type != sourceKB.Type {
+			continue
+		}
+		if kb.EmbeddingModelID != sourceKB.EmbeddingModelID {
+			continue
+		}
+		targets = append(targets, kb)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    targets,
+	})
+}
+
+// GetImageAttrsSchema godoc
+// @Summary      获取图片属性字典
+// @Description  返回当前版本的图片属性注册表、提示词版本和默认动作。全局只读，不绑定知识库。
+// @Tags         知识库
+// @Produce      json
+// @Success      200  {object}  handler.DataResponse{data=handler.ImageAttrSchemaData}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /image-attrs/schema [get]
+func (h *KnowledgeBaseHandler) GetImageAttrsSchema(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"version":         types.ImageAttrSchemaVersion,
+			"prompt":          types.ImageAttrPromptVersion,
+			"attributes":      types.ImageAttrRegistry,
+			"default_actions": types.DefaultImageActions(),
+		},
+	})
+}
+
+// GetImagePipelines returns every registered image pipeline in the shape the
+// settings panel renders: id, name, and the fields each one owns. The panel
+// reads this instead of carrying a list of its own, so adding a pipeline is a
+// backend-only change — its fields arrive here already described, and no UI code
+// mentions the pipeline by name.
+//
+// The fields of two pipelines are deliberately allowed to share a key. Each is
+// private to the pipeline that declared it, which is why the knowledge base
+// stores them under that pipeline's own group rather than in one flat map.
+// Read-only, and global rather than per-KB, so only the Viewer role is required.
+func (h *KnowledgeBaseHandler) GetImagePipelines(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    service.ListImagePipelines(),
+	})
+}
+
+// ValidateImagePipelines answers the settings panel's question — could what is
+// on screen be saved? — without saving anything. The panel asks as the user
+// types so the warnings arrive before the save rather than as a rejection after
+// it; the save path asks again on its own, so this endpoint is the polite half
+// of one check, not the whole of it.
+//
+// Nothing is judged here. The rules come from the pipeline being validated, the
+// same ones ListImagePipelines publishes, so a pipeline whose actions are not
+// the user's to switch off declares none and is never told that it is wrong.
+// Every broken rule is reported, each with the i18n key of its own wording and
+// the name of the field that is at fault: the panel translates and points, as
+// it does for the strings already on it.
+func (h *KnowledgeBaseHandler) ValidateImagePipelines(c *gin.Context) {
+	var request struct {
+		PipelineID types.ImagePipelineID `json:"pipeline_id"`
+		Params     map[string]any        `json:"params"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "invalid request body",
+		})
+		return
+	}
+
+	broken := service.BrokenImagePipelineRules(request.PipelineID, request.Params)
+	if len(broken) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    gin.H{"valid": true, "violations": []any{}},
+		})
+		return
+	}
+
+	violations := make([]gin.H, 0, len(broken))
+	for _, invalid := range broken {
+		violations = append(violations, gin.H{
+			"message_key": invalid.MessageKey,
+			"field":       invalid.Field,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gin.H{"valid": false, "violations": violations},
+	})
+}

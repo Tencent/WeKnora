@@ -1,0 +1,141 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
+)
+
+var dataSchemaTool = BaseTool{
+	name: ToolDataSchema,
+	description: "Use this tool to get the schema information of a CSV or Excel file loaded into DuckDB. " +
+		"It returns the columns and row count. When querying the document with data_analysis, " +
+		"reference it as the table \"" + DataAnalysisTableName + "\".",
+	schema: utils.GenerateSchema[DataSchemaInput](),
+}
+
+type DataSchemaInput struct {
+	KnowledgeID string `json:"knowledge_id" jsonschema:"doc://N document handle to query"`
+}
+
+type DataSchemaTool struct {
+	BaseTool
+	knowledgeService interfaces.KnowledgeService
+	chunkRepo        interfaces.ChunkRepository
+	targetChunkTypes []types.ChunkType
+	searchTargets    types.SearchTargets
+	scopeEnforced    bool
+}
+
+// WithSearchTargets enables Agent request-scope authorization. An Agent turn
+// with no search target must reject every document rather than fall back to
+// the unrestricted service-owned lookup.
+func (t *DataSchemaTool) WithSearchTargets(searchTargets types.SearchTargets) *DataSchemaTool {
+	t.searchTargets = searchTargets
+	t.scopeEnforced = true
+	return t
+}
+
+func NewDataSchemaTool(knowledgeService interfaces.KnowledgeService, chunkRepo interfaces.ChunkRepository, targetChunkTypes ...types.ChunkType) *DataSchemaTool {
+	if len(targetChunkTypes) == 0 {
+		targetChunkTypes = []types.ChunkType{types.ChunkTypeTableSummary, types.ChunkTypeTableColumn}
+	}
+	return &DataSchemaTool{
+		BaseTool:         dataSchemaTool,
+		knowledgeService: knowledgeService,
+		chunkRepo:        chunkRepo,
+		targetChunkTypes: targetChunkTypes,
+	}
+}
+
+// Execute executes the tool logic
+func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	var input DataSchemaInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
+		}, err
+	}
+
+	// Get knowledge to get TenantID (use IDOnly to support cross-tenant shared KB)
+	var knowledge *types.Knowledge
+	var err error
+	if t.scopeEnforced {
+		knowledge, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService)
+	} else {
+		knowledge, err = t.knowledgeService.GetKnowledgeByIDOnly(ctx, input.KnowledgeID)
+	}
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to get knowledge '%s': %v", input.KnowledgeID, err),
+		}, err
+	}
+
+	// Get chunks for the knowledge ID using ChunkRepository
+	// We only need table summary and column chunks
+	chunkTypes := t.targetChunkTypes
+	page := &types.Pagination{
+		Page:     1,
+		PageSize: 100, // Should be enough for schema chunks
+	}
+	enabled := true
+
+	chunks, _, err := t.chunkRepo.ListPagedChunksByKnowledgeID(
+		ctx,
+		knowledge.TenantID,
+		input.KnowledgeID,
+		page,
+		chunkTypes,
+		nil, // tagIDs
+		"",  // keyword
+		"",  // searchField
+		"",  // sortOrder
+		"",  // knowledgeType
+		&enabled,
+	)
+	if err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to list chunks for knowledge ID '%s': %v", input.KnowledgeID, err),
+		}, err
+	}
+
+	var summaryContent, columnContent string
+	for _, chunk := range chunks {
+		if chunk.ChunkType == types.ChunkTypeTableSummary {
+			summaryContent = chunk.Content
+		} else if chunk.ChunkType == types.ChunkTypeTableColumn {
+			columnContent = chunk.Content
+		}
+	}
+
+	if summaryContent == "" || columnContent == "" {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("No table schema information found for knowledge ID '%s'", input.KnowledgeID),
+		}, fmt.Errorf("no schema info found")
+	}
+
+	output := fmt.Sprintf(
+		"%s\n\n%s\n\nQuery this document with data_analysis as the table %q.",
+		summaryContent, columnContent, DataAnalysisTableName,
+	)
+
+	return &types.ToolResult{
+		Success: true,
+		Output:  output,
+		Data: map[string]interface{}{
+			"summary": summaryContent,
+			"columns": columnContent,
+		},
+	}, nil
+}

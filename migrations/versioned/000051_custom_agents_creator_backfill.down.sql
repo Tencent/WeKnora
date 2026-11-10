@@ -1,0 +1,12 @@
+-- Rollback for 000051_custom_agents_creator_backfill.
+--
+-- We deliberately don't try to revert the per-row updates: there is no
+-- way to distinguish a row whose `created_by` was just set by 000051
+-- from a row that legitimately had the same tenant-owner as creator
+-- before the migration ran. Rolling back the column data would risk
+-- erasing genuine creator attributions, which is strictly worse than
+-- leaving the backfilled values in place.
+--
+-- The forward migration is therefore treated as one-way; this file
+-- exists only to satisfy golang-migrate's up/down pairing requirement.
+DO $$ BEGIN RAISE NOTICE '[Migration 000051] No-op rollback (backfill is one-way)'; END $$;

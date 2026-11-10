@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package docreader;
+
+option go_package = "github.com/Tencent/WeKnora/internal/docreader/proto";
+
+service DocReader {
+  rpc Read(ReadRequest) returns (ReadResponse) {}
+  // ReadStream is the streaming counterpart of Read. It first emits one
+  // ReadStreamResponse carrying the parse metadata (markdown / metadata /
+  // error), then emits one message per image. This keeps every gRPC message
+  // small so large scanned PDFs (hundreds of page images, far exceeding the
+  // unary message-size cap) can be returned without RESOURCE_EXHAUSTED. Parsers
+  // that support incremental images can render and send a bounded number of
+  // pages at a time instead of retaining the full image set in the server.
+  rpc ReadStream(ReadRequest) returns (stream ReadStreamResponse) {}
+  rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse) {}
+  // PreprocessImage straightens and crops a photographed page so that OCR sees
+  // an upright, content-tight image. The caller sends the raw photograph and
+  // receives either the corrected page or a verdict that this input is not a
+  // page worth correcting — never an error for "not correctable", because the
+  // caller's fallback (use the original bytes) is a normal outcome rather than
+  // a failure to report.
+  rpc PreprocessImage(PreprocessImageRequest) returns (PreprocessImageResponse) {}
+  // GetInfo reports the build identity of the running docreader instance.
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse) {}
+}
+
+// PreprocessImageRequest carries one photographed page.
+message PreprocessImageRequest {
+  bytes image = 1;
+}
+
+message PreprocessImageResponse {
+  // image is the corrected page, JPEG-encoded. Empty when fallback_needed.
+  bytes image = 1;
+  // fallback_needed tells the caller to keep its original bytes: the input is
+  // not a correctable page, or correcting it would not be an improvement.
+  bool fallback_needed = 2;
+  // Diagnostics for the run's trace and for tuning the thresholds.
+  float  theta = 3;      // dominant text-line angle (degrees)
+  float  residual = 4;   // residual skew after alignment; > 2 means low quality
+  bool   flip = 5;       // whether a 180-degree flip was applied
+  int32  n_boxes = 6;    // text boxes detected
+  int32  n_kept = 7;     // text boxes kept after filtering
+  // status is "ok" | "no_text" | "low_quality", for logs and metrics.
+  string status = 8;
+}
+
+message ReadConfig {
+  string parser_engine = 1;
+  map<string, string> parser_engine_overrides = 2;
+  // image_storage removed: image persistence is now handled entirely by the Go App.
+  // Field number 3 is reserved for backward compatibility.
+  reserved 3;
+}
+
+// Unified read request: set file_content for file mode, url for URL mode.
+message ReadRequest {
+  bytes  file_content = 1;
+  string file_name = 2;
+  string file_type = 3;
+  string url = 4;
+  string title = 5;
+  ReadConfig config = 6;
+  string request_id = 7;
+}
+
+message ImageRef {
+  string filename = 1;
+  string original_ref = 2;
+  string mime_type = 3;
+  string storage_key = 4;    // download URL from shared storage
+  bytes  image_data = 5;     // inline bytes fallback
+}
+
+// SourceBlock ties a range of markdown_content to the place in the original
+// file it was parsed from, so a citation can open the file there.
+message SourceBlock {
+  // Unicode code point offsets into markdown_content, end exclusive.
+  uint32 start = 1;
+  uint32 end = 2;
+  // JSON-encoded locator: {"type":"pdf","page":3,"bbox":[x0,y0,x1,y1]}
+  // with ordinals 1-based and bbox as fractions of the page, origin top-left.
+  string locator_json = 3;
+}
+
+message ReadResponse {
+  string markdown_content = 1;
+  repeated ImageRef image_refs = 2;
+  string image_dir_path = 3;
+  map<string, string> metadata = 4;
+  string error = 5;
+  repeated SourceBlock source_blocks = 6;
+}
+
+// Metadata header for a streamed read. Sent exactly once, before any image.
+message ReadStreamMeta {
+  string markdown_content = 1;
+  string image_dir_path = 2;
+  map<string, string> metadata = 3;
+  string error = 4;
+  uint32 image_count = 5; // best-effort total image count (0 if unknown)
+  repeated SourceBlock source_blocks = 6;
+}
+
+// One frame of a ReadStream. The first frame carries `meta`; every subsequent
+// frame carries a single `image`.
+message ReadStreamResponse {
+  oneof payload {
+    ReadStreamMeta meta = 1;
+    ImageRef image = 2;
+  }
+}
+
+message ListEnginesRequest {
+  map<string, string> config_overrides = 1;
+}
+
+message ParserEngineInfo {
+  string name = 1;
+  string description = 2;
+  repeated string file_types = 3;
+  bool available = 4;
+  string unavailable_reason = 5;
+}
+
+message ListEnginesResponse {
+  repeated ParserEngineInfo engines = 1;
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  string version = 1;
+  string commit_id = 2;
+}

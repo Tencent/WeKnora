@@ -1,0 +1,163 @@
+// Package doc — create.go implements `weknora doc create --text "..."`.
+// Allows creating a knowledge entry directly from inline text content without
+// uploading a file or fetching a remote URL.
+package doc
+
+import (
+	"cmp"
+	"context"
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+// docCreateFields enumerates the fields surfaced for `--format json` discovery
+// on `doc create`.
+var docCreateFields = []string{
+	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
+	"source", "channel", "parse_status", "summary_status", "enable_status",
+	"created_at", "updated_at", "error_message",
+}
+
+// CreateOptions holds CLI flag values for `doc create`.
+type CreateOptions struct {
+	Text    string // --text (required): document text content (Markdown)
+	Title   string // --title: document title (matches `doc update --title`)
+	TagID   string // --tag-id: associate with a tag
+	Channel string // --channel: ingestion-channel tag (default "api")
+	DryRun  bool
+}
+
+// CreateService is the narrow SDK surface for `doc create`.
+// *sdk.Client satisfies it.
+type CreateService interface {
+	CreateManualKnowledge(
+		ctx context.Context,
+		kbID string,
+		req *sdk.CreateManualKnowledgeRequest,
+	) (*sdk.Knowledge, error)
+}
+
+// NewCmdCreate builds `weknora doc create --text "..."`.
+func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
+	opts := &CreateOptions{}
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a knowledge entry from inline text content",
+		Long: `Create a new knowledge entry by passing Markdown content directly via --text.
+Useful for short snippets, agent-generated content, or structured notes that
+don't require a file upload or remote URL. KB resolution follows the standard
+4-level chain: --kb flag > WEKNORA_KB_ID env > .weknora/project.yaml > error.
+
+  --text <content>    Document text in Markdown format (required).
+  --title <title>     Display title stored with the entry (matches doc update --title).
+  --tag-id <id>       Associate the new entry with a tag.
+  --channel <name>    Override the ingestion-channel tag (default "api").`,
+		Example: `  weknora doc create --text "# Meeting Notes\n\nAction items: ..."
+  weknora doc create --text "$(cat notes.md)" --title "Sprint Notes" --kb my-kb
+  weknora doc create --text "API usage guide" --title "API Guide" --tag-id tag_abc`,
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			fopts, err := cmdutil.CheckFormatFlag(c)
+			if err != nil {
+				return err
+			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			if opts.DryRun {
+				// ResolveKBLocal validates the KB is set via flag / env /
+				// project link without an SDK call; the plan reports the
+				// raw --kb value (UUID or name) for agent inspection.
+				kbID, err := f.ResolveKBLocal(c)
+				if err != nil {
+					return err
+				}
+				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
+					Action: "doc.create",
+					Args: map[string]any{
+						"text":  opts.Text,
+						"title": opts.Title,
+						"kb":    kbID,
+					},
+				}); handled {
+					return err
+				}
+			}
+			cli, err := f.Client()
+			if err != nil {
+				return err
+			}
+			// Live path resolves --kb name → id via the SDK.
+			kbID, err := f.ResolveKB(c)
+			if err != nil {
+				return err
+			}
+			return runCreate(c.Context(), opts, fopts, cli, kbID)
+		},
+	}
+	cmdutil.AddKBFlag(cmd)
+	cmd.Flags().StringVar(&opts.Text, "text", "", "Document text content in Markdown format (required)")
+	cmd.Flags().StringVar(&opts.Title, "title", "", "Document title")
+	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Tag id to associate with the new entry")
+	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
+	_ = cmd.MarkFlagRequired("text")
+	cmdutil.AddFormatFlag(cmd, docCreateFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Create a knowledge entry from inline Markdown text. KB resolved via --kb flag, WEKNORA_KB_ID env, or project link. Emits the created Knowledge object with its id.",
+		RequiredFlags: []string{"--text", "--kb (or WEKNORA_KB_ID / project link)"},
+		Examples: []string{
+			`weknora doc create --kb kb_eng --text "# Runbook\n\nRestart steps: ..."`,
+			`weknora doc create --kb kb_eng --text "$(cat notes.md)" --title "Sprint Notes"`,
+		},
+		Output: "envelope.data is the created Knowledge object with id, knowledge_base_id, title, parse_status",
+	})
+	return cmd
+}
+
+// runCreate creates a manual knowledge entry via SDK CreateManualKnowledge.
+func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOptions, svc CreateService, kbID string) error {
+	// Guard against empty text: cobra's MarkFlagRequired enforces this for
+	// normal CLI invocations; this check protects tests that call runCreate
+	// directly and any future callers that bypass cobra.
+	if opts.Text == "" {
+		return cmdutil.NewFlagError(fmt.Errorf("--text is required"))
+	}
+	req := &sdk.CreateManualKnowledgeRequest{
+		Title:   opts.Title,
+		Content: opts.Text,
+		TagID:   opts.TagID,
+		Channel: cmp.Or(opts.Channel, uploadChannel),
+	}
+	k, err := svc.CreateManualKnowledge(ctx, kbID, req)
+	if err != nil {
+		return cmdutil.WrapHTTP(err, "create document")
+	}
+	// Inline-created docs land in parse_status=draft and are NOT auto-queued
+	// for parsing (unlike `doc upload`), so they aren't searchable until
+	// reparsed. Surface the next step so an agent doesn't `doc wait` into a
+	// timeout or `search` into empty results.
+	var meta *output.Meta
+	if k.ParseStatus == "draft" {
+		meta = &output.Meta{Hint: "document created in parse_status=draft (not yet indexed) — run `weknora doc reparse " + k.ID + "` to parse & make it searchable"}
+	}
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, k, meta)
+	}
+	displayed := opts.Title
+	if displayed == "" {
+		displayed = k.Title
+	}
+	if displayed == "" {
+		displayed = k.ID
+	}
+	fmt.Fprintf(iostreams.IO.Out, "✓ Created %q (id: %s)\n", displayed, k.ID)
+	if meta != nil {
+		fmt.Fprintf(iostreams.IO.Out, "  ⚠ %s\n", meta.Hint)
+	}
+	return nil
+}

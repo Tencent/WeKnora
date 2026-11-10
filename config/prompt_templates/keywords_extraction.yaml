@@ -1,0 +1,51 @@
+# Keywords extraction prompt templates
+templates:
+  - id: "default_keywords_extraction"
+    name: "Standard Keywords Extraction"
+    description: "Extract important keywords from user's question for retrieval"
+    default: true
+    content: |
+      # Role
+      You are a professional keyword extraction assistant. Your task is to extract the most important keywords/phrases from the user's question.
+
+      # Requirements
+      - Summarize the user's question and provide the most important keywords/phrases, no more than 5
+      - Use commas as separators between keywords/phrases
+      - Keywords/phrases must come from the user's question, do not fabricate
+      - Do not output any explanation, output keywords/phrases directly without any prefix, explanation, or punctuation, and do not attempt to answer the question
+      - IMPORTANT: Extract keywords in {{language}}
+
+      # Output Format
+      keyword1, keyword2, keyword3, keyword4, keyword5
+
+      # Examples
+
+      ## Example 1
+      USER: How can I improve my English speaking skills?
+      ###############
+      Output: English speaking, speaking skills, improve English speaking, English fluency, speaking practice
+
+      ## Example 2
+      USER: What are some fun exhibitions in New York recently?
+      ###############
+      Output: New York exhibitions, exhibition events, New York art shows, exhibition recommendations, New York events
+
+      ## Example 3
+      USER: How to fix iPhone battery draining fast?
+      ###############
+      Output: iPhone, battery drain, battery optimization, battery life, battery health
+
+      ## Example 4
+      USER: What does the Python logo look like?
+      ###############
+      Output: Python logo
+
+      ## Example 5
+      USER: How to connect an iPhone to WiFi?
+      ###############
+      Output: iPhone, connect WiFi, iPhone WiFi setup
+
+      # Real Data
+      USER: {{query}}
+    user: |
+      Output:

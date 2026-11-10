@@ -1,0 +1,443 @@
+import type { SourceLocator } from './sourceLocator'
+
+export type ReferenceItemKind = 'web' | 'document' | 'tool'
+
+export type KnowledgeReferenceLike = {
+  id?: string
+  chunk_ids?: string[]
+  knowledge_id?: string
+  knowledge_title?: string
+  knowledge_filename?: string
+  knowledge_base_id?: string
+  chunk_index?: number
+  chunk_type?: string
+  content?: string
+  metadata?: Record<string, string>
+  /** Where the knowledge came from: an upload, "manual", or the imported URL. */
+  knowledge_source?: string
+  /** Positions of the chunk in the original file. */
+  source_locators?: SourceLocator[]
+  /** After merging a document's chunks: the first one with positions. */
+  source_chunk_id?: string
+}
+
+export type ReferenceListItem = {
+  key: string
+  kind: ReferenceItemKind
+  index: number
+  title: string
+  fileName?: string
+  url?: string
+  domain?: string
+  faviconUrl?: string
+  snippet?: string
+  chunkId?: string
+  chunkIds?: string[]
+  /** The chunk to open the original file at (summaries have no position). */
+  sourceChunkId?: string
+  knowledgeId?: string
+  knowledgeBaseId?: string
+  content?: string
+}
+
+export type ReferenceDrawerSection = {
+  id: 'web' | 'documents' | 'tools'
+  items: ReferenceListItem[]
+}
+
+export function normalizeReferenceUrl(url: string): string {
+  const raw = String(url || '').trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    parsed.hash = ''
+    let pathname = parsed.pathname
+    if (pathname.length > 1 && pathname.endsWith('/')) {
+      pathname = pathname.slice(0, -1)
+    }
+    parsed.pathname = pathname
+    return parsed.toString()
+  } catch {
+    return raw.replace(/\/$/, '')
+  }
+}
+
+export function getWebSearchUrl(item: KnowledgeReferenceLike): string {
+  if (item.metadata?.url) return item.metadata.url
+  if (item.id && (item.id.startsWith('http://') || item.id.startsWith('https://'))) {
+    return item.id
+  }
+  return ''
+}
+
+export function getDomainFromUrl(url: string): string {
+  if (!url) return ''
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '')
+  } catch {
+    return url
+  }
+}
+
+export function getFaviconUrl(urlOrDomain: string): string {
+  const domain = urlOrDomain.includes('://')
+    ? getDomainFromUrl(urlOrDomain)
+    : urlOrDomain.replace(/^www\./i, '')
+  if (!domain) return ''
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`
+}
+
+function truncateText(text: string, maxLen: number): string {
+  const normalized = formatReferenceSnippet(text)
+  if (normalized.length <= maxLen) return normalized
+  return `${normalized.slice(0, maxLen)}…`
+}
+
+export function formatReferenceSnippet(text: string | undefined): string {
+  let value = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!value) return ''
+  value = value.replace(/^(\.{3}|…+)\s*/, '')
+  value = value.replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+  value = value.replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+  value = value.replace(/`([^`]+)`/g, '$1')
+  value = value.replace(/\*\*([^*]+)\*\*/g, '$1')
+  value = value.replace(/\*([^*]+)\*/g, '$1')
+  value = value.replace(/(^|\s)#+\s*/g, '$1')
+  value = value.replace(/\s+/g, ' ').trim()
+  return value
+}
+
+function isWebReference(item: KnowledgeReferenceLike): boolean {
+  return item.chunk_type === 'web_search'
+}
+
+function isToolReference(item: KnowledgeReferenceLike): boolean {
+  return item.chunk_type === 'tool_result'
+}
+
+function isLikelyUrl(text: string): boolean {
+  const trimmed = String(text || '').trim()
+  if (!trimmed) return false
+  return /^https?:\/\//i.test(trimmed) || /^www\./i.test(trimmed)
+}
+
+function isSameReferenceUrl(a: string, b: string): boolean {
+  const left = String(a || '').trim()
+  const right = String(b || '').trim()
+  if (!left || !right) return false
+  if (left === right) return true
+  return normalizeReferenceUrl(left) === normalizeReferenceUrl(right)
+}
+
+function resolveWebTitle(item: KnowledgeReferenceLike, url: string, domain: string): string {
+  const metaTitle = item.metadata?.title?.trim()
+  if (metaTitle && !isLikelyUrl(metaTitle)) return metaTitle
+
+  const knowledgeTitle = item.knowledge_title?.trim()
+  if (
+    knowledgeTitle &&
+    !isLikelyUrl(knowledgeTitle) &&
+    !isSameReferenceUrl(knowledgeTitle, url) &&
+    knowledgeTitle !== domain
+  ) {
+    return knowledgeTitle
+  }
+
+  return domain || 'Web page'
+}
+
+function buildWebItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem | null {
+  const url = getWebSearchUrl(item)
+  if (!url) return null
+  const domain = getDomainFromUrl(url)
+  const title = resolveWebTitle(item, url, domain)
+  const snippet =
+    item.metadata?.snippet ||
+    truncateText(item.content || '', 220)
+  const normalizedUrl = normalizeReferenceUrl(url)
+  return {
+    key: `web:${normalizedUrl}`,
+    kind: 'web',
+    index,
+    title,
+    url,
+    domain,
+    faviconUrl: getFaviconUrl(url),
+    snippet: snippet || undefined,
+    chunkId: item.id,
+    content: item.content,
+  }
+}
+
+function buildDocumentItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem {
+  const chunkId = item.id !== item.knowledge_id ? item.id : item.chunk_ids?.[0]
+  const title = item.knowledge_title || item.knowledge_filename || item.knowledge_id || 'Document'
+  const documentKey =
+    item.knowledge_id ||
+    [item.knowledge_base_id, item.knowledge_title || item.knowledge_filename].filter(Boolean).join(':') ||
+    chunkId || `doc-${index}`
+  return {
+    key: `doc:${documentKey}`,
+    kind: 'document',
+    fileName: item.knowledge_filename,
+    index,
+    title,
+    chunkId,
+    chunkIds: item.chunk_ids,
+    sourceChunkId: item.source_chunk_id,
+    knowledgeId: item.knowledge_id,
+    knowledgeBaseId: item.knowledge_base_id,
+    snippet: truncateText(item.content || '', 220) || undefined,
+    content: item.content,
+  }
+}
+
+function buildToolItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem {
+  const id = item.id || `tool-${index}`
+  return {
+    key: `tool:${id}`,
+    kind: 'tool',
+    index,
+    title: item.knowledge_title || item.metadata?.title || 'Tool result',
+    domain: item.metadata?.source || item.metadata?.tool || undefined,
+    snippet: truncateText(item.content || '', 220) || undefined,
+    chunkId: id,
+    content: item.content,
+  }
+}
+
+function getDocumentGroupKey(item: KnowledgeReferenceLike, index: number): string {
+  if (item.knowledge_id) return item.knowledge_id
+  const title = item.knowledge_title || item.knowledge_filename
+  if (title) return [item.knowledge_base_id, title].filter(Boolean).join(':')
+  return (
+    item.id ||
+    `doc-${index}`
+  )
+}
+
+export function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] {
+  const groups = new Map<string, KnowledgeReferenceLike & { content_parts?: string[] }>()
+
+  refs.forEach((item, index) => {
+    const key = getDocumentGroupKey(item, index)
+    const content = String(item.content || '').trim()
+    const chunkIds = Array.from(new Set([...(item.chunk_ids || []), ...(item.id && item.id !== item.knowledge_id ? [item.id] : [])]))
+    const located = item.id && item.source_locators?.length ? item.id : undefined
+    const existing = groups.get(key)
+
+    if (!existing) {
+      groups.set(key, {
+        ...item,
+        id: item.id || key,
+        content_parts: content ? [content] : [],
+        chunk_ids: chunkIds,
+        source_chunk_id: item.source_chunk_id || located,
+      })
+      return
+    }
+
+    if (!existing.source_chunk_id && located) existing.source_chunk_id = located
+    if (!existing.knowledge_id && item.knowledge_id) existing.knowledge_id = item.knowledge_id
+    if (!existing.knowledge_title && item.knowledge_title) existing.knowledge_title = item.knowledge_title
+    if (!existing.knowledge_filename && item.knowledge_filename) existing.knowledge_filename = item.knowledge_filename
+    if (!existing.knowledge_base_id && item.knowledge_base_id) existing.knowledge_base_id = item.knowledge_base_id
+    for (const chunkId of chunkIds) {
+      if (!existing.chunk_ids?.includes(chunkId)) {
+        existing.chunk_ids = [...(existing.chunk_ids || []), chunkId]
+      }
+    }
+    if (content && !existing.content_parts?.includes(content)) {
+      existing.content_parts = [...(existing.content_parts || []), content]
+    }
+  })
+
+  return Array.from(groups.values()).map((item) => {
+    const { content_parts: contentParts, ...rest } = item
+    return {
+      ...rest,
+      content: contentParts?.slice(0, 3).join('\n\n') || rest.content,
+    }
+  })
+}
+
+function mergeWebReferences(refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] {
+  const groups = new Map<string, KnowledgeReferenceLike>()
+
+  refs.forEach((item, index) => {
+    const url = getWebSearchUrl(item)
+    const key = url ? normalizeReferenceUrl(url) : item.id || `web-${index}`
+    if (!groups.has(key)) {
+      groups.set(key, item)
+    }
+  })
+
+  return Array.from(groups.values())
+}
+
+export function buildReferenceSections(
+  refs: KnowledgeReferenceLike[] | null | undefined,
+): ReferenceDrawerSection[] {
+  const list = Array.isArray(refs) ? refs.filter(Boolean) : []
+  if (!list.length) return []
+
+  const webReferences: KnowledgeReferenceLike[] = []
+  const documentReferences: KnowledgeReferenceLike[] = []
+  const toolReferences: KnowledgeReferenceLike[] = []
+  const webItems: ReferenceListItem[] = []
+  const docItems: ReferenceListItem[] = []
+  const toolItems: ReferenceListItem[] = []
+  let webIndex = 0
+  let docIndex = 0
+  let toolIndex = 0
+
+  for (const item of list) {
+    if (isWebReference(item)) {
+      webReferences.push(item)
+      continue
+    }
+    if (isToolReference(item)) {
+      toolReferences.push(item)
+      continue
+    }
+    documentReferences.push(item)
+  }
+
+  for (const item of mergeWebReferences(webReferences)) {
+    const built = buildWebItem(item, ++webIndex)
+    if (built) webItems.push(built)
+  }
+
+  for (const item of mergeDocumentReferences(documentReferences)) {
+    docItems.push(buildDocumentItem(item, ++docIndex))
+  }
+
+  for (const item of toolReferences) {
+    toolItems.push(buildToolItem(item, ++toolIndex))
+  }
+
+  const sections: ReferenceDrawerSection[] = []
+  if (webItems.length) sections.push({ id: 'web', items: webItems })
+  if (docItems.length) sections.push({ id: 'documents', items: docItems })
+  if (toolItems.length) sections.push({ id: 'tools', items: toolItems })
+  return sections
+}
+
+export function buildReferenceList(
+  refs: KnowledgeReferenceLike[] | null | undefined,
+): ReferenceListItem[] {
+  return buildReferenceSections(refs).flatMap((section) => section.items)
+}
+
+export type ReferenceHighlightTarget = {
+  url?: string
+  chunkId?: string
+  documentTitle?: string
+  knowledgeBaseId?: string
+  key?: string
+  /** The answer sentence the citation supports. */
+  anchorText?: string
+  /** Open the cited document at the cited place instead of the list. */
+  openSource?: boolean
+}
+
+/** A cited chunk to show inside its original document. */
+export type ReferenceSourceTarget = {
+  /** Absent when opening a document card without a cited passage. */
+  chunkId?: string
+  knowledgeId: string
+  knowledgeBaseId?: string
+  title?: string
+  fileName?: string
+  knowledgeSource?: string
+  chunkType?: string
+  /** The chunk's own text; absent when only its document is known. */
+  content?: string
+  locators?: SourceLocator[]
+  anchorText?: string
+}
+
+/**
+ * Resolve a citation to the document and chunk it points at. Web results,
+ * tool output and FAQ entries have no original file and resolve to null.
+ */
+export function resolveReferenceSource(
+  refs: KnowledgeReferenceLike[] | null | undefined,
+  target: ReferenceHighlightTarget | null | undefined,
+): ReferenceSourceTarget | null {
+  const chunkId = String(target?.chunkId || '').trim()
+  if (!chunkId) return null
+  const list = Array.isArray(refs) ? refs.filter(Boolean) : []
+  const exact = list.find((r) => r.id === chunkId)
+  const grouped = exact || list.find((r) => r.chunk_ids?.includes(chunkId))
+  let ref = grouped
+  if (!ref && target?.documentTitle) {
+    const key = resolveReferenceHighlightKey(list, target)
+    const item = key ? buildReferenceList(list).find((i) => i.key === key && i.kind === 'document') : undefined
+    if (item?.knowledgeId) ref = list.find((r) => r.knowledge_id === item.knowledgeId)
+  }
+  if (!ref?.knowledge_id || isWebReference(ref) || isToolReference(ref) || ref.chunk_type === 'faq') return null
+  return {
+    chunkId,
+    knowledgeId: ref.knowledge_id,
+    knowledgeBaseId: ref.knowledge_base_id || target?.knowledgeBaseId,
+    title: ref.knowledge_title,
+    fileName: ref.knowledge_filename,
+    knowledgeSource: ref.knowledge_source,
+    chunkType: ref.chunk_type,
+    // A grouped match belongs to another chunk of the same document.
+    content: exact ? exact.content : undefined,
+    locators: exact ? exact.source_locators : undefined,
+    anchorText: target?.anchorText,
+  }
+}
+
+export function resolveReferenceHighlightKey(
+  refs: KnowledgeReferenceLike[] | null | undefined,
+  target: ReferenceHighlightTarget | null | undefined,
+): string | null {
+  if (!target) return null
+  if (target.key) return target.key
+
+  const items = buildReferenceList(refs)
+  if (!items.length) return null
+
+  if (target.url) {
+    const normalized = normalizeReferenceUrl(target.url)
+    const hit = items.find(
+      (item) => item.kind === 'web' && item.url && normalizeReferenceUrl(item.url) === normalized,
+    )
+    if (hit) return hit.key
+  }
+
+  if (target.chunkId) {
+    const raw = String(target.chunkId).trim()
+    const hit = items.find(
+      (item) =>
+        item.chunkId === raw ||
+        item.chunkIds?.includes(raw) ||
+        item.key === `doc:${raw}` ||
+        (item.kind === 'web' && (item.chunkId === raw || item.url === raw)),
+    )
+    if (hit) return hit.key
+  }
+
+  // Defensive fallback for historical/partially streamed Agent messages whose
+  // tool replay payload no longer contains the exact cited chunk. The public
+  // citation still carries the full document title and KB id, which identify
+  // the same document-level drawer card.
+  if (target.documentTitle) {
+    const title = target.documentTitle.trim().toLowerCase()
+    const candidates = items.filter(
+      (item) => item.kind === 'document' && item.title.trim().toLowerCase() === title,
+    )
+    const scoped = target.knowledgeBaseId
+      // Legacy read_document results omitted the KB id. Accept only one
+      // candidate; loadChunk still verifies its knowledge_id before locating.
+      ? candidates.filter((item) => !item.knowledgeBaseId || item.knowledgeBaseId === target.knowledgeBaseId)
+      : candidates
+    if (scoped.length === 1) return scoped[0]!.key
+  }
+
+  return null
+}

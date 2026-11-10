@@ -1,0 +1,795 @@
+<template>
+  <Teleport to="body" :disabled="!useOverlay">
+    <Transition name="references-panel" @after-enter="handlePanelAfterEnter">
+      <aside
+        v-if="visible"
+        class="chat-references-panel"
+        :class="{ 'is-overlay': useOverlay, 'is-embedded': embeddedMode, 'is-source': !!sourceTarget }"
+        :style="panelStyle"
+        role="complementary"
+        :aria-label="panelTitle"
+      >
+        <PanelResizeHandle
+          v-if="maxPanelWidth > minPanelWidth"
+          :key="sourceTarget ? 'source' : 'list'"
+          edge="left"
+          :label="t('knowledgeStages.resizeDrawer')"
+          :value="panelWidth"
+          :min="minPanelWidth"
+          :max="maxPanelWidth"
+          @start="resizeStartWidth = panelWidth"
+          @resize="resizePanel"
+          @end="savePanelWidths"
+        />
+        <header class="chat-references-panel__header">
+          <div class="chat-references-panel__heading">
+            <button
+              v-if="sourceTarget"
+              type="button"
+              class="chat-references-panel__back"
+              :aria-label="t('chat.referenceSourceBack')"
+              @click="backToList"
+            >
+              <t-icon name="chevron-left" size="16px" />
+              <span>{{ t('chat.referenceSourceBack') }}</span>
+              <span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
+            </button>
+            <h3 v-else class="chat-references-panel__title">
+              {{ panelTitle }}<span v-if="totalCount" class="chat-references-panel__count"> · {{ totalCount }}</span>
+            </h3>
+          </div>
+          <button
+            type="button"
+            class="chat-references-panel__close"
+            :aria-label="t('common.close')"
+            @click="close"
+          >
+            <t-icon name="close" size="16px" />
+          </button>
+        </header>
+
+        <ChatReferenceSourceView
+          v-if="sourceTarget"
+          class="chat-references-panel__source"
+          :target="sourceTarget"
+          :active="visible"
+          @unavailable="onSourceUnavailable"
+        />
+
+        <div v-else ref="listElement" class="chat-references-panel__body">
+          <div v-if="sections.length === 0" class="chat-references-panel__empty">
+            {{ t('chat.referencesDrawerEmpty') }}
+          </div>
+
+          <section
+            v-for="section in sections"
+            :key="section.id"
+            class="chat-references-panel__section"
+            :class="{ 'chat-references-panel__section--documents': section.id === 'documents' }"
+          >
+            <h4 v-if="sections.length > 1" class="chat-references-panel__section-title">
+              {{ sectionTitle(section.id) }}
+            </h4>
+
+            <article
+              v-for="item in section.items"
+              :key="item.key"
+              :ref="(el) => setItemRef(item.key, el as HTMLElement | null)"
+              class="reference-item"
+              :class="{
+                'reference-item--web': item.kind === 'web',
+                'reference-item--document': item.kind === 'document',
+                'reference-item--tool': item.kind === 'tool',
+                'is-highlighted': item.key === activeHighlightKey,
+              }"
+            >
+              <component
+                :is="item.kind === 'web' ? 'a' : 'div'"
+                class="reference-item__body"
+                :class="{ 'is-expandable': item.kind === 'document' && hasMoreContent(item) }"
+                :href="item.kind === 'web' ? item.url : undefined"
+                :target="item.kind === 'web' ? '_blank' : undefined"
+                :rel="item.kind === 'web' ? 'noopener noreferrer' : undefined"
+                :role="item.kind === 'document' && hasMoreContent(item) ? 'button' : undefined"
+                :tabindex="item.kind === 'document' && hasMoreContent(item) ? 0 : undefined"
+                @mousedown="trackContentPointerDown"
+                @click="item.kind === 'document' && hasMoreContent(item) ? toggleDocumentSnippet(item, $event) : undefined"
+                @keydown.enter="item.kind === 'document' && hasMoreContent(item) ? toggleDocumentSnippet(item) : undefined"
+                @keydown.space.prevent="item.kind === 'document' && hasMoreContent(item) ? toggleDocumentSnippet(item) : undefined"
+              >
+                <template v-if="item.kind === 'document'">
+                  <div class="reference-item__document">
+                    <ArtifactFileIcon :file-name="item.fileName || item.title" />
+                    <div class="reference-item__document-main">
+                      <div class="reference-item__title-row">
+                        <h5 class="reference-item__title" :title="item.title">{{ item.title }}</h5>
+                        <button
+                          v-if="canOpenSource(item)"
+                          type="button"
+                          class="reference-item__open"
+                          :title="t('chat.referenceSourceView')"
+                          :aria-label="t('chat.referenceSourceView')"
+                          @click.stop="openItemSource(item)"
+                        >
+                          <t-icon name="file-search" size="14px" />
+                        </button>
+                        <a
+                          v-if="item.knowledgeBaseId && !embeddedMode"
+                          class="reference-item__open"
+                          :href="getDocumentHref(item)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          :aria-label="t('chat.navigateToDocument')"
+                          @click.stop
+                        >
+                          <t-icon name="jump" size="14px" />
+                        </a>
+                      </div>
+                      <p v-if="item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
+                        {{ formatReferenceSnippet(item.snippet) }}
+                      </p>
+                      <div v-if="expandedKeys.has(item.key)" class="reference-item__content">
+                        {{ formatReferenceSnippet(item.content) }}
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <template v-else>
+                  <div v-if="item.kind === 'web' && item.domain" class="reference-item__source">
+                    <img
+                      v-if="item.faviconUrl"
+                      class="reference-item__source-mark"
+                      :src="item.faviconUrl"
+                      alt=""
+                      loading="lazy"
+                      @error="onFaviconError"
+                    />
+                    <span class="reference-item__domain">{{ item.domain }}</span>
+                  </div>
+                  <div v-else-if="item.kind === 'tool' && item.domain" class="reference-item__source">
+                    <t-icon name="tools" class="reference-item__source-mark" />
+                    <span class="reference-item__domain">{{ item.domain }}</span>
+                  </div>
+
+                  <h5 v-if="shouldShowItemTitle(item)" class="reference-item__title">{{ item.title }}</h5>
+
+                  <p v-if="item.kind !== 'tool' && item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
+                    {{ formatReferenceSnippet(item.snippet) }}
+                  </p>
+                  <div v-if="item.kind === 'tool' && item.content" class="reference-item__content">
+                    {{ formatReferenceSnippet(item.content) }}
+                  </div>
+                </template>
+              </component>
+            </article>
+          </section>
+        </div>
+      </aside>
+    </Transition>
+  </Teleport>
+
+  <Transition name="references-backdrop">
+    <div
+      v-if="visible && useOverlay"
+      class="chat-references-panel__backdrop"
+      @click="close"
+    />
+  </Transition>
+</template>
+
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+import { REFERENCES_PANEL_WIDTH, useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
+import ChatReferenceSourceView from '@/components/ChatReferenceSourceView.vue'
+import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
+import {
+  buildReferenceSections,
+  formatReferenceSnippet,
+  resolveReferenceHighlightKey,
+  type ReferenceListItem,
+} from '@/utils/referenceSources'
+
+const props = defineProps<{
+  embeddedMode?: boolean
+  overlayBreakpoint?: number
+}>()
+
+const { t } = useI18n()
+const router = useRouter()
+const drawer = useChatReferencesDrawer()
+
+const listElement = ref<HTMLElement | null>(null)
+const itemElements = new Map<string, HTMLElement>()
+const expandedKeys = reactive(new Set<string>())
+const pointerDownSelectionText = ref('')
+const panelEntered = ref(false)
+
+const visible = computed(() => drawer?.visible.value ?? false)
+const references = computed(() => drawer?.references.value ?? [])
+const highlight = computed(() => drawer?.highlight.value ?? null)
+// The embed has no access to original files, so it always lists sources.
+const sourceTarget = computed(() => (props.embeddedMode ? null : drawer?.source.value ?? null))
+
+const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
+const onViewportResize = () => {
+  viewportWidth.value = window.innerWidth
+}
+onMounted(() => window.addEventListener('resize', onViewportResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onViewportResize))
+
+const WIDTH_STORAGE_KEY = 'weknora.references-panel-widths'
+const preferredWidths = reactive<{ source?: number; list?: number }>({})
+let resizeStartWidth = 0
+onMounted(() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(WIDTH_STORAGE_KEY) || '{}')
+    for (const key of ['source', 'list'] as const) {
+      if (typeof stored?.[key] === 'number' && Number.isFinite(stored[key]) && stored[key] > 0) {
+        preferredWidths[key] = stored[key]
+      }
+    }
+  } catch { /* Storage can be unavailable in embedded/private contexts. */ }
+})
+
+const useOverlay = computed(() => {
+  if (props.embeddedMode) return true
+  return viewportWidth.value < (props.overlayBreakpoint ?? 960)
+})
+
+const maxPanelWidth = computed(() => useOverlay.value
+  ? viewportWidth.value
+  : Math.min(1400, Math.max(360, viewportWidth.value - 560)))
+const minPanelWidth = computed(() => Math.min(sourceTarget.value ? 360 : 320, maxPanelWidth.value))
+const clampPanelWidth = (width: number) => Math.max(minPanelWidth.value, Math.min(maxPanelWidth.value, width))
+// Preserve independent preferences when switching between the list and original.
+const panelWidth = computed(() => {
+  const preferred = sourceTarget.value ? preferredWidths.source : preferredWidths.list
+  const initial = sourceTarget.value
+    ? (useOverlay.value ? 760 : Math.max(480, Math.min(780, Math.round(viewportWidth.value * 0.46))))
+    : REFERENCES_PANEL_WIDTH
+  return clampPanelWidth(preferred ?? initial)
+})
+const panelStyle = computed(() => ({ width: `${panelWidth.value}px` }))
+
+watchEffect(() => {
+  if (drawer) drawer.panelWidth.value = panelWidth.value
+})
+
+function resizePanel(delta: number) {
+  preferredWidths[sourceTarget.value ? 'source' : 'list'] = clampPanelWidth(resizeStartWidth - delta)
+}
+
+function savePanelWidths() {
+  try { localStorage.setItem(WIDTH_STORAGE_KEY, JSON.stringify(preferredWidths)) } catch { /* Optional preference. */ }
+}
+
+function canOpenSource(item: ReferenceListItem) {
+  return !props.embeddedMode && item.kind === 'document' && !!item.knowledgeId
+}
+
+function openItemSource(item: ReferenceListItem) {
+  if (!drawer || !item.knowledgeId) return
+  drawer.openSource({
+    chunkId: item.sourceChunkId || item.chunkId,
+    knowledgeId: item.knowledgeId,
+    knowledgeBaseId: item.knowledgeBaseId,
+    title: item.title,
+    fileName: item.fileName,
+  })
+}
+
+function backToList() {
+  drawer?.closeSource()
+  void nextTick(() => scrollToHighlight())
+}
+
+function onSourceUnavailable() {
+  // No original document to show (FAQ or unsupported source): fall back
+  // to the list with the cited card highlighted.
+  backToList()
+}
+
+const sections = computed(() => buildReferenceSections(references.value))
+const totalCount = computed(() => sections.value.reduce((sum, section) => sum + section.items.length, 0))
+
+const activeHighlightKey = computed(() =>
+  resolveReferenceHighlightKey(references.value, highlight.value),
+)
+
+const panelTitle = computed(() => {
+  const webCount = sections.value.find((section) => section.id === 'web')?.items.length ?? 0
+  const docCount = sections.value.find((section) => section.id === 'documents')?.items.length ?? 0
+  const toolCount = sections.value.find((section) => section.id === 'tools')?.items.length ?? 0
+  if (toolCount > 0 && webCount === 0 && docCount === 0) {
+    return t('chat.referencesDrawerTitleTools')
+  }
+  if ([webCount, docCount, toolCount].filter((count) => count > 0).length > 1) {
+    return t('chat.referencesDrawerTitleMixed')
+  }
+  if (webCount > 0) {
+    return t('chat.referencesDrawerTitleWeb')
+  }
+  if (docCount > 0) {
+    return t('chat.referencesDrawerTitleDocs')
+  }
+  return t('chat.referencesDrawerTitle')
+})
+
+function sectionTitle(id: 'web' | 'documents' | 'tools') {
+  if (id === 'web') return t('chat.referencesDrawerWebSection')
+  if (id === 'tools') return t('chat.referencesDrawerToolsSection')
+  return t('chat.referencesDrawerDocsSection')
+}
+
+function close() {
+  drawer?.close()
+}
+
+function setItemRef(key: string, el: HTMLElement | null) {
+  if (!el) {
+    itemElements.delete(key)
+    return
+  }
+  itemElements.set(key, el)
+}
+
+function onFaviconError(event: Event) {
+  const img = event.target as HTMLImageElement | null
+  if (img) img.style.display = 'none'
+}
+
+function hasMoreContent(item: ReferenceListItem) {
+  const content = String(item.content || '').trim()
+  const snippet = String(item.snippet || '').replace(/…$/, '').trim()
+  if (!content) return false
+  if (!snippet) return true
+  return content.length > snippet.length && !content.startsWith(snippet)
+    ? true
+    : content.length > snippet.length + 8
+}
+
+function getSelectedText() {
+  if (typeof window === 'undefined') return ''
+  return window.getSelection()?.toString().trim() || ''
+}
+
+function trackContentPointerDown() {
+  pointerDownSelectionText.value = getSelectedText()
+}
+
+function shouldIgnoreContentToggle(event?: MouseEvent) {
+  if (!event) return false
+  const selectedText = getSelectedText()
+  if (selectedText || pointerDownSelectionText.value) {
+    pointerDownSelectionText.value = ''
+    return true
+  }
+  pointerDownSelectionText.value = ''
+  return false
+}
+
+function toggleDocumentSnippet(item: ReferenceListItem, event?: MouseEvent) {
+  if (shouldIgnoreContentToggle(event)) return
+  if (expandedKeys.has(item.key)) {
+    expandedKeys.delete(item.key)
+    return
+  }
+  expandedKeys.add(item.key)
+}
+
+function getDocumentHref(item: ReferenceListItem) {
+  if (!item.knowledgeBaseId) return ''
+  const query: Record<string, string> = {}
+  if (item.knowledgeId) query.knowledge_id = item.knowledgeId
+  return router.resolve({
+    path: `/platform/knowledge-bases/${item.knowledgeBaseId}`,
+    query,
+  }).href
+}
+
+function shouldShowItemTitle(item: ReferenceListItem) {
+  if (item.kind !== 'web') return true
+  const title = item.title?.trim()
+  const domain = item.domain?.trim()
+  return Boolean(title && title !== domain)
+}
+
+async function scrollToHighlight() {
+  if (!panelEntered.value) return
+  const key = activeHighlightKey.value
+  if (!key) return
+  await nextTick()
+  const el = itemElements.get(key)
+  const container = listElement.value
+  if (!el || !container) return
+
+  // Keep citation positioning inside the drawer. Native element scrolling may
+  // also adjust the outer chat viewport while the fixed panel is still
+  // entering, which makes the conversation column visibly jump sideways.
+  const itemRect = el.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  let nextTop: number | null = null
+  if (itemRect.top < containerRect.top) {
+    nextTop = container.scrollTop + itemRect.top - containerRect.top - 8
+  } else if (itemRect.bottom > containerRect.bottom) {
+    nextTop = container.scrollTop + itemRect.bottom - containerRect.bottom + 8
+  }
+  if (nextTop !== null) {
+    container.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
+  }
+}
+
+function handlePanelAfterEnter() {
+  panelEntered.value = true
+  void scrollToHighlight()
+}
+
+watch(activeHighlightKey, () => {
+  void scrollToHighlight()
+})
+
+// A user may click the same citation again after manually scrolling the drawer
+// away from its card. The resolved key does not change in that case, but the
+// highlight target object does, so replay the scroll for every activation.
+watch(highlight, () => {
+  void scrollToHighlight()
+})
+
+watch(visible, (open) => {
+  if (!open) {
+    panelEntered.value = false
+    expandedKeys.clear()
+    return
+  }
+})
+</script>
+
+<style scoped lang="less">
+// Both stop at a docked assistant panel.
+.chat-references-panel__backdrop {
+  position: fixed;
+  inset: 0 var(--assistant-dock-width, 0px) 0 0;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 1200;
+}
+
+.chat-references-panel {
+  position: fixed;
+  top: 0;
+  right: var(--assistant-dock-width, 0px);
+  bottom: 0;
+  width: min(420px, 100vw);
+  z-index: 1201;
+  display: flex;
+  flex-direction: column;
+  background: var(--td-bg-color-container);
+  border-left: 1px solid var(--td-component-stroke);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.06);
+
+  &.is-overlay {
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.12);
+  }
+}
+
+.chat-references-panel__source {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-references-panel__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 6px 4px 2px;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.chat-references-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: var(--app-chat-header-height);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.chat-references-panel__heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-references-panel__title {
+  margin: 0;
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-references-panel__count {
+  color: var(--td-text-color-placeholder);
+  font-weight: 500;
+}
+
+.chat-references-panel__close {
+  border: 0;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-md);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--td-text-color-primary) 8%, var(--td-bg-color-secondarycontainer));
+    color: var(--td-text-color-primary);
+  }
+}
+
+.chat-references-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 12px 24px;
+}
+
+.chat-references-panel__empty {
+  padding: 24px 8px;
+  text-align: center;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-md);
+}
+
+.chat-references-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-references-panel__section + .chat-references-panel__section {
+  margin-top: 16px;
+}
+
+.chat-references-panel__section--documents {
+  gap: 0;
+  padding-top: var(--app-space-2);
+}
+
+.chat-references-panel__section-title {
+  margin: 0 0 8px;
+  padding: 0 4px;
+  font-size: var(--app-text-sm);
+  font-weight: 600;
+  color: var(--td-text-color-placeholder);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.reference-item {
+  border-radius: var(--app-radius-xl);
+  transition: background-color var(--app-motion-fast) ease;
+
+  &:hover:not(.is-highlighted) {
+    background: color-mix(in srgb, var(--td-text-color-primary) 4%, transparent);
+  }
+
+  &.is-highlighted {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
+.reference-item__body {
+  display: block;
+  padding: 10px 12px;
+  color: inherit;
+  text-decoration: none;
+
+  &.is-expandable {
+    cursor: pointer;
+  }
+}
+
+.reference-item__document {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-3);
+  min-width: 0;
+}
+
+.reference-item--document {
+  border-radius: var(--app-radius-md);
+
+  &:hover:not(.is-highlighted) {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  .reference-item__body {
+    padding: 10px var(--app-space-2);
+    border-radius: inherit;
+
+    &:focus-visible {
+      outline: 2px solid var(--td-text-color-secondary);
+      outline-offset: -2px;
+    }
+  }
+
+  .reference-item__title {
+    display: block;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .reference-item__snippet {
+    display: block;
+    margin-top: 2px;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-sm);
+    line-height: 1.3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  &:has(.reference-item__content) .reference-item__document {
+    align-items: flex-start;
+  }
+}
+
+.reference-item__document-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.reference-item__source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 6px;
+}
+
+.reference-item__source-mark {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--app-radius-pill);
+  object-fit: cover;
+  font-size: var(--app-text-base);
+  color: var(--td-text-color-placeholder);
+}
+
+.reference-item__domain {
+  font-size: var(--app-text-md);
+  line-height: 1.35;
+  color: var(--td-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-item__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reference-item__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--app-text-lg);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.reference-item__open {
+  flex-shrink: 0;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--td-text-color-placeholder);
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+}
+
+.reference-item:hover .reference-item__open,
+.reference-item:focus-within .reference-item__open,
+.reference-item.is-highlighted .reference-item__open {
+  opacity: 1;
+}
+
+.reference-item__open:hover {
+  color: var(--td-text-color-primary);
+}
+
+.reference-item__snippet {
+  margin: 4px 0 0;
+  font-size: var(--app-text-md);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.reference-item__content {
+  margin: 4px 0 0;
+  font-size: var(--app-text-md);
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.references-panel-enter-active {
+  transition:
+    transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.references-panel-leave-active {
+  transition:
+    transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.references-panel-enter-from,
+.references-panel-leave-to {
+  transform: translateX(100%);
+  opacity: 0.6;
+}
+
+.references-backdrop-enter-active {
+  transition: opacity 0.24s ease;
+}
+
+.references-backdrop-leave-active {
+  transition: opacity var(--app-motion-slow) ease;
+}
+
+.references-backdrop-enter-from,
+.references-backdrop-leave-to {
+  opacity: 0;
+}
+</style>

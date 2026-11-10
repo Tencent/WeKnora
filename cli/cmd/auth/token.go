@@ -1,0 +1,188 @@
+package auth
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+)
+
+// authTokenFields lists fields surfaced in `--help` as a hint for `--jq`
+// projection. Single-resource shape: emits the bare token object directly.
+var authTokenFields = []string{"token", "mode", "profile"}
+
+type tokenResult struct {
+	Token   string `json:"token"`
+	Mode    string `json:"mode"` // ModeBearer (JWT) or ModeAPIKey
+	Profile string `json:"profile"`
+}
+
+// NewCmdToken builds `weknora auth token`. Prints the active profile's
+// credential to stdout for use in shell pipelines, e.g.
+//
+//	WEKNORA_TOKEN=$(weknora auth token)
+//	curl -H "Authorization: Bearer $WEKNORA_TOKEN" ...     # JWT mode
+//	curl -H "X-API-Key: $WEKNORA_TOKEN" ...                # api-key mode
+//
+// The user is responsible for constructing the appropriate header -
+// `auth list` shows which mode each profile uses.
+//
+// Default output: raw token on stdout, no trailing newline (clean $(...)).
+// `--format json[=fields]` emits a bare {token, mode, profile} object.
+func NewCmdToken(f *cmdutil.Factory) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "token",
+		Short: "Print the active profile's credential to stdout",
+		Long: `Print the active profile's credential to stdout, with no trailing
+newline, suitable for shell command substitution.
+
+The credential is the long-lived API key (mode: api-key) or the access JWT
+(mode: bearer), depending on how the profile was created. Run ` + "`weknora auth list`" + `
+to see which mode each profile uses, and construct the matching HTTP header:
+
+  Authorization: Bearer <token>    # bearer mode
+  X-API-Key: <token>               # api-key mode
+
+` + "`--profile <name>`" + ` (global flag) selects a non-active profile to read from.`,
+		Example: `  WEKNORA_TOKEN=$(weknora auth token)
+  weknora auth token --profile staging
+  weknora auth token --format json`,
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			fopts, err := cmdutil.CheckFormatFlag(c)
+			if err != nil {
+				return err
+			}
+			// `auth token` is a scalar scripting helper (WEKNORA_TOKEN=$(...)),
+			// so it defaults to the raw token — overriding the global json
+			// default, the same way `doc download` streams raw bytes. Explicit
+			// --format json / WEKNORA_FORMAT=json still emit the
+			// {token,mode,profile} envelope.
+			fopts.FromEnv()
+			if fopts.Mode == "" {
+				// --jq implies JSON (it filters the envelope); without it,
+				// default to the raw token for clean $(...) capture.
+				if fopts.JQ != "" {
+					fopts.Mode = cmdutil.FormatJSON
+				} else {
+					fopts.Mode = cmdutil.FormatText
+				}
+			}
+			return runToken(f, fopts)
+		},
+	}
+	cmdutil.AddFormatFlag(cmd, authTokenFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor: "print the active profile's raw credential to stdout for shell capture",
+		Examples: []string{
+			"WEKNORA_TOKEN=$(weknora auth token)",
+			"weknora auth token --profile staging",
+			"weknora auth token --format json",
+		},
+		Output: "raw token on stdout (no envelope, no trailing newline) by default; --format json emits {token, mode, profile}",
+		Warnings: []string{
+			"default output is the bare token, NOT the JSON envelope — it is a scripting helper for shell capture",
+		},
+	})
+	return cmd
+}
+
+func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
+	// Env credentials are the active credential on the headless path — `auth
+	// token` must surface them (they ARE the token / api key) instead of
+	// erroring on the absence of a stored profile.
+	if active, kind := cmdutil.EnvCredential(); active {
+		mode := ModeBearer
+		if kind == "WEKNORA_API_KEY" {
+			mode = ModeAPIKey
+		}
+		// EnvCredential gates on the trimmed value and buildClientFromEnv
+		// trims before authenticating - emit the same trimmed credential, or
+		// stray padding/newlines (common in CI secret stores) only break the
+		// captured $(weknora auth token) output, not the CLI's own calls.
+		return emitToken(fopts, strings.TrimSpace(os.Getenv(kind)), mode, "(env)")
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		return err
+	}
+	profileName := cfg.CurrentProfile
+	if f.ProfileOverride != "" {
+		profileName = f.ProfileOverride
+	}
+	if profileName == "" {
+		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+			"no active profile configured")
+	}
+	ctx, ok := cfg.Profiles[profileName]
+	if !ok {
+		return cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,
+			fmt.Sprintf("profile %q not found", profileName))
+	}
+
+	store, err := f.Secrets()
+	if err != nil {
+		return cmdutil.Wrapf(cmdutil.CodeLocalKeychainDenied, err, "init secrets store")
+	}
+
+	// Resolve the stored credential. Prefer bearer (JWT) when both refs
+	// are present - JWT is the more capable mode and what `buildClient`
+	// uses for the Authorization header (see factory.go buildClient).
+	var token, mode string
+	switch {
+	case ctx.TokenRef != "":
+		v, ferr := cmdutil.LoadSecret(store, profileName, "access")
+		if ferr != nil {
+			return ferr
+		}
+		token, mode = v, ModeBearer
+	case ctx.APIKeyRef != "":
+		v, ferr := cmdutil.LoadSecret(store, profileName, "api_key")
+		if ferr != nil {
+			return ferr
+		}
+		token, mode = v, ModeAPIKey
+	default:
+		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+			fmt.Sprintf("profile %q has no stored credential; run `weknora auth login`", profileName))
+	}
+
+	if token == "" {
+		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+			fmt.Sprintf("profile %q credential is empty in keyring; run `weknora auth login`", profileName))
+	}
+
+	return emitToken(fopts, token, mode, profileName)
+}
+
+// emitToken renders a resolved credential: the {token, mode, profile} envelope
+// under --format json, else the raw token on stdout (no trailing newline, for
+// clean $(weknora auth token) capture) with a TTY-only leak hint on stderr.
+func emitToken(fopts *cmdutil.FormatOptions, token, mode, profile string) error {
+	if token == "" {
+		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "active credential is empty")
+	}
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Profile: profile}, nil)
+	}
+
+	// No trailing newline - clean $(weknora auth token) substitution.
+	fmt.Fprint(iostreams.IO.Out, token)
+	// Defensive hint to stderr when stdout is an interactive terminal:
+	// the user likely didn't mean to display the secret on screen.
+	// stderr-only so scripts (always non-TTY) are unaffected. Mode-specific
+	// because api-key tokens are long-lived and rotation is the only
+	// recourse on leak - bearer tokens self-expire via refresh.
+	if iostreams.IO.IsStdoutTTY() {
+		fmt.Fprintln(iostreams.IO.Err)
+		fmt.Fprintln(iostreams.IO.Err, "hint: pipe to $(weknora auth token) to capture; this terminal scrollback now contains the secret")
+		if mode == ModeAPIKey {
+			fmt.Fprintln(iostreams.IO.Err, "note: api-key credentials are long-lived - rotate via your auth provider if exposed (no `auth refresh` path)")
+		}
+	}
+	return nil
+}

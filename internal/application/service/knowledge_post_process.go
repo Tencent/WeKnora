@@ -1,0 +1,741 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
+)
+
+// KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
+// after a document has been parsed and split into chunks (including multimodal OCR/Caption).
+type KnowledgePostProcessService struct {
+	knowledgeRepo interfaces.KnowledgeRepository
+	kbService     interfaces.KnowledgeBaseService
+	chunkService  interfaces.ChunkService
+	chunkRepo     interfaces.ChunkRepository
+	taskEnqueuer  interfaces.TaskEnqueuer
+	pendingRepo   interfaces.TaskPendingOpsRepository
+	redisClient   *redis.Client
+	spanTracker   SpanTracker
+}
+
+func NewKnowledgePostProcessService(
+	knowledgeRepo interfaces.KnowledgeRepository,
+	kbService interfaces.KnowledgeBaseService,
+	chunkService interfaces.ChunkService,
+	chunkRepo interfaces.ChunkRepository,
+	taskEnqueuer interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	redisClient *redis.Client,
+	spanTracker SpanTracker,
+) interfaces.TaskHandler {
+	return &KnowledgePostProcessService{
+		knowledgeRepo: knowledgeRepo,
+		kbService:     kbService,
+		chunkService:  chunkService,
+		chunkRepo:     chunkRepo,
+		taskEnqueuer:  taskEnqueuer,
+		pendingRepo:   pendingRepo,
+		redisClient:   redisClient,
+		spanTracker:   spanTracker,
+	}
+}
+
+func (s *KnowledgePostProcessService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
+	}
+	return s.spanTracker
+}
+
+// finishRunningMultimodalStage closes the multimodal stage only when image
+// work really ran and is still open. The canonical stage also exists when
+// multimodal processing is disabled, but that row is already "skipped" and
+// must not be rewritten to "done" with the postprocess queueing delay as its
+// duration.
+func (s *KnowledgePostProcessService) finishRunningMultimodalStage(
+	ctx context.Context,
+	knowledgeID string,
+	attempt int,
+) {
+	mm := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StageMultimodal)
+	if mm == nil ||
+		mm.Kind != types.SpanKindStage ||
+		mm.Status != types.SpanStatusRunning {
+		return
+	}
+	s.tracker().EndSpan(ctx, mm, nil)
+}
+
+// Handle implements asynq handler for TypeKnowledgePostProcess.
+func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Task) error {
+	var payload types.KnowledgePostProcessPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return fmt.Errorf("unmarshal knowledge post process payload: %w", err)
+	}
+
+	logger.Infof(ctx, "[KnowledgePostProcess] Orchestrating post processing for knowledge: %s", payload.KnowledgeID)
+
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
+
+	// 1. Fetch Knowledge and KB
+	knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
+	if err != nil {
+		return fmt.Errorf("get knowledge %s: %w", payload.KnowledgeID, err)
+	}
+	if knowledge == nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Knowledge %s not found, aborting.", payload.KnowledgeID)
+		return nil
+	}
+
+	if err := validateProcessingKnowledge(knowledge,
+		payload.TenantID,
+		payload.KnowledgeBaseID,
+		payload.KnowledgeID); err != nil {
+		return err
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if err != nil || kb == nil {
+		return fmt.Errorf("get knowledge base %s: %w", payload.KnowledgeBaseID, err)
+	}
+
+	if kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
+		return fmt.Errorf("postprocess task KB owner changed: %w", asynq.SkipRetry)
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return fmt.Errorf("invalid postprocess scope: %v: %w", err, asynq.SkipRetry)
+	}
+	// Resolve attempt: payload carries it from the upstream stage, but
+	// fall back to the latest known attempt for compatibility with
+	// in-flight tasks queued before this code shipped.
+	attempt := payload.Attempt
+	if attempt <= 0 {
+		attempt = s.tracker().LatestAttempt(ctx, payload.KnowledgeID)
+	} else if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, attempt) {
+		// A reparse started after this run. Entering finalizing here would
+		// seed the counter for subtasks that all drop themselves as
+		// superseded, and the new run's own post-process would then find
+		// the row already finalizing and skip its fan-out.
+		logger.Infof(ctx, "[KnowledgePostProcess] Attempt %d of %s superseded, skipping.",
+			attempt, payload.KnowledgeID)
+		return nil
+	}
+
+	// Close the multimodal stage span (parent enqueued it as "running"
+	// and we never see the per-image fan-in here other than by reaching
+	// post-process). If the parent skipped multimodal entirely, the
+	// stage row will already be in "skipped" state and must remain so.
+	// Per-image success/failure counts are NOT
+	// aggregated here — the frontend already walks the children when
+	// rendering the multimodal stage detail and counts them itself,
+	// avoiding an extra query path.
+	s.finishRunningMultimodalStage(ctx, payload.KnowledgeID, attempt)
+
+	postSpan := s.tracker().BeginStage(ctx, payload.KnowledgeID, attempt, types.StagePostProcess, nil)
+
+	// Skip post-processing entirely when the knowledge has been cancelled
+	// by the user or marked for deletion. We must NOT enqueue summary /
+	// question / graph / wiki child tasks for an aborted knowledge. We
+	// MUST also close postSpan before returning, otherwise it stays in
+	// running state forever and the trace viewer shows an orange bar
+	// long after the user cancelled (the AbortAttempt sweep ran before
+	// we opened postSpan, so the sweep didn't catch this row).
+	switch knowledge.ParseStatus {
+	case types.ParseStatusCancelled, types.ParseStatusDeleting:
+		logger.Infof(ctx,
+			"[KnowledgePostProcess] Knowledge %s aborted (%s), skipping post-processing.",
+			payload.KnowledgeID, knowledge.ParseStatus,
+		)
+		s.tracker().SkipSpan(ctx, postSpan,
+			"knowledge "+knowledge.ParseStatus+" before postprocess started")
+		return nil
+	}
+
+	processOverrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, processOverrides)
+
+	// 2. Fetch all text-like chunks. ListChunksByKnowledgeID is text-only by
+	//    design, which silently dropped the OCR / Caption chunks that
+	//    multimodal parsing adds for scanned PDFs — leaving graph extraction
+	//    with nothing but image-link placeholders. Ask the repository for the
+	//    exact chunk types we enrich instead.
+	chunks, err := s.chunkRepo.ListChunksByKnowledgeIDAndTypes(ctx, payload.TenantID, payload.KnowledgeID,
+		[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeImageOCR, types.ChunkTypeImageCaption})
+	if err != nil {
+		return fmt.Errorf("list chunks for knowledge %s: %w", payload.KnowledgeID, err)
+	}
+
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.TenantID != payload.TenantID || chunk.KnowledgeID != payload.KnowledgeID ||
+			chunk.KnowledgeBaseID != payload.KnowledgeBaseID {
+			return fmt.Errorf("postprocess chunk binding changed: %w", asynq.SkipRetry)
+		}
+	}
+
+	// Gather all text-like chunks (including newly added OCR and Caption from multimodal tasks)
+	var textChunks []*types.Chunk
+	for _, c := range chunks {
+		if c.ChunkType == types.ChunkTypeText || c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
+			textChunks = append(textChunks, c)
+		}
+	}
+
+	graphChunks := selectGraphChunks(textChunks)
+
+	// 3. Compute the enrichment subtask count up front so we can flip to
+	//    "finalizing" with the right counter BEFORE spawning any subtasks.
+	//    Each subtask handler atomically decrements pending_subtasks_count
+	//    on its terminal exit; the row promotes itself to "completed" when
+	//    the counter hits zero (see knowledgeRepository.FinalizeSubtask).
+	//
+	//    Wiki ingest IS counted (as a single subtask): although it's a
+	//    KB-scoped debounced batch, each upload enqueues exactly one
+	//    per-knowledge op, and the batch worker calls FinalizeSubtask once
+	//    when that op reaches a terminal state (mapped successfully or
+	//    dead-lettered after exhausting retries). Counting it keeps the row
+	//    in "finalizing" — i.e. shown as in-progress and still cancellable —
+	//    until wiki generation actually finishes instead of flipping to
+	//    completed while wiki runs minutes later. A wiki op that never
+	//    drains is bounded by the housekeeping finalizing sweep.
+	willSpawnSummary := eff.SummaryEnabled && len(textChunks) > 0
+	willSpawnQuestion := len(textChunks) > 0 && kb.NeedsEmbeddingModel() &&
+		eff.QuestionGenerationConfig.Enabled
+	willSpawnWiki := kb.IsWikiAutoGenerateEnabled() && len(textChunks) > 0
+	willSpawnAutoTag := kb.Type == types.KnowledgeBaseTypeDocument &&
+		kb.AutoTagConfig != nil && kb.AutoTagConfig.Enabled && len(textChunks) > 0
+	enqueuedAutoTag := false
+
+	// Question generation now fans out one subtask per plain text chunk
+	// (mirroring the graph-extract per-chunk pattern) so each chunk's LLM
+	// call retries / cancels / traces independently. We only target
+	// ChunkTypeText here — OCR / Caption chunks were never fed to question
+	// generation in the legacy whole-knowledge loop, so excluding them
+	// keeps behavior identical. Link-only text chunks (scanned PDF pages)
+	// are skipped: the LLM has nothing to ask about and tends to echo the
+	// few-shot example. Sorted by StartAt so the per-chunk context
+	// (prev / next) matches the legacy ordering.
+	var questionChunks []*types.Chunk
+	if willSpawnQuestion {
+		for _, c := range textChunks {
+			if c.ChunkType == types.ChunkTypeText && chunkHasExtractableText(c.Content) {
+				questionChunks = append(questionChunks, c)
+			}
+		}
+		sort.Slice(questionChunks, func(i, j int) bool {
+			return questionChunks[i].StartAt < questionChunks[j].StartAt
+		})
+	}
+
+	// Question generation is batched: one subtask per window of
+	// questionGenChunkBatchSize text chunks (not one per chunk), so a
+	// huge document doesn't spawn thousands of tiny tasks. The counter
+	// must match exactly how many batch tasks we enqueue below.
+	questionBatchCount := (len(questionChunks) + questionGenChunkBatchSize - 1) / questionGenChunkBatchSize
+
+	graphChunkCount := 0
+	if eff.GraphEnabled {
+		graphChunkCount = len(graphChunks)
+	}
+	expectedSubtasks := 0
+	if willSpawnSummary {
+		expectedSubtasks++
+	}
+	expectedSubtasks += questionBatchCount
+	if willSpawnWiki {
+		expectedSubtasks++
+	}
+	expectedSubtasks += graphChunkCount
+
+	// enteredFinalizing is set only when the processing-to-finalizing handoff
+	// actually seeded the counter. For Wiki-enabled knowledge, that handoff
+	// also persists the pending Wiki op in the same transaction.
+	enteredFinalizing := false
+	wikiSlotOwned := false
+
+	switch {
+	case knowledge.ParseStatus == types.ParseStatusFinalizing && kb.IndexingStrategy.WikiEnabled:
+		// A previous delivery may have persisted the Wiki op but failed to
+		// enqueue its KB-scoped trigger. Retry only the trigger: appending a
+		// second pending op would duplicate durable work and its finalizer.
+		if err := enqueueWikiIngestTrigger(ctx, s.taskEnqueuer, payload.TenantID, payload.KnowledgeBaseID); err != nil {
+			s.tracker().FailSpanRetryable(ctx, postSpan, "WIKI_TRIGGER_ENQUEUE_FAILED", err.Error(), err)
+			return fmt.Errorf("retry wiki ingest trigger: %w", err)
+		}
+		logger.Infof(ctx, "[KnowledgePostProcess] Re-enqueued wiki ingest trigger for %s", payload.KnowledgeID)
+		retryOutput := types.JSONMap{"retried_wiki_trigger": true}
+		s.tracker().EndSpan(ctx, postSpan, retryOutput)
+		s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
+			types.SpanStatusDone, retryOutput, "", "")
+		return nil
+	case knowledge.ParseStatus != types.ParseStatusProcessing:
+		// The row was already in some other state (deleting / cancelled /
+		// failed / completed) when we arrived. Don't touch parse_status
+		// and don't spawn enrichment — the upstream that put the row in
+		// that state has already decided this attempt is over.
+		logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s is in %s, skipping enrichment fan-out.",
+			payload.KnowledgeID, knowledge.ParseStatus)
+		s.tracker().EndSpan(ctx, postSpan, types.JSONMap{
+			"skipped":         "non_processing_status",
+			"observed_status": knowledge.ParseStatus,
+		})
+		s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
+			types.SpanStatusDone, types.JSONMap{
+				"skipped":         "non_processing_status",
+				"observed_status": knowledge.ParseStatus,
+			}, "", "")
+		return nil
+	case expectedSubtasks == 0:
+		completed, err := s.knowledgeRepo.CompleteProcessingWithoutSubtasks(ctx, payload.KnowledgeID)
+		if err != nil {
+			s.tracker().FailSpanRetryable(ctx, postSpan, "COMPLETION_FAILED", err.Error(), err)
+			return fmt.Errorf("complete knowledge without enrichment: %w", err)
+		}
+		if !completed {
+			output := types.JSONMap{"skipped": "knowledge_no_longer_processing"}
+			s.tracker().EndSpan(ctx, postSpan, output)
+			s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt, types.SpanStatusDone, output, "", "")
+			return nil
+		}
+	default:
+		// Flip processing to finalizing before fan-out so a parallel
+		// cancel/delete cannot race us into completed.
+		var promoted bool
+		var err error
+		if willSpawnWiki {
+			seeder, ok := s.pendingRepo.(interfaces.TaskPendingOpsFinalizingSeeder)
+			if !ok {
+				return errors.New("wiki post-process requires atomic finalizing handoff")
+			}
+			pendingOp, buildErr := newWikiIngestPendingOp(
+				withAttempt(ctx, attempt), payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID,
+			)
+			if buildErr != nil {
+				return buildErr
+			}
+			promoted, err = seeder.SeedKnowledgeFinalizingWithPendingOp(
+				ctx, payload.KnowledgeID, expectedSubtasks, pendingOp,
+			)
+			wikiSlotOwned = promoted
+		} else {
+			promoted, err = s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expectedSubtasks)
+		}
+		if err != nil {
+			// Acking here would read as "no longer processing" below and
+			// strand the row; retry so the handoff (or dead-letter) happens.
+			logger.Warnf(ctx, "[KnowledgePostProcess] SetFinalizing failed for %s: %v",
+				payload.KnowledgeID, err)
+			s.tracker().FailSpanRetryable(ctx, postSpan, "FINALIZING_HANDOFF_FAILED", err.Error(), err)
+			return fmt.Errorf("enter finalizing: %w", err)
+		}
+		if promoted {
+			enteredFinalizing = true
+			// Reflect summary status separately so the UI shows the
+			// summary as queued for users who already had it visible.
+			summaryStatus := types.SummaryStatusNone
+			if willSpawnSummary {
+				summaryStatus = types.SummaryStatusPending
+			}
+			if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx,
+				payload.KnowledgeID, "summary_status", summaryStatus); err != nil {
+				logger.Warnf(ctx, "[KnowledgePostProcess] Failed to update summary_status for %s: %v",
+					payload.KnowledgeID, err)
+			}
+			logger.Infof(ctx,
+				"[KnowledgePostProcess] Knowledge %s entered finalizing (pending_subtasks=%d).",
+				payload.KnowledgeID, expectedSubtasks)
+		} else {
+			// Row was no longer 'processing' (cancel / delete won the race).
+			// Skip enrichment entirely so we don't waste LLM quota on a row
+			// the user already abandoned.
+			logger.Infof(ctx,
+				"[KnowledgePostProcess] Knowledge %s no longer in processing, skipping enrichment fan-out.",
+				payload.KnowledgeID)
+			s.tracker().EndSpan(ctx, postSpan, types.JSONMap{
+				"skipped": "knowledge_no_longer_processing",
+			})
+			s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
+				types.SpanStatusDone, types.JSONMap{
+					"skipped": "knowledge_no_longer_processing",
+				}, "", "")
+			return nil
+		}
+	}
+
+	// Queue best-effort automatic tagging only after the processing row has
+	// successfully handed off to finalizing or completed. This avoids model calls from a
+	// duplicate post-process delivery that observes an already terminal row.
+	if willSpawnAutoTag {
+		enqueuedAutoTag = s.enqueueAutoTagTask(ctx, payload, attempt)
+	}
+
+	// 4. Spawn Summary and Question Tasks
+	enqueuedSummary := false
+	enqueuedQuestionCount := 0
+	if willSpawnSummary {
+		enqueuedSummary = s.enqueueSummaryGenerationTask(ctx, payload, attempt)
+		if !enqueuedSummary {
+			_ = s.knowledgeRepo.UpdateKnowledgeColumn(
+				ctx, payload.KnowledgeID, "summary_status", types.SummaryStatusFailed,
+			)
+		}
+	}
+	if willSpawnQuestion {
+		// Create the postprocess.question grouping span up front so the
+		// per-batch subspans (enqueued just below, run later in their own
+		// workers) have a parent to nest under. It's begun and ended right
+		// here as a structural container — the batches extend past it,
+		// which the timeline renders with the wrapping outline bar.
+		if grp := s.tracker().BeginSubSpan(ctx, postSpan, postprocessQuestionGroupSpanName,
+			types.SpanKindSubSpan, types.JSONMap{
+				"batch_count": questionBatchCount,
+				"chunk_count": len(questionChunks),
+				"batch_size":  questionGenChunkBatchSize,
+			}); grp != nil {
+			s.tracker().EndSpan(ctx, grp, types.JSONMap{
+				"batch_count": questionBatchCount,
+				"chunk_count": len(questionChunks),
+			})
+		}
+		enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(
+			ctx, payload, eff.QuestionGenerationConfig, attempt, questionChunks,
+		)
+	}
+
+	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
+	enqueuedGraphCount := 0
+	if graphChunkCount > 0 {
+		logger.Infof(ctx,
+			"[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text/OCR chunks (of %d text-like)",
+			len(graphChunks), len(textChunks))
+		for i, chunk := range graphChunks {
+			ok, err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
+				payload.KnowledgeID, attempt, i)
+			if err != nil {
+				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
+			}
+			if ok {
+				enqueuedGraphCount++
+			}
+		}
+	}
+
+	// 6. Schedule the Wiki trigger. The durable per-knowledge op already owns
+	//    its finalizing slot because it was committed atomically with the state
+	//    transition above. A trigger failure is returned so the post-process
+	//    task retries only the trigger without double-accounting.
+	var wikiEnqueueErr error
+	if willSpawnWiki {
+		wikiEnqueueErr = enqueueWikiIngestTrigger(
+			ctx, s.taskEnqueuer, payload.TenantID, payload.KnowledgeBaseID,
+		)
+		if wikiEnqueueErr != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue wiki ingest for %s: %v",
+				payload.KnowledgeID, wikiEnqueueErr)
+		} else if wikiSlotOwned {
+			logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
+		}
+	}
+
+	// Reconcile the seeded counter against what was actually enqueued.
+	// summary/question/graph each own a counted slot that ONLY their own
+	// task drains; a slot whose task was never enqueued (graph with NEO4J
+	// off, a transient enqueue/marshal failure, a nil enqueuer) has no owner
+	// and would otherwise strand the row in "finalizing". Release exactly the
+	// shortfall — each release is a clamped decrement that promotes the row to
+	// "completed" if it brings the counter to zero. Safe against fast workers:
+	// shortfall slots have no draining
+	// task, so total drains == seeded count regardless of ordering.
+	//
+	// Detached ctx: the same reasoning that motivates finalizeSubtaskDetached
+	// for terminal worker drains applies here. If the postprocess handler's
+	// ctx is cancelled (graceful shutdown, preempted worker) between SetFinalizing
+	// and this point, the seeded slots have NO other path to drain — every
+	// owning task either failed to enqueue or was never created. Riding a
+	// cancelled ctx would silently abort the releases and strand the row in
+	// "finalizing". The bound is per-call (matches the helper) so a wedged
+	// connection can't pin the goroutine for the whole serial loop.
+	if enteredFinalizing {
+		plannedOwned := questionBatchCount + graphChunkCount
+		if willSpawnSummary {
+			plannedOwned++
+		}
+		if willSpawnWiki {
+			plannedOwned++
+		}
+		actualOwned := enqueuedQuestionCount + enqueuedGraphCount
+		if enqueuedSummary {
+			actualOwned++
+		}
+		if wikiSlotOwned {
+			actualOwned++
+		}
+		if shortfall := plannedOwned - actualOwned; shortfall > 0 {
+			logger.Warnf(ctx,
+				"[KnowledgePostProcess] Releasing %d un-enqueued subtask slot(s) for %s (planned=%d actual=%d)",
+				shortfall, payload.KnowledgeID, plannedOwned, actualOwned)
+			// Keep going past a failed release: stopping at the first error
+			// left every remaining slot without an owner.
+			for i := 0; i < shortfall; i++ {
+				if err := releaseSubtaskSlot(ctx, s.knowledgeRepo, payload.KnowledgeID); err != nil {
+					logger.Errorf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
+						payload.KnowledgeID, err)
+				}
+			}
+		}
+	}
+
+	postOutput := types.JSONMap{
+		"chunks_total":            len(textChunks),
+		"enqueued_summary":        enqueuedSummary,
+		"enqueued_question":       enqueuedQuestionCount > 0,
+		"enqueued_question_count": enqueuedQuestionCount,
+		"enqueued_wiki":           wikiSlotOwned && wikiEnqueueErr == nil,
+		"wiki_slot_owned":         wikiSlotOwned,
+		"enqueued_graph":          enqueuedGraphCount > 0,
+		"enqueued_graph_count":    enqueuedGraphCount,
+		"enqueued_auto_tag":       enqueuedAutoTag,
+	}
+	s.tracker().EndSpan(ctx, postSpan, postOutput)
+	if wikiSlotOwned && wikiEnqueueErr != nil {
+		return fmt.Errorf("enqueue wiki ingest trigger: %w", wikiEnqueueErr)
+	}
+	// Close the root span — the parse pipeline is done. Async
+	// downstream stages (summary/question/wiki/graph) record their
+	// own spans independently; their finishing extends the trace's
+	// end-time but does not reopen the root. A late failure in one
+	// of those stages does not poison the parse result.
+	s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
+		types.SpanStatusDone, postOutput, "", "")
+	// The document now counts (title, type, folder, tags) in the knowledge-base
+	// description aggregation even before its summary lands; the summary task
+	// requests another refresh once the profile exists. No-op unless the KB
+	// opted in, and debounced so a batch upload costs one aggregation.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.taskEnqueuer, kb, false)
+	return nil
+}
+
+// enqueueAutoTagTask schedules best-effort classification against the KB's
+// existing tags. It intentionally owns no pending-subtask slot: a model or
+// configuration failure must never keep document parsing in finalizing.
+func (s *KnowledgePostProcessService) enqueueAutoTagTask(
+	ctx context.Context,
+	payload types.KnowledgePostProcessPayload,
+	attempt int,
+) bool {
+	if s.taskEnqueuer == nil {
+		return false
+	}
+	taskPayload := types.KnowledgeAutoTagPayload{
+		TenantID:        payload.TenantID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		KnowledgeID:     payload.KnowledgeID,
+		Language:        payload.Language,
+		Attempt:         attempt,
+	}
+	langfuse.InjectTracing(ctx, &taskPayload)
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal auto tag payload: %v", err)
+		return false
+	}
+	task := asynq.NewTask(types.TypeKnowledgeAutoTag, payloadBytes,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(2), asynq.Timeout(2*time.Minute))
+	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue automatic tagging for %s: %v", payload.KnowledgeID, err)
+		return false
+	}
+	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued automatic tagging for %s", payload.KnowledgeID)
+	return true
+}
+
+// enqueueSummaryGenerationTask enqueues the summary task. Returns true only
+// when a task was actually placed on the queue, so the caller can release the
+// seeded pending-subtask slot when enqueue is skipped or fails.
+func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.Context, payload types.KnowledgePostProcessPayload, attempt int) bool {
+	if s.taskEnqueuer == nil {
+		return false
+	}
+
+	taskPayload := types.SummaryGenerationPayload{
+		TenantID:        payload.TenantID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		KnowledgeID:     payload.KnowledgeID,
+		Language:        payload.Language,
+		Attempt:         attempt,
+	}
+	langfuse.InjectTracing(ctx, &taskPayload)
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal summary generation payload: %v", err)
+		return false
+	}
+
+	task := asynq.NewTask(types.TypeSummaryGeneration, payloadBytes,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
+	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
+		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue summary generation for %s: %v", payload.KnowledgeID, err)
+		return false
+	}
+	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued summary generation task for %s", payload.KnowledgeID)
+	return true
+}
+
+// questionGenChunkBatchSize is the number of text chunks handled by a single
+// question-generation task. Batching keeps the task count bounded for very
+// large documents (a 5k-chunk doc becomes ~250 tasks instead of 5k) while
+// preserving per-batch retry / cancellation granularity and letting each task
+// do one embedding BatchIndex over the whole batch.
+const questionGenChunkBatchSize = 20
+
+// postprocessQuestionGroupSpanName is the grouping span the per-batch
+// question subspans (postprocess.question.batch[i]) nest under, so the trace
+// viewer shows one "postprocess.question" node instead of dozens of siblings
+// directly beneath the postprocess stage.
+const postprocessQuestionGroupSpanName = "postprocess.question"
+
+// enqueueQuestionGenerationTasks fans out one TypeQuestionGeneration task per
+// batch of questionGenChunkBatchSize text chunks. Each task carries only chunk
+// ids (+ the adjacent boundary ids for context) — never the chunk content — so
+// the payload stays small and the worker reads fresh content at run time,
+// matching the ExtractChunkPayload precedent.
+//
+// Returns the number of batch tasks successfully enqueued. A failed
+// marshal/enqueue is logged and skipped; the caller's reconciliation
+// step (the shortfall-release loop in Handle) compares this count
+// against questionBatchCount and releases any unowned slots so a
+// half-fanned-out batch can't strand the row in "finalizing".
+func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
+	ctx context.Context,
+	payload types.KnowledgePostProcessPayload,
+	qg types.QuestionGenerationConfig,
+	attempt int,
+	questionChunks []*types.Chunk,
+) int {
+	if s.taskEnqueuer == nil || len(questionChunks) == 0 {
+		return 0
+	}
+	if !qg.Enabled {
+		return 0
+	}
+
+	questionCount := qg.QuestionCount
+	if questionCount <= 0 {
+		questionCount = 3
+	}
+	if questionCount > 10 {
+		questionCount = 10
+	}
+
+	total := len(questionChunks)
+	enqueued := 0
+	batchIndex := 0
+	for start := 0; start < total; start += questionGenChunkBatchSize {
+		end := start + questionGenChunkBatchSize
+		if end > total {
+			end = total
+		}
+		batch := questionChunks[start:end]
+		chunkIDs := make([]string, len(batch))
+		for i, c := range batch {
+			chunkIDs[i] = c.ID
+		}
+
+		taskPayload := types.QuestionGenerationPayload{
+			TenantID:        payload.TenantID,
+			KnowledgeBaseID: payload.KnowledgeBaseID,
+			KnowledgeID:     payload.KnowledgeID,
+			QuestionCount:   questionCount,
+			Language:        payload.Language,
+			Attempt:         attempt,
+			ChunkIDs:        chunkIDs,
+			BatchIndex:      batchIndex,
+		}
+		// Boundary context: the text chunk just before / after this window.
+		if start > 0 {
+			taskPayload.PrevChunkID = questionChunks[start-1].ID
+		}
+		if end < total {
+			taskPayload.NextChunkID = questionChunks[end].ID
+		}
+		batchIndex++
+
+		langfuse.InjectTracing(ctx, &taskPayload)
+		payloadBytes, err := json.Marshal(taskPayload)
+		if err != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal question generation payload for batch %d: %v", batchIndex-1, err)
+			continue
+		}
+
+		task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes,
+			asynq.Queue(types.QueueQuestion), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
+		if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue question generation batch %d for %s: %v", batchIndex-1, payload.KnowledgeID, err)
+			continue
+		}
+		enqueued++
+	}
+	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued %d question generation batch tasks (%d chunks, batch_size=%d) for %s (count=%d)",
+		enqueued, total, questionGenChunkBatchSize, payload.KnowledgeID, questionCount)
+	return enqueued
+}
+
+// selectGraphChunks picks the chunks that should be sent to graph extraction.
+// Captions are dropped (they describe the page visually and duplicate OCR).
+// Text chunks that are only image placeholders are skipped so the extractor
+// cannot echo the few-shot example. OCR is kept when the parent text chunk
+// has no extractable prose (scanned PDF pages); OCR of figures next to real
+// text is skipped to avoid doubling LLM cost on illustrated documents.
+func selectGraphChunks(chunks []*types.Chunk) []*types.Chunk {
+	textByID := make(map[string]*types.Chunk, len(chunks))
+	for _, c := range chunks {
+		if c != nil && c.ChunkType == types.ChunkTypeText {
+			textByID[c.ID] = c
+		}
+	}
+	var out []*types.Chunk
+	for _, c := range chunks {
+		if c == nil {
+			continue
+		}
+		switch c.ChunkType {
+		case types.ChunkTypeImageCaption:
+			continue
+		case types.ChunkTypeImageOCR:
+			if !chunkHasExtractableText(c.Content) {
+				continue
+			}
+			if parent := textByID[c.ParentChunkID]; parent != nil && chunkHasExtractableText(parent.Content) {
+				continue
+			}
+			out = append(out, c)
+		case types.ChunkTypeText:
+			if chunkHasExtractableText(c.Content) {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+// chunkHasExtractableText reports whether a chunk still contains prose once
+// markdown images and <image> wrappers are removed, i.e. whether graph
+// extraction (or question generation) can find entities in it.
+func chunkHasExtractableText(content string) bool {
+	return extractRealText(docparser.StripMarkdownImages(content)) != ""
+}

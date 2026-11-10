@@ -1,0 +1,395 @@
+package types
+
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"log"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/utils"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// WebSearchProviderType represents the type of web search provider
+type WebSearchProviderType string
+
+// Supported web search provider identifiers.
+const (
+	WebSearchProviderTypeBrave      WebSearchProviderType = "brave"
+	WebSearchProviderTypeBing       WebSearchProviderType = "bing"
+	WebSearchProviderTypeGoogle     WebSearchProviderType = "google"
+	WebSearchProviderTypeDuckDuckGo WebSearchProviderType = "duckduckgo"
+	WebSearchProviderTypeTavily     WebSearchProviderType = "tavily"
+	WebSearchProviderTypeOllama     WebSearchProviderType = "ollama"
+	WebSearchProviderTypeBaidu      WebSearchProviderType = "baidu"
+	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
+	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
+	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
+	WebSearchProviderTypeExa        WebSearchProviderType = "exa"
+	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
+	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
+	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
+	WebSearchProviderTypeDeepSeek   WebSearchProviderType = "deepseek"
+	WebSearchProviderTypeSearchAPI  WebSearchProviderType = "searchapi"
+)
+
+// WebSearchProviderEntity represents a configured web search provider instance for a workspace.
+// This is a CRUD entity stored in the database, similar to the Model entity.
+// Each workspace can create multiple provider configurations (e.g., "Production Bing", "Test Google").
+// Agents reference these by ID.
+type WebSearchProviderEntity struct {
+	// Unique identifier (UUID, auto-generated)
+	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey"`
+	// Workspace ID for scoping
+	TenantID uint64 `yaml:"tenant_id" json:"tenant_id"`
+	// User-friendly name, e.g., "Production Bing Search"
+	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null"`
+	// Provider type: bing, google, duckduckgo, tavily
+	Provider WebSearchProviderType `yaml:"provider" json:"provider" gorm:"type:varchar(50);not null"`
+	// Description
+	Description string `yaml:"description" json:"description" gorm:"type:text"`
+	// Provider-specific parameters (API key, engine ID, etc.) stored as encrypted JSON
+	Parameters WebSearchProviderParameters `yaml:"parameters" json:"parameters" gorm:"type:json"`
+	// Whether this is the default provider for the workspace
+	IsDefault bool `yaml:"is_default" json:"is_default" gorm:"default:false"`
+	// Timestamps
+	CreatedAt time.Time      `yaml:"created_at" json:"created_at"`
+	UpdatedAt time.Time      `yaml:"updated_at" json:"updated_at"`
+	DeletedAt gorm.DeletedAt `yaml:"deleted_at" json:"deleted_at" gorm:"index"`
+}
+
+// TableName returns the table name for WebSearchProviderEntity
+func (WebSearchProviderEntity) TableName() string {
+	return "web_search_providers"
+}
+
+// BeforeCreate is a GORM hook that runs before creating a new record.
+// Automatically generates a UUID for new providers.
+func (e *WebSearchProviderEntity) BeforeCreate(tx *gorm.DB) (err error) {
+	if e.ID == "" {
+		e.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// WebSearchProviderParameters holds provider-specific configuration.
+// API keys are encrypted at rest using AES-GCM.
+//
+// Credential mutation flows through the dedicated /credentials subresource
+// (see internal/handler/web_search_provider_credentials.go). Secret fields
+// are never returned in responses — handlers serialize via
+// dto.NewWebSearchProviderResponse which omits APIKey by construction.
+type WebSearchProviderParameters struct {
+	// API key for the search provider (encrypted in DB)
+	APIKey string `yaml:"api_key" json:"api_key,omitempty"`
+	// Google Custom Search Engine ID (only for Google provider)
+	EngineID string `yaml:"engine_id" json:"engine_id,omitempty"`
+	// Base URL for self-hosted search engines (e.g. SearXNG instance URL).
+	// Validated with utils.ValidateURLForSSRF; private hosts must be added to SSRF_WHITELIST.
+	BaseURL string `yaml:"base_url" json:"base_url,omitempty"`
+	// Optional HTTP/HTTPS proxy URL for outbound search requests (e.g. http://host:port); validated with utils.ValidateURLForSSRF.
+	// Does not replace the search API endpoint; only tunnels traffic to the official APIs.
+	ProxyURL string `yaml:"proxy_url" json:"proxy_url,omitempty"`
+	// Provider-specific extra configuration for future extensibility
+	ExtraConfig map[string]string `yaml:"extra_config" json:"extra_config,omitempty"`
+}
+
+// Value implements the driver.Valuer interface.
+// Encrypts APIKey before persisting to database.
+func (p WebSearchProviderParameters) Value() (driver.Value, error) {
+	if key := utils.GetAESKey(); key != nil && p.APIKey != "" {
+		if encrypted, err := utils.EncryptAESGCM(p.APIKey, key); err == nil {
+			p.APIKey = encrypted
+		}
+	}
+	return json.Marshal(p)
+}
+
+// Scan implements the sql.Scanner interface.
+// Decrypts APIKey after loading from database.
+func (p *WebSearchProviderParameters) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(b, p); err != nil {
+		return err
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(p.APIKey); ok {
+		p.APIKey = plain
+	} else {
+		log.Printf("[crypto] web search provider api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		p.APIKey = ""
+	}
+	return nil
+}
+
+// WebSearchProviderTypeInfo describes the metadata of a provider type.
+// Used by the GET /types endpoint so the frontend can dynamically render forms.
+type WebSearchProviderTypeInfo struct {
+	// Provider type identifier
+	ID string `json:"id" extensions:"x-agent"`
+	// Human-readable name
+	Name string `json:"name" extensions:"x-agent"`
+	// Whether the provider requires an API key
+	RequiresAPIKey bool `json:"requires_api_key" extensions:"x-agent"`
+	// Whether the provider accepts an optional API key (keyless by default, but a
+	// key unlocks higher limits — e.g. Keenable). Mutually exclusive with RequiresAPIKey.
+	SupportsOptionalAPIKey bool `json:"supports_optional_api_key,omitempty"`
+	// Whether the provider requires an engine ID (e.g., Google CSE)
+	RequiresEngineID bool `json:"requires_engine_id" extensions:"x-agent"`
+	// Whether the provider requires a user-supplied base URL (e.g., self-hosted SearXNG instance)
+	RequiresBaseURL bool `json:"requires_base_url" extensions:"x-agent"`
+	// Whether optional proxy_url in parameters is honored for outbound requests
+	SupportsProxy bool `json:"supports_proxy"`
+	// Description
+	Description string `json:"description" extensions:"x-agent"`
+	// URL to the provider's official website or documentation for obtaining credentials
+	DocsURL string `json:"docs_url,omitempty"`
+	// Provider-specific non-secret configuration rendered dynamically by the frontend.
+	ConfigFields []WebSearchProviderConfigField `json:"config_fields,omitempty"`
+	// Search and fetch readers registered for this type; nil when the type is not registered.
+	Clients *WebSearchClients `json:"clients,omitempty"`
+}
+
+// WebSearchProviderConfigField describes a non-secret provider-specific form field.
+// Values are persisted in WebSearchProviderParameters.ExtraConfig.
+type WebSearchProviderConfigField struct {
+	Key            string                               `json:"key"`
+	Label          string                               `json:"label"`
+	LabelKey       string                               `json:"label_key,omitempty"`
+	Type           string                               `json:"type"`
+	Required       bool                                 `json:"required,omitempty"`
+	Default        string                               `json:"default,omitempty"`
+	Description    string                               `json:"description,omitempty"`
+	DescriptionKey string                               `json:"description_key,omitempty"`
+	Options        []WebSearchProviderConfigFieldOption `json:"options,omitempty"`
+}
+
+// WebSearchProviderConfigFieldOption describes a selectable config field value.
+type WebSearchProviderConfigFieldOption struct {
+	Label    string `json:"label"`
+	LabelKey string `json:"label_key,omitempty"`
+	Value    string `json:"value"`
+}
+
+// GetWebSearchProviderTypes returns metadata for all supported provider types.
+func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
+	return []WebSearchProviderTypeInfo{
+		{
+			ID: "brave", Name: "Brave Search", RequiresAPIKey: true, SupportsProxy: true,
+			Description: "Brave Search API (supports country and freshness filters)",
+			DocsURL:     "https://api-dashboard.search.brave.com/app/keys",
+		},
+		{
+			ID: "serply", Name: "Serply", RequiresAPIKey: true, SupportsProxy: true,
+			Description: "Serply Google search API (supports country and freshness filters)",
+			DocsURL:     "https://serply.io/docs",
+		},
+		{
+			ID: "searchapi", Name: "SearchApi", RequiresAPIKey: true, SupportsProxy: true,
+			Description: "SearchApi Google search API (supports country and freshness filters)",
+			DocsURL:     "https://www.searchapi.io/docs/google",
+		},
+		{
+			ID:             "duckduckgo",
+			Name:           "DuckDuckGo",
+			RequiresAPIKey: false,
+			SupportsProxy:  true,
+			Description:    "DuckDuckGo Search (free, no API key required)",
+			DocsURL:        "https://duckduckgo.com/",
+		},
+		{
+			ID:             "bing",
+			Name:           "Bing",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Bing Search API (requires API key from Azure)",
+			DocsURL:        "https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/overview",
+		},
+		{
+			ID:               "google",
+			Name:             "Google",
+			RequiresAPIKey:   true,
+			RequiresEngineID: true,
+			SupportsProxy:    true,
+			Description:      "Google Custom Search API (requires API key and engine ID)",
+			DocsURL:          "https://developers.google.com/custom-search/v1/overview",
+		},
+		{
+			ID:             "tavily",
+			Name:           "Tavily",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Tavily Search API (requires API key)",
+			DocsURL:        "https://tavily.com/",
+		},
+		{
+			ID:             "ollama",
+			Name:           "Ollama Web Search",
+			RequiresAPIKey: true,
+			Description:    "Ollama Cloud web search (requires Ollama API key)",
+			DocsURL:        "https://docs.ollama.com/capabilities/web-search",
+		},
+		{
+			ID:              "searxng",
+			Name:            "SearXNG",
+			RequiresAPIKey:  false,
+			RequiresBaseURL: true,
+			SupportsProxy:   true,
+			Description:     "Self-hosted SearXNG metasearch instance (provide instance URL; private hosts must be SSRF-whitelisted)",
+			DocsURL:         "https://docs.searxng.org/",
+		},
+		{
+			ID:             "baidu",
+			Name:           "Baidu",
+			RequiresAPIKey: true,
+			Description:    "Baidu AI Search (requires API key from Baidu Cloud)",
+			DocsURL:        "https://cloud.baidu.com/doc/AppBuilder/s/qlvEcai0p",
+		},
+		{
+			ID:                     "keenable",
+			Name:                   "Keenable",
+			RequiresAPIKey:         false,
+			SupportsOptionalAPIKey: true,
+			SupportsProxy:          true,
+			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
+			DocsURL:                "https://keenable.ai/",
+		},
+		{
+			ID:             "metaso",
+			Name:           "Metaso AI Search",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Metaso AI Search API (requires API key)",
+			DocsURL:        "https://metaso.cn/search-api/playground",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "scope",
+					Label:       "Search scope",
+					Type:        "select",
+					Required:    true,
+					Default:     "webpage",
+					Description: "Select the content source searched by Metaso.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Web pages", Value: "webpage"},
+						{Label: "Documents", Value: "document"},
+						{Label: "Scholar", Value: "scholar"},
+						{Label: "Podcasts", Value: "podcast"},
+						{Label: "Videos", Value: "video"},
+						{Label: "Images", Value: "image"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "zhipu",
+			Name:           "Zhipu AI",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Zhipu AI Web Search API (requires API key)",
+			DocsURL:        "https://docs.bigmodel.cn/cn/guide/tools/web-search",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:            "search_engine",
+					Label:          "Search engine",
+					LabelKey:       "webSearchSettings.configFields.searchEngine",
+					Type:           "select",
+					Required:       true,
+					Default:        "search_std",
+					Description:    "Select the Zhipu search engine and per-request price tier.",
+					DescriptionKey: "webSearchSettings.configFields.searchEngineDesc",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Standard · ¥0.01/request", LabelKey: "webSearchSettings.configFields.searchStd", Value: "search_std"},
+						{Label: "Pro · ¥0.03/request", LabelKey: "webSearchSettings.configFields.searchPro", Value: "search_pro"},
+						{Label: "Sogou · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchSogou", Value: "search_pro_sogou"},
+						{Label: "Quark · ¥0.05/request", LabelKey: "webSearchSettings.configFields.searchQuark", Value: "search_pro_quark"},
+					},
+				},
+				{
+					Key:            "content_size",
+					Label:          "Content size",
+					LabelKey:       "webSearchSettings.configFields.contentSize",
+					Type:           "select",
+					Required:       true,
+					Default:        "medium",
+					Description:    "Medium returns concise summaries; high returns more context.",
+					DescriptionKey: "webSearchSettings.configFields.contentSizeDesc",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Medium", LabelKey: "webSearchSettings.configFields.contentMedium", Value: "medium"},
+						{Label: "High", LabelKey: "webSearchSettings.configFields.contentHigh", Value: "high"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "exa",
+			Name:           "Exa",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Exa Search API for AI applications (requires API key)",
+			DocsURL:        "https://docs.exa.ai/",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "include_text",
+					Label:       "Include text",
+					Type:        "select",
+					Default:     "false",
+					Description: "Include page text in the unified result Content field.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Enabled", Value: "true"},
+						{Label: "Disabled", Value: "false"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "bocha",
+			Name:           "Bocha AI Search",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Bocha AI Web Search API (requires API key)",
+			DocsURL:        "https://open.bochaai.com/",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "freshness",
+					Label:       "Freshness",
+					Type:        "select",
+					Required:    true,
+					Default:     "noLimit",
+					Description: "Time range filter applied by Bocha; noLimit is recommended.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "No limit", Value: "noLimit"},
+						{Label: "Past day", Value: "oneDay"},
+						{Label: "Past week", Value: "oneWeek"},
+						{Label: "Past month", Value: "oneMonth"},
+						{Label: "Past year", Value: "oneYear"},
+					},
+				},
+				{
+					Key:         "summary",
+					Label:       "Summary",
+					Type:        "select",
+					Default:     "true",
+					Description: "Request long text summaries and prefer them as result snippets.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Enabled", Value: "true"},
+						{Label: "Disabled", Value: "false"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "deepseek",
+			Name:           "DeepSeek",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "DeepSeek Search and Fetch (requires API key)",
+			DocsURL:        "https://api-docs.deepseek.com/api/search",
+		},
+	}
+}

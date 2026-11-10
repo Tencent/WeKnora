@@ -1,0 +1,1105 @@
+package core
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
+)
+
+// Client wraps the Feishu Open Platform API for document/wiki operations.
+type Client struct {
+	baseURL   string
+	appID     string
+	appSecret string
+
+	// location renders bitable date cells in the table's timezone (default GMT+8).
+	location *time.Location
+
+	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
+
+	// Token cache (thread-safe)
+	tokenMu    sync.Mutex
+	tokenCache string
+	tokenExpAt time.Time
+}
+
+// maxJSONResponseBytes bounds every API response body. Document and wiki
+// payloads are small; a larger body means a broken or hostile server.
+const maxJSONResponseBytes = 16 << 20
+
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
+	}
+	return data, nil
+}
+
+type WikiNodeListFailure struct {
+	Node WikiNode
+	Err  error
+}
+
+type PartialWikiNodeListError struct {
+	Failures []WikiNodeListFailure
+}
+
+func (e *PartialWikiNodeListError) Error() string {
+	if e == nil || len(e.Failures) == 0 {
+		return "partial wiki node listing failed"
+	}
+	parts := make([]string, 0, len(e.Failures))
+	for _, failure := range e.Failures {
+		parts = append(parts, failure.Err.Error())
+	}
+	return strings.Join(parts, "; ")
+}
+
+// tz returns the client's date-rendering location, defaulting to GMT+8 when a
+// Client was constructed without one (e.g. in tests that build Client directly).
+func (c *Client) tz() *time.Location {
+	if c.location != nil {
+		return c.location
+	}
+	return time.FixedZone("GMT+8", defaultTimezoneOffsetSeconds)
+}
+
+// NewClient creates a new Feishu API client.
+func NewClient(config *Config) *Client {
+	return &Client{
+		baseURL:    config.GetBaseURL(),
+		appID:      config.AppID,
+		appSecret:  config.AppSecret,
+		location:   resolveLocation(config.Timezone),
+		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
+		jsonLimit:  maxJSONResponseBytes,
+	}
+}
+
+// GetTenantAccessToken retrieves (or returns cached) tenant access token.
+// Feishu tokens expire in 2 hours; we cache with a 5-minute safety margin.
+func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+
+	if c.tokenCache != "" && time.Now().Before(c.tokenExpAt) {
+		return c.tokenCache, nil
+	}
+
+	payload, _ := json.Marshal(map[string]string{
+		"app_id":     c.appID,
+		"app_secret": c.appSecret,
+	})
+
+	url := c.baseURL + "/open-apis/auth/v3/tenant_access_token/internal"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("create token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := readCapped(resp.Body, c.jsonLimit)
+	if err != nil {
+		return "", fmt.Errorf("read token response: %w", err)
+	}
+	var result TokenResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode token response: %w", err)
+	}
+	if result.Code != 0 {
+		return "", fmt.Errorf("feishu auth error: code=%d msg=%s", result.Code, result.Msg)
+	}
+
+	c.tokenCache = result.TenantAccessToken
+	ttl := time.Duration(result.Expire) * time.Second
+	if ttl > 5*time.Minute {
+		ttl -= 5 * time.Minute
+	}
+	c.tokenExpAt = time.Now().Add(ttl)
+
+	// Never log token material: even a prefix/suffix narrows the bearer credential.
+	logger.Infof(ctx, "[Feishu] tenant access token refreshed expire=%ds", result.Expire)
+
+	return c.tokenCache, nil
+}
+
+// waitForRequestToken authenticates before pacing and rechecks the cached token
+// afterwards. A refresh must happen before rejoining the gate, otherwise requests
+// that have already been paced can pile up behind tokenMu and then burst together.
+func (c *Client) waitForRequestToken(ctx context.Context, gate *feishuRequestGate) (string, error) {
+	for {
+		token, err := c.GetTenantAccessToken(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := gate.wait(ctx); err != nil {
+			return "", err
+		}
+		// Never wait on a token refresh after the gate has granted a request slot.
+		if !c.tokenMu.TryLock() {
+			continue
+		}
+		valid := token == c.tokenCache && time.Now().Before(c.tokenExpAt)
+		c.tokenMu.Unlock()
+		if valid {
+			return token, nil
+		}
+	}
+}
+
+// Retry policy shared by DoRequest (JSON API calls) and downloadRawBytes (file
+// downloads): rate limits honour Feishu's reset header / Retry-After, 5xx
+// retries once, transport errors back off.
+const (
+	feishuMaxRetries    = 3
+	feishuMax5xxRetries = 1
+	feishuRetry5xxDelay = 2 * time.Second
+)
+
+// maxFeishuErrorPreviewBytes bounds how much of a failed download's body is
+// read for diagnostics; only the first 500 bytes are ever logged.
+const maxFeishuErrorPreviewBytes = 4 << 10
+
+// maxFeishuDownloadBytes bounds a single file download to protect the sync
+// worker from adversarial or pathological oversized responses. downloadRawBytes
+// rejects early on an honest Content-Length, and tests exercise the
+// oversize-degrade path by declaring a huge Content-Length.
+const maxFeishuDownloadBytes = int64(512 * 1024 * 1024) // 512 MB
+
+// ErrDownloadTooLarge marks a download rejected by the maxFeishuDownloadBytes
+// cap (errors.Is-able). The connector degrades oversized attachments to an
+// inline Markdown placeholder instead of an error item — the file exists and is
+// fine, it just doesn't fit the sync budget.
+var ErrDownloadTooLarge = errors.New("download exceeds max size")
+
+var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+
+// DoRequest executes an authenticated API request and decodes the JSON response,
+// retrying transient failures (transport errors, HTTP 429, 5xx). Feishu's drive
+// export/wiki APIs are aggressively rate limited, and a thousand-document sync
+// issues tens of thousands of calls; without backoff a single 429 burst used to
+// fail whole swathes of documents silently. HTTP 400 with code 99991400 is
+// also a rate limit. Ordinary permission/validation errors still fail fast.
+func (c *Client) DoRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
+	const (
+		maxRetries    = feishuMaxRetries
+		max5xxRetries = feishuMax5xxRetries
+		retry5xxDelay = feishuRetry5xxDelay
+	)
+	backoff := feishuRetryBackoff
+
+	_, err := c.GetTenantAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	var bodyBytes []byte
+	if body != nil {
+		bodyBytes, err = json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal request body: %w", err)
+		}
+	}
+
+	url := c.baseURL + path
+	var lastErr error
+	gate := c.requestGate(method, path)
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		token, err := c.waitForRequestToken(ctx, gate)
+		if err != nil {
+			return err
+		}
+		var bodyReader io.Reader
+		if bodyBytes != nil {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		if attempt == 0 {
+			logger.Infof(ctx, "[Feishu] %s %s", method, path)
+		} else {
+			logger.Infof(ctx, "[Feishu] %s %s (retry %d/%d)", method, path, attempt, maxRetries)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("execute request: %w", err)
+			if attempt < maxRetries {
+				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
+					return sErr
+				}
+				continue
+			}
+			return lastErr
+		}
+
+		respBody, readErr := readCapped(resp.Body, c.jsonLimit)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read response body: %w", readErr)
+			if attempt < maxRetries && !errors.Is(readErr, errResponseTooLarge) {
+				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
+					return sErr
+				}
+				continue
+			}
+			return lastErr
+		}
+
+		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
+			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
+
+		if isFeishuRateLimited(resp.StatusCode, respBody) {
+			wait := feishuRateLimitWait(resp.Header, time.Now())
+			gate.cooldown(wait)
+			logger.Warnf(ctx, "[Feishu] rate limited: api=%q wait=%s attempt=%d/%d",
+				gate.api, wait, attempt, maxRetries)
+			lastErr = fmt.Errorf("feishu rate limited: status=%d body=%s",
+				resp.StatusCode, truncate(string(respBody), 500))
+			if attempt < maxRetries {
+				continue
+			}
+			return lastErr
+		}
+
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			lastErr = fmt.Errorf("feishu server error: status=%d body=%s", resp.StatusCode, truncate(string(respBody), 500))
+			if attempt < max5xxRetries {
+				if sErr := sleepCtx(ctx, retry5xxDelay); sErr != nil {
+					return sErr
+				}
+				continue
+			}
+			return lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
+		}
+
+		if result != nil {
+			if err := json.Unmarshal(respBody, result); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+		}
+		return nil
+	}
+
+	return lastErr
+}
+
+// sleepCtx waits for d or until ctx is cancelled, returning ctx.Err() if the
+// context ends first so retries abort promptly on task cancellation/timeout.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// truncate truncates a string to maxLen and appends "..." if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	// Back off to a rune boundary: a partial multi-byte rune is invalid UTF-8,
+	// and this preview reaches sync_logs / data_sources through the sync error
+	// message, which PostgreSQL rejects. Same rule as #4555.
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
+// ListWikiSpaces returns all wiki spaces accessible to the app.
+func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
+	var allSpaces []WikiSpace
+	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
+
+	for {
+		path := "/open-apis/wiki/v2/spaces?page_size=50"
+		if pageToken != "" {
+			path += "&page_token=" + pageToken
+		}
+
+		var resp WikiSpaceListResponse
+		if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+			return nil, fmt.Errorf("list wiki spaces: %w", err)
+		}
+		if resp.Code != 0 {
+			logger.Errorf(ctx, "[Feishu] ListWikiSpaces error: code=%d msg=%s", resp.Code, resp.Msg)
+			return nil, fmt.Errorf("list wiki spaces error: code=%d msg=%s", resp.Code, resp.Msg)
+		}
+
+		logger.Infof(ctx, "[Feishu] ListWikiSpaces: got %d spaces, has_more=%v", len(resp.Data.Items), resp.Data.HasMore)
+		for i, s := range resp.Data.Items {
+			logger.Infof(ctx, "[Feishu]   space[%d]: id=%s name=%q visibility=%s", i, s.SpaceID, s.Name, s.Visibility)
+		}
+
+		allSpaces = append(allSpaces, resp.Data.Items...)
+
+		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+			break
+		}
+		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
+			return nil, fmt.Errorf("feishu wiki space pagination repeated page token %q", resp.Data.PageToken)
+		}
+		seenPageTokens[resp.Data.PageToken] = struct{}{}
+		pageToken = resp.Data.PageToken
+	}
+
+	logger.Infof(ctx, "[Feishu] ListWikiSpaces: total %d spaces", len(allSpaces))
+	return allSpaces, nil
+}
+
+// ListWikiNodes returns all nodes (documents) under a wiki space.
+// If parentNodeToken is empty, returns top-level nodes.
+func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]WikiNode, error) {
+	var allNodes []WikiNode
+	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
+
+	for {
+		path := fmt.Sprintf("/open-apis/wiki/v2/spaces/%s/nodes?page_size=50", spaceID)
+		if parentNodeToken != "" {
+			path += "&parent_node_token=" + parentNodeToken
+		}
+		if pageToken != "" {
+			path += "&page_token=" + pageToken
+		}
+
+		var resp WikiNodeListResponse
+		if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+			return nil, fmt.Errorf("list wiki nodes: %w", err)
+		}
+		if resp.Code != 0 {
+			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
+		}
+
+		for _, node := range resp.Data.Items {
+			if parentNodeToken != "" && node.ParentNodeID == "" {
+				node.ParentNodeID = parentNodeToken
+			}
+			if node.SpaceID == "" {
+				node.SpaceID = spaceID
+			}
+			allNodes = append(allNodes, node)
+		}
+
+		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+			break
+		}
+		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
+			return nil, fmt.Errorf("feishu wiki node pagination repeated page token %q", resp.Data.PageToken)
+		}
+		seenPageTokens[resp.Data.PageToken] = struct{}{}
+		pageToken = resp.Data.PageToken
+	}
+
+	return allNodes, nil
+}
+
+// GetWikiNode returns metadata for a single wiki node.
+func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken string) (WikiNode, error) {
+	path := fmt.Sprintf("/open-apis/wiki/v2/spaces/get_node?token=%s", url.QueryEscape(nodeToken))
+
+	var resp WikiNodeInfoResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return WikiNode{}, fmt.Errorf("get wiki node: %w", err)
+	}
+	if resp.Code != 0 {
+		return WikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	node := resp.Data.Node
+	if node.SpaceID == "" {
+		node.SpaceID = spaceID
+	}
+	return node, nil
+}
+
+// listAllWikiNodesRecursive recursively lists all nodes under a wiki space.
+// It walks the tree depth-first to discover all nested documents.
+func (c *Client) listAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]WikiNode, error) {
+	// Start with top-level nodes
+	topNodes, err := c.ListWikiNodes(ctx, spaceID, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var allNodes []WikiNode
+	var failures []WikiNodeListFailure
+	var walk func(nodes []WikiNode)
+
+	walk = func(nodes []WikiNode) {
+		for _, node := range nodes {
+			allNodes = append(allNodes, node)
+
+			// Recurse into child nodes if this node has children
+			if node.HasChild {
+				children, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
+				if err != nil {
+					wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
+					failures = append(failures, WikiNodeListFailure{
+						Node: node,
+						Err:  wrappedErr,
+					})
+					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+						spaceID, node.NodeToken, err)
+					continue
+				}
+				walk(children)
+			}
+		}
+	}
+
+	walk(topNodes)
+	if len(failures) > 0 {
+		return allNodes, &PartialWikiNodeListError{Failures: failures}
+	}
+
+	return allNodes, nil
+}
+
+// ListWikiNodesRecursiveFrom returns a wiki node and all descendants below it.
+func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string, nodeToken string) ([]WikiNode, error) {
+	if nodeToken == "" {
+		return c.listAllWikiNodesRecursive(ctx, spaceID)
+	}
+
+	root, err := c.GetWikiNode(ctx, spaceID, nodeToken)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := c.listWikiNodeDescendants(ctx, spaceID, root)
+	if err != nil {
+		return append([]WikiNode{root}, nodes...), err
+	}
+	return append([]WikiNode{root}, nodes...), nil
+}
+
+func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, root WikiNode) ([]WikiNode, error) {
+	if !root.HasChild {
+		return nil, nil
+	}
+
+	children, err := c.ListWikiNodes(ctx, spaceID, root.NodeToken)
+	if err != nil {
+		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
+		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+			spaceID, root.NodeToken, err)
+		return nil, &PartialWikiNodeListError{
+			Failures: []WikiNodeListFailure{{
+				Node: root,
+				Err:  wrappedErr,
+			}},
+		}
+	}
+
+	var allNodes []WikiNode
+	var failures []WikiNodeListFailure
+	var walk func(nodes []WikiNode)
+
+	walk = func(nodes []WikiNode) {
+		for _, node := range nodes {
+			allNodes = append(allNodes, node)
+			if !node.HasChild {
+				continue
+			}
+
+			grandChildren, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
+			if err != nil {
+				wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
+				failures = append(failures, WikiNodeListFailure{
+					Node: node,
+					Err:  wrappedErr,
+				})
+				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+					spaceID, node.NodeToken, err)
+				continue
+			}
+			walk(grandChildren)
+		}
+	}
+
+	walk(children)
+	if len(failures) > 0 {
+		return allNodes, &PartialWikiNodeListError{Failures: failures}
+	}
+	return allNodes, nil
+}
+
+// getDocumentRawContent retrieves the raw text content of a Feishu docx document.
+// This returns plain text (not rich text / block structure).
+// Deprecated: prefer ExportAndDownload which preserves formatting.
+func (c *Client) getDocumentRawContent(ctx context.Context, documentID string) (string, error) {
+	path := fmt.Sprintf("/open-apis/docx/v1/documents/%s/raw_content", documentID)
+
+	var resp docRawContentResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return "", fmt.Errorf("get document raw content: %w", err)
+	}
+	if resp.Code != 0 {
+		return "", fmt.Errorf("get document raw content error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	return resp.Data.Content, nil
+}
+
+// Ping verifies the credentials by attempting to get a tenant access token.
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.GetTenantAccessToken(ctx)
+	return err
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Export task API: export docx/sheet/bitable to downloadable files
+//
+// Flow:
+//  1. POST  /drive/v1/export_tasks             → create export task, get ticket
+//  2. GET   /drive/v1/export_tasks/:ticket      → poll until status=0 (success)
+//  3. GET   /drive/v1/export_tasks/file/:ticket/download → download file bytes
+// ──────────────────────────────────────────────────────────────────────
+
+// createExportTask creates an async export task for a Feishu document.
+//   - token:         the obj_token of the document (e.g. docx token, sheet token)
+//   - objType:       the Feishu obj_type ("docx", "doc", "sheet", "bitable")
+//   - fileExtension: desired output format ("docx", "xlsx", "pdf")
+func (c *Client) createExportTask(ctx context.Context, token, objType, fileExtension string) (string, error) {
+	body := map[string]string{
+		"file_extension": fileExtension,
+		"token":          token,
+		"type":           objType,
+	}
+
+	var resp ExportTaskCreateResponse
+	if err := c.DoRequest(ctx, http.MethodPost, "/open-apis/drive/v1/export_tasks", body, &resp); err != nil {
+		return "", fmt.Errorf("create export task: %w", err)
+	}
+	if resp.Code != 0 {
+		return "", fmt.Errorf("create export task error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	return resp.Data.Ticket, nil
+}
+
+// getExportTaskStatus polls the status of an export task.
+// Returns (fileToken, fileName, error). fileToken is non-empty only when the job succeeds.
+// The token parameter is the obj_token of the document being exported (required by the API).
+func (c *Client) getExportTaskStatus(ctx context.Context, ticket string, token string) (string, string, error) {
+	path := fmt.Sprintf("/open-apis/drive/v1/export_tasks/%s?token=%s", ticket, token)
+
+	var resp ExportTaskStatusResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return "", "", fmt.Errorf("get export task status: %w", err)
+	}
+	if resp.Code != 0 {
+		return "", "", fmt.Errorf("get export task status error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	r := resp.Data.Result
+	switch r.JobStatus {
+	case 0: // success
+		return r.FileToken, r.FileName, nil
+	case 1, 2: // initializing, processing
+		return "", "", nil // not ready yet
+	default:
+		return "", "", fmt.Errorf("export task failed: status=%d msg=%s", r.JobStatus, r.JobErrorMsg)
+	}
+}
+
+// downloadExportFile downloads the exported file by its file_token.
+// The file_token is returned by getExportTaskStatus when the export job completes.
+// The file must be downloaded within 10 minutes of export completion.
+func (c *Client) downloadExportFile(ctx context.Context, fileToken string) ([]byte, error) {
+	path := fmt.Sprintf("/open-apis/drive/v1/export_tasks/file/%s/download", fileToken)
+	return c.downloadRawBytes(ctx, path)
+}
+
+// errExportPollsExhausted keeps the error classification independent of the
+// message's poll count and ticket details, including when connectors wrap it.
+var errExportPollsExhausted = errors.New("export task still processing")
+
+// ExportAndDownload is a high-level helper that creates an export task, polls until
+// completion, and downloads the resulting file. Returns (fileBytes, fileName, error).
+//
+// Poll count and interval are configurable. Pacing/cooldown waits do not consume
+// the poll budget; the caller's context still bounds the entire operation.
+func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string) ([]byte, string, error) {
+	// Determine export format
+	fileExt, ok := ObjTypeToExportFileExtension[objType]
+	if !ok {
+		return nil, "", fmt.Errorf("unsupported obj_type for export: %s", objType)
+	}
+
+	exportType, ok := ObjTypeToExportType[objType]
+	if !ok {
+		return nil, "", fmt.Errorf("unsupported obj_type for export: %s", objType)
+	}
+
+	// Step 1: create export task
+	ticket, err := c.createExportTask(ctx, objToken, exportType, fileExt)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Step 2: retain the same ticket while waiting on shared API limits. A wall
+	// clock deadline here would turn other documents' cooldowns into false failures.
+	maxPolls := feishuExportMaxPolls()
+	pollInterval := feishuConfiguredDuration("FEISHU_EXPORT_POLL_INTERVAL", defaultFeishuExportPollInterval)
+	var fileToken, fileName string
+
+	for poll := 0; poll < maxPolls; poll++ {
+		fileToken, fileName, err = c.getExportTaskStatus(ctx, ticket, objToken)
+		if err != nil {
+			return nil, "", err
+		}
+		if fileToken != "" {
+			break // export ready
+		}
+		if poll+1 < maxPolls {
+			if err := sleepCtx(ctx, pollInterval); err != nil {
+				return nil, "", err
+			}
+		}
+	}
+
+	if fileToken == "" {
+		return nil, "", fmt.Errorf("%w after %d polls (ticket=%s)", errExportPollsExhausted, maxPolls, ticket)
+	}
+
+	// Step 3: download file using file_token (NOT ticket)
+	data, err := c.downloadExportFile(ctx, fileToken)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Build a sensible file name
+	if fileName == "" {
+		fileName = "export" + ExportFileExtToSuffix[fileExt]
+	}
+
+	return data, fileName, nil
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Drive file download: for "file" type wiki nodes (uploaded PDF/Word/etc.)
+// ──────────────────────────────────────────────────────────────────────
+
+// DownloadDriveFile downloads a file from Feishu Drive by its file token.
+// Used for wiki nodes with obj_type="file" (user-uploaded PDF, Word, images, etc.).
+func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byte, error) {
+	path := fmt.Sprintf("/open-apis/drive/v1/files/%s/download", fileToken)
+	return c.downloadRawBytes(ctx, path)
+}
+
+// downloadMediaFile downloads embedded media (attachments/images referenced by
+// document File/Image blocks) by its media token. Embedded block media live in a
+// different token space than standalone Drive files and must use the /medias/
+// endpoint rather than /files/.
+func (c *Client) downloadMediaFile(ctx context.Context, fileToken string) ([]byte, error) {
+	path := fmt.Sprintf("/open-apis/drive/v1/medias/%s/download", url.PathEscape(fileToken))
+	return c.downloadRawBytes(ctx, path)
+}
+
+// downloadRawBytes performs an authenticated GET and returns the raw response body.
+func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
+	_, err := c.GetTenantAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.baseURL + path
+	var lastErr error
+	gate := c.requestGate(http.MethodGet, path)
+
+	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
+		token, err := c.waitForRequestToken(ctx, gate)
+		if err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create download request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		if attempt == 0 {
+			logger.Infof(ctx, "[Feishu] download GET %s", path)
+		} else {
+			logger.Infof(ctx, "[Feishu] download GET %s (retry %d/%d)", path, attempt, feishuMaxRetries)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("download request: %w", err)
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadRequest {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
+			resp.Body.Close()
+			if !isFeishuRateLimited(resp.StatusCode, body) {
+				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
+					path, resp.StatusCode, truncate(string(body), 500))
+				return nil, fmt.Errorf("download failed: status=%d body=%s",
+					resp.StatusCode, truncate(string(body), 500))
+			}
+			wait := feishuRateLimitWait(resp.Header, time.Now())
+			gate.cooldown(wait)
+			logger.Warnf(ctx, "[Feishu] download rate limited: api=%q wait=%s attempt=%d/%d",
+				gate.api, wait, attempt, feishuMaxRetries)
+			lastErr = fmt.Errorf("download rate limited: status=%d body=%s",
+				resp.StatusCode, truncate(string(body), 500))
+			if attempt < feishuMaxRetries {
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
+			resp.Body.Close()
+			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
+			if attempt < feishuMax5xxRetries {
+				if sErr := sleepCtx(ctx, feishuRetry5xxDelay); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
+			resp.Body.Close()
+			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
+			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
+		}
+
+		// Early reject on an honest Content-Length: avoids buffering a
+		// hopeless 512 MB body just to hit the LimitReader check below.
+		if resp.ContentLength > maxFeishuDownloadBytes {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("%w (Content-Length %d): %s", ErrDownloadTooLarge, resp.ContentLength, path)
+		}
+
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))
+		if readErr == nil && int64(len(data)) > maxFeishuDownloadBytes {
+			resp.Body.Close()
+			return nil, fmt.Errorf("%w (%d bytes): %s", ErrDownloadTooLarge, maxFeishuDownloadBytes, path)
+		}
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read download body: %w", readErr)
+			if attempt < feishuMaxRetries {
+				if sErr := sleepCtx(ctx, feishuRetryBackoff[attempt]); sErr != nil {
+					return nil, sErr
+				}
+				continue
+			}
+			return nil, lastErr
+		}
+
+		logger.Infof(ctx, "[Feishu] download GET %s → OK, %d bytes", path, len(data))
+		return data, nil
+	}
+
+	return nil, lastErr
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Drive (云盘) file listing: for feishu_drive / lark_drive connectors.
+// Mirrors the wiki ListWikiNodes / ListWikiNodesRecursiveFrom shape so the
+// Drive connector's FetchStream mirrors the wiki connector's. See ADR-0001/0002.
+// ──────────────────────────────────────────────────────────────────────
+
+// listDriveFiles lists files in a Drive folder (non-recursive), one page at a
+// time. Pass pageToken="" for the first page; the returned nextPageToken is ""
+// when there are no more pages. hasMore mirrors the API's has_more field and
+// is the authoritative stop signal: nextPageToken can be non-empty even when
+// has_more is false.
+//
+// folderToken == "" is rejected: the root folder is not paginated and does
+// not return shortcuts (Feishu API limitation), which would silently drop
+// content and risk an unbounded single response. See ADR-0004.
+func (c *Client) listDriveFiles(
+	ctx context.Context, folderToken, pageToken string,
+) ([]DriveFile, string, bool, error) {
+	if folderToken == "" {
+		return nil, "", false, fmt.Errorf("root folder not supported; specify a concrete folder_token " +
+			"(root folder is not paginated and does not return shortcuts)")
+	}
+
+	path := "/open-apis/drive/v1/files?folder_token=" + url.QueryEscape(folderToken)
+	path += "&page_size=200" // max
+	path += "&order_by=EditedTime&direction=DESC"
+	if pageToken != "" {
+		path += "&page_token=" + url.QueryEscape(pageToken)
+	}
+
+	var resp DriveFileListResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, "", false, fmt.Errorf("list drive files: %w", err)
+	}
+	if resp.Code != 0 {
+		return nil, "", false, fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	logger.Infof(ctx, "[FeishuDrive] listDriveFiles: folder=%s got %d files, has_more=%v",
+		folderToken, len(resp.Data.Files), resp.Data.HasMore)
+	return resp.Data.Files, resp.Data.NextPageToken, resp.Data.HasMore, nil
+}
+
+// GetDriveFolderMeta returns the metadata (name, owner, etc.) of a single Drive
+// folder. Used to resolve a root folder's human-readable name - the list API
+// only returns the folder's children, not the folder itself.
+//
+// GET /open-apis/drive/explorer/v2/folder/:folderToken/meta
+func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (driveFolderMetaResponse, error) {
+	var resp driveFolderMetaResponse
+	if folderToken == "" {
+		return resp, fmt.Errorf("root folder not supported; specify a concrete folder_token")
+	}
+	path := "/open-apis/drive/explorer/v2/folder/" + url.QueryEscape(folderToken) + "/meta"
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return resp, fmt.Errorf("get drive folder meta: %w", err)
+	}
+	if resp.Code != 0 {
+		return resp, fmt.Errorf("get drive folder meta error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return resp, nil
+}
+
+// ListDriveFilesAllPages lists every direct child of a folder across all pages.
+func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string) ([]DriveFile, error) {
+	var all []DriveFile
+	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
+	for {
+		files, next, hasMore, err := c.listDriveFiles(ctx, folderToken, pageToken)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, files...)
+		if !hasMore || next == "" {
+			break
+		}
+		if _, exists := seenPageTokens[next]; exists {
+			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
+		}
+		seenPageTokens[next] = struct{}{}
+		pageToken = next
+	}
+	return all, nil
+}
+
+// WalkDriveTree walks a Drive folder subtree depth-first and is the single
+// recursive Drive walker shared by the drive connector (it resurrects the
+// former ListDriveFilesRecursiveFrom semantics, which could not hand back
+// folder names). Contract:
+//   - folder -> recurse
+//   - shortcut -> expand to its target (target_type is never "folder")
+//   - other -> collect
+//
+// Listing failures are collected into the returned failures and the walk
+// continues (PartialDriveFileListError semantics). dirPaths maps every visited
+// folder token to its cleaned directory path relative to the selected root;
+// the walk root's own prefix is baseDir (the root folder's display name for a
+// bare root selection, "<根名>/<子文件夹名>" for a sub-folder selection; ""
+// when the root name could not be resolved, mirroring pre-root-mirror paths).
+func WalkDriveTree(
+	ctx context.Context, client *Client, rootToken, baseDir string,
+) (files []DriveFile, dirPaths map[string]string, failures []DriveFileListFailure) {
+	dirPaths = map[string]string{rootToken: baseDir}
+	visited := make(map[string]bool)
+
+	var walk func(folderToken string)
+	walk = func(folderToken string) {
+		if visited[folderToken] {
+			return
+		}
+		visited[folderToken] = true
+
+		entries, err := client.ListDriveFilesAllPages(ctx, folderToken)
+		if err != nil {
+			wrappedErr := fmt.Errorf("list children of %s: %w", folderToken, err)
+			failures = append(failures, DriveFileListFailure{
+				FolderToken: folderToken,
+				Err:         wrappedErr,
+			})
+			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s err=%v",
+				folderToken, err)
+			return
+		}
+
+		for _, f := range entries {
+			switch f.Type {
+			case "folder":
+				name := SanitizeFileName(f.Name)
+				if parent := dirPaths[folderToken]; parent != "" {
+					name = parent + "/" + name
+				}
+				dirPaths[f.Token] = name
+				walk(f.Token)
+			case "shortcut":
+				if target, ok := ExpandDriveShortcut(f); ok {
+					files = append(files, target)
+				}
+			default:
+				files = append(files, f)
+			}
+		}
+	}
+
+	walk(rootToken)
+	return files, dirPaths, failures
+}
+
+// ExpandDriveShortcut preserves the shortcut's display name and location while
+// addressing its content by the target token. Folder targets are unsupported.
+func ExpandDriveShortcut(f DriveFile) (DriveFile, bool) {
+	if f.Type != "shortcut" {
+		return f, true
+	}
+	if f.ShortcutInfo == nil || f.ShortcutInfo.TargetToken == "" || f.ShortcutInfo.TargetType == "folder" {
+		return DriveFile{}, false
+	}
+	f.Token, f.Type = f.ShortcutInfo.TargetToken, f.ShortcutInfo.TargetType
+	f.ShortcutInfo = nil
+	return f, true
+}
+
+// userNameResponse is the GET /contact/v3/users/:userID payload;
+// data.user.name is the user's display name.
+type userNameResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		User struct {
+			Name string `json:"name"`
+		} `json:"user"`
+	} `json:"data"`
+}
+
+// DocTitles resolves display titles for document tokens via the drive
+// metadata batch API (one call for all refs, capped at the API's 200-item
+// limit). Tokens whose metadata is unavailable — no permission (970003),
+// deleted/mismatched (970005) — are simply absent from the result;
+// transport-level failures return nil. Callers degrade to the URL as link
+// text, so failures never block ingestion.
+func (c *Client) DocTitles(ctx context.Context, refs []pendingDocName) map[string]string {
+	if len(refs) == 0 {
+		return nil
+	}
+	type reqDoc struct {
+		DocToken string `json:"doc_token"`
+		DocType  string `json:"doc_type"`
+	}
+	reqs := make([]reqDoc, 0, len(refs))
+	for _, r := range refs {
+		if len(reqs) == 200 {
+			break
+		}
+		reqs = append(reqs, reqDoc{DocToken: r.Token, DocType: r.DocType})
+	}
+	var resp struct {
+		ApiResponse
+		Data struct {
+			Metas []struct {
+				DocToken string `json:"doc_token"`
+				Title    string `json:"title"`
+			} `json:"metas"`
+		} `json:"data"`
+	}
+	path := "/open-apis/drive/v1/metas/batch_query"
+	if err := c.DoRequest(ctx, http.MethodPost, path, map[string]any{"request_docs": reqs}, &resp); err != nil {
+		return nil
+	}
+	if resp.Code != 0 {
+		return nil
+	}
+	out := make(map[string]string, len(resp.Data.Metas))
+	for _, m := range resp.Data.Metas {
+		out[m.DocToken] = m.Title
+	}
+	return out
+}
+
+// UserName fetches a user's display name by OpenID via the contact API.
+// mention_user.user_id carries an OpenID, hence user_id_type=open_id. Requires
+// a contact read scope (contact:user.base:readonly / contact:contact:readonly);
+// callers degrade to a generic @ marker on any failure, so errors here never
+// block ingestion.
+func (c *Client) UserName(ctx context.Context, userID string) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("empty user id")
+	}
+	path := fmt.Sprintf("/open-apis/contact/v3/users/%s?user_id_type=open_id", url.PathEscape(userID))
+
+	var resp userNameResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return "", fmt.Errorf("get user %s: %w", userID, err)
+	}
+	if resp.Code != 0 {
+		return "", fmt.Errorf("get user %s error: code=%d msg=%s", userID, resp.Code, resp.Msg)
+	}
+	return resp.Data.User.Name, nil
+}

@@ -1,0 +1,39 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/chat/chat",
+    "pages/settings/settings"
+  ],
+  "window": {
+    "navigationBarTitleText": "WeKnora",
+    "navigationBarBackgroundColor": "#0d3b2a",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f3f3f3"
+  },
+  "tabBar": {
+    "color": "#8b8b8b",
+    "selectedColor": "#07c05f",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "知识库",
+        "iconPath": "assets/tab/knowledge.png",
+        "selectedIconPath": "assets/tab/knowledge-active.png"
+      },
+      {
+        "pagePath": "pages/chat/chat",
+        "text": "问答",
+        "iconPath": "assets/tab/chat.png",
+        "selectedIconPath": "assets/tab/chat-active.png"
+      },
+      {
+        "pagePath": "pages/settings/settings",
+        "text": "设置",
+        "iconPath": "assets/tab/settings.png",
+        "selectedIconPath": "assets/tab/settings-active.png"
+      }
+    ]
+  }
+}

@@ -1,0 +1,646 @@
+package service
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
+	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+// maxRetrievalPoolSize bounds every retrieval depth derived from MatchCount:
+// the over-retrieval pool below and the doubling TopK of the FAQ iterative
+// path. Without it a caller-supplied MatchCount scales the vector-store query
+// depth without limit.
+const maxRetrievalPoolSize = 500
+
+// GetQueryEmbedding computes the query embedding using the embedding model
+// associated with the given knowledge base. Callers can pre-compute and reuse
+// the result across multiple KBs that share the same embedding model and
+// configured vector dimension to avoid redundant embedding API calls.
+func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID string, queryText string) ([]float32, error) {
+	kb, err := s.repo.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+
+	currentTenantID := types.MustTenantIDFromContext(ctx)
+	var embeddingModel embedding.Embedder
+
+	if kb.TenantID != currentTenantID {
+		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
+	} else {
+		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	}
+	if err != nil {
+		logger.Errorf(ctx, "GetQueryEmbedding: failed to get embedding model %s: %v", kb.EmbeddingModelID, err)
+		return nil, err
+	}
+
+	vector, err := embeddingModel.Embed(types.WithEmbedQuery(ctx), queryText)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateQueryEmbeddingDimension(embeddingModel, len(vector)); err != nil {
+		logger.Errorf(ctx, "GetQueryEmbedding: %v", err)
+		return nil, err
+	}
+	return vector, nil
+}
+
+// GetQueryImageEmbedding computes the query embedding for an image using the
+// same multimodal model path the index used when it stored image_vector chunks,
+// so a query image is comparable with them. It returns an error when the KB's
+// embedding model has no image side: silently falling back to text recall would
+// answer a different question than the one asked.
+func (s *knowledgeBaseService) GetQueryImageEmbedding(
+	ctx context.Context, kbID string, img []byte,
+) ([]float32, error) {
+	if len(img) == 0 {
+		return nil, fmt.Errorf("query image is empty")
+	}
+	kb, err := s.repo.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	var embeddingModel embedding.Embedder
+	if kb.TenantID != types.MustTenantIDFromContext(ctx) {
+		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
+	} else {
+		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	}
+	if err != nil {
+		logger.Errorf(ctx, "GetQueryImageEmbedding: failed to get embedding model %s: %v", kb.EmbeddingModelID, err)
+		return nil, err
+	}
+	imageModel, ok := embedding.AsImageEmbedder(embeddingModel)
+	if !ok {
+		// A KB indexed without images has no image_vector rows to match; a
+		// text query is the only recall it supports.
+		return nil, fmt.Errorf(
+			"embedding model %s cannot embed images; enable image vectors for this knowledge base or search with text",
+			embeddingModel.GetModelName(),
+		)
+	}
+	prepared, err := imageprep.Prepare(img, imageModel.ImageLimits())
+	if err != nil {
+		return nil, fmt.Errorf("query image not embeddable: %w", err)
+	}
+	vectors, err := imageModel.BatchEmbedImages(types.WithEmbedQuery(ctx), []embedding.Image{prepared})
+	if err != nil {
+		return nil, err
+	}
+	if len(vectors) == 0 {
+		return nil, fmt.Errorf("embedding model returned no vector for the query image")
+	}
+	if err := validateQueryEmbeddingDimension(embeddingModel, len(vectors[0])); err != nil {
+		logger.Errorf(ctx, "GetQueryImageEmbedding: %v", err)
+		return nil, err
+	}
+	return vectors[0], nil
+}
+
+// validateQueryEmbeddingDimension catches provider/model configuration drift
+// before a malformed query reaches the vector store. Without this check, a
+// provider returning a different vector size is reported as the misleading
+// generic 2201 "bound store unavailable" error (or, for dimension-partitioned
+// stores, silently produces no matches).
+func validateQueryEmbeddingDimension(model embedding.Embedder, actual int) error {
+	if model == nil || actual == 0 {
+		return nil
+	}
+	expected := model.GetDimensions()
+	if expected <= 0 || expected == actual {
+		return nil
+	}
+	return apperrors.NewVectorStoreUnavailableError(
+		"embedding vector dimension does not match the configured model",
+	).WithDetails(map[string]any{
+		"model":              model.GetModelName(),
+		"expected_dimension": expected,
+		"actual_dimension":   actual,
+		"hint":               fmt.Sprintf("check the embedding model configuration and rebuild the affected index (%d dimensions)", expected),
+	})
+}
+
+// ResolveEmbeddingModelKeys resolves embedding model IDs to their actual model
+// identity key (name + endpoint + configured vector dimension). KBs using the
+// same underlying model and vector space across different tenants will share
+// the same key, enabling optimal grouping without reusing a query embedding
+// across incompatible index dimensions.
+func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kbs []*types.KnowledgeBase) map[string]string {
+	type modelRef struct {
+		ModelID  string
+		TenantID uint64
+	}
+
+	// Deduplicate model references
+	uniqueRefs := make(map[modelRef]struct{})
+	kbRefs := make(map[string]modelRef, len(kbs))
+	for _, kb := range kbs {
+		ref := modelRef{ModelID: kb.EmbeddingModelID, TenantID: kb.TenantID}
+		uniqueRefs[ref] = struct{}{}
+		kbRefs[kb.ID] = ref
+	}
+
+	// Resolve each unique (modelID, tenantID) to a model identity key. The
+	// configured dimension is part of the key because providers such as OpenAI
+	// support multiple output widths for one model name and endpoint.
+	resolvedKeys := make(map[modelRef]string, len(uniqueRefs))
+	for ref := range uniqueRefs {
+		tenantCtx := types.WithExecutionTenant(ctx, ref.TenantID)
+		model, err := s.modelService.GetModelByID(tenantCtx, ref.ModelID)
+		if err != nil || model == nil {
+			logger.Warnf(ctx, "ResolveEmbeddingModelKeys: cannot resolve model %s for tenant %d: %v", ref.ModelID, ref.TenantID, err)
+			resolvedKeys[ref] = ref.ModelID
+			continue
+		}
+		resolvedKeys[ref] = fmt.Sprintf("%s|%s|%d", model.Name, model.Parameters.BaseURL,
+			model.Parameters.EmbeddingParameters.Dimension)
+	}
+
+	result := make(map[string]string, len(kbs))
+	for _, kb := range kbs {
+		result[kb.ID] = resolvedKeys[kbRefs[kb.ID]]
+	}
+	return result
+}
+
+// HybridSearch performs hybrid search, including vector retrieval and keyword retrieval.
+//
+// id is the "primary" knowledge base ID used to resolve the embedding model and
+// determine the KB type (e.g. FAQ). When params.KnowledgeBaseIDs is set, those
+// IDs are used for the actual retrieval scope instead of id alone, allowing a
+// single call to span multiple KBs that share the same embedding model. In that
+// case id should be any one of those KBs (typically the first) so that its
+// embedding model and type configuration are used for the search.
+func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
+	id string,
+	params types.SearchParams,
+) ([]*types.SearchResult, error) {
+	// Normalize once, before anything reads MatchCount. params is a value
+	// copy, so this stays local to the call.
+	params.MatchCount = normalizedMatchCount(params.MatchCount)
+
+	chunks, err := s.hybridSearchCandidates(ctx, id, params)
+	if err != nil || len(chunks) == 0 {
+		return nil, err
+	}
+
+	recordImageRecallDecision(ctx, "fusion.candidate_selection", "",
+		summarizeImageCandidateCut(chunks, params.MatchCount))
+
+	return s.processSearchResults(ctx, chunks, params.MatchCount, params.SkipContextEnrichment)
+}
+
+// hybridSearchCandidates runs retrieval, fusion and FAQ post-processing for
+// HybridSearch and returns the fused chunks, best first, before the
+// MatchCount cut. params.MatchCount must already be normalized.
+func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
+	id string,
+	params types.SearchParams,
+) ([]*types.IndexWithScore, error) {
+	// Determine the set of KB IDs to search.
+	searchKBIDs := params.KnowledgeBaseIDs
+	if len(searchKBIDs) == 0 {
+		searchKBIDs = []string{id}
+	}
+
+	// QueryText is user-controlled; sanitize before logging to prevent
+	// CR/LF/tab log injection. Matches the handler-layer sanitization at
+	// handler/knowledgebase.go.
+	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s",
+		searchKBIDs, secutils.SanitizeForLog(params.QueryText))
+
+	tenantInfo, _ := types.TenantInfoFromContext(ctx)
+
+	// Batch-load every KB in scope. Required for store grouping,
+	// embedding-model consistency validation, and FAQ type detection.
+	// GetKnowledgeBaseByIDs is intentionally tenant-agnostic at the
+	// repository layer so that Organization-shared KBs (owned by a
+	// different tenant) can be loaded here; authorization for each
+	// returned row is enforced explicitly below.
+	kbs, err := s.repo.GetKnowledgeBaseByIDs(ctx, searchKBIDs)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_ids": searchKBIDs,
+		})
+		return nil, err
+	}
+	if len(kbs) == 0 {
+		return nil, apperrors.NewNotFoundError("knowledge base not found")
+	}
+
+	// Authorize every KB for the original caller, using exact upstream
+	// grants or organization permissions. Execution in a shared tenant
+	// does not grant access to its other KBs. Without this guard, a
+	// caller could pass arbitrary KB UUIDs in params.KnowledgeBaseIDs
+	// and reach foreign tenants' bound vector stores via the per-group
+	// engine resolution downstream.
+	if err := s.authorizeKBAccess(ctx, kbs); err != nil {
+		return nil, err
+	}
+
+	// Explicit embedding-model consistency check. Multi-KB searches that
+	// span different embedding spaces would otherwise silently produce
+	// meaningless cross-model scores. Same-model wiki/graph KBs are
+	// tolerated — see validateSameEmbeddingModel for the carve-out.
+	if err := s.validateSameEmbeddingModel(ctx, kbs); err != nil {
+		return nil, err
+	}
+
+	// Resolve the primary KB — embedding model + FAQ type come from this
+	// one. Miss → 404 (no kbs[0] fallback; a silent pivot to an arbitrary
+	// KB would hide caller bugs and reveal foreign KB metadata).
+	kb := pickPrimary(kbs, id)
+	if kb == nil {
+		return nil, apperrors.NewNotFoundError("knowledge base not found")
+	}
+
+	// Over-retrieval (existing rule, preserved): 5x per-KB matchCount,
+	// floored at DefaultRetrievalTopK, capped at maxRetrievalPoolSize across
+	// the whole search.
+	matchCount := max(params.MatchCount*5, types.DefaultRetrievalTopK) * len(searchKBIDs)
+	if matchCount > maxRetrievalPoolSize {
+		matchCount = maxRetrievalPoolSize
+	}
+
+	// Compute the query embedding once before fan-out and propagate via
+	// params.QueryEmbedding. Without this, each storeGroup's
+	// buildRetrievalParams would re-embed the same query text — for N
+	// stores that means N API calls of identical input.
+	//
+	// Skip when params already carries an embedding (e.g. the agent
+	// pre-computed it) or when the primary KB has no vector indexing
+	// configured.
+	embeddingKB := kb
+	if !hasEmbeddingModel(embeddingKB) {
+		embeddingKB = nil
+		for _, candidate := range kbs {
+			if hasEmbeddingModel(candidate) {
+				embeddingKB = candidate
+				break
+			}
+		}
+	}
+	if len(params.QueryEmbedding) == 0 && embeddingKB != nil && !params.DisableVectorMatch {
+		emb, embErr := s.GetQueryEmbedding(ctx, embeddingKB.ID, params.QueryText)
+		if embErr != nil {
+			return nil, embErr
+		}
+		params.QueryEmbedding = emb
+	}
+
+	// Group KBs by (storeID, owner tenant), resolve the bound engine for
+	// each group, and build the per-group base RetrieveParams once.
+	groups, err := s.resolveStoreGroups(ctx, kb, kbs, params, matchCount)
+	if err != nil {
+		return nil, err
+	}
+	if len(groups) == 0 || allBaseParamsEmpty(groups) {
+		// Wiki-only / graph-only fan-out: every KB is non-retrievable.
+		// Preserve the existing "return empty rather than error" contract
+		// so agent tools that combine multiple KB scopes degrade gracefully.
+		logger.Infof(ctx, "No retrievable indexing pipelines across %d KBs", len(kbs))
+		return nil, nil
+	}
+
+	// Image vectors are recalled only for KBs that opted in to them.
+	s.applyImageRecall(ctx, kbs, groups, params)
+
+	// Execute retrieval with fan-out + score normalization (multi-store
+	// only) and a langfuse span around the entire retrieve step.
+	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))
+	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "retrieve",
+		Input: map[string]interface{}{
+			"query_text":             params.QueryText,
+			"kb_ids":                 searchKBIDs,
+			"knowledge_ids":          params.KnowledgeIDs,
+			"tag_ids":                params.TagIDs,
+			"scope_tag_ids":          params.ScopeTagIDs,
+			"match_count":            matchCount,
+			"vector_threshold":       params.VectorThreshold,
+			"keyword_threshold":      params.KeywordThreshold,
+			"disable_vector_match":   params.DisableVectorMatch,
+			"disable_keywords_match": params.DisableKeywordsMatch,
+			"group_count":            len(groups),
+		},
+		Metadata: map[string]interface{}{
+			"primary_kb_id":       kb.ID,
+			"primary_kb_type":     string(kb.Type),
+			"embedding_model_id":  kb.EmbeddingModelID,
+			"has_query_embedding": len(params.QueryEmbedding) > 0,
+		},
+	})
+	retrieveResults, err := s.retrieveFromStores(retrieveCtx, groups, retriever.EngineAwareNormalizer{})
+	retrieveSpan.Finish(langfuse.SummarizeRetrieveOutput(retrieveResults), nil, err)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_ids": searchKBIDs,
+			"query_text":         params.QueryText,
+		})
+		return nil, err
+	}
+
+	// Separate and fuse retrieval results.
+	vectorLists, keywordLists := classifyRetrievalResults(ctx, retrieveResults)
+	vectorResults, keywordResults := flattenLists(vectorLists), flattenLists(keywordLists)
+	if len(vectorResults) == 0 && len(keywordResults) == 0 {
+		logger.Info(ctx, "No search results found")
+		return nil, nil
+	}
+	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d",
+		len(vectorResults), len(keywordResults))
+
+	var retrievalCfg *types.RetrievalConfig
+	if tenantInfo != nil {
+		retrievalCfg = tenantInfo.RetrievalConfig
+	}
+	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorLists, keywordLists, retrievalCfg)
+
+	kb.EnsureDefaults()
+
+	// FAQ-specific post-processing now operates on storeGroups so the
+	// iterative TopK growth applies uniformly across the fan-out. An
+	// AppError from inside the iterative fan-out path (e.g. a per-group
+	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
+	// caller rather than be silently converted to a truncated chunk list.
+	return s.applyFAQPostProcessing(
+		ctx, kb, kbs, deduplicatedChunks, vectorLists, groups, params, matchCount)
+}
+
+// normalizedMatchCount resolves the effective primary-match cap for a search.
+//
+// MatchCount arrives as Go's zero value whenever a caller omits it — JSON
+// cannot tell an absent match_count from an explicit 0 — and three consumers
+// inside HybridSearch read it: the over-retrieval floor, the FAQ
+// iterative-retrieval trigger, and the final truncation. They must agree, so
+// the value is resolved here rather than at each use site. A raw 0 truncates
+// the deduplicated chunk list to [:0] and empties an otherwise successful
+// search; a negative value panics on that same slice bound.
+//
+// The fallback is shared with RetrievalConfig.GetEffectiveEmbeddingTopK:
+// internal callers (chat pipeline, agent tools) feed these results into
+// reranking, which trims to RerankTopK afterwards, so a wide candidate pool is
+// the right failure mode for them.
+func normalizedMatchCount(requested int) int {
+	if requested <= 0 {
+		return types.DefaultRetrievalTopK
+	}
+	// A search never returns more than the pool it draws from, so capping here
+	// changes no result; it keeps the over-retrieval arithmetic
+	// (MatchCount*5*len(KBs), the FAQ path's MatchCount*3) from overflowing
+	// into a negative TopK on absurd input.
+	return min(requested, maxRetrievalPoolSize)
+}
+
+// hasEmbeddingModel reports whether kb is vector-indexed with a configured
+// embedding model, i.e. whether it can embed a query for vector retrieval.
+func hasEmbeddingModel(kb *types.KnowledgeBase) bool {
+	return kb != nil && kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
+}
+
+// pickPrimary returns the KB whose ID matches id, or nil if id is not in
+// scope. Callers map a nil result to NotFound; there is intentionally no
+// kbs[0] fallback because it would mask caller bugs and could leak an
+// unintended KB's embedding-model identity into the search path.
+//
+// The primary KB drives the embedding model and FAQ-type decisions for
+// buildRetrievalParams. If the caller selects a wiki-only / graph-only
+// KB as primary, the multi-KB search is implicitly demoted to
+// keyword-only retrieval — vector retrieval is skipped because
+// primary.IsVectorEnabled() is false. Callers that mix vector-enabled
+// and non-vector KBs should pass a vector-enabled KB as id.
+func pickPrimary(kbs []*types.KnowledgeBase, id string) *types.KnowledgeBase {
+	for _, kb := range kbs {
+		if kb.ID == id {
+			return kb
+		}
+	}
+	return nil
+}
+
+// allBaseParamsEmpty reports whether every store group has an empty
+// BaseParams slice. True only when every KB in scope is wiki-only or
+// graph-only with neither vector nor keyword indexing — HybridSearch then
+// returns nil so callers that combine searchable + non-searchable KBs
+// (agent tools, chat pipeline) degrade gracefully.
+func allBaseParamsEmpty(groups []*storeGroup) bool {
+	for _, g := range groups {
+		if len(g.BaseParams) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// totalHits counts the IndexWithScore entries across a slice of retrieve
+// results.
+func totalHits(rrs []*types.RetrieveResult) int {
+	n := 0
+	for _, r := range rrs {
+		n += len(r.Results)
+	}
+	return n
+}
+
+// buildRetrievalParams constructs the vector and keyword retrieval parameters
+// for one store group, based on each member KB's type, the engine's
+// capabilities, and the search params.
+//
+// The FAQ-vs-document index decision is a PER-KB property (kb.Type), not a
+// property of the multi-KB search's primary KB. groupKBs therefore drives the
+// routing: KBs in the group are split into a FAQ subset (retrieved from the
+// FAQ vector index) and a document subset (retrieved from the default vector
+// index plus the keyword index). Deciding this from the primary KB alone would
+// route every KB in scope into the primary's index — e.g. a FAQ primary would
+// drag a document-type KB into the FAQ index and skip its keyword recall.
+//
+// primary is used only to resolve the shared query embedding model; every KB
+// in a multi-KB search is guaranteed to share a single embedding model by
+// validateSameEmbeddingModel upstream.
+func (s *knowledgeBaseService) buildRetrievalParams(
+	ctx context.Context,
+	retrieveEngine *retriever.CompositeRetrieveEngine,
+	primary *types.KnowledgeBase,
+	groupKBs []*types.KnowledgeBase,
+	params types.SearchParams,
+	matchCount int,
+) ([]types.RetrieveParams, error) {
+	currentTenantID := types.MustTenantIDFromContext(ctx)
+	var retrieveParams []types.RetrieveParams
+
+	// Partition the group's KBs by index routing. A KB that does not have
+	// vector indexing enabled (e.g. wiki-only or graph-only KBs) has no
+	// embeddings to retrieve from, and typically has no EmbeddingModelID
+	// configured either; such KBs are skipped for vector retrieval to avoid
+	// spurious "model ID cannot be empty" errors when an agent's retrieval
+	// scope happens to include them (e.g. KBSelectionMode=all picking up a
+	// wiki-only KB).
+	var faqVectorKBIDs, docVectorKBIDs, docKeywordKBIDs []string
+	// Document KBs with question generation off must not spend TopK on
+	// historical question vectors. FAQ KBs are absent from this list: their
+	// similar-question rows use the same source-id shape.
+	var questionOffKBIDs []string
+	for _, kb := range groupKBs {
+		if types.QuestionGenerationDisabled(kb) {
+			questionOffKBIDs = append(questionOffKBIDs, kb.ID)
+		}
+	}
+	// The query is embedded with the primary's model, or with the first
+	// vector KB of the group when the primary has none (a wiki primary
+	// searched together with document KBs): asking the primary for its empty
+	// model ID failed the whole search.
+	embeddingKB := primary
+	if !hasEmbeddingModel(primary) {
+		embeddingKB = nil
+	}
+	for _, kb := range groupKBs {
+		if hasEmbeddingModel(kb) {
+			if embeddingKB == nil {
+				embeddingKB = kb
+			}
+			if kb.Type == types.KnowledgeBaseTypeFAQ {
+				faqVectorKBIDs = append(faqVectorKBIDs, kb.ID)
+			} else {
+				docVectorKBIDs = append(docVectorKBIDs, kb.ID)
+			}
+		}
+		// FAQ KBs are retrieved exclusively via the FAQ vector index and
+		// have no keyword index; only document-type KBs participate in
+		// keyword retrieval.
+		if kb.IsKeywordEnabled() && kb.Type != types.KnowledgeBaseTypeFAQ {
+			docKeywordKBIDs = append(docKeywordKBIDs, kb.ID)
+		}
+	}
+
+	// Add vector retrieval params if supported
+	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch &&
+		(len(faqVectorKBIDs) > 0 || len(docVectorKBIDs) > 0) {
+		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
+
+		queryEmbedding, err := s.resolveQueryEmbedding(ctx, embeddingKB, params, currentTenantID)
+		if err != nil {
+			return nil, err
+		}
+
+		appendVectorParams := func(kbIDs []string, knowledgeType string) {
+			retrieveParams = append(retrieveParams, types.RetrieveParams{
+				Query:                         params.QueryText,
+				Embedding:                     queryEmbedding,
+				KnowledgeBaseIDs:              kbIDs,
+				TopK:                          matchCount,
+				Threshold:                     params.VectorThreshold,
+				RetrieverType:                 types.VectorRetrieverType,
+				KnowledgeIDs:                  params.KnowledgeIDs,
+				TagIDs:                        params.TagIDs,
+				KnowledgeType:                 knowledgeType,
+				ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(kbIDs, questionOffKBIDs),
+			})
+		}
+
+		// Document KBs use the default vector index; FAQ KBs use the FAQ
+		// index. A group containing both types yields one retrieval param
+		// per index so each KB is queried against the index it was written to.
+		if len(docVectorKBIDs) > 0 {
+			appendVectorParams(docVectorKBIDs, "")
+		}
+		if len(faqVectorKBIDs) > 0 {
+			appendVectorParams(faqVectorKBIDs, types.KnowledgeTypeFAQ)
+		}
+		logger.Info(ctx, "Vector retrieval parameters setup completed")
+	}
+
+	// Add keyword retrieval params if supported and any document KB has
+	// keyword indexing enabled.
+	if retrieveEngine.SupportRetriever(types.KeywordsRetrieverType) && !params.DisableKeywordsMatch &&
+		len(docKeywordKBIDs) > 0 {
+		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
+		retrieveParams = append(retrieveParams, types.RetrieveParams{
+			Query:                         params.QueryText,
+			KnowledgeBaseIDs:              docKeywordKBIDs,
+			TopK:                          matchCount,
+			Threshold:                     params.KeywordThreshold,
+			RetrieverType:                 types.KeywordsRetrieverType,
+			KnowledgeIDs:                  params.KnowledgeIDs,
+			TagIDs:                        params.TagIDs,
+			ExcludeGeneratedQuestionKBIDs: generatedQuestionKBIDs(docKeywordKBIDs, questionOffKBIDs),
+		})
+		logger.Info(ctx, "Keyword retrieval parameters setup completed")
+	}
+
+	return retrieveParams, nil
+}
+
+// generatedQuestionKBIDs keeps the off-switch ids that this retrieval param
+// actually searches. An empty result leaves the SQL filter off.
+func generatedQuestionKBIDs(searched, disabled []string) []string {
+	if len(searched) == 0 || len(disabled) == 0 {
+		return nil
+	}
+	off := make(map[string]struct{}, len(disabled))
+	for _, id := range disabled {
+		off[id] = struct{}{}
+	}
+	var matched []string
+	for _, id := range searched {
+		if _, ok := off[id]; ok {
+			matched = append(matched, id)
+		}
+	}
+	return matched
+}
+
+// resolveQueryEmbedding returns the query embedding for a store group. It
+// reuses params.QueryEmbedding when the caller pre-computed it (the common
+// path — HybridSearch embeds once before fan-out), otherwise it embeds the
+// query text using the embedding model of the supplied KB. For cross-tenant
+// shared KBs the source tenant's embedding model is used so the produced
+// vector is compatible with the index it will be searched against.
+func (s *knowledgeBaseService) resolveQueryEmbedding(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	params types.SearchParams,
+	currentTenantID uint64,
+) ([]float32, error) {
+	if len(params.QueryEmbedding) > 0 {
+		logger.Infof(ctx, "Using pre-computed query embedding, vector length: %d", len(params.QueryEmbedding))
+		return params.QueryEmbedding, nil
+	}
+
+	logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
+
+	var embeddingModel embedding.Embedder
+	var err error
+	if kb.TenantID != currentTenantID {
+		logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)
+		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
+	} else {
+		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	}
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
+		return nil, err
+	}
+	logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
+
+	logger.Info(ctx, "Starting to generate query embedding")
+	queryEmbedding, err := embeddingModel.Embed(types.WithEmbedQuery(ctx), params.QueryText)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
+		return nil, err
+	}
+	if err := validateQueryEmbeddingDimension(embeddingModel, len(queryEmbedding)); err != nil {
+		logger.Errorf(ctx, "resolveQueryEmbedding: %v", err)
+		return nil, err
+	}
+	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
+	return queryEmbedding, nil
+}

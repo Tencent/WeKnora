@@ -1,0 +1,56 @@
+# Brand asset sources
+
+Logos identify supported integrations and the teams or products featured in the community showcase; their names and marks belong to their respective owners.
+
+Paths below written as `public/brand/…`, `public/brands/…` and `public/product/…` live under `public/docs/_home/`, so the site serves them from `/docs/_home/` next to the rest of the documentation.
+
+- WeKnora logo: `docs/images/logo.png` from the WeKnora repository (the README logo), copied unchanged to `public/brand/weknora-original.png`. The site preserves all lettering, graphics and proportions. CSS hides only the empty outer canvas and blends the white background into the page; dark mode uses an inverted presentation with hue rotation. The source image remains unchanged.
+- WeKnora browser icon: copied unchanged from the existing product's `frontend/public/favicon.ico` into the documentation (`/docs/favicon.ico`), which the homepage also uses. The replacement square sail SVG is no longer shipped.
+- Feishu, GitLab, Tencent IMA, Notion, Yuque, RSS, WeCom, Slack, Telegram: copied unchanged from the WeKnora frontend asset library.
+- Seafile: copied unchanged from `frontend/src/assets/img/datasource-seafile.png` to `public/brands/seafile.png`.
+- OpenAI, DeepSeek, Qwen, Hunyuan, Gemini, Ollama, MCP: static SVGs from [Lobe Icons](https://github.com/lobehub/lobe-icons), `@lobehub/icons-static-svg@1.95.0`. Upstream MIT license included with assets.
+- Confluence, DingTalk: copied unchanged from the WeKnora frontend asset library (`frontend/src/assets/img/datasource-confluence.svg`, `frontend/src/assets/img/im/dingtalk.svg`).
+- Claude (Anthropic), Zhipu, Kimi (Moonshot), Volcengine, MiniMax: copied unchanged from `internal/models/providers/assets/`, which carries the same Lobe Icons static SVGs; covered by the included Lobe Icons MIT license.
+- BrowserSkill: `frontend/src/assets/browserskill/logo.png` from the WeKnora frontend (the extension's own icon, [Tencent/BrowserSkill](https://github.com/Tencent/BrowserSkill)), copied unchanged to `public/brands/browserskill.png` with its MIT license as `public/brands/BROWSERSKILL-LICENSE`.
+- Chrome: [official Chrome website asset](https://www.google.com/chrome/static/images/chrome-logo-m100.svg).
+- File formats, REST API, CLI: generic interface icons, not brand logos.
+- LiteLLM: [official documentation favicon](https://docs.litellm.ai/img/favicon.ico).
+- WeChat Dialog Open Platform: [official platform icon](https://res.wx.qq.com/mmspraiweb_node/dist/static/logo/logo180.png), referenced by the platform login page and saved unchanged as `public/brands/wechat-dialog.png`.
+- Tencent Cloud: [official website icon](https://cloudcache.tencent-cloud.com/qcloud/favicon.ico), referenced by the Lighthouse product page and saved unchanged as `public/brands/tencent-cloud.ico`. Both platform icons retain their original colors in light and dark mode.
+
+## Community showcase
+
+The eight logos below were copied from the maintainer-supplied `素材包.zip` on 2026-10-29. They are served locally from `public/docs/_home/adopters/`, preserving the original artwork and proportions; only trailing whitespace in the Lighthouse SVG was normalized. Cards and company names follow the site theme; only the logo image has a light backing, softened to blue-gray in dark mode. Multiply blending merges white image backgrounds into that backing without inverting or redrawing the marks. `app/adopters.ts` contains concise display copy based on the supplied use cases and [the public showcase issue](https://github.com/Tencent/WeKnora/issues/4801).
+
+| Brand | Supplied file | Local file | Source |
+| --- | --- | --- | --- |
+| 赛乐医疗 / Sifary | `img/01_logo.svg` | `sifary.svg` | [Community submission](https://github.com/Tencent/WeKnora/issues/4801#issuecomment-6439352798) |
+| 出版人杂志社 / China Publishers | `img/02_logo.png` | `china-publishers.png` | [Community submission](https://github.com/Tencent/WeKnora/issues/4801#issuecomment-6440012673) |
+| 智达创客 | `img/03_logo.png` | `zhida-chuangke.png` | [Community submission](https://github.com/Tencent/WeKnora/issues/4801#issuecomment-6464362211) |
+| 腾讯云 ClawPro | `img/04_ClawPro.svg` | `clawpro.svg` | Maintainer collection |
+| 光子工作室群 | `img/05_logo.png` | `lightspeed.png` | Maintainer collection |
+| 腾讯客服 | `img/06_logo.png` | `tencent-customer-service.png` | Maintainer collection |
+| 微信游戏 | `img/07_logo.png` | `wechat-games.png` | Maintainer collection |
+| 腾讯云轻量应用服务器 | `img/08_logo.svg` | `lighthouse.svg` | Maintainer collection |
+
+- The retained metadata records 智达创客 as POC according to its public submission, correcting `status: "online"` in the supplied JSON. ClawPro and Lighthouse are recorded as ecosystem integrations to describe their knowledge-base integration and deployment-template roles. Adoption stages are not displayed in the cards.
+- The pack's reversed settings for 赛乐医疗 and 智达创客 are corrected to match the artwork: 赛乐医疗 uses A (horizontal logo only); 智达创客, ClawPro, and Lighthouse use B (square logo beside the name). The other four brands use A. Logos keep their original proportions in both layouts. 智达创客 uses CSS scaling to hide only the source image's excessive blank margin; the complete mark and original file are preserved.
+- The retained ClawPro link points to its [official product overview](https://cloud.tencent.com/document/product/213/129156), instead of the general cloud-server documentation index in the pack. Public website/product links are currently not displayed in the cards.
+- Descriptions summarize reported use cases; they are not attributed testimonials. The displayed roster is limited to the eight brands in the supplied pack. Issue #4801 provides source references and accepts submissions/removal requests; additional submissions are not added to the display automatically.
+
+## Product screenshots
+
+- Update reused screenshots in `../public/screenshots/`. The homepage prebuild/predev hook refreshes existing product copies, including the `sandbox-terminal.png` alias. Do not edit those copies separately.
+
+- Release highlights also reuse `chat-source-location.png`, copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`. Four features use compact sidebar navigation beside the screenshot, with all descriptions expanded. Attachment reading is a secondary link; its screenshot remains in the documentation. The standalone browser section presents task execution and extension connection as two expanded items on the left, switching the corresponding screenshot on the right.
+
+- v0.8.3 gallery: `kb-image-gallery.png`, `kb-image-gallery-detail.png`, and `kb-image-vector-settings.png` are real product screenshots copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`. The vector settings image shows the image-vector toggle. The gallery screenshots retain some image-load failure states from the captured interface. Screenshot contents and usage are documented in `../README.md`.
+
+- Skill catalog and sandbox terminal: copied unchanged from `../public/screenshots/skill-catalog.png` and `sandbox-panel-terminal.png` to `public/product/skill-catalog.png` and `sandbox-terminal.png`, for the skills & sandbox gallery.
+- Sandbox desktop (`public/product/sandbox-desktop.png`): the chat's sandbox panel on the 桌面 tab, showing the XFCE desktop of a desktop template. It shares the 终端与图形桌面 card with the terminal screenshot, switched inside the card.
+- The permanent local-browser section reuses `local-browser-task.png` and `browser-connection.png` with the BrowserSkill icon and GitHub link from the v0.8.2 showcase. MCP Server is described within integrations; conversation controls stay in the Agent overview. `mcp-server-endpoint.png` and `chat-steer-queue.png` remain reference assets, without separate homepage showcases.
+- Browser task (`public/product/local-browser-task.png`): a smart-reasoning chat driving the connected Chrome through BrowserSkill (GitHub release lookup, then filling the httpbin.org sample order form without submitting), with the in-chat task preview and pause / end controls.
+
+- Wiki browser: copied unchanged from `../public/screenshots/wiki-browser.png` to `public/product/wiki-browser.png`. Shows the actual Wiki directory, linked page and source references using sample company policies.
+- Wiki graph: `wiki-graph-groups.png` is a real product screenshot showing the full graph with grouped regions, theme labels and a node-type legend. It is copied unchanged from `../public/screenshots/` to `public/docs/_home/product/`.
+- Historical Wiki graph and revision history: copied unchanged from `../public/screenshots/wiki-graph.png` and `wiki-revision-history.png` to matching files in `public/product/`, the revision-history image remains in the Wiki gallery, while the old graph image is retained for reference.

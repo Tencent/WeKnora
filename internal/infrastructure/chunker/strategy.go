@@ -1,0 +1,377 @@
+// Package chunker - strategy.go is the public entry point for adaptive
+// chunking. Callers invoke Split / SplitParentChild instead of the legacy
+// SplitText / SplitTextParentChild functions; the strategy resolver picks
+// a tier based on document profile and the SplitterConfig.Strategy hint.
+//
+// The legacy entry points still exist in splitter.go for backwards
+// compatibility — strategy.go simply layers a tier-selector on top.
+package chunker
+
+import (
+	"context"
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+)
+
+// Strategy values for SplitterConfig.Strategy.
+const (
+	StrategyAuto      = "auto"
+	StrategyHeading   = "heading"
+	StrategyHeuristic = "heuristic"
+	StrategyRecursive = "recursive"
+	StrategyLegacy    = "legacy"
+)
+
+// Split chunks text using the strategy configured in cfg. When cfg.Strategy
+// is empty or "auto" the document profiler picks the tier. The function
+// always returns a non-nil result: on tier failure the chain falls through
+// to the legacy splitter, which is the original Tier 3 implementation.
+//
+// Hot path: avoids the Diagnostics struct allocation that
+// SplitWithDiagnostics performs (matters in SplitParentChild where
+// Split is called once per parent).
+func Split(text string, cfg SplitterConfig) []Chunk {
+	if text == "" {
+		return nil
+	}
+	cfg = ensureDefaults(cfg)
+	chain, profile := resolveChainWithProfile(text, cfg)
+	totalChars := len([]rune(text))
+	budget := tokenRuneBudget(cfg)
+
+	var lastOut []Chunk
+	for i, tier := range chain {
+		out := runTier(tier, text, cfg, profile)
+		if budget > 0 {
+			out = enforceChunkBudget(out, budget)
+		}
+		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
+			return out
+		} else {
+			logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
+		}
+		if tier == TierLegacy && i == len(chain)-1 {
+			lastOut = out
+		}
+	}
+	if lastOut != nil {
+		return lastOut
+	}
+	return SplitText(text, cfg)
+}
+
+// TierRejection records why a tier was rejected by the validator and the
+// chain advanced to the next tier. Surfaced by SplitWithDiagnostics for
+// the debug/preview endpoint.
+type TierRejection struct {
+	Tier   StrategyTier `json:"tier"`
+	Reason string       `json:"reason"`
+}
+
+// Diagnostics captures which tier produced the returned chunks plus the
+// chain that was attempted, any rejected tiers along the way, and the
+// document profile that drove tier selection.
+//
+// Useful for surfacing in a debug UI; not produced by the normal Split
+// path. The JSON shape is part of the public preview-endpoint API — keep
+// field names stable.
+type Diagnostics struct {
+	SelectedTier StrategyTier    `json:"selected_tier"`
+	TierChain    []StrategyTier  `json:"tier_chain"`
+	Rejected     []TierRejection `json:"rejected"`
+	// Profile is set when the auto strategy resolved the chain via the
+	// document profiler. nil when an explicit Strategy bypassed profiling.
+	Profile *DocProfile `json:"profile,omitempty"`
+}
+
+// SplitWithDiagnostics is the same as Split but also returns the
+// diagnostic trace (selected tier, full chain, rejection reasons,
+// profile when available). Use this for the chunker preview endpoint
+// where the caller wants to know which tier won and why others lost.
+func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostics) {
+	// Default selected tier to legacy so an empty diag never carries the
+	// zero string — that would render as a blank tag in the debug UI.
+	diag := &Diagnostics{SelectedTier: TierLegacy}
+	if text == "" {
+		return nil, diag
+	}
+	cfg = ensureDefaults(cfg)
+	chain, profile := resolveChainWithProfile(text, cfg)
+	budget := tokenRuneBudget(cfg)
+	diag.TierChain = chain
+	diag.Profile = profile
+	totalChars := len([]rune(text))
+
+	var lastOut []Chunk
+	var lastTier StrategyTier
+	for i, tier := range chain {
+		out := runTier(tier, text, cfg, profile)
+		if budget > 0 {
+			out = enforceChunkBudget(out, budget)
+		}
+		v := ValidateChunks(out, totalChars, cfg.ChunkSize)
+		if v.OK {
+			diag.SelectedTier = tier
+			return out, diag
+		}
+		diag.Rejected = append(diag.Rejected, TierRejection{Tier: tier, Reason: v.Reason})
+		logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
+		if tier == TierLegacy && i == len(chain)-1 {
+			lastOut = out
+			lastTier = tier
+		}
+	}
+	if lastOut != nil {
+		diag.SelectedTier = lastTier
+		return lastOut, diag
+	}
+	// Defensive last-ditch fallback.
+	return SplitText(text, cfg), diag
+}
+
+// SplitParentChild is the strategy-aware analog of SplitTextParentChild.
+// It runs the tier selector for parent splitting, then re-splits each
+// parent into children with the small-chunk config.
+//
+// Child splitting honours childCfg.Strategy. If it is empty/auto and a
+// parent has its own internal structure (sub-headings, numbered sub-
+// sections), the appropriate tier picks it up so child chunks carry a
+// finer-grained breadcrumb than the parent's. Re-profiling each parent
+// is bounded by O(sum(parent_size)) ≈ O(N) total, which is the same
+// order as the original parent profiling pass.
+func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChildResult {
+	result, _ := splitParentChild(text, parentCfg, childCfg, false)
+	return result
+}
+
+// SplitParentChildWithDiagnostics is the diagnostics-aware form of
+// SplitParentChild. The result is identical to SplitParentChild; diagnostics
+// describe the strategy selected for the parent split over the full document.
+// It is intended for debug surfaces rather than the ingestion hot path.
+func SplitParentChildWithDiagnostics(text string, parentCfg, childCfg SplitterConfig) (ParentChildResult, *Diagnostics) {
+	return splitParentChild(text, parentCfg, childCfg, true)
+}
+
+func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagnostics bool) (ParentChildResult, *Diagnostics) {
+	parentCfg = ensureDefaults(parentCfg)
+	childCfg = ensureDefaults(childCfg)
+
+	var (
+		parents []Chunk
+		diag    *Diagnostics
+	)
+	if withDiagnostics {
+		parents, diag = SplitWithDiagnostics(text, parentCfg)
+	} else {
+		parents = Split(text, parentCfg)
+	}
+	if len(parents) == 0 {
+		return ParentChildResult{}, diag
+	}
+
+	var newParents []Chunk
+	var children []ChildChunk
+	childSeq := 0
+	budget := tokenRuneBudget(childCfg)
+	for _, parent := range parents {
+		subs := mapChildrenToSource(parent, Split(parent.Content, childCfg))
+		for i := range subs {
+			subs[i].ContextHeader = mergeBreadcrumbs(parent.ContextHeader, subs[i].ContextHeader)
+		}
+		if budget > 0 {
+			subs = enforceChunkBudget(subs, budget)
+		}
+
+		parentIndex := -1
+		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {
+			parentIndex = len(newParents)
+			newParents = append(newParents, parent)
+		}
+		for _, sub := range subs {
+			sub.Seq = childSeq
+			children = append(children, ChildChunk{Chunk: sub, ParentIndex: parentIndex})
+			childSeq++
+		}
+	}
+	return ParentChildResult{Parents: newParents, Children: children}, diag
+}
+
+// defaultChunkSizeAndOverlap fills unset size/overlap fields.
+//
+// An empty config (both fields still at Go zero values) still receives the
+// package defaults. When ChunkSize is already set, ChunkOverlap == 0 is kept
+// as an explicit "no overlap" request — matching the wiki-only KB preset and
+// the DefaultChunkOverlap docs ("Use 0 for strictly atomic data").
+func defaultChunkSizeAndOverlap(cfg SplitterConfig) SplitterConfig {
+	sizeUnset := cfg.ChunkSize <= 0
+	if sizeUnset {
+		cfg.ChunkSize = DefaultChunkSize
+	}
+	if cfg.ChunkOverlap < 0 || (cfg.ChunkOverlap == 0 && sizeUnset) {
+		cfg.ChunkOverlap = DefaultChunkOverlap
+	}
+	return cfg
+}
+
+// NormalizeSplitterConfig applies the same base splitter defaults used by
+// knowledge ingestion before parent-child derivation or single-pass splitting.
+func NormalizeSplitterConfig(cfg SplitterConfig) SplitterConfig {
+	cfg = defaultChunkSizeAndOverlap(cfg)
+	if len(cfg.Separators) == 0 {
+		cfg.Separators = []string{"\n\n", "\n", "。"}
+	}
+	return cfg
+}
+
+// NormalizeLineEndings canonicalizes text before chunking. Browser textareas
+// normalize pasted CRLF text to LF, while uploaded files preserve their
+// original line endings; without this, the same document produces different
+// character counts and chunk boundaries.
+func NormalizeLineEndings(text string) string {
+	if !strings.Contains(text, "\r") {
+		return text
+	}
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
+}
+
+// DeriveParentChildConfigs produces the exact parent and child splitter
+// configurations used by knowledge ingestion. Keeping this here lets preview
+// and ingestion remain in lockstep as the parent-child defaults evolve.
+// Languages are copied to both levels so parent and child splitters use the same boundary rules.
+// TokenLimit is copied only to children because parents keep the configured context window.
+func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (parent, child SplitterConfig) {
+	if parentSize <= 0 {
+		parentSize = 4096
+	}
+	if childSize <= 0 {
+		childSize = 384
+	}
+	parent = SplitterConfig{
+		ChunkSize:    parentSize,
+		ChunkOverlap: base.ChunkOverlap,
+		Separators:   base.Separators,
+		Strategy:     base.Strategy,
+		Languages:    base.Languages,
+	}
+	child = SplitterConfig{
+		ChunkSize:    childSize,
+		ChunkOverlap: childSize / 5,
+		Separators:   base.Separators,
+		Strategy:     base.Strategy,
+		TokenLimit:   base.TokenLimit,
+		Languages:    base.Languages,
+	}
+	return
+}
+
+// mergeBreadcrumbs combines the parent and child heading breadcrumbs into a
+// single ContextHeader. When the child re-runs heading detection on parent
+// content, its first breadcrumb line typically duplicates the parent's last
+// line (the parent's leading heading sits at the top of the child's input);
+// drop that duplicate so the embedding context isn't redundant.
+func mergeBreadcrumbs(parent, child string) string {
+	if parent == "" {
+		return child
+	}
+	if child == "" {
+		return parent
+	}
+	parentLines := strings.Split(parent, "\n")
+	childLines := strings.Split(child, "\n")
+	if len(parentLines) > 0 && len(childLines) > 0 &&
+		strings.TrimSpace(parentLines[len(parentLines)-1]) == strings.TrimSpace(childLines[0]) {
+		childLines = childLines[1:]
+	}
+	if len(childLines) == 0 {
+		return parent
+	}
+	return parent + "\n" + strings.Join(childLines, "\n")
+}
+
+// resolveChainWithProfile returns the strategy chain to attempt and, when
+// the chain was selected by the profiler (auto strategy), the DocProfile
+// that drove the selection. Profile is nil for explicit non-auto strategies
+// so callers don't pay for an unused profiling pass.
+func resolveChainWithProfile(text string, cfg SplitterConfig) ([]StrategyTier, *DocProfile) {
+	switch cfg.Strategy {
+	case StrategyHeading:
+		return []StrategyTier{TierHeading, TierLegacy}, nil
+	case StrategyHeuristic:
+		return []StrategyTier{TierHeuristic, TierLegacy}, nil
+	case StrategyRecursive:
+		// "recursive" is a public-API alias for "legacy": both invoke
+		// SplitText. Kept for backwards compatibility with stored configs.
+		return []StrategyTier{TierLegacy}, nil
+	case StrategyLegacy, "":
+		// Empty == legacy preserves backwards compatibility with stored
+		// ChunkingConfig rows that pre-date the Strategy field.
+		return []StrategyTier{TierLegacy}, nil
+	case StrategyAuto:
+		fallthrough
+	default:
+		profile := ProfileDocument(text)
+		return SelectStrategy(profile), profile
+	}
+}
+
+// runTier dispatches the splitter implementation for the given tier.
+// splitByHeadings / splitByHeuristics are package-level vars overridden
+// from heading_splitter.go / heuristic_splitter.go via init(); legacy
+// runs SplitText. The default branch is defensive for future
+// StrategyTier additions.
+//
+// profile may be nil when the caller did not run the document profiler
+// (explicit non-auto strategies skip profiling); splitters that need a
+// profile compute one on demand.
+func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocProfile) []Chunk {
+	switch tier {
+	case TierHeading:
+		return splitByHeadings(text, cfg, profile)
+	case TierHeuristic:
+		return splitByHeuristics(text, cfg, profile)
+	case TierLegacy:
+		return SplitText(text, cfg)
+	}
+	return SplitText(text, cfg)
+}
+
+// ensureDefaults fills in zero-value config fields with sane defaults.
+// Size/overlap defaulting is shared with NormalizeSplitterConfig via
+// defaultChunkSizeAndOverlap so service callers and direct callers stay aligned.
+//
+// When cfg.TokenLimit is set, ChunkSize is clamped to the character budget
+// that fits within that token limit (with a 10% safety factor). This makes
+// chunks safe for embedding APIs that have hard token caps.
+func ensureDefaults(cfg SplitterConfig) SplitterConfig {
+	cfg = defaultChunkSizeAndOverlap(cfg)
+	if len(cfg.Separators) == 0 {
+		cfg.Separators = []string{"\n\n", "\n", "。"}
+	}
+	if cfg.TokenLimit > 0 {
+		if charBudget := tokenRuneBudget(cfg); charBudget > 0 && charBudget < cfg.ChunkSize {
+			cfg.ChunkSize = charBudget
+		}
+	}
+	// Guard against pathological overlap configurations: if Overlap exceeds
+	// half of ChunkSize, almost every chunk is duplicate content. Cap it at
+	// ChunkSize/2 so Overlap stays a useful smoothing band rather than a
+	// near-clone of the previous chunk.
+	if cfg.ChunkOverlap > cfg.ChunkSize/2 && cfg.ChunkSize > 0 {
+		cfg.ChunkOverlap = cfg.ChunkSize / 2
+	}
+	return cfg
+}
+
+// splitByHeadings is overridden by heading_splitter.go. The default no-op
+// fallback ignores the profile (profile may be nil; the override computes
+// one on demand when so).
+var splitByHeadings = func(text string, cfg SplitterConfig, _ *DocProfile) []Chunk {
+	return SplitText(text, cfg)
+}
+
+// splitByHeuristics is overridden by heuristic_splitter.go. profile may be nil.
+var splitByHeuristics = func(text string, cfg SplitterConfig, _ *DocProfile) []Chunk {
+	return SplitText(text, cfg)
+}

@@ -1,0 +1,625 @@
+<template>
+  <teleport to="body">
+    <div v-if="drawerVisible && resizable && !maximized" class="setting-drawer-resize-handle"
+      :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
+      :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
+      role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
+      <div class="setting-drawer-resize-line" />
+    </div>
+  </teleport>
+  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="zIndex" placement="right"
+    attach="body" destroy-on-close :footer="!hideFooter"
+    :class="drawerClass" @before-close="blurActiveElementBeforeClose">
+    <!--
+      Custom header. We replace TDesign's default header so we can put a leading
+      icon badge and an optional subtitle (description) right next to the title,
+      keeping the body uncluttered. The close affordance is the slide-out drawer
+      itself + the underlying overlay click — TDesign already wires those up,
+      so we don't need a redundant X button.
+    -->
+    <template #header>
+      <div class="setting-drawer__header-block">
+        <div class="setting-drawer__header">
+          <div v-if="$slots.headerIcon || icon" class="setting-drawer__header-icon">
+            <slot name="headerIcon">
+              <t-icon v-if="icon" :name="icon" />
+            </slot>
+          </div>
+          <div class="setting-drawer__header-text">
+            <div class="setting-drawer__title">{{ title }}</div>
+            <div v-if="description || $slots.subtitle" class="setting-drawer__subtitle">
+              <slot name="subtitle">{{ description }}</slot>
+            </div>
+          </div>
+          <div class="setting-drawer__header-tools">
+            <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
+            <t-tooltip v-if="maximizable" :content="maximized ? t('common.exitFullscreen') : t('common.fullscreen')" placement="bottom">
+              <button
+                type="button"
+                class="setting-drawer__maximize"
+                :aria-label="maximized ? t('common.exitFullscreen') : t('common.fullscreen')"
+                :aria-pressed="maximized"
+                @click="maximized = !maximized"
+              >
+                <t-icon :name="maximized ? 'fullscreen-exit' : 'fullscreen'" />
+              </button>
+            </t-tooltip>
+          </div>
+        </div>
+        <div v-if="$slots['header-extra']" class="setting-drawer__header-extra">
+          <slot name="header-extra" />
+        </div>
+      </div>
+    </template>
+
+    <div class="setting-drawer__body">
+      <slot />
+    </div>
+    <template v-if="!hideFooter" #footer>
+      <div v-if="$slots['footer-extra']" class="setting-drawer__footer-extra">
+        <slot name="footer-extra" />
+      </div>
+      <div class="setting-drawer__footer">
+        <div class="setting-drawer__footer-left">
+          <slot name="footer-left" />
+        </div>
+        <div class="setting-drawer__footer-right">
+          <slot name="footer-right">
+            <t-button theme="default" variant="outline" :disabled="cancelDisabled" @click="handleCancel">
+              {{ cancelText || t('common.cancel') }}
+            </t-button>
+            <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
+              {{ confirmText || t('common.save') }}
+            </t-button>
+          </slot>
+        </div>
+      </div>
+    </template>
+  </t-drawer>
+</template>
+
+<script lang="ts">
+import type { InjectionKey } from 'vue'
+
+// Skill manage (and similar) panels teleport compact header actions here so
+// they sit on the title row without each drawer re-declaring the chrome.
+export const SETTING_DRAWER_HEADER_ACTIONS_ID: InjectionKey<string> = Symbol('settingDrawerHeaderActionsId')
+</script>
+
+<script setup lang="ts">
+import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+interface Props {
+  visible: boolean
+  title: string
+  description?: string
+  /** Optional TDesign icon name shown as a leading badge in the header. */
+  icon?: string
+  /**
+   * Initial width when the user has no persisted preference. Accepts any
+   * CSS length string (e.g. "560px", "40%").
+   */
+  width?: string
+  /**
+   * Whether the drawer can be horizontally resized by dragging the visible
+   * handle on its left edge (same affordance as doc-content drawer).
+   */
+  resizable?: boolean
+  /** Min/max bounds for the drag-resize, in px. */
+  minWidth?: number
+  maxWidth?: number
+  /**
+   * Show a maximize toggle in the header. Content-heavy drawers (the Markdown
+   * editor) need more room than `maxWidth` allows; while maximized the drawer
+   * spans the viewport and the drag handle steps aside.
+   */
+  maximizable?: boolean
+  /**
+   * localStorage key used to remember the user's chosen width. Set to '' to
+   * disable persistence. Default key is namespaced per-consumer using the
+   * drawer title.
+   */
+  storageKey?: string
+  confirmLoading?: boolean
+  cancelDisabled?: boolean
+  confirmDisabled?: boolean
+  confirmText?: string
+  cancelText?: string
+  hideFooter?: boolean
+  zIndex?: number
+}
+
+defineOptions({ inheritAttrs: false })
+
+const props = withDefaults(defineProps<Props>(), {
+  description: '',
+  icon: '',
+  width: '560px',
+  resizable: true,
+  minWidth: 480,
+  maxWidth: 1200,
+  maximizable: false,
+  storageKey: '',
+  confirmLoading: false,
+  cancelDisabled: false,
+  confirmDisabled: false,
+  confirmText: '',
+  cancelText: '',
+  hideFooter: false,
+  zIndex: 2500,
+})
+
+const emit = defineEmits<{
+  (e: 'update:visible', value: boolean): void
+  (e: 'confirm'): void
+  (e: 'cancel'): void
+}>()
+
+const { t } = useI18n()
+const attrs = useAttrs()
+const headerActionsId = `sdha${useId().replace(/\W/g, '')}`
+provide(SETTING_DRAWER_HEADER_ACTIONS_ID, `#${headerActionsId}`)
+
+const drawerPassthroughAttrs = computed(() => {
+  const { class: _class, ...rest } = attrs
+  return rest
+})
+
+// ---------- visibility ----------
+const drawerVisible = computed({
+  get: () => props.visible,
+  set: (val) => emit('update:visible', val)
+})
+
+// ---------- width state ----------
+// Storage key derives from the drawer title so different drawers (model
+// editor vs MCP service vs web search provider) get independent widths.
+// Callers can override via the `storageKey` prop when titles collide.
+const resolvedStorageKey = computed(
+  () => props.storageKey || `setting-drawer:width:${props.title || 'default'}`
+)
+
+const viewportWidth = ref(
+  typeof window === 'undefined' ? props.maxWidth : window.innerWidth,
+)
+
+const clampWidth = (n: number) => {
+  const cap = Math.min(props.maxWidth, viewportWidth.value)
+  const floor = Math.min(props.minWidth, cap)
+  return Math.max(floor, Math.min(cap, Math.round(n)))
+}
+
+const parseWidthToPx = (width: string) => {
+  const n = parseInt(width, 10)
+  return Number.isFinite(n) ? n : 560
+}
+
+const loadStoredWidth = (): number | null => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(resolvedStorageKey.value)
+    if (!raw) return null
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return null
+    return clampWidth(n)
+  } catch {
+    return null
+  }
+}
+
+// User's persisted width (px) wins over the prop default.
+const userWidthPx = ref<number | null>(loadStoredWidth())
+
+const drawerWidthPx = computed(() =>
+  clampWidth(userWidthPx.value ?? parseWidthToPx(props.width)),
+)
+
+// ---------- maximize ----------
+const maximized = ref(false)
+
+// Leaving the drawer maximized would surprise the next caller of the same
+// storage key, so the toggle lives for one open.
+watch(drawerVisible, (val) => {
+  if (!val) maximized.value = false
+})
+
+const effectiveWidth = computed(() =>
+  maximized.value ? `${viewportWidth.value}px` : `${drawerWidthPx.value}px`,
+)
+
+const persistWidth = (width: number) => {
+  const next = clampWidth(width)
+  userWidthPx.value = next
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(resolvedStorageKey.value, String(next))
+  } catch {
+    // localStorage can throw in private mode / quota errors.
+  }
+}
+
+// ---------- Custom drag-resize (visible handle, same as doc-content) ----------
+const drawerResizing = ref(false)
+
+const drawerClass = computed(() => [
+  'setting-drawer',
+  attrs.class,
+  { 'setting-drawer--resizing': drawerResizing.value },
+])
+
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+function onResizeStart(e: MouseEvent) {
+  drawerResizing.value = true
+  resizeStartX = e.clientX
+  resizeStartWidth = drawerWidthPx.value
+  document.addEventListener('mousemove', onResizeMove)
+  document.addEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onResizeMove(e: MouseEvent) {
+  const delta = resizeStartX - e.clientX
+  userWidthPx.value = clampWidth(resizeStartWidth + delta)
+}
+
+function onResizeEnd() {
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  drawerResizing.value = false
+  persistWidth(drawerWidthPx.value)
+}
+
+function cleanupResize() {
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  drawerResizing.value = false
+}
+
+function onWindowResize() {
+  viewportWidth.value = window.innerWidth
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onWindowResize, { passive: true })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onWindowResize)
+  cleanupResize()
+})
+
+function blurActiveElementBeforeClose() {
+  // TDesign textarea autosize calls getComputedStyle on blur/resize; if the
+  // drawer is already tearing down (destroy-on-close), that node may no longer
+  // be an Element and the promise rejects uncaught.
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+}
+
+const handleConfirm = () => emit('confirm')
+const handleCancel = () => {
+  blurActiveElementBeforeClose()
+  emit('cancel')
+  emit('update:visible', false)
+}
+</script>
+
+<style lang="less" scoped>
+/* ---------- Header ---------- */
+.setting-drawer__header-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  gap: 8px;
+}
+
+.setting-drawer__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-drawer__header-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+  color: var(--td-brand-color);
+  font-size: var(--app-text-lg);
+  transition: background var(--app-motion-base) ease;
+}
+
+.setting-drawer__header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-drawer__header-tools {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.setting-drawer__maximize {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-lg);
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
+  }
+}
+
+.setting-drawer__header-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+
+  &:empty {
+    display: none;
+  }
+
+  :deep(.t-button) {
+    white-space: nowrap;
+  }
+}
+
+.setting-drawer__header-extra {
+  width: 100%;
+  min-width: 0;
+}
+
+.setting-drawer__title {
+  font-size: var(--app-text-lg);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setting-drawer__subtitle {
+  font-size: var(--app-text-sm);
+  line-height: 1.45;
+  color: var(--td-text-color-secondary);
+}
+
+/* ---------- Body ---------- */
+.setting-drawer__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* The Body is the entry-animation host. Children (.form-item) get
+     a subtle staggered slide-in to echo the model-card hover transform. */
+  animation: setting-drawer-body-in 0.28s ease both;
+}
+
+@keyframes setting-drawer-body-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- Sections (consumed by ModelEditorDialog & friends) ---------- */
+.setting-drawer__body :deep(.setting-drawer__section) {
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: setting-drawer-section-in 0.32s ease both;
+
+  &:first-child {
+    padding-top: 0;
+    animation-delay: 0.04s;
+  }
+
+  &:nth-child(2) {
+    animation-delay: 0.08s;
+  }
+
+  &:nth-child(3) {
+    animation-delay: 0.12s;
+  }
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+}
+
+@keyframes setting-drawer-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.setting-drawer__body :deep(.setting-drawer__section-title) {
+  font-size: var(--app-text-md);
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 4px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  /* A subtle leading bar — replaces the previous all-caps + letter-spacing
+     trick (which mangles Chinese). Gives the section title a consistent
+     visual anchor without yelling at the user. */
+  &::before {
+    content: '';
+    width: 3px;
+    height: 14px;
+    background: var(--td-brand-color);
+    border-radius: 2px;
+  }
+}
+
+/* ---------- Footer ---------- */
+.setting-drawer__footer-extra {
+  margin-bottom: 12px;
+  min-width: 0;
+  text-align: left;
+}
+
+.setting-drawer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.setting-drawer__footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-drawer__footer-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+</style>
+
+<!--
+  Non-scoped block: t-drawer renders header/footer wrappers outside the
+  scoped style boundary in some TDesign builds, so we tweak chrome (border,
+  padding) at the global level — namespaced under `.setting-drawer` to avoid
+  bleeding into other drawers in the app.
+-->
+<style lang="less">
+.setting-drawer {
+  max-width: 100vw;
+
+  .t-drawer__content {
+    min-width: 0;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .t-drawer__header {
+    // 72px 的抽屉头在一屏设置里太重：图标 32px、上下各 14px，再加标题与副标题
+    // 两行。收到 60px（图标 28px、内边距 10px）够了，标题字号刻意不动——再小
+    // 就和正文里的字段标签一样大，层级会塌。
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .t-drawer__body {
+    padding: 16px 18px;
+  }
+
+  .t-drawer__footer {
+    padding: 10px 18px;
+    border-top: 1px solid var(--td-component-stroke);
+    box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.04);
+  }
+}
+
+/* Visible resize handle — teleported to body, aligned with drawer left edge. */
+.setting-drawer-resize-handle {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  margin-left: -6px;
+  // Its inline right is the drawer width; a docked assistant panel adds to it.
+  margin-right: var(--assistant-dock-width, 0px);
+  cursor: col-resize;
+  z-index: 2501;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The handle is teleported separately from TDesign's sliding panel. Move it
+     along the same path instead of letting it flash at the panel's final left
+     edge while the drawer is still entering from the right. */
+  animation: setting-drawer-resize-handle-in 0.28s cubic-bezier(0.38, 0, 0.24, 1) both;
+}
+
+@keyframes setting-drawer-resize-handle-in {
+  from {
+    transform: translateX(var(--setting-drawer-travel));
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+.setting-drawer-resize-line {
+  width: 2px;
+  height: 48px;
+  border-radius: 1px;
+  background: var(--td-component-border);
+  opacity: 0.55;
+  transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
+}
+
+.setting-drawer-resize-handle:hover .setting-drawer-resize-line,
+.setting-drawer-resize-handle--active .setting-drawer-resize-line {
+  opacity: 1;
+  background: var(--td-brand-color);
+}
+
+.t-drawer.setting-drawer--resizing .t-drawer__content {
+  transition: none !important;
+}
+</style>

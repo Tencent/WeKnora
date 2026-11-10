@@ -1,0 +1,460 @@
+package types
+
+import (
+	"context"
+	"os"
+	"strings"
+)
+
+// EnvLanguage returns the WEKNORA_LANGUAGE environment variable value, or empty string if unset.
+func EnvLanguage() string {
+	return strings.TrimSpace(os.Getenv("WEKNORA_LANGUAGE"))
+}
+
+// DefaultLanguage returns the configured default language locale.
+// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to "zh-CN".
+func DefaultLanguage() string {
+	if lang := EnvLanguage(); lang != "" {
+		return lang
+	}
+	return "zh-CN"
+}
+
+// TenantIDFromContext extracts the execution tenant ID from ctx.
+// Authorization should use CallerFromContext instead.
+// Returns (0, false) when the key is absent or the value is not uint64.
+func TenantIDFromContext(ctx context.Context) (uint64, bool) {
+	v, ok := ctx.Value(TenantIDContextKey).(uint64)
+	return v, ok
+}
+
+// MustTenantIDFromContext extracts the tenant ID from ctx, panicking if missing.
+func MustTenantIDFromContext(ctx context.Context) uint64 {
+	v, ok := TenantIDFromContext(ctx)
+	if !ok {
+		panic("types.TenantIDContextKey not set in context")
+	}
+	return v
+}
+
+// TenantInfoFromContext extracts the *Tenant from ctx.
+func TenantInfoFromContext(ctx context.Context) (*Tenant, bool) {
+	v, ok := ctx.Value(TenantInfoContextKey).(*Tenant)
+	return v, ok && v != nil
+}
+
+// RequestIDFromContext extracts the request ID string from ctx.
+func RequestIDFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(RequestIDContextKey).(string)
+	return v, ok && v != ""
+}
+
+// UserIDFromContext extracts the user ID string from ctx.
+func UserIDFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(UserIDContextKey).(string)
+	return v, ok && v != ""
+}
+
+// WithWikiEditSource marks ctx so wiki page writes performed under it are
+// attributed to the given edit source (WikiEditSourceUser / Agent / Revert).
+// Writes without the mark are attributed to the ingest pipeline.
+func WithWikiEditSource(ctx context.Context, source string) context.Context {
+	return context.WithValue(ctx, WikiEditSourceContextKey, NormalizeWikiEditSource(source))
+}
+
+// WikiEditSourceFromContext returns the wiki edit source carried by ctx,
+// defaulting to WikiEditSourcePipeline when absent.
+func WikiEditSourceFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(WikiEditSourceContextKey).(string)
+	return NormalizeWikiEditSource(v)
+}
+
+// WithWikiShrinkAllowed marks ctx so ONE wiki page write may drop table rows
+// the stored page still carries.
+//
+// UpdatePage refuses such a write by default, because a model asked to re-emit
+// a whole page silently returns it with rows missing and the page then shrinks
+// with no trace. Callers that are removing content on purpose — a retraction
+// after a source document was deleted, an exact-text replacement that deletes
+// rows — say so here, and only for the write that does it.
+func WithWikiShrinkAllowed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, WikiShrinkAllowedContextKey, true)
+}
+
+// WikiShrinkAllowedFromContext reports whether ctx was marked with
+// WithWikiShrinkAllowed.
+func WikiShrinkAllowedFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(WikiShrinkAllowedContextKey).(bool)
+	return v
+}
+
+// WithEmbedQuery marks ctx as embedding a search query rather than content
+// being indexed. Asymmetric retrieval models encode the two sides differently
+// and lose accuracy when a query is embedded as a passage; the embedding
+// layer turns the mark into the vendor's own parameter where it has one.
+func WithEmbedQuery(ctx context.Context) context.Context {
+	return context.WithValue(ctx, EmbedQueryContextKey, true)
+}
+
+// IsEmbedQuery reports whether ctx was marked with WithEmbedQuery.
+func IsEmbedQuery(ctx context.Context) bool {
+	v, _ := ctx.Value(EmbedQueryContextKey).(bool)
+	return v
+}
+
+// TaskInitiator is the authenticated caller that submitted an asynchronous
+// task. Workers restore it into their context so audit entries describe who
+// initiated the operation, while tasks created by schedulers remain
+// attributable to the system.
+type TaskInitiator struct {
+	UserID     string     `json:"user_id,omitempty"`
+	Role       TenantRole `json:"role,omitempty"`
+	APIKeyID   uint64     `json:"api_key_id,omitempty"`
+	APIKeyName string     `json:"api_key_name,omitempty"`
+	// Agent is set when the task was submitted by an agent acting for UserID.
+	Agent *AuditAgentAction `json:"agent,omitempty"`
+}
+
+// AuditAPIKey is the display identity of the API key that initiated work.
+// It is not an authorization grant and must not be confused with
+// TenantAPIKeyScope.
+type AuditAPIKey struct {
+	ID   uint64
+	Name string
+}
+
+func WithAuditAPIKey(ctx context.Context, key AuditAPIKey) context.Context {
+	if key.ID == 0 && key.Name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, AuditAPIKeyContextKey, key)
+}
+
+func AuditAPIKeyFromContext(ctx context.Context) (AuditAPIKey, bool) {
+	if ctx == nil {
+		return AuditAPIKey{}, false
+	}
+	key, ok := ctx.Value(AuditAPIKeyContextKey).(AuditAPIKey)
+	if !ok || (key.ID == 0 && key.Name == "") {
+		return AuditAPIKey{}, false
+	}
+	return key, true
+}
+
+// TaskInitiatorFromContext snapshots the real caller identity for a task
+// payload. Synthetic API-key users are service identities, not people, and are
+// intentionally left empty so the activity feed presents them as system work.
+// The API key id/name is still captured so workers can attribute activity.
+func TaskInitiatorFromContext(ctx context.Context) TaskInitiator {
+	initiator := TaskInitiator{}
+	if key, ok := AuditAPIKeyFromContext(ctx); ok {
+		initiator.APIKeyID = key.ID
+		initiator.APIKeyName = key.Name
+	} else if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && (scope.KeyID > 0 || scope.Name != "") {
+		initiator.APIKeyID = scope.KeyID
+		initiator.APIKeyName = scope.Name
+	}
+	if agent, ok := AuditAgentActionFromContext(ctx); ok {
+		initiator.Agent = &agent
+	}
+	userID, ok := UserIDFromContext(ctx)
+	if !ok || IsSyntheticUserID(userID) {
+		return initiator
+	}
+	initiator.UserID = userID
+	initiator.Role = TenantRoleFromContext(ctx)
+	return initiator
+}
+
+// Apply restores a captured task initiator onto a worker context. Empty or
+// legacy payloads are a no-op and therefore retain the system-task fallback.
+// API key identity is restored for audit display only — not as TenantAPIKeyScope.
+func (i TaskInitiator) Apply(ctx context.Context) context.Context {
+	if i.UserID != "" {
+		ctx = context.WithValue(ctx, UserIDContextKey, i.UserID)
+		if i.Role.IsValid() {
+			ctx = context.WithValue(ctx, TenantRoleContextKey, i.Role)
+		}
+	}
+	if i.APIKeyID > 0 || i.APIKeyName != "" {
+		ctx = WithAuditAPIKey(ctx, AuditAPIKey{ID: i.APIKeyID, Name: i.APIKeyName})
+	}
+	if i.Agent != nil {
+		ctx = WithAuditAgentAction(ctx, *i.Agent)
+	}
+	return ctx
+}
+
+// IsSyntheticUserID reports whether id refers to the synthetic system
+// user that the X-API-Key auth path attaches to each tenant
+// (User.ID = "system-<tenantID>"). These users have no real human
+// behind them and no tenant_members row, so RBAC ownership matching
+// against them is never meaningful — service-layer code that records
+// "the creator" should skip storing this ID and treat the resource as
+// tenant-owned instead.
+//
+// Kept minimal on purpose: the prefix and "all digits afterwards"
+// invariant comes from middleware/auth.go's User construction for the
+// API-key branch. If that prefix changes, update both sides.
+func IsSyntheticUserID(id string) bool {
+	const prefix = "system-"
+	if len(id) <= len(prefix) {
+		return false
+	}
+	if id[:len(prefix)] != prefix {
+		return false
+	}
+	for _, r := range id[len(prefix):] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// TenantRoleFromContext extracts the caller's TenantRole in the currently
+// active tenant. Returns TenantRoleViewer when the key is absent so that
+// callers fail closed (least privilege) if the auth middleware did not
+// populate the role for some reason.
+func TenantRoleFromContext(ctx context.Context) TenantRole {
+	v, ok := ctx.Value(TenantRoleContextKey).(TenantRole)
+	if !ok || !v.IsValid() {
+		return TenantRoleViewer
+	}
+	return v
+}
+
+// IsSystemAdminFromContext extracts the system admin flag from ctx.
+// Returns false (fail-closed) when the key is absent.
+func IsSystemAdminFromContext(ctx context.Context) bool {
+	v, ok := ctx.Value(SystemAdminContextKey).(bool)
+	if !ok {
+		return false
+	}
+	return v
+}
+
+// SessionTenantIDFromContext extracts the session-owner tenant ID from ctx.
+// Falls back to TenantIDFromContext when the session key is absent.
+func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {
+	v, ok := ctx.Value(SessionTenantIDContextKey).(uint64)
+	if ok && v != 0 {
+		return v, true
+	}
+	return TenantIDFromContext(ctx)
+}
+
+// WithSessionID returns a derived context carrying the current session ID.
+// Stateful sandbox backends (e.g. CubeSandbox) rely on this key to route
+// script execution to the per-session persistent MicroVM instance.
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	if sessionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, SessionIDContextKey, sessionID)
+}
+
+// SessionIDFromContext extracts the current session ID from ctx.
+// Returns ("", false) when the key is absent or the value is not a non-empty string.
+func SessionIDFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	v, ok := ctx.Value(SessionIDContextKey).(string)
+	return v, ok && v != ""
+}
+
+// WithSandboxTenantID records the session-owner tenant that session→sandbox
+// bindings must be keyed by, independently of the tenant the rest of the
+// pipeline runs as. Callers set it wherever they swap TenantIDContextKey for a
+// shared agent's workspace.
+func WithSandboxTenantID(ctx context.Context, tenantID uint64) context.Context {
+	if tenantID == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, SandboxTenantIDContextKey, tenantID)
+}
+
+// SandboxTenantIDFromContext returns the tenant to key session→sandbox
+// bindings by. It falls back to TenantIDFromContext, which is correct for every
+// path that never borrows another workspace's tenant: there the request tenant
+// already IS the session owner.
+func SandboxTenantIDFromContext(ctx context.Context) (uint64, bool) {
+	if ctx == nil {
+		return 0, false
+	}
+	if v, ok := ctx.Value(SandboxTenantIDContextKey).(uint64); ok && v != 0 {
+		return v, true
+	}
+	return TenantIDFromContext(ctx)
+}
+
+// WithMCPOAuthNonInteractive marks ctx as originating from a channel that cannot
+// complete an in-conversation MCP OAuth prompt (e.g. an IM bot). The agent uses
+// this to emit a one-shot authorization notice instead of blocking on the OAuth
+// wait until it times out. See MCPOAuthNonInteractiveContextKey.
+func WithMCPOAuthNonInteractive(ctx context.Context) context.Context {
+	return context.WithValue(ctx, MCPOAuthNonInteractiveContextKey, true)
+}
+
+// IsMCPOAuthNonInteractive reports whether ctx was marked non-interactive for
+// MCP OAuth (see WithMCPOAuthNonInteractive), or belongs to an agent run
+// whose mode is not attended.
+func IsMCPOAuthNonInteractive(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	if v, _ := ctx.Value(MCPOAuthNonInteractiveContextKey).(bool); v {
+		return true
+	}
+	m, set := ctx.Value(RunModeContextKey).(RunMode)
+	return set && !m.Attended()
+}
+
+// WithBackgroundTask marks ctx as originating from an asynq background worker
+// (document parse / summary / question / graph / multimodal enrichment). The
+// chat concurrency governor throttles only background LLM traffic, so this flag
+// determines whether the per-model concurrency limit applies. See
+// BackgroundTaskContextKey.
+func WithBackgroundTask(ctx context.Context) context.Context {
+	return context.WithValue(ctx, BackgroundTaskContextKey, true)
+}
+
+// IsBackgroundTask reports whether ctx was marked as a background worker task
+// (see WithBackgroundTask). Returns false for interactive / HTTP request paths.
+func IsBackgroundTask(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(BackgroundTaskContextKey).(bool)
+	return v
+}
+
+type taskRetryMetadata struct {
+	retried  int
+	maxRetry int
+}
+
+// WithTaskRetryMetadata records retry counters for task executors that do not
+// provide Asynq's native worker context, notably the Lite synchronous executor.
+func WithTaskRetryMetadata(ctx context.Context, retried, maxRetry int) context.Context {
+	return context.WithValue(ctx, taskRetryMetadataContextKey{}, taskRetryMetadata{
+		retried: retried, maxRetry: maxRetry,
+	})
+}
+
+// TaskRetryMetadataFromContext returns retry counters supplied by a non-Asynq
+// task executor. The boolean is false for ordinary request contexts.
+func TaskRetryMetadataFromContext(ctx context.Context) (retried, maxRetry int, ok bool) {
+	if ctx == nil {
+		return 0, 0, false
+	}
+	metadata, ok := ctx.Value(taskRetryMetadataContextKey{}).(taskRetryMetadata)
+	if !ok {
+		return 0, 0, false
+	}
+	return metadata.retried, metadata.maxRetry, true
+}
+
+type taskRetryMetadataContextKey struct{}
+
+// WithLLMCallMetadata annotates a provider call for cache observability. The
+// fingerprint must be a hash, never raw prompt content.
+func WithLLMCallMetadata(ctx context.Context, purpose, prefixFingerprint string) context.Context {
+	if strings.TrimSpace(purpose) != "" {
+		ctx = context.WithValue(ctx, LLMCallPurposeContextKey, strings.TrimSpace(purpose))
+	}
+	if strings.TrimSpace(prefixFingerprint) != "" {
+		ctx = context.WithValue(ctx, LLMPromptPrefixFingerprintContextKey, strings.TrimSpace(prefixFingerprint))
+	}
+	return ctx
+}
+
+// LLMCallMetadataFromContext returns the cache-observability labels attached
+// by the orchestration layer.
+func LLMCallMetadataFromContext(ctx context.Context) (purpose, prefixFingerprint string) {
+	if ctx == nil {
+		return "", ""
+	}
+	purpose, _ = ctx.Value(LLMCallPurposeContextKey).(string)
+	prefixFingerprint, _ = ctx.Value(LLMPromptPrefixFingerprintContextKey).(string)
+	return purpose, prefixFingerprint
+}
+
+// LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
+// Returns ("zh-CN", false) when the key is absent.
+func LanguageFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(LanguageContextKey).(string)
+	return v, ok && v != ""
+}
+
+// ResolveLanguage resolves the effective locale for work that may carry its own
+// language, in descending precedence: the explicit locale, the locale in ctx,
+// then DefaultLanguage().
+//
+// Async workers must use this rather than reading a payload field directly: a
+// task payload persisted before the language field existed, or enqueued from a
+// background path that never passed through the HTTP language middleware,
+// carries an empty locale. Interpolating that empty value into a prompt yields
+// instructions like "Write in ." and lets the model pick a language at random.
+func ResolveLanguage(ctx context.Context, locale string) string {
+	if locale = strings.TrimSpace(locale); locale != "" {
+		return locale
+	}
+	if ctxLocale, ok := LanguageFromContext(ctx); ok {
+		return ctxLocale
+	}
+	return DefaultLanguage()
+}
+
+// ResolveLanguageName is ResolveLanguage rendered as the human-readable name
+// that prompt templates interpolate (e.g. "Chinese (Simplified)").
+//
+// It is idempotent over already-resolved names: LanguageLocaleName passes
+// unknown values through, so re-resolving a display name returns it unchanged.
+func ResolveLanguageName(ctx context.Context, locale string) string {
+	return LanguageLocaleName(ResolveLanguage(ctx, locale))
+}
+
+// LanguageFromContextOrDefault returns the locale carried by ctx, falling back
+// to DefaultLanguage(). Use it when persisting a locale onto an async task
+// payload so downstream workers never inherit an empty language.
+func LanguageFromContextOrDefault(ctx context.Context) string {
+	return ResolveLanguage(ctx, "")
+}
+
+// LanguageNameFromContext returns the human-readable language name for use in prompts.
+// e.g. "zh-CN" -> "Chinese (Simplified)", "en-US" -> "English", "ko-KR" -> "Korean"
+// Falls back to DefaultLanguage() (WEKNORA_LANGUAGE env, then "zh-CN").
+func LanguageNameFromContext(ctx context.Context) string {
+	return ResolveLanguageName(ctx, "")
+}
+
+// LanguageLocaleName maps a locale code to a human-readable language name for LLM prompts.
+func LanguageLocaleName(locale string) string {
+	switch locale {
+	case "zh-CN", "zh", "zh-Hans":
+		return "Chinese (Simplified)"
+	case "zh-TW", "zh-HK", "zh-Hant":
+		return "Chinese (Traditional)"
+	case "en-US", "en", "en-GB":
+		return "English"
+	case "ko-KR", "ko":
+		return "Korean"
+	case "ja-JP", "ja":
+		return "Japanese"
+	case "ru-RU", "ru":
+		return "Russian"
+	case "fr-FR", "fr":
+		return "French"
+	case "de-DE", "de":
+		return "German"
+	case "es-ES", "es":
+		return "Spanish"
+	case "pt-BR", "pt":
+		return "Portuguese"
+	default:
+		// For unknown locales, return the locale itself
+		return locale
+	}
+}

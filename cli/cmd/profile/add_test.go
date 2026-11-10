@@ -1,0 +1,184 @@
+package profilecmd
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/config"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+)
+
+func TestAdd_HappyPath(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	out, _ := iostreams.SetForTest(t)
+
+	if err := runAdd(&AddOptions{Host: "https://my.example.com", User: "alice@example.com"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "staging"); err != nil {
+		t.Fatalf("runAdd: %v", err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	c, ok := cfg.Profiles["staging"]
+	if !ok {
+		t.Fatalf("staging not in Profiles; got keys=%v", profileKeys(cfg.Profiles))
+	}
+	if c.Host != "https://my.example.com" {
+		t.Errorf("Host=%q, want https://my.example.com", c.Host)
+	}
+	if c.User != "alice@example.com" {
+		t.Errorf("User=%q, want alice@example.com", c.User)
+	}
+	// First profile auto-becomes current.
+	if cfg.CurrentProfile != "staging" {
+		t.Errorf("first profile should auto-become current, got CurrentProfile=%q", cfg.CurrentProfile)
+	}
+	if !strings.Contains(out.String(), "staging") {
+		t.Errorf("output should mention added name, got %q", out.String())
+	}
+}
+
+func TestAdd_DuplicateName(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+
+	cfg := &config.Config{
+		CurrentProfile: "staging",
+		Profiles:       map[string]config.Profile{"staging": {Host: "https://old.example.com"}},
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	err := runAdd(&AddOptions{Host: "https://new.example.com"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "staging")
+	if err == nil {
+		t.Fatal("expected error on duplicate name")
+	}
+	cm, ok := err.(*cmdutil.Error)
+	if !ok {
+		t.Fatalf("expected *cmdutil.Error, got %T", err)
+	}
+	if cm.Code != cmdutil.CodeResourceAlreadyExists {
+		t.Errorf("code=%q, want %q", cm.Code, cmdutil.CodeResourceAlreadyExists)
+	}
+	// Existing entry must NOT be overwritten.
+	got, _ := config.Load()
+	if got.Profiles["staging"].Host != "https://old.example.com" {
+		t.Errorf("existing profile overwritten; Host=%q", got.Profiles["staging"].Host)
+	}
+}
+
+func TestAdd_BadHost(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+
+	bad := []string{
+		"",                     // empty
+		"my.example.com",       // missing scheme
+		"ftp://my.example.com", // wrong scheme
+		"http://",              // missing host
+	}
+	for _, h := range bad {
+		err := runAdd(&AddOptions{Host: h}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "staging")
+		if err == nil {
+			t.Errorf("host=%q: expected error", h)
+			continue
+		}
+		cm, ok := err.(*cmdutil.Error)
+		if !ok {
+			t.Errorf("host=%q: expected *cmdutil.Error, got %T", h, err)
+			continue
+		}
+		if cm.Code != cmdutil.CodeInputInvalidArgument {
+			t.Errorf("host=%q: code=%q, want %q", h, cm.Code, cmdutil.CodeInputInvalidArgument)
+		}
+	}
+}
+
+func TestAdd_SecondProfileDoesNotChangeCurrent(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+
+	cfg := &config.Config{
+		CurrentProfile: "production",
+		Profiles:       map[string]config.Profile{"production": {Host: "https://prod.example.com"}},
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := runAdd(&AddOptions{Host: "https://stg.example.com"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "staging"); err != nil {
+		t.Fatalf("runAdd: %v", err)
+	}
+	got, _ := config.Load()
+	if got.CurrentProfile != "production" {
+		t.Errorf("adding a second profile must not switch current; got %q", got.CurrentProfile)
+	}
+}
+
+// TestAdd_UseSwitchesCurrent asserts --use switches the current profile to the
+// newly-added one even when another profile is already current.
+func TestAdd_UseSwitchesCurrent(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	out, _ := iostreams.SetForTest(t)
+
+	cfg := &config.Config{
+		CurrentProfile: "production",
+		Profiles:       map[string]config.Profile{"production": {Host: "https://prod.example.com"}},
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	host, err := cmdutil.NormalizeHost("https://h")
+	if err != nil {
+		t.Fatalf("NormalizeHost: %v", err)
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := runAddWithConfig(&AddOptions{Host: host, Use: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "new", host, loaded); err != nil {
+		t.Fatalf("runAddWithConfig: %v", err)
+	}
+
+	got, _ := config.Load()
+	if got.CurrentProfile != "new" {
+		t.Errorf("--use must switch current to the new profile; got %q", got.CurrentProfile)
+	}
+	if _, ok := got.Profiles["new"]; !ok {
+		t.Errorf("new profile not registered; keys=%v", profileKeys(got.Profiles))
+	}
+	if !strings.Contains(out.String(), "now current") {
+		t.Errorf("output should note the profile is now current, got %q", out.String())
+	}
+}
+
+func TestAdd_JSON(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	out, _ := iostreams.SetForTest(t)
+
+	if err := runAdd(&AddOptions{Host: "https://my.example.com"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, "staging"); err != nil {
+		t.Fatalf("runAdd: %v", err)
+	}
+	var env struct {
+		OK   bool           `json:"ok"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput=%q", err, out.String())
+	}
+	got := env.Data
+	if got["name"] != "staging" {
+		t.Errorf("name should be staging, got %v", got)
+	}
+	if got["host"] != "https://my.example.com" {
+		t.Errorf("host wrong: %v", got)
+	}
+	if got["current"] != true {
+		t.Errorf("first added profile must be current=true, got %v", got)
+	}
+}

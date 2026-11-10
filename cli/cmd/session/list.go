@@ -1,0 +1,227 @@
+package sessioncmd
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
+	"github.com/Tencent/WeKnora/cli/internal/text"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+const (
+	defaultPageSize = 30
+	maxPageSize     = 1000
+)
+
+// sessionListFields enumerates the fields surfaced for `--format json` discovery on
+// `session list`. Mirrors sdk.Session json tags.
+var sessionListFields = []string{
+	"id", "tenant_id", "title", "description", "created_at", "updated_at",
+}
+
+type ListOptions struct {
+	PageSize int    // Items per server batch (default 50).
+	Since    string // --since: filter to sessions updated within the past duration
+	// Limit caps the returned items client-side (default 30; 0 = no cap).
+	// Applied after pagination / --all-pages accumulation and --since filter.
+	Limit int
+	// AllPages walks server pages internally, accumulating items until
+	// total exhausted or --limit hit.
+	AllPages bool
+}
+
+// ListService is the narrow SDK surface this command depends on.
+type ListService interface {
+	GetSessionsByTenant(
+		ctx context.Context, page, pageSize int, opts ...sdk.SessionListOptions,
+	) ([]sdk.Session, int, error)
+}
+
+// NewCmdList builds `weknora session list`.
+func NewCmdList(f *cmdutil.Factory) *cobra.Command {
+	opts := &ListOptions{PageSize: defaultPageSize}
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List chat sessions for the active profile",
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			fopts, err := cmdutil.CheckFormatFlag(c)
+			if err != nil {
+				return err
+			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input before building the client so a bad
+			// --page-size/--limit returns input.invalid_argument (exit 5), not
+			// an auth error (exit 3).
+			if err := validateListOpts(opts); err != nil {
+				return err
+			}
+			cli, err := f.Client()
+			if err != nil {
+				return err
+			}
+			return runList(c.Context(), opts, fopts, cli)
+		},
+	}
+	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
+	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
+	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
+	cmdutil.AddFormatFlag(cmd, sessionListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "List chat sessions for the active profile. Results come with meta.count; use --limit to cap, --all-pages to walk every server page, --since to filter by recency (e.g. 7d).",
+		Examples: []string{"weknora session list --format json", "weknora session list --all-pages --since 7d --format json"},
+		Output:   "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.total_count is the server-side total before --since filtering; meta.has_more=true when --limit truncated",
+	})
+	return cmd
+}
+
+// validateListOpts checks --page-size / --limit. Called from RunE before the
+// client is built (so a bad value surfaces as exit 5, not an auth error) and at
+// runList's top for direct callers; idempotent.
+func validateListOpts(opts *ListOptions) error {
+	if opts.PageSize < 1 || opts.PageSize > maxPageSize {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
+		}
+	}
+	if opts.Limit < 1 || opts.Limit > 10000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
+		}
+	}
+	return nil
+}
+
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+	if err := validateListOpts(opts); err != nil {
+		return err
+	}
+	var since time.Duration
+	if opts.Since != "" {
+		d, err := parseSinceDuration(opts.Since)
+		if err != nil {
+			return err
+		}
+		since = d
+	}
+
+	threshold := time.Now().Add(-since)
+	filterSince := func(items []sdk.Session) []sdk.Session {
+		if since <= 0 {
+			return items
+		}
+		filtered := items[:0]
+		for _, session := range items {
+			updated, err := time.Parse(time.RFC3339, session.UpdatedAt)
+			if err == nil && updated.After(threshold) {
+				filtered = append(filtered, session)
+			}
+		}
+		return filtered
+	}
+
+	var items []sdk.Session
+	var serverTotal int
+	if opts.AllPages {
+		accum := make([]sdk.Session, 0)
+		scanned := 0
+		for page := 1; ; page++ {
+			chunk, total, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize)
+			if err != nil {
+				return cmdutil.WrapHTTP(err, "list sessions")
+			}
+			serverTotal = total
+			scanned += len(chunk)
+			accum = append(accum, filterSince(chunk)...)
+			if opts.Limit > 0 && len(accum) > opts.Limit {
+				break
+			}
+			if scanned >= total || len(chunk) == 0 {
+				break
+			}
+		}
+		items = accum
+	} else {
+		chunk, total, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize)
+		if err != nil {
+			return cmdutil.WrapHTTP(err, "list sessions")
+		}
+		serverTotal = total
+		items = filterSince(chunk)
+	}
+	if items == nil {
+		items = []sdk.Session{} // JSON [] not null
+	}
+	// --limit applies after --since so the cap reflects what the user sees.
+	truncated := false
+	if opts.Limit > 0 && len(items) > opts.Limit {
+		items = items[:opts.Limit]
+		truncated = true
+	}
+
+	if fopts.WantsJSON() {
+		meta := &output.Meta{Count: output.IntPtr(len(items)), HasMore: truncated, TotalCount: output.IntPtr(serverTotal)}
+		return fopts.Emit(iostreams.IO.Out, items, meta)
+	}
+
+	if len(items) == 0 {
+		fmt.Fprintln(iostreams.IO.Out, "(no sessions)")
+		return nil
+	}
+	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tTITLE\tUPDATED")
+	now := time.Now()
+	for _, s := range items {
+		title := text.Truncate(50, s.Title)
+		if title == "" {
+			title = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, title, text.FuzzyAgoStr(now, s.UpdatedAt))
+	}
+	return tw.Flush()
+}
+
+// parseSinceDuration accepts `time.ParseDuration` forms (1h30m, 24h, 30m)
+// plus a `<N>d` suffix for whole days (e.g. 7d). Returns an
+// input.invalid_argument *cmdutil.Error for unparseable inputs or
+// non-positive durations.
+func parseSinceDuration(s string) (time.Duration, error) {
+	raw := strings.TrimSpace(s)
+	var d time.Duration
+	var err error
+	if rest, ok := strings.CutSuffix(raw, "d"); ok {
+		num, perr := strconv.ParseFloat(rest, 64)
+		if perr != nil {
+			err = perr
+		} else {
+			d = time.Duration(num * float64(24*time.Hour))
+		}
+	} else {
+		d, err = time.ParseDuration(raw)
+	}
+	if err != nil {
+		return 0, &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--since %q is not a valid duration: %v (try 7d, 24h, 30m, 1h30m)", s, err),
+		}
+	}
+	if d <= 0 {
+		return 0, &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--since must be positive, got %q", s),
+		}
+	}
+	return d, nil
+}

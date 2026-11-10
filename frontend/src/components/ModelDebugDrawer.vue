@@ -1,0 +1,935 @@
+<template>
+  <SettingDrawer
+    v-model:visible="drawerVisible"
+    :title="$t('modelSettings.debug.title')"
+    :description="$t('modelSettings.debug.description')"
+    icon="play-circle-stroke"
+    width="560px"
+    :min-width="480"
+    :max-width="900"
+    storage-key="setting-drawer:width:model-debug"
+    :confirm-text="$t('modelSettings.debug.run')"
+    :confirm-loading="running"
+    :confirm-disabled="!canRun"
+    :cancel-text="$t('common.close')"
+    @confirm="runDebug"
+  >
+    <template v-if="result" #footer-left>
+      <t-button variant="outline" @click="copyResult">
+        <template #icon><t-icon name="file-copy" /></template>
+        {{ $t('modelSettings.debug.copyResult') }}
+      </t-button>
+    </template>
+
+    <div class="model-debug">
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('modelSettings.debug.groupModel') }}</h4>
+        <div v-if="availableModelTypes.length > 1" class="form-item">
+          <div class="model-type-options" role="radiogroup" :aria-label="$t('modelSettings.debug.modelType')">
+            <button
+              v-for="option in availableModelTypes"
+              :key="option.value"
+              type="button"
+              class="model-type-option"
+              :class="{ 'is-active': selectedModelType === option.value }"
+              role="radio"
+              :aria-checked="selectedModelType === option.value"
+              @click="selectModelType(option.value)"
+            >
+              <t-icon :name="option.icon" class="model-type-option__icon" />
+              <span class="model-type-option__label">{{ option.label }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="form-item">
+          <label class="form-label">{{ $t('modelSettings.debug.model') }}</label>
+          <t-select
+            v-model="selectedModelId"
+            filterable
+            :placeholder="$t('modelSettings.debug.modelPlaceholder')"
+            :disabled="filteredModels.length === 0"
+            @change="resetResult"
+          >
+            <t-option
+              v-for="model in filteredModels"
+              :key="model.id"
+              :value="model.id!"
+              :label="modelLabel(model)"
+            >
+              <div class="model-option">
+                <span class="model-option__name">{{ modelLabel(model) }}</span>
+                <span class="model-option__meta">
+                  {{ vendorLabel(model) }}
+                  <template v-if="modelHasContextWindow(model.type)">
+                    · {{ formatContextWindow(model.parameters?.context_window) }}
+                  </template>
+                </span>
+              </div>
+            </t-option>
+          </t-select>
+          <p v-if="filteredModels.length === 0" class="form-desc">
+            {{ $t('modelSettings.debug.noModelsForType') }}
+          </p>
+        </div>
+      </section>
+
+      <template v-if="selectedModel">
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('modelSettings.debug.groupInput') }}</h4>
+          <div v-if="hasImageMode || isEmbedding" class="form-item">
+            <t-radio-group v-model="inputMode" @change="clearFile">
+              <t-radio-button value="text">{{ isEmbedding ? $t('modelSettings.debug.embeddingInput') : $t('modelSettings.debug.documents') }}</t-radio-button>
+              <t-radio-button v-if="hasImageMode" value="image">{{ $t('modelSettings.debug.imageFile') }}</t-radio-button>
+              <t-radio-button v-if="isEmbedding" value="similarity">{{ $t('modelSettings.debug.similarityMode') }}</t-radio-button>
+            </t-radio-group>
+          </div>
+          <div v-if="selectedModel.type !== 'ASR' && !(isEmbedding && useImageMode)" class="form-item">
+            <label class="form-label">{{ inputLabel }}</label>
+            <t-textarea
+              v-model="input"
+              :placeholder="inputPlaceholder"
+              :autosize="{ minRows: useSimilarityMode ? 2 : 4, maxRows: 8 }"
+            />
+          </div>
+
+          <div v-if="(selectedModel.type === 'Rerank' && !useImageMode) || useSimilarityMode" class="form-item">
+            <label class="form-label">{{ useSimilarityMode ? $t('modelSettings.debug.similarityCandidates') : $t('modelSettings.debug.documents') }}</label>
+            <t-textarea
+              v-model="documentsText"
+              :placeholder="useSimilarityMode ? $t('modelSettings.debug.similarityCandidatesPlaceholder') : $t('modelSettings.debug.documentsPlaceholder')"
+              :autosize="{ minRows: 4, maxRows: 8 }"
+            />
+            <p class="form-desc">{{ useSimilarityMode ? $t('modelSettings.debug.similarityHint') : $t('modelSettings.debug.documentsHint') }}</p>
+          </div>
+
+          <div v-if="showFilePicker" class="form-item">
+            <label class="form-label">{{ useSimilarityMode ? $t('modelSettings.debug.similarityImage') : fileLabel }}</label>
+            <div class="file-picker">
+              <input
+                ref="fileInputRef"
+                class="file-picker__input"
+                type="file"
+                :accept="selectedModel.type === 'ASR' ? 'audio/*' : 'image/*'"
+                @change="onNativeFileChange"
+              >
+              <t-button variant="outline" size="small" @click="fileInputRef?.click()">
+                <template #icon><t-icon name="upload" /></template>
+                {{ $t('modelSettings.debug.chooseFile') }}
+              </t-button>
+            </div>
+            <div v-if="file" class="selected-file">
+              <img v-if="imagePreview" :src="imagePreview" :alt="file.name" class="image-preview">
+              <p class="form-desc">{{ file.name }} · {{ formatBytes(file.size) }}</p>
+              <t-button variant="text" size="small" @click="clearFile">{{ $t('common.clear') }}</t-button>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="isChat" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('modelSettings.debug.parameters') }}</h4>
+          <div class="parameter-grid">
+            <div class="form-item">
+              <label class="form-label">Temperature</label>
+              <t-input-number v-model="temperature" :min="0" :max="2" :step="0.1" theme="column" />
+            </div>
+            <div class="form-item">
+              <label class="form-label">Top P</label>
+              <t-input-number v-model="topP" :min="0.01" :max="1" :step="0.1" theme="column" />
+            </div>
+            <div class="form-item">
+              <label class="form-label">Max Tokens</label>
+              <t-input-number v-model="maxTokens" :min="1" :max="8192" :step="128" theme="column" />
+            </div>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('modelSettings.debug.systemPrompt') }}</label>
+            <t-textarea
+              v-model="systemPrompt"
+              :placeholder="$t('modelSettings.debug.systemPromptPlaceholder')"
+              :autosize="{ minRows: 2, maxRows: 4 }"
+            />
+          </div>
+          <!-- 思考强度：由模型 capabilities.thinking_levels 决定；不能思考的模型不显示 -->
+          <div v-if="supportsThinking" class="form-item">
+            <label class="form-label">{{ $t('modelSettings.debug.reasoningEffort') }}</label>
+            <t-select v-model="reasoningEffort" :popup-props="{ overlayClassName: 'reasoning-level-select-popup' }">
+              <t-option v-for="level in reasoningOptions" :key="level" :value="level" :label="$t(levelLabelKey(level))"
+                :show-overflow-tooltip="false">
+                <div class="reasoning-level-option">
+                  <span class="reasoning-level-option__title">{{ $t(levelLabelKey(level)) }}</span>
+                  <span class="reasoning-level-option__hint">{{ $t(levelDescriptionKey(level)) }}</span>
+                </div>
+              </t-option>
+            </t-select>
+            <p class="form-desc">
+              {{ $t('modelSettings.debug.reasoningEffortDesc') }}
+              <template v-if="selectedModel.capabilities?.thinking_format">
+                · <code>{{ selectedModel.capabilities.thinking_format }}</code>
+              </template>
+            </p>
+          </div>
+        </section>
+
+        <section v-if="result || history.length > 0" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('modelSettings.debug.groupResult') }}</h4>
+
+          <div v-if="history.length > 1" class="form-item">
+            <label class="form-label">{{ $t('modelSettings.debug.history') }}</label>
+            <div class="history-list">
+              <button
+                v-for="run in history"
+                :key="run.id"
+                type="button"
+                class="history-item"
+                :class="{ 'history-item--active': result === run.result }"
+                @click="result = run.result"
+              >
+                <span class="history-item__label">{{ run.label }}</span>
+                <span class="history-item__meta">{{ run.result.elapsed_ms }} ms</span>
+              </button>
+            </div>
+          </div>
+
+          <div v-if="result" class="debug-result">
+            <div class="result-banner" :class="result.ok ? 'result-banner--ok' : 'result-banner--error'">
+              <t-icon :name="result.ok ? 'check-circle-filled' : 'close-circle-filled'" />
+              <div class="result-banner__text">
+                <strong>{{ result.ok ? $t('modelSettings.debug.success') : $t('modelSettings.debug.failed') }}</strong>
+                <span>{{ result.elapsed_ms }} ms</span>
+              </div>
+            </div>
+
+            <div v-if="resultMetrics.length > 0" class="metric-list">
+              <span v-for="metric in resultMetrics" :key="metric.key" class="metric-chip">
+                {{ metric.label }}: {{ metric.value }}
+              </span>
+            </div>
+
+            <p v-if="result.error" class="result-error">{{ result.error }}</p>
+
+            <div v-if="similarityResults.length > 0" class="similarity-list">
+              <div v-for="(item, rank) in similarityResults" :key="item.index" class="similarity-row">
+                <span class="similarity-row__rank">{{ rank + 1 }}</span>
+                <span class="similarity-row__content">
+                  <template v-if="item.kind === 'image'">
+                    <img v-if="imagePreview" :src="imagePreview" :alt="file?.name" class="similarity-row__image">
+                    {{ $t('modelSettings.debug.similarityImageCandidate') }}
+                  </template>
+                  <template v-else>{{ item.content }}</template>
+                </span>
+                <span class="similarity-row__bar">
+                  <span :style="{ width: `${Math.max(0, item.similarity) * 100}%` }" />
+                </span>
+                <span class="similarity-row__score">{{ item.similarity.toFixed(4) }}</span>
+              </div>
+            </div>
+
+            <t-tabs v-model="resultTab" class="result-tabs">
+              <t-tab-panel value="response" :label="$t('modelSettings.debug.rawResponse')" />
+              <t-tab-panel value="request" :label="$t('modelSettings.debug.requestPreview')" />
+            </t-tabs>
+            <pre class="json-output">{{ formattedResult }}</pre>
+          </div>
+        </section>
+      </template>
+    </div>
+  </SettingDrawer>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { MessagePlugin } from 'tdesign-vue-next'
+import { useI18n } from 'vue-i18n'
+import { copyWithToast } from '@/utils/clipboard'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { debugModel, type ModelConfig, type ModelDebugResult } from '@/api/model'
+import { fileSizeVerification } from '@/utils'
+import { useModelProvidersStore } from '@/stores/modelProviders'
+import {
+  clampLevel,
+  levelDescriptionKey,
+  levelEnablesThinking,
+  levelLabelKey,
+  modelCanThink,
+  supportedLevels,
+  type ReasoningLevel,
+} from '@/utils/reasoningEffort'
+import {
+  formatContextWindow,
+  modelHasContextWindow,
+} from '@/utils/contextWindow'
+
+const props = defineProps<{
+  visible: boolean
+  models: ModelConfig[]
+}>()
+
+const emit = defineEmits<{
+  (e: 'update:visible', value: boolean): void
+}>()
+
+const { t, locale } = useI18n()
+const providersStore = useModelProvidersStore()
+const drawerVisible = computed({
+  get: () => props.visible,
+  set: value => emit('update:visible', value),
+})
+
+type DebugModelType = ModelConfig['type']
+
+const selectedModelType = ref<DebugModelType>('KnowledgeQA')
+const selectedModelId = ref('')
+const input = ref('')
+const documentsText = ref('')
+const file = ref<File | null>(null)
+const inputMode = ref<'text' | 'image' | 'similarity'>('text')
+const imagePreview = ref('')
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const reasoningEffort = ref<ReasoningLevel>('off')
+const temperature = ref(0.7)
+const topP = ref(1)
+const maxTokens = ref(1024)
+const systemPrompt = ref('')
+const running = ref(false)
+const result = ref<ModelDebugResult | null>(null)
+const resultTab = ref<'response' | 'request'>('response')
+const history = ref<Array<{
+  id: number
+  label: string
+  result: ModelDebugResult
+}>>([])
+let runSequence = 0
+
+const selectedModel = computed(() => props.models.find(model => model.id === selectedModelId.value))
+const filteredModels = computed(() => props.models.filter(model => model.type === selectedModelType.value))
+const isChat = computed(() => selectedModel.value?.type === 'KnowledgeQA')
+// Thinking is offered only when the catalog says the model can think
+// (remote chat models carry `capabilities` computed by the backend).
+const supportsThinking = computed(() => modelCanThink(selectedModel.value?.capabilities))
+const reasoningOptions = computed(() => supportedLevels(selectedModel.value?.capabilities))
+const acceptsImages = computed(() => {
+  const model = selectedModel.value
+  if (!model || model.type === 'ASR') return false
+  return model.type === 'VLLM'
+    || model.capabilities?.input?.includes('image') === true
+    || (model.type === 'KnowledgeQA' && model.parameters.supports_vision === true)
+})
+const hasImageMode = computed(() => acceptsImages.value && ['Embedding', 'Rerank'].includes(selectedModel.value?.type || ''))
+const useImageMode = computed(() => hasImageMode.value && inputMode.value === 'image')
+const isEmbedding = computed(() => selectedModel.value?.type === 'Embedding')
+const useSimilarityMode = computed(() => isEmbedding.value && inputMode.value === 'similarity')
+// In similarity mode the image is an optional extra candidate.
+const showFilePicker = computed(() => selectedModel.value?.type === 'ASR'
+  || (acceptsImages.value && (!hasImageMode.value || useImageMode.value || useSimilarityMode.value)))
+const needsFile = computed(() => useImageMode.value || ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
+const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
+const canRun = computed(() => {
+  if (!selectedModel.value) return false
+  if (useSimilarityMode.value) return !!input.value.trim() && (documents.value.length > 0 || !!file.value)
+  if (needsFile.value && !file.value) return false
+  if (['ASR', 'VLLM'].includes(selectedModel.value.type) || (selectedModel.value.type === 'Embedding' && useImageMode.value)) return true
+  if (selectedModel.value.type === 'Rerank') return !!input.value.trim() && (useImageMode.value ? !!file.value : documents.value.length > 0)
+  return !!input.value.trim() || (isChat.value && acceptsImages.value && !!file.value)
+})
+
+const allModelTypeOptions = computed(() => {
+  const keys: Record<DebugModelType, { short: string; icon: string }> = {
+    KnowledgeQA: { short: 'chat', icon: 'chat' },
+    Embedding: { short: 'embedding', icon: 'chart-bubble' },
+    Rerank: { short: 'rerank', icon: 'filter-sort' },
+    VLLM: { short: 'vllm', icon: 'image' },
+    ASR: { short: 'asr', icon: 'sound' },
+  }
+  return (Object.keys(keys) as DebugModelType[]).map(value => ({
+    value,
+    label: t(`modelSettings.typeShort.${keys[value].short}`),
+    icon: keys[value].icon,
+  }))
+})
+
+const modelCount = (type: DebugModelType) => props.models.filter(model => model.type === type).length
+
+const availableModelTypes = computed(() =>
+  allModelTypeOptions.value.filter(option => modelCount(option.value) > 0),
+)
+
+const modelLabel = (model: ModelConfig) => model.display_name?.trim() || model.name
+
+const vendorLabel = (model: ModelConfig) => {
+  const provider = model.parameters.provider || ''
+  if (model.source === 'local') return 'Ollama'
+  if (provider === 'generic') return t('modelSettings.source.custom')
+  if (!provider) return model.source
+  return providersStore.labelFor(provider, String(locale.value || '')) || provider
+}
+
+const inputLabel = computed(() => {
+  if (useSimilarityMode.value) return t('modelSettings.debug.similarityQuery')
+  if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingInput')
+  if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPrompt')
+  if (selectedModel.value?.type === 'Rerank') return t('modelSettings.debug.query')
+  return t('modelSettings.debug.query')
+})
+
+const inputPlaceholder = computed(() => {
+  if (useSimilarityMode.value) return t('modelSettings.debug.similarityQueryPlaceholder')
+  if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingPlaceholder')
+  if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPromptPlaceholder')
+  return t('modelSettings.debug.queryPlaceholder')
+})
+
+const fileLabel = computed(() =>
+  selectedModel.value?.type === 'ASR'
+    ? t('modelSettings.debug.audioFile')
+    : t('modelSettings.debug.imageFile'),
+)
+
+const formattedResult = computed(() => {
+  if (!result.value) return ''
+  const value = resultTab.value === 'response'
+    ? result.value.raw_response
+    : result.value.request
+  return JSON.stringify(value, null, 2)
+})
+
+interface SimilarityResult {
+  index: number
+  kind: 'text' | 'image'
+  content?: string
+  similarity: number
+}
+
+const similarityResults = computed<SimilarityResult[]>(() => {
+  const response = result.value?.raw_response as { results?: unknown } | null | undefined
+  if (!isEmbedding.value || !result.value?.ok || !response || !Array.isArray(response.results)) return []
+  return response.results as SimilarityResult[]
+})
+
+const OBSERVATION_LABELS: Record<string, string> = {
+  api: 'modelSettings.debug.metrics.api',
+  thinking_format: 'modelSettings.debug.metrics.thinkingFormat',
+  requested_reasoning_effort: 'modelSettings.debug.metrics.requestedReasoningEffort',
+  dimension: 'modelSettings.debug.metrics.dimension',
+  result_count: 'modelSettings.debug.metrics.resultCount',
+  answer_characters: 'modelSettings.debug.metrics.answerChars',
+  reasoning_characters: 'modelSettings.debug.metrics.reasoningChars',
+  reasoning_returned: 'modelSettings.debug.metrics.reasoningReturned',
+  text_characters: 'modelSettings.debug.metrics.textChars',
+  segment_count: 'modelSettings.debug.metrics.segmentCount',
+}
+
+const resultMetrics = computed(() => {
+  if (!result.value?.observations) return []
+  // Flatten the nested capabilities object the backend attaches so the
+  // effective thinking encoding shows up next to the protocol.
+  const raw = result.value.observations
+  const caps = raw.capabilities as { thinking_format?: unknown } | undefined
+  const obs: Record<string, unknown> = {
+    ...raw,
+    ...(caps && typeof caps === 'object' && caps.thinking_format !== undefined
+      ? { thinking_format: caps.thinking_format }
+      : {}),
+  }
+  const keys = Object.keys(OBSERVATION_LABELS).filter(key => obs[key] !== undefined && obs[key] !== null)
+  return keys.map(key => ({
+    key,
+    label: t(OBSERVATION_LABELS[key]),
+    value: formatMetricValue(key, obs[key]),
+  }))
+})
+
+const formatMetricValue = (key: string, value: unknown) => {
+  if (typeof value === 'boolean') {
+    return value ? t('common.yes') : t('common.no')
+  }
+  if (key === 'requested_reasoning_effort' && typeof value === 'string' && value) {
+    return t(levelLabelKey(value))
+  }
+  return String(value)
+}
+
+const ensureDefaultSelection = () => {
+  const types = availableModelTypes.value
+  if (types.length === 0) {
+    selectedModelId.value = ''
+    return
+  }
+  if (!types.some(option => option.value === selectedModelType.value)) {
+    selectedModelType.value = types[0].value
+  }
+  const models = filteredModels.value
+  if (!models.some(model => model.id === selectedModelId.value)) {
+    selectedModelId.value = models[0]?.id || ''
+  }
+}
+
+watch(() => props.visible, visible => {
+  if (visible) {
+    ensureDefaultSelection()
+    void providersStore.ensureLoaded('').catch(() => {})
+  }
+})
+
+watch(availableModelTypes, () => {
+  if (props.visible) ensureDefaultSelection()
+})
+
+watch(() => selectedModel.value?.id, () => {
+  reasoningEffort.value = clampLevel(reasoningEffort.value, reasoningOptions.value)
+}, { immediate: true })
+
+watch(() => selectedModel.value?.id, () => {
+  inputMode.value = 'text'
+  clearFile()
+})
+
+const resetResult = () => {
+  result.value = null
+  history.value = []
+  resultTab.value = 'response'
+}
+
+const selectModelType = (type: DebugModelType) => {
+  if (selectedModelType.value === type) return
+  selectedModelType.value = type
+  selectedModelId.value = filteredModels.value[0]?.id || ''
+  input.value = ''
+  documentsText.value = ''
+  file.value = null
+  resetResult()
+}
+
+const clearFile = () => {
+  file.value = null
+  if (fileInputRef.value) fileInputRef.value.value = ''
+  resetResult()
+}
+
+watch(file, value => {
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
+  imagePreview.value = value && selectedModel.value?.type !== 'ASR' ? URL.createObjectURL(value) : ''
+})
+
+const onNativeFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const selectedFile = target.files?.[0] || null
+  if (selectedFile && fileSizeVerification(selectedFile)) {
+    target.value = ''
+    file.value = null
+    resetResult()
+    return
+  }
+  file.value = selectedFile
+  resetResult()
+}
+
+const formatBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const historyLabel = (level: ReasoningLevel | null) => {
+  if (level) {
+    return `${t('modelSettings.debug.reasoningEffort')}: ${t(levelLabelKey(level))}`
+  }
+  return t('modelSettings.debug.runLabel', { n: runSequence })
+}
+
+const runDebug = async () => {
+  if (!selectedModel.value?.id || !canRun.value || running.value) return
+  running.value = true
+  try {
+    const level: ReasoningLevel | null = supportsThinking.value ? reasoningEffort.value : null
+    const nextResult = await debugModel(selectedModel.value.id, {
+      input: isEmbedding.value && useImageMode.value ? '' : input.value.trim(),
+      documents: (selectedModel.value.type === 'Rerank' && !useImageMode.value) || useSimilarityMode.value ? documents.value : [],
+      file: showFilePicker.value ? file.value : null,
+      options: isChat.value ? {
+        system_prompt: systemPrompt.value.trim() || undefined,
+        temperature: temperature.value,
+        top_p: topP.value,
+        max_tokens: maxTokens.value,
+        // reasoning_effort is authoritative; the boolean keeps older backends working.
+        ...(level ? { reasoning_effort: level, thinking: levelEnablesThinking(level) } : { thinking: false }),
+      } : useSimilarityMode.value ? { similarity: true } : {},
+    })
+    result.value = nextResult
+    history.value.unshift({
+      id: ++runSequence,
+      label: historyLabel(level),
+      result: nextResult,
+    })
+    history.value = history.value.slice(0, 6)
+    resultTab.value = 'response'
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('modelSettings.debug.requestFailed'))
+  } finally {
+    running.value = false
+  }
+}
+
+const copyResult = async () => {
+  if (!result.value) return
+  await copyWithToast(JSON.stringify(result.value, null, 2), 'common.copied')
+}
+
+onBeforeUnmount(() => {
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+})
+</script>
+
+<style scoped lang="less">
+.form-item {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  line-height: 1.4;
+}
+
+.form-desc {
+  margin: 4px 0 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+
+  &--inline {
+    margin: 0;
+  }
+}
+
+.model-type-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.model-type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  min-height: 32px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-md);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
+
+  &__icon {
+    font-size: var(--app-text-lg);
+    flex-shrink: 0;
+  }
+
+  &__label {
+    white-space: nowrap;
+  }
+
+  &:hover:not(.is-active) {
+    border-color: var(--td-brand-color-3);
+    color: var(--td-text-color-primary);
+  }
+
+  &.is-active {
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+
+  &__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    flex-shrink: 0;
+    color: var(--td-text-color-placeholder);
+    font-size: var(--app-text-sm);
+  }
+}
+
+.parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+
+  :deep(.t-input-number) {
+    width: 100%;
+  }
+}
+
+.form-desc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-text-xs);
+}
+
+.file-picker {
+  position: relative;
+
+  &__input {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.selected-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.image-preview {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  border-radius: var(--app-radius-sm);
+}
+
+.history-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.history-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--app-text-sm);
+
+  &__label {
+    color: var(--td-text-color-primary);
+    font-weight: 500;
+  }
+
+  &__meta {
+    color: var(--td-text-color-placeholder);
+  }
+
+  &:hover,
+  &--active {
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 6%, var(--td-bg-color-container));
+  }
+}
+
+.result-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
+
+  &--ok {
+    background: var(--td-success-color-light);
+    color: var(--td-success-color);
+
+    .result-banner__text strong {
+      color: var(--td-text-color-primary);
+    }
+  }
+
+  &--error {
+    background: var(--td-error-color-light);
+    color: var(--td-error-color);
+
+    .result-banner__text strong {
+      color: var(--td-text-color-primary);
+    }
+  }
+
+  &__text {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+
+    span {
+      color: var(--td-text-color-placeholder);
+      font-size: var(--app-text-sm);
+    }
+  }
+}
+
+.metric-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.metric-chip {
+  padding: 2px 8px;
+  border-radius: var(--app-radius-xs);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+}
+
+.similarity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.similarity-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 80px 56px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-sm);
+
+  &__rank {
+    color: var(--td-text-color-placeholder);
+    text-align: right;
+  }
+
+  &__content {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    color: var(--td-text-color-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__image {
+    width: 24px;
+    height: 24px;
+    object-fit: cover;
+    border-radius: var(--app-radius-xs);
+  }
+
+  &__bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--td-component-stroke);
+
+    span {
+      display: block;
+      height: 100%;
+      background: var(--td-brand-color);
+    }
+  }
+
+  &__score {
+    color: var(--td-text-color-secondary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    text-align: right;
+  }
+}
+
+.result-error {
+  margin: 10px 0 0;
+  color: var(--td-error-color);
+  font-size: var(--app-text-md);
+  white-space: pre-wrap;
+}
+
+.result-tabs {
+  margin-top: 12px;
+
+  :deep(.t-tabs__content) {
+    display: none;
+  }
+}
+
+.json-output {
+  overflow: auto;
+  max-height: 420px;
+  min-height: 140px;
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .parameter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<!-- 非 scoped：t-select popup 渲染到 body 下 -->
+<style lang="less">
+.reasoning-level-select-popup {
+  padding: 4px;
+
+  .t-select-option {
+    height: auto !important;
+    padding: 6px 10px;
+    border-radius: 6px;
+    margin: 2px 0;
+    white-space: normal;
+  }
+}
+
+.reasoning-level-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  min-width: 0;
+
+  &__title {
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    font-size: var(--app-text-sm);
+    color: var(--td-text-color-placeholder);
+    word-break: break-word;
+  }
+}
+</style>

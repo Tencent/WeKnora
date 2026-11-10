@@ -1,0 +1,1508 @@
+<template>
+  <SettingDrawer
+    :visible="dialogVisible"
+    :z-index="2300"
+    :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
+    class="mcp-drawer"
+    icon="tools"
+    :confirm-loading="submitting"
+    :confirm-disabled="metadataBusy || generatingUsage || (step === 1 && !toolsSynced)"
+    :confirm-text="t(step === 0 ? 'mcpMetadata.saveNext' : 'common.save')"
+    width="680px"
+    :min-width="560"
+    :max-width="920"
+    storage-key="setting-drawer:width:mcp-config-v2"
+    @update:visible="(v: boolean) => dialogVisible = v"
+    @confirm="step === 0 ? handleNext() : handleSubmit()"
+    @cancel="handleClose"
+  >
+    <!-- 副标题：编辑时显示已保存服务的 transport 与启用状态；新建时还没有状态可展示 -->
+    <template #subtitle>
+      <template v-if="mode === 'edit'">
+        <span>{{ transportLabel }}</span>
+        <span
+          class="subtitle-tag"
+          :class="formData.enabled ? 'subtitle-tag--ok' : 'subtitle-tag--muted'"
+        >
+          {{ formData.enabled ? t('mcpSettings.enabled', '已启用') : t('mcpSettings.disabled', '已禁用') }}
+        </span>
+      </template>
+      <template v-else>{{ t('mcpServiceDialog.addDesc') }}</template>
+    </template>
+
+    <template #header-extra>
+      <nav class="mcp-steps" :aria-label="t('mcpMetadata.setupProgress')">
+        <button v-for="(label, index) in [t('mcpMetadata.connection'), t('mcpMetadata.toolsAndUsage')]"
+          :key="index" type="button" :class="['mcp-step', { 'is-active': step === index, 'is-done': step > index, 'is-clickable': true }]"
+          :aria-current="step === index ? 'step' : undefined" :disabled="submitting || metadataBusy || generatingUsage"
+          @click="index === 0 ? step = 0 : (step === 0 && handleNext())">
+          <span class="mcp-step__marker"><t-icon v-if="step > index" name="check" /><template v-else>{{ index + 1 }}</template></span>
+          <span class="mcp-step__title">{{ label }}</span>
+          <span v-if="index === 0" class="mcp-step__line" aria-hidden="true" />
+        </button>
+      </nav>
+    </template>
+    <template #footer-left>
+      <t-button v-if="step === 1" variant="outline" :disabled="submitting || metadataBusy || generatingUsage" @click="step = 0">
+        {{ t('mcpMetadata.previous') }}
+      </t-button>
+    </template>
+
+    <t-form ref="formRef" :data="formData" :rules="rules" label-align="top" class="mcp-editor-form">
+      <div v-show="step === 0" class="connection-step">
+      <!--
+        从代码导入：粘贴标准 mcpServers JSON，纯前端解析后填回表单。
+        不自动提交；用户检查后再点保存。
+      -->
+      <section class="setting-drawer__section code-import">
+        <button type="button" class="code-import__toggle" @click="codeImportOpen = !codeImportOpen">
+          <t-icon :name="codeImportOpen ? 'chevron-down' : 'chevron-right'" />
+          <span>{{ t('mcpServiceDialog.codeImport.toggle') }}</span>
+        </button>
+        <div v-if="codeImportOpen" class="code-import__body">
+          <p class="form-desc">{{ t('mcpServiceDialog.codeImport.hint') }}</p>
+          <p v-if="mode === 'edit'" class="form-desc code-import__warn">
+            {{ t('mcpServiceDialog.codeImport.editOverwriteHint') }}
+          </p>
+          <t-textarea
+            v-model="codeImportText"
+            :autosize="{ minRows: 5, maxRows: 14 }"
+            :placeholder="codeImportPlaceholder"
+            class="code-import__textarea"
+          />
+          <p v-if="codeImportError" class="code-import__error">{{ codeImportError }}</p>
+          <div class="code-import__actions">
+            <t-button theme="primary" variant="outline" @click="handleCodeImport">
+              {{ t('mcpServiceDialog.codeImport.parse') }}
+            </t-button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 1 — 基本信息 -->
+      <section class="setting-drawer__section mcp-settings-group">
+        <h4 class="setting-drawer__section-title">{{ t('mcpServiceDialog.basicSection', '基本信息') }}</h4>
+
+        <div class="form-item">
+          <label class="form-label required">{{ t('mcpServiceDialog.name') }}</label>
+          <t-input v-model="formData.name" :placeholder="t('mcpServiceDialog.namePlaceholder')" />
+        </div>
+
+        <div class="form-item">
+          <label class="form-label">{{ t('mcpServiceDialog.enableService') }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.enabled" />
+            <span class="form-desc form-desc--inline">
+              {{ t('mcpServiceDialog.enableServiceDesc', '关闭后该服务不会被调用') }}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2 — 连接配置（transport + url） -->
+      <section class="setting-drawer__section mcp-settings-group">
+        <h4 class="setting-drawer__section-title">{{ t('mcpServiceDialog.connectionSection', '连接配置') }}</h4>
+
+        <div class="form-item">
+          <label class="form-label required">{{ t('mcpServiceDialog.transportType') }}</label>
+          <!-- 紧凑 pill segmented，与 ModelEditorDialog 来源切换 / Storage MinIO 部署模式同款 -->
+          <div class="source-options" role="radiogroup">
+            <button
+              type="button"
+              class="source-option"
+              :class="{ 'is-active': formData.transport_type === 'sse' }"
+              @click="formData.transport_type = 'sse'"
+            >
+              <t-icon name="cast" class="source-option__icon" />
+              <span class="source-option__label">SSE</span>
+            </button>
+            <button
+              type="button"
+              class="source-option"
+              :class="{ 'is-active': formData.transport_type === 'http-streamable' }"
+              @click="formData.transport_type = 'http-streamable'"
+            >
+              <t-icon name="link" class="source-option__icon" />
+              <span class="source-option__label">HTTP Streamable</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-item">
+          <label class="form-label required">{{ t('mcpServiceDialog.serviceUrl') }}</label>
+          <t-input v-model="formData.url" :placeholder="t('mcpServiceDialog.serviceUrlPlaceholder')" />
+        </div>
+
+        <!-- 自定义请求头：附加到每次 MCP 请求的 HTTP header（与模型管理同款交互） -->
+        <div class="form-item">
+          <div class="custom-headers-header">
+            <label class="form-label" style="margin-bottom: 0">
+              {{ t('mcpServiceDialog.customHeaders.label') }}
+            </label>
+            <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
+              <template #icon><t-icon name="add" /></template>
+              {{ t('mcpServiceDialog.customHeaders.add') }}
+            </t-button>
+          </div>
+          <p class="form-desc custom-headers-desc">{{ t('mcpServiceDialog.customHeaders.desc') }}</p>
+          <div v-if="formData.headers.length > 0" class="custom-headers-list">
+            <div v-for="(item, idx) in formData.headers" :key="idx" class="custom-header-row">
+              <t-input
+                v-model="item.key"
+                :placeholder="t('mcpServiceDialog.customHeaders.keyPlaceholder')"
+                class="custom-header-key"
+              />
+              <t-input
+                v-model="item.value"
+                :placeholder="t('mcpServiceDialog.customHeaders.valuePlaceholder')"
+                class="custom-header-value"
+              />
+              <t-button
+                variant="text"
+                shape="square"
+                size="small"
+                class="custom-header-remove"
+                :aria-label="t('common.delete')"
+                @click="removeCustomHeader(idx)"
+              >
+                <t-icon name="close" />
+              </t-button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3 — 认证配置（无 / API Key / Bearer Token / OAuth） -->
+      <section class="setting-drawer__section mcp-settings-group">
+        <h4 class="setting-drawer__section-title">{{ t('mcpServiceDialog.authConfig') }}</h4>
+
+        <div class="form-item">
+          <label class="form-label">{{ t('mcpServiceDialog.authType', '认证方式') }}</label>
+          <!-- 展开式 pill segmented，与上方传输类型同款，避免再点开下拉 -->
+          <div class="source-options" role="radiogroup">
+            <button
+              v-for="opt in authTypeOptions"
+              :key="opt.value"
+              type="button"
+              class="source-option"
+              :class="{ 'is-active': formData.auth_config.auth_type === opt.value }"
+              @click="formData.auth_config.auth_type = opt.value as '' | 'api_key' | 'bearer' | 'oauth'"
+            >
+              <span class="source-option__label">{{ opt.label }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- OAuth 2.0：默认零配置（自动发现 + 动态客户端注册），也可填写预注册客户端；按用户授权 -->
+        <template v-if="isOAuth">
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthScopes', 'Scopes（可选，空格分隔）') }}</label>
+            <t-input v-model="oauthScopesText" :placeholder="t('mcpServiceDialog.optional')" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthClientId', 'Client ID（可选）') }}</label>
+            <t-input v-model="formData.auth_config.client_id" :placeholder="t('mcpServiceDialog.optional')" />
+            <p class="form-desc">{{ t('mcpServiceDialog.oauthClientIdDesc', '填写在授权服务器预先注册的客户端；留空则自动进行动态客户端注册。更换 Client ID 时请同时更新 Client Secret。') }}</p>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthClientSecret', 'Client Secret（可选）') }}</label>
+            <CredentialResource
+              v-if="mode === 'edit' && currentService?.id"
+              :api="credentialApi"
+              :fields="credentialFields"
+              :meta="credentialMeta"
+            />
+            <t-input
+              v-else
+              v-model="formData.auth_config.client_secret"
+              type="password"
+              :placeholder="t('mcpServiceDialog.optional')"
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthAuthorization', '授权状态') }}</label>
+            <div class="oauth-status">
+              <t-tag v-if="oauthTokenState === 'authorized'" theme="success" variant="light">
+                {{ t('mcpServiceDialog.oauthAuthorized', '已授权') }}
+              </t-tag>
+              <t-tag v-else-if="oauthTokenState === 'refreshable'" theme="primary" variant="light">
+                {{ t('mcpServiceDialog.oauthRefreshable', 'Token 已过期，将自动刷新') }}
+              </t-tag>
+              <t-tag v-else theme="warning" variant="light">
+                {{ t('mcpServiceDialog.oauthUnauthorized', '未授权') }}
+              </t-tag>
+              <t-button
+                size="small"
+                theme="primary"
+                :loading="oauthAuthorizing || oauthChecking || submitting"
+                @click="handleAuthorize"
+              >
+                {{ oauthTokenState === 'reauth_required' ? t('mcpServiceDialog.oauthAuthorize', '去授权') : t('mcpServiceDialog.oauthReauthorize', '重新授权') }}
+              </t-button>
+              <t-button
+                v-if="oauthTokenState !== 'reauth_required' && currentService?.id"
+                size="small"
+                theme="danger"
+                variant="outline"
+                @click="handleRevokeOAuth"
+              >
+                {{ t('mcpServiceDialog.oauthRevoke', '撤销授权') }}
+              </t-button>
+            </div>
+            <p class="form-desc">
+              {{ t('mcpServiceDialog.oauthAuthorizeHint', '点击「去授权」会先自动保存当前配置，再发起授权（每个用户独立授权）。') }}
+            </p>
+          </div>
+        </template>
+
+        <!--
+          非 OAuth：Edit 模式下凭证由 CredentialResource 管理（独立的
+          /credentials 子资源调用）；Create 模式下用 plain password input。
+          两个字段都是 optional — MCP 服务可能完全不需要鉴权。
+        -->
+        <!-- 凭证 Header 策略：请求头名称 + 密钥值（其余 auth_type 不展示密钥字段） -->
+        <template v-else-if="formData.auth_config.auth_type === 'api_key'">
+          <!-- 请求头名称（非密钥）：默认 X-API-Key，Bearer/裸 token 场景填 Authorization。 -->
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.apiKeyHeader', '请求头名称') }}</label>
+            <t-input
+              v-model="formData.auth_config.api_key_header"
+              placeholder="X-API-Key"
+            />
+            <p class="form-desc">{{ t('mcpServiceDialog.apiKeyHeaderDesc', '留空默认 X-API-Key。Bearer 方式请填 Authorization，并在下方密钥值中写 “Bearer <token>”；需要裸 token 时填 Authorization 并直接填入 token。') }}</p>
+          </div>
+
+          <CredentialResource
+            v-if="mode === 'edit' && currentService?.id"
+            :api="credentialApi"
+            :fields="credentialFields"
+            :meta="credentialMeta"
+          />
+          <div v-else class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.credentialValue', '密钥值 / Token') }}</label>
+            <t-input
+              v-model="formData.auth_config.api_key"
+              type="password"
+              :placeholder="t('mcpServiceDialog.optional')"
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+          </div>
+        </template>
+      </section>
+
+      <!-- Section 4 — 高级配置（超时/重试），改用带后缀单位的轻量数字输入框，
+           不再用 t-input-number 的加减器（步进按钮在这里没必要，用户更倾向直接键入）。 -->
+      <section class="setting-drawer__section mcp-settings-group">
+        <h4 class="setting-drawer__section-title">{{ t('mcpServiceDialog.advancedConfig') }}</h4>
+
+        <div class="form-item">
+          <label class="form-label">{{ t('mcpServiceDialog.timeoutSec') }}</label>
+          <t-input
+            v-model="advancedTimeoutText"
+            type="number"
+            :min="1"
+            :max="300"
+            placeholder="30"
+            class="number-input"
+            @blur="onAdvancedNumberBlur('timeout', 30, 1, 300)"
+          >
+            <template #suffix>
+              <span class="number-input__unit">{{ t('mcpServiceDialog.unitSecond', '秒') }}</span>
+            </template>
+          </t-input>
+        </div>
+        <div class="form-item">
+          <label class="form-label">{{ t('mcpServiceDialog.retryCount') }}</label>
+          <t-input
+            v-model="advancedRetryCountText"
+            type="number"
+            :min="0"
+            :max="10"
+            placeholder="3"
+            class="number-input"
+            @blur="onAdvancedNumberBlur('retry_count', 3, 0, 10)"
+          >
+            <template #suffix>
+              <span class="number-input__unit">{{ t('mcpServiceDialog.unitTimes', '次') }}</span>
+            </template>
+          </t-input>
+        </div>
+        <div class="form-item">
+          <label class="form-label">{{ t('mcpServiceDialog.retryDelaySec') }}</label>
+          <t-input
+            v-model="advancedRetryDelayText"
+            type="number"
+            :min="0"
+            :max="60"
+            placeholder="1"
+            class="number-input"
+            @blur="onAdvancedNumberBlur('retry_delay', 1, 0, 60)"
+          >
+            <template #suffix>
+              <span class="number-input__unit">{{ t('mcpServiceDialog.unitSecond', '秒') }}</span>
+            </template>
+          </t-input>
+        </div>
+      </section>
+
+      </div>
+      <template v-if="step === 1">
+        <section class="setting-drawer__section mcp-settings-group">
+          <div class="section-title-block">
+            <h4 class="setting-drawer__section-title">{{ t('mcpMetadata.usage') }}</h4>
+            <p class="form-desc">{{ t('mcpMetadata.usageHint') }}</p>
+          </div>
+          <div class="form-item">
+            <div class="usage-heading">
+              <label class="form-label required">{{ t('mcpMetadata.usageInstructions') }}</label>
+              <t-tooltip :content="t('mcpMetadata.generateHint')" placement="top-right"
+                :overlay-inner-style="{ maxWidth: '300px', whiteSpace: 'normal' }">
+                <t-button variant="text" theme="primary" size="small" :loading="generatingUsage"
+                  :disabled="!toolsSynced || metadataBusy || submitting" @click="handleGenerateUsage">
+                  <template #icon><t-icon name="lightbulb" /></template>
+                  {{ t('mcpMetadata.generateUsage') }}
+                </t-button>
+              </t-tooltip>
+            </div>
+            <t-textarea v-model="formData.usage_instructions" class="usage-textarea" :maxlength="16000" :autosize="{ minRows: 3, maxRows: 8 }"
+              :disabled="generatingUsage || submitting"
+              :placeholder="t('mcpMetadata.instructionsPlaceholder')" />
+          </div>
+        </section>
+        <McpMetadataPanel v-if="currentService?.id" :key="currentService.id" :service-id="currentService.id"
+          :disabled="submitting || generatingUsage" @busy="metadataBusy = $event" @synced="toolsSynced = $event" />
+      </template>
+    </t-form>
+  </SettingDrawer>
+</template>
+
+<script setup lang="ts">
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
+import { MessagePlugin } from 'tdesign-vue-next'
+import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
+import { useI18n } from 'vue-i18n'
+import {
+  createMCPService,
+  updateMCPService,
+  generateMCPUsageInstructions,
+  putMCPCredentials,
+  deleteMCPCredentialField,
+  getMCPOAuthAuthorizeURL,
+  getMCPOAuthAuthorizationStatus,
+  getMCPOAuthStatus,
+  revokeMCPOAuthToken,
+  MCP_OAUTH_CALLBACK_PATH,
+  type MCPService,
+  type McpCredentialField,
+  type MCPOAuthTokenState,
+} from '@/api/mcp-service'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import McpMetadataPanel from './McpMetadataPanel.vue'
+import CredentialResource, {
+  type CredentialFieldDef,
+  type CredentialResourceApi,
+} from '@/components/credentials/CredentialResource.vue'
+
+interface Props {
+  visible: boolean
+  service: MCPService | null
+  mode: 'add' | 'edit'
+  initialStep?: 0 | 1
+}
+
+interface Emits {
+  (e: 'update:visible', value: boolean): void
+  (e: 'success'): void
+  // Emitted after a successful create; carries the newly created service so
+  // the parent can transition the drawer to edit mode without closing it.
+  (e: 'created', service: MCPService): void
+}
+
+const props = defineProps<Props>()
+const emit = defineEmits<Emits>()
+
+const savedService = ref<MCPService | null>(null)
+const currentService = computed(() => savedService.value ?? props.service)
+const step = ref(0)
+const metadataBusy = ref(false)
+const toolsSynced = ref(false)
+const generatingUsage = ref(false)
+let usageGeneration = 0
+const formRef = ref<FormInstanceFunctions>()
+const submitting = ref(false)
+const { t, locale } = useI18n()
+const codeImportPlaceholder = `{
+  "mcpServers": {
+    "my-server": {
+      "url": "https://example.com/sse"
+    }
+  }
+}`
+
+const formData = ref({
+  name: '',
+  usage_instructions: '',
+  enabled: true,
+  transport_type: 'sse' as 'sse' | 'http-streamable',
+  url: '',
+  // Custom HTTP headers attached to every MCP request — edited as key/value
+  // rows here, serialised to a Record<string,string> on submit (top-level
+  // `headers`). Independent of the auth strategy.
+  headers: [] as { key: string; value: string }[],
+  auth_config: {
+    // Authentication strategy. UI exposes '' (none) | 'api_key' (credential
+    // header) | 'oauth'. Legacy 'bearer' is normalised to 'api_key' on load.
+    auth_type: '' as '' | 'api_key' | 'bearer' | 'oauth',
+    // Only used in add-mode; in edit-mode the CredentialResource owns these.
+    api_key: '',
+    // Non-secret: header name for the api_key value (default X-API-Key).
+    api_key_header: '',
+    token: '',
+    // OAuth-only, non-secret config.
+    scopes: [] as string[],
+    auth_server_metadata_url: '',
+    // Pre-registered OAuth client; empty means dynamic client registration.
+    client_id: '',
+    // Only used in add-mode; in edit-mode the CredentialResource owns it.
+    client_secret: '',
+  },
+  advanced_config: {
+    timeout: 30,
+    retry_count: 3,
+    retry_delay: 1,
+  },
+})
+
+// ---- Custom headers (key/value editor, same UX as ModelEditorDialog) ----
+const addCustomHeader = () => {
+  formData.value.headers.push({ key: '', value: '' })
+}
+const removeCustomHeader = (idx: number) => {
+  formData.value.headers.splice(idx, 1)
+}
+
+// ---- Code import (paste standard mcpServers JSON) ----
+const codeImportOpen = ref(false)
+const codeImportText = ref('')
+const codeImportError = ref('')
+
+// Map a raw MCP server config object onto the form. Stdio is rejected.
+function applyServerConfig(name: string, cfg: Record<string, unknown>) {
+  if (cfg.command) {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.stdioUnsupported')
+    return false
+  }
+  const url = typeof cfg.url === 'string' ? cfg.url.trim() : ''
+  if (!url) {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.missingUrl')
+    return false
+  }
+
+  // Transport: explicit type/transport wins, else guess from the URL shape.
+  const rawType = String(cfg.type ?? cfg.transport ?? '').toLowerCase()
+  let transport: 'sse' | 'http-streamable'
+  if (rawType === 'sse') {
+    transport = 'sse'
+  } else if (['http', 'http-streamable', 'streamable-http', 'streamablehttp', 'streamable_http'].includes(rawType)) {
+    transport = 'http-streamable'
+  } else {
+    transport = /\/sse\/?($|\?)/i.test(url) ? 'sse' : 'http-streamable'
+  }
+
+  // Auth: recognise Bearer / API-key headers; every other header lands in the
+  // custom-headers editor so nothing is silently dropped.
+  // Map a recognised auth header onto the unified credential strategy: the raw
+  // header value is the secret (encrypted), carried in the given header name.
+  // Bearer keeps its "Bearer " prefix inside the value; Authorization with a
+  // raw token and X-API-Key all collapse to the same shape.
+  let authType: '' | 'api_key' = ''
+  let apiKey = ''
+  let apiKeyHeader = ''
+  const customHeaders: { key: string; value: string }[] = []
+  const headers = (cfg.headers && typeof cfg.headers === 'object')
+    ? (cfg.headers as Record<string, unknown>)
+    : {}
+  for (const [key, val] of Object.entries(headers)) {
+    const lowerKey = key.toLowerCase()
+    const strVal = typeof val === 'string' ? val : String(val ?? '')
+    if (lowerKey === 'authorization' || ['x-api-key', 'api-key', 'apikey'].includes(lowerKey)) {
+      authType = 'api_key'
+      apiKey = strVal.trim()
+      apiKeyHeader = lowerKey === 'x-api-key' ? '' : key
+    } else {
+      customHeaders.push({ key, value: strVal })
+    }
+  }
+
+  formData.value.name = name || formData.value.name
+  formData.value.url = url
+  formData.value.transport_type = transport
+  if (typeof cfg.usage_instructions === 'string') formData.value.usage_instructions = cfg.usage_instructions
+  else if (typeof cfg.description === 'string') formData.value.usage_instructions = cfg.description
+  formData.value.headers = customHeaders
+  // No recognised auth header → none (custom headers carry the rest).
+  formData.value.auth_config.auth_type = authType
+  formData.value.auth_config.token = ''
+  formData.value.auth_config.api_key = apiKey
+  formData.value.auth_config.api_key_header = apiKeyHeader
+  formData.value.auth_config.scopes = []
+  formData.value.auth_config.client_id = ''
+  formData.value.auth_config.client_secret = ''
+
+  return true
+}
+
+const handleCodeImport = () => {
+  codeImportError.value = ''
+  const raw = codeImportText.value.trim()
+  if (!raw) {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.empty')
+    return
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.invalidJson')
+    return
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+    return
+  }
+
+  const obj = parsed as Record<string, unknown>
+  let name = ''
+  let cfg: Record<string, unknown> | null = null
+  let multiple = false
+
+  const servers = obj.mcpServers
+  if (servers && typeof servers === 'object') {
+    const entries = Object.entries(servers as Record<string, unknown>)
+    if (entries.length === 0) {
+      codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+      return
+    }
+    multiple = entries.length > 1
+    name = entries[0][0]
+    cfg = entries[0][1] as Record<string, unknown>
+  } else if (obj.url || obj.command) {
+    // Bare single-server object (no mcpServers wrapper).
+    cfg = obj
+  } else {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+    return
+  }
+
+  if (!cfg || typeof cfg !== 'object') {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+    return
+  }
+
+  if (!applyServerConfig(name, cfg)) return
+
+  formRef.value?.clearValidate()
+  if (multiple) {
+    MessagePlugin.info(
+      t('mcpServiceDialog.codeImport.toasts.multipleServers', { name }) as string,
+    )
+  } else {
+    MessagePlugin.success(t('mcpServiceDialog.codeImport.toasts.filled') as string)
+  }
+}
+
+// Comma/space separated text binding for OAuth scopes.
+const oauthScopesText = computed({
+  get: () => (formData.value.auth_config.scopes || []).join(' '),
+  set: (val: string) => {
+    formData.value.auth_config.scopes = val
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+  },
+})
+
+const isOAuth = computed(() => formData.value.auth_config.auth_type === 'oauth')
+
+// API Key / Bearer are unified into one "credential header" strategy now that
+// the header name is configurable (Bearer is just Authorization + a "Bearer "
+// value prefix). "None" stays as the default for services that need no auth or
+// only the custom headers configured above.
+const authTypeOptions = computed(() => [
+  { value: '', label: t('mcpServiceDialog.authTypeNone', '无 / 自定义 Header') },
+  { value: 'api_key', label: t('mcpServiceDialog.authTypeApiKey', 'API Key / Token') },
+  { value: 'oauth', label: t('mcpServiceDialog.authTypeOAuth', 'OAuth 2.0（首次连接授权）') },
+])
+
+// ---- OAuth authorization state (edit mode only) ----
+const oauthAuthorized = ref(false)
+const oauthTokenState = ref<MCPOAuthTokenState>('reauth_required')
+const oauthChecking = ref(false)
+const oauthAuthorizing = ref(false)
+let oauthGeneration = 0
+let oauthPollTimer: number | null = null
+
+// The drawer is reused; cancellation must also invalidate requests already in flight.
+function cancelOAuthRequests() {
+  oauthGeneration++
+  if (oauthPollTimer !== null) window.clearInterval(oauthPollTimer)
+  oauthPollTimer = null
+  oauthChecking.value = false
+  oauthAuthorizing.value = false
+}
+
+function isCurrentOAuthRequest(generation: number, serviceId: string) {
+  return generation === oauthGeneration && props.visible && isOAuth.value
+    && currentService.value?.id === serviceId
+}
+
+async function refreshOAuthStatus() {
+  if (props.mode !== 'edit' || !currentService.value?.id || !isOAuth.value || !props.visible) return
+  const serviceId = currentService.value.id
+  const generation = oauthGeneration
+  oauthChecking.value = true
+  try {
+    const status = await getMCPOAuthAuthorizationStatus(currentService.value.id)
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
+    oauthAuthorized.value = status.authorized
+    oauthTokenState.value = status.state
+  } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
+    console.error('Failed to query MCP OAuth status:', e)
+  } finally {
+    if (isCurrentOAuthRequest(generation, serviceId)) oauthChecking.value = false
+  }
+}
+
+// Open the OAuth popup for an already-persisted service and poll for
+// completion against that service id (independent of props, which may be
+// re-bound by the parent after a save).
+async function startAuthorize(serviceId: string) {
+  if (!serviceId || !isCurrentOAuthRequest(oauthGeneration, serviceId)) return
+  cancelOAuthRequests()
+  const generation = oauthGeneration
+  oauthAuthorizing.value = true
+  try {
+    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
+    // After the backend completes the exchange it bounces the popup here. The
+    // app root is harmless; the popup is closed by the opener below once the
+    // authorization status flips, so this page is only shown briefly.
+    const frontendRedirect = '/'
+    const authorization = await getMCPOAuthAuthorizeURL(serviceId, {
+      redirect_uri: redirectUri,
+      frontend_redirect: frontendRedirect,
+    })
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
+    if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
+      MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
+      oauthAuthorizing.value = false
+      return
+    }
+    const popup = window.open(authorization.authorizationUrl, 'mcp_oauth', 'width=600,height=720')
+    // Poll for completion: either the popup closes or the status flips.
+    oauthPollTimer = window.setInterval(async () => {
+      if (!isCurrentOAuthRequest(generation, serviceId)) return
+      const closed = !popup || popup.closed
+      let authorized: boolean | undefined
+      try {
+        authorized = await getMCPOAuthStatus(serviceId, authorization.authorizationAttempt)
+      } catch { /* keep polling */ }
+      if (!isCurrentOAuthRequest(generation, serviceId)) return
+      if (authorized !== undefined) {
+        oauthAuthorized.value = authorized
+        if (authorized) oauthTokenState.value = 'authorized'
+      }
+      if (authorized || closed) {
+        cancelOAuthRequests()
+        if (authorized) {
+          try { popup?.close() } catch { /* cross-origin close may throw */ }
+          MessagePlugin.success(t('mcpServiceDialog.toasts.authorized', '授权成功') as string)
+        }
+      }
+    }, 1500)
+  } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
+    console.error('Failed to start MCP OAuth authorization:', e)
+    MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
+    oauthAuthorizing.value = false
+  }
+}
+
+// Authorize ALWAYS persists the current form first (create or update), so the
+// backend sees auth_type=oauth before issuing the authorization request.
+// Without this, a brand-new service or one just switched to OAuth fails with
+// "MCP service is not configured to use OAuth". The drawer stays open the whole
+// time — the parent re-binds the (now saved) service via the `created` event.
+async function handleAuthorize() {
+  const generation = oauthGeneration
+  const saved = await saveConnection()
+  if (saved && generation === oauthGeneration) await startAuthorize(saved.id)
+}
+
+async function handleRevokeOAuth() {
+  if (!currentService.value?.id) return
+  const serviceId = currentService.value.id
+  cancelOAuthRequests()
+  const generation = oauthGeneration
+  try {
+    await revokeMCPOAuthToken(serviceId)
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
+    oauthAuthorized.value = false
+    oauthTokenState.value = 'reauth_required'
+    MessagePlugin.success(t('mcpServiceDialog.toasts.revoked', '已撤销授权') as string)
+  } catch (e) {
+    if (!isCurrentOAuthRequest(generation, serviceId)) return
+    console.error('Failed to revoke MCP OAuth token:', e)
+    MessagePlugin.error(t('mcpServiceDialog.toasts.revokeFailed', '撤销失败') as string)
+  }
+}
+
+// Header icon name + transport label, mirrored from McpSettings list cards
+// so the list-card → drawer hand-off stays visually continuous.
+const transportLabel = computed(() => {
+  return formData.value.transport_type === 'http-streamable' ? 'HTTP Streamable' : 'SSE'
+})
+
+// Field metadata for the credential subresource. Keep label keys local to
+// MCP so other resources don't accidentally inherit "API Key" / "Bearer
+// Token" labels via the shared component.
+// The unified credential strategy stores its secret in the api_key field
+// (placed verbatim into the configured header). OAuth's only static secret is
+// the optional secret of a pre-registered client; none carries no secret.
+const credentialFields = computed<CredentialFieldDef<McpCredentialField>[]>(() => {
+  if (formData.value.auth_config.auth_type === 'api_key') {
+    return [{ key: 'api_key', label: t('mcpServiceDialog.credentialValue', '密钥值 / Token') }]
+  }
+  if (isOAuth.value) {
+    return [{ key: 'client_secret', label: t('mcpServiceDialog.oauthClientSecret', 'Client Secret（可选）') }]
+  }
+  return []
+})
+
+// Adapter that binds the generic CredentialResource component to the MCP
+// credential endpoints. Recomputed if the user opens a different service.
+const credentialApi = computed<CredentialResourceApi<McpCredentialField>>(() => {
+  const id = currentService.value?.id ?? ''
+  return {
+    save: async (patch) => {
+      const meta = await putMCPCredentials(id, patch)
+      return meta.fields
+    },
+    remove: async (field) => {
+      await deleteMCPCredentialField(id, field)
+    },
+  }
+})
+
+// Initial "configured?" metadata read from the main service response. The
+// component reads this on mount; subsequent state changes after save/remove
+// are tracked locally by the component itself (and re-derived from this
+// whenever the parent reloads the service).
+const credentialMeta = computed(() => currentService.value?.credentials ?? {
+  api_key: { configured: false },
+  token: { configured: false },
+  client_secret: { configured: false },
+})
+
+const rules: Record<string, FormRule[]> = {
+  name: [{ required: true, message: t('mcpServiceDialog.rules.nameRequired') as string, type: 'error' }],
+  transport_type: [{ required: true, message: t('mcpServiceDialog.rules.transportRequired') as string, type: 'error' }],
+  url: [
+    {
+      validator: (val: string) => {
+        if (!val || val.trim() === '') {
+          return { result: false, message: t('mcpServiceDialog.rules.urlRequired') as string, type: 'error' }
+        }
+        try {
+          new URL(val)
+          return { result: true, message: '', type: 'success' }
+        } catch {
+          return { result: false, message: t('mcpServiceDialog.rules.urlInvalid') as string, type: 'error' }
+        }
+      },
+    },
+  ],
+}
+
+const dialogVisible = computed({
+  get: () => props.visible,
+  set: (value) => emit('update:visible', value),
+})
+
+// ---- Advanced numeric inputs (text-bound proxies) ----
+// We bind text instead of v-model directly to advanced_config.<n> so the
+// user can clear the field and see the placeholder while typing. On blur
+// we coerce, clamp, and write back; bad values fall back to the default.
+const advancedTimeoutText = computed<string>({
+  get: () => String(formData.value.advanced_config.timeout ?? ''),
+  set: (v) => { formData.value.advanced_config.timeout = parseSloppyInt(v) ?? 30 },
+})
+const advancedRetryCountText = computed<string>({
+  get: () => String(formData.value.advanced_config.retry_count ?? ''),
+  set: (v) => { formData.value.advanced_config.retry_count = parseSloppyInt(v) ?? 3 },
+})
+const advancedRetryDelayText = computed<string>({
+  get: () => String(formData.value.advanced_config.retry_delay ?? ''),
+  set: (v) => { formData.value.advanced_config.retry_delay = parseSloppyInt(v) ?? 1 },
+})
+
+// Permissive int parser — keeps '' / NaN inputs as null instead of 0 so the
+// field can stay visually empty while the user is still typing. Negative
+// numbers and non-int chars are rejected (returns null).
+function parseSloppyInt(raw: string): number | null {
+  if (raw == null) return null
+  const s = String(raw).trim()
+  if (!s) return null
+  const n = Number(s)
+  if (!Number.isFinite(n)) return null
+  return Math.trunc(n)
+}
+
+function onAdvancedNumberBlur(
+  field: 'timeout' | 'retry_count' | 'retry_delay',
+  fallback: number,
+  min: number,
+  max: number,
+) {
+  const cur = formData.value.advanced_config[field]
+  if (cur == null || !Number.isFinite(cur)) {
+    formData.value.advanced_config[field] = fallback
+    return
+  }
+  // Clamp to [min, max] on blur — gives the input "settled" feedback even
+  // though native type=number doesn't enforce its own min/max attribute
+  // for typed values (only for stepper buttons).
+  formData.value.advanced_config[field] = Math.min(max, Math.max(min, cur))
+}
+
+const resetForm = () => {
+  formData.value = {
+    name: '',
+    usage_instructions: '',
+    enabled: true,
+    transport_type: 'sse',
+    url: '',
+    headers: [],
+    auth_config: {
+      auth_type: '', api_key: '', api_key_header: '', token: '', scopes: [], auth_server_metadata_url: '',
+      client_id: '', client_secret: '',
+    },
+    advanced_config: { timeout: 30, retry_count: 3, retry_delay: 1 },
+  }
+  formRef.value?.clearValidate()
+}
+
+watch(
+  () => [props.visible, props.service] as const,
+  ([visible, service], previous) => {
+    if (!visible) { cancelOAuthRequests(); usageGeneration++; generatingUsage.value = false; return }
+    const opening = !previous?.[0]
+    if (!opening && service?.id && savedService.value?.id === service.id) {
+      savedService.value = service
+      return
+    }
+    cancelOAuthRequests()
+    usageGeneration++
+    generatingUsage.value = false
+    savedService.value = service
+    step.value = service?.id ? (props.initialStep ?? 0) : 0
+    toolsSynced.value = false
+    // 同时重置代码导入区域，避免上一个服务残留的粘贴内容/报错漂到新表单
+    codeImportOpen.value = false
+    codeImportText.value = ''
+    codeImportError.value = ''
+    if (service) {
+      const transportType = service.transport_type === 'stdio' ? 'sse' : (service.transport_type || 'sse')
+      formData.value = {
+        name: service.name || '',
+        usage_instructions: service.usage_instructions?.trim() || service.description || '',
+        enabled: service.enabled ?? true,
+        transport_type: transportType as 'sse' | 'http-streamable',
+        url: service.url || '',
+        headers: service.headers
+          ? Object.entries(service.headers).map(([key, value]) => ({ key, value: String(value) }))
+          : [],
+        // Credentials are owned by CredentialResource in edit mode, but reset
+        // the local state too so a switch to add-mode starts clean.
+        auth_config: {
+          // Legacy 'bearer' collapses into the unified 'api_key' strategy; ''
+          // (none) and the rest are preserved.
+          auth_type: service.auth_config?.auth_type === 'bearer'
+            ? 'api_key'
+            : ((service.auth_config?.auth_type as '' | 'api_key' | 'oauth') || ''),
+          api_key: '',
+          api_key_header: service.auth_config?.api_key_header || '',
+          token: '',
+          scopes: service.auth_config?.scopes ? [...service.auth_config.scopes] : [],
+          auth_server_metadata_url: service.auth_config?.auth_server_metadata_url || '',
+          client_id: service.auth_config?.client_id || '',
+          client_secret: '',
+        },
+        advanced_config: {
+          timeout: service.advanced_config?.timeout || 30,
+          retry_count: service.advanced_config?.retry_count || 3,
+          retry_delay: service.advanced_config?.retry_delay || 1,
+        },
+      }
+      oauthAuthorized.value = false
+      oauthTokenState.value = 'reauth_required'
+      refreshOAuthStatus()
+    } else {
+      resetForm()
+    }
+  },
+  { immediate: true },
+)
+
+// Build the request body from the form. `asCreate` controls whether initial
+// secret credentials ride along (POST only — edits route secrets through the
+// /credentials subresource).
+function buildPayload(asCreate: boolean): Partial<MCPService> {
+  // Custom headers: trim, drop blank rows, collapse to a Record. Always send
+  // the field (even when empty) so removing the last header persists on edit.
+  const headersMap: Record<string, string> = {}
+  for (const item of formData.value.headers) {
+    const key = (item.key ?? '').trim()
+    const value = (item.value ?? '').trim()
+    if (key && value) headersMap[key] = value
+  }
+
+  const data: Partial<MCPService> = {
+    name: formData.value.name,
+    enabled: formData.value.enabled,
+    transport_type: formData.value.transport_type,
+    advanced_config: formData.value.advanced_config,
+    url: formData.value.url || undefined,
+    headers: headersMap,
+  }
+
+  // Non-secret auth config (strategy + OAuth params) flows through the main body.
+  const auth: NonNullable<MCPService['auth_config']> = {
+    auth_type: formData.value.auth_config.auth_type,
+  }
+  if (formData.value.auth_config.auth_type === 'api_key') {
+    auth.api_key_header = formData.value.auth_config.api_key_header.trim()
+  }
+  if (isOAuth.value) {
+    auth.scopes = formData.value.auth_config.scopes
+    if (formData.value.auth_config.auth_server_metadata_url) {
+      auth.auth_server_metadata_url = formData.value.auth_config.auth_server_metadata_url
+    }
+    // Always sent so clearing the field returns the service to dynamic
+    // client registration.
+    auth.client_id = formData.value.auth_config.client_id.trim()
+    if (asCreate && formData.value.auth_config.client_secret) {
+      auth.client_secret = formData.value.auth_config.client_secret
+    }
+  }
+  if (asCreate && !isOAuth.value) {
+    if (formData.value.auth_config.api_key) auth.api_key = formData.value.auth_config.api_key
+    if (formData.value.auth_config.token) auth.token = formData.value.auth_config.token
+  }
+  data.auth_config = auth
+  return data
+}
+
+async function saveConnection(): Promise<MCPService | null> {
+  if (submitting.value) return null
+  const valid = await formRef.value?.validate()
+  if (valid !== true) return null
+  if (!formData.value.name.trim()) { MessagePlugin.warning(t('mcpServiceDialog.rules.nameRequired')); return null }
+  try { const url = new URL(formData.value.url); if (!['https:', 'http:'].includes(url.protocol)) throw new Error('url') }
+  catch { MessagePlugin.warning(t('mcpServiceDialog.rules.urlInvalid')); return null }
+  submitting.value = true
+  try {
+    const id = currentService.value?.id
+    const saved = id ? await updateMCPService(id, buildPayload(false)) : await createMCPService(buildPayload(true))
+    savedService.value = saved
+    emit('created', saved)
+    return saved
+  } catch (error) {
+    MessagePlugin.error(t('mcpServiceDialog.toasts.updateFailed'))
+    return null
+  } finally { submitting.value = false }
+}
+
+async function handleNext() {
+  if (metadataBusy.value || generatingUsage.value) return
+  if (await saveConnection()) step.value = 1
+}
+
+async function handleGenerateUsage() {
+  const id = currentService.value?.id
+  if (!id || generatingUsage.value || submitting.value || metadataBusy.value || !toolsSynced.value) return
+  const current = ++usageGeneration
+  generatingUsage.value = true
+  try {
+    const instructions = await generateMCPUsageInstructions(id, locale.value)
+    if (current !== usageGeneration) return
+    formData.value.usage_instructions = instructions
+    MessagePlugin.success(t('mcpMetadata.generated'))
+  } catch {
+    if (current === usageGeneration) MessagePlugin.error(t('mcpMetadata.generateFailed'))
+  } finally {
+    if (current === usageGeneration) generatingUsage.value = false
+  }
+}
+
+watch(isOAuth, (enabled) => { if (!enabled) cancelOAuthRequests() })
+
+onBeforeUnmount(() => { cancelOAuthRequests(); usageGeneration++ })
+
+const handleSubmit = async () => {
+  const id = currentService.value?.id
+  if (!id || submitting.value || metadataBusy.value || generatingUsage.value) return
+  const instructions = formData.value.usage_instructions.trim()
+  if (!instructions) {
+    MessagePlugin.warning(t('mcpMetadata.instructionsRequired'))
+    return
+  }
+  if (!toolsSynced.value) {
+    MessagePlugin.warning(t('mcpMetadata.syncRequired'))
+    return
+  }
+  submitting.value = true
+  try {
+    await updateMCPService(id, { usage_instructions: instructions })
+    MessagePlugin.success(t('mcpServiceDialog.toasts.updated'))
+    emit('success')
+  } catch (error) { MessagePlugin.error(t('mcpServiceDialog.toasts.updateFailed')) }
+  finally { submitting.value = false }
+}
+
+const handleClose = () => {
+  dialogVisible.value = false
+}
+</script>
+
+<style scoped lang="less">
+.usage-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  .form-label { margin-bottom: 0; }
+}
+
+.usage-textarea {
+  :deep(.t-textarea__inner) {
+    font-size: var(--app-text-md);
+    line-height: 1.65;
+    padding: 8px 10px;
+  }
+
+  :deep(.t-textarea__info_wrapper),
+  :deep(.t-textarea__limit) {
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.mcp-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.mcp-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--td-text-color-placeholder);
+  transition: color var(--app-motion-fast) ease;
+
+  /* Only the steps that draw a connector need to absorb the leftover width. */
+  &:not(:last-child) {
+    flex: 1;
+  }
+
+  &.is-active {
+    color: var(--td-brand-color);
+  }
+
+  &.is-done {
+    color: var(--td-text-color-secondary);
+  }
+
+  /*
+    Reachable steps render as <button>, so the browser's own control styling has
+    to be undone to keep the rail looking identical either way. Only the cursor
+    and hover state give the affordance away.
+  */
+  &.is-clickable {
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    background: none;
+    border: 0;
+    cursor: pointer;
+
+    &:hover:not(.is-active) {
+      color: var(--td-brand-color);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+      border-radius: var(--app-radius-xs);
+    }
+  }
+}
+
+.mcp-step__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: var(--app-text-xs);
+  font-weight: 600;
+  line-height: 1;
+
+  .is-active & {
+    background: var(--td-brand-color);
+    border-color: var(--td-brand-color);
+    color: #fff;
+  }
+
+  .is-done & {
+    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+    border-color: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
+    color: var(--td-brand-color);
+  }
+}
+
+.mcp-step__title {
+  overflow: hidden;
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-step__line {
+  flex: 1;
+  min-width: 16px;
+  height: 1px;
+  margin: 0 4px;
+  background: var(--td-component-stroke);
+
+  .is-done & {
+    background: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
+  }
+}
+
+
+.mcp-editor-form, .connection-step { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.section-title-block .form-desc { margin-top: 5px; }
+
+// ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----
+.form-item {
+  margin-bottom: 0;
+}
+
+// ---- 自定义请求头（与 ModelEditorDialog 同款 key/value 行） ----
+.custom-headers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.custom-headers-desc {
+  margin: 4px 0 8px;
+}
+
+.custom-headers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-header-key {
+  flex: 0 0 38%;
+}
+
+.custom-header-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.custom-header-remove {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-error-color);
+  }
+}
+
+// ---- 从代码导入 ----
+.code-import {
+  &__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+  }
+
+  &__body {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__warn {
+    color: var(--td-warning-color);
+  }
+
+  &__textarea :deep(textarea) {
+    font-family: var(--td-font-family-mono);
+    font-size: var(--app-text-sm);
+  }
+
+  &__error {
+    margin: 0;
+    font-size: var(--app-text-sm);
+    color: var(--td-error-color);
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+.oauth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.test-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  .setting-drawer__section-title {
+    margin-bottom: 0;
+  }
+
+  .test-result-close {
+    flex-shrink: 0;
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.oauth-hint {
+  margin: 0;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--app-text-md);
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  line-height: 1.4;
+
+  &.required::before {
+    content: '*';
+    color: var(--td-error-color);
+    margin-right: 4px;
+    font-weight: 500;
+    line-height: 1;
+  }
+}
+
+.form-desc {
+  margin: 4px 0 0 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+
+  &--inline {
+    margin: 0;
+  }
+}
+
+:deep(.t-input),
+:deep(.t-select),
+:deep(.t-textarea),
+:deep(.t-input-number) {
+  width: 100%;
+  font-size: var(--app-text-md);
+}
+
+// 隐藏 t-form 默认 form-item 容器 — 走自定义 .form-item / .form-label
+:deep(.t-form) .t-form-item {
+  display: none;
+}
+
+// ---- 紧凑 pill segmented（transport 切换） ----
+.source-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: var(--td-bg-color-component);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+}
+
+.source-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
+  line-height: 1;
+  transition: all var(--app-motion-fast) ease;
+
+  &:hover:not(.is-active) {
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &.is-active {
+    background: var(--td-bg-color-container);
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+}
+
+.source-option__icon {
+  font-size: var(--app-text-base);
+  flex-shrink: 0;
+}
+
+.source-option__label {
+  white-space: nowrap;
+}
+
+.vision-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// ---- 高级配置数字输入：替代 t-input-number 的步进按钮，更轻量 ----
+// 用普通 t-input + suffix 单位 + type=number。原生 number 输入会
+// 在 Chrome 上显示一对 spin button，scoped 里把它们隐藏掉以保持视觉
+// 干净。最大/最小值通过 onBlur clamp，而不是依赖原生 step 限制。
+.number-input {
+  :deep(input::-webkit-outer-spin-button),
+  :deep(input::-webkit-inner-spin-button) {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+  }
+
+  // Firefox 把 type=number 渲染成 textfield 风格更好看
+  :deep(input[type="number"]) {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
+
+.number-input__unit {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+  user-select: none;
+}
+
+// ---- footer-left 测试按钮的状态 icon ----
+.status-icon {
+  font-size: var(--app-text-xl);
+  flex-shrink: 0;
+
+  &.available {
+    color: var(--td-brand-color);
+  }
+
+  &.unavailable {
+    color: var(--td-error-color);
+  }
+}
+
+// ---- 副标题里的小标签 ----
+.subtitle-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  margin-left: 6px;
+  height: 16px;
+  font-size: var(--app-text-2xs);
+  font-weight: 500;
+  border-radius: 3px;
+
+  &--ok {
+    color: var(--td-success-color);
+    background: var(--td-success-color-light);
+  }
+
+  &--muted {
+    color: var(--td-text-color-placeholder);
+    background: var(--td-bg-color-component);
+  }
+}
+</style>
+
+<!--
+  Non-scoped block: per-transport header-icon coloring. Mirrors the matching
+  .service-card--{transport} .service-card__badge in McpSettings so the
+  list-card → drawer hand-off stays visually continuous.
+-->
+<style lang="less">
+.mcp-drawer .setting-drawer__body .setting-drawer__section.mcp-settings-group {
+  padding: 12px 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+  gap: 12px;
+  min-width: 0;
+  box-sizing: border-box;
+
+  .setting-drawer__section-title { margin: 0; }
+  &:last-child { border-bottom: 0; padding-bottom: 0; }
+}
+</style>

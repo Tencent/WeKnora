@@ -1,0 +1,223 @@
+package interfaces
+
+import (
+	"context"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// ChunkImageInfo holds (knowledge_id, image_info) pairs for image cleanup before chunk deletion.
+type ChunkImageInfo struct {
+	KnowledgeID string `gorm:"column:knowledge_id"`
+	ImageInfo   string `gorm:"column:image_info"`
+}
+
+// ChunkRepository defines the interface for chunk repository operations
+type ChunkRepository interface {
+	// ListAllChunksByKnowledgeID includes every type and storage status for
+	// scoped lifecycle operations; UI pagination hides unindexed chunks.
+	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+
+	// CreateChunks creates chunks
+	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// GetChunkByID gets a chunk by id
+	GetChunkByID(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error)
+	// GetChunkByIDOnly gets a chunk by id without tenant filter (for permission resolution)
+	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
+	// GetChunkBySeqID gets a chunk by seq_id
+	GetChunkBySeqID(ctx context.Context, tenantID uint64, seqID int64) (*types.Chunk, error)
+	// ListChunksByID lists chunks by ids
+	ListChunksByID(ctx context.Context, tenantID uint64, ids []string) ([]*types.Chunk, error)
+	// ListChunksByIDOnly lists chunks by ids without tenant filter (for shared KB resolution).
+	ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
+	// ListChunkEvidenceByIDOnly loads only ID, KnowledgeBaseID, KnowledgeID and
+	// IsEnabled for live chunks, without a tenant filter for shared KB resolution.
+	ListChunkEvidenceByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
+	// ListChunksBySeqID lists chunks by seq_ids
+	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
+	// ListChunksByKnowledgeID lists the knowledge's text chunks. Despite the name
+	// it filters to chunk_type = 'text'; reach for ListChunksByKnowledgeIDAndTypes
+	// when summary, parent_text or image chunks are needed too.
+	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListChunksByKnowledgeIDAndTypes lists the knowledge's chunks restricted to
+	// the given chunk types, ordered by chunk_index.
+	ListChunksByKnowledgeIDAndTypes(
+		ctx context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+	) ([]*types.Chunk, error)
+	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
+	// When tagIDs is non-empty, results are filtered by tag_id (OR semantics).
+	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
+	//   - FAQ: sorts by updated_at, searchField can be "standard_question", "similar_questions", "answers", or "" for all
+	//   - Document (manual): sorts by chunk_index, keyword searches content only
+	// sortOrder: "asc" for ascending, default is descending
+	// searchField: specifies which field to search in (only applicable for FAQ type)
+	// isEnabled: when non-nil, filters chunks by their enabled state. Agent/model
+	// consumers must pass true so disabled content never enters model context.
+	ListPagedChunksByKnowledgeID(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		page *types.Pagination,
+		chunkType []types.ChunkType,
+		tagIDs []string,
+		keyword string,
+		searchField string,
+		sortOrder string,
+		knowledgeType string,
+		isEnabled *bool,
+	) ([]*types.Chunk, int64, error)
+	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
+	// ListChunkNeighbors returns up to `before` enabled chunks immediately
+	// preceding chunkIndex and up to `after` immediately following it, in
+	// document order, restricted to chunkTypes. It walks chunk_index rather
+	// than list positions, so gaps left by other chunk types (parents,
+	// summaries, images) do not shift the neighbourhood.
+	ListChunkNeighbors(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		chunkIndex int,
+		before int,
+		after int,
+		chunkTypes []types.ChunkType,
+	) ([]*types.Chunk, error)
+	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
+	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
+	// ListChunksByParentIDsOnly lists chunks by parent IDs without tenant filter
+	// (for shared KB resolution).
+	ListChunksByParentIDsOnly(ctx context.Context, parentIDs []string) ([]*types.Chunk, error)
+	// UpdateChunk updates a chunk
+	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
+	// CreateChunkRevision stores an immutable snapshot of a superseded revision.
+	CreateChunkRevision(ctx context.Context, revision *types.ChunkRevision) error
+	// SaveChunkRevision atomically snapshots the old row and applies the new
+	// row only when its revision still matches expectedRevision.
+	SaveChunkRevision(ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int) error
+	// ListChunkRevisions returns snapshots ordered newest first.
+	ListChunkRevisions(ctx context.Context, tenantID uint64, chunkID string) ([]*types.ChunkRevision, error)
+	// GetChunkRevision returns one historical snapshot.
+	GetChunkRevision(ctx context.Context, tenantID uint64, chunkID string, revision int) (*types.ChunkRevision, error)
+	// UpdateChunks updates chunks in batch
+	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
+	SaveChunks(ctx context.Context, chunks []*types.Chunk) error
+	// UpdateChunkFieldsByIDs sets the same column values (e.g. {"status": 2})
+	// on every listed chunk of the tenant with one UPDATE per batch of IDs.
+	// updated_at is set automatically.
+	UpdateChunkFieldsByIDs(ctx context.Context, tenantID uint64, ids []string, fields map[string]interface{}) error
+	// DeleteChunk deletes a chunk
+	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
+	// DeleteChunks deletes chunks by IDs in batch
+	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
+	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
+	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
+	// DeleteByKnowledgeList deletes all chunks for a knowledge list
+	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
+	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
+	ListImageInfoByKnowledgeIDs(ctx context.Context, tenantID uint64, knowledgeIDs []string) ([]ChunkImageInfo, error)
+	// ListImageAssets returns one page of a KB's de-duplicated image assets
+	// (one per image_info entry, keyed by URL) with the query's filters and
+	// sort applied in the database, plus the filtered total.
+	ListImageAssets(
+		ctx context.Context, tenantID uint64, kbID string, q *types.ImageAssetQuery,
+	) ([]types.ImageAssetRow, int64, error)
+	// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
+	MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error
+	// DeleteChunksByTagID deletes all chunks with the specified tag ID
+	// Returns the IDs of deleted chunks for index cleanup
+	DeleteChunksByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, excludeIDs []string) ([]string, error)
+	// CountChunksByKnowledgeBaseID counts the number of chunks in a knowledge base.
+	CountChunksByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
+	// DeleteUnindexedChunks deletes unindexed chunks by knowledge id and chunk index range
+	DeleteUnindexedChunks(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListAllFAQChunksByKnowledgeID lists all FAQ chunks for a knowledge ID
+	// only ID and ContentHash fields for efficiency
+	ListAllFAQChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListAllFAQChunksWithMetadataByKnowledgeBaseID lists all FAQ chunks for a knowledge base ID
+	// returns ID and Metadata fields for duplicate question checking
+	ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Chunk, error)
+	// FindFAQChunkWithDuplicateQuestion finds a single FAQ chunk whose standard_question or
+	// similar_questions overlap with the given question list. Returns nil if no duplicate found.
+	FindFAQChunkWithDuplicateQuestion(ctx context.Context, tenantID uint64, kbID string, excludeChunkID string, questions []string) (*types.Chunk, error)
+	// ListAllFAQChunksForExport lists all FAQ chunks for export with full metadata, tag_id, is_enabled, and flags
+	ListAllFAQChunksForExport(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// UpdateChunkFlagsBatch updates flags for multiple chunks in batch using a single SQL statement.
+	// setFlags: map of chunk ID to flags to set (OR operation)
+	// clearFlags: map of chunk ID to flags to clear (AND NOT operation)
+	UpdateChunkFlagsBatch(ctx context.Context, tenantID uint64, kbID string, setFlags map[string]types.ChunkFlags, clearFlags map[string]types.ChunkFlags) error
+	// UpdateChunkFieldsByTagID updates fields for all chunks with the specified tag ID.
+	// Supports updating is_enabled, flags, and tag_id fields.
+	// newTagID: if not nil, updates tag_id to this value (empty string means uncategorized)
+	UpdateChunkFieldsByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, isEnabled *bool, setFlags types.ChunkFlags, clearFlags types.ChunkFlags, newTagID *string, excludeIDs []string) ([]string, error)
+	// FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
+	FAQChunkDiff(ctx context.Context, srcTenantID uint64, srcKBID string, dstTenantID uint64, dstKBID string) (*types.FAQChunkDiffResult, error)
+	// ListFAQChunkStatusByIDs loads status fields for FAQ clone sync.
+	ListFAQChunkStatusByIDs(ctx context.Context, tenantID uint64, ids []string) (map[string]*types.FAQChunkStatus, error)
+
+	// ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
+	// Filter by explicitly selected kbIDs, knowledgeIDs, and/or FAQ tagIDs.
+	// Returns up to `limit` chunks sorted by updated_at descending.
+	ListRecommendedFAQChunks(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, tagIDs []string, limit int) ([]*types.Chunk, error)
+
+	// ListRecentDocumentChunksWithQuestions lists recent document chunks that have generated questions.
+	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.
+	// Returns up to `limit` chunks sorted by updated_at descending.
+	ListRecentDocumentChunksWithQuestions(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
+}
+
+// ChunkService mutations require explicit KB write grants and validate persisted
+// document bindings. Trusted processing/rollback code uses ChunkRepository after
+// its own task admission; the execution tenant alone is not a write grant.
+// ChunkService defines the interface for chunk service operations
+type ChunkService interface {
+	// CreateChunks creates chunks
+	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// GetChunkByID gets a chunk by id (uses tenant from context)
+	GetChunkByID(ctx context.Context, id string) (*types.Chunk, error)
+	// GetChunkByIDOnly gets a chunk by id without tenant filter (for permission resolution)
+	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
+	// ListChunksByKnowledgeID lists chunks by knowledge id
+	ListChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error)
+	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id
+	ListPagedChunksByKnowledgeID(
+		ctx context.Context,
+		knowledgeID string,
+		page *types.Pagination,
+		chunkType []types.ChunkType,
+	) (*types.PageResult, error)
+	// ListImagesByKnowledgeBaseID lists the image assets of a KB with keyword
+	// search, schema-driven attribute filters, sorting and pagination.
+	ListImagesByKnowledgeBaseID(
+		ctx context.Context,
+		kbID string,
+		page *types.Pagination,
+		filter *types.ImageListFilter,
+	) (*types.PageResult, error)
+	// UpdateChunk updates a chunk
+	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
+	// UpdateChunks updates chunks in batch
+	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// DeleteChunk deletes a chunk
+	DeleteChunk(ctx context.Context, id string) error
+	// DeleteChunks deletes chunks by IDs in batch
+	DeleteChunks(ctx context.Context, ids []string) error
+	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
+	DeleteChunksByKnowledgeID(ctx context.Context, knowledgeID string) error
+	// DeleteByKnowledgeList deletes all chunks for a knowledge list
+	DeleteByKnowledgeList(ctx context.Context, ids []string) error
+	// ListChunkByParentID lists chunks by parent id
+	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
+	// GetRepository gets the chunk repository
+	GetRepository() ChunkRepository
+	// DeleteGeneratedQuestion deletes a single generated question from a chunk by question ID
+	// This updates the chunk metadata and removes the corresponding vector index
+	DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error
+	// UpdateDocumentChunk applies a revision-checked edit and synchronizes retrieval indices.
+	UpdateDocumentChunk(ctx context.Context, chunkID string, content *string, isEnabled *bool, expectedRevision *int) (*types.Chunk, error)
+	// ListChunkRevisions lists immutable snapshots for a chunk.
+	ListChunkRevisions(ctx context.Context, chunkID string) ([]*types.ChunkRevision, error)
+	// RevertDocumentChunk restores a historical revision as a new current revision.
+	RevertDocumentChunk(ctx context.Context, chunkID string, revision int, expectedRevision *int) (*types.Chunk, error)
+	// UpsertGeneratedQuestion creates or updates a generated retrieval question.
+	UpsertGeneratedQuestion(ctx context.Context, chunkID string, questionID string, question string) (*types.GeneratedQuestion, error)
+}

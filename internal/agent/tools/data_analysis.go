@@ -1,0 +1,1076 @@
+package tools
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
+)
+
+// DataAnalysisTableName is the only table name the model needs to know when
+// querying a CSV/Excel document through data_analysis. Each document is loaded
+// into a physical DuckDB table named after its knowledge ID; that name is
+// never shown to the model. Every query runs on a private connection where
+// "dataset" is a temporary view over the selected document, so the model
+// references the same fixed identifier for every document and the knowledge
+// ID never has to appear inside SQL text.
+const DataAnalysisTableName = "dataset"
+
+var dataAnalysisTool = BaseTool{
+	name: ToolDataAnalysis,
+	description: "Use this tool when the knowledge is CSV or Excel files. It loads the document into DuckDB " +
+		"and executes a read-only SQL query for data analysis. The selected document is always exposed as " +
+		"the single table \"" + DataAnalysisTableName + "\"; write SQL against that table name and never put " +
+		"the document ID inside the SQL. For Excel files with multiple sheets, non-empty sheets are loaded into " +
+		"the same table and the source sheet name is exposed as a '__sheet_name' column so you can " +
+		"filter/aggregate per sheet. A legacy binary .xls is converted to .xlsx before it is read; " +
+		"if that conversion fails, re-save the workbook as .xlsx or export the sheet as .csv. " +
+		"If the user's question requires data statistics, convert the question into SQL and execute it.",
+	schema: utils.GenerateSchema[DataAnalysisInput](),
+}
+
+// excelSheetNameColumn is the name of the synthetic column that identifies
+// which Excel sheet a row came from when multiple sheets are unioned together.
+const excelSheetNameColumn = "__sheet_name"
+
+// legacyXLSMagic is the OLE2/CFB compound-document signature that binary BIFF
+// .xls workbooks start with ("D0 CF 11 E0 A1 B1 1A E1").
+//
+// DuckDB's excel extension only reads the ZIP-based OOXML container
+// (.xlsx/.xlsm). A genuine .xls is converted before read_xlsx; if that
+// conversion fails, the caller gets an actionable error instead of
+// "No xl/workbook.xml found in xlsx file".
+var legacyXLSMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+
+// hasLegacyXLSContainer reports whether path holds an OLE2 compound document,
+// i.e. a binary BIFF .xls workbook.
+//
+// The sniff is by content, not by extension: a .xls that is really a renamed
+// .xlsx is a ZIP archive and returns false, so it keeps loading through the
+// normal read_xlsx path. Unreadable or truncated files also return false and
+// are left to DuckDB to report.
+func hasLegacyXLSContainer(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	head := make([]byte, len(legacyXLSMagic))
+	if _, err := io.ReadFull(f, head); err != nil {
+		return false
+	}
+	return bytes.Equal(head, legacyXLSMagic)
+}
+
+// errLegacyBinaryXLS is returned when a binary .xls workbook cannot be
+// converted to .xlsx. Naming the conversion the caller can still do beats
+// DuckDB's "No xl/workbook.xml found in xlsx file".
+func errLegacyBinaryXLS() error {
+	return fmt.Errorf(
+		"legacy binary .xls workbooks are not supported by data analysis: " +
+			"only the ZIP-based .xlsx format can be read; " +
+			"re-save the workbook as .xlsx (or export the sheet as .csv) and upload it again",
+	)
+}
+
+// sqlSingleQuoteEscape escapes single quotes in a string so it can be safely
+// embedded inside a single-quoted SQL literal.
+func sqlSingleQuoteEscape(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
+func normalizeIdentifierForMatch(s string) string {
+	normalized := strings.ToLower(strings.TrimSpace(s))
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	normalized = strings.ReplaceAll(normalized, "\u3000", "")
+	return normalized
+}
+
+func reconcileSQLColumnsWithSchema(sqlText string, schema *TableSchema) (string, []string) {
+	if schema == nil || len(schema.Columns) == 0 {
+		return sqlText, nil
+	}
+
+	normalizedToCanonical := make(map[string]string, len(schema.Columns))
+	for _, col := range schema.Columns {
+		key := normalizeIdentifierForMatch(col.Name)
+		if key == "" {
+			continue
+		}
+		if _, exists := normalizedToCanonical[key]; !exists {
+			normalizedToCanonical[key] = col.Name
+		}
+	}
+
+	// Use the same SQL lexer as validation so quoted text in literals and
+	// comments is never mistaken for an identifier. Leave invalid SQL to validation.
+	tokens, err := pg_query.Scan(sqlText)
+	if err != nil {
+		return sqlText, nil
+	}
+	fixes := make([]string, 0)
+	var rewritten strings.Builder
+	previous := 0
+	for _, token := range tokens.Tokens {
+		raw := sqlText[token.Start:token.End]
+		if token.Token != pg_query.Token_IDENT || !strings.HasPrefix(raw, `"`) {
+			continue
+		}
+		name := strings.ReplaceAll(raw[1:len(raw)-1], `""`, `"`)
+		canonical, ok := normalizedToCanonical[normalizeIdentifierForMatch(name)]
+		if !ok || canonical == name {
+			continue
+		}
+		fixes = append(fixes, fmt.Sprintf("%q -> %q", name, canonical))
+		rewritten.WriteString(sqlText[previous:token.Start])
+		fmt.Fprintf(&rewritten, `"%s"`, strings.ReplaceAll(canonical, `"`, `""`))
+		previous = int(token.End)
+	}
+	rewritten.WriteString(sqlText[previous:])
+
+	return rewritten.String(), fixes
+}
+
+func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
+	if sqlErr == nil || schema == nil {
+		return ""
+	}
+	msg := sqlErr.Error()
+	if !strings.Contains(msg, `Referenced column "`) || !strings.Contains(msg, `not found`) {
+		return ""
+	}
+
+	matches := regexp.MustCompile(`Referenced column "([^"]+)" not found`).FindStringSubmatch(msg)
+	if len(matches) < 2 {
+		return ""
+	}
+
+	missing := matches[1]
+	normalizedMissing := normalizeIdentifierForMatch(missing)
+	if normalizedMissing == "" {
+		return ""
+	}
+
+	for _, col := range schema.Columns {
+		if normalizeIdentifierForMatch(col.Name) == normalizedMissing {
+			return fmt.Sprintf("Column %q does not exist. Did you mean %q? Please use the exact column name from schema.", missing, col.Name)
+		}
+	}
+
+	return ""
+}
+
+type DataAnalysisInput struct {
+	KnowledgeID string `json:"knowledge_id" jsonschema:"doc://N document handle to query"`
+	SQL         string `json:"sql" jsonschema:"Read-only SELECT executed on the document. Reference the document as the table \"dataset\" (for example SELECT COUNT(*) FROM dataset); it is the only table available"` //nolint:lll // jsonschema tag
+}
+
+type DataAnalysisTool struct {
+	BaseTool
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	fileService          interfaces.FileService
+	tenantService        interfaces.TenantService
+	db                   *sql.DB
+	sessionID            string
+	createdTables        []string        // Cleanup candidates, including failed CREATE attempts
+	loadedTables         map[string]bool // CREATE succeeded, even if a subsequent schema read failed
+	// localBaseDir is the LOCAL_STORAGE_BASE_DIR value captured at construction
+	// time so resolveFileServiceForKnowledge uses the same base path that was
+	// used when the local FileService was initialised by DI.  Re-reading the
+	// env var at request time can produce a different (or empty) value if the
+	// variable was not exported to the sub-process or was set programmatically
+	// after startup, causing GetFile to look in the wrong directory (#1040).
+	localBaseDir    string
+	storageResolver interfaces.StorageBackendResolver
+	searchTargets   types.SearchTargets
+	scopeEnforced   bool
+}
+
+// WithSearchTargets enables the Agent-only authorization boundary. Other
+// internal data-analysis callers retain their existing service-owned scope.
+// The flag is set independently of the slice length: an Agent turn that ended
+// up with no search target must reject every document, not fall back to
+// unrestricted access.
+func (t *DataAnalysisTool) WithSearchTargets(searchTargets types.SearchTargets) *DataAnalysisTool {
+	t.searchTargets = searchTargets
+	t.scopeEnforced = true
+	return t
+}
+
+func NewDataAnalysisTool(
+	knowledgeBaseService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
+	tenantService interfaces.TenantService,
+	fileService interfaces.FileService,
+	db *sql.DB,
+	sessionID string,
+	storageResolvers ...interfaces.StorageBackendResolver,
+) *DataAnalysisTool {
+	tool := &DataAnalysisTool{
+		BaseTool:             dataAnalysisTool,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		fileService:          fileService,
+		tenantService:        tenantService,
+		db:                   db,
+		sessionID:            sessionID,
+		// Capture LOCAL_STORAGE_BASE_DIR once at construction time so that every
+		// call to resolveFileServiceForKnowledge uses the same base path.  The
+		// env var is guaranteed to be set (or empty == "/data/files" fallback)
+		// when the application starts and the DI container is assembled.
+		localBaseDir: strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
+	}
+	if len(storageResolvers) > 0 {
+		tool.storageResolver = storageResolvers[0]
+	}
+	return tool
+}
+
+// recordCreatedTable records a cleanup candidate, not proof that CREATE succeeded.
+func (t *DataAnalysisTool) recordCreatedTable(tableName string) {
+	for _, name := range t.createdTables {
+		if name == tableName {
+			return
+		}
+	}
+	t.createdTables = append(t.createdTables, tableName)
+}
+
+func (t *DataAnalysisTool) markTableLoaded(tableName string) {
+	if t.loadedTables == nil {
+		t.loadedTables = make(map[string]bool)
+	}
+	t.loadedTables[tableName] = true
+}
+
+// Cleanup cleans up the session-specific schema
+func (t *DataAnalysisTool) Cleanup(ctx context.Context) {
+	if len(t.createdTables) == 0 {
+		logger.Infof(ctx, "[Tool][DataAnalysis] No tables to clean up for session: %s", t.sessionID)
+		return
+	}
+
+	logger.Infof(ctx, "[Tool][DataAnalysis] Cleaning up %d tables for session: %s", len(t.createdTables), t.sessionID)
+
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
+	for _, tableName := range t.createdTables {
+		dropSQL := fmt.Sprintf("DROP TABLE IF EXISTS \"%s\"", tableName)
+		if _, err := t.db.ExecContext(cleanupCtx, dropSQL); err != nil {
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to drop table '%s': %v", tableName, err)
+			// Continue to drop other tables even if one fails
+			continue
+		}
+		logger.Infof(ctx, "[Tool][DataAnalysis] Successfully dropped table '%s'", tableName)
+	}
+
+	// Reset both cleanup tracking and successful-load state.
+	t.createdTables = nil
+	t.loadedTables = nil
+}
+
+// Execute executes the SQL query on DuckDB (only read-only queries are allowed)
+func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	logger.Infof(ctx, "[Tool][DataAnalysis] Execute started for session: %s", t.sessionID)
+	var input DataAnalysisInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to parse input args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
+		}, err
+	}
+	if t.scopeEnforced {
+		if _, err := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
+			return &types.ToolResult{Success: false, Error: err.Error()}, err
+		}
+	}
+
+	schema, err := t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': %v", input.KnowledgeID, err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to load knowledge ID '%s': %v", input.KnowledgeID, err),
+		}, err
+	}
+
+	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.SQL, schema); len(fixes) > 0 {
+		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
+		input.SQL = rewrittenSQL
+	}
+
+	// Check if this is a read-only query
+	normalizedSQL := strings.TrimSpace(strings.ToLower(input.SQL))
+	isReadOnly := strings.HasPrefix(normalizedSQL, "select")
+
+	if !isReadOnly {
+		// Reject modification queries
+		logger.Warnf(ctx, "[Tool][DataAnalysis] Modification query rejected for session %s: %s", t.sessionID, input.SQL)
+		return &types.ToolResult{
+			Success: false,
+			Error: "DuckDB tool only supports read-only SELECT queries. " +
+				"Modification operations and configuration statements are not allowed.",
+		}, fmt.Errorf("modification queries are not allowed")
+	}
+
+	if err := validateDataAnalysisSQL(input.SQL, schema); err != nil {
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   err.Error(),
+		}, err
+	}
+
+	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.SQL)
+	// Execute single query and get results
+	results, err := t.executeSingleQuery(ctx, input.SQL, schema.TableName)
+	if err != nil {
+		if suggestion := buildMissingColumnSuggestion(err, schema); suggestion != "" {
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("Query execution failed: %v. %s", err, suggestion),
+			}, err
+		}
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Query execution failed: %v", err),
+		}, err
+	}
+
+	queryOutput := t.formatQueryResults(results, input.SQL)
+	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
+	return &types.ToolResult{
+		Success: true,
+		Output:  queryOutput,
+		Data: map[string]interface{}{
+			"rows":         results,
+			"row_count":    len(results),
+			"query":        input.SQL,
+			"display_type": ToolDataAnalysis,
+			"session_id":   t.sessionID,
+		},
+	}, nil
+}
+
+// executeSingleQuery executes a single SQL query and returns columns and results
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - sqlQuery: the SQL query to execute
+//   - existingColumns: existing column names to merge with (can be nil or empty)
+//
+// Returns:
+//   - []string: merged column names (existing + new columns, deduplicated)
+//   - []map[string]string: query results
+//   - error: any error that occurred during execution
+//
+// validateDataAnalysisSQL enforces the read-only, single-table contract. The
+// model-facing DataAnalysisTableName and the physical table are both accepted
+// so that internal callers (ingest sampling, older stored schema summaries)
+// keep working; a query against anything else is rejected with an error that
+// names the table the model should have used.
+func validateDataAnalysisSQL(sqlQuery string, schema *TableSchema) error {
+	// IMPORTANT: Must enable validateSelectStmt to block RangeFunction attacks
+	_, validation := utils.ValidateSQL(sqlQuery,
+		utils.WithAllowedTables(DataAnalysisTableName, schema.TableName),
+		utils.WithSelectOnly(),
+		utils.WithSingleStatement(),      // Block multiple statements
+		utils.WithNoDangerousFunctions(), // Block dangerous functions
+	)
+	if validation.Valid {
+		return nil
+	}
+	for _, validationErr := range validation.Errors {
+		if validationErr.Type == "table_not_allowed" {
+			return fmt.Errorf(
+				"SQL validation failed: %s. The selected document is exposed as the single table %q; "+
+					"write the query against that table name and pass the document only through knowledge_id",
+				validationErr.Message, DataAnalysisTableName,
+			)
+		}
+	}
+	return fmt.Errorf("SQL validation failed: %v", validation.Errors)
+}
+
+// executeSingleQuery runs a validated query on a dedicated connection where
+// DataAnalysisTableName is a temporary view over the document's physical
+// table. Temporary objects are connection-local in DuckDB, so concurrent
+// sessions analysing different documents never observe each other's view; the
+// view is replaced on entry and dropped on exit so a pooled connection carries
+// nothing over to its next user.
+func (t *DataAnalysisTool) executeSingleQuery(
+	ctx context.Context, sqlQuery string, physicalTable string,
+) ([]map[string]string, error) {
+	conn, err := t.db.Conn(ctx)
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to acquire connection: %v", err)
+		return nil, fmt.Errorf("failed to acquire database connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	viewSQL := fmt.Sprintf(
+		`CREATE OR REPLACE TEMPORARY VIEW "%s" AS SELECT * FROM "%s"`,
+		DataAnalysisTableName, physicalTable,
+	)
+	if _, err := conn.ExecContext(ctx, viewSQL); err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to expose table '%s' as %s: %v",
+			physicalTable, DataAnalysisTableName, err)
+		return nil, fmt.Errorf("failed to expose document table: %w", err)
+	}
+	defer func() {
+		dropSQL := fmt.Sprintf(`DROP VIEW IF EXISTS "%s"`, DataAnalysisTableName)
+		if _, err := conn.ExecContext(context.WithoutCancel(ctx), dropSQL); err != nil {
+			logger.Warnf(ctx, "[Tool][DataAnalysis] Failed to drop temporary view %s: %v", DataAnalysisTableName, err)
+		}
+	}()
+
+	rows, err := conn.QueryContext(ctx, sqlQuery)
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Query execution failed: %v", err)
+		return nil, fmt.Errorf("query execution failed: %w", err)
+	}
+	defer rows.Close()
+
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get columns: %v", err)
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// Process results
+	results := make([]map[string]string, 0)
+	for rows.Next() {
+		columnValues := make([]interface{}, len(columns))
+		columnPointers := make([]interface{}, len(columns))
+		for i := range columnValues {
+			columnPointers[i] = &columnValues[i]
+		}
+
+		if err := rows.Scan(columnPointers...); err != nil {
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to scan row: %v", err)
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		rowMap := make(map[string]string)
+		for i, colName := range columns {
+			val := columnValues[i]
+			// Convert []byte to string for better readability
+			if b, ok := val.([]byte); ok {
+				rowMap[colName] = string(b)
+			} else {
+				rowMap[colName] = fmt.Sprintf("%v", val)
+			}
+		}
+		results = append(results, rowMap)
+	}
+
+	if err := rows.Err(); err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Error iterating rows: %v", err)
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return results, nil
+}
+
+// formatQueryResults formats query results into JSONL format (one JSON object per line)
+func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query string) string {
+	var output strings.Builder
+
+	output.WriteString("=== DuckDB Query Results ===\n\n")
+	output.WriteString(fmt.Sprintf("Executed SQL: %s\n\n", query))
+	output.WriteString(fmt.Sprintf("Returned %d rows\n\n", len(results)))
+
+	if len(results) == 0 {
+		output.WriteString("No matching records found.\n")
+		return output.String()
+	}
+
+	output.WriteString("=== Data Details ===\n\n")
+	if len(results) > 10 {
+		output.WriteString(fmt.Sprintf("Showing all %d records. Consider using a LIMIT clause to restrict the result count for better performance.\n\n", len(results)))
+	}
+
+	// Write each record as a separate JSON line
+	for i, record := range results {
+		recordBytes, _ := json.Marshal(record)
+
+		// Remove the trailing newline added by Encode
+		recordStr := strings.Trim(string(recordBytes), "\n")
+		output.WriteString(fmt.Sprintf("record %d: %s\n", i+1, recordStr))
+	}
+
+	return output.String()
+}
+
+// TableSchema represents the schema information of a table
+type TableSchema struct {
+	TableName string                 `json:"table_name"`
+	Columns   []ColumnInfo           `json:"columns"`
+	RowCount  int64                  `json:"row_count"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ColumnInfo represents information about a single column
+type ColumnInfo struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Nullable string `json:"nullable"`
+}
+
+// LoadFromCSV loads data from a CSV file into a DuckDB table and returns the table schema
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - filename: path to the CSV file
+//   - tableName: name of the table to create
+//
+// Returns:
+//   - *TableSchema: schema information of the created table
+//   - error: any error that occurred during the operation
+func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
+	logger.Infof(ctx, "[Tool][DataAnalysis] Loading CSV file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
+
+	if !t.loadedTables[tableName] {
+		// Keep cleanup tracking even if CREATE fails; only successful creation
+		// makes the table reusable by a later call.
+		t.recordCreatedTable(tableName)
+		// Create table from CSV using DuckDB's read_csv_auto function
+		// with explicit header detection and VARCHAR coercion to align with
+		// Excel loading behavior.
+		// Table will be created in the session schema
+		createTableSQL := fmt.Sprintf(
+			"CREATE TABLE \"%s\" AS SELECT * FROM read_csv_auto('%s', header=true, all_varchar=true)",
+			tableName, sqlSingleQuoteEscape(filename),
+		)
+
+		_, err := t.db.ExecContext(ctx, createTableSQL)
+		if err != nil {
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: %v", err)
+			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
+		}
+		t.markTableLoaded(tableName)
+
+		logger.Infof(ctx, "[Tool][DataAnalysis] Successfully created table '%s' from CSV file in session %s", tableName, t.sessionID)
+	}
+
+	// Get and return the table schema
+	return t.LoadFromTable(ctx, tableName)
+}
+
+// LoadFromExcel loads data from an Excel file into a DuckDB table and returns the table schema.
+//
+// Multi-sheet workbooks are supported: XLSX sheets containing only formatting
+// are skipped; rows from the remaining sheets are unioned (UNION ALL BY NAME) into a
+// single table. A synthetic '__sheet_name' column is added so downstream SQL
+// can filter / aggregate per sheet. If spatial metadata is unavailable, sheet
+// names are read from the workbook itself rather than silently omitting sheets.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - filename: path to the Excel file
+//   - tableName: name of the table to create
+//
+// Returns:
+//   - *TableSchema: schema information of the created table
+//   - error: any error that occurred during the operation
+//
+// Note: requires the DuckDB 'excel' extension (for read_xlsx). Sheet discovery
+// uses 'spatial' (st_read_meta) when available, with OOXML metadata as a fallback.
+//
+// Binary BIFF .xls workbooks are converted to a temporary .xlsx before DuckDB
+// is touched. The excel extension only reads the ZIP-based OOXML container, so
+// a real .xls would otherwise surface as "No xl/workbook.xml found in xlsx
+// file". A workbook that cannot be converted returns an actionable error.
+func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
+	logger.Infof(ctx, "[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
+
+	if !t.loadedTables[tableName] {
+		if hasLegacyXLSContainer(filename) {
+			prepared, cleanup, err := prepareExcelForDuckDB(filename)
+			if err != nil {
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis] Could not convert legacy binary .xls workbook '%s' (session=%s): %v",
+					filename, t.sessionID, err,
+				)
+				return nil, errLegacyBinaryXLS()
+			}
+			defer cleanup()
+			filename = prepared
+		}
+
+		t.recordCreatedTable(tableName)
+		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
+		if enumErr != nil {
+			return nil, fmt.Errorf("failed to enumerate Excel worksheets: %w", enumErr)
+		}
+		if len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
+			filtered, err := filterEmptyExcelSheets(ctx, filename, sheetNames)
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return nil, fmt.Errorf("inspect Excel worksheets: %w", err)
+			case err != nil:
+				// The preflight is best-effort: keep loading every sheet as before.
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis] Could not inspect worksheets of '%s' (session=%s): %v. Keeping all sheets.",
+					filename, t.sessionID, err,
+				)
+			case len(filtered) == 0:
+				return nil, fmt.Errorf("excel workbook contains no non-empty worksheets")
+			default:
+				sheetNames = filtered
+			}
+		}
+
+		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
+
+		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
+			return nil, fmt.Errorf("failed to create table from Excel file (sheets=%v): %w", sheetNames, err)
+		}
+		t.markTableLoaded(tableName)
+
+		logger.Infof(ctx,
+			"[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s (sheets=%v)",
+			tableName, t.sessionID, sheetNames,
+		)
+	}
+
+	// Get and return the table schema
+	return t.LoadFromTable(ctx, tableName)
+}
+
+// listExcelSheets preserves workbook order and recovers from unavailable or
+// empty spatial metadata by reading sheet names from the OOXML container.
+func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
+	names, metaErr := t.listExcelSheetsFromSpatial(ctx, filename)
+	if metaErr == nil && len(names) > 0 {
+		return names, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if metaErr == nil {
+		metaErr = fmt.Errorf("spatial metadata contains no worksheets")
+	}
+	names, err := listExcelSheetsFromWorkbook(ctx, filename)
+	if err != nil {
+		return nil, fmt.Errorf("spatial metadata: %v; workbook metadata: %w", metaErr, err)
+	}
+	logger.Warnf(ctx,
+		"[Tool][DataAnalysis] Using workbook metadata for '%s' after spatial enumeration failed: %v",
+		filename, metaErr,
+	)
+	return names, nil
+}
+
+// listExcelSheetsFromSpatial queries DuckDB's spatial st_read_meta function.
+//
+// st_read_meta returns a single row whose `layers` column is a LIST of
+// STRUCTs (one per layer / sheet). We UNNEST that list and project the
+// struct's `name` field to get a flat list of sheet names.
+func (t *DataAnalysisTool) listExcelSheetsFromSpatial(ctx context.Context, filename string) ([]string, error) {
+	metaSQL := fmt.Sprintf(
+		"SELECT UNNEST(layers).name FROM st_read_meta('%s')",
+		sqlSingleQuoteEscape(filename),
+	)
+
+	rows, err := t.db.QueryContext(ctx, metaSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sheet metadata: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan sheet name: %w", err)
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating sheet metadata rows: %w", err)
+	}
+	return names, nil
+}
+
+// buildExcelCreateTableSQL assembles the CREATE TABLE statement used by
+// LoadFromExcel. Exposed at package level (lower-case) to make it trivially
+// testable without a live DuckDB connection.
+func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) string {
+	escFile := sqlSingleQuoteEscape(filename)
+
+	// Without an explicit sheet selection, retain the default read_xlsx SQL form.
+	if len(sheetNames) == 0 {
+		return fmt.Sprintf(
+			"CREATE TABLE \"%s\" AS SELECT * FROM read_xlsx('%s', header=true, all_varchar=true)",
+			tableName, escFile,
+		)
+	}
+
+	// Single sheet: keep it simple but still tag the source for consistency
+	// with the multi-sheet path.
+	if len(sheetNames) == 1 {
+		escSheet := sqlSingleQuoteEscape(sheetNames[0])
+		return fmt.Sprintf(
+			"CREATE TABLE \"%s\" AS SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s', header=true, all_varchar=true)",
+			tableName, escSheet, excelSheetNameColumn, escFile, escSheet,
+		)
+	}
+
+	// Multiple sheets: UNION ALL BY NAME tolerates schema differences
+	// between sheets (missing columns become NULL, conflicting types are
+	// widened).
+	parts := make([]string, 0, len(sheetNames))
+	for _, sheet := range sheetNames {
+		escSheet := sqlSingleQuoteEscape(sheet)
+		parts = append(parts, fmt.Sprintf(
+			"SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s', header=true, all_varchar=true)",
+			escSheet, excelSheetNameColumn, escFile, escSheet,
+		))
+	}
+	return fmt.Sprintf(
+		"CREATE TABLE \"%s\" AS %s",
+		tableName,
+		strings.Join(parts, "\nUNION ALL BY NAME\n"),
+	)
+}
+
+// LoadFromKnowledge loads data from a Knowledge entity into a DuckDB table and returns the table schema.
+// It automatically determines the file type and calls the appropriate loading method.
+//
+// The source file is first materialized to a local temp file via FileService.GetFile
+// so DuckDB's st_read / read_xlsx / read_csv_auto can open it directly. This
+// side-steps provider-specific URL schemes (e.g. the local:// URL returned by
+// the local file service) that DuckDB's extensions cannot resolve on their own.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - knowledge: the Knowledge entity containing file information
+//
+// Returns:
+//   - *TableSchema: schema information of the created table
+//   - error: any error that occurred during the operation
+func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *types.Knowledge) (*TableSchema, error) {
+	if knowledge == nil {
+		return nil, fmt.Errorf("knowledge cannot be nil")
+	}
+	tableName := t.TableName(knowledge)
+
+	// Normalize file type to lowercase for comparison
+	fileType := strings.ToLower(knowledge.FileType)
+
+	logger.Infof(ctx, "[Tool][DataAnalysis] Loading knowledge '%s' (type: %s) into table '%s' for session %s",
+		knowledge.ID, fileType, tableName, t.sessionID)
+
+	localPath, cleanup, err := t.materializeKnowledgeFile(ctx, knowledge)
+	if err != nil {
+		return nil, fmt.Errorf("failed to materialize knowledge '%s' for DuckDB: %w", knowledge.ID, err)
+	}
+	defer cleanup()
+
+	switch fileType {
+	case "csv":
+		return t.LoadFromCSV(ctx, localPath, tableName)
+	case "xlsx", "xls":
+		return t.LoadFromExcel(ctx, localPath, tableName)
+	default:
+		logger.Warnf(ctx, "[Tool][DataAnalysis] Unsupported file type '%s' for knowledge '%s' in session %s",
+			fileType, knowledge.ID, t.sessionID)
+		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", fileType)
+	}
+}
+
+// materializeKnowledgeFile copies the knowledge's backing blob into a fresh
+// temp file on the local filesystem so DuckDB can open it with ordinary path
+// semantics. It returns the temp path and a cleanup closure that removes the
+// temp file; the closure is always safe to call and is a no-op on failure.
+//
+// This hides storage-backend-specific URL schemes (local://, oss://, s3://,
+// minio://, cos://, …) behind the FileService.GetFile abstraction, so the
+// Data Analysis tool works identically across all deployments.
+func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowledge *types.Knowledge) (string, func(), error) {
+	noop := func() {}
+
+	reader, err := t.resolveFileServiceForKnowledge(ctx, knowledge).GetFile(ctx, knowledge.FilePath)
+	if err != nil {
+		return "", noop, fmt.Errorf("failed to open file for knowledge '%s': %w", knowledge.ID, err)
+	}
+	defer reader.Close()
+
+	// Preserve the file extension so DuckDB's format auto-detection still
+	// works (e.g. the CSV reader expects .csv, xlsx reader expects .xlsx).
+	suffix := ""
+	if ext := strings.ToLower(strings.TrimSpace(knowledge.FileType)); ext != "" {
+		suffix = "." + ext
+	}
+
+	tmp, err := os.CreateTemp("", "weknora-data-analysis-*"+suffix)
+	if err != nil {
+		return "", noop, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		// Best-effort cleanup; a missing file is fine, any other error is
+		// only logged to avoid masking the original operation's result.
+		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+			logger.Warnf(ctx, "[Tool][DataAnalysis] Failed to remove temp file %s: %v", tmpPath, err)
+		}
+	}
+
+	if _, err := io.Copy(tmp, reader); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("failed to finalize temp file for knowledge '%s': %w", knowledge.ID, err)
+	}
+
+	logger.Infof(ctx, "[Tool][DataAnalysis] Materialized knowledge '%s' to temp file %s for session %s",
+		knowledge.ID, tmpPath, t.sessionID)
+
+	return tmpPath, cleanup, nil
+}
+
+// LoadFromKnowledgeID loads data from a Knowledge ID into a DuckDB table and returns the table schema
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - knowledgeID: the ID of the Knowledge entity
+//
+// Returns:
+//   - string: the name of the created table
+//   - *TableSchema: schema information of the created table
+//   - error: any error that occurred during the operation
+func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
+	// Use GetKnowledgeByIDOnly to support cross-tenant shared KB
+	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
+	if err != nil || knowledge == nil {
+		if err == nil {
+			err = fmt.Errorf("knowledge service returned an empty result")
+		}
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get knowledge by ID '%s': %v", knowledgeID, err)
+		return nil, fmt.Errorf("failed to get knowledge by ID: %w", err)
+	}
+
+	return t.LoadFromKnowledge(ctx, knowledge)
+}
+
+// LoadFromTable retrieves the schema information of an existing table
+// Parameters:
+//   - ctx: context for cancellation and timeout
+//   - tableName: name of the table to query
+//
+// Returns:
+//   - *TableSchema: schema information of the table
+//   - error: any error that occurred during the operation
+//
+// Note: This function does NOT create the table, it only retrieves schema information
+func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) (*TableSchema, error) {
+	logger.Infof(ctx, "[Tool][DataAnalysis] Getting schema for table '%s' in session %s", tableName, t.sessionID)
+
+	// Query to get column information using PRAGMA table_info or DESCRIBE
+	schemaSQL := fmt.Sprintf("DESCRIBE \"%s\"", tableName)
+
+	rows, err := t.db.QueryContext(ctx, schemaSQL)
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get table schema: %v", err)
+		return nil, fmt.Errorf("failed to get table schema: %w", err)
+	}
+	defer rows.Close()
+
+	// Parse column information
+	columns := make([]ColumnInfo, 0)
+	for rows.Next() {
+		var colName, colType, nullable string
+		var extra1, extra2, extra3 interface{} // DuckDB DESCRIBE may return additional columns
+
+		// Try to scan with different column counts
+		err := rows.Scan(&colName, &colType, &nullable, &extra1, &extra2, &extra3)
+		if err != nil {
+			// Try with fewer columns
+			err = rows.Scan(&colName, &colType, &nullable)
+			if err != nil {
+				logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to scan column info: %v", err)
+				return nil, fmt.Errorf("failed to scan column info: %w", err)
+			}
+		}
+
+		columns = append(columns, ColumnInfo{
+			Name:     colName,
+			Type:     colType,
+			Nullable: nullable,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Error iterating schema rows: %v", err)
+		return nil, fmt.Errorf("error iterating schema rows: %w", err)
+	}
+
+	// Get row count
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM \"%s\"", tableName)
+	var rowCount int64
+	if err := t.db.QueryRowContext(ctx, countSQL).Scan(&rowCount); err != nil {
+		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get row count: %v", err)
+		return nil, fmt.Errorf("failed to get row count: %w", err)
+	}
+
+	schema := &TableSchema{
+		TableName: tableName,
+		Columns:   columns,
+		RowCount:  rowCount,
+		Metadata: map[string]interface{}{
+			"column_count": len(columns),
+			"session_id":   t.sessionID,
+		},
+	}
+
+	logger.Infof(ctx, "[Tool][DataAnalysis] Retrieved schema for table '%s' in session %s: %d columns, %d rows",
+		tableName, t.sessionID, len(columns), rowCount)
+
+	return schema, nil
+}
+
+func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
+	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_")
+}
+
+// Description builds the model-facing schema description. It names the table
+// as DataAnalysisTableName, the identifier the model must use in SQL; the
+// physical TableName stays internal.
+func (t *TableSchema) Description() string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Table name: %s\n", DataAnalysisTableName)
+	builder.WriteString(fmt.Sprintf("Columns: %d\n", len(t.Columns)))
+	builder.WriteString(fmt.Sprintf("Rows: %d\n\n", t.RowCount))
+	builder.WriteString("Column info:\n")
+
+	for _, col := range t.Columns {
+		builder.WriteString(fmt.Sprintf("- %s (%s)\n", col.Name, col.Type))
+	}
+
+	return builder.String()
+}
+
+// resolveFileServiceForKnowledge resolves a provider-specific FileService based on the knowledge file path.
+// It falls back to the injected default service when provider/config cannot be resolved.
+func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, knowledge *types.Knowledge) interfaces.FileService {
+	if knowledge == nil {
+		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s reason=knowledge_nil", t.sessionID)
+		return t.fileService
+	}
+
+	kbID := strings.TrimSpace(knowledge.KnowledgeBaseID)
+	var kb *types.KnowledgeBase
+	if t.knowledgeBaseService != nil && kbID != "" {
+		var err error
+		kb, err = t.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+		if err != nil {
+			logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get kb failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s err=%v",
+				t.sessionID, knowledge.ID, kbID, err)
+			return t.fileService
+		}
+	}
+	if kb == nil && kbID != "" {
+		logger.Infof(ctx, "[Tool][DataAnalysis][storage] kb not found, fallback default: session_id=%s knowledge_id=%s kb_id=%s",
+			t.sessionID, knowledge.ID, kbID)
+		return t.fileService
+	}
+
+	provider := ""
+	backendID, _, _ := types.ParseStorageBackendPath(knowledge.FilePath)
+	if kb != nil {
+		provider = kb.GetStorageProvider()
+		if backendID == "" && kb.StorageBackendID != nil {
+			backendID = strings.TrimSpace(*kb.StorageBackendID)
+		}
+	}
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
+		tenantID := uint64(0)
+		if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+			tenantID = tid
+		}
+		if tenantID == 0 && kb != nil {
+			tenantID = knowledge.TenantID
+		}
+		if tenantID > 0 && t.tenantService != nil {
+			resolvedTenant, err := t.tenantService.GetTenantByID(ctx, tenantID)
+			if err != nil {
+				logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get tenant failed: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d err=%v",
+					t.sessionID, knowledge.ID, kbID, tenantID, err)
+			} else if resolvedTenant != nil {
+				tenant = resolvedTenant
+				logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved tenant from service: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
+					t.sessionID, knowledge.ID, kbID, tenantID)
+			}
+		}
+	}
+	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+	// The resolver also handles workspace defaults without a legacy provider.
+	if t.storageResolver != nil && tenant != nil {
+		resolvedSvc, resolvedProvider, err := t.storageResolver.ResolveFileService(
+			ctx, tenant, backendID, provider, t.localBaseDir,
+		)
+		if err == nil {
+			logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved storage backend: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s",
+				t.sessionID, knowledge.ID, kbID, backendID, resolvedProvider)
+			return resolvedSvc
+		}
+		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] resolve storage backend failed, trying legacy config: session_id=%s knowledge_id=%s kb_id=%s backend_id=%s provider=%s err=%v",
+			t.sessionID, knowledge.ID, kbID, backendID, provider, err)
+	}
+
+	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
+		hasTenantStorageConfig := tenant != nil && tenant.StorageEngineConfig != nil
+		logger.Infof(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%q tenant_cfg=%t",
+			t.sessionID, knowledge.ID, kbID, provider, hasTenantStorageConfig)
+		return t.fileService
+	}
+
+	storageConfig := tenant.StorageEngineConfig
+	// Use the localBaseDir captured at construction time rather than re-reading
+	// LOCAL_STORAGE_BASE_DIR from os.Getenv here.  Reading the env var at
+	// request-handling time can produce an empty string (or the wrong value)
+	// when the variable was set programmatically before startup or is absent
+	// from the process environment of the DI-constructed sub-component, causing
+	// the newly created local FileService to use the /data/files fallback
+	// instead of the configured path and therefore fail to locate files (#1040).
+	baseDir := t.localBaseDir
+
+	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, storageConfig, baseDir)
+	if err != nil {
+		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] create file service failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%s err=%v",
+			t.sessionID, knowledge.ID, kbID, provider, err)
+		return t.fileService
+	}
+
+	logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved file service: session_id=%s knowledge_id=%s kb_id=%s provider=%s",
+		t.sessionID, knowledge.ID, kbID, resolvedProvider)
+	return resolvedSvc
+}

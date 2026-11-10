@@ -1,0 +1,25 @@
+<view class="page">
+  <view class="card">
+    <view class="title">{{settingsTitle}}</view>
+    <view class="muted">{{settingsSubtitle}}</view>
+
+    <view class="field">
+      <text class="label">{{apiBaseUrlLabel}}</text>
+      <input value="{{baseUrl}}" placeholder="{{apiBaseUrlPlaceholder}}" bindinput="onBaseUrlInput" />
+    </view>
+
+    <view class="field">
+      <text class="label">{{apiKeyLabel}}</text>
+      <input value="{{apiKey}}" password placeholder="{{apiKeyPlaceholder}}" bindinput="onApiKeyInput" />
+    </view>
+
+    <view class="field">
+      <text class="label">{{languageLabel}}</text>
+      <picker range="{{languageLabels}}" value="{{languageIndex}}" bindchange="onLanguageChange">
+        <view class="picker-value">{{displayLanguageLabel}}</view>
+      </picker>
+    </view>
+
+    <button bindtap="save">{{saveSettingsText}}</button>
+  </view>
+</view>

@@ -1,0 +1,39 @@
+;; Base policy for WeKnora Lite's local sandbox.
+;; Deny-by-default; everything else is granted explicitly by the compiler.
+
+(version 1)
+(deny default)
+
+(allow process-exec)
+(allow process-fork)
+(allow signal (target same-sandbox))
+(allow process-info* (target same-sandbox))
+
+(allow sysctl-read)
+
+;; darwin 25: a platform subpath allowlist is not enough to exec /bin/echo
+;; (sandbox-exec SIGABRT). Unfiltered file-read* is required; DenyRead
+;; (emitted last by the compiler) is what actually restricts reads.
+;; This also matches Windows WRITE_RESTRICTED and lets ~/.nvm etc. work.
+(allow file-read*)
+
+(allow file-read-metadata)
+
+;; Character devices and the controlling terminal. git status needs /dev/null.
+(allow file-read* (literal "/dev/null") (literal "/dev/zero")
+                  (literal "/dev/random") (literal "/dev/urandom"))
+(allow file-write-data
+  (require-all (path "/dev/null") (vnode-type CHARACTER-DEVICE)))
+(allow file-read* file-write* file-ioctl (literal "/dev/ptmx") (literal "/dev/tty"))
+(allow file-read* file-write* file-ioctl (regex #"^/dev/ttys[0-9]+$"))
+(allow file-read* (subpath "/dev/fd"))
+
+;; Python multiprocessing (sem) and OpenMP (named shm).
+(allow ipc-posix-sem)
+(allow ipc-posix-shm-read-data
+       ipc-posix-shm-write-create
+       ipc-posix-shm-write-unlink
+       (ipc-posix-name-regex #"^/__KMP_REGISTERED_LIB_[0-9]+$"))
+(allow pseudo-tty)
+
+(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))

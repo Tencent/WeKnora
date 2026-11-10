@@ -1,0 +1,249 @@
+package search
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+type fakeChunksSvc struct {
+	results []*sdk.SearchResult
+	err     error
+	gotKB   string
+	gotQ    string
+}
+
+func (f *fakeChunksSvc) HybridSearch(
+	_ context.Context, kbID string, p *sdk.SearchParams, _ ...sdk.ResourceURLOptions,
+) ([]*sdk.SearchResult, error) {
+	f.gotKB = kbID
+	f.gotQ = p.QueryText
+	return f.results, f.err
+}
+
+func TestRunSearch_TextOutput(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeChunksSvc{results: []*sdk.SearchResult{
+		{Score: 0.92, Content: "first chunk", KnowledgeID: "doc-1", MatchType: sdk.MatchTypeVector},
+		{Score: 0.81, Content: "second chunk", KnowledgeID: "doc-2", MatchType: sdk.MatchTypeKeyword},
+	}}
+	opts := &ChunksOptions{Query: "hello", KBID: "kb_abc", Limit: 5}
+	require.NoError(t, runChunks(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+
+	assert.Equal(t, "kb_abc", svc.gotKB)
+	assert.Equal(t, "hello", svc.gotQ)
+	got := out.String()
+	assert.Contains(t, got, "2 result(s) from kb=kb_abc")
+	assert.Contains(t, got, "first chunk")
+	assert.Contains(t, got, "doc-1")
+}
+
+// JSON output must surface match_type so machine consumers / agents can
+// reason about retrieval channels without re-implementing the wire format.
+// (Text renderer keeps default minimal - diagnostic info opt-in via --format json.)
+func TestRunSearch_JSONIncludesMatchType(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeChunksSvc{results: []*sdk.SearchResult{
+		{Score: 0.9, Content: "x", MatchType: sdk.MatchTypeKeyword},
+	}}
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	assert.Contains(t, out.String(), `"match_type":1`)
+}
+
+func TestRunSearch_JSONOutput(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeChunksSvc{results: []*sdk.SearchResult{{Score: 0.9, Content: "x"}}}
+	opts := &ChunksOptions{Query: "q", KBID: "kb1", Limit: 1}
+	require.NoError(t, runChunks(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	got := out.String()
+	var env struct {
+		OK   bool                `json:"ok"`
+		Data []*sdk.SearchResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got: %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Contains(t, got, `"score":0.9`)
+}
+
+func TestRunSearch_EmptyResults(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeChunksSvc{results: nil}
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	assert.Contains(t, out.String(), "(no results)")
+}
+
+// Server returns primary matches plus parent/related/nearby enrichment chunks,
+// so the wire response can exceed Limit. CLI must trim to honor the user's
+// hard-limit contract.
+func TestRunSearch_LimitHardCap(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeChunksSvc{results: []*sdk.SearchResult{
+		{Score: 0.9, Content: "primary 1"},
+		{Score: 0.8, Content: "primary 2"},
+		{Score: 0.7, Content: "primary 3"},
+		{Score: 0, Content: "enrichment parent"}, // server-padded
+		{Score: 0, Content: "enrichment nearby"}, // server-padded
+	}}
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1", Limit: 3}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	got := out.String()
+	assert.Contains(t, got, "3 result(s)")
+	assert.NotContains(t, got, "enrichment parent")
+	assert.NotContains(t, got, "enrichment nearby")
+}
+
+func TestRunSearch_BothChannelsDisabled(t *testing.T) {
+	iostreams.SetForTest(t)
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1", NoVector: true, NoKeyword: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeChunksSvc{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "input.invalid_argument")
+}
+
+func TestRunSearch_ServiceError_Transport(t *testing.T) {
+	iostreams.SetForTest(t)
+	svc := &fakeChunksSvc{err: assert.AnError}
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeNetworkError, typed.Code,
+		"non-HTTP-shaped errors classify as network.error so IsTransient picks them up")
+}
+
+func TestRunSearch_ServiceError_HTTPNotFound(t *testing.T) {
+	iostreams.SetForTest(t)
+	svc := &fakeChunksSvc{err: errors.New("HTTP error 404: knowledge base not found")}
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "missing"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeResourceNotFound, typed.Code)
+}
+
+func TestIndent(t *testing.T) {
+	assert.Equal(t, "  foo\n  bar", indent("foo\nbar", "  "))
+	assert.Equal(t, "", indent("", "  "))
+}
+
+func TestRunSearch_NilService(t *testing.T) {
+	iostreams.SetForTest(t)
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "server.error")
+}
+
+// TestNewCmdChunks_NoKBUsesResolver asserts that `search chunks "<query>"`
+// without --kb no longer fails with cobra's `required flag(s) "kb"`. The
+// command now resolves the KB through the shared flag→env→project-link chain
+// (cmdutil.Factory.ResolveKB), matching `doc list` / `chat`; when nothing
+// resolves it reports the typed local.kb_id_required (exit 1), not a cobra
+// usage error. This is the inverse of the old lock test, which deliberately
+// blocked the link fallback for this read path — the asymmetry with `doc
+// list` was not worth keeping (a non-destructive search is the same risk
+// profile as a list). The destructive `doc delete --all` keeps its explicit
+// --kb rule; that safety guard is unrelated to this path.
+func TestNewCmdChunks_NoKBUsesResolver(t *testing.T) {
+	iostreams.SetForTest(t)
+	t.Setenv("WEKNORA_KB_ID", "") // no ambient KB from env
+	t.Chdir(t.TempDir())          // no .weknora project link discoverable
+	cmd := NewCmdChunks(&cmdutil.Factory{
+		// Resolution reaches local.kb_id_required before any client is built,
+		// so this must never be invoked; make it loud if it is.
+		Client: func() (*sdk.Client, error) { return nil, errors.New("client should not be built") },
+	})
+	cmd.SetArgs([]string{"some query"}) // query but no --kb
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), `required flag(s) "kb"`)
+	typed := cmdutil.AsError(err)
+	require.NotNil(t, typed)
+	assert.Equal(t, cmdutil.CodeKBIDRequired, typed.Code)
+}
+
+// TestNewCmdChunks_HonorsKBEnv proves the env fallback is wired: with
+// WEKNORA_KB_ID set and no --kb, KB resolution succeeds (no kb-required
+// error) and the command proceeds to the client step — which here errors,
+// confirming we got past resolution using the env value alone.
+func TestNewCmdChunks_HonorsKBEnv(t *testing.T) {
+	iostreams.SetForTest(t)
+	t.Setenv("WEKNORA_KB_ID", "kb_from_env")
+	cmd := NewCmdChunks(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, errors.New("client boom") },
+	})
+	cmd.SetArgs([]string{"some query"}) // no --kb; env supplies it
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "kb is required")
+	assert.Contains(t, err.Error(), "client boom")
+}
+
+func TestNewCmdChunks_RequiresQuery(t *testing.T) {
+	iostreams.SetForTest(t)
+	cmd := NewCmdChunks(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, nil },
+	})
+	cmd.SetArgs([]string{}) // no query
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+}
+
+func TestNewCmdChunks_RejectsEmptyQuery(t *testing.T) {
+	iostreams.SetForTest(t)
+	cmd := NewCmdChunks(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, nil },
+	})
+	cmd.SetArgs([]string{"  ", "--kb", "kb1"})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "input.invalid_argument")
+}
+
+func TestRunSearch_NoVectorPassedThrough(t *testing.T) {
+	iostreams.SetForTest(t)
+	var got *sdk.SearchParams
+	svc := &capturingChunksSvc{capture: func(p *sdk.SearchParams) { got = p }}
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{
+		Query: "q", KBID: "kb1", NoVector: true,
+	}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NotNil(t, got)
+	assert.True(t, got.DisableVectorMatch)
+	assert.False(t, got.DisableKeywordsMatch)
+}
+
+func TestRunSearch_NoKeywordPassedThrough(t *testing.T) {
+	iostreams.SetForTest(t)
+	var got *sdk.SearchParams
+	svc := &capturingChunksSvc{capture: func(p *sdk.SearchParams) { got = p }}
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{
+		Query: "q", KBID: "kb1", NoKeyword: true,
+	}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NotNil(t, got)
+	assert.True(t, got.DisableKeywordsMatch)
+	assert.False(t, got.DisableVectorMatch)
+}
+
+type capturingChunksSvc struct {
+	capture func(*sdk.SearchParams)
+}
+
+func (c *capturingChunksSvc) HybridSearch(
+	_ context.Context, _ string, p *sdk.SearchParams, _ ...sdk.ResourceURLOptions,
+) ([]*sdk.SearchResult, error) {
+	c.capture(p)
+	return nil, nil
+}

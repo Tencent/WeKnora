@@ -1,0 +1,129 @@
+// Package secrets stores and retrieves credentials. Production wires
+// KeyringStore (OS keychain, primary) with FileStore (0600 plaintext under
+// $XDG_CONFIG_HOME/weknora/secrets/, used as a fallback when no keyring
+// backend is available).
+//
+// Namespace convention: "weknora:<profile>:<key>" where key is "access",
+// "refresh", or "api_key".
+package secrets
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/Tencent/WeKnora/cli/internal/xdg"
+)
+
+// ErrNotFound is returned when the requested secret does not exist.
+var ErrNotFound = errors.New("secret: not found")
+
+// Store is the abstraction CLI commands depend on; tests inject in-memory impls.
+//
+// Ref returns a stable URI (e.g. file://<profile>/<key> or
+// keychain://weknora/<profile>/<key>) describing where a saved secret lives.
+// Backends own their scheme so commands never need to type-assert the
+// concrete implementation.
+type Store interface {
+	Get(profile, key string) (string, error)
+	Set(profile, key, value string) error
+	Delete(profile, key string) error
+	Ref(profile, key string) string
+}
+
+// FileStore writes 0600 plain-text files under $XDG_CONFIG_HOME/weknora/secrets/<profile>.
+// It is the headless / CI default and the keychain fallback.
+type FileStore struct {
+	root string
+}
+
+// NewFileStore returns a FileStore rooted at $XDG_CONFIG_HOME/weknora/secrets
+// (or ~/.config/weknora/secrets if XDG_CONFIG_HOME is unset). Same convention
+// as config.Path - see that file for the rationale (CLI convention).
+func NewFileStore() (*FileStore, error) {
+	root, err := defaultRoot()
+	if err != nil {
+		return nil, err
+	}
+	return &FileStore{root: root}, nil
+}
+
+func defaultRoot() (string, error) {
+	return xdg.Path("XDG_CONFIG_HOME", ".config", "secrets")
+}
+
+func (f *FileStore) path(profile, key string) string {
+	return filepath.Join(f.root, profile, key)
+}
+
+func (f *FileStore) Get(profile, key string) (string, error) {
+	data, err := os.ReadFile(f.path(profile, key))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read secret: %w", err)
+	}
+	return string(data), nil
+}
+
+func (f *FileStore) Set(profile, key, value string) error {
+	dir := filepath.Join(f.root, profile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("mkdir secrets dir: %w", err)
+	}
+	if err := os.WriteFile(f.path(profile, key), []byte(value), 0o600); err != nil {
+		return fmt.Errorf("write secret: %w", err)
+	}
+	return nil
+}
+
+func (f *FileStore) Delete(profile, key string) error {
+	err := os.Remove(f.path(profile, key))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// Ref returns the file:// URI under which a secret would be stored. Path
+// component is forward-slash-normalized per RFC 8089 (file:///path on Unix,
+// file:///C:/... on Windows) - the wire format must not depend on platform
+// path separator since this string is persisted to config.yaml and may be
+// consumed by tooling on a different OS.
+func (f *FileStore) Ref(profile, key string) string {
+	p := filepath.ToSlash(f.path(profile, key))
+	if !strings.HasPrefix(p, "/") {
+		// Windows absolute path "C:/..." needs a leading slash to form a
+		// proper file:/// URI ("file:///C:/...").
+		p = "/" + p
+	}
+	return "file://" + p
+}
+
+// MemStore is an in-memory implementation of Store used by tests across
+// packages. It is intentionally exported (not _test.go-only) so that
+// downstream packages can compose it without copying the same 20 lines.
+type MemStore struct{ m map[string]string }
+
+// NewMemStore returns an empty in-memory secrets store.
+func NewMemStore() *MemStore { return &MemStore{m: map[string]string{}} }
+
+func (m *MemStore) k(c, key string) string { return c + ":" + key }
+
+func (m *MemStore) Get(c, key string) (string, error) {
+	v, ok := m.m[m.k(c, key)]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return v, nil
+}
+
+func (m *MemStore) Set(c, key, value string) error { m.m[m.k(c, key)] = value; return nil }
+
+func (m *MemStore) Delete(c, key string) error { delete(m.m, m.k(c, key)); return nil }
+
+// Ref returns a mem:// URI; meaningful only inside tests.
+func (m *MemStore) Ref(c, key string) string { return "mem://" + c + "/" + key }

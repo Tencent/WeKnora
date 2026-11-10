@@ -1,0 +1,48 @@
+MIME-Version: 1.0
+Subject: Titled Image Contract
+Content-Type: multipart/related; type="text/html"; boundary="----=_NextPart_Contract"
+
+------=_NextPart_Contract
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+Content-Location: https://example.com/titled-image
+
+<html>
+  <body>
+    <table>
+      <tr><th>体验方向</th><th>代表内容</th></tr>
+      <tr><td>赛季制建立</td><td>BP、Rank</td></tr>
+    </table>
+
+    <p><img src="images/%E7%AC%AC%201%20%E9%A1%B5%20%28%E6%B5%8B%E8%AF%95%29.gif" alt="图片" title="阶段 1) 图片"></p>
+
+    <p>高机动性身法与独特枪械反馈</p>
+
+    <p>alpha<br>beta</p>
+
+    <p><br><br><br></p>
+
+    <ul>
+      <li>parent
+        <ul><li>child</li></ul>
+      </li>
+    </ul>
+
+    <blockquote><p>quoted</p></blockquote>
+
+    <pre><code>line1
+
+
+line2
+</code></pre>
+  </body>
+</html>
+
+------=_NextPart_Contract
+Content-Type: image/gif
+Content-Transfer-Encoding: base64
+Content-Location: images/%E7%AC%AC%201%20%E9%A1%B5%20%28%E6%B5%8B%E8%AF%95%29.gif
+
+R0lGODdhQABAAIEAAFCM3AAAAAAAAAAAACwAAAAAQABAAEAIaQABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyBDihxJsqTJkyhTqlzJsqXLlzBjypxJs6bNmzhz6tzJs6fPn0CDCh1KtKjRo0iTKl3KtKnTp1CjSp1KtarVq1izagUQEAA7
+
+------=_NextPart_Contract--

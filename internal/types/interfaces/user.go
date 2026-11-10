@@ -1,0 +1,174 @@
+package interfaces
+
+import (
+	"context"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// UserService defines the user service interface
+type UserService interface {
+	// Register creates a new user account
+	Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
+	// Login authenticates a user and returns tokens
+	Login(ctx context.Context, req *types.LoginRequest) (*types.LoginResponse, error)
+	// GetOIDCAuthorizationURL builds the third-party OIDC authorization URL
+	GetOIDCAuthorizationURL(ctx context.Context, redirectURI string) (*types.OIDCAuthURLResponse, error)
+	// LoginWithOIDC exchanges the callback code, auto-provisions users if needed, and completes login.
+	// provisioning is the default tenant mode for a newly auto-created user
+	// (resolved by the caller from auth.default_tenant_mode).
+	LoginWithOIDC(
+		ctx context.Context, code, redirectURI string,
+		provisioning types.TenantProvisioningMode, codeVerifier string,
+	) (*types.OIDCCallbackResponse, error)
+	// GetUserByID gets a user by ID
+	GetUserByID(ctx context.Context, id string) (*types.User, error)
+	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
+	// user id. Missing ids are simply absent from the result; the call
+	// is not an error when some ids resolve to no row. Used on hot list
+	// endpoints (tenant members, audit logs) to avoid N+1 queries.
+	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
+	// GetUserByEmail gets a user by email
+	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
+	// GetUserByUsername gets a user by username
+	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
+	// GetUserByTenantID gets the first user (owner) of a tenant
+	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
+	// UpdateUser updates user data without changing account status; use SetUserActive for that.
+	UpdateUser(ctx context.Context, user *types.User) error
+	// DeleteUser deletes a user
+	DeleteUser(ctx context.Context, id string) error
+	// ChangePassword changes user password
+	ChangePassword(ctx context.Context, userID string, oldPassword, newPassword string) error
+	// AdminResetPassword replaces a user's password without requiring the old
+	// password and revokes all of that user's existing sessions. Callers must
+	// enforce the system-admin and cannot-reset-self guards before invoking it.
+	AdminResetPassword(ctx context.Context, userID string, newPassword string) error
+	// ValidatePassword validates user password
+	ValidatePassword(ctx context.Context, userID string, password string) error
+	// GenerateTokens generates access and refresh tokens for user
+	GenerateTokens(ctx context.Context, user *types.User) (accessToken, refreshToken string, err error)
+	// BuildLoginMemberships projects the user's tenant memberships into
+	// the login-response shape. activeTenant is reused (without an extra
+	// lookup) for the matching row's TenantName. The slice is guaranteed
+	// non-nil so callers can serialise it as an empty JSON array when the
+	// membership table is unavailable.
+	BuildLoginMemberships(ctx context.Context, user *types.User, activeTenant *types.Tenant) []types.Membership
+	// SwitchTenant issues a new token pair scoped to targetTenantID and
+	// returns the corresponding LoginResponse. The caller's previous
+	// refresh token (passed in for revocation) is invalidated. Membership
+	// is verified via the TenantMember service before tokens are issued.
+	// On success the target is recorded as the user's last-active-tenant
+	// preference (next login and refresh land there). A preference-write
+	// failure fails the switch so no token pair is issued.
+	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
+	// ValidateToken validates an access token. It returns the user
+	// referenced by the token plus the active tenant ID encoded in the
+	// JWT's `tenant_id` claim — the latter lets the auth middleware
+	// honour /auth/switch-tenant sessions that were minted with a
+	// non-home tenant. Falls back to user.TenantID when the claim is
+	// missing (old tokens issued before tenant-level RBAC).
+	ValidateToken(ctx context.Context, token string) (*types.User, uint64, error)
+	// GetAccessTokenByValue looks up the stored access-token row for a JWT
+	// string. The Token field is redacted. Used to bind a sandbox-terminal
+	// ticket to the minting session without putting the JWT in the ticket.
+	GetAccessTokenByValue(ctx context.Context, token string) (*types.AuthToken, error)
+	// GetAccessTokenByID looks up a stored access-token row by primary key.
+	// The Token field is redacted. Used by the sandbox-terminal recheck.
+	GetAccessTokenByID(ctx context.Context, id string) (*types.AuthToken, error)
+	// RefreshToken refreshes access token using refresh token
+	RefreshToken(ctx context.Context, refreshToken string) (accessToken, newRefreshToken string, err error)
+	// RevokeToken revokes a token
+	RevokeToken(ctx context.Context, token string) error
+	// Logout revokes every outstanding access/refresh token for the user
+	// identified by the presented JWT.
+	Logout(ctx context.Context, token string) error
+	// GetCurrentUser gets current user from context
+	GetCurrentUser(ctx context.Context) (*types.User, error)
+	// SearchUsers searches users by username or email
+	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+	// SetUserActive enables or disables a user account (SystemAdmin action).
+	// Disabling also revokes all of that user's outstanding tokens. The
+	// repository enforces self-disable and last-system-admin guards.
+	SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error)
+	// ListAllUsers lists every platform user (across tenants) newest-first.
+	// Returns the page plus a has_more flag so the system-admin user-list UI
+	// can paginate without a second count query. The handler enforces the
+	// SystemAdmin gate, so the service does not duplicate it here.
+	ListAllUsers(ctx context.Context, offset, limit int) ([]*types.User, bool, error)
+	// ListSystemAdmins lists users with IsSystemAdmin=true.
+	// Returns the page of admins plus the total count (for pagination UI);
+	// callers pass offset/limit to page through results. Used by the
+	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
+	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// AdminCreateUser provisions a new local user on behalf of a
+	// SystemAdmin. When req.Password is nil, a random password is generated
+	// and returned exactly once as the second result. provisioning is
+	// resolved by the caller from the shared auth.default_tenant_mode policy.
+	AdminCreateUser(
+		ctx context.Context, req *types.AdminCreateUserRequest, provisioning types.TenantProvisioningMode,
+	) (*types.User, string, error)
+	// RevokeSystemAdmin removes system-admin privileges with the
+	// last-admin/self-revoke checks performed atomically.
+	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)
+	// UpdateUserPreferences partially updates the calling user's
+	// preferences blob (PATCH semantics: only keys present in `patch`
+	// overwrite existing values). Returns the updated, persisted prefs.
+	UpdateUserPreferences(ctx context.Context, userID string, patch types.UserPreferences) (types.UserPreferences, error)
+}
+
+// UserRepository defines the user repository interface
+type UserRepository interface {
+	// CreateUser creates a user
+	CreateUser(ctx context.Context, user *types.User) error
+	// GetUserByID gets a user by ID
+	GetUserByID(ctx context.Context, id string) (*types.User, error)
+	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
+	// user id. Missing ids are simply absent from the result.
+	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
+	// GetUserByEmail gets a user by email
+	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
+	// GetUserByUsername gets a user by username
+	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
+	// GetUserByTenantID gets the first user (owner) of a tenant
+	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
+	// UpdateUser updates user data without changing account status; use SetUserActive for that.
+	UpdateUser(ctx context.Context, user *types.User) error
+	// SetUserActive atomically changes status and revokes sessions on disable,
+	// preserving at least one active system administrator.
+	SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error)
+	// DeleteUser deletes a user
+	DeleteUser(ctx context.Context, id string) error
+	// ListUsers lists users with pagination
+	ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error)
+	// ListSystemAdmins lists users where is_system_admin = true.
+	// Walks the partial-friendly idx_users_is_system_admin index. Returns
+	// the slice plus the total count for pagination metadata. Used by
+	// the system-admin management endpoint.
+	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// RevokeSystemAdmin removes system-admin privileges with the
+	// last-admin/self-revoke checks performed atomically.
+	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)
+	// SearchUsers searches users by username or email
+	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+}
+
+// AuthTokenRepository defines the auth token repository interface
+type AuthTokenRepository interface {
+	// CreateToken creates an auth token
+	CreateToken(ctx context.Context, token *types.AuthToken) error
+	// GetTokenByValue gets a token by its value
+	GetTokenByValue(ctx context.Context, tokenValue string) (*types.AuthToken, error)
+	// GetTokenByID gets a token by its primary key
+	GetTokenByID(ctx context.Context, id string) (*types.AuthToken, error)
+	// GetTokensByUserID gets all tokens for a user
+	GetTokensByUserID(ctx context.Context, userID string) ([]*types.AuthToken, error)
+	// UpdateToken updates a token
+	UpdateToken(ctx context.Context, token *types.AuthToken) error
+	// DeleteToken deletes a token
+	DeleteToken(ctx context.Context, id string) error
+	// DeleteExpiredTokens deletes all expired tokens
+	DeleteExpiredTokens(ctx context.Context) error
+	// RevokeTokensByUserID revokes all tokens for a user
+	RevokeTokensByUserID(ctx context.Context, userID string) error
+}

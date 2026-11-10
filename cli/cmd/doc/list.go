@@ -1,0 +1,265 @@
+package doc
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
+	"github.com/Tencent/WeKnora/cli/internal/text"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+// docListFields enumerates the fields surfaced for `--format json` discovery on
+// `doc list`. Filter applies to each Knowledge object in the bare array.
+var docListFields = []string{
+	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
+	"source", "channel", "parse_status", "summary_status", "enable_status",
+	"embedding_model_id", "file_name", "file_type", "file_size", "file_hash",
+	"file_path", "storage_size",
+	"created_at", "updated_at", "processed_at", "error_message",
+}
+
+type ListOptions struct {
+	PageSize int // Items per server batch. With --all-pages, controls
+	// per-request load. Without, controls the single page size.
+	Status string // --status: filter by parse_status (server-side query param)
+	// Limit caps the returned items client-side (default 30; 0 = no cap).
+	// Applied after pagination / --all-pages accumulation and sort.
+	Limit int
+	// AllPages walks server pages internally, accumulating items until
+	// total exhausted or --limit hit.
+	AllPages bool
+	// Additional server-side filters (each maps 1:1 to a sdk.KnowledgeListFilter
+	// field). Empty / zero values are omitted from the request.
+	Keyword   string
+	FileType  string
+	Source    string
+	TagID     string
+	StartTime string // raw RFC3339; parsed into filter.StartTime
+	EndTime   string // raw RFC3339; parsed into filter.EndTime
+}
+
+// docListStatusValues mirrors internal/types/knowledge.go ParseStatus*
+// constants - these are the values the server accepts on the
+// ?parse_status= query. Kept in sync manually since the SDK doesn't
+// re-export the enum.
+var docListStatusValues = []string{"pending", "processing", "completed", "failed"}
+
+// ListService is the narrow SDK surface this command depends on.
+// *sdk.Client satisfies it.
+type ListService interface {
+	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
+}
+
+// NewCmdList builds `weknora doc list`.
+func NewCmdList(f *cmdutil.Factory) *cobra.Command {
+	opts := &ListOptions{}
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List documents in a knowledge base",
+		Long: `Lists documents (uploaded files / web pages / inline text) in the
+resolved knowledge base. KB resolution follows the standard 4-level chain:
+--kb flag > WEKNORA_KB_ID env > .weknora/project.yaml > error. The --kb
+flag accepts either a KB UUID (passed through) or a name (resolved via list).
+
+Default sort is updated_at desc so the most recent uploads surface first;
+backend storage order is not guaranteed and varies between deployments.`,
+		Example: `  weknora doc list                                                  # uses project link / env
+  weknora doc list --kb a32a63ff-fb36-4874-bcaa-30f48570a694        # explicit UUID
+  weknora doc list --kb my-kb                                       # resolved by name
+  weknora doc list --all-pages --format json                               # walk every page`,
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			fopts, err := cmdutil.CheckFormatFlag(c)
+			if err != nil {
+				return err
+			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input (--page-size / --limit / --status) before
+			// resolving the KB or building the client so a bad value returns
+			// input.invalid_argument (exit 5) instead of an auth error (exit 3)
+			// when the profile is unconfigured — an agent must see the real,
+			// fixable problem.
+			if err := validateListOpts(opts); err != nil {
+				return err
+			}
+			kbID, err := f.ResolveKB(c)
+			if err != nil {
+				return err
+			}
+			cli, err := f.Client()
+			if err != nil {
+				return err
+			}
+			return runList(c.Context(), opts, fopts, cli, kbID)
+		},
+	}
+	cmdutil.AddKBFlag(cmd)
+	cmd.Flags().IntVar(&opts.PageSize, "page-size", 50, "Items per server batch (1..1000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
+	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
+	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
+	cmd.Flags().StringVar(&opts.Keyword, "keyword", "", "Server-side substring match against title / file_name (case-insensitive)")
+	cmd.Flags().StringVar(&opts.FileType, "file-type", "", `Filter by file extension (e.g. "pdf", "md")`)
+	cmd.Flags().StringVar(&opts.Source, "source", "", `Filter by ingestion source (e.g. "api", "web")`)
+	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Filter by tag association")
+	cmd.Flags().StringVar(&opts.StartTime, "start-time", "", "Include docs with updated_at >= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
+	cmd.Flags().StringVar(&opts.EndTime, "end-time", "", "Include docs with updated_at <= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
+	cmdutil.AddFormatFlag(cmd, docListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "List documents in the resolved knowledge base. Results come with meta.count; use --limit to cap, --all-pages to walk every server page, --status/--keyword to filter server-side.",
+		Examples: []string{"weknora doc list --format json", "weknora doc list --all-pages --limit 200 --format json"},
+		Output:   "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the returned count; meta.total_count is the server-side total before client-side --limit truncation; meta.has_more=true when --limit truncated",
+	})
+	return cmd
+}
+
+// validateListOpts checks --page-size / --limit / --status. Called from RunE
+// before the KB/client are resolved (so bad input surfaces as exit 5, not an
+// auth error) and again at the top of runList for direct callers; idempotent.
+func validateListOpts(opts *ListOptions) error {
+	if opts.PageSize < 1 || opts.PageSize > 1000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--page-size must be in 1..1000, got %d", opts.PageSize),
+		}
+	}
+	if opts.Limit < 1 || opts.Limit > 10000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
+		}
+	}
+	// Validate + normalize --status via the shared enum helper (same exit-5
+	// path and case-insensitive normalization as every other enum flag).
+	status, err := cmdutil.ValidateEnum("status", opts.Status, docListStatusValues)
+	if err != nil {
+		return err
+	}
+	opts.Status = status
+	return nil
+}
+
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService, kbID string) error {
+	if err := validateListOpts(opts); err != nil {
+		return err
+	}
+	filter := sdk.KnowledgeListFilter{
+		ParseStatus: opts.Status,
+		Keyword:     opts.Keyword,
+		FileType:    opts.FileType,
+		Source:      opts.Source,
+		TagID:       opts.TagID,
+	}
+	start, err := cmdutil.ParseTimeFlag("--start-time", opts.StartTime)
+	if err != nil {
+		return err
+	}
+	if start != nil {
+		filter.StartTime = *start
+	}
+	end, err := cmdutil.ParseTimeFlag("--end-time", opts.EndTime)
+	if err != nil {
+		return err
+	}
+	if end != nil {
+		filter.EndTime = *end
+	}
+
+	// Pagination is always 1-indexed internally. --all-pages walks; the
+	// non-walking path returns the first page only.
+	var items []sdk.Knowledge
+	var serverTotal int64
+	truncated := false
+	if opts.AllPages {
+		accum := make([]sdk.Knowledge, 0)
+		for page := 1; ; page++ {
+			chunk, total, err := svc.ListKnowledgeWithFilter(ctx, kbID, page, opts.PageSize, filter)
+			if err != nil {
+				return cmdutil.WrapHTTP(err, "list documents")
+			}
+			serverTotal = total
+			accum = append(accum, chunk...)
+			if opts.Limit > 0 && len(accum) >= opts.Limit {
+				truncated = int64(len(accum)) < total
+				break
+			}
+			if int64(len(accum)) >= total || len(chunk) == 0 {
+				break
+			}
+		}
+		items = accum
+	} else {
+		chunk, total, err := svc.ListKnowledgeWithFilter(ctx, kbID, 1, opts.PageSize, filter)
+		if err != nil {
+			return cmdutil.WrapHTTP(err, "list documents")
+		}
+		serverTotal = total
+		items = chunk
+	}
+	if items == nil {
+		items = []sdk.Knowledge{} // ensure JSON [] not null
+	}
+	// Default sort: updated_at desc. Server return order is not guaranteed,
+	// so client-side sort makes output deterministic regardless of backend
+	// storage choices. Mirrors `weknora kb list`.
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	// --limit applies after sort so users get the top-N most-recent items
+	// when combined with a single-page fetch where page_size > limit.
+	if opts.Limit > 0 && len(items) > opts.Limit {
+		items = items[:opts.Limit]
+		truncated = true
+	}
+
+	if fopts.WantsJSON() {
+		meta := &output.Meta{Count: output.IntPtr(len(items)), HasMore: truncated, TotalCount: output.IntPtr(int(serverTotal))}
+		return fopts.Emit(iostreams.IO.Out, items, meta)
+	}
+
+	if len(items) == 0 {
+		fmt.Fprintln(iostreams.IO.Out, "(no documents)")
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tNAME\tSTATUS\tSIZE\tUPDATED")
+	now := time.Now()
+	for _, k := range items {
+		name := text.Truncate(40, text.KnowledgeDisplayName(k.FileName, k.Title, k.ID))
+		updated := text.FuzzyAgo(now, k.UpdatedAt)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", k.ID, name, k.ParseStatus, formatSize(k.FileSize), updated)
+	}
+	return tw.Flush()
+}
+
+// formatSize renders a byte count as a short human string (KB / MB).
+// Kept tiny on purpose - go-humanize would pull a transitive dep just for one
+// column. A "-" placeholder hides zero-size entries (URL / text).
+func formatSize(bytes int64) string {
+	if bytes <= 0 {
+		return "-"
+	}
+	const (
+		kb = 1 << 10
+		mb = 1 << 20
+		gb = 1 << 30
+	)
+	switch {
+	case bytes >= gb:
+		return fmt.Sprintf("%.1fGB", float64(bytes)/float64(gb))
+	case bytes >= mb:
+		return fmt.Sprintf("%.1fMB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%.1fKB", float64(bytes)/float64(kb))
+	}
+	return fmt.Sprintf("%dB", bytes)
+}

@@ -1,0 +1,1743 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"mime/multipart"
+	"reflect"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/Tencent/WeKnora/internal/application/access"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/datasource"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/hibiken/asynq"
+)
+
+// DataSourceService implements the DataSourceService interface
+type DataSourceService struct {
+	dsRepo            interfaces.DataSourceRepository
+	syncLogRepo       interfaces.SyncLogRepository
+	knowledgeService  interfaces.KnowledgeService
+	kbService         interfaces.KnowledgeBaseService
+	taskEnqueuer      interfaces.TaskEnqueuer
+	connectorRegistry *datasource.ConnectorRegistry
+	scheduler         *datasource.Scheduler
+	tenantRepo        interfaces.TenantRepository
+	tagService        interfaces.KnowledgeTagService
+	audit             interfaces.AuditLogService
+}
+
+// NewDataSourceService creates a new data source service
+func NewDataSourceService(
+	dsRepo interfaces.DataSourceRepository,
+	syncLogRepo interfaces.SyncLogRepository,
+	knowledgeService interfaces.KnowledgeService,
+	kbService interfaces.KnowledgeBaseService,
+	taskEnqueuer interfaces.TaskEnqueuer,
+	connectorRegistry *datasource.ConnectorRegistry,
+	scheduler *datasource.Scheduler,
+	tenantRepo interfaces.TenantRepository,
+	tagService interfaces.KnowledgeTagService,
+	audit interfaces.AuditLogService,
+) interfaces.DataSourceService {
+	return &DataSourceService{
+		dsRepo:            dsRepo,
+		syncLogRepo:       syncLogRepo,
+		knowledgeService:  knowledgeService,
+		kbService:         kbService,
+		taskEnqueuer:      taskEnqueuer,
+		connectorRegistry: connectorRegistry,
+		scheduler:         scheduler,
+		tenantRepo:        tenantRepo,
+		tagService:        tagService,
+		audit:             audit,
+	}
+}
+
+// CreateDataSource creates a new data source configuration
+func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.DataSource) (*types.DataSource, error) {
+	if ds == nil {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	if err := datasource.ValidateSyncSchedule(ds.SyncSchedule); err != nil {
+		return nil, err
+	}
+
+	// Validate knowledge base exists
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
+	if err != nil || kb == nil {
+		return nil, datasource.ErrKnowledgeBaseNotFound
+	}
+	if kb.TenantID != ds.TenantID {
+		return nil, datasource.ErrKnowledgeBaseNotFound
+	}
+
+	// Validate connector type
+	_, err = s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate configuration
+	if cfg, err := ds.ParseConfig(); err == nil && cfg != nil {
+		cfg.StripNonSecretCredentials(ds.Type)
+		if blob, err := cfg.ToJSON(); err == nil {
+			ds.Config = blob
+		}
+	}
+	if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+		return nil, err
+	}
+
+	// Create in database
+	if err := s.dsRepo.Create(ctx, ds); err != nil {
+		logger.Errorf(ctx, "failed to create data source: %v", err)
+		return nil, err
+	}
+
+	// Register cron schedule if configured
+	if ds.SyncSchedule != "" && ds.Status == types.DataSourceStatusActive {
+		if err := s.scheduler.AddOrUpdate(ds); err != nil {
+			logger.Warnf(ctx, "failed to register cron for ds=%s: %v", ds.ID, err)
+		}
+	}
+
+	logger.Infof(ctx, "data source created: id=%s type=%s kb=%s", ds.ID, ds.Type, ds.KnowledgeBaseID)
+	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceCreated,
+		"data_source", ds.ID, types.AuditOutcomeSuccess,
+		map[string]any{"name": ds.Name, "type": ds.Type})
+	return ds, nil
+}
+
+// GetDataSource retrieves a data source by ID
+func (s *DataSourceService) GetDataSource(ctx context.Context, id string) (*types.DataSource, error) {
+	ds, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return ds, nil
+}
+
+// ListDataSources lists all data sources for a knowledge base
+func (s *DataSourceService) ListDataSources(ctx context.Context, kbID string) ([]*types.DataSource, error) {
+	dataSources, err := s.dsRepo.FindByKnowledgeBase(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to list data sources: %v", err)
+		return nil, err
+	}
+
+	// Attach latest sync log to each data source
+	for _, ds := range dataSources {
+		log, _ := s.syncLogRepo.FindLatest(ctx, ds.ID)
+		if log != nil {
+			ds.LatestSyncLog = log
+		}
+	}
+
+	return dataSources, nil
+}
+
+// UpdateDataSource updates an existing data source
+func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.DataSource) (*types.DataSource, error) {
+	return s.updateDataSource(ctx, ds, nil, nil)
+}
+
+// PatchDataSourceSyncSettings preserves worker state and settings omitted by the caller.
+func (s *DataSourceService) PatchDataSourceSyncSettings(
+	ctx context.Context, before, after *types.DataSource, fields []string,
+) (*types.DataSource, error) {
+	if before == nil || after == nil || before.ID != after.ID || len(fields) == 0 {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	return s.updateDataSource(ctx, after, before, fields)
+}
+
+func (s *DataSourceService) updateDataSource(
+	ctx context.Context, ds, before *types.DataSource, fields []string,
+) (*types.DataSource, error) {
+	if ds == nil || ds.ID == "" {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+
+	// Verify data source exists
+	existing, err := s.dsRepo.FindByID(ctx, ds.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	if ds.KnowledgeBaseID == "" {
+		ds.KnowledgeBaseID = existing.KnowledgeBaseID
+	}
+	if ds.KnowledgeBaseID != existing.KnowledgeBaseID {
+		return nil, fmt.Errorf("changing knowledge base is not allowed")
+	}
+
+	if ds.TenantID == 0 {
+		ds.TenantID = existing.TenantID
+	}
+	if ds.TenantID != existing.TenantID {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	if err := datasource.ValidateSyncSchedule(ds.SyncSchedule); err != nil {
+		return nil, err
+	}
+
+	// Credentials NEVER flow through this endpoint — they live behind the
+	// /credentials subresource. Force-preserve the stored credentials map
+	// regardless of what the body says. Log a warning if a stale caller
+	// passes one so we can spot them and migrate later. Non-credential
+	// fields of Config (Type / ResourceIDs / Settings) flow through.
+	var mergedCfg, existingParsedCfg *types.DataSourceConfig
+	if len(ds.Config) > 0 {
+		incomingCfg, parseIncErr := ds.ParseConfig()
+		existingCfg, parseExErr := existing.ParseConfig()
+		if parseIncErr == nil && parseExErr == nil && incomingCfg != nil {
+			if incomingCfg.HasCredentials() {
+				logger.Warnf(ctx,
+					"deprecated: credentials in PUT /datasource/%s body are ignored; use PUT /credentials instead",
+					secutils.SanitizeForLog(ds.ID))
+			}
+			merged := *incomingCfg
+			if existingCfg != nil {
+				merged.Credentials = existingCfg.Credentials
+			} else {
+				merged.Credentials = nil
+			}
+			merged.StripNonSecretCredentials(ds.Type)
+			if blob, err := merged.ToJSON(); err == nil {
+				ds.Config = blob
+			}
+			mergedCfg = &merged
+			existingParsedCfg = existingCfg
+		}
+	}
+
+	// Validate new configuration if non-credential fields changed. Skip
+	// when there are no stored credentials yet (validators would fail with
+	// no token to call the live API) and when the parsed config is
+	// structurally identical.
+	configActuallyChanged := true
+	if mergedCfg != nil && existingParsedCfg != nil {
+		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
+	}
+	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
+	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
+		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+			return nil, err
+		}
+	}
+
+	if before != nil {
+		err = s.dsRepo.PatchSyncSettings(ctx, ds, before.Config, fields)
+	} else {
+		err = s.dsRepo.Update(ctx, ds)
+	}
+	if err != nil {
+		logger.Errorf(ctx, "failed to update data source: %v", err)
+		return nil, err
+	}
+
+	if before != nil {
+		// Schedule from current persisted status, never the handler's stale snapshot.
+		ds, err = s.dsRepo.FindByID(ctx, ds.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Update cron schedule
+	if err := s.scheduler.AddOrUpdate(ds); err != nil {
+		logger.Warnf(ctx, "failed to update cron for ds=%s: %v", ds.ID, err)
+	}
+
+	logger.Infof(ctx, "data source updated: id=%s", ds.ID)
+	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceUpdated,
+		"data_source", ds.ID, types.AuditOutcomeSuccess,
+		map[string]any{"name": ds.Name, "type": ds.Type, "changed_fields": []string{"settings"}})
+	return ds, nil
+}
+
+// UpdateDataSourceCredentials replaces the connector credential map. This is
+// a single atomic write; the previous credential set is discarded entirely
+// (callers cannot patch individual keys because half-configured connector
+// auth is meaningless). After persisting, the live connection is validated
+// so the caller learns immediately if the new credentials are wrong.
+func (s *DataSourceService) UpdateDataSourceCredentials(
+	ctx context.Context, id string, credentials map[string]interface{},
+) (*types.DataSource, error) {
+	if id == "" {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return nil, err
+	}
+	if parsed == nil {
+		parsed = &types.DataSourceConfig{Type: existing.Type}
+	}
+	parsed.Credentials = credentials
+	parsed.StripNonSecretCredentials(existing.Type)
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return nil, err
+	}
+	existing.Config = blob
+
+	// Run live validation now that the credentials are in place — surfaces
+	// "wrong token" feedback immediately to the user instead of waiting for
+	// the next scheduled sync.
+	if err := s.validateDataSourceConfig(ctx, existing); err != nil {
+		return nil, err
+	}
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return nil, err
+	}
+	logger.Infof(ctx, "DataSource credentials updated: id=%s", secutils.SanitizeForLog(id))
+	recordKBActivity(ctx, s.audit, existing.TenantID, existing.KnowledgeBaseID, types.AuditActionDataSourceUpdated,
+		"data_source", existing.ID, types.AuditOutcomeSuccess,
+		map[string]any{"name": existing.Name, "type": existing.Type, "changed_fields": []string{"credentials"}})
+	return existing, nil
+}
+
+// ClearDataSourceCredentials wipes the connector credential map without
+// touching any other config field. Idempotent.
+func (s *DataSourceService) ClearDataSourceCredentials(ctx context.Context, id string) error {
+	if id == "" {
+		return datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return err
+	}
+	if parsed == nil {
+		return nil
+	}
+	parsed.StripNonSecretCredentials(existing.Type)
+	if !parsed.HasConfiguredCredentials(existing.Type) {
+		blob, err := parsed.ToJSON()
+		if err != nil {
+			return err
+		}
+		existing.Config = blob
+		return s.dsRepo.Update(ctx, existing)
+	}
+	parsed.Credentials = nil
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return err
+	}
+	existing.Config = blob
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return err
+	}
+	logger.Infof(ctx, "DataSource credentials cleared by user: id=%s", secutils.SanitizeForLog(id))
+	recordKBActivity(ctx, s.audit, existing.TenantID, existing.KnowledgeBaseID, types.AuditActionDataSourceUpdated,
+		"data_source", existing.ID, types.AuditOutcomeSuccess,
+		map[string]any{"name": existing.Name, "type": existing.Type, "changed_fields": []string{"credentials"}})
+	return nil
+}
+
+// DeleteDataSource deletes a data source (soft delete)
+func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) error {
+	// Verify data source exists
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if err := s.dsRepo.Delete(ctx, id); err != nil {
+		logger.Errorf(ctx, "failed to delete data source: %v", err)
+		return err
+	}
+
+	// Remove cron schedule
+	s.scheduler.Remove(id)
+
+	// Cancel any pending/running sync logs so queued asynq tasks won't retry
+	if err := s.syncLogRepo.CancelPendingByDataSource(ctx, id); err != nil {
+		logger.Warnf(ctx, "failed to cancel pending sync logs for ds=%s: %v", id, err)
+	}
+
+	logger.Infof(ctx, "data source deleted: id=%s", id)
+	recordKBActivity(ctx, s.audit, existing.TenantID, existing.KnowledgeBaseID, types.AuditActionDataSourceDeleted,
+		"data_source", existing.ID, types.AuditOutcomeSuccess,
+		map[string]any{"name": existing.Name, "type": existing.Type})
+	return nil
+}
+
+// ValidateConnection tests the connection to an external data source
+func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string) error {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return err
+	}
+
+	// Get connector
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return err
+	}
+
+	// Parse configuration
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return datasource.ErrInvalidConfig
+	}
+
+	// Validate connection
+	if err := connector.Validate(ctx, config); err != nil {
+		// Update data source with error
+		ds.Status = types.DataSourceStatusError
+		ds.ErrorMessage = err.Error()
+		_ = s.dsRepo.Update(ctx, ds)
+		return err
+	}
+
+	// Clear error if it was previously in error state
+	if ds.Status == types.DataSourceStatusError {
+		ds.Status = types.DataSourceStatusActive
+		ds.ErrorMessage = ""
+		_ = s.dsRepo.Update(ctx, ds)
+	}
+
+	return nil
+}
+
+// ListAvailableResources lists resources available for sync in the external system.
+// parentID enables lazy (on-demand) loading of hierarchical resources: pass "" to
+// list the top level, or a resource's ExternalID to list only its direct children.
+func (s *DataSourceService) ListAvailableResources(
+	ctx context.Context, dsID string, parentID string,
+) ([]types.Resource, error) {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get connector
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse configuration
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return nil, datasource.ErrInvalidConfig
+	}
+
+	// List resources
+	resources, err := connector.ListResources(ctx, config, parentID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to list resources: %v", err)
+		return nil, err
+	}
+
+	return resources, nil
+}
+
+// ResolveResourceAncestors resolves the ancestor ExternalIDs needed to reveal the
+// given resources in a lazily-loaded picker (see the connector method for details).
+func (s *DataSourceService) ResolveResourceAncestors(
+	ctx context.Context, dsID string, resourceIDs []string,
+) ([]string, error) {
+	if len(resourceIDs) == 0 {
+		return []string{}, nil
+	}
+
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return nil, err
+	}
+
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return nil, datasource.ErrInvalidConfig
+	}
+
+	ancestors, err := connector.ResolveResourceAncestors(ctx, config, resourceIDs)
+	if err != nil {
+		logger.Errorf(ctx, "failed to resolve resource ancestors: %v", err)
+		return nil, err
+	}
+
+	return ancestors, nil
+}
+
+// ManualSync triggers an immediate sync for a data source
+func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error) {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return nil, err
+	}
+
+	if ds.Status != types.DataSourceStatusActive &&
+		ds.Status != types.DataSourceStatusError &&
+		ds.Status != types.DataSourceStatusPaused {
+		return nil, datasource.ErrDataSourceNotActive
+	}
+
+	// Create sync log
+	syncLog := &types.SyncLog{
+		DataSourceID: dsID,
+		TenantID:     ds.TenantID,
+		Status:       types.SyncLogStatusRunning,
+		StartedAt:    time.Now().UTC(),
+	}
+
+	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
+		logger.Errorf(ctx, "failed to create sync log: %v", err)
+		return nil, err
+	}
+
+	// Enqueue sync task
+	payload := &types.DataSourceSyncPayload{
+		DataSourceID: dsID,
+		TenantID:     ds.TenantID,
+		SyncLogID:    syncLog.ID,
+		ForceFull:    false,
+		Initiator:    types.TaskInitiatorFromContext(ctx),
+		Trigger:      "manual",
+	}
+	langfuse.InjectTracing(ctx, payload)
+
+	payloadJSON, _ := json.Marshal(payload)
+	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON,
+		asynq.Queue(types.QueueSync), asynq.MaxRetry(5), asynq.Timeout(2*time.Hour))
+
+	info, err := s.taskEnqueuer.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "failed to enqueue sync task: %v", err)
+		syncLog.Status = types.SyncLogStatusFailed
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = err.Error()
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		if ds.Status != types.DataSourceStatusPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+		ds.ErrorMessage = fmt.Sprintf("Failed to enqueue sync: %v", err)
+		_ = s.dsRepo.Update(ctx, ds)
+		recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncFailed,
+			"data_source", ds.ID, types.AuditOutcomeFailed,
+			map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID, "trigger": "manual"})
+		return nil, err
+	}
+
+	logger.Infof(ctx, "sync task enqueued: ds=%s syncLog=%s", dsID, syncLog.ID)
+	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncStarted,
+		"data_source", ds.ID, types.AuditOutcomeAccepted,
+		map[string]any{
+			"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
+			"task_id": info.ID, "trigger": "manual", "processing_status": "pending",
+		})
+	return syncLog, nil
+}
+
+// PauseDataSource pauses a data source's scheduled syncs
+func (s *DataSourceService) PauseDataSource(ctx context.Context, id string) error {
+	ds, err := s.GetDataSource(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	ds.Status = types.DataSourceStatusPaused
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		logger.Errorf(ctx, "failed to pause data source: %v", err)
+		return err
+	}
+
+	// Remove cron schedule
+	s.scheduler.Remove(id)
+
+	logger.Infof(ctx, "data source paused: id=%s", id)
+	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourcePaused,
+		"data_source", ds.ID, types.AuditOutcomeSuccess, map[string]any{"name": ds.Name, "type": ds.Type})
+	return nil
+}
+
+// ResumeDataSource resumes a paused data source
+func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) error {
+	ds, err := s.GetDataSource(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := datasource.ValidateSyncSchedule(ds.SyncSchedule); err != nil {
+		return err
+	}
+
+	ds.Status = types.DataSourceStatusActive
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		logger.Errorf(ctx, "failed to resume data source: %v", err)
+		return err
+	}
+
+	// Re-register cron schedule
+	if err := s.scheduler.AddOrUpdate(ds); err != nil {
+		logger.Warnf(ctx, "failed to re-register cron for ds=%s: %v", ds.ID, err)
+	}
+
+	logger.Infof(ctx, "data source resumed: id=%s", id)
+	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceResumed,
+		"data_source", ds.ID, types.AuditOutcomeSuccess, map[string]any{"name": ds.Name, "type": ds.Type})
+	return nil
+}
+
+// GetSyncLogs retrieves sync history for a data source
+func (s *DataSourceService) GetSyncLogs(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error) {
+	logs, err := s.syncLogRepo.FindByDataSource(ctx, dsID, limit, offset)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get sync logs: %v", err)
+		return nil, err
+	}
+	return logs, nil
+}
+
+// GetSyncLog retrieves a specific sync log entry
+func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*types.SyncLog, error) {
+	log, err := s.syncLogRepo.FindByID(ctx, syncLogID)
+	if err != nil {
+		return nil, err
+	}
+	return log, nil
+}
+
+// ProcessSync handles the actual sync operation (called by asynq task)
+func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
+	var payload types.DataSourceSyncPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
+		return err
+	}
+	ctx = payload.Initiator.Apply(ctx)
+	taskID, _ := asynq.GetTaskID(ctx)
+	ctx = withKBActivityTask(ctx, taskID, payload.Trigger)
+
+	logger.Infof(ctx, "processing data source sync: ds=%s syncLog=%s", payload.DataSourceID, payload.SyncLogID)
+
+	// Get data source
+	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
+	sourceMissing := errors.Is(err, datasource.ErrDataSourceNotFound)
+	if err != nil && !sourceMissing {
+		return fmt.Errorf("read data source for sync: %w", err)
+	}
+
+	// Get sync log
+	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
+	if errors.Is(err, datasource.ErrSyncLogNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read sync log: %w", err)
+	}
+	if sourceMissing {
+		logger.Warnf(ctx, "data source not found, cancelling sync: ds=%s", payload.DataSourceID)
+		syncLog.Status = types.SyncLogStatusCanceled
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = "data source has been deleted"
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		return nil
+	}
+
+	kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
+	if kbErr != nil {
+		if !errors.Is(kbErr, apprepo.ErrKnowledgeBaseNotFound) {
+			return fmt.Errorf("read knowledge base for sync: %w", kbErr)
+		}
+		logger.Warnf(ctx, "knowledge base not found, cancelling sync: kb=%s ds=%s",
+			ds.KnowledgeBaseID, payload.DataSourceID)
+		syncLog.Status = types.SyncLogStatusCanceled
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = "knowledge base has been deleted"
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		return nil
+	}
+
+	ctx, err = access.WithKBTaskWrite(ctx, kb, ds.TenantID)
+	if err != nil {
+		return fmt.Errorf("%w: data source KB does not belong to its tenant", asynq.SkipRetry)
+	}
+	wasPaused := ds.Status == types.DataSourceStatusPaused
+
+	// Get connector
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		logger.Errorf(ctx, "connector not found: type=%s", ds.Type)
+		syncLog.Status = types.SyncLogStatusFailed
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = fmt.Sprintf("Connector not found: %s", ds.Type)
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
+		return err
+	}
+
+	// Parse configuration
+	config, err := ds.ParseConfig()
+	if err != nil {
+		logger.Errorf(ctx, "failed to parse config: %v", err)
+		syncLog.Status = types.SyncLogStatusFailed
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
+		return err
+	}
+	// Streaming path: connectors that support it interleave fetch→ingest→
+	// checkpoint so a large sync bounds memory and resumes after a timeout
+	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
+	if sc, ok := connector.(datasource.StreamingConnector); ok {
+		return s.processSyncStreaming(ctx, sc, ds, syncLog, config, payload, wasPaused)
+	}
+
+	// Fetch items based on sync mode
+	var items []types.FetchedItem
+	var nextCursor *types.SyncCursor
+	var fetchErr error
+
+	if payload.ForceFull || ds.SyncMode == types.SyncModeFull {
+		if full, ok := connector.(datasource.FullSyncWithCursor); ok {
+			cursor, _ := ds.ParseSyncCursor()
+			items, nextCursor, fetchErr = full.FetchAllFromCursor(ctx, config, config.ResourceIDs, cursor)
+		} else {
+			items, fetchErr = connector.FetchAll(ctx, config, config.ResourceIDs)
+		}
+		logger.Infof(ctx, "full sync fetched %d items", len(items))
+	} else {
+		// Incremental sync
+		cursor, _ := ds.ParseSyncCursor()
+		items, nextCursor, fetchErr = connector.FetchIncremental(ctx, config, cursor)
+		logger.Infof(ctx, "incremental sync fetched %d items", len(items))
+	}
+
+	var fetchWarnings []string
+	var partialFetch *datasource.PartialFetchError
+	if errors.As(fetchErr, &partialFetch) {
+		fetchWarnings = partialFetch.Details
+		fetchErr = nil
+	}
+
+	if fetchErr != nil {
+		// Persist connector cursor even when fetch failed so transient outages
+		// (e.g. RSS feed downtime) do not force a full re-ingest on recovery.
+		if nextCursor != nil {
+			if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
+				ds.LastSyncCursor = cursorJSON
+				if uerr := s.dsRepo.UpdateSyncState(ctx, ds); uerr != nil {
+					logger.Warnf(ctx, "failed to persist sync cursor after fetch error: %v", uerr)
+				}
+			}
+		}
+		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
+		syncLog.Status = types.SyncLogStatusFailed
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
+		return fetchErr
+	}
+
+	// Process fetched items and write to knowledge base
+	result := &types.SyncResult{
+		Total: len(items),
+	}
+
+	// Set tenant context so KnowledgeService can resolve tenant info correctly
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, ds.TenantID)
+
+	tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get tenant info: %v", err)
+		syncLog.Status = types.SyncLogStatusFailed
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = fmt.Sprintf("Failed to get tenant info: %v", err)
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
+		return err
+	}
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+
+	// Auto-tag: find or create a tag for this data source so synced items are easily identifiable
+	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
+
+	var ingestErr error
+	nonBlockingFailures := 0
+	for _, item := range items {
+		item := item
+		nonBlocking, err := s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result)
+		if nonBlocking || errors.Is(err, ErrInvalidFileType) {
+			nonBlockingFailures++
+		} else if err != nil && ingestErr == nil {
+			ingestErr = err
+		}
+	}
+
+	resultJSON, _ := result.ToJSON()
+	if ingestErr != nil {
+		// Keep the previous cursor so a retry can recover items the sink did not accept.
+		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
+			types.SyncLogStatusFailed, ingestErr.Error(), wasPaused)
+		return ingestErr
+	}
+	if err := allFetchedItemsFailedError(result, nonBlockingFailures); err != nil {
+		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
+		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		return err
+	}
+
+	// Update cursor for next incremental sync
+	if nextCursor != nil {
+		cursorJSON, _ := nextCursor.ToJSON()
+		ds.LastSyncCursor = cursorJSON
+	}
+
+	ds.LastSyncAt = timePtr(time.Now().UTC())
+	syncStatus := types.SyncLogStatusSuccess
+	syncErrorMessage := ""
+	if len(fetchWarnings) > 0 {
+		syncStatus = types.SyncLogStatusPartial
+		syncErrorMessage = fmt.Sprintf("Some feeds failed: %s", strings.Join(fetchWarnings, "; "))
+		for _, w := range fetchWarnings {
+			result.Errors = append(result.Errors, types.SyncItemError{Message: w})
+		}
+		resultJSON, _ = result.ToJSON()
+	}
+	if result.Failed > 0 {
+		// Per-document failures flip the sync to partial so the drawer shows
+		// which docs didn't make it (mirrors the streaming path). Deletion
+		// failures additionally only retry on a later full sync.
+		syncStatus = types.SyncLogStatusPartial
+		if syncErrorMessage != "" {
+			syncErrorMessage += "; "
+		}
+		syncErrorMessage += fmt.Sprintf("%d document(s) failed to sync", result.Failed)
+		if result.DeletionFailed > 0 {
+			syncErrorMessage += fmt.Sprintf(
+				"; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
+		}
+	}
+	if err := s.updateSyncRunResult(
+		ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused,
+	); err != nil {
+		return err
+	}
+
+	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
+		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
+
+	return nil
+}
+
+// resolveAutoTagIDs finds or creates the per-data-source tag applied to every
+// synced item so results are identifiable in the KB. A tag failure is
+// non-fatal: the sync proceeds untagged.
+func (s *DataSourceService) resolveAutoTagIDs(ctx context.Context, ds *types.DataSource) []string {
+	autoTagIDs := []string{}
+	if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, ds.Name); tagErr != nil {
+		logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", ds.Name, tagErr)
+	} else if autoTag != nil {
+		autoTagIDs = append(autoTagIDs, autoTag.ID)
+		logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", ds.Name, autoTag.ID)
+	}
+	return autoTagIDs
+}
+
+// maxSyncResultErrors bounds the per-item error sample retained in
+// SyncResult.Errors. That slice is persisted as jsonb and returned in every
+// sync-log list response, so an unbounded list on a sync that fails thousands of
+// documents means multi-MB DB rows and payloads. The accurate failure count
+// lives in SyncResult.Failed (a bounded int); this list only keeps a sample for
+// display (Tencent/WeKnora#2136 / #1262).
+const maxSyncResultErrors = 100
+
+// recordSyncError appends an error sample to result.Errors, capped at
+// maxSyncResultErrors. Callers still increment result.Failed for the exact count.
+func recordSyncError(result *types.SyncResult, item types.SyncItemError) {
+	if len(result.Errors) < maxSyncResultErrors {
+		result.Errors = append(result.Errors, item)
+	}
+}
+
+// fetchFailureSyncError maps a connector error item into a structured, user-
+// facing sample. Connectors that classify their errors (Feishu) provide a stable
+// i18n code + params via metadata so the frontend localises it to the viewer's
+// language; the raw status/body/log_id never leaves the server logs. Connectors
+// without codes keep the raw text as a Message fallback. Best practice per
+// Airbyte/Fivetran/Onyx: humanised, actionable, localised UI; raw detail in logs.
+func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncItemError {
+	e := types.SyncItemError{Title: item.Title}
+	if code := item.Metadata["error_reason_code"]; code != "" {
+		e.Code = code
+		if v := item.Metadata["error_reason_code_value"]; v != "" {
+			e.Params = map[string]string{"code": v}
+		}
+		e.Message = item.Metadata["error_reason"] // fallback if the client lacks the key
+	} else {
+		e.Message = rawMsg
+	}
+	return e
+}
+
+// applyFetchedItem writes a single fetched item into the knowledge base and
+// updates result counters. It is the shared core of the batch loop and the
+// streaming handler so item classification (deleted / empty / ingest outcome)
+// stays identical across both fetch paths. Unexpected ingestion errors are
+// returned so callers do not acknowledge a cursor beyond an unaccepted item.
+// The boolean marks oversized downloads that should not disable scheduled syncs.
+func (s *DataSourceService) applyFetchedItem(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
+	tagIDs []string, result *types.SyncResult,
+) (nonBlockingFailure bool, ingestErr error) {
+	if item.IsDeleted {
+		if !ds.SyncDeletions {
+			// Sync deletion disabled: neither count nor delete.
+			return false, nil
+		}
+		if item.ExternalID == "" {
+			logger.Warnf(ctx, "skipping deletion for item %q: empty external_id", item.Title)
+			result.Skipped++
+			return false, nil
+		}
+		// Perform real KB deletion, scoped to items owned by this data source
+		// so identical external IDs from different data sources cannot collide.
+		repo := s.knowledgeService.GetRepository()
+		existing, lookupErr := repo.FindByDataSourceExternalID(
+			ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
+		)
+		if lookupErr != nil {
+			logger.Errorf(ctx, "failed to find deleted knowledge for external_id=%s (ds=%s, kb=%s): %v",
+				item.ExternalID, ds.ID, ds.KnowledgeBaseID, lookupErr)
+			result.Failed++
+			result.DeletionFailed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   item.Title,
+				Code:    "deletion_lookup_failed",
+				Message: "Failed to look up the item before deletion; see server logs",
+			})
+			return false, nil
+		}
+		if existing == nil {
+			// Deletion is idempotent: the source item may already have been
+			// removed manually or by an earlier sync.
+			result.Skipped++
+			return false, nil
+		}
+		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
+			// The cursor is already past this item, so a failed deletion normally
+			// retries only on a later full sync. Counted separately so the
+			// sync-log message can warn the operator about this gap.
+			result.Failed++
+			result.DeletionFailed++
+			logger.Errorf(ctx, "failed to delete knowledge %s for external_id=%s (ds=%s): %v",
+				existing.ID, item.ExternalID, ds.ID, deleteErr)
+			recordSyncError(result, types.SyncItemError{
+				Title:   item.Title,
+				Code:    "deletion_failed",
+				Message: "Deletion failed; see server logs",
+			})
+			return false, nil
+		}
+		if herr := repo.HardDeleteKnowledge(ctx, ds.TenantID, existing.ID); herr != nil {
+			result.Failed++
+			result.DeletionFailed++
+			logger.Errorf(ctx, "failed to hard-delete knowledge %s for external_id=%s (ds=%s): %v",
+				existing.ID, item.ExternalID, ds.ID, herr)
+			recordSyncError(result, types.SyncItemError{
+				Title:   item.Title,
+				Code:    "deletion_failed",
+				Message: "Deletion failed; see server logs",
+			})
+			return false, nil
+		}
+		result.Deleted++
+		return false, nil
+	}
+
+	if len(item.Content) == 0 && item.URL == "" {
+		// Check if this is an error item from the connector (failed to fetch content)
+		if errMsg, hasErr := item.Metadata["error"]; hasErr {
+			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", item.Title, item.ExternalID, errMsg)
+			result.Failed++
+			recordSyncError(result, fetchFailureSyncError(item, errMsg))
+			return item.Metadata["error_reason_code"] == "dingtalk_document_too_large", nil
+		} else {
+			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", item.Title, item.ExternalID)
+			result.Skipped++
+		}
+		return false, nil
+	}
+
+	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
+	if err != nil {
+		var dupErr *types.DuplicateKnowledgeError
+		switch {
+		case errors.As(err, &dupErr):
+			// Duplicate file/URL is not a failure — count as skipped.
+			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
+			result.Skipped++
+		case errors.Is(err, ErrInvalidFileType):
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title: item.Title, Code: "unsupported_file_type", Message: "Unsupported file type",
+			})
+			return false, err
+		default:
+			var appErr *werrors.AppError
+			if errors.As(err, &appErr) && appErr.Code == werrors.ErrImportPrerequisiteMissing {
+				// A missing VLM/ASR prerequisite can never succeed on replay:
+				// the file waits for the operator to configure a model.
+				// Classify it as a permanent rejection — visible in the sync
+				// log, stream keeps going, cursor advances past it — so one
+				// image cannot abort the round and force every later sync to
+				// re-fetch the same items again (Tencent/WeKnora#4712).
+				result.Failed++
+				recordSyncError(result, types.SyncItemError{
+					Title:   item.Title,
+					Code:    "prerequisite_not_configured",
+					Message: appErr.Message,
+				})
+				return true, nil
+			}
+			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   item.Title,
+				Code:    "ingest_failed",
+				Message: "Ingest failed; see server logs",
+			})
+			return false, &dataSourceIngestError{cause: err}
+		}
+	} else if isUpdate {
+		result.Updated++
+	} else {
+		result.Created++
+	}
+	return false, nil
+}
+
+// streamStartCursor decides which cursor a streaming fetch should resume from.
+// A user-triggered full sync on its first attempt drops the cursor so every
+// item is re-fetched; a retried full sync (attempt > 0) and every incremental
+// sync resume from the last persisted checkpoint so a timed-out run converges
+// instead of restarting from scratch.
+func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*types.SyncCursor, error) {
+	if forceFull && attempt == 0 {
+		return nil, nil
+	}
+	return ds.ParseSyncCursor()
+}
+
+// feishuSettingResyncRequired is the one-shot upgrade marker key. Legacy
+// feishu/lark data sources are stamped by migration 000122 (sqlite 000040).
+const feishuSettingResyncRequired = "resync_required"
+
+// resyncRequired reads the one-shot upgrade marker out of parsed config
+// Settings. Tolerates both bool and string encodings. The marker is stamped
+// onto legacy feishu/lark data sources by migration 000122 (sqlite 000040)
+// when the per-source parse_mode shipped; it upgrades their next sync — even
+// a scheduled incremental one — to a full pass so existing documents re-ingest
+// with folder paths and block-level parsing.
+func resyncRequired(cfg *types.DataSourceConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	switch v := cfg.Settings[feishuSettingResyncRequired].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
+	}
+}
+
+// clearResyncMarker removes the one-shot upgrade marker after the upgraded sync
+// succeeded so it never fires again. Streaming path only: the feishu/lark
+// connectors the migration tags all implement StreamingConnector.
+func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.DataSource) {
+	cfg, err := ds.ParseConfig()
+	if err == nil && cfg.Settings[feishuSettingResyncRequired] == nil {
+		return
+	}
+	// Re-read the row before writing: the upgraded sync may have run long, and
+	// a full-row Update from the sync-start snapshot would silently revert
+	// concurrent user edits (settings, resource_ids, schedule…). Only the
+	// marker removal is ours to persist.
+	fresh, err := s.dsRepo.FindByID(ctx, ds.ID)
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, re-read failed: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	cfg, err = fresh.ParseConfig()
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, config unreadable: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	if cfg.Settings[feishuSettingResyncRequired] == nil {
+		return
+	}
+	delete(cfg.Settings, feishuSettingResyncRequired)
+	blob, err := cfg.ToJSON()
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, config re-encode failed: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	fresh.Config = blob
+	if err := s.dsRepo.Update(ctx, fresh); err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker: ds=%s err=%v", ds.ID, err)
+	}
+}
+
+// streamSyncHandler adapts a streaming fetch to the knowledge-base ingest path.
+// Emit ingests each item as it arrives (bounding memory) and Checkpoint persists
+// the connector cursor plus live progress counts at page boundaries.
+type streamSyncHandler struct {
+	svc       *DataSourceService
+	ds        *types.DataSource
+	tagIDs    []string
+	result    *types.SyncResult
+	syncLog   *types.SyncLog
+	ingestErr error
+	// Count separately from the capped error samples; unsupported and oversized
+	// files must not disable future syncs, including runs with both failure types.
+	nonBlockingFailures int
+}
+
+// Emit ingests one streamed item. Unexpected ingestion errors abort the stream
+// before the connector can checkpoint past the failed item.
+func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) error {
+	if h.ingestErr != nil {
+		return h.ingestErr
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	h.result.Total++
+	failedBefore := h.result.Failed
+	nonBlocking, err := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	if item.RetryOnFailure && h.result.Failed > failedBefore {
+		h.ingestErr = fmt.Errorf("streamed item %q was not accepted; retry synchronization", item.ExternalID)
+		return h.ingestErr
+	}
+	if nonBlocking || errors.Is(err, ErrInvalidFileType) {
+		h.nonBlockingFailures++
+		return nil
+	}
+	h.ingestErr = err
+	return h.ingestErr
+}
+
+// Checkpoint persists the connector cursor onto the data source and mirrors the
+// running counts into the sync log so progress survives a crash and the UI can
+// reflect a long sync mid-flight instead of jumping from 0 to done.
+func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCursor) error {
+	if h.ingestErr != nil {
+		return h.ingestErr
+	}
+	if cursor == nil {
+		return nil
+	}
+	cursorJSON, err := cursor.ToJSON()
+	if err != nil {
+		return err
+	}
+	h.ds.LastSyncCursor = cursorJSON
+	if err := h.svc.dsRepo.UpdateSyncState(ctx, h.ds); err != nil {
+		return err
+	}
+
+	// Best-effort live progress; a failure here must not abort the sync.
+	h.syncLog.ItemsTotal = h.result.Total
+	h.syncLog.ItemsCreated = h.result.Created
+	h.syncLog.ItemsUpdated = h.result.Updated
+	h.syncLog.ItemsDeleted = h.result.Deleted
+	h.syncLog.ItemsSkipped = h.result.Skipped
+	h.syncLog.ItemsFailed = h.result.Failed
+	if err := h.svc.syncLogRepo.UpdateResult(ctx, h.syncLog); err != nil {
+		logger.Warnf(ctx, "failed to persist sync log progress at checkpoint: %v", err)
+	}
+	return nil
+}
+
+// streamingFetch dispatches to FetchFullStream when a connector can re-fetch
+// every item while keeping the stored cursor as the deletion baseline. Other
+// streaming connectors keep FetchStream, including force-full runs that drop
+// the cursor on the first attempt via streamStartCursor.
+func streamingFetch(
+	ctx context.Context,
+	sc datasource.StreamingConnector,
+	config *types.DataSourceConfig,
+	forceFull bool,
+	startCursor, fullBaseline *types.SyncCursor,
+	h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	if forceFull {
+		if full, ok := sc.(datasource.FullStreamingConnector); ok {
+			return full.FetchFullStream(ctx, config, fullBaseline, h)
+		}
+	}
+	return sc.FetchStream(ctx, config, startCursor, h)
+}
+
+// processSyncStreaming runs a sync through a StreamingConnector, ingesting each
+// item as it arrives and checkpointing progress so the run is memory-bounded and
+// resumable after a timeout.
+func (s *DataSourceService) processSyncStreaming(
+	ctx context.Context, sc datasource.StreamingConnector,
+	ds *types.DataSource, syncLog *types.SyncLog,
+	config *types.DataSourceConfig, payload types.DataSourceSyncPayload, wasPaused bool,
+) error {
+	// Tenant + auto-tag setup must precede fetching because the stream ingests
+	// each item on the fly.
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, ds.TenantID)
+	tenant, err := s.tenantRepo.GetTenantByID(ctx, ds.TenantID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get tenant info: %v", err)
+		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
+			types.SyncLogStatusFailed, fmt.Sprintf("Failed to get tenant info: %v", err), wasPaused)
+		return err
+	}
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+
+	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
+
+	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
+	if resyncRequired(config) {
+		// One-shot legacy upgrade (design §7). The marker is cleared only
+		// after the run succeeds below; a failure keeps it so the retry
+		// resumes the upgraded pass from its checkpoint.
+		forceFull = true
+	}
+	attempt, _ := asynq.GetRetryCount(ctx)
+	startCursor, err := streamStartCursor(ds, forceFull, attempt)
+	if err != nil {
+		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)
+		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
+			types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", err), wasPaused)
+		return err
+	}
+
+	result := &types.SyncResult{}
+	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
+
+	fullBaseline := startCursor
+	if forceFull {
+		if _, ok := sc.(datasource.FullStreamingConnector); ok {
+			baseline, cursorErr := ds.ParseSyncCursor()
+			if cursorErr != nil {
+				logger.Errorf(ctx, "failed to parse full-sync cursor: %v", cursorErr)
+				s.updateSyncRunResult(ctx, ds, syncLog, result, nil,
+					types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", cursorErr), wasPaused)
+				return cursorErr
+			}
+			fullBaseline = baseline
+		}
+	}
+
+	nextCursor, fetchErr := streamingFetch(ctx, sc, config, forceFull, startCursor, fullBaseline, handler)
+	if handler.ingestErr != nil {
+		// Do not publish a final cursor even if the connector ignored an Emit error.
+		fetchErr = handler.ingestErr
+	}
+	if fetchErr != nil {
+		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
+		// it in place so the Asynq retry resumes from there. Persist counts.
+		logger.Errorf(ctx, "streaming fetch failed: %v", fetchErr)
+		resultJSON, _ := result.ToJSON()
+		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
+			types.SyncLogStatusFailed, fmt.Sprintf("Fetch failed: %v", fetchErr), wasPaused)
+		return fetchErr
+	}
+
+	resultJSON, _ := result.ToJSON()
+	if err := allFetchedItemsFailedError(result, handler.nonBlockingFailures); err != nil {
+		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
+		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		return err
+	}
+
+	// Persist the final cursor for the next incremental sync.
+	if nextCursor != nil {
+		if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
+			ds.LastSyncCursor = cursorJSON
+		}
+	}
+	ds.LastSyncAt = timePtr(time.Now().UTC())
+
+	// Surface per-document failures as a partial sync (not silent success), so
+	// the sync-log drawer's failure detail explains which docs didn't make it —
+	// the visibility gap behind "status normal but not everything syncs"
+	// (Tencent/WeKnora#2136). Fetch failures abort the stream before the failed
+	// page is checkpointed, so the next run retries them; deletion failures are
+	// past the cursor and only retry on a full sync in the normal case (see
+	// applyFetchedItem).
+	status := types.SyncLogStatusSuccess
+	errMsg := ""
+	if result.Failed > 0 {
+		status = types.SyncLogStatusPartial
+		errMsg = fmt.Sprintf("%d document(s) failed to sync", result.Failed)
+		if result.DeletionFailed > 0 {
+			errMsg += fmt.Sprintf("; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
+		}
+	}
+	if err := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused); err != nil {
+		return err
+	}
+	// The upgraded full pass succeeded (success or partial — per-document
+	// failures are a normal retryable condition): retire the marker so it
+	// never fires again. Failed runs returned earlier and keep it.
+	if resyncRequired(config) {
+		s.clearResyncMarker(ctx, ds)
+	}
+	logger.Infof(ctx, "streaming sync completed: ds=%s created=%d updated=%d deleted=%d skipped=%d failed=%d",
+		payload.DataSourceID, result.Created, result.Updated, result.Deleted, result.Skipped, result.Failed)
+	return nil
+}
+
+func (s *DataSourceService) updateSyncRunResult(
+	ctx context.Context,
+	ds *types.DataSource,
+	syncLog *types.SyncLog,
+	result *types.SyncResult,
+	resultJSON types.JSON,
+	status string,
+	errorMessage string,
+	wasPaused bool,
+) error {
+	syncLog.ItemsTotal = result.Total
+	syncLog.ItemsCreated = result.Created
+	syncLog.ItemsUpdated = result.Updated
+	syncLog.ItemsDeleted = result.Deleted
+	syncLog.ItemsSkipped = result.Skipped
+	syncLog.ItemsFailed = result.Failed
+	syncLog.Status = status
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.ErrorMessage = errorMessage
+	syncLog.Result = resultJSON
+	logErr := s.syncLogRepo.UpdateResult(ctx, syncLog)
+	if logErr != nil {
+		logger.Errorf(ctx, "failed to update sync log: %v", logErr)
+	}
+
+	if status == types.SyncLogStatusFailed {
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+	} else if wasPaused {
+		ds.Status = types.DataSourceStatusPaused
+	} else {
+		ds.Status = types.DataSourceStatusActive
+	}
+	ds.ErrorMessage = errorMessage
+	ds.LastSyncResult = resultJSON
+	sourceErr := s.dsRepo.UpdateSyncState(ctx, ds)
+	if sourceErr != nil {
+		logger.Errorf(ctx, "failed to update data source: %v", sourceErr)
+	}
+	if err := errors.Join(logErr, sourceErr); err != nil {
+		return fmt.Errorf("persist sync result: %w", err)
+	}
+	action := types.AuditActionDataSourceSyncCompleted
+	outcome := types.AuditOutcomeSuccess
+	if status == types.SyncLogStatusFailed {
+		action = types.AuditActionDataSourceSyncFailed
+		outcome = types.AuditOutcomeFailed
+	} else if status == types.SyncLogStatusPartial {
+		outcome = types.AuditOutcomePartial
+	}
+	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, action,
+		"data_source", ds.ID, outcome,
+		map[string]any{
+			"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
+			"total": result.Total, "created": result.Created, "updated": result.Updated,
+			"deleted": result.Deleted, "skipped": result.Skipped, "failed": result.Failed,
+		})
+	return nil
+}
+
+func allFetchedItemsFailedError(result *types.SyncResult, nonBlockingFailures int) error {
+	if result == nil || result.Total == 0 {
+		return nil
+	}
+	if result.Failed != result.Total || result.Created != 0 || result.Updated != 0 ||
+		result.Deleted != 0 || result.Skipped != 0 {
+		return nil
+	}
+	// An oversized or unsupported file will not recover by replaying the same
+	// task. Keep the failure visible as a partial run. Oversized downloads retain
+	// their connector revision until the source file is replaced. Other failures
+	// still follows the existing failure/retry path, even beyond the sample cap.
+	if nonBlockingFailures == result.Failed {
+		return nil
+	}
+
+	detail := ""
+	if len(result.Errors) > 0 {
+		detail = result.Errors[0].Display()
+		const maxDetailLen = 500
+		if len(detail) > maxDetailLen {
+			// Back off to a rune boundary: a partial multi-byte rune is invalid
+			// UTF-8, which PostgreSQL rejects when the error is persisted.
+			cut := maxDetailLen
+			for cut > 0 && !utf8.RuneStart(detail[cut]) {
+				cut--
+			}
+			detail = detail[:cut] + "..."
+		}
+	}
+	if detail == "" {
+		return fmt.Errorf("all fetched items failed during sync (%d/%d)", result.Failed, result.Total)
+	}
+	return fmt.Errorf("all fetched items failed during sync (%d/%d): %s", result.Failed, result.Total, detail)
+}
+
+// ValidateCredentials tests connectivity using raw credentials without persisting anything.
+func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorType string, credentials map[string]interface{}) error {
+	connector, err := s.connectorRegistry.Get(connectorType)
+	if err != nil {
+		return err
+	}
+	config := &types.DataSourceConfig{
+		Type:        connectorType,
+		Credentials: credentials,
+	}
+	if err := connector.Validate(ctx, config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Helper functions
+
+func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *types.DataSource) error {
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return err
+	}
+
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return datasource.ErrInvalidConfig
+	}
+
+	return connector.Validate(ctx, config)
+}
+
+// ingestItem writes a single FetchedItem into the knowledge base.
+// Existing datasource items are replaced atomically at the knowledge-row boundary.
+//
+// Routing logic:
+//   - Has Content bytes → CreateKnowledgeFromFile (走完整的文档解析 pipeline)
+//   - Has URL only      → CreateKnowledgeFromURL  (让 WeKnora 下载并解析)
+//
+// Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
+func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+	// Reject unsupported source files before replacing an existing document.
+	// Do not classify generic BadRequest errors: missing storage configuration
+	// also uses that type and must remain retryable.
+	if len(item.Content) > 0 && (IsVideoType(getFileType(item.FileName)) || !isValidFileType(item.FileName)) {
+		return false, ErrInvalidFileType
+	}
+	// Channel decides the knowledge "source" label shown in the UI. Prefer the
+	// connector-supplied metadata["channel"] (e.g. Feishu Drive sets it to
+	// "feishu" so Drive docs share the wiki's "飞书" label instead of showing
+	// "unknown" for the raw ds.Type "feishu_drive"). Fall back to ds.Type so
+	// connectors that don't set metadata.channel still get a meaningful label.
+	channel := ds.Type // e.g. "feishu", "notion"
+	if item.Metadata != nil {
+		if mc, ok := item.Metadata["channel"]; ok && mc != "" {
+			channel = mc
+		}
+	}
+
+	metadata := map[string]string{
+		"external_id":        item.ExternalID,
+		"source_resource_id": item.SourceResourceID,
+		"datasource_id":      ds.ID,
+	}
+	// The source system's own last-modified time, when the connector supplied
+	// one. The knowledge row's UpdatedAt moves on every re-parse, so this is
+	// the only record of how old the document itself is.
+	if !item.UpdatedAt.IsZero() {
+		metadata["source_updated_at"] = item.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	if !item.CreatedAt.IsZero() {
+		metadata["source_created_at"] = item.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	for k, v := range item.Metadata {
+		metadata[k] = v
+	}
+
+	// Existing items are replaced through a short DB transaction. Validation and
+	// file storage must succeed before the previous row or resources are retired.
+	isUpdate := false
+	if item.ExternalID != "" {
+		repo := s.knowledgeService.GetRepository()
+		existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
+		if err != nil {
+			return false, fmt.Errorf("check existing datasource knowledge: %w", err)
+		}
+		if existing != nil {
+			// Conflict strategy "skip" (跳过已存在): the item already exists in
+			// the KB, so leave it untouched and report the conflict as a skip
+			// via the shared DuplicateKnowledgeError path (Tencent/WeKnora#4640 —
+			// this strategy was silently ignored and the item was overwritten).
+			if ds.ConflictStrategy == types.ConflictStrategySkip {
+				logger.Infof(
+					ctx,
+					"item %q (external_id=%s) already exists as knowledge %s, conflict strategy skip → skipping",
+					item.Title, item.ExternalID, existing.ID,
+				)
+				return false, &types.DuplicateKnowledgeError{
+					Message: fmt.Sprintf(
+						"knowledge already exists for external_id %s (conflict strategy: skip)",
+						item.ExternalID,
+					),
+					Knowledge: existing,
+				}
+			}
+			_, err := s.knowledgeService.ReplaceKnowledgeFromDataSource(
+				ctx, existing.ID, item, metadata, tagIDs, channel)
+			var dupErr *types.DuplicateKnowledgeError
+			if err == nil || (errors.As(err, &dupErr) && dupIsSameNode(dupErr, item)) {
+				s.sweepStaleSubtree(ctx, ds, item)
+			}
+			return err == nil, err
+		}
+	}
+
+	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
+	if len(item.Content) > 0 {
+		// Images ride inline as base64 data URIs; ProcessDocument's image
+		// resolver stores them on the file service and swaps in persistent
+		// provider:// URLs before chunking.
+		fh, err := bytesToFileHeader(item.Content, item.FileName)
+		if err != nil {
+			return isUpdate, fmt.Errorf("build file header: %w", err)
+		}
+		if _, err := s.knowledgeService.CreateKnowledgeFromFile(
+			ctx,
+			ds.KnowledgeBaseID,
+			fh,
+			metadata,
+			nil,           // use KB default for multimodal
+			item.FileName, // customFileName — must include extension for file-type validation
+			tagIDs,        // auto-tag from data source
+			channel,
+			nil,
+		); err != nil {
+			var dupErr *types.DuplicateKnowledgeError
+			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
+				// Identical content is already present in the KB under THIS node's
+				// own external_id, so the parent effectively exists — reconcile the
+				// subtree so children removed from the doc do not linger.
+				s.sweepStaleSubtree(ctx, ds, item)
+			}
+			return isUpdate, err
+		}
+		s.sweepStaleSubtree(ctx, ds, item)
+		return isUpdate, nil
+	}
+
+	// Case 2: only a remote URL — let WeKnora handle downloading and parsing
+	if item.URL != "" {
+		created, err := s.knowledgeService.CreateKnowledgeFromURL(
+			ctx,
+			ds.KnowledgeBaseID,
+			item.URL,
+			item.FileName,
+			"",  // auto-detect file type
+			nil, // use KB default for multimodal
+			item.Title,
+			tagIDs, // auto-tag from data source
+			channel,
+			nil,
+		)
+		if err != nil {
+			var dupErr *types.DuplicateKnowledgeError
+			if errors.As(err, &dupErr) && dupIsSameNode(dupErr, item) {
+				// Identical content is already present in the KB under THIS node's
+				// own external_id, so the parent effectively exists — reconcile the
+				// subtree so children removed from the doc do not linger.
+				s.sweepStaleSubtree(ctx, ds, item)
+			}
+			return isUpdate, err
+		}
+		// URL-created knowledge has no metadata, so a later deletion could
+		// never find it. Attach the datasource keys on fresh creation only;
+		// the duplicate path reuses an existing row that must not be re-tagged.
+		if created != nil {
+			metadataBytes, mErr := json.Marshal(metadata)
+			if mErr != nil {
+				return isUpdate, fmt.Errorf("marshal datasource metadata: %w", mErr)
+			}
+			created.Metadata = types.JSON(metadataBytes)
+			// Only the metadata column: the processing task is already
+			// queued, and a full-row save of this snapshot could put
+			// parse_status back to "pending" under a worker that has moved
+			// it on, which then skips post-process and strands the row.
+			if uErr := s.knowledgeService.GetRepository().UpdateKnowledgeColumn(
+				ctx, created.ID, "metadata", created.Metadata,
+			); uErr != nil {
+				return isUpdate, fmt.Errorf("attach datasource metadata: %w", uErr)
+			}
+		}
+		s.sweepStaleSubtree(ctx, ds, item)
+		return isUpdate, nil
+	}
+
+	return isUpdate, fmt.Errorf("item has neither content nor URL")
+}
+
+// dupIsSameNode reports whether a duplicate-content error means the parent still
+// exists in the KB *under this item's own external_id* — i.e. a content-dedup hit
+// against this same node, so reconciling its subtree is safe. File deduplication
+// keys on file_hash plus file_type (CheckKnowledgeExists), so an updated node whose rebuilt body
+// happens to hash-collide with a DIFFERENT knowledge item (another node, or a
+// manually-uploaded file with no external_id) would otherwise sweep this node's
+// children even though its own parent row was just deleted for the update and
+// never recreated — deleting those children with no parent to replace them. In
+// that case the matched row's external_id differs (or is absent), so we skip the
+// sweep and leave the children intact.
+func dupIsSameNode(dupErr *types.DuplicateKnowledgeError, item *types.FetchedItem) bool {
+	return dupErr != nil && dupErr.Knowledge != nil &&
+		dupErr.Knowledge.GetMetadata()["external_id"] == item.ExternalID
+}
+
+// sweepStaleSubtree deletes STALE sub-items of item — knowledge whose external_id
+// is prefixed with "<item.ExternalID>#" (e.g. attachment children of a docx node)
+// that is NOT listed in item.SubtreeKeep, i.e. no longer present in the source.
+//
+// It runs only AFTER the parent item exists in the KB (freshly (re)created, or
+// confirmed present via a duplicate-hash error), so a genuinely failed parent
+// write never destroys existing children. Children still present in the source
+// are preserved via SubtreeKeep even when they could not be re-ingested this
+// cycle (e.g. a transient attachment download failure), so a still-present
+// attachment never loses its previously-synced good copy. The "<id>#" prefix
+// never matches the parent's own "<id>" external_id, so the parent is never
+// self-swept.
+func (s *DataSourceService) sweepStaleSubtree(ctx context.Context, ds *types.DataSource, item *types.FetchedItem) {
+	if !item.ReplacesSubtree || item.ExternalID == "" {
+		return
+	}
+	repo := s.knowledgeService.GetRepository()
+	children, err := repo.FindByMetadataKeyPrefix(ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", types.SubtreeChildPrefix(item.ExternalID))
+	if err != nil {
+		logger.Warnf(ctx, "failed to list subtree of external_id=%s: %v", item.ExternalID, err)
+		return
+	}
+	if len(children) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(children))
+	for _, child := range children {
+		// Scope to this data source so identical external_id prefixes from
+		// another connector in the same KB cannot be swept.
+		if child.GetMetadata()["datasource_id"] != ds.ID {
+			continue
+		}
+		// A child still present in the source is preserved even if it could not be
+		// re-ingested this sync; only children that vanished from the source are
+		// stale and swept. Every child here was selected by the external_id-prefix
+		// query, so its external_id is guaranteed present and readable (a malformed
+		// row could not have matched the SQL predicate), and GetMetadata resolves
+		// it identically to the keep-set entries the connector built. SubtreeKeep
+		// holds one entry per still-present sub-item of this node (a small set), so
+		// a linear scan is cheaper than materializing a lookup map.
+		if slices.Contains(item.SubtreeKeep, child.GetMetadata()["external_id"]) {
+			continue
+		}
+		ids = append(ids, child.ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	// Batch the deletion so a node whose attachment set shrank from N pays one
+	// round of the delete fan-out rather than N sequential ones.
+	if derr := s.knowledgeService.DeleteKnowledgeList(ctx, ids); derr != nil {
+		logger.Warnf(ctx, "failed to delete %d stale sub-item(s) of external_id=%s: %v",
+			len(ids), item.ExternalID, derr)
+	} else if herr := repo.HardDeleteKnowledgeList(ctx, ds.TenantID, ids); herr != nil {
+		logger.Warnf(ctx, "failed to hard-delete %d stale sub-item(s) of external_id=%s: %v",
+			len(ids), item.ExternalID, herr)
+	}
+}
+
+// bytesToFileHeader wraps a []byte into a *multipart.FileHeader so it can be
+// consumed by KnowledgeService.CreateKnowledgeFromFile.
+func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return nil, fmt.Errorf("create multipart part: %w", err)
+	}
+
+	if _, err := part.Write(data); err != nil {
+		return nil, fmt.Errorf("write data to part: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	// Parse the multipart data to get a FileHeader
+	reader := multipart.NewReader(&buf, writer.Boundary())
+	form, err := reader.ReadForm(int64(len(data)) + 1024)
+	if err != nil {
+		return nil, fmt.Errorf("read multipart form: %w", err)
+	}
+
+	files := form.File["file"]
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no file in multipart form")
+	}
+
+	return files[0], nil
+}
+
+func timePtr(t time.Time) *time.Time {
+	utc := t.UTC()
+	return &utc
+}

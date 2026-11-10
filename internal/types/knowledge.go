@@ -1,0 +1,568 @@
+package types
+
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+const (
+	// KnowledgeTypeManual represents the manual knowledge type
+	KnowledgeTypeManual = "manual"
+	// KnowledgeTypeFAQ represents the FAQ knowledge type
+	KnowledgeTypeFAQ = "faq"
+)
+
+// Channel constants identify through which channel a knowledge entry was ingested.
+// Aligned with Message.Channel values ("web", "api", "im") but allows finer granularity.
+const (
+	ChannelWeb              = "web"               // Web UI (default)
+	ChannelAPI              = "api"               // External API call
+	ChannelBrowserExtension = "browser_extension" // Browser extension / plugin
+	ChannelWechat           = "wechat"            // WeChat
+	ChannelWecom            = "wecom"             // WeCom (企业微信)
+	ChannelFeishu           = "feishu"            // Feishu / Lark
+	ChannelFeishuDrive      = "feishu_drive"      // Feishu Drive (云盘)
+	ChannelLarkDrive        = "lark_drive"        // Lark Drive (international)
+	ChannelDingtalk         = "dingtalk"          // DingTalk
+	ChannelSlack            = "slack"             // Slack
+	ChannelIM               = "im"                // Generic IM channel
+	ChannelNotion           = "notion"            // Notion
+	ChannelConfluence       = "confluence"        // Atlassian Confluence
+	ChannelYuque            = "yuque"             // Yuque (语雀)
+	ChannelRSS              = "rss"               // RSS / Atom feed
+	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
+	ChannelSeafile          = "seafile"           // Seafile
+	ChannelNextcloud        = "nextcloud"         // Nextcloud
+)
+
+// Knowledge parse status constants
+const (
+	// ParseStatusPending indicates the knowledge is waiting to be processed
+	ParseStatusPending = "pending"
+	// ParseStatusProcessing indicates the knowledge is being processed
+	// (DocReader / chunking / embedding stage).
+	ParseStatusProcessing = "processing"
+	// ParseStatusFinalizing indicates the primary parse has finished but
+	// enrichment subtasks (summary, question generation, graph extract)
+	// are still in flight. The user-facing intuition behind this state is
+	// "the document is queryable for vector search but is still spending
+	// resources" — cancel-parse can interrupt enrichment from here.
+	// pending_subtasks_count holds the outstanding subtask count; the
+	// last subtask to finish atomically promotes the row to completed.
+	ParseStatusFinalizing = "finalizing"
+	// ParseStatusCompleted indicates the knowledge has been processed
+	// successfully AND every enrichment subtask has reached a terminal
+	// state. No further resources will be spent on the document until
+	// the user explicitly re-parses it.
+	ParseStatusCompleted = "completed"
+	// ParseStatusFailed indicates the knowledge processing failed
+	ParseStatusFailed = "failed"
+	// ParseStatusDeleting indicates the knowledge is being deleted (used to prevent async task conflicts)
+	ParseStatusDeleting = "deleting"
+	// ParseStatusCancelled indicates parsing was cancelled by the user.
+	// Same short-circuit semantics as ParseStatusDeleting for in-flight and
+	// queued downstream tasks, but the knowledge row and any already-written
+	// chunks/index are kept so the user can re-trigger parsing via reparse.
+	ParseStatusCancelled = "cancelled"
+)
+
+// Summary status constants for async summary generation
+const (
+	// SummaryStatusNone indicates no summary task is needed
+	SummaryStatusNone = "none"
+	// SummaryStatusPending indicates the summary task is waiting to be processed
+	SummaryStatusPending = "pending"
+	// SummaryStatusProcessing indicates the summary is being generated
+	SummaryStatusProcessing = "processing"
+	// SummaryStatusCompleted indicates the summary has been generated successfully
+	SummaryStatusCompleted = "completed"
+	// SummaryStatusFailed indicates the summary generation failed
+	SummaryStatusFailed = "failed"
+)
+
+// ManualKnowledgeFormat represents the format of the manual knowledge
+const (
+	ManualKnowledgeFormatMarkdown = "markdown"
+	ManualKnowledgeStatusDraft    = "draft"
+	ManualKnowledgeStatusPublish  = "publish"
+)
+
+// KnowledgeListFilter aggregates optional filters for listing knowledge entries
+// under a knowledge base. Empty / zero fields mean "no filter on that dimension".
+type KnowledgeListFilter struct {
+	// TagIDs filters by multiple tags (OR semantics: match any of the given tags).
+	TagIDs []string
+	// Keyword performs a LIKE match on file_name / title when non-empty.
+	Keyword string
+	// FileType filters by file_type, or by type for the special values "manual" / "url".
+	FileType string
+	// ParseStatus filters by parse_status when non-empty (e.g. pending, processing, completed, failed).
+	ParseStatus string
+	// Source filters by ingestion channel when non-empty (web, api, feishu, notion, wechat, ...).
+	// The special values "manual" and "url" are routed to the `type` column to match
+	// FileType semantics, so callers can filter "manually created" / "URL imported" entries.
+	Source string
+	// UpdatedFrom, when non-zero, keeps rows with updated_at >= UpdatedFrom.
+	UpdatedFrom time.Time
+	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
+	UpdatedTo time.Time
+	// FolderPath is the folder navigated to in the sidebar tree. It is only
+	// applied when FolderScope is not FolderScopeAny, so the empty string can
+	// unambiguously mean "the knowledge base root".
+	FolderPath string
+	// FolderScope selects whether FolderPath matches exactly or includes
+	// descendant folders. FolderScopeAny (the default) ignores folders.
+	FolderScope KnowledgeFolderScope
+	// SortBy 指定列表排序字段；公开列表接口会显式提供默认值。
+	SortBy KnowledgeListSortField
+	// SortOrder 指定升序或降序；零值与 desc 等价。
+	SortOrder KnowledgeListSortOrder
+}
+
+// KnowledgeListSortField 是知识文件列表允许使用的排序字段。
+type KnowledgeListSortField string
+
+const (
+	// KnowledgeListSortByUpdatedAt 表示按最后更新时间排序。
+	KnowledgeListSortByUpdatedAt KnowledgeListSortField = "updated_at"
+	// KnowledgeListSortByCreatedAt 表示按创建时间排序。
+	KnowledgeListSortByCreatedAt KnowledgeListSortField = "created_at"
+	// KnowledgeListSortByFileName 表示按展示文件名排序。
+	KnowledgeListSortByFileName KnowledgeListSortField = "file_name"
+)
+
+// Valid 返回排序字段是否属于公开接口允许的白名单。
+func (field KnowledgeListSortField) Valid() bool {
+	switch field {
+	case KnowledgeListSortByUpdatedAt, KnowledgeListSortByCreatedAt, KnowledgeListSortByFileName:
+		return true
+	default:
+		return false
+	}
+}
+
+// KnowledgeListSortOrder 是知识文件列表允许使用的排序方向。
+type KnowledgeListSortOrder string
+
+const (
+	// KnowledgeListSortAscending 表示按升序排列。
+	KnowledgeListSortAscending KnowledgeListSortOrder = "asc"
+	// KnowledgeListSortDescending 表示按降序排列。
+	KnowledgeListSortDescending KnowledgeListSortOrder = "desc"
+)
+
+// Valid 返回排序方向是否属于公开接口允许的白名单。
+func (order KnowledgeListSortOrder) Valid() bool {
+	return order == KnowledgeListSortAscending || order == KnowledgeListSortDescending
+}
+
+// Knowledge represents a knowledge entity in the system.
+// It contains metadata about the knowledge source, its processing status,
+// and references to the physical file if applicable.
+type Knowledge struct {
+	// Unique identifier of the knowledge
+	ID string `json:"id"                 gorm:"type:varchar(36);primaryKey" extensions:"x-agent=knowledge_id"`
+	// Workspace ID
+	TenantID uint64 `json:"tenant_id"`
+	// ID of the knowledge base
+	KnowledgeBaseID string `json:"knowledge_base_id" extensions:"x-agent"`
+	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
+	Tags []*KnowledgeTag `json:"tags"               gorm:"-" extensions:"x-agent"`
+	// Type of the knowledge
+	Type string `json:"type" extensions:"x-agent"`
+	// Title of the knowledge
+	Title string `json:"title" extensions:"x-agent"`
+	// Description of the knowledge
+	Description string `json:"description"`
+	// DescriptionSpecified distinguishes an explicitly supplied empty description
+	// from an omitted field in partial update requests.
+	DescriptionSpecified bool `json:"-" gorm:"-"`
+	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
+	Source string `json:"source"             gorm:"type:varchar(2048)" extensions:"x-agent"`
+	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
+	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'" extensions:"x-agent"`
+	// Parse status of the knowledge
+	ParseStatus string `json:"parse_status" extensions:"x-agent"`
+	// PendingSubtasksCount is the outstanding enrichment subtask count
+	// (summary + question + graph chunks). Only meaningful while
+	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.
+	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
+	// Summary status for async summary generation
+	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none" extensions:"x-agent"`
+	// Profile is the structured companion of Description: a one-line gist,
+	// topic keywords, a document type and one typical question. It is produced
+	// by the same model call as the summary and feeds the knowledge-base
+	// level description aggregation. nil when no summary has been generated.
+	Profile *KnowledgeProfile `json:"profile,omitempty" gorm:"column:profile;type:json"`
+	// Enable status of the knowledge
+	EnableStatus string `json:"enable_status" extensions:"x-agent"`
+	// ID of the embedding model
+	EmbeddingModelID string `json:"embedding_model_id"`
+	// File name of the knowledge
+	FileName string `json:"file_name" extensions:"x-agent"`
+	// FolderPath is the canonical relative directory this entry belongs to
+	// inside the knowledge base, e.g. "docs/spec" for a folder upload of
+	// "docs/spec/design.md". Empty means the knowledge base root. It is a
+	// display/navigation concern only: it never affects where the file is
+	// physically stored (see FilePath).
+	FolderPath string `json:"folder_path"        gorm:"type:varchar(1024);not null;default:''" extensions:"x-agent"`
+	// File type of the knowledge
+	FileType string `json:"file_type" extensions:"x-agent"`
+	// File size of the knowledge
+	FileSize int64 `json:"file_size" extensions:"x-agent"`
+	// File hash of the knowledge
+	FileHash string `json:"file_hash"`
+	// File path of the knowledge
+	FilePath string `json:"file_path"`
+	// Storage size of the knowledge
+	StorageSize int64 `json:"storage_size"`
+	// Metadata of the knowledge
+	Metadata JSON `json:"metadata"           gorm:"type:json"`
+	// CustomMetadata is user-authored descriptive metadata. It is deliberately
+	// separate from Metadata, which contains internal ingestion state and IDs.
+	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json;not null"`
+	// Last FAQ import result (for FAQ type knowledge only)
+	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
+	// Creation time of the knowledge
+	CreatedAt time.Time `json:"created_at" extensions:"x-agent"`
+	// Last updated time of the knowledge
+	UpdatedAt time.Time `json:"updated_at" extensions:"x-agent"`
+	// Processed time of the knowledge
+	ProcessedAt *time.Time `json:"processed_at" extensions:"x-agent"`
+	// Error message of the knowledge
+	ErrorMessage string `json:"error_message" extensions:"x-agent"`
+	// Deletion time of the knowledge
+	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
+	// Knowledge base name (not stored in database, populated on query)
+	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-" extensions:"x-agent"`
+	// Most recent processing progress (row or span write) for an in-flight
+	// row, so clients can tell a slow stage from a stalled one. Not stored.
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty" gorm:"-" extensions:"x-agent"`
+	// Verdict on an in-flight row gone quiet: StallStateQueued (its work is
+	// still queued, i.e. backlogged) or StallStateStalled (nothing left to
+	// run it). Empty while it is progressing or the probe failed. Not stored.
+	StallState string `json:"stall_state,omitempty" gorm:"-" extensions:"x-agent"`
+}
+
+// Stall verdicts for Knowledge.StallState.
+const (
+	StallStateQueued  = "queued"
+	StallStateStalled = "stalled"
+)
+
+// CustomMetadataText returns stable human-readable metadata for summaries and
+// document-scoped model context. Internal ingestion metadata is intentionally
+// excluded.
+func (k *Knowledge) CustomMetadataText() string {
+	if k == nil || len(k.CustomMetadata) == 0 {
+		return ""
+	}
+	var values map[string]interface{}
+	if err := json.Unmarshal(k.CustomMetadata, &values); err != nil || len(values) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if values[key] == nil {
+			continue
+		}
+		value := strings.TrimSpace(fmt.Sprint(values[key]))
+		if strings.TrimSpace(key) != "" && value != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", strings.TrimSpace(key), value))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// GetMetadata returns the metadata as a map[string]string.
+func (k *Knowledge) GetMetadata() map[string]string {
+	metadata := make(map[string]string)
+	if len(k.Metadata) == 0 {
+		return metadata
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return nil
+	}
+	for k, v := range metadataMap {
+		metadata[k] = fmt.Sprintf("%v", v)
+	}
+	return metadata
+}
+
+// BeforeCreate initializes required defaults for new Knowledge entities.
+func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
+	if k.ID == "" {
+		k.ID = uuid.New().String()
+	}
+	// JSON.Value returns SQL NULL for an empty value. PostgreSQL's column
+	// default is not applied when GORM explicitly inserts that NULL, so keep the
+	// application-side representation aligned with the NOT NULL database
+	// invariant for every knowledge creation path.
+	if len(k.CustomMetadata) == 0 {
+		k.CustomMetadata = JSON(`{}`)
+	}
+	return nil
+}
+
+// ManualKnowledgeMetadata stores metadata for manual Markdown knowledge content.
+type ManualKnowledgeMetadata struct {
+	Content   string `json:"content"`
+	Format    string `json:"format"`
+	Status    string `json:"status"`
+	Version   int    `json:"version"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ManualKnowledgePayload represents the payload for manual knowledge operations.
+type ManualKnowledgePayload struct {
+	// Document title.
+	Title string `json:"title" extensions:"x-agent"`
+	// Markdown content. The assistant may send a full document; the API limit
+	// is 200000 runes, and x-agent-max-bytes covers that in UTF-8.
+	Content string `json:"content" extensions:"x-agent,x-agent-required,x-agent-max-bytes=800000"`
+	// draft keeps the document out of search; publish indexes it.
+	Status        string                     `json:"status" enums:"draft,publish" extensions:"x-agent,x-agent-required"`
+	TagIDs        []string                   `json:"tag_ids"`
+	Channel       string                     `json:"channel"`
+	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+}
+
+// KnowledgeSearchScope defines a (tenant_id, knowledge_base_id) scope for knowledge search (e.g. own KBs + shared KBs).
+type KnowledgeSearchScope struct {
+	TenantID uint64
+	KBID     string
+}
+
+// NewManualKnowledgeMetadata creates a new ManualKnowledgeMetadata instance.
+func NewManualKnowledgeMetadata(content, status string, version int) *ManualKnowledgeMetadata {
+	if version <= 0 {
+		version = 1
+	}
+	return &ManualKnowledgeMetadata{
+		Content:   content,
+		Format:    ManualKnowledgeFormatMarkdown,
+		Status:    status,
+		Version:   version,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// ToJSON converts the metadata to JSON type.
+func (m *ManualKnowledgeMetadata) ToJSON() (JSON, error) {
+	if m == nil {
+		return nil, nil
+	}
+	if m.Format == "" {
+		m.Format = ManualKnowledgeFormatMarkdown
+	}
+	if m.Status == "" {
+		m.Status = ManualKnowledgeStatusDraft
+	}
+	if m.Version <= 0 {
+		m.Version = 1
+	}
+	if m.UpdatedAt == "" {
+		m.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	bytes, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return JSON(bytes), nil
+}
+
+// ManualMetadata parses and returns manual knowledge metadata.
+func (k *Knowledge) ManualMetadata() (*ManualKnowledgeMetadata, error) {
+	if len(k.Metadata) == 0 {
+		return nil, nil
+	}
+	var metadata ManualKnowledgeMetadata
+	if err := json.Unmarshal(k.Metadata, &metadata); err != nil {
+		return nil, err
+	}
+	if metadata.Format == "" {
+		metadata.Format = ManualKnowledgeFormatMarkdown
+	}
+	if metadata.Version <= 0 {
+		metadata.Version = 1
+	}
+	return &metadata, nil
+}
+
+// KnowledgeTransferMetadataKey is reserved for server-owned transfer recovery state.
+const KnowledgeTransferMetadataKey = "_knowledge_transfer"
+
+// SetManualMetadata sets manual knowledge metadata onto the knowledge instance.
+func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
+	if meta == nil {
+		k.Metadata = nil
+		return nil
+	}
+	jsonValue, err := meta.ToJSON()
+	if err != nil {
+		return err
+	}
+	// Manual processing may finish before the move worker acknowledges its
+	// task. Preserve the recovery marker when updating manual content/status.
+	old, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if state, ok := old[KnowledgeTransferMetadataKey]; ok {
+		fields, err := jsonValue.Map()
+		if err != nil {
+			return err
+		}
+		fields[KnowledgeTransferMetadataKey] = state
+		jsonValue, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+	}
+	k.Metadata = jsonValue
+	return nil
+}
+
+// SetLastFAQImportResult sets FAQ import result to the dedicated field.
+func (k *Knowledge) SetLastFAQImportResult(result *FAQImportResult) error {
+	if result == nil {
+		k.LastFAQImportResult = nil
+		return nil
+	}
+	jsonValue, err := result.ToJSON()
+	if err != nil {
+		return err
+	}
+	k.LastFAQImportResult = jsonValue
+	return nil
+}
+
+// GetLastFAQImportResult parses and returns FAQ import result from the dedicated field.
+func (k *Knowledge) GetLastFAQImportResult() (*FAQImportResult, error) {
+	if len(k.LastFAQImportResult) == 0 {
+		return nil, nil
+	}
+	var result FAQImportResult
+	if err := json.Unmarshal(k.LastFAQImportResult, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// IsManual returns true if the knowledge item is manual Markdown knowledge.
+func (k *Knowledge) IsManual() bool {
+	return k != nil && k.Type == KnowledgeTypeManual
+}
+
+// EnsureManualDefaults sets default values for manual knowledge entries.
+func (k *Knowledge) EnsureManualDefaults() {
+	if k == nil {
+		return
+	}
+	if k.Type == "" {
+		k.Type = KnowledgeTypeManual
+	}
+	if k.FileType == "" {
+		k.FileType = KnowledgeTypeManual
+	}
+	if k.Source == "" {
+		k.Source = KnowledgeTypeManual
+	}
+	if k.Channel == "" {
+		k.Channel = ChannelWeb
+	}
+}
+
+// IsDraft returns whether the payload should be saved as draft.
+func (p ManualKnowledgePayload) IsDraft() bool {
+	return p.Status == "" || p.Status == ManualKnowledgeStatusDraft
+}
+
+const metadataKeyProcessOverrides = "process_overrides"
+
+// ProcessOverrides parses process config overrides from knowledge metadata.
+func (k *Knowledge) ProcessOverrides() (*KnowledgeProcessOverrides, error) {
+	if k == nil || len(k.Metadata) == 0 {
+		return nil, nil
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := metadataMap[metadataKeyProcessOverrides]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var overrides KnowledgeProcessOverrides
+	if err := json.Unmarshal(bytes, &overrides); err != nil {
+		return nil, err
+	}
+	return &overrides, nil
+}
+
+// SetProcessOverrides merges process config overrides into knowledge metadata.
+func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
+	if k == nil {
+		return nil
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if o == nil {
+		delete(metadataMap, metadataKeyProcessOverrides)
+	} else {
+		bytes, err := json.Marshal(o)
+		if err != nil {
+			return err
+		}
+		var value interface{}
+		if err := json.Unmarshal(bytes, &value); err != nil {
+			return err
+		}
+		metadataMap[metadataKeyProcessOverrides] = value
+	}
+	bytes, err := json.Marshal(metadataMap)
+	if err != nil {
+		return err
+	}
+	k.Metadata = JSON(bytes)
+	return nil
+}
+
+// KnowledgeCheckParams defines parameters used to check if knowledge already exists.
+type KnowledgeCheckParams struct {
+	// ExcludeKnowledgeID ignores only the row being replaced during duplicate checks.
+	ExcludeKnowledgeID string
+	// File parameters
+	FileName string
+	// FileType scopes file-hash deduplication; callers checking file uploads should set it.
+	FileType string
+	FileSize int64
+	FileHash string
+	// When both are set, file deduplication is scoped to this source item.
+	DataSourceID string
+	ExternalID   string
+	// URL parameters
+	URL string
+	// Text passage parameters
+	Passages []string
+	// Knowledge type
+	Type string
+}

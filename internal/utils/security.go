@@ -1,0 +1,1395 @@
+package utils
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"html"
+	"log"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unicode/utf8"
+
+	"golang.org/x/net/http/httpproxy"
+
+	"github.com/Tencent/WeKnora/internal/ipclass"
+)
+
+// XSS 防护相关正则表达式
+var (
+	// 匹配潜在的 XSS 攻击模式
+	xssPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`),
+		regexp.MustCompile(`(?i)<iframe[^>]*>.*?</iframe>`),
+		regexp.MustCompile(`(?i)<object[^>]*>.*?</object>`),
+		regexp.MustCompile(`(?i)<embed[^>]*>.*?</embed>`),
+		regexp.MustCompile(`(?i)<embed[^>]*>`),
+		regexp.MustCompile(`(?i)<form[^>]*>.*?</form>`),
+		regexp.MustCompile(`(?i)<input[^>]*>`),
+		regexp.MustCompile(`(?i)<button[^>]*>.*?</button>`),
+		regexp.MustCompile(`(?i)javascript:`),
+		regexp.MustCompile(`(?i)vbscript:`),
+		regexp.MustCompile(`(?i)onload\s*=`),
+		regexp.MustCompile(`(?i)onerror\s*=`),
+		regexp.MustCompile(`(?i)onclick\s*=`),
+		regexp.MustCompile(`(?i)onmouseover\s*=`),
+		regexp.MustCompile(`(?i)onfocus\s*=`),
+		regexp.MustCompile(`(?i)onblur\s*=`),
+	}
+)
+
+// SanitizeHTML 清理 HTML 内容，防止 XSS 攻击
+func SanitizeHTML(input string) string {
+	if input == "" {
+		return ""
+	}
+
+	// 检查输入长度
+	if len(input) > 10000 {
+		input = input[:10000]
+	}
+
+	// 检查是否包含潜在的 XSS 攻击
+	for _, pattern := range xssPatterns {
+		if pattern.MatchString(input) {
+			// 如果包含恶意内容，进行 HTML 转义
+			return html.EscapeString(input)
+		}
+	}
+
+	// 如果内容相对安全，返回原内容
+	return input
+}
+
+// EscapeHTML 转义 HTML 特殊字符
+func EscapeHTML(input string) string {
+	if input == "" {
+		return ""
+	}
+	return html.EscapeString(input)
+}
+
+// ValidateInputSyntax checks the input properties shared by all user-query
+// entry points. It deliberately does not apply the XSS pattern list because
+// some callers, such as AgentQA, accept frontend code as conversation text.
+func ValidateInputSyntax(input string) (string, bool) {
+	// 检查是否包含控制字符
+	for _, r := range input {
+		if r < 32 && r != 9 && r != 10 && r != 13 {
+			return "", false
+		}
+	}
+
+	// 检查 UTF-8 有效性
+	if !utf8.ValidString(input) {
+		return "", false
+	}
+
+	return strings.TrimSpace(input), true
+}
+
+// ValidateInput 验证用户输入
+func ValidateInput(input string) (string, bool) {
+	validatedInput, valid := ValidateInputSyntax(input)
+	if !valid {
+		return "", false
+	}
+
+	// 检查是否包含潜在的 XSS 攻击
+	for _, pattern := range xssPatterns {
+		if pattern.MatchString(input) {
+			return "", false
+		}
+	}
+
+	return validatedInput, true
+}
+
+// SafePathUnderBase 校验 filePath 是否落在 baseDir 下，防止路径遍历（如 ../../）。
+// 返回规范化的绝对路径；若路径逃逸出 baseDir 则返回错误。
+func SafePathUnderBase(baseDir, filePath string) (string, error) {
+	if baseDir == "" || filePath == "" {
+		return "", fmt.Errorf("baseDir and filePath cannot be empty")
+	}
+	absBase, err := filepath.Abs(filepath.Clean(baseDir))
+	if err != nil {
+		return "", fmt.Errorf("invalid base dir: %w", err)
+	}
+	absPath, err := filepath.Abs(filepath.Clean(filePath))
+	if err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
+	}
+	sep := string(filepath.Separator)
+	if absPath != absBase && !strings.HasPrefix(absPath, absBase+sep) {
+		return "", fmt.Errorf("path traversal denied: path is outside base directory")
+	}
+	return absPath, nil
+}
+
+// SafeJoinUnderBase 把调用方提供的相对后缀拼到 baseDir 下，并返回仍落在
+// baseDir 内的绝对路径。首尾分隔符会被去掉，避免 "/etc" 一类输入覆盖根目录；
+// ".." 经 path.Clean 后若仍指向父级则拒绝。空后缀表示 baseDir 本身。
+func SafeJoinUnderBase(baseDir, relPath string) (string, error) {
+	if strings.TrimSpace(baseDir) == "" {
+		return "", fmt.Errorf("baseDir cannot be empty")
+	}
+	rel := strings.Trim(strings.TrimSpace(relPath), `/\`)
+	if rel == "" {
+		return SafePathUnderBase(baseDir, baseDir)
+	}
+	slashRel := filepath.ToSlash(rel)
+	cleaned := path.Clean(slashRel)
+	if path.IsAbs(slashRel) || path.IsAbs(cleaned) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("path traversal denied: path is outside base directory")
+	}
+	return SafePathUnderBase(baseDir, filepath.Join(baseDir, filepath.FromSlash(cleaned)))
+}
+
+// SafeFileName 校验并返回安全的“仅文件名”部分，防止路径遍历。
+// 仅保留最后一个路径成分，禁止 ".."、空名或仅含点，用于 SaveBytes 等场景。
+func SafeFileName(fileName string) (string, error) {
+	if fileName == "" {
+		return "", fmt.Errorf("fileName cannot be empty")
+	}
+	base := filepath.Base(filepath.Clean(fileName))
+	if base == "" || base == "." || base == ".." {
+		return "", fmt.Errorf("invalid fileName: path traversal or empty name")
+	}
+	if strings.Contains(base, "..") {
+		return "", fmt.Errorf("invalid fileName: contains path traversal")
+	}
+	if len(base) > 255 {
+		return "", fmt.Errorf("fileName too long")
+	}
+	return base, nil
+}
+
+// SafeObjectKey 校验对象存储的 key（如 COS/MinIO objectName），禁止包含 ".." 等路径遍历
+func SafeObjectKey(objectKey string) error {
+	if objectKey == "" {
+		return fmt.Errorf("object key cannot be empty")
+	}
+	if strings.Contains(objectKey, "..") {
+		return fmt.Errorf("object key contains path traversal")
+	}
+	return nil
+}
+
+// IsValidURL 验证 URL 是否安全
+func IsValidURL(url string) bool {
+	if url == "" {
+		return false
+	}
+
+	// 检查长度
+	if len(url) > 2048 {
+		return false
+	}
+
+	// Internal resource references are resolved through authenticated file
+	// proxies; provider schemes remain supported for legacy stored content.
+	allowedProtocols := []string{
+		"http://", "https://", "resource://", "storage://", "local://", "minio://",
+		"cos://", "tos://", "s3://", "oss://", "ks3://", "obs://",
+	}
+	isAllowed := false
+	for _, protocol := range allowedProtocols {
+		if strings.HasPrefix(strings.ToLower(url), protocol) {
+			isAllowed = true
+			break
+		}
+	}
+	if !isAllowed {
+		return false
+	}
+
+	// 检查是否包含恶意内容
+	for _, pattern := range xssPatterns {
+		if pattern.MatchString(url) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// restrictedHostnames contains hostnames that are blocked for SSRF prevention
+var restrictedHostnames = []string{
+	"localhost",
+	"127.0.0.1",
+	"::1",
+	"0.0.0.0",
+	"metadata.google.internal",
+	"metadata.tencentyun.com",
+	"metadata.aws.internal",
+	// Docker-specific internal hostnames
+	"host.docker.internal",
+	"gateway.docker.internal",
+	"kubernetes.docker.internal",
+	// Kubernetes internal hostnames
+	"kubernetes",
+	"kubernetes.default",
+	"kubernetes.default.svc",
+	"kubernetes.default.svc.cluster.local",
+}
+
+// restrictedHostSuffixes contains hostname suffixes that are blocked
+var restrictedHostSuffixes = []string{
+	".local",
+	".localhost",
+	".internal",
+	".corp",
+	".lan",
+	".home",
+	".localdomain",
+	// Kubernetes internal suffixes
+	".svc.cluster.local",
+	".pod.cluster.local",
+}
+
+// restrictedPorts contains non-HTTP service ports that user-controlled URLs
+// must not reach. It is checked both during URL validation and again at dial
+// time so dynamically discovered URLs cannot bypass the input boundary.
+var restrictedPorts = map[string]bool{
+	"22":    true, // SSH
+	"23":    true, // Telnet
+	"25":    true, // SMTP
+	"445":   true, // SMB
+	"3389":  true, // RDP
+	"5432":  true, // PostgreSQL
+	"3306":  true, // MySQL
+	"6379":  true, // Redis
+	"27017": true, // MongoDB
+	"9200":  true, // Elasticsearch
+	"2379":  true, // etcd
+	"2380":  true, // etcd
+	"8500":  true, // Consul
+	"4001":  true, // etcd (old)
+}
+
+// isRestrictedIP checks if an IP address falls within any restricted range.
+//
+// The URLs guarded here come from end users, who get no opt-in for internal
+// targets, so every class except ipclass.Public is restricted. Documentation
+// ranges are included in that: they are unroutable, and a user-supplied URL
+// has no legitimate reason to name one.
+func isRestrictedIP(ip net.IP) (bool, string) {
+	class, reason := ipclass.Classify(ip)
+	if class == ipclass.Public {
+		return false, ""
+	}
+	return true, reason
+}
+
+// IsPublicIP returns true if the IP is safe for outbound fetch (not private, loopback, link-local, etc.).
+// Used for DNS pinning: after resolving a hostname we pick the first public IP and pin all requests to it.
+func IsPublicIP(ip net.IP) bool {
+	restricted, _ := isRestrictedIP(ip)
+	return !restricted
+}
+
+// ipLikePatterns contains regex patterns for detecting IP-like hostnames
+// These catch various IP address obfuscation techniques
+var ipLikePatterns = []*regexp.Regexp{
+	// Standard IPv4: 192.168.1.1
+	regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`),
+	// Decimal IP: 3232235777 (equivalent to 192.168.1.1)
+	regexp.MustCompile(`^\d{8,10}$`),
+	// Octal IP: 0300.0250.0001.0001 or 0177.0.0.1
+	regexp.MustCompile(`^0[0-7]+\.`),
+	// Hex IP: 0xC0.0xA8.0x01.0x01 or 0x7f.0.0.1
+	regexp.MustCompile(`(?i)^0x[0-9a-f]+\.`),
+	// Mixed formats with hex: 0xC0A80101
+	regexp.MustCompile(`(?i)^0x[0-9a-f]{6,8}$`),
+	// IPv6 patterns
+	regexp.MustCompile(`(?i)^[0-9a-f:]+::[0-9a-f:]*$`),
+	regexp.MustCompile(`(?i)^[0-9a-f]{1,4}(:[0-9a-f]{1,4}){7}$`),
+	// IPv4-mapped IPv6: ::ffff:192.168.1.1
+	regexp.MustCompile(`(?i)^::ffff:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`),
+	// Bracketed IPv6: [::1]
+	regexp.MustCompile(`(?i)^\[[0-9a-f:]+\]$`),
+}
+
+// isIPLikeHostname checks if a hostname looks like an IP address in any format
+// This catches obfuscation attempts like octal, hex, decimal, etc.
+func isIPLikeHostname(hostname string) bool {
+	for _, pattern := range ipLikePatterns {
+		if pattern.MatchString(hostname) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSSRFSafeURL validates a URL to prevent SSRF attacks
+// It checks for:
+// - Valid http/https protocol
+// - Private IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+// - Loopback addresses (127.x.x.x, ::1)
+// - Link-local addresses (169.254.x.x, fe80::)
+// - Cloud metadata endpoints
+// - Reserved hostnames (localhost, *.local, etc.)
+func isSSRFSafeURL(rawURL string) (bool, string) {
+	if rawURL == "" {
+		return false, "URL is empty"
+	}
+
+	// Check URL length
+	if len(rawURL) > 2048 {
+		return false, "URL exceeds maximum length"
+	}
+
+	// Parse URL
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false, fmt.Sprintf("invalid URL format: %v", err)
+	}
+
+	// Only allow http and https
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false, fmt.Sprintf("invalid scheme: %s (only http/https allowed)", scheme)
+	}
+
+	// Extract hostname
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return false, "URL has no hostname"
+	}
+	hostnameLower := strings.ToLower(hostname)
+
+	// Check against restricted hostnames
+	for _, restricted := range restrictedHostnames {
+		if hostnameLower == restricted {
+			return false, fmt.Sprintf("hostname %s is restricted", hostname)
+		}
+	}
+
+	// Check against restricted hostname suffixes
+	for _, suffix := range restrictedHostSuffixes {
+		if strings.HasSuffix(hostnameLower, suffix) {
+			return false, fmt.Sprintf("hostname suffix %s is restricted", suffix)
+		}
+	}
+
+	// STRICT MODE: Block all direct IP addresses in URLs (both IPv4 and IPv6).
+	// This prevents IP-based SSRF attacks including obfuscation, tunneling, and
+	// transition mechanism bypasses. Legitimate IPs should be whitelisted via
+	// SSRF_WHITELIST env var; the whitelist is checked by ValidateURLForSSRF
+	// before this function is called.
+	ip := net.ParseIP(hostname)
+	if ip != nil {
+		return false, "direct IP address access is not allowed, use domain name or add to SSRF_WHITELIST"
+	}
+
+	// Also check for IP addresses in various formats that ParseIP might not catch
+	// e.g., octal (0177.0.0.1), hex (0x7f.0.0.1), decimal (2130706433)
+	if isIPLikeHostname(hostname) {
+		return false, "IP-like hostname format is not allowed"
+	}
+
+	// Perform DNS resolution to check the resolved IP
+	// This prevents DNS rebinding attacks where a domain resolves to internal IPs
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		return false, fmt.Sprintf("DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP", hostname)
+	}
+
+	// Check if any resolved IP is restricted
+	for _, resolvedIP := range ips {
+		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
+			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
+		}
+	}
+
+	// Check for suspicious port numbers
+	port := parsed.Port()
+	if restrictedPorts[port] {
+		return false, fmt.Sprintf("port %s is blocked for security reasons", port)
+	}
+
+	return true, ""
+}
+
+// IsValidImageURL 验证图片 URL 是否安全
+func IsValidImageURL(url string) bool {
+	if !IsValidURL(url) {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(url), "resource://") {
+		return true
+	}
+
+	// 检查是否为图片文件
+	imageExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico"}
+	lowerURL := strings.ToLower(url)
+
+	for _, ext := range imageExtensions {
+		if strings.Contains(lowerURL, ext) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// CleanMarkdown 清理 Markdown 内容
+func CleanMarkdown(input string) string {
+	if input == "" {
+		return ""
+	}
+
+	// 移除潜在的恶意脚本
+	cleaned := input
+	for _, pattern := range xssPatterns {
+		cleaned = pattern.ReplaceAllString(cleaned, "")
+	}
+
+	return cleaned
+}
+
+// SanitizeForDisplay 为显示清理内容
+func SanitizeForDisplay(input string) string {
+	if input == "" {
+		return ""
+	}
+
+	// 首先清理 Markdown
+	cleaned := CleanMarkdown(input)
+
+	// 然后进行 HTML 转义
+	escaped := html.EscapeString(cleaned)
+
+	return escaped
+}
+
+// SanitizeForLog 清理日志输入,防止日志注入攻击
+// 日志注入攻击是指攻击者通过在输入中插入换行符和其他控制字符,
+// 伪造日志条目,可能导致日志分析工具误判或隐藏恶意活动
+func SanitizeForLog(input string) string {
+	if input == "" {
+		return ""
+	}
+
+	// 替换换行符(LF, CR, CRLF)为空格,防止日志注入
+	sanitized := strings.ReplaceAll(input, "\n", " ")
+	sanitized = strings.ReplaceAll(sanitized, "\r", " ")
+
+	// 替换制表符为空格
+	sanitized = strings.ReplaceAll(sanitized, "\t", " ")
+
+	// 移除其他控制字符(ASCII 0-31,除了空格已处理的)
+	var builder strings.Builder
+	for _, r := range sanitized {
+		// 保留可打印字符和常用Unicode字符
+		if r >= 32 || r == ' ' {
+			builder.WriteRune(r)
+		}
+	}
+
+	sanitized = builder.String()
+
+	return sanitized
+}
+
+// SanitizeForLogArray 清理日志输入数组,防止日志注入攻击
+func SanitizeForLogArray(input []string) []string {
+	if len(input) == 0 {
+		return []string{}
+	}
+
+	sanitized := make([]string, 0, len(input))
+	for _, item := range input {
+		sanitized = append(sanitized, SanitizeForLog(item))
+	}
+
+	return sanitized
+}
+
+// AllowedStdioCommands defines the whitelist of allowed commands for MCP stdio transport
+// These are the standard MCP server launchers that are considered safe
+var AllowedStdioCommands = map[string]bool{
+	"uvx": true, // Python package runner (uv)
+	"npx": true, // Node.js package runner
+}
+
+// DangerousArgPatterns contains patterns that indicate potentially dangerous arguments
+var DangerousArgPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^-c$`),                                   // Shell command execution flag
+	regexp.MustCompile(`(?i)^--command$`),                            // Shell command execution flag
+	regexp.MustCompile(`(?i)^-e$`),                                   // Eval flag
+	regexp.MustCompile(`(?i)^--eval$`),                               // Eval flag
+	regexp.MustCompile(`(?i)[;&|]`),                                  // Shell command chaining
+	regexp.MustCompile(`(?i)\$\(`),                                   // Command substitution
+	regexp.MustCompile("(?i)`"),                                      // Backtick command substitution
+	regexp.MustCompile(`(?i)>\s*[/~]`),                               // Output redirection to absolute/home path
+	regexp.MustCompile(`(?i)<\s*[/~]`),                               // Input redirection from absolute/home path
+	regexp.MustCompile(`(?i)^/bin/`),                                 // Direct binary path
+	regexp.MustCompile(`(?i)^/usr/bin/`),                             // Direct binary path
+	regexp.MustCompile(`(?i)^/sbin/`),                                // Direct binary path
+	regexp.MustCompile(`(?i)^/usr/sbin/`),                            // Direct binary path
+	regexp.MustCompile(`(?i)^\.\./`),                                 // Path traversal
+	regexp.MustCompile(`(?i)/\.\./`),                                 // Path traversal in middle
+	regexp.MustCompile(`(?i)^(bash|sh|zsh|ksh|csh|tcsh|fish|dash)$`), // Shell interpreters as args
+	regexp.MustCompile(`(?i)^(curl|wget|nc|netcat|ncat)$`),           // Network tools as args
+	regexp.MustCompile(`(?i)^(rm|dd|mkfs|fdisk)$`),                   // Destructive commands as args
+}
+
+// DangerousEnvVarPatterns contains patterns for dangerous environment variable names or values
+var DangerousEnvVarPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^LD_PRELOAD$`),      // Library injection
+	regexp.MustCompile(`(?i)^LD_LIBRARY_PATH$`), // Library path manipulation
+	regexp.MustCompile(`(?i)^DYLD_`),            // macOS dynamic linker
+	regexp.MustCompile(`(?i)^PATH$`),            // PATH manipulation
+	regexp.MustCompile(`(?i)^PYTHONPATH$`),      // Python path manipulation
+	regexp.MustCompile(`(?i)^NODE_OPTIONS$`),    // Node.js options injection
+	regexp.MustCompile(`(?i)^BASH_ENV$`),        // Bash environment file
+	regexp.MustCompile(`(?i)^ENV$`),             // Shell environment file
+	regexp.MustCompile(`(?i)^SHELL$`),           // Shell override
+}
+
+// ValidateStdioCommand validates the command for MCP stdio transport
+// Returns an error if the command is not in the whitelist or contains dangerous patterns
+func ValidateStdioCommand(command string) error {
+	if command == "" {
+		return fmt.Errorf("command cannot be empty")
+	}
+
+	// Normalize command (extract base name if it's a path)
+	baseCommand := command
+	if strings.Contains(command, "/") {
+		parts := strings.Split(command, "/")
+		baseCommand = parts[len(parts)-1]
+	}
+
+	// Check against whitelist
+	if !AllowedStdioCommands[baseCommand] {
+		return fmt.Errorf("command '%s' is not in the allowed list. Allowed commands: uvx, npx, node, python, python3, deno, bun", baseCommand)
+	}
+
+	// Additional check: command should not contain path traversal
+	if strings.Contains(command, "..") {
+		return fmt.Errorf("command path contains invalid characters")
+	}
+
+	return nil
+}
+
+// ValidateStdioArgs validates the arguments for MCP stdio transport
+// Returns an error if any argument contains dangerous patterns
+func ValidateStdioArgs(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+
+	for i, arg := range args {
+		// Check length
+		if len(arg) > 1024 {
+			return fmt.Errorf("argument %d exceeds maximum length (1024 characters)", i)
+		}
+
+		// Check against dangerous patterns
+		for _, pattern := range DangerousArgPatterns {
+			if pattern.MatchString(arg) {
+				return fmt.Errorf("argument %d contains potentially dangerous pattern: %s", i, SanitizeForLog(arg))
+			}
+		}
+
+		// Check for null bytes
+		if strings.Contains(arg, "\x00") {
+			return fmt.Errorf("argument %d contains null bytes", i)
+		}
+	}
+
+	return nil
+}
+
+// ValidateStdioEnvVars validates environment variables for MCP stdio transport
+// Returns an error if any env var name or value is dangerous
+func ValidateStdioEnvVars(envVars map[string]string) error {
+	if len(envVars) == 0 {
+		return nil
+	}
+
+	for key, value := range envVars {
+		// Check key against dangerous patterns
+		for _, pattern := range DangerousEnvVarPatterns {
+			if pattern.MatchString(key) {
+				return fmt.Errorf("environment variable '%s' is not allowed for security reasons", key)
+			}
+		}
+
+		// Check key length
+		if len(key) > 256 {
+			return fmt.Errorf("environment variable name '%s' exceeds maximum length", SanitizeForLog(key[:50]))
+		}
+
+		// Check value length
+		if len(value) > 4096 {
+			return fmt.Errorf("environment variable '%s' value exceeds maximum length", key)
+		}
+
+		// Check for null bytes in value
+		if strings.Contains(value, "\x00") {
+			return fmt.Errorf("environment variable '%s' value contains null bytes", key)
+		}
+
+		// Check value for shell injection patterns
+		for _, pattern := range DangerousArgPatterns {
+			if pattern.MatchString(value) {
+				return fmt.Errorf("environment variable '%s' value contains potentially dangerous pattern", key)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateStdioConfig performs comprehensive validation of stdio configuration
+// This should be called before creating or executing any stdio-based MCP client
+func ValidateStdioConfig(command string, args []string, envVars map[string]string) error {
+	// Validate command
+	if err := ValidateStdioCommand(command); err != nil {
+		return fmt.Errorf("invalid command: %w", err)
+	}
+
+	// Validate arguments
+	if err := ValidateStdioArgs(args); err != nil {
+		return fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	// Validate environment variables
+	if err := ValidateStdioEnvVars(envVars); err != nil {
+		return fmt.Errorf("invalid environment variables: %w", err)
+	}
+
+	return nil
+}
+
+// SSRFSafeHTTPClientConfig contains configuration for the SSRF-safe HTTP client
+type SSRFSafeHTTPClientConfig struct {
+	SameOriginRedirectsOnly bool
+	Timeout                 time.Duration
+	MaxRedirects            int
+	DisableKeepAlives       bool
+	DisableCompression      bool
+}
+
+// DefaultSSRFSafeHTTPClientConfig returns the default configuration
+func DefaultSSRFSafeHTTPClientConfig() SSRFSafeHTTPClientConfig {
+	return SSRFSafeHTTPClientConfig{
+		Timeout:            30 * time.Second,
+		MaxRedirects:       10,
+		DisableKeepAlives:  false,
+		DisableCompression: false,
+	}
+}
+
+// ErrSSRFRedirectBlocked is returned when a redirect target is blocked due to SSRF protection
+var ErrSSRFRedirectBlocked = fmt.Errorf("redirect blocked: target URL failed SSRF validation")
+
+// sameHTTPOrigin reports whether two URLs share scheme and host (port-aware).
+func sameHTTPOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
+// stripRedirectSensitiveHeaders removes credentials that must not follow a
+// cross-host redirect (Go only strips Authorization/Cookie by default).
+func stripRedirectSensitiveHeaders(req *http.Request) {
+	for name := range req.Header {
+		switch http.CanonicalHeaderKey(name) {
+		case "Accept", "Accept-Language", "User-Agent":
+		default:
+			req.Header.Del(name)
+		}
+	}
+	req.Host = ""
+}
+
+// NewSSRFSafeTransport builds an *http.Transport whose connections are guarded
+// by SSRFSafeDialContext. The transport carries no per-request timeout and no
+// redirect policy — those live on the *http.Client — so a single transport can
+// be shared across many clients to pool keep-alive connections globally.
+func NewSSRFSafeTransport(config SSRFSafeHTTPClientConfig) *http.Transport {
+	return &http.Transport{
+		DisableKeepAlives:  config.DisableKeepAlives,
+		DisableCompression: config.DisableCompression,
+		// Dial with SSRF protection - validates resolved IPs before connecting
+		DialContext: SSRFSafeDialContext,
+	}
+}
+
+// newSSRFCheckRedirect returns a CheckRedirect policy that enforces the redirect
+// count limit, strips sensitive headers on cross-host hops, and re-validates
+// every redirect target against SSRF protections.
+func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		// Check redirect count
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
+
+		// Strip credentials when the redirect crosses hosts so connector
+		// tokens (e.g. Yuque X-Auth-Token) cannot leak to a third party.
+		if len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
+			if via[0].Method != http.MethodGet && via[0].Method != http.MethodHead || via[0].Body != nil {
+				return fmt.Errorf("%w: cross-origin request replay is forbidden", ErrSSRFRedirectBlocked)
+			}
+			stripRedirectSensitiveHeaders(req)
+		}
+
+		// Validate the redirect target URL for SSRF (whitelist-aware).
+		// Even whitelisted hosts must use http/https to prevent scheme-based attacks.
+		redirectScheme := strings.ToLower(req.URL.Scheme)
+		if redirectScheme != "http" && redirectScheme != "https" {
+			return fmt.Errorf("%w: invalid scheme %s", ErrSSRFRedirectBlocked, redirectScheme)
+		}
+		redirectHost := req.URL.Hostname()
+		if redirectHost != "" && IsSSRFWhitelisted(redirectHost) {
+			return nil
+		}
+		if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
+			return fmt.Errorf("%w: %w", ErrSSRFRedirectBlocked, err)
+		}
+
+		return nil
+	}
+}
+
+// SSRFValidatingRoundTripper enforces the URL policy for every outbound
+// request, including URLs discovered at runtime by SDKs (for example OAuth
+// metadata) that never passed through an application handler. Dial-time checks
+// remain necessary to pin DNS answers and cover transports that cannot accept
+// this wrapper directly.
+type SSRFValidatingRoundTripper struct {
+	Base http.RoundTripper
+}
+
+func (t *SSRFValidatingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, fmt.Errorf("outbound request blocked: request URL is required")
+	}
+	if t == nil || t.Base == nil {
+		return nil, fmt.Errorf("outbound request blocked: base transport is required")
+	}
+	if err := validateURLForSSRFForOutbound(req.URL.String()); err != nil {
+		return nil, fmt.Errorf("outbound request blocked by SSRF policy: %w", err)
+	}
+	return t.Base.RoundTrip(req)
+}
+
+// NewSSRFSafeHTTPClientWithTransport wraps a caller-supplied transport in an
+// *http.Client carrying the given timeout and the SSRF-aware redirect policy.
+// Pass a transport from NewSSRFSafeTransport (optionally shared across clients)
+// to reuse a single connection pool while keeping per-client timeouts.
+func NewSSRFSafeHTTPClientWithTransport(
+	config SSRFSafeHTTPClientConfig, transport http.RoundTripper,
+) *http.Client {
+	if transport == nil {
+		transport = NewSSRFSafeTransport(config)
+	}
+	return &http.Client{
+		Timeout:   config.Timeout,
+		Transport: &SSRFValidatingRoundTripper{Base: transport},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if config.SameOriginRedirectsOnly && len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
+				return fmt.Errorf("%w: cross-origin redirect is forbidden", ErrSSRFRedirectBlocked)
+			}
+			return newSSRFCheckRedirect(config.MaxRedirects)(req, via)
+		},
+	}
+}
+
+// NewSSRFSafeHTTPClient creates an HTTP client that validates redirect targets against SSRF protections.
+// This prevents SSRF attacks via HTTP redirects where an attacker's server redirects to internal services.
+// Each call builds a dedicated transport; callers that create many short-lived clients against the same
+// upstream should share one NewSSRFSafeTransport via NewSSRFSafeHTTPClientWithTransport instead.
+func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
+	return NewSSRFSafeHTTPClientWithTransport(config, NewSSRFSafeTransport(config))
+}
+
+// SSRFSafeGRPCDialer is compatible with grpc.WithContextDialer and pins DNS
+// answers the same way as SSRFSafeDialContext.
+func SSRFSafeGRPCDialer(ctx context.Context, addr string) (net.Conn, error) {
+	return SSRFSafeDialContext(ctx, "tcp", addr)
+}
+
+// outboundDialTimeoutNanos caps how long SSRFSafeDialContext may spend
+// establishing a TCP connection to an outbound (SSRF-validated) endpoint before
+// giving up. A black-holed or otherwise unreachable endpoint should fail fast —
+// if a dial takes longer than this, the remote service is effectively
+// unavailable and the caller (e.g. the VLM/LLM client) can surface the error
+// immediately instead of letting the UI show a misleading "thinking" state.
+// Defaults to 5s and is tuned via WEKNORA_OUTBOUND_DIAL_TIMEOUT in
+// config.LoadConfig. Stored as nanoseconds so it can be swapped atomically.
+var outboundDialTimeoutNanos atomic.Int64
+
+func init() {
+	outboundDialTimeoutNanos.Store(int64(5 * time.Second))
+}
+
+// SetOutboundDialTimeout overrides the per-connection dial timeout used by
+// SSRFSafeDialContext. It is called once at startup from config.LoadConfig and
+// is safe to call concurrently. Non-positive values are ignored.
+func SetOutboundDialTimeout(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	outboundDialTimeoutNanos.Store(int64(d))
+}
+
+// OutboundDialTimeout returns the current per-connection dial timeout.
+func OutboundDialTimeout() time.Duration {
+	return time.Duration(outboundDialTimeoutNanos.Load())
+}
+
+// SSRFSafeDialContext is a custom dial function that validates the resolved IP addresses
+// before establishing a connection. This provides an additional layer of SSRF protection
+// against DNS rebinding attacks during the connection phase.
+func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	// Parse host and port
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address %s: %w", addr, err)
+	}
+
+	// Whitelisted hosts bypass all dial-time SSRF checks, consistent with
+	// ValidateURLForSSRF which skips isSSRFSafeURL for whitelisted hosts.
+	// NOTE: This intentionally relaxes DNS-rebinding protection for whitelisted
+	// hosts. Admins must ensure whitelisted domains are under their control.
+	if IsSystemProxy(addr) || IsSSRFWhitelisted(host) {
+		dialer := &net.Dialer{
+			Timeout:   OutboundDialTimeout(),
+			KeepAlive: 30 * time.Second,
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+	// Whitelist-only mode refuses a non-whitelisted NAME before the lookup
+	// below; an address is left to the checks that follow (#3378).
+	if err := CheckDialWhitelistOnly(host); err != nil {
+		return nil, fmt.Errorf("connection blocked: %w", err)
+	}
+	if restrictedPorts[port] {
+		return nil, fmt.Errorf("connection blocked: port %s is restricted", port)
+	}
+
+	// Check if the host is a restricted hostname
+	hostLower := strings.ToLower(host)
+	for _, restricted := range restrictedHostnames {
+		if hostLower == restricted {
+			return nil, fmt.Errorf("connection blocked: hostname %s is restricted", host)
+		}
+	}
+	for _, suffix := range restrictedHostSuffixes {
+		if strings.HasSuffix(hostLower, suffix) {
+			return nil, fmt.Errorf("connection blocked: hostname suffix %s is restricted", suffix)
+		}
+	}
+
+	// Resolve the hostname once, validate every answer, and then dial one of
+	// those exact IPs. Dialing the original hostname here would make the
+	// standard dialer resolve it a second time, leaving a DNS-rebinding window
+	// between validation and connection establishment.
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("DNS resolution returned no addresses for %s", host)
+	}
+
+	// Validate all resolved IPs
+	for _, ipAddr := range ips {
+		if restricted, reason := isRestrictedIP(ipAddr.IP); restricted {
+			return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s (%s)", host, ipAddr.IP.String(), reason)
+		}
+	}
+
+	// If we get here, all IPs are safe. Pin the connection to the validated DNS
+	// answers; TLS still uses the request hostname for SNI/certificate checks.
+	dialer := &net.Dialer{
+		Timeout:   OutboundDialTimeout(),
+		KeepAlive: 30 * time.Second,
+	}
+	var lastErr error
+	for _, ipAddr := range ips {
+		pinnedAddr := net.JoinHostPort(ipAddr.IP.String(), port)
+		conn, dialErr := dialer.DialContext(ctx, network, pinnedAddr)
+		if dialErr == nil {
+			return conn, nil
+		}
+		lastErr = dialErr
+	}
+	return nil, fmt.Errorf("failed to connect to validated addresses for %s: %w", host, lastErr)
+}
+
+// ---------------------------------------------------------------------------
+// SSRF Whitelist mechanism
+// ---------------------------------------------------------------------------
+//
+// The environment variable SSRF_WHITELIST accepts a comma-separated list of
+// allowed host patterns. Each entry can be:
+//   - An exact domain: "example.com"
+//   - A wildcard domain: "*.example.com" (matches all subdomains)
+//   - An IPv4 address: "203.0.113.5"
+//   - An IPv6 address: "2001:db8::1"
+//   - A CIDR range (v4 or v6): "10.0.0.0/8", "2001:db8::/32"
+//
+// Whitelisted entries bypass the normal SSRF checks performed by isSSRFSafeURL.
+
+var (
+	// ssrfWhitelistOnce protects the cold-start ENV-only path. Once
+	// SystemSettingService has called SetSSRFWhitelistFromRaw, the
+	// atomic pointer below takes over and this Once is never observed
+	// again — we keep it for tests (resetSSRFWhitelistForTest) and the
+	// rare deployment that runs without DB-backed system_settings.
+	ssrfWhitelistOnce sync.Once
+	ssrfWhitelist     *ssrfWhitelistConfig
+
+	// ssrfWhitelistAtomic is the runtime-tunable whitelist source.
+	// SystemSettingService writes here at preload, on every Update,
+	// and on every pubsub-driven reload (multi-replica fan-out). When
+	// non-nil, it takes precedence over the ENV-only Once-cached
+	// `ssrfWhitelist`. nil means "service hasn't pushed yet"; the
+	// loadSSRFWhitelist fallback then reads ENV directly.
+	//
+	// We use atomic.Pointer so reads on the SSRF hot path
+	// (ValidateURLForSSRF, called for every outgoing URL) are lock-free.
+	ssrfWhitelistAtomic atomic.Pointer[ssrfWhitelistConfig]
+)
+
+type ssrfWhitelistConfig struct {
+	exactHosts  map[string]bool // lowercase exact hostnames / IPs
+	suffixHosts []string        // suffix matches (from "*.example.com" → ".example.com")
+	cidrNets    []*net.IPNet    // CIDR ranges
+}
+
+// loadSSRFWhitelist returns the active whitelist config. Resolution
+// order:
+//  1. ssrfWhitelistAtomic — set by SystemSettingService whenever DB
+//     ssrf.whitelist changes. This is the runtime-tunable path.
+//  2. ENV fallback — sync.Once-cached parse of SSRF_WHITELIST and
+//     SSRF_WHITELIST_EXTRA. Used during the startup window before
+//     the service has finished its preload, and on deployments that
+//     don't run system_settings (lite mode).
+func loadSSRFWhitelist() *ssrfWhitelistConfig {
+	if cur := ssrfWhitelistAtomic.Load(); cur != nil {
+		return cur
+	}
+	ssrfWhitelistOnce.Do(func() {
+		raw := os.Getenv("SSRF_WHITELIST")
+		// SSRF_WHITELIST_EXTRA is merged in addition to SSRF_WHITELIST so that
+		// deployment-managed defaults (e.g. docker-compose injected sidecar host
+		// names like "searxng") aren't accidentally clobbered when an operator
+		// overrides SSRF_WHITELIST in their .env.
+		extra := os.Getenv("SSRF_WHITELIST_EXTRA")
+		ssrfWhitelist = parseSSRFWhitelistRaw(mergeSSRFWhitelistRaws(raw, extra))
+	})
+	return ssrfWhitelist
+}
+
+// SetSSRFWhitelistFromRaw atomically replaces the active SSRF whitelist
+// with the parse of `raw` (comma-separated entries, same syntax as
+// the SSRF_WHITELIST env var). The new whitelist takes effect for every
+// subsequent ValidateURLForSSRF call across all goroutines without
+// additional synchronisation.
+//
+// Called by SystemSettingService at preload, after each Update, and
+// after each pubsub-driven peer change. Empty `raw` clears the whitelist
+// (only built-in private-IP rejection remains in effect).
+//
+// Note: this replaces the ENV-only fallback completely. If you want
+// SSRF_WHITELIST_EXTRA to keep being merged, the caller must do the
+// merge before calling this — see service.systemSettingService.
+// applySSRFWhitelist for the canonical merge logic.
+func SetSSRFWhitelistFromRaw(raw string) {
+	ssrfWhitelistAtomic.Store(parseSSRFWhitelistRaw(raw))
+	invalidateSSRFOutboundValidationCache()
+}
+
+// parseSSRFWhitelistRaw parses a comma-separated whitelist string into
+// a config struct. Pure function; no env reads. Always returns a
+// non-nil pointer so callers can blindly Load.
+//
+// Invalid entries (malformed CIDR like "10.0.0.0/333", wildcards
+// without a "*." prefix, etc.) are dropped with a `[ssrf-whitelist]`
+// log line rather than silently falling through to the exact-host
+// branch. Falling through used to turn "10.0.0.0/333" into a literal
+// host string that never matches anything — operators would believe
+// the entry was active when in reality their SSRF check was unchanged.
+//
+// Callers that want hard rejection (e.g. ValidateSSRFWhitelistEntries
+// for the system_settings Update path) should pre-validate before
+// passing the raw string here.
+func parseSSRFWhitelistRaw(raw string) *ssrfWhitelistConfig {
+	cfg := &ssrfWhitelistConfig{
+		exactHosts: make(map[string]bool),
+	}
+	if raw == "" {
+		return cfg
+	}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		// CIDR range — entries containing '/' are exclusively CIDRs.
+		// A parse failure must NOT fall through to the exact-host
+		// branch (which would store "10.0.0.0/333" as a literal
+		// hostname that can never match anything).
+		if strings.Contains(entry, "/") {
+			_, ipNet, err := net.ParseCIDR(entry)
+			if err != nil {
+				log.Printf("[ssrf-whitelist] dropping invalid CIDR entry %q: %v", entry, err)
+				continue
+			}
+			cfg.cidrNets = append(cfg.cidrNets, ipNet)
+			continue
+		}
+		// Wildcard domain: *.example.com
+		if strings.HasPrefix(entry, "*.") {
+			suffix := strings.ToLower(entry[1:]) // ".example.com"
+			if len(suffix) <= 1 {
+				log.Printf("[ssrf-whitelist] dropping bare wildcard entry %q (need *.<domain>)", entry)
+				continue
+			}
+			cfg.suffixHosts = append(cfg.suffixHosts, suffix)
+			continue
+		}
+		// Reject mid-string wildcards like "foo.*.bar" — they look
+		// useful but neither parseSSRFWhitelistRaw nor IsSSRFWhitelisted
+		// implement glob matching, so the entry would silently never
+		// match. Surface it loudly.
+		if strings.Contains(entry, "*") {
+			log.Printf("[ssrf-whitelist] dropping unsupported wildcard pattern %q (only \"*.\" prefix is supported)", entry)
+			continue
+		}
+		// Exact host or IP
+		cfg.exactHosts[strings.ToLower(entry)] = true
+	}
+	return cfg
+}
+
+// ValidateSSRFWhitelistEntries returns nil when every entry in `entries`
+// would be accepted by parseSSRFWhitelistRaw, or an error describing
+// the first malformed entry. Used by the system_settings Update path
+// to give the UI a clear 400 instead of silently dropping bad input
+// at parse-time.
+//
+// Validation rules mirror parseSSRFWhitelistRaw exactly:
+//   - "<a>/<b>" must be a valid CIDR
+//   - "*.<domain>" must have a non-empty domain after the prefix
+//   - mid-string "*" is not supported
+//   - everything else is treated as an exact host or literal IP
+//     (we don't pre-resolve DNS here; that's a runtime concern)
+func ValidateSSRFWhitelistEntries(entries []string) error {
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			if _, _, err := net.ParseCIDR(entry); err != nil {
+				return fmt.Errorf("invalid CIDR %q: %w", entry, err)
+			}
+			continue
+		}
+		if strings.HasPrefix(entry, "*.") {
+			if len(entry) <= 2 {
+				return fmt.Errorf("wildcard entry %q is missing a domain (use *.example.com)", entry)
+			}
+			continue
+		}
+		if strings.Contains(entry, "*") {
+			return fmt.Errorf("wildcard pattern %q is not supported (only the \"*.\" prefix is allowed)", entry)
+		}
+	}
+	return nil
+}
+
+// mergeSSRFWhitelistRaws joins two comma-separated raw strings, dropping
+// the comma when one side is empty. Exposed for the service layer's
+// "merge SSRF_WHITELIST_EXTRA into the DB-backed list" code path.
+func mergeSSRFWhitelistRaws(primary, extra string) string {
+	primary = strings.TrimSpace(primary)
+	extra = strings.TrimSpace(extra)
+	switch {
+	case primary == "" && extra == "":
+		return ""
+	case primary == "":
+		return extra
+	case extra == "":
+		return primary
+	default:
+		return primary + "," + extra
+	}
+}
+
+// IsSSRFWhitelisted checks whether the given hostname (or IP string) is
+// covered by the SSRF_WHITELIST environment variable.
+func IsSSRFWhitelisted(hostname string) bool {
+	// One read of the whitelist for the whole decision: SetSSRFWhitelistFromRaw
+	// can swap it between two loads, which would mix generations.
+	wl := loadSSRFWhitelist()
+	if whitelistedByName(wl, hostname) {
+		return true
+	}
+	// Also resolve and check resolved IPs against CIDR whitelist — never in
+	// whitelist-only mode, where a hostname outside the whitelist must not
+	// reach DNS at all.
+	if wl == nil || len(wl.cidrNets) == 0 || net.ParseIP(hostname) != nil || SSRFWhitelistOnlyEnabled() {
+		return false
+	}
+	if ips, err := net.LookupIP(hostname); err == nil {
+		for _, ip := range ips {
+			for _, cidr := range wl.cidrNets {
+				if cidr.Contains(ip) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// isSSRFWhitelistedByName matches a host against the whitelist without any
+// DNS query: exact and wildcard names, and CIDR entries for an IP literal.
+func isSSRFWhitelistedByName(hostname string) bool {
+	return whitelistedByName(loadSSRFWhitelist(), hostname)
+}
+
+// whitelistedByName is isSSRFWhitelistedByName against an already-loaded
+// whitelist.
+func whitelistedByName(wl *ssrfWhitelistConfig, hostname string) bool {
+	if wl == nil {
+		return false
+	}
+	lower := strings.ToLower(hostname)
+
+	// Exact match
+	if wl.exactHosts[lower] {
+		return true
+	}
+
+	// Suffix / wildcard match
+	for _, suffix := range wl.suffixHosts {
+		if strings.HasSuffix(lower, suffix) || lower == suffix[1:] {
+			return true
+		}
+	}
+
+	// CIDR match (only when hostname looks like an IP)
+	if ip := net.ParseIP(hostname); ip != nil {
+		for _, cidr := range wl.cidrNets {
+			if cidr.Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// SSRFWhitelistOnlyEnabled reports whether SSRF_DNS_WHITELIST_ONLY turns the
+// whitelist into the whole egress policy: a host outside it is refused before
+// any DNS query, and a hostname counts as whitelisted by name only, never by
+// what it resolves to (#3378).
+//
+// The value is parsed with strconv.ParseBool, so 1/t/T/TRUE/true/True enable
+// it and 0/f/F/FALSE/false/False disable it. A non-empty value that parses as
+// neither enables it: silently leaving an egress lockdown off because an
+// operator wrote "yes" is the one failure mode this control must not have.
+func SSRFWhitelistOnlyEnabled() bool {
+	raw := strings.TrimSpace(os.Getenv("SSRF_DNS_WHITELIST_ONLY"))
+	if raw == "" {
+		return false
+	}
+	parsed, err := strconv.ParseBool(raw)
+	return err != nil || parsed
+}
+
+// ErrSSRFHostNotWhitelisted is what whitelist-only mode returns for a host
+// outside SSRF_WHITELIST. It is raised before the name is resolved.
+var ErrSSRFHostNotWhitelisted = errors.New("host is not in the SSRF whitelist")
+
+// CheckSSRFWhitelistOnly refuses a host that whitelist-only mode does not
+// admit. Paths that still hold the URL run it before resolving a name, so a
+// host outside the whitelist never produces a DNS query; with the mode off it
+// admits everything and the usual checks apply. An IP literal is judged here
+// too: the URL layer is where "no direct IP" belongs.
+func CheckSSRFWhitelistOnly(host string) error {
+	if !SSRFWhitelistOnlyEnabled() || isSSRFWhitelistedByName(host) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s (SSRF_DNS_WHITELIST_ONLY is on; add it to SSRF_WHITELIST to allow it)",
+		ErrSSRFHostNotWhitelisted, host)
+}
+
+// CheckDialWhitelistOnly is CheckSSRFWhitelistOnly for a dial address, and it
+// judges hostnames only. An IP literal arriving at a dialer is either a name
+// something else already resolved — gRPC's own resolver runs before the
+// dialer it was given, so a whitelisted service name reaches this point as an
+// address — or a literal the URL layer already refused. Refusing it again
+// here would break clients whose whitelisted host was resolved for them,
+// while adding nothing the URL layer does not already do.
+func CheckDialWhitelistOnly(host string) error {
+	if net.ParseIP(host) != nil {
+		return nil
+	}
+	return CheckSSRFWhitelistOnly(host)
+}
+
+// ResetSSRFWhitelistForTest resets the whitelist singleton so tests in any
+// package can re-read the SSRF_WHITELIST environment variable after changing
+// it. Exported (rather than unexported) because callers exist outside
+// internal/utils — notably internal/infrastructure/web_search/searxng_test.go,
+// whose tests would otherwise see whatever whitelist an alphabetically-
+// earlier test in the same binary (e.g. proxy_test.go's TestValidateProxyURL)
+// cached via the first sync.Once.Do(). NOT for production use — the ForTest
+// suffix is the contract.
+func ResetSSRFWhitelistForTest() {
+	ssrfWhitelistOnce = sync.Once{}
+	ssrfWhitelist = nil
+	ssrfWhitelistAtomic.Store(nil)
+	invalidateSSRFOutboundValidationCache()
+}
+
+// FormatSSRFError takes the error returned by ValidateURLForSSRF and wraps
+// it with operator guidance — specifically how to add a host to the SSRF
+// allow-list. Without this hint, users hit "Base URL 未通过安全校验" with
+// no idea how to recover (the allowlist is configured server-side, not
+// in the UI). The hint references SSRF_WHITELIST_EXTRA rather than
+// SSRF_WHITELIST because the latter is the project's baseline list and
+// EXTRA is the operator's append-only escape hatch.
+//
+// `label` is a short noun describing the URL field that failed, e.g.
+// "Base URL" or "VLM Base URL". The function returns an empty string for
+// a nil err so callers can use it inline without guarding.
+func FormatSSRFError(label, rawURL string, err error) string {
+	if err == nil {
+		return ""
+	}
+	host := rawURL
+	if parsed, perr := parseHostForHint(rawURL); perr == nil && parsed != "" {
+		host = parsed
+	}
+	if errors.Is(err, ErrSSRFHostNotWhitelisted) {
+		return fmt.Sprintf(
+			"%s 未通过安全校验：服务端开启了「仅允许白名单出站」（SSRF_DNS_WHITELIST_ONLY），"+
+				"%s 不在白名单内，因此在解析域名之前就被拒绝。如该地址确实可信，请联系运维把它加入 "+
+				"SSRF_WHITELIST_EXTRA（支持精确域名 / *.example.com 通配 / IP / CIDR），"+
+				"示例：SSRF_WHITELIST_EXTRA=%s,*.example.com,10.0.0.0/8",
+			label, host, host,
+		)
+	}
+	return fmt.Sprintf(
+		"%s 未通过安全校验：%v。如该地址确实可信，请联系运维在服务端环境变量 "+
+			"SSRF_WHITELIST_EXTRA 中加入该主机（支持精确域名 / *.example.com 通配 / IP / CIDR），"+
+			"示例：SSRF_WHITELIST_EXTRA=%s,*.example.com,10.0.0.0/8",
+		label, err, host,
+	)
+}
+
+// parseHostForHint extracts a hostname from rawURL purely so we can echo
+// it back inside the SSRF hint. Best-effort — returns ("", err) for
+// completely unparseable input and the caller falls back to the raw URL.
+func parseHostForHint(rawURL string) (string, error) {
+	if rawURL == "" {
+		return "", fmt.Errorf("empty url")
+	}
+	norm := rawURL
+	if !strings.Contains(norm, "://") {
+		norm = "https://" + norm
+	}
+	u, err := url.Parse(norm)
+	if err != nil {
+		return "", err
+	}
+	return u.Hostname(), nil
+}
+
+// ValidateURLForSSRF is the centralised entry-point that all handlers should
+// call to validate a user-supplied URL. It first checks the SSRF_WHITELIST;
+// whitelisted hosts skip the full isSSRFSafeURL check.
+//
+// rawURL may be a full URL ("https://example.com/v1") or a bare host/host:port
+// (for cases like ReconnectDocReader). If a scheme is missing the function
+// prepends "https://" before parsing so that net/url can extract the host.
+//
+// Returns nil when the URL is safe, or an error describing the problem.
+func ValidateURLForSSRF(rawURL string) error {
+	if rawURL == "" {
+		return nil // callers that require non-empty should validate separately
+	}
+
+	// Normalise: if no scheme, prepend https:// so url.Parse works correctly.
+	normalized := rawURL
+	if !strings.Contains(normalized, "://") {
+		normalized = "https://" + normalized
+	}
+
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("URL has no hostname")
+	}
+
+	// A whitelist relaxes host/IP restrictions only. It must never turn other
+	// schemes (file://, gopher://, etc.) into valid outbound request targets.
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("invalid scheme: %s (only http/https allowed)", scheme)
+	}
+
+	// If the host is whitelisted, skip the heavy checks.
+	if IsSSRFWhitelisted(hostname) {
+		return nil
+	}
+
+	// Whitelist-only mode stops here: the validation below resolves the name,
+	// and a host outside the whitelist must not reach DNS (#3378).
+	if err := CheckSSRFWhitelistOnly(hostname); err != nil {
+		return err
+	}
+
+	// Delegate to the full SSRF validation (uses the normalised URL).
+	if safe, reason := isSSRFSafeURL(normalized); !safe {
+		return fmt.Errorf("SSRF validation failed: %s", reason)
+	}
+	return nil
+}
+
+// IsSystemProxy 判断是否为系统代理
+func IsSystemProxy(host string) bool {
+	proxyCfg := httpproxy.FromEnvironment()
+	for _, proxyUrl := range []string{
+		proxyCfg.HTTPProxy,
+		proxyCfg.HTTPSProxy,
+	} {
+		if proxyUrl == "" {
+			continue
+		}
+		if parse, err := url.Parse(proxyUrl); err == nil {
+			if parse.Host == host {
+				return true
+			}
+		}
+	}
+	return false
+}

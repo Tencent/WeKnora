@@ -1,0 +1,404 @@
+package file
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/google/uuid"
+)
+
+// s3FileService AWS S3 file service implementation
+type s3FileService struct {
+	client     *s3.Client
+	bucketName string
+	pathPrefix string
+}
+
+// s3UsePathStyle reports whether the S3 client should use path-style
+// addressing. S3-compatible services default to path-style; AWS and Tencent
+// COS use virtual-hosted style, since COS rejects path-style for buckets
+// created from 2024-01-01 (#3134). force_path_style always wins.
+func s3UsePathStyle(endpoint string, forcePathStyle bool) bool {
+	if forcePathStyle {
+		return true
+	}
+	if strings.Contains(endpoint, "amazonaws.com") {
+		return false
+	}
+	if u, err := url.Parse(endpoint); err == nil && strings.HasSuffix(strings.ToLower(u.Hostname()), ".myqcloud.com") {
+		return false
+	}
+	return true
+}
+
+// newS3Client creates a bare s3FileService with just the SDK client initialised.
+func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string, forcePathStyle bool) (*s3FileService, error) {
+	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("unsafe S3 endpoint: %w", err)
+	}
+	var cfg aws.Config
+	var err error
+
+	// With no explicit AK/SK, keep the AWS default credential chain intact. This
+	// supports IAM roles for EC2/ECS/EKS (IRSA), web identity, shared config, and
+	// environment credentials without persisting long-lived keys in WeKnora.
+	loadOptions := []func(*config.LoadOptions) error{config.WithRegion(region)}
+	if accessKey != "" || secretKey != "" {
+		if accessKey == "" || secretKey == "" {
+			return nil, fmt.Errorf("S3 access key and secret key must be provided together")
+		}
+		loadOptions = append(loadOptions, config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+		))
+	}
+	cfg, err = config.LoadDefaultConfig(context.Background(), loadOptions...)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Create S3 client with custom endpoint if provided.
+	httpClient := objectStorageHTTPClient()
+	var client *s3.Client
+	if endpoint != "" {
+		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(endpoint)
+			o.UsePathStyle = s3UsePathStyle(endpoint, forcePathStyle)
+			if !strings.Contains(endpoint, "amazonaws.com") {
+				// S3-compatible services commonly reject the SDK's default
+				// trailing checksum negotiation. Only relax this for explicit
+				// non-AWS endpoints; standard AWS S3 keeps its default behavior.
+				o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+			}
+			o.HTTPClient = httpClient
+		})
+	} else {
+		// Standard AWS S3
+		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.HTTPClient = httpClient
+		})
+	}
+
+	// Normalize pathPrefix: ensure it ends with '/' if not empty
+	if pathPrefix != "" && !strings.HasSuffix(pathPrefix, "/") {
+		pathPrefix += "/"
+	}
+
+	return &s3FileService{
+		client:     client,
+		bucketName: bucketName,
+		pathPrefix: pathPrefix,
+	}, nil
+}
+
+// NewS3FileService creates an AWS S3 file service.
+// It verifies that the bucket exists and creates it if missing.
+func NewS3FileService(endpoint,
+	accessKey, secretKey, bucketName, region, pathPrefix string,
+) (interfaces.FileService, error) {
+	svc, err := newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureS3Bucket(svc); err != nil {
+		return nil, err
+	}
+	return svc, nil
+}
+
+// NewS3FileServiceWithOptions is the instance-aware S3 constructor. Existing
+// callers keep the historical endpoint-based path-style inference.
+func NewS3FileServiceWithOptions(endpoint, accessKey, secretKey, bucketName, region, pathPrefix string, forcePathStyle bool) (interfaces.FileService, error) {
+	svc, err := newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix, forcePathStyle)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureS3Bucket(svc); err != nil {
+		return nil, err
+	}
+	return svc, nil
+}
+
+func ensureS3Bucket(svc *s3FileService) error {
+	headCtx, cancel := objectStorageSetupContext()
+	exists, err := svc.bucketExists(headCtx)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("failed to check bucket: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	createCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	if err := svc.createBucket(createCtx); err != nil {
+		return fmt.Errorf("failed to create bucket: %w", err)
+	}
+	return nil
+}
+
+// bucketExists checks if the bucket exists
+func (s *s3FileService) bucketExists(ctx context.Context) (bool, error) {
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(s.bucketName),
+	})
+	if err != nil {
+		// Check if the error is a NotFound error
+		var notFound *types.NotFound
+		if errors.As(err, &notFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// createBucket creates a new bucket
+func (s *s3FileService) createBucket(ctx context.Context) error {
+	_, err := s.client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(s.bucketName),
+	})
+	return err
+}
+
+// CheckConnectivity verifies S3 is reachable and, if a bucket is configured,
+// that the bucket exists. This is a read-only probe — it never creates a bucket.
+func (s *s3FileService) CheckConnectivity(ctx context.Context) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	if s.bucketName != "" {
+		exists, err := s.bucketExists(checkCtx)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("bucket %q does not exist", s.bucketName)
+		}
+		return nil
+	}
+
+	// List buckets to verify connectivity
+	_, err := s.client.ListBuckets(checkCtx, &s3.ListBucketsInput{})
+	return err
+}
+
+// CheckS3Connectivity tests S3 connectivity using the provided credentials.
+// It creates a temporary service instance internally and delegates to CheckConnectivity.
+func CheckS3Connectivity(ctx context.Context, endpoint, accessKey, secretKey, bucketName, region string) error {
+	return CheckS3ConnectivityWithOptions(ctx, endpoint, accessKey, secretKey, bucketName, region, false)
+}
+
+func CheckS3ConnectivityWithOptions(ctx context.Context, endpoint, accessKey, secretKey, bucketName, region string, forcePathStyle bool) error {
+	svc, err := newS3Client(endpoint, accessKey, secretKey, bucketName, region, "", forcePathStyle)
+	if err != nil {
+		return err
+	}
+	return svc.CheckConnectivity(ctx)
+}
+
+// parseS3FilePath extracts the object name from a provider scheme: s3://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/s3://{bucket}/{objectKey} paths are accepted
+// too: the wrapper is stripped so services reached bare (global env storage,
+// legacy tenants) can resolve catalog-produced paths (#3151).
+func (s *s3FileService) parseS3FilePath(filePath string) (string, error) {
+	// Provider scheme format: s3://{bucket}/{objectKey}
+	const prefix = "s3://"
+	filePath = storageBackendInnerPath(filePath)
+	if !strings.HasPrefix(filePath, prefix) {
+		return "", fmt.Errorf("invalid S3 file path: %s", filePath)
+	}
+	rest := strings.TrimPrefix(filePath, prefix)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", fmt.Errorf("invalid S3 file path: %s", filePath)
+	}
+	if parts[0] != s.bucketName {
+		return "", fmt.Errorf("bucket mismatch in path: got %s, want %s", parts[0], s.bucketName)
+	}
+	if err := utils.SafeObjectKey(parts[1]); err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
+	}
+	return parts[1], nil
+}
+
+// SaveFile saves a file to S3
+func (s *s3FileService) SaveFile(ctx context.Context,
+	file *multipart.FileHeader, tenantID uint64, knowledgeID string,
+) (string, error) {
+	// Generate object name
+	ext := filepath.Ext(file.Filename)
+	objectName := fmt.Sprintf("%s%d/%s/%s%s", s.pathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
+
+	// Open file
+	src, err := file.Open()
+	if err != nil {
+		return "", fmt.Errorf("failed to open file: %w", err)
+	}
+	defer src.Close()
+
+	// Determine content type
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = utils.GetContentTypeByExt(ext)
+	}
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
+	// Upload file to S3
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(s.bucketName),
+		Key:           aws.String(objectName),
+		Body:          src,
+		ContentLength: aws.Int64(file.Size),
+		ContentType:   aws.String(contentType),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload file to S3: %w", err)
+	}
+
+	return fmt.Sprintf("s3://%s/%s", s.bucketName, objectName), nil
+}
+
+// GetFile gets a file from S3
+func (s *s3FileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
+	objectName, err := s.parseS3FilePath(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(objectName),
+	})
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to get file from S3: %w", err)
+	}
+
+	return objectStorageBoundReader(resp.Body, cancel), nil
+}
+
+// DeleteFile deletes a file
+func (s *s3FileService) DeleteFile(ctx context.Context, filePath string) error {
+	objectName, err := s.parseS3FilePath(filePath)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
+	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(objectName),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	return nil
+}
+
+// CopyFile copies an existing S3 object to a new knowledge-owned object using a
+// server-side CopyObject (no data leaves S3). The destination uses the same
+// layout as SaveFile. Returns ErrCrossBackendCopy when srcPath is not an s3:// path.
+func (s *s3FileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	srcKey, err := s.parseS3FilePath(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("s3 copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+
+	ext := filepath.Ext(srcPath)
+	destKey := fmt.Sprintf("%s%d/%s/%s%s", s.pathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
+
+	// CopySource is "bucket/key"; the '/' separators must NOT be percent-encoded
+	// (url.PathEscape would turn them into %2F and break the bucket/key split).
+	// srcKey is already validated by parseS3FilePath -> SafeObjectKey.
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
+	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(s.bucketName),
+		CopySource: aws.String(s.bucketName + "/" + srcKey),
+		Key:        aws.String(destKey),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to copy file in S3: %w", err)
+	}
+
+	newPath := fmt.Sprintf("s3://%s/%s", s.bucketName, destKey)
+	logger.Infof(ctx, "Copied S3 object %s to %s", srcPath, newPath)
+	return newPath, nil
+}
+
+// SaveBytes saves bytes data to S3 and returns the file path
+// temp parameter is ignored for S3 (no auto-expiration support in this implementation)
+func (s *s3FileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+	safeName, err := utils.SafeFileName(fileName)
+	if err != nil {
+		return "", fmt.Errorf("invalid file name: %w", err)
+	}
+	ext := filepath.Ext(safeName)
+	objectName := fmt.Sprintf("%s%d/exports/%s%s", s.pathPrefix, tenantID, uuid.New().String(), ext)
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
+	// Upload bytes to S3
+	reader := bytes.NewReader(data)
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(s.bucketName),
+		Key:           aws.String(objectName),
+		Body:          reader,
+		ContentLength: aws.Int64(int64(len(data))),
+		ContentType:   aws.String(utils.GetContentTypeByExt(ext)),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload bytes to S3: %w", err)
+	}
+
+	return fmt.Sprintf("s3://%s/%s", s.bucketName, objectName), nil
+}
+
+// GetFileURL returns a presigned download URL for the file
+func (s *s3FileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+	objectName, err := s.parseS3FilePath(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	// Create presign client
+	presignClient := s3.NewPresignClient(s.client)
+
+	// Generate presigned URL
+	presignedReq, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(objectName),
+	}, s3.WithPresignExpires(24*time.Hour))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate presigned URL: %w", err)
+	}
+
+	return presignedReq.URL, nil
+}

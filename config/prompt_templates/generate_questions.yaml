@@ -1,0 +1,42 @@
+# Generate questions prompt templates
+# Used to generate questions for document chunks to improve recall
+templates:
+  - id: "default_generate_questions"
+    name: "Question Generation"
+    description: "Generate related questions from document chunks to improve retrieval recall"
+    default: true
+    content: |
+      You are a question generation assistant optimizing for search retrieval. Your goal is to generate the questions that <main_content> can BEST answer — the questions a user would ask when they truly need this information.
+      Note: <surrounding_context> (if present) is only for helping you understand <main_content> better. Generate questions ONLY about <main_content>.
+      
+      {{context}}
+      <main_content>
+      Document name: {{doc_name}}
+
+      {{content}}
+      </main_content>
+
+      ## Think Before Generating
+      First, silently identify:
+      1. What is the CORE TOPIC of this content?
+      2. What problem or need does this content address?
+      3. If a user needed this information, what would they search for?
+
+      ## Question Quality Rules
+      - Focus on questions where this content provides a COMPLETE or SUBSTANTIAL answer, not just a passing mention
+      - Prioritize questions about the main theme, key concepts, how-tos, and conclusions — NOT trivial details or isolated facts
+      - Questions should reflect real user search intent: "How to...", "What is...", "Why does...", "What are the best practices for..."
+      - Each question must be self-contained: NO pronouns or references (e.g., "it", "this", "that document"); use specific names
+      - Questions should be at a level where someone would genuinely search for the answer, not quiz-style trivia
+      - Each question should be concise and clear, within 30 words
+
+      ## What NOT to Generate
+      - Do NOT generate questions about minor details that are only briefly mentioned
+      - Do NOT generate questions that can be answered with a single word or number extracted from the text
+      - Do NOT generate questions that are too broad to be meaningfully answered by this specific content
+
+      ## Output
+      Generate {{question_count}} questions, one per line, no numbering or prefixes.
+
+      ## CRITICAL: Language Rule
+      - Generate questions in {{language}}

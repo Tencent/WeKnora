@@ -1,0 +1,153 @@
+# Fallback templates
+# Contains both fixed-response templates and model-fallback prompt templates.
+# Fixed responses: used directly as the reply when fallback_strategy = "fixed"
+# Model prompts: used as the prompt to the LLM when fallback_strategy = "model"
+templates:
+  # --- Fixed response templates ---
+  - id: "default_fallback"
+    name: "Standard Fallback"
+    description: "Standard fallback response template"
+    i18n:
+      zh-CN:
+        name: "标准兜底"
+        description: "友好告知无法回答并提供建议"
+      en-US:
+        name: "Standard Fallback"
+        description: "Friendly message with suggestions when unable to answer"
+      ko-KR:
+        name: "표준 폴백"
+        description: "친절하게 답변 및 제안을 드릴 수 없음을 알려드립니다."
+      ja-JP:
+        name: "標準フォールバック"
+        description: "回答できないことを丁寧に伝え、提案を提示するメッセージ"
+    default: true
+    content: |
+      Sorry, I could not find content directly related to your question in the knowledge base.
+
+      You can try:
+      1. Rephrasing your question in a different way
+      2. Providing more specific information
+      3. Consulting a professional in the relevant field
+
+      If you have other questions, I'm happy to continue helping you.
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
+
+  - id: "polite_fallback"
+    name: "Polite Fallback"
+    description: "More polite and friendly fallback response"
+    i18n:
+      zh-CN:
+        name: "礼貌兜底"
+        description: "更加礼貌详细的无法回答提示"
+      en-US:
+        name: "Polite Fallback"
+        description: "More polite and detailed unable-to-answer message"
+      ko-KR:
+        name: "정중한 폴백"
+        description: "더 정중하고 자세한 답변 불가 프롬프트"
+      ja-JP:
+        name: "丁寧なフォールバック"
+        description: "より丁寧で詳細な回答不可メッセージ"
+    content: |
+      I'm sorry, I'm currently unable to provide an accurate answer to your question. This may be because:
+      - The question is beyond my knowledge scope
+      - The knowledge base does not yet contain relevant content
+
+      Suggestions:
+      1. Try rephrasing with different keywords
+      2. Break down your question into more specific sub-questions
+      3. Contact customer support for assistance
+
+      Thank you for your understanding, and I look forward to helping you with other questions!
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
+
+  - id: "brief_fallback"
+    name: "Brief Fallback"
+    description: "Short fallback response"
+    i18n:
+      zh-CN:
+        name: "简洁兜底"
+        description: "简短的无法回答提示"
+      en-US:
+        name: "Brief Fallback"
+        description: "Short unable-to-answer message"
+      ko-KR:
+        name: "간단한 폴백"
+        description: "대답할 수 없는 짧은 프롬프트"
+      ja-JP:
+        name: "簡潔なフォールバック"
+        description: "短い回答不可メッセージ"
+    content: "Sorry, I'm unable to answer this question at the moment. Please try rephrasing your question, or contact customer support."
+
+  # --- Model fallback prompt templates (for fallback_strategy = "model") ---
+  - id: "model_fallback"
+    name: "Model Fallback"
+    description: "Fallback prompt that delegates to the model for generation"
+    i18n:
+      zh-CN:
+        name: "模型兜底提示"
+        description: "引导模型基于通用知识回答的提示词"
+      en-US:
+        name: "Model Fallback Prompt"
+        description: "Prompt to guide model to answer with general knowledge"
+      ko-KR:
+        name: "모델 폴백 프롬프트"
+        description: "일반 지식을 바탕으로 모델이 답변하도록 안내하는 프롬프트"
+      ja-JP:
+        name: "モデルフォールバックプロンプト"
+        description: "一般知識に基づいて回答するようモデルを誘導するプロンプト"
+    mode: "model"
+    content: |
+      No content directly matched the user's query via search. However, the knowledge base contains the following documents:
+
+      {{kb_documents}}
+
+      Important Notes:
+      1. If the document listing above is available, use it to help answer the user's question (e.g., list relevant documents, suggest which documents may contain the information they need)
+      2. If the document listing is empty, use your general knowledge and clearly inform the user that the answer is not from the knowledge base
+      3. If the question involves specific domains or requires the latest information, suggest the user consult official resources
+      4. Maintain accuracy and objectivity in the response
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
+
+      User question: {{query}}
+
+  - id: "default_fallback_prompt"
+    name: "Standard Fallback Prompt"
+    description: "Default prompt that delegates to the model when KB has no relevant results"
+    i18n:
+      zh-CN:
+        name: "标准兜底 Prompt"
+        description: "知识库无相关结果时引导模型回答的默认提示词"
+      en-US:
+        name: "Standard Fallback Prompt"
+        description: "Default prompt that delegates to the model when KB has no relevant results"
+      ko-KR:
+        name: "표준 폴백 프롬프트"
+        description: "KB에 관련 결과가 없을 때 모델에 위임하는 기본 프롬프트"
+      ja-JP:
+        name: "標準フォールバックプロンプト"
+        description: "ナレッジベースに関連する結果がない場合にモデルへ委ねるデフォルトのプロンプト"
+    mode: "model"
+    content: |
+      You are WeKnora, a professional and friendly AI assistant developed by Tencent.
+
+      No content directly matched the user's query via search. However, the knowledge base contains the following documents:
+
+      {{kb_documents}}
+
+      ## Response Requirements
+      - Treat the document listing as metadata: it can identify titles or suggest relevant documents, but cannot support a summary of unread contents or detailed factual claims.
+      - If the document listing is empty or not relevant, answer the user's question based on your general knowledge and clearly inform the user that the answer is not from the knowledge base
+      - Be concise, clear, and substantive
+      - Do not guess unavailable current or private facts. Explain the specific evidence gap when it affects the answer.
+      - Use a polite and professional tone
+      - Default response language: {{language}}; follow an explicit request for another language.
+
+      ## User's question:
+      {{query}}

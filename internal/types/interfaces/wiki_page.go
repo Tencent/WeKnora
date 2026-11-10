@@ -1,0 +1,477 @@
+package interfaces
+
+import (
+	"context"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// WikiPageService defines the wiki page service interface.
+// Provides high-level operations for wiki page CRUD, link management,
+// and chunk synchronization.
+type WikiPageService interface {
+	// CreatePage creates a new wiki page, parses outbound links, updates
+	// bidirectional link references, and syncs to chunks for retrieval.
+	CreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error)
+
+	// UpdatePage updates an existing wiki page, re-parses links, and updates
+	// bidirectional references. The `version` field is incremented only when
+	// a user-visible content field (title, content, summary, page_type,
+	// status) actually differs from the stored value — bookkeeping-only
+	// writes (e.g. refreshing source_refs after a same-content re-ingest) are
+	// persisted without bumping the version.
+	UpdatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error)
+
+	// UpdatePageMeta updates only metadata (status, source_refs, etc.) without
+	// incrementing version or re-parsing links. Use for publish/archive/source
+	// ref changes driven by internal reconciliation.
+	UpdatePageMeta(ctx context.Context, page *types.WikiPage) error
+
+	// UpdateAutoLinkedContent persists content changes that come from
+	// machine-only link decoration — cross-link injection and dead-link
+	// cleanup — without bumping `version`. Out-links are re-parsed from the
+	// new body and bidirectional in-link references on target pages are
+	// refreshed. Conceptually the body still represents the same revision
+	// the user saw before, just with wiki-link markup added or stripped, so
+	// surfacing a version bump to end users is misleading.
+	UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error
+
+	// GetPageBySlug retrieves a wiki page by its slug within a knowledge base.
+	GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error)
+
+	// RepairContentLinks rewrites dead [[slug]] references in content to their
+	// most likely live target (rewrite-only — never strips). Used by the agent
+	// write path to auto-correct LLM-mangled slugs (especially UUID-based
+	// summary slugs) before persistence. Returns the possibly-updated content
+	// and whether any rewrite happened. Best-effort: callers may ignore errors.
+	RepairContentLinks(ctx context.Context, kbID, selfSlug, content string) (string, bool, error)
+
+	// GetPageByID retrieves a wiki page by its unique ID.
+	GetPageByID(ctx context.Context, id string) (*types.WikiPage, error)
+
+	// ListPages lists wiki pages with optional filtering and pagination.
+	ListPages(ctx context.Context, req *types.WikiPageListRequest) (*types.WikiPageListResponse, error)
+
+	// DeletePage soft-deletes a wiki page and removes its chunk sync.
+	DeletePage(ctx context.Context, kbID string, slug string) error
+
+	// GetIndex returns the index page for a knowledge base.
+	// Creates a default one if it doesn't exist.
+	//
+	// The index row now carries only the LLM-generated intro in its content
+	// column — the heavy directory listing was moved out of wiki_pages.
+	// Callers that want a renderable directory should use GetIndexView,
+	// which assembles {intro, groups} structured output on demand.
+	GetIndex(ctx context.Context, kbID string) (*types.WikiPage, error)
+
+	// GetIndexView returns the structured index response — intro (from the
+	// index row) plus a paginated window of directory entries per requested
+	// page_type. `types` restricts which page types to include (empty =
+	// all), `limit` bounds the per-type window size, `cursor` is an opaque
+	// offset string resumed from a previous response.
+	//
+	// Keeping the directory as JSON rather than a multi-MB markdown blob
+	// means a 40k-page KB no longer pays O(N) transport + rendering cost
+	// on every index open. See /wiki/index handler + WikiBrowser.vue for
+	// the consumer.
+	GetIndexView(ctx context.Context, kbID string, pageTypes []string, limit int, cursor string) (*types.WikiIndexResponse, error)
+
+	// GetGraph returns the link graph data for visualization. The caller
+	// supplies a WikiGraphRequest describing the desired slice of the graph
+	// (overview top-N or ego neighborhood around a center slug). Callers
+	// that need the full graph (e.g. wiki lint) can set Limit <= 0 to
+	// disable the node cap; the HTTP handler always clamps Limit to a
+	// safe range before invoking the service.
+	GetGraph(ctx context.Context, req *types.WikiGraphRequest) (*types.WikiGraphData, error)
+
+	// GetStats returns aggregate statistics about the wiki.
+	GetStats(ctx context.Context, kbID string) (*types.WikiStats, error)
+
+	// RebuildLinks re-parses all pages and rebuilds bidirectional link references.
+	// It is best-effort: pages that could not be written are skipped, and any
+	// such failure is returned as a joined error counting the failed pages.
+	RebuildLinks(ctx context.Context, kbID string) error
+
+	// InjectCrossLinks scans specified pages and injects [[wiki-links]] for mentions
+	// of other wiki page titles/aliases in the content.
+	InjectCrossLinks(ctx context.Context, kbID string, affectedSlugs []string)
+
+	// RebuildIndexPage regenerates the index page.
+	RebuildIndexPage(ctx context.Context, kbID string) error
+
+	// ListAllPages retrieves all non-archived wiki pages in a knowledge base without pagination.
+	// Used for index rebuild, graph generation, cross-link injection, etc.
+	ListAllPages(ctx context.Context, kbID string) ([]*types.WikiPage, error)
+
+	// ListByType returns every wiki page of the given type. Used by
+	// callers that need the full set for a specific type (e.g. intro
+	// regeneration needs summary pages). For directory rendering, use
+	// GetIndexView instead — it paginates via ListByTypeLight.
+	ListByType(ctx context.Context, kbID string, pageType string) ([]*types.WikiPage, error)
+
+	// ListPagesBySourceRef retrieves all wiki pages whose source_refs reference
+	// the given knowledge ID. Used by delete/ingest reconciliation paths that
+	// need to find pages touched by a specific document at read time (rather
+	// than relying on a caller-provided stale snapshot).
+	ListPagesBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]*types.WikiPage, error)
+
+	// ListSlugsBySourceRef returns just the slugs of pages that cite the
+	// given knowledge id. Cheaper than ListPagesBySourceRef when callers
+	// only need the slug set (e.g. wiki ingest's "before" snapshot).
+	ListSlugsBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]string, error)
+
+	// ListBySlugs is the lazy fetcher used by the wiki ingest batch
+	// context: returns lightweight projections (no content / source_refs)
+	// for the requested slugs in a single IN query. Used in place of
+	// the pre-batch ListAllPages dump.
+	ListBySlugs(ctx context.Context, kbID string, slugs []string) (map[string]*types.WikiPageLite, error)
+
+	// ListSummariesByKnowledgeIDs returns summary-page content keyed by
+	// the knowledge id that authored it. Used by the retract / reparse
+	// branches of reduceSlugUpdates for "what was this doc's
+	// contribution?" framing.
+	ListSummariesByKnowledgeIDs(ctx context.Context, kbID string, kids []string) (map[string]string, error)
+
+	// ExistsSlugs reports which of the given slugs are live (non-archived).
+	// Used by cleanDeadLinks to validate out-link targets cheaply.
+	ExistsSlugs(ctx context.Context, kbID string, slugs []string) (map[string]bool, error)
+
+	// ListAllSlugs returns every non-archived slug in the KB. Used by
+	// lint to compute the live-slug set for broken-link detection.
+	ListAllSlugs(ctx context.Context, kbID string) ([]string, error)
+
+	// ListPagesCursor walks the KB in id-asc order with an opaque
+	// cursor. Used by lint to stream the page set without holding it
+	// all in memory at once.
+	ListPagesCursor(ctx context.Context, kbID string, cursor string, limit int) ([]*types.WikiPage, string, error)
+
+	// ListByTypeRecent returns the most-recently-updated pages of the
+	// given type, projected to slug/title/summary, capped at `limit`.
+	// Used by rebuildIndexPage's first-time generation path.
+	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
+
+	// FindSimilarPages performs a title similarity search over page titles.
+	// PostgreSQL uses pg_trgm; Lite uses a SQLite-compatible fallback. Used by
+	// the dedup pre-filter to surface candidate merge targets server-side.
+	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
+
+	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
+	// display title matches identity after the same whitespace/case fold used
+	// by wiki ingest identity claims. Used so exact same-title pages are found
+	// even when they miss the trigram top-K.
+	FindPagesByNormalizedTitle(ctx context.Context, kbID, pageType, identity string) ([]*types.WikiPageLite, error)
+
+	// FindPagesByNormalizedTitles is the batched form of
+	// FindPagesByNormalizedTitle. identities are already whitespace-stripped
+	// and lowercased; empty entries are ignored.
+	FindPagesByNormalizedTitles(ctx context.Context, kbID, pageType string, identities []string) ([]*types.WikiPageLite, error)
+
+	// ListDistinctCategoryPaths returns the existing wiki folder paths (split
+	// into segments), capped at maxPaths. Used by wiki ingest's taxonomy
+	// planner as the pool of folders to reuse.
+	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
+
+	// --- Folder tree (wiki_folders) ---
+
+	// ListChildFolders returns the direct child folders of parentID ("" =
+	// root) relevant to the given page types, each enriched with a recursive
+	// page count (the folder's whole subtree, restricted to pageTypes) and
+	// whether it has relevant sub-folders. A folder is shown when its subtree
+	// holds at least one page of pageTypes, or when it is entirely empty (a
+	// user-created container with no pages of any type). When pageTypes is
+	// empty every type counts.
+	ListChildFolders(
+		ctx context.Context, kbID string, parentID string, pageTypes []string,
+	) ([]types.WikiFolderNode, error)
+	// GetFolder retrieves a single folder by id.
+	GetFolder(ctx context.Context, kbID string, id string) (*types.WikiFolder, error)
+	// CreateFolder creates a new (initially empty) folder under parentID and
+	// returns it. Fails if a sibling with the same name already exists.
+	CreateFolder(ctx context.Context, kbID string, tenantID uint64, parentID string, name string) (*types.WikiFolder, error)
+	// RenameOrMoveFolder renames and/or reparents a folder, recomputing the
+	// materialized path/depth of the whole subtree and the cached paths of
+	// every page underneath. Returns the updated folder.
+	RenameOrMoveFolder(ctx context.Context, kbID string, id string, newName string, newParentID string, moveParent bool) (*types.WikiFolder, error)
+	// DeleteFolder removes an empty folder. Fails if it still contains pages
+	// or child folders (the UI must move or delete contents first).
+	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// PruneEmptyFolderChains deletes candidate folders that are still empty,
+	// walking upward through newly-empty ancestors. Candidates are supplied by
+	// document retract cleanup so unrelated user-created empty folders remain.
+	PruneEmptyFolderChains(ctx context.Context, kbID string, folderIDs []string) ([]string, error)
+	// FindOrCreateFolderPath resolves a category path (e.g. ["AI","RAG"]) to a
+	// folder id, creating any missing intermediate folders. Returns the leaf
+	// folder id and the canonical (cleaned) path. An empty/blank path resolves
+	// to the root ("").
+	FindOrCreateFolderPath(ctx context.Context, kbID string, tenantID uint64, path []string) (string, []string, error)
+	// MovePage relocates a page into folderID ("" = root), recomputing its
+	// cached category path. Returns the updated page.
+	MovePage(ctx context.Context, kbID string, slug string, folderID string) (*types.WikiPage, error)
+
+	// CountByType returns page counts grouped by type for a knowledge
+	// base. Re-exposed at the service layer so the index intro
+	// generation path can frame the LLM prompt with "showing N of M"
+	// metadata when the recent-N projection doesn't cover the full
+	// summary set.
+	CountByType(ctx context.Context, kbID string) (map[string]int64, error)
+
+	// SearchPages performs full-text search over wiki pages.
+	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// SearchPagesLiteral searches for query text without regular-expression interpretation.
+	SearchPagesLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// SearchPagesAcross searches wiki pages across multiple knowledge bases
+	// with the same ranking as SearchPages, then returns a global top-N.
+	SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
+
+	// ListRevisions returns the stored historical snapshots for a page
+	// (newest first, content omitted) plus the total snapshot count and the
+	// page's current version. The current version itself has no revision
+	// row — it lives in wiki_pages.
+	ListRevisions(ctx context.Context, kbID string, slug string, limit int, offset int) (*types.WikiPageRevisionListResponse, error)
+
+	// GetRevision returns one historical snapshot (content included).
+	GetRevision(ctx context.Context, kbID string, slug string, version int) (*types.WikiPageRevision, error)
+
+	// RevertPageToVersion rolls the page back to the content of the given
+	// stored revision by applying it as a regular edit: the pre-revert state
+	// is snapshotted, version advances, and links are re-parsed. The edit is
+	// attributed to WikiEditSourceRevert.
+	RevertPageToVersion(ctx context.Context, kbID string, slug string, version int) (*types.WikiPage, error)
+
+	// CreateIssue logs a new issue for a wiki page.
+	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) (*types.WikiPageIssue, error)
+
+	// ListIssues retrieves issues for a knowledge base, optionally filtered by slug and status.
+	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
+
+	// UpdateIssueStatus updates the status of an issue of kbID (e.g. pending -> resolved/ignored).
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
+}
+
+// WikiPageRepository defines the wiki page data persistence interface.
+type WikiPageRepository interface {
+	// Create inserts a new wiki page record.
+	Create(ctx context.Context, page *types.WikiPage) error
+
+	// Update rewrites a wiki page record with optimistic locking and
+	// unconditionally increments `version`. Callers are responsible for
+	// deciding whether the edit is user-visible — the service layer uses
+	// UpdateMeta for bookkeeping-only writes instead.
+	Update(ctx context.Context, page *types.WikiPage) error
+
+	// UpdateMeta 更新状态、来源等元数据，不修改反链或版本；旧页面快照不得覆盖新的反链。
+	UpdateMeta(ctx context.Context, page *types.WikiPage) error
+
+	// AddInLink 在数据库当前数组上原子添加反链；已有反链、缺失或已删除目标均不产生写入。
+	AddInLink(ctx context.Context, tenantID uint64, kbID, targetSlug, sourceSlug string) error
+
+	// RemoveInLink 原子删除该来源的反链，保留其他来源；不存在的反链不更新目标页。
+	RemoveInLink(ctx context.Context, tenantID uint64, kbID, targetSlug, sourceSlug string) error
+
+	// UpdateLinks 仅保存链接重建结果；页面身份、旧链接、正文或版本不匹配时返回冲突。
+	UpdateLinks(ctx context.Context, previous, page *types.WikiPage) error
+
+	// UpdateAutoLinkedContent rewrites `content`, `out_links` and
+	// `updated_at` in place while leaving `version` untouched. Intended for
+	// machine-only link markup changes (cross-link injection / dead-link
+	// cleanup) so the first-ingest page doesn't jump to v2 just because the
+	// post-processor added a `[[...]]` wrapper.
+	UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error
+
+	// GetByID retrieves a wiki page by its unique ID.
+	GetByID(ctx context.Context, id string) (*types.WikiPage, error)
+
+	// GetBySlug retrieves a wiki page by slug within a knowledge base.
+	GetBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error)
+
+	// List retrieves wiki pages with filtering and pagination.
+	List(ctx context.Context, req *types.WikiPageListRequest) ([]*types.WikiPage, int64, error)
+
+	// ListByType retrieves all wiki pages of a given type within a knowledge base.
+	ListByType(ctx context.Context, kbID string, pageType string) ([]*types.WikiPage, error)
+
+	// ListByTypeLight returns a paginated window of lightweight entries
+	// (slug/title/summary only) for the given page_type plus the total
+	// non-archived count. Used by the structured index API so reads do not
+	// have to materialize TEXT content for every wiki_pages row.
+	ListByTypeLight(ctx context.Context, kbID string, pageType string, limit int, offset int) ([]types.WikiIndexEntry, int64, error)
+
+	// ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
+	ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error)
+
+	// ListSlugsBySourceRef returns just the slugs of pages that reference
+	// the given knowledge id. Same predicate as ListBySourceRef but
+	// projected to a single column for the wiki ingest pipeline's
+	// "before" snapshot path.
+	ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error)
+
+	// ListBySlugs returns lightweight projections (slug/title/page_type/
+	// status/aliases/out_links) for the given slugs in one IN query.
+	// Used by the lazy fetcher path in wiki ingest's Map/Reduce phases.
+	ListBySlugs(ctx context.Context, kbID string, slugs []string) (map[string]*types.WikiPageLite, error)
+
+	// ListSummariesByKnowledgeIDs returns summary-page content keyed by
+	// the knowledge id that authored it. Used by the retract branch of
+	// reduceSlugUpdates for "what was this doc's contribution?" framing.
+	ListSummariesByKnowledgeIDs(ctx context.Context, kbID string, kids []string) (map[string]string, error)
+
+	// ExistsSlugs reports which of the given slugs are live (non-
+	// archived). Used by cleanDeadLinks to validate out-link targets
+	// without loading the referenced pages' content.
+	ExistsSlugs(ctx context.Context, kbID string, slugs []string) (map[string]bool, error)
+
+	// ListAllSlugs returns every non-archived slug in the KB. Used by
+	// lint to compute the live-slug set without paying for ListAll's
+	// full row materialization.
+	ListAllSlugs(ctx context.Context, kbID string) ([]string, error)
+
+	// ListPagesCursor returns up to `limit` pages ordered by id ASC,
+	// paginated by an opaque numeric cursor. Used by lint to stream
+	// the KB without loading every page at once.
+	ListPagesCursor(ctx context.Context, kbID string, cursor string, limit int) ([]*types.WikiPage, string, error)
+
+	// ListByTypeRecent returns the most-recently-updated pages of the
+	// given type, projected to slug/title/summary, capped at `limit`.
+	// Used by rebuildIndexPage's first-time generation path so the
+	// LLM prompt size is bounded on large KBs.
+	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
+
+	// FindSimilarPages returns the top-k pages whose lowercase title
+	// is most similar to the query under pg_trgm. `pageTypes` empty
+	// defaults to entity+concept. Used by the dedup pre-filter to
+	// surface candidate merge targets server-side.
+	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
+
+	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
+	// whitespace-stripped, lowercased title equals identity.
+	FindPagesByNormalizedTitle(ctx context.Context, kbID, pageType, identity string) ([]*types.WikiPageLite, error)
+
+	// FindPagesByNormalizedTitles is the batched form of
+	// FindPagesByNormalizedTitle.
+	FindPagesByNormalizedTitles(ctx context.Context, kbID, pageType string, identities []string) ([]*types.WikiPageLite, error)
+
+	// ListDistinctCategoryPaths returns the materialized paths of existing
+	// wiki folders (split into segments), capped at maxPaths. Used by the
+	// wiki ingest taxonomy planner as the pool of folders to reuse.
+	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
+
+	// --- Folder tree (wiki_folders) ---
+
+	// CreateFolder inserts a new directory node.
+	CreateFolder(ctx context.Context, folder *types.WikiFolder) error
+	// GetFolderByID retrieves a folder by id within a knowledge base.
+	GetFolderByID(ctx context.Context, kbID string, id string) (*types.WikiFolder, error)
+	// GetChildFolderByName returns the live child folder of parentID with the
+	// given name, or ErrWikiFolderNotFound. Used by find-or-create.
+	GetChildFolderByName(ctx context.Context, kbID string, parentID string, name string) (*types.WikiFolder, error)
+	// ListChildFolders returns the direct child folders of parentID, ordered
+	// by sort_order then name.
+	ListChildFolders(ctx context.Context, kbID string, parentID string) ([]*types.WikiFolder, error)
+	// ListAllFolders returns every folder in the knowledge base.
+	ListAllFolders(ctx context.Context, kbID string) ([]*types.WikiFolder, error)
+	// UpdateFolder rewrites a folder's mutable fields (name, parent_id, path,
+	// depth, sort_order, updated_at).
+	UpdateFolder(ctx context.Context, folder *types.WikiFolder) error
+	// DeleteFolder soft-deletes a folder by id.
+	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// CountPagesInFolder returns the number of live (non-archived) pages
+	// directly in the folder (folder_id = id).
+	CountPagesInFolder(ctx context.Context, kbID string, folderID string) (int64, error)
+	// CountPagesByFolder returns live (non-archived) page counts grouped by
+	// folder_id. When pageTypes is non-empty the count is restricted to those
+	// page types; otherwise all types are counted. Pages at the wiki root carry
+	// the empty-string key.
+	CountPagesByFolder(ctx context.Context, kbID string, pageTypes []string) (map[string]int64, error)
+	// ListPagesByFolderIDs returns all pages whose folder_id is in the set.
+	// Used to recompute cached paths when a folder subtree is moved/renamed.
+	ListPagesByFolderIDs(ctx context.Context, kbID string, folderIDs []string) ([]*types.WikiPage, error)
+
+	// ListAll retrieves all non-archived wiki pages in a knowledge base (for link rebuilding, graph generation).
+	ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error)
+
+	// ListRecentForSuggestions returns recent user-visible wiki pages under the given
+	// knowledge bases, used to produce fallback suggested questions for Wiki-only KBs
+	// that do not have AI-generated document questions or recommended FAQ entries.
+	// Excludes the index page and archived pages. Returns up to `limit` rows sorted
+	// by updated_at descending.
+	ListRecentForSuggestions(ctx context.Context, tenantID uint64, kbIDs []string, limit int) ([]*types.WikiPage, error)
+
+	// Delete soft-deletes a wiki page by knowledge base ID and slug.
+	Delete(ctx context.Context, kbID string, slug string) error
+
+	// DeleteByID soft-deletes a wiki page by ID.
+	DeleteByID(ctx context.Context, id string) error
+
+	// Search performs full-text search on wiki pages within a knowledge base.
+	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// SearchLiteral matches the query as text on every supported database.
+	SearchLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// SearchAcross performs the same full-text search across multiple
+	// knowledge bases, then returns a global top-N by match_rank.
+	SearchAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
+
+	// CountByType returns page counts grouped by type for a knowledge base.
+	CountByType(ctx context.Context, kbID string) (map[string]int64, error)
+
+	// CountOrphans returns the number of pages with no inbound links.
+	CountOrphans(ctx context.Context, kbID string) (int64, error)
+
+	// UpdateWithRevision snapshots the version being superseded and applies
+	// the page update in a single transaction, so history can never contain
+	// a snapshot of a version that is still current. Inserting an already-
+	// present (page_id, version) pair is a silent no-op.
+	UpdateWithRevision(ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision) error
+
+	// ListRevisions returns snapshots for a page newest-first (content
+	// column omitted) plus the total snapshot count.
+	ListRevisions(ctx context.Context, kbID string, pageID string, limit int, offset int) ([]*types.WikiPageRevision, int64, error)
+
+	// GetRevision returns one snapshot with content.
+	GetRevision(ctx context.Context, kbID string, pageID string, version int) (*types.WikiPageRevision, error)
+
+	// PruneRevisions bounds per-page history storage using the two-tier
+	// retention described by the request.
+	PruneRevisions(ctx context.Context, req types.WikiRevisionPruneRequest) error
+
+	// DeleteRevisionsByPage hard-deletes a page's entire snapshot history.
+	DeleteRevisionsByPage(ctx context.Context, pageID string) error
+
+	// DeleteByKnowledgeBaseID soft-deletes all wiki pages for tenantID+kbID.
+	// Used by KB delete cleanup to batch-soft-delete every page without walking
+	// the folder tree. Bypasses the per-page chunk/link reconciliation that
+	// DeletePage does — the whole KB is going away, so cross-link cleanup is
+	// the KB delete flow's responsibility. tenantID is required so a tampered
+	// delete payload cannot wipe another tenant's wiki by kbID alone.
+	DeleteByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
+	// DeleteFoldersByKnowledgeBaseID soft-deletes all wiki folders for
+	// tenantID+kbID. Unlike DeleteFolder this does NOT enforce the emptiness
+	// guard — the KB is being deleted, so non-empty folders must go too.
+	DeleteFoldersByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
+	// DeleteRevisionsByKnowledgeBaseID hard-deletes all wiki page revisions
+	// for tenantID+kbID. Revisions have no deleted_at column (they are
+	// immutable snapshots, not soft-deletable rows), so this is a physical
+	// DELETE — same semantics as DeleteRevisionsByPage but scoped to the
+	// whole KB.
+	DeleteRevisionsByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
+	// DeleteIssuesByKnowledgeBaseID soft-deletes all wiki page issues for
+	// tenantID+kbID. Issues reference the KB and must be cleaned up
+	// alongside pages to avoid orphans.
+	DeleteIssuesByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
+	// CreateIssue inserts a new wiki page issue record.
+	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) error
+
+	// ListIssues retrieves issues with optional filtering by slug and status.
+	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
+
+	// UpdateIssueStatus updates the status of an issue of kbID; ErrWikiIssueNotFound
+	// when no such issue belongs to it.
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
+}

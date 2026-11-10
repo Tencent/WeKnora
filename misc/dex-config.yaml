@@ -1,0 +1,20 @@
+# config.yaml，reference https://github.com/dexidp/dex/blob/master/examples/config-dev.yaml
+issuer: http://127.0.0.1:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+staticClients:
+  - id: weknora
+    redirectURIs:
+      - 'http://127.0.0.1:5173/api/v1/auth/oidc/callback'
+      - 'http://127.0.0.1/api/v1/auth/oidc/callback'
+    name: 'WeKnora'
+    # add a "secret" field here
+enablePasswordDB: true
+oauth2:
+  responseTypes: 
+    - code
+    - id_token
+    - token
+  skipApprovalScreen: true

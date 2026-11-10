@@ -1,0 +1,40 @@
+package milvus
+
+import (
+	"sync"
+
+	"github.com/milvus-io/milvus/client/v2/entity"
+	client "github.com/milvus-io/milvus/client/v2/milvusclient"
+)
+
+type milvusRepository struct {
+	filter
+	client             *client.Client
+	collectionBaseName string
+	metricType         entity.MetricType
+	shardsNum          int // 0 = use Milvus default (1)
+	replicaNumber      int // 0 = use Milvus default (1); set at LoadCollection time
+	// Cache for initialized collections (dimension -> true)
+	initializedCollections sync.Map
+	// Cache for collection analyzer modes (collection name -> collectionAnalyzerMode).
+	collectionAnalyzerModes sync.Map
+}
+
+type MilvusVectorEmbedding struct {
+	ID              string    `json:"id"`
+	Content         string    `json:"content"`
+	Language        string    `json:"language"`
+	SourceID        string    `json:"source_id"`
+	SourceType      int       `json:"source_type"`
+	ChunkID         string    `json:"chunk_id"`
+	KnowledgeID     string    `json:"knowledge_id"`
+	KnowledgeBaseID string    `json:"knowledge_base_id"`
+	TagID           string    `json:"tag_id"`
+	Embedding       []float32 `json:"embedding"`
+	IsEnabled       bool      `json:"is_enabled"`
+}
+
+type MilvusVectorEmbeddingWithScore struct {
+	MilvusVectorEmbedding
+	Score float64
+}

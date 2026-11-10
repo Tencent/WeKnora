@@ -1,0 +1,116 @@
+package cmd
+
+import (
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+)
+
+// dryRunExpectation declares, for every leaf command, whether it must register
+// --dry-run. The rule (per internal/cmdutil/dryrun.go): commands that change
+// server/local state get a preview path. Reads, generate/stream ops, the
+// interactive credential flow, and the long-running MCP server are exempt.
+//
+// This is a drift guard (sibling of TestEveryLeafCommandHasAgentHelp): every
+// leaf must appear here, so a newly-added command forces an explicit dry-run
+// decision rather than silently inheriting "no preview".
+var dryRunExpectation = map[string]bool{
+	// --- mutations: MUST have --dry-run ---
+	"kb create": true, "kb update": true, "kb delete": true, "kb pin": true, "kb unpin": true,
+	"kb config set": true, // binds models to a KB (state change)
+	"model create": true, "model update": true, "model delete": true,
+	"doc create": true, "doc upload": true, "doc fetch": true, "doc delete": true,
+	"doc reparse": true, // re-triggers server-side parsing (a state change)
+	"doc update":  true, // edits title/description server-side
+	"chunk delete": true, "message delete": true,
+	"session delete": true, "session stop": true, "session tool-approval resolve": true,
+	"agent create": true, "agent update": true, "agent delete": true,
+	"profile add": true, "profile use": true, "profile remove": true,
+	"skills install": true, // writes skill files to a local dir (state change)
+	"auth logout": true, "auth refresh": true,
+	"link": true, "unlink": true,
+	"api": true, // passthrough: dry-run previews write methods, rejected on GET
+
+	// --- exempt: no state change to preview ---
+	// reads
+	"kb list": false, "kb view": false, "kb status": false, "kb check": false,
+	"kb config": false, // read-only inspection of a KB's model config
+	"doc list": false, "doc view": false, "doc download": false,
+	"doc wait":   false, // polling read, no mutation
+	"chunk list": false, "chunk view": false,
+	"message list": false, "message search": false,
+	"session list": false, "session view": false,
+	"agent list": false, "agent view": false, "agent status": false, "agent check": false,
+	"model list": false, "model view": false,
+	"search chunks": false, "search docs": false, "search kb": false, "search sessions": false,
+	"auth list": false, "auth status": false, "auth token": false,
+	"profile list": false,
+	"skills list":  false, // read-only: lists the embedded skills
+	// read-only inspection of the resolved config; no mutation, no network.
+	"config view": false,
+	"doctor":      false, "version": false,
+	// generate / stream ops — the session-creation side effect is incidental,
+	// not a CRUD write; a no-SDK-call preview would be meaningless.
+	"chat": false, "session ask": false, "session resume": false,
+	// auth login VALIDATES credentials against the server and stores them; its
+	// whole purpose is the server round-trip, which a side-effect-free dry-run
+	// cannot exercise — so previewing it would be misleading. Exempt by design.
+	"auth login": false,
+	// long-running stdio server, not a one-shot command.
+	"mcp serve": false,
+	// offline help topic: prints the static exit-code matrix.
+	"exit-codes": false,
+	// offline introspection: prints command contracts from the in-binary tree.
+	"schema": false,
+}
+
+// TestIdAddressedCommandsTolerateKB pins that the id-addressed read/wait
+// commands accept a (redundant, ignored) --kb flag, so an agent flowing from
+// `doc upload --kb X` into `doc wait <id> --kb X` doesn't hit exit 2.
+func TestIdAddressedCommandsTolerateKB(t *testing.T) {
+	root := NewRootCmd(cmdutil.New())
+	for _, path := range [][]string{
+		{"doc", "view"}, {"doc", "wait"}, {"doc", "download"},
+		{"doc", "reparse"}, {"doc", "update"},
+		{"chunk", "list"}, {"chunk", "view"}, {"chunk", "delete"},
+	} {
+		c, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if c.Flags().Lookup("kb") == nil {
+			t.Errorf("`%s` must accept a --kb flag (ignored) so a carried-over --kb doesn't error", strings.Join(path, " "))
+		}
+	}
+}
+
+func TestDryRunCoverageMatchesExpectation(t *testing.T) {
+	root := NewRootCmd(cmdutil.New())
+
+	var unlisted, wrong []string
+	eachLeafCommand(root, func(c *cobra.Command) {
+		key := strings.TrimPrefix(c.CommandPath(), "weknora ")
+		want, declared := dryRunExpectation[key]
+		if !declared {
+			unlisted = append(unlisted, key)
+			return
+		}
+		has := c.Flags().Lookup("dry-run") != nil
+		if has != want {
+			wrong = append(wrong, key)
+		}
+	})
+
+	sort.Strings(unlisted)
+	sort.Strings(wrong)
+	if len(unlisted) > 0 {
+		t.Errorf("leaf commands missing from dryRunExpectation (declare must-have-dry-run true/false):\n  %v", unlisted)
+	}
+	if len(wrong) > 0 {
+		t.Errorf("dry-run flag presence disagrees with dryRunExpectation:\n  %v", wrong)
+	}
+}

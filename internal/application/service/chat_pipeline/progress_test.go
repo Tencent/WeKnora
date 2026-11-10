@@ -1,0 +1,201 @@
+package chatpipeline
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type recordingEventBus struct {
+	events []types.Event
+}
+
+func (b *recordingEventBus) On(types.EventType, types.EventHandler) {}
+
+func (b *recordingEventBus) Emit(_ context.Context, evt types.Event) error {
+	b.events = append(b.events, evt)
+	return nil
+}
+
+func TestIsConsolidatedRetrievalStage(t *testing.T) {
+	cm := &types.ChatManage{}
+	assert.True(t, IsConsolidatedRetrievalStage(types.CHUNK_SEARCH_PARALLEL, cm))
+	assert.False(t, IsConsolidatedRetrievalStage(types.QUERY_UNDERSTAND, cm))
+	assert.False(t, IsConsolidatedRetrievalStage(types.LOAD_HISTORY, cm))
+}
+
+func TestLastConsolidatedRetrievalStage(t *testing.T) {
+	cm := &types.ChatManage{}
+	pipeline := []types.EventType{
+		types.LOAD_HISTORY,
+		types.QUERY_UNDERSTAND,
+		types.CHUNK_SEARCH_PARALLEL,
+		types.CHUNK_RERANK,
+		types.CHUNK_MERGE,
+		types.FILTER_TOP_K,
+		types.INTO_CHAT_MESSAGE,
+		types.CHAT_COMPLETION_STREAM,
+	}
+	assert.Equal(t, types.FILTER_TOP_K, LastConsolidatedRetrievalStage(pipeline, cm))
+}
+
+func TestShouldCloseRetrievalProgress(t *testing.T) {
+	last := types.FILTER_TOP_K
+
+	// Normal completion: only the last retrieval stage closes the window.
+	assert.True(t, ShouldCloseRetrievalProgress(types.FILTER_TOP_K, last, nil))
+	assert.False(t, ShouldCloseRetrievalProgress(types.CHUNK_SEARCH_PARALLEL, last, nil))
+
+	// ErrSearchNothing at an earlier retrieval stage must still close the
+	// window so the frontend stops spinning before the fallback answer streams.
+	assert.True(t, ShouldCloseRetrievalProgress(types.CHUNK_SEARCH_PARALLEL, last, ErrSearchNothing))
+
+	// A hard error at any retrieval stage must also close the window.
+	assert.True(t, ShouldCloseRetrievalProgress(types.CHUNK_RERANK, last, &PluginError{}))
+}
+
+func TestShouldEmitQueryUnderstandProgress(t *testing.T) {
+	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{EnableRewrite: true}}
+	assert.True(t, ShouldEmitQueryUnderstandProgress(cm))
+
+	cm.EnableRewrite = false
+	assert.False(t, ShouldEmitQueryUnderstandProgress(cm))
+
+	cm.Images = []string{"data:image/png;base64,abc"}
+	assert.True(t, ShouldEmitQueryUnderstandProgress(cm))
+}
+
+func TestQueryUnderstandProgressEmitsToolCallAndResult(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{SessionID: "sess-1", EnableRewrite: true},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+	}
+
+	start := time.Now()
+	progress := BeginQueryUnderstandProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndQueryUnderstandProgress(context.Background(), cm, progress, start, nil)
+
+	require.Len(t, bus.events, 2)
+	callData, ok := bus.events[0].Data.(event.AgentToolCallData)
+	require.True(t, ok)
+	assert.Equal(t, "query_understand", callData.ToolName)
+}
+
+func TestRetrievalProgressEmitsSingleToolCallAndResult(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{SessionID: "sess-1"},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{{ID: "r1"}, {ID: "r2"}, {ID: "r3"}},
+		},
+	}
+
+	start := time.Now()
+	progress := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndRetrievalProgress(context.Background(), cm, progress, start, nil)
+
+	require.Len(t, bus.events, 2)
+	assert.Equal(t, types.EventType(event.EventAgentToolCall), bus.events[0].Type)
+	assert.Equal(t, types.EventType(event.EventAgentToolResult), bus.events[1].Type)
+
+	callData, ok := bus.events[0].Data.(event.AgentToolCallData)
+	require.True(t, ok)
+	assert.Equal(t, "knowledge_search", callData.ToolName)
+	assert.Equal(t, retrievalSourceKnowledge, callData.Arguments["search_source"])
+
+	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.True(t, resultData.Success)
+	assert.Equal(t, 3, resultData.Data["count"])
+	assert.Equal(t, 3, resultData.Data["doc_count"])
+	assert.Equal(t, 0, resultData.Data["web_count"])
+	assert.Equal(t, retrievalSourceKnowledge, resultData.Data["search_source"])
+}
+
+// A turn whose candidates all fell below the relevance threshold answers from
+// the fallback, which never sees a retrieved chunk. Reporting the raw hits as
+// the result count claimed context the answer did not have — and offered a row
+// with no references behind it.
+func TestRetrievalProgressReportsNoResultsWhenPipelineFellBack(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{SessionID: "sess-fallback"},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineState: types.PipelineState{
+			SearchResult: []*types.SearchResult{{ID: "r1"}, {ID: "r2"}, {ID: "r3"}},
+		},
+	}
+
+	progress := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndRetrievalProgress(context.Background(), cm, progress, time.Now(), ErrSearchNothing)
+
+	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.True(t, resultData.Success)
+	assert.Equal(t, 0, resultData.Data["count"])
+	assert.Equal(t, 0, resultData.Data["doc_count"])
+	assert.Equal(t, 0, resultData.Data["web_count"])
+	assert.Equal(t, 3, resultData.Data["candidate_count"])
+	assert.Equal(t, "命中 3 条候选，相关性不足，未用于回答", resultData.Output)
+}
+
+func TestRetrievalProgressReportsNothingFoundWhenThereWereNoCandidates(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{SessionID: "sess-empty"},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+	}
+
+	progress := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndRetrievalProgress(context.Background(), cm, progress, time.Now(), ErrSearchNothing)
+
+	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.Equal(t, 0, resultData.Data["count"])
+	assert.Equal(t, 0, resultData.Data["candidate_count"])
+	assert.Equal(t, "未检索到相关内容", resultData.Output)
+}
+
+func TestRetrievalProgressWebOnlySearchSource(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SessionID:        "sess-web",
+			WebSearchEnabled: true,
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "w1", ChunkType: "web_search"},
+				{ID: "w2", KnowledgeSource: "web_search"},
+			},
+		},
+	}
+
+	start := time.Now()
+	progress := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndRetrievalProgress(context.Background(), cm, progress, start, nil)
+
+	callData, ok := bus.events[0].Data.(event.AgentToolCallData)
+	require.True(t, ok)
+	assert.Equal(t, retrievalSourceWeb, callData.Arguments["search_source"])
+
+	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.Equal(t, 2, resultData.Data["count"])
+	assert.Equal(t, 0, resultData.Data["doc_count"])
+	assert.Equal(t, 2, resultData.Data["web_count"])
+	assert.Equal(t, retrievalSourceWeb, resultData.Data["search_source"])
+}
