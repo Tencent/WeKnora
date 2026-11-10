@@ -115,12 +115,12 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		// Relationship import query
 		rel_import_query := `
 			UNWIND $data AS row
-			WITH row ORDER BY row.source ASC, row.target ASC, row.type ASC
 			WITH row,
 			     CASE WHEN row.source <= row.target THEN row.source ELSE row.target END AS first_name,
 			     CASE WHEN row.source <= row.target THEN row.source_labels ELSE row.target_labels END AS first_labels,
 			     CASE WHEN row.source <= row.target THEN row.target ELSE row.source END AS second_name,
 			     CASE WHEN row.source <= row.target THEN row.target_labels ELSE row.source_labels END AS second_labels
+			ORDER BY first_name ASC, second_name ASC, row.type ASC
 			CALL apoc.merge.node(
 				first_labels, {name: first_name, kg: row.knowledge_id}, {}, {}
 			) YIELD node AS first_node
@@ -150,16 +150,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		// The relationship statement locks source then target before merging
 		// the edge. Sort the full identity tuple so every worker sees the same
 		// endpoint and edge lock order regardless of model output order.
-		sort.Slice(relData, func(i, j int) bool {
-			left, right := relData[i], relData[j]
-			if left["source"].(string) != right["source"].(string) {
-				return left["source"].(string) < right["source"].(string)
-			}
-			if left["target"].(string) != right["target"].(string) {
-				return left["target"].(string) < right["target"].(string)
-			}
-			return left["type"].(string) < right["type"].(string)
-		})
+		sortRelationRowsForLockOrder(relData)
 
 		result, err = tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData})
 		if err != nil {
@@ -175,6 +166,44 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		return err
 	}
 	return nil
+}
+
+// sortRelationRowsForLockOrder orders rows by the endpoint pair the Cypher
+// statement actually locks. The Go sort keeps the payload deterministic for
+// tests and drivers; ORDER BY in the statement is what guarantees execution
+// order after UNWIND.
+func sortRelationRowsForLockOrder(rows []map[string]interface{}) {
+	sort.Slice(rows, func(i, j int) bool {
+		leftFirst, leftSecond := canonicalRelationEndpoints(rows[i])
+		rightFirst, rightSecond := canonicalRelationEndpoints(rows[j])
+		if leftFirst != rightFirst {
+			return leftFirst < rightFirst
+		}
+		if leftSecond != rightSecond {
+			return leftSecond < rightSecond
+		}
+		leftType, rightType := rows[i]["type"].(string), rows[j]["type"].(string)
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		if rows[i]["source"].(string) != rows[j]["source"].(string) {
+			return rows[i]["source"].(string) < rows[j]["source"].(string)
+		}
+		return rows[i]["target"].(string) < rows[j]["target"].(string)
+	})
+}
+
+// canonicalRelationEndpoints returns the order in which the relationship
+// statement merges the endpoints: lexicographically smaller name first. The
+// second endpoint can be larger than the next row's first endpoint, so the
+// statement itself must order rows by this canonical pair rather than by the
+// model's original source field.
+func canonicalRelationEndpoints(row map[string]interface{}) (string, string) {
+	source, target := row["source"].(string), row["target"].(string)
+	if source <= target {
+		return source, target
+	}
+	return target, source
 }
 
 // DelGraph deletes a graph from the Neo4j repository

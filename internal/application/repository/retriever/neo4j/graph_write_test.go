@@ -82,6 +82,7 @@ func TestAddGraphUsesStableNodeAndRelationshipOrder(t *testing.T) {
 		Node: []*types.GraphNode{{Name: "z"}, {Name: "a"}, nil},
 		Relation: []*types.GraphRelation{
 			{Node1: "z", Node2: "a", Type: "R"},
+			{Node1: "c", Node2: "b", Type: "R"},
 			{Node1: "a", Node2: "z", Type: "R"},
 			nil,
 		},
@@ -90,6 +91,7 @@ func TestAddGraphUsesStableNodeAndRelationshipOrder(t *testing.T) {
 		Node: []*types.GraphNode{{Name: "a"}, {Name: "z"}},
 		Relation: []*types.GraphRelation{
 			{Node1: "a", Node2: "z", Type: "R"},
+			{Node1: "c", Node2: "b", Type: "R"},
 			{Node1: "z", Node2: "a", Type: "R"},
 		},
 	}
@@ -106,7 +108,8 @@ func TestAddGraphUsesStableNodeAndRelationshipOrder(t *testing.T) {
 			require.Len(t, tx.payloads, 2)
 			nodes, relations := nodeNames(tx.payloads[0]), relationKeys(tx.payloads[1])
 			assert.Equal(t, []string{"a", "z"}, nodes)
-			assert.Equal(t, []string{"a->z", "z->a"}, relations)
+			assert.Equal(t, []string{"a->z", "z->a", "b->c"}, relations,
+				"rows must sort by the canonical first/second endpoint pair, not original source")
 			if firstNodes == nil {
 				firstNodes, firstRelations = nodes, relations
 			} else {
@@ -130,12 +133,38 @@ func nodeNames(params map[string]any) []string {
 }
 
 func relationKeys(params map[string]any) []string {
-	rows := params["data"].([]map[string]interface{})
+	return relationKeysFromRows(params["data"].([]map[string]interface{}))
+}
+
+func relationKeysFromRows(rows []map[string]interface{}) []string {
 	keys := make([]string, len(rows))
 	for i, row := range rows {
 		keys[i] = row["source"].(string) + "->" + row["target"].(string)
 	}
 	return keys
+}
+
+func TestCanonicalRelationOrderLeavesNoInversionAtAdjacentRows(t *testing.T) {
+	// A raw-source sort can leave (a,z) before (b,c), but the statement locks
+	// a then z, so starting (b,c) next is an inversion if b sorts between them.
+	// Sorting by the canonical first/second endpoint pair removes that gap.
+	rows := []map[string]interface{}{
+		{"source": "z", "target": "a", "type": "R"},
+		{"source": "c", "target": "b", "type": "R"},
+		{"source": "a", "target": "z", "type": "R"},
+	}
+	sortRelationRowsForLockOrder(rows)
+	require.Equal(t, []string{"a->z", "z->a", "b->c"}, relationKeysFromRows(rows))
+}
+
+func TestCanonicalRelationOrderIsStableForOppositeDirections(t *testing.T) {
+	rows := []map[string]interface{}{
+		{"source": "z", "target": "a", "type": "R"},
+		{"source": "a", "target": "z", "type": "R"},
+	}
+	sortRelationRowsForLockOrder(rows)
+	require.Equal(t, []string{"a->z", "z->a"}, relationKeysFromRows(rows),
+		"equal canonical endpoints need a deterministic original-direction tie-breaker")
 }
 
 func TestRelationshipQueryMergesEndpointsInCanonicalOrder(t *testing.T) {
@@ -147,8 +176,8 @@ func TestRelationshipQueryMergesEndpointsInCanonicalOrder(t *testing.T) {
 	}}))
 	require.Len(t, tx.queries, 2)
 	query := tx.queries[1]
-	assert.Contains(t, query, "WITH row ORDER BY row.source ASC, row.target ASC, row.type ASC",
-		"the database, not just the Go slice, must establish relationship lock order")
+	assert.Contains(t, query, "ORDER BY first_name ASC, second_name ASC, row.type ASC",
+		"the database, not just the Go slice, must establish canonical relationship lock order")
 	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.source ELSE row.target END")
 	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.source_labels ELSE row.target_labels END")
 	assert.Contains(t, query, "CASE WHEN row.source <= row.target THEN row.target_labels ELSE row.source_labels END")
