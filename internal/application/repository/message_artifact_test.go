@@ -136,6 +136,7 @@ func TestListMessagesBySessionBeforeCursorForLLMSkipsArtifactLookup(t *testing.T
 	require.Equal(t, msg.ID, withoutArtifacts[0].ID)
 	require.Nil(t, withoutArtifacts[0].Artifacts, "LLM history must not pay for artifact lookups")
 }
+
 func TestRecordRestoredArtifactMtimeUpdatesMatchingRows(t *testing.T) {
 	db := newArtifactTestDB(t)
 	repo := NewMessageRepository(db).(*messageRepository)
