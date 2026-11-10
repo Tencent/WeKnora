@@ -129,7 +129,7 @@ func (c *DockerRemoteClient) pendingTemplate(image string) RemoteTemplate {
 func (c *DockerRemoteClient) EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	image := strings.TrimSpace(c.settings.Image)
 	if image == "" {
-		image = DefaultDockerImage
+		image = StandardDockerImage()
 	}
 	if _, err := c.api.ImageInspect(ctx, image); err == nil {
 		return &RemoteTemplate{

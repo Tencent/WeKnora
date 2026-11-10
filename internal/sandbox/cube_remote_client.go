@@ -478,7 +478,7 @@ func (c *CubeRemoteClient) tryRebuildStandardTemplate(
 
 func (c *CubeRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	job, err := c.client.BuildTemplate(ctx, cubesandbox.BuildTemplateOptions{
-		Image: DefaultCubeTemplateImage,
+		Image: StandardCubeTemplateImage(),
 		Extra: c.standardTemplateSpec(),
 	})
 	if err != nil {
@@ -488,7 +488,7 @@ func (c *CubeRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTe
 		return &RemoteTemplate{
 			Name:     StandardTemplateName,
 			Status:   "failed",
-			Image:    DefaultCubeTemplateImage,
+			Image:    StandardCubeTemplateImage(),
 			Standard: true,
 			Error:    err.Error(),
 		}, nil
@@ -501,7 +501,7 @@ func (c *CubeRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTe
 		ID:       job.TemplateID,
 		Name:     StandardTemplateName,
 		Status:   status,
-		Image:    DefaultCubeTemplateImage,
+		Image:    StandardCubeTemplateImage(),
 		Standard: true,
 		Error:    strings.TrimSpace(job.ErrorMessage),
 	}, nil
@@ -545,7 +545,7 @@ func (c *CubeRemoteClient) tryRebuildDesktopTemplate(
 
 func (c *CubeRemoteClient) buildDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	job, err := c.client.BuildTemplate(ctx, cubesandbox.BuildTemplateOptions{
-		Image: DefaultCubeDesktopTemplateImage,
+		Image: StandardCubeDesktopTemplateImage(),
 		Extra: c.desktopTemplateSpec(),
 	})
 	if err != nil {
@@ -553,7 +553,7 @@ func (c *CubeRemoteClient) buildDesktopTemplate(ctx context.Context) (*RemoteTem
 		return &RemoteTemplate{
 			Name:    DesktopTemplateName,
 			Status:  "failed",
-			Image:   DefaultCubeDesktopTemplateImage,
+			Image:   StandardCubeDesktopTemplateImage(),
 			Desktop: true,
 			Error:   err.Error(),
 		}, nil
@@ -566,7 +566,7 @@ func (c *CubeRemoteClient) buildDesktopTemplate(ctx context.Context) (*RemoteTem
 		ID:      job.TemplateID,
 		Name:    DesktopTemplateName,
 		Status:  status,
-		Image:   DefaultCubeDesktopTemplateImage,
+		Image:   StandardCubeDesktopTemplateImage(),
 		Desktop: true,
 		Error:   strings.TrimSpace(job.ErrorMessage),
 	}, nil
@@ -613,7 +613,7 @@ func (c *CubeRemoteClient) desktopTemplateSpec() map[string]any {
 // two hand-kept copies of the spec would eventually disagree.
 func cubeStandardTemplateSpec(dns []string) map[string]any {
 	spec := map[string]any{
-		"image": DefaultCubeTemplateImage,
+		"image": StandardCubeTemplateImage(),
 		"name":  StandardTemplateName,
 		// Cube has no volumes: the workspaces and installed dependencies of
 		// every session on the machine live on this layer.
@@ -646,7 +646,7 @@ func cubeStandardTemplateSpec(dns []string) map[string]any {
 // Basic auth stays as defence in depth on the overlay path.
 func cubeDesktopTemplateSpec(dns []string) map[string]any {
 	spec := map[string]any{
-		"image": DefaultCubeDesktopTemplateImage,
+		"image": StandardCubeDesktopTemplateImage(),
 		"name":  DesktopTemplateName,
 		// Cube has no volumes: the workspaces, installed dependencies and
 		// browser profiles of every session on the machine live on this layer.
