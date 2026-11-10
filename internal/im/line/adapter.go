@@ -77,6 +77,7 @@ func (a *Adapter) isReset(content string) bool {
 	return strings.EqualFold(strings.TrimSpace(content), a.resetKeyword)
 }
 
+// Platform returns im.PlatformLine.
 func (a *Adapter) Platform() im.Platform {
 	return im.PlatformLine
 }
@@ -867,32 +868,47 @@ var httpClient = secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfi
 
 // webhookPayload is the top-level LINE webhook envelope.
 type webhookPayload struct {
-	Destination string          `json:"destination"`
-	Events      []webhookEvent  `json:"events"`
+	// Destination is the bot user ID receiving the webhook.
+	Destination string `json:"destination"`
+	// Events is the list of webhook events.
+	Events []webhookEvent `json:"events"`
 }
 
 // webhookEvent is a single incoming LINE event.
 type webhookEvent struct {
-	Type       string        `json:"type"`
-	Token      string        `json:"token"`
-	Timestamp  int64         `json:"timestamp"`
-	Source     webhookSource `json:"source"`
-	ReplyToken string        `json:"replyToken"`
-	Message    *webhookMessage `json:"message"`
+	// Type is the event type (e.g. "message").
+	Type string `json:"type"`
+	// Token is the webhook event token.
+	Token string `json:"token"`
+	// Timestamp is the event timestamp in milliseconds.
+	Timestamp int64 `json:"timestamp"`
+	// Source identifies where the event originated.
+	Source webhookSource `json:"source"`
+	// ReplyToken is the token used to reply to this event.
+	ReplyToken string `json:"replyToken"`
+	// Message is the message object if the event is a message.
+	Message *webhookMessage `json:"message"`
 }
 
 // webhookSource identifies the origin of an event.
 type webhookSource struct {
-	Type    string `json:"type"`
-	UserID  string `json:"userId"`
+	// Type is the source type ("user", "group", or "room").
+	Type string `json:"type"`
+	// UserID is the sender user ID.
+	UserID string `json:"userId"`
+	// GroupID is the group ID if from a group.
 	GroupID string `json:"groupId"`
-	RoomID  string `json:"roomId"`
+	// RoomID is the room ID if from a room.
+	RoomID string `json:"roomId"`
 }
 
 // webhookMessage is a message payload (text subset for this phase).
 type webhookMessage struct {
+	// Type is the message type (e.g. "text").
 	Type string `json:"type"`
-	ID   string `json:"id"`
+	// ID is the unique message ID.
+	ID string `json:"id"`
+	// Text is the message content.
 	Text string `json:"text"`
 	// Mention is populated for group/room messages that contain @ mentions.
 	Mention *mention `json:"mention"`
@@ -900,14 +916,19 @@ type webhookMessage struct {
 
 // mention lists the @ targets referenced by a group/room message.
 type mention struct {
+	// Mentionees is the list of mentioned entities.
 	Mentionees []mentionee `json:"mentionees"`
 }
 
 // mentionee is a single @ mention target. Type is "bot" when the mention is the
 // bot itself; IsSelf is set by the LINE platform when the bot is a target.
 type mentionee struct {
-	Index  int    `json:"index"`
-	Type   string `json:"type"`
-	ID     string `json:"id"`
-	IsSelf bool   `json:"isSelf"`
+	// Index is the character position where the mention starts.
+	Index int `json:"index"`
+	// Type is the mention target type ("user" or "bot").
+	Type string `json:"type"`
+	// ID is the user ID or bot ID.
+	ID string `json:"id"`
+	// IsSelf reports whether the bot itself was mentioned.
+	IsSelf bool `json:"isSelf"`
 }
