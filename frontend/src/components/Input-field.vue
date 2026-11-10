@@ -10,6 +10,7 @@ import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useUIStore } from '@/stores/ui';
 import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 import { useMenuStore } from '@/stores/menu';
+import { useMentionFileDrawer } from '@/composables/useMentionFileDrawer';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession, transcribeVoice } from '@/api/chat';
@@ -842,6 +843,17 @@ const removeSelectedItem = (item: MentionItem) => {
   } else if (item.type === 'skill') {
     settingsStore.removeSkill(item.skillName || item.id);
   }
+};
+
+// 点击文件 chip 打开文件信息抽屉（仅 file 类型）
+const mentionFileDrawer = useMentionFileDrawer();
+const openFileMentionDrawer = (item: MentionItem) => {
+  if (item.type !== 'file') return;
+  mentionFileDrawer?.open({
+    fileId: item.id,
+    kbId: item.kbId || undefined,
+    fileName: item.name,
+  });
 };
 
 const getMentionIcon = (item: MentionItem) => {
@@ -3007,8 +3019,9 @@ defineExpose({
         <slot name="chips" />
         <span v-for="item in (embeddedMode ? [] : allSelectedItems)" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
-          { 'mention-chip--agent': item.isAgentConfigured }
-        ]">
+          { 'mention-chip--agent': item.isAgentConfigured },
+          { 'mention-chip--clickable': item.type === 'file' }
+        ]" @click.stop="item.type === 'file' && openFileMentionDrawer(item)">
           <span class="mention-chip__icon-wrap" :class="{ 'has-org': item.org_name }">
             <span class="mention-chip__icon">
               <t-icon v-if="item.type === 'kb'" :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
@@ -3498,6 +3511,10 @@ const getImgSrc = (url: string) => {
 
   &:hover {
     .chat-resource-chip-hover();
+  }
+
+  &.mention-chip--clickable {
+    cursor: pointer;
   }
 }
 

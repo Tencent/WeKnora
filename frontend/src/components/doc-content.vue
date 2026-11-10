@@ -40,6 +40,7 @@ const authStore = useAuthStore();
 // 传下来（包含 KB creator / Admin / 组织分享 editor 三种来源），未
 // 传时按更严格的 Admin 兜底，避免 Viewer 看到一个会 403 的入口。
 const canDeleteGeneratedQuestion = computed(() => {
+  if (props.readOnly) return false;
   if (props.canEditKB === true) return true;
   return authStore.hasRole('admin');
 });
@@ -242,7 +243,15 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
+const props = defineProps({
+  visible: Boolean,
+  details: { type: Object, required: true },
+  canEditKB: Boolean,
+  canDownloadKB: Boolean,
+  kbId: String,
+  // 对话引用只提供阅读入口，即使当前用户拥有管理员权限也不显示编辑操作。
+  readOnly: Boolean,
+});
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
 const assistant = useAssistantStore();
 const readingAssistantActions = computed(() => {
@@ -543,7 +552,8 @@ const chunkPage = ref(1);
 const loadedChunkPage = ref(1);
 let pendingChunkPage: number | null = null;
 const isChunkPageTransition = computed(
-  () => Boolean(props.details?.chunkLoading) && chunkPage.value !== loadedChunkPage.value,
+  () => Boolean(props.details?.chunkLoading) &&
+    (chunkPage.value !== loadedChunkPage.value || !props.details?.md?.length),
 );
 let mdContentWrap = ref()
 // Drawer uses attach="body", so markdown nodes live outside mdContentWrap in the DOM.
@@ -759,24 +769,6 @@ const canPreview = (): boolean => {
   return isKnownPreviewableExt(ft);
 };
 
-// 当文档详情加载完成时，file 类型自动切换到「预览」；音频类型使用 merged + 播放器
-watch(() => props.details?.id, (newId) => {
-  // 清理旧音频
-  if (audioBlobUrl.value) {
-    URL.revokeObjectURL(audioBlobUrl.value);
-    audioBlobUrl.value = '';
-  }
-  if (!newId) return;
-  if (isAudioFile(props.details?.file_type)) {
-    viewMode.value = 'merged'; // 音频默认全文视图，播放器已内嵌
-    loadAudioPreview();
-  } else if (props.details?.type === 'file' && canPreview()) {
-    viewMode.value = 'preview';
-  } else {
-    viewMode.value = 'merged';
-  }
-});
-
 const isTextFile = (fileType?: string): boolean => {
   if (!fileType) return false;
   const textTypes = ['txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts', 'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml', 'ini', 'conf', 'log'];
@@ -797,18 +789,31 @@ const isAudioFile = (fileType?: string): boolean => {
 const audioBlobUrl = ref('');
 const audioLoading = ref(false);
 
-const loadAudioPreview = async () => {
-  if (!props.details?.id || audioBlobUrl.value) return;
+// 异步挂载的对话抽屉可能已收到详情，首次渲染也要选择默认视图。
+watch(() => props.details?.id, async (id, _, onCleanup) => {
+  if (audioBlobUrl.value) {
+    URL.revokeObjectURL(audioBlobUrl.value);
+    audioBlobUrl.value = '';
+  }
+  audioLoading.value = false;
+  if (!id) return;
+
+  viewMode.value = canPreview() ? 'preview' : 'merged';
+  if (!isAudioFile(props.details?.file_type)) return;
+
+  let canceled = false;
+  onCleanup(() => { canceled = true; });
   audioLoading.value = true;
   try {
-    const blob = await previewKnowledgeFile(props.details.id);
-    audioBlobUrl.value = URL.createObjectURL(blob);
+    const blob = await previewKnowledgeFile(id);
+    if (!canceled) audioBlobUrl.value = URL.createObjectURL(blob);
   } catch (err) {
-    console.error('Audio preview load failed:', err);
+    if (!canceled) console.error('Audio preview load failed:', err);
   } finally {
-    audioLoading.value = false;
+    if (!canceled) audioLoading.value = false;
   }
-};
+}, { immediate: true });
+
 const runMarkdownPostRenderPipeline = async () => {
   await nextTick();
   const renderRoot = getMarkdownRenderRoot();
@@ -955,9 +960,9 @@ const processMarkdown = (markdownText) => {
   return result;
 };
 const handleClose = () => {
-  emit("closeDoc", false);
-  const scrollEl = document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
+  const scrollEl = docMarkdownRoot.value?.closest('.t-drawer__body') as HTMLElement | null;
   if (scrollEl) scrollEl.scrollTop = 0;
+  emit("closeDoc", false);
   viewMode.value = 'merged';
 };
 
@@ -1594,7 +1599,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
         <div class="doc-drawer-resize-line" />
       </div>
     </teleport>
-    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
+    <t-drawer :visible="visible" :zIndex="2000" :size="`min(${mainDrawerWidth}px, 100vw)`" attach="body" :closeBtn="true"
       :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
       @close="handleClose">
       <template #header>
@@ -1605,7 +1610,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           <div class="doc-drawer-header-text">
             <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
           </div>
-          <div class="header-actions">
+          <div v-if="!readOnly" class="header-actions">
             <t-button v-if="canDownloadKB && (details.type === 'file' || details.type === 'manual')" class="header-action-btn" size="small"
               variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
               @click="downloadFile()">
@@ -1629,7 +1634,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
       <!-- Hidden mount: keeps the timeline fetching data so the header
            link's status dot / duration stays live even before the user
            opens the secondary drawer. -->
-      <div class="kp-trigger-shadow" aria-hidden="true">
+      <div v-if="!readOnly" class="kp-trigger-shadow" aria-hidden="true">
         <KnowledgeProcessingTimeline v-if="details.id" :knowledge-id="details.id" :parse-status="details.parse_status"
           :compact="true" :grace-poll="false" @update:has-spans="hasTimelineSpans = $event"
           @update:summary="timelineSummary = $event" />
@@ -1654,7 +1659,8 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
         </div>
       </t-drawer>
 
-      <div ref="docMarkdownRoot" class="doc-markdown-root doc-drawer-body setting-drawer__body">
+      <slot name="status" />
+      <div v-if="!$slots.status" ref="docMarkdownRoot" class="doc-markdown-root doc-drawer-body setting-drawer__body">
         <section v-if="details.id" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.detailSectionMeta') }}</h4>
           <div class="doc-detail-rows">
@@ -1867,8 +1873,13 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
             </audio>
           </div>
 
+          <div v-if="viewMode !== 'preview' && details.chunkLoadError && !details.md?.length"
+            class="no_content" role="alert">
+            {{ details.chunkLoadError }}
+          </div>
+
           <!-- 合并视图 -->
-          <div v-if="viewMode === 'merged'">
+          <div v-else-if="viewMode === 'merged'">
             <div v-if="isChunkPageTransition" class="chunk-page-loading">
               <t-loading size="small" />
               <span>{{ $t('common.loading') }}</span>

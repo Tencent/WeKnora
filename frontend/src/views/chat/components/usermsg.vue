@@ -3,8 +3,9 @@
         <!-- 显示@的知识库和文件 -->
         <div v-if="mentioned_items && mentioned_items.length > 0" class="mentioned_items">
             <span v-for="item in mentioned_items" :key="item.id" class="mentioned_tag" :class="[
-                mentionTagClass(item)
-            ]">
+                mentionTagClass(item),
+                { 'mentioned_tag--clickable': item.type === 'file' }
+            ]" @click.stop="openFileMentionDrawer(item)">
                 <span class="tag_icon">
                     <t-icon v-if="item.type === 'kb'" :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
                     <t-icon v-else :name="mentionTagIcon(item)" />
@@ -89,6 +90,7 @@ import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
 import { SKILL_ICON } from '@/types/mention';
+import { useMentionFileDrawer } from '@/composables/useMentionFileDrawer';
 import { copyWithToast } from '@/utils/clipboard';
 import { formatMessageTimestamp, getConversationTimestampModel } from '@/utils/messageTimestamp';
 const emit = defineEmits(['retry-steer', 'remove-steer', 'fork', 'rewind']);
@@ -105,6 +107,17 @@ const mentionTagIcon = (item) => {
     if (item.type === 'mcp') return 'tools';
     if (item.type === 'skill') return SKILL_ICON;
     return 'file';
+};
+
+// 点击文件标签打开文件信息抽屉（仅 file 类型）
+const mentionFileDrawer = useMentionFileDrawer();
+const openFileMentionDrawer = (item) => {
+    if (item.type !== 'file') return;
+    mentionFileDrawer?.open({
+        fileId: item.id,
+        kbId: item.kb_id || undefined,
+        fileName: item.name,
+    });
 };
 
 const props = defineProps({
@@ -251,6 +264,14 @@ const closePreImg = () => {
 
 .mentioned_tag {
     .chat-mentioned-tag();
+
+    &.mentioned_tag--clickable {
+        cursor: pointer;
+
+        &:hover {
+            .chat-resource-chip-hover();
+        }
+    }
 }
 
 .user_msg_container {
