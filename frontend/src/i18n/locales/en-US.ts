@@ -2589,6 +2589,7 @@ export default {
     apiKeyOptionalLabel: 'API Key (optional)',
     baseUrlLabel: 'Instance URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
+    customSearchEndpointHint: 'Optional. Bing: enter the full search endpoint. Google: enter the API base URL; customsearch/v1 is appended.',
     apiKeyPlaceholder: 'Enter API key',
     clients: {
       label: 'Search & page reading',

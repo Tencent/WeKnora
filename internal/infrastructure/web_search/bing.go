@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -16,7 +17,6 @@ import (
 
 const (
 	// defaultBingSearchURL is the hardcoded Bing search API URL.
-	// Not configurable by tenants — prevents SSRF.
 	defaultBingSearchURL = "https://api.bing.microsoft.com/v7.0/search"
 )
 
@@ -53,13 +53,20 @@ func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSe
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Bing provider")
 	}
+	base := strings.TrimSpace(params.BaseURL)
+	if err := ValidateOptionalSearchBaseURL(base); err != nil {
+		return nil, err
+	}
+	if base == "" {
+		base = defaultBingSearchURL
+	}
 	client, err := NewSearchHTTPClient(defaultBingTimeout, params.ProxyURL)
 	if err != nil {
 		return nil, err
 	}
 	return &BingProvider{
 		client:  client,
-		baseURL: defaultBingSearchURL, // Hardcoded — not tenant-configurable
+		baseURL: base,
 		apiKey:  params.APIKey,
 	}, nil
 }

@@ -7355,6 +7355,7 @@ export default {
     apiKeyOptionalLabel: 'API 키 (선택 사항)',
     baseUrlLabel: '인스턴스 URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
+    customSearchEndpointHint: '선택 사항입니다. Bing은 전체 검색 엔드포인트를, Google은 API 기본 URL을 입력하세요. Google에는 customsearch/v1이 추가됩니다.',
     apiKeyPlaceholder: 'API 키를 입력하세요',
     clients: {
       label: '검색 및 페이지 읽기',

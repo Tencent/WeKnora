@@ -7355,6 +7355,7 @@ export default {
     apiKeyOptionalLabel: 'API-ключ (необязательно)',
     baseUrlLabel: 'URL экземпляра',
     baseUrlPlaceholder: 'https://searxng.example.com',
+    customSearchEndpointHint: 'Необязательно. Для Bing укажите полный адрес поиска, для Google — базовый адрес API; customsearch/v1 добавляется автоматически.',
     apiKeyPlaceholder: 'Введите API-ключ',
     clients: {
       label: 'Поиск и чтение страниц',
