@@ -106,7 +106,7 @@ func LoadAgentHistory(
 	)
 	replay.locale = types.LanguageFromContextOrDefault(ctx)
 	for len(rows) < agentHistoryMaxRows {
-		page, err := messageRepo.ListMessagesBySessionBeforeCursor(
+		page, err := messageRepo.ListMessagesBySessionBeforeCursorForLLM(
 			ctx, sessionID, before, beforeID, agentHistoryPageSize,
 		)
 		if err != nil {
