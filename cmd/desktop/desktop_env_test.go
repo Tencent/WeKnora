@@ -110,7 +110,7 @@ func TestConfigureWindowsDesktopStorageRedirectsPackagedInstalls(t *testing.T) {
 	writeConfig(t, install) // packaged layout: config/ next to the exe
 	t.Setenv("DB_PATH", "./data/weknora.db")
 
-	configureWindowsDesktopStorage(filepath.Join(install, "WeKnora Lite.exe"))
+	configurePackagedXdgStorage(filepath.Join(install, "WeKnora Lite.exe"))
 
 	want := filepath.Join(cfgRoot, "WeKnora Lite", "data", "weknora.db")
 	require.Equal(t, want, os.Getenv("DB_PATH"),
@@ -127,7 +127,7 @@ func TestConfigureWindowsDesktopStorageMigratesLegacyInstallData(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(legacyData, "weknora.db"), []byte("old"), 0o644))
 	t.Setenv("DB_PATH", "./data/weknora.db")
 
-	configureWindowsDesktopStorage(filepath.Join(install, "WeKnora Lite.exe"))
+	configurePackagedXdgStorage(filepath.Join(install, "WeKnora Lite.exe"))
 
 	migrated := filepath.Join(cfgRoot, "WeKnora Lite", "data", "weknora.db")
 	b, err := os.ReadFile(migrated)
@@ -145,7 +145,7 @@ func TestConfigureWindowsDesktopStorageKeepsDevTreesInPlace(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module test\n"), 0o644))
 	t.Setenv("DB_PATH", "./data/weknora.db")
 
-	configureWindowsDesktopStorage(filepath.Join(repo, "cmd", "desktop", "build", "bin", "WeKnora Lite.exe"))
+	configurePackagedXdgStorage(filepath.Join(repo, "cmd", "desktop", "build", "bin", "WeKnora Lite.exe"))
 
 	require.Equal(t, "./data/weknora.db", os.Getenv("DB_PATH"),
 		"wails dev keeps the database inside the repo")
@@ -155,7 +155,7 @@ func TestConfigureWindowsDesktopStorageWithoutARootKeepsEnvUntouched(t *testing.
 	isolateWindowsUserConfigDir(t)
 
 	t.Setenv("DB_PATH", "/elsewhere/weknora.db")
-	configureWindowsDesktopStorage(filepath.Join(t.TempDir(), "bin", "WeKnora Lite.exe"))
+	configurePackagedXdgStorage(filepath.Join(t.TempDir(), "bin", "WeKnora Lite.exe"))
 
 	require.Equal(t, "/elsewhere/weknora.db", os.Getenv("DB_PATH"))
 }

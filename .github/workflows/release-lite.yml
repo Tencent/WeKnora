@@ -60,12 +60,8 @@ jobs:
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
-          - os: macos-14
-            goos: darwin
-            goarch: amd64
-          - os: macos-14
-            goos: darwin
-            goarch: arm64
+          # macOS 暂摘（账号级 macOS runner 拦截，探针 workflow 亦被秒取消）；
+          # 解除后恢复 darwin/amd64 与 darwin/arm64 两段
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
@@ -358,7 +354,7 @@ jobs:
 
   # ── 3. Create GitHub Release ──
   release:
-    needs: [build-binary, build-desktop-app]
+    needs: [build-binary, build-desktop-app, kylin-v10-sp1-aarch64-deb]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -488,32 +484,173 @@ jobs:
             git push origin main
           fi
 
-  # ── 5. (Planned) 银河麒麟 V10 SP1 aarch64 桌面 deb ──
-  # 只能在 GitHub 构建，且必须用与麒麟 V10 SP1 同源的基线（Ubuntu 20.04 focal，
-  # glibc 2.31）：ubuntu-latest (glibc 2.39) 构建的产物在 glibc 2.31 的麒麟上
-  # 启动即报 GLIBC not found；AppImage 不内置 glibc，同样救不了基线问题。
-  # 落地要点（后续扩展时取消注释并补全）：
-  #   runs-on: ubuntu-24.04-arm + container: ubuntu:20.04（多架构镜像，arm 变体
-  #   与 V10 SP1 的 glibc 2.31 / 包名一致）；容器内 apt 必须配
-  #   Acquire::http(s)::Timeout=30、timeout 包裹、DEBIAN_FRONTEND=noninteractive、
-  #   azure.archive.ubuntu.com 镜像与 Check-Valid-Until=false（focal 已过期）。
-  #   Go 与 wails 在容器内安装；CGO_ENABLED=1 构建 wails 桌面端需要
-  #   libgtk-3-dev libwebkit2gtk-4.0-dev（focal 无 4.1，构建标签用默认 webkit2，
-  #   勿加 webkit2_41）。
-  #   deb 常规包 Depends 只声明真正的 ELF 依赖；离线包依赖闭包按 ldd 反查 +
-  #   递归展开，只装目标机缺失的包，绝不升级系统组件，黑名单
-  #   glibc(systemd*|dbus*|libpam*|udev|login|passwd) 永不进闭包；
-  #   构建后 dpkg-deb -c 断言载荷；真实容器里 dpkg -i + ldd 门禁 + 装包前后
-  #   dpkg -l 快照零升级断言。
-  #   桌面入口：/usr/bin/weknora-lite 包装脚本追加 --password-store=basic
-  #   （麒麟/UOS 常无运行中的 gnome-keyring，防止启动弹系统钥匙串解锁框；
-  #   这是 Chromium/Electron 开关，Wails/WebKitGTK 下为无害占位，真机仍需验证
-  #   WebKitGTK 的密钥环行为），.desktop 的 Exec 行经由此包装脚本启动；按需
-  #   同时导出 WEBKIT_DISABLE_COMPOSITING_MODE=1（麒麟部分 GPU 上 WebKitGTK
-  #   空白窗口的已知规避）。
-  # kylin-v10-sp1-aarch64-deb:
-  #   runs-on: ubuntu-24.04-arm
-  #   container: ubuntu:20.04
-  #   steps:
-  #     # checkout → 安装 go/wails/node → 构建 web/ → wails build
+  # ── 5. 银河麒麟 V10 SP1 aarch64 桌面 deb ──
+  # 只能在 GitHub 构建：用与麒麟 V10 SP1 同源的基线（Ubuntu 20.04 focal，
+  # glibc 2.31）容器产出兼容二进制；ubuntu-latest (glibc 2.39) 的产物在麒麟上
+  # 启动即报 GLIBC not found；AppImage 不内置 glibc，同样救不了基线。
+  # focal 已 EOL：apt 源指到 old-releases（冻结归档，恰好保证装依赖时零升级）。
+  kylin-v10-sp1-aarch64-deb:
+    needs: build-frontend
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:20.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GO_VERSION: "1.26.10"
+    steps:
+      - name: Configure apt (focal EOL archive + timeouts)
+        run: |
+          sed -i 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g; s|http://azure.archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+          printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "3";\nAcquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99ci
+          apt-get update
+
+      - name: Install build dependencies (webkit2gtk-4.0 = focal 对齐麒麟 V10 SP1)
+        run: |
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config file xz-utils unzip curl ca-certificates git \
+            libgtk-3-dev libwebkit2gtk-4.0-dev libnss3-dev
+
+      - name: Install Go
+        run: |
+          curl -sSL -o /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz"
+          tar -C /usr/local -xzf /tmp/go.tgz
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/checkout@v6
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: web/
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build desktop (linux/arm64)
+        run: |
+          export EDITION=lite
+          export CGO_ENABLED=1
+          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          eval "$(./scripts/get_version.sh env)"
+          LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
+          bash ./scripts/check-license-bundle.sh
+          cd cmd/desktop
+          # focal 的 webkit2gtk 是 4.0：不加 webkit2_41 标签
+          wails build -clean \
+            -tags "sqlite_fts5" \
+            -platform linux/arm64 \
+            -ldflags "${LDFLAGS}" \
+            -o "weknora-lite"
+          test -f build/bin/weknora-lite
+
+      - name: Assemble deb (常规包：Depends 只声明真正的 ELF 依赖)
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          DEBVER="${VERSION#v}"
+          ROOT="debroot/weknora-lite_${DEBVER}_arm64"
+          OPT="$ROOT/opt/weknora-lite"
+          mkdir -p "$ROOT/DEBIAN" "$OPT" "$ROOT/usr/bin" \
+            "$ROOT/usr/share/applications" "$ROOT/usr/share/icons/hicolor/512x512/apps"
+
+          cp "cmd/desktop/build/bin/weknora-lite" "$OPT/weknora-lite"
+          if [ -f .env.lite.example ]; then cp .env.lite.example "$OPT/.env"; fi
+          if [ -d config ]; then cp -r config "$OPT/config"; fi
+          if [ -d migrations/sqlite ]; then
+            mkdir -p "$OPT/migrations/sqlite"
+            cp -r migrations/sqlite/* "$OPT/migrations/sqlite/"
+          fi
+          test -f web/index.html || { echo "::error::web/ missing"; exit 1; }
+          cp -r web "$OPT/web"
+          cp LICENSE THIRD_PARTY_NOTICES.md "$OPT/"
+          bash ./scripts/copy-licenses.sh "$OPT"
+          cp docs/LITE.md "$OPT/README.md"
+          cp cmd/desktop/build/appicon.png "$ROOT/usr/share/icons/hicolor/512x512/apps/weknora-lite.png"
+
+          # 启动包装脚本：--password-store=basic 防麒麟无钥匙串时的解锁弹窗
+          # （Electron/Chromium 开关，Wails/WebKitGTK 下无害占位，真机仍需验证），
+          # 并按需规避 WebKitGTK 在部分麒麟 GPU 上的空白窗口问题
+          cat > "$ROOT/usr/bin/weknora-lite" <<'LAUNCH'
+#!/bin/bash
+export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/WeKnora Lite"
+mkdir -p "$CFG/logs" 2>/dev/null || true
+export LOG_PATH="$CFG/logs/weknora-lite.log"
+exec "/opt/weknora-lite/weknora-lite" --password-store=basic "$@"
+LAUNCH
+          chmod 755 "$ROOT/usr/bin/weknora-lite" "$OPT/weknora-lite"
+
+          cat > "$ROOT/usr/share/applications/weknora-lite.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=WeKnora Lite
+Comment=RAG 文档理解与语义问答
+Exec=/usr/bin/weknora-lite
+Icon=weknora-lite
+Categories=Office;Development;
+Terminal=false
+DESKTOP
+
+          cat > "$ROOT/DEBIAN/control" <<CONTROL
+Package: weknora-lite
+Version: ${DEBVER}
+Section: utils
+Priority: optional
+Architecture: arm64
+Maintainer: WeKnora Team
+Depends: libc6 (>= 2.31), libgtk-3-0, libwebkit2gtk-4.0-37, libnss3, libgbm1
+Description: WeKnora Lite 桌面版（银河麒麟 V10 SP1 aarch64）
+ 本机知识库与语义问答（SQLite + FTS5 + sqlite-vec，零外部依赖）。
+CONTROL
+
+          # 载荷自检：deb 里必须真的有应用本体
+          dpkg-deb --root-owner-group --build "$ROOT"
+          DEB="weknora-lite_${DEBVER}_arm64.deb"
+          dpkg-deb -c "$DEB" | grep -q "opt/weknora-lite/weknora-lite" || {
+            echo "::error::deb 载荷缺失应用本体"; exit 1; }
+          sha256sum "$DEB" > "$DEB.sha256"
+
+      # 在同源 focal 容器里安装验证：ldd 门禁（零 not found）+ 零升级断言
+      - name: Verify deb in focal container
+        run: |
+          set -euo pipefail
+          DEB=$(ls weknora-lite_*_arm64.deb | head -1)
+          dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null | sort > /tmp/before.txt || true
+          apt-get install -y "./$DEB"
+          dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null | sort > /tmp/after.txt
+          # 零升级断言：装包前后快照比对，交集必须等于装前全量
+          # （即没有任何已装包被升级/替换——红线：绝不升级系统组件）
+          if comm -12 /tmp/before.txt /tmp/after.txt | diff /tmp/before.txt - >/dev/null; then
+            echo "zero-upgrade assertion ✓ (没有任何已装包被变更)"
+          else
+            echo "::error::已有包被升级/变更（红线违规）"; exit 1
+          fi
+          # ldd 门禁：零 not found
+          if ldd /opt/weknora-lite/weknora-lite | grep "not found"; then
+            echo "::error::ldd 门禁失败：存在 not found"; exit 1
+          fi
+          echo "ldd gate ✓"
+          head -c 4 /opt/weknora-lite/.env >/dev/null && test -f /opt/weknora-lite/web/index.html && \
+            test -f /opt/weknora-lite/config/config.yaml && echo "payload ✓"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-kylin-arm64
+          path: |
+            weknora-lite_*_arm64.deb
+            weknora-lite_*_arm64.deb.sha256
+          retention-days: 3
   #     # （linux/arm64，tags "sqlite_fts5"）→ dpkg-deb 打包 → 上传 artifact

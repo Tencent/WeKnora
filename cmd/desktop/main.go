@@ -432,8 +432,8 @@ func configureDesktopStorage(execPath string) {
 	switch gostd.GOOS {
 	case "darwin":
 		configureDarwinDesktopStorage(execPath)
-	case "windows":
-		configureWindowsDesktopStorage(execPath)
+	case "windows", "linux":
+		configurePackagedXdgStorage(execPath)
 	}
 }
 
@@ -461,13 +461,14 @@ func configureDarwinDesktopStorage(execPath string) {
 	_ = os.Setenv("DB_PATH", dbPath)
 }
 
-// configureWindowsDesktopStorage redirects the relative data paths of a
-// packaged Windows install (installer or portable layout: config/ next to the
-// exe, no go.mod above it) to the per-user application data directory, e.g.
-// %APPDATA%\WeKnora Lite. An installed location under Program Files is not
-// writable, and the directory a shortcut launches from must not decide where
-// the database lives. wails dev trees keep the repo-relative ./data.
-func configureWindowsDesktopStorage(execPath string) {
+// configurePackagedXdgStorage redirects the relative data paths of a packaged
+// install (installer or portable layout: config/ next to the exe, no go.mod
+// above it) to the per-user application data directory: %APPDATA% on Windows,
+// $XDG_CONFIG_HOME or ~/.config on Linux (Kylin deb installs live under
+// /opt, which the user cannot write). The directory a shortcut launches from
+// must not decide where the database lives; wails dev trees keep the
+// repo-relative ./data.
+func configurePackagedXdgStorage(execPath string) {
 	configRoot, hasConfigRoot := desktopConfigRoot(execPath)
 	if !hasConfigRoot || hasGoMod(configRoot) {
 		return
