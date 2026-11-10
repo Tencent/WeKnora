@@ -3027,6 +3027,14 @@ func (s *knowledgeService) reparseKnowledge(
 		}
 		manualContent = meta.Content
 	} else {
+		// Check the parser engine before anything is deleted: parsing runs
+		// later in a worker, so a missing engine would otherwise only show
+		// up after the old chunks and vectors are already gone.
+		if err := s.preflightReparseEngine(ctx, existing, reparseEff); err != nil {
+			logger.Warnf(ctx, "Reparse rejected, parser engine unavailable for knowledge %s: %v", knowledgeID, err)
+			return nil, err
+		}
+
 		// Cleanup synchronously; manual knowledge is cleaned up by its worker.
 		logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
 		if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
@@ -4587,16 +4595,58 @@ func isLikelyRateLimitError(err error) bool {
 func (s *knowledgeService) resolveDocReader(
 	ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string,
 ) interfaces.DocReader {
-	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, docparser.ReaderDeps{
-		Overrides:               overrides,
-		Remote:                  s.documentReader,
-		WeKnoraCloudCredentials: s.tenantService.GetWeKnoraCloudCredentials,
-	})
+	deps := docparser.ReaderDeps{
+		Overrides: overrides,
+		Remote:    s.documentReader,
+	}
+	if s.tenantService != nil {
+		deps.WeKnoraCloudCredentials = s.tenantService.GetWeKnoraCloudCredentials
+	}
+	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, deps)
 	if err != nil {
 		logger.Warnf(ctx, "[resolveDocReader] engine=%q fileType=%q unusable: %v", engine, fileType, err)
 		return nil
 	}
 	return reader
+}
+
+// preflightReparseEngine checks that the parser engine a reparse will use can
+// be created, with the same engine and override resolution as the parse
+// worker. It does not parse anything. Call it before cleanup so an unavailable
+// engine rejects the request while the old content is still in place.
+func (s *knowledgeService) preflightReparseEngine(
+	ctx context.Context, knowledge *types.Knowledge, eff types.EffectiveProcessConfig,
+) error {
+	var fileType string
+	isURL := false
+	switch {
+	case knowledge.FilePath != "":
+		fileType = getFileType(knowledge.FileName)
+	case knowledge.Type == "file_url" && knowledge.Source != "":
+		fileType = knowledge.FileType
+	case knowledge.Type == "url" && knowledge.Source != "":
+		isURL = true
+	default:
+		return nil // nothing will be parsed; reparse handles this case itself
+	}
+
+	var uploadOverrides map[string]string
+	if po, err := knowledge.ProcessOverrides(); err == nil && po != nil {
+		uploadOverrides = po.ParserEngineOverrides
+	}
+	overrides := MergeParserEngineOverrides(s.getParserEngineOverridesFromContext(ctx), uploadOverrides)
+	applyParserRuleOverrides(overrides, eff.ChunkingConfig, fileType)
+
+	engine := eff.ChunkingConfig.ResolveParserEngine(fileType)
+	if isURL {
+		engine = eff.ChunkingConfig.ResolveParserEngine("url")
+	}
+	if s.resolveDocReader(ctx, engine, fileType, isURL, overrides) == nil {
+		return werrors.NewBadRequestError(fmt.Sprintf(
+			"Parser engine %q is not available, so the document was not reparsed and its existing content is kept. "+
+				"Check the parser engine settings or the document parsing service.", engine))
+	}
+	return nil
 }
 
 // failKnowledge marks knowledge as failed (only on last retry) and returns an error.
