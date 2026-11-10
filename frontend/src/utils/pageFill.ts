@@ -338,7 +338,12 @@ export async function undoFill(key: string): Promise<{ restored: number; skipped
   let skipped = 0
   for (const entry of [...entries].reverse()) {
     const { field } = entry
-    if (!field.control.isConnected || !sameValue(readFieldValue(field), entry.after)) {
+    // Option labels are normalized for matching, but every character of a
+    // user's text edit matters, including case, spacing and line breaks.
+    const isText = field.kind === 'text' || field.kind === 'multiline'
+    if (!field.control.isConnected || (isText
+      ? readFieldValue(field) !== entry.after
+      : !sameValue(readFieldValue(field), entry.after))) {
       skipped++
       continue
     }
