@@ -58,6 +58,7 @@ function fixture(t: TestContext, embedded: boolean) {
     nodes: [{ name: 'Book', attributes: ['Fiction'] }],
     relations: [{ node1: 'Book', node2: 'Writer', type: 'Author' }],
     customInstructions: 'Extract authors and their books.',
+    maxGraphChunksPerDocument: 1000,
   }
   const snapshot = structuredClone(graphExtract)
   const store = {
@@ -93,7 +94,7 @@ function fixture(t: TestContext, embedded: boolean) {
     embedded,
     'onUpdate:graphExtract': (value: unknown) => events.push(value),
   })
-  for (const name of ['t-button', 't-icon', 't-input', 't-option', 't-select', 't-switch', 't-textarea']) {
+  for (const name of ['t-button', 't-icon', 't-input', 't-input-number', 't-option', 't-select', 't-switch', 't-textarea']) {
     app.component(name, vue.defineComponent({
       inheritAttrs: false,
       setup: (_props, { attrs, slots }) => () => vue.h(name, attrs, slots.message?.() ?? slots.default?.()),
@@ -136,6 +137,7 @@ function fixture(t: TestContext, embedded: boolean) {
       const inputValue = (type: string, placeholder: string) => elements(type)
         .find(el => el.props.placeholder === `graphSettings.${placeholder}`)?.props.modelValue
       assert.equal(inputValue('t-textarea', 'customInstructionsPlaceholder'), snapshot.customInstructions)
+      assert.equal(elements('t-input-number')[0]?.props.modelValue, snapshot.maxGraphChunksPerDocument)
       assert.equal(inputValue('t-textarea', 'sampleTextPlaceholder'), snapshot.text)
       assert.deepEqual([...inputValue('t-select', 'tagsPlaceholder')], snapshot.tags)
       assert.deepEqual(classes('node-name-input').map(el => el.props.modelValue), snapshot.nodes.map(value => value.name))

@@ -377,6 +377,9 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 	if override.CustomInstructions != "" {
 		result.CustomInstructions = override.CustomInstructions
 	}
+	if override.MaxGraphChunksPerDocument != 0 {
+		result.MaxGraphChunksPerDocument = override.MaxGraphChunksPerDocument
+	}
 	return result
 }
 

@@ -297,21 +297,24 @@ func TestResolveProcessConfig_ExtractConfigFieldMerge(t *testing.T) {
 
 	kb := &types.KnowledgeBase{
 		ExtractConfig: &types.ExtractConfig{
-			Enabled: true,
-			Text:    "base text",
-			Tags:    []string{"base-tag"},
+			Enabled:                   true,
+			Text:                      "base text",
+			Tags:                      []string{"base-tag"},
+			MaxGraphChunksPerDocument: 2000,
 		},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
 		ExtractConfig: &types.ExtractConfig{
-			Enabled: true,
-			Tags:    []string{"override-tag"},
+			Enabled:                   true,
+			Tags:                      []string{"override-tag"},
+			MaxGraphChunksPerDocument: 500,
 		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.True(t, eff.ExtractConfig.Enabled)
 	require.Equal(t, "base text", eff.ExtractConfig.Text)
 	require.Equal(t, []string{"override-tag"}, eff.ExtractConfig.Tags)
+	require.Equal(t, 500, eff.ExtractConfig.MaxGraphChunksPerDocument)
 }
 
 func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testing.T) {
