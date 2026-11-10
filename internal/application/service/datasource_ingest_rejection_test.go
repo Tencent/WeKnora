@@ -45,6 +45,9 @@ func TestProcessSyncPermanentRejectionsAdvanceCursor(t *testing.T) {
 			cursor, err := h.ds.ParseSyncCursor()
 			require.NoError(t, err)
 			assert.Equal(t, len(h.connector.items), ingestAckOffset(cursor))
+			// Reopen the log so this exercises the advanced cursor, not the
+			// terminal-status replay guard.
+			h.syncLogRepo.logs[h.syncLogID].Status = types.SyncLogStatusRunning
 			require.NoError(t, h.svc.ProcessSync(context.Background(), h.task))
 			assert.Zero(t, h.syncLogRepo.logs[h.syncLogID].ItemsTotal)
 		})
@@ -144,6 +147,9 @@ func TestProcessSyncPrerequisiteRejectionsAdvanceCursor(t *testing.T) {
 				cursor, err := h.ds.ParseSyncCursor()
 				require.NoError(t, err)
 				assert.Equal(t, 1, ingestAckOffset(cursor))
+				// Reopen the log so this exercises the advanced cursor, not the
+				// terminal-status replay guard.
+				h.syncLogRepo.logs[h.syncLogID].Status = types.SyncLogStatusRunning
 				require.NoError(t, h.svc.ProcessSync(context.Background(), h.task))
 				assert.Zero(t, h.syncLogRepo.logs[h.syncLogID].ItemsTotal)
 			})
