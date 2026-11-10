@@ -20,6 +20,9 @@ func (s *toolSurfaceKBService) GetKnowledgeBaseByIDOnly(context.Context, string)
 func (s *toolSurfaceKBService) GetKnowledgeBasesByIDsOnly(
 	context.Context, []string,
 ) ([]*types.KnowledgeBase, error) {
+	if s.kb == nil {
+		return nil, nil
+	}
 	return []*types.KnowledgeBase{s.kb}, nil
 }
 
