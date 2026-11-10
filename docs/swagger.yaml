@@ -12548,6 +12548,14 @@ definitions:
         type: string
       modelName:
         type: string
+      modelType:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType'
+        description: ModelType selects the remote connection probe and defaults to
+          KnowledgeQA.
+        enum:
+        - KnowledgeQA
+        - VLLM
       provider:
         type: string
       source:
@@ -13091,6 +13099,14 @@ definitions:
         type: string
       modelName:
         type: string
+      modelType:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType'
+        description: ModelType selects the remote connection probe and defaults to
+          KnowledgeQA.
+        enum:
+        - KnowledgeQA
+        - VLLM
       provider:
         type: string
       source:
@@ -18687,7 +18703,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 检查远程API模型连接是否正常
+      description: 检查远程 API 模型连接。modelType=VLLM 时发送合成图片，收到完整的非空回复才标记为可用。省略 modelType
+        时检查聊天模型。
       parameters:
       - description: 模型检查请求
         in: body

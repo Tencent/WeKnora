@@ -1967,16 +1967,16 @@ const checkRemoteAPI = async () => {
         break
 
       case 'vllm':
-        // VLLM 模型（多模态）
-        // VLLM 使用 checkRemoteModel 进行基础连接测试
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
+          modelType: 'VLLM',
           baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
           ...extraPayload,
+          extraConfig,
         })
         break
 

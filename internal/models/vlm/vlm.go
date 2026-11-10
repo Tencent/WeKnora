@@ -43,6 +43,8 @@ type PredictOptions struct {
 	// An OCR caller cannot tell that apart from an image with no text, so the
 	// switch is per-action rather than per-model.
 	Thinking *bool
+	// RejectTruncated requires a complete reply from adapters that can return partial text.
+	RejectTruncated bool
 }
 
 // Config holds the configuration needed to create a VLM instance.
@@ -128,10 +130,13 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	return wrapVLMConcurrency(v, config.MaxConcurrency, err)
 }
 
-func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
-	ifType := strings.ToLower(config.InterfaceType)
+// UsesOllama reports whether the VLM uses the server-configured Ollama client.
+func UsesOllama(source types.ModelSource, interfaceType string) bool {
+	return strings.ToLower(interfaceType) == "ollama" || source == types.ModelSourceLocal
+}
 
-	if ifType == "ollama" || config.Source == types.ModelSourceLocal {
+func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
+	if UsesOllama(config.Source, config.InterfaceType) {
 		return NewOllamaVLM(config, ollamaService)
 	}
 

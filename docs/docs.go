@@ -5986,7 +5986,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "检查远程API模型连接是否正常",
+                "description": "检查远程 API 模型连接。modelType=VLLM 时发送合成图片，收到完整的非空回复才标记为可用。省略 modelType 时检查聊天模型。",
                 "consumes": [
                     "application/json"
                 ],
@@ -41589,6 +41589,18 @@ const docTemplate = `{
                 "modelName": {
                     "type": "string"
                 },
+                "modelType": {
+                    "description": "ModelType selects the remote connection probe and defaults to KnowledgeQA.",
+                    "enum": [
+                        "KnowledgeQA",
+                        "VLLM"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                        }
+                    ]
+                },
                 "provider": {
                     "type": "string"
                 },
@@ -42332,6 +42344,18 @@ const docTemplate = `{
                 },
                 "modelName": {
                     "type": "string"
+                },
+                "modelType": {
+                    "description": "ModelType selects the remote connection probe and defaults to KnowledgeQA.",
+                    "enum": [
+                        "KnowledgeQA",
+                        "VLLM"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                        }
+                    ]
                 },
                 "provider": {
                     "type": "string"
