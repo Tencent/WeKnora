@@ -848,12 +848,16 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
+	// The completion budget follows KNOWLEDGE_BASE_PROFILE_MAX_TOKENS like the
+	// other summary-model calls: reasoning-style models can spend a small fixed
+	// budget on thinking and return an empty completion, which fails the whole
+	// table ingestion (same failure family as #4221).
 	thinking := false
 	response, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "user", Content: prompt},
 	}, &chat.ChatOptions{
 		Temperature: 0.3,
-		MaxTokens:   512,
+		MaxTokens:   knowledgeBaseProfileMaxTokens(),
 		Thinking:    &thinking,
 	})
 	if err != nil {
@@ -875,13 +879,13 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateColumnDescriptions prompt: %s", prompt)
 
-	// Call LLM once for all columns
+	// Call LLM once for all columns. Budget: see generateTableDescription.
 	thinking := false
 	response, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "user", Content: prompt},
 	}, &chat.ChatOptions{
 		Temperature: 0.3,
-		MaxTokens:   2048,
+		MaxTokens:   knowledgeBaseProfileMaxTokens(),
 		Thinking:    &thinking,
 	})
 	if err != nil {
