@@ -98,6 +98,101 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 	return config.SearchTargets.GetAllKnowledgeBaseIDs(), kbTenantMap
 }
 
+// agentKBMetadataBatchSize bounds the IN list passed to one metadata lookup.
+// SQLite has a much smaller bound-parameter limit than the production
+// databases, so a scope larger than this is still split into a few queries
+// rather than reverting to one query per KB.
+const agentKBMetadataBatchSize = 500
+
+// agentKnowledgeBaseSnapshot is the per-engine KB metadata read shared by
+// tool capability detection and system-prompt construction. A successful
+// batch is authoritative: an ID missing from it is not looked up again. If a
+// batch fails, lookups fall back to the old per-ID path and cache successful
+// rows for the later consumer.
+type agentKnowledgeBaseSnapshot struct {
+	service  interfaces.KnowledgeBaseService
+	byID     map[string]*types.KnowledgeBase
+	fallback bool
+}
+
+func loadAgentKnowledgeBaseSnapshot(
+	ctx context.Context,
+	service interfaces.KnowledgeBaseService,
+	ids []string,
+) *agentKnowledgeBaseSnapshot {
+	snapshot := &agentKnowledgeBaseSnapshot{
+		service: service,
+		byID:    make(map[string]*types.KnowledgeBase, len(ids)),
+	}
+	if len(ids) == 0 || service == nil {
+		snapshot.fallback = true
+		return snapshot
+	}
+	for start := 0; start < len(ids); start += agentKBMetadataBatchSize {
+		end := min(start+agentKBMetadataBatchSize, len(ids))
+		kbs, err := service.GetKnowledgeBasesByIDsOnly(ctx, ids[start:end])
+		if err != nil {
+			logger.Warnf(ctx, "Failed to batch-load %d knowledge base(s); "+
+				"falling back to per-KB lookups: %v", end-start, err)
+			snapshot.fallback = true
+			continue
+		}
+		for _, kb := range kbs {
+			if kb != nil && kb.ID != "" {
+				snapshot.byID[kb.ID] = kb
+			}
+		}
+	}
+	return snapshot
+}
+
+// agentKnowledgeBaseIDsForEngine returns the union of the prompt scope and
+// SearchTargets. The latter is what tool capability detection reads, while
+// KnowledgeBases can carry the same IDs in a different order.
+func agentKnowledgeBaseIDsForEngine(config *types.AgentConfig) []string {
+	if config == nil {
+		return nil
+	}
+	ids, _ := knowledgeBaseScopesForPrompt(config)
+	ids = append(slices.Clone(ids), config.SearchTargets.GetAllKnowledgeBaseIDs()...)
+	return dedupStrings(ids)
+}
+
+// resolve returns the snapshot copy of id. tenantScoped selects the same
+// lookup path the caller used before this cache existed: prompt metadata uses
+// the tenant-scoped reader, while tool capability detection is explicitly
+// cross-tenant because SearchTargets was already authorized upstream.
+func (s *agentKnowledgeBaseSnapshot) resolve(
+	ctx context.Context, id string, tenantScoped bool,
+) (*types.KnowledgeBase, error) {
+	if s == nil {
+		return nil, fmt.Errorf("knowledge base snapshot is nil for %s", id)
+	}
+	kb, ok := s.byID[id]
+	if ok {
+		return kb, nil
+	}
+	if !s.fallback {
+		return nil, fmt.Errorf("knowledge base %s was not returned by the metadata batch", id)
+	}
+	if s.service == nil {
+		return nil, fmt.Errorf("knowledge base service is unavailable for %s", id)
+	}
+	var (
+		row *types.KnowledgeBase
+		err error
+	)
+	if tenantScoped {
+		row, err = s.service.GetKnowledgeBaseByID(ctx, id)
+	} else {
+		row, err = s.service.GetKnowledgeBaseByIDOnly(ctx, id)
+	}
+	if err == nil && row != nil {
+		s.byID[id] = row
+	}
+	return row, err
+}
+
 // agentService implements agent-related business logic
 type agentService struct {
 	browserSkill          *browserskill.Manager
@@ -255,12 +350,19 @@ func (s *agentService) CreateAgentEngine(
 			"enable the browser integration or update the input-bar selection")
 	}
 
+	// Load KB metadata once per engine. Tool capability detection and prompt
+	// construction ask about the same scope; batching here also removes the
+	// serial per-KB round trips that used to happen before the first token.
+	kbSnapshot := loadAgentKnowledgeBaseSnapshot(
+		ctx, s.knowledgeBaseService, agentKnowledgeBaseIDsForEngine(config),
+	)
+
 	// 2. Build tool registry
 	toolRegistry := tools.NewToolRegistry()
 	if config.MaxToolOutputChars > 0 {
 		toolRegistry.SetMaxToolOutputSize(config.MaxToolOutputChars)
 	}
-	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
+	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID, kbSnapshot); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
@@ -281,7 +383,7 @@ func (s *agentService) CreateAgentEngine(
 	toolRegistry.PrepareMCPTools(ctx)
 
 	// 3. Resolve knowledge base and selected document metadata
-	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
+	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config, kbSnapshot)
 
 	// 4. Resolve system prompt template
 	systemPromptTemplate := ""
@@ -505,9 +607,10 @@ func (s *agentService) registerMCPTools(
 func (s *agentService) resolveKBAndDocInfos(
 	ctx context.Context,
 	config *types.AgentConfig,
+	snapshot *agentKnowledgeBaseSnapshot,
 ) ([]*agent.KnowledgeBaseInfo, []*agent.SelectedDocumentInfo) {
 	kbIDs, kbTenantMap := knowledgeBaseScopesForPrompt(config)
-	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs, kbTenantMap)
+	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs, kbTenantMap, snapshot)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
 		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(kbIDs))
@@ -1255,7 +1358,13 @@ func (s *agentService) registerTools(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	sessionID string,
+	snapshot *agentKnowledgeBaseSnapshot,
 ) error {
+	if snapshot == nil {
+		snapshot = &agentKnowledgeBaseSnapshot{
+			service: s.knowledgeBaseService, byID: make(map[string]*types.KnowledgeBase), fallback: true,
+		}
+	}
 	// Source of truth policy:
 	//   - `config.AllowedTools` is the explicit, user-editable whitelist —
 	//     populated by the agent-type preset on create and freely editable
@@ -1282,7 +1391,7 @@ func (s *agentService) registerTools(
 		if target == nil || target.KnowledgeBaseID == "" {
 			continue
 		}
-		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByIDOnly(ctx, target.KnowledgeBaseID)
+		kb, err := snapshot.resolve(ctx, target.KnowledgeBaseID, false)
 		if err != nil {
 			continue
 		}
@@ -1645,16 +1754,26 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 // getKnowledgeBaseInfos retrieves detailed information for knowledge bases.
 // kbTenantMap carries the tenant each KB should be queried under (source tenant
 // for directly shared KBs); a missing entry falls back to the request tenant.
-func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string, kbTenantMap map[string]uint64) ([]*agent.KnowledgeBaseInfo, error) {
+func (s *agentService) getKnowledgeBaseInfos(
+	ctx context.Context,
+	kbIDs []string,
+	kbTenantMap map[string]uint64,
+	snapshot *agentKnowledgeBaseSnapshot,
+) ([]*agent.KnowledgeBaseInfo, error) {
 	if len(kbIDs) == 0 {
 		return []*agent.KnowledgeBaseInfo{}, nil
+	}
+	if snapshot == nil {
+		snapshot = &agentKnowledgeBaseSnapshot{
+			service: s.knowledgeBaseService, byID: make(map[string]*types.KnowledgeBase), fallback: true,
+		}
 	}
 
 	kbInfos := make([]*agent.KnowledgeBaseInfo, 0, len(kbIDs))
 
 	for _, kbID := range kbIDs {
 		// Get knowledge base details
-		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+		kb, err := snapshot.resolve(ctx, kbID, true)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge base %s: %v", secutils.SanitizeForLog(kbID), err)
 			kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{

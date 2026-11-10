@@ -34,6 +34,20 @@ func (s *fakeAgentKnowledgeBaseService) GetKnowledgeBaseByID(context.Context, st
 	return s.kb, nil
 }
 
+func (s *fakeAgentKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(
+	_ context.Context, ids []string,
+) ([]*types.KnowledgeBase, error) {
+	if s.kb == nil {
+		return nil, nil
+	}
+	for _, id := range ids {
+		if id == s.kb.ID {
+			return []*types.KnowledgeBase{s.kb}, nil
+		}
+	}
+	return nil, nil
+}
+
 type fakeAgentKnowledgeService struct {
 	interfaces.KnowledgeService
 	knowledges []*types.Knowledge
@@ -696,7 +710,9 @@ func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T)
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, receiverTenantID)
 
-	infos, err := service.getKnowledgeBaseInfos(ctx, []string{"shared-kb"}, map[string]uint64{"shared-kb": sourceTenantID})
+	infos, err := service.getKnowledgeBaseInfos(
+		ctx, []string{"shared-kb"}, map[string]uint64{"shared-kb": sourceTenantID}, nil,
+	)
 
 	require.NoError(t, err)
 	require.Len(t, infos, 1)
@@ -704,6 +720,121 @@ func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T)
 	require.Len(t, infos[0].RecentDocs, 1)
 	assert.Equal(t, "shared-doc", infos[0].RecentDocs[0].KnowledgeID)
 	assert.Equal(t, sourceTenantID, knowledgeService.lastTenant)
+}
+
+type countingAgentKnowledgeBaseService struct {
+	*fakeAgentKnowledgeBaseService
+	kbs     map[string]*types.KnowledgeBase
+	batches int
+	singles int
+}
+
+func (s *countingAgentKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(
+	_ context.Context, ids []string,
+) ([]*types.KnowledgeBase, error) {
+	s.batches++
+	out := make([]*types.KnowledgeBase, 0, len(ids))
+	for _, id := range ids {
+		if kb := s.kbs[id]; kb != nil {
+			out = append(out, kb)
+		}
+	}
+	return out, nil
+}
+
+func (s *countingAgentKnowledgeBaseService) GetKnowledgeBaseByID(
+	_ context.Context, id string,
+) (*types.KnowledgeBase, error) {
+	s.singles++
+	if kb := s.kbs[id]; kb != nil {
+		return kb, nil
+	}
+	return nil, errors.New("knowledge base not found")
+}
+
+func (s *countingAgentKnowledgeBaseService) GetKnowledgeBaseByIDOnly(
+	ctx context.Context, id string,
+) (*types.KnowledgeBase, error) {
+	return s.GetKnowledgeBaseByID(ctx, id)
+}
+
+func TestAgentEngineKBLookupsAreBatchedOnceForToolAndPromptMetadata(t *testing.T) {
+	const tenantID = uint64(7)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+	kbOne := &types.KnowledgeBase{ID: "kb-1", Name: "One", TenantID: tenantID}
+	kbOne.IndexingStrategy.VectorEnabled = true
+	kbTwo := &types.KnowledgeBase{ID: "kb-2", Name: "Two", TenantID: tenantID}
+	kbTwo.IndexingStrategy.VectorEnabled = true
+	kbService := &countingAgentKnowledgeBaseService{
+		fakeAgentKnowledgeBaseService: &fakeAgentKnowledgeBaseService{},
+		kbs:                           map[string]*types.KnowledgeBase{"kb-1": kbOne, "kb-2": kbTwo},
+	}
+	knowledgeService := &fakeAgentKnowledgeService{knowledges: []*types.Knowledge{
+		{ID: "doc-1", KnowledgeBaseID: "kb-1", ParseStatus: types.ParseStatusCompleted},
+		{ID: "doc-2", KnowledgeBaseID: "kb-2", ParseStatus: types.ParseStatusCompleted},
+	}}
+	service := &agentService{knowledgeBaseService: kbService, knowledgeService: knowledgeService}
+	config := &types.AgentConfig{
+		KnowledgeBases: []string{"kb-1", "kb-2"},
+		SearchTargets: types.SearchTargets{
+			{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: tenantID},
+			{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-2", TenantID: tenantID},
+		},
+		AllowedTools: []string{tools.ToolSearchKnowledge},
+	}
+
+	kbs := loadAgentKnowledgeBaseSnapshot(ctx, kbService, agentKnowledgeBaseIDsForEngine(config))
+	registry := tools.NewToolRegistry()
+	require.NoError(t, service.registerTools(ctx, registry, config, nil, nil, "s", kbs))
+	kbInfos, _ := service.resolveKBAndDocInfos(ctx, config, kbs)
+
+	require.True(t, toolRegistered(registry, tools.ToolSearchKnowledge))
+	require.Len(t, kbInfos, 2)
+	require.Equal(t, 1, kbService.batches, "both KBs must arrive in one batch")
+	require.Zero(t, kbService.singles, "neither consumer may fall back to per-KB reads")
+}
+
+type failingBatchAgentKBService struct {
+	countingAgentKnowledgeBaseService
+}
+
+func (s *failingBatchAgentKBService) GetKnowledgeBasesByIDsOnly(
+	context.Context, []string,
+) ([]*types.KnowledgeBase, error) {
+	s.batches++
+	return nil, errors.New("batch unavailable")
+}
+
+func TestAgentEngineKBLookupsFallBackAndShareSuccessfulReadAcrossCaches(t *testing.T) {
+	const tenantID = uint64(7)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+	kb := &types.KnowledgeBase{ID: "kb-1", Name: "One", TenantID: tenantID}
+	kb.IndexingStrategy.VectorEnabled = true
+	kbService := &failingBatchAgentKBService{countingAgentKnowledgeBaseService{
+		fakeAgentKnowledgeBaseService: &fakeAgentKnowledgeBaseService{},
+		kbs:                           map[string]*types.KnowledgeBase{"kb-1": kb},
+	}}
+	service := &agentService{
+		knowledgeBaseService: kbService,
+		knowledgeService:     &fakeAgentKnowledgeService{},
+	}
+	config := &types.AgentConfig{
+		KnowledgeBases: []string{"kb-1"},
+		SearchTargets: types.SearchTargets{
+			{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: tenantID},
+		},
+		AllowedTools: []string{tools.ToolSearchKnowledge},
+	}
+
+	snapshot := loadAgentKnowledgeBaseSnapshot(ctx, kbService, []string{"kb-1"})
+	registry := tools.NewToolRegistry()
+	require.NoError(t, service.registerTools(ctx, registry, config, nil, nil, "s", snapshot))
+	_, _ = service.resolveKBAndDocInfos(ctx, config, snapshot)
+
+	require.True(t, toolRegistered(registry, tools.ToolSearchKnowledge))
+	require.Equal(t, 1, kbService.batches)
+	require.Equal(t, 1, kbService.singles,
+		"the successful fallback read must be reused by prompt construction")
 }
 
 func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
@@ -742,7 +873,7 @@ func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
 		knowledgeService: knowledgeService,
 	}
 
-	infos, err := service.getKnowledgeBaseInfos(context.Background(), []string{"kb-1"}, nil)
+	infos, err := service.getKnowledgeBaseInfos(context.Background(), []string{"kb-1"}, nil, nil)
 
 	require.NoError(t, err)
 	require.Len(t, infos, 1)
