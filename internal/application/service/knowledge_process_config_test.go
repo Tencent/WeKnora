@@ -353,6 +353,22 @@ func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testin
 	require.Equal(t, "contract entities", eff.ExtractConfig.CustomInstructions)
 }
 
+func TestValidateProcessOverrides_RejectsOutOfRangeGraphChunkLimit(t *testing.T) {
+	kb := &types.KnowledgeBase{}
+	for _, limit := range []int{0, 1, 100000} {
+		err := ValidateProcessOverrides(context.Background(), kb, &types.KnowledgeProcessOverrides{
+			ExtractConfig: &types.ExtractConfig{MaxGraphChunksPerDocument: processConfigIntPtr(limit)},
+		}, []string{"pdf"})
+		require.NoError(t, err, "limit %d", limit)
+	}
+	for _, limit := range []int{-1, 100001} {
+		err := ValidateProcessOverrides(context.Background(), kb, &types.KnowledgeProcessOverrides{
+			ExtractConfig: &types.ExtractConfig{MaxGraphChunksPerDocument: processConfigIntPtr(limit)},
+		}, []string{"pdf"})
+		require.Error(t, err, "limit %d", limit)
+	}
+}
+
 func TestValidateProcessOverrides_RejectsOversizedInstructions(t *testing.T) {
 	t.Parallel()
 
