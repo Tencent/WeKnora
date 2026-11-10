@@ -84,6 +84,13 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 	}
 	replacement := &knowledgeReplacement{previous: previous, metadata: metadata, tagIDs: tagIDs}
 	var created *types.Knowledge
+	// Preserve the source folder hierarchy on updates too (issue #5171): a
+	// path-qualified custom name relocates the knowledge when the source
+	// folder changed, matching the fresh-create path.
+	customName := item.FileName
+	if folder := sourceFolderPath(item); folder != "" && item.FileName != "" {
+		customName = folder + "/" + item.FileName
+	}
 	if len(item.Content) > 0 {
 		file, buildErr := bytesToFileHeader(item.Content, item.FileName)
 		if buildErr != nil {
@@ -93,9 +100,13 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 			return nil, err
 		}
 		created, err = s.createKnowledgeFromFile(plan.ctx, previous.KnowledgeBaseID, file, metadata,
-			nil, item.FileName, tagIDs, channel, nil, replacement)
+			nil, customName, tagIDs, channel, nil, replacement)
 	} else {
-		created, err = s.createKnowledgeFromURL(plan.ctx, previous.KnowledgeBaseID, item.URL, item.FileName,
+		// The path-qualified customName places the new row in its folder at
+		// INSERT (issue #5171); a post-create column write would race the
+		// processing worker, and a URL-duplicate hit returns a different
+		// row that must not be relocated.
+		created, err = s.createKnowledgeFromURL(plan.ctx, previous.KnowledgeBaseID, item.URL, customName,
 			"", nil, item.Title, tagIDs, channel, nil, replacement)
 	}
 	if !replacement.committed {

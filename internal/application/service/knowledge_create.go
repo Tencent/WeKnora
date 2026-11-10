@@ -349,6 +349,12 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 
 	url := rawURL
 
+	// A path-qualified fileName places the knowledge in that folder on
+	// insertion (issue #5171). Setting it at INSERT is what makes this work
+	// for the async URL pipeline: a folder written after creation can race
+	// the processing worker's full-row saves and be silently reset to root.
+	kbFolder, _ := types.SplitKnowledgeRelativePath(fileName)
+
 	// Get knowledge base configuration
 	logger.Info(ctx, "Getting knowledge base configuration")
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
@@ -424,6 +430,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
+		FolderPath:       kbFolder,
 	}
 
 	// Save knowledge record
@@ -581,7 +588,21 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		return nil, ErrInvalidURL
 	}
 
-	// Resolve fileName: user-provided > extracted from URL path
+	// Resolve fileName: user-provided > extracted from URL path. A
+	// path-qualified user name places the row in that folder at INSERT
+	// (issue #5171): a folder written after creation would race the
+	// processing worker's full-row saves and could be silently reset to root.
+	folderPath := ""
+	if fileName != "" {
+		folderPath, fileName = types.SplitKnowledgeRelativePath(fileName)
+	}
+	if folderPath != "" {
+		if _, ok := secutils.ValidateInput(folderPath); !ok {
+			logger.Errorf(ctx, "Invalid folder path: %s", folderPath)
+			return nil, werrors.NewValidationError("文件夹路径包含非法字符")
+		}
+		folderPath = types.NormalizeKnowledgeFolderPath(folderPath)
+	}
 	if fileName == "" {
 		fileName = extractFileNameFromURL(fileURL)
 	}
@@ -655,6 +676,7 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		Channel:          defaultChannel(channel),
 		Title:            title,
 		FileName:         displayName,
+		FolderPath:       folderPath,
 		FileType:         fileType,
 		Source:           fileURL,
 		FileHash:         fileHash,
