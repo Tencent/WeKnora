@@ -188,6 +188,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		params.RedisClient,
 		params.FileService,
 		params.StorageBackendResolver,
+		// The embed public routes precede the engine-level
+		// AuditServiceProvider below, so the service has to come in
+		// through the group (see embedPublicGroup).
+		params.AuditLogService,
 		params.ResourceCatalog,
 	)
 

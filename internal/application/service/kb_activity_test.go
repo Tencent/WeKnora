@@ -29,7 +29,9 @@ func (*captureKBActivityAudit) List(context.Context, uint64, *interfaces.AuditLo
 
 func (*captureKBActivityAudit) Purge(context.Context, int) (int64, error) { return 0, nil }
 
-func (*captureKBActivityAudit) CardActionAlreadyExecuted(context.Context, uint64, string, string, string) (bool, error) {
+func (*captureKBActivityAudit) CardActionAlreadyExecuted(
+	context.Context, uint64, string, string, string,
+) (bool, error) {
 	return false, nil
 }
 

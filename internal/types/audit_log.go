@@ -200,8 +200,9 @@ const (
 	AuditActionFAQImportCompleted AuditAction = "faq.import_completed"
 	AuditActionFAQImportFailed    AuditAction = "faq.import_failed"
 
-	// Interactive A2UI button actions (upstream issue #3017, route B — official
-	// A2UI v0.9). TargetType is "a2ui_button", TargetID is
+	// AuditActionAgentCardExecuted and AuditActionAgentCardDenied cover the
+	// interactive A2UI button actions (upstream issue #3017 — official A2UI
+	// v0.9). TargetType is "a2ui_button", TargetID is
 	// "<surface_id>/<source_component_id>". Executed is the success row; Denied
 	// covers the five refusal paths (unresolved button, action-name mismatch,
 	// whitelist refusal, insufficient role, unsupported action type).
@@ -235,6 +236,12 @@ const (
 // Rows are append-only — no UpdatedAt, no soft-delete column. The
 // monotonic ID acts as both primary key and pagination cursor (newest-
 // first is `WHERE id < AfterID ORDER BY id DESC`).
+//
+// ActorUserID holds either a real user id (36) or a synthetic plane id —
+// the embed channel authenticates as "embed-" + its channel UUID, which is
+// 42 characters. That is why audit_logs.actor_user_id is VARCHAR(64) since
+// migration 000135; at the original VARCHAR(36) Postgres rejected every
+// embed audit row and the confirm-once dedup silently never matched.
 type AuditLog struct {
 	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement;index:idx_audit_logs_tenant_scope_desc,priority:4,sort:desc" extensions:"x-agent=event_id"`
 	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1;index:idx_audit_logs_tenant_scope_desc,priority:1"`

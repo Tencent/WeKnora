@@ -199,11 +199,17 @@ func TestAuditCardActionAlreadyExecuted(t *testing.T) {
 		},
 		{
 			name: "different message_id does not count",
-			rows: []*types.AuditLog{{Outcome: types.AuditOutcomeSuccess, Details: types.JSON(`{"message_id":"msg-2","action_name":"confirm"}`)}},
+			rows: []*types.AuditLog{{
+				Outcome: types.AuditOutcomeSuccess,
+				Details: types.JSON(`{"message_id":"msg-2","action_name":"confirm"}`),
+			}},
 		},
 		{
 			name: "different action_name does not count",
-			rows: []*types.AuditLog{{Outcome: types.AuditOutcomeSuccess, Details: types.JSON(`{"message_id":"msg-1","action_name":"noop"}`)}},
+			rows: []*types.AuditLog{{
+				Outcome: types.AuditOutcomeSuccess,
+				Details: types.JSON(`{"message_id":"msg-1","action_name":"noop"}`),
+			}},
 		},
 		{
 			name: "denied row never counts",

@@ -140,7 +140,9 @@ func (r *auditLogRepository) DeleteOlderThan(ctx context.Context, cutoff time.Ti
 // is the executed action only: denial rows (already_executed and the rest)
 // must not count as "already executed" — that would let a refused first click
 // permanently refuse the real one.
-func (r *auditLogRepository) ListCardActionRows(ctx context.Context, tenantID uint64, targetID string) ([]*types.AuditLog, error) {
+func (r *auditLogRepository) ListCardActionRows(
+	ctx context.Context, tenantID uint64, targetID string,
+) ([]*types.AuditLog, error) {
 	var rows []*types.AuditLog
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND action = ? AND target_id = ?", tenantID, types.AuditActionAgentCardExecuted, targetID).

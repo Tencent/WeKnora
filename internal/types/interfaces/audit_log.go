@@ -86,5 +86,7 @@ type AuditLogService interface {
 	// widths. Lookup errors propagate: the caller degrades to proceed — the
 	// exclusive live-run claim is the real double-run backstop, and audit is
 	// best-effort by design.
-	CardActionAlreadyExecuted(ctx context.Context, tenantID uint64, targetID, messageID, actionName string) (bool, error)
+	CardActionAlreadyExecuted(
+		ctx context.Context, tenantID uint64, targetID, messageID, actionName string,
+	) (bool, error)
 }
