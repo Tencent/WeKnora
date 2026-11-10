@@ -584,37 +584,37 @@ jobs:
           # （Electron/Chromium 开关，Wails/WebKitGTK 下无害占位，真机仍需验证），
           # 并按需规避 WebKitGTK 在部分麒麟 GPU 上的空白窗口问题
           cat > "$ROOT/usr/bin/weknora-lite" <<'LAUNCH'
-#!/bin/bash
-export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
-CFG="${XDG_CONFIG_HOME:-$HOME/.config}/WeKnora Lite"
-mkdir -p "$CFG/logs" 2>/dev/null || true
-export LOG_PATH="$CFG/logs/weknora-lite.log"
-exec "/opt/weknora-lite/weknora-lite" --password-store=basic "$@"
-LAUNCH
+          #!/bin/bash
+          export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
+          CFG="${XDG_CONFIG_HOME:-$HOME/.config}/WeKnora Lite"
+          mkdir -p "$CFG/logs" 2>/dev/null || true
+          export LOG_PATH="$CFG/logs/weknora-lite.log"
+          exec "/opt/weknora-lite/weknora-lite" --password-store=basic "$@"
+          LAUNCH
           chmod 755 "$ROOT/usr/bin/weknora-lite" "$OPT/weknora-lite"
 
           cat > "$ROOT/usr/share/applications/weknora-lite.desktop" <<'DESKTOP'
-[Desktop Entry]
-Type=Application
-Name=WeKnora Lite
-Comment=RAG 文档理解与语义问答
-Exec=/usr/bin/weknora-lite
-Icon=weknora-lite
-Categories=Office;Development;
-Terminal=false
-DESKTOP
+          [Desktop Entry]
+          Type=Application
+          Name=WeKnora Lite
+          Comment=RAG 文档理解与语义问答
+          Exec=/usr/bin/weknora-lite
+          Icon=weknora-lite
+          Categories=Office;Development;
+          Terminal=false
+          DESKTOP
 
           cat > "$ROOT/DEBIAN/control" <<CONTROL
-Package: weknora-lite
-Version: ${DEBVER}
-Section: utils
-Priority: optional
-Architecture: arm64
-Maintainer: WeKnora Team
-Depends: libc6 (>= 2.31), libgtk-3-0, libwebkit2gtk-4.0-37, libnss3, libgbm1
-Description: WeKnora Lite 桌面版（银河麒麟 V10 SP1 aarch64）
- 本机知识库与语义问答（SQLite + FTS5 + sqlite-vec，零外部依赖）。
-CONTROL
+          Package: weknora-lite
+          Version: ${DEBVER}
+          Section: utils
+          Priority: optional
+          Architecture: arm64
+          Maintainer: WeKnora Team
+          Depends: libc6 (>= 2.31), libgtk-3-0, libwebkit2gtk-4.0-37, libnss3, libgbm1
+          Description: WeKnora Lite 桌面版（银河麒麟 V10 SP1 aarch64）
+           本机知识库与语义问答（SQLite + FTS5 + sqlite-vec，零外部依赖）。
+          CONTROL
 
           # 载荷自检：deb 里必须真的有应用本体
           dpkg-deb --root-owner-group --build "$ROOT"
