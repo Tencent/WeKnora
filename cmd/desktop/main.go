@@ -14,7 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
+	gostd "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -429,7 +429,7 @@ func main() {
 }
 
 func configureDesktopStorage(execPath string) {
-	switch runtime.GOOS {
+	switch gostd.GOOS {
 	case "darwin":
 		configureDarwinDesktopStorage(execPath)
 	case "windows":
