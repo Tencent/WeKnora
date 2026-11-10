@@ -21,6 +21,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/net/http/httpproxy"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 
 	"github.com/Tencent/WeKnora/internal/ipclass"
 )
@@ -77,6 +79,30 @@ func EscapeHTML(input string) string {
 		return ""
 	}
 	return html.EscapeString(input)
+}
+
+// NormalizeMultipartFilename re-encodes a multipart filename that is not
+// valid UTF-8. curl builds without iconv (notably the Windows Schannel
+// builds) send the Content-Disposition filename in the local legacy codepage
+// — GBK on zh-CN Windows, which RFC 7578 §4.2 acknowledges — so a valid CJK
+// name reaches the server as raw GBK bytes and fails the UTF-8 syntax check
+// downstream (issue #4268). Names already valid UTF-8, CJK included, pass
+// through untouched; other non-UTF-8 bytes are decoded as GBK, and when that
+// yields nothing valid the original name is returned so the caller's input
+// validation still decides — this only rescues encodable names, never
+// relaxes the check itself.
+func NormalizeMultipartFilename(name string) string {
+	if name == "" || utf8.ValidString(name) {
+		return name
+	}
+	decoded, _, err := transform.String(simplifiedchinese.GBK.NewDecoder(), name)
+	// The GBK decoder replaces undecodable bytes with U+FFFD instead of
+	// failing; such output is garbage, not a rescued name, so fall back to
+	// the original and let the caller's validation reject it.
+	if err == nil && utf8.ValidString(decoded) && !strings.ContainsRune(decoded, '\ufffd') {
+		return decoded
+	}
+	return name
 }
 
 // ValidateInputSyntax checks the input properties shared by all user-query
