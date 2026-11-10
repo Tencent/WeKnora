@@ -41,41 +41,56 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	// Cancellation preserves partial index data for a later retry. Exclude
 	// those hits before they can take a result slot or supply enrichment.
-	selected := make([]*types.IndexWithScore, 0, min(primaryLimit, len(chunks)))
-	selectedKnowledge := make(map[string]*types.Knowledge)
+	candidates := make([]*types.IndexWithScore, 0, len(chunks))
+	chunkIDs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
 		knowledge := knowledgeMap[chunk.KnowledgeID]
 		if knowledge == nil || knowledge.ParseStatus == types.ParseStatusCancelled {
 			continue
 		}
-		selected = append(selected, chunk)
-		selectedKnowledge[knowledge.ID] = knowledge
-		if len(selected) == primaryLimit {
-			break
-		}
+		candidates = append(candidates, chunk)
+		chunkIDs = append(chunkIDs, chunk.ChunkID)
 	}
-	if len(selected) == 0 {
+	if len(candidates) == 0 {
 		return nil, nil
 	}
-	index := s.buildChunkIndex(selected)
 
 	// Batch fetch chunks (include shared KB chunks)
-	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(index.chunkIDs))
-	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, index.chunkIDs)
+	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(chunkIDs))
+	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, chunkIDs)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
-			"chunk_ids": index.chunkIDs,
+			"chunk_ids": chunkIDs,
 		})
 		return nil, err
 	}
 	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
 
-	// Build chunk map and collect enrichment IDs (parent, related, nearby)
-	chunkMap := make(map[string]*types.Chunk, len(allChunks))
+	// A stale index hit can refer to a removed, disabled, or unsynchronized
+	// chunk. Hydrate the bounded candidate pool before spending primary slots.
+	candidateMap := make(map[string]*types.Chunk, len(allChunks))
 	for _, chunk := range allChunks {
-		chunkMap[chunk.ID] = chunk
+		candidateMap[chunk.ID] = chunk
 	}
+	selected := make([]*types.IndexWithScore, 0, min(primaryLimit, len(candidates)))
+	selectedKnowledge := make(map[string]*types.Knowledge)
+	chunkMap := make(map[string]*types.Chunk)
+	allChunks = nil
+	for _, candidate := range candidates {
+		chunk := candidateMap[candidate.ChunkID]
+		if !s.isSearchableChunk(chunk) || chunkMap[candidate.ChunkID] != nil {
+			continue
+		}
+		selected = append(selected, candidate)
+		selectedKnowledge[candidate.KnowledgeID] = knowledgeMap[candidate.KnowledgeID]
+		chunkMap[chunk.ID] = chunk
+		allChunks = append(allChunks, chunk)
+		if len(selected) == primaryLimit {
+			break
+		}
+	}
+	index := s.buildChunkIndex(selected)
 
 	if !skipEnrichment {
 		additionalChunkIDs := s.collectEnrichmentChunkIDs(ctx, allChunks, index)
