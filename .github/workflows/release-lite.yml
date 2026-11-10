@@ -658,7 +658,9 @@ jobs:
           # 显式指定输出文件：默认生成在输入目录旁（debroot/）会让校验扑空
           DEB="weknora-lite_${DEBVER}_arm64.deb"
           dpkg-deb --root-owner-group --build "$ROOT" "$DEB"
-          dpkg-deb -c "$DEB" | grep -q "opt/weknora-lite/weknora-lite" || {
+          # grep 不加 -q：pipefail 下 -q 首个匹配即退出，SIGPIPE 杀掉
+          # dpkg-deb 的 tar 子进程，误报载荷缺失（见麒麟指南 §4）
+          dpkg-deb -c "$DEB" | grep "opt/weknora-lite/weknora-lite" || {
             echo "::error::deb 载荷缺失应用本体"; exit 1; }
           sha256sum "$DEB" > "$DEB.sha256"
 
