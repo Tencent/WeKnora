@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeDetails, getKnowledgeDetailsCon } from '@/api/knowledge-base'
 import { useMentionFileDrawer } from '@/composables/useMentionFileDrawer'
@@ -8,7 +7,6 @@ import { formatStringDate } from '@/utils'
 
 const DocContent = defineAsyncComponent(() => import('@/components/doc-content.vue'))
 const { t } = useI18n()
-const route = useRoute()
 const drawer = useMentionFileDrawer()
 
 const visible = computed(() => drawer?.visible.value ?? false)
@@ -71,11 +69,8 @@ watch([visible, () => target.value?.fileId], async ([open, fileId]) => {
   loading.value = true
   loadError.value = ''
   try {
-    const { agent_id, agent_source_tenant_id } = route.query
-    const result: any = await getKnowledgeDetails(fileId, {
-      agent_id: typeof agent_id === 'string' ? agent_id : undefined,
-      agent_source_tenant_id: typeof agent_source_tenant_id === 'string' ? agent_source_tenant_id : undefined,
-    })
+    // 与分块和原文件预览一致，由后端按当前用户的有效共享权限检查读取。
+    const result: any = await getKnowledgeDetails(fileId)
     if (generation !== requestGeneration) return
     if (!result?.success || !result.data) {
       loadError.value = result?.message || result?.error?.message || t('knowledgeBase.chunkLoadFailed')
