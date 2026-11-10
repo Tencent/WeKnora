@@ -344,6 +344,15 @@ func TestNormalizeMultipartFilename(t *testing.T) {
 			"基于统一场论的月行九道天文数学原理研究.pdf",
 		},
 		{"gbk bytes rescued", gbkName, "基于统一场论的月行九道天文数学原理研究.pdf"},
+		{
+			// "乗" in GBK is 0x81 0x5C — a raw backslash byte inside the
+			// name. A full multipart round-trip through net/http keeps the
+			// bytes intact (verified on Go 1.26), and the GBK decode
+			// rescues the name.
+			"gbk backslash trail byte",
+			string([]byte{0xc7, 0xb0, 0x81, 0x5c, 0xba, 0xf3, 0x2e, 'p', 'd', 'f'}),
+			"前乗后.pdf",
+		},
 		{"empty", "", ""},
 	}
 	for _, tt := range tests {
