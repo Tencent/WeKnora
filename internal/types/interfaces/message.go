@@ -123,6 +123,12 @@ type MessageRepository interface {
 	ListMessagesBySessionBeforeCursor(
 		ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
 	) ([]*types.Message, error)
+	// ListMessagesBySessionBeforeCursorForLLM has the same paging contract but
+	// omits Message.Artifacts. LLM history replay does not consume artifact
+	// metadata, so this avoids a side query for every page.
+	ListMessagesBySessionBeforeCursorForLLM(
+		ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+	) ([]*types.Message, error)
 	// ListMessagesBySessionUpTo returns every message sorting strictly before
 	// the (boundary, boundaryID) composite cursor, oldest first. Used by
 	// session fork to copy the history preceding a fork point.

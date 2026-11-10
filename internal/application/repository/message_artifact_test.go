@@ -108,6 +108,34 @@ func TestMessagesWithoutArtifactsLoadAsEmpty(t *testing.T) {
 	require.Empty(t, got.Artifacts)
 }
 
+func TestListMessagesBySessionBeforeCursorForLLMSkipsArtifactLookup(t *testing.T) {
+	db := newArtifactTestDB(t)
+	repo := NewMessageRepository(db)
+	ctx := context.Background()
+	created := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
+
+	msg, err := repo.CreateMessage(ctx, &types.Message{
+		SessionID: "s1", RequestID: "r1", Role: "assistant",
+		Artifacts: types.MessageArtifacts{testArtifact("report.pptx", "/w/report.pptx", created)},
+	})
+	require.NoError(t, err)
+
+	withArtifacts, err := repo.ListMessagesBySessionBeforeCursor(
+		ctx, "s1", time.Time{}, "", 10,
+	)
+	require.NoError(t, err)
+	require.Len(t, withArtifacts, 1)
+	require.Equal(t, msg.ID, withArtifacts[0].ID)
+	require.Len(t, withArtifacts[0].Artifacts, 1, "artifact-aware readers keep their contract")
+
+	withoutArtifacts, err := repo.ListMessagesBySessionBeforeCursorForLLM(
+		ctx, "s1", time.Time{}, "", 10,
+	)
+	require.NoError(t, err)
+	require.Len(t, withoutArtifacts, 1)
+	require.Equal(t, msg.ID, withoutArtifacts[0].ID)
+	require.Nil(t, withoutArtifacts[0].Artifacts, "LLM history must not pay for artifact lookups")
+}
 func TestRecordRestoredArtifactMtimeUpdatesMatchingRows(t *testing.T) {
 	db := newArtifactTestDB(t)
 	repo := NewMessageRepository(db).(*messageRepository)
