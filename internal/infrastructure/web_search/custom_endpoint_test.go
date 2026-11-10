@@ -73,8 +73,11 @@ func TestOptionalSearchBaseURL(t *testing.T) {
 		url string
 		bad bool
 	}{
-		{"", false}, {"ftp://example.com", true}, {"http://127.0.0.1", true},
-		{"https://example.com/?q=x", true}, {"https://example.com/#fragment", true},
+		{"", false},
+		{"ftp://example.com", true},
+		{"http://127.0.0.1", true},
+		{"https://example.com/?q=x", true},
+		{"https://example.com/#fragment", true},
 	} {
 		if err := ValidateOptionalSearchBaseURL(tc.url); (err != nil) != tc.bad {
 			t.Errorf("%q: %v", tc.url, err)
