@@ -50,6 +50,8 @@ func NewStorageBackendServiceWithResources(
 }
 
 func (s *StorageBackendService) Create(ctx context.Context, backend *types.StorageBackend) error {
+	// Source is server-owned; callers cannot turn a tenant config into an env backend.
+	backend.Source = types.StorageBackendSourceUser
 	if err := backend.Validate(); err != nil {
 		return err
 	}
@@ -81,7 +83,11 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 		return apperrors.NewBadRequestError("environment storage backend is read-only")
 	}
 	incoming.Provider = existing.Provider
-	incoming.Config = incoming.Config.MergeSecrets(existing.Config)
+	incoming.Source = types.StorageBackendSourceUser
+	incoming.Config = incoming.Config.MergeSecrets(existing.Provider, existing.Config)
+	if err := incoming.ValidateAuthSource(); err != nil {
+		return err
+	}
 	if incoming.Config.LocationKey(existing.Provider) != existing.Config.LocationKey(existing.Provider) {
 		return apperrors.NewBadRequestError("endpoint, region, bucket and path prefix are immutable; use storage migration instead")
 	}
@@ -238,7 +244,7 @@ func (s *StorageBackendService) Test(ctx context.Context, backend *types.Storage
 	case "s3":
 		return filesvc.CheckS3ConnectivityWithOptions(ctx, c.Endpoint, c.AccessKeyID, c.SecretAccessKey, c.BucketName, c.Region, c.ForcePathStyle)
 	case "oss":
-		return filesvc.CheckOssConnectivity(ctx, c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.BucketName)
+		return filesvc.CheckOssConnectivityWithConfig(ctx, *backend.ToStorageEngineConfig().OSS)
 	case "ks3":
 		return filesvc.CheckKS3Connectivity(ctx, c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.BucketName)
 	case "obs":
@@ -300,6 +306,11 @@ func (s *StorageBackendService) ResolveBackend(ctx context.Context, tenant *type
 	if backendID == "" && provider != "" {
 		backend, err := s.repo.FindLegacyAlias(ctx, tenant.ID, provider)
 		if err != nil || backend != nil {
+			if err == nil {
+				if authErr := backend.ValidateAuthSource(); authErr != nil {
+					return nil, authErr
+				}
+			}
 			return backend, err
 		}
 	}
@@ -313,6 +324,9 @@ func (s *StorageBackendService) ResolveBackend(ctx context.Context, tenant *type
 		}
 		if backend == nil {
 			return nil, fmt.Errorf("storage backend not found")
+		}
+		if err := backend.ValidateAuthSource(); err != nil {
+			return nil, err
 		}
 		if backend.Status != types.StorageBackendStatusActive {
 			return nil, fmt.Errorf("storage backend is not active")
@@ -332,7 +346,7 @@ func (s *StorageBackendService) ResolveFileService(ctx context.Context, tenant *
 		return nil, "", err
 	}
 	if backend != nil {
-		inner, provider, err := filesvc.NewFileServiceFromStorageConfig(backend.Provider, backend.ToStorageEngineConfig(), localBaseDir)
+		inner, provider, err := filesvc.NewFileServiceFromStorageBackend(backend, localBaseDir)
 		if err != nil {
 			return nil, provider, err
 		}
@@ -344,7 +358,11 @@ func (s *StorageBackendService) ResolveFileService(ctx context.Context, tenant *
 		if env := types.StorageBackendFromEnvironment(tenant.ID); env != nil {
 			provider = env.Provider
 			if sec == nil {
-				sec = env.ToStorageEngineConfig()
+				inner, resolvedProvider, err := filesvc.NewFileServiceFromStorageBackend(env, localBaseDir)
+				if err != nil {
+					return nil, resolvedProvider, err
+				}
+				return filesvc.NewResourceCatalogFileService(inner, s.resourceCatalog), resolvedProvider, nil
 			}
 		}
 	}

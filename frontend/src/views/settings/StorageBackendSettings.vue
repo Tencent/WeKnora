@@ -170,6 +170,7 @@
             <label class="form-label required">Region</label>
             <t-input v-model="form.config.region" :disabled="!!editing" clearable />
           </div>
+          <p v-if="form.provider === 'oss'" class="form-desc">{{ t('settings.storageBackend.ossRoleEnvOnlyHelp') }}</p>
           <template v-if="needsCredentials">
             <div class="form-item">
               <label class="form-label required">Access Key / Secret ID</label>
@@ -268,7 +269,10 @@ const blankConfig = (): StorageBackendConfig => ({ mode: 'remote', endpoint: '',
 const form = reactive<{ name: string; provider: string; config: StorageBackendConfig }>({ name: '', provider: 'local', config: blankConfig() })
 const needsEndpoint = computed(() => !['local', 'cos'].includes(form.provider) && !(form.provider === 'minio' && form.config.mode === 'docker'))
 const needsRegion = computed(() => !['local', 'minio'].includes(form.provider))
-const needsCredentials = computed(() => form.provider !== 'local' && !(form.provider === 'minio' && form.config.mode === 'docker'))
+const needsCredentials = computed(() =>
+  form.provider !== 'local'
+  && !(form.provider === 'minio' && form.config.mode === 'docker'),
+)
 
 const resolveLogo = (provider: string) => providerLogo('storage', provider)
 const providerInitial = (provider: string) => (provider || '?').trim().charAt(0).toUpperCase() || '?'
@@ -334,12 +338,23 @@ async function load() {
 }
 function resetConfig() { form.config = blankConfig(); rawTestResult.value = null }
 function openCreate() { editing.value = null; form.name = ''; form.provider = providers.value[0] || 'local'; form.config = blankConfig(); rawTestResult.value = null; visible.value = true }
-function openEdit(backend: StorageBackend) { editing.value = backend; form.name = backend.name; form.provider = backend.provider; form.config = { ...blankConfig(), ...backend.config }; rawTestResult.value = null; visible.value = true }
+function openEdit(backend: StorageBackend) {
+  editing.value = backend
+  form.name = backend.name
+  form.provider = backend.provider
+  form.config = { ...blankConfig(), ...backend.config }
+  if (backend.provider === 'oss') {
+    form.config.auth_type = 'access_key'
+    form.config.role_name = ''
+  }
+  rawTestResult.value = null
+  visible.value = true
+}
 async function testRaw() {
   testing.value = true
   rawTestResult.value = null
   try {
-    const r: any = editing.value ? await testStorageBackendByID(editing.value.id) : await testStorageBackend(form)
+    const r: any = await testStorageBackend({ ...form, id: editing.value?.id })
     if (r.success) { rawTestResult.value = 'ok'; MessagePlugin.success(t('settings.storageBackend.testSuccess')) }
     else { rawTestResult.value = 'error'; MessagePlugin.error(r.error || t('settings.storageBackend.testFailed')) }
   } finally { testing.value = false }

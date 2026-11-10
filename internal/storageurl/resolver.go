@@ -2,6 +2,7 @@ package storageurl
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 
@@ -176,6 +177,9 @@ func (r *FileServiceResolver) resolveStorage(
 			r.cache[cacheKey] = svc
 			return svc
 		}
+		if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+			return filesvc.NewUnavailableFileService(err)
+		}
 		logger.Warnf(r.ctx, "resolve storage backend failed: backend_id=%s provider=%s err=%v",
 			backendID, provider, err)
 	}
@@ -208,6 +212,9 @@ func BuildFileServiceForProvider(
 	svc, _, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
 	if err == nil {
 		return svc
+	}
+	if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+		return filesvc.NewUnavailableFileService(err)
 	}
 	if provider == "local" {
 		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))

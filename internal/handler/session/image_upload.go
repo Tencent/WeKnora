@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -147,6 +148,9 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 	}
 	if h.storageResolver != nil {
 		svc, resolvedProvider, err := h.storageResolver.ResolveFileService(ctx, tenant, "", storageProvider, "")
+		if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+			return filesvc.NewUnavailableFileService(err)
+		}
 		if err == nil && svc != nil {
 			logger.Infof(ctx, "[image-storage] using storage instance provider=%s for image uploads", resolvedProvider)
 			return svc
@@ -160,6 +164,9 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 	}
 
 	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, tenant.StorageEngineConfig, "")
+	if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+		return filesvc.NewUnavailableFileService(err)
+	}
 	if err != nil {
 		logger.Warnf(ctx, "[image-storage] failed to create %s file service: %v, fallback to default", storageProvider, err)
 		return h.fileService
