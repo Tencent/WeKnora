@@ -19,6 +19,15 @@ func (s *browserSourceKBService) GetKnowledgeBaseByIDOnly(context.Context, strin
 	return s.kb, nil
 }
 
+func (s *browserSourceKBService) GetKnowledgeBasesByIDsOnly(
+	context.Context, []string,
+) ([]*types.KnowledgeBase, error) {
+	if s.kb == nil {
+		return nil, nil
+	}
+	return []*types.KnowledgeBase{s.kb}, nil
+}
+
 func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 	t.Setenv("BROWSERSKILL_BINARY", "/unused/browser-skill")
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))

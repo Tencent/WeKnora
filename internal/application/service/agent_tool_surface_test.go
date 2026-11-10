@@ -17,6 +17,15 @@ func (s *toolSurfaceKBService) GetKnowledgeBaseByIDOnly(context.Context, string)
 	return s.kb, nil
 }
 
+func (s *toolSurfaceKBService) GetKnowledgeBasesByIDsOnly(
+	context.Context, []string,
+) ([]*types.KnowledgeBase, error) {
+	if s.kb == nil {
+		return nil, nil
+	}
+	return []*types.KnowledgeBase{s.kb}, nil
+}
+
 func newToolSurfaceService(kb *types.KnowledgeBase) *agentService {
 	return &agentService{
 		knowledgeBaseService: &toolSurfaceKBService{fakeAgentKnowledgeBaseService{kb: kb}},
@@ -47,7 +56,7 @@ func TestRegisterToolsMapsRetiredRetrievalToolsToSuccessors(t *testing.T) {
 		tools.LegacyToolListKnowledgeChunks, tools.LegacyToolGetDocumentInfo,
 		tools.LegacyToolWikiReadSourceDoc, tools.ToolThinking,
 	)
-	require.NoError(t, svc.registerTools(t.Context(), registry, cfg, nil, nil, "session"))
+	require.NoError(t, svc.registerTools(t.Context(), registry, cfg, nil, nil, "session", nil))
 
 	names := registry.ListTools()
 	require.Contains(t, names, tools.ToolSearchKnowledge)
@@ -70,8 +79,7 @@ func TestRegisterToolsOffersGraphToolOnlyWithGraphEnabledKB(t *testing.T) {
 	registry := tools.NewToolRegistry()
 	require.NoError(t, newToolSurfaceService(plain).registerTools(
 		t.Context(), registry, toolSurfaceConfig(tools.ToolSearchKnowledge, tools.ToolQueryKnowledgeGraph),
-		nil, nil, "s",
-	))
+		nil, nil, "s", nil))
 	require.Contains(t, registry.ListTools(), tools.ToolSearchKnowledge)
 	require.NotContains(t, registry.ListTools(), tools.ToolQueryKnowledgeGraph)
 
@@ -81,8 +89,7 @@ func TestRegisterToolsOffersGraphToolOnlyWithGraphEnabledKB(t *testing.T) {
 	registry = tools.NewToolRegistry()
 	require.NoError(t, newToolSurfaceService(graph).registerTools(
 		t.Context(), registry, toolSurfaceConfig(tools.ToolSearchKnowledge, tools.ToolQueryKnowledgeGraph),
-		nil, nil, "s",
-	))
+		nil, nil, "s", nil))
 	require.Contains(t, registry.ListTools(), tools.ToolQueryKnowledgeGraph)
 }
 
@@ -92,8 +99,7 @@ func TestRegisterToolsDefaultSurface(t *testing.T) {
 	kb.IndexingStrategy.KeywordEnabled = true
 	registry := tools.NewToolRegistry()
 	require.NoError(t, newToolSurfaceService(kb).registerTools(
-		t.Context(), registry, toolSurfaceConfig(), nil, nil, "s",
-	))
+		t.Context(), registry, toolSurfaceConfig(), nil, nil, "s", nil))
 	names := registry.ListTools()
 	for _, want := range []string{tools.ToolSearchKnowledge, tools.ToolReadDocument, tools.ToolListDocuments} {
 		require.Contains(t, names, want)
@@ -121,7 +127,7 @@ func TestRegisterToolsKeepsDocumentReadersForWikiOnlyScope(t *testing.T) {
 		tools.ToolWikiSearch, tools.ToolWikiReadPage, tools.ToolReadDocument,
 		tools.ToolListDocuments, tools.ToolSearchKnowledge, tools.LegacyToolWikiReadSourceDoc,
 	)
-	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, cfg, nil, nil, "s"))
+	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, cfg, nil, nil, "s", nil))
 	names := registry.ListTools()
 	for _, want := range []string{
 		tools.ToolWikiSearch, tools.ToolWikiReadPage, tools.ToolReadDocument, tools.ToolListDocuments,
@@ -144,7 +150,7 @@ func TestRegisterToolsOffersWikiWritesOnlyForWritableKBs(t *testing.T) {
 
 	readOnly := toolSurfaceConfig(allowed...)
 	registry := tools.NewToolRegistry()
-	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, readOnly, nil, nil, "s"))
+	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, readOnly, nil, nil, "s", nil))
 	names := registry.ListTools()
 	require.Contains(t, names, tools.ToolWikiReadPage)
 	require.Contains(t, names, tools.ToolWikiReadIssue)
@@ -155,7 +161,7 @@ func TestRegisterToolsOffersWikiWritesOnlyForWritableKBs(t *testing.T) {
 	writable := toolSurfaceConfig(allowed...)
 	writable.WritableKBIDs = []string{"kb"}
 	registry = tools.NewToolRegistry()
-	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, writable, nil, nil, "s"))
+	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, writable, nil, nil, "s", nil))
 	names = registry.ListTools()
 	for _, name := range writeTools {
 		require.Contains(t, names, name)
