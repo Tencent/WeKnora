@@ -33,6 +33,7 @@ func Builtins() []*Definition {
 		newRequestyProvider(),
 		newRuncrateProvider(),
 		newSiliconflowProvider(),
+		newUberllmProvider(),
 		newVolcengineProvider(),
 		newWeKnoraCloudProvider(),
 		newZhipuProvider(),

@@ -2183,6 +2183,23 @@
           "off": null
         }
       }
+    ],
+    "uberllm": [
+      {
+        "id": "z-ai/glm-5.3",
+        "thinking_levels": {
+          "off": null,
+          "minimal": null,
+          "medium": null,
+          "xhigh": null
+        }
+      },
+      {
+        "id": "qwen/qwen3.8-flash",
+        "thinking_levels": {
+          "off": null
+        }
+      }
     ]
   }
 }
