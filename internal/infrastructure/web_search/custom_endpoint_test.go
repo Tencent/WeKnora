@@ -57,7 +57,8 @@ func TestCustomSearchEndpoints(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.create(types.WebSearchProviderParameters{APIKey: "key", EngineID: "engine", BaseURL: tc.base}); err != nil {
+			params := types.WebSearchProviderParameters{APIKey: "key", EngineID: "engine", BaseURL: tc.base}
+			if err := tc.create(params); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -71,7 +72,10 @@ func TestOptionalSearchBaseURL(t *testing.T) {
 	for _, tc := range []struct {
 		url string
 		bad bool
-	}{{"", false}, {"ftp://example.com", true}, {"http://127.0.0.1", true}, {"https://example.com/?q=x", true}, {"https://example.com/#fragment", true}} {
+	}{
+		{"", false}, {"ftp://example.com", true}, {"http://127.0.0.1", true},
+		{"https://example.com/?q=x", true}, {"https://example.com/#fragment", true},
+	} {
 		if err := ValidateOptionalSearchBaseURL(tc.url); (err != nil) != tc.bad {
 			t.Errorf("%q: %v", tc.url, err)
 		}

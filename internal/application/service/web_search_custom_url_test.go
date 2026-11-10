@@ -11,7 +11,9 @@ func TestWebSearchCustomURLValidation(t *testing.T) {
 	utils.ResetSSRFWhitelistForTest()
 	t.Setenv("SSRF_WHITELIST", "")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
-	for _, provider := range []types.WebSearchProviderType{types.WebSearchProviderTypeBing, types.WebSearchProviderTypeGoogle} {
+	for _, provider := range []types.WebSearchProviderType{
+		types.WebSearchProviderTypeBing, types.WebSearchProviderTypeGoogle,
+	} {
 		params := types.WebSearchProviderParameters{APIKey: "key", EngineID: "engine"}
 		if err := validateProviderParameters(provider, params); err != nil {
 			t.Fatalf("%s default: %v", provider, err)
