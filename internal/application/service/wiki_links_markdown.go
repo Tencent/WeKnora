@@ -51,12 +51,12 @@ func rewriteMarkdownWikiLinks(content string, replace func(markdownWikiLink) str
 	return out.String(), true
 }
 
-// markdownWikiLinks keeps derivation and repair on the same source spans.
-// In particular, a table's escaped alias separator is not part of its slug,
-// and literal examples must not become graph edges or repair targets.
-func markdownWikiLinks(content string) []markdownWikiLink {
+// markdownCodeSpans returns the byte ranges covered by fenced and indented
+// code blocks (including a fence's info string) and inline code spans.
+// Derivation, repair and ingest sanitization share it so literal examples
+// never become graph edges or repair targets.
+func markdownCodeSpans(content string) []span {
 	source := []byte(content)
-	type span struct{ start, end int }
 	var code []span
 	document := goldmark.DefaultParser().Parse(text.NewReader(source))
 	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -85,6 +85,14 @@ func markdownWikiLinks(content string) []markdownWikiLink {
 		}
 		return ast.WalkContinue, nil
 	})
+	return code
+}
+
+// markdownWikiLinks keeps derivation and repair on the same source spans.
+// In particular, a table's escaped alias separator is not part of its slug,
+// and literal examples must not become graph edges or repair targets.
+func markdownWikiLinks(content string) []markdownWikiLink {
+	code := markdownCodeSpans(content)
 
 	var links []markdownWikiLink
 	for _, match := range markdownWikiLinkRegex.FindAllStringSubmatchIndex(content, -1) {
