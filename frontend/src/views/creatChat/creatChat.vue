@@ -63,6 +63,7 @@
     </div>
 
     <ContextualGuide tour="chat" :when="showChatContextualGuide" />
+    <MentionFileDrawer />
 
     <!-- 知识库编辑器（创建/编辑统一组件） -->
     <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
@@ -73,6 +74,8 @@
 import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
+import MentionFileDrawer from '@/components/MentionFileDrawer.vue';
+import { provideMentionFileDrawer } from '@/composables/useMentionFileDrawer';
 import { createSessions } from "@/api/chat/index";
 import { pickHostProjectDir } from '@/utils/desktopProjectDir';
 import { projectDirBasename, shouldRenderHostProjectSettings, withOptionalProjectDir } from '@/utils/hostWorkspace';
@@ -104,6 +107,8 @@ const uiStore = useUIStore();
 const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
+
+provideMentionFileDrawer();
 
 const hostSandboxEnabled = computed(() =>
     shouldRenderHostProjectSettings(deploymentCapabilities.isSupported('settings.sandbox.host')),

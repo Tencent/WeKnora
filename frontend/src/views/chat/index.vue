@@ -218,6 +218,7 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
     <ChatReferencesDrawer />
     <ChatAttachmentPreviewDrawer />
+    <MentionFileDrawer />
     <SandboxSidePanel v-if="!embeddedMode" :session-id="session_id"
         :agent-id="useSettingsStoreInstance.selectedAgentId"
         :agent-source-tenant-id="useSettingsStoreInstance.selectedAgentSourceTenantId"
@@ -288,6 +289,8 @@ import {
 } from '@/api/message-suggestion';
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
+import { provideMentionFileDrawer } from '@/composables/useMentionFileDrawer';
+import MentionFileDrawer from '@/components/MentionFileDrawer.vue';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAssistantStore } from '@/stores/assistant';
 import { useAssistantPageContext } from '@/composables/useAssistantPageContext';
@@ -308,6 +311,7 @@ const childTabs = inheritedChildTabs || createChildAgentTabs();
 provide(childAgentTabsKey, childTabs);
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
+provideMentionFileDrawer();
 const sandboxPanel = provideChatSandboxPanel();
 const { visible: referencesDrawerVisible, panelWidth: referencesPanelWidth } = referencesDrawer;
 
