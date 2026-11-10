@@ -651,10 +651,13 @@ func TestIngestItem_ComposesSourceFolderIntoCustomFileName(t *testing.T) {
 	assert.Contains(t, ks3.events, "create:bad.md")
 }
 
-// TestIngestItem_URLItemLandsInSourceFolder verifies that a URL-only item
-// gets its source folder written straight onto the knowledge row, since the
-// URL create flow has no path-qualified name to split (issue #5171).
-func TestIngestItem_URLItemLandsInSourceFolder(t *testing.T) {
+// TestIngestItem_URLItemPassesFolderQualifiedFileName verifies that a URL-only
+// item hands the create flow a path-qualified name carrying the source folder
+// (issue #5171): the URL create split places the row in the folder at INSERT,
+// so no post-create column write races the processing worker. The trailing-
+// slash form is used when the connector's item has no file name — display
+// naming falls back to the URL inside the create flow.
+func TestIngestItem_URLItemPassesFolderQualifiedFileName(t *testing.T) {
 	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
 	repo := &deletionLookupKnowledgeRepo{}
 	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
@@ -666,11 +669,15 @@ func TestIngestItem_URLItemLandsInSourceFolder(t *testing.T) {
 		Metadata:   map[string]string{"folder_path": "网页收藏"},
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, repo.folderUpdates, 1)
-	assert.Equal(t, "url-knowledge-1", repo.folderUpdates[0].id)
-	assert.Equal(t, "网页收藏", repo.folderUpdates[0].value)
+	require.Equal(t, []string{"网页收藏/"}, ks.createURLNames)
+	// No post-create folder_path column write: the folder rides the INSERT
+	// through the path-qualified name, so it cannot race the worker. The
+	// datasource metadata attach still happens on a single column.
+	assert.Empty(t, repo.folderUpdates)
+	require.Len(t, repo.metadataUpdates, 1)
+	assert.Equal(t, "url:1", repo.metadataUpdates[0]["external_id"])
 
-	// Without folder_path metadata there is no folder write.
+	// Root-level URL items pass the plain (empty) name through.
 	repo = &deletionLookupKnowledgeRepo{}
 	ks = &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-2"}}
 	svc = &DataSourceService{knowledgeService: ks}
@@ -679,6 +686,7 @@ func TestIngestItem_URLItemLandsInSourceFolder(t *testing.T) {
 		URL:        "https://example.com/doc2",
 	}, nil)
 	require.NoError(t, err)
+	require.Equal(t, []string{""}, ks.createURLNames)
 	assert.Empty(t, repo.folderUpdates)
 }
 

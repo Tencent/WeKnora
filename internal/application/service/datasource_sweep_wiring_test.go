@@ -51,14 +51,16 @@ type sweepFakeKS struct {
 	createErr          error            // if set, CreateKnowledgeFromFile returns it after logging
 	deleteErr          error            // if set, DeleteKnowledge returns it after logging
 	createURLKnowledge *types.Knowledge // if set, CreateKnowledgeFromURL returns it
+	createURLNames     []string         // fileName arguments of CreateKnowledgeFromURL
 }
 
 func (k *sweepFakeKS) GetRepository() interfaces.KnowledgeRepository { return k.repo }
 
 func (k *sweepFakeKS) CreateKnowledgeFromURL(
-	_ context.Context, _ string, _ string, _ string, _ string, _ *bool,
+	_ context.Context, _ string, _ string, fileName string, _ string, _ *bool,
 	_ string, _ []string, _ string, _ *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
+	k.createURLNames = append(k.createURLNames, fileName)
 	return k.createURLKnowledge, nil
 }
 

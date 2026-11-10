@@ -1473,14 +1473,15 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		}
 	}
 
-	// Preserve the source folder hierarchy (issue #5171): connectors publish
-	// each item's folder path as "folder_path" metadata ("A/B", no leading
-	// slash). Composing it with the file name yields the path-qualified
-	// custom name the create/replace flows already split into folder_path
-	// plus display name, so synced documents land in the matching
-	// knowledge-base folder instead of piling up at the root.
+	// Preserve the source folder hierarchy (issue #5171): composing the
+	// connector's folder path with the file name yields the path-qualified
+	// custom name the create/replace flows split into folder_path plus
+	// display name at INSERT, so synced documents land in the matching
+	// knowledge-base folder. URL items often carry no file name at all —
+	// the trailing-slash form still places the folder, and the display
+	// name falls back to the URL-derived one inside the create flows.
 	customName := item.FileName
-	if folder := sourceFolderPath(item); folder != "" && item.FileName != "" {
+	if folder := sourceFolderPath(item); folder != "" {
 		customName = folder + "/" + item.FileName
 	}
 
@@ -1579,9 +1580,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			ctx,
 			ds.KnowledgeBaseID,
 			item.URL,
-			item.FileName,
-			"",  // auto-detect file type
-			nil, // use KB default for multimodal
+			customName, // path-qualified — places the row in the source folder at INSERT
+			"",         // auto-detect file type
+			nil,        // use KB default for multimodal
 			item.Title,
 			tagIDs, // auto-tag from data source
 			channel,
@@ -1614,15 +1615,6 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				ctx, created.ID, "metadata", created.Metadata,
 			); uErr != nil {
 				return isUpdate, fmt.Errorf("attach datasource metadata: %w", uErr)
-			}
-			// URL creates have no path-qualified name to split, so the source
-			// folder lands on the row directly (issue #5171).
-			if folder := sourceFolderPath(item); folder != "" {
-				if fErr := s.knowledgeService.GetRepository().UpdateKnowledgeColumn(
-					ctx, created.ID, "folder_path", folder,
-				); fErr != nil {
-					return isUpdate, fmt.Errorf("attach datasource folder: %w", fErr)
-				}
 			}
 		}
 		s.sweepStaleSubtree(ctx, ds, item)

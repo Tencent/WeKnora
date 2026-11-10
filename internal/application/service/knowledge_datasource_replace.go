@@ -102,18 +102,12 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 		created, err = s.createKnowledgeFromFile(plan.ctx, previous.KnowledgeBaseID, file, metadata,
 			nil, customName, tagIDs, channel, nil, replacement)
 	} else {
-		created, err = s.createKnowledgeFromURL(plan.ctx, previous.KnowledgeBaseID, item.URL, item.FileName,
+		// The path-qualified customName places the new row in its folder at
+		// INSERT (issue #5171); a post-create column write would race the
+		// processing worker, and a URL-duplicate hit returns a different
+		// row that must not be relocated.
+		created, err = s.createKnowledgeFromURL(plan.ctx, previous.KnowledgeBaseID, item.URL, customName,
 			"", nil, item.Title, tagIDs, channel, nil, replacement)
-		if created != nil {
-			// URL creates have no path-qualified name to split, so the source
-			// folder lands on the row directly (issue #5171).
-			if folder := sourceFolderPath(item); folder != "" {
-				if fErr := s.repo.UpdateKnowledgeColumn(plan.ctx, created.ID, "folder_path", folder); fErr != nil {
-					logger.Warnf(plan.ctx, "failed to attach datasource folder to replaced knowledge %s: %v",
-						created.ID, fErr)
-				}
-			}
-		}
 	}
 	if !replacement.committed {
 		return created, err
