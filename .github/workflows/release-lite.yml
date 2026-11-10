@@ -199,7 +199,13 @@ jobs:
 
       - name: Install NSIS (Windows)
         if: runner.os == 'Windows'
-        run: choco install nsis -y
+        shell: bash
+        run: |
+          choco install nsis -y
+          # choco 装完不会刷新后续步骤的 PATH，wails 找不到 makensis 会静默跳过
+          # 安装器生成；显式加入 GITHUB_PATH（后续步骤均为 shell: bash）
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+          echo "C:\Program Files\NSIS" >> "$GITHUB_PATH"
 
       - name: Resolve version
         id: ver
