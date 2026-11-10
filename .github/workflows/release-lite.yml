@@ -348,8 +348,13 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
+          # 只上传文件模式：Linux 打包会留下同名暂存目录，
+          # 目录被合并进 release job 后 gh 上传资产会报 "is a directory"
           path: |
-            WeKnora-Lite-App_*
+            WeKnora-Lite-App_*.tar.gz
+            WeKnora-Lite-App_*.tar.gz.sha256
+            WeKnora-Lite-App_*_setup.exe
+            WeKnora-Lite-App_*_setup.exe.sha256
           retention-days: 3
 
   # ── 3. Create GitHub Release ──
@@ -510,6 +515,18 @@ jobs:
             build-essential pkg-config file xz-utils unzip curl ca-certificates git \
             libgtk-3-dev libwebkit2gtk-4.0-dev libnss3-dev
 
+      # duckdb 预编译静态库用 GCC11+ 构建（含 std::__throw_bad_array_new_length），
+      # focal 系统的 GCC9/libstdc++ 链接不了。装 toolchain PPA 的 GCC12（仍是
+      # glibc 2.31 基线）；产出的二进制运行时需要 libstdc++6 >= 11——麒麟归档
+      # 没有，deb 里打私有副本（/opt/weknora-lite/lib + 包装脚本 LD_LIBRARY_PATH，
+      # 不触碰系统组件）
+      - name: Install GCC-12 (toolchain PPA)
+        run: |
+          apt-get install -y --no-install-recommends software-properties-common gnupg
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          apt-get install -y --no-install-recommends gcc-12 g++-12
+
       - name: Install Go
         run: |
           curl -sSL -o /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz"
@@ -542,6 +559,8 @@ jobs:
         run: |
           export EDITION=lite
           export CGO_ENABLED=1
+          export CC=gcc-12
+          export CXX=g++-12
           export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
           export CGO_CFLAGS="-Wno-deprecated-declarations"
           eval "$(./scripts/get_version.sh env)"
@@ -567,6 +586,10 @@ jobs:
             "$ROOT/usr/share/applications" "$ROOT/usr/share/icons/hicolor/512x512/apps"
 
           cp "cmd/desktop/build/bin/weknora-lite" "$OPT/weknora-lite"
+          # GCC12 构建产物的 C++ 运行时：麒麟归档没有 libstdc++6 >= 11，
+          # 打私有副本进应用目录（LD_LIBRARY_PATH 解析，不触碰系统组件）
+          mkdir -p "$OPT/lib"
+          cp -a /usr/lib/aarch64-linux-gnu/libstdc++.so.6* "$OPT/lib/"
           if [ -f .env.lite.example ]; then cp .env.lite.example "$OPT/.env"; fi
           if [ -d config ]; then cp -r config "$OPT/config"; fi
           if [ -d migrations/sqlite ]; then
@@ -586,6 +609,7 @@ jobs:
           cat > "$ROOT/usr/bin/weknora-lite" <<'LAUNCH'
           #!/bin/bash
           export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
+          export LD_LIBRARY_PATH="/opt/weknora-lite/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           CFG="${XDG_CONFIG_HOME:-$HOME/.config}/WeKnora Lite"
           mkdir -p "$CFG/logs" 2>/dev/null || true
           export LOG_PATH="$CFG/logs/weknora-lite.log"
@@ -638,11 +662,14 @@ jobs:
           else
             echo "::error::已有包被升级/变更（红线违规）"; exit 1
           fi
-          # ldd 门禁：零 not found
-          if ldd /opt/weknora-lite/weknora-lite | grep "not found"; then
+          # ldd 门禁：零 not found（带包装脚本同款 LD_LIBRARY_PATH），
+          # 且 libstdc++ 必须解析到 deb 私有副本
+          if LD_LIBRARY_PATH=/opt/weknora-lite/lib ldd /opt/weknora-lite/weknora-lite | grep "not found"; then
             echo "::error::ldd 门禁失败：存在 not found"; exit 1
           fi
-          echo "ldd gate ✓"
+          LD_LIBRARY_PATH=/opt/weknora-lite/lib ldd /opt/weknora-lite/weknora-lite | grep "libstdc++" | grep -q "/opt/weknora-lite/lib" || {
+            echo "::error::libstdc++ 未解析到私有副本"; exit 1; }
+          echo "ldd gate ✓ (含私有 libstdc++ 解析)"
           head -c 4 /opt/weknora-lite/.env >/dev/null && test -f /opt/weknora-lite/web/index.html && \
             test -f /opt/weknora-lite/config/config.yaml && echo "payload ✓"
 
