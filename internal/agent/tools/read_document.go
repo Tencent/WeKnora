@@ -685,7 +685,13 @@ func formatFileSize(size int64) string {
 		div *= unit
 		exp++
 	}
-	return fmt.Sprintf("%.1f %cB", float64(size)/float64(div), "KMGTPE"[exp])
+	value := float64(size) / float64(div)
+	// A value just under the next unit rounds up to "1024.0"; show it in the next unit instead.
+	if fmt.Sprintf("%.1f", value) == "1024.0" && exp < len("KMGTPE")-1 {
+		value /= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", value, "KMGTPE"[exp])
 }
 
 func formatParseStatus(status string) string {
