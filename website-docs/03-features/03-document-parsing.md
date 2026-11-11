@@ -322,6 +322,15 @@ Go 服务负责保存图片并执行知识库选定的图片处理流程。v0.9.
 
 知识库还可选择 OCR 图片预处理：`off`（默认关闭）、`auto`（根据观察结果决定是否矫正和裁边）、`always`（对可处理页面执行）。预处理在 Docreader 中进行，繁忙或失败时回退原图，处理轨迹会显示实际结果。部署参数与资源上限见[配置说明](../01-getting-started/04-configuration.md#image-preprocess)。
 
+#### MiniCPM-OCR 接入 {#minicpm-ocr}
+
+MiniCPM-OCR 走的就是上面这条 VLM OCR 路径：docreader 把扫描页渲染成图片，Go 侧把图片交给知识库配置的多模态模型。接入方式取决于部署形态：
+
+- **MiniCPM-OCR 服务（推荐）**：按官方 `webdemo` / SDK 部署后，服务本身完成版面检测、矫正和表格合并，并以 OpenAI 兼容的 `/v1/chat/completions` 暴露页图解析。在 WeKnora 里新建一个 `VLLM` 模型，`base_url` 指向该服务、模型名填 `minicpm-ocr`，再在知识库的 `vlm_config` 中选中它即可；`ocr_prompt` 保持为空。
+- **直接连 vLLM**：MiniCPM-OCR 的识别模型要求固定的识别指令。把 `vlm_config.ocr_prompt` 设为 `Text Recognition:`（表格用 `Table Recognition:`、公式用 `Formula Recognition:`，但后两者需要先做版面切块，整页输入时通常只用前者）。为空时仍使用 WeKnora 内置的通用 OCR 提示词。
+
+`ocr_prompt` 是 OCR 专用字段，只影响 OCR；图片描述仍使用 `custom_instructions`，两者不会互相覆盖。自定义提示词会整体替换内置提示词，需要自行保留「无文本」约定（例如要求模型回复 `No text content`），否则空白页可能生成无效分块。
+
 各解析引擎输出中的内联 HTML `<table>`（常见于 MinerU、PaddleOCR-VL 与 VLM OCR）会在分块前统一转换为 Markdown 表格；含合并单元格等无法转换的表格保留 HTML，但每行单独成行，保证分块器能在行边界切分。**docreader 内没有任何 VLM 调用**；`models/read_config.py` 中的 `vlm_config`/`storage_config` 字段只是为了老构造函数签名兼容而保留的空壳（"Legacy config kept for backward compatibility"）。
 
 ---
