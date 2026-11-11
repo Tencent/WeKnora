@@ -244,10 +244,10 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   }
 
   /** 并行预取对话输入栏及列表页常用的空间级资源 */
-  async function prefetchChatInput(force = false): Promise<void> {
+  async function prefetchChatInput(force = false, { includeKnowledgeBases = true } = {}): Promise<void> {
     const orgStore = useOrganizationStore()
     await Promise.all([
-      ensureKnowledgeBases(force),
+      includeKnowledgeBases ? ensureKnowledgeBases(force) : undefined,
       ensureAgents(force),
       ensureModels(force),
       ensureWebSearchProviders(force),

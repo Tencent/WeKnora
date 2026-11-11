@@ -676,7 +676,9 @@ func (p *kbListPage) slice(kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
 }
 
 type knowledgeBaseDashboardLister interface {
-	ListKnowledgeBasesForDashboard(context.Context, func([]*types.KnowledgeBase) []*types.KnowledgeBase) ([]*types.KnowledgeBase, error)
+	ListKnowledgeBasesForDashboard(
+		context.Context, func([]*types.KnowledgeBase) []*types.KnowledgeBase,
+	) ([]*types.KnowledgeBase, error)
 }
 
 // ListKnowledgeBases godoc

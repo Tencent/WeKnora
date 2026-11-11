@@ -97,9 +97,10 @@ func (r *knowledgeBaseRepository) FillKnowledgeBaseListCounts(
 			ProcessingCount int64
 		}
 		err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-			Select("knowledge_base_id, COUNT(*) AS document_count, SUM(CASE WHEN parse_status IN (?, ?) THEN 1 ELSE 0 END) AS processing_count",
-				"pending", "processing").
-			Where("tenant_id = ? AND knowledge_base_id IN ? AND parse_status <> ?", tenantID, ids, types.ParseStatusDeleting).
+			Select("knowledge_base_id, COUNT(*) AS document_count, "+
+				"SUM(CASE WHEN parse_status IN (?, ?) THEN 1 ELSE 0 END) AS processing_count", "pending", "processing").
+			Where("tenant_id = ? AND knowledge_base_id IN ?", tenantID, ids).
+			Where("parse_status <> ?", types.ParseStatusDeleting).
 			Group("knowledge_base_id").Scan(&documents).Error
 		if err != nil {
 			countErr = errors.Join(countErr, err)
