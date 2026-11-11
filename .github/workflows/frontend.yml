@@ -50,6 +50,11 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Check locale purity
+        run: |
+          python3 -m pip install --quiet opencc
+          python3 ../scripts/i18n/check-locales.py
+
       - name: Type-check
         run: npm run type-check
 
