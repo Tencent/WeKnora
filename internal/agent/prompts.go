@@ -404,6 +404,19 @@ func formatToolGuidanceWithDesktop(
 		"after something relevant changes. Do not bypass permission or policy denials. For missing " +
 		"capabilities, an authorized equivalent tool may be used if it respects the user's source " +
 		"selection. Report a blocker only when it cannot be resolved within the task.\n")
+	if has("run_javascript") {
+		b.WriteString("Orchestration: default to direct tool calls. Use run_javascript only when " +
+			"the work is mechanical and needs at least two dependent calls, pagination/loops over " +
+			"one result set, or filtering/aggregation that would otherwise put several raw results " +
+			"in context. One script should cover the whole mechanical step. For data exports, fetch " +
+			"inside the script, write the structured file with sandbox.writeJSON or " +
+			"tools.write_sandbox_file, and run conversion commands with tools.shell_exec; return " +
+			"only the summary and output path. If data came from an earlier call, pass its call_id " +
+			"in inputs; never paste it. Do not use it for a single call; exploratory steps where " +
+			"you must read each result before choosing the next call; independent calls that can " +
+			"be issued together; ask_user/confirmations/secure forms; or image/attachment reads. " +
+			"Inside a script, check r.success, surface failures, and return compact final data.\n")
+	}
 	if has("read_file") {
 		b.WriteString("Use read_file for workspace files, saved web:// pages and listed skill:// resources. " +
 			"In older instructions, translate read_skill(skill_name, file_path) to " +

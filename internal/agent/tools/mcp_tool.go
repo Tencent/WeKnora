@@ -213,6 +213,15 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 			// even if the tool stopped requiring approval meanwhile, since the
 			// user may have edited the arguments.
 			resumed := meta.Answered != nil && meta.Answered.Kind == types.AgentPromptKindToolApproval
+			if !resumed && meta.Scripted {
+				// A run_javascript call has no surface for the approval card.
+				// Refuse instead of blocking the script.
+				return &types.ToolResult{
+					Success: false,
+					Error: "this tool changes data and needs the user's confirmation; " +
+						"call it directly from the conversation.",
+				}, nil
+			}
 			if resumed || verdict == policy.Ask {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
 				// human approval can legitimately wait longer than the per-tool 60s.

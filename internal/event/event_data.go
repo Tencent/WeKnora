@@ -196,6 +196,20 @@ type AgentToolResultData struct {
 	Data       map[string]interface{} `json:"data,omitempty"` // Structured data from tool result (e.g., display_type, formatted results)
 }
 
+// JavaScriptProgressData describes one nested tool call of a run_javascript
+// script. Phase is "start" or "result"; the result phase carries the outcome.
+type JavaScriptProgressData struct {
+	ToolCallID   string `json:"tool_call_id"`   // outer run_javascript call
+	NestedCallID string `json:"nested_call_id"` // stable id for this nested call
+	ToolName     string `json:"tool_name"`
+	Phase        string `json:"phase"` // start | result
+	Index        int    `json:"index"` // 1-based position in the script
+	Success      bool   `json:"success,omitempty"`
+	DurationMS   int64  `json:"duration_ms,omitempty"`
+	Chars        int    `json:"chars,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
 // AgentReferencesData represents knowledge references data
 type AgentReferencesData struct {
 	References interface{} `json:"references"` // []*types.SearchResult

@@ -44,7 +44,10 @@ const hostPreviewLimit = 64 << 10
 // sandbox times each command itself.
 func (h HostApprovals) attach(ctx context.Context, port sandbox.CommandApproval) context.Context {
 	meta, ok := ToolExecFromContext(ctx)
-	if !ok || meta.EventBus == nil {
+	if !ok || meta.EventBus == nil || meta.Scripted {
+		// A script has no surface for a host approval card. Leave the port
+		// without an approver so the sandbox refuses the command rather than
+		// silently running it or blocking the run.
 		return sandbox.WithCommandApproval(ctx, port)
 	}
 	tenantID, _ := types.TenantIDFromContext(ctx)

@@ -19,6 +19,7 @@ require (
 	github.com/duckdb/duckdb-go/v2 v2.10502.0
 	github.com/elastic/go-elasticsearch/v7 v7.17.10
 	github.com/elastic/go-elasticsearch/v8 v8.19.6
+	github.com/fastschema/qjs v0.0.6
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-openapi/strfmt v0.26.2
@@ -95,7 +96,10 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-require github.com/metakeule/fmtdate v1.1.2 // indirect
+require (
+	github.com/metakeule/fmtdate v1.1.2 // indirect
+	github.com/tetratelabs/wazero v1.9.0 // indirect
+)
 
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect

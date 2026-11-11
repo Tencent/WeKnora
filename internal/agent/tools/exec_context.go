@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -38,6 +39,15 @@ type ToolExecContext struct {
 	// Mode says whether the client can show and answer prompts; IM and
 	// MCP-server runs have no such surface.
 	Mode types.RunMode
+	// Scripted marks a call made by run_javascript rather than by the model.
+	// A script has no client surface to answer a prompt, so approval and
+	// question gates fail closed instead of suspending the run.
+	Scripted bool
+	// DecodeNestedArgs applies the request's model-handle and MCP identity
+	// decoding to a tool call made from inside a script. The engine normally
+	// decodes only top-level calls; without this, a tool_ref or source handle
+	// written inside the script would reach the tool undecoded.
+	DecodeNestedArgs func(toolName string, args json.RawMessage) json.RawMessage
 }
 
 // Attended reports whether a client can answer prompts now.

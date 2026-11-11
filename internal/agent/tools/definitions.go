@@ -11,6 +11,7 @@ const (
 	ToolCallMCPTool      = "call_mcp_tool"
 	ToolThinking         = "thinking"
 	ToolTodoWrite        = "todo_write"
+	ToolRunJavaScript    = "run_javascript"
 	// ToolAskUser asks the user a question through a card and waits for the
 	// answer; the run may suspend until it arrives.
 	ToolAskUser = "ask_user"
@@ -122,6 +123,12 @@ func AvailableToolDefinitions() []AvailableTool {
 	return []AvailableTool{
 		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具", Group: ToolGroupBase},
 		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划", Group: ToolGroupBase},
+		{
+			Name:        ToolRunJavaScript,
+			Label:       "工具编排",
+			Description: "用脚本循环、过滤和聚合多个工具调用，中间结果不进入上下文",
+			Group:       ToolGroupBase,
+		},
 		{Name: ToolAskUser, Label: "向用户提问", Description: "需要用户补充信息或做选择时，弹出卡片等待回答", Group: ToolGroupBase},
 		{
 			Name:        ToolSearchConversations,

@@ -1417,6 +1417,37 @@ func (e *AgentEngine) runReActIteration(
 	return iterOutcomeNext, nil
 }
 
+// toolResultLookup snapshots completed tool results before a round starts, so
+// run_javascript inputs can reference earlier calls without sharing mutable
+// state with concurrent tool execution.
+func (e *AgentEngine) toolResultLookup(
+	state *types.AgentState, current *types.AgentStep,
+) agenttools.ToolResultLookup {
+	values := make(map[string]json.RawMessage)
+	add := func(calls []types.ToolCall) {
+		for _, call := range calls {
+			if raw := agenttools.ToolResultInputValueForTool(call.Name, call.Result); raw != nil {
+				values[call.ID] = raw
+			}
+		}
+	}
+	if state != nil {
+		for i := range state.RoundSteps {
+			add(state.RoundSteps[i].ToolCalls)
+		}
+	}
+	if current != nil {
+		add(current.ToolCalls)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return func(callID string) (json.RawMessage, bool) {
+		raw, ok := values[strings.TrimSpace(callID)]
+		return raw, ok
+	}
+}
+
 // runRoundTools executes the round's tool calls and reports whether the run
 // suspended on a prompt.
 func (e *AgentEngine) runRoundTools(
@@ -1426,6 +1457,7 @@ func (e *AgentEngine) runRoundTools(
 	step *types.AgentStep,
 	sessionID, assistantMessageID string,
 ) bool {
+	ctx = agenttools.WithToolResultLookup(ctx, e.toolResultLookup(state, step))
 	e.beginRound(*step, response.ToolCalls)
 	suspended := e.executeToolCalls(ctx, response, step, state.CurrentRound, sessionID, assistantMessageID)
 	e.endRound()

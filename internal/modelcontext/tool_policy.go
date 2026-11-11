@@ -69,7 +69,15 @@ type toolHandlePolicy struct {
 var toolHandlePolicies = map[string]toolHandlePolicy{
 	"discover_mcp_tools": {opaqueOutput: true, mcpRoutingKey: "server_id", mcpDirectoryOutput: true},
 	"call_mcp_tool":      {opaqueOutput: true, mcpRoutingKey: "tool_ref"},
-	"read_file":          {},
+	// run_javascript embeds tool arguments inside a script body, so source
+	// handles in the code must become bare durable IDs before the nested tool
+	// sees them. The script's returned value can hold durable IDs from those
+	// nested results; sourceOutput compacts them back into model handles.
+	"run_javascript": {
+		sourceTextKeys: map[string]struct{}{"code": {}},
+		sourceOutput:   true,
+	},
+	"read_file": {},
 	"search_knowledge": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,

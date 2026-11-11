@@ -1272,6 +1272,39 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
+      case 'javascript_progress': {
+        const outerId = dataPayload?.tool_call_id as string | undefined
+        if (!outerId) break
+        const toolEvent = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+          event => event.type === 'tool_call' && event.tool_call_id === outerId,
+        )
+        if (!toolEvent) break
+        const progress = Array.isArray(toolEvent.js_progress)
+          ? toolEvent.js_progress as ChatMessage[]
+          : []
+        if (!Array.isArray(toolEvent.js_progress)) toolEvent.js_progress = progress
+        const nestedId = String(
+          dataPayload?.nested_call_id || `${outerId}-js-${dataPayload?.index ?? 0}`,
+        )
+        const item = {
+          nested_call_id: nestedId,
+          tool_name: dataPayload?.tool_name,
+          phase: dataPayload?.phase,
+          index: dataPayload?.index,
+          success: dataPayload?.success,
+          duration_ms: dataPayload?.duration_ms,
+          chars: dataPayload?.chars,
+          error: dataPayload?.error,
+        }
+        const existing = progress.find(entry => entry.nested_call_id === nestedId)
+        if (existing) {
+          if (existing.phase === 'result' && item.phase === 'start') break
+          Object.assign(existing, item)
+        } else {
+          progress.push(item)
+        }
+        break
+      }
       case 'work_event': {
         const inner = dataPayload?.inner as { response_type?: string; data?: ChatMessage } | undefined
         if (inner?.response_type === 'command_output' && inner.data?.tool_call_id) {
@@ -1706,6 +1739,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'tool_call' ||
       data.response_type === 'tool_result' ||
       data.response_type === 'command_output' ||
+      data.response_type === 'javascript_progress' ||
       data.response_type === 'work_event' ||
       data.response_type === 'work_started' ||
       data.response_type === 'work_finished' ||
