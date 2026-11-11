@@ -1707,6 +1707,8 @@ export default {
       wechat: 'WeChat',
       qqbot: 'QQBot',
       yunzhijia: 'Yunzhijia',
+      line: 'LINE',
+      lineConsole: 'Консоль разработчика LINE',
       addChannel: 'Добавить канал',
       channelsTitle: 'IM-каналы',
       disabled: 'Отключено',
