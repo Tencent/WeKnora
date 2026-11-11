@@ -406,7 +406,7 @@ func (e *jsExecution) run(code string) *types.ToolResult {
 	// still giving the WASI preopen something to mount. Restore the mode
 	// before cleanup so RemoveAll can unlink the tree.
 	if chmodErr := os.Chmod(workDir, 0o500); chmodErr != nil {
-		os.RemoveAll(workDir)
+		_ = os.RemoveAll(workDir)
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to prepare script sandbox: %v", chmodErr)}
 	}
 	defer func() {
@@ -459,7 +459,7 @@ func (e *jsExecution) run(code string) *types.ToolResult {
 		" } catch (err) { globalThis.__error = __qjs_error(err); }" +
 		" }, err => { globalThis.__error = __qjs_error(err); });"
 
-	evalErr, runtimeBroken := evalQJS(runtime, wrapped)
+	runtimeBroken, evalErr := evalQJS(runtime, wrapped)
 	scriptErr := e.scriptError(evalErr, runtimeBroken)
 	if scriptErr != "" {
 		return e.failure(scriptErr)
@@ -492,7 +492,7 @@ func closeQJSRuntime(runtime *qjs.Runtime) {
 // evalQJS turns qjs's panic-on-context-cancellation into an error. A panic
 // leaves the WASM module closed, so callers must not touch runtime values
 // afterwards.
-func evalQJS(runtime *qjs.Runtime, code string) (err error, broken bool) {
+func evalQJS(runtime *qjs.Runtime, code string) (broken bool, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("%v", recovered)
@@ -500,11 +500,11 @@ func evalQJS(runtime *qjs.Runtime, code string) (err error, broken bool) {
 		}
 	}()
 	_, err = runtime.Eval("run_javascript.js", qjs.Code(code))
-	return err, false
+	return false, err
 }
 
 func (e *jsExecution) installGlobals() error {
-	if evalErr, _ := evalQJS(e.runtime, javascriptHardening); evalErr != nil {
+	if _, evalErr := evalQJS(e.runtime, javascriptHardening); evalErr != nil {
 		return fmt.Errorf("failed to prepare the JavaScript sandbox: %v", evalErr)
 	}
 
@@ -607,13 +607,15 @@ func (e *jsExecution) installSandboxHelpers() error {
 	// arguments, while JSON.stringify/parse already exist in the engine.
 	var helpers []string
 	if canWrite {
-		helpers = append(helpers, "sandbox.writeJSON = (path, value) => sandbox.writeText(path, JSON.stringify(value));")
+		helpers = append(helpers,
+			"sandbox.writeJSON = (path, value) => "+
+				"sandbox.writeText(path, JSON.stringify(value));")
 	}
 	if canRead {
 		helpers = append(helpers, "sandbox.readJSON = (path) => JSON.parse(sandbox.readText(path));")
 	}
 	if len(helpers) > 0 {
-		if err, _ := evalQJS(e.runtime, strings.Join(helpers, "\n")); err != nil {
+		if _, err := evalQJS(e.runtime, strings.Join(helpers, "\n")); err != nil {
 			return fmt.Errorf("failed to install sandbox helpers: %v", err)
 		}
 	}

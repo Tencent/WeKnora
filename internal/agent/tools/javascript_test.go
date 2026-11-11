@@ -59,11 +59,20 @@ func newScriptTestRegistry() *ToolRegistry {
 	return registry
 }
 
+func scriptArgs(code string) json.RawMessage {
+	raw, err := json.Marshal(map[string]string{"code": code})
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
 func TestJavaScriptComposesToolsWithoutLeakingNestedOutput(t *testing.T) {
 	tool := NewJavaScriptTool(newScriptTestRegistry())
-	result, err := tool.Execute(context.Background(), json.RawMessage(`{
-		"code": "const a = await tools.search_knowledge({query:'x'}); const b = await tools.search_knowledge({query:'y'}); return [a.data.results[0].title, b.data.results[0].title];"
-	}`))
+	result, err := tool.Execute(context.Background(), scriptArgs(
+		"const a = await tools.search_knowledge({query:'x'}); "+
+			"const b = await tools.search_knowledge({query:'y'}); "+
+			"return [a.data.results[0].title, b.data.results[0].title];"))
 
 	require.NoError(t, err)
 	require.True(t, result.Success)
@@ -176,9 +185,10 @@ func TestJavaScriptCollectsOutputFilesAndLogs(t *testing.T) {
 	}))
 	tool := NewJavaScriptTool(registry)
 
-	result, err := tool.Execute(context.Background(), json.RawMessage(`{
-		"code": "console.log('start', {step: 1}); await tools.write_artifact({}); await tools.write_artifact({}); console.warn('done'); return 'ok';"
-	}`))
+	result, err := tool.Execute(context.Background(), scriptArgs(
+		"console.log('start', {step: 1}); "+
+			"await tools.write_artifact({}); await tools.write_artifact({}); "+
+			"console.warn('done'); return 'ok';"))
 
 	require.NoError(t, err)
 	require.True(t, result.Success)
@@ -226,9 +236,11 @@ func TestJavaScriptNestedCallsAreMarkedScripted(t *testing.T) {
 
 func TestJavaScriptRemovesSandboxEscapeGlobals(t *testing.T) {
 	tool := NewJavaScriptTool(newScriptTestRegistry())
-	result, err := tool.Execute(context.Background(), json.RawMessage(`{
-		"code": "return [typeof std, typeof os, typeof eval, typeof Function, typeof ({}).constructor.constructor, typeof (async function(){}).constructor, typeof (function*(){}).constructor].join(',');"
-	}`))
+	result, err := tool.Execute(context.Background(), scriptArgs(
+		"return [typeof std, typeof os, typeof eval, typeof Function, "+
+			"typeof ({}).constructor.constructor, "+
+			"typeof (async function(){}).constructor, "+
+			"typeof (function*(){}).constructor].join(',');"))
 
 	require.NoError(t, err)
 	require.True(t, result.Success)
@@ -251,9 +263,9 @@ func TestJavaScriptThroughRegistry(t *testing.T) {
 	registry := newScriptTestRegistry()
 	registry.RegisterTool(NewJavaScriptTool(registry))
 
-	result, err := registry.ExecuteTool(context.Background(), ToolRunJavaScript, json.RawMessage(`{
-		"code": "return {title: (await tools.search_knowledge({query:'x'})).data.results[0].title, canRecurse: typeof tools.run_javascript};"
-	}`))
+	result, err := registry.ExecuteTool(context.Background(), ToolRunJavaScript, scriptArgs(
+		"return {title: (await tools.search_knowledge({query:'x'})).data.results[0].title, "+
+			"canRecurse: typeof tools.run_javascript};"))
 
 	require.NoError(t, err)
 	require.True(t, result.Success)
@@ -316,9 +328,9 @@ func TestJavaScriptSandboxJSONHelpers(t *testing.T) {
 	}))
 	tool := NewJavaScriptTool(registry)
 
-	result, err := tool.Execute(context.Background(), json.RawMessage(`{
-		"code": "await sandbox.writeJSON('/workspace/data.json', {a: 7}); const v = await sandbox.readJSON('/workspace/data.json'); return v.a;"
-	}`))
+	result, err := tool.Execute(context.Background(), scriptArgs(
+		"await sandbox.writeJSON('/workspace/data.json', {a: 7}); "+
+			"const v = await sandbox.readJSON('/workspace/data.json'); return v.a;"))
 
 	require.NoError(t, err)
 	require.True(t, result.Success, result.Error+"\n"+result.Output)
