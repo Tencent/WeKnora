@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -180,6 +181,18 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
+	// A synthesis that produced only whitespace, or only a  thinking block, has no
+	// visible answer to show. Returning nil here would complete the turn with an
+	// empty bubble and skip the caller's failure fallback (issue #5386). Keep the
+	// error observable so handleMaxIterations can persist a visible explanation.
+	if strings.TrimSpace(fullAnswer) == "" {
+		common.PipelineError(ctx, "Agent", "final_answer_empty_synthesis", map[string]interface{}{
+			"session_id": sessionID,
+			"finish":     llmResult.FinishReason,
+		})
+		return fmt.Errorf("final answer synthesis produced an empty visible answer (finish=%s)",
+			llmResult.FinishReason)
+	}
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,
 		"answer_len": len(fullAnswer),
