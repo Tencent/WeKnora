@@ -59,3 +59,23 @@ func TestCreateIMChannelRejectsUnsupportedLocale(t *testing.T) {
 		t.Fatalf("body = %s, want locale validation error", recorder.Body.String())
 	}
 }
+
+func TestCreateIMChannelRejectsInvalidLanguageMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/agents/:id/im-channels", NewIMHandler(nil).CreateIMChannel)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/agents/agent-1/im-channels",
+		strings.NewReader(`{"platform":"feishu","language_mode":"auto"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(context.WithValue(req.Context(), types.TenantIDContextKey, uint64(42)))
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "language_mode must be") {
+		t.Fatalf("status = %d, body = %s; want language mode validation error", recorder.Code, recorder.Body.String())
+	}
+}
