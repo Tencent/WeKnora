@@ -2533,6 +2533,7 @@ const keepAllowedToolsUnset = ref(false);
 const toolTexts = computed<Record<string, ToolText>>(() => ({
   thinking: { label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc') },
   todo_write: { label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc') },
+  run_javascript: { label: t('agentEditor.tools.runJavascript'), description: t('agentEditor.tools.runJavascriptDesc') },
   ask_user: { label: t('agentEditor.tools.askUser'), description: t('agentEditor.tools.askUserDesc') },
   search_conversations: { label: t('agentEditor.tools.searchConversations'), description: t('agentEditor.tools.searchConversationsDesc') },
   search_knowledge: { label: t('agentEditor.tools.searchKnowledge'), description: t('agentEditor.tools.searchKnowledgeDesc') },

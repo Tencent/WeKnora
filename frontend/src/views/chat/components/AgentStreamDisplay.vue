@@ -239,6 +239,11 @@
                     </div>
                   </div>
 
+                  <div v-if="event.tool_name === 'run_javascript' && getJavaScriptSummary(event)"
+                    class="search-results-summary-fixed js-tool-summary">
+                    <div class="results-summary-text">{{ getJavaScriptSummary(event) }}</div>
+                  </div>
+
                   <div
                     v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data"
                     class="search-results-summary-fixed">
@@ -278,9 +283,10 @@
                     <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
                   </div>
 
-                    <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
+                    <div v-if="isEventExpanded(event.tool_call_id) && (!event.pending || event.tool_name === 'run_javascript') && hasExpandableResults(event)"
                     class="action-details">
                     <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
+                    <JavaScriptToolDetails v-else-if="event.tool_name === 'run_javascript'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
                         :output="toolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
@@ -651,6 +657,11 @@
                   </div>
                 </div>
 
+                <div v-if="event.tool_name === 'run_javascript' && getJavaScriptSummary(event)"
+                  class="search-results-summary-fixed js-tool-summary">
+                  <div class="results-summary-text">{{ getJavaScriptSummary(event) }}</div>
+                </div>
+
                 <div
                   v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data"
                   class="search-results-summary-fixed">
@@ -690,9 +701,10 @@
                   <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
                 </div>
 
-                <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
+                <div v-if="isEventExpanded(event.tool_call_id) && (!event.pending || event.tool_name === 'run_javascript') && hasExpandableResults(event)"
                   class="action-details">
                   <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
+                  <JavaScriptToolDetails v-else-if="event.tool_name === 'run_javascript'" :event="event" />
                     <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
                       :output="toolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
@@ -897,6 +909,8 @@ import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
 
 import BrowserToolDetails from './BrowserToolDetails.vue';
+import JavaScriptToolDetails from './JavaScriptToolDetails.vue';
+import { parseJavaScriptEvent } from '@/utils/javascriptTool';
 import { browserToolTitle } from '@/utils/browserToolDisplay';
 const getToolIconName = getAgentToolIconName;
 
@@ -956,6 +970,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   shell_exec_async: 'agentStream.tools.shellExec',
   local_browser: 'localBrowser.local',
   data_analysis: 'agentStream.tools.dataAnalysis',
+  run_javascript: 'agentStream.tools.runJavascript',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
   find_operations: 'agentStream.tools.findOperations',
@@ -973,6 +988,19 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   fill_page: 'agentStream.tools.fillPage',
   search_weknora_docs: 'agentStream.tools.searchWeKnoraDocs',
   read_weknora_doc: 'agentStream.tools.readWeKnoraDoc',
+};
+
+const getJavaScriptSummary = (event: any): string => {
+  const view = parseJavaScriptEvent(event);
+  const parts: string[] = [];
+  if (view.lineCount) parts.push(t('agentStream.javascript.lines', { count: view.lineCount }));
+  if (event?.pending) {
+    parts.push(t('agentStream.javascript.running'));
+  } else {
+    if (view.calls.length) parts.push(t('agentStream.javascript.callCount', { count: view.calls.length }));
+    if (view.failedCalls) parts.push(t('agentStream.javascript.failedCount', { count: view.failedCalls }));
+  }
+  return parts.join(' · ');
 };
 
 const getLocalizedToolName = (toolName?: string | null): string => {
