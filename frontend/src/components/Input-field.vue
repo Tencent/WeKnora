@@ -2171,14 +2171,13 @@ onMounted(() => {
     settingsStore.addKnowledgeBase(kbId);
   }
 
-  const prefill = menuStore.consumePrefillQuery();
-  if (prefill) {
-    query.value = prefill;
-    nextTick(() => {
-      const textarea = getTextareaEl();
-      if (textarea) textarea.focus();
-    });
-  }
+  // Searches can target this already-mounted composer.
+  watch(() => menuStore.prefillQuery, (prefill) => {
+    if (!prefill || route.path !== '/platform/creatChat') return;
+    query.value = menuStore.consumePrefillQuery();
+    // Let the closing search panel finish its autofocus before taking focus.
+    requestAnimationFrame(() => { void focusInput(); });
+  }, { immediate: true });
 
   // 监听点击外部关闭下拉菜单
   document.addEventListener('click', closeAgentModeSelector);
