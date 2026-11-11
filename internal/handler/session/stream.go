@@ -374,6 +374,9 @@ func (h *Handler) handleAgentEventsForSSE(
 	defer heartbeat.Stop()
 
 	lastOffset := 0
+	// Titles can arrive many polls before completion. Remember them for the
+	// lifetime of this connection, not just the current event batch.
+	titleReceived := false
 	log := logger.GetLogger(ctx)
 	// Agent mode releases the sandbox turn lease, and therefore cancels ctx,
 	// before the completion event is published. Polling Redis with that
@@ -407,7 +410,6 @@ func (h *Handler) handleAgentEventsForSSE(
 
 			// Send any new events
 			streamCompleted := false
-			titleReceived := false
 			for _, evt := range events {
 				// Check for stop event
 				if evt.Type == types.ResponseType(event.EventStop) {
