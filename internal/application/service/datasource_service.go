@@ -1018,6 +1018,10 @@ func (s *DataSourceService) applyFetchedItem(
 			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
 			result.Skipped++
+		case errors.Is(err, errNoKnowledgeToEmpty):
+			logger.Infof(ctx, "skipping emptied item %q (external_id=%s): no knowledge to update",
+				item.Title, item.ExternalID)
+			result.Skipped++
 		case errors.Is(err, ErrInvalidFileType):
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
@@ -1467,6 +1471,10 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 	return connector.Validate(ctx, config)
 }
 
+// errNoKnowledgeToEmpty marks an emptied in-place item whose knowledge no longer
+// exists (e.g. it was deleted by hand): there is nothing to update or create.
+var errNoKnowledgeToEmpty = errors.New("emptied item has no knowledge to update")
+
 // ingestItem writes a single FetchedItem into the knowledge base.
 // Existing datasource items are replaced atomically at the knowledge-row boundary.
 // Items that set UpdateInPlace instead update an existing file knowledge and keep
@@ -1553,6 +1561,10 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			}
 			return err == nil, err
 		}
+	}
+
+	if item.UpdateInPlace && len(item.Content) == 0 && item.URL == "" {
+		return false, errNoKnowledgeToEmpty
 	}
 
 	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile

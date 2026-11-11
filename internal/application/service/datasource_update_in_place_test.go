@@ -144,6 +144,21 @@ func TestApplyFetchedItem_EmptiedFileReplacesExistingKnowledgeInPlace(t *testing
 	assert.Equal(t, []string{"replace:k-1:notes/a.md"}, ks.calls, "same identity, old content replaced")
 }
 
+func TestApplyFetchedItem_EmptiedFileWithoutKnowledgeIsSkippedNotFailed(t *testing.T) {
+	ks := &inPlaceKS{repo: &deletionLookupKnowledgeRepo{}}
+	svc := &DataSourceService{knowledgeService: ks}
+	item := inPlaceItem(true)
+	item.Content = nil
+	result := &types.SyncResult{}
+
+	_, err := svc.applyFetchedItem(context.Background(), inPlaceDataSource, item, nil, result)
+
+	require.NoError(t, err, "must not abort the stream and pin the cursor on this file")
+	assert.Equal(t, 1, result.Skipped)
+	assert.Zero(t, result.Failed)
+	assert.Empty(t, ks.calls)
+}
+
 func TestApplyFetchedItem_EmptyItemWithoutUpdateInPlaceIsStillSkipped(t *testing.T) {
 	repo := &deletionLookupKnowledgeRepo{knowledge: &types.Knowledge{ID: "k-1", Type: "file"}}
 	ks := &inPlaceKS{repo: repo}
