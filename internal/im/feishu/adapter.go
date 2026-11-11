@@ -64,6 +64,15 @@ type Adapter struct {
 	// deployments that cannot reach open.feishu.cn directly.
 	apiBaseURL string
 
+	// replyInThread, when true, makes group-chat replies pass
+	// reply_in_thread=true to the reply-message API so Feishu anchors the
+	// exchange on the user's message as a topic (话题) — the reply shows as
+	// "N 条话题回复" instead of a plain "N 条回复" thread, mirroring the
+	// client's "创建话题" behavior. Direct chats have no topic form, so the
+	// flag is ignored there. Off by default; enabled per channel via the
+	// reply_in_thread credential.
+	replyInThread bool
+
 	// Token cache
 	tokenMu    sync.Mutex
 	tokenCache string
@@ -76,10 +85,23 @@ type Adapter struct {
 	botOpenID   string
 }
 
+// AdapterOption customizes optional Adapter behavior. Options keep the
+// positional-argument constructor source-compatible for existing callers.
+type AdapterOption func(*Adapter)
+
+// WithReplyInThread toggles topic-form replies for group chats (see the
+// replyInThread field comment for the exact wire behavior).
+func WithReplyInThread(v bool) AdapterOption {
+	return func(a *Adapter) { a.replyInThread = v }
+}
+
 // NewAdapter creates a new adapter for the given region (RegionFeishu or RegionLark).
 // apiBaseURL overrides the Open Platform API origin (empty uses the region
 // default); it is validated for scheme and SSRF safety before use.
-func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey, apiBaseURL string) (*Adapter, error) {
+func NewAdapter(
+	region Region, appID, appSecret, verificationToken, encryptKey, apiBaseURL string,
+	opts ...AdapterOption,
+) (*Adapter, error) {
 	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
 	if err := validateAPIBaseURL(apiBaseURL, region.OpenBaseURL); err != nil {
 		return nil, err
@@ -88,14 +110,18 @@ func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey, 
 		apiBaseURL = region.OpenBaseURL
 	}
 	startStreamReaper()
-	return &Adapter{
+	a := &Adapter{
 		region:            region,
 		appID:             appID,
 		appSecret:         appSecret,
 		verificationToken: verificationToken,
 		encryptKey:        encryptKey,
 		apiBaseURL:        apiBaseURL,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a, nil
 }
 
 // BotOpenID returns the app's own bot open_id, fetching and caching it on the
@@ -603,7 +629,8 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 // reply lands under the original message / thread instead of creating a new
 // top-level message (which, in topic-enabled groups, would spawn a new topic).
 // Feishu automatically replies in thread form when the replied-to message is
-// already a thread message, so we leave reply_in_thread at its default (false).
+// already a thread message, so reply_in_thread stays false unless the channel
+// enables topic-form replies via WithReplyInThread (see replyInThread).
 //
 // If the reply API fails with a fallback-eligible code (e.g. 230071 group does
 // not support reply-in-thread, 230019 topic gone, 230054 unsupported message
@@ -652,6 +679,7 @@ func (a *Adapter) sendTextReply(ctx context.Context, incoming *im.IncomingMessag
 		"msg_type": "text",
 		"content":  string(content),
 	}
+	a.applyReplyInThread(incoming, replyPayload)
 
 	// Fallback payload (plain send-message API) — needs receive_id
 	receiveIDType, receiveID := a.resolveReceiveID(incoming)
@@ -675,6 +703,18 @@ func (a *Adapter) resolveReceiveID(incoming *im.IncomingMessage) (receiveIDType 
 		receiveID = incoming.ChatID
 	}
 	return
+}
+
+// applyReplyInThread marks a reply-API payload as topic-form (话题) when the
+// channel enables it and the chat is a group: Feishu then anchors the reply on
+// the original message and renders the exchange as "N 条话题回复" instead of
+// a plain "N 条回复" thread. Direct chats have no topic form, so the flag is
+// ignored there. Per the reply-message API contract the value is the string
+// "true", not a JSON boolean.
+func (a *Adapter) applyReplyInThread(incoming *im.IncomingMessage, payload map[string]interface{}) {
+	if a.replyInThread && incoming.ChatType == im.ChatTypeGroup {
+		payload["reply_in_thread"] = "true"
+	}
 }
 
 // fallbackEligibleErrorCodes are Feishu API error codes for which replying via
@@ -1148,6 +1188,7 @@ func (a *Adapter) sendCardByCardID(ctx context.Context, accessToken string, inco
 		"msg_type": "interactive",
 		"content":  string(content),
 	}
+	a.applyReplyInThread(incoming, replyPayload)
 	fallbackPayload := map[string]interface{}{
 		"receive_id": receiveID,
 		"msg_type":   "interactive",

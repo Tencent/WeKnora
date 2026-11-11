@@ -136,6 +136,84 @@ func TestSendReply_EndToEnd_UsesRegionCloud(t *testing.T) {
 	}
 }
 
+// When the channel enables topic-form replies, a group reply must carry
+// reply_in_thread=true so Feishu anchors the exchange on the user's message
+// as a topic ("N 条话题回复" instead of a plain "N 条回复" thread).
+func TestSendReply_EndToEnd_ReplyInThreadGroup(t *testing.T) {
+	useTestHTTPClient(t)
+	fake := &fakeOpenPlatform{}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	a, _ := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "", "", WithReplyInThread(true))
+	incoming := &im.IncomingMessage{
+		Platform:  im.PlatformLark,
+		UserID:    "ou_user1",
+		ChatID:    "oc_chat1",
+		ChatType:  im.ChatTypeGroup,
+		MessageID: "om_msg1",
+	}
+
+	if err := a.SendReply(context.Background(), incoming, &im.ReplyMessage{Content: "threaded"}); err != nil {
+		t.Fatalf("SendReply: %v", err)
+	}
+
+	if got := fake.replyBody["reply_in_thread"]; got != "true" {
+		t.Errorf("reply_in_thread = %v, want %q", got, "true")
+	}
+}
+
+// Direct chats have no topic form: an enabled flag must not leak into the
+// payload there.
+func TestSendReply_EndToEnd_ReplyInThreadSkippedInDirectChat(t *testing.T) {
+	useTestHTTPClient(t)
+	fake := &fakeOpenPlatform{}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	a, _ := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "", "", WithReplyInThread(true))
+	incoming := &im.IncomingMessage{
+		Platform:  im.PlatformLark,
+		UserID:    "ou_user1",
+		ChatType:  im.ChatTypeDirect,
+		MessageID: "om_msg1",
+	}
+
+	if err := a.SendReply(context.Background(), incoming, &im.ReplyMessage{Content: "dm"}); err != nil {
+		t.Fatalf("SendReply: %v", err)
+	}
+
+	if _, present := fake.replyBody["reply_in_thread"]; present {
+		t.Errorf("reply_in_thread set in a direct chat: %v", fake.replyBody["reply_in_thread"])
+	}
+}
+
+// The default adapter keeps the historic plain-reply behavior: no
+// reply_in_thread on group replies unless the channel opts in.
+func TestSendReply_EndToEnd_ReplyInThreadDefaultOff(t *testing.T) {
+	useTestHTTPClient(t)
+	fake := &fakeOpenPlatform{}
+	srv := httptest.NewServer(fake.handler())
+	defer srv.Close()
+
+	a, _ := NewAdapter(testRegion(srv.URL), "cli_app", "secret", "", "", "")
+	incoming := &im.IncomingMessage{
+		Platform:  im.PlatformLark,
+		UserID:    "ou_user1",
+		ChatID:    "oc_chat1",
+		ChatType:  im.ChatTypeGroup,
+		MessageID: "om_msg1",
+	}
+
+	if err := a.SendReply(context.Background(), incoming, &im.ReplyMessage{Content: "plain"}); err != nil {
+		t.Fatalf("SendReply: %v", err)
+	}
+
+	if _, present := fake.replyBody["reply_in_thread"]; present {
+		t.Errorf("reply_in_thread set without opt-in: %v", fake.replyBody["reply_in_thread"])
+	}
+}
+
 // A group that rejects reply-in-thread (230071) must still receive the answer
 // via the plain send-message API, addressed to the chat.
 func TestSendReply_EndToEnd_FallsBackToSendAPI(t *testing.T) {

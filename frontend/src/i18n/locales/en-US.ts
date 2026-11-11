@@ -8206,6 +8206,8 @@ export default {
       wecomWSEndpointHint: 'Optional. For private WeCom deployments, enter a custom WebSocket address. Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
       wecomAPIBaseURLHint: 'Optional. For private WeCom deployments, enter a custom API base URL. Leave empty to use the default public cloud endpoint. For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
       feishuAPIBaseURLHint: 'Optional. Leave empty if the server can reach the internet directly; if a proxy is required to access Feishu, enter the reverse proxy URL (e.g. nginx, http://host:port). For internal network addresses, add the hostname to the SSRF_WHITELIST env var.',
+      feishuReplyInThread: 'Reply as Topic (Groups)',
+      feishuReplyInThreadHint: 'When enabled, bot replies in group chats are sent with reply_in_thread=true so each Q&A folds into a Feishu topic anchored on the question message (shown as "N topic replies") instead of a flat reply list. Direct chats are unaffected.',
       fileKnowledgeBase: 'File Storage Knowledge Base',
       fileKnowledgeBasePlaceholder: 'Select a knowledge base (optional)',
       fileKnowledgeBaseHint: 'When configured, files sent by users will be automatically saved to this knowledge base',

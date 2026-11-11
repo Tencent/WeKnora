@@ -8206,6 +8206,8 @@ export default {
       wecomWSEndpointHint: '任意。WeComをセルフホストで導入している場合は、カスタムWebSocketアドレスを入力してください。空欄の場合はデフォルトのパブリッククラウドのエンドポイントを使用します。内部ネットワークのアドレスの場合は、ホスト名をSSRF_WHITELIST環境変数に追加してください。',
       wecomAPIBaseURLHint: '任意。WeComをセルフホストで導入している場合は、カスタムAPIベースURLを入力してください。空欄の場合はデフォルトのパブリッククラウドのエンドポイントを使用します。内部ネットワークのアドレスの場合は、ホスト名をSSRF_WHITELIST環境変数に追加してください。',
       feishuAPIBaseURLHint: '任意。サーバが直接インターネットに接続できる場合は空欄のままにしてください。Feishuへのアクセスにプロキシが必要な場合は、リバースプロキシのURL（例: nginx、http://host:port）を入力してください。内部ネットワークのアドレスの場合は、ホスト名をSSRF_WHITELIST環境変数に追加してください。',
+      feishuReplyInThread: 'グループ返信をトピック化',
+      feishuReplyInThreadHint: '有効にすると、グループチャットでのボットの返信が質問メッセージに紐づくトピックとして送信され（「N 件のトピック返信」と表示）、各Q&Aがフラットな返信ではなく折りたたまれたトピックになります。ダイレクトチャットには影響しません',
       fileKnowledgeBase: 'ファイル保存先ナレッジベース',
       fileKnowledgeBasePlaceholder: 'ナレッジベースを選択（任意）',
       fileKnowledgeBaseHint: '設定すると、ユーザが送信したファイルがこのナレッジベースに自動的に保存されます',
