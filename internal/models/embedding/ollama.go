@@ -3,6 +3,7 @@ package embedding
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -18,7 +19,26 @@ type OllamaEmbedder struct {
 	dimensions                int
 	modelID                   string
 	supportsDimensionOverride bool
+	keepAlive                 *ollamaapi.Duration
 	EmbedderPooler
+}
+
+// parseOllamaEmbeddingKeepAlive leaves the server policy untouched when unset.
+// A finite duration is preferred; -1 and 0 retain Ollama's explicit pin/unload
+// semantics. Do not silently turn a malformed negative duration into a pin.
+func parseOllamaEmbeddingKeepAlive(value string) (*ollamaapi.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	if value == "-1" {
+		return &ollamaapi.Duration{Duration: -1}, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration < 0 {
+		return nil, fmt.Errorf("invalid Ollama embedding keep_alive: use a non-negative duration (e.g. 30m), 0, or -1")
+	}
+	return &ollamaapi.Duration{Duration: duration}, nil
 }
 
 // OllamaEmbedRequest represents an Ollama embedding request
@@ -93,9 +113,10 @@ func (e *OllamaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 
 	// Create request
 	req := &ollamaapi.EmbedRequest{
-		Model:   e.modelName,
-		Input:   texts,
-		Options: make(map[string]interface{}),
+		Model:     e.modelName,
+		Input:     texts,
+		KeepAlive: e.keepAlive,
+		Options:   make(map[string]interface{}),
 	}
 	if e.supportsDimensionOverride && e.dimensions > 0 {
 		req.Dimensions = e.dimensions
