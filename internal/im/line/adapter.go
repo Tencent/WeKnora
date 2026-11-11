@@ -770,6 +770,9 @@ func tableComponents(rows [][]string) []map[string]interface{} {
 	}
 	out := make([]map[string]interface{}, 0, len(rows)*2)
 	for _, line := range keyValueTableLines(rows) {
+		// The card renderer has no span-level styling, so inline markers would
+		// otherwise reach the user as literal ** and ` characters.
+		line = strings.ReplaceAll(strings.ReplaceAll(line, "**", ""), "`", "")
 		out = append(out, map[string]interface{}{
 			"type":   "text",
 			"text":   line,
@@ -808,6 +811,7 @@ func tableGridComponent(rows [][]string) map[string]interface{} {
 			if idx < len(cells) {
 				text = cells[idx]
 			}
+			text = strings.ReplaceAll(strings.ReplaceAll(text, "**", ""), "`", "")
 			cell := map[string]interface{}{
 				"type": "text",
 				"text": text,

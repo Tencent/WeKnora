@@ -222,3 +222,24 @@ func TestLongCellTableFallsBackToKeyValue(t *testing.T) {
 		}
 	}
 }
+
+// TestFlexTableStripsInlineMarkers: card text has no span styling, so bold and
+// code markers in table cells must be removed instead of shown literally.
+func TestFlexTableStripsInlineMarkers(t *testing.T) {
+	grid := "| 項目 | 值 |\n| --- | --- |\n| **插槽** | `32` |\n"
+	for _, c := range markdownToFlexComponents(grid) {
+		if txt, ok := c["text"].(string); ok {
+			if strings.Contains(txt, "**") || strings.Contains(txt, "`") {
+				t.Errorf("marker leaked into card text: %q", txt)
+			}
+		}
+	}
+	kv := "| # | 說明 |\n| --- | --- |\n| **1** | " + strings.Repeat("很長", 20) + " |\n"
+	for _, c := range markdownToFlexComponents(kv) {
+		if txt, ok := c["text"].(string); ok {
+			if strings.Contains(txt, "**") {
+				t.Errorf("marker leaked into key-value text: %q", txt)
+			}
+		}
+	}
+}
