@@ -1712,7 +1712,7 @@ export default {
       lineAccessToken: '액세스 토큰',
       lineChannelSecret: '클라이언트 시크릿',
       lineResetKeyword: '리셋 키워드 (선택)',
-      lineResetKeywordHint: '선택 항목. 대화 메모리 초기화 명령어. 기본값은 /clear 입니다.',
+      lineResetKeywordHint: '선택 항목. 대화 메모리 초기화 명령어. 기본값은 /reset 이며 내장 /clear 도 항상 동작합니다.',
       lineAdvancedSettings: 'LINE 상세 설정',
       lineResetKeywordPlaceholder: 'reset',
       lineEnableFlexMessage: 'Flex Message 카드 형식 출력 활성화 (구조화 레이아웃 및 소스 태그 포함)',

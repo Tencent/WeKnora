@@ -1714,7 +1714,7 @@ export default {
       lineAccessToken: '访问令牌',
       lineChannelSecret: '客户端密钥',
       lineResetKeyword: '重置关键字（选填）',
-      lineResetKeywordHint: '可选。用于清空对话记忆的指令，默认为 /clear。',
+      lineResetKeywordHint: '可选。用于清空对话记忆的指令，默认为 /reset；内置的 /clear 始终可用。',
       lineAdvancedSettings: 'LINE 高级设置',
       lineResetKeywordPlaceholder: 'reset',
       lineEnableFlexMessage: '启用 Flex Message 卡片样式输出（含结构化排版与来源标签）',

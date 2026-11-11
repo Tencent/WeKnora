@@ -8155,7 +8155,7 @@ export default {
       lineAccessToken: 'アクセストークン',
       lineChannelSecret: 'クライアントシークレット',
       lineResetKeyword: 'リセットキーワード（任意）',
-      lineResetKeywordHint: '任意。会話記憶をクリアするコマンド。デフォルトは /clear です。',
+      lineResetKeywordHint: '任意。会話記憶をクリアするコマンド。デフォルトは /reset（組み込みの /clear も常に有効）。',
       lineAdvancedSettings: 'LINE 詳細設定',
       lineResetKeywordPlaceholder: 'reset',
       lineEnableFlexMessage: 'Flex Message カード形式の出力を有効にする（構造化レイアウトとソースタグを含む）',

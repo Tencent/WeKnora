@@ -8155,7 +8155,7 @@ export default {
       lineAccessToken: 'Access token',
       lineChannelSecret: 'Client secret',
       lineResetKeyword: 'Reset keyword (optional)',
-      lineResetKeywordHint: 'Optional. The command to clear the conversation memory. Default is /clear.',
+      lineResetKeywordHint: 'Optional. The command that clears the conversation memory. Default is /reset; the built-in /clear keeps working.',
       lineAdvancedSettings: 'LINE advanced settings',
       lineResetKeywordPlaceholder: 'reset',
       lineEnableFlexMessage: 'Enable Flex Message card-style output (structured layout and source tags)',

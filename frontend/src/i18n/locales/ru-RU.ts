@@ -1712,7 +1712,7 @@ export default {
       lineAccessToken: 'Токен доступа',
       lineChannelSecret: 'Секрет канала',
       lineResetKeyword: 'Ключ сброса (необязательно)',
-      lineResetKeywordHint: 'Необязательно. Команда для очистки памяти диалога. По умолчанию /clear.',
+      lineResetKeywordHint: 'Необязательно. Команда для очистки памяти диалога. По умолчанию /reset; встроенная /clear работает всегда.',
       lineAdvancedSettings: 'Расширенные настройки LINE',
       lineResetKeywordPlaceholder: 'reset',
       lineEnableFlexMessage: 'Включить вывод в виде карточек Flex Message (структурная вёрстка и теги источника)',

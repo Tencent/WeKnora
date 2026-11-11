@@ -234,7 +234,6 @@
           </div>
 
           <div class="form-item">
-            <label class="form-label">{{ $t('agentEditor.im.lineEnableFlexMessage') }}</label>
             <t-checkbox v-model="lineEnableFlex">
               {{ $t('agentEditor.im.lineEnableFlexMessage') }}
             </t-checkbox>
@@ -568,7 +567,7 @@
             <!-- LINE credentials -->
             <template v-if="formData.platform === 'line'">
               <div class="platform-link-hint">
-                <a href="https://store.line-measuring.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                <a href="https://developers.line.biz/console/" target="_blank" rel="noopener noreferrer" class="doc-link">
                   {{ $t('agentEditor.im.lineConsole') }}
                   <t-icon name="link" class="link-icon" />
                 </a>
