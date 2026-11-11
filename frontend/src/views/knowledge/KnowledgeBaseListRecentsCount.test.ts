@@ -131,3 +131,24 @@ test('a later deletion moves the list and the count together', async t => {
   assert.equal(f.vm.recentsList.length, 2)
   assert.equal(f.vm.kbRecentsCount, 2)
 })
+
+test('knowledge-base pages cap card rendering and return to the first page after a filter change', async t => {
+  const rows = Array.from({ length: 65 }, (_, i) => ({
+    id: `kb-${i}`,
+    name: `Knowledge base ${i}`,
+  }))
+  const f = await setup(t, [rows, rows.slice(0, 5)])
+
+  assert.equal(f.vm.visibleResultCount, 66) // 65 owned and one shared
+  assert.equal(f.vm.pagedKnowledgeBases.length, 50)
+  f.vm.onCardPageChange({ current: 2 })
+  await flush()
+  assert.equal(f.vm.pagedKnowledgeBases.length, 16)
+  assert.equal(f.vm.pagedKnowledgeBases[0].id, 'kb-50')
+
+  f.creator.value = 'mine'
+  await flush()
+  await flush()
+  assert.equal(f.vm.cardPage, 1)
+  assert.equal(f.vm.pagedKnowledgeBases.length, 6)
+})

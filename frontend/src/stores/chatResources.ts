@@ -154,23 +154,15 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     return resources[key].isLoaded()
   }
 
-  /**
-   * 知识库列表（支持 creator 筛选）。creator=all 走共享快照供对话页复用。
-   */
   async function fetchKnowledgeBasesForList(
     params?: { creator?: ListCreatorFilter },
     force = false,
   ): Promise<any[]> {
-    const creator = params?.creator ?? 'all'
-    // 带 creator 过滤的列表是列表页专用、不进快照，直接透传请求。
-    // 写操作后的强刷同时把全量快照刷一遍，否则对话输入栏会看到已删除的知识库。
-    if (creator !== 'all') {
-      if (force) void ensureKnowledgeBases(true).catch(() => {})
-      const res: any = await listKnowledgeBases({ creator })
-      return res?.data && Array.isArray(res.data) ? res.data : []
-    }
-    await ensureKnowledgeBases(force)
-    return rawKnowledgeBases.value
+    // The dashboard needs card fields only. Keep its response out of the
+    // full-resource snapshot used by chat and agent settings.
+    if (force) knowledgeBasesResource.invalidate()
+    const res: any = await listKnowledgeBases({ creator: params?.creator, view: 'list' })
+    return res?.data && Array.isArray(res.data) ? res.data : []
   }
 
   // 共享资源是附带刷新：它的接口挂了不能连坐自己的列表，否则调用方的 catch

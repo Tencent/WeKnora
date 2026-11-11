@@ -601,6 +601,84 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
 }
 
+// kbDashboardCard intentionally omits the configuration payload used by the
+// details and settings views. Keep the list's badges and model readiness.
+func kbDashboardCard(kb *types.KnowledgeBase) gin.H {
+	card := gin.H{
+		"id":                     kb.ID,
+		"name":                   kb.Name,
+		"description":            kb.Description,
+		"type":                   kb.Type,
+		"created_at":             kb.CreatedAt,
+		"updated_at":             kb.UpdatedAt,
+		"creator_id":             kb.CreatorID,
+		"creator_name":           kb.CreatorName,
+		"embedding_model_id":     kb.EmbeddingModelID,
+		"summary_model_id":       kb.SummaryModelID,
+		"indexing_strategy":      kb.IndexingStrategy,
+		"is_pinned":              kb.IsPinned,
+		"pinned_at":              kb.PinnedAt,
+		"knowledge_count":        kb.KnowledgeCount,
+		"chunk_count":            kb.ChunkCount,
+		"is_processing":          kb.IsProcessing,
+		"processing_count":       kb.ProcessingCount,
+		"share_count":            kb.ShareCount,
+		"vlm_config":             gin.H{"enabled": kb.VLMConfig.Enabled},
+		"storage_provider_config": kb.StorageProviderConfig,
+	}
+	if kb.ExtractConfig != nil {
+		card["extract_config"] = gin.H{"enabled": kb.ExtractConfig.Enabled}
+	}
+	if kb.QuestionGenerationConfig != nil {
+		card["question_generation_config"] = gin.H{"enabled": kb.QuestionGenerationConfig.Enabled}
+	}
+	return card
+}
+
+type kbListPage struct {
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
+	Total    int `json:"total"`
+}
+
+func parseKBListPage(pageValue, sizeValue string) (kbListPage, error) {
+	if pageValue == "" && sizeValue == "" {
+		return kbListPage{}, nil
+	}
+	page := kbListPage{Page: 1, PageSize: 50}
+	if pageValue != "" {
+		n, err := strconv.Atoi(pageValue)
+		if err != nil || n < 1 {
+			return kbListPage{}, apperrors.NewBadRequestError("page must be a positive integer")
+		}
+		page.Page = n
+	}
+	if sizeValue != "" {
+		n, err := strconv.Atoi(sizeValue)
+		if err != nil || n < 1 || n > 200 {
+			return kbListPage{}, apperrors.NewBadRequestError("page_size must be between 1 and 200")
+		}
+		page.PageSize = n
+	}
+	return page, nil
+}
+
+func (p *kbListPage) slice(kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+	if p.PageSize == 0 {
+		return kbs
+	}
+	p.Total = len(kbs)
+	if p.Page-1 > p.Total/p.PageSize {
+		return kbs[:0]
+	}
+	offset := (p.Page - 1) * p.PageSize
+	return kbs[offset : offset+min(p.PageSize, p.Total-offset)]
+}
+
+type knowledgeBaseDashboardLister interface {
+	ListKnowledgeBasesForDashboard(context.Context, func([]*types.KnowledgeBase) []*types.KnowledgeBase) ([]*types.KnowledgeBase, error)
+}
+
 // ListKnowledgeBases godoc
 // @Summary      获取知识库列表
 // @Description  获取当前空间的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）
@@ -609,6 +687,9 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 // @Produce      json
 // @Param        agent_id  query     string  false  "共享智能体 ID（传入时返回该智能体可用的知识库）"
 // @Param        creator   query     string  false  "按创建者过滤，仅 mine 与 others 生效"  Enums(mine, others)
+// @Param        view       query     string  false  "Use list for lightweight workspace cards"  Enums(list)
+// @Param        page       query     int     false  "Workspace list page (1-based)"
+// @Param        page_size  query     int     false  "Workspace list page size (1–200, defaults to 50)"
 // @Success      200       {object}  handler.DataResponse{data=[]handler.KnowledgeBaseView}  "知识库列表"
 // @Failure      400       {object}  errors.AppError                                         "请求参数错误"
 // @Failure      500       {object}  errors.AppError                                         "服务器错误"
@@ -649,42 +730,38 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		return
 	}
 
-	// Get all knowledge bases for this tenant
-	kbs, err := h.service.ListKnowledgeBases(ctx)
+	page, err := parseKBListPage(c.Query("page"), c.Query("page_size"))
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	lightweight := c.Query("view") == "list"
+	creator := strings.ToLower(strings.TrimSpace(c.Query("creator")))
+	callerUserID, _ := c.Get(types.UserIDContextKey.String())
+	userID, _ := callerUserID.(string)
+	selectRows := func(kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+		kbs = filterKnowledgeBasesByCreator(kbs, creator, userID)
+		kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
+		return page.slice(kbs)
+	}
+
+	var kbs []*types.KnowledgeBase
+	dashboard, supportsDashboard := h.service.(knowledgeBaseDashboardLister)
+	if (lightweight || page.PageSize > 0) && supportsDashboard {
+		kbs, err = dashboard.ListKnowledgeBasesForDashboard(ctx, selectRows)
+	} else {
+		kbs, err = h.service.ListKnowledgeBases(ctx)
+		if err == nil {
+			kbs = selectRows(kbs)
+		}
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	// Optional creator filter — drives the [All | Mine | Others] segmented
-	// control on the list page. We filter in-process rather than pushing
-	// down into SQL because the tenant-bounded KB list is small (typically
-	// <100 rows) and adding a creator predicate to ListKnowledgeBases would
-	// ripple through every other caller (chat pipeline, agent editor, …).
-	// Rows with empty CreatorID predate the RBAC migration (PR 5); we treat
-	// them as "not anyone in particular" so they never appear under "mine"
-	// or "others" — they fall out of both filters cleanly.
-	creatorFilter := strings.ToLower(strings.TrimSpace(c.Query("creator")))
-	if creatorFilter == "mine" || creatorFilter == "others" {
-		callerUserID, _ := c.Get(types.UserIDContextKey.String())
-		callerUserIDStr, _ := callerUserID.(string)
-		filtered := make([]*types.KnowledgeBase, 0, len(kbs))
-		for _, kb := range kbs {
-			if kb.CreatorID == "" {
-				continue
-			}
-			if creatorFilter == "mine" && kb.CreatorID == callerUserIDStr {
-				filtered = append(filtered, kb)
-			} else if creatorFilter == "others" && kb.CreatorID != callerUserIDStr {
-				filtered = append(filtered, kb)
-			}
-		}
-		kbs = filtered
-	}
-	kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
-
-	// Get share counts for all knowledge bases
+	// Enrich only the knowledge bases that will be returned.
 	if len(kbs) > 0 && h.kbShareService != nil {
 		kbIDs := make([]string, len(kbs))
 		for i, kb := range kbs {
@@ -708,11 +785,35 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	// CreatorID 为空的老数据）就让字段为空，前端按 fallback 渲染。
 	enrichKBCreatorNames(ctx, h.userService, kbs)
 
-	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    h.buildKBListResponse(ctx, kbs, callerTenantID),
-	})
+	response := gin.H{"success": true}
+	if lightweight {
+		cards := make([]gin.H, 0, len(kbs))
+		for _, kb := range kbs {
+			cards = append(cards, kbDashboardCard(kb))
+		}
+		response["data"] = cards
+	} else {
+		callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+		response["data"] = h.buildKBListResponse(ctx, kbs, callerTenantID)
+	}
+	if page.PageSize > 0 {
+		response["pagination"] = page
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func filterKnowledgeBasesByCreator(kbs []*types.KnowledgeBase, creator, userID string) []*types.KnowledgeBase {
+	if creator != "mine" && creator != "others" {
+		return kbs
+	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		// Rows predating the RBAC backfill belong to neither creator filter.
+		if kb.CreatorID != "" && (kb.CreatorID == userID) == (creator == "mine") {
+			filtered = append(filtered, kb)
+		}
+	}
+	return filtered
 }
 
 func filterKnowledgeBasesForAPIKeyScope(ctx context.Context, kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
