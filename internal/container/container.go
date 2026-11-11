@@ -30,6 +30,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
 	"gorm.io/driver/postgres"
@@ -1553,6 +1554,83 @@ func newEnvMilvusClient(ctx context.Context, cfg *milvusclient.ClientConfig) (*m
 	return milvusclient.New(ctx, cfg)
 }
 
+// buildEnvMilvusEngine constructs the env-configured Milvus engine. Startup
+// calls it once; a failed construction is retried in the background because
+// the process can outlive a Milvus dependency that was still starting.
+func buildEnvMilvusEngine(ctx context.Context) (interfaces.RetrieveEngineService, error) {
+	milvusCfg := milvusclient.ClientConfig{
+		DialOptions: []grpc.DialOption{grpc.WithTimeout(5 * time.Second)}, //nolint:staticcheck // existing dial budget
+	}
+	milvusAddress := os.Getenv("MILVUS_ADDRESS")
+	if milvusAddress == "" {
+		milvusAddress = "localhost:19530"
+	}
+	milvusCfg.Address = milvusAddress
+	if milvusUsername := os.Getenv("MILVUS_USERNAME"); milvusUsername != "" {
+		milvusCfg.Username = milvusUsername
+	}
+	if milvusPassword := os.Getenv("MILVUS_PASSWORD"); milvusPassword != "" {
+		milvusCfg.Password = milvusPassword
+	}
+	if milvusDBName := os.Getenv("MILVUS_DB_NAME"); milvusDBName != "" {
+		milvusCfg.DBName = milvusDBName
+	}
+	milvusCli, err := newEnvMilvusClient(ctx, &milvusCfg)
+	if err != nil {
+		return nil, err
+	}
+	return retriever.NewKVHybridRetrieveEngine(
+		milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli, nil),
+		types.MilvusRetrieverEngineType,
+	), nil
+}
+
+// retryRegisterEnvEngine keeps trying an env engine that failed to start.
+// Milvus and its etcd sidecar can lose the startup race against this process;
+// before this retry the engine stayed absent until an operator restarted the
+// whole app. Each attempt is bounded by EngineBuildTimeout, and the backoff
+// stops after attempts so a permanently broken address does not spin forever.
+func retryRegisterEnvEngine(
+	registry interfaces.RetrieveEngineRegistry,
+	engineType types.RetrieverEngineType,
+	build func(context.Context) (interfaces.RetrieveEngineService, error),
+	log *logrus.Entry,
+	initialDelay, maxDelay time.Duration,
+	attempts int,
+) {
+	delay := initialDelay
+	for attempt := 1; attempt <= attempts; attempt++ {
+		time.Sleep(delay)
+		if _, err := registry.GetRetrieveEngineService(engineType); err == nil {
+			log.Infof("[Container] %s engine became available, stopping retry", engineType)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), retriever.EngineBuildTimeout)
+		svc, err := build(ctx)
+		cancel()
+		if err != nil {
+			log.Warnf("[Container] Retry %d/%d to build %s engine failed: %v", attempt, attempts, engineType, err)
+			delay = min(delay*2, maxDelay)
+			continue
+		}
+		if svc == nil {
+			log.Warnf("[Container] Retry %d/%d built a nil %s engine", attempt, attempts, engineType)
+			delay = min(delay*2, maxDelay)
+			continue
+		}
+		if err := registry.Register(svc); err != nil {
+			log.Infof("[Container] %s engine is already registered: %v", engineType, err)
+			return
+		}
+		log.Infof("[Container] %s engine registered after retry %d/%d", engineType, attempt, attempts)
+		return
+	}
+	log.Errorf(
+		"[Container] Could not register %s engine after %d attempts; fix the endpoint and restart",
+		engineType, attempts,
+	)
+}
+
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
 	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
@@ -1721,40 +1799,17 @@ func initRetrieveEngineRegistry(
 		}
 	}
 	if slices.Contains(retrieveDriver, "milvus") {
-		milvusCfg := milvusclient.ClientConfig{
-			DialOptions: []grpc.DialOption{grpc.WithTimeout(5 * time.Second)},
-		}
-		milvusAddress := os.Getenv("MILVUS_ADDRESS")
-		if milvusAddress == "" {
-			milvusAddress = "localhost:19530"
-		}
-		milvusCfg.Address = milvusAddress
-		milvusUsername := os.Getenv("MILVUS_USERNAME")
-		if milvusUsername != "" {
-			milvusCfg.Username = milvusUsername
-		}
-		milvusPassword := os.Getenv("MILVUS_PASSWORD")
-		if milvusPassword != "" {
-			milvusCfg.Password = milvusPassword
-		}
-		milvusDBName := os.Getenv("MILVUS_DB_NAME")
-		if milvusDBName != "" {
-			milvusCfg.DBName = milvusDBName
-		}
-		milvusCli, err := newEnvMilvusClient(context.Background(), &milvusCfg)
+		milvusEngine, err := buildEnvMilvusEngine(context.Background())
 		if err != nil {
 			log.Errorf("Create milvus client failed: %v", err)
+			go retryRegisterEnvEngine(
+				registry, types.MilvusRetrieverEngineType, buildEnvMilvusEngine, log,
+				5*time.Second, time.Minute, 12,
+			)
+		} else if err := registry.Register(milvusEngine); err != nil {
+			log.Errorf("Register milvus retrieve engine failed: %v", err)
 		} else {
-			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli, nil)
-			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					milvusRepository, types.MilvusRetrieverEngineType,
-				),
-			); err != nil {
-				log.Errorf("Register milvus retrieve engine failed: %v", err)
-			} else {
-				log.Infof("Register milvus retrieve engine success")
-			}
+			log.Infof("Register milvus retrieve engine success")
 		}
 	}
 	if slices.Contains(retrieveDriver, "doris") {
