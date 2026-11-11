@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,6 +207,7 @@ var toolDisplayNames = map[string]string{
 	agenttools.ToolWriteSandboxFile:          "写入沙箱文件",
 	agenttools.ToolEditSandboxFile:           "编辑沙箱文件",
 	agenttools.ToolShellExec:                 "执行沙箱命令",
+	agenttools.ToolRunJavaScript:             "工具编排",
 }
 
 // toolHintSensitiveArgs lists tools whose arguments should NOT be shown in hints
@@ -222,6 +224,13 @@ func formatToolHint(name string, args map[string]any) string {
 		displayName = dn
 	}
 
+	if name == agenttools.ToolRunJavaScript {
+		if code, ok := args["code"].(string); ok && strings.TrimSpace(code) != "" {
+			lines := strings.Count(code, "\n") + 1
+			return fmt.Sprintf("%s（%d 行）", displayName, lines)
+		}
+		return displayName
+	}
 	if len(args) == 0 || toolHintSensitiveArgs[name] {
 		return displayName
 	}
@@ -630,6 +639,16 @@ func (e *AgentEngine) runToolCallAnswered(
 		Snapshot:    e.snapshotFunc(i, tc.Function.Name),
 		Answered:    answered,
 		Mode:        e.mode,
+		DecodeNestedArgs: func(toolName string, args json.RawMessage) json.RawMessage {
+			if e.modelContext == nil {
+				return args
+			}
+			calls := []types.LLMToolCall{{
+				Function: types.FunctionCall{Name: toolName, Arguments: string(args)},
+			}}
+			e.modelContext.DecodeToolCalls(calls)
+			return json.RawMessage(calls[0].Function.Arguments)
+		},
 	})
 
 	var result *types.ToolResult

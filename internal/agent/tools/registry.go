@@ -32,6 +32,28 @@ type outputLimitProvider interface {
 	OutputLimitChars(args json.RawMessage) int
 }
 
+// nestedToolBudgetKey carries a larger per-call output budget for tools called
+// from inside run_javascript. Their output stays in the script instead of the
+// model context, so the model-facing 16KB ceiling would unnecessarily limit
+// aggregation work. The outer run_javascript result is still truncated to the
+// normal ceiling.
+type nestedToolBudgetKey struct{}
+
+func withNestedToolBudget(ctx context.Context, chars int) context.Context {
+	if chars <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, nestedToolBudgetKey{}, chars)
+}
+
+func nestedToolBudget(ctx context.Context) int {
+	if ctx == nil {
+		return 0
+	}
+	chars, _ := ctx.Value(nestedToolBudgetKey{}).(int)
+	return chars
+}
+
 // NewToolRegistry creates a new tool registry
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
@@ -266,6 +288,9 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	// Publish the ceiling so budget-aware tools can shape a batched result
 	// themselves; the truncation below stays as the fallback for the rest.
 	maxOutput := r.getMaxToolOutput()
+	if nested := nestedToolBudget(ctx); nested > maxOutput {
+		maxOutput = nested
+	}
 	if provider, ok := tool.(outputLimitProvider); ok {
 		if toolLimit := provider.OutputLimitChars(args); toolLimit > maxOutput {
 			maxOutput = toolLimit

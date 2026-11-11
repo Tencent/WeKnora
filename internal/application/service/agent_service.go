@@ -368,6 +368,9 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 	s.attachBackgroundWork(ctx, engine, toolRegistry, sessionID, assistantMessageID)
+	// run_javascript must see the complete registry: MCP, operations, sandbox,
+	// browser, collaboration and background tools are all registered above.
+	s.registerJavaScriptTool(ctx, toolRegistry, config)
 	toolRegistry.BindSession(sessionID)
 	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
 	engine.SetDesktopEnabled(s.lookupSessionDesktopEnabled(ctx, sessionID, config))
@@ -1560,6 +1563,13 @@ func (s *agentService) registerTools(
 		case tools.ToolWikiDeletePage:
 			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes)
 
+		case tools.ToolRunJavaScript:
+			// Registered at the end of CreateAgentEngine, after MCP,
+			// operations, sandbox and collaboration tools exist. Registering
+			// here would make the script's callable set depend on allowlist
+			// order.
+			continue
+
 		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
 			tools.ToolEditSandboxFile, tools.ToolRequestSecureForm, tools.ToolBrowserFillSecret:
@@ -1623,6 +1633,25 @@ func withoutWikiWriteTools(allowed []string) []string {
 		}
 	}
 	return filtered
+}
+
+// registerJavaScriptTool grants run_javascript when the agent's allowlist asks
+// for it. The tool is built here, at the end of engine setup, so its callable
+// set includes every tool the run actually has — including MCP, operations,
+// sandbox and collaboration tools registered after registerTools.
+func (s *agentService) registerJavaScriptTool(
+	ctx context.Context,
+	registry *tools.ToolRegistry,
+	config *types.AgentConfig,
+) {
+	if config == nil || !slices.Contains(tools.EffectiveAllowedTools(config.AllowedTools), tools.ToolRunJavaScript) {
+		return
+	}
+	if _, err := registry.GetTool(tools.ToolRunJavaScript); err == nil {
+		return
+	}
+	registry.RegisterTool(tools.NewJavaScriptTool(registry))
+	logger.Infof(ctx, "Registered run_javascript tool")
 }
 
 // ValidateConfig validates the agent configuration
