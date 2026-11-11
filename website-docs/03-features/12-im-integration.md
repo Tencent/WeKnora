@@ -145,7 +145,8 @@ credentials.api_base_url 可覆盖 API origin，并同时用作长连接 SDK 的
 
 - **签名校验**：`VerifyCallback` 以 `channel_secret` 对原始请求体做 HMAC-SHA256，Base64 后与 `X-Line-Signature` 用 `subtle.ConstantTimeCompare` 常量时间比对；请求体先经 `LimitWebhookBody` 限流。
 - **异步 ACK**：回调在入队前立即返回 200（`writeIMCallbackACK`），避免 LINE 的 webhook 超时重投。
-- **輸出形態**：`enable_flex_message=true` 時，長度 ≥200 rune 的回覆渲染為 Flex 卡片（標題取渠道名稱，內文由 `markdownToFlexComponents` 解析，末尾附來源標籤）；短回覆（指令確認、錯誤提示）維持純文字，避免一句話被包成帶標題與來源標籤的卡片。關閉時一律走純文字，仍經 `polishPlainText` 排版整形（`**粗體**`→`【】`、表格→鍵值列表、標題→📌、代碼區塊→`[代碼區塊]`）。
+- **輸出形態**：`enable_flex_message=true` 時，長度 ≥200 rune 的回覆渲染為 Flex 卡片（標題取渠道名稱，內文由 `markdownToFlexComponents` 解析，末尾附來源標籤）；指令與系統提示不論長度一律純文字。關閉時一律走純文字，仍經 `polishPlainText` 排版整形（`**粗體**`→`【】`、表格→鍵值列表、標題→📌、代碼區塊→`[代碼區塊]`）。
+- **表格**：LINE 沒有表格元件，卡片路徑以巢狀 box 模擬網格（≤4 欄、單格 ≤32 rune），超出此範圍改為與純文字相同的鍵值列表；兩種路徑都不會把 `| … |` 原樣丟給使用者。
 - **平台硬限制**（超出会被 LINE 以 400 拒绝，用户收不到任何内容）：单条 text 消息 5000 字元、单次请求最多 5 条消息、单个 flex bubble 的 JSON 不超过 30 KB。适配器在发送前统一整形：超长纯文字按换行切成最多 5 段（末段追加「內容過長，已截斷」），flex 卡片超过 30 KB 时自动降级为分段纯文字。
 - **会话重置只有一个入口**：内置 `/clear`，与其他渠道一致，LINE 不额外提供自定义重置关键字。确认文案跟随渠道「回复语言」（`types.LanguageFromContext`，与模型回答同一语言来源）：`zh-TW`／`zh-Hant*` 回「✅ 對話已清空，下一則訊息會開始全新會話。」，其余沿用上游简中字符串。
 - **文案语言**：Flex 卡片的标题与 `altText` 取渠道名称；纯文字路径的 `📌`/`📊`/`[代碼區塊]` 标签仍是固定中文，与 `think.go` 里其他平台的思考块表头同一现状（`FormatIMDisplayContent` 没有 locale 上下文）；渠道级「回复语言」只影响模型回答本身。

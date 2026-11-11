@@ -158,3 +158,67 @@ func TestCommandOutputIsNeverACard(t *testing.T) {
 		t.Errorf("answers of the same length should still be a card, got %v", got)
 	}
 }
+
+// TestFlexTableBecomesAGrid pins the table fix: LINE has no table component, so
+// a Markdown table used to reach the card as raw "| a | b |" paragraphs. A small
+// table now becomes a grid of horizontal boxes.
+func TestFlexTableBecomesAGrid(t *testing.T) {
+	md := "## 記憶體規則\n\n| 項目 | Gen12 | Gen11 |\n| --- | --- | --- |\n| 插槽 | 32 | 24 |\n| 最大容量 | 8TB | 6TB |\n"
+	comps := markdownToFlexComponents(md)
+	var grid map[string]interface{}
+	for _, c := range comps {
+		if c["type"] == "box" {
+			if _, ok := c["contents"].([]interface{}); ok {
+				grid = c
+			}
+		}
+		if txt, ok := c["text"].(string); ok && strings.Contains(txt, "|") {
+			t.Fatalf("raw pipe text leaked into the card: %q", txt)
+		}
+	}
+	if grid == nil {
+		t.Fatal("expected a grid box for the table")
+	}
+	children := grid["contents"].([]interface{})
+	// header + separator + 2 data rows
+	if len(children) != 4 {
+		t.Errorf("grid children = %d, want 4", len(children))
+	}
+}
+
+// TestWideFlexTableFallsBackToKeyValue keeps wide tables readable: more columns
+// than a phone can hold become a key-value list instead of a grid.
+func TestWideFlexTableFallsBackToKeyValue(t *testing.T) {
+	md := "| a | b | c | d | e | f |\n| --- | --- | --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 | 5 | 6 |\n"
+	comps := markdownToFlexComponents(md)
+	for _, c := range comps {
+		if c["type"] == "box" {
+			t.Fatalf("wide table must not become a grid: %v", c)
+		}
+		if txt, ok := c["text"].(string); ok && strings.HasPrefix(txt, "|") {
+			t.Fatalf("raw pipe text leaked into the card: %q", txt)
+		}
+	}
+	joined := ""
+	for _, c := range comps {
+		if txt, ok := c["text"].(string); ok {
+			joined += txt + "\n"
+		}
+	}
+	if !strings.Contains(joined, "• a：1") {
+		t.Errorf("expected key-value fallback, got %q", joined)
+	}
+}
+
+// TestLongCellTableFallsBackToKeyValue: a single long cell also forces the
+// key-value shape, because a grid would wrap it into an unreadable sliver.
+func TestLongCellTableFallsBackToKeyValue(t *testing.T) {
+	long := strings.Repeat("很長的說明文字", 6)
+	md := "| 項目 | 說明 |\n| --- | --- |\n| 插槽 | " + long + " |\n"
+	comps := markdownToFlexComponents(md)
+	for _, c := range comps {
+		if c["type"] == "box" {
+			t.Fatalf("long-cell table must not become a grid")
+		}
+	}
+}

@@ -696,7 +696,10 @@ func markdownToFlexComponents(md string) []map[string]interface{} {
 		}
 	}
 
-	for _, raw := range strings.Split(md, "\n") {
+	lines := strings.Split(md, "\n")
+	// Index walk (not range) so a table block can consume its data rows.
+	for i := 0; i < len(lines); i++ {
+		raw := lines[i]
 		trimmed := strings.TrimSpace(raw)
 		if strings.HasPrefix(trimmed, "```") {
 			if inCode {
@@ -713,6 +716,10 @@ func markdownToFlexComponents(md string) []map[string]interface{} {
 		switch {
 		case trimmed == "":
 			// blank line: the box spacing already provides the gap.
+		case looksLikeTable(lines, i):
+			rows, next := collectTableRows(lines, i)
+			comps = append(comps, tableComponents(rows)...)
+			i = next - 1
 		case isDivider(trimmed):
 			comps = append(comps, separatorComponent())
 		case isHeader(trimmed):
@@ -726,6 +733,149 @@ func markdownToFlexComponents(md string) []map[string]interface{} {
 	flushCode()
 
 	return comps
+}
+
+// collectTableRows returns the cell matrix of the Markdown table that starts at
+// lines[i] and the index of the first line after it. The separator row is
+// dropped: it carries no content.
+func collectTableRows(lines []string, i int) ([][]string, int) {
+	rows := [][]string{significantCells(lines[i])}
+	j := i + 2 // header, separator, then data rows
+	for j < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[j]), "|") {
+		rows = append(rows, significantCells(lines[j]))
+		j++
+	}
+	return rows, j
+}
+
+// tableGridMaxColumns / tableGridMaxCellRunes bound the grid layout: LINE has no
+// table component, so a table is emulated with nested boxes, and wide tables with
+// long cells turn into unreadable slivers on a phone. Past these limits the
+// table is rendered as a key-value list instead.
+const (
+	tableGridMaxColumns   = 4
+	tableGridMaxCellRunes = 32
+)
+
+// tableComponents renders a Markdown table inside the card. Small tables become
+// a real grid (one horizontal box per row); wide or wordy tables fall back to
+// the same key-value list the plain-text path emits, so a table never shows up
+// as raw pipe characters.
+func tableComponents(rows [][]string) []map[string]interface{} {
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return nil
+	}
+	if gridFits(rows) {
+		return []map[string]interface{}{tableGridComponent(rows)}
+	}
+	out := make([]map[string]interface{}, 0, len(rows)*2)
+	for _, line := range keyValueTableLines(rows) {
+		out = append(out, map[string]interface{}{
+			"type":   "text",
+			"text":   line,
+			"size":   "sm",
+			"wrap":   true,
+			"color":  "#333333",
+			"margin": "xs",
+		})
+	}
+	return out
+}
+
+// gridFits reports whether the table is small enough for a phone-width grid.
+func gridFits(rows [][]string) bool {
+	if len(rows[0]) < 2 || len(rows[0]) > tableGridMaxColumns {
+		return false
+	}
+	for _, row := range rows {
+		for _, cell := range row {
+			if utf8.RuneCountInString(cell) > tableGridMaxCellRunes {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// tableGridComponent builds the nested-box grid: a bold header row, a
+// separator, then one row per record. Every cell gets equal width (flex 1).
+func tableGridComponent(rows [][]string) map[string]interface{} {
+	columns := len(rows[0])
+	rowBox := func(cells []string, header bool) map[string]interface{} {
+		contents := make([]interface{}, 0, columns)
+		for idx := 0; idx < columns; idx++ {
+			text := ""
+			if idx < len(cells) {
+				text = cells[idx]
+			}
+			cell := map[string]interface{}{
+				"type": "text",
+				"text": text,
+				"size": "xs",
+				"wrap": true,
+				"flex": 1,
+			}
+			if header {
+				cell["weight"] = "bold"
+				cell["color"] = "#111111"
+			} else {
+				cell["color"] = "#333333"
+			}
+			contents = append(contents, cell)
+		}
+		return map[string]interface{}{
+			"type":     "box",
+			"layout":   "horizontal",
+			"spacing":  "sm",
+			"contents": contents,
+		}
+	}
+
+	children := []interface{}{rowBox(rows[0], true), map[string]interface{}{"type": "separator"}}
+	for _, row := range rows[1:] {
+		children = append(children, rowBox(row, false))
+	}
+	return map[string]interface{}{
+		"type":     "box",
+		"layout":   "vertical",
+		"margin":   "md",
+		"spacing":  "sm",
+		"contents": children,
+	}
+}
+
+// keyValueTableLines flattens a table into the plain-text key-value shape
+// (bullets keyed by the first column) so wide tables stay readable.
+func keyValueTableLines(rows [][]string) []string {
+	header := rows[0]
+	lines := []string{tableTitle()}
+	for _, row := range rows[1:] {
+		allEmpty := true
+		for _, cell := range row {
+			if cell != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
+		for idx := range header {
+			value := ""
+			if idx < len(row) {
+				value = row[idx]
+			}
+			if idx == 0 {
+				lines = append(lines, "  • "+header[idx]+"："+value)
+				continue
+			}
+			lines = append(lines, "    "+header[idx]+"："+value)
+		}
+	}
+	if len(lines) == 1 {
+		return nil
+	}
+	return lines
 }
 
 // isHeader reports whether s opens a Markdown heading (#).
