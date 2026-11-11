@@ -162,9 +162,22 @@ func searchResultHasResourceHandle(ref *types.SearchResult, handle string) bool 
 	if ref == nil {
 		return false
 	}
-	return textHasResourceHandle(ref.Content, handle) ||
+	if textHasResourceHandle(ref.Content, handle) ||
 		textHasResourceHandle(ref.MatchedContent, handle) ||
-		textHasResourceHandle(ref.ImageInfo, handle)
+		textHasResourceHandle(ref.ImageInfo, handle) {
+		return true
+	}
+	// EvidenceHandles carries storage references a citation source exposed to
+	// the model after merge scoping kept them out of the text fields above.
+	// Entries are canonical ScanResourceReferences output, so exact equality
+	// keeps the match fail-closed.
+	want := types.BuildResourcePath(handle)
+	for _, evidence := range ref.EvidenceHandles {
+		if evidence == want {
+			return true
+		}
+	}
+	return false
 }
 
 func textHasResourceHandle(text, handle string) bool {

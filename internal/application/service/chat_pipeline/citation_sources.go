@@ -163,6 +163,35 @@ func (p *PluginMerge) attachCitationSources(ctx context.Context, results []*type
 			source.CitationSources = nil
 			r.CitationSources = append(r.CitationSources, &source)
 		}
+		recordCitationSourceEvidence(r)
+	}
+}
+
+// recordCitationSourceEvidence preserves, on the merged result, the storage
+// references its citation sources expose to the model. Merge scoping keeps only
+// the matched child's image Markdown in Content and ImageInfo, but the prompt
+// renders every source body verbatim, so an answer may cite an image whose
+// handle survives nowhere on the merged result itself. The message-scoped file
+// proxy authorizes org-shared-KB files from the persisted references alone
+// (#3022); without this record it denies such an image (#5069).
+func recordCitationSourceEvidence(r *types.SearchResult) {
+	seen := make(map[string]bool)
+	for _, text := range []string{r.Content, r.MatchedContent, r.ImageInfo} {
+		for _, ref := range types.ScanResourceReferences(text) {
+			seen[ref] = true
+		}
+	}
+	for _, ref := range r.EvidenceHandles {
+		seen[ref] = true
+	}
+	for _, source := range r.CitationSources {
+		for _, ref := range types.ScanResourceReferences(source.Content) {
+			if seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			r.EvidenceHandles = append(r.EvidenceHandles, ref)
+		}
 	}
 }
 
