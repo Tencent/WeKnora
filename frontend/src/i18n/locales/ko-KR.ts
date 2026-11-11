@@ -3250,6 +3250,10 @@ export default {
     clearRecent: '지우기',
     retrieval: '검색 설정',
     untitledSession: '제목 없는 대화',
+    errors: {
+      knowledge: '지식 베이스를 검색하지 못했습니다. 다시 시도해 주세요.',
+      messages: '대화 내용을 검색하지 못했습니다. 다시 시도해 주세요.'
+    },
     hotkey: {
       select: '이동',
       enter: '열기',

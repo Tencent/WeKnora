@@ -7141,6 +7141,10 @@ export default {
     clearRecent: 'Clear',
     retrieval: 'Retrieval settings',
     untitledSession: 'Untitled conversation',
+    errors: {
+      knowledge: 'Could not search knowledge bases. Please try again.',
+      messages: 'Could not search conversation content. Please try again.'
+    },
     scope: {
       placeholder: 'Search within this knowledge base…',
       remove: 'Remove scope (Backspace)'

@@ -135,8 +135,16 @@
               @hover="selectItemAt($event)" />
           </ResultGroup>
 
+          <div v-if="!loading && searchFailures.length" class="cmdk__search-error" role="alert">
+            <p v-if="searchFailures.includes('knowledge')">{{ t('commandPalette.errors.knowledge') }}</p>
+            <p v-if="searchFailures.includes('messages')">{{ t('commandPalette.errors.messages') }}</p>
+            <t-button variant="outline" size="small" @keydown.enter.exact.stop @click="retrySearch">
+              {{ t('common.retry') }}
+            </t-button>
+          </div>
+
           <!-- No results -->
-          <div v-if="!loading && !hasAnyResults && hasSearched" class="cmdk__empty">
+          <div v-if="!loading && !searchFailures.length && !hasAnyResults && hasSearched" class="cmdk__empty">
             <p>{{ t('commandPalette.empty.noResults') }}</p>
             <div class="cmdk__empty-actions">
               <t-button theme="primary" variant="outline" size="small" @click="askAi">
@@ -210,7 +218,7 @@ const activeKbScope = ref<{ id: string; name: string } | null>(null)
 const scopeDismissed = ref(false) // user clicked ✕, remember for this session
 
 const {
-  query, loading, hasSearched,
+  query, loading, hasSearched, searchFailures, retrySearch,
   fileGroups, messageGroups, kbMatches,
   knowledgeBases,
   agentMatches, sessionMatches,
@@ -807,6 +815,12 @@ onUnmounted(() => {
   min-height: 0;
   overflow-y: auto;
   padding: 6px 4px;
+}
+
+.cmdk__search-error {
+  padding: 12px;
+  color: var(--td-text-color-secondary);
+  p { margin: 0 0 8px; }
 }
 
 .cmdk__empty {
