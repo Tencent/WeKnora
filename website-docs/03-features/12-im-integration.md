@@ -148,6 +148,7 @@ credentials.api_base_url 可覆盖 API origin，并同时用作长连接 SDK 的
 - **输出形态**：`enable_flex_message=true` 时回复渲染为 Flex 卡片（标题 + `markdownToFlexComponents` 解析的 Markdown + 来源标签）；关闭时为纯文字，仍经 `polishPlainText` 做排版整形（`**粗体**`→`【】`、表格→键值列表、标题→📌、代码块→`[代碼區塊]`）。
 - **平台硬限制**（超出会被 LINE 以 400 拒绝，用户收不到任何内容）：单条 text 消息 5000 字元、单次请求最多 5 条消息、单个 flex bubble 的 JSON 不超过 30 KB。适配器在发送前统一整形：超长纯文字按换行切成最多 5 段（末段追加「內容過長，已截斷」），flex 卡片超过 30 KB 时自动降级为分段纯文字。
 - **重置关键字**：`reset_keyword`（如 `/reset`、`/new`）命中后与 `/clear` 走同一 `ActionClear` 副作用，但回自己的确认文案；匹配为去空白后的大小写不敏感全等，不会误伤普通句子。
+- **文案语言**：Flex 卡片的标题与 `altText`（`RAG 回答`）、纯文字路径的 `📌`/`📊`/`[代碼區塊]` 标签目前是固定中文，与 `think.go` 里其他平台的思考块表头同一现状（`FormatIMDisplayContent` 没有 locale 上下文）；渠道级「回复语言」只影响模型回答本身。
 
 #### 长连接的可靠性：leader 选举与 Supervisor
 
