@@ -1,12 +1,15 @@
 <template>
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed, 'aside_box--resizing': uiStore.sidebarResizing }">
-        <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
+        <!-- 展开时：快捷按钮行（桌面端工具/助手/搜索/帮助/注册/折叠）。
+             WeKnora logo 已移除，腾出的空间用于更多快捷入口。 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-                <img class="logo" src="@/assets/img/weknora.png" alt="">
-                <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
-            </div>
-            <div class="logo_actions">
+            <div class="logo_actions logo_actions--full">
+                <t-tooltip v-if="isDesktopShell" :content="t('menu.tool')" placement="bottom">
+                    <div class="header-icon-btn" data-guide="tool-entry" @click="emitAppReload"
+                        :aria-label="t('menu.tool')">
+                        <t-icon name="refresh" size="16px" />
+                    </div>
+                </t-tooltip>
                 <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
                     <AssistantButton data-guide="assistant-entry" icon-only :icon-size="18" :label="assistantName"
                         :active="assistantStore.visible" @click="assistantStore.toggle()" />
@@ -21,6 +24,19 @@
                     <div class="header-icon-btn" @click="commandPaletteStore.openPalette('')"
                         :aria-label="t('menu.search')">
                         <img class="header-icon-img" :src="getImgSrc('search.svg')" alt="">
+                    </div>
+                </t-tooltip>
+                <span class="logo_actions__spacer"></span>
+                <t-tooltip :content="t('menu.help')" placement="bottom">
+                    <div class="header-icon-btn header-icon-btn--reserved" @click="notifyReservedFeature"
+                        :aria-label="t('menu.help')">
+                        <t-icon name="help-circle" size="16px" />
+                    </div>
+                </t-tooltip>
+                <t-tooltip :content="t('menu.register')" placement="bottom">
+                    <div class="header-icon-btn header-icon-btn--reserved" @click="notifyReservedFeature"
+                        :aria-label="t('menu.register')">
+                        <t-icon name="user-add" size="16px" />
                     </div>
                 </t-tooltip>
                 <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
@@ -66,6 +82,15 @@
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
                  折叠态在此处保留为图标项 + 深色 tooltip。 -->
             <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
+                <t-tooltip v-if="isDesktopShell" :content="t('menu.tool')" placement="right">
+                    <div class="menu_item menu_item--cmdk" @click="emitAppReload" :aria-label="t('menu.tool')">
+                        <div class="menu_item-box">
+                            <div class="menu_icon">
+                                <t-icon name="refresh" size="16px" />
+                            </div>
+                        </div>
+                    </div>
+                </t-tooltip>
                 <t-tooltip placement="right">
                     <template #content>
                         <span class="cmdk-tip">
@@ -346,6 +371,28 @@ watch(() => uiStore.sidebarBrowserStatus && toolboxPreview.value.some((tool) => 
 const commandPaletteStore = useCommandPaletteStore();
 const assistantStore = useAssistantStore();
 const assistantName = computed(() => assistantStore.displayName || t('assistant.title'));
+
+// Desktop shell detection (Wails bindings present). The sidebar tool button
+// replaces the hidden native menu's Reload item; in the browser the button is
+// hidden entirely (F5 reloads there).
+const isDesktopShell = computed(() =>
+    !!(window as any).go && !!(window as any).go?.main?.App);
+
+// Same channel the old native "View > Reload" item used:
+// views/platform/index.vue listens for "app:reload" and re-runs its boot.
+const emitAppReload = () => {
+    const rt = (window as any).runtime;
+    if (isDesktopShell.value && rt?.EventsEmit) {
+        rt.EventsEmit('app:reload');
+        return;
+    }
+    window.location.reload();
+};
+
+// Help / Register are reserved entries: visible with icons, wired up later.
+const notifyReservedFeature = () => {
+    MessagePlugin.info(t('menu.comingSoon'));
+};
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
 // the alternatives (userAgentData.platform) aren't universally available yet;
@@ -1849,6 +1896,25 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
+}
+
+/* logo 移除后按钮行占满整行；spacer 把帮助/注册/折叠推到右侧 */
+.logo_actions--full {
+    width: 100%;
+}
+
+.logo_actions__spacer {
+    flex: 1;
+}
+
+/* 预留入口（帮助/注册）：弱化观感，区别于已启用的按钮 */
+.header-icon-btn--reserved {
+    opacity: 0.55;
+    transition: opacity 0.15s ease;
+
+    &:hover {
+        opacity: 1;
+    }
 }
 
 .aside_box--collapsed .assistant-sidebar-entry {
