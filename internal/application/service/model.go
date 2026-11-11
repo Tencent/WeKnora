@@ -624,8 +624,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 // GetEmbeddingInputCharLimit resolves an embedding model's declared
 // per-input character limit (vendor catalog + row spec overlay). 0 means
 // "no declared limit"; the value never fails ingestion on its own.
-func (s *modelService) GetEmbeddingInputCharLimit(ctx context.Context, modelId string) (int, error) {
-	model, err := s.GetModelByID(ctx, modelId)
+func (s *modelService) GetEmbeddingInputCharLimit(ctx context.Context, modelID string) (int, error) {
+	model, err := s.GetModelByID(ctx, modelID)
 	if err != nil {
 		return 0, err
 	}

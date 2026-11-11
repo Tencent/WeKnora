@@ -309,38 +309,18 @@ type ChunkingConfig struct {
 	ParentChunkSize int `yaml:"parent_chunk_size,omitempty" json:"parent_chunk_size,omitempty" minimum:"1" maximum:"20000" extensions:"x-agent"`
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
-<<<<<<< HEAD
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty" minimum:"1" maximum:"10000" extensions:"x-agent"`
 	// Strategy selects how documents are split: auto, heading, heuristic,
-	// recursive or legacy. Empty keeps the server default.
-	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty" enums:"auto,heading,heuristic,recursive,legacy" extensions:"x-agent"`
+	// recursive, legacy or custom_separator (pre-chunked documents: split
+	// on CustomSeparator only, see CustomSeparator / CustomSeparatorOnly).
+	// Empty keeps the server default.
+	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty" enums:"auto,heading,heuristic,recursive,legacy,custom_separator" extensions:"x-agent"`
 	// TokenLimit caps chunk size in approximate tokens. 0 uses ChunkSize as a character count.
 	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty" minimum:"0" maximum:"100000" extensions:"x-agent"`
 	// Languages hints the splitter, for example de or zh. Empty detects the language from the document.
 	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty" extensions:"x-agent,x-agent-maximum=20"`
 	// TableMetadataInstructions is extra guidance for CSV and Excel summaries. The output format stays fixed.
 	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty" extensions:"x-agent,x-agent-detail,x-agent-max-bytes=4000"`
-=======
-	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
-	// Strategy selects the adaptive chunking tier. Empty / "legacy" preserves
-	// the historical recursive splitter; "auto" lets a profiler pick between
-	// heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
-	// "recursive" pin the tier explicitly; "custom_separator" treats the
-	// document as pre-chunked upstream and splits on CustomSeparator only
-	// (see CustomSeparator / CustomSeparatorOnly).
-	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
-	// TokenLimit caps chunk size in approximate tokens (a per-language
-	// character heuristic — not an exact model-token guarantee). 0 = use
-	// ChunkSize as a character count.
-	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty"`
-	// Languages hints the heuristic patterns. Empty = auto-detect from content.
-	// Examples: ["de"], ["en", "zh"].
-	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty"`
-	// TableMetadataInstructions contains optional business guidance used when
-	// generating searchable summaries for CSV/Excel tables. The system-owned
-	// output contract remains fixed; these instructions only add domain context.
-	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
->>>>>>> 4cbf5f1d (refactor(chunking): custom_separator as a Strategy value with size budget)
 }
 
 // defaultParserEngineByType maps file types the builtin/simple engines cannot

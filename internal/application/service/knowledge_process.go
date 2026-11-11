@@ -387,7 +387,7 @@ func (s *knowledgeService) embeddingInputLimit(ctx context.Context, kb *types.Kn
 		return 0
 	}
 	resolver, ok := s.modelService.(interface {
-		GetEmbeddingInputCharLimit(ctx context.Context, modelId string) (int, error)
+		GetEmbeddingInputCharLimit(ctx context.Context, modelID string) (int, error)
 	})
 	if !ok {
 		return 0

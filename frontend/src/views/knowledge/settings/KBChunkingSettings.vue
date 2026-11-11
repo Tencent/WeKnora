@@ -612,8 +612,8 @@ const emitUpdate = () => {
 }
 
 .custom-separator-only-label {
-  font-size: 12px;
-  color: var(--td-text-color-secondary, rgba(0, 0, 0, 0.6));
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
 }
 
 // Strategy row stacks the picker above the test trigger so the action has

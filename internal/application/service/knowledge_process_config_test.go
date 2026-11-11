@@ -651,7 +651,7 @@ func TestBuildSplitterConfigFromChunking_PreservesWikiOnlyZeroOverlap(t *testing
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 2048, ChunkOverlap: 0},
 	}
 	eff := ResolveProcessConfig(kb, nil)
-	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig, 0)
 
 	require.Equal(t, 2048, cfg.ChunkSize)
 	require.Equal(t, 0, cfg.ChunkOverlap)
@@ -762,4 +762,10 @@ func TestBuildSplitterConfigFromChunking_WiresEmbeddingCharLimit(t *testing.T) {
 	}
 }
 
-func runeLen(s string) int { n := 0; for range s { n++ }; return n }
+func runeLen(s string) int {
+	n := 0
+	for range s {
+		n++
+	}
+	return n
+}
