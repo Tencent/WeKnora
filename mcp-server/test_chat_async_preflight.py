@@ -186,39 +186,32 @@ class ChatAsyncPreflightTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assert_metadata_off_loop()
 
-    async def test_agent_configuration_preflight_runs_off_loop(self):
-        result = await srv.agent_chat("session", "question", AGENT_ID)
-        self.assertEqual(result["answer"], "done")
-        self.assertEqual(
-            [path for path, *_ in self.metadata_calls], [f"/agents/{AGENT_ID}"]
-        )
-        self.assert_metadata_off_loop()
-
-    async def test_missing_kbs_keep_ordered_hint_and_skip_chat(self):
-        self.routes[f"/api/v1/agents/{AGENT_ID}"] = {
-            "data": {"config": {"kb_selection_mode": "none"}}
-        }
-        with self.assertRaises(ValueError) as raised:
-            await srv.agent_chat("session", "question", AGENT_ID)
-        self.assertEqual(
-            str(raised.exception),
-            f"Agent '{AGENT_ID}' has kb_selection_mode='none' with no built-in "
-            "knowledge bases. You must provide knowledge_base_ids. "
-            f"Available knowledge bases: [Docs ({KB_ID}), Shared ({SHARED_KB_ID})]",
-        )
-        self.assertEqual(
-            [path for path, *_ in self.metadata_calls],
-            [f"/agents/{AGENT_ID}", "/knowledge-bases", "/shared-knowledge-bases"],
-        )
-        self.assertTrue(all(method == "GET" for method, *_ in self.http_calls))
-        self.assert_metadata_off_loop()
-
-    async def test_failed_agent_preflight_remains_nonfatal(self):
-        self.routes[f"/api/v1/agents/{AGENT_ID}"] = (503, {"error": "offline"})
-        result = await srv.agent_chat("session", "question", AGENT_ID)
-        self.assertEqual(result["answer"], "done")
-        self.assertEqual(self.http_calls[-1][0], "POST")
-        self.assert_metadata_off_loop()
+    async def test_agent_chat_without_knowledge_bases_uses_server_scope(self):
+        for config in (
+            {"kb_selection_mode": "none"},
+            {"kb_selection_mode": "selected", "knowledge_bases": []},
+            {"kb_selection_mode": "all"},
+        ):
+            with self.subTest(config=config):
+                self.routes[f"/api/v1/agents/{AGENT_ID}"] = {"data": {"config": config}}
+                self.http_calls.clear()
+                result = await srv.agent_chat(
+                    "session", "question", AGENT_ID, web_search_enabled=True
+                )
+                self.assertEqual(result["answer"], "done")
+                self.assertEqual(
+                    self.http_calls[-1],
+                    (
+                        "POST",
+                        "/api/v1/agent-chat/session",
+                        {
+                            "query": "question",
+                            "agent_id": AGENT_ID,
+                            "channel": "api",
+                            "web_search_enabled": True,
+                        },
+                    ),
+                )
 
     async def test_unknown_kb_still_fails_before_chat(self):
         with self.assertRaisesRegex(ValueError, "Knowledge base 'Missing' not found"):
