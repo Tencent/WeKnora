@@ -17,7 +17,7 @@ import (
 // validIMPlatforms is the set of supported IM platforms.
 var validIMPlatforms = map[string]bool{
 	"wecom": true, "feishu": true, "lark": true, "slack": true, "telegram": true, "dingtalk": true,
-	"mattermost": true, "wechat": true, "qqbot": true, "yunzhijia": true,
+	"mattermost": true, "wechat": true, "qqbot": true, "yunzhijia": true, "whatsapp": true,
 }
 
 // invalidIMPlatformError is the 400 message listing the accepted platforms. It
@@ -117,7 +117,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		channel.OutputMode = "full"
 	} else {
 		if channel.Mode == "" {
-			if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
+			if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" || channel.Platform == "whatsapp" {
 				channel.Mode = "webhook"
 			} else {
 				channel.Mode = "websocket"
@@ -433,7 +433,7 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	}
 
 	defaultMode := "websocket"
-	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
+	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" || channel.Platform == "whatsapp" {
 		defaultMode = "webhook"
 	}
 	if im.ResolveMode(channel, defaultMode) != "webhook" ||

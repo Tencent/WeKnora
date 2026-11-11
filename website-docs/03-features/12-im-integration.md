@@ -13,7 +13,7 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 
 ## 支持的平台与能力对比
 
-`internal/handler/im.go` 中 `validIMPlatforms` 定义了 10 个合法平台。各平台能力（以各 `factory.go` 与 adapter 编译期断言为准）：
+`internal/handler/im.go` 中 `validIMPlatforms` 定义了 11 个合法平台。各平台能力（以各 `factory.go` 与 adapter 编译期断言为准）：
 
 | 平台 | 接入模式（默认加粗） | 流式回复 StreamSender | 文件下载 FileDownloader | 线程/话题 ThreadID | 主要凭据字段（credentials JSON） |
 | --- | --- | --- | --- | --- | --- |
@@ -27,6 +27,7 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 | 微信 `wechat`（iLink 机器人） | **longpoll**（强制；创建时后端强制 `mode=longpoll`、`output_mode=full`） | 否（仅整段输出） | 是 | 否 | `bot_token`、`ilink_bot_id`（均必填） |
 | QQ 机器人 `qqbot` | **websocket**（仅支持） | 否 | 否 | 否 | `app_id`、`client_secret`、`api_base_url`、`gateway_url` |
 | 云之家 `yunzhijia` | **webhook** / websocket（从 `send_msg_url` 推导 WS 地址） | 否 | 是 | 是（顶层 msgId / 回复 replyRootMsgId） | `send_msg_url`（必填）、`secret`、`app_id`、`app_secret`、`allowed_webhook_host_suffix`、`timeout_seconds` |
+| WhatsApp `whatsapp`（Meta Cloud API） | **webhook**（仅支持；需公网 HTTPS 回调地址） | 否（WhatsApp 无法编辑已发送消息，仅整段输出；生成期间显示“正在输入”提示） | 否（当前仅处理文本消息） | 否 | `phone_number_id`、`access_token`、`app_secret`、`verify_token`（均必填） |
 
 ## 内置命令系统
 
@@ -49,6 +50,7 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 - **Slack**：群聊消息来自 `AppMentionEvent`（@机器人）以及 channel/group 的 `MessageEvent`（过滤 `BotID` 非空的机器人消息、非 `file_share` 的 subtype）；回复固定发在 thread 中（`thread_ts` 顶层消息用自身时间戳）。
 - **Telegram**：`group`/`supergroup` 判定为群聊，剥除 `@botname` 提及前缀；回复带 `reply_to_message_id`。
 - **Mattermost**：Outgoing Webhook 触发词必须是消息**第一个词**，否则回调解析为空消息（`handler/im.go` 中有针对性的排查日志）；`post_to_main` 凭据控制回帖发主频道还是线程。
+- **WhatsApp**：仅支持私聊（`direct`）。在 Meta 应用后台把 Webhook 回调地址设为渠道的回调 URL、Verify token 填 `verify_token`，并订阅 `messages` 字段；还需确认该应用已订阅对应的 WhatsApp Business 账号（`POST /{WABA_ID}/subscribed_apps`，可用 `GET` 同一地址核对），否则握手能通过但收不到任何消息事件；GET 握手校验 `hub.verify_token`，事件 POST 用 `app_secret` 校验 `X-Hub-Signature-256`。同一 Meta 应用下其他号码的事件按 `phone_number_id` 过滤。回复会把 Markdown 转成 WhatsApp 标记（`*粗体*` 等），超过 4096 字符自动拆成多条；收到消息后会将其标为已读并显示“正在输入”提示（适配器实现 `FullOutputProgressSender`，该提示 25 秒后会自动消失，因此每 20 秒续发一次，直到答案发出）；受 WhatsApp 24 小时客服窗口限制，只能在用户最近一条消息后的 24 小时内自由回复。
 - 会话隔离：`user` 模式下同一用户在"私聊"与"群 A""群 B"分别是不同 `ChannelSession`（key 含 `chat_id`）；`thread` 模式下同一线程内所有用户共享会话。
 
 ## 文件消息处理
@@ -104,7 +106,7 @@ flowchart LR
 | 字段 | 说明 |
 | --- | --- |
 | `AgentID` | 绑定的自定义智能体；回答走该 Agent 的配置（模型、知识库、Skills、MCP、联网搜索） |
-| `Platform` / `Mode` | 平台与接入模式。默认值：mattermost/yunzhijia → `webhook`，wechat → `longpoll`（且强制 `output_mode=full`），其余 → `websocket` |
+| `Platform` / `Mode` | 平台与接入模式。默认值：mattermost/yunzhijia/whatsapp → `webhook`，wechat → `longpoll`（且强制 `output_mode=full`），其余 → `websocket` |
 | `OutputMode` | `stream`（默认，流式）或 `full`（等完整答案后一次性回复） |
 | `Locale` | 回复语言：`zh-CN` / `en-US` / `ja-JP` / `ko-KR` / `ru-RU`，其他值返回 400。留空（默认）使用 `WEKNORA_LANGUAGE`，未设置时为 `zh-CN`。IM 回调请求头里的 `Accept-Language` 来自平台而非提问者，因此不参与决定回复语言 |
 | `KnowledgeBaseID` | 可选"文件知识库"。无论是否配置，文件/图片都会下载后供 QA 理解；配置后会额外在后台入库（见下文） |
@@ -238,7 +240,7 @@ type Adapter interface {
 两个**可选**扩展接口决定了平台能力差异：
 
 - `StreamSender` —— 流式回复（`StartStream` → `UpdateStreamContent`（整段替换语义）→ `FinalizeStream`（最终只保留答案，剥离思考/工具过程）→ `EndStream`）。实现者：Feishu/Lark（流式卡片）、DingTalk（AI 卡片，需 `card_template_id`）、Slack、Telegram（消息编辑）、Mattermost、WeCom WebSocket 模式。
-- `FileDownloader` —— 从平台下载用户发送的文件/图片（`DownloadFile`）。实现者：除 QQ 机器人外的全部平台（WeCom 两种模式均支持）。
+- `FileDownloader` —— 从平台下载用户发送的文件/图片（`DownloadFile`）。实现者：除 QQ 机器人、WhatsApp 外的全部平台（WeCom 两种模式均支持）。
 
 统一消息模型 `IncomingMessage` 携带 `Platform`、`MessageType`（`text`/`file`/`image`）、`UserID`、`ChatID`、`ChatType`（`direct`/`group`）、`Content`、`MessageID`（用于去重）、`FileKey`/`FileName`/`FileSize`、`ThreadID`（话题/线程 ID）、`Quote`（引用消息）等字段。
 
@@ -265,11 +267,12 @@ imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
 imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
 imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
 imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
+imService.RegisterAdapterFactory("whatsapp", whatsapp.NewFactory())
 ```
 
 ## 实现参考
 
 - 核心框架与编排：`internal/im/`（`adapter.go`、`service.go`、`supervisor.go`、`command*.go`、`qaqueue.go`、`session/stream/think/tool_display` 等）
-- 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia}/`
+- 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia,whatsapp}/`
 - HTTP 接口层：`internal/handler/im.go`
 - 路由：`internal/router/routes_agent.go` 的 `RegisterIMRoutes` / `RegisterIMChannelRoutes`

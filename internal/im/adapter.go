@@ -23,6 +23,8 @@ const (
 	PlatformWeChat     Platform = "wechat"
 	PlatformQQBot      Platform = "qqbot"
 	PlatformYunzhijia  Platform = "yunzhijia"
+	// PlatformWhatsApp is the WhatsApp Business Platform (Meta Cloud API).
+	PlatformWhatsApp Platform = "whatsapp"
 )
 
 // SessionMode determines how IM sessions are resolved.

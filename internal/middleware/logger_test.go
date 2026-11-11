@@ -54,6 +54,11 @@ func TestSanitizeBody(t *testing.T) {
 			want: `{"password":"***","token":"***"}`,
 		},
 		{
+			name: "IM channel app secret and webhook verify token",
+			in:   `{"credentials":{"phone_number_id":"123","app_secret":"abc","verify_token":"vt"}}`,
+			want: `{"credentials":{"phone_number_id":"123","app_secret":"***","verify_token":"***"}}`,
+		},
+		{
 			name: "sandbox terminal handshake ticket in JSON body",
 			in:   `{"success":true,"data":{"ticket":"eyJhbGciOiJIUzI1NiJ9.payload.signature","expires_in":120}}`,
 			want: `{"success":true,"data":{"ticket":"***","expires_in":120}}`,
@@ -261,6 +266,14 @@ func TestSanitizeQueryRedactsTerminalTicket(t *testing.T) {
 	}
 	if strings.Contains(got, "signature") {
 		t.Fatalf("sanitizeQuery() leaked the ticket: %q", got)
+	}
+}
+
+func TestSanitizeQueryRedactsWebhookVerifyToken(t *testing.T) {
+	got := sanitizeQuery("hub.challenge=893265048&hub.mode=subscribe&hub.verify_token=shared-secret")
+	want := "hub.challenge=893265048&hub.mode=subscribe&hub.verify_token=%2A%2A%2A"
+	if got != want {
+		t.Fatalf("sanitizeQuery() = %q, want %q", got, want)
 	}
 }
 

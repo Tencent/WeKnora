@@ -56,7 +56,7 @@ var sensitiveFieldRegex = regexp.MustCompile(
 	`(?i)("(?:new[_-]?password|old[_-]?password|password|passwd|ticket|token|access[_-]?token|` +
 		`refresh[_-]?token|next[_-]?token|device[_-]?token|pending[_-]?token|pairing[_-]?link|` +
 		`id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
-		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret|` +
+		`api[_-]?secret|secret[_-]?key|client[_-]?secret|app[_-]?secret|verify[_-]?token|private[_-]?key|secret|` +
 		`authorization[_-]?url|authorization[_-]?attempt|assertion)")\s*:\s*"[^"]*"`,
 )
 
@@ -84,9 +84,13 @@ var sensitiveQueryFields = map[string]struct{}{
 	"access_token":          {},
 	"authorization_attempt": {},
 	"code":                  {},
-	"id_token":              {},
-	"refresh_token":         {},
-	"state":                 {},
+	// hub.verify_token is the shared secret of the Meta (WhatsApp) webhook
+	// handshake; it arrives as a query parameter on the callback GET.
+	"hub.verify_token": {},
+	"hub_verify_token": {},
+	"id_token":         {},
+	"refresh_token":    {},
+	"state":            {},
 	// ticket is the sandbox terminal's WebSocket handshake credential. A
 	// browser cannot set Authorization on an upgrade, so it travels in the
 	// query string; anyone holding it for its 2-minute TTL can open a shell
