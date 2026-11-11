@@ -72,7 +72,7 @@ func TestCopyModel_CopiesCredentialsAndKeepsName(t *testing.T) {
 		},
 	}
 	repo := &stubCopyModelRepo{source: source}
-	svc := NewModelService(repo, &stubKBRepoForModelDelete{}, &stubAgentRepoForModelDelete{}, nil, nil, nil)
+	svc := NewModelService(repo, &stubKBRepoForModelDelete{}, &stubAgentRepoForModelDelete{}, nil, nil, nil, nil)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
 	copied, err := svc.CopyModel(ctx, "src", "  生产 GPT 副本\n")
@@ -110,7 +110,7 @@ func TestCopyModel_ActiveLocalModelSkipsDownload(t *testing.T) {
 		Source: types.ModelSourceLocal,
 		Status: types.ModelStatusActive,
 	}}
-	svc := NewModelService(repo, &stubKBRepoForModelDelete{}, &stubAgentRepoForModelDelete{}, nil, nil, nil)
+	svc := NewModelService(repo, &stubKBRepoForModelDelete{}, &stubAgentRepoForModelDelete{}, nil, nil, nil, nil)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
 	copied, err := svc.CopyModel(ctx, "local-src", "qwen3:8b 副本")
@@ -129,7 +129,7 @@ func TestCopyModel_RejectsBuiltinMissingAndOverlongDisplayName(t *testing.T) {
 		Source:    types.ModelSourceRemote,
 		Status:    types.ModelStatusActive,
 	}}
-	svc := NewModelService(repo, &stubKBRepoForModelDelete{}, &stubAgentRepoForModelDelete{}, nil, nil, nil)
+	svc := NewModelService(repo, &stubKBRepoForModelDelete{}, &stubAgentRepoForModelDelete{}, nil, nil, nil, nil)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
 	_, err := svc.CopyModel(ctx, "builtin", "副本")

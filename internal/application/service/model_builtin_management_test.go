@@ -27,7 +27,7 @@ func TestUpdateBuiltinModel_RequiresSystemAdmin(t *testing.T) {
 			updated = true
 			return nil
 		},
-	}, nil, nil, nil, nil, nil)
+	}, nil, nil, nil, nil, nil, nil)
 
 	err := svc.UpdateModel(builtinModelContext(false), &types.Model{ID: stored.ID})
 	require.Error(t, err)
@@ -50,7 +50,7 @@ func TestUpdateBuiltinModel_SystemAdminCreatesRuntimeOverride(t *testing.T) {
 			saved = &copy
 			return nil
 		},
-	}, nil, nil, nil, nil, nil)
+	}, nil, nil, nil, nil, nil, nil)
 
 	input := &types.Model{ID: stored.ID, Name: "edited"}
 	require.NoError(t, svc.UpdateModel(builtinModelContext(true), input))
@@ -65,7 +65,7 @@ func TestUpdateBuiltinModelCredentials_SystemAdminOnly(t *testing.T) {
 
 	t.Run("tenant admin denied", func(t *testing.T) {
 		stored := &types.Model{ID: "builtin-chat", TenantID: 10000, IsBuiltin: true}
-		svc := NewModelService(&stubModelRepoForDelete{model: stored}, nil, nil, nil, nil, nil)
+		svc := NewModelService(&stubModelRepoForDelete{model: stored}, nil, nil, nil, nil, nil, nil)
 		_, err := svc.UpdateModelCredentials(builtinModelContext(false), stored.ID, &newKey, nil)
 		require.Error(t, err)
 		appErr, ok := apperrors.IsAppError(err)
@@ -86,7 +86,7 @@ func TestUpdateBuiltinModelCredentials_SystemAdminOnly(t *testing.T) {
 				saved = &copy
 				return nil
 			},
-		}, nil, nil, nil, nil, nil)
+		}, nil, nil, nil, nil, nil, nil)
 
 		updated, err := svc.UpdateModelCredentials(
 			builtinModelContext(true), stored.ID, &newKey, nil,
