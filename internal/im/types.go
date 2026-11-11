@@ -99,7 +99,7 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 		ch.ID = uuid.New().String()
 	}
 	if ch.Mode == "" {
-		if ch.Platform == "mattermost" || ch.Platform == "yunzhijia" {
+		if ch.Platform == "mattermost" || ch.Platform == "yunzhijia" || ch.Platform == "whatsapp" {
 			ch.Mode = "webhook"
 		} else {
 			ch.Mode = "websocket"
@@ -233,6 +233,10 @@ func (ch *IMChannel) computeBotIdentity() string {
 			if token := strings.TrimSpace(parsed.Query().Get("yzjtoken")); token != "" {
 				return fmt.Sprintf("yunzhijia:%x", sha256.Sum256([]byte(token)))
 			}
+		}
+	case "whatsapp":
+		if phoneNumberID := strings.TrimSpace(str("phone_number_id")); phoneNumberID != "" {
+			return "whatsapp:" + phoneNumberID
 		}
 	}
 	return ""
