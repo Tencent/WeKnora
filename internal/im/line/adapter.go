@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -280,21 +281,86 @@ func shouldEmitDirectReply(reply *im.ReplyMessage) bool {
 	return reply.IsFinal || !reply.IsStreaming
 }
 
+// LINE hard limits for a single reply/push request. Exceeding any of them is a
+// request-validation 400, i.e. the user receives nothing, so every outgoing
+// answer is shaped against them before it is sent.
+const (
+	// lineMaxTextRunes is the maximum length of one "text" message object.
+	lineMaxTextRunes = 5000
+	// lineMaxMessagesPerRequest is the maximum number of message objects one
+	// reply or push call accepts.
+	lineMaxMessagesPerRequest = 5
+	// lineMaxFlexJSONBytes is the maximum size of the JSON that defines one
+	// flex bubble. A larger card is rejected, so we fall back to text.
+	lineMaxFlexJSONBytes = 30 * 1024
+	// lineTruncatedSuffix marks the last chunk when the answer needs more than
+	// lineMaxMessagesPerRequest messages.
+	lineTruncatedSuffix = "\n…（內容過長，已截斷）"
+)
+
 // flexMessages builds the LINE message payload for a reply. When enableFlex is
 // true it returns a structured flex card carrying a title, the answer body, and
-// a source tag; otherwise it falls back to a plain text message.
-func flexMessages(text string, enableFlex bool) []map[string]interface{} {
+// a source tag; otherwise it falls back to plain text. In both paths the result
+// is guaranteed to fit LINE's per-message and per-request limits, because an
+// oversized payload is rejected outright and the answer is lost.
+func flexMessages(ctx context.Context, text string, enableFlex bool) []map[string]interface{} {
 	if enableFlex {
-		return []map[string]interface{}{flexMessage(text)}
+		card := flexMessage(text)
+		if raw, err := json.Marshal(card); err == nil && len(raw) <= lineMaxFlexJSONBytes {
+			return []map[string]interface{}{card}
+		}
+		logger.Warnf(ctx, "[IM/Line] flex card exceeds %d bytes, falling back to text", lineMaxFlexJSONBytes)
 	}
 	// Non-Flex path: strip raw Markdown markers via polishPlainText so the
-	// chat window never shows bare **, ###, ``` and friends.
-	return []map[string]interface{}{
-		{
+	// chat window never shows bare **, ###, ``` and friends, then split the
+	// result into at most lineMaxMessagesPerRequest messages of
+	// lineMaxTextRunes runes each.
+	chunks := splitForLINE(polishPlainText(text), lineMaxTextRunes, lineMaxMessagesPerRequest)
+	messages := make([]map[string]interface{}, 0, len(chunks))
+	for _, chunk := range chunks {
+		messages = append(messages, map[string]interface{}{
 			"type": "text",
-			"text": polishPlainText(text),
-		},
+			"text": chunk,
+		})
 	}
+	return messages
+}
+
+// splitForLINE cuts text into chunks of at most maxRunes runes, preferring a
+// newline boundary in the back half of the window so sentences stay intact. It
+// stops after maxParts chunks and appends lineTruncatedSuffix to the last one,
+// because LINE rejects a sixth message object in the same request.
+func splitForLINE(text string, maxRunes, maxParts int) []string {
+	if text == "" {
+		return nil
+	}
+	if maxRunes <= 0 {
+		maxRunes = lineMaxTextRunes
+	}
+	if maxParts <= 0 {
+		maxParts = 1
+	}
+	rest := []rune(text)
+	var chunks []string
+	for len(rest) > 0 && len(chunks) < maxParts {
+		end := maxRunes
+		if end > len(rest) {
+			end = len(rest)
+		}
+		if end < len(rest) {
+			// Keep the newline itself on the chunk being closed so the next
+			// chunk starts at the beginning of a line.
+			if idx := strings.LastIndex(string(rest[:end]), "\n"); idx > 0 {
+				end = utf8.RuneCountInString(string(rest[:end])[:idx+1])
+			}
+		}
+		chunks = append(chunks, string(rest[:end]))
+		rest = rest[end:]
+	}
+	if len(rest) > 0 {
+		chunks[len(chunks)-1] += lineTruncatedSuffix
+	}
+	return chunks
 }
 
 // polishPlainText converts a Markdown-flavoured RAG answer into clean,
@@ -774,7 +840,7 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 
 	// Emit a structured flex card when the channel opted in; otherwise fall
 	// back to a plain text message. The builder keeps the wire shape in one place.
-	messages := flexMessages(text, a.enableFlexMessage)
+	messages := flexMessages(ctx, text, a.enableFlexMessage)
 
 	// Prefer the reply API. A replyToken is single-use and expires fast, so we
 	// degrade to push only when the reply API genuinely fails. A successful
