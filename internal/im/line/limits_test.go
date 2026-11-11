@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestSplitForLINEHonoursTextLimit pins the per-message character limit: no
@@ -71,7 +72,7 @@ func TestFlexMessagesFallBackWhenCardTooLarge(t *testing.T) {
 	if raw, _ := json.Marshal(flexMessage(answer, adapter.cardHeader())); len(raw) <= lineMaxFlexJSONBytes {
 		t.Fatalf("test fixture is not oversized: %d bytes", len(raw))
 	}
-	messages := adapter.buildMessages(context.Background(), answer)
+	messages := adapter.buildMessages(context.Background(), answer, false)
 	if len(messages) == 0 {
 		t.Fatal("expected fallback messages")
 	}
@@ -92,7 +93,7 @@ func TestFlexMessagesLongAnswerStaysFlex(t *testing.T) {
 	adapter := NewWebhookAdapterWithFlex("token", "secret", true)
 	adapter.cardTitle = "HPE 智能檢索助手"
 
-	messages := adapter.buildMessages(context.Background(), answer)
+	messages := adapter.buildMessages(context.Background(), answer, false)
 	if len(messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(messages))
 	}
@@ -115,7 +116,7 @@ func TestFlexMessagesLongAnswerStaysFlex(t *testing.T) {
 func TestShortNoticeStaysPlainText(t *testing.T) {
 	adapter := NewWebhookAdapterWithFlex("token", "secret", true)
 	for _, notice := range []string{"✅ 對話已清空，下次消息將開始全新會話。", "會話已重置 / Session cleared", "❌ 无法读取此附件，请重试或改用文字描述。"} {
-		messages := adapter.buildMessages(context.Background(), notice)
+		messages := adapter.buildMessages(context.Background(), notice, false)
 		if len(messages) != 1 {
 			t.Fatalf("%q: messages = %d, want 1", notice, len(messages))
 		}
@@ -137,4 +138,23 @@ func tail(s string) string {
 		return "…" + s[len(s)-24:]
 	}
 	return s
+}
+
+// TestCommandOutputIsNeverACard pins the rule that command and system output is
+// plain text even when it is long enough to qualify for a card: /help listings
+// are reference text, and a card would add a bot-name header and a source tag
+// that mean nothing for a command listing.
+func TestCommandOutputIsNeverACard(t *testing.T) {
+	help := "可用指令：\n" + strings.Repeat("· `/clear` — 清空对话记忆\n", 40)
+	if utf8.RuneCountInString(help) < lineFlexMinRunes {
+		t.Fatalf("fixture is too short: %d runes", utf8.RuneCountInString(help))
+	}
+	adapter := NewWebhookAdapterWithFlex("token", "secret", true)
+
+	if got := adapter.buildMessages(context.Background(), help, true); len(got) != 1 || got[0]["type"] != "text" {
+		t.Errorf("command output must go out as plain text, got %v", got)
+	}
+	if got := adapter.buildMessages(context.Background(), help, false); len(got) != 1 || got[0]["type"] != "flex" {
+		t.Errorf("answers of the same length should still be a card, got %v", got)
+	}
 }

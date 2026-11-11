@@ -293,12 +293,13 @@ const (
 )
 
 // buildMessages builds the LINE message payload for a reply. It returns a
-// structured flex card when the channel opted in and the answer is long enough
-// to be worth a card; otherwise it falls back to plain text. In both paths the
-// result fits LINE's per-message and per-request limits, because an oversized
-// payload is rejected outright and the answer is lost.
-func (a *Adapter) buildMessages(ctx context.Context, text string) []map[string]interface{} {
-	if a.enableFlexMessage && utf8.RuneCountInString(text) >= lineFlexMinRunes {
+// structured flex card when the channel opted in, the reply is an answer (not
+// command or system output), and it is long enough to be worth a card;
+// otherwise it falls back to plain text. In both paths the result fits LINE's
+// per-message and per-request limits, because an oversized payload is rejected
+// outright and the answer is lost.
+func (a *Adapter) buildMessages(ctx context.Context, text string, plainText bool) []map[string]interface{} {
+	if a.enableFlexMessage && !plainText && utf8.RuneCountInString(text) >= lineFlexMinRunes {
 		card := flexMessage(text, a.cardHeader())
 		if raw, err := json.Marshal(card); err == nil && len(raw) <= lineMaxFlexJSONBytes {
 			return []map[string]interface{}{card}
@@ -853,7 +854,7 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 
 	// Emit a structured flex card when the channel opted in; otherwise fall
 	// back to a plain text message. The builder keeps the wire shape in one place.
-	messages := a.buildMessages(ctx, text)
+	messages := a.buildMessages(ctx, text, reply.PlainText)
 
 	// Prefer the reply API. A replyToken is single-use and expires fast, so we
 	// degrade to push only when the reply API genuinely fails. A successful
