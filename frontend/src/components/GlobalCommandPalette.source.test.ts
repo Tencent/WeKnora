@@ -38,7 +38,7 @@ async function fixture(options: { kbId?: string; unsupported?: boolean; missingK
   const group = { knowledgeId: 'handbook', kbId: options.missingKb ? '' : 'travel-kb', title: 'Travel handbook', kbName: 'Travel', chunks }
   const query = ref('travel')
   const search = {
-    query, loading: ref(false), hasSearched: ref(true),
+    query, loading: ref(false), hasSearched: ref(true), searchFailures: ref([]), retrySearch() {},
     fileGroups: ref([group]), messageGroups: ref([]), kbMatches: ref([]), knowledgeBases: ref([]),
     agentMatches: ref([]), sessionMatches: ref([]), totalChunks: ref(2), totalMessages: ref(0), clearResults() {},
   }
