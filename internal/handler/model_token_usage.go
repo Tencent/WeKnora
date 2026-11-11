@@ -11,14 +11,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ModelTokenUsageHandler serves tenant-scoped token usage reports.
 type ModelTokenUsageHandler struct {
 	repo *repository.ModelTokenUsageRepository
 }
 
+// NewModelTokenUsageHandler creates a handler backed by the model usage ledger.
 func NewModelTokenUsageHandler(repo *repository.ModelTokenUsageRepository) *ModelTokenUsageHandler {
 	return &ModelTokenUsageHandler{repo: repo}
 }
 
+// List returns daily or monthly aggregates within the caller's administrative scope.
 func (h *ModelTokenUsageHandler) List(c *gin.Context) {
 	ctx := c.Request.Context()
 	caller := types.CallerFromContext(ctx)

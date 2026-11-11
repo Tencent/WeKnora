@@ -8,20 +8,24 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// ModelTokenUsageRepository stores and aggregates chat model calls across tenants.
 type ModelTokenUsageRepository struct {
 	db *gorm.DB
 }
 
+// NewModelTokenUsageRepository uses the application's database for the usage ledger.
 func NewModelTokenUsageRepository(db *gorm.DB) *ModelTokenUsageRepository {
 	return &ModelTokenUsageRepository{db: db}
 }
 
+// Record inserts a call once, even if the same call ID is submitted again.
 func (r *ModelTokenUsageRepository) Record(ctx context.Context, entry types.ModelTokenUsage) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}}, DoNothing: true,
 	}).Create(&entry).Error
 }
 
+// ModelTokenUsageSummary reports usage and call counts for one tenant, model, and period.
 type ModelTokenUsageSummary struct {
 	Period          string `json:"period"`
 	TenantID        uint64 `json:"tenant_id"`

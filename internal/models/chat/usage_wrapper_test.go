@@ -38,8 +38,12 @@ func TestUsageChatRecordsFinalSnapshotForInterruptedStream(t *testing.T) {
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, uint64(20))
 	out, err := model.ChatStream(ctx, nil, nil)
 	require.NoError(t, err)
-	for range out {
+	var forwarded []types.StreamResponse
+	for chunk := range out {
+		forwarded = append(forwarded, chunk)
 	}
+	require.Len(t, forwarded, 2)
+	require.Equal(t, types.ResponseTypeError, forwarded[1].ResponseType)
 	require.Len(t, records, 1)
 	entry := <-records
 	require.NotEmpty(t, entry.ID)
