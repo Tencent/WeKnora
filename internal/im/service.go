@@ -31,6 +31,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -3422,13 +3423,16 @@ func (s *Service) checkDuplicateBot(channel *IMChannel, excludeID string) error 
 // at the start and end of processing.
 // ────────────────────────────────────────────────────────────────────────
 
-// supportedKBFileExts is the set of file extensions that can be saved to a knowledge base.
-var supportedKBFileExts = map[string]bool{
-	"pdf": true, "txt": true, "docx": true, "doc": true,
-	"md": true, "markdown": true,
-	"png": true, "jpg": true, "jpeg": true, "gif": true,
-	"csv": true, "xlsx": true, "xls": true,
-	"pptx": true, "ppt": true,
+// canArchiveToKnowledgeBase reports whether a downloaded attachment may be written
+// into a bound knowledge base.
+//
+// This used to be a locally maintained extension list, which drifted from the
+// single source of truth used by every other import path: HTML, EPUB, RTF,
+// XMind, JSON and the audio formats were importable everywhere except here, so
+// a WeChat attachment could be downloaded, parsed and answered from while being
+// silently dropped at archive time (issue #5403).
+func canArchiveToKnowledgeBase(ext string) bool {
+	return utils.IsSupportedImportExtension(ext)
 }
 
 // fileMessageQAContent turns a file-only platform event into a valid QA query.
@@ -3465,7 +3469,7 @@ func (s *Service) processDownloadedFileToKnowledgeBase(ctx context.Context, chan
 
 	fileName := file.fileName
 	ext := fileExtension(fileName)
-	if !supportedKBFileExts[ext] {
+	if !canArchiveToKnowledgeBase(ext) {
 		logger.Infof(ctx, "[IM] Unsupported file type after download: %s (file=%s)", ext, fileName)
 		return
 	}
