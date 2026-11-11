@@ -536,7 +536,7 @@ if err := registry.Register(mysourceConnector.NewConnector()); err != nil {
 ```go
 // internal/im/adapter.go
 type Platform string // "wecom" / "feishu" / "lark" / "slack" / "telegram" / "dingtalk" /
-                     // "mattermost" / "wechat" / "qqbot" / "yunzhijia"
+                     // "mattermost" / "wechat" / "qqbot" / "yunzhijia" / "line"
 
 // Adapter is the interface every IM platform must implement.
 type Adapter interface {
@@ -589,7 +589,7 @@ func (s *Service) RegisterAdapterFactory(platform string, factory AdapterFactory
 
 ### 现有实现
 
-`internal/im/` 下每个平台一个子包：`wecom/`、`feishu/`（lark 复用，`feishu.NewFactory(RegionLark)`）、`slack/`、`telegram/`、`dingtalk/`、`mattermost/`、`wechat/`、`qqbot/`、`yunzhijia/`。
+`internal/im/` 下每个平台一个子包：`wecom/`、`feishu/`（lark 复用，`feishu.NewFactory(RegionLark)`）、`slack/`、`telegram/`、`dingtalk/`、`mattermost/`、`wechat/`、`qqbot/`、`yunzhijia/`、`line/`。
 
 ### 新增步骤
 

@@ -13,7 +13,7 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 
 ## 支持的平台与能力对比
 
-`internal/handler/im.go` 中 `validIMPlatforms` 定义了 10 个合法平台。各平台能力（以各 `factory.go` 与 adapter 编译期断言为准）：
+`internal/handler/im.go` 中 `validIMPlatforms` 定义了 11 个合法平台。各平台能力（以各 `factory.go` 与 adapter 编译期断言为准）：
 
 | 平台 | 接入模式（默认加粗） | 流式回复 StreamSender | 文件下载 FileDownloader | 线程/话题 ThreadID | 主要凭据字段（credentials JSON） |
 | --- | --- | --- | --- | --- | --- |
@@ -27,6 +27,7 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 | 微信 `wechat`（iLink 机器人） | **longpoll**（强制；创建时后端强制 `mode=longpoll`、`output_mode=full`） | 否（仅整段输出） | 是 | 否 | `bot_token`、`ilink_bot_id`（均必填） |
 | QQ 机器人 `qqbot` | **websocket**（仅支持） | 否 | 否 | 否 | `app_id`、`client_secret`、`api_base_url`、`gateway_url` |
 | 云之家 `yunzhijia` | **webhook** / websocket（从 `send_msg_url` 推导 WS 地址） | 否 | 是 | 是（顶层 msgId / 回复 replyRootMsgId） | `send_msg_url`（必填）、`secret`、`app_id`、`app_secret`、`allowed_webhook_host_suffix`、`timeout_seconds` |
+| LINE `line` | **webhook**（LINE Messaging API；创建时后端强制 `mode=webhook`、`output_mode=full`） | 否（仅整段输出；reply token 一次性，失败时回退 push） | 否 | 否（群组/房间按 `chat_id` 复用会话） | `channel_access_token`、`channel_secret`（均必填）、`reset_keyword`、`enable_flex_message` |
 
 ## 内置命令系统
 
@@ -49,6 +50,7 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 - **Slack**：群聊消息来自 `AppMentionEvent`（@机器人）以及 channel/group 的 `MessageEvent`（过滤 `BotID` 非空的机器人消息、非 `file_share` 的 subtype）；回复固定发在 thread 中（`thread_ts` 顶层消息用自身时间戳）。
 - **Telegram**：`group`/`supergroup` 判定为群聊，剥除 `@botname` 提及前缀；回复带 `reply_to_message_id`。
 - **Mattermost**：Outgoing Webhook 触发词必须是消息**第一个词**，否则回调解析为空消息（`handler/im.go` 中有针对性的排查日志）；`post_to_main` 凭据控制回帖发主频道还是线程。
+- **LINE**：`group`/`room` 消息先看 `message.mention.mentionees`（`type=bot` 或 `isSelf`），未 @机器人时整条忽略；命中后按 `mention.index` 剥除前导 `@botname`。房间（room）与群组（group）都按 `ChatID` 复用会话。
 - 会话隔离：`user` 模式下同一用户在"私聊"与"群 A""群 B"分别是不同 `ChannelSession`（key 含 `chat_id`）；`thread` 模式下同一线程内所有用户共享会话。
 
 ## 文件消息处理
@@ -138,6 +140,14 @@ credentials.api_base_url 可覆盖 API origin，并同时用作长连接 SDK 的
 ```
 
 云之家选择 session_mode=thread 后按话题复用会话，顶层消息启动新线程，回复沿根消息线程继续。钉钉富文本消息会提取可读内容；飞书 post 消息中的图片进入图片处理。output_mode=full 可显示中间过程与输出进度，answer_only 保留最终答案。
+
+#### LINE 渠道要点
+
+- **签名校验**：`VerifyCallback` 以 `channel_secret` 对原始请求体做 HMAC-SHA256，Base64 后与 `X-Line-Signature` 用 `subtle.ConstantTimeCompare` 常量时间比对；请求体先经 `LimitWebhookBody` 限流。
+- **异步 ACK**：回调在入队前立即返回 200（`writeIMCallbackACK`），避免 LINE 的 webhook 超时重投。
+- **输出形态**：`enable_flex_message=true` 时回复渲染为 Flex 卡片（标题 + `markdownToFlexComponents` 解析的 Markdown + 来源标签）；关闭时为纯文字，仍经 `polishPlainText` 做排版整形（`**粗体**`→`【】`、表格→键值列表、标题→📌、代码块→`[代碼區塊]`）。
+- **平台硬限制**（超出会被 LINE 以 400 拒绝，用户收不到任何内容）：单条 text 消息 5000 字元、单次请求最多 5 条消息、单个 flex bubble 的 JSON 不超过 30 KB。适配器在发送前统一整形：超长纯文字按换行切成最多 5 段（末段追加「內容過長，已截斷」），flex 卡片超过 30 KB 时自动降级为分段纯文字。
+- **重置关键字**：`reset_keyword`（如 `/reset`、`/new`）命中后与 `/clear` 走同一 `ActionClear` 副作用，但回自己的确认文案；匹配为去空白后的大小写不敏感全等，不会误伤普通句子。
 
 #### 长连接的可靠性：leader 选举与 Supervisor
 
@@ -265,11 +275,12 @@ imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
 imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
 imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
 imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
+imService.RegisterAdapterFactory("line", line.NewFactory())
 ```
 
 ## 实现参考
 
 - 核心框架与编排：`internal/im/`（`adapter.go`、`service.go`、`supervisor.go`、`command*.go`、`qaqueue.go`、`session/stream/think/tool_display` 等）
-- 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia}/`
+- 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia,line}/`
 - HTTP 接口层：`internal/handler/im.go`
 - 路由：`internal/router/routes_agent.go` 的 `RegisterIMRoutes` / `RegisterIMChannelRoutes`
