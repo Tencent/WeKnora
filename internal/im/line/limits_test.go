@@ -67,10 +67,11 @@ func TestSplitForLINEBreaksOnNewline(t *testing.T) {
 // that respect the 5000-rune limit instead.
 func TestFlexMessagesFallBackWhenCardTooLarge(t *testing.T) {
 	answer := strings.Repeat("• HPE 記憶體混插規則：全機以最慢的 DIMM 速度運作。\n| 規格 | 描述 |\n| --- | --- |\n| 處理器 | Xeon 6338 |\n\n", 400)
-	if raw, _ := json.Marshal(flexMessage(answer)); len(raw) <= lineMaxFlexJSONBytes {
+	adapter := NewWebhookAdapterWithFlex("token", "secret", "", true)
+	if raw, _ := json.Marshal(flexMessage(answer, adapter.cardHeader())); len(raw) <= lineMaxFlexJSONBytes {
 		t.Fatalf("test fixture is not oversized: %d bytes", len(raw))
 	}
-	messages := flexMessages(context.Background(), answer, true)
+	messages := adapter.buildMessages(context.Background(), answer)
 	if len(messages) == 0 {
 		t.Fatal("expected fallback messages")
 	}
@@ -84,15 +85,43 @@ func TestFlexMessagesFallBackWhenCardTooLarge(t *testing.T) {
 	}
 }
 
-// TestFlexMessagesSmallAnswerStaysFlex makes sure the normal path still emits a
-// single flex card for an answer that fits.
-func TestFlexMessagesSmallAnswerStaysFlex(t *testing.T) {
-	messages := flexMessages(context.Background(), "## 你好\n\n這是**簡短**回答。", true)
+// TestFlexMessagesLongAnswerStaysFlex makes sure an answer worth a card still
+// gets one, and that the card header carries the channel name.
+func TestFlexMessagesLongAnswerStaysFlex(t *testing.T) {
+	answer := "## " + strings.Repeat("記憶體混插規則", 10) + "\n\n" + strings.Repeat("• 全機以最慢的 DIMM 速度運作。\n", 12)
+	adapter := NewWebhookAdapterWithFlex("token", "secret", "", true)
+	adapter.cardTitle = "HPE 智能檢索助手"
+
+	messages := adapter.buildMessages(context.Background(), answer)
 	if len(messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(messages))
 	}
 	if messages[0]["type"] != "flex" {
-		t.Errorf("type = %v, want flex", messages[0]["type"])
+		t.Fatalf("type = %v, want flex", messages[0]["type"])
+	}
+	if got := messages[0]["altText"]; got != "HPE 智能檢索助手" {
+		t.Errorf("altText = %v, want the channel name", got)
+	}
+	header := messages[0]["contents"].(map[string]interface{})["header"].(map[string]interface{})
+	title := header["contents"].([]interface{})[0].(map[string]interface{})["text"]
+	if title != "HPE 智能檢索助手" {
+		t.Errorf("card title = %v, want the channel name", title)
+	}
+}
+
+// TestShortNoticeStaysPlainText pins the UX rule that one-line confirmations and
+// errors are not wrapped in a card: a "/clear" confirmation or an error notice
+// inside a card with a header and a source tag reads like a malfunction.
+func TestShortNoticeStaysPlainText(t *testing.T) {
+	adapter := NewWebhookAdapterWithFlex("token", "secret", "/reset", true)
+	for _, notice := range []string{"✅ 對話已清空，下次消息將開始全新會話。", "會話已重置 / Session cleared", "❌ 无法读取此附件，请重试或改用文字描述。"} {
+		messages := adapter.buildMessages(context.Background(), notice)
+		if len(messages) != 1 {
+			t.Fatalf("%q: messages = %d, want 1", notice, len(messages))
+		}
+		if messages[0]["type"] != "text" {
+			t.Errorf("%q: type = %v, want text", notice, messages[0]["type"])
+		}
 	}
 }
 

@@ -35,6 +35,10 @@ type Adapter struct {
 	// (structured layout with a title and source tag). When false, replies are
 	// emitted as plain text messages.
 	enableFlexMessage bool
+	// cardTitle is the card header, taken from the channel name so a card says
+	// which bot answered instead of a fixed string. Empty falls back to
+	// lineDefaultCardTitle.
+	cardTitle string
 }
 
 // Compile-time check that Adapter satisfies the im.Adapter interface.
@@ -296,16 +300,26 @@ const (
 	// lineTruncatedSuffix marks the last chunk when the answer needs more than
 	// lineMaxMessagesPerRequest messages.
 	lineTruncatedSuffix = "\n…（內容過長，已截斷）"
+	// lineFlexMinRunes is the length below which a reply stays plain text. A
+	// one-line confirmation or error wrapped in a card (header + source tag)
+	// reads like a malfunction, so short notices are sent inline.
+	lineFlexMinRunes = 200
+	// lineDefaultCardTitle is the card header when the channel has no name.
+	lineDefaultCardTitle = "WeKnora"
+	// lineTitleMaxRunes and lineAltTextMaxRunes keep the card header and the
+	// notification text inside LINE's limits.
+	lineTitleMaxRunes   = 40
+	lineAltTextMaxRunes = 400
 )
 
-// flexMessages builds the LINE message payload for a reply. When enableFlex is
-// true it returns a structured flex card carrying a title, the answer body, and
-// a source tag; otherwise it falls back to plain text. In both paths the result
-// is guaranteed to fit LINE's per-message and per-request limits, because an
-// oversized payload is rejected outright and the answer is lost.
-func flexMessages(ctx context.Context, text string, enableFlex bool) []map[string]interface{} {
-	if enableFlex {
-		card := flexMessage(text)
+// buildMessages builds the LINE message payload for a reply. It returns a
+// structured flex card when the channel opted in and the answer is long enough
+// to be worth a card; otherwise it falls back to plain text. In both paths the
+// result fits LINE's per-message and per-request limits, because an oversized
+// payload is rejected outright and the answer is lost.
+func (a *Adapter) buildMessages(ctx context.Context, text string) []map[string]interface{} {
+	if a.enableFlexMessage && utf8.RuneCountInString(text) >= lineFlexMinRunes {
+		card := flexMessage(text, a.cardHeader())
 		if raw, err := json.Marshal(card); err == nil && len(raw) <= lineMaxFlexJSONBytes {
 			return []map[string]interface{}{card}
 		}
@@ -324,6 +338,15 @@ func flexMessages(ctx context.Context, text string, enableFlex bool) []map[strin
 		})
 	}
 	return messages
+}
+
+// cardHeader returns the flex card title: the channel name, or a neutral
+// fallback when the channel has none.
+func (a *Adapter) cardHeader() string {
+	if title := strings.TrimSpace(a.cardTitle); title != "" {
+		return title
+	}
+	return lineDefaultCardTitle
 }
 
 // splitForLINE cuts text into chunks of at most maxRunes runes, preferring a
@@ -617,18 +640,27 @@ func polishInline(s string) string {
 // flexMessage constructs a single LINE flex message per the official messaging
 // schema: contents is ONE BubbleContainer object (NOT an array). Only carousel
 // multi-flex wraps bubbles in an array.
-func flexMessage(text string) map[string]interface{} {
+func flexMessage(text, title string) map[string]interface{} {
 	return map[string]interface{}{
 		"type":     "flex",
-		"altText":  "RAG 回答",
-		"contents": bubbleContainer(text),
+		"altText":  truncateRunes(title, lineAltTextMaxRunes),
+		"contents": bubbleContainer(text, title),
 	}
+}
+
+// truncateRunes cuts s to at most n runes (LINE caps altText length).
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // bubbleContainer returns a LINE BubbleContainer with a "RAG 回答" header and a
 // body whose answer renders as Markdown flex components followed by the
 // WeKnora source line.
-func bubbleContainer(text string) map[string]interface{} {
+func bubbleContainer(text, title string) map[string]interface{} {
 	return map[string]interface{}{
 		"type": "bubble",
 		"header": map[string]interface{}{
@@ -637,9 +669,10 @@ func bubbleContainer(text string) map[string]interface{} {
 			"contents": []interface{}{
 				map[string]interface{}{
 					"type":   "text",
-					"text":   "RAG 回答",
+					"text":   truncateRunes(title, lineTitleMaxRunes),
 					"weight": "bold",
 					"size":   "lg",
+					"wrap":   true,
 				},
 			},
 		},
@@ -840,7 +873,7 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 
 	// Emit a structured flex card when the channel opted in; otherwise fall
 	// back to a plain text message. The builder keeps the wire shape in one place.
-	messages := flexMessages(ctx, text, a.enableFlexMessage)
+	messages := a.buildMessages(ctx, text)
 
 	// Prefer the reply API. A replyToken is single-use and expires fast, so we
 	// degrade to push only when the reply API genuinely fails. A successful

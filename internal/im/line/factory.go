@@ -3,6 +3,7 @@ package line
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/im"
 )
@@ -38,6 +39,11 @@ func NewFactory() im.AdapterFactory {
 		adapter := NewWebhookAdapterWithFlex(
 			channelAccessToken, channelSecret, resetKeyword, enableFlexMessage,
 		)
+		// Use the channel's display name as the card header so a card says which
+		// bot answered instead of carrying a fixed string.
+		if channel != nil {
+			adapter.cardTitle = strings.TrimSpace(channel.Name)
+		}
 		return adapter, nil, nil
 	}
 }
