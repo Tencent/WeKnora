@@ -56,7 +56,11 @@ func TestHandleAgentEventsForSSE_TitleAcrossPolls(t *testing.T) {
 		wantTimeout  bool
 	}{
 		{"title_before_complete", [][]interfaces.StreamEvent{{title}, {complete}}, true, true, false, false},
-		{"title_before_empty_poll_and_complete", [][]interfaces.StreamEvent{{title}, nil, {complete}}, true, true, false, false},
+		{
+			"title_before_empty_poll_and_complete",
+			[][]interfaces.StreamEvent{{title}, nil, {complete}},
+			true, true, false, false,
+		},
 		{"title_with_complete", [][]interfaces.StreamEvent{{title, complete}}, true, true, false, false},
 		{"title_after_complete", [][]interfaces.StreamEvent{{complete}, nil, {title}}, true, true, false, false},
 		{"no_title_requested", [][]interfaces.StreamEvent{{complete}}, false, false, false, false},
@@ -78,9 +82,11 @@ func TestHandleAgentEventsForSSE_TitleAcrossPolls(t *testing.T) {
 			t.Logf("stream duration: %s; polls: %d", elapsed, stream.reads)
 			require.NoError(t, ctx.Err(), "stream did not finish before the test deadline")
 			if tt.wantTimeout {
-				assert.GreaterOrEqual(t, elapsed, 3*time.Second, "a genuinely missing title should retain the bounded wait")
+				assert.GreaterOrEqual(t, elapsed, 3*time.Second,
+					"a genuinely missing title should retain the bounded wait")
 			} else {
-				assert.Less(t, elapsed, 2*time.Second, "an already delivered title must not trigger the 3-second timeout")
+				assert.Less(t, elapsed, 2*time.Second,
+					"an already delivered title must not trigger the 3-second timeout")
 			}
 			body := recorder.Body.String()
 			if tt.wantTitle {
