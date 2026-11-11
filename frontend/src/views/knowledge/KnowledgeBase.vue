@@ -739,6 +739,7 @@ const sourceOptions = computed(() => [
   { label: t('knowledgeBase.channelSeafile'), value: 'seafile' },
   { label: t('knowledgeBase.channelNextcloud'), value: 'nextcloud' },
   { label: t('knowledgeBase.channelIma'), value: 'ima' },
+  { label: t('knowledgeBase.channelLocalFolder'), value: 'local_folder' },
   { label: t('knowledgeBase.channelWechat'), value: 'wechat' },
   { label: t('knowledgeBase.channelWecom'), value: 'wecom' },
   { label: t('knowledgeBase.channelDingtalk'), value: 'dingtalk' },

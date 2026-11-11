@@ -714,6 +714,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
+	config.ManualTrigger = payload.Trigger == "manual"
+
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
@@ -992,7 +994,9 @@ func (s *DataSourceService) applyFetchedItem(
 		return false, nil
 	}
 
-	if len(item.Content) == 0 && item.URL == "" {
+	// An in-place item may be empty on purpose: its source file was emptied, and
+	// the existing knowledge must be updated instead of keeping the old content.
+	if len(item.Content) == 0 && item.URL == "" && !item.UpdateInPlace {
 		// Check if this is an error item from the connector (failed to fetch content)
 		if errMsg, hasErr := item.Metadata["error"]; hasErr {
 			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", item.Title, item.ExternalID, errMsg)
@@ -1013,6 +1017,10 @@ func (s *DataSourceService) applyFetchedItem(
 		case errors.As(err, &dupErr):
 			// Duplicate file/URL is not a failure — count as skipped.
 			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
+			result.Skipped++
+		case errors.Is(err, errNoKnowledgeToEmpty):
+			logger.Infof(ctx, "skipping emptied item %q (external_id=%s): no knowledge to update",
+				item.Title, item.ExternalID)
 			result.Skipped++
 		case errors.Is(err, ErrInvalidFileType):
 			result.Failed++
@@ -1463,8 +1471,14 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 	return connector.Validate(ctx, config)
 }
 
+// errNoKnowledgeToEmpty marks an emptied in-place item whose knowledge no longer
+// exists (e.g. it was deleted by hand): there is nothing to update or create.
+var errNoKnowledgeToEmpty = errors.New("emptied item has no knowledge to update")
+
 // ingestItem writes a single FetchedItem into the knowledge base.
 // Existing datasource items are replaced atomically at the knowledge-row boundary.
+// Items that set UpdateInPlace instead update an existing file knowledge and keep
+// its ID (see replaceItemInPlace).
 //
 // Routing logic:
 //   - Has Content bytes → CreateKnowledgeFromFile (走完整的文档解析 pipeline)
@@ -1536,6 +1550,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 					Knowledge: existing,
 				}
 			}
+			if item.UpdateInPlace && existing.Type == "file" {
+				return true, s.replaceItemInPlace(ctx, existing, item, metadata)
+			}
 			_, err := s.knowledgeService.ReplaceKnowledgeFromDataSource(
 				ctx, existing.ID, item, metadata, tagIDs, channel)
 			var dupErr *types.DuplicateKnowledgeError
@@ -1544,6 +1561,10 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			}
 			return err == nil, err
 		}
+	}
+
+	if item.UpdateInPlace && len(item.Content) == 0 && item.URL == "" {
+		return false, errNoKnowledgeToEmpty
 	}
 
 	// Case 1: content already fetched → build a FileHeader from bytes and call CreateKnowledgeFromFile
@@ -1627,6 +1648,21 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	}
 
 	return isUpdate, fmt.Errorf("item has neither content nor URL")
+}
+
+// replaceItemInPlace updates an existing file knowledge with the item's content,
+// keeping its knowledge ID. Unchanged content surfaces as a
+// DuplicateKnowledgeError, which applyFetchedItem counts as skipped.
+func (s *DataSourceService) replaceItemInPlace(
+	ctx context.Context, existing *types.Knowledge, item *types.FetchedItem, metadata map[string]string,
+) error {
+	logger.Infof(ctx, "updating knowledge %s in place for external_id=%s", existing.ID, item.ExternalID)
+	fh, err := bytesToFileHeader(item.Content, item.FileName)
+	if err != nil {
+		return fmt.Errorf("build file header: %w", err)
+	}
+	_, err = s.knowledgeService.ReplaceKnowledgeFile(ctx, existing.ID, fh, item.FileName, metadata)
+	return err
 }
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still

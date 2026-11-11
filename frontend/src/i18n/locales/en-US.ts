@@ -1108,6 +1108,7 @@ export default {
     channelNextcloud: 'Nextcloud',
     channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
+    channelLocalFolder: 'Local Folder',
     channelUpload: 'Upload',
     channelManual: 'Manual',
     channelUrl: 'Web',
@@ -8425,6 +8426,12 @@ export default {
     connectionFailed: 'Connection failed',
     isRequired: 'is required',
     credentialsLabel: 'credentials',
+    localFolder: {
+      title: 'Local folder', rootPath: 'Folder path',
+      rootPathHint: 'Absolute path on the WeKnora server or in its container — not on your own computer — under a directory listed in WEKNORA_LOCAL_FOLDER_ROOTS (for example a read-only mounted Obsidian vault).',
+      include: 'Include patterns', exclude: 'Exclude patterns',
+      patternsHint: 'One glob pattern per line, relative to the folder (** matches any number of directories). Leave empty to use the defaults, which cover common document formats (Markdown, text, PDF, Office, CSV, HTML, EPUB). Images and audio need VLM/ASR, so add patterns for them explicitly. Formats WeKnora cannot import are skipped.',
+    },
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: 'Personal access token', projects: 'GitLab projects',
       projectsHint: 'Enter a project ID or namespace path (for example group/project), with optional branch and directories.',
@@ -8531,7 +8538,8 @@ export default {
       ima: 'Tencent IMA',
       gitlab: 'GitLab',
       nextcloud: 'Nextcloud',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      local_folder: 'Local Folder'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -8546,7 +8554,8 @@ export default {
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
       gitlab: 'Sync files from GitLab projects',
       nextcloud: 'Sync folders and files from Nextcloud over WebDAV',
-      seafile: 'Sync folders and files from Seafile libraries'
+      seafile: 'Sync folders and files from Seafile libraries',
+      local_folder: 'Sync files from a folder on the server, such as a mounted Obsidian vault'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',
