@@ -1109,7 +1109,13 @@ func (h *WikiPageHandler) SearchPages(c *gin.Context) {
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 
-	pages, err := h.wikiService.SearchPages(c.Request.Context(), kbID, query, limit)
+	// The search box sends plain text, so treat it literally on every
+	// dialect. PostgreSQL would otherwise read the raw query as a POSIX
+	// regex (~*) and fail the whole request with a 500 (plus the raw
+	// driver error) on everyday inputs like "func(", "arr[0" or "C++".
+	// This matches the agent tool's default (SearchPagesLiteral) and the
+	// literal LIKE matching the SQLite branch already applies.
+	pages, err := h.wikiService.SearchPagesLiteral(c.Request.Context(), kbID, query, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
