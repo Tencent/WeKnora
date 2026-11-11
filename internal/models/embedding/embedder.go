@@ -165,8 +165,17 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
 	switch strings.ToLower(string(config.Source)) {
 	case string(types.ModelSourceLocal):
-		return NewOllamaEmbedder(config.BaseURL,
+		keepAlive, err := parseOllamaEmbeddingKeepAlive(config.ExtraConfig["keep_alive"])
+		if err != nil {
+			return nil, err
+		}
+		e, err := NewOllamaEmbedder(config.BaseURL,
 			config.ModelName, config.TruncatePromptTokens, config.Dimensions, config.ModelID, pooler, ollamaService)
+		if err != nil {
+			return nil, err
+		}
+		e.keepAlive = keepAlive
+		return e, nil
 	case string(types.ModelSourceRemote):
 		return newRemoteEmbedder(config, pooler)
 	default:
