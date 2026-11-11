@@ -9,11 +9,16 @@ export const DEFAULT_ASSISTANT_ACCESS_LEVEL: AssistantAccessLevel = 'confirm'
 
 export const MAX_ASSISTANT_DISPLAY_NAME_LENGTH = 24
 
+export const DEFAULT_ASSISTANT_MAX_ITERATIONS = 20
+export const MAX_ASSISTANT_MAX_ITERATIONS = 100
+
 export interface AssistantConfig {
   /** Empty keeps the default name. */
   display_name: string
   /** The highest level a member may pick. */
   max_access_level: AssistantAccessLevel
+  /** Caps one assistant task's ReAct rounds. */
+  max_iterations: number
 }
 
 export function isAssistantAccessLevel(value: unknown): value is AssistantAccessLevel {
