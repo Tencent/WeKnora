@@ -30,7 +30,6 @@ import (
 type Adapter struct {
 	channelAccessToken string
 	channelSecret      string
-	resetKeyword       string
 	// enableFlexMessage opts the adapter into structured Flex Message output
 	// (structured layout with a title and source tag). When false, replies are
 	// emitted as plain text messages.
@@ -49,40 +48,27 @@ var _ im.Adapter = (*Adapter)(nil)
 // channelAccessToken is the bot messaging token; channelSecret is the channel
 // secret used to verify incoming webhook signatures (x-line-signature).
 //
-// resetKeyword is the per-channel command (e.g. "/reset", "/clear", "/new",
-// "/restart") that clears the current session context. When empty, no custom
-// keyword is matched and only the platform-level mechanism applies.
+// Session reset is handled by the shared "/clear" command, like every other
+// channel: this adapter adds no reset keyword of its own.
 //
 // The structured Flex Message output stays disabled; use
 // NewWebhookAdapterWithFlex to opt into it.
-func NewWebhookAdapter(channelAccessToken, channelSecret, resetKeyword string) *Adapter {
-	return NewWebhookAdapterWithFlex(channelAccessToken, channelSecret, resetKeyword, false)
+func NewWebhookAdapter(channelAccessToken, channelSecret string) *Adapter {
+	return NewWebhookAdapterWithFlex(channelAccessToken, channelSecret, false)
 }
 
 // NewWebhookAdapterWithFlex is like NewWebhookAdapter but enables structured
 // Flex Message output when enableFlexMessage is true. When false it emits plain
 // text messages, matching the default adapter behaviour.
 func NewWebhookAdapterWithFlex(
-	channelAccessToken, channelSecret, resetKeyword string,
+	channelAccessToken, channelSecret string,
 	enableFlexMessage bool,
 ) *Adapter {
 	return &Adapter{
 		channelAccessToken: channelAccessToken,
 		channelSecret:      channelSecret,
-		resetKeyword:       strings.TrimSpace(resetKeyword),
 		enableFlexMessage:  enableFlexMessage,
 	}
-}
-
-// isReset reports whether content matches this channel's configured reset
-// keyword. Matching is exact after trimming and case-folding, so a keyword of
-// "/reset" only fires when the user sends exactly "/reset" (nothing more,
-// nothing less) — just like the other slash commands.
-func (a *Adapter) isReset(content string) bool {
-	if a.resetKeyword == "" {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(content), a.resetKeyword)
 }
 
 // Platform returns im.PlatformLine.
@@ -171,12 +157,6 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		incoming := buildIncoming(ev, ev.Message)
 		incoming.Extra = map[string]string{
 			"replyToken": ev.ReplyToken,
-		}
-		// Reset keyword: flag it so the service routes this through the same
-		// session-clear action as "/clear". Matching is case-insensitive and
-		// exact (see isReset), so stray text never triggers a reset.
-		if a.isReset(incoming.Content) {
-			incoming.Extra["reset"] = "true"
 		}
 		return incoming, nil
 	}

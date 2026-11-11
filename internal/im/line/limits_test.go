@@ -67,7 +67,7 @@ func TestSplitForLINEBreaksOnNewline(t *testing.T) {
 // that respect the 5000-rune limit instead.
 func TestFlexMessagesFallBackWhenCardTooLarge(t *testing.T) {
 	answer := strings.Repeat("• HPE 記憶體混插規則：全機以最慢的 DIMM 速度運作。\n| 規格 | 描述 |\n| --- | --- |\n| 處理器 | Xeon 6338 |\n\n", 400)
-	adapter := NewWebhookAdapterWithFlex("token", "secret", "", true)
+	adapter := NewWebhookAdapterWithFlex("token", "secret", true)
 	if raw, _ := json.Marshal(flexMessage(answer, adapter.cardHeader())); len(raw) <= lineMaxFlexJSONBytes {
 		t.Fatalf("test fixture is not oversized: %d bytes", len(raw))
 	}
@@ -89,7 +89,7 @@ func TestFlexMessagesFallBackWhenCardTooLarge(t *testing.T) {
 // gets one, and that the card header carries the channel name.
 func TestFlexMessagesLongAnswerStaysFlex(t *testing.T) {
 	answer := "## " + strings.Repeat("記憶體混插規則", 10) + "\n\n" + strings.Repeat("• 全機以最慢的 DIMM 速度運作。\n", 12)
-	adapter := NewWebhookAdapterWithFlex("token", "secret", "", true)
+	adapter := NewWebhookAdapterWithFlex("token", "secret", true)
 	adapter.cardTitle = "HPE 智能檢索助手"
 
 	messages := adapter.buildMessages(context.Background(), answer)
@@ -113,7 +113,7 @@ func TestFlexMessagesLongAnswerStaysFlex(t *testing.T) {
 // errors are not wrapped in a card: a "/clear" confirmation or an error notice
 // inside a card with a header and a source tag reads like a malfunction.
 func TestShortNoticeStaysPlainText(t *testing.T) {
-	adapter := NewWebhookAdapterWithFlex("token", "secret", "/reset", true)
+	adapter := NewWebhookAdapterWithFlex("token", "secret", true)
 	for _, notice := range []string{"✅ 對話已清空，下次消息將開始全新會話。", "會話已重置 / Session cleared", "❌ 无法读取此附件，请重试或改用文字描述。"} {
 		messages := adapter.buildMessages(context.Background(), notice)
 		if len(messages) != 1 {

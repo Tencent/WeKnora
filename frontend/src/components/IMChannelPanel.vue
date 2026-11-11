@@ -213,25 +213,11 @@
           </div>
         </section>
 
-        <!-- LINE: conversation command + structured Flex Message output -->
+        <!-- LINE: structured Flex Message output. Session reset is the shared
+             /clear command, so there is no channel-specific keyword here. -->
         <section v-if="formData.platform === 'line'"
           class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.lineAdvancedSettings') }}</h4>
-
-          <div class="form-item">
-            <label class="form-label">{{ $t('agentEditor.im.lineResetKeyword') }}</label>
-            <div class="slash-input">
-              <span class="slash-input__prefix" aria-hidden="true">/</span>
-              <t-input
-                class="slash-input__field"
-                v-model="lineResetKeywordBody"
-                :placeholder="$t('agentEditor.im.lineResetKeywordPlaceholder')"
-                :maxlength="24"
-                show-word-limit
-              />
-            </div>
-            <p class="form-desc">{{ $t('agentEditor.im.lineResetKeywordHint') }}</p>
-          </div>
 
           <div class="form-item">
             <t-checkbox v-model="lineEnableFlex">
@@ -805,21 +791,6 @@ const formData = ref({
   credentials: defaultCredentials(),
 });
 
-// LINE reset keyword: stored with the leading slash so it matches the incoming
-// slash command verbatim (isReset). The UI edits only the keyword body; the
-// slash prefix is a fixed label the user cannot delete.
-const lineResetKeywordBody = computed<string>({
-  get: () => {
-    const stored = formData.value.credentials.reset_keyword || '';
-    return stored.startsWith('/') ? stored.slice(1) : stored;
-  },
-  set: (value: string) => {
-    // The slash prefix is fixed by the label, so keep English letters only.
-    const body = value.replace(/[^a-zA-Z]/g, '');
-    formData.value.credentials.reset_keyword = body ? '/' + body : '';
-  },
-});
-
 // LINE structured Flex Message output toggle, bound to the stored credential.
 const lineEnableFlex = computed<boolean>({
   get: () => formData.value.credentials.enable_flex_message === true,
@@ -917,8 +888,7 @@ function onPlatformChange(val: string | number | boolean) {
     // LINE is locked to webhook delivery + direct (non-streaming) output.
     formData.value.mode = 'webhook';
     formData.value.output_mode = 'full';
-    // Conversation command and structured-output defaults for LINE.
-    formData.value.credentials.reset_keyword = '/reset';
+    // Structured-output default; session reset stays the shared /clear command.
     formData.value.credentials.enable_flex_message = false;
   } else if (val === 'mattermost' || val === 'yunzhijia') {
     formData.value.mode = 'webhook';
@@ -1306,38 +1276,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-/* LINE reset keyword: fixed "/ " prefix label + bordered field. The prefix is a
-   static label (not an input) so the user cannot delete the slash. */
-.slash-input {
-  display: flex;
-  align-items: center;
-  gap: 0;
-}
-
-.slash-input__prefix {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 34px;
-  height: 100%;
-  padding: 0 8px;
-  box-sizing: border-box;
-  border: 1px solid var(--td-component-border);
-  border-right: 0;
-  border-radius: var(--td-radius-medium) 0 0 var(--td-radius-medium);
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
-  font: inherit;
-  font-size: 14px;
-  line-height: 32px;
-  user-select: none;
-}
-
-.slash-input__field :deep(input) {
-  border-radius: 0 var(--td-radius-medium) var(--td-radius-medium) 0;
 }
 
 .callback-url-input {
