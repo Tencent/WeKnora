@@ -16,6 +16,16 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	primaryLimit int,
 	skipEnrichment bool,
 ) ([]*types.SearchResult, error) {
+	return s.processSearchResultsAtRevisions(ctx, chunks, primaryLimit, skipEnrichment, nil)
+}
+
+func (s *knowledgeBaseService) processSearchResultsAtRevisions(
+	ctx context.Context,
+	chunks []*types.IndexWithScore,
+	primaryLimit int,
+	skipEnrichment bool,
+	expectedRevisions map[string]int,
+) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
 	}
@@ -70,6 +80,25 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		return nil, err
 	}
 	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
+
+	// A rerank score describes the text sent to the model. If a chunk
+	// changed while the model was running, it cannot seed enrichment.
+	if len(expectedRevisions) > 0 {
+		stale := make(map[string]bool)
+		allChunks = slices.DeleteFunc(allChunks, func(chunk *types.Chunk) bool {
+			if expected, ok := expectedRevisions[chunk.ID]; ok && expected != chunk.ContentRevision {
+				stale[chunk.ID] = true
+				return true
+			}
+			return false
+		})
+		if len(stale) > 0 {
+			selected = slices.DeleteFunc(selected, func(hit *types.IndexWithScore) bool {
+				return stale[hit.ChunkID]
+			})
+			index = s.buildChunkIndex(selected)
+		}
+	}
 
 	// Build chunk map and collect enrichment IDs (parent, related, nearby)
 	chunkMap := make(map[string]*types.Chunk, len(allChunks))
