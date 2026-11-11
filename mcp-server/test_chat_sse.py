@@ -106,6 +106,7 @@ class ChatSSETest(unittest.TestCase):
             ]
         )
         self.assertEqual(result["answer"], "done")
+        self.assertNotIn("suspended", result)
         self.response.__exit__.assert_called_once()
 
     def test_stop_returns_partial_answer_in_both_chat_paths(self):
@@ -124,6 +125,35 @@ class ChatSSETest(unittest.TestCase):
                 self.assertIs(result["stopped"], True)
                 self.assertEqual(result["session_id"], "session-1")
                 self.response.__exit__.assert_called_once()
+
+    def test_suspended_agent_run_returns_pending_prompt(self):
+        suspension = {
+            "pending_id": "prompt-1",
+            "kind": "tool_approval",
+            "expires_at": "2026-11-11T13:00:00Z",
+        }
+        result = self.consume(
+            [
+                'data: {"response_type":"answer","content":"partial answer"}',
+                "",
+                "data: " + json.dumps({
+                    "response_type": "run_suspended",
+                    "data": suspension,
+                }),
+                "",
+                "data: " + json.dumps({
+                    "response_type": "complete",
+                    "done": True,
+                    "data": {"suspended": suspension},
+                }),
+                "",
+            ],
+            agent=True,
+        )
+        self.assertEqual(result["answer"], "partial answer")
+        self.assertEqual(result["suspended"], suspension)
+        self.assertEqual(result["session_id"], "session-1")
+        self.assertNotIn("stopped", result)
 
     def test_eof_before_complete_fails_in_both_chat_paths(self):
         cases = [
