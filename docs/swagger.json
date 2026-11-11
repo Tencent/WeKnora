@@ -38098,7 +38098,8 @@
                 "bocha",
                 "serply",
                 "deepseek",
-                "searchapi"
+                "searchapi",
+                "sofya"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBrave",
@@ -38116,7 +38117,8 @@
                 "WebSearchProviderTypeBocha",
                 "WebSearchProviderTypeSerply",
                 "WebSearchProviderTypeDeepSeek",
-                "WebSearchProviderTypeSearchAPI"
+                "WebSearchProviderTypeSearchAPI",
+                "WebSearchProviderTypeSofya"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo": {
