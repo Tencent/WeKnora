@@ -29,8 +29,9 @@ func NewFactory() im.AdapterFactory {
 			return nil, nil, fmt.Errorf("line credentials: channel_secret is required")
 		}
 
-		// resetKeyword is an optional, per-channel command that clears the
-		// session context (default: use empty so only "/clear" applies).
+		// resetKeyword is an optional, per-channel alias that clears the session
+		// context. Empty means only the built-in "/clear" applies; the channel
+		// form pre-fills "/reset", so a UI-created LINE channel usually has it.
 		resetKeyword := im.GetString(creds, "reset_keyword")
 		// enable_flex_message opts the channel into structured Flex Message
 		// output; absent means plain text replies.

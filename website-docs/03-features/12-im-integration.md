@@ -147,7 +147,7 @@ credentials.api_base_url 可覆盖 API origin，并同时用作长连接 SDK 的
 - **异步 ACK**：回调在入队前立即返回 200（`writeIMCallbackACK`），避免 LINE 的 webhook 超时重投。
 - **輸出形態**：`enable_flex_message=true` 時，長度 ≥200 rune 的回覆渲染為 Flex 卡片（標題取渠道名稱，內文由 `markdownToFlexComponents` 解析，末尾附來源標籤）；短回覆（指令確認、錯誤提示）維持純文字，避免一句話被包成帶標題與來源標籤的卡片。關閉時一律走純文字，仍經 `polishPlainText` 排版整形（`**粗體**`→`【】`、表格→鍵值列表、標題→📌、代碼區塊→`[代碼區塊]`）。
 - **平台硬限制**（超出会被 LINE 以 400 拒绝，用户收不到任何内容）：单条 text 消息 5000 字元、单次请求最多 5 条消息、单个 flex bubble 的 JSON 不超过 30 KB。适配器在发送前统一整形：超长纯文字按换行切成最多 5 段（末段追加「內容過長，已截斷」），flex 卡片超过 30 KB 时自动降级为分段纯文字。
-- **重置关键字**：`reset_keyword`（如 `/reset`、`/new`）命中后与 `/clear` 走同一 `ActionClear` 副作用，但回自己的确认文案；匹配为去空白后的大小写不敏感全等，不会误伤普通句子。
+- **重置关键字**：`reset_keyword`（如 `/reset`、`/new`）命中后与 `/clear` 走同一 `ActionClear` 副作用，但回自己的确认文案（`cmd_reset.go`）；匹配为去空白后的大小写不敏感全等，不会误伤普通句子。它与内置 `/clear` 是两个入口、同一效果：`/clear` 由命令注册表提供、任何渠道都有；`reset_keyword` 是这个渠道的别名，前端建渠道时预填 `/reset`，把字段清空后该别名消失，仅剩 `/clear`。
 - **文案语言**：Flex 卡片的标题与 `altText` 取渠道名称；纯文字路径的 `📌`/`📊`/`[代碼區塊]` 标签仍是固定中文，与 `think.go` 里其他平台的思考块表头同一现状（`FormatIMDisplayContent` 没有 locale 上下文）；渠道级「回复语言」只影响模型回答本身。
 
 #### 长连接的可靠性：leader 选举与 Supervisor
