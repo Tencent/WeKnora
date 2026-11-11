@@ -1,11 +1,6 @@
 package im
 
-import (
-	"context"
-	"strings"
-
-	"github.com/Tencent/WeKnora/internal/types"
-)
+import "context"
 
 // ClearCommand implements /clear.
 // It soft-deletes the current ChannelSession and clears the LLM context so
@@ -27,14 +22,11 @@ func (c *ClearCommand) Description() string {
 // deployment default), which is the same value that drives the model's answer
 // language, so the confirmation does not switch language mid-conversation.
 func (c *ClearCommand) Execute(ctx context.Context, _ *CommandContext, _ []string) (*CommandResult, error) {
-	content := "✅ 对话已清空，下次消息将开始全新会话。"
-	lang, _ := types.LanguageFromContext(ctx)
-	normalized := strings.ToLower(strings.ReplaceAll(lang, "_", "-"))
-	if strings.HasPrefix(normalized, "zh-tw") || strings.HasPrefix(normalized, "zh-hant") {
-		content = "✅ 對話已清空，下一則訊息會開始全新會話。"
-	}
 	return &CommandResult{
-		Content: content,
-		Action:  ActionClear,
+		Content: localizeCopy(ctx,
+			"✅ 对话已清空，下次消息将开始全新会话。",
+			"✅ 對話已清空，下一則訊息會開始全新會話。",
+		),
+		Action: ActionClear,
 	}, nil
 }

@@ -1820,7 +1820,10 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	// Unrecognised slash-word: show help hint instead of sending to QA.
 	if LooksLikeCommand(msg.Content) {
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: "未知指令，发送 `/help` 查看所有可用指令。",
+			Content: localizeCopy(ctx,
+				"未知指令，发送 `/help` 查看所有可用指令。",
+				"未知指令，發送 `/help` 查看所有可用指令。",
+			),
 			IsFinal: true,
 		})
 		return nil
@@ -2136,7 +2139,10 @@ func (s *Service) handleCommand(
 	if err != nil {
 		logger.Errorf(ctx, "[IM] Command /%s error: %v", cmd.Name(), err)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: "抱歉，执行指令时出现了异常，请稍后再试。",
+			Content: localizeCopy(ctx,
+				"抱歉，执行指令时出现了异常，请稍后再试。",
+				"抱歉，執行指令時出現異常，請稍後再試。",
+			),
 			IsFinal: true,
 		})
 		return err
