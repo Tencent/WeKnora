@@ -21,6 +21,12 @@ func TestChatStreamTerminalToolCalls(t *testing.T) {
 	const delta = `{"type":"response.function_call_arguments.delta","output_index":0,` +
 		`"item_id":"fc_1","delta":"{\"city\":\"Paris\"}"}`
 	const done = `{"type":"response.output_item.done","output_index":0,"item":` + call + `}`
+	const callWithoutID = `{"type":"function_call","call_id":"call_1","name":"get_weather",` +
+		`"arguments":"{\"city\":\"Paris\"}"}`
+	const addedWithoutID = `{"type":"response.output_item.added","output_index":0,"item":` +
+		`{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":""}}`
+	const deltaWithoutID = `{"type":"response.function_call_arguments.delta","output_index":0,` +
+		`"delta":"{\"city\":\"Paris\"}"}`
 	for _, tc := range []struct {
 		name       string
 		events     []string
@@ -41,10 +47,19 @@ func TestChatStreamTerminalToolCalls(t *testing.T) {
 		},
 		{
 			name: "indices without item ids", wantCalls: 1,
-			events: []string{`{"type":"response.output_item.added","output_index":0,"item":` +
-				`{"type":"function_call","call_id":"call_1","name":"get_weather","arguments":""}}`},
-			output: `{"type":"function_call","call_id":"call_1","name":"get_weather",` +
-				`"arguments":"{\"city\":\"Paris\"}"}`,
+			events: []string{addedWithoutID}, output: callWithoutID,
+		},
+		{
+			name: "terminal gains item id", wantCalls: 1,
+			events: []string{addedWithoutID, deltaWithoutID}, output: call,
+		},
+		{
+			name: "unannounced delta without item id", wantCalls: 1,
+			events: []string{deltaWithoutID}, output: call,
+		},
+		{
+			name: "terminal omits item id", wantCalls: 1,
+			events: []string{added, delta}, output: callWithoutID,
 		},
 		{name: "incomplete remains length", output: call, incomplete: true, wantCalls: 1},
 		{

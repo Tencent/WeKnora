@@ -353,7 +353,8 @@ type rawStreamEvent struct {
 // streamState tracks the function_call items seen so far so argument deltas
 // can be routed to the assembler index that announced the call.
 type streamState struct {
-	toolIndex      map[string]int // item id -> assembler index
+	toolIndex      map[string]int    // item id -> assembler index
+	callItems      map[string]string // call id -> original stream item key
 	argsSeen       map[string]bool
 	nextToolIndex  int
 	reasoningItems []json.RawMessage
@@ -374,7 +375,7 @@ func (c *Client) processStream(
 ) {
 	assembler := api.NewStreamAssembler(ctx, c.cfg.Endpoint.Model)
 	reader := api.NewSSEReader(body)
-	st := &streamState{toolIndex: map[string]int{}, argsSeen: map[string]bool{}}
+	st := &streamState{toolIndex: map[string]int{}, callItems: map[string]string{}, argsSeen: map[string]bool{}}
 
 	// response.completed / response.incomplete return before either caller,
 	// so reaching finish means the terminal event never arrived.
@@ -450,6 +451,9 @@ func (c *Client) processStream(
 				continue
 			}
 			itemID := streamItemID(item, ev.OutputIndex)
+			if item.CallID != "" {
+				st.callItems[item.CallID] = itemID
+			}
 			idx := st.indexFor(itemID)
 			assembler.Process(ch, api.Delta{ToolCalls: []api.ToolCallDelta{{
 				Index: idx, ID: item.CallID, Type: "function", Name: item.Name,
@@ -524,7 +528,21 @@ func streamEventKey(itemID string, outputIndex int) string {
 func (st *streamState) completeToolCall(
 	ch chan<- types.StreamResponse, assembler *api.StreamAssembler, item rawOutputItem, outputIndex int,
 ) {
-	itemID := streamItemID(item, outputIndex)
+	itemID := st.callItems[item.CallID]
+	if itemID == "" {
+		itemID = streamItemID(item, outputIndex)
+		if _, exists := st.toolIndex[itemID]; !exists {
+			// A gateway may omit item_id on deltas but include id in the
+			// terminal item. Reuse that output index's existing placeholder.
+			fallback := streamEventKey("", outputIndex)
+			if _, exists := st.toolIndex[fallback]; exists {
+				itemID = fallback
+			}
+		}
+	}
+	if item.CallID != "" {
+		st.callItems[item.CallID] = itemID
+	}
 	arguments := ""
 	if !st.argsSeen[itemID] && item.Arguments != "" {
 		st.argsSeen[itemID] = true
