@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -171,14 +172,17 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		})
 		return err
 	}
+	// Validate the visible answer before publishing a successful terminal event.
+	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
+	if strings.TrimSpace(fullAnswer) == "" {
+		return fmt.Errorf("final answer synthesis returned no visible content")
+	}
 	_, tail := splitter.Flush()
 	_ = e.eventBus.Emit(ctx, event.Event{
 		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
 		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true},
 	})
 
-	// Safety net: strip any residual <think> blocks that may have leaked through
-	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,
