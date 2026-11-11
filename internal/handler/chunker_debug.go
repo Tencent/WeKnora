@@ -55,15 +55,17 @@ type PreviewChunkingRequest struct {
 // directly because it carries unrelated parser rules and table-processing
 // metadata that the preview path does not use.
 type PreviewChunkingPayload struct {
-	ChunkSize         int      `json:"chunk_size"`
-	ChunkOverlap      int      `json:"chunk_overlap"`
-	Separators        []string `json:"separators"`
-	EnableParentChild bool     `json:"enable_parent_child"`
-	ParentChunkSize   int      `json:"parent_chunk_size"`
-	ChildChunkSize    int      `json:"child_chunk_size"`
-	Strategy          string   `json:"strategy"`
-	TokenLimit        int      `json:"token_limit"`
-	Languages         []string `json:"languages"`
+	ChunkSize           int      `json:"chunk_size"`
+	ChunkOverlap        int      `json:"chunk_overlap"`
+	Separators          []string `json:"separators"`
+	EnableParentChild   bool     `json:"enable_parent_child"`
+	ParentChunkSize     int      `json:"parent_chunk_size"`
+	ChildChunkSize      int      `json:"child_chunk_size"`
+	Strategy            string   `json:"strategy"`
+	TokenLimit          int      `json:"token_limit"`
+	Languages           []string `json:"languages"`
+	CustomSeparator     string   `json:"custom_separator"`
+	CustomSeparatorOnly bool     `json:"custom_separator_only"`
 }
 
 // PreviewChunkResult describes one chunk emitted during preview.
@@ -151,12 +153,14 @@ func PreviewChunking(c *gin.Context) {
 	text = docparser.NormalizeHTMLTables(text)
 
 	cfg := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
-		ChunkSize:    req.ChunkingConfig.ChunkSize,
-		ChunkOverlap: req.ChunkingConfig.ChunkOverlap,
-		Separators:   req.ChunkingConfig.Separators,
-		Strategy:     req.ChunkingConfig.Strategy,
-		TokenLimit:   req.ChunkingConfig.TokenLimit,
-		Languages:    req.ChunkingConfig.Languages,
+		ChunkSize:           req.ChunkingConfig.ChunkSize,
+		ChunkOverlap:        req.ChunkingConfig.ChunkOverlap,
+		Separators:          req.ChunkingConfig.Separators,
+		Strategy:            req.ChunkingConfig.Strategy,
+		TokenLimit:          req.ChunkingConfig.TokenLimit,
+		Languages:           req.ChunkingConfig.Languages,
+		CustomSeparator:     req.ChunkingConfig.CustomSeparator,
+		CustomSeparatorOnly: req.ChunkingConfig.CustomSeparatorOnly,
 	})
 
 	// Run the splitter on a goroutine so we can honor the request timeout.
@@ -170,7 +174,7 @@ func PreviewChunking(c *gin.Context) {
 	go func() {
 		var chunks []chunker.Chunk
 		var diag *chunker.Diagnostics
-		if req.ChunkingConfig.EnableParentChild {
+		if req.ChunkingConfig.EnableParentChild && cfg.Strategy != chunker.StrategyCustomSeparator {
 			parentCfg, childCfg := chunker.DeriveParentChildConfigs(
 				cfg,
 				req.ChunkingConfig.ParentChunkSize,

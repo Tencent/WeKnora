@@ -21,7 +21,21 @@ const (
 	StrategyHeuristic = "heuristic"
 	StrategyRecursive = "recursive"
 	StrategyLegacy    = "legacy"
+	// StrategyCustomSeparator treats the document as pre-chunked upstream:
+	// CustomSeparator holds the literal marker that joins the ready-made
+	// chunks and CustomSeparatorOnly selects marker-only mode. See
+	// custom_separator.go.
+	StrategyCustomSeparator = "custom_separator"
 )
+
+// usesCustomSeparatorStrategy reports whether cfg selects the pre-chunked
+// document path: the strategy value plus a non-blank marker. A marker
+// without the strategy value is inert (except for the legacy migration in
+// ensureDefaults); the strategy without a marker falls through to the
+// ordinary resolver chain.
+func usesCustomSeparatorStrategy(cfg SplitterConfig) bool {
+	return cfg.Strategy == StrategyCustomSeparator && strings.TrimSpace(cfg.CustomSeparator) != ""
+}
 
 // Split chunks text using the strategy configured in cfg. When cfg.Strategy
 // is empty or "auto" the document profiler picks the tier. The function
@@ -36,6 +50,11 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 		return nil
 	}
 	cfg = ensureDefaults(cfg)
+	// Strategy "custom_separator" marks a pre-chunked document and diverts
+	// to the marker splitter before any tier resolution (custom_separator.go).
+	if usesCustomSeparatorStrategy(cfg) {
+		return SplitByCustomSeparator(text, cfg)
+	}
 	chain, profile := resolveChainWithProfile(text, cfg)
 	totalChars := len([]rune(text))
 	budget := tokenRuneBudget(cfg)
@@ -97,6 +116,11 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 		return nil, diag
 	}
 	cfg = ensureDefaults(cfg)
+	if usesCustomSeparatorStrategy(cfg) {
+		diag.SelectedTier = TierCustom
+		diag.TierChain = []StrategyTier{TierCustom}
+		return SplitByCustomSeparator(text, cfg), diag
+	}
 	chain, profile := resolveChainWithProfile(text, cfg)
 	budget := tokenRuneBudget(cfg)
 	diag.TierChain = chain
@@ -156,6 +180,30 @@ func SplitParentChildWithDiagnostics(text string, parentCfg, childCfg SplitterCo
 func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagnostics bool) (ParentChildResult, *Diagnostics) {
 	parentCfg = ensureDefaults(parentCfg)
 	childCfg = ensureDefaults(childCfg)
+
+	// Pre-chunked documents (custom separator) define authoritative chunk
+	// boundaries; parent-child refinement would fight them, so the custom
+	// separator wins and the result is a flat chunk list.
+	if usesCustomSeparatorStrategy(parentCfg) || usesCustomSeparatorStrategy(childCfg) {
+		cfg := parentCfg
+		if !usesCustomSeparatorStrategy(cfg) {
+			cfg = childCfg
+		}
+		var diag *Diagnostics
+		if withDiagnostics {
+			_, diag = SplitWithDiagnostics(text, cfg)
+		}
+		// Flat result: each marker segment is both its own parent and its own
+		// child, so any parent-child consumer still gets an embeddable child
+		// per boundary. The ingestion pipeline normally skips parent-child
+		// entirely for pre-chunked documents (see knowledge_process.go).
+		flat := SplitByCustomSeparator(text, cfg)
+		children := make([]ChildChunk, len(flat))
+		for i, c := range flat {
+			children[i] = ChildChunk{Chunk: c, ParentIndex: i}
+		}
+		return ParentChildResult{Parents: flat, Children: children}, diag
+	}
 
 	var (
 		parents []Chunk
@@ -217,6 +265,11 @@ func defaultChunkSizeAndOverlap(cfg SplitterConfig) SplitterConfig {
 // NormalizeSplitterConfig applies the same base splitter defaults used by
 // knowledge ingestion before parent-child derivation or single-pass splitting.
 func NormalizeSplitterConfig(cfg SplitterConfig) SplitterConfig {
+	// Same legacy migration as ensureDefaults: marker without strategy
+	// becomes the custom_separator strategy.
+	if cfg.CustomSeparator != "" && cfg.Strategy == "" {
+		cfg.Strategy = StrategyCustomSeparator
+	}
 	cfg = defaultChunkSizeAndOverlap(cfg)
 	if len(cfg.Separators) == 0 {
 		cfg.Separators = []string{"\n\n", "\n", "。"}
@@ -249,19 +302,23 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 		childSize = 384
 	}
 	parent = SplitterConfig{
-		ChunkSize:    parentSize,
-		ChunkOverlap: base.ChunkOverlap,
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-		Languages:    base.Languages,
+		ChunkSize:           parentSize,
+		ChunkOverlap:        base.ChunkOverlap,
+		Separators:          base.Separators,
+		Strategy:            base.Strategy,
+		Languages:           base.Languages,
+		CustomSeparator:     base.CustomSeparator,
+		CustomSeparatorOnly: base.CustomSeparatorOnly,
 	}
 	child = SplitterConfig{
-		ChunkSize:    childSize,
-		ChunkOverlap: childSize / 5,
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-		TokenLimit:   base.TokenLimit,
-		Languages:    base.Languages,
+		ChunkSize:           childSize,
+		ChunkOverlap:        childSize / 5,
+		Separators:          base.Separators,
+		Strategy:            base.Strategy,
+		TokenLimit:          base.TokenLimit,
+		Languages:           base.Languages,
+		CustomSeparator:     base.CustomSeparator,
+		CustomSeparatorOnly: base.CustomSeparatorOnly,
 	}
 	return
 }
@@ -345,6 +402,11 @@ func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocPro
 // that fits within that token limit (with a 10% safety factor). This makes
 // chunks safe for embedding APIs that have hard token caps.
 func ensureDefaults(cfg SplitterConfig) SplitterConfig {
+	// Same legacy migration as ensureDefaults: marker without strategy
+	// becomes the custom_separator strategy.
+	if cfg.CustomSeparator != "" && cfg.Strategy == "" {
+		cfg.Strategy = StrategyCustomSeparator
+	}
 	cfg = defaultChunkSizeAndOverlap(cfg)
 	if len(cfg.Separators) == 0 {
 		cfg.Separators = []string{"\n\n", "\n", "。"}
