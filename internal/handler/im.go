@@ -115,6 +115,13 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	if req.Platform == "wechat" {
 		channel.Mode = "longpoll"
 		channel.OutputMode = "full"
+	} else if req.Platform == "line" {
+		// LINE only speaks the Messaging API webhook and cannot stream: a reply
+		// token is single-use, so partial updates would be wasted. Pin both
+		// fields server-side instead of trusting the client, which otherwise
+		// leaves rows created through the API on stream/websocket defaults.
+		channel.Mode = "webhook"
+		channel.OutputMode = "full"
 	} else {
 		if channel.Mode == "" {
 			if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
@@ -433,7 +440,7 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	}
 
 	defaultMode := "websocket"
-	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
+	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" || channel.Platform == "line" {
 		defaultMode = "webhook"
 	}
 	if im.ResolveMode(channel, defaultMode) != "webhook" ||
