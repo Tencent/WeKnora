@@ -98,7 +98,10 @@ func WithReplyInThread(v bool) AdapterOption {
 // NewAdapter creates a new adapter for the given region (RegionFeishu or RegionLark).
 // apiBaseURL overrides the Open Platform API origin (empty uses the region
 // default); it is validated for scheme and SSRF safety before use.
-func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey, apiBaseURL string, opts ...AdapterOption) (*Adapter, error) {
+func NewAdapter(
+	region Region, appID, appSecret, verificationToken, encryptKey, apiBaseURL string,
+	opts ...AdapterOption,
+) (*Adapter, error) {
 	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
 	if err := validateAPIBaseURL(apiBaseURL, region.OpenBaseURL); err != nil {
 		return nil, err
