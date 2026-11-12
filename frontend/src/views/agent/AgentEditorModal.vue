@@ -6428,6 +6428,7 @@ const handleSave = async () => {
 
   .textarea-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
@@ -6446,6 +6447,14 @@ const handleSave = async () => {
 
   :deep(.prompt-template-selector) {
     flex-shrink: 0;
+    max-width: 100%;
+    margin-inline-start: auto;
+  }
+
+  // 停靠侧栏占用较多空间时，模板组内的按钮也需要换行。
+  :deep(.template-btn-group) {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 }
 
