@@ -119,6 +119,8 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		slugSet[slug] = true
 	}
 
+	isLive := func(slug string) bool { return slugSet[slug] }
+
 	var issues []WikiLintIssue
 	healthScore := 100
 	knowledgeLive := make(map[string]bool) // kid -> exists; cached across pages
@@ -166,7 +168,7 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 			// don't exist in the live set.
 			// Historical OutLinks can contain escaped aliases and code
 			// examples. Validate the current body without rewriting the page.
-			for _, outLink := range wikiOutLinks(page.Content) {
+			for _, outLink := range wikiOutLinks(markdownWikiLinks(page.Content), isLive) {
 				if !slugSet[outLink] {
 					issues = append(issues, WikiLintIssue{
 						Type:        LintIssueBrokenLink,
@@ -241,7 +243,7 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		for _, page := range pages {
 			lowerContent := strings.ToLower(page.Content)
 			outLinkSet := make(map[string]struct{})
-			for _, l := range wikiOutLinks(page.Content) {
+			for _, l := range wikiOutLinks(markdownWikiLinks(page.Content), isLive) {
 				outLinkSet[l] = struct{}{}
 			}
 			for slug, title := range entitySlugs {
@@ -359,30 +361,8 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 
 		switch issue.Type {
 		case LintIssueBrokenLink:
-			// Replace [[broken-slug]] with plain text so the reference text is
-			// preserved but no longer renders as a dangling wiki link.
-			if issue.TargetSlug == "" {
-				continue
-			}
-			page, err := s.wikiService.GetPageBySlug(ctx, kbID, issue.PageSlug)
-			if err != nil {
-				continue
-			}
-			target := issue.TargetSlug
-			updated, changed := rewriteMarkdownWikiLinks(page.Content, func(link markdownWikiLink) string {
-				if link.slug != target {
-					return page.Content[link.start:link.end]
-				}
-				if link.display != "" {
-					return link.display
-				}
-				return link.slug
-			})
-			if !changed {
-				continue
-			}
-			page.Content = updated
-			if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err == nil {
+			changed, err := s.wikiService.FixBrokenLink(ctx, kbID, issue.PageSlug, issue.TargetSlug)
+			if err == nil && changed {
 				fixed++
 			}
 

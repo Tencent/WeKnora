@@ -15,7 +15,6 @@ import (
 )
 
 func TestWikiOutLinksRespectMarkdown(t *testing.T) {
-	svc := &wikiPageService{}
 	for _, tc := range []struct {
 		name, content string
 		want          types.StringArray
@@ -40,7 +39,7 @@ func TestWikiOutLinksRespectMarkdown(t *testing.T) {
 		{"fence info", "```[[concept/example]]\nexample\n```\n[[concept/real]]", types.StringArray{"concept/real"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, svc.parseOutLinks(tc.content))
+			require.Equal(t, tc.want, wikiOutLinks(markdownWikiLinks(tc.content), nil))
 		})
 	}
 }
