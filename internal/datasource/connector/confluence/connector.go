@@ -420,6 +420,10 @@ func (c *Connector) fetchStream(
 				}
 			}
 			full, err := client.body(ctx, summary.ID)
+			var item types.FetchedItem
+			if err == nil {
+				item, err = markdownItem(ctx, client, resourceID, summary, full)
+			}
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil, err
@@ -427,22 +431,13 @@ func (c *Connector) fetchStream(
 				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
 					return nil, emitErr
 				}
-				if !forceFull {
-					if prior, ok := priorVersionByPage[summary.ID]; ok {
-						next.SpacePages[resourceID][summary.ID] = prior
+				if prior, ok := priorVersionByPage[summary.ID]; ok {
+					if forceFull {
+						// Retain deletion ownership without marking the body
+						// refreshed. A retry must still fetch this page.
+						prior = ""
 					}
-				}
-				continue
-			}
-			item, err := markdownItem(ctx, client, resourceID, summary, full)
-			if err != nil {
-				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
-					return nil, emitErr
-				}
-				if !forceFull {
-					if prior, ok := priorVersionByPage[summary.ID]; ok {
-						next.SpacePages[resourceID][summary.ID] = prior
-					}
+					next.SpacePages[resourceID][summary.ID] = prior
 				}
 				continue
 			}
