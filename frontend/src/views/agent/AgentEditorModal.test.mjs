@@ -3,8 +3,32 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { effectScope, nextTick, ref, watch } from 'vue'
+import { agentRequiresRerankModel } from '../../utils/agent-readiness.ts'
 
 const source = readFileSync(new URL('./AgentEditorModal.vue', import.meta.url), 'utf8')
+
+test('the agent editor marks rerank required only for the built-in knowledge search', () => {
+  const declaration = source.match(/^const needsRerankModel = computed\(\(\) => \{[\s\S]*?^\}\);/m)?.[0]
+  assert.ok(declaration)
+
+  const required = ({ allowedTools, ragEnabled, isAgent = true }) => runInNewContext(
+    `${declaration}\nneedsRerankModel`,
+    {
+      computed: evaluate => evaluate(),
+      isAgentMode: { value: isAgent },
+      kbSelectionMode: { value: 'all' },
+      hasKnowledgeBase: { value: true },
+      kbOptions: { value: [{ ragEnabled }] },
+      allowedToolsToSave: () => allowedTools,
+      agentRequiresRerankModel,
+    },
+  )
+
+  assert.equal(required({ allowedTools: [], ragEnabled: true }), false)
+  assert.equal(required({ allowedTools: ['wiki_search'], ragEnabled: true }), false)
+  assert.equal(required({ allowedTools: null, ragEnabled: false }), true)
+  assert.equal(required({ allowedTools: [], ragEnabled: true, isAgent: false }), true)
+})
 
 test('editing an agent closes the editor after a successful save', () => {
   assert.match(
