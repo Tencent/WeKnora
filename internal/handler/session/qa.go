@@ -8,6 +8,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -999,6 +1000,23 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	childLimit := ""
+	if request.ChildrenLimit != 0 {
+		childLimit = strconv.Itoa(request.ChildrenLimit)
+	}
+	treeOptions, treeErr := types.ParseKnowledgeChildrenOptions(
+		c.DefaultQuery("children_depth", strconv.Itoa(request.ChildrenDepth)),
+		c.DefaultQuery("children_limit", childLimit),
+	)
+	if treeErr != nil {
+		_ = c.Error(errors.NewBadRequestError(treeErr.Error()))
+		return
+	}
+	opts.ChildrenDepth = treeOptions.Depth
+	if treeOptions.Depth != 0 {
+		opts.ChildrenLimit = treeOptions.Limit
+	}
+
 	opts.QueryImage = queryImage
 	opts.QueryImageMediaType = queryImageType
 
@@ -1027,11 +1045,25 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Knowledge search completed, found %d results", len(retrieval.Results))
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    rewriter.CopyReferences(ctx, retrieval.Results),
-		"meta":    retrieval.Meta,
-	})
+	response := gin.H{"success": true, "data": rewriter.CopyReferences(ctx, retrieval.Results), "meta": retrieval.Meta}
+	if opts.ChildrenDepth != 0 {
+		for i := range retrieval.Expanded {
+			u, _ := url.Parse(retrieval.Expanded[i].ContentURL)
+			q := u.Query()
+			for _, key := range []string{"agent_id", types.AgentSourceTenantIDParam} {
+				if value := c.Query(key); value != "" {
+					q.Set(key, value)
+				}
+			}
+			u.RawQuery = q.Encode()
+			retrieval.Expanded[i].ContentURL = u.String()
+		}
+		if retrieval.Expanded == nil {
+			retrieval.Expanded = []types.KnowledgeChild{}
+		}
+		response["expanded"] = retrieval.Expanded
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // maxQueryImageBytes bounds a query image so one request cannot turn into a

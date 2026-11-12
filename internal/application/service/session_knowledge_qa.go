@@ -940,7 +940,15 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base search completed, found %d results, rerank outcome: %s",
 		len(results), diag.Outcome)
-	return &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag}}, nil
+	response := &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag}}
+	if opts.ChildrenDepth != 0 {
+		expanded, expandErr := s.expandSearchKnowledgeChildren(ctx, searchTargets, results, opts)
+		if expandErr != nil {
+			return nil, expandErr
+		}
+		response.Expanded = expanded
+	}
+	return response, nil
 }
 
 // applyKnowledgeSearchOverrides applies the caller's knowledge-search

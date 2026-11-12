@@ -159,6 +159,19 @@ func TestSearchKnowledge_OmittedOverridesKeepTenantConfig(t *testing.T) {
 	assert.Equal(t, types.KnowledgeSearchOptions{}, *svc.lastOpts)
 }
 
+func TestSearchKnowledge_ChildrenOptionsFromJSON(t *testing.T) {
+	svc := &stubSearchSessionService{}
+	w := performKnowledgeSearch(t, svc,
+		`{"query":"q","knowledge_base_ids":["kb-1"],"children_depth":2,"children_limit":25}`,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, 2, svc.lastOpts.ChildrenDepth)
+	require.Equal(t, 25, svc.lastOpts.ChildrenLimit)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Contains(t, body, "expanded")
+}
+
 func TestSearchKnowledge_RejectsInvalidOverrides(t *testing.T) {
 	for name, extra := range map[string]string{
 		"negative match_count":  `"match_count":-1`,

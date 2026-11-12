@@ -166,6 +166,11 @@ func (order KnowledgeListSortOrder) Valid() bool {
 // It contains metadata about the knowledge source, its processing status,
 // and references to the physical file if applicable.
 type Knowledge struct {
+	// Native parent identity; a source-system parent_id is a different field.
+	ParentKnowledgeID string           `json:"parent_knowledge_id,omitempty" gorm:"size:36;default:null"`
+	Children          []KnowledgeChild `json:"children,omitempty" gorm:"-"`
+	// SubKnowledge is explicit provenance, not an inferred graph relation.
+	SubKnowledge *SubKnowledgeInput `json:"sub_knowledge,omitempty" gorm:"-"`
 	// Unique identifier of the knowledge
 	ID string `json:"id"                 gorm:"type:varchar(36);primaryKey" extensions:"x-agent=knowledge_id"`
 	// Workspace ID
@@ -327,6 +332,9 @@ type ManualKnowledgeMetadata struct {
 
 // ManualKnowledgePayload represents the payload for manual knowledge operations.
 type ManualKnowledgePayload struct {
+	ParentKnowledgeID string `json:"parent_knowledge_id,omitempty"`
+	// Optional source identity; the server owns tenant, KB and knowledge IDs.
+	SubKnowledge *SubKnowledgeInput `json:"sub_knowledge,omitempty"`
 	// Document title.
 	Title string `json:"title" extensions:"x-agent"`
 	// Markdown content. The assistant may send a full document; the API limit

@@ -54,7 +54,7 @@ func (s *hybridSearchTestService) HybridSearchWithRerank(
 	}, nil
 }
 
-func newHybridSearchTestRouter(svc interfaces.KnowledgeBaseService) *gin.Engine {
+func newHybridSearchTestRouter(svc interfaces.KnowledgeBaseService, kg ...interfaces.KnowledgeService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.ErrorHandler())
@@ -64,6 +64,9 @@ func newHybridSearchTestRouter(svc interfaces.KnowledgeBaseService) *gin.Engine 
 		c.Next()
 	})
 	handler := &KnowledgeBaseHandler{service: svc}
+	if len(kg) > 0 {
+		handler.knowledgeService = kg[0]
+	}
 	router.POST("/knowledge-bases/:id/hybrid-search", handler.HybridSearch)
 	return router
 }

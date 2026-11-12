@@ -331,9 +331,10 @@ type KnowledgeBaseView struct {
 // HybridSearchResponse is the hybrid-search body. meta is set only when the
 // request enabled rerank.
 type HybridSearchResponse struct {
-	Success bool                  `json:"success" example:"true"`
-	Data    []*types.SearchResult `json:"data"`
-	Meta    *types.RetrievalMeta  `json:"meta,omitempty"`
+	Success  bool                   `json:"success" example:"true"`
+	Data     []*types.SearchResult  `json:"data"`
+	Meta     *types.RetrievalMeta   `json:"meta,omitempty"`
+	Expanded []types.KnowledgeChild `json:"expanded,omitempty"`
 }
 
 // DuplicateKnowledgeBaseData is the data object of POST /knowledge-bases/{id}/duplicate.
@@ -392,6 +393,11 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		}
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	childrenOptions, childrenErr := parseHTTPKnowledgeChildrenOptions(c, req.ChildrenDepth, req.ChildrenLimit)
+	if childrenErr != nil {
+		_ = c.Error(apperrors.NewBadRequestError(childrenErr.Error()))
 		return
 	}
 	precomputedVectorOnly := len(req.QueryEmbedding) > 0 && req.DisableKeywordsMatch && !req.DisableVectorMatch
@@ -454,6 +460,11 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 	if retrieval.Meta.Rerank != nil {
 		response["meta"] = retrieval.Meta
+	}
+	if !h.expandHybridChildren(
+		c, effectiveTenantID, id, retrieval.Results, response, childrenOptions, req.KnowledgeBaseIDs,
+	) {
+		return
 	}
 	c.JSON(http.StatusOK, response)
 }

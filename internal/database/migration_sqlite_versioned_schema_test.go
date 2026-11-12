@@ -48,6 +48,7 @@ var versionedSQLiteTables = []string{
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
 	"credential_vault_items",
+	"knowledge_sub_knowledge",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -60,8 +61,9 @@ var versionedSQLiteColumns = map[string][]string{
 	"memory_items":          {"replaces_id"},                                               // 000094
 	"tenants":               {"api_principal_config"},                                      // 000064
 	"users":                 {"is_system_admin"},                                           // 000053
-	"knowledges":            {"pending_subtasks_count", "profile"},                         // 000056, 000101
-	"knowledge_bases":       {"profile_config", "generated_profile"},                       // 000101
+	// Counter, profile and native-parent columns.
+	"knowledges":      {"pending_subtasks_count", "profile", "parent_knowledge_id", "deletion_pending"},
+	"knowledge_bases": {"profile_config", "generated_profile"}, // 000101
 	// 000034/085/097/105/119
 	"messages": {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint", "run_state"},
 	"sessions": {
@@ -89,7 +91,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 52
+const expectedSQLiteMigrationVersion = 54
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

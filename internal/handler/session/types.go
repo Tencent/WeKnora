@@ -106,6 +106,8 @@ type AttachmentUpload struct {
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization
 type SearchKnowledgeRequest struct {
+	ChildrenDepth int `json:"children_depth,omitempty"`
+	ChildrenLimit int `json:"children_limit,omitempty"`
 	// Query is the text query. It is required unless QueryImage is set: an
 	// image-only request searches by visual similarity.
 	Query string `json:"query"`
