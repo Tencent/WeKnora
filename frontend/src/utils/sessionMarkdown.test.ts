@@ -63,6 +63,24 @@ test('buildSessionMarkdown exports visible conversation content without internal
 })
 
 
+for (const role of ['user', 'assistant'] as const) {
+  for (const [description, content] of [
+    ['Markdown hard breaks', 'First line  \nSecond line'],
+    ['fenced code whitespace', '```python\nvalue = """first  \nsecond\t\n"""\n```'],
+  ]) {
+    test(`buildSessionMarkdown preserves ${description} in ${role} messages`, () => {
+      const markdown = buildSessionMarkdown({
+        sessionId: 'session-1',
+        title: 'Example chat',
+        labels,
+        messages: [{ role, content: `\n${content}\n` }],
+      })
+
+      assert.ok(markdown.endsWith(`## ${labels[role]}\n\n${content}\n`))
+    })
+  }
+}
+
 test('export messages sort by instants across fractional timestamps and timezone offsets', async () => {
   const messages = [
     { id: 'late', role: 'assistant', created_at: '2026-01-01T00:00:00.100Z' },
