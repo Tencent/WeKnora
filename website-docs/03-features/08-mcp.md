@@ -7,6 +7,10 @@ MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 M
 
 接入外部服务可扩展 WeKnora 智能体的工具；运行 WeKnora MCP Server 可让外部客户端使用知识库检索、问答和管理能力。
 
+**重排模型取决于调用的工具。** 接入外部 MCP 服务本身不需要配置 Rerank。智能推理 Agent 启用知识库范围和内置 `search_knowledge` 时，需在该 Agent 的模型设置里配置 Rerank。默认内置工具包含 `search_knowledge`。如果只使用外部 MCP，可将知识库范围设为「不使用知识库」，或在内置工具中取消勾选 `search_knowledge`。
+
+外部客户端直连 WeKnora 内置 MCP Server 时，端点的 `search_knowledge` 和 `grep_chunks` 无需配置 Rerank。`ask` 调用端点配置的 Agent 或快速问答，沿用相应模式的模型设置。
+
 空间 Admin 在侧边栏「工具箱 → MCP服务」新建服务（旧的「设置 → MCP 服务」链接会自动跳转到这里），填好连接后同步工具并写使用说明，再在智能体中选择所需服务。需要控制写入或外发操作时，可为相应工具开启人工审批，调用前会显示确认卡片。
 
 <Screenshot

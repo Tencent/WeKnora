@@ -661,7 +661,7 @@
               </label>
               <p class="desc">
                 {{ $t('agent.editor.rerankModelDesc') }}
-                <template v-if="!needsRerankModel">
+                <template v-if="!isAgentMode && !needsRerankModel">
                   <br />
                   <span class="hint">{{ $t('agent.editor.rerankModelOptionalHint') }}</span>
                 </template>
@@ -3594,8 +3594,13 @@ const contextTemplatePlaceholder = computed(() => {
   return t('agent.editor.contextTemplatePlaceholder');
 });
 
-// 是否需要配置 ReRank 模型（仅当关联的知识库中有 RAG 类型时需要）
 const needsRerankModel = computed(() => {
+  if (isAgentMode.value) {
+    return agentRequiresRerankModel({
+      kb_selection_mode: kbSelectionMode.value,
+      allowed_tools: allowedToolsToSave(),
+    });
+  }
   if (!hasKnowledgeBase.value) return false;
   const mode = kbSelectionMode.value;
   if (mode === 'all') {
