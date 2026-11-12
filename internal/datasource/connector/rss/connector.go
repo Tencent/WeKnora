@@ -205,6 +205,9 @@ func (c *Connector) walk(
 	var feedErrors []string
 
 	for _, feedURL := range feedURLs {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		data, err := cli.fetchFeed(ctx, feedURL)
 		if err != nil {
 			logger.Warnf(ctx, "[RSS] sync: fetch %s failed: %v", feedURL, err)
@@ -261,6 +264,9 @@ func (c *Connector) walk(
 			}
 
 			resolved := c.resolveItem(ctx, cli, feed, item, feedURL, itemID, feedContent)
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
 			if incremental && resolved.articleFailed && prevItems[itemID] != "" && prevSignals[itemID] != "" {
 				// A cached signal records a successful resolution. Preserve its body
 				// and old signal so a changed entry retries without replacing the full
@@ -307,6 +313,12 @@ func (c *Connector) walk(
 
 		logger.Infof(ctx, "[RSS] feed %s: items=%d fetched=%d skipped=%d",
 			feedURL, len(feed.Items), kept, skipped)
+	}
+
+	// The caller may persist a returned cursor even on fetch failure.
+	// Discard the interrupted batch so a retry starts from the prior cursor.
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
 
 	if len(feedErrors) > 0 {
