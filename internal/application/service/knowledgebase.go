@@ -443,6 +443,38 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 	return kbs, nil
 }
 
+type knowledgeBaseListCountRepository interface {
+	FillKnowledgeBaseListCounts(context.Context, uint64, []*types.KnowledgeBase) error
+}
+
+func (s *knowledgeBaseService) ListKnowledgeBasesForDashboard(
+	ctx context.Context, selectRows func([]*types.KnowledgeBase) []*types.KnowledgeBase,
+) ([]*types.KnowledgeBase, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if userID, ok := types.UserIDFromContext(ctx); ok && userID != "" {
+		s.applyUserKBPins(ctx, tenantID, userID, kbs)
+	}
+	kbs = selectRows(kbs)
+	counter, supportsBatch := s.repo.(knowledgeBaseListCountRepository)
+	if !supportsBatch {
+		for _, kb := range kbs {
+			_ = s.FillKnowledgeBaseCounts(ctx, kb)
+		}
+		return kbs, nil
+	}
+	for _, kb := range kbs {
+		kb.EnsureDefaults()
+	}
+	if err := counter.FillKnowledgeBaseListCounts(ctx, tenantID, kbs); err != nil {
+		logger.Warnf(ctx, "Failed to get knowledge base list counts: %v", err)
+	}
+	return kbs, nil
+}
+
 // ListKnowledgeBasesByTenantID returns all knowledge bases for the given tenant (e.g. for shared agent context).
 func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
 	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
