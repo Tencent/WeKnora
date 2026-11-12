@@ -97,7 +97,8 @@ test('forcing a cold dashboard refresh only fetches the lightweight list', async
   await store.fetchKnowledgeBasesForList(undefined, true)
   await flush()
   assert.equal(api.listKnowledgeBases.mock.callCount(), 1)
-  assert.deepEqual(api.listKnowledgeBases.mock.calls[0].arguments[0], {
+  // The store is evaluated in a separate VM context.
+  assert.deepEqual({ ...api.listKnowledgeBases.mock.calls[0].arguments[0] }, {
     creator: undefined,
     view: 'list',
   })
