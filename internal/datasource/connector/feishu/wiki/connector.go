@@ -306,6 +306,8 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 	return nodes, nil, nil
 }
 
+func (o *wikiOps) NodeURL(n core.WikiNode) string { return o.region.WikiURL(n.NodeToken) }
+
 func (o *wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
 func (o *wikiOps) Title(n core.WikiNode) string   { return n.Title }
 func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
