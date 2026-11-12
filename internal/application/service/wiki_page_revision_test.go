@@ -73,6 +73,65 @@ func TestUpdateWikiPageSnapshotsSupersededVersion(t *testing.T) {
 	require.Equal(t, 2, resp.CurrentVersion)
 }
 
+func TestWikiPageRejectsStalePipelineWriteAfterManualEdit(t *testing.T) {
+	ctx, h, _ := newWikiRevisionTestService(t)
+	const kb = "kb-concurrent-edit"
+	created, err := h.svc.CreatePage(ctx, &types.WikiPage{
+		KnowledgeBaseID: kb, TenantID: 1, Slug: "concept/rag",
+		Title: "RAG", PageType: types.WikiPageTypeConcept, Content: "generated body",
+	})
+	require.NoError(t, err)
+
+	stalePipelinePage := *created
+	manualPage := *created
+	manualPage.Content = "generated body\nmanual correction"
+	updatedManual, err := h.svc.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourceUser), &manualPage)
+	require.NoError(t, err)
+
+	stalePipelinePage.Content = "regenerated body"
+	stalePipelinePage.SourceRefs = types.StringArray{"new-source"}
+	updated, err := h.svc.UpdatePage(ctx, &stalePipelinePage)
+	require.Nil(t, updated)
+	require.ErrorIs(t, err, repository.ErrWikiPageConflict)
+
+	stored, err := h.svc.GetPageBySlug(ctx, kb, created.Slug)
+	require.NoError(t, err)
+	require.Equal(t, updatedManual.Content, stored.Content)
+	require.Equal(t, updatedManual.Version, stored.Version)
+	require.Equal(t, types.WikiEditSourceUser, stored.LastEditSource)
+	require.Empty(t, stored.SourceRefs)
+
+	revisions, err := h.svc.ListRevisions(ctx, kb, created.Slug, 10, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), revisions.Total)
+}
+
+func TestWikiPageRejectsStaleMetadataAndAutoLinkWrites(t *testing.T) {
+	ctx, h, _ := newWikiRevisionTestService(t)
+	const kb = "kb-concurrent-meta"
+	created, err := h.svc.CreatePage(ctx, &types.WikiPage{
+		KnowledgeBaseID: kb, TenantID: 1, Slug: "concept/rag",
+		Title: "RAG", PageType: types.WikiPageTypeConcept, Content: "generated body",
+	})
+	require.NoError(t, err)
+
+	stale := *created
+	manual := *created
+	manual.Content = "manual correction"
+	_, err = h.svc.UpdatePage(types.WithWikiEditSource(ctx, types.WikiEditSourceUser), &manual)
+	require.NoError(t, err)
+
+	stale.SourceRefs = types.StringArray{"new-source"}
+	require.ErrorIs(t, h.svc.UpdatePageMeta(ctx, &stale), repository.ErrWikiPageConflict)
+	stale.Content = "automatically linked body"
+	require.ErrorIs(t, h.svc.UpdateAutoLinkedContent(ctx, &stale), repository.ErrWikiPageConflict)
+
+	stored, err := h.svc.GetPageBySlug(ctx, kb, created.Slug)
+	require.NoError(t, err)
+	require.Equal(t, "manual correction", stored.Content)
+	require.Empty(t, stored.SourceRefs)
+}
+
 func TestUpdateWikiPagePersistsClearedFields(t *testing.T) {
 	ctx, h, _ := newWikiRevisionTestService(t)
 	const kb = "kb-clear"
