@@ -1856,6 +1856,8 @@ type RuntimeWorkerPool struct {
 	ClusterCapacity int     `json:"cluster_capacity" extensions:"x-agent"` // sum of live server concurrency
 	Active          int     `json:"active" extensions:"x-agent"`           // live workers assigned to this pool
 	Utilization     float64 `json:"utilization" extensions:"x-agent"`      // Active / ClusterCapacity
+	// Nil without live heartbeats; true when any instance differs from configuration.
+	PendingRestart *bool `json:"pending_restart" extensions:"x-agent"`
 }
 
 type RuntimeQueuesResponse struct {
@@ -1897,6 +1899,12 @@ func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.Work
 			idx, ok := indexes[poolName]
 			if !ok {
 				break
+			}
+			if pools[idx].PendingRestart == nil {
+				pools[idx].PendingRestart = new(bool)
+			}
+			if server.Concurrency != pools[idx].Concurrency {
+				*pools[idx].PendingRestart = true
 			}
 			pools[idx].Instances++
 			pools[idx].ClusterCapacity += server.Concurrency
