@@ -125,6 +125,9 @@
               {{ poolDescription(pool.name) }}
               <span class="rq-pool-meta">
                 {{ t('system.globalSettings.runtime.poolConfigured', { value: pool.concurrency }) }}
+                <t-tag v-if="pool.pending_restart" theme="warning" variant="light" size="small">
+                  {{ t('system.globalSettings.badgeRequiresRestart') }}
+                </t-tag>
                 <template v-if="pool.instances > 0">
                   · {{ t('system.globalSettings.runtime.poolInstances', { value: pool.instances }) }}
                   · {{ t('system.globalSettings.runtime.poolUtilization', { value: poolUtilization(pool) }) }}
