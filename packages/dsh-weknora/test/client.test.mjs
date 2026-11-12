@@ -3,7 +3,7 @@ import { after, test } from 'node:test'
 
 import { WeknoraApiError, WeknoraClient } from '../dist/client.js'
 import { resolveConfig } from '../dist/config.js'
-import { startMockWeknora } from './helpers/mock-weknora.mjs'
+import { ARCH_HANDLE, startMockWeknora } from './helpers/mock-weknora.mjs'
 
 const never = new AbortController().signal
 
@@ -56,20 +56,48 @@ test('resourceUrls defaults to public so figures are loadable', async () => {
   assert.equal(mock.requests.at(-1).query.resource_urls, 'public')
 })
 
-test('handle mode omits the resource_urls query parameter', async () => {
-  const { mock, client } = await harness({ resourceUrls: 'handle' })
+test('handle mode explicitly overrides the deployment resource URL mode', async () => {
+  const { mock, client } = await harness({ resourceUrls: 'handle' }, { defaultResourceUrls: 'public' })
   await client.listKnowledgeBases(never)
-  assert.equal(mock.requests.at(-1).query.resource_urls, undefined)
+  assert.equal(mock.requests.at(-1).query.resource_urls, 'handle')
 })
 
 test('a knowledge-base-restricted key falls back from public URLs to handles', async () => {
-  const { mock, client } = await harness({}, { forbidPublicResourceUrls: true })
-  const bases = await client.listKnowledgeBases(never)
-  assert.equal(bases.length, 2)
+  const { mock, client } = await harness({}, { forbidPublicResourceUrls: true, defaultResourceUrls: 'public' })
+  const input = { query: '系统架构', knowledgeBaseIds: ['kb-product'], knowledgeIds: [] }
+  const results = await client.search(input, never)
+  assert.ok(results.some(result => result.content.includes(ARCH_HANDLE)))
   assert.equal(mock.requests[0].query.resource_urls, 'public')
-  assert.equal(mock.requests[1].query.resource_urls, undefined)
-  await client.listKnowledgeBases(never)
-  assert.equal(mock.requests.at(-1).query.resource_urls, undefined, 'later calls must not retry public mode')
+  assert.equal(mock.requests[1].query.resource_urls, 'handle')
+  await client.search(input, never)
+  assert.equal(mock.requests.at(-1).query.resource_urls, 'handle', 'later calls must not retry public mode')
+})
+
+test('streamed answers retry with explicit handles after public mode is refused', async () => {
+  const { mock, client } = await harness({}, { forbidPublicResourceUrls: true, defaultResourceUrls: 'public' })
+  const answer = await client.ask(
+    { sessionId: 's1', query: '系统架构', knowledgeBaseIds: ['kb-product'], agentId: undefined, webSearch: false },
+    never,
+  )
+  assert.equal(mock.requests[0].query.resource_urls, 'public')
+  assert.equal(mock.requests[1].query.resource_urls, 'handle')
+  assert.ok(answer.references.some(reference => reference.content.includes(ARCH_HANDLE)))
+})
+
+test('handle mode keeps resource handles in search results and streamed citations', async () => {
+  const { mock, client } = await harness({ resourceUrls: 'handle' }, { defaultResourceUrls: 'public' })
+  const results = await client.search(
+    { query: '系统架构', knowledgeBaseIds: ['kb-product'], knowledgeIds: [] },
+    never,
+  )
+  assert.ok(results.some(result => result.content.includes(ARCH_HANDLE)))
+  assert.equal(mock.requests.at(-1).query.resource_urls, 'handle')
+  const answer = await client.ask(
+    { sessionId: 's1', query: '系统架构', knowledgeBaseIds: ['kb-product'], agentId: undefined, webSearch: false },
+    never,
+  )
+  assert.ok(answer.references.some(reference => reference.content.includes(ARCH_HANDLE)))
+  assert.equal(mock.requests.at(-1).query.resource_urls, 'handle')
 })
 
 test('chunk pages carry their pagination envelope', async () => {
