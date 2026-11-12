@@ -119,11 +119,14 @@
                   :maxlength="4000"
                   :autosize="{ minRows: 3, maxRows: 8 }"
                 />
-                <AssistantActionButton class="wiki-instructions-action"
-                  :label="$t(formData.wikiConfig.contentInstructions.trim() ? 'assistant.actions.refineRules' : 'assistant.actions.writePrompt')"
-                  :query="$t(formData.wikiConfig.contentInstructions.trim() ? 'assistant.prompts.refineWikiRules' : 'assistant.prompts.writeWikiRules', { field: $t('knowledgeEditor.wiki.contentInstructionsLabel') })"
-                  :selection="{ field: $t('knowledgeEditor.wiki.contentInstructionsLabel'), text: formData.wikiConfig.contentInstructions }"
-                  :disabled="saving || loading" />
+                <div class="wiki-instructions-footer">
+                  <AssistantActionButton class="wiki-instructions-action"
+                    :label="$t(formData.wikiConfig.contentInstructions.trim() ? 'assistant.actions.refineRules' : 'assistant.actions.writePrompt')"
+                    :query="$t(formData.wikiConfig.contentInstructions.trim() ? 'assistant.prompts.refineWikiRules' : 'assistant.prompts.writeWikiRules', { field: $t('knowledgeEditor.wiki.contentInstructionsLabel') })"
+                    :selection="{ field: $t('knowledgeEditor.wiki.contentInstructionsLabel'), text: formData.wikiConfig.contentInstructions }"
+                    :disabled="saving || loading" />
+                  <span class="wiki-instructions-counter">{{ formData.wikiConfig.contentInstructions.length }}/4000</span>
+                </div>
               </div>
             </div>
 
@@ -137,11 +140,14 @@
                   :maxlength="4000"
                   :autosize="{ minRows: 3, maxRows: 8 }"
                 />
-                <AssistantActionButton class="wiki-instructions-action"
-                  :label="$t(formData.wikiConfig.extractionInstructions.trim() ? 'assistant.actions.refineRules' : 'assistant.actions.writePrompt')"
-                  :query="$t(formData.wikiConfig.extractionInstructions.trim() ? 'assistant.prompts.refineWikiRules' : 'assistant.prompts.writeWikiRules', { field: $t('knowledgeEditor.wiki.extractionInstructionsLabel') })"
-                  :selection="{ field: $t('knowledgeEditor.wiki.extractionInstructionsLabel'), text: formData.wikiConfig.extractionInstructions }"
-                  :disabled="saving || loading" />
+                <div class="wiki-instructions-footer">
+                  <AssistantActionButton class="wiki-instructions-action"
+                    :label="$t(formData.wikiConfig.extractionInstructions.trim() ? 'assistant.actions.refineRules' : 'assistant.actions.writePrompt')"
+                    :query="$t(formData.wikiConfig.extractionInstructions.trim() ? 'assistant.prompts.refineWikiRules' : 'assistant.prompts.writeWikiRules', { field: $t('knowledgeEditor.wiki.extractionInstructionsLabel') })"
+                    :selection="{ field: $t('knowledgeEditor.wiki.extractionInstructionsLabel'), text: formData.wikiConfig.extractionInstructions }"
+                    :disabled="saving || loading" />
+                  <span class="wiki-instructions-counter">{{ formData.wikiConfig.extractionInstructions.length }}/4000</span>
+                </div>
               </div>
             </div>
 
@@ -2011,17 +2017,27 @@ watch(() => chatResources.allModels, (list) => {
 </script>
 
 <style scoped lang="less">
+// Wiki 生成要求 / 提取重点：按钮与字数计数放在输入框下方一行（左按钮右计数），
+// 不再悬浮在框内，避免 .t-textarea__info_wrapper（字数统计条）撑高容器导致按钮压边框。
+// 隐藏 TDesign 内置计数条（输入截断限制 maxlength 仍生效），自建 footer 展示计数。
 .wiki-instructions-input {
-  position: relative;
-
-  .wiki-instructions-action {
-    position: absolute;
-    left: 8px;
-    bottom: 8px;
+  :deep(.t-textarea__info_wrapper) {
+    display: none;
   }
 
-  :deep(.t-textarea__inner) {
-    padding-bottom: 44px;
+  .wiki-instructions-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 24px;
+    margin-top: 2px;
+  }
+
+  .wiki-instructions-counter {
+    font-size: var(--app-text-xs);
+    line-height: 1;
+    color: var(--td-text-color-placeholder);
+    user-select: none;
   }
 }
 
