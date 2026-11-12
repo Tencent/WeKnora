@@ -18,3 +18,11 @@ cli/acceptance/testdata/**/*.json text eol=lf
 
 # Unified diffs use a space to mark empty context lines.
 patches/browserskill/*.patch whitespace=-blank-at-eol
+
+# Jieba dictionaries are embedded and extracted byte-exact at runtime;
+# CRLF would append \r to every dictionary entry.
+internal/types/jiebadata/** -text
+
+# License manifest checksums are hex-compared line-by-line by
+# scripts/check-license-bundle.sh; CRLF on Windows checkouts breaks it.
+*.tsv -text
