@@ -60,8 +60,6 @@ jobs:
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
-          # macOS 暂摘（账号级 macOS runner 拦截，探针 workflow 亦被秒取消）；
-          # 解除后恢复 darwin/amd64 与 darwin/arm64 两段
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
@@ -95,9 +93,6 @@ jobs:
           eval "$(./scripts/get_version.sh env)"
           LDFLAGS="-w -s $(./scripts/get_version.sh ldflags)"
           export CGO_CFLAGS="-Wno-deprecated-declarations"
-          if [ "${{ matrix.goos }}" = "darwin" ]; then
-            export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
-          fi
           go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
             -o WeKnora-lite ./cmd/server
 
@@ -138,20 +133,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS 暂时摘除：GitHub 对本账号的 macOS runner 秒取消（疑似新账号/
-          # fork 风控；探针 workflow 也被取消）。解除后恢复以下三行段：
-          # - os: macos-14
-          #   platform: darwin/universal
-          #   arch_label: macOS_universal
-          #   artifact_name: desktop-macos-universal
-          # - os: macos-14
-          #   platform: darwin/amd64
-          #   arch_label: macOS_amd64
-          #   artifact_name: desktop-macos-amd64
-          # - os: macos-14
-          #   platform: darwin/arm64
-          #   arch_label: macOS_arm64
-          #   artifact_name: desktop-macos-arm64
           - os: ubuntu-latest
             platform: linux/amd64
             arch_label: linux_amd64
@@ -253,9 +234,6 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             BUILD_TAGS="sqlite_fts5 webkit2_41"
           fi
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
-          fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
           fi
@@ -268,44 +246,6 @@ jobs:
             ${NSIS_FLAG} \
             -ldflags="${LDFLAGS}" \
             -o "WeKnora Lite"
-
-      # ── macOS: bundle .app with resources, then create DMG ──
-      - name: Package macOS app
-        if: runner.os == 'macOS'
-        run: |
-          APP_BUNDLE="WeKnora Lite.app"
-          SRC="cmd/desktop/build/bin/${APP_BUNDLE}"
-          RESOURCES="${SRC}/Contents/Resources"
-
-          mkdir -p "${RESOURCES}/config"
-          mkdir -p "${RESOURCES}/migrations/sqlite"
-          bash ./scripts/copy-licenses.sh "${RESOURCES}"
-
-          if [ -f .env.lite.example ]; then
-            cp .env.lite.example "${RESOURCES}/.env"
-          fi
-          if [ -d migrations/sqlite ]; then
-            cp -r migrations/sqlite/* "${RESOURCES}/migrations/sqlite/"
-          fi
-          if [ -d config ]; then
-            cp -r config/* "${RESOURCES}/config/"
-          fi
-          test -f web/index.html || { echo "::error::web/ frontend build is missing; the app window would be blank"; exit 1; }
-          cp -r web "${RESOURCES}/web"
-
-          DMG_NAME="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
-
-          DMG_SRC="dmg_staging"
-          mkdir -p "${DMG_SRC}"
-          cp -R "cmd/desktop/build/bin/${APP_BUNDLE}" "${DMG_SRC}/"
-          ln -s /Applications "${DMG_SRC}/Applications"
-
-          hdiutil create -volname "WeKnora Lite" \
-            -srcfolder "${DMG_SRC}" \
-            -ov -format UDZO \
-            "${DMG_NAME}.dmg"
-
-          shasum -a 256 "${DMG_NAME}.dmg" > "${DMG_NAME}.dmg.sha256"
 
       # ── Linux: package tarball ──
       - name: Package Linux app
@@ -419,8 +359,6 @@ jobs:
           |------|------|
           | `WeKnora-lite_*_linux_amd64.tar.gz` | Linux x86_64 |
           | `WeKnora-lite_*_linux_arm64.tar.gz` | Linux ARM64 |
-          | `WeKnora-lite_*_darwin_amd64.tar.gz` | macOS Intel |
-          | `WeKnora-lite_*_darwin_arm64.tar.gz` | macOS Apple Silicon |
 
           ---
 
@@ -461,45 +399,6 @@ jobs:
               --title "WeKnora Lite ${{ steps.ver.outputs.version }}" \
               --notes-file notes.md \
               $FILES || true
-          fi
-
-  # ── 4. Update Homebrew Formula ──
-  update-homebrew:
-    needs: release
-    if: ${{ !cancelled() && needs.release.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            VERSION="${{ inputs.tag }}"
-          else
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for release assets to be available
-        run: sleep 15
-
-      - name: Update Formula
-        run: ./scripts/update-homebrew-formula.sh "${{ steps.ver.outputs.version }}"
-
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/weknora-lite.rb
-          if git diff --cached --quiet; then
-            echo "No changes to Formula"
-          else
-            git commit -m "formula: update weknora-lite to ${{ steps.ver.outputs.version }}"
-            git push origin main
           fi
 
   # ── 5. 银河麒麟 V10 SP1 aarch64 桌面 deb ──
