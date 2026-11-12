@@ -62,7 +62,12 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 		},
 		{name: "file fetch fails", getErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{name: "file read fails", readErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
-		{name: "reader returns no result", missingResult: true, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
+		{
+			name:          "reader returns no result",
+			missingResult: true,
+			retryable:     true,
+			code:          werrors.ErrCodeDocReaderParseFailed,
+		},
 		{name: "reader call fails", rpcErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{
 			name: "CSV expansion budget exceeded", rpcErr: docparser.ErrCSVMarkdownTooLarge,
