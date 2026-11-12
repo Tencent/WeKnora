@@ -198,30 +198,34 @@
             </div>
             <div class="setting-control setting-control-full" style="position: relative;">
               <!-- Agent模式：统一提示词（使用 {{web_search_status}} 占位符动态控制行为） -->
-              <div v-if="isAgentMode" class="textarea-with-template textarea-with-assistant">
+              <div v-if="isAgentMode" class="textarea-with-template">
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
-                <AssistantActionButton class="prompt-assistant-action"
-                  :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
-                  :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
-                  :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
-                <PromptTemplateSelector type="agentSystemPrompt" position="corner"
-                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
-                  @reset-default="handleAgentSystemPromptResetDefault" />
+                <div class="textarea-actions">
+                  <AssistantActionButton class="prompt-assistant-action"
+                    :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                    :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                    :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
+                  <PromptTemplateSelector type="agentSystemPrompt" position="inline"
+                    :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                    @reset-default="handleAgentSystemPromptResetDefault" />
+                </div>
               </div>
               <!-- 普通模式：单个提示词 -->
-              <div v-else class="textarea-with-template textarea-with-assistant">
+              <div v-else class="textarea-with-template">
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
-                <AssistantActionButton class="prompt-assistant-action"
-                  :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
-                  :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
-                  :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
-                <PromptTemplateSelector type="systemPrompt" position="corner"
-                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
-                  @reset-default="handleSystemPromptTemplateSelect" />
+                <div class="textarea-actions">
+                  <AssistantActionButton class="prompt-assistant-action"
+                    :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                    :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                    :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
+                  <PromptTemplateSelector type="systemPrompt" position="inline"
+                    :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                    @reset-default="handleSystemPromptTemplateSelect" />
+                </div>
               </div>
               <!-- 占位符提示下拉框 -->
               <Teleport to="body">
@@ -267,9 +271,11 @@
                 <t-textarea ref="contextTemplateTextareaRef" v-model="formData.config.context_template"
                   :placeholder="contextTemplatePlaceholder" :autosize="{ minRows: 8, maxRows: 20 }"
                   @input="handleContextTemplateInput" class="system-prompt-textarea" />
-                <PromptTemplateSelector type="contextTemplate" position="corner"
-                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
-                  @reset-default="handleContextTemplateSelect" />
+                <div class="textarea-actions textarea-actions--right">
+                  <PromptTemplateSelector type="contextTemplate" position="inline"
+                    :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
+                    @reset-default="handleContextTemplateSelect" />
+                </div>
               </div>
               <!-- 上下文模板占位符提示下拉框 -->
               <Teleport to="body">
@@ -340,8 +346,10 @@
                       :disabled="props.readOnly || !selectedIntent"
                       :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
                       @input="handleIntentPromptInput" />
-                    <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
-                      :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                    <div class="textarea-actions textarea-actions--right">
+                      <PromptTemplateSelector type="intentPrompt" position="inline" :intent-id="selectedIntent"
+                        :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                    </div>
                   </div>
 
                   <Teleport to="body">
@@ -391,8 +399,10 @@
                   <t-textarea ref="rewriteSystemTextareaRef" v-model="formData.config.rewrite_prompt_system"
                     :placeholder="defaultRewritePromptSystem || $t('agent.editor.rewritePromptSystemPlaceholder')"
                     :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteSystemInput" />
-                  <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
-                    @reset-default="handleRewriteTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="rewrite" position="inline" @select="handleRewriteTemplateSelect"
+                      @reset-default="handleRewriteTemplateSelect" />
+                  </div>
                 </div>
                 <Teleport to="body">
                   <div v-if="rewriteSystemPopup.show && filteredRewriteSystemPlaceholders.length > 0"
@@ -436,8 +446,10 @@
                   <t-textarea ref="rewriteUserTextareaRef" v-model="formData.config.rewrite_prompt_user"
                     :placeholder="defaultRewritePromptUser || $t('agent.editor.rewritePromptUserPlaceholder')"
                     :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteUserInput" />
-                  <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
-                    @reset-default="handleRewriteTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="rewrite" position="inline" @select="handleRewriteTemplateSelect"
+                      @reset-default="handleRewriteTemplateSelect" />
+                  </div>
                 </div>
                 <Teleport to="body">
                   <div v-if="rewriteUserPopup.show && filteredRewriteUserPlaceholders.length > 0"
@@ -487,9 +499,11 @@
                   <t-textarea v-model="formData.config.fallback_response"
                     :placeholder="defaultFallbackResponse || $t('agent.editor.fallbackResponsePlaceholder')"
                     :autosize="{ minRows: 2, maxRows: 6 }" />
-                  <PromptTemplateSelector type="fallback" position="corner" fallbackMode="fixed"
-                    @select="handleFallbackResponseTemplateSelect"
-                    @reset-default="handleFallbackResponseTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="fallback" position="inline" fallbackMode="fixed"
+                      @select="handleFallbackResponseTemplateSelect"
+                      @reset-default="handleFallbackResponseTemplateSelect" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -516,9 +530,11 @@
                   <t-textarea ref="fallbackPromptTextareaRef" v-model="formData.config.fallback_prompt"
                     :placeholder="defaultFallbackPrompt || $t('agent.editor.fallbackPromptPlaceholder')"
                     :autosize="{ minRows: 4, maxRows: 10 }" @input="handleFallbackPromptInput" />
-                  <PromptTemplateSelector type="fallback" position="corner" fallbackMode="model"
-                    @select="handleFallbackPromptTemplateSelect"
-                    @reset-default="handleFallbackPromptTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="fallback" position="inline" fallbackMode="model"
+                      @select="handleFallbackPromptTemplateSelect"
+                      @reset-default="handleFallbackPromptTemplateSelect" />
+                  </div>
                 </div>
                 <Teleport to="body">
                   <div v-if="fallbackPromptPopup.show && filteredFallbackPlaceholders.length > 0"
@@ -6405,21 +6421,31 @@ const handleSave = async () => {
   }
 }
 
-// textarea 与模板选择器容器
+// textarea 与模板选择器容器：按钮全部放在输入框下方操作栏，不再悬浮侵入输入框空间，
+// 避免内容较长时操作按钮（无背景色）与输入文本重叠。
 .textarea-with-template {
-  position: relative;
   width: 100%;
-}
 
-.textarea-with-assistant {
-  .prompt-assistant-action {
-    position: absolute;
-    left: 8px;
-    bottom: 8px;
+  .textarea-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 32px;
+    margin-top: 4px;
+    padding: 2px 0;
+
+    &--right {
+      justify-content: flex-end;
+    }
   }
 
-  :deep(.t-textarea__inner) {
-    padding-bottom: 44px;
+  .prompt-assistant-action {
+    flex-shrink: 0;
+  }
+
+  :deep(.prompt-template-selector) {
+    flex-shrink: 0;
   }
 }
 
