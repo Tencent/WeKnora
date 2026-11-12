@@ -71,24 +71,35 @@ document.addEventListener('keydown',function(e){
   }
 },true);
 
-// Intercept external link clicks and window.open so they open in the system browser
+// Intercept external link clicks and window.open so they open in the system
+// browser — but ONLY true cross-origin links. HTMLAnchorElement.href returns
+// the resolved absolute URL, so in-app anchors (href="#", href="/route")
+// normalize to http://wails.localhost/... and must stay in the webview for
+// the SPA router to handle them.
+function isExternalLink(rawUrl){
+  if(!rawUrl||typeof rawUrl!=='string')return false;
+  try{
+    var u=new URL(rawUrl,window.location.href);
+    if(u.protocol!=='http:'&&u.protocol!=='https:')return false;
+    return u.host!==window.location.host;
+  }catch(_){return false}
+}
+
 document.addEventListener('click',function(e){
   var el=e.target;
   while(el&&el.tagName!=='A')el=el.parentElement;
   if(!el||!el.href)return;
-  var href=el.href;
-  if(href.indexOf('http://')===0||href.indexOf('https://')===0){
-    if(window.runtime&&window.runtime.BrowserOpenURL){
-      e.preventDefault();
-      e.stopPropagation();
-      window.runtime.BrowserOpenURL(href);
-    }
+  if(!isExternalLink(el.href))return;
+  if(window.runtime&&window.runtime.BrowserOpenURL){
+    e.preventDefault();
+    e.stopPropagation();
+    window.runtime.BrowserOpenURL(el.href);
   }
 },true);
 
 var origOpen=window.open;
 window.open=function(url){
-  if(url&&(typeof url==='string')&&(url.indexOf('http://')===0||url.indexOf('https://')===0)){
+  if(isExternalLink(url)){
     if(window.runtime&&window.runtime.BrowserOpenURL){
       window.runtime.BrowserOpenURL(url);
       return null;
