@@ -125,18 +125,7 @@
 
       <HostApprovalDefaultSetting v-if="authStore.isLiteMode" />
 
-      <!-- 自动下载更新开关 (Lite edition only) -->
-      <div class="setting-row" v-if="authStore.isLiteMode">
-        <div class="setting-info">
-          <label>{{ $t('settings.autoCheckUpdate') }}</label>
-          <p class="desc">{{ $t('settings.autoCheckUpdateDesc') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-switch
-            v-model="isAutoCheckUpdateEnabled"
-          />
-        </div>
-      </div>
+      <!-- 检测更新已移除：本构建面向离线部署，更新走手动覆盖安装 -->
     </div>
   </div>
 </template>
@@ -207,21 +196,6 @@ const monoFontOptions = computed<{ value: MonoFontKey; label: string; preview: s
 // commits the choice to the global store and writes the CSS variable.
 const currentSansStack = computed(() => SANS_STACKS[localSansFont.value] ?? SANS_STACKS.system)
 const currentMonoStack = computed(() => MONO_STACKS[localMonoFont.value] ?? MONO_STACKS.system)
-
-// 自动检查更新状态
-const isAutoCheckUpdateEnabled = computed({
-  get: () => settingsStore.isAutoCheckUpdateEnabled,
-  set: (val) => {
-    settingsStore.toggleAutoCheckUpdate(val)
-    if (val) {
-      // @ts-ignore
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoCheckForUpdates) {
-        // @ts-ignore
-        window.go.main.App.AutoCheckForUpdates()
-      }
-    }
-  }
-})
 
 // 初始化加载
 onMounted(() => {

@@ -45,35 +45,83 @@ import (
 // message is sent directly through the WKWebView script-message bridge,
 // which the native Objective-C handler in WailsContext.m converts to
 // [NSWindow performWindowDragWithEvent:].
-const dragHandlerJS = `(function(){
-if(window.__wkDragBound)return;
-window.__wkDragBound=true;
-document.documentElement.classList.add('wails-desktop');
-
-// Disable rubber-band overscroll that reveals the dark window background
+// desktopCommonJS is injected into the webview on DomReady for every desktop
+// platform: overscroll damping, drag-out prevention, external links opening in
+// the system browser, and a Ctrl+A guard that stops select-all leaking onto
+// page chrome outside editable fields.
+const desktopCommonJS = `(function(){
+if(window.__wkCommonBound)return;
+window.__wkCommonBound=true;
 document.documentElement.style.overscrollBehavior='none';
 document.body.style.overscrollBehavior='none';
-
-if(window.wails&&window.wails.flags){
-  window.wails.flags.cssDragProperty='__disabled__';
-  window.wails.flags.cssDragValue='__never__';
-}
 
 // Prevent native text/image drag-out to fix the "selected and dragged away" issue
 window.addEventListener('dragstart', function(e){
   e.preventDefault();
 }, true);
 
+// Ctrl+A must not select the whole page; keep it working inside inputs,
+// textareas and contenteditable hosts.
+document.addEventListener('keydown',function(e){
+  if((e.ctrlKey||e.metaKey)&&(e.key==='a'||e.key==='A')){
+    var t=e.target;
+    if(t&&t.nodeType===Node.TEXT_NODE){t=t.parentElement}
+    var editable=t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable||(t.closest&&t.closest('input,textarea,select,[contenteditable="true"],[contenteditable=""]')));
+    if(!editable){e.preventDefault()}
+  }
+},true);
+
+// Intercept external link clicks and window.open so they open in the system browser
+document.addEventListener('click',function(e){
+  var el=e.target;
+  while(el&&el.tagName!=='A')el=el.parentElement;
+  if(!el||!el.href)return;
+  var href=el.href;
+  if(href.indexOf('http://')===0||href.indexOf('https://')===0){
+    if(window.runtime&&window.runtime.BrowserOpenURL){
+      e.preventDefault();
+      e.stopPropagation();
+      window.runtime.BrowserOpenURL(href);
+    }
+  }
+},true);
+
+var origOpen=window.open;
+window.open=function(url){
+  if(url&&(typeof url==='string')&&(url.indexOf('http://')===0||url.indexOf('https://')===0)){
+    if(window.runtime&&window.runtime.BrowserOpenURL){
+      window.runtime.BrowserOpenURL(url);
+      return null;
+    }
+  }
+  return origOpen.apply(window,arguments);
+};
+})();`
+
+// macDragInterceptJS is macOS-only: it adds the wails-desktop class (which
+// pads the layout for the HiddenInset traffic lights) and turns the top 40px
+// of the page into a window-drag band via the WKWebView script-message
+// bridge. On Windows/Linux the native frame is visible and injecting this
+// swallowed clicks on top-of-window UI (drawer close X) plus added a 30px
+// dead strip.
+const macDragInterceptJS = `(function(){
+if(window.__wkDragBound)return;
+window.__wkDragBound=true;
+document.documentElement.classList.add('wails-desktop');
+
+if(window.wails&&window.wails.flags){
+  window.wails.flags.cssDragProperty='__disabled__';
+  window.wails.flags.cssDragValue='__never__';
+}
+
 var TITLEBAR_H=40;
 
-// We specifically look for Wails' inline style attributes injected by Vue,
-// and custom drag classes, avoiding generic headers like .section-header.
-// .chat-topbar is the window top on the conversation page.
 var dragSel='.logo_row,.menu_top,.chat-topbar,.drag-region,[data-wails-drag],' +
   '[style*="--wails-draggable: drag"],[style*="--wails-draggable:drag"]';
 
 var noDragSel='button,a,input,select,textarea,[role="button"],' +
   '.t-button,.t-input,.t-select,.t-textarea,' +
+  '.t-drawer__close-btn,.t-drawer__header,.doc-drawer-header,' +
   '.header-actions,.header-action-btn,.sidebar-toggle,.logo_box,' +
   '.close-btn,.menu_item,.submenu,.submenu_item,.menu_bottom,' +
   '.t-popup,.t-dropdown,.t-tooltip,.t-dialog,[data-no-drag],' +
@@ -122,8 +170,6 @@ window.addEventListener('mousedown',function(e){
   }
   if(e.button!==0||e.detail!==1)return;
   if(!shouldDrag(target,e.clientY))return;
-  // The session title renames on double-click. Wait until the pointer
-  // actually moves so that click still lands; other top-bar hits drag now.
   var defer=target.closest&&target.closest('.chat-header__title');
   if(!defer){
     e.preventDefault();
@@ -144,32 +190,6 @@ window.addEventListener('mousedown',function(e){
   window.addEventListener('mousemove',move,true);
   window.addEventListener('mouseup',up,true);
 },true);
-
-// Intercept external link clicks and window.open so they open in the system browser
-document.addEventListener('click',function(e){
-  var el=e.target;
-  while(el&&el.tagName!=='A')el=el.parentElement;
-  if(!el||!el.href)return;
-  var href=el.href;
-  if(href.indexOf('http://')===0||href.indexOf('https://')===0){
-    if(window.runtime&&window.runtime.BrowserOpenURL){
-      e.preventDefault();
-      e.stopPropagation();
-      window.runtime.BrowserOpenURL(href);
-    }
-  }
-},true);
-
-var origOpen=window.open;
-window.open=function(url){
-  if(url&&(typeof url==='string')&&(url.indexOf('http://')===0||url.indexOf('https://')===0)){
-    if(window.runtime&&window.runtime.BrowserOpenURL){
-      window.runtime.BrowserOpenURL(url);
-      return null;
-    }
-  }
-  return origOpen.apply(window,arguments);
-};
 })();`
 
 // wailsThemeSyncJS：与 index.html 首屏一致，在 DomReady 再跑一遍，覆盖 Ctrl+R 后 runtime 就绪时机
@@ -360,7 +380,12 @@ func main() {
 		OnStartup:   app.startup,
 		OnDomReady: func(ctx context.Context) {
 			wailsruntime.WindowExecJS(ctx, wailsThemeSyncJS)
-			wailsruntime.WindowExecJS(ctx, dragHandlerJS)
+			wailsruntime.WindowExecJS(ctx, desktopCommonJS)
+			// 40px 拖拽带与 wails-desktop 类仅 macOS（HiddenInset）需要；
+			// Windows/Linux 注入会吞掉窗口顶部点击并产生顶部空白
+			if gostd.GOOS == "darwin" {
+				wailsruntime.WindowExecJS(ctx, macDragInterceptJS)
+			}
 			// 注入真实 API 根路径（与 window.location.origin 不同）；无 Go 绑定时仍可显示。
 			if u := strings.TrimSpace(app.backendURL); u != "" {
 				apiRoot := strings.TrimRight(u, "/") + "/api/v1"
