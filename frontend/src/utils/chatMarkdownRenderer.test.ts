@@ -736,6 +736,13 @@ test('joinCitationTagsToPreviousLine does not merge citations onto an unlabeled 
   assert.equal(joinCitationTagsToPreviousLine(input), '```\nAPR = principal\n```\n' + tag)
 })
 
+test('joinCitationTagsToPreviousLine does not merge citations onto display-math closing $$', () => {
+  const tag = '<kb doc="math.pdf" chunk_id="1" />'
+  const formula = '$$\nl = |\\alpha| r\n$$'
+  assert.equal(joinCitationTagsToPreviousLine(`${formula}\n\n${tag}`), `${formula}\n\n${tag}`)
+  assert.equal(joinCitationTagsToPreviousLine(`${formula}\n${tag}`), `${formula}\n${tag}`)
+})
+
 test('applyStreamingTailFade wraps the trailing text run', () => {
   const out = applyStreamingTailFade('<p>Great, that narrows it down a lot. Two more quick</p>')
   assert.match(out, /<span class="stream-fade-tail">[^<]*Two more quick<\/span><\/p>$/)

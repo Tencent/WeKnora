@@ -249,11 +249,12 @@ export function joinCitationTagsToPreviousLine(content: string): string {
   }
 
   // Blank lines before citations: join to the previous content. Fenced-code
-  // delimiters are the only exception because ``` / ~~~ must stay on their own line.
+  // delimiters and display-math closers ($$) must stay on their own line so
+  // marked-katex / fence parsers still match.
   result = result.replace(/\n[ \t]*\n+([ \t]*<(?:kb|web)\b)/gi, (match, kbStart, offset, full) => {
     const before = full.slice(0, offset)
     const lastLine = before.split('\n').filter((line: string) => line.trim()).pop() || ''
-    if (isFencedCodeDelimiterLine(lastLine)) {
+    if (isFencedCodeDelimiterLine(lastLine) || lastLine.trim() === '$$') {
       return `\n\n${kbStart}`
     }
     return ` ${kbStart.trimStart()}`
@@ -267,7 +268,7 @@ export function joinCitationTagsToPreviousLine(content: string): string {
       // partial line (e.g. ``` captured as ``), which would skip the fence check.
       const lineStart = full.lastIndexOf('\n', offset - 1) + 1
       const fullPrevLine = full.slice(lineStart, offset + beforePart.length)
-      if (isFencedCodeDelimiterLine(fullPrevLine)) {
+      if (isFencedCodeDelimiterLine(fullPrevLine) || fullPrevLine.trim() === '$$') {
         return match
       }
       return `${beforePart} ${kbStart.trimStart()}`
