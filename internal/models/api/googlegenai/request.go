@@ -431,6 +431,18 @@ func sanitizeSchema(v any) any {
 			}
 			out[k] = sanitizeSchema(val)
 		}
+		// Gemini's Schema uses a scalar type and a separate nullable flag.
+		// Preserve the concrete type of a JSON Schema [T, "null"] union.
+		if types, ok := out["type"].([]any); ok && len(types) == 2 {
+			for i, typ := range types {
+				if typ == "null" {
+					if concrete, ok := types[1-i].(string); ok && concrete != "null" {
+						out["type"] = concrete
+						out["nullable"] = true
+					}
+				}
+			}
+		}
 		return out
 	case []any:
 		for i := range t {
