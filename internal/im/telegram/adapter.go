@@ -367,7 +367,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	// Send initial "thinking" message
 	body := map[string]interface{}{
 		"chat_id": chatID,
-		"text":    "正在思考...",
+		"text":    im.ThinkingPlaceholder(ctx),
 	}
 	if incoming.ThreadID != "" {
 		if tid, err := strconv.Atoi(incoming.ThreadID); err == nil {
