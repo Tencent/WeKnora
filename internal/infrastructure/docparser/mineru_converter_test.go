@@ -145,6 +145,8 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 		backend    string
 		effort     string
 		wantEffort string
+		apiKey     string
+		wantAuth   string
 	}{
 		{name: "original basename", fileName: "reports/Illustrator 研报.pdf", fileType: "pdf", want: "Illustrator 研报.pdf"},
 		{
@@ -174,6 +176,10 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 			name: "invalid effort is omitted", fileName: "report.pdf", want: "report.pdf",
 			backend: "hybrid-auto-engine", effort: "invalid",
 		},
+		{
+			name: "legacy gateway auth header", fileName: "report.pdf", want: "report.pdf",
+			apiKey: "sk-test-key", wantAuth: "Bearer sk-test-key",
+		},
 	}
 
 	for _, tt := range tests {
@@ -185,6 +191,7 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 				content   string
 				effort    string
 				hasEffort bool
+				auth      string
 				err       error
 			}
 
@@ -210,6 +217,7 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 					return
 				}
 				got := capturedRequest{method: r.Method, path: r.URL.Path}
+				got.auth = r.Header.Get("Authorization")
 				file, header, err := r.FormFile("files")
 				got.effort = r.FormValue("effort")
 				_, got.hasEffort = r.MultipartForm.Value["effort"]
@@ -233,6 +241,9 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 				"mineru_model":    tt.backend,
 				"mineru_effort":   tt.effort,
 			})
+			if tt.apiKey != "" {
+				reader.apiKey = tt.apiKey
+			}
 			result, err := reader.Read(context.Background(), &types.ReadRequest{
 				FileContent: []byte(fileContent),
 				FileName:    tt.fileName,
@@ -265,7 +276,49 @@ func TestMinerULegacyMultipartRequest(t *testing.T) {
 				t.Errorf("multipart effort = %q (present=%v), want %q",
 					request.effort, request.hasEffort, tt.wantEffort)
 			}
+			if request.auth != tt.wantAuth {
+				t.Errorf("Authorization header = %q, want %q", request.auth, tt.wantAuth)
+			}
 		})
+	}
+}
+
+func TestPingMinerULegacyGatewayAuth(t *testing.T) {
+	allowLoopbackSSRF(t)
+
+	const key = "sk-gateway-key"
+	var gotAuth string
+	// A legacy MinerU server (no /v1/health) sitting behind an authenticating
+	// gateway: /docs answers 401 without the key, 200 with it.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/health":
+			http.NotFound(w, r)
+		case "/docs":
+			gotAuth = r.Header.Get("Authorization")
+			if gotAuth != "Bearer "+key {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	ok, msg := PingMinerU(server.URL, key)
+	if !ok {
+		t.Fatalf("PingMinerU with gateway key = false, msg = %q; want true", msg)
+	}
+	if gotAuth != "Bearer "+key {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer "+key)
+	}
+
+	// Without a key the legacy probe should still surface the gateway 401.
+	ok, _ = PingMinerU(server.URL, "")
+	if ok {
+		t.Errorf("PingMinerU without key = true; want false (gateway requires auth)")
 	}
 }
 

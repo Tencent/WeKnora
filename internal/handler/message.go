@@ -416,6 +416,34 @@ type SearchMessagesRequest struct {
 	SessionIDs []string `json:"session_ids"`
 }
 
+// ClearChatHistoryIndex godoc
+// @Summary      清空当前空间的历史消息索引
+// @Description  暂停消息索引，删除索引知识、分块和向量，保留原始会话和消息。失败后保持暂停，可重试。
+// @Tags         消息
+// @Produce      json
+// @Success      200  {object}  handler.DataResponse{data=types.ChatHistoryKBStats}
+// @Failure      403  {object}  errors.AppError  "需要空间管理权限"
+// @Failure      500  {object}  errors.AppError  "清理未完成，查看当前状态后可重试"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/chat-history-index/clear [post]
+func (h *MessageHandler) ClearChatHistoryIndex(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
+	defer cancel()
+	stats, err := h.MessageService.ClearChatHistoryIndex(ctx)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			_ = c.Error(errors.NewInternalServerError(
+				"Failed to clear chat history index; check its current state before retrying"))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
+}
+
 // GetChatHistoryKBStats godoc
 // @Summary      获取聊天历史知识库统计
 // @Description  获取聊天历史知识库的统计信息（已索引消息数、知识库大小等）

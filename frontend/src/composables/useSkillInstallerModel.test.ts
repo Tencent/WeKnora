@@ -12,6 +12,10 @@ const compiled = ts.transpileModule(
   readFileSync(new URL('./useSkillInstallerModel.ts', import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText
+const preferenceStorageCompiled = ts.transpileModule(
+  readFileSync(new URL('./preferenceStorage.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText
 
 function agent(config: CustomAgent['config'] = {}): CustomAgent {
   return { id: 'builtin-skill-installer', name: 'Installer', is_builtin: true, config }
@@ -21,18 +25,36 @@ function fixture(options: {
   load?: () => Promise<{ data?: CustomAgent | null }>
   save?: (data: UpdateAgentRequest) => Promise<{ data?: CustomAgent | null } | undefined>
   readStorage?: (key: string) => string | null
+  userId?: string
 } = {}) {
   const reads: string[] = []
   const writes: Array<{ id: string; data: UpdateAgentRequest }> = []
   const errors: string[] = []
+  const store = new Map<string, string>()
+  const localStorage = {
+    getItem: (key: string) => {
+      // The user record is always store-backed so userId seeding stays
+      // deterministic even when a test overrides reads for other keys.
+      if (key === 'weknora_user') return store.get(key) ?? null
+      const override = options.readStorage?.(key)
+      if (override !== undefined) return override
+      return store.get(key) ?? null
+    },
+    setItem: (key: string, value: string) => { store.set(key, value) },
+    removeItem: (key: string) => { store.delete(key) },
+  }
+  if (options.userId) store.set('weknora_user', JSON.stringify({ id: options.userId }))
   const exports: { useSkillInstallerModel?: typeof useSkillInstallerModel } = {}
+  const preferenceExports: Record<string, unknown> = {}
+  runInNewContext(preferenceStorageCompiled, { exports: preferenceExports, localStorage, require: () => { throw new Error('preferenceStorage must stay dependency-free') } })
   runInNewContext(compiled, {
     exports,
-    localStorage: { getItem: (key: string) => options.readStorage?.(key) ?? null },
+    localStorage,
     require(name: string) {
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { error: (message: string) => errors.push(message) } }
+      if (name === './preferenceStorage') return preferenceExports
       if (name === '@/api/agent') return {
         getAgentById: async (id: string) => {
           reads.push(id)
@@ -47,7 +69,7 @@ function fixture(options: {
     },
   })
   const create = exports.useSkillInstallerModel!
-  return { model: create(), create, reads, writes, errors }
+  return { model: create(), create, reads, writes, errors, store }
 }
 
 test('configured installer model takes precedence over the last chat model', async () => {
@@ -74,10 +96,29 @@ test('missing, empty and failed agent loads fall back to the last chat model wit
     const f = fixture({ load, readStorage: key => { keys.push(key); return 'last-chat' } })
     await f.model.loadInstallerModel()
     assert.equal(f.model.installerModelId.value, 'last-chat')
-    assert.deepEqual(keys, ['weknora_last_chat_model_id'])
+    // With no user record the read is namespaced to "anon" — never the
+    // un-scoped legacy key another account could inherit.
+    assert.deepEqual(keys, ['WeKnora_anon_last_chat_model'])
     assert.equal(f.writes.length, 0)
     assert.deepEqual(f.errors, [])
   }
+})
+
+test('the last chat model is scoped per user: another account does not inherit the pick', async () => {
+  const f = fixture({ userId: 'u1', load: async () => ({ data: null }) })
+  f.store.set('WeKnora_u1_last_chat_model', 'model-u1')
+  await f.model.loadInstallerModel()
+  assert.equal(f.model.installerModelId.value, 'model-u1')
+
+  // Same browser, a different account signs in (session expiry / crash
+  // recovery — no logout or tenant-switch handler ran).
+  f.store.set('weknora_user', JSON.stringify({ id: 'u2' }))
+  await f.model.loadInstallerModel()
+  assert.equal(f.model.installerModelId.value, '', 'u2 must not inherit u1’s remembered model')
+
+  f.store.set('WeKnora_u2_last_chat_model', 'model-u2')
+  await f.model.loadInstallerModel()
+  assert.equal(f.model.installerModelId.value, 'model-u2')
 })
 
 test('unavailable storage or missing preference leaves an empty selection', async () => {

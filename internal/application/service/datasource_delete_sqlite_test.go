@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -9,11 +11,82 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestProcessSyncRetriesMetadataLookupErrors(t *testing.T) {
+	for _, table := range []string{"data_sources", "sync_logs", "knowledge_bases"} {
+		t.Run(table, func(t *testing.T) {
+			fixture := newSQLiteDataSourceDeleteFixture(t)
+			lookupErr := errors.New("temporary metadata read failure")
+			kbService := &processSyncKBService{}
+			if table == "knowledge_bases" {
+				kbService.getErr = lookupErr
+			}
+			failLookup := true
+			query := fixture.db.Callback().Query().Before("gorm:query")
+			require.NoError(t, query.Register("fail_sync_lookup", func(tx *gorm.DB) {
+				if failLookup && tx.Statement.Table == table {
+					_ = tx.AddError(lookupErr)
+				}
+			}))
+			svc := &DataSourceService{dsRepo: fixture.dsRepo, syncLogRepo: fixture.syncLogRepo, kbService: kbService}
+			payload, err := json.Marshal(types.DataSourceSyncPayload{
+				DataSourceID: fixture.ds.ID,
+				TenantID:     fixture.ds.TenantID,
+				SyncLogID:    fixture.runningLog.ID,
+			})
+			require.NoError(t, err)
+			err = svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload))
+			assert.ErrorIs(t, err, lookupErr)
+			assert.NotErrorIs(t, err, asynq.SkipRetry)
+
+			failLookup = false
+			log, err := fixture.syncLogRepo.FindByID(context.Background(), fixture.runningLog.ID)
+			require.NoError(t, err)
+			assert.Equal(t, types.SyncLogStatusRunning, log.Status)
+			assert.Nil(t, log.FinishedAt)
+			assert.Empty(t, log.ErrorMessage)
+		})
+	}
+}
+
+func TestProcessSyncAcknowledgesMissingMetadata(t *testing.T) {
+	for _, missing := range []string{"data source", "sync log"} {
+		t.Run(missing, func(t *testing.T) {
+			fixture := newSQLiteDataSourceDeleteFixture(t)
+			ctx := context.Background()
+			logID := fixture.runningLog.ID
+			if missing == "data source" {
+				require.NoError(t, fixture.dsRepo.Delete(ctx, fixture.ds.ID))
+			} else {
+				logID = "missing-log"
+			}
+			payload, err := json.Marshal(types.DataSourceSyncPayload{
+				DataSourceID: fixture.ds.ID,
+				TenantID:     fixture.ds.TenantID,
+				SyncLogID:    logID,
+			})
+			require.NoError(t, err)
+			svc := &DataSourceService{dsRepo: fixture.dsRepo, syncLogRepo: fixture.syncLogRepo}
+			require.NoError(t, svc.ProcessSync(ctx, asynq.NewTask(types.TypeDataSourceSync, payload)))
+			log, err := fixture.syncLogRepo.FindByID(ctx, fixture.runningLog.ID)
+			require.NoError(t, err)
+			if missing == "data source" {
+				assert.Equal(t, types.SyncLogStatusCanceled, log.Status)
+				assert.Equal(t, "data source has been deleted", log.ErrorMessage)
+				assert.NotNil(t, log.FinishedAt)
+			} else {
+				assert.Equal(t, types.SyncLogStatusRunning, log.Status)
+				assert.Nil(t, log.FinishedAt)
+			}
+		})
+	}
+}
 
 type sqliteDataSourceDeleteFixture struct {
 	db          *gorm.DB

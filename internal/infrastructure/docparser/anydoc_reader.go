@@ -49,8 +49,8 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	if !ok {
 		return nil, fmt.Errorf("anydoc engine does not support file type %q", fileTypeOf(req))
 	}
-	if format == "docx" && r.extractImages && docxHasMetafiles(req.FileContent) {
-		return r.readDOCXMetafileFallback(ctx, req)
+	if r.extractImages && format == "docx" && officeHasVectorMedia(req.FileContent, "word/media/") {
+		return r.readVectorDOCX(ctx, req)
 	}
 	// Anydoc preserves vector bytes, but cannot rasterize EMF/WMF for the
 	// browser or VLM. MarkItDown's PPTX path already provides that conversion.
@@ -90,14 +90,18 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 }
 
 // Inspect only the ZIP directory: no media decompression or filesystem writes
-// are needed to decide which reader can preserve the presentation's images.
+// are needed to decide which reader can preserve the document's images.
 func pptxHasVectorMedia(data []byte) bool {
+	return officeHasVectorMedia(data, "ppt/media/")
+}
+
+func officeHasVectorMedia(data []byte, prefix string) bool {
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return false // Let the converter report malformed input normally.
 	}
 	for _, file := range archive.File {
-		if file.FileInfo().IsDir() || !strings.HasPrefix(file.Name, "ppt/media/") {
+		if file.FileInfo().IsDir() || !strings.HasPrefix(strings.ToLower(file.Name), prefix) {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(file.Name)) {
@@ -106,6 +110,36 @@ func pptxHasVectorMedia(data []byte) bool {
 		}
 	}
 	return false
+}
+
+// readVectorDOCX sends the original document to MarkItDown for rasterization.
+func (r *AnydocReader) readVectorDOCX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	if !r.canFallback() {
+		return nil, fmt.Errorf("anydoc conversion of %q with EMF/WMF images requires a connected docreader",
+			req.FileName)
+	}
+	logger.Infof(ctx, "[anydoc] falling back to markitdown for %q: docx_vector_media", req.FileName)
+	fallbackReq := *req
+	fallbackReq.ParserEngine = "markitdown"
+	fallbackReq.FileType = "docx"
+	result, err := r.fallback.Read(ctx, &fallbackReq)
+	if err != nil {
+		return nil, fmt.Errorf("anydoc DOCX vector-media fallback failed for %q: %w", req.FileName, err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("anydoc DOCX vector-media fallback returned no result for %q", req.FileName)
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("anydoc DOCX vector-media fallback failed for %q: %s", req.FileName, result.Error)
+	}
+	if result.Metadata == nil {
+		result.Metadata = map[string]string{}
+	}
+	if result.Metadata["parser"] == "" {
+		result.Metadata["parser"] = "markitdown"
+	}
+	result.Metadata["anydoc_fallback"] = "docx_vector_media"
+	return result, nil
 }
 
 func (r *AnydocReader) readVectorPPTX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
@@ -173,50 +207,6 @@ func (r *AnydocReader) readPDFFallback(
 		result.Metadata["image_source_type"] = "scanned_pdf"
 	}
 	return result, nil
-}
-
-func (r *AnydocReader) readDOCXMetafileFallback(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
-	if !r.canFallback() {
-		return nil, fmt.Errorf("anydoc cannot render EMF/WMF images in %q: docreader is required", req.FileName)
-	}
-	logger.Infof(ctx, "[anydoc] falling back to markitdown for %q: docx_metafile", req.FileName)
-	fallbackReq := *req
-	fallbackReq.ParserEngine = "markitdown"
-	fallbackReq.FileType = "docx"
-	result, err := r.fallback.Read(ctx, &fallbackReq)
-	if err != nil {
-		return nil, fmt.Errorf("anydoc DOCX metafile fallback failed for %q: %w", req.FileName, err)
-	}
-	if result == nil {
-		return nil, fmt.Errorf("anydoc DOCX metafile fallback returned no result for %q", req.FileName)
-	}
-	if result.Error != "" {
-		return nil, fmt.Errorf("anydoc DOCX metafile fallback failed for %q: %s", req.FileName, result.Error)
-	}
-	if result.Metadata == nil {
-		result.Metadata = map[string]string{}
-	}
-	if result.Metadata["parser"] == "" {
-		result.Metadata["parser"] = "markitdown"
-	}
-	result.Metadata["anydoc_fallback"] = "docx_metafile"
-	return result, nil
-}
-
-// Inspect only the ZIP directory, before anydoc can discard legacy image nodes.
-// Invalid archives are left to the converter's existing validation.
-func docxHasMetafiles(data []byte) bool {
-	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return false
-	}
-	for _, file := range archive.File {
-		name := strings.ToLower(file.Name)
-		if strings.HasPrefix(name, "word/media/") && (strings.HasSuffix(name, ".emf") || strings.HasSuffix(name, ".wmf")) {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *AnydocReader) canFallback() bool {

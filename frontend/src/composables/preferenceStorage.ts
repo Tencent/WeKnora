@@ -19,6 +19,7 @@ const PREFERENCE_SUFFIXES = [
   'font_sans',
   'font_mono',
   'font_size',
+  'last_chat_model',
 ] as const
 
 export function readUserId(): string {

@@ -15,7 +15,7 @@ import re
 import secrets
 import sys
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Iterator
 
 import urllib3
 import requests
@@ -36,6 +36,15 @@ try:
 except ValueError:
     logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
     WEKNORA_CHAT_TIMEOUT = 300
+
+# Timeout in seconds for the non-chat API requests (CRUD, search, uploads).
+# Without it requests waits forever, so a hung backend blocks the calling
+# tool indefinitely. Default 300s, matching the chat read timeout.
+try:
+    WEKNORA_API_TIMEOUT = int(os.getenv("WEKNORA_API_TIMEOUT", "300"))
+except ValueError:
+    logger.warning("WEKNORA_API_TIMEOUT is not a valid integer; falling back to 300s.")
+    WEKNORA_API_TIMEOUT = 300
 
 # Bound the data accumulated while waiting for an SSE event's blank line.
 MAX_SSE_EVENT_BYTES = 8 * 1024 * 1024
@@ -126,12 +135,35 @@ def _normalize_kb_entries(resp: object) -> list[Dict]:
     return out
 
 
+def _iter_sse_lines(response: requests.Response) -> Iterator[bytes]:
+    """Split SSE lines without treating a CRLF split across chunks as two breaks."""
+    pending = bytearray()
+    skip_lf = False
+    for chunk in response.iter_content(chunk_size=512):
+        if not chunk:
+            continue
+        if skip_lf and chunk.startswith(b"\n"):
+            chunk = chunk[1:]
+        # Emit bare CR immediately. If the next chunk starts with LF, it
+        # belongs to this same line ending.
+        skip_lf = chunk.endswith(b"\r")
+        for part in chunk.splitlines(keepends=True):
+            if part.endswith((b"\r", b"\n")):
+                pending.extend(part.rstrip(b"\r\n"))
+                yield bytes(pending)
+                pending.clear()
+            else:
+                pending.extend(part)
+    if pending:
+        yield bytes(pending)
+
+
 class WeKnoraClient:
     """Client for interacting with WeKnora API"""
 
     def __init__(self, base_url: str, api_key: str):
         """Initialize the WeKnora API client with base URL and authentication"""
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         # SSL verification: enabled by default. Set WEKNORA_VERIFY_SSL=false to disable
         # (e.g. for self-signed certs in dev environments — NOT recommended for production).
@@ -175,6 +207,9 @@ class WeKnoraClient:
             JSON response as dictionary
         """
         url = f"{self.base_url}{endpoint}"
+        # Bound the wait like the chat SSE path does; an explicit timeout
+        # passed by the caller still wins.
+        kwargs.setdefault("timeout", WEKNORA_API_TIMEOUT)
         try:
             # Execute HTTP request with the specified method
             response = self.session.request(method, url, **kwargs)
@@ -247,9 +282,8 @@ class WeKnoraClient:
         """Resolve an agent ID or name to its canonical ID.
 
         If *agent_id_or_name* is already a UUID it is returned unchanged.
-        Otherwise all agents are listed and the first one whose ``id``
-        matches exactly or whose ``name`` matches case-insensitively is
-        returned.
+        Otherwise an exact ``id`` match takes precedence over the first
+        case-insensitive ``name`` match.
         Raises ValueError when no match is found.
         """
         if self._UUID_RE.match(agent_id_or_name):
@@ -259,13 +293,16 @@ class WeKnoraClient:
         if isinstance(agents, dict):
             agents = agents.get("list", agents.get("items", []))
         needle = agent_id_or_name.lower()
+        name_match = None
         for agent in (agents or []):
             if not isinstance(agent, dict):
                 continue
             if agent.get("id") == agent_id_or_name:
                 return agent["id"]
-            if agent.get("name", "").lower() == needle:
-                return agent["id"]
+            if name_match is None and agent.get("name", "").lower() == needle:
+                name_match = agent["id"]
+        if name_match is not None:
+            return name_match
         raise ValueError(
             f"Agent {agent_id_or_name!r} not found. "
             "Use list_agents to see available agent IDs and names."
@@ -332,6 +369,7 @@ class WeKnoraClient:
                 files=files,
                 data=data,
                 verify=self.verify_ssl,
+                timeout=WEKNORA_API_TIMEOUT,
             )
             response.raise_for_status()
             return response.json()
@@ -456,7 +494,7 @@ class WeKnoraClient:
     # Session Management - Methods for managing chat sessions
     def create_session(
         self,
-        kb_id: str,
+        kb_id: str | None = None,
         max_rounds: int = 5,
         enable_rewrite: bool = True,
         fallback_response: str = "Sorry, I cannot answer this question.",
@@ -464,21 +502,20 @@ class WeKnoraClient:
         title: str = "",
         description: str = "",
     ) -> Dict:
-        """Create a new chat session with strategy configuration"""
-        strategy = {
-            "max_rounds": max_rounds,
-            "enable_rewrite": enable_rewrite,
-            "fallback_strategy": "FIXED_RESPONSE",
-            "fallback_response": fallback_response,
-            "embedding_top_k": 10,
-            "keyword_threshold": 0.5,
-            "vector_threshold": 0.7,
-            "summary_model_id": summary_model_id,
-        }
-        data = {
-            "knowledge_base_id": kb_id,
-            "session_strategy": strategy,
-        }
+        """Create a session, retaining the legacy payload when a KB is supplied."""
+        data: Dict[str, Any] = {}
+        if kb_id is not None:
+            data["knowledge_base_id"] = kb_id
+            data["session_strategy"] = {
+                "max_rounds": max_rounds,
+                "enable_rewrite": enable_rewrite,
+                "fallback_strategy": "FIXED_RESPONSE",
+                "fallback_response": fallback_response,
+                "embedding_top_k": 10,
+                "keyword_threshold": 0.5,
+                "vector_threshold": 0.7,
+                "summary_model_id": summary_model_id,
+            }
         if title:
             data["title"] = title
         if description:
@@ -509,6 +546,7 @@ class WeKnoraClient:
           data: {"response_type": "answer", "content": "..."}
           data: {"response_type": "references", "knowledge_references": [...]}
           data: {"response_type": "complete"}
+          data: {"response_type": "stop", "done": true}
         
         A blank line ends each event; multiple data lines are joined with newlines.
         We accumulate answer chunks and extract references, returning them as a dict.
@@ -532,9 +570,8 @@ class WeKnoraClient:
             with response:
                 response.raise_for_status()
                 first_line = True
-                for raw_line in response.iter_lines():
-                    if isinstance(raw_line, bytes):
-                        raw_line = raw_line.decode("utf-8")
+                for line in _iter_sse_lines(response):
+                    raw_line = line.decode("utf-8")
                     if first_line:
                         # SSE ignores exactly one BOM at the start of the stream.
                         raw_line = raw_line.removeprefix("\ufeff")
@@ -578,16 +615,17 @@ class WeKnoraClient:
                         raise RequestException(
                             f"Server error: {event_data.get('content', 'unknown error')}"
                         )
-                    elif response_type == "complete":
-                        break
-                else:
-                    raise RequestException("SSE stream ended before complete event")
+                    elif response_type in ("complete", "stop"):
+                        result = {
+                            "answer": "".join(answer_chunks),
+                            "references": references,
+                            "_debug_events": debug_events,
+                        }
+                        if response_type == "stop":
+                            result["stopped"] = True
+                        return result
 
-            return {
-                "answer": "".join(answer_chunks),
-                "references": references,
-                "_debug_events": debug_events,
-            }
+            raise RequestException("SSE stream ended before complete event")
         except RequestException as e:
             logger.error(f"SSE stream request failed ({url}): {e}")
             raise
@@ -920,7 +958,7 @@ def get_model(model_id: str) -> dict:
 
 @mcp.tool()
 def create_session(
-    kb_id: str,
+    kb_id: str | None = None,
     max_rounds: int = 5,
     enable_rewrite: bool = True,
     fallback_response: str = "Sorry, I cannot answer this question.",
@@ -928,12 +966,13 @@ def create_session(
     title: str = "",
     description: str = "",
 ) -> dict:
-    """Create a new chat session bound to a knowledge base with a retrieval strategy.
+    """Create a chat session. No knowledge base is required.
 
-    kb_id may be a UUID or a knowledge-base name (resolved automatically).
+    To retrieve from a knowledge base, pass knowledge_base_ids to chat or agent_chat.
+    Older servers can still receive kb_id (UUID or name) and the session strategy.
     """
     return client.create_session(
-        kb_id=client.resolve_kb_id(kb_id),
+        kb_id=client.resolve_kb_id(kb_id) if kb_id is not None else None,
         max_rounds=max_rounds,
         enable_rewrite=enable_rewrite,
         fallback_response=fallback_response,

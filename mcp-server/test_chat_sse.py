@@ -18,7 +18,11 @@ class ChatSSETest(unittest.TestCase):
 
     def consume(self, lines, *, agent=False):
         response = mock.MagicMock()
-        response.iter_lines.return_value = iter(lines)
+        wire = b"".join(
+            (line.encode("utf-8") if isinstance(line, str) else line) + b"\n"
+            for line in lines
+        )
+        response.iter_content.return_value = iter([wire])
         self.response = response
         with mock.patch.object(self.client.session, "post", return_value=response):
             if agent:
@@ -104,6 +108,23 @@ class ChatSSETest(unittest.TestCase):
         self.assertEqual(result["answer"], "done")
         self.response.__exit__.assert_called_once()
 
+    def test_stop_returns_partial_answer_in_both_chat_paths(self):
+        lines = [
+            b'data: {"response_type":"answer","content":"partial answer"}',
+            b"",
+            b'data: {"response_type":"stop","done":true}',
+            b"",
+            b'data: {"response_type":"error","content":"must not read"}',
+            b"",
+        ]
+        for agent in (False, True):
+            with self.subTest(agent=agent):
+                result = self.consume(lines, agent=agent)
+                self.assertEqual(result["answer"], "partial answer")
+                self.assertIs(result["stopped"], True)
+                self.assertEqual(result["session_id"], "session-1")
+                self.response.__exit__.assert_called_once()
+
     def test_eof_before_complete_fails_in_both_chat_paths(self):
         cases = [
             [],
@@ -165,8 +186,8 @@ class ChatSSETest(unittest.TestCase):
                 ), mock.patch.object(
                     response, "close", wraps=response.close
                 ) as close, mock.patch.object(
-                    response, "iter_lines"
-                ) as iter_lines:
+                    response, "iter_content"
+                ) as iter_content:
                     with self.assertRaises(requests.HTTPError) as raised:
                         if agent:
                             self.client.agent_chat("session-1", "question", "agent-1")
@@ -176,7 +197,7 @@ class ChatSSETest(unittest.TestCase):
                 close.assert_called_once_with()
                 response.raw.close.assert_called_once_with()
                 response.raw.release_conn.assert_called_once_with()
-                iter_lines.assert_not_called()
+                iter_content.assert_not_called()
 
     def test_bad_request_closes_streaming_response(self):
         self.check_http_error_closes_in_both_chat_paths(400)
@@ -246,7 +267,7 @@ class ChatSSETest(unittest.TestCase):
                 with mock.patch.object(
                     self.client.session, "post", return_value=response
                 ), mock.patch.object(
-                    response, "iter_lines", side_effect=error
+                    response, "iter_content", side_effect=error
                 ), mock.patch.object(
                     response, "close", wraps=response.close
                 ) as close:
@@ -407,6 +428,52 @@ class ChatSSETest(unittest.TestCase):
             paths,
             ["/api/v1/knowledge-chat/session-1", "/api/v1/agent-chat/session-1"],
         )
+
+    def test_bare_cr_complete_does_not_read_another_chunk(self):
+        def chunks():
+            yield b'data: {"response_type":"complete"}\r\r'
+            self.fail("completion waited for another chunk")
+
+        self.assertEqual(self.consume_wire(b"", chunks=chunks())["answer"], "")
+        self.wire_close.assert_called_once_with()
+
+    def test_real_http_split_crlf_keeps_multiline_answer(self):
+        chunks = (
+            b'data: {"response_type":"answer",\r',
+            '\ndata: "content":"你好"}\r\n\r'.encode(),
+            b'\ndata: {"response_type":"complete"}\r',
+            b'\n\r\n',
+        )
+
+        class SSEHandler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Transfer-Encoding", "chunked")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                for chunk in chunks:
+                    self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
+                self.wfile.write(b"0\r\n\r\n")
+
+            def log_message(self, format, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), SSEHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        client = srv.WeKnoraClient(f"http://127.0.0.1:{server.server_port}/api/v1", "test-key")
+        client.session.trust_env = False
+        self.addCleanup(client.session.close)
+        for chat, args in ((client.chat, ()), (client.agent_chat, ("agent-1",))):
+            with self.subTest(path=chat.__name__):
+                self.assertEqual(chat("session-1", "question", *args)["answer"], "你好")
 
 
 if __name__ == "__main__":

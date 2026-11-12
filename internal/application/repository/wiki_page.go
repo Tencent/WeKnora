@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -89,7 +90,7 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
 	}
-	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+	return "(in_links IS NULL OR in_links IN ('[]'::JSONB, 'null'::JSONB))"
 }
 
 // Create inserts a new wiki page record
@@ -1457,6 +1458,16 @@ func (r *wikiPageRepository) Search(
 	ctx context.Context, kbID string, query string, limit int,
 ) ([]*types.WikiPage, error) {
 	return r.SearchAcross(ctx, []string{kbID}, query, limit)
+}
+
+// SearchLiteral preserves literal text across PostgreSQL regex and SQLite LIKE.
+func (r *wikiPageRepository) SearchLiteral(
+	ctx context.Context, kbID, query string, limit int,
+) ([]*types.WikiPage, error) {
+	if r.wikiDialect() != "sqlite" {
+		query = regexp.QuoteMeta(query)
+	}
+	return r.Search(ctx, kbID, query, limit)
 }
 
 func wikiSearchPredicate(column, op string, withEscape bool) string {

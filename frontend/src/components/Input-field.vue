@@ -15,6 +15,7 @@ import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession, transcribeVoice } from '@/api/chat';
 import type { SteerQueueItem } from '@/api/chat/steer';
 import { chatSubmitShortcut } from '@/utils/chatSubmitShortcut';
+import { loadPreference, savePreference, safeRemoveItem, userKey } from '@/composables/preferenceStorage';
 import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
@@ -1111,33 +1112,24 @@ const enabledAgents = computed(() =>
   agents.value.filter(a => !disabledOwnAgentIds.value.includes(a.id))
 );
 
-// LAST_CHAT_MODEL_KEY scopes the per-user "last selected chat model"
-// to localStorage. The previous implementation wrote this back to the
-// tenant-level KV /tenants/kv/conversation-config — which (a) required
-// Admin+ to mutate, so a Viewer/Contributor switching models in the
-// chat input got a 403, and (b) silently overwrote the tenant default
-// for everyone else. localStorage is per-user-per-browser, which is
-// what "remember my last pick" actually wants.
-const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
+// The "last selected chat model" lives in localStorage so it survives
+// reloads without a KV round-trip. localStorage is per-browser, not
+// per-user, so the key is namespaced by the active user id via
+// preferenceStorage — otherwise two accounts sharing a browser inherit
+// each other's pick (logout and tenant-switch never cover session-expiry
+// or crash recovery). The un-namespaced legacy key from before this
+// scoping is removed on write so other readers cannot resurrect it.
+const LAST_CHAT_MODEL_LEGACY_KEY = 'weknora_last_chat_model_id'
 
-const readLastChatModelID = (): string => {
-  try {
-    return localStorage.getItem(LAST_CHAT_MODEL_KEY) || ''
-  } catch {
-    return ''
-  }
-}
+const readLastChatModelID = (): string => loadPreference('last_chat_model') || ''
 
 const writeLastChatModelID = (id: string) => {
-  try {
-    if (id) {
-      localStorage.setItem(LAST_CHAT_MODEL_KEY, id)
-    } else {
-      localStorage.removeItem(LAST_CHAT_MODEL_KEY)
-    }
-  } catch {
-    // localStorage may be disabled in incognito mode; ignore.
+  if (id) {
+    savePreference('last_chat_model', id)
+  } else {
+    safeRemoveItem(userKey('last_chat_model'))
   }
+  safeRemoveItem(LAST_CHAT_MODEL_LEGACY_KEY)
 }
 
 // Initial chat-model selection priority: per-user last pick

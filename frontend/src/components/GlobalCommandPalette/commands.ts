@@ -2,6 +2,7 @@ import type { Router } from 'vue-router'
 import type { Composer } from 'vue-i18n'
 import { openNewUserGuide } from '@/config/contextualGuides'
 import { useAssistantStore } from '@/stores/assistant'
+import { useSettingsStore } from '@/stores/settings'
 
 /**
  * A single command that can be searched and invoked from the palette.
@@ -55,6 +56,8 @@ export function buildCommands(ctx: CommandContext): CmdkCommand[] {
       keywords: ['new', 'chat', 'conversation', '新建', '对话', 'создать'],
       run: () => {
         close()
+        // 当前已在新对话页时重复点击命令不会触发路由守卫。
+        if (router.currentRoute.value.name === 'globalCreatChat') useSettingsStore().clearChatReferences()
         router.push('/platform/creatChat')
       },
     },

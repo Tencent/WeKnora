@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -251,19 +252,38 @@ func runDataAnalysis(
 }
 
 // parseDataAnalysisPlan decodes the model's structured answer, tolerating a
-// Markdown code fence around the JSON object.
+// Markdown code fence or surrounding prose around the JSON object.
 func parseDataAnalysisPlan(content string) (*dataAnalysisPlan, error) {
-	text := strings.TrimSpace(content)
-	if strings.HasPrefix(text, "```") {
-		text = strings.TrimPrefix(text, "```json")
-		text = strings.TrimPrefix(text, "```")
-		text = strings.TrimSuffix(strings.TrimSpace(text), "```")
+	// A plan always carries needs_analysis. Scan every balanced object and take
+	// the first one with that field, so a prose aside ("[table 1]") or a JSON
+	// example in the preamble is not mistaken for the answer.
+	rest := content
+	for {
+		index := strings.IndexByte(rest, '{')
+		if index < 0 {
+			break
+		}
+		if candidate := common.ExtractBalancedJSON(rest[index:]); candidate != "" {
+			var envelope map[string]json.RawMessage
+			if json.Unmarshal([]byte(candidate), &envelope) == nil {
+				if _, ok := envelope["needs_analysis"]; ok {
+					var plan dataAnalysisPlan
+					if err := json.Unmarshal([]byte(candidate), &plan); err == nil {
+						return &plan, nil
+					}
+				}
+			}
+		}
+		rest = rest[index+1:]
 	}
+
+	// No plan-shaped object: keep the shared parser's answer for an empty
+	// object (an explicit "no analysis") and report failure otherwise.
 	var plan dataAnalysisPlan
-	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &plan); err != nil {
-		return nil, err
+	if err := common.ParseLLMJsonResponse(content, &plan); err == nil {
+		return &plan, nil
 	}
-	return &plan, nil
+	return nil, fmt.Errorf("data analysis plan did not contain a JSON object")
 }
 
 func isDataFile(filename string) bool {

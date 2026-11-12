@@ -7,50 +7,41 @@ import i18n from '@/i18n';
 /**
  * 下载 SVG 为 PNG 图片（使用实际渲染尺寸）
  */
-const downloadSvgAsImage = async (svgElement: SVGElement, filename = 'mermaid-diagram.png'): Promise<void> => {
-  // 获取 SVG 实际渲染尺寸
-  const bbox = svgElement.getBoundingClientRect()
-  const w = Math.round(bbox.width)
-  const h = Math.round(bbox.height)
-
-  // 克隆 SVG
-  const svgClone = svgElement.cloneNode(true) as SVGElement
-  svgClone.setAttribute('width', String(w))
-  svgClone.setAttribute('height', String(h))
-
-  const svgData = new XMLSerializer().serializeToString(svgClone)
-  const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData)
-
+async function downloadDiagram(diagram: SVGElement | HTMLImageElement): Promise<void> {
+  let image: HTMLImageElement
+  if (diagram instanceof HTMLImageElement) {
+    // For standalone files the serialized SVG already has its intrinsic width and height.
+    image = diagram
+  } else {
+    const { width, height } = diagram.getBoundingClientRect()
+    const clone = diagram.cloneNode(true) as SVGElement
+    clone.setAttribute('width', String(Math.round(width)))
+    clone.setAttribute('height', String(Math.round(height)))
+    image = new Image()
+    image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone))
+  }
+  await image.decode()
+  const { naturalWidth: width, naturalHeight: height } = image
+  if (!width || !height || (diagram instanceof HTMLImageElement && width * height > 16_000_000)) {
+    throw new Error('Invalid PNG size')
+  }
   const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
+  canvas.width = width
+  canvas.height = height
   const ctx = canvas.getContext('2d')
-  if (!ctx) return
-
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, w, h)
-      ctx.drawImage(img, 0, 0, w, h)
-
-      canvas.toBlob((blob) => {
-        if (!blob) return
-        const link = document.createElement('a')
-        link.download = filename
-        link.href = URL.createObjectURL(blob)
-        link.click()
-        URL.revokeObjectURL(link.href)
-        resolve()
-      }, 'image/png')
-    }
-    img.src = svgDataUri
-  })
+  if (!ctx) throw new Error('Canvas unavailable')
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, width, height)
+  ctx.drawImage(image, 0, 0, width, height)
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(value => value ? resolve(value) : reject(new Error('PNG encoding failed')), 'image/png'))
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = 'mermaid-diagram.png'
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000)
 }
 
-/**
- * 显示按钮操作反馈提示
- */
 const showBtnFeedback = (btn: HTMLElement, success: boolean, text?: string): void => {
   const origColor = btn.style.color
   const origTitle = btn.title
@@ -65,7 +56,9 @@ const showBtnFeedback = (btn: HTMLElement, success: boolean, text?: string): voi
 /**
  * 打开 Mermaid 全屏查看器
  */
-export const openMermaidFullscreen = (svgHtml: string): void => {
+export const openMermaidFullscreen = (
+  diagram: string | HTMLImageElement,
+): (() => void) => {
   let scale = 1
   let translateX = 0
   let translateY = 0
@@ -78,11 +71,11 @@ export const openMermaidFullscreen = (svgHtml: string): void => {
 
   // 创建遮罩层
   const overlay = document.createElement('div')
-  overlay.style.cssText = 'position:fixed;inset:0;zIndex:9999;background:rgba(0,0,0,0.65);overflow:hidden;cursor:grab;'
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.65);overflow:hidden;cursor:grab;'
 
   // 创建工具栏
   const toolbar = document.createElement('div')
-  toolbar.style.cssText = 'position:fixed;top:20px;right:20px;display:flex;gap:6px;zIndex:10001;'
+  toolbar.style.cssText = 'position:fixed;top:20px;right:20px;display:flex;gap:6px;z-index:10001;'
 
   const createBtn = (title: string, icon: string): HTMLButtonElement => {
     const btn = document.createElement('button')
@@ -104,8 +97,9 @@ export const openMermaidFullscreen = (svgHtml: string): void => {
 
   // 创建内容区域
   const content = document.createElement('div')
-  content.style.cssText = 'position:absolute;left:50%;top:50%;background:#fff;border-radius:12px;padding:32px;box-shadow:0 8px 32px rgba(0,0,0,0.2);transformOrigin:0 0;'
-  content.innerHTML = svgHtml
+  content.style.cssText = 'position:absolute;left:50%;top:50%;background:#fff;border-radius:12px;padding:32px;box-shadow:0 8px 32px rgba(0,0,0,0.2);transform-origin:0 0;'
+  if (typeof diagram === 'string') content.innerHTML = diagram
+  else content.append(diagram.cloneNode())
   const svgEl = content.querySelector('svg')
   if (svgEl) {
     svgEl.style.display = 'block'
@@ -139,9 +133,12 @@ export const openMermaidFullscreen = (svgHtml: string): void => {
   // 下载 - 使用实际渲染尺寸
   downloadBtn.onclick = (e) => {
     e.stopPropagation()
-    if (!svgEl) return
-    downloadSvgAsImage(svgEl)
-    showBtnFeedback(downloadBtn, true, t('mermaid.downloading'))
+    const source = typeof diagram === 'string' ? svgEl : diagram
+    if (!source) return
+    void downloadDiagram(source).then(
+      () => showBtnFeedback(downloadBtn, true, t('mermaid.downloading')),
+      () => showBtnFeedback(downloadBtn, false),
+    )
   }
 
   // 关闭函数
@@ -204,13 +201,17 @@ export const openMermaidFullscreen = (svgHtml: string): void => {
   // 点击遮罩层关闭
   overlay.onclick = (e) => {
     const target = e.target as Element
-    if (target === overlay) {
+    const bounds = content.getBoundingClientRect()
+    const inside = e.clientX >= bounds.left && e.clientX <= bounds.right &&
+      e.clientY >= bounds.top && e.clientY <= bounds.bottom
+    if (target === overlay && !inside) {
       close()
     }
   }
 
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
+  return close
 }
 
 /**

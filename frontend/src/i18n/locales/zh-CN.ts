@@ -5866,11 +5866,14 @@ export default {
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
+        sourcePage: '第 {page} 页',
         attr: {
           builtin_caption: '描述',
           builtin_caption_description: '模型生成的图片描述',
           builtin_ocr_text: 'OCR 文本',
           builtin_ocr_text_description: 'OCR 从图片中提取的文字',
+          builtin_page: '文档页码',
+          builtin_page_description: '按来源文档分组，再按 PDF 页码排序；未知页码放在文档末尾。',
           builtin_created_at: '创建时间',
           builtin_created_at_description: '所属文档片段的创建时间',
           builtin_updated_at: '更新时间',
@@ -7278,9 +7281,16 @@ export default {
     statsIndexedMessages: '已索引消息',
     statsNotConfigured: '消息索引未配置',
     statsNotConfiguredDesc: '启用并选择 Embedding 模型后，对话消息将自动向量化索引',
+    clearIndexLabel: '清空消息索引',
+    clearIndexDescription: '暂停消息索引，并清空当前空间的消息检索索引。原始会话和消息会保留。',
+    clearIndexButton: '清空索引',
+    clearIndexConfirm: '确定清空当前空间所有成员的消息索引吗？消息索引将暂停，原始会话和消息不会删除，历史消息也不会自动重新索引。此操作不可撤销。',
     toasts: {
       saveSuccess: '消息管理配置已保存',
-      saveFailed: '保存配置失败: {message}'
+      saveFailed: '保存配置失败: {message}',
+      loadFailed: '无法加载消息索引配置或统计信息',
+      clearSuccess: '消息索引已清空，索引已暂停，可在准备好后重新启用。',
+      clearFailed: '索引清理未完成，请检查当前状态后重试：{message}'
     }
   },
   vectorStoreSettings: {

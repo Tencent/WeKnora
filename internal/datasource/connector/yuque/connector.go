@@ -315,7 +315,7 @@ func (c *Connector) walk(
 			// A blank body is not a document. Never fall through to the URL
 			// path for it: the datasource service would download the Yuque web
 			// page, which is an SPA shell, and index that as content.
-			if strings.TrimSpace(detail.Body) == "" {
+			if trimBodyForClassification(detail.Body) == "" {
 				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): empty document body", d.ID, d.Title)
 				out = append(out, skippedDocItem(docIDStr, bookIDStr, d.Slug, d.Title,
 					"empty document body"))
@@ -414,11 +414,15 @@ func skippedDocItem(docIDStr, bookIDStr, slug, title, reason string) types.Fetch
 	}
 }
 
+func trimBodyForClassification(body string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(body), "\ufeff"))
+}
+
 // isHTMLPageShell reports a body that is the Yuque web app's HTML shell rather
 // than Markdown. A Markdown document may legitimately contain HTML, but it does
 // not start with a document-type declaration or an <html> root element.
 func isHTMLPageShell(body string) bool {
-	trimmed := strings.TrimPrefix(strings.TrimSpace(body), "\ufeff")
+	trimmed := trimBodyForClassification(body)
 	// Only the opening declarations matter; do not lowercase a whole document.
 	if len(trimmed) > 512 {
 		trimmed = trimmed[:512]

@@ -109,7 +109,7 @@ type ImageInfo struct {
 	Caption string `json:"caption"`
 	// 图片OCR文本
 	OCRText string `json:"ocr_text"`
-	// Attrs 是描述轮给出的图片属性观察结果（取值见 ImageAttrs / ImageAttrRegistry）。
+	// Attrs 保存描述轮的图片观察结果（见 ImageAttrs / ImageAttrRegistry）和解析器 source.* 来源位置。
 	// 只记录模型确实回答了的属性：观察失败或取值非法的属性不会写入默认值，而是直接缺键，
 	// 因此读取方必须用 ImageAttrs.Observed 区分「未观察到」与「观察到了负值」。
 	// 该字段以 JSON 存储在 chunks.image_info 中，无需迁移；属性观察能力上线前写入的

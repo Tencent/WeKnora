@@ -29,6 +29,14 @@ func init() {
 				Usage:       GalleryUsage{InSearchField: true},
 			},
 			{
+				Name:  "page",
+				Type:  "number",
+				Label: "Document page",
+				Description: "Group by source document, then sort by PDF page; " +
+					"unknown pages come last within each document.",
+				Usage: GalleryUsage{InSortField: true},
+			},
+			{
 				Name:  "created_at",
 				Type:  "date",
 				Label: "Created at",

@@ -16,7 +16,7 @@ func TestAnydocReaderRoutesDOCXMetafilesToDocreader(t *testing.T) {
 	for _, tc := range []struct{ media, fileName, fileType string }{
 		{"word/media/diagram.emf", "diagram.docx", ""},
 		{"word/media/diagram.wmf", "diagram.docx", ".DOCX"},
-		{"word/media/DIAGRAM.EMF", "diagram.docm", "docm"},
+		{"WORD/MEDIA/DIAGRAM.EMF", "diagram.docm", "docm"},
 	} {
 		t.Run(tc.media, func(t *testing.T) {
 			want := &types.ReadResult{
@@ -40,7 +40,7 @@ func TestAnydocReaderRoutesDOCXMetafilesToDocreader(t *testing.T) {
 				fallback.got.ParserEngineOverrides["custom"] != "value" || req.ParserEngine != AnydocEngineName {
 				t.Fatalf("fallback lost the original document/options or mutated the request: %#v", fallback.got)
 			}
-			if got.Metadata["parser"] != "markitdown" || got.Metadata["anydoc_fallback"] != "docx_metafile" {
+			if got.Metadata["parser"] != "markitdown" || got.Metadata["anydoc_fallback"] != "docx_vector_media" {
 				t.Fatalf("fallback metadata = %#v", got.Metadata)
 			}
 		})

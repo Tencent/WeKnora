@@ -117,3 +117,57 @@ func TestProcessSyncPermanentRejectionsBeyondErrorSampleLimit(t *testing.T) {
 		assert.Equal(t, len(h.connector.items), ingestAckOffset(cursor))
 	}
 }
+
+// A missing VLM/ASR prerequisite is a permanent rejection: replaying the task
+// cannot succeed until the operator configures the model. The round must stay
+// partial (not failed), keep the cursor past the rejected item, and leave
+// nothing to re-fetch on the next incremental sync (Tencent/WeKnora#4712).
+func TestProcessSyncPrerequisiteRejectionsAdvanceCursor(t *testing.T) {
+	failures := []error{
+		werrors.NewImportPrerequisiteError("上传图片文件需要设置VLM模型"),
+		werrors.NewImportPrerequisiteError("上传音频文件需要设置ASR语音识别模型"),
+		fmt.Errorf("import rejected: %w", werrors.NewImportPrerequisiteError("上传图片文件需要设置VLM模型")),
+	}
+	for _, streaming := range []bool{false, true} {
+		for i, failure := range failures {
+			t.Run(fmt.Sprintf("stream=%v/case=%d", streaming, i), func(t *testing.T) {
+				h := newIngestAckHarness(t, streaming)
+				h.connector.items = h.connector.items[1:2]
+				h.sink.failure = failure
+				require.NoError(t, h.svc.ProcessSync(context.Background(), h.task))
+				log := h.syncLogRepo.logs[h.syncLogID]
+				assert.Equal(t, types.SyncLogStatusPartial, log.Status)
+				assert.Equal(t, 1, log.ItemsFailed)
+				assert.Contains(t, string(log.Result), "prerequisite_not_configured")
+				assert.Equal(t, types.DataSourceStatusActive, h.ds.Status)
+				assert.False(t, h.sink.stored["blocked"])
+				cursor, err := h.ds.ParseSyncCursor()
+				require.NoError(t, err)
+				assert.Equal(t, 1, ingestAckOffset(cursor))
+				require.NoError(t, h.svc.ProcessSync(context.Background(), h.task))
+				assert.Zero(t, h.syncLogRepo.logs[h.syncLogID].ItemsTotal)
+			})
+		}
+	}
+}
+
+// A prerequisite rejection in a mixed round must not abort the stream: items
+// before and after the rejected one still sync, and the final cursor covers
+// the whole listing.
+func TestProcessSyncPrerequisiteRejectionKeepsOtherItems(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		h := newIngestAckHarness(t, streaming)
+		h.sink.failure = werrors.NewImportPrerequisiteError("上传图片文件需要设置VLM模型")
+		require.NoError(t, h.svc.ProcessSync(context.Background(), h.task))
+		log := h.syncLogRepo.logs[h.syncLogID]
+		assert.Equal(t, types.SyncLogStatusPartial, log.Status)
+		assert.Equal(t, 2, log.ItemsCreated)
+		assert.Equal(t, 1, log.ItemsFailed)
+		assert.True(t, h.sink.stored["first"])
+		assert.False(t, h.sink.stored["blocked"])
+		assert.True(t, h.sink.stored["last"])
+		cursor, err := h.ds.ParseSyncCursor()
+		require.NoError(t, err)
+		assert.Equal(t, len(h.connector.items), ingestAckOffset(cursor))
+	}
+}
