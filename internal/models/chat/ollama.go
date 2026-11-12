@@ -45,6 +45,9 @@ func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 		}
 		if msg.Role == "tool" {
 			msgOllama.ToolName = msg.Name
+			if _, err := strconv.Atoi(msg.ToolCallID); err != nil {
+				msgOllama.ToolCallID = msg.ToolCallID
+			}
 		}
 		// The agent builds multimodal turns as MultiContent parts, the shape
 		// every remote protocol prefers, and only the older callers fill
@@ -285,7 +288,7 @@ func (c *OllamaChat) ChatStream(
 								Done:         false,
 								Data: map[string]interface{}{
 									"source":       "thinking_tool",
-									"tool_call_id": tooli2s(tc.Function.Index),
+									"tool_call_id": ollamaToolCallID(tc),
 								},
 							}
 						}
@@ -375,14 +378,22 @@ func (c *OllamaChat) toolCallFrom(toolCalls []ToolCall) []ollamaapi.ToolCall {
 		return nil
 	}
 	ollamaToolCalls := make([]ollamaapi.ToolCall, 0, len(toolCalls))
-	for _, tc := range toolCalls {
+	for i, tc := range toolCalls {
 		args := ollamaapi.NewToolCallFunctionArguments()
 		if tc.Function.Arguments != "" {
 			_ = args.UnmarshalJSON([]byte(tc.Function.Arguments))
 		}
+		// Numeric IDs came from older adapters that used the function index.
+		// Native Ollama IDs must instead travel in the wire ID field.
+		index, err := strconv.Atoi(tc.ID)
+		var id string
+		if err != nil {
+			index, id = i, tc.ID
+		}
 		ollamaToolCalls = append(ollamaToolCalls, ollamaapi.ToolCall{
+			ID: id,
 			Function: ollamaapi.ToolCallFunction{
-				Index:     tools2i(tc.ID),
+				Index:     index,
 				Name:      tc.Function.Name,
 				Arguments: args,
 			},
@@ -400,7 +411,7 @@ func (c *OllamaChat) toolCallTo(ollamaToolCalls []ollamaapi.ToolCall) []types.LL
 	for _, tc := range ollamaToolCalls {
 		argsBytes, _ := json.Marshal(tc.Function.Arguments)
 		toolCalls = append(toolCalls, types.LLMToolCall{
-			ID:   tooli2s(tc.Function.Index),
+			ID:   ollamaToolCallID(tc),
 			Type: "function",
 			Function: types.FunctionCall{
 				Name:      tc.Function.Name,
@@ -411,11 +422,9 @@ func (c *OllamaChat) toolCallTo(ollamaToolCalls []ollamaapi.ToolCall) []types.LL
 	return toolCalls
 }
 
-func tooli2s(i int) string {
-	return strconv.Itoa(i)
-}
-
-func tools2i(s string) int {
-	i, _ := strconv.Atoi(s)
-	return i
+func ollamaToolCallID(call ollamaapi.ToolCall) string {
+	if call.ID != "" {
+		return call.ID
+	}
+	return strconv.Itoa(call.Function.Index)
 }
