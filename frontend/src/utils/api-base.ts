@@ -22,21 +22,50 @@ export function getApiBaseUrl(): string {
  * so large-body requests go straight to http://127.0.0.1:<port> instead of
  * through the interceptor.
  */
-let desktopApiOriginCache: string | undefined;
+let desktopApiOrigin = '';
+let desktopApiOriginSettled = false;
+let desktopApiOriginPromise: Promise<string> | null = null;
 
-export function getDesktopApiOrigin(): string {
-  if (desktopApiOriginCache !== undefined) return desktopApiOriginCache;
-  try {
-    const url: unknown = (window as any).go?.main?.App?.GetAPIBaseURL?.();
-    if (typeof url === 'string' && url.startsWith('http')) {
-      // The binding returns .../api/v1; axios paths already include /api/v1.
-      // Cache only a success: the binding reports '' until the embedded
-      // listener has picked its port, and a cached miss would pin uploads to
-      // the interceptor for the whole session.
-      desktopApiOriginCache = url.replace(/\/api\/v1\/?$/, '');
+/**
+ * Resolves the loopback origin once (IPC round-trip) and caches it. The
+ * binding is async — treating its Promise like a string silently disabled
+ * the upload bypass (v1 of this fix). A '' answer (embedded listener not up
+ * yet) is NOT cached: the next call retries.
+ */
+function resolveDesktopApiOrigin(): Promise<string> {
+  if (desktopApiOriginSettled) return Promise.resolve(desktopApiOrigin);
+  if (!desktopApiOriginPromise) {
+    const fn = (window as any)?.go?.main?.App?.GetAPIBaseURL;
+    if (typeof fn !== 'function') {
+      // Not in the desktop shell (plain browser) — permanent.
+      desktopApiOrigin = '';
+      desktopApiOriginSettled = true;
+      return Promise.resolve('');
     }
-  } catch {
-    // Not in the desktop shell (window.go absent) — retry cost is negligible.
+    desktopApiOriginPromise = Promise.resolve(fn())
+      .then((url: unknown) => {
+        if (typeof url === 'string' && url.startsWith('http')) {
+          // The binding returns .../api/v1; axios paths already include /api/v1.
+          desktopApiOrigin = (url as string).replace(/\/api\/v1\/?$/, '');
+          desktopApiOriginSettled = true;
+        } else {
+          // Backend listener not up yet — let the next caller retry.
+          desktopApiOriginPromise = null;
+        }
+        return desktopApiOrigin;
+      })
+      .catch(() => {
+        desktopApiOriginPromise = null;
+        return '';
+      });
   }
-  return desktopApiOriginCache ?? '';
+  return desktopApiOriginPromise;
+}
+
+// Warm the resolution as soon as the bundle loads so the first upload (which
+// the queue starts within a second of the confirm dialog) has the origin ready.
+void resolveDesktopApiOrigin();
+
+export async function getDesktopApiOrigin(): Promise<string> {
+  return resolveDesktopApiOrigin();
 }

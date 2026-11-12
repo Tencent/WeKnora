@@ -241,7 +241,7 @@ export async function getDown(url: string): Promise<Blob> {
   return res
 }
 
-export function postUpload(
+export async function postUpload(
   url: string,
   data = {},
   onUploadProgress?: (progressEvent: any) => void,
@@ -250,7 +250,7 @@ export function postUpload(
   // Desktop shell: send uploads straight to the loopback listener. The Wails
   // asset-server interceptor turns multipart file bodies into empty parts
   // (see getDesktopApiOrigin for the full story); an absolute URL skips it.
-  const desktopOrigin = getDesktopApiOrigin();
+  const desktopOrigin = await getDesktopApiOrigin();
   const target = desktopOrigin ? desktopOrigin + url : url;
   return instance.post(target, data, {
     // Uploads are bounded by transfer time, not by the 30s default that suits
