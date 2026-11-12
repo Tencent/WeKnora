@@ -146,6 +146,7 @@ func TestAnydocReaderDoesNotRouteOtherInputsToMarkitdown(t *testing.T) {
 		{"svg", "pptx", "ppt/media/chart.svg", nil},
 		{"unrelated directory", "pptx", "custom/chart.emf", nil},
 		{"word raster", "docx", "word/media/chart.png", nil},
+		{"word with PPTX media path", "docx", "ppt/media/chart.emf", nil},
 		{"text only", "pptx", "ppt/media/chart.emf", map[string]string{"anydoc_extract_images": "false"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

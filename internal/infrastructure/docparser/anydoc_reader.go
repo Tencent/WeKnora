@@ -19,14 +19,14 @@ import (
 //
 // Embedded images are rendered in place from the document model. PDFs with no
 // text layer or a structure anydoc rejects are handed to the configured
-// fallback reader (typically the builtin docreader). PPTX files with EMF/WMF
-// media use the docreader's MarkItDown path to rasterize those embedded images.
+// fallback reader (typically the builtin docreader). DOCX and PPTX files with
+// EMF/WMF media use docreader's MarkItDown pipeline to rasterize the images.
 type AnydocReader struct {
 	// extractImages controls whether embedded images are parsed and placed
 	// in the markdown. Off halves parse time for text-only indexing.
 	extractImages bool
-	// fallback handles PDFs requiring OCR/structure recovery and PPTX vector
-	// media. Nil means the required conversion is reported as an error.
+	// fallback handles PDFs needing OCR/structure recovery and DOCX/PPTX
+	// vector media. Nil means the required conversion is reported as an error.
 	fallback interfaces.DocReader
 }
 
@@ -49,15 +49,15 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	if !ok {
 		return nil, fmt.Errorf("anydoc engine does not support file type %q", fileTypeOf(req))
 	}
+	if r.extractImages && format == "docx" && officeHasVectorMedia(req.FileContent, "word/media/") {
+		return r.readVectorDOCX(ctx, req)
+	}
 	// Anydoc preserves vector bytes, but cannot rasterize EMF/WMF for the
 	// browser or VLM. MarkItDown's PPTX path already provides that conversion.
 	// Check the actual extension: anydoc also maps PPTM to its PPTX parser,
 	// but docreader does not support PPTM.
 	if r.extractImages && fileTypeOf(req) == "pptx" && pptxHasVectorMedia(req.FileContent) {
 		return r.readVectorPPTX(ctx, req)
-	}
-	if r.extractImages && fileTypeOf(req) == "docx" && officeHasVectorMedia(req.FileContent, "word/media/") {
-		return r.readVectorDOCX(ctx, req)
 	}
 
 	converted, err := anydoc.Convert(req.FileContent, anydoc.Options{
@@ -90,7 +90,7 @@ func (r *AnydocReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 }
 
 // Inspect only the ZIP directory: no media decompression or filesystem writes
-// are needed to decide which reader can preserve the presentation's images.
+// are needed to decide which reader can preserve the document's images.
 func pptxHasVectorMedia(data []byte) bool {
 	return officeHasVectorMedia(data, "ppt/media/")
 }
@@ -101,7 +101,7 @@ func officeHasVectorMedia(data []byte, prefix string) bool {
 		return false // Let the converter report malformed input normally.
 	}
 	for _, file := range archive.File {
-		if file.FileInfo().IsDir() || !strings.HasPrefix(file.Name, prefix) {
+		if file.FileInfo().IsDir() || !strings.HasPrefix(strings.ToLower(file.Name), prefix) {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(file.Name)) {
@@ -112,21 +112,25 @@ func officeHasVectorMedia(data []byte, prefix string) bool {
 	return false
 }
 
-// readVectorDOCX preserves the original vector bytes through MarkItDown; it
-// does not promise that browsers or vision models can render those formats.
+// readVectorDOCX sends the original document to MarkItDown for rasterization.
 func (r *AnydocReader) readVectorDOCX(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	if !r.canFallback() {
 		return nil, fmt.Errorf("anydoc conversion of %q with EMF/WMF images requires a connected docreader",
 			req.FileName)
 	}
+	logger.Infof(ctx, "[anydoc] falling back to markitdown for %q: docx_vector_media", req.FileName)
 	fallbackReq := *req
 	fallbackReq.ParserEngine = "markitdown"
+	fallbackReq.FileType = "docx"
 	result, err := r.fallback.Read(ctx, &fallbackReq)
 	if err != nil {
 		return nil, fmt.Errorf("anydoc DOCX vector-media fallback failed for %q: %w", req.FileName, err)
 	}
 	if result == nil {
 		return nil, fmt.Errorf("anydoc DOCX vector-media fallback returned no result for %q", req.FileName)
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("anydoc DOCX vector-media fallback failed for %q: %s", req.FileName, result.Error)
 	}
 	if result.Metadata == nil {
 		result.Metadata = map[string]string{}
