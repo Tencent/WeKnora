@@ -1089,6 +1089,9 @@ func newEnsureCollectionTestRepository(t *testing.T, createErr error) (*qdrantRe
 		case *qdrant.CollectionExistsRequest:
 			reply.(*qdrant.CollectionExistsResponse).Result = &qdrant.CollectionExists{Exists: false}
 			return nil
+		case *qdrant.GetCollectionInfoRequest:
+			reply.(*qdrant.GetCollectionInfoResponse).Result = &qdrant.CollectionInfo{}
+			return nil
 		case *qdrant.CreateCollection:
 			return createErr
 		case *qdrant.CreateFieldIndexCollection:

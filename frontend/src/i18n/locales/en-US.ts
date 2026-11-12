@@ -2607,6 +2607,7 @@ export default {
     }
   },
   vectorStoreSettings: {
+    fields: { qdrant_keyword_search: 'Keyword Search' },
     title: 'Vector Database Engine',
     description: 'Register and manage vector database instances for knowledge base search.',
     basicSection: 'Basic',
