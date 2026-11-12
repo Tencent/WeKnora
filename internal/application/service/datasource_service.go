@@ -1507,6 +1507,18 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	for k, v := range item.Metadata {
 		metadata[k] = v
 	}
+	// Keep durable source links when downloaded content is ingested as a file.
+	// Credentials and temporary download grants must not become citation links.
+	for _, key := range []string{"source_url", "sourceUrl"} {
+		if sourceURL := types.ValidSourceURL(metadata[key]); sourceURL != "" {
+			metadata[key] = sourceURL
+		} else {
+			delete(metadata, key)
+		}
+	}
+	if sourceURL := types.ValidSourceURL(item.URL); sourceURL != "" {
+		metadata["source_url"] = sourceURL
+	}
 
 	// Existing items are replaced through a short DB transaction. Validation and
 	// file storage must succeed before the previous row or resources are retired.
