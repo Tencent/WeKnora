@@ -125,9 +125,6 @@
               {{ poolDescription(pool.name) }}
               <span class="rq-pool-meta">
                 {{ t('system.globalSettings.runtime.poolConfigured', { value: pool.concurrency }) }}
-                <t-tag v-if="pool.pending_restart" theme="warning" variant="light" size="small">
-                  {{ t('system.globalSettings.badgeRequiresRestart') }}
-                </t-tag>
                 <template v-if="pool.instances > 0">
                   · {{ t('system.globalSettings.runtime.poolInstances', { value: pool.instances }) }}
                   · {{ t('system.globalSettings.runtime.poolUtilization', { value: poolUtilization(pool) }) }}
@@ -135,6 +132,9 @@
                 · {{ t('system.globalSettings.runtime.queueCount', { value: pool.queue_count }) }}
               </span>
             </p>
+            <t-tag v-if="pool.pending_restart" class="rq-pool-restart" theme="warning" variant="light" size="small">
+              {{ t('system.globalSettings.badgeRequiresRestart') }}
+            </t-tag>
           </div>
         </div>
       </section>
@@ -1307,6 +1307,10 @@ onUnmounted(() => {
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
+}
+
+.rq-pool-restart {
+  align-self: flex-start;
 }
 
 .rq-pool-topline {

@@ -23,7 +23,7 @@ for (const pending of [true, false, null, undefined]) {
       }),
     })
     app.component('t-tag', {
-      setup: (_, { slots }) => () => h('span', { 'data-restart-badge': 'true' }, slots.default()),
+      setup: (_, { slots }) => () => h('div', { 'data-restart-badge': 'true' }, slots.default()),
     })
     const html = await renderToString(app)
     assert.equal(html.includes('data-restart-badge="true"'), pending === true)
