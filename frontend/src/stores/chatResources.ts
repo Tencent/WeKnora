@@ -160,7 +160,13 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   ): Promise<any[]> {
     // The dashboard needs card fields only. Keep its response out of the
     // full-resource snapshot used by chat and agent settings.
-    if (force) knowledgeBasesResource.invalidate()
+    if (force) {
+      const refreshFullList = knowledgeBasesResource.isLoaded() || knowledgeBasesResource.hasInFlightRequest()
+      knowledgeBasesResource.invalidate()
+      // The invalidated response cannot update existing selectors. Queue its
+      // replacement without fetching a full list on a cold dashboard.
+      if (refreshFullList) void knowledgeBasesResource.ensure(true).catch(() => {})
+    }
     const res: any = await listKnowledgeBases({ creator: params?.creator, view: 'list' })
     return res?.data && Array.isArray(res.data) ? res.data : []
   }

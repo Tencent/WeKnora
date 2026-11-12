@@ -10,7 +10,7 @@ import { change, fixture, flush } from '../test-utils/vueFixture.ts'
 function setup(t: TestContext) {
   const f = fixture(t)
   const api = {
-    listKnowledgeBases: t.mock.fn(async () => ({ data: [{ id: 'kb' }] })),
+    listKnowledgeBases: t.mock.fn(async (_params?: { view?: string }) => ({ data: [{ id: 'kb' }] })),
     getKnowledgeBaseById: t.mock.fn(async () => ({ data: { id: 'kb' } })),
     listAgents: t.mock.fn(async () => ({ data: [{ id: 'agent' }] })),
     listModels: t.mock.fn(async () => [{ id: 'model' }]),
@@ -64,6 +64,45 @@ for (const operation of ['knowledge_base.generate_profile', 'knowledge.delete', 
     assert.equal(api.getKnowledgeBaseById.mock.callCount(), 2)
   })
 }
+
+test('dashboard refresh replaces an in-flight full KB snapshot after an assistant change', async t => {
+  const { store, api, emit } = setup(t)
+  let fullReads = 0
+  let finishStaleRead!: (value: { data: { id: string }[] }) => void
+  api.listKnowledgeBases.mock.mockImplementation(async (params) => {
+    if (params?.view === 'list') return { data: [{ id: 'card' }] }
+    fullReads += 1
+    if (fullReads === 1) return { data: [{ id: 'before' }] }
+    if (fullReads === 2) {
+      return new Promise(resolve => { finishStaleRead = resolve })
+    }
+    return { data: [{ id: 'current' }] }
+  })
+
+  await store.ensureKnowledgeBases()
+  emit(change('knowledge_base.delete', { knowledge_base_id: ['before'] }))
+  t.mock.timers.tick(300)
+  assert.equal(fullReads, 2)
+
+  assert.deepEqual(await store.fetchKnowledgeBasesForList(undefined, true), [{ id: 'card' }])
+  finishStaleRead({ data: [{ id: 'stale' }] })
+  await flush()
+
+  assert.equal(fullReads, 3)
+  assert.deepEqual(store.rawKnowledgeBases, [{ id: 'current' }])
+})
+
+test('forcing a cold dashboard refresh only fetches the lightweight list', async t => {
+  const { store, api } = setup(t)
+  await store.fetchKnowledgeBasesForList(undefined, true)
+  await flush()
+  assert.equal(api.listKnowledgeBases.mock.callCount(), 1)
+  assert.deepEqual(api.listKnowledgeBases.mock.calls[0].arguments[0], {
+    creator: undefined,
+    view: 'list',
+  })
+  assert.equal(store.isLoaded('knowledgeBases'), false)
+})
 
 test('refreshes the model selectors on a model change', async t => {
   const { store, api, emit } = setup(t)
