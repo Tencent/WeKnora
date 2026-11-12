@@ -78,6 +78,7 @@ func (e *builtinEngine) FileTypes(_ bool) []string {
 		"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls",
 		"pptx", "ppt", "epub",
 		"html", "htm", "mhtml", "xmind",
+		"adoc", "asciidoc",
 		"jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp",
 		"mp3", "wav", "m4a", "flac", "ogg",
 	}
