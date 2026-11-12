@@ -203,6 +203,12 @@ type CustomAgentConfig struct {
 	MaxIterations int `yaml:"max_iterations" json:"max_iterations"`
 	// Timeout for a single LLM call in seconds (0 = use global default)
 	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout,omitempty"`
+	// Maximum completion tokens for one complete turn. Zero is uncapped.
+	MaxRunTokens int `yaml:"max_run_tokens" json:"max_run_tokens,omitempty"`
+	// Maximum wall-clock seconds for one complete turn. Zero is uncapped.
+	MaxRunSeconds int `yaml:"max_run_seconds" json:"max_run_seconds,omitempty"`
+	// Maximum mutating tool calls for one complete turn. Zero is uncapped.
+	MaxWriteActions int `yaml:"max_write_actions" json:"max_write_actions,omitempty"`
 	// Allowed tools (only for agent type)
 	AllowedTools []string `yaml:"allowed_tools" json:"allowed_tools" extensions:"x-agent,x-agent-detail"`
 	// MCP service selection mode: "all" = all enabled MCP services, "selected" = specific services, "none" = no MCP

@@ -18,6 +18,7 @@ type parentOwnerKey struct{}
 func (r *Runtime) AcquireParent(ctx context.Context, requested Scope) (*Binding, error) {
 	messageID := requested.ID
 	var row Record
+	var runBudgetTurnID string
 	err := r.Store.db.WithContext(ctx).
 		Where("tenant_id = ? AND user_id = ? AND session_id = ? AND status = ?",
 			requested.TenantID,
@@ -54,12 +55,16 @@ func (r *Runtime) AcquireParent(ctx context.Context, requested Scope) (*Binding,
 		g.ParentMessageID = messageID
 		g.ParentOwner = owner
 		g.ParentLease = time.Now().Add(r.Lease)
+		runBudgetTurnID = g.RunBudgetTurnID
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &Binding{Runtime: r, Scope: requested, ParentOwner: owner, Recovered: recovered}, nil
+	return &Binding{
+		Runtime: r, Scope: requested, ParentOwner: owner, Recovered: recovered,
+		RunBudgetTurnID: runBudgetTurnID,
+	}, nil
 }
 
 // Context adds the parent ownership fence to store operations.

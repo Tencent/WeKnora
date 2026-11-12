@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -73,6 +74,17 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			return fmt.Errorf("final answer synthesis cannot fit after compaction: estimated input %d tokens "+
 				"plus completion budget %d exceeds context window %d", inputTokens, budget, e.config.MaxContextTokens)
 		}
+		if e.runBudget != nil && e.runBudget.limit.MaxTotalTokens > 0 {
+			available := e.completionBudgetForRunTokens(inputTokens, budget)
+			if available < minTurnCompletionTokens {
+				return errTurnTokenBudgetInsufficient
+			}
+			budget = available
+		}
+		sharedModelKey, reserved := e.reserveSharedModel(ctx, inputTokens+budget)
+		if !reserved {
+			return errTurnTokenBudgetInsufficient
+		}
 		llmResult, err = e.streamLLMToEventBus(
 			ctx,
 			messages,
@@ -130,6 +142,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		overflow := compaction.IsOverflowError(err)
 		if llmResult != nil && llmResult.Usage != nil {
 			state.TurnUsage.Accumulate(*llmResult.Usage)
+			e.settleSharedModel(ctx, sharedModelKey, contextTokensFromUsage(*llmResult.Usage))
 			if err == nil && e.responseHitContextLimit(&types.ChatResponse{
 				FinishReason: llmResult.FinishReason, Usage: *llmResult.Usage,
 			}) {
@@ -137,6 +150,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 				err = fmt.Errorf("final answer synthesis reached the context window: finish=%s prompt=%d completion=%d",
 					llmResult.FinishReason, llmResult.Usage.PromptTokens, llmResult.Usage.CompletionTokens)
 			}
+		} else {
+			e.settleSharedModel(ctx, sharedModelKey, inputTokens+budget)
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -271,6 +286,75 @@ func (e *AgentEngine) handleMaxIterations(
 	return nil
 }
 
+// finishBudgetStop ends a RunContract-stopped turn without spending another
+// model call. The contract exists to cap total work, so synthesizing with the
+// model after the cap would reintroduce the exact spend it just stopped.
+// Existing tool evidence remains in AgentSteps and the notice is emitted as a
+// complete answer so clients never receive a dangling stream.
+func (e *AgentEngine) finishBudgetStop(ctx context.Context, state *types.AgentState, sessionID string) error {
+	if state == nil {
+		return nil
+	}
+	if state.Budget == nil {
+		state.Budget = ptrBudgetUsage(e.budgetSnapshot(state.TurnUsage.TotalTokens))
+	}
+	if state.Budget.StopReason == "" {
+		state.Budget.StopReason = RunStopTokenBudget
+	}
+	notice := budgetHardStopNotice(state.Budget.StopReason, *state.Budget)
+	logger.Warnf(ctx, "[Agent] %s", notice)
+	common.PipelineWarn(ctx, "Agent", "run_budget_stop", map[string]interface{}{
+		"reason":      string(state.Budget.StopReason),
+		"tokens_used": state.Budget.Used.TotalTokens,
+		"time_used":   state.Budget.Used.WallTimeSec,
+		"writes_used": state.Budget.Used.WriteActions,
+	})
+	state.FinalAnswer = notice
+	e.emitBudgetStopAnswer(ctx, sessionID, notice)
+	state.IsComplete = true
+	return nil
+}
+
+// emitBudgetStopAnswer publishes the reason as one complete answer. The UI
+// must never be left with a Done marker for content it never received.
+func (e *AgentEngine) emitBudgetStopAnswer(ctx context.Context, sessionID, notice string) {
+	answerID := generateEventID("answer")
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{Content: notice},
+	})
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
+		Data: event.AgentFinalAnswerData{Done: true},
+	})
+}
+
+// finishPausedBudget finalizes a run whose owner chose finish or cancel after a
+// budget pause. It never calls the model or a tool. finish keeps the evidence
+// already collected and writes an explicit accounting notice; cancel records
+// the canceled decision and completes without claiming the task succeeded.
+func (e *AgentEngine) finishPausedBudget(
+	ctx context.Context, state *types.AgentState, sessionID, _ string, action string,
+) (*types.AgentState, error) {
+	if state == nil {
+		return nil, errors.New("finish paused budget: nil state")
+	}
+	var notice string
+	if action == "cancel" {
+		notice = "The task was canceled at your request after it paused at its run budget."
+	} else {
+		notice = budgetHardStopNotice(state.Budget.StopReason, *state.Budget) +
+			"\n\nYou chose to finish from the evidence collected so far. " +
+			"Any work not completed is listed in the steps above."
+	}
+	state.FinalAnswer = notice
+	state.IsComplete = true
+	e.emitBudgetStopAnswer(ctx, sessionID, notice)
+	// The caller owns the exactly-once EventAgentComplete emission. Emitting
+	// here as well produced duplicate persistence on the executeLoop path.
+	return state, nil
+}
+
 // emitCompletionEvent emits the EventAgentComplete event with execution summary.
 func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
@@ -302,6 +386,7 @@ func (e *AgentEngine) emitCompletionEvent(
 		KnowledgeRefs:   knowledgeRefsInterface,
 		AgentSteps:      steps,
 		Usage:           turnUsage(state),
+		Budget:          e.completionBudgetUsage(state),
 		TotalSteps:      len(state.RoundSteps),
 		TotalDurationMs: time.Since(startTime).Milliseconds(),
 		MessageID:       messageID, // Include message ID for proper message update
@@ -316,6 +401,9 @@ func (e *AgentEngine) emitCompletionEvent(
 	if state.Suspended != nil {
 		data.Suspended = state.Suspended
 	}
+	if state.Budget != nil {
+		data.StopReason = string(state.Budget.StopReason)
+	}
 	e.eventBus.Emit(ctx, event.Event{
 		ID:        generateEventID("complete"),
 		Type:      event.EventAgentComplete,
@@ -324,6 +412,29 @@ func (e *AgentEngine) emitCompletionEvent(
 	})
 
 	logger.Infof(ctx, "Agent execution completed in %d rounds", state.CurrentRound)
+}
+
+// completionBudgetUsage prefers the durable shared account so a parent and
+// child report the same cumulative parent-turn usage. If the account cannot be
+// read, the local ledger remains a safe fallback.
+func (e *AgentEngine) completionBudgetUsage(state *types.AgentState) *types.RunBudgetUsage {
+	if state == nil {
+		return nil
+	}
+	if e != nil && e.budgetSink != nil && e.budgetTurnID != "" {
+		if usage, err := e.budgetSink.UsageBudget(context.Background(), e.budgetTurnID); err == nil {
+			if state.Budget != nil {
+				usage.StopReason = state.Budget.StopReason
+				usage.Action = state.Budget.Action
+			}
+			return &usage
+		}
+	}
+	if state.Budget == nil {
+		return nil
+	}
+	budget := *state.Budget
+	return &budget
 }
 
 // turnUsage returns the turn's aggregated LLM usage, or nil when no round

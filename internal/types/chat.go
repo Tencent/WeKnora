@@ -165,6 +165,31 @@ func (u *TokenUsage) Scan(value interface{}) error {
 	return json.Unmarshal(b, u)
 }
 
+// Value persists a RunBudgetUsage as jsonb; nil writes SQL NULL.
+func (u *RunBudgetUsage) Value() (driver.Value, error) {
+	if u == nil {
+		return nil, nil
+	}
+	return json.Marshal(u)
+}
+
+// Scan restores a jsonb run-budget column; NULL leaves the receiver unchanged.
+func (u *RunBudgetUsage) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil
+	}
+	return json.Unmarshal(b, u)
+}
+
 // LLMToolCall represents a function/tool call from the LLM
 type LLMToolCall struct {
 	ID               string           `json:"id"`
