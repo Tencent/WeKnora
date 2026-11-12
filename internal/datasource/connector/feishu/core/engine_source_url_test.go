@@ -22,6 +22,7 @@ func (failedSourceOps) LogTag() string         { return "test" }
 func (failedSourceOps) Fetch(context.Context, *Client, string, string) ([]*types.FetchedItem, error) {
 	return nil, errors.New("download failed")
 }
+
 func (failedSourceOps) EncodeCursor(times map[string]map[string]string, _ time.Time) *types.SyncCursor {
 	return &types.SyncCursor{ConnectorCursor: map[string]interface{}{"times": times}}
 }
@@ -41,14 +42,23 @@ func TestFailedFetchPreservesOptionalSourceURL(t *testing.T) {
 				ops = linkedFailedSourceOps{url: url}
 			}
 			handler := &CollectHandler{}
-			cursor, err := FetchStreamEngine(context.Background(), nil, &types.DataSourceConfig{ResourceIDs: []string{"space"}}, nil, handler, ops)
+			cursor, err := FetchStreamEngine(
+				context.Background(),
+				nil,
+				&types.DataSourceConfig{ResourceIDs: []string{"space"}},
+				nil,
+				handler,
+				ops,
+			)
 			require.NoError(t, err)
 			require.Len(t, handler.items, 1)
 			require.Equal(t, url, handler.items[0].URL)
 			require.Equal(t, "document", handler.items[0].ExternalID)
 			require.Equal(t, "space", handler.items[0].SourceResourceID)
 			require.NotEmpty(t, handler.items[0].Metadata)
-			require.Empty(t, cursor.ConnectorCursor["times"].(map[string]map[string]string)["space"], "failed fetch must remain retryable")
+			require.Empty(t,
+				cursor.ConnectorCursor["times"].(map[string]map[string]string)["space"],
+				"failed fetch must remain retryable")
 		})
 	}
 }

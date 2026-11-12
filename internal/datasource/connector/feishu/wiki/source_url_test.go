@@ -1,9 +1,10 @@
 package wiki
 
 import (
+	"testing"
+
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestWikiNodeURLUsesConnectorRegion(t *testing.T) {
