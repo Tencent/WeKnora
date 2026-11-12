@@ -50,12 +50,21 @@ func TestKnowledgeDetailConfluenceAttachmentBaseURL(t *testing.T) {
 		wantLookup                   bool
 		forbidden                    bool
 	}{
-		{name: "first site", channel: types.ChannelConfluence, sourceID: "first", url: "https://first.example/confluence", wantLookup: true},
-		{name: "shared document at second site", channel: types.ChannelConfluence, sourceID: "second", url: "https://team.atlassian.net/wiki", wantLookup: true},
+		{
+			name: "first site", channel: types.ChannelConfluence,
+			sourceID: "first", url: "https://first.example/confluence", wantLookup: true,
+		},
+		{
+			name: "shared document at second site", channel: types.ChannelConfluence,
+			sourceID: "second", url: "https://team.atlassian.net/wiki", wantLookup: true,
+		},
 		{name: "uploaded file", channel: types.ChannelWeb, sourceID: "first"},
 		{name: "missing provenance", channel: types.ChannelConfluence},
 		{name: "lookup failed", channel: types.ChannelConfluence, sourceID: "missing", wantLookup: true},
-		{name: "source in another knowledge base", channel: types.ChannelConfluence, sourceID: "unrelated", wantLookup: true},
+		{
+			name: "source in another knowledge base", channel: types.ChannelConfluence,
+			sourceID: "unrelated", wantLookup: true,
+		},
 		{name: "URL includes credentials", channel: types.ChannelConfluence, sourceID: "userinfo", wantLookup: true},
 		{name: "document access denied", channel: types.ChannelConfluence, sourceID: "second", forbidden: true},
 	} {
@@ -66,14 +75,24 @@ func TestKnowledgeDetailConfluenceAttachmentBaseURL(t *testing.T) {
 				ID: "doc", TenantID: 8, KnowledgeBaseID: "kb", Channel: tc.channel, Metadata: types.JSON(metadata),
 			}
 			sources := &confluenceDataSourceStub{sources: map[string]*types.DataSource{
-				"first": {TenantID: 8, KnowledgeBaseID: "kb", Type: types.ConnectorTypeConfluence,
-					Config: types.JSON(`{"settings":{"base_url":"https://first.example/confluence/"}}`)},
-				"second": {TenantID: 8, KnowledgeBaseID: "kb", Type: types.ConnectorTypeConfluence,
-					Config: types.JSON(`{"credentials":{"edition":"cloud","base_url":"team.atlassian.net","api_token":"private-token"}}`)},
-				"unrelated": {TenantID: 8, KnowledgeBaseID: "different-kb", Type: types.ConnectorTypeConfluence,
-					Config: types.JSON(`{"settings":{"base_url":"https://unrelated.example"}}`)},
-				"userinfo": {TenantID: 8, KnowledgeBaseID: "kb", Type: types.ConnectorTypeConfluence,
-					Config: types.JSON(`{"settings":{"base_url":"https://user:password@wiki.example"}}`)},
+				"first": {
+					TenantID: 8, KnowledgeBaseID: "kb", Type: types.ConnectorTypeConfluence,
+					Config: types.JSON(`{"settings":{"base_url":"https://first.example/confluence/"}}`),
+				},
+				"second": {
+					TenantID: 8, KnowledgeBaseID: "kb", Type: types.ConnectorTypeConfluence,
+					Config: types.JSON(`{"credentials":{
+						"edition":"cloud","base_url":"team.atlassian.net","api_token":"private-token"
+					}}`),
+				},
+				"unrelated": {
+					TenantID: 8, KnowledgeBaseID: "different-kb", Type: types.ConnectorTypeConfluence,
+					Config: types.JSON(`{"settings":{"base_url":"https://unrelated.example"}}`),
+				},
+				"userinfo": {
+					TenantID: 8, KnowledgeBaseID: "kb", Type: types.ConnectorTypeConfluence,
+					Config: types.JSON(`{"settings":{"base_url":"https://user:password@wiki.example"}}`),
+				},
 			}}
 			h := &KnowledgeHandler{kgService: confluenceKnowledgeStub{knowledge: doc}, dataSourceRepo: sources}
 			if !tc.forbidden {

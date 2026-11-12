@@ -86,7 +86,8 @@ func AttachmentBaseURL(ds *types.DataSourceConfig) string {
 	}
 	parsed, err := url.Parse(base)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
-		parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		parsed.Hostname() == "" || parsed.User != nil ||
+		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
 		return ""
 	}
 	return base
