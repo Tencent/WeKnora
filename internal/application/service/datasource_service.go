@@ -695,7 +695,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 
@@ -711,7 +711,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 	// Streaming path: connectors that support it interleave fetch→ingest→
@@ -768,7 +768,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return fetchErr
 	}
 
@@ -791,7 +791,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
