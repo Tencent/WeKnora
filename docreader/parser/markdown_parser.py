@@ -68,6 +68,37 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
     return "\n".join(out)
 
 
+def _inline_code_spans(content: str) -> list[tuple[int, int]]:
+    """Find paired backtick runs without rescanning unmatched suffixes."""
+    tokens = list(re.finditer(r"`+|\n[ \t\r]*\n", content))
+    following: dict[int, int] = {}
+    closers: dict[int, int] = {}
+    for i in range(len(tokens) - 1, -1, -1):
+        token = tokens[i]
+        if token[0].startswith("\n"):
+            following.clear()  # Inline code cannot cross a blank paragraph.
+            continue
+        start = token.start()
+        while start > 0 and content[start - 1] == "\\":
+            start -= 1
+        # Outside code, an odd backslash run escapes the first backtick.
+        length = len(token[0]) - (token.start() - start) % 2
+        if length in following:
+            closers[i] = following[length]
+        following[len(token[0])] = i
+
+    spans: list[tuple[int, int]] = []
+    i = 0
+    while i < len(tokens):
+        closing = closers.get(i)
+        if closing is None:
+            i += 1
+        else:
+            spans.append((tokens[i].start(), tokens[closing].end()))
+            i = closing + 1
+    return spans
+
+
 class MarkdownTableUtil:
     """Utility class for formatting Markdown tables.
 
@@ -380,7 +411,7 @@ class MarkdownImageUtil:
         path_prefix: Optional[str] = None,
         replace: bool = True,
     ) -> Tuple[str, Dict[str, bytes]]:
-        """Extract and decode base64 embedded images outside fenced code.
+        """Extract and decode base64 images outside fenced and inline code.
 
         This method finds all base64-encoded images in the Markdown content,
         decodes them to binary format, generates unique filenames, and
@@ -433,9 +464,21 @@ class MarkdownImageUtil:
             suffix = f" {image_title}" if image_title else ""
             return f"![{title}]({image_path}{suffix})"
 
-        text = _transform_outside_fences(
-            content, lambda prose: self.b64_pattern.sub(repl, prose)
-        )
+        def extract_prose(prose: str) -> str:
+            spans = iter(_inline_code_spans(prose))
+            span = next(spans, None)
+
+            def replace_image(match: Match[str]) -> str:
+                nonlocal span
+                while span is not None and span[1] <= match.start():
+                    span = next(spans, None)
+                if span is not None and span[0] <= match.start() < span[1]:
+                    return match.group(0)
+                return repl(match)
+
+            return self.b64_pattern.sub(replace_image, prose)
+
+        text = _transform_outside_fences(content, extract_prose)
         logger.debug(f"Extracted {len(images)} base64 images from markdown")
         return text, images
 
