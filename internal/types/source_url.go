@@ -14,7 +14,11 @@ func ValidSourceURL(raw string) string {
 		return ""
 	}
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || u.Opaque != "" {
+	if err != nil ||
+		(u.Scheme != "https" && u.Scheme != "http") ||
+		u.Hostname() == "" ||
+		u.User != nil ||
+		u.Opaque != "" {
 		return ""
 	}
 	query, err := url.ParseQuery(u.RawQuery)
@@ -28,15 +32,17 @@ func ValidSourceURL(raw string) string {
 		}
 		switch key {
 		case "token", "accesstoken", "refreshtoken", "idtoken", "authtoken", "downloadtoken", "downloadticket",
-			"authorization", "auth", "authkey", "apikey", "clientsecret", "secret", "password", "credential", "signature", "sig", "sign", "qsignature", "hmac",
-			"awsaccesskeyid", "ossaccesskeyid", "accesskeyid", "securitytoken", "xosssecuritytoken", "xcossecuritytoken",
+			"authorization", "auth", "authkey", "apikey", "clientsecret", "secret", "password", "credential",
+			"signature", "sig", "sign", "qsignature", "hmac", "awsaccesskeyid", "ossaccesskeyid", "accesskeyid",
+			"securitytoken", "xosssecuritytoken", "xcossecuritytoken",
 			"xbcesignature", "xsignature", "policy", "keypairid", "expires", "expiry", "expiration":
 			return ""
 		}
 	}
 	path := strings.ToLower(u.Path)
 	if strings.HasPrefix(path, "/api/v1/files/") || strings.HasPrefix(path, "/api/v1/resources/") ||
-		strings.HasPrefix(path, "/r/") || (strings.HasPrefix(path, "/open-apis/") && strings.Contains(path, "/download")) {
+		strings.HasPrefix(path, "/r/") ||
+		(strings.HasPrefix(path, "/open-apis/") && strings.Contains(path, "/download")) {
 		return ""
 	}
 	return raw

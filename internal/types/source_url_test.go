@@ -26,7 +26,15 @@ func TestValidSourceURL(t *testing.T) {
 		t.Run(raw, func(t *testing.T) { require.Empty(t, ValidSourceURL(raw)) })
 	}
 	for _, key := range []string{
-		"X-Amz-Signature", "X-Goog-Credential", "Signature", "sIg", "sign", "q-signature", "token", "access_token", "download_token",
+		"X-Amz-Signature",
+		"X-Goog-Credential",
+		"Signature",
+		"sIg",
+		"sign",
+		"q-signature",
+		"token",
+		"access_token",
+		"download_token",
 		"client_secret", "auth_key", "Authorization", "AWSAccessKeyId", "OSSAccessKeyId", "x-oss-security-token",
 		"x-cos-security-token", "Policy", "Key-Pair-Id", "Expires",
 	} {
