@@ -10,11 +10,16 @@ func tokenRuneBudget(cfg SplitterConfig) int {
 	if cfg.TokenLimit <= 0 {
 		return 0
 	}
-	lang := LangMixed
+	return CharsForTokenLimit(cfg.TokenLimit, TokenBudgetLanguage(cfg))
+}
+
+// TokenBudgetLanguage returns the language used to estimate the configured
+// token budget. A document's detected language does not override the config.
+func TokenBudgetLanguage(cfg SplitterConfig) string {
 	if len(cfg.Languages) > 0 {
-		lang = cfg.Languages[0]
+		return cfg.Languages[0]
 	}
-	return CharsForTokenLimit(cfg.TokenLimit, lang)
+	return LangMixed
 }
 
 // splitOversizeUnits hard-splits source-backed units above limit runes. It is
