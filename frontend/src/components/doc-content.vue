@@ -850,6 +850,14 @@ watch(() => props.visible, (visible) => {
   }
 }, { flush: 'post' });
 
+// Confluence 站点地址异步就绪后，重新渲染正文（链接前缀已变化）。
+watch(() => props.details?.confluence_base_url, () => {
+  if (!props.visible) return;
+  if (viewMode.value === 'chunks' || viewMode.value === 'merged') {
+    runMarkdownPostRenderPipeline();
+  }
+}, { flush: 'post' });
+
 watch(summaryStatusRefreshing, (refreshing) => {
   if (refreshing) {
     cancelSummaryEdit();
@@ -950,7 +958,7 @@ const processMarkdown = (markdownText) => {
   html = html.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
 
   // 最终安全清理
-  let result = sanitizeHTML(html);
+  let result = sanitizeHTML(html, props.details?.confluence_base_url);
 
   return result;
 };
@@ -2152,7 +2160,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           </div>
 
           <div v-else-if="viewMode === 'preview'">
-            <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
+            <DocumentPreview :knowledgeId="details.id" :confluence-base-url="details.confluence_base_url" :fileType="details.file_type" :fileName="details.title"
               :active="viewMode === 'preview'" />
           </div>
         </section>

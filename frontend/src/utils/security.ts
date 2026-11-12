@@ -5,6 +5,7 @@
 import DOMPurify from 'dompurify';
 import { applyProtectedFile, responseFileName, RESOURCE_PREVIEW_EVENT, type LoadedProtectedFile } from './protectedResource.ts';
 import type { Config, NodeHook } from 'dompurify';
+import { rewriteConfluenceAttachmentAnchor } from './confluenceAttachmentLinks.ts';
 import {
   domPurifySecurityHooks,
   domPurifySecurityOptions,
@@ -41,13 +42,21 @@ function sanitizeWithSecurityHooks(
   html: string,
   config: Config,
   hooks: SecurityHooks,
+  confluenceBaseUrl?: string,
 ): string {
+  // Rewrite anchor attributes before DOMPurify applies its URI policy.
+  const afterSanitizeElements: NodeHook = confluenceBaseUrl
+    ? function (node, event, activeConfig) {
+        rewriteConfluenceAttachmentAnchor(node, confluenceBaseUrl);
+        hooks.afterSanitizeElements.call(this, node, event, activeConfig);
+      }
+    : hooks.afterSanitizeElements;
   DOMPurify.addHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
-  DOMPurify.addHook('afterSanitizeElements', hooks.afterSanitizeElements);
+  DOMPurify.addHook('afterSanitizeElements', afterSanitizeElements);
   try {
     return DOMPurify.sanitize(html, config);
   } finally {
-    DOMPurify.removeHook('afterSanitizeElements', hooks.afterSanitizeElements);
+    DOMPurify.removeHook('afterSanitizeElements', afterSanitizeElements);
     DOMPurify.removeHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
   }
 }
@@ -105,7 +114,7 @@ const DOMPurifyConfig = {
  * @param html 需要清理的 HTML 字符串
  * @returns 清理后的安全 HTML 字符串
  */
-export function sanitizeHTML(html: string): string {
+export function sanitizeHTML(html: string, confluenceBaseUrl?: string): string {
   if (!html || typeof html !== 'string') {
     return '';
   }
@@ -116,6 +125,7 @@ export function sanitizeHTML(html: string): string {
       preparedHTML,
       DOMPurifyConfig as unknown as Config,
       domPurifySecurityHooks,
+      confluenceBaseUrl,
     );
   } catch (error) {
     console.error('HTML sanitization failed:', error);
@@ -148,7 +158,7 @@ const documentPreviewSecurityHooks: SecurityHooks = {
 };
 
 /** Sanitize DocumentPreview Markdown and enforce a single image loading policy. */
-export function sanitizeDocumentPreviewHTML(html: string): string {
+export function sanitizeDocumentPreviewHTML(html: string, confluenceBaseUrl?: string): string {
   if (!html || typeof html !== 'string') {
     return '';
   }
@@ -159,6 +169,7 @@ export function sanitizeDocumentPreviewHTML(html: string): string {
       preparedHTML,
       documentPreviewDomPurifyConfig as unknown as Config,
       documentPreviewSecurityHooks,
+      confluenceBaseUrl,
     );
   } catch (error) {
     console.error('Document preview HTML sanitization failed:', error);

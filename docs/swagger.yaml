@@ -12046,6 +12046,157 @@ definitions:
     required:
     - name
     type: object
+  internal_handler.KnowledgeDetail:
+    properties:
+      channel:
+        description: Channel indicates through which channel the knowledge was ingested
+          (web, api, browser_extension, wechat, etc.)
+        type: string
+        x-agent: true
+      confluence_base_url:
+        type: string
+      created_at:
+        description: Creation time of the knowledge
+        type: string
+        x-agent: true
+      custom_metadata:
+        description: |-
+          CustomMetadata is user-authored descriptive metadata. It is deliberately
+          separate from Metadata, which contains internal ingestion state and IDs.
+        type: object
+      deleted_at:
+        allOf:
+        - $ref: '#/definitions/gorm.DeletedAt'
+        description: Deletion time of the knowledge
+      description:
+        description: Description of the knowledge
+        type: string
+      embedding_model_id:
+        description: ID of the embedding model
+        type: string
+      enable_status:
+        description: Enable status of the knowledge
+        type: string
+        x-agent: true
+      error_message:
+        description: Error message of the knowledge
+        type: string
+        x-agent: true
+      file_hash:
+        description: File hash of the knowledge
+        type: string
+      file_name:
+        description: File name of the knowledge
+        type: string
+        x-agent: true
+      file_path:
+        description: File path of the knowledge
+        type: string
+      file_size:
+        description: File size of the knowledge
+        type: integer
+        x-agent: true
+      file_type:
+        description: File type of the knowledge
+        type: string
+        x-agent: true
+      folder_path:
+        description: |-
+          FolderPath is the canonical relative directory this entry belongs to
+          inside the knowledge base, e.g. "docs/spec" for a folder upload of
+          "docs/spec/design.md". Empty means the knowledge base root. It is a
+          display/navigation concern only: it never affects where the file is
+          physically stored (see FilePath).
+        type: string
+        x-agent: true
+      id:
+        description: Unique identifier of the knowledge
+        type: string
+        x-agent: knowledge_id
+      knowledge_base_id:
+        description: ID of the knowledge base
+        type: string
+        x-agent: true
+      knowledge_base_name:
+        description: Knowledge base name (not stored in database, populated on query)
+        type: string
+        x-agent: true
+      last_activity_at:
+        description: |-
+          Most recent processing progress (row or span write) for an in-flight
+          row, so clients can tell a slow stage from a stalled one. Not stored.
+        type: string
+        x-agent: true
+      last_faq_import_result:
+        description: Last FAQ import result (for FAQ type knowledge only)
+        type: object
+      metadata:
+        description: Metadata of the knowledge
+        type: object
+      parse_status:
+        description: Parse status of the knowledge
+        type: string
+        x-agent: true
+      pending_subtasks_count:
+        description: |-
+          PendingSubtasksCount is the outstanding enrichment subtask count
+          (summary + question + graph chunks). Only meaningful while
+          ParseStatus == "finalizing"; defaults to 0 in any terminal state.
+        type: integer
+      processed_at:
+        description: Processed time of the knowledge
+        type: string
+        x-agent: true
+      profile:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProfile'
+        description: |-
+          Profile is the structured companion of Description: a one-line gist,
+          topic keywords, a document type and one typical question. It is produced
+          by the same model call as the summary and feeds the knowledge-base
+          level description aggregation. nil when no summary has been generated.
+      source:
+        description: Source of the knowledge (e.g. URL address for url type, "manual"
+          for manual type)
+        type: string
+        x-agent: true
+      stall_state:
+        description: |-
+          Verdict on an in-flight row gone quiet: StallStateQueued (its work is
+          still queued, i.e. backlogged) or StallStateStalled (nothing left to
+          run it). Empty while it is progressing or the probe failed. Not stored.
+        type: string
+        x-agent: true
+      storage_size:
+        description: Storage size of the knowledge
+        type: integer
+      summary_status:
+        description: Summary status for async summary generation
+        type: string
+        x-agent: true
+      tags:
+        description: Tags holds the tags associated with this knowledge (populated
+          on query, not persisted directly).
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag'
+        type: array
+        x-agent: true
+      tenant_id:
+        description: Workspace ID
+        type: integer
+      title:
+        description: Title of the knowledge
+        type: string
+        x-agent: true
+      type:
+        description: Type of the knowledge
+        type: string
+        x-agent: true
+      updated_at:
+        description: Last updated time of the knowledge
+        type: string
+        x-agent: true
+    type: object
   internal_handler.KnowledgeSearchKnowledgeResponse:
     properties:
       data:
@@ -21320,7 +21471,7 @@ paths:
             - $ref: '#/definitions/internal_handler.DataResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+                  $ref: '#/definitions/internal_handler.KnowledgeDetail'
               type: object
         "400":
           description: 请求参数错误

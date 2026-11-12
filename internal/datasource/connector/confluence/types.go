@@ -76,6 +76,22 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 	return cfg, nil
 }
 
+// AttachmentBaseURL returns the browser-facing site URL without requiring
+// working connector credentials. Legacy settings use the same precedence as sync.
+func AttachmentBaseURL(ds *types.DataSourceConfig) string {
+	cloud := strings.EqualFold(configValue(ds, "edition"), editionCloud)
+	base, err := normalizeBaseURL(configValue(ds, "base_url"), cloud)
+	if err != nil {
+		return ""
+	}
+	parsed, err := url.Parse(base)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return ""
+	}
+	return base
+}
+
 func normalizeBaseURL(raw string, cloud bool) (string, error) {
 	raw = strings.TrimSpace(strings.TrimRight(raw, "/"))
 	if raw == "" {
