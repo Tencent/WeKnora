@@ -52,6 +52,7 @@ function detail(id: string, revision = 'current') {
     data: {
       id, file_name: `${id}-${revision}.pdf`, file_type: 'pdf',
       updated_at: '2026-01-01T00:00:00Z', description: `${id}-${revision} summary`,
+      confluence_base_url: `https://${id}.example/wiki`,
       custom_metadata: { revision }, tags: [{ id: revision, name: revision }],
     },
   }
@@ -63,6 +64,7 @@ test('late metadata and chunks from a previous document cannot replace the curre
   const { hook, metadata, chunks } = setup(t)
   hook.getCardDetails({ id: 'a' })
   hook.getCardDetails({ id: 'b' })
+  assert.equal(hook.details.confluence_base_url, '')
   metadata[1].resolve(detail('b'))
   chunks[1].resolve(chunkPage('b content'))
   await flush()
@@ -73,6 +75,7 @@ test('late metadata and chunks from a previous document cannot replace the curre
   await flush()
   assert.equal(JSON.stringify(hook.details), current)
   assert.equal(hook.details.id, 'b')
+  assert.equal(hook.details.confluence_base_url, 'https://b.example/wiki')
   assert.equal(hook.details.md[0].content, 'b content')
 })
 

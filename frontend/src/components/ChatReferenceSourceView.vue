@@ -36,7 +36,8 @@
       v-else-if="mode === 'file'"
       class="reference-source__preview"
       :knowledge-id="target.knowledgeId"
-      :file-type="isManual ? 'md' : meta.fileType"
+      :confluence-base-url="meta.confluenceBaseUrl"
+      :file-type="previewFileType"
       :file-name="meta.fileName || displayName"
       :active="active"
       source-mode
@@ -66,7 +67,7 @@ import { useRouter } from 'vue-router'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 import { getChunkByIdOnly, getKnowledgeDetails } from '@/api/knowledge-base/index'
-import { isKnownPreviewableFile } from '@/utils/filePreview'
+import { isKnownPreviewableFile, resolveFilePreviewExt } from '@/utils/filePreview'
 import type { ReferenceSourceTarget } from '@/utils/referenceSources'
 import {
   locatorPages,
@@ -110,8 +111,9 @@ const edited = ref(false)
 const imageDigest = ref<string>()
 const imageContext = ref<SourceLocateRequest['imageContext']>()
 let locateToken = 0
-const meta = reactive({ fileName: '', fileType: '', knowledgeSource: '', knowledgeType: '', title: '' })
+const meta = reactive({ fileName: '', fileType: '', knowledgeSource: '', knowledgeType: '', title: '', confluenceBaseUrl: '' })
 let loadVersion = 0
+let metadataLoaded = false
 /** The knowledge whose file the preview currently shows. */
 let shownKnowledgeId = ''
 
@@ -121,6 +123,8 @@ const displayTitle = computed(() => props.target.title || meta.title || displayN
 // though these entries have file_type="manual" and no physical file path.
 const isManual = computed(() => meta.knowledgeSource === 'manual' ||
   (meta.knowledgeType || meta.fileType).toLowerCase() === 'manual')
+// Keep the preview format stable when document details arrive after the file name.
+const previewFileType = computed(() => isManual.value ? 'md' : resolveFilePreviewExt(displayName.value, meta.fileType))
 
 const documentHref = computed(() => {
   if (!props.target.knowledgeBaseId) return ''
@@ -163,22 +167,27 @@ function isWebUrl(value: string) {
 }
 
 async function loadMeta(version: number) {
+  metadataLoaded = false
   meta.fileName = props.target.fileName || ''
   meta.fileType = ''
   meta.knowledgeSource = props.target.knowledgeSource || ''
   meta.knowledgeType = ''
+  meta.confluenceBaseUrl = ''
   meta.title = props.target.title || ''
   sourceHash.value = ''
   try {
     const res: any = await getKnowledgeDetails(props.target.knowledgeId)
     if (version !== loadVersion) return
-    const data = res?.data || {}
+    const data = res?.data
+    if (!data) return
     sourceHash.value = data.file_hash || ''
     meta.fileName = meta.fileName || data.file_name || ''
     meta.fileType = data.file_type || ''
     meta.knowledgeSource = meta.knowledgeSource || data.source || ''
     meta.knowledgeType = data.type || ''
+    meta.confluenceBaseUrl = data.confluence_base_url || ''
     meta.title = meta.title || data.title || ''
+    metadataLoaded = true
   } catch {
     // Without details the file name from the reference decides below.
   }
@@ -291,11 +300,10 @@ async function load() {
   status.value = 'idle'
   locatedPage.value = 0
   locate.value = null
-  // Another citation in the open file: keep the preview mounted and only
-  // move the highlight, instead of downloading and rendering the file again.
+  // Keep the open file mounted while retrying a failed details request.
   const sameFile = mode.value === 'file' && shownKnowledgeId === props.target.knowledgeId
   if (!sameFile) mode.value = 'loading'
-  await Promise.all([sameFile ? Promise.resolve() : loadMeta(version), loadChunk(version)])
+  await Promise.all([sameFile && metadataLoaded ? Promise.resolve() : loadMeta(version), loadChunk(version)])
   if (version !== loadVersion) return
   shownKnowledgeId = props.target.knowledgeId
   const next = resolveMode()
