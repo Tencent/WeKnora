@@ -402,6 +402,7 @@ func graphTruncationNote(data map[string]interface{}, shownRelations int) string
 // not read as an absence of evidence).
 func annotateSearchNotes(output string, data map[string]interface{}) string {
 	omitted := intValue(data, "omitted_for_budget")
+	excerpted := countContentExcerpts(data)
 	failures := stringSliceValue(data["partial_failures"])
 	// retrieval_candidates is the candidate pool of the first ranked-filter
 	// stage that dropped anything (rerank, merge or FILTER_TOP_K), not the
@@ -418,6 +419,11 @@ func annotateSearchNotes(output string, data map[string]interface{}) string {
 	if omitted > 0 {
 		fmt.Fprintf(&b, "  <omitted count=\"%d\" reason=\"output_budget\">Lower-ranked results were left out to "+
 			"fit the output size. Narrow the query or lower limit to see them.</omitted>\n", omitted)
+	}
+	if excerpted > 0 {
+		fmt.Fprintf(&b, "  <content_excerpts count=\"%d\">Some result bodies were shortened to fit the output "+
+			"size. Their chunk handles and snippets are still present; call read_document(id=chunk://N, context=k) "+
+			"for the full chunk when the excerpt is not enough.</content_excerpts>\n", excerpted)
 	}
 	if truncated {
 		// The caveat is conditional on purpose: a truncated view is the norm
@@ -436,6 +442,20 @@ func annotateSearchNotes(output string, data map[string]interface{}) string {
 			escapeText(failure))
 	}
 	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// countContentExcerpts reports how many rendered rows carry a shortened body.
+// The tool sets the flag on Data, not on the XML, because this model view is
+// rebuilt from Data and would otherwise silently present an excerpt as the
+// whole chunk.
+func countContentExcerpts(data map[string]interface{}) int {
+	count := 0
+	for _, row := range mapsValue(data["results"]) {
+		if boolValue(row, "content_excerpt") {
+			count++
+		}
+	}
+	return count
 }
 
 // annotateWebSearchNotes restates a clamped count inside the retrieval block.
