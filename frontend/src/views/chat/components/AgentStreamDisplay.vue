@@ -852,7 +852,7 @@ import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAn
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getCatalogToolDisplayType, getCatalogToolTitle } from '@/utils/catalogToolDisplay';
-import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import { countSearchResultFiles, getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   formatToolTitleWithDetail,
   getEventSkillName,
@@ -3142,11 +3142,11 @@ const getSearchResultsSummary = (event: any): string => {
   const count = Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
   if (count === 0) return t('agentStream.search.noResults');
 
-  // Build summary text
+  // Build summary text. kb_counts is keyed by knowledge base, not by file.
   let summary = '';
-  const kbCount = toolData.kb_counts ? Object.keys(toolData.kb_counts).length : 0;
-  if (kbCount > 0) {
-    summary = t('agentStream.search.foundResultsFromFiles', { count: `<strong>${count}</strong>`, files: `<strong>${kbCount}</strong>` });
+  const fileCount = countSearchResultFiles(toolData.results);
+  if (fileCount > 0) {
+    summary = t('agentStream.search.foundResultsFromFiles', { count: `<strong>${count}</strong>`, files: `<strong>${fileCount}</strong>` });
   } else {
     summary = t('agentStream.search.foundResults', { count: `<strong>${count}</strong>` });
   }
