@@ -34,6 +34,10 @@ This will log an issue for human review or automated maintenance.`,
 			json.RawMessage(`{
   "type": "object",
   "properties": {
+    "knowledge_base_id": {
+      "type": "string",
+      "description": "Optional kb://N handle from search/read results to disambiguate the slug."
+    },
     "slug": {
       "type": "string",
       "description": "The slug of the wiki page that has an issue (e.g. 'entity/hunyuan-damoxing')"
@@ -75,6 +79,7 @@ func (t *wikiFlagIssueTool) WithKnowledgeScope(
 
 func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
+		KnowledgeBaseID       string   `json:"knowledge_base_id"`
 		Slug                  string   `json:"slug"`
 		IssueType             string   `json:"issue_type"`
 		Description           string   `json:"description"`
@@ -95,7 +100,12 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for issue tracking"}, nil
 	}
 
-	page, kbID, err := resolveUniqueWikiPage(ctx, t.wikiService, slug, t.kbIDs, t.routes)
+	kbIDs, scopeErr := wikiMutationKBs(t.kbIDs, params.KnowledgeBaseID)
+	if scopeErr != nil {
+		return &types.ToolResult{Success: false, Error: scopeErr.Error()}, nil
+	}
+
+	page, kbID, err := resolveUniqueWikiPage(ctx, t.wikiService, slug, kbIDs, t.routes)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, nil
 	}

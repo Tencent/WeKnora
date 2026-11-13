@@ -37,6 +37,10 @@ func NewWikiWritePageTool(
 			json.RawMessage(`{
 				"type": "object",
 				"properties": {
+					"knowledge_base_id": {
+						"type": "string",
+						"description": "Optional kb://N handle from search/read results to disambiguate the slug."
+					},
 					"slug": {
 						"type": "string",
 						"description": "The slug of the Wiki page (e.g. 'entity/hunyuan-damoxing')"
@@ -94,13 +98,14 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	// revision history distinguishes agent edits from pipeline/user ones.
 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
 	var params struct {
-		Slug       string    `json:"slug"`
-		Title      string    `json:"title"`
-		Summary    string    `json:"summary"`
-		Content    string    `json:"content"`
-		PageType   string    `json:"page_type"`
-		Aliases    *[]string `json:"aliases"`
-		SourceRefs *[]string `json:"source_refs"`
+		KnowledgeBaseID string    `json:"knowledge_base_id"`
+		Slug            string    `json:"slug"`
+		Title           string    `json:"title"`
+		Summary         string    `json:"summary"`
+		Content         string    `json:"content"`
+		PageType        string    `json:"page_type"`
+		Aliases         *[]string `json:"aliases"`
+		SourceRefs      *[]string `json:"source_refs"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -123,9 +128,14 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	params.Slug = normalizedSlug
 
+	kbIDs, scopeErr := wikiMutationKBs(t.kbIDs, params.KnowledgeBaseID)
+	if scopeErr != nil {
+		return &types.ToolResult{Success: false, Error: scopeErr.Error()}, nil
+	}
+
 	// Resolve and authorize provenance before choosing a creation target. In a
-	// multi-Wiki Agent, source documents provide a server-owned KB hint and
-	// remove the need for a model-visible knowledge_base_id argument.
+	// multi-Wiki Agent, source documents provide a server-owned KB hint when
+	// no explicit knowledge base was selected.
 	var sourceDocs []wikiSourceDocument
 	var resolvedRefs []string
 	var err error
@@ -138,17 +148,16 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 		}
 		resolvedRefs = wikiSourceRefs(sourceDocs)
 	}
-	// Resolve existing pages across every legal Wiki KB. Cached provenance only
-	// influences lookup order; ambiguous slugs are never silently written to
-	// the first KB. New pages require one unambiguous creation target.
-	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
+	// Resolve within the selected scope. Without an explicit KB, cached
+	// provenance only affects lookup order and ambiguous slugs are rejected.
+	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, kbIDs, t.routes)
 	if errors.Is(err, errWikiPageNotFoundInScope) {
 		existingPage = nil
 		sourceKBHints, sourceErr := wikiKnowledgeBasesForSourceDocuments(sourceDocs, t.kbIDs)
 		if sourceErr != nil {
 			return &types.ToolResult{Success: false, Error: "Failed to resolve source_refs routing: " + sourceErr.Error()}, nil
 		}
-		kbID, err = resolveWikiCreateKB(params.Slug, t.kbIDs, t.routes, sourceKBHints...)
+		kbID, err = resolveWikiCreateKB(params.Slug, kbIDs, t.routes, sourceKBHints...)
 	}
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to resolve wiki target: " + err.Error()}, nil
