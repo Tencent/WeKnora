@@ -5776,6 +5776,9 @@ definitions:
     - MCPTransportStdio
   github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload:
     properties:
+      custom_metadata:
+        description: Optional flat user attributes, saved on manual creation.
+        type: object
       channel:
         type: string
       content:

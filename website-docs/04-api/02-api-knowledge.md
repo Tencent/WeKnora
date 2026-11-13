@@ -408,12 +408,17 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API
 | `tag_ids` | []string | 否 | 标签 |
 | `channel` | string | 否 | 渠道 |
 | `process_config` | object | 否 | 解析覆盖 |
+| `custom_metadata` | object | 否 | 自定义元数据，与正文在创建时一并保存；省略或 null 时保存为空对象 |
 
 响应：200 `{"success":true,"data":{Knowledge}}`
 
+`custom_metadata` 最多 20 个平面字段；非空白键最多 64 字节，值仅支持字符串、数字、布尔或 null，字符串表示最多 1000 字节。不支持嵌套对象或数组；非法输入返回 400，不创建知识或入队。大整数业务 ID 请使用字符串，避免后续模型上下文中的数字精度损失。
+
+返回的 `data.custom_metadata` 可通过知识详情或列表再次读取。该字段不拼入 Embedding 文本；仍按现有规则用于摘要和文档级上下文。`status: "publish"` 仅提交异步入库，不代表索引已经完成。
+
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/manual -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"title":"FAQ 汇总","content":"# 内容","status":"publish"}'
+  -H 'Content-Type: application/json' -d '{"title":"FAQ 汇总","content":"# 内容","status":"publish","custom_metadata":{"source_id":"9007199254740993","version":"1"}}'
 ```
 
 ### GET /api/v1/knowledge-bases/:id/knowledge

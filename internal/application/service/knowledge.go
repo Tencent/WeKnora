@@ -862,22 +862,9 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	}
 	metadataChanged := false
 	if knowledge.CustomMetadata != nil {
-		var custom map[string]interface{}
-		if err := json.Unmarshal(knowledge.CustomMetadata, &custom); err != nil {
-			return fmt.Errorf("custom_metadata must be a JSON object: %w", err)
-		}
-		if len(custom) > 20 {
-			return fmt.Errorf("custom_metadata supports at most 20 fields")
-		}
-		for key, value := range custom {
-			if len(strings.TrimSpace(key)) == 0 || len(key) > 64 || len(fmt.Sprint(value)) > 1000 {
-				return fmt.Errorf("invalid custom_metadata field %q", key)
-			}
-			switch value.(type) {
-			case string, float64, bool, nil:
-			default:
-				return fmt.Errorf("custom_metadata field %q must be a string, number, boolean, or null", key)
-			}
+		custom, err := parseCustomMetadata(knowledge.CustomMetadata)
+		if err != nil {
+			return err
 		}
 		existing := make(map[string]interface{})
 		if len(record.CustomMetadata) > 0 {
