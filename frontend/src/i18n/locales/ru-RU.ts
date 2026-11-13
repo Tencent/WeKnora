@@ -2083,7 +2083,7 @@ export default {
     search: {
       noResults: 'Совпадения не найдены',
       candidatesBelowThreshold: 'Найдено кандидатов: {count}, ни один не подошёл по релевантности',
-      foundResultsFromFiles: 'Найдено {count} результат(ов) из {files} файл(ов)',
+      foundResultsWithKnowledgeBases: 'Найдено результатов: {count}, баз знаний с результатами: {knowledgeBases}',
       foundResults: 'Найдено {count} результат(ов)',
       foundMixedResults: 'Найдено {count} результат(ов) ({docCount} док., {webCount} веб)',
       webResults: 'Найдено {count} веб-результат(ов)',

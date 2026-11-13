@@ -467,7 +467,7 @@ const messages = {
       "search": {
         "noResults": "未找到匹配的内容",
         "candidatesBelowThreshold": "命中 {count} 条候选，相关性不足，未用于回答",
-        "foundResultsFromFiles": "找到 {count} 个结果，来自 {files} 个文件",
+        "foundResultsWithKnowledgeBases": "找到 {count} 个结果，来自 {knowledgeBases} 个知识库",
         "foundResults": "找到 {count} 个结果",
         "foundMixedResults": "找到 {count} 个结果（{docCount} 篇文档，{webCount} 条网页）",
         "webResults": "找到 {count} 条网页",
@@ -1065,7 +1065,7 @@ const messages = {
       "search": {
         "noResults": "未找到比對的內容",
         "candidatesBelowThreshold": "命中 {count} 條候選，相關性不足，未用於回答",
-        "foundResultsFromFiles": "找到 {count} 個結果，來自 {files} 個檔案",
+        "foundResultsWithKnowledgeBases": "找到 {count} 個結果，來自 {knowledgeBases} 個知識庫",
         "foundResults": "找到 {count} 個結果",
         "foundMixedResults": "找到 {count} 個結果（{docCount} 篇文件，{webCount} 條網頁）",
         "webResults": "找到 {count} 條網頁",
@@ -1663,7 +1663,7 @@ const messages = {
       "search": {
         "noResults": "一致する内容が見つかりません",
         "candidatesBelowThreshold": "{count}件の候補が該当しましたが、関連性が十分でないため使用していません",
-        "foundResultsFromFiles": "{files}件のファイルから{count}件の結果が見つかりました",
+        "foundResultsWithKnowledgeBases": "{knowledgeBases}件のナレッジベースから{count}件の結果が見つかりました",
         "foundResults": "{count}件の結果が見つかりました",
         "foundMixedResults": "{count}件の結果が見つかりました（ドキュメント{docCount}件、Web検索結果{webCount}件）",
         "webResults": "{count}件のWeb検索結果が見つかりました",
@@ -2261,7 +2261,7 @@ const messages = {
       "search": {
         "noResults": "No matching content found",
         "candidatesBelowThreshold": "Matched {count} candidate(s), none relevant enough to use",
-        "foundResultsFromFiles": "Found {count} result(s) from {files} file(s)",
+        "foundResultsWithKnowledgeBases": "Found {count} result(s) from {knowledgeBases} knowledge base(s)",
         "foundResults": "Found {count} result(s)",
         "foundMixedResults": "Found {count} result(s) ({docCount} documents, {webCount} web results)",
         "webResults": "Found {count} web result(s)",

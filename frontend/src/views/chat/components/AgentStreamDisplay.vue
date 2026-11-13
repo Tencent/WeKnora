@@ -3146,7 +3146,7 @@ const getSearchResultsSummary = (event: any): string => {
   let summary = '';
   const kbCount = toolData.kb_counts ? Object.keys(toolData.kb_counts).length : 0;
   if (kbCount > 0) {
-    summary = t('agentStream.search.foundResultsFromFiles', { count: `<strong>${count}</strong>`, files: `<strong>${kbCount}</strong>` });
+    summary = t('agentStream.search.foundResultsWithKnowledgeBases', { count: `<strong>${count}</strong>`, knowledgeBases: `<strong>${kbCount}</strong>` });
   } else {
     summary = t('agentStream.search.foundResults', { count: `<strong>${count}</strong>` });
   }

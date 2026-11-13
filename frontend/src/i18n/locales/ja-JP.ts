@@ -7846,7 +7846,7 @@ export default {
     search: {
       noResults: '一致するコンテンツが見つかりません',
       candidatesBelowThreshold: '{count}件の候補が一致しましたが、関連性が不十分なため回答には使用しませんでした',
-      foundResultsFromFiles: '{files}件のファイルから{count}件の結果が見つかりました',
+      foundResultsWithKnowledgeBases: '{knowledgeBases}件のナレッジベースから{count}件の結果が見つかりました',
       foundResults: '{count}件の結果が見つかりました',
       foundMixedResults: '{count}件の結果が見つかりました（ドキュメント{docCount}件、Web検索結果{webCount}件）',
       webResults: '{count}件のWeb検索結果が見つかりました',
