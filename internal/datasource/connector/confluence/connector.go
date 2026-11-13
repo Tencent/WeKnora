@@ -328,6 +328,8 @@ func (c *Connector) fetchStream(
 	}
 	baseline, next := prepareSyncCursors(old, forceFull)
 	prepareAttachmentCursor(decodeCursor(old), &next, forceFull, syncAttachmentsEnabled(ds))
+	commentSetting := ds.Settings["sync_comments"]
+	syncComments := commentSetting == true || commentSetting == "true"
 	// Accepted attachments establish a page baseline even if its body failed.
 	// Include those pages in the existing empty-list/mass-deletion safeguards.
 	for id, owner := range next.AttachmentOwners {
@@ -408,6 +410,15 @@ func (c *Connector) fetchStream(
 					return nil, err
 				}
 			}
+			var comments string
+			if syncComments {
+				// Comment changes do not advance the page body version.
+				comments, err = client.pageComments(ctx, summary.ID)
+				if err != nil {
+					return nil, fmt.Errorf("list Confluence comments for page %s: %w", summary.ID, err)
+				}
+				version = fmt.Sprintf("%s%s:%x", commentsVersionPrefix, version, sha256.Sum256([]byte(comments)))
+			}
 			// An unknown version cannot prove a page unchanged, so it must
 			// always refresh the body instead of skipping on a stable "t:".
 			if versionKnown {
@@ -446,6 +457,12 @@ func (c *Connector) fetchStream(
 				}
 				continue
 			}
+			if comments != "" {
+				markdown := strings.TrimRight(string(item.Content), "\n")
+				item.Content = []byte(markdown + "\n\n## Comments\n\n" + comments + "\n")
+			}
+			hadComments := strings.HasPrefix(priorVersionByPage[summary.ID], commentsVersionPrefix)
+			item.RetryOnFailure = syncComments || hadComments
 			if err := h.Emit(ctx, item); err != nil {
 				return nil, err
 			}
