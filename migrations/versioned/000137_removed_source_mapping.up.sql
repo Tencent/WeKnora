@@ -1,0 +1,4 @@
+-- Intentionally empty.
+-- The external source-mapping table planned for this version was removed
+-- before release. Native parent relationships live on knowledges.parent_knowledge_id
+-- and are managed by versions 000138 (PostgreSQL) / 000054 (SQLite).

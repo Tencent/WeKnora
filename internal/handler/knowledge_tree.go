@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/url"
 	"strconv"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -59,7 +60,7 @@ func expandKnowledgeRows(
 	}
 	byID := map[string][]types.KnowledgeChild{}
 	for _, child := range children {
-		child.ContentURL = subKnowledgeResourceURL(child.ContentURL, c.Request.URL.Query())
+		child.ContentURL = knowledgeResourceURL(child.ContentURL, c.Request.URL.Query())
 		byID[child.AnchorKnowledgeID] = append(byID[child.AnchorKnowledgeID], child)
 	}
 	for _, k := range rows {
@@ -77,4 +78,18 @@ func cascadeChildrenOption(c *gin.Context) (bool, error) {
 		return false, apperrors.NewBadRequestError("invalid cascade_children")
 	}
 	return value, nil
+}
+
+// knowledgeResourceURL keeps the resource-access query parameters on child
+// preview links so the existing file proxy can authorize them.
+func knowledgeResourceURL(path string, resourceQuery url.Values) string {
+	u, _ := url.Parse(path)
+	q := u.Query()
+	for _, key := range []string{"agent_id", types.AgentSourceTenantIDParam} {
+		if value := resourceQuery.Get(key); value != "" {
+			q.Set(key, value)
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }

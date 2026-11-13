@@ -48,7 +48,6 @@ var versionedSQLiteTables = []string{
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
 	"credential_vault_items",
-	"knowledge_sub_knowledge",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the

@@ -402,8 +402,6 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API
 
 file/URL/manual 上传支持可选顶层 `parent_knowledge_id`，查询可展开子孙，删除可选级联，详见[父子知识参数](./11-api-knowledge-hierarchy.md)。
 
-可选 `sub_knowledge` 用于关联独立知识；已有 file/URL 等知识也可单独设置关系，详见[子知识关联接口](./10-api-sub-knowledge.md)。
-
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `title` | string | 否 | 标题 |

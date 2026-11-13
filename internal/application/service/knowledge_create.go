@@ -865,23 +865,32 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		}
 	}
 
-	knowledge, created, err := s.createManualSubKnowledge(ctx, knowledge, payload, status)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
+	if err := s.validateImportParent(ctx, kbID, payload.ParentKnowledgeID); err != nil {
 		return nil, err
 	}
-	if !created {
+	knowledge.ParentKnowledgeID = payload.ParentKnowledgeID
+	if knowledge.ParentKnowledgeID != "" {
+		if err := s.validateKnowledgeTagIDs(ctx, tenantID, kbID, payload.TagIDs); err != nil {
+			return nil, err
+		}
+		r, ok := s.repo.(interfaces.KnowledgeTreeRepository)
+		if !ok {
+			return nil, werrors.NewServiceUnavailableError("parent repository unavailable")
+		}
+		if err := r.CreateKnowledgeWithParent(ctx, knowledge, payload.TagIDs...); err != nil {
+			logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
+			return nil, err
+		}
 		s.attachTagsToKnowledge(ctx, knowledge)
-		return knowledge, nil
-	}
-	// Set tag relations
-	if payload.SubKnowledge != nil || knowledge.ParentKnowledgeID != "" {
-		// Linked creation already validated and wrote the tag relations in the
-		// same transaction, so a failed tag write cannot strand an idempotent row.
-		s.attachTagsToKnowledge(ctx, knowledge)
-	} else if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, payload.TagIDs); err != nil {
-		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
-		return nil, err
+	} else {
+		if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+			logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
+			return nil, err
+		}
+		if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, payload.TagIDs); err != nil {
+			logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+			return nil, err
+		}
 	}
 
 	// Claim the body's files immediately, before publishing. A draft saved from
@@ -1132,7 +1141,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		existing.Description = ""
 		existing.ProcessedAt = nil
 
-		if err := s.persistManualSubKnowledge(ctx, existing, payload, status); err != nil {
+		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to persist manual draft: %v", err)
 			return nil, err
 		}
@@ -1153,7 +1162,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return nil, err
 	}
 
-	if err := s.persistManualSubKnowledge(ctx, existing, payload, status); err != nil {
+	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to persist manual knowledge before indexing: %v", err)
 		return nil, err
 	}

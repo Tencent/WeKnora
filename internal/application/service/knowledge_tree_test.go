@@ -55,7 +55,6 @@ func TestNativeKnowledgeManualParentOnlyInput(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, parent.ID, child.ID)
 	require.Equal(t, parent.ID, child.ParentKnowledgeID)
-	require.Nil(t, child.SubKnowledge, "native parent does not require external-source identity")
 	saved, err := repo.GetKnowledgeByID(ctx, 7, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, parent.ID, saved.ParentKnowledgeID)

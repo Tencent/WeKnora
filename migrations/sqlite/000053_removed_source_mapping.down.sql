@@ -1,0 +1,1 @@
+-- Intentionally empty; see the corresponding up migration.

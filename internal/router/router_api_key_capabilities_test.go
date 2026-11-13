@@ -320,7 +320,6 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/knowledge"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/knowledge/batch-download"},
 		{http.MethodGet, "/api/v1/knowledge/:id"},
-		{http.MethodGet, "/api/v1/knowledge/:id/sub-knowledge"},
 		{http.MethodGet, "/api/v1/knowledge/:id/download"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/faq/search"},
 		{http.MethodGet, "/api/v1/knowledge-bases/:id/tags"},
@@ -623,7 +622,6 @@ func TestKnowledgeBatchWriteRoutesDeclareIngestCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge/batch-reparse"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/rebuild-index"},
 		{http.MethodPut, "/api/v1/knowledge/tags"},
-		{http.MethodPut, "/api/v1/knowledge/:id/sub-knowledge"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
