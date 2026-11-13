@@ -559,7 +559,7 @@ func (t *SearchKnowledgeTool) compactSearchSnippets(
 	snippetBudget := max(budget-metaCost-len(results), 0)
 	caps := splitBudgetFairly(snippetBudget, sizes)
 	out := make([]*searchResultWithMeta, 0, len(results))
-	for i, result := range results {
+	for i := range results {
 		keep := min(caps[i], sizes[i])
 		snippet := ""
 		if keep > 0 {
