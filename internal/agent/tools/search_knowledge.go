@@ -575,12 +575,12 @@ func (t *SearchKnowledgeTool) compactSearchSnippets(
 	return out
 }
 
-func firstFAQMetadata(result *types.SearchResult) *types.FAQChunkMetadata {
-	if result == nil || result.ChunkMetadata == "" {
+func firstFAQMetadata(row *types.SearchResult) *types.FAQChunkMetadata {
+	if row == nil || len(row.ChunkMetadata) == 0 {
 		return nil
 	}
 	chunk := &types.Chunk{}
-	chunk.Metadata = result.ChunkMetadata
+	chunk.Metadata = row.ChunkMetadata
 	meta, err := chunk.FAQMetadata()
 	if err != nil {
 		return nil
