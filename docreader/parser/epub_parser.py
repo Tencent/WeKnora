@@ -45,16 +45,14 @@ class EPUBParser(BaseParser):
             try:
                 book = epub.read_epub(epub_path)
                 metadata = self._extract_metadata(book)
-                markdown_content, images = self._extract_content(book)
+                markdown_parts, images = self._extract_content(book)
 
                 metadata["source_format"] = "epub"
                 metadata["file_size"] = len(content)
-                metadata["chapter_count"] = len(
-                    [part for part in markdown_content.split("\n## ") if part.strip()]
-                )
+                metadata["chapter_count"] = len(markdown_parts)
                 metadata["image_count"] = len(images)
                 return Document(
-                    content=markdown_content, images=images, metadata=metadata
+                    content="\n\n".join(markdown_parts), images=images, metadata=metadata
                 )
             finally:
                 if os.path.exists(epub_path):
@@ -198,7 +196,7 @@ class EPUBParser(BaseParser):
                     metadata[out_key] = values[0][0]
         return metadata
 
-    def _extract_content(self, book) -> tuple[str, Dict[str, str]]:
+    def _extract_content(self, book) -> tuple[list[str], Dict[str, str]]:
         markdown_parts = []
         images: Dict[str, str] = {}
         image_aliases: Dict[str, str] = {}
@@ -221,7 +219,7 @@ class EPUBParser(BaseParser):
                 )
             )
 
-        return "\n\n".join(part for part in markdown_parts if part.strip()), images
+        return [part for part in markdown_parts if part.strip()], images
 
     @staticmethod
     def _documents_in_reading_order(book) -> list:
