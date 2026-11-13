@@ -43,7 +43,8 @@ func listKnowledgeBasesTool() mcp.Tool {
 func searchKnowledgeTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolSearchKnowledge,
 		mcp.WithDescription("Search the knowledge bases in scope and return the most relevant passages with their "+
-			"document ids and titles. mode hybrid (default) combines semantic and keyword retrieval; semantic "+
+			"document ids, titles, and, when available, source filenames and locations. "+
+			"Mode hybrid (default) combines semantic and keyword retrieval; semantic "+
 			"ranks by meaning; keyword matches exact terms, identifiers, codes or names."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("A natural-language question, topic, or the exact "+
 			"terms to match")),
