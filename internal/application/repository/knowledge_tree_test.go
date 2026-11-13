@@ -29,7 +29,7 @@ func nativeTreeRepo(t *testing.T) *knowledgeRepository {
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}))
 	require.NoError(t, db.Migrator().DropColumn(&types.Knowledge{}, "ParentKnowledgeID"))
-	ddl, err := os.ReadFile("../../../migrations/sqlite/000054_native_knowledge_parent.up.sql")
+	ddl, err := os.ReadFile("../../../migrations/sqlite/000053_native_knowledge_parent.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(ddl)).Error)
 	require.NoError(
@@ -379,7 +379,7 @@ func TestNativeKnowledgeMovingReadIsRejected(t *testing.T) {
 
 func TestNativeKnowledgeMigrationDown(t *testing.T) {
 	r := nativeTreeRepo(t)
-	ddl, err := os.ReadFile("../../../migrations/sqlite/000054_native_knowledge_parent.down.sql")
+	ddl, err := os.ReadFile("../../../migrations/sqlite/000053_native_knowledge_parent.down.sql")
 	require.NoError(t, err)
 	require.NoError(t, r.db.Exec(string(ddl)).Error)
 	require.False(t, r.db.Migrator().HasColumn("knowledges", "parent_knowledge_id"))

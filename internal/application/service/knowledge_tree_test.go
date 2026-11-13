@@ -22,7 +22,7 @@ func TestNativeKnowledgeManualParentOnlyInput(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, conn.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.KnowledgeTag{}, &types.KnowledgeTagRelation{}))
 	require.NoError(t, db.Migrator().DropColumn(&types.Knowledge{}, "ParentKnowledgeID"))
-	ddl, err := os.ReadFile("../../../migrations/sqlite/000054_native_knowledge_parent.up.sql")
+	ddl, err := os.ReadFile("../../../migrations/sqlite/000053_native_knowledge_parent.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(ddl)).Error)
 	require.NoError(

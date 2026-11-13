@@ -90,7 +90,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 54
+const expectedSQLiteMigrationVersion = 53
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -136,6 +136,52 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"),
 		"SQLite migrations must drop legacy knowledges.tag_id after multi-tag migration")
+}
+
+func TestSQLiteMigrationsUpgradeMainPreservesKnowledge(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	chdirAndRestore(t, copySQLiteMigrationsThrough(t, repoRoot, 52))
+	dbPath := filepath.Join(t.TempDir(), "main-upgrade.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	version, dirty := sqliteMigrationState(t, db)
+	require.Equal(t, 52, version)
+	require.False(t, dirty)
+	require.False(t, sqliteColumnExists(t, db, "knowledges", "parent_knowledge_id"))
+	require.False(t, sqliteColumnExists(t, db, "knowledges", "deletion_pending"))
+	var tablesBefore int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").Scan(&tablesBefore))
+	_, err := db.Exec("INSERT INTO tenants (name, business) VALUES (?, ?)", "main-upgrade", "hierarchy-test")
+	require.NoError(t, err)
+	_, err = db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, metadata, custom_metadata) "+
+			"VALUES (?, 1, ?, 'manual', ?, 'manual', ?, ?)",
+		"existing-knowledge", "existing-kb", "Existing title",
+		`{"content":"Existing body"}`, `{"source_id":"original"}`,
+	)
+	require.NoError(t, err)
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db = openSQLiteDB(t, dbPath)
+	version, dirty = sqliteMigrationState(t, db)
+	require.Equal(t, expectedSQLiteMigrationVersion, version)
+	require.False(t, dirty)
+	var title, metadata, customMetadata string
+	var parent sql.NullString
+	var deletionPending bool
+	require.NoError(t, db.QueryRow(
+		"SELECT title, metadata, custom_metadata, parent_knowledge_id, deletion_pending FROM knowledges WHERE id = ?",
+		"existing-knowledge",
+	).Scan(&title, &metadata, &customMetadata, &parent, &deletionPending))
+	require.Equal(t, "Existing title", title)
+	require.JSONEq(t, `{"content":"Existing body"}`, metadata)
+	require.JSONEq(t, `{"source_id":"original"}`, customMetadata)
+	require.False(t, parent.Valid)
+	require.False(t, deletionPending)
+	var tablesAfter int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").Scan(&tablesAfter))
+	require.Equal(t, tablesBefore, tablesAfter)
 }
 
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
