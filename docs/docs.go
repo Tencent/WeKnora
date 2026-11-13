@@ -32918,7 +32918,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "custom_metadata": {
-                    "description": "Optional flat user attributes, saved on creation. Updates use PUT /knowledge/{id}.",
+                    "description": "Optional flat user attributes, saved on manual creation.",
                     "type": "object"
                 },
                 "channel": {

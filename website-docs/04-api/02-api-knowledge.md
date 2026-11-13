@@ -621,8 +621,6 @@ curl -X POST $BASE/api/v1/knowledge/k-1/regenerate-summary -H "Authorization: Be
 
 用途：整篇替换手工录入的 Markdown。只适用于手工知识；上传文件不能用这个接口改正文。`content` 是完整正文，空内容会被拒绝。`status` 为 `draft`（不进入检索）或 `publish`（建立索引）；不传 `status` 时按草稿保存。权限同上。
 
-省略 `custom_metadata` 会保留已有自定义元数据。本正文更新接口不接受该字段（传入返回 400）；修改元数据请使用 `PUT /api/v1/knowledge/:id`，按其对象整体替换规则提交。
-
 响应：200 `{"success":true,"data":{Knowledge}}`
 
 ```bash

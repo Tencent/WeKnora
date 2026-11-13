@@ -327,7 +327,7 @@ type ManualKnowledgeMetadata struct {
 
 // ManualKnowledgePayload represents the payload for manual knowledge operations.
 type ManualKnowledgePayload struct {
-	// Optional flat user attributes, saved on creation. Updates use PUT /knowledge/{id}.
+	// Optional flat user attributes, saved on manual creation.
 	CustomMetadata json.RawMessage `json:"custom_metadata,omitempty"`
 	// Document title.
 	Title string `json:"title" extensions:"x-agent"`

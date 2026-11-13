@@ -1052,9 +1052,6 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	if payload == nil {
 		return nil, werrors.NewBadRequestError("请求内容不能为空")
 	}
-	if payload.CustomMetadata != nil {
-		return nil, werrors.NewBadRequestError("update custom_metadata using PUT /api/v1/knowledge/{id}")
-	}
 
 	cleanContent := secutils.CleanMarkdown(payload.Content)
 	if strings.TrimSpace(cleanContent) == "" {

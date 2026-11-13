@@ -171,21 +171,6 @@ func TestManualCustomMetadataPersistsOnCreate(t *testing.T) {
 	}
 }
 
-func TestManualCustomMetadataUpdateMustUsePropertiesEndpoint(t *testing.T) {
-	t.Parallel()
-	for _, raw := range []string{"null", "{}", `{"version":"2"}`} {
-		// No repository is configured: rejection must happen before any mutation.
-		svc := &knowledgeService{}
-		_, err := svc.UpdateManualKnowledge(context.Background(), "doc", &types.ManualKnowledgePayload{
-			Content: "body", Status: "publish", CustomMetadata: json.RawMessage(raw),
-		})
-		appErr, ok := apperrors.IsAppError(err)
-		require.True(t, ok)
-		require.Equal(t, http.StatusBadRequest, appErr.HTTPCode)
-		require.Contains(t, appErr.Message, "PUT /api/v1/knowledge/{id}")
-	}
-}
-
 func TestUpdateKnowledgeCustomMetadataValidationRemainsCompatible(t *testing.T) {
 	t.Parallel()
 	fields := map[string]int{}
