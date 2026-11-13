@@ -7846,7 +7846,7 @@ export default {
     search: {
       noResults: 'No matching content found',
       candidatesBelowThreshold: 'Matched {count} candidate(s), none relevant enough to use',
-      foundResultsFromFiles: 'Found {count} result(s) from {files} file(s)',
+      foundResultsWithKnowledgeBases: 'Found {count} result(s) from {knowledgeBases} knowledge base(s)',
       foundResults: 'Found {count} result(s)',
       foundMixedResults: 'Found {count} result(s) ({docCount} documents, {webCount} web results)',
       webResults: 'Found {count} web result(s)',

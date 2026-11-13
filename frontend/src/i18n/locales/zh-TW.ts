@@ -2085,7 +2085,7 @@ export default {
     search: {
       noResults: '未找到比對的內容',
       candidatesBelowThreshold: '命中 {count} 條候選，相關性不足，未用於回答',
-      foundResultsFromFiles: '找到 {count} 個結果，來自 {files} 個檔案',
+      foundResultsWithKnowledgeBases: '找到 {count} 個結果，來自 {knowledgeBases} 個知識庫',
       foundResults: '找到 {count} 個結果',
       foundMixedResults: '找到 {count} 個結果（{docCount} 篇文件，{webCount} 條網頁）',
       webResults: '找到 {count} 條網頁',

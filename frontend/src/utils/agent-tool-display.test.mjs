@@ -9,8 +9,8 @@ import {
 } from './agent-tool-display.ts'
 
 const t = (key, params) => {
-  if (key === 'agentStream.search.foundResultsFromFiles') {
-    return `found ${params?.count} from ${params?.files} files`
+  if (key === 'agentStream.search.foundResultsWithKnowledgeBases') {
+    return `found ${params?.count} from ${params?.knowledgeBases} knowledge bases`
   }
   if (key === 'agentStream.search.candidatesBelowThreshold') {
     return `matched ${params?.count}, none relevant`
@@ -81,12 +81,12 @@ test('getWikiPageText supports persisted slugs arrays', () => {
   assert.equal(getWikiPageText('{"slug":"index"}'), 'index')
 })
 
-test('getKnowledgeSearchSummaryHtml includes file count when present', () => {
+test('getKnowledgeSearchSummaryHtml labels the knowledge-base count separately from the result count', () => {
   const html = getKnowledgeSearchSummaryHtml(t, {
-    results: [{}, {}],
-    kb_counts: { a: 1, b: 2 },
+    results: [{}, {}, {}],
+    kb_counts: { a: 3 },
   })
-  assert.match(html, /found <strong>2<\/strong> from <strong>2<\/strong> files/)
+  assert.match(html, /found <strong>3<\/strong> from <strong>1<\/strong> knowledge bases/)
 })
 
 // Candidates that all fell below the relevance threshold never reached the
