@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeSearchMode(t *testing.T) {
@@ -293,10 +294,9 @@ func TestFormatOutputRendersFAQFromResultMetadata(t *testing.T) {
 	}
 }
 
-// The model reads a view rebuilt from Data, which registry truncation does not
-// reach, so the tool fits its own rows to the output budget, keeps the best
-// ones, and says how many it left out.
-func TestFormatWithinBudgetDropsLowestRankedRows(t *testing.T) {
+// The model reads a view rebuilt from Data. The tool keeps every reranked
+// handle visible and shortens bodies fairly instead of dropping whole rows.
+func TestFormatWithinBudgetKeepsRankedRows(t *testing.T) {
 	tool := &SearchKnowledgeTool{}
 	results := make([]*searchResultWithMeta, 10)
 	for i := range results {
@@ -308,18 +308,18 @@ func TestFormatWithinBudgetDropsLowestRankedRows(t *testing.T) {
 			KnowledgeBaseID: "kb-1",
 		}
 	}
-	ctx := WithOutputBudget(context.Background(), 5000)
+	ctx := WithOutputBudget(context.Background(), 24000)
 
 	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "q", SearchModeHybrid)
 	rows, _ := res.Data["results"].([]map[string]interface{})
-	if omitted == 0 || len(rows)+omitted != 10 {
+	if omitted != 0 || len(rows) != 10 {
 		t.Fatalf("rows=%d omitted=%d", len(rows), omitted)
 	}
 	if rows[0]["chunk_id"] != "c0" {
 		t.Fatalf("best row not kept first: %v", rows[0]["chunk_id"])
 	}
-	if n := utf8.RuneCountInString(res.Output); n > 4000 && len(rows) > 1 {
-		t.Fatalf("output has %d runes with %d rows, over the 4000-rune share of the budget", n, len(rows))
+	if n := utf8.RuneCountInString(res.Output); n > 19200 {
+		t.Fatalf("output has %d runes, over the 19200-rune share of the budget", n)
 	}
 
 	// A single row is always kept, even over budget.
@@ -327,6 +327,81 @@ func TestFormatWithinBudgetDropsLowestRankedRows(t *testing.T) {
 	if omittedSingle != 0 || single.Data["count"] != 1 {
 		t.Fatalf("single row dropped: omitted=%d count=%v", omittedSingle, single.Data["count"])
 	}
+}
+
+func TestFormatWithinBudgetKeepsRankedRowsAndExcerptsLongBodies(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	results := make([]*searchResultWithMeta, 10)
+	for i := range results {
+		results[i] = &searchResultWithMeta{
+			SearchResult: &types.SearchResult{
+				ID: fmt.Sprintf("chunk-%d", i), KnowledgeID: "doc", ChunkIndex: i,
+				Content: strings.Repeat("内容", 1500), Score: 1 - float64(i)/100,
+			},
+			KnowledgeBaseID: "kb-1",
+		}
+	}
+	ctx := WithOutputBudget(context.Background(), 24000)
+
+	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "q", SearchModeHybrid)
+	rows, _ := res.Data["results"].([]map[string]interface{})
+	require.Equal(t, 10, len(rows), "all reranked rows must remain discoverable")
+	require.Zero(t, omitted)
+	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 19200)
+	for i, row := range rows {
+		require.Equal(t, fmt.Sprintf("chunk-%d", i), row["chunk_id"])
+		excerpt, _ := row["content_excerpt"].(bool)
+		require.True(t, excerpt, "long body %d must be marked as an excerpt", i)
+		require.Less(t, utf8.RuneCountInString(row["content"].(string)), 3000)
+	}
+	require.Contains(t, res.Output, `excerpt="true"`)
+	require.Contains(t, res.Output, "chunk-9")
+}
+
+func TestFormatWithinBudgetCompactsSnippetsBeforeDroppingRows(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	results := make([]*searchResultWithMeta, 10)
+	for i := range results {
+		results[i] = &searchResultWithMeta{
+			SearchResult: &types.SearchResult{
+				ID: fmt.Sprintf("tiny-%d", i), KnowledgeID: "doc", ChunkIndex: i,
+				Content: "one two three four five six seven eight nine ten " + strings.Repeat("context ", 80),
+				Score:   1 - float64(i)/100,
+			},
+			KnowledgeBaseID: "kb-1",
+		}
+	}
+	ctx := WithOutputBudget(context.Background(), 5000)
+
+	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "six", SearchModeHybrid)
+	rows, _ := res.Data["results"].([]map[string]interface{})
+	require.NotEmpty(t, rows, "a constrained budget must still return the best ranked evidence")
+	require.Equal(t, 10, len(rows)+omitted, "omitted rows must be reported, not silently lost")
+	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 4000,
+		"the fixed XML shape must still respect the published budget")
+}
+
+func TestFormatWithinBudgetKeepsChunkHandleWhenNoBodyBudgetRemains(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	results := []*searchResultWithMeta{
+		{
+			SearchResult: &types.SearchResult{
+				ID: "best", KnowledgeID: "doc", Content: strings.Repeat("x", 100), Score: 1,
+			},
+			KnowledgeBaseID: "kb",
+		},
+		{
+			SearchResult: &types.SearchResult{
+				ID: "second", KnowledgeID: "doc", Content: strings.Repeat("y", 100), Score: 0.5,
+			},
+			KnowledgeBaseID: "kb",
+		},
+	}
+	views := tool.fitSearchResultsToBudget(context.Background(), results, []string{"kb"}, "q", SearchModeHybrid, 1)
+	require.Len(t, views, 2, "even a zero body allocation must retain metadata and handles")
+	require.Equal(t, "best", views[0].ID)
+	require.Equal(t, "second", views[1].ID)
+	require.Empty(t, views[1].Content)
 }
 
 func TestDeduplicateResultsKeepsSiblingsImagesAndBestScore(t *testing.T) {
