@@ -243,13 +243,16 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 // enqueueKnowledgeListDelete enqueues an async batch-delete task for the
 // given knowledge IDs and returns the asynq task ID.
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
-	ctx context.Context, tenantID uint64, kbID string, ids []string,
+	ctx context.Context, tenantID uint64, kbID string, ids []string, cascade ...bool,
 ) (string, error) {
 	payload := types.KnowledgeListDeletePayload{
 		KnowledgeBaseID: kbID,
 		TenantID:        tenantID,
 		KnowledgeIDs:    ids,
 		Initiator:       types.TaskInitiatorFromContext(ctx),
+	}
+	if len(cascade) > 0 {
+		payload.CascadeChildren = cascade[0]
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
@@ -433,7 +436,21 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	}
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	var knowledge *types.Knowledge
+	if parent := c.PostForm("parent_knowledge_id"); parent != "" {
+		importer, ok := h.kgService.(interfaces.KnowledgeParentImportService)
+		if !ok {
+			_ = c.Error(errors.NewServiceUnavailableError("parent knowledge import unavailable"))
+			return
+		}
+		knowledge, err = importer.CreateKnowledgeFromFileWithParent(
+			ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides, parent,
+		)
+	} else {
+		knowledge, err = h.kgService.CreateKnowledgeFromFile(
+			ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides,
+		)
+	}
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -462,6 +479,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 // CreateKnowledgeFromURLRequest is the body of the URL import endpoint.
 type CreateKnowledgeFromURLRequest struct {
+	ParentKnowledgeID string `json:"parent_knowledge_id,omitempty"`
 	// Page or file URL to import.
 	URL              string `json:"url" binding:"required" extensions:"x-agent"`
 	FileName         string `json:"file_name"`
@@ -536,9 +554,23 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	)
 
 	// Create knowledge entry from the URL
-	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
-	)
+	var knowledge *types.Knowledge
+	if req.ParentKnowledgeID != "" {
+		importer, ok := h.kgService.(interfaces.KnowledgeParentImportService)
+		if !ok {
+			_ = c.Error(errors.NewServiceUnavailableError("parent knowledge import unavailable"))
+			return
+		}
+		knowledge, err = importer.CreateKnowledgeFromURLWithParent(
+			ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel,
+			req.Title, req.TagIDs, req.Channel, req.ProcessConfig, req.ParentKnowledgeID,
+		)
+	} else {
+		knowledge, err = h.kgService.CreateKnowledgeFromURL(
+			ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel,
+			req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
+		)
+	}
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
@@ -660,10 +692,19 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 		return
 	}
 
+	authorizedKB := knowledge.KnowledgeBaseID
 	// Re-fetch with tenant-scoped service so tags and other joined fields are populated.
 	if knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewNotFoundError("Knowledge not found"))
+		return
+	}
+
+	if knowledge.KnowledgeBaseID != authorizedKB {
+		_ = c.Error(errors.NewNotFoundError("knowledge scope changed"))
+		return
+	}
+	if !expandKnowledgeRows(effCtx, c, h.kgService, []*types.Knowledge{knowledge}) {
 		return
 	}
 
@@ -1174,6 +1215,12 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	if rows, ok := result.Data.([]*types.Knowledge); ok {
+		if !expandKnowledgeRows(ctx, c, h.kgService, rows) {
+			return
+		}
 	}
 
 	logger.Infof(
@@ -1843,8 +1890,27 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		return
 	}
 
+	cascade, optionErr := cascadeChildrenOption(c)
+	if optionErr != nil {
+		_ = c.Error(optionErr)
+		return
+	}
+	ids := []string{id}
+	if cascade {
+		tree, ok := h.kgService.(interfaces.KnowledgeTreeService)
+		if !ok {
+			_ = c.Error(errors.NewServiceUnavailableError("knowledge tree unavailable"))
+			return
+		}
+		ids, err = tree.PrepareKnowledgeCascade(effCtx, effectiveTenantID, knowledge.KnowledgeBaseID, ids, false)
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+
 	logger.Infof(ctx, "Enqueuing knowledge delete, ID: %s", secutils.SanitizeForLog(id))
-	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, knowledge.KnowledgeBaseID, []string{id})
+	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, knowledge.KnowledgeBaseID, ids, cascade)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue delete task"))
@@ -1863,6 +1929,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 
 // BatchDeleteKnowledgeRequest is the body schema for POST /knowledge/batch-delete.
 type BatchDeleteKnowledgeRequest struct {
+	CascadeChildren bool `json:"cascade_children,omitempty"`
 	// Knowledge base the documents belong to.
 	KBID string `json:"kb_id" binding:"required" extensions:"x-agent=knowledge_base_id"`
 	// Documents to delete.
@@ -1945,7 +2012,20 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, ids)
+	if req.CascadeChildren {
+		tree, ok := h.kgService.(interfaces.KnowledgeTreeService)
+		if !ok {
+			_ = c.Error(errors.NewServiceUnavailableError("knowledge tree unavailable"))
+			return
+		}
+		ids, err = tree.PrepareKnowledgeCascade(ctx, effectiveTenantID, kbID, ids, false)
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, ids, req.CascadeChildren)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
@@ -2251,6 +2331,9 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))
 
+	if !expandKnowledgeRows(ctx, c, h.kgService, knowledges) {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledges,
@@ -2975,6 +3058,9 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
 			return
 		}
+		if !expandKnowledgeRows(ctx, c, h.kgService, knowledges) {
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success":  true,
 			"data":     knowledges,
@@ -3000,6 +3086,9 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
 			return
 		}
+		if !expandKnowledgeRows(ctx, c, h.kgService, knowledges) {
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success":  true,
 			"data":     knowledges,
@@ -3017,6 +3106,9 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
+	if !expandKnowledgeRows(ctx, c, h.kgService, knowledges) {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":  true,
 		"data":     knowledges,
@@ -3180,6 +3272,13 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 			)
 			return
 		}
+		if tree, ok := h.kgService.(interfaces.KnowledgeTreeService); ok {
+			if err := tree.CheckKnowledgeTreeMove(ctx, tenantID.(uint64), kID, req.TargetKBID); err != nil {
+				_ = c.Error(err)
+				return
+			}
+		}
+
 		if knowledge.ParseStatus != types.ParseStatusCompleted {
 			c.Error(errors.NewBadRequestError(fmt.Sprintf("Knowledge item %s is not in completed status (current: %s)", kID, knowledge.ParseStatus)))
 			return

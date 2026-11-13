@@ -18,6 +18,11 @@ import (
 func transferFixture(t *testing.T, operation access.KBTransferOperation) *documentWriteFixture {
 	t.Helper()
 	f := newDocumentWriteFixture(t)
+	// Native child admission and moving claims serialize on the real KB row.
+	require.NoError(t, f.db.Exec(`
+		CREATE TABLE knowledge_bases(id TEXT PRIMARY KEY,tenant_id BIGINT,deleted_at DATETIME);
+		INSERT INTO knowledge_bases VALUES ('kb',7,NULL),('other',7,NULL)
+	`).Error)
 	require.NoError(t, f.db.AutoMigrate(&types.Tenant{}))
 	require.NoError(t, f.db.Create(&types.Tenant{ID: 7, Name: "tenant", StorageUsed: 5}).Error)
 	require.NoError(

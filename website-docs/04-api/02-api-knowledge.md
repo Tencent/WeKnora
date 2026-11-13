@@ -400,6 +400,8 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API
 
 用途：创建手工（Markdown）知识。权限/API key 同上。
 
+file/URL/manual 上传支持可选顶层 `parent_knowledge_id`，查询可展开子孙，删除可选级联，详见[父子知识参数](./11-api-knowledge-hierarchy.md)。
+
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `title` | string | 否 | 标题 |

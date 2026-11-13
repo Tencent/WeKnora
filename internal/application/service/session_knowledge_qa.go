@@ -907,7 +907,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 	applyKnowledgeSearchOverrides(chatManage, opts)
 
-	results, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets))
+	results, treeDiag, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -940,7 +940,11 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base search completed, found %d results, rerank outcome: %s",
 		len(results), diag.Outcome)
-	return &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag}}, nil
+	if opts.ChildrenDepth != 0 && treeDiag == nil {
+		treeDiag = &types.KnowledgeTreeDiagnostics{}
+	}
+	response := &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag, Tree: treeDiag}}
+	return response, nil
 }
 
 // applyKnowledgeSearchOverrides applies the caller's knowledge-search
@@ -977,10 +981,11 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	targetCount int,
-) ([]*types.SearchResult, error) {
+	opts *types.KnowledgeSearchOptions,
+) ([]*types.SearchResult, *types.KnowledgeTreeDiagnostics, error) {
 	if targetCount == 0 {
 		logger.Warn(ctx, "No search targets available, returning empty results")
-		return []*types.SearchResult{}, nil
+		return []*types.SearchResult{}, nil, nil
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
@@ -993,7 +998,17 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 
 	logger.Infof(ctx, "Trigger search event list: %v", searchEvents)
 
+	var treeDiag *types.KnowledgeTreeDiagnostics
+	var originalHits []*types.SearchResult
 	for _, event := range searchEvents {
+		if event == types.CHUNK_RERANK && opts != nil && opts.ChildrenDepth != 0 && chatManage.RerankModelID != "" {
+			originalHits = chatManage.SearchResult
+			var err error
+			treeDiag, err = s.expandSearchKnowledgeCandidates(ctx, chatManage, opts)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		logger.Infof(ctx, "Starting to trigger search event: %v", event)
 		stageCtx, stageSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 			Name: "pipeline." + string(event),
@@ -1009,19 +1024,28 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 		}
 		stageSpan.Finish(nil, nil, spanErr)
 
+		if event == types.CHUNK_RERANK && treeDiag != nil && chatManage.RerankDiagnostics != nil {
+			treeDiag.Applied = chatManage.RerankDiagnostics.Applied
+			if !treeDiag.Applied {
+				// A provider error must not promote unscored structural additions
+				// into the normal retrieval fallback.
+				chatManage.SearchResult, chatManage.RerankResult = originalHits, nil
+			}
+		}
+
 		if err == chatpipeline.ErrSearchNothing {
 			logger.Warnf(ctx, "Event %v triggered, search result is empty", event)
-			return []*types.SearchResult{}, nil
+			return []*types.SearchResult{}, treeDiag, nil
 		}
 
 		if err != nil {
 			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
 				event, err.ErrorType, err.Description, err.Err)
-			return nil, err.Err
+			return nil, treeDiag, err.Err
 		}
 		logger.Infof(ctx, "Event %v triggered successfully", event)
 	}
-	return chatManage.MergeResult, nil
+	return chatManage.MergeResult, treeDiag, nil
 }
 
 // handleFallbackResponse handles fallback response based on strategy

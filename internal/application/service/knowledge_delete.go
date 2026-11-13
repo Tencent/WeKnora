@@ -495,7 +495,8 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 				return err
 			}
 		}
-		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing {
+		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing ||
+			prev == types.ParseStatusDeleting {
 			inFlightIDs = append(inFlightIDs, knowledge.ID)
 		}
 	}
@@ -809,6 +810,21 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 			kbID = row.KnowledgeBaseID
 		}
 	}
+	if payload.CascadeChildren {
+		ids, err = s.PrepareKnowledgeCascade(ctx, payload.TenantID, kbID, ids, true)
+		if err != nil {
+			var appErr *apperrors.AppError
+			if errors.As(err, &appErr) &&
+				(appErr.HTTPCode == 400 || appErr.HTTPCode == 403 || appErr.HTTPCode == 404 || appErr.HTTPCode == 409) {
+				return fmt.Errorf("invalid cascade scope: %v: %w", err, asynq.SkipRetry)
+			}
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+	}
+
 	bindings := make(map[string]string, len(ids))
 	for _, id := range ids {
 		bindings[id] = kbID

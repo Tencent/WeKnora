@@ -1,0 +1,12 @@
+DROP TRIGGER IF EXISTS knowledge_native_deleting;
+DROP TRIGGER IF EXISTS knowledge_native_deleting_mark;
+DROP TRIGGER IF EXISTS knowledge_native_deleting_insert;
+DROP TRIGGER IF EXISTS knowledge_native_deleting_fence;
+DROP TRIGGER IF EXISTS knowledge_native_parent_hard_delete;
+DROP TRIGGER IF EXISTS knowledge_native_parent_delete;
+DROP TRIGGER IF EXISTS knowledge_native_parent_scope;
+DROP TRIGGER IF EXISTS knowledge_native_parent_update;
+DROP TRIGGER IF EXISTS knowledge_native_parent_insert;
+DROP INDEX IF EXISTS idx_knowledge_parent;
+ALTER TABLE knowledges DROP COLUMN parent_knowledge_id;
+ALTER TABLE knowledges DROP COLUMN deletion_pending;

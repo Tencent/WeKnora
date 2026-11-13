@@ -444,6 +444,7 @@ type KBDeletePayload struct {
 
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
 type KnowledgeListDeletePayload struct {
+	CascadeChildren bool `json:"cascade_children,omitempty"`
 	TracingContext
 	TenantID        uint64        `json:"tenant_id"`
 	KnowledgeIDs    []string      `json:"knowledge_ids"`

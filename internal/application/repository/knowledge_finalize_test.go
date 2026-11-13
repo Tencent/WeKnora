@@ -23,6 +23,7 @@ import (
 // processing/finalizing/completed columns the helpers care about.
 const knowledgesTestDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+	parent_knowledge_id TEXT,
     profile TEXT,
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,

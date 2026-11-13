@@ -37,7 +37,7 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool,
 	customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
-	replacement *knowledgeReplacement,
+	replacement *knowledgeReplacement, parentIDs ...string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -124,6 +124,10 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 		return nil, err
 	}
 	if exists {
+		if parentImportID(parentIDs) != "" && existingKnowledge.ParentKnowledgeID != parentImportID(parentIDs) {
+			return nil, werrors.NewConflictError("duplicate knowledge belongs to another parent; it was not reparented")
+		}
+
 		logger.Infof(ctx, "File already exists: %s", fileName)
 		// Update creation time for existing knowledge
 		if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
@@ -177,23 +181,24 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	// Prepare knowledge record
 	logger.Info(ctx, "Preparing knowledge record")
 	knowledge := &types.Knowledge{
-		ID:               uuid.New().String(),
-		TenantID:         tenantID,
-		KnowledgeBaseID:  kbID,
-		Type:             "file",
-		Channel:          defaultChannel(channel),
-		Title:            safeFilename,
-		FileName:         safeFilename,
-		FolderPath:       folderPath,
-		FileType:         getFileType(safeFilename),
-		FileSize:         file.Size,
-		FileHash:         hash,
-		ParseStatus:      "pending",
-		EnableStatus:     "disabled",
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		EmbeddingModelID: kb.EmbeddingModelID,
-		Metadata:         metadataJSON,
+		ParentKnowledgeID: parentImportID(parentIDs),
+		ID:                uuid.New().String(),
+		TenantID:          tenantID,
+		KnowledgeBaseID:   kbID,
+		Type:              "file",
+		Channel:           defaultChannel(channel),
+		Title:             safeFilename,
+		FileName:          safeFilename,
+		FolderPath:        folderPath,
+		FileType:          getFileType(safeFilename),
+		FileSize:          file.Size,
+		FileHash:          hash,
+		ParseStatus:       "pending",
+		EnableStatus:      "disabled",
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		EmbeddingModelID:  kb.EmbeddingModelID,
+		Metadata:          metadataJSON,
 	}
 
 	if processOverrides != nil {
@@ -215,7 +220,7 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 
 	// Save knowledge record to database after the file is safely stored.
 	logger.Info(ctx, "Saving knowledge record to database")
-	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement); err != nil {
+	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement, tagIDs...); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
 		if replacement == nil || !replacement.keepFile {
 			if deleteErr := fileSvc.DeleteFile(context.WithoutCancel(ctx), filePath); deleteErr != nil {
@@ -334,7 +339,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool,
 	title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
-	replacement *knowledgeReplacement,
+	replacement *knowledgeReplacement, parentIDs ...string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
@@ -343,7 +348,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 	if isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURLWithReplacement(
 			ctx, kbID, rawURL, fileName, fileType, enableMultimodel,
-			title, tagIDs, channel, processOverrides, replacement,
+			title, tagIDs, channel, processOverrides, replacement, parentIDs...,
 		)
 	}
 
@@ -389,6 +394,10 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 	if exists {
+		if parentImportID(parentIDs) != "" && existingKnowledge.ParentKnowledgeID != parentImportID(parentIDs) {
+			return nil, werrors.NewConflictError("duplicate knowledge belongs to another parent; it was not reparented")
+		}
+
 		logger.Infof(ctx, "URL already exists: %s", url)
 		// Update creation time for existing knowledge
 		existingKnowledge.CreatedAt = time.Now()
@@ -410,20 +419,21 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 	// Create knowledge record
 	logger.Info(ctx, "Creating knowledge record")
 	knowledge := &types.Knowledge{
-		ID:               uuid.New().String(),
-		TenantID:         tenantID,
-		KnowledgeBaseID:  kbID,
-		Type:             "url",
-		Channel:          defaultChannel(channel),
-		Title:            title,
-		Source:           url,
-		FileType:         "html",
-		FileHash:         fileHash,
-		ParseStatus:      "pending",
-		EnableStatus:     "disabled",
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		EmbeddingModelID: kb.EmbeddingModelID,
+		ParentKnowledgeID: parentImportID(parentIDs),
+		ID:                uuid.New().String(),
+		TenantID:          tenantID,
+		KnowledgeBaseID:   kbID,
+		Type:              "url",
+		Channel:           defaultChannel(channel),
+		Title:             title,
+		Source:            url,
+		FileType:          "html",
+		FileHash:          fileHash,
+		ParseStatus:       "pending",
+		EnableStatus:      "disabled",
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		EmbeddingModelID:  kb.EmbeddingModelID,
 	}
 
 	// Save knowledge record
@@ -433,7 +443,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 
-	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement); err != nil {
+	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement, tagIDs...); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
@@ -551,7 +561,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 	ctx context.Context, kbID, fileURL, fileName, fileType string,
 	enableMultimodel *bool, title string, tagIDs []string, channel string,
-	processOverrides *types.KnowledgeProcessOverrides, replacement *knowledgeReplacement,
+	processOverrides *types.KnowledgeProcessOverrides, replacement *knowledgeReplacement, parentIDs ...string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
@@ -629,6 +639,10 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		return nil, err
 	}
 	if exists {
+		if parentImportID(parentIDs) != "" && existingKnowledge.ParentKnowledgeID != parentImportID(parentIDs) {
+			return nil, werrors.NewConflictError("duplicate knowledge belongs to another parent; it was not reparented")
+		}
+
 		logger.Infof(ctx, "File URL already exists: %s", fileURL)
 		existingKnowledge.CreatedAt = time.Now()
 		existingKnowledge.UpdatedAt = time.Now()
@@ -648,21 +662,22 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 
 	// Create knowledge record
 	knowledge := &types.Knowledge{
-		ID:               uuid.New().String(),
-		TenantID:         tenantID,
-		KnowledgeBaseID:  kbID,
-		Type:             "file_url",
-		Channel:          defaultChannel(channel),
-		Title:            title,
-		FileName:         displayName,
-		FileType:         fileType,
-		Source:           fileURL,
-		FileHash:         fileHash,
-		ParseStatus:      "pending",
-		EnableStatus:     "disabled",
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-		EmbeddingModelID: kb.EmbeddingModelID,
+		ParentKnowledgeID: parentImportID(parentIDs),
+		ID:                uuid.New().String(),
+		TenantID:          tenantID,
+		KnowledgeBaseID:   kbID,
+		Type:              "file_url",
+		Channel:           defaultChannel(channel),
+		Title:             title,
+		FileName:          displayName,
+		FileType:          fileType,
+		Source:            fileURL,
+		FileHash:          fileHash,
+		ParseStatus:       "pending",
+		EnableStatus:      "disabled",
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		EmbeddingModelID:  kb.EmbeddingModelID,
 	}
 	if knowledge.Title == "" {
 		knowledge.Title = displayName
@@ -679,7 +694,7 @@ func (s *knowledgeService) createKnowledgeFromFileURLWithReplacement(
 		}
 	}
 
-	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement); err != nil {
+	if err := s.persistKnowledgeForCreation(ctx, knowledge, replacement, tagIDs...); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
@@ -850,14 +865,32 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		}
 	}
 
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
+	if err := s.validateImportParent(ctx, kbID, payload.ParentKnowledgeID); err != nil {
 		return nil, err
 	}
-	// Set tag relations
-	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, payload.TagIDs); err != nil {
-		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
-		return nil, err
+	knowledge.ParentKnowledgeID = payload.ParentKnowledgeID
+	if knowledge.ParentKnowledgeID != "" {
+		if err := s.validateKnowledgeTagIDs(ctx, tenantID, kbID, payload.TagIDs); err != nil {
+			return nil, err
+		}
+		r, ok := s.repo.(interfaces.KnowledgeTreeRepository)
+		if !ok {
+			return nil, werrors.NewServiceUnavailableError("parent repository unavailable")
+		}
+		if err := r.CreateKnowledgeWithParent(ctx, knowledge, payload.TagIDs...); err != nil {
+			logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
+			return nil, err
+		}
+		s.attachTagsToKnowledge(ctx, knowledge)
+	} else {
+		if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+			logger.Errorf(ctx, "Failed to create manual knowledge record: %v", err)
+			return nil, err
+		}
+		if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, payload.TagIDs); err != nil {
+			logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+			return nil, err
+		}
 	}
 
 	// Claim the body's files immediately, before publishing. A draft saved from
@@ -1040,6 +1073,9 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return nil, werrors.NewBadRequestError("请求内容不能为空")
 	}
 
+	if payload.ParentKnowledgeID != "" {
+		return nil, werrors.NewBadRequestError("parent_knowledge_id is create-only")
+	}
 	cleanContent := secutils.CleanMarkdown(payload.Content)
 	if strings.TrimSpace(cleanContent) == "" {
 		return nil, werrors.NewValidationError("内容不能为空")

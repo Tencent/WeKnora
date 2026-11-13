@@ -1292,6 +1292,10 @@ func (s *knowledgeService) moveOneKnowledge(
 	if err := validateMoveItem(ctx, knowledge, sourceKB, targetKB, mode); err != nil {
 		return err
 	}
+	if err := s.CheckKnowledgeTreeMove(ctx, tenantID, knowledgeID, targetKB.ID); err != nil {
+		return err
+	}
+
 	copyOfKnowledge := *knowledge
 	knowledge = &copyOfKnowledge
 	state, err := transferState(knowledge)
