@@ -26,7 +26,9 @@ func (s *recordingMCPService) ListMCPServices(_ context.Context, _ uint64) ([]*t
 	return nil, nil
 }
 
-func (s *recordingMCPService) ListMCPServicesByIDs(_ context.Context, _ uint64, ids []string) ([]*types.MCPService, error) {
+func (s *recordingMCPService) ListMCPServicesByIDs(
+	_ context.Context, _ uint64, ids []string,
+) ([]*types.MCPService, error) {
 	s.listByIDs = append([]string(nil), ids...)
 	return nil, nil
 }
