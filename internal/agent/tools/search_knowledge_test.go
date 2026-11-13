@@ -308,7 +308,7 @@ func TestFormatWithinBudgetKeepsRankedRows(t *testing.T) {
 			KnowledgeBaseID: "kb-1",
 		}
 	}
-	ctx := WithOutputBudget(context.Background(), 5000)
+	ctx := WithOutputBudget(context.Background(), 24000)
 
 	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "q", SearchModeHybrid)
 	rows, _ := res.Data["results"].([]map[string]interface{})
@@ -318,8 +318,8 @@ func TestFormatWithinBudgetKeepsRankedRows(t *testing.T) {
 	if rows[0]["chunk_id"] != "c0" {
 		t.Fatalf("best row not kept first: %v", rows[0]["chunk_id"])
 	}
-	if n := utf8.RuneCountInString(res.Output); n > 4000 {
-		t.Fatalf("output has %d runes, over the 4000-rune share of the budget", n)
+	if n := utf8.RuneCountInString(res.Output); n > 19200 {
+		t.Fatalf("output has %d runes, over the 19200-rune share of the budget", n)
 	}
 
 	// A single row is always kept, even over budget.
@@ -341,13 +341,13 @@ func TestFormatWithinBudgetKeepsRankedRowsAndExcerptsLongBodies(t *testing.T) {
 			KnowledgeBaseID: "kb-1",
 		}
 	}
-	ctx := WithOutputBudget(context.Background(), 5000)
+	ctx := WithOutputBudget(context.Background(), 24000)
 
 	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "q", SearchModeHybrid)
 	rows, _ := res.Data["results"].([]map[string]interface{})
 	require.Equal(t, 10, len(rows), "all reranked rows must remain discoverable")
 	require.Zero(t, omitted)
-	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 4000)
+	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 19200)
 	for i, row := range rows {
 		require.Equal(t, fmt.Sprintf("chunk-%d", i), row["chunk_id"])
 		excerpt, _ := row["content_excerpt"].(bool)
@@ -356,6 +356,28 @@ func TestFormatWithinBudgetKeepsRankedRowsAndExcerptsLongBodies(t *testing.T) {
 	}
 	require.Contains(t, res.Output, `excerpt="true"`)
 	require.Contains(t, res.Output, "chunk-9")
+}
+
+func TestFormatWithinBudgetCompactsSnippetsBeforeDroppingRows(t *testing.T) {
+	tool := &SearchKnowledgeTool{}
+	results := make([]*searchResultWithMeta, 10)
+	for i := range results {
+		results[i] = &searchResultWithMeta{
+			SearchResult: &types.SearchResult{
+				ID: fmt.Sprintf("tiny-%d", i), KnowledgeID: "doc", ChunkIndex: i,
+				Content: "one two three four five six seven eight nine ten " + strings.Repeat("context ", 80),
+				Score:   1 - float64(i)/100,
+			},
+			KnowledgeBaseID: "kb-1",
+		}
+	}
+	ctx := WithOutputBudget(context.Background(), 5000)
+
+	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "six", SearchModeHybrid)
+	rows, _ := res.Data["results"].([]map[string]interface{})
+	require.Len(t, rows, 10, "snippet compaction must not drop ranked handles")
+	require.Zero(t, omitted)
+	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 4000)
 }
 
 func TestFormatWithinBudgetKeepsChunkHandleWhenNoBodyBudgetRemains(t *testing.T) {

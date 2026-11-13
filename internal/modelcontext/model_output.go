@@ -412,7 +412,8 @@ func annotateSearchNotes(output string, data map[string]interface{}) string {
 	shown := intValue(data, "retrieval_shown")
 	candidates := intValue(data, "retrieval_candidates")
 	truncated := shown > 0 && candidates > shown
-	if (omitted <= 0 && len(failures) == 0 && !truncated) || !strings.HasSuffix(output, "</retrieval>") {
+	if (omitted <= 0 && excerpted <= 0 && len(failures) == 0 && !truncated) ||
+		!strings.HasSuffix(output, "</retrieval>") {
 		return output
 	}
 	var b strings.Builder
