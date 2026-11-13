@@ -1139,6 +1139,12 @@ func (t *SearchKnowledgeTool) formatOutput(
 		} else {
 			row["chunk_id"] = result.ID
 			row["chunk_index"] = result.ChunkIndex
+			if result.KnowledgeFilename != "" {
+				row["knowledge_filename"] = result.KnowledgeFilename
+			}
+			if len(result.SourceLocators) > 0 {
+				row["source_locators"] = result.SourceLocators
+			}
 		}
 		formattedResults = append(formattedResults, row)
 	}

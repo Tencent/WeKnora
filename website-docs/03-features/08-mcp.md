@@ -127,6 +127,8 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 `search_knowledge` 的结构化结果 `results[].chunk_type` 和文本结果的 `chunk_type` 属性保留命中片段的原始类型，例如 `text`、`summary`、`image_ocr`、`image_caption` 或 `image_vector`。空字符串表示类型未知，不能据此认定为原文；客户端可据类型决定是否补读文档正文。
 
+外部客户端可以直接用 `search_knowledge` 的 `structuredContent.results` 生成来源引用。文档分块包含 `knowledge_id`、`knowledge_title` 和 `chunk_id`，有原始文件名或解析定位时还分别返回 `knowledge_filename` 和 `source_locators`（例如 `[{"type":"pdf","page":3}]`）。定位取决于原始格式和解析器，缺少信息时省略相应字段。引用这些结果无需调用 `ask`。
+
 现有 MCP 工具的返回结果会复用 REST/IM 的资源链接转换：正文、Wiki 内容以及结构化数据中的图片引用，都会在权限校验后转换为可直接访问的 HTTP(S) 链接，不需要新增工具或修改端点工具清单。`ask` 的 `references[].images` 保留图片 URL、caption 和 OCR 文本，文本引用列表也包含图片链接，避免正文摘要截断后丢失图片信息。
 
 本地或私有存储请配置外部客户端可访问的 `APP_EXTERNAL_URL`，并确保反向代理转发 `/r/`。`resource://` 图片沿用有时效的 `/r/<token>` 链接；其他存储地址使用对应存储服务生成的 HTTP(S) URL。一次工具调用中同一资源只转换一次，返回链接不写回文档或会话记录。无法生成可访问链接时保留原引用，不中断文本结果。
