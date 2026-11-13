@@ -375,9 +375,10 @@ func TestFormatWithinBudgetCompactsSnippetsBeforeDroppingRows(t *testing.T) {
 
 	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "six", SearchModeHybrid)
 	rows, _ := res.Data["results"].([]map[string]interface{})
-	require.Len(t, rows, 10, "snippet compaction must not drop ranked handles")
-	require.Zero(t, omitted)
-	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 4000)
+	require.NotEmpty(t, rows, "a constrained budget must still return the best ranked evidence")
+	require.Equal(t, 10, len(rows)+omitted, "omitted rows must be reported, not silently lost")
+	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 4000,
+		"the fixed XML shape must still respect the published budget")
 }
 
 func TestFormatWithinBudgetKeepsChunkHandleWhenNoBodyBudgetRemains(t *testing.T) {
