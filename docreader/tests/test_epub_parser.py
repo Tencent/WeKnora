@@ -197,6 +197,34 @@ def _epub_with_encoded_chapter(encoding: str, *, missing_navigation: bool) -> by
 
 
 class EPUBParserTest(unittest.TestCase):
+    def test_extracts_designated_cover_referenced_by_chapter(self):
+        image = BytesIO()
+        Image.new("RGB", (1, 1), "red").save(image, format="JPEG")
+        cover_bytes = image.getvalue()
+        book = epub.EpubBook()
+        book.set_identifier("designated-cover")
+        book.set_title("Book with a cover")
+        book.set_language("en")
+        book.set_cover("images/cover.jpg", cover_bytes, create_page=False)
+        chapter = epub.EpubHtml(title="Chapter", file_name="chapter.xhtml", lang="en")
+        chapter.content = '<img src="images/cover.jpg" alt="Front cover"/>'
+        book.add_item(chapter)
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        book.toc = (chapter,)
+        book.spine = [chapter]
+        output = BytesIO()
+        epub.write_epub(output, book)
+
+        document = EPUBParser(file_name="cover.epub").parse_into_text(
+            output.getvalue()
+        )
+
+        self.assertEqual(document.metadata["image_count"], 1)
+        [(path, encoded)] = document.images.items()
+        self.assertEqual(base64.b64decode(encoded), cover_bytes)
+        self.assertIn(f"![Front cover]({path})", document.content)
+
     def test_zip_recovery_decodes_unicode_chapters(self):
         for encoding in ("utf-8", "utf-8-sig", "utf-16-le", "utf-16-be"):
             for extract_images in (False, True):
