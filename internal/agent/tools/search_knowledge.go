@@ -489,8 +489,6 @@ func (t *SearchKnowledgeTool) fitSearchResultsToBudget(
 	// handle survives; bodies then receive whatever budget remains.
 	if fixedCost > budget {
 		fixedViews = t.compactSearchSnippets(ctx, fixedViews, kbIDs, query, mode, budget)
-		fixed = t.formatOutput(ctx, fixedViews, kbIDs, query, mode)
-		fixedCost = utf8.RuneCountInString(fixed.Output)
 	}
 	// Measure the exact final shape with an empty body. This includes the
 	// per-row tags, escaped metadata, snippets and the empty content element;
