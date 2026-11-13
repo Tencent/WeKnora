@@ -361,8 +361,18 @@ func TestFormatWithinBudgetKeepsRankedRowsAndExcerptsLongBodies(t *testing.T) {
 func TestFormatWithinBudgetKeepsChunkHandleWhenNoBodyBudgetRemains(t *testing.T) {
 	tool := &SearchKnowledgeTool{}
 	results := []*searchResultWithMeta{
-		{SearchResult: &types.SearchResult{ID: "best", KnowledgeID: "doc", Content: strings.Repeat("x", 100), Score: 1}, KnowledgeBaseID: "kb"},
-		{SearchResult: &types.SearchResult{ID: "second", KnowledgeID: "doc", Content: strings.Repeat("y", 100), Score: 0.5}, KnowledgeBaseID: "kb"},
+		{
+			SearchResult: &types.SearchResult{
+				ID: "best", KnowledgeID: "doc", Content: strings.Repeat("x", 100), Score: 1,
+			},
+			KnowledgeBaseID: "kb",
+		},
+		{
+			SearchResult: &types.SearchResult{
+				ID: "second", KnowledgeID: "doc", Content: strings.Repeat("y", 100), Score: 0.5,
+			},
+			KnowledgeBaseID: "kb",
+		},
 	}
 	views := tool.fitSearchResultsToBudget(context.Background(), results, []string{"kb"}, "q", SearchModeHybrid, 1)
 	require.Len(t, views, 2, "even a zero body allocation must retain metadata and handles")
