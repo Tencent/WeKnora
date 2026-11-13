@@ -3,6 +3,8 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -51,7 +53,7 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 
 		var val interface{}
 		decoder := json.NewDecoder(bytes.NewReader(rawVal))
-		if targetType == "string" {
+		if targetType == "string" || targetType == "integer" {
 			// A numeric identifier must reach the tool as the original literal,
 			// not a rounded float64 string. Keep other conversions unchanged.
 			decoder.UseNumber()
@@ -62,7 +64,7 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		// Integer literals already have the requested JSON representation. A
 		// float64-to-int64 round trip would corrupt values above 2^53. Keep
 		// decimal/exponent notation on the existing normalization path.
-		if _, isNumber := val.(float64); isNumber && targetType == "integer" &&
+		if _, isNumber := val.(json.Number); isNumber && targetType == "integer" &&
 			!strings.ContainsAny(string(rawVal), ".eE") {
 			continue
 		}
@@ -130,6 +132,9 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 		}
 
 	case "integer":
+		if number, ok := val.(json.Number); ok {
+			return castIntegerNumber(number)
+		}
 		if s, ok := val.(string); ok {
 			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 				return i, true
@@ -176,4 +181,28 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	}
 
 	return val, false
+}
+
+// castIntegerNumber normalizes decimal/exponent notation only when the exact
+// value is an int64. A float64 round trip can change IDs above 2^53, round
+// fractions into integers, or move out-of-range values onto the int64 boundary.
+func castIntegerNumber(number json.Number) (interface{}, bool) {
+	// Reject clearly fractional or out-of-range magnitudes before constructing
+	// a rational. In particular, tiny exponents must not allocate huge denominators.
+	f, err := number.Float64()
+	if err != nil || math.Trunc(f) != f {
+		return number, false
+	}
+	if f == 0 {
+		mantissa, _, _ := strings.Cut(strings.ToLower(number.String()), "e")
+		if strings.ContainsAny(mantissa, "123456789") {
+			return number, false // a nonzero fraction underflowed to zero
+		}
+		return int64(0), true
+	}
+	exact, ok := new(big.Rat).SetString(number.String())
+	if !ok || !exact.IsInt() || !exact.Num().IsInt64() {
+		return number, false
+	}
+	return exact.Num().Int64(), true
 }
