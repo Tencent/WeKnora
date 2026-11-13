@@ -71,7 +71,10 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 			return nil, err
 		}
 		out := &types.RetrievalResult{Results: results}
-		if params.Rerank != nil {
+		if params.ChildrenDepth != 0 {
+			out.Meta.Tree = &types.KnowledgeTreeDiagnostics{}
+		}
+		if params.Rerank != nil || params.ChildrenDepth != 0 {
 			out.Meta.Rerank = &types.RerankDiagnostics{
 				Outcome:        types.RerankOutcomeDisabled,
 				CandidateCount: len(results),
@@ -115,6 +118,9 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 		EffectiveThreshold: threshold,
 	}
 	out := &types.RetrievalResult{Meta: types.RetrievalMeta{Rerank: diag}}
+	if params.ChildrenDepth != 0 {
+		out.Meta.Tree = &types.KnowledgeTreeDiagnostics{}
+	}
 
 	// Recall at least as deep as the rerank asks for: with match_count=5 and
 	// rerank.top_k=200 the pool used to stop at the 50-hit floor.
@@ -132,10 +138,38 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	baseCount := len(candidates)
+	originalCandidates := candidates
+	canExpand := modelID != "" && params.ChildrenDepth != 0
+	if canExpand {
+		_, modelErr := s.modelService.GetRerankModel(modelCtx, modelID)
+		canExpand = modelErr == nil
+	}
+	if canExpand {
+		candidates, out.Meta.Tree, err = s.hybridRerankTree(ctx, id, params, candidates)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Enrichment hydrates only IDs in the pool; keep the real added chunks
+	// there too, so a parent/sibling selected by the model is not discarded.
+	pool = append([]*types.IndexWithScore(nil), pool...)
+	for _, row := range candidates[baseCount:] {
+		pool = append(pool, &types.IndexWithScore{
+			ChunkID: row.ID, KnowledgeID: row.KnowledgeID, KnowledgeBaseID: row.KnowledgeBaseID,
+			Content: row.Content, MatchType: row.MatchType, IsEnabled: true,
+		})
+	}
 	diag.CandidateCount = len(candidates)
 
 	final := s.rerankCandidates(modelCtx, modelID, params.QueryText, candidates, threshold, topK,
 		reranking.ImageKeepScoreFor(params.VectorThreshold), diag)
+	if out.Meta.Tree != nil {
+		out.Meta.Tree.Applied = canExpand && diag.Applied
+		if !diag.Applied {
+			final = originalCandidates[:min(len(originalCandidates), topK)]
+		}
+	}
 	diag.ResultCount = len(final)
 	logger.Infof(ctx, "Hybrid search rerank: kb=%s model=%s(%s) outcome=%s candidates=%d results=%d",
 		secutils.SanitizeForLog(id), modelID, modelSource, diag.Outcome, len(candidates), len(final))

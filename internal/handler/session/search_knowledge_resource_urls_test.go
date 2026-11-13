@@ -169,7 +169,7 @@ func TestSearchKnowledge_ChildrenOptionsFromJSON(t *testing.T) {
 	require.Equal(t, 25, svc.lastOpts.ChildrenLimit)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Contains(t, body, "expanded")
+	require.NotContains(t, body, "expanded", "candidate expansion must happen before rerank")
 }
 
 func TestSearchKnowledge_RejectsInvalidOverrides(t *testing.T) {

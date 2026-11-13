@@ -40,17 +40,32 @@ func TestNativeKnowledgeHybridExpansionKeepsScoredHits(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, 200, w.Code, w.Body.String())
-	require.True(t, tree.called)
-	require.Equal(t, 2, tree.options.Depth)
+
+	require.False(t, tree.called, "handler must not expand again after rerank")
+	require.Equal(t, 1, svc.rerankCalls)
+	require.Equal(t, 2, svc.searchParams.ChildrenDepth)
+	require.Equal(t, 200, svc.searchParams.ChildrenLimit)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.NotContains(t, body, "expanded")
 	data := body["data"].([]any)
 	require.Len(t, data, 1)
-	require.Equal(t, 0.83, data[0].(map[string]any)["score"])
-	require.Equal(t, "hit", data[0].(map[string]any)["id"])
-	expanded := body["expanded"].([]any)
-	require.Len(t, expanded, 1)
-	require.NotContains(t, expanded[0].(map[string]any), "score")
+	require.Equal(t, "c1", data[0].(map[string]any)["id"])
+}
+
+func TestNativeKnowledgeHybridQueryZeroOverridesBodyExpansion(t *testing.T) {
+	svc := &hybridSearchTestService{}
+	r := newHybridSearchTestRouter(svc)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb/hybrid-search?children_depth=0",
+		strings.NewReader(`{"query_text":"question","children_depth":2,"children_limit":20}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, 1, svc.searchCalls)
+	require.Zero(t, svc.rerankCalls)
+	require.Zero(t, svc.searchParams.ChildrenDepth)
+	require.NotContains(t, w.Body.String(), `"expanded"`)
 }
 
 func (s *nativeTreeHandlerStub) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
@@ -252,80 +267,6 @@ func TestNativeKnowledgeHTTPUploadTopLevelParent(t *testing.T) {
 			require.Equal(t, 200, w.Code, w.Body.String())
 			require.Equal(t, "parent", svc.parent)
 			require.Contains(t, w.Body.String(), `"parent_knowledge_id":"parent"`)
-		})
-	}
-}
-
-type nativeMultiKBSearchStub struct {
-	*hybridSearchTestService
-	owners map[string]uint64
-}
-
-func (s *nativeMultiKBSearchStub) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
-	return &types.KnowledgeBase{ID: id, TenantID: s.owners[id]}, nil
-}
-
-func TestNativeKnowledgeHybridUsesEachAuthorizedHitKB(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		owner         uint64
-		keyRestricted bool
-		hitKB         string
-		ok            bool
-	}{
-		{"same tenant secondary KB", 1, false, "kb-b", true},
-		{"shared secondary KB", 8, false, "kb-b", true},
-		{"API key denies secondary KB", 1, true, "kb-b", false},
-		{"unexpected hit outside requested KBs", 1, false, "other", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-a/hybrid-search", nil)
-			ctx := types.WithCaller(
-				c.Request.Context(),
-				types.Caller{TenantID: 1, UserID: "viewer", Role: types.TenantRoleViewer},
-			)
-			if tc.keyRestricted {
-				ctx = types.WithTenantAPIKeyScope(
-					ctx,
-					types.TenantAPIKeyScope{KnowledgeBaseIDs: types.StringArray{"kb-a"}},
-				)
-			}
-			c.Request = c.Request.WithContext(types.WithExecutionTenant(ctx, 1))
-			tree := &nativeTreeHandlerStub{}
-			svc := &nativeMultiKBSearchStub{
-				hybridSearchTestService: &hybridSearchTestService{},
-				owners:                  map[string]uint64{"kb-b": tc.owner},
-			}
-			h := &KnowledgeBaseHandler{
-				service:          svc,
-				knowledgeService: tree,
-				kbShareService:   &downloadShareStub{permission: types.OrgRoleViewer},
-			}
-			hits := []*types.SearchResult{{ID: "hit-b", KnowledgeID: "doc-b", KnowledgeBaseID: tc.hitKB, Score: .83}}
-			response := gin.H{"data": hits}
-			ok := h.expandHybridChildren(
-				c,
-				1,
-				"kb-a",
-				hits,
-				response,
-				types.KnowledgeChildrenOptions{Depth: 2, Limit: 200},
-				[]string{"kb-a", "kb-b"},
-			)
-			require.Equal(t, tc.ok, ok)
-			require.Equal(t, tc.ok, tree.called)
-			if ok {
-				require.Equal(
-					t,
-					[]types.KnowledgeTreeRoot{{TenantID: tc.owner, KBID: "kb-b", KnowledgeID: "doc-b"}},
-					tree.roots,
-				)
-				require.Equal(t, .83, hits[0].Score)
-			} else {
-				require.NotEmpty(t, c.Errors)
-			}
 		})
 	}
 }

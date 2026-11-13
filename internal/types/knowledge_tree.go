@@ -14,6 +14,25 @@ const MaxKnowledgeChildren = 1000
 // KnowledgeChildrenOptions controls descendant expansion depth and response size.
 type KnowledgeChildrenOptions struct{ Depth, Limit int }
 
+// MaxKnowledgeTreePassages caps additional billed passages independently of the knowledge limit.
+const MaxKnowledgeTreePassages = 1000
+
+// KnowledgeTreeDiagnostics describes the bounded pre-rerank expansion, not vector recall success.
+type KnowledgeTreeDiagnostics struct {
+	Applied        bool `json:"applied"`
+	AddedKnowledge int  `json:"added_knowledge"`
+	AddedPassages  int  `json:"added_passages"`
+	Truncated      bool `json:"truncated"`
+}
+
+// KnowledgeTreePassage carries actual stored evidence and its structural provenance.
+type KnowledgeTreePassage struct {
+	Knowledge         *Knowledge
+	Chunk             *Chunk
+	AnchorKnowledgeID string
+	Depth             int
+}
+
 // ParseKnowledgeChildrenOptions validates the HTTP depth and limit parameters.
 func ParseKnowledgeChildrenOptions(depth, limit string) (KnowledgeChildrenOptions, error) {
 	o := KnowledgeChildrenOptions{Limit: 200}

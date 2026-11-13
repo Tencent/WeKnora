@@ -8,7 +8,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1046,23 +1045,6 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 
 	logger.Infof(ctx, "Knowledge search completed, found %d results", len(retrieval.Results))
 	response := gin.H{"success": true, "data": rewriter.CopyReferences(ctx, retrieval.Results), "meta": retrieval.Meta}
-	if opts.ChildrenDepth != 0 {
-		for i := range retrieval.Expanded {
-			u, _ := url.Parse(retrieval.Expanded[i].ContentURL)
-			q := u.Query()
-			for _, key := range []string{"agent_id", types.AgentSourceTenantIDParam} {
-				if value := c.Query(key); value != "" {
-					q.Set(key, value)
-				}
-			}
-			u.RawQuery = q.Encode()
-			retrieval.Expanded[i].ContentURL = u.String()
-		}
-		if retrieval.Expanded == nil {
-			retrieval.Expanded = []types.KnowledgeChild{}
-		}
-		response["expanded"] = retrieval.Expanded
-	}
 	c.JSON(http.StatusOK, response)
 }
 

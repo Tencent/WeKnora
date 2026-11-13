@@ -107,7 +107,8 @@ type RerankDiagnostics struct {
 // RetrievalMeta is the diagnostic envelope returned beside retrieval API
 // results.
 type RetrievalMeta struct {
-	Rerank *RerankDiagnostics `json:"rerank,omitempty"`
+	Rerank *RerankDiagnostics        `json:"rerank,omitempty"`
+	Tree   *KnowledgeTreeDiagnostics `json:"tree,omitempty"`
 }
 
 // RetrievalResult is a retrieval API result with its diagnostics.

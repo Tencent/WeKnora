@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### New Features
+
+- **Knowledge hierarchy** — create native parent links on existing upload APIs, read bounded descendants, and optionally cascade deletion. Retrieval can expand a hit's direct parent and descendants before the shared reranker, with configurable knowledge limits and passage-budget diagnostics.
+
 ## [0.9.0] - 2026-10-29
 
 Changes since v0.8.3. [Website release notes](./website-docs/07-releases/v0.9.0.md) · [Full comparison](https://github.com/Tencent/WeKnora/compare/v0.8.3...v0.9.0).

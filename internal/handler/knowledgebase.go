@@ -400,6 +400,10 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		_ = c.Error(apperrors.NewBadRequestError(childrenErr.Error()))
 		return
 	}
+	req.ChildrenDepth = childrenOptions.Depth
+	if childrenOptions.Depth != 0 {
+		req.ChildrenLimit = childrenOptions.Limit
+	}
 	precomputedVectorOnly := len(req.QueryEmbedding) > 0 && req.DisableKeywordsMatch && !req.DisableVectorMatch
 	if strings.TrimSpace(req.QueryText) == "" && !precomputedVectorOnly {
 		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
@@ -430,7 +434,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	// primitive it has always been; with one, the response carries meta.
 	// Note: For shared KBs, the service uses effectiveTenantID internally via context
 	var retrieval *types.RetrievalResult
-	if req.Rerank != nil {
+	if req.Rerank != nil || req.ChildrenDepth != 0 {
 		retrieval, err = h.service.HybridSearchWithRerank(c.Request.Context(), id, req)
 	} else {
 		var results []*types.SearchResult
@@ -458,13 +462,8 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		"success": true,
 		"data":    rewriter.CopyReferences(ctx, retrieval.Results),
 	}
-	if retrieval.Meta.Rerank != nil {
+	if retrieval.Meta.Rerank != nil || retrieval.Meta.Tree != nil {
 		response["meta"] = retrieval.Meta
-	}
-	if !h.expandHybridChildren(
-		c, effectiveTenantID, id, retrieval.Results, response, childrenOptions, req.KnowledgeBaseIDs,
-	) {
-		return
 	}
 	c.JSON(http.StatusOK, response)
 }
