@@ -123,12 +123,11 @@ class MHTMLParser(BaseParser):
                     continue
                 payload = payload or b""
                 charset = part.get_content_charset()
-                if charset:
-                    try:
-                        html_text = payload.decode(charset, errors="ignore")
-                    except LookupError:
-                        html_text = payload.decode("utf-8", errors="ignore")
-                else:
+                try:
+                    html_text = payload.decode(charset, errors="ignore") if charset else None
+                except LookupError:
+                    html_text = None
+                if html_text is None:
                     # Keep the bytes until HTML declarations and BOMs have
                     # been inspected; decoding as UTF-8 first loses text.
                     html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
