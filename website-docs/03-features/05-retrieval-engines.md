@@ -74,7 +74,28 @@ QDRANT_HOST=qdrant
 QDRANT_PORT=6334
 ```
 
-将 `DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWORD` 和 `DB_NAME` 指向业务库，并用 `docker compose --profile qdrant up -d` 启动。`qdrant:6334` 是 Compose 网络内的 gRPC 地址，使用独立部署的 Qdrant 时填入应用可访问的 gRPC 地址和对应认证设置。
+将 `DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWORD` 和 `DB_NAME` 指向业务库。`qdrant:6334` 是 Compose 网络内的 gRPC 地址，使用独立部署的 Qdrant 时填入应用可访问的 gRPC 地址和对应认证设置。
+
+在 `docker-compose.yml` 旁创建 `compose.managed-postgres.yml`。以下覆盖文件需要 Docker Compose 2.24.4 或更高版本。它将本地 ParadeDB 放入单独的 profile，并替换 `app` 的依赖列表，保留 Redis 和文档解析服务。
+
+```yaml
+services:
+  postgres:
+    profiles: [local-postgres]
+  app:
+    depends_on: !override
+      redis:
+        condition: service_started
+      docreader:
+        condition: service_healthy
+```
+
+仅启用 `qdrant` profile。先检查服务列表，确认包含 `app`、`redis`、`docreader`、`qdrant`，且没有 `postgres`。随后使用同一份覆盖文件启动。
+
+```bash
+docker compose -f docker-compose.yml -f compose.managed-postgres.yml --profile qdrant config --services
+docker compose -f docker-compose.yml -f compose.managed-postgres.yml --profile qdrant up -d
+```
 
 - `RETRIEVE_DRIVER` 必须排除 `postgres`。启动迁移会自动设置 `app.skip_embedding=true`，跳过 PostgreSQL 检索索引及其 `vector` 和 `pg_search` 扩展的初始化。
 - 业务库迁移仍需要 `uuid-ossp` 和 `pg_trgm`。如果应用账号无权创建扩展，由数据库管理员在目标库预先安装。这版应用的 PostgreSQL 连接使用 `sslmode=disable`，仅接受 TLS 连接的数据库不能按此示例直连。
