@@ -10,6 +10,28 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func TestWikiMutationToolsDecodeKnowledgeBaseSelection(t *testing.T) {
+	for _, name := range []string{
+		"wiki_write_page", "wiki_replace_text", "wiki_rename_page", "wiki_delete_page", "wiki_flag_issue",
+	} {
+		t.Run(name, func(t *testing.T) {
+			registry := NewRegistry(true)
+			handle := registry.RegisterKnowledgeBase("kb-real")
+			calls := []types.LLMToolCall{{Function: types.FunctionCall{
+				Name:      name,
+				Arguments: `{"knowledge_base_id":"` + handle + `","slug":"entity/da-zong-shi"}`,
+			}}}
+			registry.DecodeToolCalls(calls)
+			require.JSONEq(t,
+				`{"knowledge_base_id":"kb-real","slug":"entity/da-zong-shi"}`,
+				calls[0].Function.Arguments,
+			)
+			require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+			require.Empty(t, calls[0].UnresolvedHandles)
+		})
+	}
+}
+
 func TestRegistryOwnsEncodingOrderForSummarySlugs(t *testing.T) {
 	const knowledgeID = "36283d3d-a495-40d2-a13f-e925fc322996"
 	registry := NewRegistry(true)

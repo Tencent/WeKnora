@@ -31,6 +31,10 @@ func NewWikiDeletePageTool(
 			json.RawMessage(`{
 				"type": "object",
 				"properties": {
+					"knowledge_base_id": {
+						"type": "string",
+						"description": "Optional kb://N handle from search/read results to disambiguate the slug."
+					},
 					"slug": {
 						"type": "string",
 						"description": "The slug of the Wiki page to delete"
@@ -50,7 +54,8 @@ func (t *wikiDeletePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	// revision history distinguishes agent edits from pipeline/user ones.
 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
 	var params struct {
-		Slug string `json:"slug"`
+		KnowledgeBaseID string `json:"knowledge_base_id"`
+		Slug            string `json:"slug"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -69,8 +74,13 @@ func (t *wikiDeletePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	}
 	params.Slug = normalizedSlug
 
+	kbIDs, scopeErr := wikiMutationKBs(t.kbIDs, params.KnowledgeBaseID)
+	if scopeErr != nil {
+		return &types.ToolResult{Success: false, Error: scopeErr.Error()}, nil
+	}
+
 	// Fetch page to get its incoming links before deleting
-	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
+	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, kbIDs, t.routes)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to fetch page to delete: " + err.Error()}, nil
 	}
