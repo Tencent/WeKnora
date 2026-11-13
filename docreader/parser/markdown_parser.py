@@ -68,6 +68,66 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
     return "\n".join(out)
 
 
+_PARAGRAPH = re.compile(r"[^\n]+(?:\n(?![ \t]*(?:\n|$))[^\n]+)*")
+_BACKTICK_RUN = re.compile(r"`+")
+
+
+def _code_span_ranges(prose: str) -> List[Tuple[int, int]]:
+    """Return ``(start, end)`` offsets of inline code spans in ``prose``.
+
+    A span opens at a backtick run and closes at the next run of exactly the
+    same length inside the same paragraph; backslash-escaped backticks outside
+    a span do not open one.
+    """
+    spans: List[Tuple[int, int]] = []
+    for para in _PARAGRAPH.finditer(prose):
+        text, base, i = para.group(0), para.start(), 0
+        while i < len(text):
+            if text[i] == "\\":
+                i += 2
+                continue
+            if text[i] != "`":
+                i += 1
+                continue
+            opener = _BACKTICK_RUN.match(text, i)
+            assert opener is not None
+            size = len(opener[0])
+            close = next(
+                (
+                    run
+                    for run in _BACKTICK_RUN.finditer(text, opener.end())
+                    if len(run[0]) == size
+                ),
+                None,
+            )
+            if close is None:
+                i = opener.end()
+                continue
+            spans.append((base + i, base + close.end()))
+            i = close.end()
+    return spans
+
+
+def _sub_outside_code_spans(
+    pattern: "re.Pattern[str]", repl: Callable[[Match[str]], str], prose: str
+) -> str:
+    """Like ``pattern.sub`` but matches that start inside inline code are kept."""
+    spans = _code_span_ranges(prose)
+    out: List[str] = []
+    last = pos = 0
+    while (match := pattern.search(prose, pos)) is not None:
+        if any(a <= match.start() < b for a, b in spans):
+            pos = match.start() + 1
+            continue
+        out.append(prose[last : match.start()])
+        out.append(repl(match))
+        last = pos = match.end()
+        if match.end() == match.start():
+            pos += 1
+    out.append(prose[last:])
+    return "".join(out)
+
+
 class MarkdownTableUtil:
     """Utility class for formatting Markdown tables.
 
@@ -380,7 +440,7 @@ class MarkdownImageUtil:
         path_prefix: Optional[str] = None,
         replace: bool = True,
     ) -> Tuple[str, Dict[str, bytes]]:
-        """Extract and decode base64 embedded images outside fenced code.
+        """Extract and decode base64 embedded images outside code.
 
         This method finds all base64-encoded images in the Markdown content,
         decodes them to binary format, generates unique filenames, and
@@ -434,7 +494,8 @@ class MarkdownImageUtil:
             return f"![{title}]({image_path}{suffix})"
 
         text = _transform_outside_fences(
-            content, lambda prose: self.b64_pattern.sub(repl, prose)
+            content,
+            lambda prose: _sub_outside_code_spans(self.b64_pattern, repl, prose),
         )
         logger.debug(f"Extracted {len(images)} base64 images from markdown")
         return text, images
