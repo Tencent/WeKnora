@@ -315,7 +315,9 @@ OCR 的模型调用和输出校验分别记录处理状态。失败、截断或�
 
 `internal/types/knowledge.go`。关键字段：`type`（`manual` 手动 Markdown / `faq` / 文件类型）、`source` / `channel`（摄入渠道）、`parse_status`、`summary_status`、`enable_status`、`file_name/type/size/hash/path`、`storage_size`、`metadata`（JSON，手动知识存 `ManualKnowledgeMetadata{content, format, status(draft/publish), version}`）、`custom_metadata`（JSON，用户自填元数据）、`last_faq_import_result`。
 
-`custom_metadata` 保存用户维护的部门、密级、版本号等描述性字段；`metadata` 保存处理流程的内部状态与 ID。自定义元数据最多 20 项，键为 1–64 字符，值支持字符串、数字、布尔值或 null，长度不超过 1000 字符。修改后会自动刷新摘要。
+`custom_metadata` 保存用户维护的部门、密级、版本号等描述性字段；`metadata` 保存处理流程的内部状态与 ID。自定义元数据最多 20 项，非空白键为 1–64 字节，值支持字符串、数字、布尔值或 null，值转成字符串后不超过 1000 字节，不支持数组或嵌套对象。大整数 ID 应使用字符串。
+
+手工 Markdown 创建接口可直接携带 `custom_metadata`，与正文一并保存；省略或 null 时保存为空对象。后续正文编辑保留已有元数据；修改元数据仍使用 `PUT /knowledge/:id`，按原有规则触发摘要刷新。
 
 实现中，`Knowledge.CustomMetadataText()` 按键排序生成 `键: 值` 文本，供摘要生成和文档级模型上下文使用。字段由迁移 `000078` 引入。
 
@@ -357,7 +359,8 @@ stateDiagram-v2
 | DELETE | `/knowledge-bases/:id/knowledge` | 清空 KB 内容 | Admin + KBAccessWrite |
 | GET | `/knowledge/:id`、`/knowledge/batch` | 详情 / 批量获取 | Viewer+ |
 | GET | `/knowledge/:id/stages`、`/knowledge/:id/spans` | 处理阶段 / 跨度 | Viewer+ |
-| PUT / DELETE | `/knowledge/:id`、`/knowledge/manual/:id` | 更新（含 `custom_metadata`）/ 删除 | OwnedKnowledgeKBOrAdmin + KBAccessWrite |
+| PUT / DELETE | `/knowledge/:id` | 更新属性（含 `custom_metadata`）/ 删除 | OwnedKnowledgeKBOrAdmin + KBAccessWrite |
+| PUT | `/knowledge/manual/:id` | 更新完整 Markdown，保留已有 `custom_metadata`；元数据修改用上一行接口 | 同上 |
 | POST | `/knowledge/:id/reparse`、`/knowledge/:id/cancel-parse` | 重解析 / 取消解析 | 同上 |
 | POST | `/knowledge/:id/regenerate-summary` | 重新生成文档摘要 | 同上 |
 | GET | `/knowledge/:id/download` | 下载原始文件 | Contributor+ + KBAccessWrite |

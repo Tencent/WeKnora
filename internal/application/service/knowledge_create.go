@@ -777,6 +777,18 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		return nil, werrors.NewBadRequestError("请求内容不能为空")
 	}
 
+	var customMetadata types.JSON
+	if payload.CustomMetadata != nil {
+		custom, err := parseCustomMetadata(payload.CustomMetadata)
+		if err != nil {
+			return nil, werrors.NewValidationError(err.Error())
+		}
+		customMetadata = append(types.JSON(nil), payload.CustomMetadata...)
+		if custom == nil {
+			customMetadata = types.JSON(`{}`)
+		}
+	}
+
 	cleanContent := secutils.CleanMarkdown(payload.Content)
 	if strings.TrimSpace(cleanContent) == "" {
 		return nil, werrors.NewValidationError("内容不能为空")
@@ -833,6 +845,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		FileName:         fileName,
 		FileType:         types.KnowledgeTypeManual,
+		CustomMetadata:   customMetadata,
 	}
 	if err := knowledge.SetManualMetadata(meta); err != nil {
 		logger.Errorf(ctx, "Failed to set manual metadata: %v", err)
@@ -1038,6 +1051,9 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	logger.Info(ctx, "Start updating manual knowledge entry")
 	if payload == nil {
 		return nil, werrors.NewBadRequestError("请求内容不能为空")
+	}
+	if payload.CustomMetadata != nil {
+		return nil, werrors.NewBadRequestError("update custom_metadata using PUT /api/v1/knowledge/{id}")
 	}
 
 	cleanContent := secutils.CleanMarkdown(payload.Content)
