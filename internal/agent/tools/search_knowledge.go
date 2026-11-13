@@ -441,15 +441,6 @@ func (t *SearchKnowledgeTool) formatWithinBudget(
 }
 
 // fitSearchResultsToBudget returns copies of results whose Content fits the
-// supplied rune budget. It uses the same max-min fair allocation as other
-// batched tools: short rows keep their full body and the remaining budget is
-// shared by the long rows. The ranking order is preserved.
-//
-// The allocation is deliberately about body text only. A row that receives no
-// body budget stays in the list with its snippet and chunk handle, so the
-// model can still discover it and call read_document. The best row is always
-// retained even when the surrounding XML itself must be over budget.
-// fitSearchResultsToBudget returns copies of results whose Content fits the
 // supplied rune budget. The fixed metadata and match snippet are measured
 // first with the body suppressed; the remaining budget is then distributed
 // max-min fairly across the bodies. This keeps every ranked handle visible
