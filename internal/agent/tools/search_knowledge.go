@@ -492,10 +492,18 @@ func (t *SearchKnowledgeTool) fitSearchResultsToBudget(
 		fixed = t.formatOutput(ctx, fixedViews, kbIDs, query, mode)
 		fixedCost = utf8.RuneCountInString(fixed.Output)
 	}
-	// The body allocation is exact for the bodies themselves; reserve one rune
-	// per non-empty excerpt for its ellipsis so the final XML cannot overshoot
-	// solely because a fair cap was reached.
-	bodyBudget := max(budget-fixedCost-min(len(fixedViews), budget), 0)
+	// Measure the exact final shape with an empty body. This includes the
+	// per-row tags, escaped metadata, snippets and the empty content element;
+	// subtracting that from the budget is the only safe basis for body
+	// allocation. A small reserve covers one ellipsis per excerpted row.
+	finalShape := make([]*searchResultWithMeta, 0, len(fixedViews))
+	for _, view := range fixedViews {
+		copyResult := *view
+		copyResult.contentExcerpt = true
+		finalShape = append(finalShape, &copyResult)
+	}
+	shapeCost := utf8.RuneCountInString(t.formatOutput(ctx, finalShape, kbIDs, query, mode).Output)
+	bodyBudget := max(budget-shapeCost-min(len(finalShape), budget), 0)
 	sizes := make([]int, len(fixedViews))
 	for i, result := range fixedViews {
 		sizes[i] = len([]rune(result.snippetSource))
