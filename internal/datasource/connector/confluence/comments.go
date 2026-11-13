@@ -9,8 +9,22 @@ import (
 
 const commentsVersionPrefix = "comments:"
 
-type commentBody struct {
-	Value *string `json:"value"`
+type commentView struct {
+	Body struct {
+		View struct {
+			Value *string `json:"value"`
+		} `json:"view"`
+	} `json:"body"`
+}
+
+func (c *client) cloudCommentView(ctx context.Context, id string) (*string, error) {
+	// Cloud's bulk footer-comments endpoint does not support rendered view bodies.
+	var comment commentView
+	endpoint := "/api/v2/footer-comments/" + url.PathEscape(id) + "?body-format=view"
+	if err := c.get(ctx, endpoint, &comment); err != nil {
+		return nil, err
+	}
+	return comment.Body.View.Value, nil
 }
 
 // pageComments fetches top-level page comments. Keep the original document
@@ -24,7 +38,7 @@ func (c *client) pageComments(ctx context.Context, pageID string) (string, error
 	cloud := c.cfg.cloud()
 	if cloud {
 		path = "/api/v2/pages/" + url.PathEscape(pageID) + "/footer-comments"
-		query = url.Values{"limit": {"100"}, "body-format": {"storage"}, "status": {"current"}}
+		query = url.Values{"limit": {"100"}, "status": {"current"}}
 	}
 
 	var comments strings.Builder
@@ -33,11 +47,8 @@ func (c *client) pageComments(ctx context.Context, pageID string) (string, error
 	err := c.paginate(ctx, path+"?"+query.Encode(), func(endpoint string) (string, error) {
 		var result struct {
 			Results *[]struct {
-				ID   string `json:"id"`
-				Body struct {
-					View    commentBody `json:"view"`
-					Storage commentBody `json:"storage"`
-				} `json:"body"`
+				ID string `json:"id"`
+				commentView
 			} `json:"results"`
 			Links struct {
 				Next string `json:"next"`
@@ -57,18 +68,22 @@ func (c *client) pageComments(ctx context.Context, pageID string) (string, error
 			if len(seen) > maxTraversalNodes {
 				return "", fmt.Errorf("too many Confluence comments")
 			}
-			body := comment.Body.View
+			body := comment.Body.View.Value
 			if cloud {
-				body = comment.Body.Storage
+				rendered, err := c.cloudCommentView(ctx, comment.ID)
+				if err != nil {
+					return "", fmt.Errorf("get rendered Confluence comment %s: %w", comment.ID, err)
+				}
+				body = rendered
 			}
-			if body.Value == nil {
+			if body == nil {
 				return "", fmt.Errorf("confluence comment %s omitted its body", comment.ID)
 			}
-			bodyBytes += int64(len(*body.Value))
+			bodyBytes += int64(len(*body))
 			if bodyBytes > maxJSONResponseBytes {
 				return "", fmt.Errorf("confluence comments exceed %d MiB limit", maxJSONResponseBytes>>20)
 			}
-			markdown, err := convertPageHTML(*body.Value)
+			markdown, err := convertPageHTML(*body)
 			if err != nil {
 				return "", err
 			}
