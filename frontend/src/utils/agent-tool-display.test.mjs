@@ -7,6 +7,7 @@ import {
   getRagPipelineStepTitle,
   getWikiPageText,
 } from './agent-tool-display.ts'
+import { synthesizeRagPipelineToolEvents } from './rag-pipeline-history.ts'
 
 const t = (key, params) => {
   if (key === 'agentStream.search.foundResultsFromFiles') {
@@ -121,6 +122,22 @@ test('getKnowledgeSearchSummaryHtml omits a file count it cannot derive from res
     kb_counts: { a: 1, b: 2 },
   })
   assert.equal(html, 'agentStream.search.foundResults')
+})
+
+// History puts web hits in results (knowledge_id is the URL) and used to leave
+// them out of kb_counts. A mixed step must still count only documents.
+test('mixed history counts documents and skips web pages', () => {
+  const events = synthesizeRagPipelineToolEvents({
+    knowledge_references: [
+      { knowledge_id: 'doc-a', knowledge_title: '步步高-数学-讲义.pdf', chunk_type: 'text' },
+      { knowledge_id: 'doc-b', knowledge_title: '53高中知识清单.pdf', chunk_type: 'text' },
+      { knowledge_id: 'doc-b', knowledge_title: '53高中知识清单.pdf', chunk_type: 'text' },
+      { chunk_type: 'web_search', knowledge_id: 'https://example.com/page', knowledge_title: 'A page' },
+    ],
+  })
+  const search = events.find((event) => event.tool_name === 'knowledge_search')
+  const html = getKnowledgeSearchSummaryHtml(t, search.tool_data)
+  assert.match(html, /found <strong>4<\/strong> from <strong>2<\/strong> files/)
 })
 
 // Candidates that all fell below the relevance threshold never reached the

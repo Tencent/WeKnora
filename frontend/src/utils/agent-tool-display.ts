@@ -91,13 +91,17 @@ export function getRetrievalSearchSource(
 
 // kb_counts is keyed by knowledge base id. The caption says "files", so count
 // distinct documents on the result rows instead. A blank id falls back to the
-// title, which is what the expanded result list shows.
+// title, which is what the expanded result list shows. History copies web hits
+// into results (knowledge_id is the URL) and used to leave them out of
+// kb_counts, so a web_search row is not a file.
 export function countSearchResultFiles(results: unknown): number {
   if (!Array.isArray(results)) return 0
   const files = new Set<string>()
   for (const item of results) {
     if (!item || typeof item !== 'object') continue
-    const key = searchResultFileKey(item as Record<string, unknown>)
+    const row = item as Record<string, unknown>
+    if (row.chunk_type === 'web_search') continue
+    const key = searchResultFileKey(row)
     if (key) files.add(key)
   }
   return files.size

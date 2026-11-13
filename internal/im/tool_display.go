@@ -618,28 +618,46 @@ func imIntField(data map[string]interface{}, key string) int {
 
 // imSearchFileCount is the number of distinct documents in a search payload.
 // kb_counts is keyed by knowledge base id, so its length is not a file count.
-// A blank knowledge_id falls back to the title shown in the result list.
+// search_knowledge stores results as []map[string]interface{} and the IM event
+// keeps that value; a JSON replay is []interface{}. A blank knowledge_id falls
+// back to the title. Web pages (chunk_type web_search) are not files.
 func imSearchFileCount(data map[string]interface{}) int {
-	results, ok := data["results"].([]interface{})
-	if !ok {
+	if data == nil {
 		return 0
 	}
 	seen := make(map[string]struct{})
-	for _, item := range results {
-		row, ok := item.(map[string]interface{})
-		if !ok {
-			continue
+	switch results := data["results"].(type) {
+	case []map[string]interface{}:
+		for _, row := range results {
+			imSearchRememberFile(seen, row)
 		}
-		key := strings.TrimSpace(imMapString(row, "knowledge_id"))
-		if key == "" {
-			key = strings.TrimSpace(imMapString(row, "knowledge_title"))
+	case []interface{}:
+		for _, item := range results {
+			row, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			imSearchRememberFile(seen, row)
 		}
-		if key == "" {
-			continue
-		}
-		seen[key] = struct{}{}
 	}
 	return len(seen)
+}
+
+func imSearchRememberFile(seen map[string]struct{}, row map[string]interface{}) {
+	if row == nil {
+		return
+	}
+	if chunkType, _ := row["chunk_type"].(string); chunkType == "web_search" {
+		return
+	}
+	key := strings.TrimSpace(imMapString(row, "knowledge_id"))
+	if key == "" {
+		key = strings.TrimSpace(imMapString(row, "knowledge_title"))
+	}
+	if key == "" {
+		return
+	}
+	seen[key] = struct{}{}
 }
 
 func imMapString(row map[string]interface{}, key string) string {
