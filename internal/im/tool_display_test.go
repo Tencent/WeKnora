@@ -24,8 +24,13 @@ func TestFormatIMToolLine_searchDoneWithQueryAndSummary(t *testing.T) {
 			"query": "文明6",
 		},
 		Data: map[string]interface{}{
-			"results":   []interface{}{map[string]interface{}{}, map[string]interface{}{}, map[string]interface{}{}},
-			"kb_counts": map[string]interface{}{"a": 1, "b": 1},
+			"results": []interface{}{
+				map[string]interface{}{"knowledge_id": "doc-a", "knowledge_title": "A.pdf"},
+				map[string]interface{}{"knowledge_id": "doc-b", "knowledge_title": "B.pdf"},
+				map[string]interface{}{"knowledge_id": "doc-b", "knowledge_title": "B.pdf"},
+			},
+			// One knowledge base. The caption must count the two documents.
+			"kb_counts": map[string]interface{}{"kb-1": 3},
 		},
 	})
 	if !strings.Contains(line, "检索知识库：「文明6」") {
@@ -33,6 +38,58 @@ func TestFormatIMToolLine_searchDoneWithQueryAndSummary(t *testing.T) {
 	}
 	if !strings.Contains(line, "找到 3 个结果，来自 2 个文件") {
 		t.Fatalf("summary missing: %q", line)
+	}
+}
+
+func TestFormatIMToolLine_searchFileCountIgnoresKnowledgeBaseKeys(t *testing.T) {
+	line := FormatIMToolLine(IMToolStep{
+		ToolName: "search_knowledge",
+		Success:  true,
+		Data: map[string]interface{}{
+			"results": []interface{}{
+				map[string]interface{}{"knowledge_id": "a", "knowledge_title": "步步高-数学-讲义.pdf"},
+				map[string]interface{}{"knowledge_id": "b", "knowledge_title": "53高中知识清单.pdf"},
+				map[string]interface{}{"knowledge_id": "c", "knowledge_title": "精讲册.pdf"},
+			},
+			"kb_counts": map[string]interface{}{"8d2ce368": 3},
+		},
+	})
+	if !strings.Contains(line, "找到 3 个结果，来自 3 个文件") {
+		t.Fatalf("summary = %q", line)
+	}
+}
+
+func TestFormatIMToolLine_searchFileCountFallsBackToTitle(t *testing.T) {
+	line := FormatIMToolLine(IMToolStep{
+		ToolName: "knowledge_search",
+		Success:  true,
+		Data: map[string]interface{}{
+			"results": []interface{}{
+				map[string]interface{}{"knowledge_id": "  ", "knowledge_title": "A.pdf"},
+				map[string]interface{}{"knowledge_title": "B.pdf"},
+			},
+			"kb_counts": map[string]interface{}{"only": 2},
+		},
+	})
+	if !strings.Contains(line, "找到 2 个结果，来自 2 个文件") {
+		t.Fatalf("summary = %q", line)
+	}
+}
+
+func TestFormatIMToolLine_searchWithoutDocumentIdentityOmitsFileCount(t *testing.T) {
+	line := FormatIMToolLine(IMToolStep{
+		ToolName: "knowledge_search",
+		Success:  true,
+		Data: map[string]interface{}{
+			"results":   []interface{}{map[string]interface{}{}, map[string]interface{}{}, map[string]interface{}{}},
+			"kb_counts": map[string]interface{}{"a": 1, "b": 1},
+		},
+	})
+	if strings.Contains(line, "个文件") {
+		t.Fatalf("kb_counts must not be reported as files: %q", line)
+	}
+	if !strings.Contains(line, "找到 3 个结果") {
+		t.Fatalf("summary = %q", line)
 	}
 }
 

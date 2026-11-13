@@ -81,12 +81,46 @@ test('getWikiPageText supports persisted slugs arrays', () => {
   assert.equal(getWikiPageText('{"slug":"index"}'), 'index')
 })
 
-test('getKnowledgeSearchSummaryHtml includes file count when present', () => {
+test('getKnowledgeSearchSummaryHtml counts documents, not knowledge bases', () => {
+  const html = getKnowledgeSearchSummaryHtml(t, {
+    results: [
+      { knowledge_id: 'doc-a', knowledge_title: '步步高-数学-讲义.pdf' },
+      { knowledge_id: 'doc-b', knowledge_title: '53高中知识清单.pdf' },
+      { knowledge_id: 'doc-c', knowledge_title: '精讲册.pdf' },
+    ],
+    kb_counts: { '8d2ce368-ceff-4f17-9928-038bb9e1a23a': 3 },
+  })
+  assert.match(html, /found <strong>3<\/strong> from <strong>3<\/strong> files/)
+})
+
+test('getKnowledgeSearchSummaryHtml collapses chunks of one document', () => {
+  const html = getKnowledgeSearchSummaryHtml(t, {
+    results: [
+      { knowledge_id: 'doc-a', knowledge_title: 'A.pdf' },
+      { knowledge_id: 'doc-a', knowledge_title: 'A.pdf' },
+    ],
+    kb_counts: { kb1: 1, kb2: 1 },
+  })
+  assert.match(html, /found <strong>2<\/strong> from <strong>1<\/strong> files/)
+})
+
+test('getKnowledgeSearchSummaryHtml uses the title when knowledge_id is blank', () => {
+  const html = getKnowledgeSearchSummaryHtml(t, {
+    results: [
+      { knowledge_id: '  ', knowledge_title: 'A.pdf' },
+      { knowledge_title: 'B.pdf' },
+    ],
+    kb_counts: { only: 2 },
+  })
+  assert.match(html, /found <strong>2<\/strong> from <strong>2<\/strong> files/)
+})
+
+test('getKnowledgeSearchSummaryHtml omits a file count it cannot derive from results', () => {
   const html = getKnowledgeSearchSummaryHtml(t, {
     results: [{}, {}],
     kb_counts: { a: 1, b: 2 },
   })
-  assert.match(html, /found <strong>2<\/strong> from <strong>2<\/strong> files/)
+  assert.equal(html, 'agentStream.search.foundResults')
 })
 
 // Candidates that all fell below the relevance threshold never reached the

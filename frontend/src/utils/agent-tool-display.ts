@@ -89,6 +89,26 @@ export function getRetrievalSearchSource(
   return 'knowledge'
 }
 
+// kb_counts is keyed by knowledge base id. The caption says "files", so count
+// distinct documents on the result rows instead. A blank id falls back to the
+// title, which is what the expanded result list shows.
+export function countSearchResultFiles(results: unknown): number {
+  if (!Array.isArray(results)) return 0
+  const files = new Set<string>()
+  for (const item of results) {
+    if (!item || typeof item !== 'object') continue
+    const key = searchResultFileKey(item as Record<string, unknown>)
+    if (key) files.add(key)
+  }
+  return files.size
+}
+
+function searchResultFileKey(row: Record<string, unknown>): string {
+  const id = typeof row.knowledge_id === 'string' ? row.knowledge_id.trim() : ''
+  if (id) return id
+  return typeof row.knowledge_title === 'string' ? row.knowledge_title.trim() : ''
+}
+
 function getRetrievalStatusKeys(source: RetrievalSearchSource, failed: boolean) {
   if (source === 'web') {
     return failed
@@ -141,12 +161,11 @@ export function getKnowledgeSearchSummaryHtml(
     return t('agentStream.search.webResults', { count: `<strong>${count}</strong>` })
   }
 
-  const kbCounts = toolData.kb_counts
-  const kbCount = kbCounts && typeof kbCounts === 'object' ? Object.keys(kbCounts).length : 0
-  if (kbCount > 0) {
+  const fileCount = countSearchResultFiles(results)
+  if (fileCount > 0) {
     return t('agentStream.search.foundResultsFromFiles', {
       count: `<strong>${count}</strong>`,
-      files: `<strong>${kbCount}</strong>`,
+      files: `<strong>${fileCount}</strong>`,
     })
   }
 

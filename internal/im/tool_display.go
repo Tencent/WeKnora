@@ -616,6 +616,37 @@ func imIntField(data map[string]interface{}, key string) int {
 	}
 }
 
+// imSearchFileCount is the number of distinct documents in a search payload.
+// kb_counts is keyed by knowledge base id, so its length is not a file count.
+// A blank knowledge_id falls back to the title shown in the result list.
+func imSearchFileCount(data map[string]interface{}) int {
+	results, ok := data["results"].([]interface{})
+	if !ok {
+		return 0
+	}
+	seen := make(map[string]struct{})
+	for _, item := range results {
+		row, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		key := strings.TrimSpace(imMapString(row, "knowledge_id"))
+		if key == "" {
+			key = strings.TrimSpace(imMapString(row, "knowledge_title"))
+		}
+		if key == "" {
+			continue
+		}
+		seen[key] = struct{}{}
+	}
+	return len(seen)
+}
+
+func imMapString(row map[string]interface{}, key string) string {
+	s, _ := row[key].(string)
+	return s
+}
+
 func imKnowledgeSearchSummary(data map[string]interface{}) string {
 	if data == nil {
 		return ""
@@ -630,8 +661,8 @@ func imKnowledgeSearchSummary(data map[string]interface{}) string {
 	if source == imRetrievalSourceWeb || (webCount > 0 && docCount == 0) {
 		return fmt.Sprintf("找到 %d 条网页", count)
 	}
-	if kbCounts, ok := data["kb_counts"].(map[string]interface{}); ok && len(kbCounts) > 0 {
-		return fmt.Sprintf("找到 %d 个结果，来自 %d 个文件", count, len(kbCounts))
+	if files := imSearchFileCount(data); files > 0 {
+		return fmt.Sprintf("找到 %d 个结果，来自 %d 个文件", count, files)
 	}
 	if source == imRetrievalSourceMixed && docCount > 0 && webCount > 0 {
 		return fmt.Sprintf("找到 %d 个结果（%d 篇文档，%d 条网页）", count, docCount, webCount)
