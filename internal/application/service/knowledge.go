@@ -75,6 +75,7 @@ type knowledgeService struct {
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
 	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
+	memCopyProgress     sync.Map // taskID -> types.KnowledgeMoveProgress
 	wikiRepo            interfaces.WikiPageRepository
 	wikiService         interfaces.WikiPageService
 

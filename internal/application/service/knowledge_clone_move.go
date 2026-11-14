@@ -255,7 +255,13 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 // and updating the vector database representation of the moved chunks.
 // It also ensures that the chunk's relationships (like pre and next chunk IDs) are maintained
 // by mapping the source chunk IDs to the new target chunk IDs.
-func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowledge) (err error) {
+func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowledge) error {
+	return s.cloneTransferChunks(ctx, src, dst, access.KBTransferClone)
+}
+
+func (s *knowledgeService) cloneTransferChunks(
+	ctx context.Context, src, dst *types.Knowledge, operation access.KBTransferOperation,
+) (err error) {
 	sourceKB, err := knowledgeWriteKB(ctx, s.kbService, src)
 	if err != nil {
 		return err
@@ -264,7 +270,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	if err != nil {
 		return err
 	}
-	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, access.KBTransferClone); err != nil {
+	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, operation); err != nil {
 		return err
 	}
 	stored, err := s.repo.GetKnowledgeByID(ctx, dst.TenantID, dst.ID)

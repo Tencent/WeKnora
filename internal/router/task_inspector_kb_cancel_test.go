@@ -32,6 +32,8 @@ func TestMatchesKnowledgeBase(t *testing.T) {
 		{name: "source id is task specific", taskType: types.TypeDocumentProcess, payload: `{"source_id":"kb-1"}`},
 		{name: "move source", taskType: types.TypeKnowledgeMove, payload: `{"source_kb_id":"kb-1"}`, want: true},
 		{name: "move target", taskType: types.TypeKnowledgeMove, payload: `{"target_kb_id":"kb-1"}`, want: true},
+		{name: "copy source", taskType: types.TypeKnowledgeCopy, payload: `{"source_kb_id":"kb-1"}`, want: true},
+		{name: "copy target", taskType: types.TypeKnowledgeCopy, payload: `{"target_kb_id":"kb-1"}`, want: true},
 		{name: "move fields are task specific", taskType: types.TypeDocumentProcess, payload: `{"source_kb_id":"kb-1"}`},
 		{name: "single knowledge", taskType: types.TypeChunkExtract, payload: `{"knowledge_id":"knowledge-1"}`, want: true},
 		{
