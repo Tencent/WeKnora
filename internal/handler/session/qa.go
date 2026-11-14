@@ -383,9 +383,16 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		}
 
 		// Use ASR only when the agent has audio upload enabled.
-		asrModelID := ""
+		var processOpts AttachmentProcessOptions
 		if customAgent != nil && customAgent.Config.AudioUploadEnabled && customAgent.Config.ASRModelID != "" {
-			asrModelID = customAgent.Config.ASRModelID
+			processOpts.ASRModelID = customAgent.Config.ASRModelID
+		}
+		// Scanned documents get the same VLM OCR fallback as temporary
+		// attachments (see UploadTemporaryDocument).
+		if customAgent != nil && customAgent.Config.ImageUploadEnabled && customAgent.Config.VLMModelID != "" {
+			processOpts.VLMModelID = customAgent.Config.VLMModelID
+			processOpts.ScannedDocumentOCR = customAgent.Config.AttachmentImageUnderstanding
+			processOpts.OCRMaxPages = customAgent.Config.AttachmentOCRMaxPages
 		}
 
 		// Resolve the agent's chat parser engine from attachment file types
@@ -410,7 +417,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 				defer wg.Done()
 
 				processed, err := h.attachmentProcessor.ProcessAttachment(
-					attachmentRuntimeCtx, decodedAttachments[idx], att.FileName, int64(len(decodedAttachments[idx])), tenantID, asrModelID,
+					attachmentRuntimeCtx, decodedAttachments[idx], att.FileName,
+					int64(len(decodedAttachments[idx])), tenantID, processOpts,
 				)
 				if err != nil {
 					errChan <- fmt.Errorf("attachment %d processing failed: %w", idx+1, err)
