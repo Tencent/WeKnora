@@ -9,7 +9,7 @@ async function setup(t: TestContext, translate = (key: string, _params?: unknown
   const route = vue.reactive({ params: { kbId: 'kb' }, query: {} })
   const hook = {
     cardList: vue.ref([{ id: 'doc', parse_status: 'completed' }]), total: vue.ref(1), moreIndex: vue.ref(-1),
-    details: vue.reactive({ id: 'doc' }), getKnowled: t.mock.fn(async () => {}),
+    details: vue.reactive({ id: 'doc' }), getKnowled: t.mock.fn(async (_query?: { page: number }, _kbId?: string) => {}),
     getCardDetails: t.mock.fn(), getfDetails() {}, onVisibleChange() {},
   }
   const listKnowledgeFolders = t.mock.fn(async (_id: string) => ({ data: { folders: [] } }))
@@ -289,4 +289,42 @@ test('a pending rebuild does not reload another folder or KB after navigation or
     await flush()
   }
   assert.equal(f.hook.getKnowled.mock.callCount(), 0)
+})
+
+
+test('loads more documents without a scroll event when the viewport is not filled', async t => {
+  const f = await setup(t)
+  f.vm.docListLoading = true
+  f.vm.knowledgeScroll = { scrollTop: 0, scrollHeight: 1800, clientHeight: 1800 }
+  f.hook.cardList.value = Array.from({ length: 35 }, (_, id) => ({ id: String(id), parse_status: 'completed' }))
+  f.hook.total.value = 75
+  f.hook.getKnowled.mock.mockImplementation(async () => {
+    const start = f.hook.cardList.value.length
+    f.hook.cardList.value.push(...Array.from({ length: Math.min(35, 75 - start) }, (_, id) => ({
+      id: String(start + id), parse_status: 'completed',
+    })))
+  })
+  f.vm.docListLoading = false
+  await flush()
+  assert.deepEqual(f.hook.getKnowled.mock.calls.map(call => call.arguments[0]?.page), [2, 3])
+
+  f.vm.handleScroll()
+  await flush()
+  assert.equal(f.hook.getKnowled.mock.callCount(), 2)
+})
+
+
+test('does not loop on an empty page and retries the same page on scroll', async t => {
+  const f = await setup(t)
+  f.vm.docListLoading = true
+  f.vm.knowledgeScroll = { scrollTop: 0, scrollHeight: 1800, clientHeight: 1800 }
+  f.hook.total.value = 75
+  f.vm.docListLoading = false
+  await flush()
+  assert.deepEqual(f.hook.getKnowled.mock.calls.map(call => call.arguments[0]?.page), [2])
+
+  f.vm.handleScroll()
+  f.vm.handleScroll()
+  await flush()
+  assert.deepEqual(f.hook.getKnowled.mock.calls.map(call => call.arguments[0]?.page), [2, 2])
 })
