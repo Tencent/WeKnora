@@ -13,6 +13,7 @@ import (
 // processSearchResults handles the processing of search results, optimizing database queries.
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
+	primaryLimit int,
 	skipEnrichment bool,
 ) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
@@ -21,15 +22,42 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	// Collect all knowledge and chunk IDs, track scores and match info
-	index := s.buildChunkIndex(chunks)
+	chunks = chunks[:min(len(chunks), maxRetrievalPoolSize)]
+	knowledgeIDs := make([]string, 0, len(chunks))
+	seenKnowledge := make(map[string]bool, len(chunks))
+	for _, chunk := range chunks {
+		if !seenKnowledge[chunk.KnowledgeID] {
+			knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
+			seenKnowledge[chunk.KnowledgeID] = true
+		}
+	}
 
 	// Batch fetch knowledge data (include shared KB so cross-tenant retrieval works)
-	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(index.knowledgeIDs))
-	knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, index.knowledgeIDs)
+	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(knowledgeIDs))
+	knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return nil, err
 	}
+
+	// Cancellation preserves partial index data for a later retry. Exclude
+	// those hits before they can take a result slot or supply enrichment.
+	selected := make([]*types.IndexWithScore, 0, min(primaryLimit, len(chunks)))
+	selectedKnowledge := make(map[string]*types.Knowledge)
+	for _, chunk := range chunks {
+		knowledge := knowledgeMap[chunk.KnowledgeID]
+		if knowledge == nil || knowledge.ParseStatus == types.ParseStatusCancelled {
+			continue
+		}
+		selected = append(selected, chunk)
+		selectedKnowledge[knowledge.ID] = knowledge
+		if len(selected) == primaryLimit {
+			break
+		}
+	}
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	index := s.buildChunkIndex(selected)
 
 	// Batch fetch chunks (include shared KB chunks)
 	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(index.chunkIDs))
@@ -82,7 +110,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	}
 
 	// Build final search results
-	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+	searchResults := s.assembleSearchResults(ctx, selected, chunkMap, selectedKnowledge, index, skipEnrichment)
 
 	// Results can come from org-shared KBs owned by another workspace; the
 	// chunks above were already permission checked, so look up their image
@@ -95,7 +123,6 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 // chunkIndex holds pre-computed lookup structures for processing search results.
 type chunkIndex struct {
-	knowledgeIDs    []string
 	chunkIDs        []string
 	scores          map[string]float64
 	vectorScores    map[string]float64
@@ -104,7 +131,7 @@ type chunkIndex struct {
 	processedIDs    map[string]bool // tracks all IDs (chunk + enrichment) to avoid duplicates
 }
 
-// buildChunkIndex collects knowledge/chunk IDs and builds score/matchType maps
+// buildChunkIndex collects chunk IDs and builds score/matchType maps
 // from the raw retrieval results.
 func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *chunkIndex {
 	idx := &chunkIndex{
@@ -115,12 +142,7 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		processedIDs:    make(map[string]bool, len(chunks)*2),
 	}
 
-	processedKnowledgeIDs := make(map[string]bool)
 	for _, chunk := range chunks {
-		if !processedKnowledgeIDs[chunk.KnowledgeID] {
-			idx.knowledgeIDs = append(idx.knowledgeIDs, chunk.KnowledgeID)
-			processedKnowledgeIDs[chunk.KnowledgeID] = true
-		}
 		idx.chunkIDs = append(idx.chunkIDs, chunk.ChunkID)
 		idx.scores[chunk.ChunkID] = chunk.Score
 		idx.vectorScores[chunk.ChunkID] = chunk.VectorScore

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -54,7 +55,7 @@ func (r *DataSourceRepository) FindByID(ctx context.Context, id string) (*types.
 		Where("deleted_at IS NULL").
 		First(&ds).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("data source not found")
+			return nil, datasource.ErrDataSourceNotFound
 		}
 		return nil, err
 	}
@@ -184,7 +185,7 @@ func (r *SyncLogRepository) FindByID(ctx context.Context, id string) (*types.Syn
 		Where("id = ?", id).
 		First(&log).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("sync log not found")
+			return nil, datasource.ErrSyncLogNotFound
 		}
 		return nil, err
 	}

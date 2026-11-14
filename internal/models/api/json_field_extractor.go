@@ -2,6 +2,7 @@ package api
 
 import (
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -79,36 +80,35 @@ func (e *JSONFieldExtractor) IsDone() bool {
 // findFieldValueStart finds the byte offset where the field's string value content begins
 // (after the opening quote of the value). Returns -1 if not found.
 func findFieldValueStart(buf string, fieldName string) int {
-	// Look for "fieldName" key followed by colon and opening quote
 	key := `"` + fieldName + `"`
-	idx := strings.Index(buf, key)
-	if idx < 0 {
-		return -1
-	}
-
-	// Skip past the key
-	pos := idx + len(key)
-
-	// Skip whitespace and colon
-	for pos < len(buf) {
-		ch := buf[pos]
-		if ch == ':' {
+	for offset := 0; offset < len(buf); {
+		idx := strings.Index(buf[offset:], key)
+		if idx < 0 {
+			return -1
+		}
+		pos := offset + idx + len(key)
+		offset = pos
+		for pos < len(buf) && strings.ContainsRune(" \t\n\r", rune(buf[pos])) {
 			pos++
+		}
+		if pos >= len(buf) {
+			return -1
+		}
+		if buf[pos] != ':' {
 			continue
 		}
-		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+		pos++
+		for pos < len(buf) && strings.ContainsRune(" \t\n\r", rune(buf[pos])) {
 			pos++
-			continue
 		}
-		if ch == '"' {
-			// Found the opening quote of the value
+		if pos >= len(buf) {
+			return -1
+		}
+		if buf[pos] == '"' {
 			return pos + 1
 		}
-		// Unexpected character
-		return -1
 	}
-
-	return -1 // Haven't seen the opening quote yet
+	return -1
 }
 
 // findSafeEnd finds the safe end position for emission within the value content.
@@ -129,6 +129,17 @@ func findSafeEnd(value string, from int) (int, bool) {
 				// Unicode escape \uXXXX - need 6 bytes total
 				if i+5 >= len(value) {
 					return i, false
+				}
+				if isHighSurrogate(unicodeEscape(value[i+2 : i+6])) {
+					rest := value[i+6:]
+					// A high surrogate may pair with the next streamed escape.
+					if rest == "" || rest == `\` || (strings.HasPrefix(rest, `\u`) && len(rest) < 6) {
+						return i, false
+					}
+					if len(rest) >= 6 && strings.HasPrefix(rest, `\u`) && isLowSurrogate(unicodeEscape(rest[2:6])) {
+						i += 12
+						continue
+					}
 				}
 				i += 6
 			} else {
@@ -190,21 +201,16 @@ func unescapeJSONString(s string) string {
 			case 'u':
 				// Unicode escape \uXXXX
 				if i+5 < len(s) {
-					// Parse hex digits
-					hexStr := s[i+2 : i+6]
-					var codepoint int
-					for _, h := range hexStr {
-						codepoint <<= 4
-						switch {
-						case h >= '0' && h <= '9':
-							codepoint += int(h - '0')
-						case h >= 'a' && h <= 'f':
-							codepoint += int(h-'a') + 10
-						case h >= 'A' && h <= 'F':
-							codepoint += int(h-'A') + 10
+					codepoint := unicodeEscape(s[i+2 : i+6])
+					if isHighSurrogate(codepoint) && i+11 < len(s) && s[i+6:i+8] == `\u` {
+						low := unicodeEscape(s[i+8 : i+12])
+						if isLowSurrogate(low) {
+							b.WriteRune(utf16.DecodeRune(codepoint, low))
+							i += 12
+							continue
 						}
 					}
-					b.WriteRune(rune(codepoint))
+					b.WriteRune(codepoint)
 					i += 6
 				} else {
 					b.WriteByte(s[i])
@@ -222,3 +228,22 @@ func unescapeJSONString(s string) string {
 
 	return b.String()
 }
+
+func unicodeEscape(hex string) rune {
+	var codepoint rune
+	for _, h := range hex {
+		codepoint <<= 4
+		switch {
+		case h >= '0' && h <= '9':
+			codepoint += h - '0'
+		case h >= 'a' && h <= 'f':
+			codepoint += h - 'a' + 10
+		case h >= 'A' && h <= 'F':
+			codepoint += h - 'A' + 10
+		}
+	}
+	return codepoint
+}
+
+func isHighSurrogate(r rune) bool { return r >= 0xd800 && r <= 0xdbff }
+func isLowSurrogate(r rune) bool  { return r >= 0xdc00 && r <= 0xdfff }

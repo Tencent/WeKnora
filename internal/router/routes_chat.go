@@ -27,6 +27,8 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 	{
 		historyMessages.POST("/search", g.Viewer(), handler.SearchMessages)
 		historyMessages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
+		messages.With(apiKeyManageTenantSettings(apiKeyFullAccess())).
+			POST("/chat-history-index/clear", g.Admin(), handler.ClearChatHistoryIndex)
 		chatMessages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
 		chatMessages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
 	}
@@ -52,9 +54,14 @@ func RegisterSessionRoutes(
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
+		// Chat-box voice input: not session-bound so the new-chat page can dictate
+		// before a session exists. The agent's ASR switch gates it in the handler.
+		sessions.POST("/transcriptions", handler.TranscribeVoiceInput)
 		sessions.GET("/:id", handler.GetSession)
 		sessions.GET("", handler.GetSessionsByTenant)
 		sessions.PUT("/:id", handler.UpdateSession)
+		sessions.GET("/:id/host-approval-mode", handler.GetHostApprovalMode)
+		sessions.PUT("/:id/host-approval-mode", handler.SetHostApprovalMode)
 		sessions.DELETE("/:id", handler.DeleteSession)
 		sessions.DELETE("/:id/messages", handler.ClearSessionMessages)
 		sessions.POST("/:session_id/generate_title", handler.GenerateTitle)

@@ -1306,7 +1306,7 @@ func (s *knowledgeService) moveOneKnowledge(
 			if state.Phase == "reparse_pending" {
 				return s.enqueueMovedKnowledge(ctx, knowledge, sourceKB, targetKB)
 			}
-			if mode == "reuse_vectors" && targetKB.IsWikiEnabled() {
+			if mode == "reuse_vectors" && targetKB.IsWikiAutoGenerateEnabled() {
 				_, err := EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
 				return err
 			}
@@ -1353,7 +1353,7 @@ func (s *knowledgeService) moveOneKnowledge(
 		// reparse re-ingests through KnowledgePostProcess once the new chunks
 		// land; reuse_vectors keeps the existing chunks and never re-enters that
 		// pipeline, so the target KB has to be told about the document here.
-		if targetKB.IsWikiEnabled() {
+		if targetKB.IsWikiAutoGenerateEnabled() {
 			_, err := EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
 			return err
 		}

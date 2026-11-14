@@ -48,14 +48,15 @@ func (g *PathGuard) allowWrite(path string) (root, rel string, err error) {
 	if g.denied(path) {
 		return "", "", fmt.Errorf("%w: %q", ErrPathDenied, path)
 	}
+	if g.readOnly(path) {
+		return "", "", fmt.Errorf("%w: %q is read-only", ErrPathDenied, path)
+	}
+	if g.writableFile(path) {
+		return filepath.Dir(path), filepath.Base(path), nil
+	}
 	for _, wr := range g.writable {
 		if !PathUnder(path, wr.Path) {
 			continue
-		}
-		for _, ro := range wr.ReadOnlySubpaths {
-			if PathUnder(path, ro) {
-				return "", "", fmt.Errorf("%w: %q is read-only", ErrPathDenied, path)
-			}
 		}
 		rel, err = relativeInside(wr.Path, path)
 		if err != nil {
@@ -73,6 +74,9 @@ func (g *PathGuard) allowRead(path string) (root, rel string, err error) {
 	}
 	if g.denied(path) {
 		return "", "", fmt.Errorf("%w: %q", ErrPathDenied, path)
+	}
+	if g.writableFile(path) {
+		return filepath.Dir(path), filepath.Base(path), nil
 	}
 	for _, wr := range g.writable {
 		if !PathUnder(path, wr.Path) {

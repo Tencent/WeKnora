@@ -3,6 +3,7 @@
 package anydoc
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -22,6 +23,14 @@ func backendAvailable() bool { return true }
 func backendUnavailableReason() string { return "" }
 
 func backendVersion() string { return upstream.Version }
+
+func backendPDFInvalidStructure(err error) (malformed, typed bool) {
+	var convertErr *upstream.ConvertError
+	if !errors.As(err, &convertErr) {
+		return false, false
+	}
+	return convertErr != nil && convertErr.Kind == "malformed", true
+}
 
 func backendConvert(data []byte, opts Options) (*Result, error) {
 	format, err := upstreamFormat(opts.Format)

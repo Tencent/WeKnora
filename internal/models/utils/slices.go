@@ -12,15 +12,13 @@ func ChunkSlice[T any](slice []T, chunkSize int) [][]T {
 	}
 
 	// Calculate how many sub-slices are needed
-	chunks := make([][]T, 0, (len(slice)+chunkSize-1)/chunkSize)
+	chunks := make([][]T, 0, 1+(len(slice)-1)/chunkSize)
 
 	// Split the slice
-	for i := 0; i < len(slice); i += chunkSize {
-		end := i + chunkSize
-		if end > len(slice) {
-			end = len(slice)
-		}
+	for i := 0; i < len(slice); {
+		end := i + min(chunkSize, len(slice)-i)
 		chunks = append(chunks, slice[i:end])
+		i = end
 	}
 
 	return chunks

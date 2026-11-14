@@ -26,6 +26,17 @@ type PipelineRequest struct {
 	// every search target. Set by the knowledge-search API.
 	DisableVectorMatch   bool `json:"disable_vector_match,omitempty"`
 	DisableKeywordsMatch bool `json:"disable_keywords_match,omitempty"`
+	// ParentSlotAggregation collapses hits that share a ParentChunkID into one
+	// top-k slot, so sibling children of the same parent cannot crowd out other
+	// pages. Set by the knowledge-search API; off by default.
+	ParentSlotAggregation bool `json:"parent_slot_aggregation,omitempty"`
+
+	// QueryImage is set when the caller submits an image to search by
+	// similarity instead of by text. Vector recall then embeds the image with
+	// the KB's image-capable embedding model; Query text still feeds keyword
+	// recall and rerank. Runtime only — never persisted or echoed.
+	QueryImage          []byte `json:"-"`
+	QueryImageMediaType string `json:"-"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -186,15 +197,14 @@ type PipelineState struct {
 	// History (a first turn) is not fetched again by a later stage.
 	HistoryLoaded bool `json:"-"`
 
-	SearchResult     []*SearchResult   `json:"-"`
-	RerankResult     []*SearchResult   `json:"-"`
-	MergeResult      []*SearchResult   `json:"-"`
-	Entity           []string          `json:"-"`
-	EntityKBIDs      []string          `json:"-"`
-	EntityKnowledge  map[string]string `json:"-"`
-	GraphResult      *GraphData        `json:"-"`
-	UserContent      string            `json:"-"`
-	RenderedContexts string            `json:"-"`
+	SearchResult     []*SearchResult `json:"-"`
+	RerankResult     []*SearchResult `json:"-"`
+	MergeResult      []*SearchResult `json:"-"`
+	Entity           []string        `json:"-"`
+	EntityKBIDs      []string        `json:"-"`
+	GraphResult      *GraphData      `json:"-"`
+	UserContent      string          `json:"-"`
+	RenderedContexts string          `json:"-"`
 	// ContextImages are retrieved images, as data URIs, shown to a vision
 	// chat model beside the contexts they belong to; see INTO_CHAT_MESSAGE.
 	ContextImages []string `json:"-"`
@@ -304,9 +314,6 @@ func (c *ChatManage) Clone() *ChatManage {
 	entityKBIDs := make([]string, len(c.EntityKBIDs))
 	copy(entityKBIDs, c.EntityKBIDs)
 
-	entityKnowledge := make(map[string]string)
-	maps.Copy(entityKnowledge, c.EntityKnowledge)
-
 	return &ChatManage{
 		PipelineRequest: PipelineRequest{
 			Query:                    c.Query,
@@ -322,6 +329,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			VectorDatabase:           c.VectorDatabase,
 			DisableVectorMatch:       c.DisableVectorMatch,
 			DisableKeywordsMatch:     c.DisableKeywordsMatch,
+			ParentSlotAggregation:    c.ParentSlotAggregation,
 			RerankModelID:            c.RerankModelID,
 			RerankTopK:               c.RerankTopK,
 			RerankThreshold:          c.RerankThreshold,
@@ -367,7 +375,6 @@ func (c *ChatManage) Clone() *ChatManage {
 			ContextImageChunkIDs: slices.Clone(c.ContextImageChunkIDs),
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
-			EntityKnowledge:      entityKnowledge,
 		},
 	}
 }

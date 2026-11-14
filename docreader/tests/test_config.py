@@ -78,5 +78,35 @@ class DocReaderConfigTest(unittest.TestCase):
             self.assertIn(key, config.dump_config())
 
 
+class FileSizeConfigTest(unittest.TestCase):
+    def _load_file_size(self, env, expected_mb):
+        with patch.dict(os.environ, env, clear=True):
+            cfg = config.load_config()
+        # The gRPC options still consume the converted byte count.
+        self.assertEqual(cfg.grpc_max_file_size_mb, expected_mb * 1024 * 1024)
+        return cfg
+
+    def test_dump_reports_default_file_size_in_mb(self):
+        cfg = self._load_file_size({}, 50)
+        with patch.object(config, "CONFIG", cfg):
+            self.assertEqual(config.dump_config()["DOCREADER_GRPC_MAX_FILE_SIZE_MB"], 50)
+
+    def test_dump_reports_namespaced_file_size_in_mb(self):
+        cfg = self._load_file_size({"DOCREADER_GRPC_MAX_FILE_SIZE_MB": "7"}, 7)
+        with patch.object(config, "CONFIG", cfg):
+            self.assertEqual(config.dump_config()["DOCREADER_GRPC_MAX_FILE_SIZE_MB"], 7)
+
+    def test_dump_reports_legacy_file_size_in_mb(self):
+        cfg = self._load_file_size({"MAX_FILE_SIZE_MB": "3"}, 3)
+        with patch.object(config, "CONFIG", cfg):
+            self.assertEqual(config.dump_config()["DOCREADER_GRPC_MAX_FILE_SIZE_MB"], 3)
+
+    def test_startup_log_reports_file_size_in_mb(self):
+        cfg = self._load_file_size({"DOCREADER_GRPC_MAX_FILE_SIZE_MB": "7"}, 7)
+        with patch.object(config, "CONFIG", cfg), self.assertLogs(config.logger, level="INFO") as logs:
+            config.print_config()
+        self.assertIn("INFO:docreader.config:DOCREADER_GRPC_MAX_FILE_SIZE_MB=7", logs.output)
+
+
 if __name__ == "__main__":
     unittest.main()

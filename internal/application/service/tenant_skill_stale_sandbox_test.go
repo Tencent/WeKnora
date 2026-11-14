@@ -128,3 +128,30 @@ func TestRunRemoveSkipsStaleMarkWhenRolloutIsNewSession(t *testing.T) {
 	require.Empty(t, fx.staleMarks)
 	require.NotEmpty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID)
 }
+
+func TestSharedSandboxSkillChangesKeepExistingMachines(t *testing.T) {
+	for _, operation := range []string{"install", "remove", "remove-last"} {
+		t.Run(operation, func(t *testing.T) {
+			fx := newInstallFixture(t)
+			fx.configRepo.entity.Config.AllocationMode = types.SandboxAllocationUser
+			// Existing rows may still contain the old default, even though the UI hides it.
+			fx.configRepo.entity.Config.SkillRollout = types.SkillRolloutNextTurn
+			if operation == "install" {
+				require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+			} else {
+				fx.seedInstalledSkill("sk-1", "snap-old", 3)
+				if operation == "remove" {
+					fx.seedInstalledSkill("sk-2", "snap-old", 3)
+				}
+				require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"))
+			}
+			require.Empty(t, fx.staleMarks, "skill changes must not schedule a shared machine for replacement")
+			if operation == "remove-last" {
+				require.Empty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID)
+			} else {
+				require.Equal(t, "snap-1", fx.configRepo.saved.Config.SkillImage.SnapshotID,
+					"future machines still use the updated image")
+			}
+		})
+	}
+}

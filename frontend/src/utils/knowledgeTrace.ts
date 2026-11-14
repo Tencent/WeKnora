@@ -49,6 +49,34 @@ function nodeEnd(node: KnowledgeTraceNode): number | null {
   return null
 }
 
+/**
+ * The persisted postprocess stage ends after enqueue, while its workers can
+ * continue for minutes. Return the elapsed wall-clock window through the
+ * latest asynchronous descendant for the stage's inclusive display duration.
+ * Keep duration_ms untouched so enqueue time remains available in details.
+ */
+export function postprocessElapsedMs(stage: KnowledgeTraceNode, now: number): number | null {
+  if (stage.name !== 'postprocess') return null
+  const start = timestamp(stage.started_at)
+  if (start === null || !stage.children?.length) return null
+
+  let latest = nodeEnd(stage) ?? start
+  let hasTimedChild = false
+  const visit = (node: KnowledgeTraceNode) => {
+    const childStart = timestamp(node.started_at)
+    const end = node.status === 'running' || node.status === 'pending'
+      ? now
+      : nodeEnd(node)
+    if (end !== null && (childStart !== null || node.status === 'pending')) {
+      latest = Math.max(latest, end)
+      hasTimedChild = true
+    }
+    node.children?.forEach(visit)
+  }
+  stage.children.forEach(visit)
+  return hasTimedChild ? Math.max(0, latest - start) : null
+}
+
 function aggregateStatus(nodes: KnowledgeTraceNode[]): string {
   if (nodes.some(node => node.status === 'running' || node.status === 'pending')) return 'running'
   if (nodes.some(node => node.status === 'failed')) return 'failed'

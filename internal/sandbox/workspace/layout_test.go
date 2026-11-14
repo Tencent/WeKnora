@@ -59,3 +59,29 @@ func TestNormalizedCleansNewFields(t *testing.T) {
 	require.Equal(t, "/var/lib/x.git", l.GitDir)
 	require.Equal(t, []string{"/tmp"}, l.WorkDirRoots)
 }
+
+const browserTestSessionID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+func TestBrowserRootLivesOutsideTheCheckpointedWorkTree(t *testing.T) {
+	remote := Remote()
+	require.Equal(t, "/var/lib/weknora/browser/session", remote.BrowserRoot)
+	require.False(t, IsUnder(remote.BrowserRoot, Root))
+
+	user, err := UserSession(browserTestSessionID)
+	require.NoError(t, err)
+	require.Equal(t, "/var/lib/weknora/sessions/"+browserTestSessionID+".browser", user.BrowserRoot)
+	require.False(t, IsUnder(user.BrowserRoot, Root), "checkpoint work tree is git add -A")
+	require.False(t, IsUnder(user.BrowserRoot, user.Root))
+}
+
+func TestBrowserRootKeepsTheDaemonSocketUnderSunPathLimit(t *testing.T) {
+	user, err := UserSession(browserTestSessionID)
+	require.NoError(t, err)
+	sock := user.BrowserRoot + "/home/.agent-browser/main.sock"
+	require.LessOrEqual(t, len(sock), 104, "sun_path is 108 bytes: %s", sock)
+}
+
+func TestNormalizedCleansBrowserRoot(t *testing.T) {
+	l := Layout{BrowserRoot: " /var/lib/weknora/browser//session/ "}.Normalized()
+	require.Equal(t, "/var/lib/weknora/browser/session", l.BrowserRoot)
+}

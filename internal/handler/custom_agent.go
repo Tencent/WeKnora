@@ -91,6 +91,8 @@ type PatchAgentRequest struct {
 	SystemPrompt *string `json:"system_prompt" extensions:"x-agent,x-agent-max-bytes=32000"`
 	// Chat model the agent answers with
 	ModelID *string `json:"model_id" extensions:"x-agent"`
+	// Rerank model for knowledge retrieval; empty clears the selection
+	RerankModelID *string `json:"rerank_model_id" extensions:"x-agent"`
 	// Knowledge bases searched: all, selected (knowledge_bases) or none
 	KBSelectionMode *string `json:"kb_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
 	// Selected knowledge bases, replacing the current ones; without
@@ -133,6 +135,9 @@ func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
 	}
 	if p.ModelID != nil {
 		cfg.ModelID = *p.ModelID
+	}
+	if p.RerankModelID != nil {
+		cfg.RerankModelID = *p.RerankModelID
 	}
 	if p.KnowledgeBases != nil {
 		cfg.KnowledgeBases = append([]string{}, *p.KnowledgeBases...)
@@ -218,7 +223,7 @@ type UpdateAgentRequest struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"agent.create","risk":"write","label_param":"name"}
-// @x-agent-hint "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update."
+// @x-agent-hint "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update, including model_id and, for knowledge search, rerank_model_id. Creating an agent does not mean its model configuration is complete."
 // @Router       /agents [post]
 func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -538,7 +543,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"agent.update","risk":"write","target":"agent.get","label":"name","require_complete_target":true}
-// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
+// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model) and rerank_model_id from a Rerank model in that list. Empty rerank_model_id clears the selection; omitting it preserves the saved value. For knowledge-search agents, report a missing chat or rerank model explicitly instead of claiming setup is complete. Take knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
 // @Router       /agents/{id} [patch]
 func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 	ctx := c.Request.Context()

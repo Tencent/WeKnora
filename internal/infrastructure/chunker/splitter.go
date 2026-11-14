@@ -95,12 +95,12 @@ type SplitterConfig struct {
 // (Go DefaultConfig: 64, knowledge.go buildSplitterConfig: 50, Python
 // docreader: 100). All consolidated to 80 here.
 //
-// Existing knowledge bases that stored ChunkOverlap=0 in the DB pick
-// this 80 up on next re-index; their previously-indexed embeddings will
-// not match new ones bit-for-bit. Recall stays similar but search
-// ranking can shift slightly. To freeze the old behavior on a per-KB
-// basis, explicitly set ChunkingConfig.ChunkOverlap to 64 before
-// re-indexing.
+// An empty SplitterConfig / ChunkingConfig (both size and overlap unset)
+// still receives DefaultChunkOverlap on normalize. An explicit
+// ChunkOverlap of 0 with a configured ChunkSize is preserved — wiki-only
+// KBs and atomic FAQ-style content rely on true zero overlap. KBs that
+// previously depended on stored 0 being rewritten to 80 should set
+// ChunkOverlap to 80 (or another positive value) before re-indexing.
 const (
 	DefaultChunkSize    = 512
 	DefaultChunkOverlap = 80
@@ -291,6 +291,15 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 		chunkOverlap = 0
 	}
 
+	// An explicit token limit is a hard upper bound across every splitting
+	// path, including separator exhaustion and protected spans. ChunkSize may
+	// be larger than the token budget, so clamp the merge window and split any
+	// unit that would otherwise bypass the budget.
+	tokenBudget := tokenRuneBudget(cfg)
+	if tokenBudget > 0 && tokenBudget < chunkSize {
+		chunkSize = tokenBudget
+	}
+
 	// Step 1: Find protected spans
 	protected := protectedSpans(text)
 
@@ -298,6 +307,9 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 	// chunkSize is forwarded so splitBySeparators can recursively apply lower-priority
 	// separators to oversize pieces (Python-parity recursive split).
 	units := buildUnitsWithProtection(text, protected, separators, chunkSize)
+	if tokenBudget > 0 {
+		units = splitOversizeUnits(units, tokenBudget)
+	}
 
 	// Step 3: Merge units into chunks with overlap
 	return mergeUnits(units, chunkSize, chunkOverlap)
@@ -872,8 +884,12 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 	var newParents []Chunk
 	var children []ChildChunk
 	childSeq := 0
+	budget := tokenRuneBudget(childCfg)
 	for _, parent := range parents {
 		subs := mapChildrenToSource(parent, SplitText(parent.Content, childCfg))
+		if budget > 0 {
+			subs = enforceChunkBudget(subs, budget)
+		}
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {

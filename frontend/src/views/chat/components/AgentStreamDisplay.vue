@@ -120,7 +120,7 @@
               </div>
 
               <!-- MCP tool human approval (issue #1173) -->
-              <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
+              <div v-else-if="event.type === 'tool_approval_required' && showInlineToolApproval(event)" class="tool-event">
                 <ToolApprovalCard :pending-id="event.pending_id" :delegated-task="event.delegated_task" :service-name="event.service_name || ''"
                   :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
                   :args-json="event.args_json" :grant-scope="event.grant_scope" :grant-lapsed="event.grant_lapsed" :timeout-seconds="event.timeout_seconds"
@@ -140,6 +140,15 @@
                   :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
               </div>
 
+              <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
+                <SecureFormCard :pending-id="event.pending_id" :request="event.request"
+                  :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                  :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                  :canceled="event.canceled" :abandoned="event.abandoned" />
+              </div>
+
               <!-- MCP OAuth in-conversation authorization prompt -->
               <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
                 <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
@@ -148,6 +157,24 @@
                   :resolved="event.resolved" :authorized="event.authorized"
                   :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled"
                   v-bind="embedAuthProps" />
+              </div>
+
+              <div v-else-if="showInlineHostApproval(event)" class="tool-event">
+                <HostReviewRecord v-if="isModelReview(event)" :host="event.host"
+                  :resolved="event.resolved" :approved="event.approved" :resolve-reason="event.resolve_reason" />
+                <HostApprovalCard v-else :pending-id="event.pending_id"
+                  :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
+                  :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
+                  :resolved="event.resolved" :approved="event.approved"
+                  :resolve-reason="event.resolve_reason" :resolve-scope="event.resolve_scope" />
+              </div>
+
+              <div v-else-if="showInlineToolApproval(event)" class="tool-event">
+                <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
+                  :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
+                  :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
+                  :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
               </div>
 
               <!-- Tool Call Event (non-thinking) -->
@@ -399,7 +426,7 @@
             </div>
 
             <!-- MCP tool human approval -->
-            <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
+            <div v-else-if="event.type === 'tool_approval_required' && showInlineToolApproval(event)" class="tool-event">
               <ToolApprovalCard :pending-id="event.pending_id" :delegated-task="event.delegated_task" :service-name="event.service_name || ''"
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
                 :grant-scope="event.grant_scope" :grant-lapsed="event.grant_lapsed" :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
@@ -418,6 +445,15 @@
                 :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
             </div>
 
+            <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'secure_form'" class="tool-event">
+              <SecureFormCard :pending-id="event.pending_id" :request="event.request"
+                :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                :canceled="event.canceled" :abandoned="event.abandoned" />
+            </div>
+
             <!-- MCP OAuth in-conversation authorization prompt -->
             <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
               <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
@@ -425,6 +461,24 @@
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
                 :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
                 :canceled="event.canceled" v-bind="embedAuthProps" />
+            </div>
+
+            <div v-else-if="showInlineHostApproval(event)" class="tool-event">
+              <HostReviewRecord v-if="isModelReview(event)" :host="event.host"
+                :resolved="event.resolved" :approved="event.approved" :resolve-reason="event.resolve_reason" />
+              <HostApprovalCard v-else :pending-id="event.pending_id"
+                :host="event.host || { reason: event.kind === 'host_command' ? 'delete' : '' }"
+                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
+                :resolved="event.resolved" :approved="event.approved"
+                :resolve-reason="event.resolve_reason" :resolve-scope="event.resolve_scope" />
+            </div>
+
+            <div v-else-if="showInlineToolApproval(event)" class="tool-event">
+              <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
+                :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
+                :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
+                :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
+                :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
             </div>
 
             <!-- Thinking Tool Call -->
@@ -755,8 +809,12 @@ import OpenPageCard from './OpenPageCard.vue';
 import PageEditCard from './PageEditCard.vue';
 import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
+import SecureFormCard from './SecureFormCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
+import HostApprovalCard from './HostApprovalCard.vue';
+import HostReviewRecord from './HostReviewRecord.vue';
+import { isHostApprovalEvent, isModelReview } from './hostApproval';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -814,6 +872,7 @@ import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
   buildManualMarkdown,
   formatManualTitle,
+  collectManualPreferredKbIds,
   replaceIncompleteMermaidWithPlaceholder,
   prepareStreamingMermaidMarkdown,
   extractMermaidCodes,
@@ -879,6 +938,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   wiki_update_issue: 'agentEditor.tools.wikiUpdateIssue',
   todo_write: 'agentStream.tools.todoWrite',
   ask_user: 'agentStream.tools.askUser',
+  request_secure_form: 'agentStream.tools.requestSecureForm',
+  browser_fill_secret: 'agentStream.tools.browserFillSecret',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
   attachment_parsing: 'agentStream.tools.attachmentParsing',
@@ -1180,6 +1241,9 @@ const props = defineProps<{
   followUpLoading?: boolean;
   canFork?: boolean;
   canRewind?: boolean;
+  // The main chat draws the approval above the composer. Embed and skill
+  // install have no composer slot, so they render the MCP card inline.
+  deferToolApprovals?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -1209,6 +1273,28 @@ const embedAuthProps = computed(() => ({
   embedSessionSig: props.embedSessionSig,
   embedVisitorId: props.embedVisitorId,
 }));
+
+// Host command cards stay above the chat composer. MCP cards render here
+// unless that composer is already showing them.
+const approvalEvent = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) =>
+  event?.type === 'tool_approval_required';
+
+// Pending host cards sit above the composer. A resolved approval, and every
+// model review (pending or not), stays in the timeline.
+const showInlineHostApproval = (event: { type?: string; kind?: string; host?: any; resolved?: boolean }) =>
+  approvalEvent(event) && isHostApprovalEvent(event) && (!!event.resolved || isModelReview(event));
+
+const showInlineToolApproval = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) => {
+  if (!approvalEvent(event) || isHostApprovalEvent(event)) return false;
+  if (event.resolved) return true;
+  return !props.deferToolApprovals;
+};
+
+const hideApprovalFromTimeline = (event: { type?: string; kind?: string; host?: unknown; resolved?: boolean }) => {
+  if (event?.type === 'tool_approval_resolved') return true;
+  if (!approvalEvent(event)) return false;
+  return !showInlineHostApproval(event) && !showInlineToolApproval(event);
+};
 
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
@@ -1652,6 +1738,14 @@ const hasCollaborationTasks = computed(() => !props.ragMode && collaborationTask
 
 // Expanded events tracking (for tool calls and thinking events)
 const expandedEvents = ref<Set<string>>(new Set());
+
+// Defined here, before any computed that can run during setup: an initial
+// non-empty event stream makes the immediate watcher evaluate
+// canAttachReasoning, which reads this function. As a const declared below it,
+// it would be in its temporal dead zone and crash the whole timeline render.
+const isEventExpanded = (eventId: string): boolean => {
+  return expandedEvents.value.has(eventId);
+};
 
 // Track IDs of thinking events that are currently "active" (latest, not yet followed by non-thinking)
 const activeThinkingIds = ref<Set<string>>(new Set());
@@ -2239,6 +2333,7 @@ const intermediateEvents = computed(() => {
   const hidden = hiddenThinkingEventIds.value;
   return result.filter((e: any) => {
     if (e.type === 'answer' || e.type === 'agent_complete') return false;
+    if (hideApprovalFromTimeline(e)) return false;
     // Mid-run injected user messages render as normal user bubbles in the
     // message list, not inside the steps tree — the tree template has no
     // branch for this type and would otherwise emit an empty node.
@@ -2268,7 +2363,7 @@ const displayEvents = computed(() => {
     // Injected user messages render as normal user bubbles in the message
     // list — never inside the agent timeline (the template has no branch for
     // the type and would render an empty card).
-    (e: any) => e.type !== 'user_message_injected',
+    (e: any) => e.type !== 'user_message_injected' && !hideApprovalFromTimeline(e),
   );
 
   // Quick-answer RAG: pipeline steps (including attachment prep) live in
@@ -2449,10 +2544,6 @@ const handleActionHeaderClick = (event: any) => {
 const handleActionCardClick = (event: any) => {
   if (!canOpenToolReferences(event)) return;
   openToolReferences(event);
-};
-
-const isEventExpanded = (eventId: string): boolean => {
-  return expandedEvents.value.has(eventId);
 };
 
 const isReferenceDrawerTool = (toolName?: string | null): boolean =>
@@ -3433,6 +3524,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   uiStore.openManualEditor({
     mode: 'create',
+    preferredKbIds: collectManualPreferredKbIds(props.session?.knowledge_references),
     title: manualTitle,
     content: manualContent,
     status: 'draft',

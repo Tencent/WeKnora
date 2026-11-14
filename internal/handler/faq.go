@@ -165,9 +165,16 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 
+	// Cap the reader before binding: the payload's entries array has no count
+	// limit, and validation only runs after the whole array is materialized.
+	limitJSONBody(c, faqJSONMaxBytes())
 	var req types.FAQBatchUpsertPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ upsert payload", err)
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(errors.NewBadRequestError("request body is too large"))
+			return
+		}
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}

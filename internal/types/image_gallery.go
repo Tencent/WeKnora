@@ -2,6 +2,15 @@ package types
 
 import "time"
 
+const (
+	// ImageSourcePageAttr 保存解析器给出的 PDF 一基页码，不由模型生成。
+	ImageSourcePageAttr = "source.page"
+	// ImageSourceIndexAttr 保存图片在原文中的零基序号，不是 chunk 内的数组下标。
+	ImageSourceIndexAttr = "source.image_index"
+	// ImageSourceMaxOrdinal 保证 Go、数据库和浏览器能无损交换来源位置整数。
+	ImageSourceMaxOrdinal = 1<<53 - 1
+)
+
 // ImageAsset is a single image projected from a chunk's image_info array.
 // It is the unit the gallery lists, filters, sorts and serves.
 type ImageAsset struct {
@@ -27,8 +36,7 @@ type ImageAsset struct {
 	Caption string `json:"caption"`
 	// OCRText is the extracted text from the image, if any.
 	OCRText string `json:"ocr_text"`
-	// Attrs is the observed attribute map (e.g. contain.text, contain.data_visual)
-	// produced by the attribute pipeline. Absent keys mean "not observed".
+	// Attrs 包含模型观察属性和解析器的 source.* 来源位置；缺少来源键表示未知。
 	Attrs map[string]any `json:"attrs"`
 	// IsEnabled mirrors the owning chunk's enabled flag.
 	IsEnabled bool `json:"is_enabled"`
@@ -85,8 +93,7 @@ type ImageListFilter struct {
 // ImageAssetField names one value of an image the gallery query can search,
 // filter or sort on. Exactly one of the two is set.
 type ImageAssetField struct {
-	// Builtin is one of the builtin source's fields: "caption", "ocr_text",
-	// "created_at", "updated_at" or "is_enabled".
+	// Builtin 是内置字段：caption、ocr_text、created_at、updated_at、is_enabled 或 page。
 	Builtin string
 	// Attr is a source-local attribute name read from image_info attrs
 	// (e.g. "contain.text").
@@ -142,6 +149,8 @@ type ImageAssetRow struct {
 	Caption     string    `gorm:"column:caption"`
 	OCRText     string    `gorm:"column:ocr_text"`
 	// AttrsJSON is the observed attribute map as JSON text.
-	AttrsJSON  string `gorm:"column:attrs_json"`
+	AttrsJSON string `gorm:"column:attrs_json"`
+	// SourcePage 是校验后的逐图页码；旧专用图片 chunk 可从可靠的 PDF 定位回退。
+	SourcePage *int64 `gorm:"column:source_page"`
 	TotalCount int64  `gorm:"column:total_count"`
 }

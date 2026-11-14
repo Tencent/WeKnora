@@ -6,6 +6,7 @@ import type { TenantInfo as TenantInfoFromAPI } from '@/api/tenant'
 import i18n from '@/i18n'
 import { reloadFontFromStorage } from '@/composables/useFont'
 import { reloadThemeFromStorage } from '@/composables/useTheme'
+import { safeRemoveItem, userKey } from '@/composables/preferenceStorage'
 import { resetMigrationLatch } from '@/composables/preferenceStorage'
 import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -13,6 +14,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useOrganizationStore } from '@/stores/organization'
 import { createSequencedRefresh } from '@/stores/sequencedRefresh'
 import { clearProtectedFileCache } from '@/utils/security'
+import { invalidateAuthRefresh } from '@/utils/authRefresh'
 
 /** 登出时丢弃空间级资源缓存和文件 Blob，避免 SPA 重登复用上一账号数据。 */
 function clearSessionResourceCaches() {
@@ -242,7 +244,12 @@ export const useAuthStore = defineStore('auth', () => {
   // only on an actual tenant change, so logout / init paths are not touched.
   const clearTenantScopedClientState = () => {
     try {
-      localStorage.removeItem('weknora_last_chat_model_id')
+      // The last-chat-model key is user-namespaced via preferenceStorage,
+      // but model ids are still tenant-scoped, so a tenant change voids the
+      // remembered pick. The un-namespaced legacy key is cleaned up for
+      // browsers upgraded from before user scoping.
+      safeRemoveItem(userKey('last_chat_model'))
+      safeRemoveItem('weknora_last_chat_model_id')
       localStorage.removeItem('weknora_current_kb')
       const raw = localStorage.getItem('WeKnora_settings')
       if (raw) {
@@ -445,6 +452,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const logout = () => {
+    invalidateAuthRefresh()
     // 清空状态
     user.value = null
     tenant.value = null

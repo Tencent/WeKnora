@@ -180,6 +180,11 @@ func (s *sessionService) KnowledgeQA(
 		req.ReasoningEffort, &chatManage.SummaryConfig.Thinking, &chatManage.SummaryConfig.ReasoningEffort,
 	)
 
+	// Fill the rerank model the same way the retrieval API path does when the
+	// overrides left it empty (issue #1800): the rerank stage otherwise skips
+	// with "empty_model_id" and the answer goes out in raw retrieval order.
+	chatManage.RerankModelID = s.resolveKnowledgeQARerankModel(ctx, chatManage.RerankModelID)
+
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
 	// plugin reads.
@@ -319,10 +324,8 @@ func (s *sessionService) selectChatModelID(
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to list models: %w", err)
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
-			return model.ID, tenantID, nil
-		}
+	if model := types.PickChatModel(models, ""); model != nil {
+		return model.ID, tenantID, nil
 	}
 	return "", 0, fmt.Errorf("no chat model ID available: no accessible knowledge base model or available models")
 }
@@ -892,6 +895,8 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 			KeywordThreshold:     rc.GetEffectiveKeywordThreshold(),
 			DisableVectorMatch:   opts.DisableVectorMatch,
 			DisableKeywordsMatch: opts.DisableKeywordsMatch,
+			QueryImage:           opts.QueryImage,
+			QueryImageMediaType:  opts.QueryImageMediaType,
 			RerankModelID:        rerankModelID,
 			RerankTopK:           rc.GetEffectiveRerankTopK(),
 			RerankThreshold:      rc.GetEffectiveRerankThreshold(),
@@ -947,6 +952,7 @@ func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.Kno
 	if opts.KeywordThreshold != nil {
 		chatManage.KeywordThreshold = *opts.KeywordThreshold
 	}
+	chatManage.ParentSlotAggregation = opts.ParentSlotAggregation
 	// The final FILTER_TOP_K stage cuts to RerankTopK whether or not the
 	// rerank stage runs, so it is the result count. Recall must be at least
 	// as deep for the count to be reachable.

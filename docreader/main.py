@@ -16,6 +16,7 @@ from docreader.auth import AuthInterceptor, TLSConfigError, load_tls_credentials
 from docreader import config
 from docreader.config import CONFIG
 from docreader.parser import Parser
+from docreader.parser.stream import ParsedDocumentStream
 from docreader.preprocess import PreprocessLimits, PreprocessRunner
 from docreader.proto import docreader_pb2_grpc
 from docreader.parser.registry import registry
@@ -25,6 +26,7 @@ from docreader.proto.docreader_pb2 import (
     ImageRef,
     ReadStreamMeta,
     ReadStreamResponse,
+    GetInfoResponse,
     ListEnginesResponse,
     ParserEngineInfo,
 )
@@ -150,6 +152,24 @@ def _iter_image_refs(images: dict):
         )
 
 
+def _image_ref_from_streamed_data(ref_path: str, image_data: bytes) -> ImageRef:
+    """Build one image reference from raw bytes yielded by a parser."""
+    fname, mime = _mime_for_ref(ref_path)
+    return ImageRef(
+        filename=fname,
+        original_ref=ref_path,
+        mime_type=mime,
+        image_data=image_data,
+    )
+
+
+def _validate_file_content_size(content: bytes) -> None:
+    if len(content) > CONFIG.grpc_max_file_size_mb:
+        raise ValueError(
+            f"File content size {len(content)} exceeds maximum {CONFIG.grpc_max_file_size_mb}"
+        )
+
+
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def __init__(self, preprocess_runner=None):
         super().__init__()
@@ -173,6 +193,13 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         self._preprocess_runner.close()
         self._preprocess_executor.shutdown(wait=True, cancel_futures=True)
 
+    def GetInfo(self, request, context):
+        """Return metadata embedded in the image that runs this instance."""
+        return GetInfoResponse(
+            version=os.getenv("DOCREADER_VERSION", "unknown"),
+            commit_id=os.getenv("DOCREADER_COMMIT_ID", "unknown"),
+        )
+
     def _parse_request(self, request: ReadRequest):
         """Run the parser for a ReadRequest, returning (result, source_desc).
 
@@ -195,6 +222,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         file_type = request.file_type or os.path.splitext(request.file_name)[1][1:]
         file_content = request.file_content
         track_request_size(len(file_content))
+        _validate_file_content_size(file_content)
         logger.info(
             "Read(File): file=%s, type=%s, size=%d bytes",
             request.file_name,
@@ -249,52 +277,107 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 return ReadResponse(error=str(e))
 
     def ReadStream(self, request: ReadRequest, context):
-        """Streaming read: yields one meta frame, then one frame per image.
-
-        Each frame is a small, independent gRPC message, so documents with many
-        page images (large scanned PDFs) are returned without hitting the unary
-        message-size cap, and neither side has to hold the whole payload at once.
-        """
+        """Yield metadata first, then images as each parser produces them."""
         request_id = request.request_id or str(uuid.uuid4())
 
         with request_id_context(request_id):
             _c = to_valid_utf8_text
+            parsed_stream = None
             try:
-                result, source_desc = self._parse_request(request)
+                if request.url or not callable(
+                    getattr(self.parser, "parse_file_stream", None)
+                ):
+                    result, source_desc = self._parse_request(request)
+                    parsed_stream = ParsedDocumentStream(
+                        document=result,
+                        image_count=len(result.images or {}),
+                    )
+                else:
+                    cfg = request.config
+                    parser_engine = cfg.parser_engine if cfg else ""
+                    engine_overrides = (
+                        dict(cfg.parser_engine_overrides) if cfg else {}
+                    )
+                    file_type = request.file_type or os.path.splitext(
+                        request.file_name
+                    )[1][1:]
+                    file_content = request.file_content
+                    try:
+                        track_request_size(len(file_content))
+                        _validate_file_content_size(file_content)
+                        logger.info(
+                            "Read(File stream): file=%s, type=%s, size=%d bytes",
+                            request.file_name,
+                            file_type,
+                            len(file_content),
+                        )
+                        parsed_stream = self.parser.parse_file_stream(
+                            request.file_name,
+                            file_type,
+                            file_content,
+                            parser_engine=parser_engine,
+                            engine_overrides=engine_overrides,
+                        )
+                    finally:
+                        del file_content
+                    result = parsed_stream.document
+                    source_desc = request.file_name
             except Exception as e:
                 logger.error("Error reading document: %s", e)
                 logger.info("Traceback: %s", traceback.format_exc())
+                if parsed_stream is not None:
+                    parsed_stream.close()
+                del request
                 yield ReadStreamResponse(meta=ReadStreamMeta(error=str(e)))
                 return
+
+            # PDF parser streams own a temporary source file; drop the request's
+            # full bytes field while the client drains page images.
+            del request
 
             if not result or not result.content:
                 error_msg = f"Failed to parse: {source_desc}"
                 logger.error(error_msg)
+                parsed_stream.close()
                 yield ReadStreamResponse(meta=ReadStreamMeta(error=error_msg))
                 return
 
             images = result.images or {}
-            image_count = len(images)
-            yield ReadStreamResponse(
-                meta=ReadStreamMeta(
-                    markdown_content=_c(result.content),
-                    image_dir_path="",
-                    metadata={k: _c(str(v)) for k, v in result.metadata.items()}
-                    if result.metadata
-                    else {},
-                    image_count=image_count,
-                    source_blocks=source_blocks_to_proto(result),
-                )
-            )
-
+            content_len = len(result.content)
             sent = 0
-            for ref in _iter_image_refs(images):
-                yield ReadStreamResponse(image=ref)
-                sent += 1
+            try:
+                yield ReadStreamResponse(
+                    meta=ReadStreamMeta(
+                        markdown_content=_c(result.content),
+                        image_dir_path="",
+                        metadata={k: _c(str(v)) for k, v in result.metadata.items()}
+                        if result.metadata
+                        else {},
+                        image_count=parsed_stream.image_count,
+                        source_blocks=source_blocks_to_proto(result),
+                    )
+                )
+
+                for ref in _iter_image_refs(images):
+                    yield ReadStreamResponse(image=ref)
+                    sent += 1
+
+                for image in parsed_stream.images:
+                    yield ReadStreamResponse(
+                        image=_image_ref_from_streamed_data(
+                            image.ref_path, image.image_data
+                        )
+                    )
+                    sent += 1
+            except Exception:
+                logger.exception("Error streaming images for %s", source_desc)
+                raise
+            finally:
+                parsed_stream.close()
 
             logger.info(
                 "ReadStream response: content_len=%d, images=%d",
-                len(result.content),
+                content_len,
                 sent,
             )
 
@@ -322,8 +405,8 @@ def main():
     server = grpc.server(
         RequestThreadPoolExecutor(max_workers=CONFIG.grpc_max_workers),
         options=[
-            ("grpc.max_send_message_length", CONFIG.grpc_max_file_size_mb),
-            ("grpc.max_receive_message_length", CONFIG.grpc_max_file_size_mb),
+            ("grpc.max_send_message_length", CONFIG.grpc_max_message_size_bytes),
+            ("grpc.max_receive_message_length", CONFIG.grpc_max_message_size_bytes),
         ],
         interceptors=interceptors,
     )

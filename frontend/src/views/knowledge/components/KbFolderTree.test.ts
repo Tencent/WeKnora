@@ -23,6 +23,20 @@ test('the rename sentinel cannot collide with the root folder path', () => {
   assert.match(tree, /row\.kind === 'folder' && renamingPath\.value === row\.path/)
 })
 
+// The rename input lives inside the row, so its keydowns bubble to the row. Vue
+// applies modifiers in order: `.prevent.self` would cancel a space typed in the
+// input before `.self` looks at the target.
+test('the row only handles a space pressed on the row itself', () => {
+  assert.match(tree, /@keydown\.space\.self\.prevent="emit\('select', row\.path\)"/)
+  assert.doesNotMatch(tree, /@keydown\.space\.prevent\.self/)
+})
+
+test('deep folders stop indenting so the name stays visible', () => {
+  assert.match(tree, /--kb-folder-indent-max:\s*4/)
+  assert.match(tree, /min\(var\(--kb-folder-depth/)
+  assert.doesNotMatch(tree, /kb-folder-row__more-placeholder/)
+})
+
 test('only real folders expose a rename affordance', () => {
   assert.match(tree, /v-if="canEdit && row\.kind === 'folder'"/)
   assert.match(tree, /popup-menu-item/)

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -49,7 +50,20 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		}
 
 		var val interface{}
-		if err := json.Unmarshal(rawVal, &val); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(rawVal))
+		if targetType == "string" {
+			// A numeric identifier must reach the tool as the original literal,
+			// not a rounded float64 string. Keep other conversions unchanged.
+			decoder.UseNumber()
+		}
+		if err := decoder.Decode(&val); err != nil {
+			continue
+		}
+		// Integer literals already have the requested JSON representation. A
+		// float64-to-int64 round trip would corrupt values above 2^53. Keep
+		// decimal/exponent notation on the existing normalization path.
+		if _, isNumber := val.(float64); isNumber && targetType == "integer" &&
+			!strings.ContainsAny(string(rawVal), ".eE") {
 			continue
 		}
 		newVal, didCast := castValue(val, targetType)
@@ -80,8 +94,9 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	switch targetType {
 	case "array":
 		if s, ok := val.(string); ok {
-			// Try JSON parsing first (handles "[{...}]" → []interface{})
-			var parsed []interface{}
+			// Unwrap serialized arrays without decoding their elements through
+			// float64, which would round IDs and precise nested numeric values.
+			var parsed []json.RawMessage
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				return parsed, true
 			}
@@ -130,6 +145,15 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	case "number":
 		if s, ok := val.(string); ok {
 			if f, err := strconv.ParseFloat(s, 64); err == nil {
+				// Keep the literal text: marshaling the parsed float64 would
+				// round integers above 2^53 and long decimals, the same way
+				// untouched arguments and integer literals are preserved.
+				// Literals ParseFloat accepts but JSON rejects (inf, +5)
+				// still fall back to the float64 normalization below.
+				var literal json.Number
+				if json.Unmarshal([]byte(s), &literal) == nil {
+					return literal, true
+				}
 				return f, true
 			}
 		}
@@ -137,6 +161,8 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	case "string":
 		// Non-string values -> string (e.g., number or bool passed as non-string)
 		switch v := val.(type) {
+		case json.Number:
+			return v.String(), true
 		case bool:
 			if v {
 				return "true", true

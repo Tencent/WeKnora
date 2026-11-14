@@ -501,6 +501,59 @@ class ExcelParserTest(unittest.TestCase):
         wb.save(bio)
         return bio.getvalue()
 
+    def test_numeric_looking_text_retains_its_exact_spelling(self):
+        rows = [
+            ["00123", "1e5", "+001", "202600012345678901"],
+            ["00456", "2e5", "+002", "202600012345678902"],
+        ]
+        document = ExcelParser(file_name="codes.xlsx").parse_into_text(
+            self._workbook_bytes(rows)
+        )
+        self.assertEqual(
+            [chunk.content.strip() for chunk in document.chunks],
+            [
+                "A: 00123,B: 1e5,C: +001,D: 202600012345678901",
+                "A: 00456,B: 2e5,C: +002,D: 202600012345678902",
+            ],
+        )
+        self.assertEqual(
+            [block["locator"]["row_start"] for block in document.source_blocks],
+            [1, 2],
+        )
+        for chunk in document.chunks:
+            self.assertEqual(document.content[chunk.start:chunk.end], chunk.content)
+
+    def test_integer_cells_are_not_coerced_by_a_decimal_column(self):
+        document = ExcelParser(file_name="quantities.xlsx").parse_into_text(
+            self._workbook_bytes([[123456789012345, 1.25], [7, 2.5]])
+        )
+        self.assertEqual(
+            document.content,
+            "A: 123456789012345,B: 1.25\nA: 7,B: 2.5\n",
+        )
+
+    def test_numeric_looking_headers_remain_distinct(self):
+        document = ExcelParser(
+            file_name="codes.xlsx", xlsx_first_row_as_header=True
+        ).parse_into_text(self._workbook_bytes([["001", "1"], ["002", "2"]]))
+        self.assertEqual(document.content, "001: 002,1: 2\n")
+
+    def test_mixed_numeric_and_text_cells_keep_their_types(self):
+        from datetime import datetime
+
+        rows = [[7, 1.25, True, datetime(2026, 1, 2), "001"],
+                [8, 2.5, False, None, "002"]]
+        document = ExcelParser(file_name="types.xlsx").parse_into_text(
+            self._workbook_bytes(rows)
+        )
+        self.assertEqual(
+            [chunk.content.strip() for chunk in document.chunks],
+            [
+                "A: 7,B: 1.25,C: True,D: 2026-01-02 00:00:00,E: 001",
+                "A: 8,B: 2.5,C: False,E: 002",
+            ],
+        )
+
     def test_xlsx_first_row_header_mode_repeats_column_context(self):
         content = self._workbook_bytes(
             [
@@ -576,6 +629,38 @@ class ExcelParserTest(unittest.TestCase):
             ["Name: Alice,Name_2: Alias,C: Shenzhen"],
         )
 
+    def test_header_mode_avoids_collisions_with_generated_labels(self):
+        cases = (
+            (
+                ["Name", "Name", "Name_2"],
+                "Name: left,Name_2: middle,Name_2_2: right",
+            ),
+            (
+                ["Name", "Name_2", "Name"],
+                "Name: left,Name_2: middle,Name_3: right",
+            ),
+            (
+                ["B", None, "B_2"],
+                "B: left,B_2: middle,B_2_2: right",
+            ),
+        )
+        for headers, expected in cases:
+            with self.subTest(headers=headers):
+                content = self._workbook_bytes([headers, ["left", "middle", "right"]])
+
+                document = ExcelParser(
+                    file_name="headers.xlsx",
+                    file_type="xlsx",
+                    xlsx_first_row_as_header=True,
+                ).parse_into_text(content)
+
+                self.assertEqual(
+                    [chunk.content.strip() for chunk in document.chunks], [expected]
+                )
+                workbook = openpyxl.load_workbook(io.BytesIO(content))
+                self.assertEqual(next(workbook.active.values), tuple(headers))
+                workbook.close()
+
     def test_xlsx_explicit_false_override_keeps_first_row_as_data(self):
         content = self._workbook_bytes(
             [
@@ -593,6 +678,67 @@ class ExcelParserTest(unittest.TestCase):
         chunks = [chunk.content.strip() for chunk in document.chunks]
         self.assertEqual(chunks[0], "A: Name,B: Age")
         self.assertEqual(chunks[1], "A: Alice,B: 30")
+
+    def test_cells_that_say_na_none_or_null_are_kept(self):
+        # pandas reads these strings as missing values by default, which
+        # dropped the pair although the cell has an answer in it.
+        content = self._workbook_bytes(
+            [
+                ["Patient", "Allergies", "Region", "Result", "Note"],
+                ["P1", "None", "NA", "N/A", "ok"],
+                ["P2", "Penicillin", "EU", "NULL", None],
+                ["P3", "n/a", "NaN", 42, "nan"],
+            ]
+        )
+
+        document = ExcelParser(
+            file_name="patients.xlsx",
+            file_type="xlsx",
+            xlsx_first_row_as_header=True,
+        ).parse_into_text(content)
+
+        self.assertEqual(
+            [chunk.content.strip() for chunk in document.chunks],
+            [
+                "Patient: P1,Allergies: None,Region: NA,Result: N/A,Note: ok",
+                "Patient: P2,Allergies: Penicillin,Region: EU,Result: NULL",
+                "Patient: P3,Allergies: n/a,Region: NaN,Result: 42,Note: nan",
+            ],
+        )
+
+    def test_a_header_cell_that_says_na_keeps_its_label(self):
+        content = self._workbook_bytes([["Item", "NA", "EU"], ["pens", 3, 4]])
+
+        document = ExcelParser(
+            file_name="sales.xlsx",
+            file_type="xlsx",
+            xlsx_first_row_as_header=True,
+        ).parse_into_text(content)
+
+        self.assertEqual(document.chunks[0].content.strip(), "Item: pens,NA: 3,EU: 4")
+
+    def test_blank_cells_and_blank_rows_are_still_skipped(self):
+        content = self._workbook_bytes(
+            [
+                ["Item", "Count"],
+                ["pens", None],
+                [None, None],
+                ["ink", 2],
+            ]
+        )
+
+        document = ExcelParser(file_name="stock.xlsx", file_type="xlsx").parse_into_text(
+            content
+        )
+
+        self.assertEqual(
+            [chunk.content.strip() for chunk in document.chunks],
+            ["A: Item,B: Count", "A: pens", "A: ink,B: 2"],
+        )
+        self.assertEqual(
+            [block["locator"]["row_start"] for block in document.source_blocks],
+            [1, 2, 4],
+        )
 
     def test_parse_phantom_shared_strings_workbook(self):
         document = ExcelParser().parse_into_text(_xlsx_with_phantom_shared_strings())

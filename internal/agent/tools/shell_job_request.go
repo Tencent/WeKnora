@@ -14,7 +14,9 @@ type ShellJobSubmitRequest struct {
 	Command string
 	// DisplayCommand is the original command, before stdin, cwd and skill
 	// wrappers. Only this command belongs in persistent metadata and results.
-	DisplayCommand  string
+	DisplayCommand string
+	// ProgramStdin is stdin the command runs as code, read by delete detection.
+	ProgramStdin    string
 	WorkDir         string
 	Env             map[string]string
 	Description     string

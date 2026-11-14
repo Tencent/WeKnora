@@ -32,3 +32,16 @@ def test_resolve_agent_id_accepts_agent_name_case_insensitively(monkeypatch):
     monkeypatch.setattr(client, "_request", lambda *args, **kwargs: agents)
 
     assert client.resolve_agent_id("wiki questioner") == "builtin-wiki-researcher"
+
+
+def test_resolve_agent_id_prefers_exact_id_over_earlier_name_match(monkeypatch):
+    client = WeKnoraClient("http://example.test/api/v1", "")
+    agents = {
+        "data": [
+            {"id": "other-agent", "name": "builtin-wiki-researcher"},
+            {"id": "builtin-wiki-researcher", "name": "Wiki Questioner"},
+        ]
+    }
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: agents)
+
+    assert client.resolve_agent_id("builtin-wiki-researcher") == "builtin-wiki-researcher"

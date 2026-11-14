@@ -8,7 +8,8 @@
   >
     <div class="cmdk-item__icon">
       <slot name="icon">
-        <t-icon :name="iconName" size="14px" />
+        <ResourceIcon v-if="iconName === 'assistant'" type="assistant" :size="14" />
+        <t-icon v-else :name="iconName" size="14px" />
       </slot>
     </div>
     <div class="cmdk-item__body">
@@ -37,6 +38,8 @@
 </template>
 
 <script setup lang="ts">
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
+
 /**
  * A single result row inside the command palette.
  * Host component owns selection state; this one just mirrors it via the

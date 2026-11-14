@@ -86,6 +86,11 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.QuestionGenerationConfig != nil {
 		base := eff.QuestionGenerationConfig
 		eff.QuestionGenerationConfig = *overrides.QuestionGenerationConfig
+		if strings.TrimSpace(eff.QuestionGenerationConfig.ModelID) == "" {
+			eff.QuestionGenerationConfig.ModelID = base.ModelID
+		} else {
+			eff.QuestionGenerationConfig.ModelID = strings.TrimSpace(eff.QuestionGenerationConfig.ModelID)
+		}
 		if eff.QuestionGenerationConfig.CustomInstructions == "" {
 			eff.QuestionGenerationConfig.CustomInstructions = base.CustomInstructions
 		}
@@ -153,11 +158,11 @@ func validateDefaultFileImportRequirements(
 	fileType = normalizeFileExtension(fileType)
 	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() {
 		logger.Error(ctx, "VLM model is not configured")
-		return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+		return werrors.NewImportPrerequisiteError("上传图片文件需要设置VLM模型")
 	}
 	if IsAudioType(fileType) && !kb.ASRConfig.IsASREnabled() {
 		logger.Error(ctx, "ASR model is not configured")
-		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+		return werrors.NewImportPrerequisiteError("上传音频文件需要设置ASR语音识别模型")
 	}
 	return nil
 }
@@ -223,12 +228,12 @@ func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTyp
 
 	if hasImage {
 		if !eff.VLMConfig.IsEnabled() {
-			return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+			return werrors.NewImportPrerequisiteError("上传图片文件需要设置VLM模型")
 		}
 	}
 
 	if hasAudio && !eff.ASRConfig.IsASREnabled() {
-		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+		return werrors.NewImportPrerequisiteError("上传音频文件需要设置ASR语音识别模型")
 	}
 
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {
@@ -289,10 +294,18 @@ func reparseFileTypes(k *types.Knowledge) []string {
 }
 
 func defaultQuestionGenerationConfig(kb *types.KnowledgeBase) types.QuestionGenerationConfig {
-	if kb == nil || kb.QuestionGenerationConfig == nil {
-		return types.QuestionGenerationConfig{}
+	var config types.QuestionGenerationConfig
+	if kb == nil {
+		return config
 	}
-	return *kb.QuestionGenerationConfig
+	if kb.QuestionGenerationConfig != nil {
+		config = *kb.QuestionGenerationConfig
+	}
+	config.ModelID = strings.TrimSpace(config.ModelID)
+	if config.ModelID == "" {
+		config.ModelID = strings.TrimSpace(kb.SummaryModelID)
+	}
+	return config
 }
 
 func derefExtractConfig(cfg *types.ExtractConfig) types.ExtractConfig {

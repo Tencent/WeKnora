@@ -70,8 +70,10 @@ func TestDecodeDataURIBytes_EmptyBase64(t *testing.T) {
 }
 
 func TestDescribeImages_WithDescriber(t *testing.T) {
+	var prompt string
 	engine := &AgentEngine{
-		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+		imageDescriber: func(_ context.Context, _ []byte, got string) (string, error) {
+			prompt = got
 			return "A red square image", nil
 		},
 	}
@@ -85,6 +87,14 @@ func TestDescribeImages_WithDescriber(t *testing.T) {
 	}
 	if descriptions[0] != "A red square image" {
 		t.Errorf("unexpected description: %s", descriptions[0])
+	}
+
+	exported := engine.DescribeDataURIImages(context.Background(), []string{dataURI})
+	if len(exported) != 1 || exported[0] != "A red square image" {
+		t.Fatalf("exported description = %v", exported)
+	}
+	if prompt != toolImageFullPrompt {
+		t.Fatalf("upload prompt = %q", prompt)
 	}
 }
 

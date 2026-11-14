@@ -30,6 +30,8 @@ def _anonymous_bytes():
 
 def _serve(control):
     os.environ["DOCREADER_PDF_RENDER_PARALLELISM"] = "1"
+    # The 64 MiB fixture must fit both the raw-file and transport budgets.
+    os.environ["DOCREADER_GRPC_MAX_FILE_SIZE_MB"] = "80"
     os.environ["GRPC_AUTH_TOKEN"] = ""
     os.environ["GRPC_TLS_ENABLED"] = "false"
     from docreader import main

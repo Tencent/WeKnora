@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import uuid
-from typing import Dict, List, Match, Optional, Tuple
+from typing import Callable, Dict, List, Match, Optional, Tuple
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
@@ -33,6 +33,39 @@ _ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Cells of a GFM alignment row as matched by the previous ``align_pattern``.
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
+_CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> str:
+    """Transform prose while leaving fenced code and its line endings intact."""
+    out: List[str] = []
+    pending: List[str] = []
+    fence: Optional[str] = None
+
+    def flush_pending() -> None:
+        if pending:
+            out.append(transform("\n".join(pending)))
+            pending.clear()
+
+    for line in content.split("\n"):
+        marker = _CODE_FENCE.fullmatch(line.removesuffix("\r"))
+        if fence is not None:
+            out.append(line)
+            if (
+                marker
+                and marker[1][0] == fence[0]
+                and len(marker[1]) >= len(fence)
+                and not marker[2].strip(" \t")
+            ):
+                fence = None
+        elif marker and (marker[1][0] != "`" or "`" not in marker[2]):
+            flush_pending()
+            fence = marker[1]
+            out.append(line)
+        else:
+            pending.append(line)
+    flush_pending()
+    return "\n".join(out)
 
 
 class MarkdownTableUtil:
@@ -141,6 +174,11 @@ class MarkdownTableUtil:
         return "\n".join(out)
 
     def format_table(self, content: str) -> str:
+        """Normalize tables outside fenced code blocks, preserving code examples."""
+        unified = content.replace("\r\n", "\n").replace("\r", "\n")
+        return _transform_outside_fences(unified, self._format_table_block)
+
+    def _format_table_block(self, content: str) -> str:
         """Format all Markdown tables in the content.
 
         Line-based and regex-free: only well-formed rows (leading *and*
@@ -273,11 +311,16 @@ class MarkdownImageUtil:
 
     def __init__(self):
         # Pattern to match base64 embedded images
-        # Captures: (1) alt text, (2) image format, (3) base64 data
+        # Captures alt text, image format, base64 data, and an optional title.
         # Alt text uses .*? (non-greedy) to allow literal ] (e.g. Windows paths).
         # MIME subtype uses [^;]+ to handle types with hyphens like x-emf.
+        # Match the base64 run atomically to avoid backtracking on long images.
         self.b64_pattern = re.compile(
-            r"!\[(.*?)\]\(data:image/([^;]+);base64,([^\)]+)\)"
+            r"!\[(.*?)\]\(data:image/([^;]+);base64,"
+            r"(?:(?=(?P<data>[A-Za-z0-9+/= \t\r\n]+))(?P=data)"
+            r"(?:(?<=[ \t\r\n])(?P<title>"
+            r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\((?:\\.|[^()\\])*\)))?"
+            r"[ \t\r\n]*|(?P<raw>[^)]+))\)"
         )
         # Pattern to match regular image syntax (alt text allows ])
         self.image_pattern = re.compile(r"!\[(.*?)\]\(([^)]+)\)")
@@ -337,7 +380,7 @@ class MarkdownImageUtil:
         path_prefix: Optional[str] = None,
         replace: bool = True,
     ) -> Tuple[str, Dict[str, bytes]]:
-        """Extract and decode base64 embedded images from Markdown.
+        """Extract and decode base64 embedded images outside fenced code.
 
         This method finds all base64-encoded images in the Markdown content,
         decodes them to binary format, generates unique filenames, and
@@ -367,7 +410,8 @@ class MarkdownImageUtil:
             """Replacement function for each base64 image match."""
             title = match.group(1)  # Alt text
             img_ext = match.group(2)  # Image format (png, jpg, etc.)
-            img_b64 = match.group(3)  # Base64 encoded data
+            img_b64 = match.group("data") or match.group("raw")
+            image_title = match.group("title")
 
             # Decode base64 string to bytes
             image_byte = endecode.encode_image(img_b64, errors="ignore")
@@ -386,9 +430,12 @@ class MarkdownImageUtil:
                 return match.group(0)
 
             # Replace base64 data with file path reference
-            return f"![{title}]({image_path})"
+            suffix = f" {image_title}" if image_title else ""
+            return f"![{title}]({image_path}{suffix})"
 
-        text = self.b64_pattern.sub(repl, content)
+        text = _transform_outside_fences(
+            content, lambda prose: self.b64_pattern.sub(repl, prose)
+        )
         logger.debug(f"Extracted {len(images)} base64 images from markdown")
         return text, images
 

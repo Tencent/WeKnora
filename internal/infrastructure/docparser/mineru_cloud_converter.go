@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -25,7 +24,7 @@ const (
 	defaultPollInterval = 3 * time.Second
 	// defaultCloudTimeout bounds how long one batch is polled;
 	// WEKNORA_MINERU_CLOUD_TIMEOUT overrides it for documents that take longer.
-	defaultCloudTimeout = 600 * time.Second
+	defaultCloudTimeout = 30 * time.Minute
 	defaultBaseURL      = "https://mineru.net/api/v4"
 )
 
@@ -82,27 +81,17 @@ func (c *MinerUCloudReader) Read(ctx context.Context, req *types.ReadRequest) (*
 		fileName = "document" + ext
 	}
 
-	batchID, uploadURL, err := c.applyUploadURLs(ctx, fileName, ext)
+	copyReq := *req
+	copyReq.FileName = fileName
+	if strings.EqualFold(ext, ".pdf") {
+		return c.readSplitPDF(ctx, &copyReq)
+	}
+	result, err := c.readCloudPart(ctx, &copyReq)
 	if err != nil {
-		return nil, fmt.Errorf("MinerU Cloud apply upload URLs: %w", err)
+		return nil, err
 	}
-
-	if err := c.uploadFile(ctx, uploadURL, content); err != nil {
-		return nil, fmt.Errorf("MinerU Cloud file upload: %w", err)
-	}
-
-	mdContent, imageRefs, contentList, err := c.pollBatchResult(ctx, batchID)
-	if err != nil {
-		return nil, fmt.Errorf("MinerU Cloud poll: %w", err)
-	}
-
-	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
-
-	return &types.ReadResult{
-		MarkdownContent: mdContent,
-		ImageRefs:       imageRefs,
-		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
-	}, nil
+	result.MarkdownContent, result.ImageRefs = ensureOriginalImageRef(req, result.MarkdownContent, result.ImageRefs)
+	return result, nil
 }
 
 // --- batch upload API ---
@@ -151,12 +140,16 @@ func (c *MinerUCloudReader) applyUploadURLs(ctx context.Context, fileName, ext s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", "", fmt.Errorf("API status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		return "", "", fmt.Errorf("API status %d: %s", resp.StatusCode, preview)
 	}
 
+	respBody, err := readCapped(resp.Body, maxJSONResponseBytes)
+	if err != nil {
+		return "", "", fmt.Errorf("read response body: %w", err)
+	}
 	var result batchApplyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", "", fmt.Errorf("decode response: %w", err)
 	}
 	if result.Code != 0 {
@@ -176,7 +169,7 @@ func (c *MinerUCloudReader) uploadFile(ctx context.Context, uploadURL string, co
 		return fmt.Errorf("create PUT request: %w", err)
 	}
 
-	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 10 * time.Minute, MaxRedirects: 5})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("PUT upload: %w", err)
@@ -287,7 +280,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, maxResultResponseBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read poll response body: %w", err)
 	}
@@ -306,8 +299,12 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 
 	// Dump the raw extract_result JSON for debugging
 	rawExtract := string(pollResp.Data.ExtractResult)
-	if len(rawExtract) > 4000 {
-		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...", rawExtract[:4000])
+	if len(rawExtract) > rawResponseLogBytes {
+		logger.Infof(
+			context.Background(),
+			"[MinerUCloud] Raw extract_result (truncated to %d chars): %s",
+			rawResponseLogBytes, rawResponsePreview(rawExtract),
+		)
 	} else {
 		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result: %s", rawExtract)
 	}
@@ -338,7 +335,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 // extractDoneResult extracts markdown and images from a completed batch item.
 // Prefers inline markdown/content fields; falls back to downloading full_zip_url.
 func (c *MinerUCloudReader) extractDoneResult(
-	_ context.Context, item *extractResultItem,
+	ctx context.Context, item *extractResultItem,
 ) (string, []types.ImageRef, []byte, error) {
 	text := firstNonEmpty(item.Markdown, item.Content, item.Text)
 	if text != "" {
@@ -350,7 +347,7 @@ func (c *MinerUCloudReader) extractDoneResult(
 		return "", nil, nil, fmt.Errorf("MinerU Cloud state=done but no markdown/content or full_zip_url")
 	}
 
-	md, imageRefs, contentList, err := downloadAndExtractZip(item.FullZipURL)
+	md, imageRefs, contentList, err := downloadAndExtractZip(ctx, item.FullZipURL)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("extract zip: %w", err)
 	}
@@ -362,12 +359,16 @@ func (c *MinerUCloudReader) extractDoneResult(
 // --- ZIP handling ---
 
 // downloadAndExtractZip also returns the content_list of the package, if any.
-func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, []byte, error) {
+func downloadAndExtractZip(ctx context.Context, zipURL string) (string, []types.ImageRef, []byte, error) {
 	if err := utils.ValidateURLForSSRF(zipURL); err != nil {
 		return "", nil, nil, fmt.Errorf("zip URL blocked by SSRF check: %v", err)
 	}
-	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
-	resp, err := client.Get(zipURL)
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 10 * time.Minute, MaxRedirects: 5})
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, zipURL, nil)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	resp, err := client.Do(request)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("download zip: %w", err)
 	}
@@ -390,7 +391,7 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, []byte, err
 // extractMarkdownZip reads the shallowest .md file of a MinerU result package
 // and the images it references, via markdown or inline HTML <img> syntax.
 func extractMarkdownZip(zipData []byte, logLabel string) (string, []types.ImageRef, error) {
-	return extractMarkdownZipBounded(zipData, logLabel, maxZipImagesTotalBytes)
+	return extractMarkdownZipBounded(zipData, logLabel, minerUMaxImageBytes())
 }
 
 // extractMarkdownZipBounded is extractMarkdownZip with the accumulated-image
@@ -457,8 +458,8 @@ func extractMarkdownZipBounded(zipData []byte, logLabel string, maxImages int64)
 			continue
 		}
 		if imageBytes+int64(len(imgData)) > maxImages {
-			return "", nil, fmt.Errorf("%w: images in %q exceed %d bytes",
-				errResultPackageTooLarge, logLabel, maxImages)
+			return "", nil, fmt.Errorf("%w: images in %q reached %d bytes and exceed configured limit %d bytes (%s)",
+				errResultPackageTooLarge, logLabel, imageBytes+int64(len(imgData)), maxImages, mineruMaxImageBytesEnv)
 		}
 		imageBytes += int64(len(imgData))
 

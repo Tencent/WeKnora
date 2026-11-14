@@ -9,11 +9,12 @@ import html
 import logging
 import os
 from email.header import decode_header
+from email.message import Message
 from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from typing import Dict
 
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, UnicodeDammit
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
@@ -105,6 +106,7 @@ class MHTMLParser(BaseParser):
             "Parsing MHTML file: %s, size: %d bytes", self.file_name, len(content)
         )
         msg = email.message_from_bytes(content)
+        explicit_root = self._explicit_html_root(msg)
 
         html_parts = []
         images: Dict[str, str] = {}
@@ -117,18 +119,25 @@ class MHTMLParser(BaseParser):
 
             if content_type == "text/html":
                 payload = part.get_payload(decode=True)
-                if not payload:
+                if not payload and part is not explicit_root:
                     continue
-                charset = part.get_content_charset() or "utf-8"
-                try:
-                    html_text = payload.decode(charset, errors="ignore")
-                except LookupError:
-                    html_text = payload.decode("utf-8", errors="ignore")
+                payload = payload or b""
+                charset = part.get_content_charset()
+                if charset:
+                    try:
+                        html_text = payload.decode(charset, errors="ignore")
+                    except LookupError:
+                        html_text = payload.decode("utf-8", errors="ignore")
+                else:
+                    # Keep the bytes until HTML declarations and BOMs have
+                    # been inspected; decoding as UTF-8 first loses text.
+                    html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
                 html_parts.append(
                     {
                         "content": html_text,
                         "location": location,
                         "size": len(html_text),
+                        "is_root": part is explicit_root,
                     }
                 )
             elif content_type.startswith("image/") and self.extract_images:
@@ -162,9 +171,12 @@ class MHTMLParser(BaseParser):
         return Document(content=markdown_text, images=images, metadata=metadata)
 
     def _select_main_html(self, html_parts) -> dict:
-        """Pick the largest non-ad HTML part as the main document body."""
+        """Honor an explicit root before the largest non-ad HTML fallback."""
         if not html_parts:
             return {}
+        for part in html_parts:
+            if part.get("is_root"):
+                return part
 
         def is_ad(location: str) -> bool:
             loc = _header_str(location)
@@ -187,6 +199,47 @@ class MHTMLParser(BaseParser):
             "Only ad content found, using largest: %d bytes", largest["size"]
         )
         return largest
+
+    @staticmethod
+    def _explicit_html_root(msg: Message) -> Message | None:
+        """Resolve the related HTML root, including the default first part.
+
+        RFC 2387 specifies the first part when the start parameter is absent.
+        Malformed/unsupported roots retain the existing size-based fallback.
+        """
+        if msg.get_content_type() != "multipart/related" or not msg.is_multipart():
+            return None
+        parts = msg.get_payload()
+        if not parts:
+            return None
+        start_param = msg.get_param("start", None)
+        if start_param is None:
+            part = parts[0]
+            # A missing or mismatched type is malformed and keeps the fallback.
+            declared_type = _header_str(msg.get_param("type", "")).lower()
+            if not declared_type or declared_type != part.get_content_type():
+                return None
+        else:
+            start = _header_str(start_param).strip().strip("<>")
+            if not start:
+                return None
+            part = next(
+                (item for item in parts
+                 if _header_str(item.get("Content-ID", "")).strip().strip("<>") == start),
+                None,
+            )
+            if part is None:
+                return None
+        if part.get_content_type() == "text/html":
+            return part
+        if part.get_content_type() == "multipart/alternative" and part.is_multipart():
+            # MIME alternatives are ordered from least to most faithful.
+            return next(
+                (alternative for alternative in reversed(part.get_payload())
+                 if alternative.get_content_type() == "text/html"),
+                None,
+            )
+        return None
 
     @staticmethod
     def _add_image_aliases(
@@ -290,6 +343,7 @@ class MHTMLParser(BaseParser):
             self._unwrap_whitespace_only_inline(soup)
             text_fallback = soup.get_text(separator="\n", strip=True)
             self._escape_table_cell_pipes(soup)
+            self._move_table_footer_rows_after_body(soup)
             markdown_text = md(str(soup), heading_style="ATX")
             result = self._normalize_markdown(markdown_text)
             if not result and text_fallback:
@@ -326,6 +380,32 @@ class MHTMLParser(BaseParser):
         for tag in reversed(soup.find_all(_WHITESPACE_DROPPING_INLINE_TAGS)):
             if tag.find(True) is None and not tag.get_text().strip():
                 tag.unwrap()
+
+    @staticmethod
+    def _move_table_footer_rows_after_body(soup: BeautifulSoup) -> None:
+        """Read the rows of a ``<tfoot>`` as the last rows of their table.
+
+        markdownify takes the first row of a ``<tfoot>`` for the start of a
+        table without a header and writes an empty header row and a
+        separator line in front of it, in the middle of the table. A browser
+        draws the footer after the body wherever it sits in the source, so
+        its rows go after the table's last body row.
+        """
+        for tfoot in soup.find_all("tfoot"):
+            table = tfoot.find_parent("table")
+            if table is None:
+                continue
+            own_rows = [
+                row for row in table.find_all("tr") if row.find_parent("table") is table
+            ]
+            footer_rows = [row for row in own_rows if row.find_parent("tfoot") is tfoot]
+            body_rows = [row for row in own_rows if row.find_parent("tfoot") is None]
+            if not body_rows:
+                continue
+            last = body_rows[-1]
+            for row in reversed(footer_rows):
+                last.insert_after(row.extract())
+            tfoot.decompose()
 
     @staticmethod
     def _escape_table_cell_pipes(soup: BeautifulSoup) -> None:

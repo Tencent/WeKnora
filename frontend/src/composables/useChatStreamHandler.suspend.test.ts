@@ -9,6 +9,8 @@ import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
 import * as dataChange from '../utils/assistantDataChange.ts'
+import * as thinkBlocks from '../utils/thinkBlocks.ts'
+import * as hostApproval from '../views/chat/components/hostApproval.ts'
 import type { useChatStreamHandler as StreamHandler } from './useChatStreamHandler.ts'
 
 const source = readFileSync(new URL('./useChatStreamHandler.ts', import.meta.url), 'utf8')
@@ -22,6 +24,8 @@ const modules: Record<string, unknown> = {
   '@/utils/messageTimestamp': timestamps,
   '@/utils/steerStreamFork': steering,
   '@/utils/assistantDataChange': dataChange,
+  '@/utils/thinkBlocks': thinkBlocks,
+  '@/views/chat/components/hostApproval': hostApproval,
 }
 const exports: { useChatStreamHandler?: typeof StreamHandler } = {}
 vm.runInNewContext(compiled, {
@@ -73,6 +77,38 @@ test('history renders a suspended message as settled with its pending card', asy
   assert.equal(card.suspended, true)
   assert.equal(card.args_json, '{"id":7}')
   assert.equal(card.requested_at, Date.parse('2026-10-13T08:00:00Z') / 1000)
+})
+
+test('a parked approval restores its durable expiry instead of the step snapshot timeout', async () => {
+  const { handler, messagesList } = setup()
+  const row = awaitingRow()
+  const step = {
+    ...row.agent_steps[0],
+    approvals: [
+      {
+        pending_id: 'p1', tool_call_id: 'call-1', timeout_seconds: 120,
+        requested_at: Date.parse(row.pending_prompt.created_at) / 1000,
+        service_name: 'svc', mcp_tool_name: 'delete', args_json: '{"id":7}',
+      },
+      {
+        pending_id: 'legacy', tool_call_id: 'call-2', timeout_seconds: 120,
+        service_name: 'svc', mcp_tool_name: 'update',
+      },
+    ],
+  }
+  await handler.handleMsgList([{ ...row, agent_steps: [step] }])
+
+  const restored = cards(messagesList[0])
+  assert.equal(restored.length, 2)
+  const [parked, legacy] = restored
+  assert.equal(parked.pending_id, 'p1')
+  assert.equal(parked.suspendable, true)
+  assert.equal(parked.suspended, true)
+  assert.equal(parked.expires_at, row.pending_prompt.expires_at)
+  assert.equal(parked.resolved, false)
+  assert.equal(legacy.pending_id, 'legacy')
+  assert.equal(legacy.suspendable, undefined)
+  assert.equal(legacy.timeout_seconds, 120)
 })
 
 test('a live run that suspends parks its card and ends without completion', () => {
@@ -324,6 +360,7 @@ test('resolved approvals reload once in timeline order before completion and nev
   await handler.handleMsgList([{ id: 'a', role: 'assistant', is_completed: true,
     content: 'final', agent_duration_ms: 5000,
     agent_steps: [{ iteration: 0, timestamp: '2026-10-13T08:00:00Z', thought: 'starting',
+      approvals: [{ pending_id: 'approved', tool_call_id: 'call-1', args_json: '{"limit":1}' }],
       tool_calls: [{ id: 'call-1', name: 'mcp_x', args: {}, result: { success: true } }] }],
     prompt_history: [prompt], delegated_prompts: [prompt,
       { ...prompt, id: 'rejected', delegated_task: 'child', response: { approved: false } },

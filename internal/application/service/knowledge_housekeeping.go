@@ -67,22 +67,31 @@ type HousekeepingService struct {
 	queuedAt  time.Time
 }
 
-// queuedProbeTTL bounds how often QueuedWork rescans the queue; clients poll
-// far more often than a backlog changes.
+// queuedProbeTTL bounds how often QueuedWork and the sweep rescan the queue;
+// clients poll far more often than a backlog changes.
 const queuedProbeTTL = time.Minute
 
 // openSpanStatuses are the span states meaning "this span never finished".
 var openSpanStatuses = []string{types.SpanStatusPending, types.SpanStatusRunning}
 
-// terminalParseStatuses are knowledge states in which no pipeline can still be
-// advancing, so any open span left on the row is orphaned by definition.
+// terminalParseStatuses are knowledge states in which no pipeline can still
+// be advancing, so any open span left on the row is orphaned by definition.
+// "deleting" counts: the delete flow dequeues in-flight tasks when it marks
+// the row, and it never resets parse_status afterwards, so deleting is the
+// last state the row will ever carry — its open spans are orphans whether
+// the delete finished or stranded (Tencent/WeKnora#5277).
 var terminalParseStatuses = []string{
-	types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled,
+	types.ParseStatusCompleted, types.ParseStatusFailed,
+	types.ParseStatusCancelled, types.ParseStatusDeleting,
 }
 
 // terminalSpanMessage is the fallback explanation for a span Sweep D closes on
 // a row that carries no error message of its own.
 const terminalSpanMessage = "row reached a terminal state without closing its trace spans"
+
+// deletingSpanMessage is the fallback for spans closed on a deleting row,
+// whose delete intent is not an error and may not leave an error_message.
+const deletingSpanMessage = "knowledge row was deleted without closing its trace spans"
 
 // NewHousekeepingService constructs a HousekeepingService. It does NOT start
 // the cron — call Start in the application bootstrap so a misconfigured
@@ -260,6 +269,19 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// delete intent can then be retried; the delete executor is idempotent
 	// and plans by row ID, so a late-arriving task still finishes cleanly).
 	//
+	// The candidate query must be Unscoped: the delete flow writes
+	// deleted_at early, so the majority of stranded rows are already
+	// soft-deleted and GORM's default scope would hide exactly the rows
+	// this sweep exists to recover (Tencent/WeKnora#5277). The two branches
+	// below split them apart:
+	//   - deleted_at IS NULL (#3345 ghost): the row still shows in the
+	//     document list, so flipping it to failed makes the delete intent
+	//     visible and retryable.
+	//   - deleted_at IS NOT NULL (#5277): the delete already removed the
+	//     row from every listing; only the status field and its spans were
+	//     left behind. Settle it the same way so the sweep stops visiting
+	//     it and Sweep D can reap the orphaned spans.
+	//
 	// Liveness gate: a backlogged delete is not stranded — probe the queue
 	// for a live knowledge:list_delete covering the row before touching it.
 	// A nil inspector (nothing wired at all) defers every candidate to the
@@ -268,7 +290,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// more interval is not. A probe error defers that single row.
 	if h.inspector != nil {
 		var strandedDeletes []types.Knowledge
-		if err := h.db.WithContext(ctx).
+		if err := h.db.WithContext(ctx).Unscoped().
 			Where("parse_status = ? AND updated_at < ?", types.ParseStatusDeleting, cutoff).
 			Find(&strandedDeletes).Error; err != nil {
 			logger.Warnf(ctx, "[Housekeeping] deleting candidate query failed: %v", err)
@@ -285,11 +307,20 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 				if queued {
 					continue
 				}
-				res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+				// The settle UPDATE needs Unscoped for soft-deleted rows: the
+				// default scope would turn it into a silent no-op there.
+				var recoverMsg string
+				if k.DeletedAt.Valid {
+					recoverMsg = "delete completed but the row stayed deleting"
+				} else {
+					recoverMsg = "delete task stranded (no queued/active delete task)"
+				}
+				recoverMsg += " > " + threshold.String() + ", recovered by housekeeping"
+				res := h.db.WithContext(ctx).Unscoped().Model(&types.Knowledge{}).
 					Where("id = ? AND parse_status = ?", k.ID, types.ParseStatusDeleting).
 					Updates(map[string]interface{}{
 						"parse_status":  types.ParseStatusFailed,
-						"error_message": "delete task stranded (no queued/active delete task) > " + threshold.String() + ", recovered by housekeeping",
+						"error_message": recoverMsg,
 					})
 				if res.Error != nil {
 					logger.Warnf(ctx, "[Housekeeping] delete sweep update failed for %s: %v", k.ID, res.Error)
@@ -375,17 +406,19 @@ func (h *HousekeepingService) recoverStrandedPendingSummaries(ctx context.Contex
 		logger.Warnf(ctx, "[Housekeeping] pending summary query failed: %v", err)
 		return
 	}
+	if len(rows) == 0 {
+		return
+	}
+	// One shared queue scan answers every row (see filterOutQueued).
+	queued, err := h.queuedSnapshot(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[Housekeeping] summary queue probe failed: %v (deferring %d row(s))", err, len(rows))
+		return
+	}
 	var recovered int64
 	for _, k := range rows {
-		if h.inspector != nil {
-			queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
-			if err != nil {
-				logger.Warnf(ctx, "[Housekeeping] summary queue probe failed for %s: %v (deferring)", k.ID, err)
-				continue
-			}
-			if queued {
-				continue
-			}
+		if _, ok := queued[k.ID]; ok {
+			continue
 		}
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("id = ? AND summary_status = ?", k.ID, types.SummaryStatusPending).
@@ -680,14 +713,14 @@ func (h *HousekeepingService) closeStalledSpans(
 // durable per document in task_pending_ops (dedup_key = knowledge ID), while
 // asynq only carries a per-KB wake-up trigger whose payload has no knowledge
 // ID — and TypeWikiIngest is deliberately absent from the inspector's
-// taskTypesForKnowledgeCancel set anyway. So HasQueuedTasksForKnowledge
+// taskTypesForKnowledgeCancel set anyway. So the queue snapshot
 // structurally reports "nothing queued" for a document whose only outstanding
 // work is a queued Wiki ingest, and the sweep force-fails a perfectly healthy
 // row. Probe the durable table directly before consulting the inspector.
 //
 // When no inspector is wired (nil) the durable gate still applies; only the
 // transient queue check is skipped. On probe error we fail safe, but in
-// opposite directions by design: an inspector error KEEPS the candidate as
+// opposite directions by design: a queue scan error KEEPS the candidates as
 // stuck (matching the span heartbeat query), whereas a durable-table error
 // DEFERS every candidate to the next sweep — we cannot tell backlog from
 // orphan without it, and wrongly failing a live document is not recoverable
@@ -720,6 +753,19 @@ func (h *HousekeepingService) filterOutQueued(
 		durable[id] = struct{}{}
 	}
 
+	// One shared queue scan answers every candidate. Under a large backlog
+	// every waiting document is a candidate, and probing per candidate walks
+	// the queues once per document, saturating Redis for hours. A nil
+	// snapshot (no inspector, or a failed scan) leaves every candidate stuck.
+	var queued map[string]struct{}
+	if len(durable) < len(candidates) {
+		var err error
+		if queued, err = h.queuedSnapshot(ctx); err != nil {
+			logger.Warnf(ctx, "[Housekeeping] %v (will fail safe and treat %d candidate(s) as stuck)",
+				err, len(candidates)-len(durable))
+		}
+	}
+
 	out := candidates[:0]
 	for _, k := range candidates {
 		if _, ok := durable[k.ID]; ok {
@@ -727,18 +773,7 @@ func (h *HousekeepingService) filterOutQueued(
 			wikiHeld = append(wikiHeld, k)
 			continue
 		}
-		if h.inspector == nil {
-			out = append(out, k)
-			continue
-		}
-		queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
-		if err != nil {
-			logger.Warnf(ctx,
-				"[Housekeeping] queue probe failed for %s: %v (will fail safe and treat as stuck)", k.ID, err)
-			out = append(out, k)
-			continue
-		}
-		if queued {
+		if _, ok := queued[k.ID]; ok {
 			skipped++
 			continue
 		}
@@ -856,12 +891,13 @@ func (h *HousekeepingService) rearmWikiTriggers(
 func (h *HousekeepingService) reapTerminalSpans(ctx context.Context) {
 	type openRow struct {
 		ID           int64   `gorm:"column:id"`
+		ParseStatus  string  `gorm:"column:parse_status"`
 		ErrorMessage *string `gorm:"column:error_message"`
 	}
 	var rows []openRow
 	if err := h.db.WithContext(ctx).
 		Table("knowledge_processing_spans AS s").
-		Select("s.id AS id", "k.error_message AS error_message").
+		Select("s.id AS id", "k.parse_status AS parse_status", "k.error_message AS error_message").
 		Joins("JOIN knowledges k ON k.id = s.knowledge_id").
 		Where("s.status IN ?", openSpanStatuses).
 		Where("k.parse_status IN ?", terminalParseStatuses).
@@ -873,6 +909,9 @@ func (h *HousekeepingService) reapTerminalSpans(ctx context.Context) {
 	var closed int64
 	for _, r := range rows {
 		msg := terminalSpanMessage
+		if r.ParseStatus == types.ParseStatusDeleting {
+			msg = deletingSpanMessage
+		}
 		if r.ErrorMessage != nil && strings.TrimSpace(*r.ErrorMessage) != "" {
 			msg = strings.TrimSpace(*r.ErrorMessage)
 		}

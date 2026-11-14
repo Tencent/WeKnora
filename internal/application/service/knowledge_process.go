@@ -6,10 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -527,9 +532,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// 打印每个Chunk的详细信息
 	for idx, chunkData := range chunks {
 		contentPreview := chunkData.Content
-		if len(contentPreview) > 200 {
-			contentPreview = contentPreview[:200] + "..."
-		}
+		contentPreview = cutLogPreview(contentPreview, 200)
 		logger.Infof(ctx, "[DocReader] Chunk #%d (seq=%d): 内容长度=%d, 图片数=%d, 范围=[%d-%d]",
 			idx, chunkData.Seq, len(chunkData.Content), len(chunkData.Images), chunkData.Start, chunkData.End)
 		logger.Debugf(ctx, "[DocReader] Chunk #%d 内容预览: %s", idx, contentPreview)
@@ -540,16 +543,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalURL)
 			if img.Caption != "" {
 				captionPreview := img.Caption
-				if len(captionPreview) > 100 {
-					captionPreview = captionPreview[:100] + "..."
-				}
+				captionPreview = cutLogPreview(captionPreview, 100)
 				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, captionPreview)
 			}
 			if img.OCRText != "" {
 				ocrPreview := img.OCRText
-				if len(ocrPreview) > 100 {
-					ocrPreview = ocrPreview[:100] + "..."
-				}
+				ocrPreview = cutLogPreview(ocrPreview, 100)
 				logger.Infof(ctx, "[DocReader]   图片 #%d: OCRText=%s", imgIdx, ocrPreview)
 			}
 			logger.Infof(ctx, "[DocReader]   图片 #%d: 位置=[%d-%d]", imgIdx, img.Start, img.End)
@@ -721,26 +720,33 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
 		// question-style queries and statement-style chunk content.
-		indexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
-		for _, chunk := range textChunks {
-			// chunk.EmbeddingContent prepends ContextHeader (heading breadcrumb)
-			// when the chunker populated it during Tier-1 splitting; falls back
-			// to plain Content otherwise. The document title sits outermost;
-			// custom metadata remains document-scoped model context.
-			indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         indexContent,
-				SourceID:        chunk.ID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
+		const indexWindowSize = 200
+		buildIndexWindow := func(chunks []*types.Chunk) []*types.IndexInfo {
+			infos := make([]*types.IndexInfo, 0, len(chunks))
+			for _, chunk := range chunks {
+				// chunk.EmbeddingContent prepends ContextHeader (heading breadcrumb)
+				// when the chunker populated it during Tier-1 splitting; falls back
+				// to plain Content otherwise. The document title sits outermost;
+				// custom metadata remains document-scoped model context.
+				indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
+				infos = append(infos, &types.IndexInfo{
+					Content:         indexContent,
+					SourceID:        chunk.ID,
+					SourceType:      types.ChunkSourceType,
+					ChunkID:         chunk.ID,
+					KnowledgeID:     knowledge.ID,
+					KnowledgeBaseID: knowledge.KnowledgeBaseID,
+					IsEnabled:       true,
+				})
+			}
+			return infos
 		}
 
-		// Calculate storage size required for embeddings
-		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
+		// Estimate the full quota before any index writes, but bound generated
+		// content and the estimator's placeholder vectors to one window at a time.
+		for batch := range slices.Chunk(textChunks, indexWindowSize) {
+			totalStorageSize += retrieveEngine.EstimateStorageSize(ctx, embeddingModel, buildIndexWindow(batch))
+		}
 		if tenantInfo.StorageQuota > 0 {
 			// Re-fetch tenant storage information
 			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
@@ -780,7 +786,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return abortRetryErr(ctx, knowledge.ID, status)
 		}
 
-		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+		for batch := range slices.Chunk(textChunks, indexWindowSize) {
+			if err = ctx.Err(); err != nil {
+				break
+			}
+			err = retrieveEngine.BatchIndex(ctx, embeddingModel, buildIndexWindow(batch))
+			if err != nil {
+				break
+			}
+		}
 		if err != nil {
 			// Embedding and vector-store errors are often transient. While the
 			// task has attempts left, leave the row processing and hand the
@@ -822,9 +836,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				code, "batch index failed", err)
 			return nil
 		}
-		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
+		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(textChunks))
 		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
-			"vectors_written": len(indexInfoList),
+			"vectors_written": len(textChunks),
 			"storage_bytes":   totalStorageSize,
 		})
 
@@ -1099,7 +1113,7 @@ func validateSummaryOutput(response *types.ChatResponse) (string, error) {
 	if response == nil {
 		return "", errEmptySummaryOutput
 	}
-	content := strings.TrimSpace(response.Content)
+	content := strings.TrimSpace(tools.StripThinkBlocks(response.Content))
 	if content == "" {
 		return "", errEmptySummaryOutput
 	}
@@ -1903,6 +1917,18 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			indexBatchAttempted,
 			indexBatchSucceeded,
 		)
+		if llmCallEmpty > 0 {
+			// Empty completions are counted, not logged, at the call site; a
+			// run where every chunk came back empty is indistinguishable from
+			// a healthy run in the application log. Reasoning-style models
+			// burning the whole budget on thinking are the known cause —
+			// point operators at the knob instead of leaving them to guess.
+			logger.Warnf(ctx,
+				"Question generation: %d of %d model calls returned empty completions "+
+					"(reasoning-style models can spend the completion budget on thinking even when disabled; "+
+					"raise %s to give the reply room)",
+				llmCallEmpty, llmCallAttempts, generateQuestionsMaxTokensEnv)
+		}
 		if qSpan != nil {
 			out := types.JSONMap{
 				"status":                 exitStatus,
@@ -2040,13 +2066,21 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	})
 
 	// Initialize chat model
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	processOverrides, _ := knowledge.ProcessOverrides()
+	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
+	questionModelID, err := resolveQuestionGenerationModel(ctx, s.modelService, kb, processOverrides)
+	if err != nil {
+		exitStatus = "question_model_invalid"
+		qErr = err
+		return err
+	}
+	chatModel, err := s.modelService.GetChatModel(ctx, questionModelID)
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
-	resolvedModelID = kb.SummaryModelID
+	resolvedModelID = questionModelID
 
 	// Initialize embedding model and retrieval engine
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
@@ -2080,8 +2114,6 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		questionCount = 10
 	}
 
-	processOverrides, _ := knowledge.ProcessOverrides()
-	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
 	customInstructions := questionGenCfg.CustomInstructions
 
 	// Collect image info for all text chunks so question generation can
@@ -2224,6 +2256,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	chunksInBatch := len(batchIDs)
 	chunksProcessed := 0
 	emptyChunks := 0
+	llmCallEmpty := 0
 	llmCallFailed := 0
 	generatedQuestionsTotal := 0
 	indexEntriesPrepared := 0
@@ -2252,11 +2285,23 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}()
 	defer func() {
 		logger.Infof(ctx,
-			"Question generation (batch) stats: knowledge=%s batch=%d chunks(in_batch=%d,processed=%d,empty=%d) llm_failed=%d retry=%d/%d status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
-			payload.KnowledgeID, payload.BatchIndex, chunksInBatch, chunksProcessed, emptyChunks, llmCallFailed,
-			retryCount, maxRetry, exitStatus, time.Since(taskStartedAt).Round(time.Millisecond),
+			"Question generation (batch) stats: knowledge=%s batch=%d "+
+				"chunks(in_batch=%d,processed=%d,empty=%d,llm_empty=%d) llm_failed=%d retry=%d/%d "+
+				"status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
+			payload.KnowledgeID, payload.BatchIndex, chunksInBatch, chunksProcessed, emptyChunks,
+			llmCallEmpty, llmCallFailed, retryCount, maxRetry, exitStatus,
+			time.Since(taskStartedAt).Round(time.Millisecond),
 			generatedQuestionsTotal, indexEntriesPrepared, indexBatchSucceeded,
 		)
+		if llmCallEmpty > 0 {
+			// See the matching warning in processQuestionGenerationForKnowledge:
+			// empty completions point at a completion budget spent on thinking.
+			logger.Warnf(ctx,
+				"Question generation (batch): %d model calls returned empty completions "+
+					"(reasoning-style models can spend the completion budget on thinking even when disabled; "+
+					"raise %s to give the reply room)",
+				llmCallEmpty, generateQuestionsMaxTokensEnv)
+		}
 		if qSpan != nil {
 			out := types.JSONMap{
 				"status":                 exitStatus,
@@ -2351,13 +2396,21 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	processOverrides, _ := knowledge.ProcessOverrides()
+	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
+	questionModelID, err := resolveQuestionGenerationModel(ctx, s.modelService, kb, processOverrides)
+	if err != nil {
+		exitStatus = "question_model_invalid"
+		qErr = err
+		return err
+	}
+	chatModel, err := s.modelService.GetChatModel(ctx, questionModelID)
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
-	resolvedModelID = kb.SummaryModelID
+	resolvedModelID = questionModelID
 
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	if err != nil {
@@ -2390,8 +2443,6 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		questionCount = 10
 	}
 
-	processOverrides, _ := knowledge.ProcessOverrides()
-	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
 	customInstructions := questionGenCfg.CustomInstructions
 
 	// Fetch the batch chunks (in payload order) plus the two boundary
@@ -2466,6 +2517,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			continue
 		}
 		if len(questions) == 0 {
+			llmCallEmpty++
 			continue
 		}
 		latestChunk, latestErr := s.chunkRepo.GetChunkByID(ctx, payload.TenantID, chunk.ID)
@@ -2528,6 +2580,29 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	return nil
 }
 
+const (
+	// generateQuestionsDefaultMaxTokens is the per-chunk completion budget for
+	// question generation. The reply itself is a handful of short lines, but
+	// reasoning-style models can spend a small budget on thinking even when
+	// thinking is disabled and come back with an empty completion (the same
+	// failure mode the description path grew KNOWLEDGE_BASE_PROFILE_MAX_TOKENS
+	// for, issue #4221) — so the default keeps headroom.
+	generateQuestionsDefaultMaxTokens = 2048
+	// generateQuestionsMaxTokensEnv lets operators raise (or lower) the budget
+	// without a rebuild; invalid or non-positive values fall back to the
+	// default so one bad variable cannot break question generation.
+	generateQuestionsMaxTokensEnv = "GENERATE_QUESTIONS_MAX_TOKENS"
+)
+
+func generateQuestionsMaxTokens() int {
+	if v := strings.TrimSpace(os.Getenv(generateQuestionsMaxTokensEnv)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return generateQuestionsDefaultMaxTokens
+}
+
 // generateQuestionsWithContext generates questions for a chunk with surrounding context
 func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,
@@ -2574,15 +2649,21 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		},
 	}, &chat.ChatOptions{
 		Temperature: 0.7,
-		MaxTokens:   512,
+		MaxTokens:   generateQuestionsMaxTokens(),
 		Thinking:    &thinking,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}
 
-	// Parse response
-	lines := strings.Split(response.Content, "\n")
+	return parseGeneratedQuestions(response.Content, questionCount), nil
+}
+
+// parseGeneratedQuestions drops inline <think> reasoning first: servers that
+// ignore Thinking=false still emit it in content, and each reasoning line
+// would otherwise be indexed as a question.
+func parseGeneratedQuestions(content string, questionCount int) []string {
+	lines := generatedQuestionLines(strings.TrimSpace(tools.StripThinkBlocks(content)))
 	questions := make([]string, 0, questionCount)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -2598,8 +2679,42 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 			}
 		}
 	}
+	return questions
+}
 
-	return questions, nil
+// generatedQuestionLines accepts plain lists and JSON question completions.
+// Structured metadata must not become indexed questions or chat starters.
+func generatedQuestionLines(content string) []string {
+	if header, body, ok := strings.Cut(content, "\n"); ok &&
+		(strings.TrimSpace(header) == "```" || strings.EqualFold(strings.TrimSpace(header), "```json")) {
+		content = strings.TrimSpace(strings.TrimSuffix(body, "```"))
+	}
+	if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
+		var value any
+		if err := json.Unmarshal([]byte(content), &value); err == nil {
+			if object, ok := value.(map[string]any); ok {
+				value = object["questions"]
+			}
+			items, ok := value.([]any)
+			if !ok {
+				return nil
+			}
+			lines := make([]string, 0, len(items))
+			for _, item := range items {
+				if question, ok := item.(string); ok {
+					lines = append(lines, question)
+				}
+			}
+			return lines
+		}
+		// Do not turn incomplete JSON into individual question lines. Preserve
+		// ordinary text such as "[RAG] How ..." and "{name} is used for ...".
+		rest := strings.TrimSpace(content[1:])
+		if rest == "" || strings.ContainsRune(`"{}[]`, rune(rest[0])) {
+			return nil
+		}
+	}
+	return strings.Split(content, "\n")
 }
 
 // RegenerateChunkQuestions synchronously refreshes Doc2Query-style auxiliary
@@ -2624,10 +2739,15 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 	if knowledge.KnowledgeBaseID != chunk.KnowledgeBaseID || chunk.TenantID != knowledge.TenantID {
 		return nil, werrors.NewForbiddenError("chunk does not belong to its knowledge document")
 	}
-	if kb.SummaryModelID == "" {
-		return nil, fmt.Errorf("summary model is required for question generation")
+	overrides, _ := knowledge.ProcessOverrides()
+	questionModelID, err := resolveQuestionGenerationModel(ctx, s.modelService, kb, overrides)
+	if err != nil {
+		return nil, err
 	}
-	chatModel, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+	if questionModelID == "" {
+		return nil, fmt.Errorf("a chat model is required for question generation")
+	}
+	chatModel, err := s.modelService.GetChatModel(ctx, questionModelID)
 	if err != nil {
 		return nil, err
 	}
@@ -2641,7 +2761,6 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 		}
 		return neighbor.Content
 	}
-	overrides, _ := knowledge.ProcessOverrides()
 	config := ResolveProcessConfig(kb, overrides).QuestionGenerationConfig
 	count := config.QuestionCount
 	if count <= 0 {
@@ -4084,12 +4203,19 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	}
 	sanitizeReadResult(convertResult)
+	normalizeStarted := time.Now()
 	if convertResult != nil {
 		convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
 		if convertResult.MarkdownContent != "" {
 			convertResult.MarkdownContent = docparser.NormalizeHTMLTables(convertResult.MarkdownContent)
 		}
 	}
+	normalizedBytes := 0
+	if convertResult != nil {
+		normalizedBytes = len(convertResult.MarkdownContent)
+	}
+	logger.Infof(ctx, "Document text normalization completed in %s (knowledge=%s input_bytes=%d output_bytes=%d)",
+		time.Since(normalizeStarted), knowledge.ID, len(parsedMarkdown), normalizedBytes)
 
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
@@ -4146,6 +4272,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			storedImages = append(storedImages, remoteImages...)
 		}
 
+		// 本地和远程图片分批收集，合并后恢复文档顺序供图片任务编号。
+		storedImages = docparser.SortImagesByPosition(convertResult.MarkdownContent, storedImages)
+
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
@@ -4162,6 +4291,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	chunkStarted := time.Now()
 
 	multimodalImages := imagesForMultimodal(storedImages)
 	processOpts := ProcessChunksOptions{
@@ -4215,6 +4345,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
+	logger.Infof(ctx, "Document chunking completed in %s (knowledge=%s input_bytes=%d chunks=%d)",
+		time.Since(chunkStarted), knowledge.ID, len(convertResult.MarkdownContent), len(chunks))
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	return s.processChunks(ctx, kb, knowledge, chunks, processOpts)
@@ -4350,12 +4482,16 @@ func (s *knowledgeService) convert(
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	// Parser resource limits are permanent document rejections, not transient reader failures.
-	if errors.Is(err, anydoc.ErrResourceLimit) {
+	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
 		result, err = &types.ReadResult{Error: err.Error()}, nil
 	}
 	if err != nil {
 		code, message := docReaderFailure(err)
-		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
+		if engineMessage := parseFailureMessageForEngine(parserEngine, err); engineMessage != "" {
+			message = engineMessage
+		}
+		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s engine=%s code=%s: %v",
+			knowledge.ID, parserEngine, code, err)
 		result, taskErr := s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 		s.failStageWithRetry(ctx, knowledge.ID, types.StageDocReader,
 			code, message, err, taskErr != nil)
@@ -4529,6 +4665,16 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	overrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, overrides)
 
+	// Mixed PDFs contain both page renders and native figures. Older parsers
+	// provide only the document-wide source, which remains the fallback.
+	var imageSourceTypes map[string]string
+	if raw := metadata["image_source_types"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &imageSourceTypes); err != nil {
+			logger.Warnf(ctx, "Invalid image source metadata for knowledge %s: %v", knowledge.ID, err)
+			imageSourceTypes = nil
+		}
+	}
+
 	enqueued := 0
 	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
@@ -4536,6 +4682,10 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		chunkID := imageChunkOwner(img.ServingURL, chunks)
 		if chunkID == "" {
 			logger.Warnf(ctx, "Image has no owning text chunk: knowledge=%s image=%s", knowledge.ID, img.ServingURL)
+		}
+		imageSourceType := metadata["image_source_type"]
+		if source := imageSourceTypes[img.OriginalRef]; source != "" {
+			imageSourceType = source
 		}
 
 		payload := types.ImageMultimodalPayload{
@@ -4549,7 +4699,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ImageAttrsEnabled:   eff.ImageAttrsEnabled,
 			ImageActions:        eff.ImageActions,
 			Language:            lang,
-			ImageSourceType:     metadata["image_source_type"],
+			ImageSourceType:     imageSourceType,
 			Attempt:             attempt,
 			ImageIndex:          idx,
 			SourceLocators:      img.SourceLocators,
@@ -4820,4 +4970,17 @@ func runKnowledgeListReparseSubmissions(
 		"%w: batch reparse submitted %d item(s) and failed %d: %w",
 		asynq.SkipRetry, outcome.Submitted, outcome.Failed, errors.Join(failures...),
 	)
+}
+
+// cutLogPreview keeps at most limit bytes of s for a log line, backing off to a
+// rune start so Chinese document text is never cut inside a character.
+func cutLogPreview(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }

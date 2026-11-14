@@ -172,6 +172,10 @@ func (t *WorkWaitTool) Execute(ctx context.Context, raw json.RawMessage) (*types
 	if waitSec > 0 {
 		fresh := t.unwaited(ids)
 		if len(fresh) > 0 {
+			if mode == "any" {
+				// An older job can also satisfy this call's completion condition.
+				fresh = ids
+			}
 			var err error
 			timedOut, interrupted, err = t.poll(ctx, fresh, mode, time.Duration(waitSec)*time.Second)
 			if err != nil {

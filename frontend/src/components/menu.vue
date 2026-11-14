@@ -8,10 +8,8 @@
             </div>
             <div class="logo_actions">
                 <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
-                    <div class="header-icon-btn" :class="{ 'is-active': assistantStore.visible }"
-                        :aria-label="assistantName" @click="assistantStore.toggle()">
-                        <t-icon name="compass" size="18px" />
-                    </div>
+                    <AssistantButton data-guide="assistant-entry" icon-only :icon-size="18" :label="assistantName"
+                        :active="assistantStore.visible" @click="assistantStore.toggle()" />
                 </t-tooltip>
                 <t-tooltip placement="bottom">
                     <template #content>
@@ -84,14 +82,8 @@
                     </div>
                 </t-tooltip>
                 <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="right">
-                    <div class="menu_item menu_item--cmdk" :class="{ 'menu_item_active': assistantStore.visible }"
-                        :aria-label="assistantName" @click="assistantStore.toggle()">
-                        <div class="menu_item-box">
-                            <div class="menu_icon">
-                                <t-icon name="compass" size="18px" />
-                            </div>
-                        </div>
-                    </div>
+                    <AssistantButton data-guide="assistant-entry" class="assistant-sidebar-entry" icon-only :icon-size="18"
+                        :label="assistantName" :active="assistantStore.visible" @click="assistantStore.toggle()" />
                 </t-tooltip>
             </div>
             <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
@@ -206,15 +198,15 @@
         <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
             <div class="batch-footer-left">
                 <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                    @change="toggleBatchSelectAll">
+                    :disabled="batchDeleting" @change="toggleBatchSelectAll">
                     {{ t('batchManage.selectAll') }}
                 </t-checkbox>
             </div>
             <div class="batch-footer-right">
-                <t-button size="small" variant="text" @click="exitBatchMode">
+                <t-button size="small" variant="text" :disabled="batchDeleting" @click="exitBatchMode">
                     {{ t('batchManage.cancel') }}
                 </t-button>
-                <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                <t-button size="small" theme="danger" variant="base" :disabled="batchDeleting || batchSelectedIds.length === 0"
                     :loading="batchDeleting" @click="handleInlineBatchDelete">
                     {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
                 </t-button>
@@ -281,6 +273,7 @@ import {
 } from './sessionSidebarSourceFilter';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
+import { useSettingsStore } from '@/stores/settings';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAuthStore } from '@/stores/auth';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
@@ -291,6 +284,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
 import { useCommandPaletteStore } from '@/stores/commandPalette';
 import { useAssistantStore } from '@/stores/assistant';
+import AssistantButton from '@/components/assistant/AssistantButton.vue';
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
@@ -614,16 +608,19 @@ const mouseleaveBotDown = () => {
 }
 
 const enterBatchMode = () => {
+    if (batchDeleting.value) return
     batchMode.value = true
     batchSelectedIds.value = []
 }
 
 const exitBatchMode = () => {
+    if (batchDeleting.value) return
     batchMode.value = false
     batchSelectedIds.value = []
 }
 
 const toggleBatchSelect = (id: string) => {
+    if (batchDeleting.value) return
     const idx = batchSelectedIds.value.indexOf(id)
     if (idx > -1) {
         batchSelectedIds.value.splice(idx, 1)
@@ -633,13 +630,16 @@ const toggleBatchSelect = (id: string) => {
 }
 
 const toggleBatchSelectAll = (checked: boolean) => {
+    if (batchDeleting.value) return
     batchSelectedIds.value = checked ? [...allSessionIds.value] : []
 }
 
 const handleInlineBatchDelete = () => {
-    if (batchSelectedIds.value.length === 0) return
-    const isDeleteAll = isAllBatchSelected.value
-    const displayCount = batchDisplayCount.value
+    if (batchDeleting.value || batchSelectedIds.value.length === 0) return;
+    const selectedIds = [...batchSelectedIds.value];
+    const isDeleteAll = isAllBatchSelected.value;
+    const displayCount = batchDisplayCount.value;
+    let submitted = false;
     const confirmDialog = DialogPlugin.confirm({
         header: t('batchManage.deleteConfirmTitle'),
         body: isDeleteAll
@@ -648,15 +648,25 @@ const handleInlineBatchDelete = () => {
         confirmBtn: { content: t('batchManage.delete'), theme: 'danger' as const },
         cancelBtn: t('batchManage.cancel'),
         theme: 'warning',
+        confirmOnEnter: false,
+        onClose: () => {
+            if (!batchDeleting.value) confirmDialog.destroy();
+        },
         onConfirm: async () => {
-            batchDeleting.value = true
+            if (submitted || batchDeleting.value) return;
+            submitted = true;
+            batchDeleting.value = true;
             try {
-                let res: any
-                if (isDeleteAll) {
-                    res = await deleteAllSessions()
-                } else {
-                    res = await batchDelSessions([...batchSelectedIds.value])
-                }
+                confirmDialog.update({
+                    confirmLoading: true,
+                    closeOnEscKeydown: false,
+                    closeOnOverlayClick: false,
+                    closeBtn: false,
+                    cancelBtn: { content: t('batchManage.cancel'), disabled: true },
+                });
+                const res = isDeleteAll
+                    ? await deleteAllSessions()
+                    : await batchDelSessions(selectedIds);
                 if (res && res.success === true) {
                     if (isDeleteAll) {
                         usemenuStore.clearMenuArr();
@@ -664,30 +674,28 @@ const handleInlineBatchDelete = () => {
                         await getMessageList();
                     } else {
                         let next = sessionBuckets.value;
-                        for (const id of batchSelectedIds.value) {
-                            next = removeSessionFromBuckets(next, id);
-                        }
+                        for (const id of selectedIds) next = removeSessionFromBuckets(next, id);
                         sessionBuckets.value = next;
                         syncMenuStoreFromBuckets();
                     }
                     const currentChatId = route.params.chatid as string;
-                    if (currentChatId && (isDeleteAll || batchSelectedIds.value.includes(currentChatId))) {
+                    if (currentChatId && (isDeleteAll || selectedIds.includes(currentChatId)))
                         router.push('/platform/creatChat');
-                    }
-                    batchSelectedIds.value = []
-                    MessagePlugin.success(t('batchManage.deleteSuccess'))
-                    exitBatchMode()
+                    batchSelectedIds.value = [];
+                    batchMode.value = false;
+                    MessagePlugin.success(t('batchManage.deleteSuccess'));
                 } else {
-                    MessagePlugin.error(t('batchManage.deleteFailed'))
+                    MessagePlugin.error(t('batchManage.deleteFailed'));
                 }
             } catch {
-                MessagePlugin.error(t('batchManage.deleteFailed'))
+                MessagePlugin.error(t('batchManage.deleteFailed'));
+            } finally {
+                batchDeleting.value = false;
+                confirmDialog.destroy();
             }
-            batchDeleting.value = false
-            confirmDialog.destroy()
         },
-    })
-}
+    });
+};
 
 const handleSessionMenuClick = (data: { value: string }, item: any) => {
     if (data?.value === 'delete') {
@@ -1236,6 +1244,8 @@ const gotopage = async (path: string) => {
         return;
     } else {
         if (path === 'creatChat') {
+            // 再次点击当前「新对话」时路由不会变化，仍需清空上一条草稿的引用。
+            if (isInCreatChat.value) useSettingsStore().clearChatReferences()
             // 如果在知识库详情页，跳转到全局对话创建页
             if (isInKnowledgeBase.value) {
                 router.push('/platform/creatChat')
@@ -1839,6 +1849,13 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
+}
+
+.aside_box--collapsed .assistant-sidebar-entry {
+    display: flex;
+    width: 32px;
+    height: 32px;
+    margin: 0 auto 6px;
 }
 
 .header-icon-btn {

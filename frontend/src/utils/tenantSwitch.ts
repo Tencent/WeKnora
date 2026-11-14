@@ -7,6 +7,7 @@
 // 用一次 full navigation 把所有 store / SSE / 请求都重置一遍。
 
 import { updateMyPreferences } from '@/api/auth'
+import { getApiBaseUrl } from '@/utils/api-base'
 
 const SAFE_FALLBACK_PATH = '/platform/knowledge-bases'
 
@@ -22,7 +23,7 @@ export function tenantSwitchTargetPath(_currentPath: string): string {
  * Perform the post-switch navigation. 统一跳到 KB 列表。
  */
 export function navigateAfterTenantSwitch(): void {
-  window.location.href = tenantSwitchTargetPath(window.location.pathname)
+  window.location.href = `${getApiBaseUrl()}${tenantSwitchTargetPath(window.location.pathname)}`
 }
 
 // 切换成功后的 toast 跨 hard reload 传递：调用方在 reload 前把信息塞进

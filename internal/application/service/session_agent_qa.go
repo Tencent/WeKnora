@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
@@ -378,27 +379,33 @@ func (s *sessionService) AgentQA(
 		engine.SetContextCheckpointSink(messageCheckpointSink{repo: s.messageRepo, sessionID: sessionID})
 	}
 
-	agentQuery := req.Query
+	var agentQuery string
 	var agentImageURLs []string
-	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
-		agentImageURLs = req.ImageURLs
-		logger.Infof(ctx, "Agent model supports vision, passing %d image(s) directly", len(agentImageURLs))
-	} else if req.ImageDescription != "" {
-		agentQuery = req.Query + "\n\n[用户上传图片内容]\n" + req.ImageDescription
-		logger.Infof(ctx, "Agent model does not support vision, appending image description (%d chars)", len(req.ImageDescription))
-	}
-	if req.QuotedContext != "" {
-		agentQuery += "\n\n" + req.QuotedContext
-	}
-	// Stored documents are listed for read_file rather than pasted in;
-	// inline uploads without a stored document still carry their content.
-	if len(req.Attachments) > 0 {
-		agentQuery += req.Attachments.BuildAgentPrompt()
-		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
-	}
-	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments, layout); manifest != "" {
-		agentQuery += manifest
-		logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
+	if req.Resume == nil {
+		agentQuery, agentImageURLs = composeAgentImageQuery(
+			ctx, req.Query, req.ImageDescription, agentModelSupportsVision, req.ImageURLs,
+			agentImageDescriber(engine),
+		)
+		if agentModelSupportsVision && len(agentImageURLs) > 0 {
+			logger.Infof(ctx, "Agent model supports vision, passing %d image(s) directly", len(agentImageURLs))
+		} else if len(req.ImageURLs) > 0 && strings.Contains(agentQuery, "[用户上传图片内容]") {
+			logger.Infof(ctx, "Agent model does not support vision, appending image description")
+		} else if len(req.ImageURLs) > 0 {
+			logger.Warnf(ctx, "Agent model cannot view %d image(s) and no description was produced", len(req.ImageURLs))
+		}
+		if req.QuotedContext != "" {
+			agentQuery += "\n\n" + req.QuotedContext
+		}
+		// Stored documents are listed for read_file rather than pasted in;
+		// inline uploads without a stored document still carry their content.
+		if len(req.Attachments) > 0 {
+			agentQuery += req.Attachments.BuildAgentPrompt()
+			logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
+		}
+		if manifest := buildSandboxAttachmentsPrompt(stagedAttachments, layout); manifest != "" {
+			agentQuery += manifest
+			logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
+		}
 	}
 
 	// Scope envelopes (runtime_context / must_use) are injected per LLM call inside
@@ -429,6 +436,51 @@ func (s *sessionService) AgentQA(
 	}
 	// Return empty - events will be handled by Handler via EventBus subscription
 	return nil
+}
+
+type dataURIImageDescriber interface {
+	DescribeDataURIImages(context.Context, []string) []string
+}
+
+func agentImageDescriber(engine any) func(context.Context, []string) []string {
+	describer, ok := engine.(dataURIImageDescriber)
+	if !ok || describer == nil {
+		return nil
+	}
+	return func(ctx context.Context, urls []string) []string {
+		imageCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		return describer.DescribeDataURIImages(imageCtx, urls)
+	}
+}
+
+// composeAgentImageQuery keeps images on the query when the chat model can
+// see them. Otherwise it uses an existing description, or asks the VLM
+// describer, so a text-only agent still receives the upload.
+func composeAgentImageQuery(
+	ctx context.Context,
+	query, description string,
+	vision bool,
+	urls []string,
+	describe func(context.Context, []string) []string,
+) (string, []string) {
+	if vision && len(urls) > 0 {
+		return query, urls
+	}
+	text := strings.TrimSpace(description)
+	if text == "" && len(urls) > 0 && describe != nil {
+		var kept []string
+		for _, part := range describe(ctx, urls) {
+			if part = strings.TrimSpace(part); part != "" {
+				kept = append(kept, part)
+			}
+		}
+		text = strings.Join(kept, "\n")
+	}
+	if text != "" {
+		return query + "\n\n[用户上传图片内容]\n" + text, nil
+	}
+	return query, nil
 }
 
 // resumableAgentRequest keeps the durable part of req needed to rebuild the

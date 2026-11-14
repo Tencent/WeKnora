@@ -60,12 +60,24 @@ func (conflictSkipConnector) FetchIncremental(
 	return items, nil, err
 }
 
+type conflictSkipKnowledgeService struct {
+	*sweepFakeKS
+	replacements int
+}
+
+func (s *conflictSkipKnowledgeService) ReplaceKnowledgeFromDataSource(
+	_ context.Context, _ string, _ *types.FetchedItem, _ map[string]string, _ []string, _ string,
+) (*types.Knowledge, error) {
+	s.replacements++
+	return &types.Knowledge{ID: "new-knowledge"}, nil
+}
+
 // newConflictSkipHarness wires a full-sync ProcessSync fixture whose data
 // source carries the given conflict strategy and whose KB already contains the
 // synced item under the same external_id.
 func newConflictSkipHarness(
 	t *testing.T, strategy string,
-) (*DataSourceService, *types.DataSource, *deletionLookupKnowledgeRepo, *sweepFakeKS, *types.SyncLog) {
+) (*DataSourceService, *types.DataSource, *deletionLookupKnowledgeRepo, *conflictSkipKnowledgeService, *types.SyncLog) {
 	t.Helper()
 	configJSON, err := (&types.DataSourceConfig{Type: conflictSkipConnectorType}).ToJSON()
 	require.NoError(t, err)
@@ -83,7 +95,7 @@ func newConflictSkipHarness(
 	}
 	existing := &types.Knowledge{ID: "knowledge-exists", FileName: "existing.md"}
 	repo := &deletionLookupKnowledgeRepo{knowledge: existing}
-	ks := &sweepFakeKS{repo: repo}
+	ks := &conflictSkipKnowledgeService{sweepFakeKS: &sweepFakeKS{repo: repo}}
 	syncLog := &types.SyncLog{
 		ID:           "log-conflict-skip",
 		DataSourceID: ds.ID,
@@ -134,6 +146,7 @@ func TestProcessSync_SkipStrategyKeepsExistingCountsSkipped(t *testing.T) {
 	log := runConflictSkipSync(t, svc, ds, syncLog)
 
 	assert.Empty(t, repo.hardDeleted, "skip strategy must not hard-delete the existing knowledge")
+	assert.Zero(t, ks.replacements)
 	assert.NotContains(t, ks.events, "delete:knowledge-exists")
 	assert.NotContains(t, ks.events, "create:existing.md")
 	assert.Equal(t, 0, log.ItemsCreated)
@@ -142,15 +155,15 @@ func TestProcessSync_SkipStrategyKeepsExistingCountsSkipped(t *testing.T) {
 }
 
 // Default strategy (overwrite) keeps the historical replace behavior: the
-// existing item is deleted and re-created, counted as updated.
+// existing item is replaced transactionally, counted as updated.
 func TestProcessSync_OverwriteStrategyReplacesExisting(t *testing.T) {
 	svc, ds, repo, ks, syncLog := newConflictSkipHarness(t, types.ConflictStrategyOverwrite)
 
 	log := runConflictSkipSync(t, svc, ds, syncLog)
 
-	assert.Equal(t, []string{"knowledge-exists"}, repo.hardDeleted)
-	assert.Contains(t, ks.events, "delete:knowledge-exists")
-	assert.Contains(t, ks.events, "create:existing.md")
+	assert.Empty(t, repo.hardDeleted)
+	assert.Empty(t, ks.events, "the caller must not delete or create outside the replacement transaction")
+	assert.Equal(t, 1, ks.replacements)
 	assert.Equal(t, 0, log.ItemsCreated)
 	assert.Equal(t, 1, log.ItemsUpdated)
 	assert.Equal(t, 0, log.ItemsSkipped)

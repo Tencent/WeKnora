@@ -156,6 +156,21 @@ func (r *chunkRepository) ListChunksByIDOnly(ctx context.Context, ids []string) 
 	return chunks, nil
 }
 
+// ListChunkEvidenceByIDOnly validates graph references without loading content.
+// Find retains Chunk's default soft-delete scope; the caller checks KB access.
+func (r *chunkRepository) ListChunkEvidenceByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Select("id, knowledge_base_id, knowledge_id, is_enabled").
+		Where("id IN ?", ids).Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListChunksBySeqID retrieves multiple chunks by their seq_ids
 func (r *chunkRepository) ListChunksBySeqID(
 	ctx context.Context, tenantID uint64, seqIDs []int64,
@@ -298,10 +313,11 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	// Determine sort order based on knowledge type
 	var orderClause string
 	if knowledgeType == types.KnowledgeTypeFAQ {
-		// FAQ: sort by updated_at
-		orderClause = "updated_at DESC"
+		// FAQ: sort by updated_at, then ID to keep pagination stable when
+		// bulk imports give multiple entries the same timestamp.
+		orderClause = "updated_at DESC, id DESC"
 		if sortOrder == "asc" {
-			orderClause = "updated_at ASC"
+			orderClause = "updated_at ASC, id ASC"
 		}
 	} else {
 		// Document: sort by chunk_index
@@ -422,19 +438,30 @@ func (r *chunkRepository) SaveChunkRevision(
 	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expectedRevision int,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		imageText := chunk.ChunkType == types.ChunkTypeImageOCR || chunk.ChunkType == types.ChunkTypeImageCaption
+		if imageText {
+			if err := syncEditedImageCopies(tx, chunk, expectedRevision); err != nil {
+				return err
+			}
+		}
+		fields := map[string]interface{}{
+			"content":          common.CleanInvalidUTF8(chunk.Content),
+			"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
+			"source_locators":  chunk.SourceLocators,
+			"content_revision": chunk.ContentRevision,
+			"is_enabled":       chunk.IsEnabled,
+			"metadata":         chunk.Metadata,
+			"index_status":     chunk.IndexStatus,
+			"last_editor_id":   chunk.LastEditorID,
+			"updated_at":       chunk.UpdatedAt,
+		}
+		if imageText {
+			fields["image_info"] = chunk.ImageInfo
+			fields["content_hash"] = chunk.ContentHash
+		}
 		result := tx.Model(&types.Chunk{}).
 			Where("id = ? AND tenant_id = ? AND content_revision = ?", chunk.ID, chunk.TenantID, expectedRevision).
-			Updates(map[string]interface{}{
-				"content":          common.CleanInvalidUTF8(chunk.Content),
-				"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
-				"source_locators":  chunk.SourceLocators,
-				"content_revision": chunk.ContentRevision,
-				"is_enabled":       chunk.IsEnabled,
-				"metadata":         chunk.Metadata,
-				"index_status":     chunk.IndexStatus,
-				"last_editor_id":   chunk.LastEditorID,
-				"updated_at":       chunk.UpdatedAt,
-			})
+			Updates(fields)
 		if result.Error != nil {
 			return result.Error
 		}

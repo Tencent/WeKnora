@@ -92,6 +92,12 @@ class DocReaderConfig:
     # Temp image output directory (shared with Go app via volume, local mode fallback)
     image_output_dir: str
 
+    @property
+    def grpc_max_message_size_bytes(self) -> int:
+        # Same bounded envelope allowance as the app's HTTP upload and gRPC
+        # client. The configured file limit still applies to raw file bytes.
+        return self.grpc_max_file_size_mb + (1 << 20)
+
 
 def load_config() -> DocReaderConfig:
     """Load config from environment variables (lightweight version)."""
@@ -190,7 +196,7 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
     cfg = CONFIG
     d: Dict[str, Any] = {
         "DOCREADER_GRPC_MAX_WORKERS": cfg.grpc_max_workers,
-        "DOCREADER_GRPC_MAX_FILE_SIZE_MB": cfg.grpc_max_file_size_mb,
+        "DOCREADER_GRPC_MAX_FILE_SIZE_MB": cfg.grpc_max_file_size_mb // (1024 * 1024),
         "DOCREADER_GRPC_PORT": cfg.grpc_port,
         "DOCREADER_DOCX_MAX_PAGES": cfg.docx_max_pages,
         "DOCREADER_MARKITDOWN_MAX_WORKERS": cfg.markitdown_max_workers,

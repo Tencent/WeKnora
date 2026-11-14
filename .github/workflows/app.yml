@@ -22,6 +22,8 @@ on:
       - "website-docs/0*/**"
       - "website-docs/.vitepress/config.mts"
       - "docker/Dockerfile.app"
+      - "scripts/docker-entrypoint.sh"
+      - "scripts/docker-entrypoint_test.sh"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
@@ -52,6 +54,8 @@ on:
       - "website-docs/0*/**"
       - "website-docs/.vitepress/config.mts"
       - "docker/Dockerfile.app"
+      - "scripts/docker-entrypoint.sh"
+      - "scripts/docker-entrypoint_test.sh"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
       - "licenses/**"
@@ -100,6 +104,8 @@ jobs:
       - name: Download modules
         run: go mod download
 
+      - name: Test Docker entrypoint permissions
+        run: bash scripts/docker-entrypoint_test.sh
       - name: Verify third-party notices and source bundle
         run: |
           bash ./scripts/check-license-bundle.sh

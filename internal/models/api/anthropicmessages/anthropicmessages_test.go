@@ -103,7 +103,7 @@ func TestBuildRequestBody_AdaptiveEffort(t *testing.T) {
 	})
 	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
 		&api.Options{ReasoningEffort: api.ReasoningXHigh}, false)
-	assert.Equal(t, map[string]any{"type": "adaptive"}, out["thinking"])
+	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, out["thinking"])
 	assert.Equal(t, map[string]any{"effort": "max"}, out["output_config"])
 	assert.Equal(t, float64(4096), out["max_tokens"])
 
@@ -128,7 +128,7 @@ func TestBuildRequestBody_ThinkingOffType(t *testing.T) {
 
 	on := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
 		&api.Options{ReasoningEffort: api.ReasoningHigh}, false)
-	assert.Equal(t, map[string]any{"type": "adaptive"}, on["thinking"])
+	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, on["thinking"])
 }
 
 func TestBuildRequestBody_NoThinkingKeepsSampling(t *testing.T) {
@@ -685,4 +685,23 @@ func TestMapStopReason(t *testing.T) {
 			assert.Equal(t, tt.want, mapStopReason(tt.reason, tt.toolCalls, tt.incomplete))
 		})
 	}
+}
+
+func TestIsolatedRequestSendsTemperatureZeroDespiteExtraBody(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+	})
+	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{Isolated: true}, false)
+	assert.Equal(t, 0.0, out["temperature"])
+}
+
+func TestIsolatedThinkingStillOmitsTemperature(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+	})
+	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{Isolated: true, ReasoningEffort: api.ReasoningLow}, false)
+	_, hasTemp := out["temperature"]
+	assert.False(t, hasTemp, "temperature is rejected alongside thinking, got %v", out["temperature"])
 }

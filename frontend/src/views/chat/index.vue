@@ -158,6 +158,17 @@
                 </div>
             </div>
             <div ref="composerElement" class="chat_composer">
+                <div v-if="composerApprovals.length" class="host-approval-pop">
+                    <HostApprovalCard v-for="approval in composerApprovals" :key="approval.pending_id"
+                        :pending-id="approval.pending_id"
+                        :host="approval.host || { reason: approval.kind === 'host_command' ? 'delete' : '' }"
+                        :timeout-seconds="approval.timeout_seconds"
+                        :requested-at="approval.requested_at"
+                        :resolved="approval.resolved"
+                        :approved="approval.approved"
+                        :resolve-reason="approval.resolve_reason"
+                        :resolve-scope="approval.resolve_scope" />
+                </div>
                 <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
                     <transition name="scroll-btn-fade">
                         <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
@@ -228,6 +239,12 @@ import { storeToRefs } from 'pinia';
 import { inject, ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed, provide } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
+import HostApprovalCard from './components/HostApprovalCard.vue';
+import {
+    clearComposerApproval,
+    isHostApprovalEvent,
+    pendingComposerApprovals,
+} from './components/hostApproval';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
@@ -258,6 +275,7 @@ import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
 import ChatQuestionMinimap from '@/components/chat/ChatQuestionMinimap.vue';
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
+import { historyHasMoreAfterAttempt } from '@/utils/historyPagination';
 import ChatHeader from '@/components/ChatHeader.vue';
 import {
     notifySessionMutation,
@@ -358,6 +376,8 @@ const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 watch(session_id, () => childTabs.reset(), { flush: 'sync' });
 const currentSession = ref(null);
+// A session ID can be revisited while requests from its previous visit are still pending.
+let chatLoadVersion = 0;
 const isAutomationSession = computed(() => currentSession.value?.kind === 'automation');
 const backgroundItems = ref([]);
 const viewingWorkId = ref('');
@@ -435,14 +455,16 @@ const loadSessionAndHydrate = async (sid) => {
     // Capture before awaiting: onMounted sends and clears firstQuery while this
     // request is in flight. A new session must retain the createChat draft.
     const preserveDraft = Boolean(firstQuery.value);
+    const version = chatLoadVersion;
     try {
         const sessionRes = await getSession(sid);
-        if (sessionRes?.data && sid === session_id.value) {
+        if (sessionRes?.data && version === chatLoadVersion && sid === session_id.value) {
             currentSession.value = sessionRes.data;
             const lastState = sessionRes.data.last_request_state;
             useSettingsStoreInstance.hydrateSessionInputState(lastState, preserveDraft);
         }
     } catch (error) {
+        if (version !== chatLoadVersion || sid !== session_id.value) return;
         console.error('Failed to load session data:', error);
     }
 };
@@ -499,6 +521,10 @@ const FORK_PREFILL_KEY = 'weknora:fork-prefill'
 let forkInFlight = false
 const rewindInFlight = ref(false)
 const rewindLockSessionId = ref('')
+const composerApprovals = computed(() =>
+    pendingComposerApprovals.value.filter((item) => item && !item.resolved && isHostApprovalEvent(item))
+)
+
 const composerLocked = computed(() =>
     isAutomationSession.value || (rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value)
 )
@@ -703,6 +729,16 @@ const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant me
 // continue-stream always fails even though the answer is coming — recover by polling
 // instead of erroring. Web/api replies are left on the original error path.
 const isAttachingImStream = ref(false);
+
+// A session change drops the stack; continue-stream replay adds back the
+// cards that are still waiting. Clearing on every isReplying change hid a
+// card that replay had just restored.
+watch(session_id, () => {
+    clearComposerApproval();
+});
+watch(isReplying, (replying) => {
+    if (!replying) clearComposerApproval();
+});
 let recoverPollTimer = null;
 // True while polling to recover an in-flight IM reply we couldn't stream. Drives
 // the same "generating" typing indicator the normal reply path shows, so the wait
@@ -955,6 +991,8 @@ watch([() => route.params], async (newvalue) => {
         steerQueue.value = [];
         session_id.value = newvalue[0].chatid;
         currentSession.value = null;
+        const version = ++chatLoadVersion;
+        const sid = session_id.value;
         clearCitationChunkCache();
 
         // 切换会话时，重置状态
@@ -971,9 +1009,10 @@ watch([() => route.params], async (newvalue) => {
         // 并应用自己的 last_request_state（在 loadSessionAndHydrate 内部完成）。
         useSettingsStoreInstance.restoreDefaultsIfSnapshotted();
 
-        await loadSessionAndHydrate(session_id.value);
+        await loadSessionAndHydrate(sid);
+        if (version !== chatLoadVersion) return;
         let data = {
-            session_id: session_id.value,
+            session_id: sid,
             created_at: '',
             limit: limit.value
         }
@@ -1031,9 +1070,12 @@ const fetchMessageList = (data) => getMessageList(data);
 // its carried-over queue is readable, and treating that gap as "queue is
 // empty" would wipe messages the user can still see.
 const hydrateSteerQueue = async ({ onlyWhenLive = false } = {}) => {
-    if (!session_id.value) return;
+    const sid = session_id.value;
+    const version = chatLoadVersion;
+    if (!sid) return;
     try {
-        const res = await listSteerSession(session_id.value);
+        const res = await listSteerSession(sid);
+        if (version !== chatLoadVersion || sid !== session_id.value) return;
         if (onlyWhenLive && !res?.assistant_message_id) return;
         const items = Array.isArray(res?.items) ? res.items : [];
         steerQueue.value = items.map((item) => ({
@@ -1047,6 +1089,7 @@ const hydrateSteerQueue = async ({ onlyWhenLive = false } = {}) => {
             if (item.delivery === 'inject') previewSteerMessage(messagesList, item);
         }
     } catch (e) {
+        if (version !== chatLoadVersion || sid !== session_id.value) return;
         console.warn('[Steer] Failed to restore queue:', e);
     }
 };
@@ -1079,6 +1122,7 @@ const {
     scrollContainer,
     debug: import.meta.env.DEV,
     onAfterMsgList: async () => {
+        const version = chatLoadVersion;
         activitySessionId.value = String(session_id.value);
         for (const message of messagesList) {
             if (message.role === 'assistant' && message.is_completed && message.suggestionSet === undefined) {
@@ -1088,6 +1132,7 @@ const {
         if (!steerQueue.value.length) {
             await hydrateSteerQueue();
         }
+        if (version !== chatLoadVersion) return;
         // Resume the trailing *assistant*, not simply the last row: a turn
         // that absorbed a mid-run message ends with the injected user bubble
         // in some orderings, and keying off that row would skip the resume
@@ -1126,7 +1171,7 @@ const {
             });
             // On success the stream resumed normally; on failure the error watcher
             // already took over (quiet recovery for IM), so only clear the flag here.
-            if (!error.value) isAttachingImStream.value = false;
+            if (version === chatLoadVersion && !error.value) isAttachingImStream.value = false;
         }
     },
     onAgentQuery: (data, existingMessage) => {
@@ -1164,18 +1209,27 @@ const showGlobalTypingIndicator = computed(() =>
 );
 
 const getmsgList = (data, isScrollType = false, scrollHeight) => {
+    const sid = String(data?.session_id || session_id.value || '');
+    const version = chatLoadVersion;
+    const isCurrent = () => version === chatLoadVersion && sid === String(session_id.value || '');
+    if (!isCurrent()) return;
     if (isScrollType) {
         if (historyLoadingMore.value || !hasMoreHistory.value) return;
         historyLoadingMore.value = true;
     }
     return fetchMessageList(data).then(async (res) => {
-        if (data?.session_id && String(data.session_id) !== String(session_id.value || '')) {
+        if (!isCurrent()) {
             return
         }
         const batch = res?.data;
         if (!batch?.length) {
             if (isScrollType) {
-                hasMoreHistory.value = false;
+                hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+                    status: 'loaded',
+                    itemCount: 0,
+                    pageSize: limit.value,
+                    cursorAdvanced: false,
+                });
             }
             return;
         }
@@ -1183,21 +1237,28 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
             cancelSuggestedQuestionsFetch();
         }
         const nextCursor = batch[0].created_at;
-        if (isScrollType && created_at.value && nextCursor === created_at.value) {
-            hasMoreHistory.value = false;
+        const cursorAdvanced = !(isScrollType && created_at.value && nextCursor === created_at.value);
+        hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+            status: 'loaded',
+            itemCount: batch.length,
+            pageSize: limit.value,
+            cursorAdvanced,
+        });
+        if (!cursorAdvanced) {
             return;
-        }
-        if (batch.length < limit.value) {
-            hasMoreHistory.value = false;
         }
         created_at.value = nextCursor;
         await handleMsgList(batch, isScrollType, scrollHeight);
     }).catch((err) => {
+        if (!isCurrent()) return;
         console.error('Failed to load messages:', err);
         if (isScrollType) {
-            hasMoreHistory.value = false;
+            hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+                status: 'failed',
+            });
         }
     }).finally(() => {
+        if (!isCurrent()) return;
         historyLoading.value = false;
         historyLoadingMore.value = false;
         if (!isScrollType && messagesList.length === 0) {
@@ -1514,8 +1575,9 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
     if (!props.embeddedMode && !currentSession.value) {
+        const version = chatLoadVersion;
         await loadSessionAndHydrate(session_id.value);
-        if (!currentSession.value) return;
+        if (version !== chatLoadVersion || !currentSession.value) return;
     }
     if (composerLocked.value) return
     const reasoningEffort = props.embeddedMode ? undefined : (useSettingsStoreInstance.reasoningEffortOverride || undefined);
@@ -1864,6 +1926,8 @@ const handleSessionMutation = (event) => {
         };
     }
     if (detail.messagesCleared) {
+        chatLoadVersion++;
+        historyLoading.value = false;
         messagesList.splice(0);
         steerQueue.value = [];
         created_at.value = '';
@@ -1928,6 +1992,7 @@ onMounted(async () => {
     }
 })
 const clearData = () => {
+    chatLoadVersion++;
     if (!props.embeddedMode) sessionActivity.detach(activitySessionId.value);
     activitySessionId.value = '';
     stopStream();
@@ -1939,11 +2004,13 @@ const clearData = () => {
     isImRecovering.value = false;
 }
 onUnmounted(() => {
+    chatLoadVersion++;
     if (!props.embeddedMode) sessionActivity.detach(activitySessionId.value);
     activitySessionId.value = '';
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
     backgroundPoller.dispose();
+    clearComposerApproval();
 });
 // An embedded view outlives the page behind it: a route change must not stop
 // its stream or restore the main chat's defaults.
@@ -2135,6 +2202,14 @@ onBeforeRouteUpdate((to, from, next) => {
         content: '';
         flex: 0 0 var(--chat-composer-height, 0px);
     }
+}
+
+.host-approval-pop {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto 8px;
+    padding: 0 16px;
+    box-sizing: border-box;
 }
 
 .chat_composer {

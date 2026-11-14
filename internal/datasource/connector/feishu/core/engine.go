@@ -127,6 +127,24 @@ func runSync[N any](
 
 	processed := 0
 	lastCheckpoint := time.Now()
+	// maybeCheckpoint persists progress on a node-count or wall-clock cadence.
+	// Skipped nodes count too: a round where every node was already up to date
+	// would otherwise write no checkpoint at all, so the next run fell back to
+	// the previous cursor snapshot and re-fetched the whole tree (#4712).
+	maybeCheckpoint := func() {
+		if processed%FeishuStreamCheckpointInterval != 0 &&
+			time.Since(lastCheckpoint) < FeishuStreamCheckpointMaxInterval {
+			return
+		}
+		checkpoint := ops.EncodeCursor(newTimes, lastSync)
+		if fullRun {
+			checkpoint.ConnectorCursor[fullSyncPending] = true
+		}
+		if cerr := h.Checkpoint(ctx, checkpoint); cerr != nil {
+			logger.Warnf(ctx, "%s stream Checkpoint failed: %v", ops.LogTag(), cerr)
+		}
+		lastCheckpoint = time.Now()
+	}
 	for _, resourceID := range resourceIDs {
 		nodes, partial, err := ops.List(ctx, client, resourceID)
 		if err != nil {
@@ -160,6 +178,8 @@ func runSync[N any](
 			// and Skip re-fetching.
 			if !forceFull && hadPrev && prevEdit == editTimeStr {
 				newTimes[resourceID][tok] = editTimeStr
+				processed++
+				maybeCheckpoint()
 				continue
 			}
 
@@ -198,16 +218,7 @@ func runSync[N any](
 			}
 
 			processed++
-			if processed%FeishuStreamCheckpointInterval == 0 || time.Since(lastCheckpoint) >= FeishuStreamCheckpointMaxInterval {
-				checkpoint := ops.EncodeCursor(newTimes, lastSync)
-				if fullRun {
-					checkpoint.ConnectorCursor[fullSyncPending] = true
-				}
-				if cerr := h.Checkpoint(ctx, checkpoint); cerr != nil {
-					logger.Warnf(ctx, "%s stream Checkpoint failed: %v", ops.LogTag(), cerr)
-				}
-				lastCheckpoint = time.Now()
-			}
+			maybeCheckpoint()
 			if n := i + 1; n%100 == 0 {
 				logger.Infof(ctx, "%s stream progress resource=%s %d/%d (%s)",
 					ops.LogTag(), resourceID, n, len(nodes), tally.summary())

@@ -177,6 +177,9 @@ type OIDCAuthURLResponse struct {
 	// Nonce is bound to an HttpOnly cookie on /auth/oidc/url and verified
 	// on callback; omitted from JSON so clients cannot replay it alone.
 	Nonce string `json:"-"`
+	// PKCEVerifier is kept in an HttpOnly cookie, never in the authorization
+	// URL, signed-but-readable state, or JSON response.
+	PKCEVerifier string `json:"-"`
 }
 
 type OIDCConfigResponse struct {
