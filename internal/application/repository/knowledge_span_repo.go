@@ -337,7 +337,9 @@ func (r *knowledgeSpanRepository) LastActivity(
 	return out, nil
 }
 
-func (r *knowledgeSpanRepository) GraphEnrichmentFailures(ctx context.Context, knowledgeIDs []string) ([]string, error) {
+func (r *knowledgeSpanRepository) GraphEnrichmentFailures(
+	ctx context.Context, knowledgeIDs []string,
+) ([]string, error) {
 	if len(knowledgeIDs) == 0 {
 		return nil, nil
 	}
