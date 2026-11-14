@@ -248,9 +248,9 @@ type getDocContentResp struct {
 // "existing external_id → delete-and-recreate" path (see
 // datasource_service.go applyFetchedItem) treats it as an update.
 //
-// Only items that were successfully synced (or deterministically skipped)
-// this cycle are recorded, so a transient download failure leaves the key
-// absent and the next run retries it instead of treating it as unchanged.
+// A transient failure leaves a new key absent. For a previously synced key,
+// keep the last resolved media_id so a replacement can be retried and a later
+// removal can still be detected.
 //
 // KBMedia is a legacy field retained only so cursors persisted by earlier
 // builds still deserialize; it is never written or consulted.
