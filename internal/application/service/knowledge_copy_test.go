@@ -112,7 +112,7 @@ func TestKnowledgeCopyKeepsSourceAndRetriesWithoutDuplicating(t *testing.T) {
 	require.NoError(t, files.DeleteFile(ctx, sourcePath))
 	copiedFile, err := files.GetFile(ctx, dst.FilePath)
 	require.NoError(t, err)
-	defer copiedFile.Close()
+	t.Cleanup(func() { require.NoError(t, copiedFile.Close()) })
 	body, err := io.ReadAll(copiedFile)
 	require.NoError(t, err)
 	require.Equal(t, "original file", string(body))

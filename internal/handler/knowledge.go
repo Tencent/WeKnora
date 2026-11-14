@@ -3102,10 +3102,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeTransfer(c *gin.Context, operation ac
 			_ = c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
 			return
 		}
-		req = MoveKnowledgeRequest{
-			KnowledgeIDs: copyReq.KnowledgeIDs, SourceKBID: copyReq.SourceKBID,
-			TargetKBID: copyReq.TargetKBID, Mode: copyReq.Mode,
-		}
+		req = MoveKnowledgeRequest(copyReq)
 	} else if err := c.ShouldBindJSON(&req); err != nil {
 		_ = c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
 		return
