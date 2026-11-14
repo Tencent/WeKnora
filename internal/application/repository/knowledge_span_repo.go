@@ -53,6 +53,9 @@ type KnowledgeSpanRepository interface {
 	// LastActivity returns each knowledge's most recent span write, across
 	// attempts. Knowledge without spans is absent from the map.
 	LastActivity(ctx context.Context, knowledgeIDs []string) (map[string]time.Time, error)
+	// GraphEnrichmentFailures returns document IDs that have a failed graph
+	// extraction in the latest parse attempt after accounting for task retries.
+	GraphEnrichmentFailures(ctx context.Context, knowledgeIDs []string) ([]string, error)
 }
 
 type knowledgeSpanRepository struct {
@@ -332,6 +335,32 @@ func (r *knowledgeSpanRepository) LastActivity(
 		}
 	}
 	return out, nil
+}
+
+func (r *knowledgeSpanRepository) GraphEnrichmentFailures(
+	ctx context.Context, knowledgeIDs []string,
+) ([]string, error) {
+	if len(knowledgeIDs) == 0 {
+		return nil, nil
+	}
+	model := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{})
+	attempts := model.Session(&gorm.Session{}).
+		Select("knowledge_id, MAX(attempt) AS attempt").
+		Where("knowledge_id IN ?", knowledgeIDs).
+		Group("knowledge_id")
+	// Retries open a new span with the same chunk name. Only the latest
+	// execution of each chunk can determine its outcome.
+	chunks := model.Session(&gorm.Session{}).
+		Select("MAX(knowledge_processing_spans.id)").
+		Joins("JOIN (?) latest ON latest.knowledge_id = knowledge_processing_spans.knowledge_id "+
+			"AND latest.attempt = knowledge_processing_spans.attempt", attempts).
+		Where("kind = ? AND name LIKE ?", types.SpanKindSubSpan, "postprocess.graph.chunk[%").
+		Group("knowledge_processing_spans.knowledge_id, name")
+	var ids []string
+	err := model.Session(&gorm.Session{}).
+		Where("id IN (?) AND status = ?", chunks, types.SpanStatusFailed).
+		Distinct("knowledge_id").Pluck("knowledge_id", &ids).Error
+	return ids, err
 }
 
 // ParseAggregateTime parses a timestamp read back through an SQL aggregate,

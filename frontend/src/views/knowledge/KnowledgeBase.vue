@@ -1470,6 +1470,7 @@ type KnowledgeCard = {
   id: string;
   knowledge_base_id?: string;
   parse_status: string;
+  graph_enrichment_failed?: boolean;
   summary_status?: string;
   description?: string;
   file_name?: string;
@@ -1564,6 +1565,7 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = STATUS_POLL_INTERVAL
           const card = cardList.value[index];
           card.last_activity_at = item.last_activity_at;
           card.stall_state = item.stall_state;
+          card.graph_enrichment_failed = item.graph_enrichment_failed;
           card.stalled_minutes = stalledMinutes({ parse_status: parseStatus, last_activity_at: item.last_activity_at });
 
           if (card.parse_status !== parseStatus ||

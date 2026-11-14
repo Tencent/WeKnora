@@ -1259,6 +1259,7 @@ export default {
     batchReparseFailed: '一括再構築に失敗しました',
     batchReparseSkippedInFlight: '解析中の{count}件のドキュメントをスキップしました',
     statusCompleted: '完了',
+    statusGraphEnrichmentFailed: '検索可能 · グラフ抽出が未完了',
     statusProcessing: '処理中',
     statusFinalizing: '最適化中',
     statusStalled: '停止の可能性',

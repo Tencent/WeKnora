@@ -1182,6 +1182,9 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		secutils.SanitizeForLog(kbID),
 		result.Total,
 	)
+	if knowledges, ok := result.Data.([]*types.Knowledge); ok {
+		h.attachGraphEnrichmentFailures(ctx, knowledges)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
 		"data":      result.Data,
@@ -2247,6 +2250,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	}
 
 	h.attachLastActivity(ctx, knowledges)
+	h.attachGraphEnrichmentFailures(ctx, knowledges)
 
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))
@@ -2329,6 +2333,33 @@ func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []
 	verdicts := h.stallVerdicts(ctx, quietIDs)
 	for _, k := range quiet {
 		k.StallState = verdicts[k.ID]
+	}
+}
+
+func (h *KnowledgeHandler) attachGraphEnrichmentFailures(ctx context.Context, knowledges []*types.Knowledge) {
+	if h.spanRepo == nil {
+		return
+	}
+	searchable := make(map[string]*types.Knowledge)
+	ids := make([]string, 0, len(knowledges))
+	for _, k := range knowledges {
+		if k != nil && k.ParseStatus == types.ParseStatusCompleted && k.EnableStatus == "enabled" {
+			searchable[k.ID] = k
+			ids = append(ids, k.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	failed, err := h.spanRepo.GraphEnrichmentFailures(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "graph enrichment status lookup failed: %v", err)
+		return
+	}
+	for _, id := range failed {
+		if k := searchable[id]; k != nil {
+			k.GraphEnrichmentFailed = true
+		}
 	}
 }
 

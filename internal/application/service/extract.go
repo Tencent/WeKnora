@@ -264,6 +264,15 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	var handleErr error
 	graphOut := types.JSONMap{}
 	defer func() {
+		// Publish the chunk outcome before the last slot can mark the
+		// document completed and make it stop polling for status.
+		if gSpan != nil {
+			if handleErr != nil {
+				s.tracker().FailSpan(ctx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
+			} else {
+				s.tracker().EndSpan(ctx, gSpan, graphOut)
+			}
+		}
 		// Decrement the parent's enrichment counter on terminal exit so a
 		// completed (or terminally-failed) per-chunk extract releases its
 		// slot in pending_subtasks_count. KnowledgeID is the new (post-#? )
@@ -271,14 +280,6 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		finalizeSubtaskDetached(ctx, s.knowledgeRepo, p.KnowledgeID,
 			fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
 			handleErr, false, isFinalAsynqAttempt(ctx))
-		if gSpan == nil {
-			return
-		}
-		if handleErr != nil {
-			s.tracker().FailSpan(ctx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
-		} else {
-			s.tracker().EndSpan(ctx, gSpan, graphOut)
-		}
 	}()
 
 	// Short-circuit when the parent knowledge has been cancelled / deleted.
