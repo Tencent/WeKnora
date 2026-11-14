@@ -135,3 +135,30 @@ func TestListAllKBFilesMergesRealPages(t *testing.T) {
 	require.Equal(t, 2, fake.callCount("get_knowledge_list"))
 	require.True(t, strings.HasSuffix(files[0].Title, "a.txt") || strings.HasSuffix(files[1].Title, "a.txt"))
 }
+
+func TestFetchIncremental_DoesNotDeleteFromIncompleteListing(t *testing.T) {
+	fake := newFakeIMA(t)
+	original := fakeFile{MediaID: "media-1", Title: "Runbook", MediaType: mediaTypeMarkdown, Body: "runbook"}
+	fake.setKB("kb-1", []fakeFile{original})
+	ctx := context.Background()
+	connector := NewConnector()
+	cfg := fake.config("kb-1")
+
+	initial, previous, err := connector.FetchIncremental(ctx, cfg, nil)
+	require.NoError(t, err)
+	require.Len(t, initial, 1)
+
+	fake.setKB("kb-1", nil)
+	fake.paging["get_knowledge_list"] = fakePaging{isEnd: false, nextCursor: ""}
+	items, next, err := connector.FetchIncremental(ctx, cfg, previous)
+	require.Empty(t, items, "an incomplete listing cannot establish that a document was removed")
+	require.Nil(t, next, "an incomplete listing must not advance the cursor")
+	require.ErrorContains(t, err, "missing next_cursor")
+
+	fake.paging["get_knowledge_list"] = fakePaging{isEnd: true}
+	items, _, err = connector.FetchIncremental(ctx, cfg, previous)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.True(t, items[0].IsDeleted)
+	require.Equal(t, initial[0].ExternalID, items[0].ExternalID)
+}

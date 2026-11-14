@@ -425,8 +425,12 @@ func listAllKBFiles(
 					FolderPath:    cur.path,
 				})
 			}
-			if resp.IsEnd || resp.NextCursor == "" {
+			if resp.IsEnd {
 				break
+			}
+			if resp.NextCursor == "" {
+				// A partial listing cannot prove that missing documents were removed.
+				return nil, nil, fmt.Errorf("get_knowledge_list: missing next_cursor on a non-final page")
 			}
 			next, err := nextPageCursor(ctx, seenCursors, resp.NextCursor, page)
 			if err != nil {
