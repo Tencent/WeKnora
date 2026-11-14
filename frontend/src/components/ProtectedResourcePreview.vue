@@ -1,21 +1,32 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import DocumentPreview from './document-preview.vue'
 import { RESOURCE_PREVIEW_EVENT, type LoadedProtectedFile } from '@/utils/protectedResource'
 
 const file = shallowRef<LoadedProtectedFile | null>(null)
 const visible = ref(false)
 const version = ref(0)
+function releaseFile() {
+  if (file.value) URL.revokeObjectURL(file.value.blobURL)
+  file.value = null
+}
 function open(event: Event) {
   const detail = (event as CustomEvent<LoadedProtectedFile>).detail
   if (!detail || !(detail.blob instanceof Blob) || !detail.blobURL?.startsWith('blob:')) return
   event.preventDefault()
-  file.value = detail
+  // The originating message can unmount while this drawer remains open.
+  // Own the download URL independently of the message's shared cache.
+  releaseFile()
+  file.value = { ...detail, blobURL: URL.createObjectURL(detail.blob) }
   version.value++
   visible.value = true
 }
 onMounted(() => window.addEventListener(RESOURCE_PREVIEW_EVENT, open))
-onUnmounted(() => window.removeEventListener(RESOURCE_PREVIEW_EVENT, open))
+watch(visible, (value) => { if (!value) releaseFile() })
+onUnmounted(() => {
+  window.removeEventListener(RESOURCE_PREVIEW_EVENT, open)
+  releaseFile()
+})
 </script>
 
 <template>

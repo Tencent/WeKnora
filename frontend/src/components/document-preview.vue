@@ -1,5 +1,6 @@
 // @ts-nocheck
 <script setup lang="ts">
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
 import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
 import { getKnowledgeDetails, listKnowledgeFiles, previewKnowledgeFile } from '@/api/knowledge-base/index';
@@ -129,6 +130,7 @@ function revokeMarkdownImageUrls() {
 const isFullscreen = ref(false);
 const previewRoot = ref<HTMLElement | null>(null);
 const previewContent = ref<HTMLElement | null>(null);
+useProtectedImageLifecycle(() => previewContent.value)
 
 function focusPreviewContent() {
   const root = previewRoot.value;

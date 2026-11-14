@@ -26,6 +26,7 @@ function fixture(bytes: Uint8Array, fileType: string) {
     exports,
     require(name: string) {
       if (name === 'vue' || name === 'xlsx') return require(name)
+      if (name === '@/composables/useProtectedImageLifecycle') return require('../composables/useProtectedImageLifecycle.ts')
       if (name === '@/utils/filePreview') return filePreview
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       // Encoding and SheetJS rendering stay real. DOM sanitization and the
