@@ -245,26 +245,7 @@ onMounted(() => {
   showPendingTenantSwitchToast()
 
   // Auto check for updates on startup
-  setTimeout(() => {
-    if (settingsStore.isAutoCheckUpdateEnabled) {
-      // @ts-ignore
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoCheckForUpdates) {
-        // @ts-ignore
-        window.go.main.App.AutoCheckForUpdates()
-      }
-    }
-  }, 2000)
-
-  // Periodically check for updates (every 4 hours)
-  updateCheckTimer = setInterval(() => {
-    if (settingsStore.isAutoCheckUpdateEnabled) {
-      // @ts-ignore
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoCheckForUpdates) {
-        // @ts-ignore
-        window.go.main.App.AutoCheckForUpdates()
-      }
-    }
-  }, 4 * 60 * 60 * 1000)
+  // 检测更新已移除（离线部署版）：更新走手动覆盖安装
 })
 
 onUnmounted(() => {

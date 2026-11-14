@@ -159,7 +159,7 @@ flowchart LR
 - `build:tags` 为 `desktop`：只有带该标签编译的程序才包含 Lite 本机沙箱，`wails build -tags ...` 传入的标签会与它合并。
 - `frontend:dir` 指向仓库的 `frontend/`；`wailsjsdir` 指向 `frontend/src`，因此 Wails 自动生成的绑定输出在 `frontend/src/wailsjs/`（`go/main/App.js`、`App.d.ts` 及 `runtime/`）。
 - **前端构建**：打包脚本单独构建前端，Wails 配置中不设置 `frontend:build`。WebView 通过反向代理访问内嵌后端。
-- `cmd/desktop/build/` 包含 `appicon.png`（应用图标）、`darwin/Info.plist`（macOS bundle 的 Go template，声明 `CFBundleIdentifier: com.wails.WeKnora Lite`、最低系统版本 10.13、Retina 支持等）和 Windows 安装器模板 `windows/installer/project.nsi`（额外安装第三方许可证文件）；`wails build` 的产物输出到 `cmd/desktop/build/bin/`。
+- `cmd/desktop/build/` 包含 `appicon.png`（应用图标）、`darwin/Info.plist`（macOS bundle 的 Go template，声明 `CFBundleIdentifier: com.wails.WeKnora Lite`、最低系统版本 10.13、Retina 支持等）和 Windows 安装器模板 `windows/installer/project.nsi`（在 exe 之外一并安装 `web/`、`config/`、`migrations/sqlite/`、`.env` 与第三方许可证/披露文件）；`wails build` 的产物输出到 `cmd/desktop/build/bin/`。
 
 ## 前端如何感知桌面环境 {#_8-前端如何感知桌面环境}
 
@@ -169,11 +169,13 @@ flowchart LR
 
 ## 构建方式 {#_9-构建方式}
 
-macOS 打包脚本为 `scripts/package-mac-app.sh`（根目录 `Makefile` 中没有 desktop 相关 target）：
+两个桌面平台各有一键打包脚本，Makefile 目标分别为 `package-mac-app` 与 `package-windows-app`。
+
+### macOS
 
 ```bash
 # 完整构建（前端 + Wails 打包 + 组装 .app）
-./scripts/package-mac-app.sh
+./scripts/package-mac-app.sh        # 或 make package-mac-app
 
 # 跳过前端构建（复用已有 web/ 目录）
 SKIP_FRONTEND=1 ./scripts/package-mac-app.sh
@@ -191,4 +193,30 @@ SKIP_FRONTEND=1 ./scripts/package-mac-app.sh
    实际生效的构建标签为 `wails.json` 中的 `desktop` 加上命令行的 `sqlite_fts5`。该命令的"生成绑定"阶段使用 `-tags bindings` 单独编译 `main_bindings.go`（不连接数据库），并刷新 `frontend/src/wailsjs/` 下的绑定文件。
 3. **组装产物**：将 `cmd/desktop/build/bin/WeKnora Lite.app` 复制到 `dist/`，并向 `.app/Contents/Resources/` 内放置第三方许可证（`scripts/copy-licenses.sh`）、`.env`（来自 `.env.lite.example`）、`config/`、`migrations/sqlite/` 与 `web/` 前端资源。
 
-最终产物为 `dist/WeKnora Lite.app`，双击即可运行。Windows/Linux 亦可在 `cmd/desktop` 下用 `wails build` 自行构建（更新机制已按 `.exe` / `xdg-open` 做了平台适配），但仓库当前仅提供 macOS 打包脚本与 `build/darwin` 资源。
+最终产物为 `dist/WeKnora Lite.app`，双击即可运行。
+
+### Windows（Git Bash）
+
+```bash
+# 完整构建（前端 + Wails 打包 + 便携版 zip + NSIS 安装包）
+./scripts/package-windows-app.sh    # 或 make package-windows-app
+
+# 跳过前端构建（复用已有 web/ 目录）
+SKIP_FRONTEND=1 ./scripts/package-windows-app.sh
+```
+
+工具链：Go 1.24+、Node 22+、Wails CLI、MinGW-w64 gcc（CGO 编译 `sqlite_fts5`）、NSIS（可选，缺失时只出便携版）。
+
+脚本流程与 macOS 对应：构建前端 → `wails build -clean -tags "sqlite_fts5" -platform windows/amd64 -nsis -o "WeKnora Lite"` → 组装便携版目录（exe + `.env` + `config/` + `migrations/sqlite/` + `web/` + 许可文件）并压缩为 zip → 复制 NSIS 安装包。安装包由 `cmd/desktop/build/windows/installer/project.nsi` 生成，会一并安装 `web/`、`config/`、`migrations/sqlite/`、`.env` 与许可证（缺失 `web/` 时构建失败，避免发布空白窗口应用）。
+
+产物：
+
+| 文件 | 说明 |
+|------|------|
+| `dist/WeKnora-Lite-App_<版本>_windows_amd64/` | 便携版目录，双击 `WeKnora Lite.exe` 直接运行 |
+| `dist/WeKnora-Lite-App_<版本>_windows_amd64.zip` | 便携版压缩包 + `.sha256` |
+| `dist/WeKnora-Lite-App_<版本>_windows_amd64_setup.exe` | NSIS 安装包 + `.sha256`（装入 `Program Files`，含开始菜单/桌面快捷方式） |
+
+数据目录：安装版与便携版启动时都会把相对路径的 SQLite 数据库重定向到 `%APPDATA%\WeKnora Lite\data`（`configureWindowsDesktopStorage`，与 macOS 写 `~/Library/Application Support` 对应；旧版落在安装目录的 `data/` 会被自动迁移）。上传文件在 `~/.weknora/data/files`。卸载程序不删除 `%APPDATA%` 下的用户数据。
+
+GitHub Actions 亦可构建：`.github/workflows/release-lite.yml` 的 `build-desktop-app` 覆盖 macOS（universal/amd64/arm64）、Linux amd64 与 Windows amd64（NSIS 安装包），workflow 手动触发（`workflow_dispatch`），release-lite 的 tag 触发保留注释。银河麒麟 V10 SP1 aarch64 的 deb 构建只能在 GitHub 上进行（需 arm64 runner + 与麒麟同源的 Ubuntu 20.04 基线容器，避免 glibc 基线超版），落地步骤已备注在同文件第 5 节注释中，其中桌面入口经 `/usr/bin/weknora-lite` 包装脚本启动并追加 `--password-store=basic`（防止无 gnome-keyring 的麒麟环境启动时弹钥匙串解锁框）。

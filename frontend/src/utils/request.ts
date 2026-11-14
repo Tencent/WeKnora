@@ -2,7 +2,7 @@
 import axios from "axios";
 import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
-import { getApiBaseUrl } from './api-base';
+import { getApiBaseUrl, getDesktopApiOrigin } from './api-base';
 import { isSkillBundleUploadUrl } from './uploadLimit';
 import { isTimeoutError, uploadTimeoutMs } from './requestTimeouts';
 import {
@@ -241,13 +241,18 @@ export async function getDown(url: string): Promise<Blob> {
   return res
 }
 
-export function postUpload(
+export async function postUpload(
   url: string,
   data = {},
   onUploadProgress?: (progressEvent: any) => void,
   config: any = {},
 ): Promise<WithStatus<any>> {
-  return instance.post(url, data, {
+  // Desktop shell: send uploads straight to the loopback listener. The Wails
+  // asset-server interceptor turns multipart file bodies into empty parts
+  // (see getDesktopApiOrigin for the full story); an absolute URL skips it.
+  const desktopOrigin = await getDesktopApiOrigin();
+  const target = desktopOrigin ? desktopOrigin + url : url;
+  return instance.post(target, data, {
     // Uploads are bounded by transfer time, not by the 30s default that suits
     // JSON calls. Derive the budget from the payload so a deployment raising
     // MAX_FILE_SIZE_MB doesn't silently abort its own uploads; an explicit

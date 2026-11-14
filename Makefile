@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc package-mac-app package-windows-app
 
 # Show help
 help:
@@ -71,6 +71,7 @@ help:
 	@echo "  run-lite          构建并启动 Lite 版本"
 	@echo "  package-lite      构建并打包 Lite 发行包（tarball）"
 	@echo "  package-mac-app   构建并打包 macOS 桌面应用 (.app)"
+	@echo "  package-windows-app 构建并打包 Windows 桌面应用（便携 zip + NSIS 安装包，Git Bash）"
 
 # Go related variables
 BINARY_NAME=WeKnora
@@ -330,6 +331,10 @@ package-lite:
 # Package Mac App
 package-mac-app:
 	./scripts/package-mac-app.sh
+
+# Package Windows App (portable zip + NSIS installer; Git Bash)
+package-windows-app:
+	./scripts/package-windows-app.sh
 
 download_spatial:
 	go run cmd/download/duckdb/duckdb.go

@@ -1,9 +1,9 @@
 name: Release Lite Binaries
 
 on:
-  # push:
-  #   tags:
-  #     - "v*"
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.26"
   NODE_VERSION: "22"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -60,12 +60,6 @@ jobs:
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
-          - os: macos-14
-            goos: darwin
-            goarch: amd64
-          - os: macos-14
-            goos: darwin
-            goarch: arm64
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
@@ -99,9 +93,6 @@ jobs:
           eval "$(./scripts/get_version.sh env)"
           LDFLAGS="-w -s $(./scripts/get_version.sh ldflags)"
           export CGO_CFLAGS="-Wno-deprecated-declarations"
-          if [ "${{ matrix.goos }}" = "darwin" ]; then
-            export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
-          fi
           go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
             -o WeKnora-lite ./cmd/server
 
@@ -137,22 +128,11 @@ jobs:
 
   # ── 2b. Build Desktop APP per platform (Wails) ──
   build-desktop-app:
+    needs: build-frontend
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            platform: darwin/universal
-            arch_label: macOS_universal
-            artifact_name: desktop-macos-universal
-          - os: macos-14
-            platform: darwin/amd64
-            arch_label: macOS_amd64
-            artifact_name: desktop-macos-amd64
-          - os: macos-14
-            platform: darwin/arm64
-            arch_label: macOS_arm64
-            artifact_name: desktop-macos-arm64
           - os: ubuntu-latest
             platform: linux/amd64
             arch_label: linux_amd64
@@ -178,6 +158,13 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # 桌面端不内嵌前端：嵌入式后端从可执行文件旁的 ./web 提供 SPA，
+      # 缺失时窗口空白。三个平台的打包步骤都会把 web/ 带进产物。
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: web/
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
@@ -189,7 +176,13 @@ jobs:
 
       - name: Install NSIS (Windows)
         if: runner.os == 'Windows'
-        run: choco install nsis -y
+        shell: bash
+        run: |
+          choco install nsis -y
+          # choco 装完不会刷新后续步骤的 PATH，wails 找不到 makensis 会静默跳过
+          # 安装器生成；显式加入 GITHUB_PATH（后续步骤均为 shell: bash）
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+          echo "C:\Program Files\NSIS" >> "$GITHUB_PATH"
 
       - name: Resolve version
         id: ver
@@ -212,6 +205,20 @@ jobs:
           go build -p 1 -buildvcs=false -tags "desktop,sqlite_fts5,production" -o _prebuild_tmp.exe . || true
           rm -f _prebuild_tmp.exe
 
+      # sqlite-vec-go-bindings 的 cgo 不自带 sqlite3.h，Windows runner 也没有系统
+      # 头文件。上一步预编译已把模块下载进 GOMODCACHE（sqlite-vec 编译失败被
+      # || true 容忍），这里把钉版本的 amalgamation 头注入模块缓存，供正式构建使用。
+      - name: Provide sqlite3.h (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSL -o /tmp/sqlite-amalg.zip "https://www.sqlite.org/2025/sqlite-amalgamation-3490100.zip"
+          mkdir -p /tmp/sqlite-amalg && cd /tmp/sqlite-amalg
+          unzip -o ../sqlite-amalg.zip >/dev/null
+          VEC_DIR="$(go env GOMODCACHE)/github.com/asg017/sqlite-vec-go-bindings@v0.1.6/cgo"
+          test -d "$VEC_DIR"
+          cp sqlite-amalgamation-*/sqlite3.h "$VEC_DIR/"
+
       - name: Build desktop app
         shell: bash
         run: |
@@ -227,9 +234,6 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             BUILD_TAGS="sqlite_fts5 webkit2_41"
           fi
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
-          fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
           fi
@@ -242,42 +246,6 @@ jobs:
             ${NSIS_FLAG} \
             -ldflags="${LDFLAGS}" \
             -o "WeKnora Lite"
-
-      # ── macOS: bundle .app with resources, then create DMG ──
-      - name: Package macOS app
-        if: runner.os == 'macOS'
-        run: |
-          APP_BUNDLE="WeKnora Lite.app"
-          SRC="cmd/desktop/build/bin/${APP_BUNDLE}"
-          RESOURCES="${SRC}/Contents/Resources"
-
-          mkdir -p "${RESOURCES}/config"
-          mkdir -p "${RESOURCES}/migrations/sqlite"
-          bash ./scripts/copy-licenses.sh "${RESOURCES}"
-
-          if [ -f .env.lite.example ]; then
-            cp .env.lite.example "${RESOURCES}/.env"
-          fi
-          if [ -d migrations/sqlite ]; then
-            cp -r migrations/sqlite/* "${RESOURCES}/migrations/sqlite/"
-          fi
-          if [ -d config ]; then
-            cp -r config/* "${RESOURCES}/config/"
-          fi
-
-          DMG_NAME="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
-
-          DMG_SRC="dmg_staging"
-          mkdir -p "${DMG_SRC}"
-          cp -R "cmd/desktop/build/bin/${APP_BUNDLE}" "${DMG_SRC}/"
-          ln -s /Applications "${DMG_SRC}/Applications"
-
-          hdiutil create -volname "WeKnora Lite" \
-            -srcfolder "${DMG_SRC}" \
-            -ov -format UDZO \
-            "${DMG_NAME}.dmg"
-
-          shasum -a 256 "${DMG_NAME}.dmg" > "${DMG_NAME}.dmg.sha256"
 
       # ── Linux: package tarball ──
       - name: Package Linux app
@@ -298,10 +266,13 @@ jobs:
             mkdir -p "${ARCHIVE}/migrations/sqlite"
             cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
           fi
+          test -f web/index.html || { echo "::error::web/ frontend build is missing; the app window would be blank"; exit 1; }
+          cp -r web "${ARCHIVE}/web"
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
-      # ── Windows: NSIS installer includes licenses and corresponding source ──
+      # ── Windows: NSIS installer bundles web/config/migrations/.env via
+      #    cmd/desktop/build/windows/installer/project.nsi ──
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
@@ -317,13 +288,19 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
+          # 只上传文件模式：Linux 打包会留下同名暂存目录，
+          # 目录被合并进 release job 后 gh 上传资产会报 "is a directory"
           path: |
-            WeKnora-Lite-App_*
+            WeKnora-Lite-App_*.tar.gz
+            WeKnora-Lite-App_*.tar.gz.sha256
+            WeKnora-Lite-App_*_setup.exe
+            WeKnora-Lite-App_*_setup.exe.sha256
           retention-days: 3
 
   # ── 3. Create GitHub Release ──
   release:
-    needs: [build-binary, build-desktop-app]
+    needs: [build-binary, build-desktop-app, kylin-v10-sp1-aarch64-deb]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -382,8 +359,6 @@ jobs:
           |------|------|
           | `WeKnora-lite_*_linux_amd64.tar.gz` | Linux x86_64 |
           | `WeKnora-lite_*_linux_arm64.tar.gz` | Linux ARM64 |
-          | `WeKnora-lite_*_darwin_amd64.tar.gz` | macOS Intel |
-          | `WeKnora-lite_*_darwin_arm64.tar.gz` | macOS Apple Silicon |
 
           ---
 
@@ -406,22 +381,81 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.ver.outputs.version }}" \
-            --title "WeKnora Lite ${{ steps.ver.outputs.version }}" \
-            --notes-file notes.md \
-            WeKnora-lite_*.tar.gz \
-            WeKnora-lite_*.tar.gz.sha256 \
-            WeKnora-Lite-App_* || true
+          # 文件清单：排除目录（历史教训：暂存目录混进 glob 会让 gh 报
+          # "is a directory" 并中止上传）
+          FILES=$(find . -maxdepth 1 -type f \
+            \( -name 'WeKnora-lite_*.tar.gz' -o -name 'WeKnora-lite_*.tar.gz.sha256' \
+               -o -name 'WeKnora-Lite-App_*_setup.exe' -o -name 'WeKnora-Lite-App_*_setup.exe.sha256' \
+               -o -name 'WeKnora-Lite-App_*.tar.gz' -o -name 'WeKnora-Lite-App_*.tar.gz.sha256' \
+               -o -name 'weknora-lite_*_arm64.deb' -o -name 'weknora-lite_*_arm64.deb.sha256' \) \
+            | sed 's|^\./||' | sort)
+          echo "assets to publish:"; echo "$FILES"
+          if [ -z "$FILES" ]; then echo "::error::no release assets found"; exit 1; fi
+          if gh release view "${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            # 已有 Release：追加/覆盖资产（重复发布同一 tag 的场景）
+            gh release upload "${{ steps.ver.outputs.version }}" $FILES --clobber
+          else
+            gh release create "${{ steps.ver.outputs.version }}" \
+              --title "WeKnora Lite ${{ steps.ver.outputs.version }}" \
+              --notes-file notes.md \
+              $FILES || true
+          fi
 
-  # ── 4. Update Homebrew Formula ──
-  update-homebrew:
-    needs: release
-    runs-on: ubuntu-latest
+  # ── 5. 银河麒麟 V10 SP1 aarch64 桌面 deb ──
+  # 只能在 GitHub 构建：用与麒麟 V10 SP1 同源的基线（Ubuntu 20.04 focal，
+  # glibc 2.31）容器产出兼容二进制；ubuntu-latest (glibc 2.39) 的产物在麒麟上
+  # 启动即报 GLIBC not found；AppImage 不内置 glibc，同样救不了基线。
+  # focal 已 EOL：apt 源指到 old-releases（冻结归档，恰好保证装依赖时零升级）。
+  kylin-v10-sp1-aarch64-deb:
+    needs: build-frontend
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:20.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      GO_VERSION: "1.26.10"
     steps:
+      - name: Configure apt (focal EOL archive + timeouts)
+        run: |
+          sed -i 's|http://archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g; s|http://azure.archive.ubuntu.com/ubuntu|http://old-releases.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+          printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "3";\nAcquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99ci
+          apt-get update
+
+      - name: Install build dependencies (webkit2gtk-4.0 = focal 对齐麒麟 V10 SP1)
+        run: |
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config file xz-utils unzip curl ca-certificates git \
+            libgtk-3-dev libwebkit2gtk-4.0-dev libnss3-dev
+
+      # duckdb 预编译静态库用 GCC11+ 构建（含 std::__throw_bad_array_new_length），
+      # focal 系统的 GCC9/libstdc++ 链接不了。装 toolchain PPA 的 GCC12（仍是
+      # glibc 2.31 基线）；产出的二进制运行时需要 libstdc++6 >= 11——麒麟归档
+      # 没有，deb 里打私有副本（/opt/weknora-lite/lib + 包装脚本 LD_LIBRARY_PATH，
+      # 不触碰系统组件）
+      - name: Install GCC-12 (toolchain PPA)
+        run: |
+          apt-get install -y --no-install-recommends software-properties-common gnupg
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          apt-get install -y --no-install-recommends gcc-12 g++-12
+
+      - name: Install Go
+        run: |
+          curl -sSL -o /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz"
+          tar -C /usr/local -xzf /tmp/go.tgz
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+
       - uses: actions/checkout@v6
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v8
         with:
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: frontend-dist
+          path: web/
 
       - name: Resolve version
         id: ver
@@ -433,20 +467,134 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for release assets to be available
-        run: sleep 15
-
-      - name: Update Formula
-        run: ./scripts/update-homebrew-formula.sh "${{ steps.ver.outputs.version }}"
-
-      - name: Commit and push
+      - name: Build desktop (linux/arm64)
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/weknora-lite.rb
-          if git diff --cached --quiet; then
-            echo "No changes to Formula"
-          else
-            git commit -m "formula: update weknora-lite to ${{ steps.ver.outputs.version }}"
-            git push origin main
+          export EDITION=lite
+          export CGO_ENABLED=1
+          export CC=gcc-12
+          export CXX=g++-12
+          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          eval "$(./scripts/get_version.sh env)"
+          LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
+          bash ./scripts/check-license-bundle.sh
+          cd cmd/desktop
+          # focal 的 webkit2gtk 是 4.0：不加 webkit2_41 标签
+          wails build -clean \
+            -tags "sqlite_fts5" \
+            -platform linux/arm64 \
+            -ldflags "${LDFLAGS}" \
+            -o "weknora-lite"
+          test -f build/bin/weknora-lite
+
+      - name: Assemble deb (常规包：Depends 只声明真正的 ELF 依赖)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          DEBVER="${VERSION#v}"
+          ROOT="debroot/weknora-lite_${DEBVER}_arm64"
+          OPT="$ROOT/opt/weknora-lite"
+          mkdir -p "$ROOT/DEBIAN" "$OPT" "$ROOT/usr/bin" \
+            "$ROOT/usr/share/applications" "$ROOT/usr/share/icons/hicolor/512x512/apps"
+
+          cp "cmd/desktop/build/bin/weknora-lite" "$OPT/weknora-lite"
+          # GCC12 构建产物的 C++ 运行时：麒麟归档没有 libstdc++6 >= 11，
+          # 打私有副本进应用目录（LD_LIBRARY_PATH 解析，不触碰系统组件）
+          mkdir -p "$OPT/lib"
+          cp -a /usr/lib/aarch64-linux-gnu/libstdc++.so.6* "$OPT/lib/"
+          if [ -f .env.lite.example ]; then cp .env.lite.example "$OPT/.env"; fi
+          if [ -d config ]; then cp -r config "$OPT/config"; fi
+          if [ -d migrations/sqlite ]; then
+            mkdir -p "$OPT/migrations/sqlite"
+            cp -r migrations/sqlite/* "$OPT/migrations/sqlite/"
           fi
+          test -f web/index.html || { echo "::error::web/ missing"; exit 1; }
+          cp -r web "$OPT/web"
+          cp LICENSE THIRD_PARTY_NOTICES.md "$OPT/"
+          bash ./scripts/copy-licenses.sh "$OPT"
+          cp docs/LITE.md "$OPT/README.md"
+          cp cmd/desktop/build/appicon.png "$ROOT/usr/share/icons/hicolor/512x512/apps/weknora-lite.png"
+
+          # 启动包装脚本：--password-store=basic 防麒麟无钥匙串时的解锁弹窗
+          # （Electron/Chromium 开关，Wails/WebKitGTK 下无害占位，真机仍需验证），
+          # 并按需规避 WebKitGTK 在部分麒麟 GPU 上的空白窗口问题
+          cat > "$ROOT/usr/bin/weknora-lite" <<'LAUNCH'
+          #!/bin/bash
+          export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
+          export LD_LIBRARY_PATH="/opt/weknora-lite/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          CFG="${XDG_CONFIG_HOME:-$HOME/.config}/WeKnora Lite"
+          mkdir -p "$CFG/logs" 2>/dev/null || true
+          export LOG_PATH="$CFG/logs/weknora-lite.log"
+          exec "/opt/weknora-lite/weknora-lite" --password-store=basic "$@"
+          LAUNCH
+          chmod 755 "$ROOT/usr/bin/weknora-lite" "$OPT/weknora-lite"
+
+          cat > "$ROOT/usr/share/applications/weknora-lite.desktop" <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=WeKnora Lite
+          Comment=RAG 文档理解与语义问答
+          Exec=/usr/bin/weknora-lite
+          Icon=weknora-lite
+          Categories=Office;Development;
+          Terminal=false
+          DESKTOP
+
+          cat > "$ROOT/DEBIAN/control" <<CONTROL
+          Package: weknora-lite
+          Version: ${DEBVER}
+          Section: utils
+          Priority: optional
+          Architecture: arm64
+          Maintainer: WeKnora Team
+          Depends: libc6 (>= 2.31), libgtk-3-0, libwebkit2gtk-4.0-37, libnss3, libgbm1
+          Description: WeKnora Lite 桌面版（银河麒麟 V10 SP1 aarch64）
+           本机知识库与语义问答（SQLite + FTS5 + sqlite-vec，零外部依赖）。
+          CONTROL
+
+          # 载荷自检：deb 里必须真的有应用本体
+          # 显式指定输出文件：默认生成在输入目录旁（debroot/）会让校验扑空
+          DEB="weknora-lite_${DEBVER}_arm64.deb"
+          dpkg-deb --root-owner-group --build "$ROOT" "$DEB"
+          # grep 不加 -q：pipefail 下 -q 首个匹配即退出，SIGPIPE 杀掉
+          # dpkg-deb 的 tar 子进程，误报载荷缺失（见麒麟指南 §4）
+          dpkg-deb -c "$DEB" | grep "opt/weknora-lite/weknora-lite" || {
+            echo "::error::deb 载荷缺失应用本体"; exit 1; }
+          sha256sum "$DEB" > "$DEB.sha256"
+
+      # 在同源 focal 容器里安装验证：ldd 门禁（零 not found）+ 零升级断言
+      - name: Verify deb in focal container
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB=$(ls weknora-lite_*_arm64.deb | head -1)
+          dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null | sort > /tmp/before.txt || true
+          apt-get install -y "./$DEB"
+          dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null | sort > /tmp/after.txt
+          # 零升级断言：装包前后快照比对，交集必须等于装前全量
+          # （即没有任何已装包被升级/替换——红线：绝不升级系统组件）
+          if comm -12 /tmp/before.txt /tmp/after.txt | diff /tmp/before.txt - >/dev/null; then
+            echo "zero-upgrade assertion ✓ (没有任何已装包被变更)"
+          else
+            echo "::error::已有包被升级/变更（红线违规）"; exit 1
+          fi
+          # ldd 门禁：零 not found（带包装脚本同款 LD_LIBRARY_PATH），
+          # 且 libstdc++ 必须解析到 deb 私有副本
+          if LD_LIBRARY_PATH=/opt/weknora-lite/lib ldd /opt/weknora-lite/weknora-lite | grep "not found"; then
+            echo "::error::ldd 门禁失败：存在 not found"; exit 1
+          fi
+          LD_LIBRARY_PATH=/opt/weknora-lite/lib ldd /opt/weknora-lite/weknora-lite | grep "libstdc++" | grep -q "/opt/weknora-lite/lib" || {
+            echo "::error::libstdc++ 未解析到私有副本"; exit 1; }
+          echo "ldd gate ✓ (含私有 libstdc++ 解析)"
+          head -c 4 /opt/weknora-lite/.env >/dev/null && test -f /opt/weknora-lite/web/index.html && \
+            test -f /opt/weknora-lite/config/config.yaml && echo "payload ✓"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-kylin-arm64
+          path: |
+            weknora-lite_*_arm64.deb
+            weknora-lite_*_arm64.deb.sha256
+          retention-days: 3
+  #     # （linux/arm64，tags "sqlite_fts5"）→ dpkg-deb 打包 → 上传 artifact
