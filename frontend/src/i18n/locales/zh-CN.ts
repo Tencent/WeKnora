@@ -8912,6 +8912,7 @@ export default {
     batchReparseFailed: '批量重建失败',
     batchReparseSkippedInFlight: '已跳过 {count} 个正在解析中的文档',
     statusCompleted: '已完成',
+    statusGraphEnrichmentFailed: '可检索 · 图谱抽取未完成',
     statusProcessing: '解析中',
     statusFinalizing: '优化中',
     statusStalled: '疑似卡住',

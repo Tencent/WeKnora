@@ -20,6 +20,33 @@ type lastActivitySpanRepo struct {
 	asked    []string
 }
 
+type graphEnrichmentSpanRepo struct {
+	repository.KnowledgeSpanRepository
+	asked []string
+}
+
+func (r *graphEnrichmentSpanRepo) GraphEnrichmentFailures(_ context.Context, ids []string) ([]string, error) {
+	r.asked = ids
+	return []string{"failed-graph"}, nil
+}
+
+func TestAttachGraphEnrichmentFailures(t *testing.T) {
+	spans := &graphEnrichmentSpanRepo{}
+	h := &KnowledgeHandler{spanRepo: spans}
+	rows := []*types.Knowledge{
+		{ID: "failed-graph", ParseStatus: types.ParseStatusCompleted, EnableStatus: "enabled"},
+		{ID: "clean", ParseStatus: types.ParseStatusCompleted, EnableStatus: "enabled"},
+		{ID: "disabled", ParseStatus: types.ParseStatusCompleted, EnableStatus: "disabled"},
+		{ID: "unfinished", ParseStatus: types.ParseStatusFinalizing, EnableStatus: "enabled"},
+	}
+	h.attachGraphEnrichmentFailures(context.Background(), rows)
+	assert.Equal(t, []string{"failed-graph", "clean"}, spans.asked)
+	assert.True(t, rows[0].GraphEnrichmentFailed)
+	for _, row := range rows[1:] {
+		assert.False(t, row.GraphEnrichmentFailed)
+	}
+}
+
 func (r *lastActivitySpanRepo) LastActivity(_ context.Context, ids []string) (map[string]time.Time, error) {
 	r.asked = ids
 	return r.activity, r.err

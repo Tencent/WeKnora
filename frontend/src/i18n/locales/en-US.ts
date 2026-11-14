@@ -1259,6 +1259,7 @@ export default {
     batchReparseFailed: 'Batch rebuild failed',
     batchReparseSkippedInFlight: 'Skipped {count} document(s) still being parsed',
     statusCompleted: 'Completed',
+    statusGraphEnrichmentFailed: 'Searchable · Graph extraction incomplete',
     statusProcessing: 'Processing',
     statusFinalizing: 'Optimizing',
     statusStalled: 'May be stuck',
