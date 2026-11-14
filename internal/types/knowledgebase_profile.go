@@ -59,12 +59,12 @@ const (
 // KnowledgeBaseProfileConfig controls automatic generation of the knowledge
 // base description. It is opt-in so upgrading a deployment adds no model calls.
 type KnowledgeBaseProfileConfig struct {
-	Enabled bool `yaml:"enabled" json:"enabled"`
-	// ModelID overrides the chat model; empty falls back to the KB summary model.
-	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty"`
-	// CustomInstructions is appended to the stable system prompt, e.g. the
-	// audience the description should address or terms to keep.
-	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
+	// Enabled turns the AI knowledge-base description on.
+	Enabled bool `yaml:"enabled" json:"enabled" extensions:"x-agent=profile_enabled"`
+	// ModelID overrides the summary model. Empty uses summary_model_id.
+	ModelID string `yaml:"model_id,omitempty" json:"model_id,omitempty" extensions:"x-agent=profile_model_id"`
+	// CustomInstructions is extra guidance for the description, such as the audience. The format stays fixed.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=profile_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 }
 
 // IsEnabled reports whether automatic generation is on for a nil-safe receiver.
@@ -113,24 +113,24 @@ type KnowledgeBaseProfileStats struct {
 // stats are copied from the aggregate so readers do not have to recompute it.
 type KnowledgeBaseProfile struct {
 	// Gist is a short statement of what the knowledge base covers.
-	Gist string `json:"gist,omitempty"`
+	Gist string `json:"gist,omitempty" extensions:"x-agent"`
 	// Topics is the merged topic list (at most KnowledgeBaseProfileMaxTopics).
-	Topics []string `json:"topics,omitempty"`
+	Topics []string `json:"topics,omitempty" extensions:"x-agent"`
 	// TypicalQuestions lists questions this knowledge base can answer.
-	TypicalQuestions []string `json:"typical_questions,omitempty"`
+	TypicalQuestions []string `json:"typical_questions,omitempty" extensions:"x-agent"`
 	// Stats is the aggregate snapshot the text was generated from.
 	Stats KnowledgeBaseProfileStats `json:"stats"`
 	// AggregateHash identifies the aggregate the gist was generated from. A
 	// mismatch with the live aggregate means the text is stale.
 	AggregateHash string `json:"aggregate_hash,omitempty"`
 	// Status is one of the KnowledgeBaseProfileStatus* values.
-	Status string `json:"status,omitempty"`
+	Status string `json:"status,omitempty" extensions:"x-agent=profile_status"`
 	// Error holds the last generation error when Status is failed.
-	Error string `json:"error,omitempty"`
+	Error string `json:"error,omitempty" extensions:"x-agent=profile_error"`
 	// ModelID records which chat model produced the text.
 	ModelID string `json:"model_id,omitempty"`
 	// GeneratedAt records when the text was produced.
-	GeneratedAt *time.Time `json:"generated_at,omitempty"`
+	GeneratedAt *time.Time `json:"generated_at,omitempty" extensions:"x-agent"`
 }
 
 // Value implements driver.Valuer.

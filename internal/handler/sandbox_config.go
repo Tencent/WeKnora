@@ -22,6 +22,8 @@ type sandboxConfigService interface {
 	Update(context.Context, uint64, string, service.UpdateSandboxConfigInput) (*types.TenantSandboxConfigEntity, error)
 	Delete(context.Context, uint64, string, bool) error
 	Inventory(context.Context, uint64, string) (service.SandboxInventory, error)
+	ListUserMachines(context.Context, uint64, string) ([]service.UserMachineView, error)
+	ReleaseUserMachine(context.Context, uint64, string, string) error
 	WorkspaceScriptsDisabled(context.Context, uint64) (bool, error)
 	SetWorkspaceScriptsDisabled(context.Context, uint64, bool) error
 	QueryTemplates(context.Context, uint64, service.SandboxTemplateQueryInput) (*service.SandboxTemplateCatalog, error)
@@ -215,7 +217,8 @@ func respondSandboxConfigRefusal(c *gin.Context, err error) bool {
 		respondSkillSnapshotBlocksTemplate(c)
 		return true
 	}
-	if stderrors.Is(err, repository.ErrSandboxConfigCordoned) {
+	if stderrors.Is(err, repository.ErrSandboxConfigCordoned) ||
+		stderrors.Is(err, service.ErrSandboxConfigCreatesInFlight) {
 		respondSandboxConfigCordoned(c)
 		return true
 	}
@@ -454,4 +457,56 @@ func (h *SandboxConfigHandler) Inventory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": inv})
+}
+
+// ListUserSandboxes godoc
+// @Summary      List shared user sandboxes
+// @Description  List the config's shared user machines with live session counts and the empty-retention clock.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        id   path      string  true  "Sandbox config ID"
+// @Success      200  {object}  map[string]interface{}  "Shared user sandboxes"
+// @Failure      401  {object}  map[string]interface{}  "Unauthorized"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/user-sandboxes [get]
+func (h *SandboxConfigHandler) ListUserSandboxes(c *gin.Context) {
+	if h.liteHidden(c, false) {
+		return
+	}
+	rows, err := h.service.ListUserMachines(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"))
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
+}
+
+// ReleaseUserSandbox godoc
+// @Summary      Release a shared user sandbox
+// @Description  Delete one shared user machine now; each session gets a fresh machine on next use. Refused while busy.
+// @Tags         SandboxConfig
+// @Produce      json
+// @Param        id      path      string  true  "Sandbox config ID"
+// @Param        digest  path      string  true  "User machine digest"
+// @Success      200     {object}  map[string]interface{}  "Released"
+// @Failure      401     {object}  map[string]interface{}  "Unauthorized"
+// @Failure      409     {object}  map[string]interface{}  "User sandbox is busy"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sandbox-configs/{id}/user-sandboxes/{digest}/release [post]
+func (h *SandboxConfigHandler) ReleaseUserSandbox(c *gin.Context) {
+	if h.liteHidden(c, false) {
+		return
+	}
+	err := h.service.ReleaseUserMachine(c.Request.Context(), sandboxConfigTenantID(c), c.Param("id"), c.Param("digest"))
+	if stderrors.Is(err, service.ErrUserSandboxBusy) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "error": "USER_SANDBOX_BUSY"})
+		return
+	}
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }

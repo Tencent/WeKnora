@@ -177,6 +177,9 @@ type OIDCAuthURLResponse struct {
 	// Nonce is bound to an HttpOnly cookie on /auth/oidc/url and verified
 	// on callback; omitted from JSON so clients cannot replay it alone.
 	Nonce string `json:"-"`
+	// PKCEVerifier is kept in an HttpOnly cookie, never in the authorization
+	// URL, signed-but-readable state, or JSON response.
+	PKCEVerifier string `json:"-"`
 }
 
 type OIDCConfigResponse struct {
@@ -281,16 +284,16 @@ type RegisterResponse struct {
 
 // UserInfo represents user information for API responses
 type UserInfo struct {
-	ID                  string          `json:"id"`
-	Username            string          `json:"username"`
-	Email               string          `json:"email"`
+	ID                  string          `json:"id" extensions:"x-agent"`
+	Username            string          `json:"username" extensions:"x-agent"`
+	Email               string          `json:"email" extensions:"x-agent"`
 	Avatar              string          `json:"avatar"`
-	TenantID            uint64          `json:"tenant_id"`
-	IsActive            bool            `json:"is_active"`
+	TenantID            uint64          `json:"tenant_id" extensions:"x-agent"`
+	IsActive            bool            `json:"is_active" extensions:"x-agent"`
 	CanAccessAllTenants bool            `json:"can_access_all_tenants"`
-	IsSystemAdmin       bool            `json:"is_system_admin"`
+	IsSystemAdmin       bool            `json:"is_system_admin" extensions:"x-agent"`
 	Preferences         UserPreferences `json:"preferences"`
-	CreatedAt           time.Time       `json:"created_at"`
+	CreatedAt           time.Time       `json:"created_at" extensions:"x-agent"`
 	UpdatedAt           time.Time       `json:"updated_at"`
 }
 

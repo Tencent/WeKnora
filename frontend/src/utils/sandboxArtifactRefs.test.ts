@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { marked } from 'marked'
+import { renderChatMarkdown } from './chatMarkdownRenderer.ts'
 import { renderArtifactFileIcon } from './artifactFileIcon'
 
 import {
+  installArtifactLinkRenderer,
   isArtifactRefHref,
   normalizeSandboxArtifactRefs,
   renderArtifactReference,
@@ -255,4 +258,32 @@ test('a deleted artifact is not mistaken for a foreign handle', () => {
   // broken image rather than an honest "deleted" card.
   const live = artifacts.filter((_, i) => i !== 0)
   assert.equal(renderArtifactReference({ href: refFor(0), artifacts: live, labels }), null)
+})
+
+
+test('parent Markdown links render as file cards with exact child indices, including refreshed metadata', () => {
+  const renderer = new marked.Renderer()
+  let files: ArtifactRefMeta[] = []
+  installArtifactLinkRenderer(renderer, () => ({ artifacts: files, labels }))
+  const body = `[开书设定](${refFor(0)})\n\n[文件](${refFor(1)})\n\n[网页](https://example.com)`
+  const render = () => renderChatMarkdown(body, {
+    renderer, escapeMarkdown: text => text, sanitizeHtml: html => html,
+  })
+  assert.doesNotMatch(render(), /data-artifact-index/)
+  files = [
+    { index: 0, handle: refFor(0), file_name: '开书设定.md', file_type: '.md' },
+    { index: 1, handle: refFor(1), file_name: '开书设定.md', file_type: '.md' },
+  ]
+  const html = render()
+  assert.match(html, /data-artifact-index="0"/)
+  assert.match(html, /data-artifact-index="1"/)
+  assert.equal((html.match(/点击预览/g) || []).length, 2)
+  assert.match(html, /href="https:\/\/example.com"/)
+  assert.doesNotMatch(html, /href="resource:/)
+  files = files.map(({ handle, ...file }) => ({ ...file, url: handle }))
+  assert.equal(render(), html, 'history URL metadata and live handle metadata render identically')
+  files[0].deleted_at = '2026-10-18'
+  assert.match(render(), /文件已删除/)
+  assert.doesNotMatch(render(), /data-artifact-index="0"/)
+  assert.match(render(), /data-artifact-index="1"/)
 })

@@ -746,3 +746,92 @@ func TestHousekeeping_KeepsOpenSpansOnInFlightRow(t *testing.T) {
 		"kid-processing").Row().Scan(&status))
 	assert.Equal(t, types.SpanStatusRunning, status)
 }
+
+// insertSoftDeletedKnowledge writes a knowledge row that the delete flow has
+// already soft-deleted (deleted_at written, parse_status left at deleting —
+// the exact residue Sweep C must recover, Tencent/WeKnora#5277).
+func insertSoftDeletedKnowledge(t *testing.T, db *gorm.DB, id string, updatedAt time.Time) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, parse_status, updated_at, deleted_at)
+		 VALUES (?, ?, ?, ?)`,
+		id, types.ParseStatusDeleting, updatedAt, updatedAt,
+	).Error)
+}
+
+func readSpanState(t *testing.T, db *gorm.DB, spanID string) (status, errorCode, errMsg string) {
+	t.Helper()
+	require.NoError(t, db.Raw(
+		`SELECT status, COALESCE(error_code, ''), COALESCE(error_message, '')
+		   FROM knowledge_processing_spans WHERE span_id = ?`, spanID,
+	).Row().Scan(&status, &errorCode, &errMsg))
+	return status, errorCode, errMsg
+}
+
+// A deleting row that already carries deleted_at is invisible to the default
+// GORM scope — the Sweep C candidate query silently skipped it, so it stayed
+// deleting (and its spans running) forever. The sweep must recover it even
+// though it is soft-deleted (Tencent/WeKnora#5277).
+func TestHousekeeping_RecoversSoftDeletedDeletingRow(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertSoftDeletedKnowledge(t, db, "kid-deleted-stale", stale)
+	insertSpan(t, db, "kid-deleted-stale", 1, "doc-deleted", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	status, errMsg := readKnowledgeStatus(t, db, "kid-deleted-stale")
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Contains(t, errMsg, "delete completed")
+	// Sweep D picks the settled row up in the same pass and closes the span
+	// its dead parse attempt left open, naming the reason Sweep C recorded.
+	spanStatus, _, spanMsg := readSpanState(t, db, "doc-deleted")
+	assert.Equal(t, types.SpanStatusCancelled, spanStatus)
+	assert.Contains(t, spanMsg, "delete completed")
+}
+
+// Backpressure still wins for the row itself: a queued delete task covers the
+// soft-deleted row, so Sweep C defers instead of settling a delete that is
+// still running. Sweep D, however, already reaps the row's orphaned parse
+// spans — deleting is terminal for spans regardless of the delete backlog.
+func TestHousekeeping_KeepsBackloggedSoftDeletedDeletingRow(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		deleteQueued: map[string]bool{"kid-deleted-backlogged": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertSoftDeletedKnowledge(t, db, "kid-deleted-backlogged", stale)
+	insertSpan(t, db, "kid-deleted-backlogged", 1, "doc-backlogged",
+		types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	status, errMsg := readKnowledgeStatus(t, db, "kid-deleted-backlogged")
+	assert.Equal(t, types.ParseStatusDeleting, status)
+	assert.Empty(t, errMsg)
+	// The row's error_message is empty, so the span closes with the
+	// delete-specific fallback message rather than a recovery note.
+	spanStatus, _, spanMsg := readSpanState(t, db, "doc-backlogged")
+	assert.Equal(t, types.SpanStatusCancelled, spanStatus)
+	assert.Equal(t, deletingSpanMessage, spanMsg)
+}
+
+// The #3345 ghost branch keeps its own message: a live deleting row and a
+// soft-deleted one recovered in the same sweep must stay distinguishable in
+// the error trail.
+func TestHousekeeping_SoftDeletedAndGhostRowsGetDistinctMessages(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-ghost", types.ParseStatusDeleting, stale)
+	insertSoftDeletedKnowledge(t, db, "kid-settled", stale)
+
+	svc.runSweep(context.Background())
+
+	_, ghostMsg := readKnowledgeStatus(t, db, "kid-ghost")
+	_, settledMsg := readKnowledgeStatus(t, db, "kid-settled")
+	assert.Contains(t, ghostMsg, "delete task stranded")
+	assert.Contains(t, settledMsg, "delete completed")
+	assert.NotEqual(t, ghostMsg, settledMsg)
+}

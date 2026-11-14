@@ -52,8 +52,8 @@ func newRerankModelService() *rerankModelService {
 			"chat-1": {ID: "chat-1", Type: types.ModelTypeKnowledgeQA},
 		},
 		availableModels: []*types.Model{
-			{ID: "chat-1", Type: types.ModelTypeKnowledgeQA},
-			{ID: "rr-auto", Type: types.ModelTypeRerank},
+			{ID: "chat-1", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
+			{ID: "rr-auto", Type: types.ModelTypeRerank, Status: types.ModelStatusActive},
 		},
 	}}
 }
@@ -188,4 +188,8 @@ func TestApplyKnowledgeSearchOverrides(t *testing.T) {
 	assert.Equal(t, 5, cm.RerankTopK, "rerank.top_k wins over match_count")
 	assert.Equal(t, -1.5, cm.RerankThreshold)
 	assert.Equal(t, 50, cm.EmbeddingTopK)
+
+	cm = base()
+	applyKnowledgeSearchOverrides(cm, &types.KnowledgeSearchOptions{ParentSlotAggregation: true})
+	assert.True(t, cm.ParentSlotAggregation, "the request flag reaches the top-k stage")
 }

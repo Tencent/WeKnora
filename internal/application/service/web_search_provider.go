@@ -35,12 +35,6 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 		return err
 	}
 
-	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, ""); err != nil {
-			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
-		}
-	}
-
 	logger.Infof(ctx, "Creating web search provider: tenant=%d, name=%s, type=%s", provider.TenantID, provider.Name, provider.Provider)
 	return s.repo.Create(ctx, provider)
 }
@@ -54,12 +48,6 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 	// Validate provider type if set
 	if provider.Provider != "" && !isValidProviderType(provider.Provider) {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
-	}
-
-	if provider.IsDefault {
-		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
-			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
-		}
 	}
 
 	if provider.Provider != "" {
@@ -142,7 +130,9 @@ func isValidProviderType(provider types.WebSearchProviderType) bool {
 		types.WebSearchProviderTypeZhipu,
 		types.WebSearchProviderTypeExa,
 		types.WebSearchProviderTypeBocha,
-		types.WebSearchProviderTypeSerply:
+		types.WebSearchProviderTypeSerply,
+		types.WebSearchProviderTypeDeepSeek,
+		types.WebSearchProviderTypeSearchAPI:
 		return true
 	default:
 		return false
@@ -159,6 +149,10 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 	case types.WebSearchProviderTypeSerply:
 		if strings.TrimSpace(params.APIKey) == "" {
 			return fmt.Errorf("API key is required for Serply provider")
+		}
+	case types.WebSearchProviderTypeSearchAPI:
+		if strings.TrimSpace(params.APIKey) == "" {
+			return fmt.Errorf("API key is required for SearchApi provider")
 		}
 	case types.WebSearchProviderTypeBing:
 		if params.APIKey == "" {
@@ -207,6 +201,10 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 		if err := infra_web_search.ValidateSearxngBaseURL(params.BaseURL); err != nil {
 			return err
 		}
+	case types.WebSearchProviderTypeDeepSeek:
+		if err := infra_web_search.ValidateDeepSeekParameters(params); err != nil {
+			return err
+		}
 	}
 	if err := validateOptionalProxyURL(params.ProxyURL); err != nil {
 		return err
@@ -216,4 +214,20 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 
 func validateOptionalProxyURL(proxyURL string) error {
 	return infra_web_search.ValidateProxyURL(proxyURL)
+}
+
+// PatchProviderSettings validates the saved provider but writes only selected settings.
+func (s *webSearchProviderService) PatchProviderSettings(
+	ctx context.Context, provider *types.WebSearchProviderEntity, fields []string,
+) error {
+	if provider == nil || provider.TenantID == 0 {
+		return fmt.Errorf("tenant ID is required")
+	}
+	if !isValidProviderType(provider.Provider) {
+		return fmt.Errorf("invalid provider type: %s", provider.Provider)
+	}
+	if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
+		return err
+	}
+	return s.repo.PatchSettings(ctx, provider, fields)
 }

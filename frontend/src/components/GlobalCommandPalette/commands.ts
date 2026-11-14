@@ -1,6 +1,8 @@
 import type { Router } from 'vue-router'
 import type { Composer } from 'vue-i18n'
 import { openNewUserGuide } from '@/config/contextualGuides'
+import { useAssistantStore } from '@/stores/assistant'
+import { useSettingsStore } from '@/stores/settings'
 
 /**
  * A single command that can be searched and invoked from the palette.
@@ -11,7 +13,7 @@ export interface CmdkCommand {
   id: string
   /** Localized display label. */
   label: string
-  /** TDesign icon name rendered on the left. */
+  /** TDesign icon name, or "assistant" for the shared assistant icon. */
   icon: string
   /** Extra tokens used purely for fuzzy matching (aliases, synonyms). */
   keywords?: string[]
@@ -26,6 +28,10 @@ export interface CommandContext {
   close: () => void
 }
 
+function assistantName(t: Composer['t']): string {
+  return useAssistantStore().displayName || t('assistant.title')
+}
+
 /**
  * Build the flat command list. Commands are intentionally static — dynamic
  * entities (KBs / agents / sessions) live in their own result groups.
@@ -34,12 +40,24 @@ export function buildCommands(ctx: CommandContext): CmdkCommand[] {
   const { router, t, close } = ctx
   return [
     {
+      id: 'open-assistant',
+      label: t('commandPalette.quick.assistant', { name: assistantName(t) }),
+      icon: 'assistant',
+      keywords: ['assistant', 'help', 'weknora', 'kora', '助手', '帮助', 'ассистент', useAssistantStore().displayName].filter(Boolean),
+      run: () => {
+        close()
+        useAssistantStore().open()
+      },
+    },
+    {
       id: 'new-chat',
       label: t('commandPalette.quick.newChat'),
       icon: 'chat-add',
       keywords: ['new', 'chat', 'conversation', '新建', '对话', 'создать'],
       run: () => {
         close()
+        // 当前已在新对话页时重复点击命令不会触发路由守卫。
+        if (router.currentRoute.value.name === 'globalCreatChat') useSettingsStore().clearChatReferences()
         router.push('/platform/creatChat')
       },
     },

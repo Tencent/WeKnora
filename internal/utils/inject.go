@@ -1645,7 +1645,24 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 		if tc.TypeName != nil {
 			typeName := v.getTypeName(tc.TypeName)
 			if strings.HasPrefix(strings.ToLower(typeName), "pg_") {
-				return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+				// The parser qualifies standard scalar types (e.g. INTEGER) with pg_catalog.
+				switch typeName {
+				case "pg_catalog.int2", "pg_catalog.int4", "pg_catalog.int8",
+					"pg_catalog.float4", "pg_catalog.float8", "pg_catalog.numeric",
+					"pg_catalog.bool", "pg_catalog.bpchar", "pg_catalog.varchar", "pg_catalog.text",
+					"pg_catalog.date", "pg_catalog.time", "pg_catalog.timetz",
+					"pg_catalog.timestamp", "pg_catalog.timestamptz", "pg_catalog.interval":
+					if len(tc.TypeName.Names) != 2 {
+						return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+					}
+				default:
+					return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+				}
+			}
+			for _, modifier := range tc.TypeName.Typmods {
+				if err := v.validateNode(modifier, result); err != nil {
+					return err
+				}
 			}
 		}
 	}

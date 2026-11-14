@@ -24,6 +24,8 @@ const CONCURRENCY = 3
 const POLL_INTERVAL_MS = 3000
 /** Keeps the ids=… query string of one status request well under URL length limits. */
 const POLL_CHUNK_SIZE = 40
+/** Status requests in flight per poll; each holds a database connection on the server. */
+const POLL_CONCURRENCY = 4
 /** Minimum gap between mid-batch list refreshes pushed to an open page. */
 const LIST_REFRESH_INTERVAL_MS = 2000
 /** Batch ends this close together produce one final refresh. */
@@ -65,6 +67,7 @@ export function createUploadTasks(deps: UploadTasksDeps) {
     concurrency: CONCURRENCY,
     pollIntervalMs: POLL_INTERVAL_MS,
     pollChunkSize: POLL_CHUNK_SIZE,
+    pollConcurrency: POLL_CONCURRENCY,
     upload: deps.upload,
     queryStatus: deps.queryStatus,
     onTransferEnd: createListRefreshThrottle(

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/event"
 	internalmcp "github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -27,7 +28,10 @@ type proxyApprovalGate struct {
 func (g *proxyApprovalGate) IsEnabled(context.Context, uint64, string, string) (bool, error) {
 	return !g.disabled, nil
 }
-func (*proxyApprovalGate) NeedsApproval(context.Context, uint64, string, string) bool { return true }
+
+func (*proxyApprovalGate) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskWrite, Always: true}
+}
 
 func (g *proxyApprovalGate) RequestAndWait(
 	_ context.Context,

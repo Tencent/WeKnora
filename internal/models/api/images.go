@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // ResolveImageURLForLLM converts stored image paths to a format that LLM APIs can consume.
 // - data: URIs and http(s):// URLs are returned as-is.
-// - resource:// and provider-backed local paths are read through the
+// - resource:// references and provider:// paths are read through the
 // application resolver and converted to base64 data URIs.
 func ResolveImageURLForLLM(imageURL string) string {
 	if strings.HasPrefix(imageURL, "data:") ||
@@ -50,10 +52,15 @@ func ResolveImageURLForOllama(imageURL string) []byte {
 	return nil
 }
 
+// isApplicationStoredImage reports whether imageURL names an image the
+// application's storage layer can read: a resource:// reference, or a
+// provider:// URL in the scheme the storage backends write (local://,
+// minio://, s3://, cos://, ...). The provider list is owned by
+// types.ParseProviderScheme, so a backend added there is resolvable here too.
+// Keeping a second, narrower list in this package left "minio://bucket/key"
+// unrecognized and it reached the vendor verbatim.
 func isApplicationStoredImage(imageURL string) bool {
-	return strings.HasPrefix(imageURL, "resource://") ||
-		strings.HasPrefix(imageURL, "local://") ||
-		strings.HasPrefix(imageURL, "storage://")
+	return strings.HasPrefix(imageURL, "resource://") || types.ParseProviderScheme(imageURL) != ""
 }
 
 // LocalImageResolver resolves a resource:// or provider storage URL to bytes

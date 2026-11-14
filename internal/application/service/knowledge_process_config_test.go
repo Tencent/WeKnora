@@ -555,16 +555,18 @@ func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
 // can override it again on top of what the knowledge base already decided. The
 // built-in action table is complete, so a knowledge base that only flips one
 // condition stays a small configuration.
+//
+// The table is the attribute conditions and nothing else: the clause for an
+// image whose attributes were not observed is the scheduling pipeline's own
+// setting, so it is put and read through ImagePipelineParams.
 func TestResolveProcessConfig_ImageActionsOverride(t *testing.T) {
 	t.Parallel()
 
 	kbActions := &types.ImageActionsConfig{
 		OCR: types.ImageOCRAction{
 			On: []types.ImageAttrCondition{
-				{Prop: "contain.text", Is: "block"},
-				{Prop: "contain.data_visual", Is: "true"},
+				{Prop: "contain.text", Is: "not_none"},
 			},
-			OnUnobserved: false,
 		},
 	}
 	kb := &types.KnowledgeBase{
@@ -577,23 +579,37 @@ func TestResolveProcessConfig_ImageActionsOverride(t *testing.T) {
 	// nil override: the knowledge base's custom action wins.
 	eff := ResolveProcessConfig(kb, nil)
 	require.True(t, eff.ImageAttrsEnabled)
-	require.False(t, eff.ImageActions.OCR.OnUnobserved,
+	require.Equal(t, kbActions.OCR.On, eff.ImageActions.OCR.On,
 		"the knowledge base's action must override the built-in default")
 
-	// An upload override rewrites the OCR action wholesale: the knowledge
-	// base's OnUnobserved=false is replaced by the upload's true.
+	// An upload override rewrites the OCR action wholesale.
 	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
 		ImageActions: &types.ImageActionsConfig{
 			OCR: types.ImageOCRAction{
-				On:           []types.ImageAttrCondition{{Prop: "contain.text", Is: "block"}},
-				OnUnobserved: true,
+				On: []types.ImageAttrCondition{{Prop: "contain.text", Is: "block"}},
 			},
 		},
 	})
-	require.True(t, eff.ImageActions.OCR.OnUnobserved,
-		"an upload action override must replace the whole OCR action, not merge")
 	require.Len(t, eff.ImageActions.OCR.On, 1,
 		"the upload's OCR.On replaces the knowledge base's list")
+
+	// The settings that live in the pipeline slot are read from that slot, and
+	// the upload's params replace the knowledge base's wholesale — so the value
+	// the run will read is the upload's, through the same lookup the run uses.
+	smartOCR := types.ImagePipelineSmartOCR
+	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ImagePipelineID: &smartOCR,
+		ImagePipelineParams: map[string]any{
+			"smartocr.ocr_on_unobserved": false,
+		},
+	})
+	require.Equal(t, map[string]any{"smartocr.ocr_on_unobserved": false}, eff.ImagePipelineParams)
+	got, ok := types.ImagePipelineParam(eff.ImagePipelineParams, string(eff.ImagePipelineID), "ocr_on_unobserved")
+	require.True(t, ok, "the upload's clause must be readable from the slot that will run")
+	require.Equal(t, false, got)
+	// The attribute table is untouched by a params override: they are different
+	// containers, and one must not be able to speak for the other.
+	require.Equal(t, kbActions.OCR.On, eff.ImageActions.OCR.On)
 
 	// With neither a KB config nor an override, the resolved action is the
 	// complete built-in default.
@@ -625,4 +641,18 @@ func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {
 			require.Equal(t, tc.want, ResolveProcessConfig(kb, overrides).SummaryEnabled)
 		})
 	}
+}
+
+func TestBuildSplitterConfigFromChunking_PreservesWikiOnlyZeroOverlap(t *testing.T) {
+	t.Parallel()
+
+	// Mirrors frontend WIKI_ONLY_CHUNKING_PRESET (chunkSize 2048, chunkOverlap 0).
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 2048, ChunkOverlap: 0},
+	}
+	eff := ResolveProcessConfig(kb, nil)
+	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+
+	require.Equal(t, 2048, cfg.ChunkSize)
+	require.Equal(t, 0, cfg.ChunkOverlap)
 }

@@ -220,11 +220,14 @@ func buildContentSignature(content string) string {
 // Two thresholds are used:
 //   - Substring containment: if the normalized short text is a literal substring
 //     of the normalized long text, the shorter chunk is removed.
-//   - Token overlap coefficient >= 0.85: if 85%+ of the smaller chunk's tokens
-//     appear in the larger chunk, the smaller one is redundant. Only applied
-//     when the two token sets are within maxOverlapSizeRatio of each other:
-//     near-duplicates are of similar size, while a long web page or parent
-//     chunk shares most words with any short chunk on its topic.
+//   - Token overlap coefficient >= 0.85, and only when the shorter text's
+//     tokens are almost a subset of the longer text's (shorter-only fraction
+//     at most maxShorterOnlyFraction). Overlap alone is not enough: shared
+//     boilerplate can clear 0.85 while each side still has its own
+//     requirement, number, or conclusion. Only applied when the two token
+//     sets are within maxOverlapSizeRatio of each other: near-duplicates are
+//     of similar size, while a long web page or parent chunk shares most
+//     words with any short chunk on its topic.
 //
 // Each text is tokenized once; tokenizing both sides of every pair ran jieba
 // O(n²) times over parent- and page-sized texts before the first token of
@@ -237,6 +240,11 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 	const (
 		overlapThreshold    = 0.85
 		maxOverlapSizeRatio = 3
+		// maxShorterOnlyFraction is the largest share of the shorter token set
+		// that may be missing from the longer set and still count as one fact.
+		// It sits far below the 0.15 residue the overlap coefficient allows, so
+		// boilerplate cannot hide a requirement, a number, or a conclusion.
+		maxShorterOnlyFraction = 0.02
 	)
 
 	if len(results) <= 1 {
@@ -292,6 +300,11 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 					searchutil.TokenOverlapRatio(shortTokens, longTokens) < overlapThreshold {
 					continue
 				}
+				// Drop only when the longer chunk actually carries the shorter
+				// one's tokens. A pair where each side has its own tokens is kept.
+				if shorterOnlyFraction(shortTokens, longTokens) > maxShorterOnlyFraction {
+					continue
+				}
 			}
 
 			victim := shortIdx
@@ -320,6 +333,21 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 		}
 	}
 	return out
+}
+
+// shorterOnlyFraction is the share of short's tokens that do not appear in long.
+// An empty short set is not evidence that long carries it.
+func shorterOnlyFraction(short, long map[string]struct{}) float64 {
+	if len(short) == 0 {
+		return 1
+	}
+	only := 0
+	for tok := range short {
+		if _, ok := long[tok]; !ok {
+			only++
+		}
+	}
+	return float64(only) / float64(len(short))
 }
 
 func logSearchScoreSample(ctx context.Context, action string, results []*types.SearchResult) {
@@ -360,11 +388,36 @@ func targetReportsEmbedFailure(kb *types.KnowledgeBase) bool {
 	return kb.IsVectorEnabled()
 }
 
+// imageQueryEmbedder is the optional capability of a knowledge base service
+// that can embed a query image. It is asserted rather than added to
+// interfaces.KnowledgeBaseService so adapters and test doubles that only serve
+// text queries keep compiling.
+type imageQueryEmbedder interface {
+	GetQueryImageEmbedding(ctx context.Context, kbID string, img []byte) ([]float32, error)
+}
+
+// queryVector embeds the query for vector recall. A query image takes the
+// image vector space the index stored image_vector chunks in; text otherwise.
+// An image the model cannot embed is an error, never a silent text fallback:
+// the caller asked to match a picture, and a text query answers something else.
+func (p *PluginSearch) queryVector(
+	ctx context.Context, kbID, queryText string, queryImage []byte,
+) ([]float32, error) {
+	if len(queryImage) == 0 {
+		return p.knowledgeBaseService.GetQueryEmbedding(ctx, kbID, queryText)
+	}
+	imageEmbedder, ok := p.knowledgeBaseService.(imageQueryEmbedder)
+	if !ok {
+		return nil, fmt.Errorf("this deployment cannot embed a query image")
+	}
+	return imageEmbedder.GetQueryImageEmbedding(ctx, kbID, queryImage)
+}
+
 // searchByTargets performs KB searches using pre-computed SearchTargets.
-// Targets sharing the same underlying embedding model (identified by model
-// name + endpoint, not just model ID) are grouped so the query embedding is
-// computed once per model AND all full-KB targets in a group are combined into
-// a single retrieval call, reducing both embedding API calls and DB round-trips.
+// Targets sharing the same model name, endpoint and configured vector dimension
+// are grouped even across model IDs. Each group computes one query embedding
+// and combines all full-KB targets into a single retrieval call, reducing both
+// embedding API calls and DB round-trips.
 func (p *PluginSearch) searchByTargets(
 	ctx context.Context,
 	chatManage *types.ChatManage,
@@ -397,8 +450,9 @@ func (p *PluginSearch) searchByTargets(
 		})
 	}
 
-	// Resolve actual model identities (name + endpoint) so that cross-tenant
-	// KBs backed by the same physical model share one embedding computation.
+	// Resolve actual model identities (name + endpoint + configured dimension)
+	// so that cross-tenant KBs backed by the same vector space share one
+	// embedding computation.
 	modelKeyMap := p.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
 
 	groups := make(map[string][]*types.SearchTarget)
@@ -428,15 +482,59 @@ func (p *PluginSearch) searchByTargets(
 		go func(modelKey string, targets []*types.SearchTarget) {
 			defer wg.Done()
 
-			// Compute embedding once for this model group. When that fails, retain
-			// only targets that have a real keyword index; vector-only targets must
-			// propagate the embedding failure instead of looking like empty recall.
+			// An image query needs the image vector space; no text embedding can
+			// stand in for it. When the model key is unresolved the group cannot
+			// share one embedding call, so embed per target rather than letting
+			// HybridSearch run with QueryText alone.
+			if len(chatManage.QueryImage) > 0 && modelKey == "" && !chatManage.DisableVectorMatch {
+				var innerWg sync.WaitGroup
+				for _, target := range targets {
+					innerWg.Add(1)
+					go func(t *types.SearchTarget) {
+						defer innerWg.Done()
+						emb, err := p.queryVector(ctx, t.KnowledgeBaseID, queryText, chatManage.QueryImage)
+						if err != nil {
+							recordError(fmt.Errorf(
+								"knowledge base %s cannot embed the query image: %w",
+								t.KnowledgeBaseID, err,
+							))
+							return
+						}
+						recordError(p.searchSingleTarget(
+							ctx, chatManage, t, queryText, emb, false, &mu, &results,
+						))
+					}(target)
+				}
+				innerWg.Wait()
+				return
+			}
+
+			// Compute embedding once for this model group. When a text query's
+			// embedding fails, retain only targets that have a real keyword index;
+			// vector-only targets must propagate the failure instead of looking
+			// like empty recall. An image query never degrades to text: the
+			// picture did not participate in a keyword search.
 			var queryEmbedding []float32
 			disableVector := chatManage.DisableVectorMatch
 			searchableTargets := targets
 			if modelKey != "" && !disableVector {
-				emb, err := p.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, queryText)
+				emb, err := p.queryVector(ctx, targets[0].KnowledgeBaseID, queryText, chatManage.QueryImage)
 				if err != nil {
+					if len(chatManage.QueryImage) > 0 {
+						for _, target := range targets {
+							recordError(fmt.Errorf(
+								"knowledge base %s cannot embed the query image: %w",
+								target.KnowledgeBaseID, err,
+							))
+						}
+						pipelineWarn(ctx, "Search", "group_image_embed_failed", map[string]interface{}{
+							"model_key":      modelKey,
+							"kb_id":          targets[0].KnowledgeBaseID,
+							"error":          err.Error(),
+							"failed_targets": len(targets),
+						})
+						return
+					}
 					searchableTargets = make([]*types.SearchTarget, 0, len(targets))
 					for _, target := range targets {
 						kb := kbMap[target.KnowledgeBaseID]
@@ -638,7 +736,13 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 			"max_results": webConfig.MaxResults,
 		},
 	})
-	webResults, err := p.webSearchService.Search(webCtx, providerID, webConfig, chatManage.RewriteQuery)
+	var webResults []*types.WebSearchResult
+	client, err := p.webSearchService.Resolve(webCtx, providerID)
+	if err == nil {
+		webResults, err = client.Search(webCtx, types.WebSearchRequest{
+			Query: chatManage.RewriteQuery, MaxResults: webConfig.MaxResults, IncludeDate: webConfig.IncludeDate,
+		})
+	}
 	webSpan.Finish(map[string]interface{}{
 		"hit_count": len(webResults),
 	}, nil, err)
@@ -653,10 +757,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
 	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
 	// tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
-	// compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
-	// 	ctx, chatManage.SessionID, tempKBID, questions, webResults, webConfig,
-	// 	p.knowledgeBaseService, p.knowledgeService, seen, ids,
-	// )
+	// state := &types.WebSearchCompressionState{TempKBID: tempKBID, SeenURLs: seen, KnowledgeIDs: ids}
+	// compressed, err := p.webResultCompressor.Compress(ctx, state, questions, webResults, webConfig)
 	// if err != nil {
 	// 	pipelineWarn(ctx, "Search", "web_compress_error", map[string]interface{}{
 	// 		"error": err.Error(),
@@ -664,7 +766,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	// } else {
 	// 	webResults = compressed
 	// 	// Persist temp KB state back into Redis using WebSearchStateRepository
-	// 	p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
+	// 	p.webSearchStateService.SaveWebSearchTempKBState(
+	// 		ctx, chatManage.SessionID, state.TempKBID, state.SeenURLs, state.KnowledgeIDs)
 	// }
 	res := searchutil.ConvertWebSearchResults(webResults)
 	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{

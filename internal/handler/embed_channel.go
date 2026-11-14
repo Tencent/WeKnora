@@ -224,7 +224,12 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 			return
 		}
 	}
-	originsJSON, _ := json.Marshal(req.AllowedOrigins)
+	// json.Marshal(nil) yields "null", which the service would store and read
+	// back as an empty allowlist that denies every origin. Leave it nil.
+	var originsJSON []byte
+	if req.AllowedOrigins != nil {
+		originsJSON, _ = json.Marshal(req.AllowedOrigins)
+	}
 	update := &types.EmbedChannel{
 		Name:               req.Name,
 		AllowedOrigins:     originsJSON,
@@ -425,6 +430,7 @@ func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 		logger.Warnf(ctx, "failed to assign embed session owner for %s: %v", created.ID, err)
 	} else {
 		created.UserID = ownerID
+		created.OwnerAuthSource = types.AuthSourceForBoundOwnerID(ownerID)
 	}
 	// Hand back a signed handle bound to this session; the widget must echo it
 	// (X-Embed-Session header) on every subsequent load/chat call.
@@ -610,19 +616,8 @@ func (h *EmbedChannelHandler) delegateEmbedChat(c *gin.Context, agentMode bool) 
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	if err := h.ensureEmbedSession(c); err != nil {
-		return
-	}
-	patched, err := patchEmbedChatPayload(c.Request.Body, ch, agentMode)
-	if err != nil {
-		switch {
-		case errors.Is(err, errInvalidEmbedChatBody):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		case errors.Is(err, errInvalidEmbedChatJSON):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare request"})
-		}
+	patched, ok := h.readEmbedChatPayload(c, ch, agentMode)
+	if !ok {
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(patched))
@@ -632,6 +627,39 @@ func (h *EmbedChannelHandler) delegateEmbedChat(c *gin.Context, agentMode bool) 
 		return
 	}
 	h.sessionHandler.KnowledgeQA(c)
+}
+
+// readEmbedChatPayload caps the visitor's body, checks the session, and merges
+// the channel's constraints into the payload. ok is false when it already wrote
+// the response.
+//
+// The cap goes on before anything reads the stream. patchEmbedChatPayload
+// buffers the whole body to rewrite it, and these routes are anonymous: the
+// publish token is public, so anyone holding it reaches that read without an
+// account. The delegated QA handler caps its own read, but that read sees the
+// rewritten payload, so the visitor's bytes were already buffered here.
+func (h *EmbedChannelHandler) readEmbedChatPayload(
+	c *gin.Context, ch *types.EmbedChannel, agentMode bool,
+) ([]byte, bool) {
+	limitJSONBody(c, embedChatJSONMaxBytes)
+	if err := h.ensureEmbedSession(c); err != nil {
+		return nil, false
+	}
+	patched, err := patchEmbedChatPayload(c.Request.Body, ch, agentMode)
+	if err != nil {
+		switch {
+		case isRequestBodyTooLarge(err):
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body is too large"})
+		case errors.Is(err, errInvalidEmbedChatBody):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		case errors.Is(err, errInvalidEmbedChatJSON):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare request"})
+		}
+		return nil, false
+	}
+	return patched, true
 }
 
 func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
@@ -685,7 +713,9 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 	// as shareable, credential-free URLs. Pinning it here covers both the
 	// `?resource_urls=public` query parameter and a deployment-wide
 	// RESOURCE_URL_MODE=public default.
-	ctx = storageurl.WithForcedHandleMode(types.WithPrincipal(ctx, principal))
+	ctx = storageurl.WithForcedHandleMode(types.WithPrincipalAuthSource(
+		types.WithPrincipal(ctx, principal), types.AuthSourceEmbed,
+	))
 	c.Request = c.Request.WithContext(ctx)
 	return nil
 }
@@ -699,7 +729,10 @@ var (
 func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode bool) ([]byte, error) {
 	raw, err := io.ReadAll(body)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errInvalidEmbedChatBody, err)
+		// Keep the read error reachable: an oversized body arrives as
+		// http.MaxBytesError, and the caller answers it with a size limit
+		// rather than "invalid request body".
+		return nil, fmt.Errorf("%w: %w", errInvalidEmbedChatBody, err)
 	}
 	var payload map[string]any
 	if len(raw) > 0 {

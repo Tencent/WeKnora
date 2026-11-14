@@ -51,6 +51,8 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		ImageAttrsEnabled:        imageCfg.ImageAttrsEnabled,
 		ImageVectorEnabled:       imageCfg.ImageVectorEnabled,
 		ImageActions:             types.ResolveImageActions(imageCfg.ImageActions),
+		ImagePipelineID:          types.ResolveImagePipelineID(&imageCfg),
+		ImagePipelineParams:      imageCfg.ImagePipelineParams,
 	}
 	if overrides == nil {
 		return eff
@@ -84,6 +86,11 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.QuestionGenerationConfig != nil {
 		base := eff.QuestionGenerationConfig
 		eff.QuestionGenerationConfig = *overrides.QuestionGenerationConfig
+		if strings.TrimSpace(eff.QuestionGenerationConfig.ModelID) == "" {
+			eff.QuestionGenerationConfig.ModelID = base.ModelID
+		} else {
+			eff.QuestionGenerationConfig.ModelID = strings.TrimSpace(eff.QuestionGenerationConfig.ModelID)
+		}
 		if eff.QuestionGenerationConfig.CustomInstructions == "" {
 			eff.QuestionGenerationConfig.CustomInstructions = base.CustomInstructions
 		}
@@ -93,6 +100,27 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	}
 	if overrides.ImageAttrsEnabled != nil {
 		eff.ImageAttrsEnabled = *overrides.ImageAttrsEnabled
+		if overrides.ImagePipelineID == nil {
+			// Legacy document overrides still select a pipeline. Parameters
+			// belong to the selected pipeline and cannot follow a switch.
+			id := types.ImagePipelineIDFor(eff.ImageAttrsEnabled)
+			if id != eff.ImagePipelineID {
+				eff.ImagePipelineParams = nil
+			}
+			eff.ImagePipelineID = id
+		}
+	}
+	if overrides.ImagePipelineID != nil {
+		// The pick and its params travel as one unit: params keyed for one
+		// pipeline say nothing to another, so an id without its params would
+		// silently run the new pipeline on the old pipeline's switches — and
+		// the params are also where every setting of that pipeline lives,
+		// including the ones the run reads from this layer.
+		eff.ImagePipelineID = types.NormalizeImagePipelineID(*overrides.ImagePipelineID)
+		eff.ImagePipelineParams = overrides.ImagePipelineParams
+		// The explicit pick also decides the legacy switch, so the fallback
+		// path and the run agree on which pipeline this document asked for.
+		eff.ImageAttrsEnabled = eff.ImagePipelineID == types.ImagePipelineSmartOCR
 	}
 	if overrides.ImageVectorEnabled != nil {
 		eff.ImageVectorEnabled = *overrides.ImageVectorEnabled
@@ -130,11 +158,11 @@ func validateDefaultFileImportRequirements(
 	fileType = normalizeFileExtension(fileType)
 	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() {
 		logger.Error(ctx, "VLM model is not configured")
-		return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+		return werrors.NewImportPrerequisiteError("上传图片文件需要设置VLM模型")
 	}
 	if IsAudioType(fileType) && !kb.ASRConfig.IsASREnabled() {
 		logger.Error(ctx, "ASR model is not configured")
-		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+		return werrors.NewImportPrerequisiteError("上传音频文件需要设置ASR语音识别模型")
 	}
 	return nil
 }
@@ -161,7 +189,7 @@ func resolveFileImportProcessConfig(
 	}
 
 	if processOverrides != nil {
-		if err := ValidateProcessOverrides(ctx, kb, processOverrides, []string{fileType}); err != nil {
+		if err := validateEffectiveProcessOverrides(eff, []string{fileType}); err != nil {
 			return eff, err
 		}
 	} else if err := validateDefaultFileImportRequirements(ctx, kb, eff, fileType); err != nil {
@@ -181,7 +209,12 @@ func ValidateProcessOverrides(
 	if overrides == nil {
 		return nil
 	}
+	return validateEffectiveProcessOverrides(ResolveProcessConfig(kb, overrides), fileTypes)
+}
 
+// Validate the final config, including the legacy enableMultimodel argument
+// applied by upload and reparse callers, before persisting or enqueueing it.
+func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTypes []string) error {
 	hasImage := false
 	hasAudio := false
 	for _, ft := range fileTypes {
@@ -193,20 +226,23 @@ func ValidateProcessOverrides(
 		}
 	}
 
-	eff := ResolveProcessConfig(kb, overrides)
-
 	if hasImage {
 		if !eff.VLMConfig.IsEnabled() {
-			return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+			return werrors.NewImportPrerequisiteError("上传图片文件需要设置VLM模型")
 		}
 	}
 
 	if hasAudio && !eff.ASRConfig.IsASREnabled() {
-		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+		return werrors.NewImportPrerequisiteError("上传音频文件需要设置ASR语音识别模型")
 	}
 
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {
 		return werrors.NewBadRequestError(err.Error())
+	}
+	if eff.EnableMultimodel {
+		if err := ValidateImagePipelineParams(eff.ImagePipelineID, eff.ImagePipelineParams); err != nil {
+			return werrors.NewBadRequestError(err.Error())
+		}
 	}
 
 	return nil
@@ -229,7 +265,7 @@ func ApplyKnowledgeProcessOverrides(
 	if processOverrides == nil {
 		return eff, nil
 	}
-	if err := ValidateProcessOverrides(ctx, kb, processOverrides, fileTypes); err != nil {
+	if err := validateEffectiveProcessOverrides(eff, fileTypes); err != nil {
 		return eff, err
 	}
 	if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
@@ -258,10 +294,18 @@ func reparseFileTypes(k *types.Knowledge) []string {
 }
 
 func defaultQuestionGenerationConfig(kb *types.KnowledgeBase) types.QuestionGenerationConfig {
-	if kb == nil || kb.QuestionGenerationConfig == nil {
-		return types.QuestionGenerationConfig{}
+	var config types.QuestionGenerationConfig
+	if kb == nil {
+		return config
 	}
-	return *kb.QuestionGenerationConfig
+	if kb.QuestionGenerationConfig != nil {
+		config = *kb.QuestionGenerationConfig
+	}
+	config.ModelID = strings.TrimSpace(config.ModelID)
+	if config.ModelID == "" {
+		config.ModelID = strings.TrimSpace(kb.SummaryModelID)
+	}
+	return config
 }
 
 func derefExtractConfig(cfg *types.ExtractConfig) types.ExtractConfig {

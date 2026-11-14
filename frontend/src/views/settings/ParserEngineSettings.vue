@@ -283,6 +283,14 @@
               <t-option value="hybrid-http-client" label="hybrid-http-client" />
             </t-select>
           </div>
+          <div class="form-item" v-if="config.mineru_model?.startsWith('hybrid-')">
+            <label class="form-label">{{ $t('settings.parser.mineruEffortLabel') }}</label>
+            <t-select v-model="config.mineru_effort" :placeholder="$t('settings.parser.mineruEffortDefault')" clearable>
+              <t-option value="medium" label="medium" />
+              <t-option value="high" label="high" />
+            </t-select>
+            <p class="form-desc">{{ $t('settings.parser.mineruEffortHint') }}</p>
+          </div>
           <div class="form-item">
             <label class="form-label">vLLM {{ $t('settings.parser.serverUrl') }}</label>
             <t-input
@@ -450,6 +458,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   mineru_server_api_key: '',
   mineru_tier: '',
   mineru_model: 'pipeline',
+  mineru_effort: '',
   mineru_vlm_server_url: '',
   mineru_enable_formula: true,
   mineru_enable_table: true,
@@ -591,6 +600,7 @@ async function loadConfig() {
       mineru_server_api_key: data?.mineru_server_api_key ?? DEFAULT_PARSER_CONFIG.mineru_server_api_key ?? '',
       mineru_tier: data?.mineru_tier ?? DEFAULT_PARSER_CONFIG.mineru_tier ?? '',
       mineru_model: data?.mineru_model ?? DEFAULT_PARSER_CONFIG.mineru_model ?? '',
+      mineru_effort: data?.mineru_effort ?? DEFAULT_PARSER_CONFIG.mineru_effort ?? '',
       mineru_vlm_server_url: data?.mineru_vlm_server_url ?? DEFAULT_PARSER_CONFIG.mineru_vlm_server_url ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
       mineru_enable_table: data?.mineru_enable_table ?? DEFAULT_PARSER_CONFIG.mineru_enable_table ?? true,
@@ -631,6 +641,7 @@ function buildConfigPayload(): ParserEngineConfig {
     mineru_server_api_key: config.value.mineru_server_api_key?.trim() ?? '',
     mineru_tier: config.value.mineru_tier?.trim() ?? '',
     mineru_model: config.value.mineru_model?.trim() ?? '',
+    mineru_effort: config.value.mineru_effort ?? '',
     mineru_vlm_server_url: config.value.mineru_vlm_server_url?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,
     mineru_enable_table: config.value.mineru_enable_table,

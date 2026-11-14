@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -80,7 +79,8 @@ func (c *Connector) pickerSpaces(ctx context.Context, client *client, cfg config
 // never becomes a map key retained in process memory or appears in diagnostics.
 func pickerSpaceCacheKey(cfg config) string {
 	fingerprint := sha256.Sum256([]byte(cfg.secret))
-	return cfg.edition + "\x00" + cfg.baseURL + "\x00" + cfg.username + "\x00" + fmt.Sprintf("%x", fingerprint)
+	return cfg.edition + "\x00" + cfg.baseURL + "\x00" + cfg.username + "\x00" +
+		fmt.Sprintf("%t:%x", cfg.usePAT, fingerprint)
 }
 
 // Type returns the connector type identifier.
@@ -327,6 +327,17 @@ func (c *Connector) fetchStream(
 		currentRoots[root.ResourceID] = true
 	}
 	baseline, next := prepareSyncCursors(old, forceFull)
+	prepareAttachmentCursor(decodeCursor(old), &next, forceFull, syncAttachmentsEnabled(ds))
+	// Accepted attachments establish a page baseline even if its body failed.
+	// Include those pages in the existing empty-list/mass-deletion safeguards.
+	for id, owner := range next.AttachmentOwners {
+		if baseline.SpacePages[owner] == nil {
+			baseline.SpacePages[owner] = map[string]string{}
+		}
+		if _, known := baseline.SpacePages[owner][id]; !known {
+			baseline.SpacePages[owner][id] = ""
+		}
+	}
 	// A prior successful body is reusable when ownership moves to a different
 	// selected root and this run cannot fetch the new body. Keep that version in
 	// the new root rather than dropping it during ownership reconciliation.
@@ -391,6 +402,12 @@ func (c *Connector) fetchStream(
 			}
 			seenPages[summary.ID] = struct{}{}
 			version, versionKnown := pageVersion(summary)
+			if syncAttachmentsEnabled(ds) {
+				// Attachment revisions are independent of the page-body version.
+				if err := client.syncPageAttachments(ctx, resourceID, summary, &next, h); err != nil {
+					return nil, err
+				}
+			}
 			// An unknown version cannot prove a page unchanged, so it must
 			// always refresh the body instead of skipping on a stable "t:".
 			if versionKnown {
@@ -519,8 +536,12 @@ func (c *Connector) fetchStream(
 	}
 	sort.Strings(missing)
 	for _, id := range missing {
+		if err := removeMissingAttachments(ctx, previousPages[id], id, nil, &next, h); err != nil {
+			return nil, err
+		}
 		deleted := types.FetchedItem{
-			ExternalID: id, IsDeleted: true, SourceResourceID: previousPages[id],
+			RetryOnFailure: syncAttachmentsEnabled(ds),
+			ExternalID:     id, IsDeleted: true, SourceResourceID: previousPages[id],
 			Metadata: map[string]string{"channel": types.ChannelConfluence},
 		}
 		if err := h.Emit(ctx, deleted); err != nil {
@@ -530,6 +551,9 @@ func (c *Connector) fetchStream(
 		// the deletion itself; an interrupted run resumes with the remaining
 		// candidates instead of re-emitting completed tombstones.
 		removePageOwnership(&next, id)
+		delete(next.Attachments, id)
+		delete(next.AttachmentOwners, id)
+		delete(next.FullAttachmentsBaseline, id)
 		if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
 			return nil, err
 		}
@@ -547,6 +571,7 @@ func (c *Connector) fetchStream(
 	next.SpacePages = committedRoots
 	next.FullSync = false
 	next.FullSyncBaseline = nil
+	retainAttachmentBaseline(&next)
 	return next.syncCursor(), nil
 }
 
@@ -600,7 +625,7 @@ func markdownItem(
 	// docparser image pipeline can persist them and rewrite to resource:// URLs.
 	// Best-effort: a failed image keeps its original src and never fails the page.
 	html = newAssetResolver(client).Resolve(ctx, html)
-	markdown, err := htmltomd.ConvertString(html)
+	markdown, err := convertPageHTML(html)
 	if err != nil {
 		return types.FetchedItem{}, err
 	}

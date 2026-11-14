@@ -41,7 +41,9 @@ type ListOptions struct {
 
 // ListService is the narrow SDK surface this command depends on.
 type ListService interface {
-	GetSessionsByTenant(ctx context.Context, page, pageSize int) ([]sdk.Session, int, error)
+	GetSessionsByTenant(
+		ctx context.Context, page, pageSize int, opts ...sdk.SessionListOptions,
+	) ([]sdk.Session, int, error)
 }
 
 // NewCmdList builds `weknora session list`.

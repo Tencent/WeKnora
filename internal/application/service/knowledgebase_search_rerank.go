@@ -48,10 +48,8 @@ func resolveRerankModelID(
 		logger.Warnf(ctx, "Rerank model auto-detection failed: %v", err)
 		return "", "", nil
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeRerank {
-			return model.ID, types.RerankModelSourceAuto, nil
-		}
+	if model := types.PickDefaultModel(models, types.ModelTypeRerank); model != nil {
+		return model.ID, types.RerankModelSourceAuto, nil
 	}
 	return "", "", nil
 }
@@ -129,8 +127,8 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 		diag.Outcome = types.RerankOutcomeNoCandidates
 		return out, nil
 	}
-	pool := chunks[:min(len(chunks), max(topK, types.DefaultRetrievalTopK))]
-	candidates, err := s.processSearchResults(ctx, pool, true)
+	pool := chunks[:min(len(chunks), maxRetrievalPoolSize)]
+	candidates, err := s.processSearchResults(ctx, pool, max(topK, types.DefaultRetrievalTopK), true)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +179,7 @@ func (s *knowledgeBaseService) rerankCandidates(
 		diag.Error = err.Error()
 		return retrievalOrder
 	}
+	s.markSkipGeneratedQuestions(ctx, candidates)
 
 	res := reranking.Rerank(ctx, model, query, candidates, reranking.Options{
 		Threshold:        threshold,
@@ -224,7 +223,7 @@ func (s *knowledgeBaseService) enrichRerankedResults(
 		rerankedByID[r.ID] = r
 	}
 
-	enriched, err := s.processSearchResults(ctx, primary, false)
+	enriched, err := s.processSearchResults(ctx, primary, len(primary), false)
 	if err != nil {
 		return nil, err
 	}

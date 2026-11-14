@@ -167,6 +167,7 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		Output:  outputMsg,
 		Data: map[string]interface{}{
 			"display_type":   "wiki_rename_page",
+			"data_change":    wikiDataChange("rename_page", kbID),
 			"old_slug":       params.Slug,
 			"new_slug":       params.NewSlug,
 			"title":          existingPage.Title,
@@ -174,4 +175,9 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 			"affected_pages": updatedSlugs,
 		},
 	}, nil
+}
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiRenamePageTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
 }

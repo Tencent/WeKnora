@@ -128,9 +128,9 @@ func TestModelHandlesReferenceTheActualExpandedChild(t *testing.T) {
 		},
 	}
 	messages, registry := prepareMessagesWithModelContext(context.Background(), manage)
-	require.Contains(t, messages[1].Content, `<chunk id="c2"`)
-	require.Contains(t, registry.DecodeOutputText(`<ref id="c2"/>`), `chunk_id="later"`)
-	require.Contains(t, registry.DecodeOutputText(`<ref id="c1"/>`), `chunk_id="opening"`)
+	require.Contains(t, messages[1].Content, `<chunk id="chunk://2"`)
+	require.Contains(t, registry.DecodeOutputText(`<ref id="chunk://2"/>`), `chunk_id="later"`)
+	require.Contains(t, registry.DecodeOutputText(`<ref id="chunk://1"/>`), `chunk_id="opening"`)
 	manage.MergeResult[0].CitationSources = nil
 	messages, _ = prepareMessagesWithModelContext(context.Background(), manage)
 	require.NotContains(t, messages[1].Content, rendered)

@@ -301,3 +301,23 @@ func TestRedisLifecycleLockAllowsDifferentKeys(t *testing.T) {
 	close(releaseFirst)
 	require.NoError(t, <-firstDone)
 }
+
+func TestRedisUserMachineKeysShareOneHashTag(t *testing.T) {
+	store, _, mini := newRedisBindingTestStore(t)
+	ctx := context.Background()
+	key := userMachineKey()
+	created, err := store.Create(ctx, key, validUserBinding("sb-1"))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	digest := testUserMachine().Digest(store.namespace)
+	require.True(t, mini.Exists("weknora:sandbox:user:{"+digest+"}:binding"))
+
+	scoped := SessionSandboxKey{TenantID: 42, SessionID: userKeySessionID, User: testUserMachine()}
+	require.NoError(t, store.BeginTurn(ctx, scoped))
+	require.True(t, mini.Exists("weknora:sandbox:user:{"+digest+"}:session:"+userKeySessionID+":turn"))
+
+	got, err := store.Get(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "sb-1", got.SandboxID)
+}

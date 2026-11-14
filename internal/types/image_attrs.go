@@ -30,6 +30,45 @@ type AttrSpec struct {
 	Label       string      `json:"label"`                 // human-readable name for the settings panel
 	Description string      `json:"description,omitempty"` // one line explaining what the attribute measures
 	Consumers   []string    `json:"consumers,omitempty"`   // downstream steps that read this attribute
+	// Internal marks an attribute that steers this pipeline's own scheduling
+	// rather than describing what the image holds. Such attributes are still
+	// observed and persisted — the values are what justify a scheduling
+	// decision after the fact — but they are kept out of the gallery's filter
+	// surface, where they would only add noise: no operator wants to filter a
+	// library by "how much margin is left around the text".
+	Internal bool `json:"internal,omitempty"`
+	// Inject says whether this attribute is always part of the describe round's
+	// standing questions, or only asked when something is going to act on it.
+	// An empty value means AttrInjectAlways, so attributes registered before
+	// this field existed keep their behaviour.
+	Inject AttrInject `json:"inject,omitempty"`
+}
+
+// AttrInject is how an attribute enters the describe prompt.
+type AttrInject string
+
+const (
+	// AttrInjectAlways puts the attribute in every describe round. This is for
+	// attributes the pipeline's policy itself reads (contain.text,
+	// contain.data_visual): their answers decide whether OCR runs, so they must
+	// always be present.
+	AttrInjectAlways AttrInject = "always"
+	// AttrInjectOnDemand asks the attribute only when a consumer is going to
+	// act on it. Asking is not free — it lengthens the prompt and gives the
+	// model one more chance to drift — so an attribute whose only job is to
+	// gate a later step is asked exactly when that step is switched on, and
+	// left out entirely otherwise.
+	AttrInjectOnDemand AttrInject = "on_demand"
+)
+
+// WantsInjection reports whether this attribute belongs in a describe round that
+// is being built for the given situation. onDemandOnly callers (a step that has
+// nothing to act on) skip the on-demand attributes entirely.
+func (s AttrSpec) WantsInjection(onDemandConsumersActive bool) bool {
+	if s.Inject != AttrInjectOnDemand {
+		return true
+	}
+	return onDemandConsumersActive
 }
 
 // AttrValue is one allowed value of an attribute: the raw value plus the words
@@ -45,6 +84,20 @@ type AttrValue struct {
 	Value       string `json:"value"`                 // raw machine value, never localized
 	Label       string `json:"label"`                 // short on-screen name
 	Description string `json:"description,omitempty"` // sentence explaining the value
+}
+
+// InjectedImageAttrNames lists the attributes a describe round asks the model
+// for, given whether the steps that consume on-demand attributes are switched on
+// for this run. The prompt builder and the observation action both take the list
+// from here, so "what was asked" and "what was answered" cannot drift apart.
+func InjectedImageAttrNames(onDemand bool) []string {
+	names := make([]string, 0, len(ImageAttrRegistry))
+	for _, spec := range ImageAttrRegistry {
+		if spec.WantsInjection(onDemand) {
+			names = append(names, spec.Name)
+		}
+	}
+	return names
 }
 
 // ImageAttrRegistry is the canonical, ordered list of observed attributes for
@@ -69,6 +122,7 @@ var ImageAttrRegistry = []AttrSpec{
 		Description: "How much body text the picture itself carries. " +
 			"Decides whether reading its text is worth a separate OCR pass.",
 		Consumers: []string{"ocr"},
+		Inject:    AttrInjectAlways,
 	},
 	{
 		Name: "contain.data_visual",
@@ -83,15 +137,55 @@ var ImageAttrRegistry = []AttrSpec{
 		Description: "Whether the picture conveys data as a chart, graph, diagram or infographic. " +
 			"Such images keep their labels on the OCR path even when the text looks sparse.",
 		Consumers: []string{"ocr"},
+		Inject:    AttrInjectAlways,
+	},
+	{
+		Name: "layout.margin",
+		Type: AttrTypeExtent,
+		Values: []AttrValue{
+			{Value: "none", Label: "None", Description: "the text reaches the edges; almost no background"},
+			{Value: "small", Label: "Small", Description: "a thin band of background or whitespace"},
+			{
+				Value: "large", Label: "Large",
+				Description: "plenty of non-text area: a desk, a room, a mostly empty page",
+			},
+		},
+		Question: "How much of the frame is NOT the document itself — background, desk, or empty " +
+			"space around the text? Answer exactly one of: none (text reaches the edges), " +
+			"small (a thin border), large (a substantial non-text area such as a desk or " +
+			"a page photographed with its surroundings).",
+		Label: "Non-text area",
+		Description: "How much background surrounds the content. Large margins mean the " +
+			"page can be cropped tighter before OCR reads it.",
+		Consumers: []string{"preprocess"},
+		Internal:  true,
+		Inject:    AttrInjectOnDemand,
+	},
+	{
+		Name: "layout.upright",
+		Type: AttrTypePresence,
+		Values: []AttrValue{
+			{Value: "true", Label: "Upright", Description: "text reads in its normal orientation"},
+			{Value: "false", Label: "Rotated", Description: "text is turned, tilted or upside down"},
+		},
+		Question: "Is the text in the image upright — that is, in its normal reading orientation? " +
+			"Text that is rotated a quarter turn, tilted by the camera, or upside down counts as false. " +
+			"Answer exactly one of: true, false.",
+		Label: "Text orientation",
+		Description: "Whether the text reads the right way up. A rotated or upside-down page " +
+			"is worth straightening before OCR reads it.",
+		Consumers: []string{"preprocess"},
+		Internal:  true,
+		Inject:    AttrInjectOnDemand,
 	},
 }
 
 // ImageAttrSchemaVersion marks the shape and the semantics of
 // ImageAttrs.Attrs. It is attrs/2 since an unobserved attribute stopped being
 // written as a conservative default: an absent key now means "the observation
-// did not answer for this attribute" and is read through the OCR policy's
-// OnUnobserved clause, so a consumer of stored observations must not assume
-// every registered key is present. Bump it when an attribute's semantics
+// did not answer for this attribute" and is read through the pipeline's
+// ocr_on_unobserved setting, so a consumer of stored observations must not
+// assume every registered key is present. Bump it when an attribute's semantics
 // change, not when one is merely added.
 const ImageAttrSchemaVersion = "attrs/2"
 
@@ -136,6 +230,45 @@ func (a ImageAttrs) TextExtent() string {
 	return ""
 }
 
+// Margin returns the observed layout.margin value ("none" | "small" |
+// "large"), or "" when the observation did not answer for it. The empty string
+// is meaningful and must not be read as "none": it says this run has no basis
+// to conclude the page is already tidy, and callers treat that as "worth a
+// look" so an unobserved page still gets its chance.
+func (a ImageAttrs) Margin() string { return a.attrString("layout.margin") }
+
+// Upright reports whether the observation found the text upright, and whether
+// it answered the question at all. A presence attribute stores a real bool (see
+// coerceAttrValue), so this is deliberately not a plain bool accessor: "the
+// model said not upright" and "the model did not say" call for different
+// behaviour, and collapsing them would turn an unanswered attribute into a
+// confident "it is upright" that skips a page which needed straightening.
+func (a ImageAttrs) Upright() (upright bool, observed bool) {
+	if a.Attrs == nil {
+		return false, false
+	}
+	if v, ok := a.Attrs["layout.upright"]; ok {
+		if b, ok := v.(bool); ok {
+			return b, true
+		}
+	}
+	return false, false
+}
+
+// attrString reads one observed attribute as a string, treating a missing key
+// and a non-string value the same way: as "not answered".
+func (a ImageAttrs) attrString(name string) string {
+	if a.Attrs == nil {
+		return ""
+	}
+	if v, ok := a.Attrs[name]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 // DataVisual returns the observed contain.data_visual value, or false when the
 // attribute was not observed. Absence is not the same as an observed "false" —
 // use Observed to distinguish them, which is what DecideOCR does.
@@ -153,8 +286,13 @@ func (a ImageAttrs) DataVisual() bool {
 
 // ImageActionsConfig is the attribute -> work policy. It is keyed by downstream
 // action (today only "ocr"); each action lists the attribute conditions that
-// turn it on, plus the conservative value to use when the driving attribute was
-// not observed.
+// turn it on.
+//
+// What to do when a driving attribute was NOT observed is not part of this table
+// — that is a scheduling decision and lives with the pipeline that does the
+// scheduling, as its own `ocr_on_unobserved` setting. The consequence for a
+// stored config is deliberate: a `on_unobserved` written into this table before
+// that move is ignored rather than honoured from two places.
 type ImageActionsConfig struct {
 	OCR ImageOCRAction `json:"ocr"`
 }
@@ -164,14 +302,6 @@ type ImageOCRAction struct {
 	// On is the list of attribute conditions that enable OCR. Matching any one
 	// turns OCR on.
 	On []ImageAttrCondition `json:"on"`
-	// OnUnobserved is the OCR decision used when the observation does not
-	// answer for one of the attributes the policy reads — the attribute is
-	// absent because the model skipped the line, or because the value it wrote
-	// was not one of the allowed ones. The default is true: an incomplete
-	// observation keeps extracting, so a missed block of text costs one extra
-	// call instead of being lost. Turn it off only with a model reliable enough
-	// to answer every attribute line.
-	OnUnobserved bool `json:"on_unobserved"`
 }
 
 // ImageAttrCondition is one attribute match: attr Prop equals Is.
@@ -180,12 +310,11 @@ type ImageAttrCondition struct {
 	Is   string `json:"is"`
 }
 
-// DefaultImageActions is the built-in attribute -> work table. It is deliberately
-// conservative: OCR runs when contain.text is "block", or contain.data_visual is
-// true, or the observation did not answer for an attribute the policy reads (the
-// OnUnobserved clause). It is equivalent to the old class table: decorative /
-// logo / photo (text reliably absent or captured by the description) skip OCR;
-// text_screenshot / table / chart / other run OCR.
+// DefaultImageActions is the built-in attribute -> work table: OCR runs when
+// contain.text is "block" or contain.data_visual is true. It is equivalent to
+// the old class table: decorative / logo / photo (text reliably absent or
+// captured by the description) skip OCR; text_screenshot / table / chart /
+// other run OCR.
 func DefaultImageActions() ImageActionsConfig {
 	return ImageActionsConfig{
 		OCR: ImageOCRAction{
@@ -193,7 +322,6 @@ func DefaultImageActions() ImageActionsConfig {
 				{Prop: "contain.text", Is: "block"},
 				{Prop: "contain.data_visual", Is: "true"},
 			},
-			OnUnobserved: true,
 		},
 	}
 }
@@ -255,9 +383,8 @@ type AttrObservation struct {
 // line, or because the value it wrote is not one of the allowed ones — is
 // simply absent from Attrs. Nothing is invented in its place: writing a
 // conservative default there would make an unanswered question look like a
-// confident "block", and would leave the OCR policy's OnUnobserved clause
-// unreachable. The absence is what DecideOCR turns into the conservative
-// decision instead.
+// confident "block", and would leave the ocr_on_unobserved setting unreachable.
+// The absence is what DecideOCR turns into the conservative decision instead.
 func ParseImageAttrsResponse(raw string) (AttrObservation, bool) {
 	obs := AttrObservation{
 		Attrs: ImageAttrs{
@@ -273,8 +400,8 @@ func ParseImageAttrsResponse(raw string) (AttrObservation, bool) {
 		if key, val, ok := cutAttrLine(trimmed); ok {
 			if spec, found := lookupAttrSpec(key); found {
 				// Unusable values are dropped rather than defaulted, so the
-				// attribute stays absent and the policy's OnUnobserved clause
-				// decides what to do about it.
+				// attribute stays absent and the pipeline's ocr_on_unobserved
+				// setting decides what to do about it.
 				if v, usable := coerceAttrValue(spec, val); usable {
 					obs.Attrs.Attrs[spec.Name] = v
 					seen[spec.Name] = true

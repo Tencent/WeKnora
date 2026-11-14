@@ -58,6 +58,7 @@ function setup(overrides: Partial<UploadQueueDeps> = {}) {
     concurrency: 2,
     pollIntervalMs: 1000,
     pollChunkSize: 2,
+    pollConcurrency: 4,
     upload: (batch, payload, progress, signal) => new Promise((resolve, reject) => {
       calls.push({ batch, payload, signal, progress, resolve, reject })
       signal.addEventListener('abort', () => reject({ message: 'Network error' }))
@@ -204,6 +205,43 @@ test('polls created rows until parsing settles', async () => {
   assert.equal(byName('c').parseStatus, 'pending')
   await queue.pollNow()
   assert.equal(byName('c').parseStatus, 'deleted')
+})
+
+test('a poll keeps at most `pollConcurrency` status requests in flight', async () => {
+  // Thousands of files still parsing used to fire every chunk at once, one
+  // database connection each on the server.
+  const pending: Array<{ ids: string[]; resolve: (rows: KnowledgeStatusRow[]) => void }> = []
+  const { items, batches, queue, byName } = setup({
+    pollConcurrency: 2,
+    queryStatus: (_kbId, ids) => new Promise(resolve => pending.push({ ids, resolve })),
+  })
+  batches.push({ id: 'b1', kbId: 'kb1', kbName: 'KB', targetFolder: '' })
+  for (const name of ['a', 'b', 'c', 'd', 'e', 'f', 'g']) {
+    items.push({
+      id: `u-${name}`, batchId: 'b1', name, relativePath: '', size: 1, loaded: 1,
+      transfer: 'uploaded', knowledgeId: `k-${name}`, parseStatus: 'pending',
+    })
+  }
+
+  const poll = queue.pollNow()
+  let done = false
+  void poll.then(() => { done = true })
+  const answered: string[][] = []
+  let maxInFlight = 0
+  while (!done) {
+    await flush()
+    maxInFlight = Math.max(maxInFlight, pending.length)
+    const next = pending.shift()
+    if (!next) continue
+    answered.push(next.ids)
+    next.resolve(next.ids.map(id => ({ id, parse_status: 'completed' })))
+  }
+
+  assert.equal(maxInFlight, 2)
+  // pollChunkSize 2: seven ids in four requests, each id asked about once.
+  assert.deepEqual(answered.flat().sort(), ['k-a', 'k-b', 'k-c', 'k-d', 'k-e', 'k-f', 'k-g'])
+  assert.equal(answered.length, 4)
+  assert.equal(byName('g').parseStatus, 'completed')
 })
 
 test('a row that reappears resets its missing count', async () => {

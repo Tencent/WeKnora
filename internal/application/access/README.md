@@ -6,7 +6,7 @@ codes, RBAC rollout behavior, and response projection at their existing boundari
 
 | Entry point | Shared rule | Additional boundary |
 | --- | --- | --- |
-| Resource mutations with URL/body KB selectors | `CheckOwnershipOrRole`: creator or sufficient tenant role | API-key capabilities, KB scope and tenant visibility remain separate checks |
+| Resource mutations with URL/body KB selectors | `CheckOwnershipOrRole`: creator at Contributor or above, or sufficient tenant role | API-key capabilities, KB scope and tenant visibility remain separate checks |
 | KB/document detail and content routes | `ResolveKB`: own tenant, organization share, then read-only shared agent | Tenant role/ownership guards and API-key capabilities |
 | Shared documents, chunks, search targets and suggestions | `KBSharePermissions`: organization grants only | Existing user requirements and caller-specific filtering/error behavior |
 | FAQ and tag service reads | `resolveKBReadTenant`: execution tenant or organization share | Direct cross-tenant calls require a user; no implicit agent fallback |

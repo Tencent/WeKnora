@@ -126,7 +126,7 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 // @Failure      403  {object}  errors.AppError  "非创建者或管理员，或知识库来自其他空间"
 // @Failure      404  {object}  errors.AppError  "知识库不存在"
 // @Security     Bearer
-// @x-agent      {"id":"knowledge_base.list_activity","risk":"read"}
+// @x-agent      {"id":"knowledge_base.list_activity","risk":"read","role":"contributor"}
 // @x-agent-hint "Newest first; only the creator or a workspace admin may read it. Assistant actions carry via=agent."
 // @Router       /knowledge-bases/{id}/activity [get]
 func (h *AuditLogHandler) ListKnowledgeBaseActivity(c *gin.Context) {

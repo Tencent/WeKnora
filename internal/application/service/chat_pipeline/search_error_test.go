@@ -258,13 +258,15 @@ func (s *partialSearchKnowledgeBaseService) HybridSearch(
 }
 
 type stubWebSearchService struct {
-	interfaces.WebSearchService
+	interfaces.WebClient
 	results []*types.WebSearchResult
 }
 
-func (s *stubWebSearchService) Search(
-	_ context.Context, _ string, _ *types.WebSearchConfig, _ string,
-) ([]*types.WebSearchResult, error) {
+func (s *stubWebSearchService) Resolve(context.Context, string) (interfaces.WebClient, error) {
+	return s, nil
+}
+
+func (s *stubWebSearchService) Search(context.Context, types.WebSearchRequest) ([]*types.WebSearchResult, error) {
 	return s.results, nil
 }
 

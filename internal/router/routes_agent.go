@@ -44,6 +44,8 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("/:id", g.Viewer(), agentHandler.GetAgent)
 		// Update agent — creator OR Admin+
 		agentsWrite.PUT("/:id", g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
+		// Partially update agent — same guard as PUT
+		agentsWrite.PATCH("/:id", g.OwnedAgentOrAdmin(), agentHandler.PatchAgent)
 		// Delete agent — creator OR Admin+
 		agentsWrite.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
 		// Copy agent — Contributor+ (copy is owned by the caller)
@@ -83,6 +85,7 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 		skills.GET("", g.Viewer(), skillHandler.ListSkills)
 		// Catalog reads are Viewer+ so the agent editor can show uninstalled skills.
 		skills.GET("/catalog", g.Viewer(), skillHandler.ListCatalog)
+		skills.GET("/catalog/:id", g.Viewer(), skillHandler.GetCatalog)
 	}
 	// Catalog writes bake into sandbox images; scoped API keys cannot hold them.
 	catalogWrite := g.apiKeyGroup(r.Group("/skills/catalog"), apiKeyFullAccess())
@@ -169,8 +172,12 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.GET("/:id/shares", g.Viewer(), orgHandler.ListOrgShares)
 		// List agents shared to this organization — Viewer+
 		orgs.GET("/:id/agent-shares", g.Viewer(), orgHandler.ListOrgAgentShares)
-		// List all knowledge bases in this organization (including mine) for list-page space view — Viewer+
-		orgs.GET("/:id/shared-knowledge-bases", g.Viewer(), orgHandler.ListOrganizationSharedKnowledgeBases)
+		// List all knowledge bases in this organization (including mine) for list-page space view — Viewer+.
+		// Discovery is read-only, so a scoped key with `retrieve` may use it;
+		// the handler narrows rows to the key's KB allow-list.
+		orgs.With(apiKeyRetrieve(apiKeyManageSpaces(apiKeyFullAccess()))).GET(
+			"/:id/shared-knowledge-bases", g.Viewer(), orgHandler.ListOrganizationSharedKnowledgeBases,
+		)
 		// List all agents in this organization (including mine) for list-page space view — Viewer+
 		orgs.GET("/:id/shared-agents", g.Viewer(), orgHandler.ListOrganizationSharedAgents)
 	}
@@ -209,8 +216,12 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		agentShares.DELETE("/:share_id", g.OwnedAgentOrAdmin(), orgHandler.RemoveAgentShare)
 	}
 
-	// Shared knowledge bases route — Viewer+
-	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
+	// Shared knowledge bases route — Viewer+.
+	// Listing is read-only discovery: a scoped key with `retrieve` may use it
+	// so it can discover the shared KBs it is already allowed to search. The
+	// handler filters every row through the key's KB allow-list.
+	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases",
+		apiKeyRetrieve(apiKeyManageSpaces(apiKeyFullAccess())), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route — Viewer+
 	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedAgents)
 	// "Disable by me" 是空间级偏好（写到 tenant_disabled_shared_agents），

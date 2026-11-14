@@ -24,7 +24,7 @@ type BraveProvider struct {
 }
 
 // NewBraveProvider creates a guarded, credential-scoped Brave search client.
-func NewBraveProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewBraveProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if strings.TrimSpace(params.APIKey) == "" {
 		return nil, fmt.Errorf("API key is required for Brave provider")
 	}
@@ -41,17 +41,11 @@ func NewBraveProvider(params types.WebSearchProviderParameters) (interfaces.WebS
 // Name returns the provider registry identifier.
 func (p *BraveProvider) Name() string { return "brave" }
 
-// Search applies the default region and result limit.
+// Search sends country and freshness to the official Brave endpoint; empty filters use its defaults.
 func (p *BraveProvider) Search(
-	ctx context.Context, query string, maxResults int, includeDate bool,
+	ctx context.Context, request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
-	return p.SearchWithFilters(ctx, query, maxResults, includeDate, types.WebSearchFilters{})
-}
-
-// SearchWithFilters sends country and freshness to the official Brave endpoint.
-func (p *BraveProvider) SearchWithFilters(
-	ctx context.Context, query string, maxResults int, _ bool, filters types.WebSearchFilters,
-) ([]*types.WebSearchResult, error) {
+	query, maxResults, filters := request.Query, request.MaxResults, request.Filters
 	if err := filters.Validate(); err != nil {
 		return nil, err
 	}

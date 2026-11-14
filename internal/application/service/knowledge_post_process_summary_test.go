@@ -41,12 +41,13 @@ func (r *optionalSummaryKnowledgeRepo) CompleteProcessingWithoutSubtasks(context
 func TestKnowledgePostProcessOptionalSummary(t *testing.T) {
 	t.Setenv("NEO4J_ENABLE", "true")
 	for _, tt := range []struct {
-		name      string
-		summary   *bool
-		question  bool
-		graph     bool
-		wiki      bool
-		wantTasks []string
+		name         string
+		summary      *bool
+		question     bool
+		graph        bool
+		wiki         bool
+		autoGenerate *bool
+		wantTasks    []string
 	}{
 		{name: "legacy defaults generate summary", wantTasks: []string{types.TypeSummaryGeneration}},
 		{
@@ -73,6 +74,14 @@ func TestKnowledgePostProcessOptionalSummary(t *testing.T) {
 			wiki:      true,
 			wantTasks: []string{types.TypeWikiIngest},
 		},
+		{
+			name:         "manual-only Wiki preserves other enrichment",
+			summary:      processConfigBoolPtr(false),
+			question:     true,
+			wiki:         true,
+			autoGenerate: processConfigBoolPtr(false),
+			wantTasks:    []string{types.TypeQuestionGeneration},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			knowledge := &types.Knowledge{
@@ -90,6 +99,7 @@ func TestKnowledgePostProcessOptionalSummary(t *testing.T) {
 				IndexingStrategy: types.IndexingStrategy{
 					VectorEnabled: true, GraphEnabled: tt.graph, WikiEnabled: tt.wiki,
 				},
+				WikiConfig:               &types.WikiConfig{AutoGenerate: tt.autoGenerate},
 				QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: tt.question},
 				ExtractConfig:            &types.ExtractConfig{Enabled: tt.graph},
 			}
@@ -145,9 +155,14 @@ func TestKnowledgePostProcessWithoutSummaryCompletionFailure(t *testing.T) {
 				wikiEnqueueFailureKnowledgeRepo: wikiEnqueueFailureKnowledgeRepo{knowledge: knowledge},
 				completionErr:                   tc.err, completionSkipped: tc.skipped,
 			}
+			tracker, db := setupSpanTrackerTest(t)
+			ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
+			_, attempt, err := tracker.OpenAttempt(ctx, knowledge.ID, "")
+			require.NoError(t, err)
 			queue := &wikiEnqueueFailureTaskQueue{}
 			svc := &KnowledgePostProcessService{
 				knowledgeRepo: repo,
+				spanTracker:   tracker,
 				kbService: &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
 					ID: "kb", TenantID: 7, Type: types.KnowledgeBaseTypeDocument,
 					AutoTagConfig: &types.AutoTagConfig{Enabled: true},
@@ -162,15 +177,24 @@ func TestKnowledgePostProcessWithoutSummaryCompletionFailure(t *testing.T) {
 				TenantID: 7, KnowledgeID: "doc", KnowledgeBaseID: "kb",
 			})
 			require.NoError(t, err)
-			err = svc.Handle(context.Background(), asynq.NewTask(types.TypeKnowledgePostProcess, payload))
+			err = svc.Handle(ctx, asynq.NewTask(types.TypeKnowledgePostProcess, payload))
 			require.ErrorIs(t, err, tc.err)
 			require.Empty(t, queue.taskTypes)
 			require.Equal(t, types.ParseStatusProcessing, knowledge.ParseStatus)
 			if tc.err != nil {
+				status, code, message := rootSpan(t, db, knowledge.ID, attempt)
+				require.Equal(t, types.SpanStatusRunning, status)
+				require.Empty(t, code)
+				require.Empty(t, message)
 				repo.completionErr = nil
+				ctx = types.WithTaskRetryMetadata(ctx, 1, 3)
 				task := asynq.NewTask(types.TypeKnowledgePostProcess, payload)
-				require.NoError(t, svc.Handle(context.Background(), task))
+				require.NoError(t, svc.Handle(ctx, task))
 				require.Equal(t, types.ParseStatusCompleted, knowledge.ParseStatus)
+				status, code, message = rootSpan(t, db, knowledge.ID, attempt)
+				require.Equal(t, types.SpanStatusDone, status)
+				require.Empty(t, code)
+				require.Empty(t, message)
 				require.Equal(t, []string{types.TypeKnowledgeAutoTag}, queue.taskTypes)
 			}
 		})

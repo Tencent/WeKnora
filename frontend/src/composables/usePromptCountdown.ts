@@ -12,28 +12,25 @@ export interface PromptTiming {
 }
 
 /**
- * Countdown of a prompt card. A suspendable prompt counts down its hot wait;
- * past it (or once suspended) it is parked: the run no longer waits in
- * memory, and answering later resumes it until expiresAt.
+ * Countdown of a prompt card. A suspendable prompt is persisted, so its hot
+ * wait is invisible to the user: it is shown as parked right away and can be
+ * answered until expiresAt. Only non-suspendable prompts count down.
  */
 export function usePromptCountdown(props: PromptTiming) {
   const { t, locale } = useI18n()
   const now = ref(Date.now())
   let timer: ReturnType<typeof setInterval> | null = null
   onMounted(() => {
+    if (props.suspendable || props.suspended) return
     timer = setInterval(() => { now.value = Date.now() }, 1000)
   })
   onBeforeUnmount(() => {
     if (timer) clearInterval(timer)
   })
 
-  const deadline = computed(() => {
-    const base = (props.requestedAt || 0) * 1000
-    const wait = props.suspendable ? props.hotWaitSeconds || props.timeoutSeconds : props.timeoutSeconds
-    return base + (wait || 600) * 1000
-  })
+  const deadline = computed(() => (props.requestedAt || 0) * 1000 + (props.timeoutSeconds || 600) * 1000)
 
-  const parked = computed(() => Boolean(props.suspended || (props.suspendable && now.value >= deadline.value)))
+  const parked = computed(() => Boolean(props.suspended || props.suspendable))
 
   const secondsLeft = computed(() => {
     if (props.resolved) return -1

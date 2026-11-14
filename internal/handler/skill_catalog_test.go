@@ -184,12 +184,34 @@ func TestInstallCatalogIncludesPerConfigErrors(t *testing.T) {
 		Data    struct {
 			Installs map[string]string `json:"installs"`
 			Errors   map[string]string `json:"errors"`
+			Started  []string          `json:"started"`
+			Failed   []string          `json:"failed"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
 	require.False(t, payload.Success)
 	require.Equal(t, "sk-1", payload.Data.Installs["cfg-1"])
 	require.Equal(t, "sandbox config not found", payload.Data.Errors["cfg-2"])
+	require.Equal(t, []string{"cfg-1"}, payload.Data.Started)
+	require.Equal(t, []string{"cfg-2: sandbox config not found"}, payload.Data.Failed)
+}
+
+func TestGetCatalogReturnsOneDefinition(t *testing.T) {
+	catalog := &fakeSkillCatalog{list: []service.SkillCatalogView{
+		{ID: "cat-1", Name: "pdf"}, {ID: "cat-2", Name: "docx", InstalledOn: []string{"cfg-1"}},
+	}}
+	router := newCatalogRouter(NewSkillHandler(&fakeUsableSkillLister{}, catalog, nil))
+	router.GET("/skills/catalog/:id", NewSkillHandler(&fakeUsableSkillLister{}, catalog, nil).GetCatalog)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/skills/catalog/cat-2", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"name":"docx"`)
+	require.Contains(t, w.Body.String(), `"installed_on":["cfg-1"]`)
+
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/skills/catalog/missing", nil))
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestDeleteCatalogRefusesWhileInstalled(t *testing.T) {

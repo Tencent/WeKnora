@@ -38,6 +38,7 @@ const (
 	ChannelRSS              = "rss"               // RSS / Atom feed
 	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
 	ChannelSeafile          = "seafile"           // Seafile
+	ChannelNextcloud        = "nextcloud"         // Nextcloud
 )
 
 // Knowledge parse status constants
@@ -172,7 +173,7 @@ type Knowledge struct {
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id" extensions:"x-agent"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
-	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
+	Tags []*KnowledgeTag `json:"tags"               gorm:"-" extensions:"x-agent"`
 	// Type of the knowledge
 	Type string `json:"type" extensions:"x-agent"`
 	// Title of the knowledge
@@ -326,9 +327,13 @@ type ManualKnowledgeMetadata struct {
 
 // ManualKnowledgePayload represents the payload for manual knowledge operations.
 type ManualKnowledgePayload struct {
-	Title         string                     `json:"title"`
-	Content       string                     `json:"content"`
-	Status        string                     `json:"status"`
+	// Document title.
+	Title string `json:"title" extensions:"x-agent"`
+	// Markdown content. The assistant may send a full document; the API limit
+	// is 200000 runes, and x-agent-max-bytes covers that in UTF-8.
+	Content string `json:"content" extensions:"x-agent,x-agent-required,x-agent-max-bytes=800000"`
+	// draft keeps the document out of search; publish indexes it.
+	Status        string                     `json:"status" enums:"draft,publish" extensions:"x-agent,x-agent-required"`
 	TagIDs        []string                   `json:"tag_ids"`
 	Channel       string                     `json:"channel"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
@@ -543,6 +548,8 @@ func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
 
 // KnowledgeCheckParams defines parameters used to check if knowledge already exists.
 type KnowledgeCheckParams struct {
+	// ExcludeKnowledgeID ignores only the row being replaced during duplicate checks.
+	ExcludeKnowledgeID string
 	// File parameters
 	FileName string
 	// FileType scopes file-hash deduplication; callers checking file uploads should set it.

@@ -30,6 +30,8 @@ const (
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
 	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
+	WebSearchProviderTypeDeepSeek   WebSearchProviderType = "deepseek"
+	WebSearchProviderTypeSearchAPI  WebSearchProviderType = "searchapi"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -130,26 +132,28 @@ func (p *WebSearchProviderParameters) Scan(value interface{}) error {
 // Used by the GET /types endpoint so the frontend can dynamically render forms.
 type WebSearchProviderTypeInfo struct {
 	// Provider type identifier
-	ID string `json:"id"`
+	ID string `json:"id" extensions:"x-agent"`
 	// Human-readable name
-	Name string `json:"name"`
+	Name string `json:"name" extensions:"x-agent"`
 	// Whether the provider requires an API key
-	RequiresAPIKey bool `json:"requires_api_key"`
+	RequiresAPIKey bool `json:"requires_api_key" extensions:"x-agent"`
 	// Whether the provider accepts an optional API key (keyless by default, but a
 	// key unlocks higher limits — e.g. Keenable). Mutually exclusive with RequiresAPIKey.
 	SupportsOptionalAPIKey bool `json:"supports_optional_api_key,omitempty"`
 	// Whether the provider requires an engine ID (e.g., Google CSE)
-	RequiresEngineID bool `json:"requires_engine_id"`
+	RequiresEngineID bool `json:"requires_engine_id" extensions:"x-agent"`
 	// Whether the provider requires a user-supplied base URL (e.g., self-hosted SearXNG instance)
-	RequiresBaseURL bool `json:"requires_base_url"`
+	RequiresBaseURL bool `json:"requires_base_url" extensions:"x-agent"`
 	// Whether optional proxy_url in parameters is honored for outbound requests
 	SupportsProxy bool `json:"supports_proxy"`
 	// Description
-	Description string `json:"description"`
+	Description string `json:"description" extensions:"x-agent"`
 	// URL to the provider's official website or documentation for obtaining credentials
 	DocsURL string `json:"docs_url,omitempty"`
 	// Provider-specific non-secret configuration rendered dynamically by the frontend.
 	ConfigFields []WebSearchProviderConfigField `json:"config_fields,omitempty"`
+	// Search and fetch readers registered for this type; nil when the type is not registered.
+	Clients *WebSearchClients `json:"clients,omitempty"`
 }
 
 // WebSearchProviderConfigField describes a non-secret provider-specific form field.
@@ -185,6 +189,11 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			ID: "serply", Name: "Serply", RequiresAPIKey: true, SupportsProxy: true,
 			Description: "Serply Google search API (supports country and freshness filters)",
 			DocsURL:     "https://serply.io/docs",
+		},
+		{
+			ID: "searchapi", Name: "SearchApi", RequiresAPIKey: true, SupportsProxy: true,
+			Description: "SearchApi Google search API (supports country and freshness filters)",
+			DocsURL:     "https://www.searchapi.io/docs/google",
 		},
 		{
 			ID:             "duckduckgo",
@@ -373,6 +382,14 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					},
 				},
 			},
+		},
+		{
+			ID:             "deepseek",
+			Name:           "DeepSeek",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "DeepSeek Search and Fetch (requires API key)",
+			DocsURL:        "https://api-docs.deepseek.com/api/search",
 		},
 	}
 }

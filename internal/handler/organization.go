@@ -1347,6 +1347,8 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 // @Produce      json
 // @Success      200  {object}  handler.ListSharedKnowledgeBasesResponse
 // @Security     Bearer
+// @x-agent      {"id":"knowledge_base.list_shared","risk":"read","max_items":200}
+// @x-agent-hint "Knowledge bases other workspaces share with the user, up to 200, with the organization and the user's permission on each."
 // @Router       /shared-knowledge-bases [get]
 func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,7 +27,7 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
-	// streamTimeout is zero by default so long-lived SSE responses are not
+	// streamTimeout is zero by default so long-lived streams and downloads are not
 	// severed by the ordinary request timeout. An explicit WithTimeout option
 	// sets both timeouts, preserving the public option's all-request semantics.
 	streamTimeout time.Duration
@@ -40,7 +41,7 @@ type ClientOption func(*Client)
 
 // WithTimeout sets the timeout for ordinary and streaming HTTP requests.
 // Streaming requests have no timeout by default; callers that set this option
-// explicitly are asking for the same upper bound to apply to SSE streams.
+// explicitly are asking for the same upper bound to apply to streams and downloads.
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *Client) {
 		c.httpClient.Timeout = timeout
@@ -103,7 +104,7 @@ func WithTenantID(tenantID uint64) ClientOption {
 // NewClient creates a new client instance
 func NewClient(baseURL string, options ...ClientOption) *Client {
 	client := &Client{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -269,6 +270,76 @@ func newAPIError(status int, body []byte) *APIError {
 	return &APIError{StatusCode: status, Body: string(body), Code: extractServerCode(body)}
 }
 
+// maxErrorBodyBytes caps how much of a failed response body the SDK reads.
+//
+// A non-2xx body is copied verbatim into APIError.Body and interpolated into
+// APIError.Error(), which callers log or print. A misconfigured server, a
+// hostile origin, or a proxy serving an HTML error page can make that body
+// arbitrarily large, so the SDK would both hold it in memory and hand the caller
+// an unbounded error string. 1 MiB matches the cap internal/models/api applies
+// to its own error bodies and sits far above any structured error the server
+// emits.
+const maxErrorBodyBytes = 1 << 20
+
+// readErrorBody reads the diagnostic body of a failed response, bounded by
+// maxErrorBodyBytes.
+//
+// Truncating here costs nothing: callers branch on the status code and on
+// APIError.Code, and the body exists only to explain the failure. The read error
+// is dropped, as before, so a broken connection cannot mask the HTTP status.
+func readErrorBody(r io.Reader) []byte {
+	body, _ := io.ReadAll(io.LimitReader(r, maxErrorBodyBytes))
+	return body
+}
+
+// maxResponseBodyBytes caps how much of a successful response body the SDK
+// decodes.
+//
+// A non-error status still lets the server — or a proxy in front of it — decide
+// how many bytes the SDK buffers and unmarshals: every helper decodes through
+// parseResponse, so an oversized envelope would be held in memory before
+// json.Decoder saw the end of it. 16 MiB matches the cap the Feishu and
+// DingTalk connectors apply to their own JSON responses and sits far above any
+// listing page the server returns, while keeping one request bounded.
+const maxResponseBodyBytes int64 = 16 << 20
+
+// errResponseBodyTooLarge reports a successful response the SDK refused to
+// decode because its body exceeded maxResponseBodyBytes.
+var errResponseBodyTooLarge = fmt.Errorf("response body exceeds the %d MiB limit", maxResponseBodyBytes>>20)
+
+// countingReader counts the bytes a decoder pulls, so decodeResponseBody can
+// tell "body too large" apart from "body is malformed JSON".
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// decodeResponseBody decodes a successful response envelope, refusing to read
+// past maxResponseBodyBytes.
+//
+// The body is streamed through the counting reader rather than read into a
+// buffer: the cap exists to bound memory, so buffering up to the cap first
+// would defeat it for ordinary responses.
+func decodeResponseBody(r io.Reader, target interface{}) error {
+	limited := &countingReader{r: io.LimitReader(r, maxResponseBodyBytes+1)}
+	if err := json.NewDecoder(limited).Decode(target); err != nil {
+		if limited.n > maxResponseBodyBytes {
+			return errResponseBodyTooLarge
+		}
+		return err
+	}
+	if limited.n > maxResponseBodyBytes {
+		return errResponseBodyTooLarge
+	}
+	return nil
+}
+
 // extractServerCode pulls the server's structured error code from a JSON error
 // body ({"code":1003,...}). Returns 0 when the body isn't JSON or carries no code.
 func extractServerCode(body []byte) int {
@@ -286,13 +357,12 @@ func parseResponse(resp *http.Response, target interface{}) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newAPIError(resp.StatusCode, body)
+		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 	}
 
 	if target == nil {
 		return nil
 	}
 
-	return json.NewDecoder(resp.Body).Decode(target)
+	return decodeResponseBody(resp.Body, target)
 }

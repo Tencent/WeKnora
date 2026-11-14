@@ -297,9 +297,11 @@ builtin_agents:
       agent_type: "custom"
       system_prompt_id: "weknora_assistant"
       temperature: 0.3
-      max_completion_tokens: 0
-      max_iterations: 30
-      kb_selection_mode: "selected"
+      max_completion_tokens: 24576
+      max_iterations: -1
+      # The workspace assistant can read the caller's accessible bases. Explicit
+      # mentions still narrow a turn; the current page is only contextual data.
+      kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
       retain_retrieval_history: true
       # find_operations / run_operation and search_weknora_docs /
@@ -321,7 +323,10 @@ builtin_agents:
         - "wiki_flag_issue"
         - "wiki_read_issue"
         - "wiki_update_issue"
-      web_search_enabled: false
+      # web_search / web_fetch let it find a skill's or MCP service's source
+      # from a description. They follow this switch rather than allowed_tools,
+      # and web_search still needs a provider configured in the workspace.
+      web_search_enabled: true
       web_search_max_results: 0
       reflection_enabled: false
       multi_turn_enabled: true

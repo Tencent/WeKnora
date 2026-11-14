@@ -1,10 +1,39 @@
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
-from docreader.parser.html_parser import HTMLParser
+import docreader.parser.html_parser as html_parser
+from docreader.config import CONFIG
+from docreader.parser.html_parser import (
+    _MIN_EXTRACTED_CHARS,
+    _MIN_KEEP_RATIO,
+    HTMLParser,
+    extract_main_content,
+)
 from docreader.parser.registry import BUILTIN_ENGINE, registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MAIN_CONTENT_FIXTURES = REPO_ROOT / "docreader" / "testdata" / "html_main_content"
+
+
+def _parse_bytes(
+    content: bytes, *, main_content: bool, file_name: str = "page.html"
+) -> str:
+    """Parse HTML through the upload path with the switch forced."""
+    with patch.object(
+        html_parser, "CONFIG", replace(CONFIG, html_main_content=main_content)
+    ):
+        return HTMLParser(file_name=file_name, file_type="html").parse(content).content
+
+
+def _parse_uploaded_html(name: str, *, main_content: bool) -> str:
+    """Parse a fixture through the upload path with the switch forced."""
+    return _parse_bytes(
+        (MAIN_CONTENT_FIXTURES / name).read_bytes(),
+        main_content=main_content,
+        file_name=name,
+    )
 
 
 class HTMLParserTest(unittest.TestCase):
@@ -72,6 +101,111 @@ class HTMLParserTest(unittest.TestCase):
         builtin_types = registry._engines[BUILTIN_ENGINE]
         self.assertIn("html", builtin_types)
         self.assertIn("htm", builtin_types)
+
+
+class HTMLMainContentTest(unittest.TestCase):
+    """DOCREADER_HTML_MAIN_CONTENT: opt-in main-content extraction on upload."""
+
+    def test_upload_indexes_the_whole_page_by_default(self):
+        content = _parse_uploaded_html("article_page.html", main_content=False)
+
+        # Header nav, sidebar and footer all reach the index, as they always did.
+        self.assertIn("产品定价", content)
+        self.assertIn("订阅我们的新闻邮件", content)
+        self.assertIn("京ICP备00000000号-1", content)
+        self.assertIn("混合检索", content)
+
+    def test_enabled_extraction_drops_page_chrome_and_keeps_the_article(self):
+        full = _parse_uploaded_html("article_page.html", main_content=False)
+        content = _parse_uploaded_html("article_page.html", main_content=True)
+
+        self.assertNotIn("产品定价", content)  # header nav
+        self.assertNotIn("订阅我们的新闻邮件", content)  # sidebar
+        self.assertNotIn("京ICP备00000000号-1", content)  # footer
+        # The article body survives in full, table and links included.
+        self.assertIn("# 深入理解 RAG 的召回策略", content)
+        self.assertIn("混合检索把 BM25 的稀疏信号与向量召回融合在一起", content)
+        self.assertIn("重排模型只对前 N 条候选打分", content)
+        self.assertIn("| 策略 | 优点 | 代价 |", content)
+        self.assertIn("两路互补，召回率最高", content)
+        self.assertIn("[分块器的实现细节](/blog/99)", content)
+        self.assertLess(len(content), len(full))
+
+    def test_enabled_extraction_preserves_body_image_references(self):
+        html = (MAIN_CONTENT_FIXTURES / "article_page.html").read_text(encoding="utf-8")
+        html = html.replace(
+            "</article>",
+            '<figure><img src="https://example.com/chart.png" alt="Recall comparison" /></figure>'
+            '<figure><img src="images/local-chart.png" alt="Local comparison" /></figure>'
+            '</article>',
+        )
+        self.assertIn("https://example.com/chart.png", html)
+        content = _parse_bytes(html.encode(), main_content=True)
+        self.assertNotIn("产品定价", content)
+        self.assertIn("https://example.com/chart.png", content)
+        self.assertIn("images/local-chart.png", content)
+        self.assertIn("混合检索", content)
+
+    def test_short_article_does_not_index_duplicate_body_text(self):
+        body = "正文说明知识库如何解析上传文件，以及如何把检索到的内容交给模型生成答案。" * 9
+        html = f"<html><body><article><h1>知识库解析说明</h1><p>{body}</p></article></body></html>".encode()
+        content = _parse_bytes(html, main_content=True)
+        self.assertEqual(content.count(body), 1)
+
+    def test_extractor_introduced_repetition_falls_back_but_source_repetition_does_not(self):
+        body = "A long paragraph about retrieval, citations and document parsing. " * 5
+        html = f"<article><p>{body}</p></article>".encode()
+        full = _parse_bytes(html, main_content=False)
+        repeated = body.strip() + "\n\n" + body.strip()
+        with patch.object(html_parser, "extract_main_content", return_value=repeated):
+            self.assertEqual(_parse_bytes(html, main_content=True), full)
+            original_repeated = f"<article><p>{body}</p><p>{body}</p></article>".encode()
+            content = _parse_bytes(original_repeated, main_content=True)
+            self.assertEqual(content.count(body.strip()), 2)
+
+    def test_falls_back_to_full_conversion_without_an_article_body(self):
+        for name, expected in (
+            ("form_page.html", "忘记密码？"),
+            ("link_list_page.html", "第六章 常见问题"),
+        ):
+            with self.subTest(fixture=name):
+                full = _parse_uploaded_html(name, main_content=False)
+                content = _parse_uploaded_html(name, main_content=True)
+
+                self.assertEqual(content, full)
+                self.assertIn(expected, content)
+
+    def test_falls_back_when_extraction_keeps_too_little_of_a_long_page(self):
+        full = _parse_uploaded_html("chrome_heavy_page.html", main_content=False)
+        content = _parse_uploaded_html("chrome_heavy_page.html", main_content=True)
+
+        # The length floor is passed here: what keeps the full conversion is the
+        # ratio guard against "trafilatura kept only a fragment of a long page".
+        html = (MAIN_CONTENT_FIXTURES / "chrome_heavy_page.html").read_text(
+            encoding="utf-8"
+        )
+        extracted = extract_main_content(html)
+        self.assertGreaterEqual(len(extracted), _MIN_EXTRACTED_CHARS)
+        self.assertLess(len(extracted), len(full) * _MIN_KEEP_RATIO)
+
+        self.assertEqual(content, full)
+        self.assertIn("批量导入任务在遇到空文件时不再中断整个批次", content)
+        self.assertIn("京ICP备00000000号-1", content)
+
+    def test_short_page_is_not_reduced_to_nothing(self):
+        full = _parse_uploaded_html("short_notice.html", main_content=False)
+        content = _parse_uploaded_html("short_notice.html", main_content=True)
+
+        self.assertEqual(content, full)
+        self.assertIn(
+            "本服务将于 10 月 1 日 02:00 至 04:00 维护，期间暂停文档上传与检索。",
+            content,
+        )
+
+    def test_empty_html_stays_empty(self):
+        content = _parse_bytes(b"", main_content=True, file_name="empty.html")
+
+        self.assertEqual("", content)
 
 
 if __name__ == "__main__":

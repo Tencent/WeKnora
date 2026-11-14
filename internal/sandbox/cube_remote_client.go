@@ -613,9 +613,11 @@ func (c *CubeRemoteClient) desktopTemplateSpec() map[string]any {
 // two hand-kept copies of the spec would eventually disagree.
 func cubeStandardTemplateSpec(dns []string) map[string]any {
 	spec := map[string]any{
-		"image":             DefaultCubeTemplateImage,
-		"name":              StandardTemplateName,
-		"writableLayerSize": "1G",
+		"image": DefaultCubeTemplateImage,
+		"name":  StandardTemplateName,
+		// Cube has no volumes: the workspaces and installed dependencies of
+		// every session on the machine live on this layer.
+		"writableLayerSize": "64G",
 		"exposedPorts":      []uint16{CubeEnvdPort},
 		// Cube defaults to probing envd, but naming the probe keeps the reason
 		// this image must ship envd visible at the call site.
@@ -646,8 +648,9 @@ func cubeDesktopTemplateSpec(dns []string) map[string]any {
 	spec := map[string]any{
 		"image": DefaultCubeDesktopTemplateImage,
 		"name":  DesktopTemplateName,
-		// The standard 1G is too small once XFCE is installed.
-		"writableLayerSize": "8G",
+		// Cube has no volumes: the workspaces, installed dependencies and
+		// browser profiles of every session on the machine live on this layer.
+		"writableLayerSize": "64G",
 		"exposedPorts":      []uint16{CubeEnvdPort},
 		// The build probe still goes to envd: websockify is lazily started
 		// and is deliberately not running at template-build time.
@@ -944,6 +947,14 @@ func (c *CubeRemoteClient) Exec(
 			SandboxTypeCube, "Exec", RemoteErrorKindInternal,
 			"cube returned an empty command result", nil,
 		)
+	}
+	if request.OnOutput != nil {
+		if sdkResult.Stdout != "" {
+			request.OnOutput("stdout", []byte(sdkResult.Stdout))
+		}
+		if sdkResult.Stderr != "" {
+			request.OnOutput("stderr", []byte(sdkResult.Stderr))
+		}
 	}
 	return &RemoteExecResult{
 		Stdout:   sdkResult.Stdout,
@@ -1388,6 +1399,13 @@ func normalizeCubeError(op string, err error) error {
 			kind = RemoteErrorKindUnavailable
 		}
 	}
+	// Cube's file List wraps a missing path as a plain error ("path not
+	// found" / "no such file"), not NotFoundError. A new session on a shared
+	// machine has no directory yet; listing it must stay NotFound so callers
+	// can treat the tree as empty instead of failing the turn.
+	if kind == RemoteErrorKindInternal && op == "ListDir" && isSDKNotFound(err) {
+		kind = RemoteErrorKindNotFound
+	}
 	kind = snapshotDeleteKind(op, kind, err.Error())
 	remoteErr := NewRemoteError(SandboxTypeCube, op, kind, err.Error(), err)
 	remoteErr.StatusCode = status
@@ -1544,6 +1562,20 @@ func (c *CubeRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handle Re
 	startTerminalTTLRefresh(ctx, nil, ttl, func(rctx context.Context) error {
 		return sb.SetTimeout(rctx, ttl)
 	})
+}
+
+// KeepAlive moves the sandbox's idle timeout to ttl from now. Cube already
+// counts commands as activity; the explicit call keeps background work from
+// depending on which requests the control plane happens to count.
+func (c *CubeRemoteClient) KeepAlive(ctx context.Context, handle RemoteSandboxHandle, ttl time.Duration) error {
+	sb, err := cubeHandleSandbox("KeepAlive", handle)
+	if err != nil {
+		return err
+	}
+	if ttl <= 0 {
+		return nil
+	}
+	return sb.SetTimeout(ctx, ttl)
 }
 
 var (

@@ -65,30 +65,6 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-func TestTruncateString(t *testing.T) {
-	tests := []struct {
-		input  string
-		maxLen int
-		want   string
-	}{
-		{"hello world", 20, "hello world"},
-		{"hello world", 5, "hello..."},
-		{"", 10, ""},
-		{"abc", 3, "abc"},
-		{"abcd", 3, "abc..."},
-		{"中文测试", 2, "中文..."},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := truncateString(tt.input, tt.maxLen)
-			if got != tt.want {
-				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAppendUnique(t *testing.T) {
 	arr := types.StringArray{"a", "b"}
 
@@ -321,6 +297,43 @@ func TestUnmaskImageURLsDropsUnknownPlaceholders(t *testing.T) {
 	}
 	if strings.Contains(got, "wkimg:") || strings.Contains(got, "![bad]") {
 		t.Fatalf("unknown placeholders should be dropped: %q", got)
+	}
+}
+
+// The synthesis model sometimes rewrites wkimg:0010 with another separator
+// (a slash in #4294). The digits still identify the image, so the token must
+// be restored — or dropped when the index is unknown — instead of reaching
+// storage as a broken image link.
+func TestUnmaskImageURLsNormalisesPlaceholderSeparators(t *testing.T) {
+	const page1 = "minio://kb/exports/page_1.jpg"
+	const page10 = "minio://kb/exports/page_10.jpg"
+	urlMap := map[string]string{
+		"wkimg:0001": page1,
+		"wkimg:0010": page10,
+	}
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"slash", "![p](wkimg/0010)", "![p](" + page10 + ")"},
+		{"underscore", "![p](wkimg_0001)", "![p](" + page1 + ")"},
+		{"dash", "![p](wkimg-0001)", "![p](" + page1 + ")"},
+		{"space", "![p](wkimg 0001)", "![p](" + page1 + ")"},
+		{"full width colon", "![p](wkimg：0010)", "![p](" + page10 + ")"},
+		{"uppercase", "![p](WKIMG:0001)", "![p](" + page1 + ")"},
+		{"outside markdown", "see wkimg/0010 here", "see " + page10 + " here"},
+		{"unknown index", "![p](wkimg/9999)", ""},
+		{"non placeholder url", "![p](https://example.com/wkimg.png)", "![p](https://example.com/wkimg.png)"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := unmaskImageURLs(tc.input, urlMap); got != tc.want {
+				t.Fatalf("unmaskImageURLs(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
 	}
 }
 

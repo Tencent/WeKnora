@@ -8,7 +8,8 @@ import logging
 import os
 import posixpath
 import tempfile
-from urllib.parse import unquote
+from xml.etree import ElementTree
+from urllib.parse import unquote, urlsplit
 import uuid
 from typing import Dict
 
@@ -18,6 +19,8 @@ from ebooklib import epub
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
+from docreader.parser.mhtml_parser import MHTMLParser
+from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +91,7 @@ class EPUBParser(BaseParser):
                 return int(match.group(1)) if match else 999999
 
             html_files.sort(key=chapter_num)
+            html_files = self._fallback_reading_order(epub_zip, html_files)
 
             if self.extract_images:
                 img_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")
@@ -108,9 +112,7 @@ class EPUBParser(BaseParser):
 
             for html_file in html_files:
                 try:
-                    html_content = epub_zip.read(html_file).decode(
-                        "utf-8", errors="ignore"
-                    )
+                    html_content = endecode.decode_bytes(epub_zip.read(html_file))
                     chapter_md = self._html_to_markdown(
                         html_content,
                         image_aliases=image_aliases,
@@ -132,6 +134,46 @@ class EPUBParser(BaseParser):
         return Document(
             content="\n\n".join(markdown_parts), images=images, metadata=metadata
         )
+
+    @staticmethod
+    def _fallback_reading_order(archive, html_files: list[str]) -> list[str]:
+        """Use a recoverable package spine even when navigation is broken."""
+        try:
+            container = ElementTree.fromstring(archive.read("META-INF/container.xml"))
+            rootfile = container.find(".//{*}rootfile")
+            if rootfile is None:
+                return html_files
+            package_path = rootfile.get("full-path", "")
+            package = ElementTree.fromstring(archive.read(package_path))
+            manifest = package.find("{*}manifest")
+            spine = package.find("{*}spine")
+            if manifest is None or spine is None:
+                return html_files
+        except (KeyError, ElementTree.ParseError):
+            return html_files
+
+        available = set(html_files)
+        by_id = {}
+        for item in manifest.findall("{*}item"):
+            try:
+                href = urlsplit(item.get("href", ""))
+            except ValueError:
+                continue
+            if href.scheme or href.netloc:
+                continue
+            path = posixpath.normpath(posixpath.join(
+                posixpath.dirname(package_path), unquote(href.path)
+            ))
+            if path in available:
+                by_id[item.get("id")] = path
+        ordered = []
+        seen = set()
+        for itemref in spine.findall("{*}itemref"):
+            path = by_id.get(itemref.get("idref"))
+            if path is not None and path not in seen:
+                ordered.append(path)
+                seen.add(path)
+        return ordered + [path for path in html_files if path not in seen]
 
     def _extract_metadata(self, book) -> Dict[str, str]:
         metadata: Dict[str, str] = {}
@@ -210,7 +252,9 @@ class EPUBParser(BaseParser):
         image_aliases: Dict[str, str] | None = None,
     ) -> str:
         try:
-            html_content = html_item.get_content()
+            # EpubHtml's serializer parses its input as UTF-8. Read the original
+            # item bytes so BeautifulSoup can honor a Unicode byte order mark.
+            html_content = epub.EpubItem.get_content(html_item)
             soup = BeautifulSoup(html_content, "lxml")
             title_tag = soup.find(["h1", "h2"])
             if title_tag:
@@ -254,9 +298,10 @@ class EPUBParser(BaseParser):
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_path)
             markdown_text = md(str(soup), heading_style="ATX")
-            return "\n".join(
-                line.strip() for line in markdown_text.split("\n") if line.strip()
-            )
+            # Keep the blank lines and indentation that delimit Markdown blocks
+            # (paragraphs, quotes, lists, tables, fenced code) and only collapse
+            # runs of blank lines, as the MHTML and static HTML parsers do.
+            return MHTMLParser._normalize_markdown(markdown_text)
         except ImportError:
             logger.warning("markdownify not available, using HTML as-is")
             return f"```html\n{html_content}\n```"
@@ -304,6 +349,14 @@ class EPUBParser(BaseParser):
         for img in soup.find_all("img"):
             src = (img.get("src") or "").strip()
             if not src:
+                continue
+            # Only archive-local references may use the basename fallback.
+            # A remote image can share its filename with an unrelated ZIP entry.
+            try:
+                reference = urlsplit(src)
+            except ValueError:
+                continue
+            if reference.scheme or reference.netloc:
                 continue
             # Only src is a URI reference. Strip its URI suffixes before decoding
             # once; archive paths from EbookLib and ZIP already contain literal

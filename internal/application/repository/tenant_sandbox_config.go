@@ -26,11 +26,30 @@ type TenantSandboxConfigRepository interface {
 	Update(ctx context.Context, e *types.TenantSandboxConfigEntity) error
 	SoftDelete(ctx context.Context, tenantID uint64, id string) error
 	SetCordon(ctx context.Context, tenantID uint64, id string, at time.Time) error
+	// RefreshCordon moves cordoned_at from previous to next only while the
+	// row still holds previous. Zero rows means another request owns the cordon.
+	RefreshCordon(ctx context.Context, tenantID uint64, id string, previous, next time.Time) error
 	ClearCordon(ctx context.Context, tenantID uint64, id string) error
+	// ClearCordonIf clears cordoned_at only when it still equals at. Zero
+	// rows is success: someone else owns the cordon.
+	ClearCordonIf(ctx context.Context, tenantID uint64, id string, at time.Time) error
 }
 
 type tenantSandboxConfigRepository struct {
 	db *gorm.DB
+}
+
+// GormDB is the database this repository writes.
+func (r *tenantSandboxConfigRepository) GormDB() *gorm.DB { return r.db }
+
+// GormDB returns the database behind a repository that exposes one.
+func GormDB(repo any) *gorm.DB {
+	type holder interface{ GormDB() *gorm.DB }
+	h, ok := repo.(holder)
+	if !ok || h == nil {
+		return nil
+	}
+	return h.GormDB()
 }
 
 // NewTenantSandboxConfigRepository returns a GORM-backed implementation.
@@ -142,11 +161,36 @@ func (r *tenantSandboxConfigRepository) SetCordon(
 	return nil
 }
 
+func (r *tenantSandboxConfigRepository) RefreshCordon(
+	ctx context.Context, tenantID uint64, id string, previous, next time.Time,
+) error {
+	result := r.db.WithContext(ctx).
+		Model(&types.TenantSandboxConfigEntity{}).
+		Where("tenant_id = ? AND id = ? AND cordoned_at = ?", tenantID, id, previous).
+		Update("cordoned_at", next)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrSandboxConfigCordoned
+	}
+	return nil
+}
+
 func (r *tenantSandboxConfigRepository) ClearCordon(
 	ctx context.Context, tenantID uint64, id string,
 ) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantSandboxConfigEntity{}).
 		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Update("cordoned_at", nil).Error
+}
+
+func (r *tenantSandboxConfigRepository) ClearCordonIf(
+	ctx context.Context, tenantID uint64, id string, at time.Time,
+) error {
+	return r.db.WithContext(ctx).
+		Model(&types.TenantSandboxConfigEntity{}).
+		Where("tenant_id = ? AND id = ? AND cordoned_at = ?", tenantID, id, at).
 		Update("cordoned_at", nil).Error
 }

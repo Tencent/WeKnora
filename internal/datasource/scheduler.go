@@ -85,10 +85,25 @@ func (s *Scheduler) Start(ctx context.Context) error {
 				ds.ID, ds.SyncSchedule, err)
 		}
 	}
+	// Retention also runs for paused and manual-only sources. Reuse this
+	// runner so StopWithin waits for cleanup along with in-flight sync jobs.
+	if _, err := s.cron.AddJob("@daily", cron.NewChain(
+		cron.SkipIfStillRunning(cron.DefaultLogger),
+	).Then(cron.FuncJob(s.cleanupSyncLogs))); err != nil {
+		return fmt.Errorf("register sync log retention: %w", err)
+	}
 
 	s.cron.Start()
 	logger.Infof(ctx, "[Scheduler] started with %d cron entries", len(s.entries))
 	return nil
+}
+
+func (s *Scheduler) cleanupSyncLogs() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.syncLogRepo.CleanupOldLogs(ctx, 30); err != nil {
+		logger.Warnf(ctx, "[Scheduler] sync log retention failed: %v", err)
+	}
 }
 
 // Stop gracefully stops the cron runner and waits for running jobs to finish.

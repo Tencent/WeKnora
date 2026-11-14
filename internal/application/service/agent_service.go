@@ -6,15 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hostreview"
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/background"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -117,7 +121,9 @@ type agentService struct {
 	memoryService         interfaces.MemoryService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
+	customAgentService    interfaces.CustomAgentService
 	operationDispatcher   operations.Dispatcher
+	collaboration         *AgentCollaboration
 	sandboxMgr            sandbox.Manager
 	sandboxResolver       sandbox.TenantSandboxResolver
 	sandboxPinner         *SessionSandboxPinner
@@ -127,6 +133,21 @@ type agentService struct {
 	hostSkillInstaller    sandbox.Manager
 	hostSkillsRoot        string
 	hostSkillVersionsRoot string
+	background            *BackgroundWork
+	// shellJobs is an interface so registration can assert ShellJobSubmitter.
+	// *ShellJobService is the production value. && binds tighter than ||, so
+	// the availability check groups RemoteAvailable and LocalAvailable.
+	shellJobs shellJobSource
+
+	// secretHandles backs browser_fill_secret; nil without Redis.
+	secretHandles tools.SecretHandles
+}
+
+// shellJobSource is the part of *ShellJobService the agent asks about
+// availability. Submit is asserted to tools.ShellJobSubmitter at registration.
+type shellJobSource interface {
+	RemoteAvailable() bool
+	LocalAvailable() bool
 }
 
 // NewAgentService creates a new agent service
@@ -157,9 +178,14 @@ func NewAgentService(
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
 	graphRepo interfaces.RetrieveGraphRepository,
+	backgroundWork *BackgroundWork,
+	shellJobs *ShellJobService,
 	operationDispatcher *operations.HandlerDispatcher,
+	customAgentService interfaces.CustomAgentService,
+	collaboration *AgentCollaboration,
 ) interfaces.AgentService {
 	svc := &agentService{
+		customAgentService:   customAgentService,
 		operationDispatcher:  operationDispatcher,
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
@@ -188,11 +214,17 @@ func NewAgentService(
 		sandboxPolicy:        sandboxPolicy,
 		hostSandbox:          hostSandbox.Manager,
 		hostDesktop:          hostSandbox.Desktop,
+		background:           backgroundWork,
+		shellJobs:            shellJobs,
 	}
 	if hostSandbox.SkillsAvailable() {
 		svc.hostSkillInstaller = hostSandbox.SkillInstaller
 		svc.hostSkillsRoot = hostSandbox.SkillTree.Root()
 		svc.hostSkillVersionsRoot = hostSandbox.SkillTree.VersionsRoot()
+	}
+	svc.collaboration = collaboration
+	if collaboration != nil {
+		collaboration.artifactFiles = svc.collaborationArtifactFiles
 	}
 	return svc
 }
@@ -238,8 +270,10 @@ func (s *agentService) CreateAgentEngine(
 	// Register the shell first: file discovery needs a separate tool only
 	// when no shell is available. File access still follows the sandbox
 	// capability independently of the existing SkillsEnabled execution gate.
-	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
-	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
+	hostApprovals := s.hostApprovals(chatModel)
+	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config, hostApprovals)
+	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config, hostApprovals)
+	s.registerSecureFormTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
 	attachmentReader := s.registerAttachmentReader(ctx, toolRegistry, config, sessionID)
 	// Advertise cached service summaries independently of @mentions. Concrete
@@ -269,7 +303,9 @@ func (s *agentService) CreateAgentEngine(
 		s.resolvePinnedSkillInfos(config),
 	)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
-	engine.SetPageContext(s.resolvePageContextInfo(ctx, config.PageContext, config.SearchTargets, kbInfos))
+	engine.SetPageContext(s.resolvePageContextInfo(
+		ctx, config.PageContext, config.SearchTargets, kbInfos, config.OperationsAgentID != ""))
+	engine.SetAssistantName(config.AssistantName)
 
 	// Non-vision chat models use the configured VLM to describe tool images.
 	// Vision chat models receive the original images after the tool replies.
@@ -326,10 +362,65 @@ func (s *agentService) CreateAgentEngine(
 		toolRegistry.RegisterTool(tools.NewBrowserSkillTool(s.browserSkill, scope, sessionID, instructions))
 	}
 
+	if s.collaboration != nil {
+		if err := s.collaboration.attach(ctx, engine, toolRegistry, config, sessionID, assistantMessageID); err != nil {
+			return nil, err
+		}
+	}
+	s.attachBackgroundWork(ctx, engine, toolRegistry, sessionID, assistantMessageID)
 	toolRegistry.BindSession(sessionID)
 	engine.SetWorkspaceLayout(s.lookupSessionWorkspaceLayout(ctx, sessionID, config))
+	engine.SetDesktopEnabled(s.lookupSessionDesktopEnabled(ctx, sessionID, config))
 
 	return engine, nil
+}
+
+// attachBackgroundWork gives the run its background-notice tracker and, when
+// the run can submit background work, the work_wait and work_cancel tools.
+// Tools are decided here, once per run, and never change mid-run (D10).
+func (s *agentService) attachBackgroundWork(
+	ctx context.Context, engine *agent.AgentEngine, registry *tools.ToolRegistry,
+	sessionID, assistantMessageID string,
+) {
+	if !s.background.Enabled() {
+		return
+	}
+	tenantID, ok := types.SandboxTenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return
+	}
+	ref := interfaces.SessionRef{TenantID: tenantID, SessionID: sessionID}
+	run := background.NewRunNotices(ref, s.background.Registry, s.background.Inbox)
+	engine.SetBackgroundRun(run)
+
+	submitters := tools.RegisteredBackgroundSubmitters(registry)
+	if len(submitters) == 0 {
+		return
+	}
+	for _, name := range submitters {
+		tool, err := registry.GetTool(name)
+		if err != nil {
+			continue
+		}
+		if async, ok := tool.(*tools.ShellExecAsyncTool); ok {
+			async.BindBackgroundRun(ref, assistantMessageID, run)
+			continue
+		}
+		// Tests wrap the real tool. The method is the same one: the run's
+		// SessionRef and RunNotices, whose MarkStarted records a running handle.
+		if binder, ok := tool.(interface {
+			BindBackgroundRun(interfaces.SessionRef, string, interface{ MarkStarted(string) })
+		}); ok {
+			binder.BindBackgroundRun(ref, assistantMessageID, run)
+		}
+	}
+	pending := func(ctx context.Context) bool {
+		return engine.HasPendingInput(ctx, sessionID, assistantMessageID)
+	}
+	registry.RegisterTool(tools.NewWorkWaitTool(
+		s.background.Handler, ref, assistantMessageID, run, pending, submitters,
+	))
+	registry.RegisterTool(tools.NewWorkCancelTool(s.background.Handler, ref, run))
 }
 
 // registerMCPTools registers MCP tools from enabled services for this tenant.
@@ -343,10 +434,17 @@ func (s *agentService) registerMCPTools(
 		tenantID = tid
 	}
 	if tenantID == 0 || s.mcpServiceService == nil || s.mcpManager == nil {
+		config.MCPSelectionMode = "none"
+		config.MCPServices = nil
 		return
 	}
 
+	// Freeze "all" to the services resolved for this turn. A child must not
+	// silently gain services added after its parent started.
 	mcpMode := config.MCPSelectionMode
+	config.MCPSelectionMode = "selected"
+	selectedIDs := append([]string(nil), config.MCPServices...)
+	config.MCPServices = nil
 	if mcpMode == "" {
 		mcpMode = "all"
 	}
@@ -359,11 +457,11 @@ func (s *agentService) registerMCPTools(
 	var err error
 
 	if mcpMode == "selected" {
-		if len(config.MCPServices) == 0 {
+		if len(selectedIDs) == 0 {
 			logger.Infof(ctx, "MCP services disabled by agent config (mode: selected, no services)")
 			return
 		}
-		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
+		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, selectedIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list selected MCP services: %v", err)
 			return
@@ -381,6 +479,7 @@ func (s *agentService) registerMCPTools(
 	for _, svc := range mcpServices {
 		if svc != nil && svc.Enabled {
 			enabledServices = append(enabledServices, svc)
+			config.MCPServices = append(config.MCPServices, svc.ID)
 		}
 	}
 	if len(enabledServices) > 0 {
@@ -431,6 +530,19 @@ func (s *agentService) resolveKBAndDocInfos(
 	return kbInfos, selectedDocs
 }
 
+// hostApprovals is what Lite host tools use to ask about local actions: the
+// gate for the user and a reviewer on this agent's own chat model for auto.
+func (s *agentService) hostApprovals(chatModel chat.Chat) tools.HostApprovals {
+	out := tools.HostApprovals{}
+	if gate, ok := s.toolApprovalGate.(tools.HostApproval); ok {
+		out.Gate = gate
+	}
+	if chatModel != nil && s.messageService != nil {
+		out.Reviewer = hostreview.New(chatModel, s.messageService)
+	}
+	return out
+}
+
 // registerSandboxFileTools registers list_sandbox_files / read_file /
 // write_sandbox_file / edit_sandbox_file.
 //
@@ -469,14 +581,35 @@ func (s *agentService) registerOperationTools(
 	}
 	identity.Agent.AgentID = config.OperationsAgentID
 	gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
+	// The router authorizes every call anyway; checking the role up front
+	// lets the model tell the user why instead of failing at the router.
+	operationAccess := operations.Access{
+		Role:        types.CallerFromContext(ctx).Role,
+		SystemAdmin: types.IsSystemAdminFromContext(ctx),
+		EnforceRole: s.cfg != nil && s.cfg.Tenant.IsRBACEnforced() && !access.IsCrossTenantSuperuser(ctx, s.cfg),
+		Level:       config.AssistantAccess,
+	}
 	catalog := operations.Builtin()
-	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog))
-	toolRegistry.RegisterTool(tools.NewRunOperationTool(tools.OperationsRuntime{
+	toolRegistry.RegisterTool(tools.NewFindOperationsTool(catalog, operationAccess))
+	runtime := tools.OperationsRuntime{
 		Catalog:    catalog,
 		Dispatcher: s.operationDispatcher,
 		Gate:       gate,
 		Identity:   identity,
-	}))
+		Access:     operationAccess,
+	}
+	toolRegistry.RegisterTool(tools.NewRunOperationTool(runtime))
+	// Opening a page changes nothing; the user saves any form themselves.
+	toolRegistry.RegisterTool(tools.NewOpenPageTool(runtime))
+	// Filling the page saves nothing either, but read-only runs only look.
+	if actor, ok := s.toolApprovalGate.(approval.PageActor); ok && actor != nil {
+		toolRegistry.RegisterTool(tools.NewViewPageTool(runtime, actor))
+		toolRegistry.RegisterTool(tools.NewReadPageTool(actor))
+		toolRegistry.RegisterTool(tools.NewSelectTabTool(actor))
+		if operationAccess.Level != types.AssistantAccessReadOnly {
+			toolRegistry.RegisterTool(tools.NewFillPageTool(actor))
+		}
+	}
 }
 
 // registerProductDocTools gives a granted run the documentation bundled with
@@ -503,6 +636,7 @@ func (s *agentService) registerSandboxFileTools(
 	toolRegistry *tools.ToolRegistry,
 	sessionID string,
 	config *types.AgentConfig,
+	hostApprovals tools.HostApprovals,
 ) {
 	if config != nil && config.SkillInstallMode() {
 		logger.Infof(ctx, "Skipping session file tools in skill install mode")
@@ -527,8 +661,8 @@ func (s *agentService) registerSandboxFileTools(
 		toolRegistry.RegisterTool(tools.NewWriteSandboxFileTool(
 			store,
 			types.AgentRoundMaxCompletionTokensFor(config.MaxCompletionTokens, config.SandboxConfigID),
-		))
-		toolRegistry.RegisterTool(tools.NewEditSandboxFileTool(store))
+		).WithHostApprovals(hostApprovals))
+		toolRegistry.RegisterTool(tools.NewEditSandboxFileTool(store).WithHostApprovals(hostApprovals))
 		logger.Infof(ctx, "Registered sandbox file primitives (listing is a no-shell fallback)")
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise session filesystem capability; "+
@@ -609,6 +743,7 @@ func (s *agentService) registerSandboxShellIfAllowed(
 	toolRegistry *tools.ToolRegistry,
 	sessionID string,
 	config *types.AgentConfig,
+	hostApprovals tools.HostApprovals,
 ) {
 	if config == nil {
 		return
@@ -628,7 +763,7 @@ func (s *agentService) registerSandboxShellIfAllowed(
 		!config.SkillsEnabled && !config.SkillInstallMode() {
 		return
 	}
-	s.registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config)
+	s.registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config, hostApprovals)
 }
 
 // resolveOpts is every resolve option this run is entitled to. Only the
@@ -683,6 +818,22 @@ func (s *agentService) lookupSessionWorkspaceLayout(
 	}
 	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
 	return sessionWorkspaceLayout(ctx, sessionID, mgr, err, s.hostSandbox, configID)
+}
+
+// lookupSessionDesktopEnabled reports whether the session's sandbox
+// configuration has the desktop switched on. A failed or empty resolution
+// means no desktop section in the prompt.
+func (s *agentService) lookupSessionDesktopEnabled(
+	ctx context.Context,
+	sessionID string,
+	config *types.AgentConfig,
+) bool {
+	mgr, err := s.resolveWorkspaceSandbox(ctx, sessionID, config)
+	if err != nil || mgr == nil {
+		return false
+	}
+	reporter, ok := mgr.(sandbox.SessionDesktopPromptReporter)
+	return ok && reporter.DesktopEnabledForPrompt()
 }
 
 // sessionWorkspaceLayout is the layout prompts and attachment staging share.
@@ -778,6 +929,11 @@ func (s *agentService) initializeSkillsManager(
 		if shell, ok := tool.(*tools.ShellExecTool); ok {
 			shell.WithSkillEnvironment(skillsManager)
 			shellEnabled = true
+		}
+	}
+	if tool, err := toolRegistry.GetTool(tools.ToolShellExecAsync); err == nil {
+		if async, ok := tool.(*tools.ShellExecAsyncTool); ok {
+			async.WithSkillEnvironment(skillsManager)
 		}
 	}
 	if config.SkillsEnabled {
@@ -878,7 +1034,7 @@ func (s *agentService) loadInstalledSkillBundle(
 // config-wide variables are injected into every execution, skills or not.
 //
 // The repository is constructed from s.db here rather than injected:
-// NewAgentService already takes 23 parameters, and this is the only place in
+// NewAgentService already takes 24 parameters, and this is the only place in
 // the agent path that touches the user env table.
 func (s *agentService) userEnvResolver(
 	ctx context.Context, config *types.AgentConfig,
@@ -1035,6 +1191,7 @@ func (s *agentService) registerSandboxShellTool(
 	toolRegistry *tools.ToolRegistry,
 	sandboxMgr sandbox.Manager,
 	config *types.AgentConfig,
+	hostApprovals tools.HostApprovals,
 ) {
 	if config.SkillInstallMode() {
 		executor := sessionSandboxInstallShellExecutor(sandboxMgr)
@@ -1058,12 +1215,35 @@ func (s *agentService) registerSandboxShellTool(
 	}
 	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
 		resolver := s.userEnvResolver(ctx, config)
-		toolRegistry.RegisterTool(
-			tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config)),
-		)
+		shell := tools.NewShellExecTool(executor, resolver).
+			WithEnvCapture(s.skillEnvCapture(config)).
+			WithHostApprovals(hostApprovals)
+		toolRegistry.RegisterTool(shell)
 		logger.Infof(ctx, "Registered shell_exec tool")
+		s.registerShellExecAsync(ctx, toolRegistry, executor, resolver, config)
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise remote shell capability; shell_exec not registered")
+	}
+}
+
+// registerShellExecAsync registers the background shell when this process can
+// submit a job. The submitter assertion and the availability check are both
+// required. && binds tighter than ||, so the availability disjunction is grouped.
+func (s *agentService) registerShellExecAsync(
+	ctx context.Context,
+	toolRegistry *tools.ToolRegistry,
+	executor tools.SandboxCommandExecutor,
+	resolver skills.SkillEnvResolver,
+	config *types.AgentConfig,
+) {
+	if s == nil || !s.background.Enabled() || s.shellJobs == nil {
+		return
+	}
+	if submitter, ok := s.shellJobs.(tools.ShellJobSubmitter); ok &&
+		(s.shellJobs.RemoteAvailable() || s.shellJobs.LocalAvailable()) {
+		toolRegistry.RegisterTool(tools.NewShellExecAsyncTool(submitter, executor, resolver).
+			WithEnvCapture(s.skillEnvCapture(config)))
+		logger.Infof(ctx, "Registered shell_exec_async tool")
 	}
 }
 
@@ -1177,9 +1357,19 @@ func (s *agentService) registerTools(
 	allowedTools = withoutString(allowedTools, tools.ToolWebSearch)
 	allowedTools = withoutString(allowedTools, tools.ToolWebFetch)
 	// If web search is enabled, add web_search to allowedTools
+	var webClient interfaces.WebClient
 	if config.WebSearchEnabled {
 		allowedTools = append(allowedTools, tools.ToolWebSearch)
 		allowedTools = append(allowedTools, tools.ToolWebFetch)
+		// The provider type selects the web_search schema and the web_fetch reader for this run.
+		if s.webSearchService != nil {
+			client, err := s.webSearchService.Resolve(ctx, config.WebSearchProviderID)
+			if err != nil {
+				logger.Warnf(ctx, "Web search provider %q unavailable: %v", config.WebSearchProviderID, err)
+			} else {
+				webClient = client
+			}
+		}
 	}
 
 	// Long-term memory search follows the memory switches, not the tool list.
@@ -1327,16 +1517,13 @@ func (s *agentService) registerTools(
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
 		case tools.ToolWebSearch:
-			toolToRegister = tools.NewWebSearchTool(
-				s.webSearchService,
-				config.WebSearchMaxResults,
-				config.WebSearchProviderID,
-			)
+			toolToRegister = tools.NewWebSearchTool(webClient, config.WebSearchMaxResults)
 			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
 
 		case tools.ToolWebFetch:
-			toolToRegister = tools.NewWebFetchTool()
-			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
+			toolToRegister = tools.NewWebFetchTool(webClient)
+			logger.Infof(ctx, "Registered web_fetch tool for session: %s, providerID: %s",
+				sessionID, config.WebSearchProviderID)
 
 		case tools.ToolDataAnalysis:
 			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).
@@ -1375,7 +1562,7 @@ func (s *agentService) registerTools(
 
 		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
-			tools.ToolEditSandboxFile:
+			tools.ToolEditSandboxFile, tools.ToolRequestSecureForm, tools.ToolBrowserFillSecret:
 			// Bound to the resolved sandbox manager in registerSandboxFileTools
 			// / registerSandboxShellIfAllowed / initializeSkillsManager.
 			// Listing them here would warn "Unknown tool: shell_exec" on every
@@ -1390,12 +1577,30 @@ func (s *agentService) registerTools(
 			if toolToRegister.Name() != toolName {
 				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
 			}
+			confirms := config.OperationsAgentID != "" || config.AssistantAccess != types.AssistantAccessAutoWrite
+			if risk, writes := assistantWriteToolRisk[toolName]; writes && confirms {
+				gate, _ := s.toolApprovalGate.(approval.BuiltinApproval)
+				toolToRegister = tools.NewConfirmedTool(toolToRegister, risk,
+					operations.Access{Level: config.AssistantAccess}, gate)
+			}
 			registry.RegisterTool(toolToRegister)
 		}
 	}
 
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))
 	return nil
+}
+
+// assistantWriteToolRisk are the direct tools of the WeKnora assistant that
+// change data outside the operation catalog. Its access level decides which
+// of them ask the user first, as it does for catalog operations.
+var assistantWriteToolRisk = map[string]operations.Risk{
+	tools.ToolWikiWritePage:   operations.RiskWrite,
+	tools.ToolWikiReplaceText: operations.RiskWrite,
+	tools.ToolWikiRenamePage:  operations.RiskWrite,
+	tools.ToolWikiFlagIssue:   operations.RiskWrite,
+	tools.ToolWikiUpdateIssue: operations.RiskWrite,
+	tools.ToolWikiDeletePage:  operations.RiskDestructive,
 }
 
 // withoutWikiWriteTools drops the tools that write Wiki state. They execute
@@ -1648,16 +1853,153 @@ func (s *agentService) knowledgeBaseName(
 // find. Parts that fail to resolve are dropped individually.
 func (s *agentService) resolvePageContextInfo(
 	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
-	kbInfos []*agent.KnowledgeBaseInfo,
+	kbInfos []*agent.KnowledgeBaseInfo, assistant bool,
 ) *agent.PageContextInfo {
-	if page == nil || page.KnowledgeBaseID == "" || !targets.ContainsKB(page.KnowledgeBaseID) {
+	if page == nil {
 		return nil
 	}
-	kbID := page.KnowledgeBaseID
-	info := &agent.PageContextInfo{
-		KnowledgeBaseID:   kbID,
-		KnowledgeBaseName: s.knowledgeBaseName(ctx, kbID, kbInfos),
+	info := &agent.PageContextInfo{}
+	if page.AgentID != "" && s.customAgentService != nil {
+		agentCtx := ctx
+		if tenantID := types.CallerFromContext(ctx).TenantID; tenantID != 0 {
+			agentCtx = types.WithExecutionTenant(ctx, tenantID)
+		}
+		if a, err := s.customAgentService.GetAgentByID(agentCtx, page.AgentID); err == nil && a != nil {
+			info.Agent = &agent.PageContextAgent{ID: a.ID, Name: a.Name}
+		}
 	}
+	if assistant {
+		s.resolveAssistantPageContext(ctx, page, info)
+		info.Title = page.Title
+		info.View = page.View
+		info.Selection = page.Selection
+	}
+	if kbID := page.KnowledgeBaseID; kbID != "" && targets.ContainsKB(kbID) {
+		s.resolveKnowledgeBasePageContext(ctx, page, targets, kbInfos, info)
+	}
+	if info.Empty() {
+		return nil
+	}
+	return info
+}
+
+// Bounds on the chat exchange quoted into a page context.
+const (
+	pageContextQuestionRunes   = 600
+	pageContextAnswerRunes     = 2000
+	pageContextMaxReferences   = 10
+	pageContextQuestionLookups = 4
+)
+
+// resolveAssistantPageContext adds the page identifier and the settings and
+// chat resources only the assistant is shown. Each is dropped unless the
+// caller can read it.
+func (s *agentService) resolveAssistantPageContext(
+	ctx context.Context, page *types.PageContext, info *agent.PageContextInfo,
+) {
+	info.Page, info.Section = page.Page, page.Section
+	tenantID := types.CallerFromContext(ctx).TenantID
+	if page.ModelID != "" && s.modelService != nil {
+		if m, err := s.modelService.GetModelByID(ctx, page.ModelID); err == nil && m != nil {
+			name := m.DisplayName
+			if name == "" {
+				name = m.Name
+			}
+			info.Model = &agent.PageContextModel{
+				ID: m.ID, Name: name, Type: string(m.Type), Source: string(m.Source), IsBuiltin: m.IsBuiltin,
+			}
+		} else {
+			logger.Infof(ctx, "Page context model %s dropped: not visible", secutils.SanitizeForLog(page.ModelID))
+		}
+	}
+	if page.MCPServiceID != "" && s.mcpServiceService != nil && tenantID != 0 {
+		svc, err := s.mcpServiceService.GetMCPServiceByID(ctx, tenantID, page.MCPServiceID)
+		if err == nil && svc != nil {
+			info.MCPService = &agent.PageContextMCPService{
+				ID: svc.ID, Name: svc.Name, Transport: string(svc.TransportType), Enabled: svc.Enabled,
+			}
+		} else {
+			logger.Infof(ctx, "Page context MCP service %s dropped: not visible",
+				secutils.SanitizeForLog(page.MCPServiceID))
+		}
+	}
+	if page.SessionID != "" && page.MessageID != "" && s.messageService != nil {
+		info.Message = s.pageContextMessage(ctx, page.SessionID, page.MessageID)
+	}
+}
+
+// pageContextMessage loads the chosen message through the message service,
+// which enforces the caller's read access to its session, and quotes the
+// question it answered.
+func (s *agentService) pageContextMessage(
+	ctx context.Context, sessionID, messageID string,
+) *agent.PageContextMessage {
+	msg, err := s.messageService.GetMessage(ctx, sessionID, messageID)
+	if err != nil || msg == nil {
+		logger.Infof(ctx, "Page context message %s dropped: not readable", secutils.SanitizeForLog(messageID))
+		return nil
+	}
+	out := &agent.PageContextMessage{
+		SessionID: sessionID, MessageID: msg.ID, Role: msg.Role, AgentID: msg.AgentID,
+	}
+	if msg.Role == "user" {
+		out.Question = truncatePageContextText(msg.Content, pageContextQuestionRunes)
+		return out
+	}
+	out.Answer = truncatePageContextText(msg.Content, pageContextAnswerRunes)
+	for _, ref := range msg.KnowledgeReferences {
+		if ref == nil || ref.KnowledgeID == "" {
+			continue
+		}
+		if len(out.References) == pageContextMaxReferences {
+			break
+		}
+		if slices.ContainsFunc(out.References, func(r *agent.PageContextReference) bool {
+			return r.KnowledgeID == ref.KnowledgeID
+		}) {
+			continue
+		}
+		title := ref.KnowledgeTitle
+		if title == "" {
+			title = ref.KnowledgeFilename
+		}
+		out.References = append(out.References, &agent.PageContextReference{
+			KnowledgeID: ref.KnowledgeID, KnowledgeBaseID: ref.KnowledgeBaseID, Title: title,
+		})
+	}
+	earlier, err := s.messageService.GetMessagesBySessionBeforeTime(
+		ctx, sessionID, msg.CreatedAt, pageContextQuestionLookups)
+	if err != nil {
+		return out
+	}
+	for i := len(earlier) - 1; i >= 0; i-- {
+		if m := earlier[i]; m != nil && m.Role == "user" && m.RequestID == msg.RequestID {
+			out.Question = truncatePageContextText(m.Content, pageContextQuestionRunes)
+			break
+		}
+	}
+	return out
+}
+
+func truncatePageContextText(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + "…"
+}
+
+// resolveKnowledgeBasePageContext adds the open knowledge base, after the
+// caller checked this turn's search targets reach it, with its document and
+// Wiki resources.
+func (s *agentService) resolveKnowledgeBasePageContext(
+	ctx context.Context, page *types.PageContext, targets types.SearchTargets,
+	kbInfos []*agent.KnowledgeBaseInfo, info *agent.PageContextInfo,
+) {
+	kbID := page.KnowledgeBaseID
+	info.KnowledgeBaseID = kbID
+	info.KnowledgeBaseName = s.knowledgeBaseName(ctx, kbID, kbInfos)
 	if page.KnowledgeID != "" {
 		docs, err := s.getSelectedDocumentInfos(ctx, []string{page.KnowledgeID})
 		if err == nil && len(docs) == 1 && docs[0].KnowledgeBaseID == kbID {
@@ -1668,11 +2010,11 @@ func (s *agentService) resolvePageContextInfo(
 		}
 	}
 	if s.wikiPageService == nil {
-		return info
+		return
 	}
 	scopes := tools.NewWikiScopesFromSearchTargets(targets, []string{kbID})
 	if len(scopes) == 0 {
-		return info
+		return
 	}
 	scope := scopes[0]
 	// Cache page lookups because the open page and several issue references
@@ -1717,7 +2059,6 @@ func (s *agentService) resolvePageContextInfo(
 			info.WikiIssues = kept
 		}
 	}
-	return info
 }
 
 // pageContextIssues keeps the requested issues that exist in kbID, in the

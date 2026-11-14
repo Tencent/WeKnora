@@ -793,7 +793,7 @@ func NewWikiSearchTool(
     "knowledge_base_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional bN knowledge-base handles to restrict the search"
+      "description": "Optional kb://N knowledge-base handles to restrict the search"
     },
     "limit": {
       "type": "integer",
@@ -892,7 +892,7 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	for _, query := range queriesToRun {
 		var allHits []searchHit
 		filteredCount := 0
-		pattern, perr := wikiSearchPattern(query, params.Regex)
+		pattern, literal, perr := wikiSearchPattern(query, params.Regex)
 		if perr != nil {
 			return &types.ToolResult{Success: false, Error: perr.Error()}, nil
 		}
@@ -910,7 +910,13 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 				fetchLimit = max(params.Limit, min(params.Limit*wikiScopedSearchOverfetch, wikiScopedSearchMaxFetch))
 			}
 			kept := 0
-			pages, err := t.wikiService.SearchPages(ctx, kbID, pattern, fetchLimit)
+			var pages []*types.WikiPage
+			var err error
+			if literal {
+				pages, err = t.wikiService.SearchPagesLiteral(ctx, kbID, query, fetchLimit)
+			} else {
+				pages, err = t.wikiService.SearchPages(ctx, kbID, pattern, fetchLimit)
+			}
 			if err != nil {
 				searchErrors = append(searchErrors, fmt.Sprintf("Wiki search %q failed in KB %s: %v", query, kbID, err))
 				continue
@@ -1017,17 +1023,17 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 // example "C++") is escaped and matched literally, so every query that worked
 // before still behaves the same. regex=false always escapes; regex=true
 // rejects an invalid pattern instead of silently changing its meaning.
-func wikiSearchPattern(query string, regex *bool) (string, error) {
+func wikiSearchPattern(query string, regex *bool) (string, bool, error) {
 	if regex != nil && !*regex {
-		return regexp.QuoteMeta(query), nil
+		return regexp.QuoteMeta(query), true, nil
 	}
 	if _, err := regexp.Compile("(?i)" + query); err != nil {
 		if regex != nil && *regex {
-			return "", fmt.Errorf("invalid regular expression %q: %v", query, err)
+			return "", false, fmt.Errorf("invalid regular expression %q: %v", query, err)
 		}
-		return regexp.QuoteMeta(query), nil
+		return regexp.QuoteMeta(query), true, nil
 	}
-	return query, nil
+	return query, false, nil
 }
 
 // --- Helper ---

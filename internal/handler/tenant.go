@@ -25,17 +25,20 @@ import (
 // Provides functionality for creating, retrieving, updating, and deleting tenants
 // through the REST API endpoints
 type TenantHandler struct {
-	service       interfaces.TenantService
-	apiKeyService interfaces.TenantAPIKeyService
-	userService   interfaces.UserService
-	memberService interfaces.TenantMemberService
-	kbService     interfaces.KnowledgeBaseService
-	config        *config.Config
+	service        interfaces.TenantService
+	apiKeyService  interfaces.TenantAPIKeyService
+	userService    interfaces.UserService
+	memberService  interfaces.TenantMemberService
+	kbService      interfaces.KnowledgeBaseService
+	messageService interfaces.MessageService
+	config         *config.Config
 	// systemSettingSvc resolves runtime tenant policies and limits.
 	// Reading goes DB > ENV >
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
+	// modelService validates the models chosen as workspace defaults.
+	modelService interfaces.ModelService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -61,8 +64,10 @@ func NewTenantHandler(
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
 	kbService interfaces.KnowledgeBaseService,
+	messageService interfaces.MessageService,
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
+	modelService interfaces.ModelService,
 ) *TenantHandler {
 	return &TenantHandler{
 		service:          service,
@@ -70,8 +75,10 @@ func NewTenantHandler(
 		userService:      userService,
 		memberService:    memberService,
 		kbService:        kbService,
+		messageService:   messageService,
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
+		modelService:     modelService,
 	}
 }
 
@@ -100,8 +107,10 @@ type createTenantRequest struct {
 // Pointers so we can distinguish "not sent" from "explicit empty
 // string"; when nil we leave the existing column untouched.
 type updateTenantRequest struct {
-	Name        *string `json:"name"        binding:"omitempty,min=1,max=128"`
-	Description *string `json:"description" binding:"omitempty,max=512"`
+	// New workspace name; cannot be blank, at most 128 characters.
+	Name *string `json:"name" binding:"omitempty,min=1,max=128" extensions:"x-agent"`
+	// New description, at most 512 characters; empty clears it. Omission preserves it.
+	Description *string `json:"description" binding:"omitempty,max=512" extensions:"x-agent"`
 }
 
 type apiPrincipalConfigRequest struct {
@@ -317,29 +326,6 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			Name:        strings.TrimSpace(req.Name),
 			Description: strings.TrimSpace(req.Description),
 		}
-	}
-
-	// Apply the system-setting-driven default storage quota when the
-	// caller didn't specify one (always true for self-serve; sometimes
-	// true for the superuser branch when the JSON omits storage_quota).
-	// We resolve at create time on purpose — the on-disk row should
-	// carry an explicit value, so changing the setting later doesn't
-	// silently shrink/grow established tenants. Negative values are
-	// treated as "use default" so a misconfigured setting can't yield
-	// a negative quota that the storage-used checks would interpret as
-	// "unlimited" (StorageQuota <= 0 disables enforcement in
-	// knowledge_create.go).
-	if tenantData.StorageQuota <= 0 {
-		gb := h.systemSettingSvc.GetInt(
-			ctx,
-			"tenant.default_storage_quota_gb",
-			"WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
-			10,
-		)
-		if gb <= 0 {
-			gb = 10
-		}
-		tenantData.StorageQuota = gb * 1024 * 1024 * 1024
 	}
 
 	logger.Infof(ctx, "Creating tenant, name: %s", secutils.SanitizeForLog(tenantData.Name))
@@ -573,7 +559,7 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      int           true  "空间ID"
-// @Param        request  body      types.Tenant  true  "空间信息"
+// @Param        request  body      updateTenantRequest  true  "空间名称或描述"
 // @Success      200      {object}  handler.DataResponse{data=dto.TenantResponse}  "更新后的空间"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -604,18 +590,8 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
-
-	// Load the persisted tenant so any column the request omits keeps
-	// its current value through the GORM `Updates(struct)` zero-skip
-	// behaviour (we always pass back the full struct).
-	existing, err := h.service.GetTenantByID(ctx, id)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to load workspace").WithDetails(err.Error()))
-		}
+	if req.Name == nil && req.Description == nil {
+		_ = c.Error(errors.NewValidationError("name or description is required"))
 		return
 	}
 
@@ -625,15 +601,14 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 			c.Error(errors.NewValidationError("name cannot be blank"))
 			return
 		}
-		existing.Name = trimmed
+		req.Name = &trimmed
 	}
 	if req.Description != nil {
-		existing.Description = strings.TrimSpace(*req.Description)
+		trimmed := strings.TrimSpace(*req.Description)
+		req.Description = &trimmed
 	}
 
-	logger.Infof(ctx, "Updating tenant, ID: %d, Name: %s", id, secutils.SanitizeForLog(existing.Name))
-
-	updatedTenant, err := h.service.UpdateTenant(ctx, existing)
+	updatedTenant, err := h.service.UpdateTenantProfile(ctx, id, req.Name, req.Description)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update workspace: application error", appErr)
@@ -1291,7 +1266,9 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取空间KV配置
-// @Description  获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  获取空间级别的KV配置。支持 web-search-config、prompt-templates、parser-engine-config、
+// @Description  storage-engine-config、chat-history-config、retrieval-config、memory-config、
+// @Description  assistant-config、default-settings。
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1335,6 +1312,12 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "memory-config":
 		h.GetTenantMemoryConfig(c)
 		return
+	case "assistant-config":
+		h.GetTenantAssistantConfig(c)
+		return
+	case "default-settings":
+		h.GetTenantDefaultSettings(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1344,7 +1327,8 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新空间KV配置
-// @Description  更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+// @Description  更新空间级别的KV配置。支持 web-search-config、parser-engine-config、storage-engine-config、
+// @Description  chat-history-config、retrieval-config、memory-config、assistant-config、default-settings。
 // @Tags         空间管理
 // @Accept       json
 // @Produce      json
@@ -1385,6 +1369,12 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	case "memory-config":
 		h.updateTenantMemoryConfigInternal(c)
+		return
+	case "assistant-config":
+		h.updateTenantAssistantConfigInternal(c)
+		return
+	case "default-settings":
+		h.updateTenantDefaultSettingsInternal(c)
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
@@ -1665,54 +1655,7 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 		return
 	}
 
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Workspace is empty")
-		c.Error(errors.NewBadRequestError("Workspace is empty"))
-		return
-	}
-
-	existing := tenant.ChatHistoryConfig
-
-	// Build the new config, preserving the internally-managed knowledge_base_id
-	cfg := &types.ChatHistoryConfig{
-		Enabled:          req.Enabled,
-		EmbeddingModelID: req.EmbeddingModelID,
-		KnowledgeBaseID:  "", // will be set below
-	}
-
-	// Carry over existing KB ID if the embedding model hasn't changed
-	if existing != nil && existing.KnowledgeBaseID != "" {
-		if existing.EmbeddingModelID == req.EmbeddingModelID {
-			cfg.KnowledgeBaseID = existing.KnowledgeBaseID
-		} else {
-			// Embedding model changed — the old KB is incompatible.
-			// We'll create a new one below. The old KB remains but is orphaned (can be cleaned up later).
-			logger.Infof(ctx, "Embedding model changed from %s to %s, will create new chat history KB", existing.EmbeddingModelID, req.EmbeddingModelID)
-		}
-	}
-
-	// Auto-create hidden KB if enabled + model set + no KB yet
-	if cfg.Enabled && cfg.EmbeddingModelID != "" && cfg.KnowledgeBaseID == "" {
-		kb := &types.KnowledgeBase{
-			Name:             "__chat_history__",
-			Type:             types.KnowledgeBaseTypeDocument,
-			IsTemporary:      true,
-			Description:      "Auto-managed knowledge base for chat history message indexing",
-			EmbeddingModelID: cfg.EmbeddingModelID,
-		}
-		createdKB, err := h.kbService.CreateKnowledgeBase(ctx, kb)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to create chat history knowledge base").WithDetails(err.Error()))
-			return
-		}
-		cfg.KnowledgeBaseID = createdKB.ID
-		logger.Infof(ctx, "Auto-created chat history KB: id=%s, embedding_model=%s", createdKB.ID, cfg.EmbeddingModelID)
-	}
-
-	tenant.ChatHistoryConfig = cfg
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	cfg, err := h.messageService.UpdateChatHistoryConfig(ctx, &req)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
@@ -1724,7 +1667,7 @@ func (h *TenantHandler) updateTenantChatHistoryConfigInternal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant.ChatHistoryConfig,
+		"data":    cfg,
 		"message": "Chat history configuration updated successfully",
 	})
 }
@@ -1899,6 +1842,73 @@ func (h *TenantHandler) updateTenantMemoryConfigInternal(c *gin.Context) {
 		"success": true,
 		"data":    updatedTenant.MemoryConfig,
 		"message": "Memory configuration updated successfully",
+	})
+}
+
+// GetTenantAssistantConfig returns the workspace assistant name and access
+// ceiling. Members read it to label the assistant and bound their own level.
+func (h *TenantHandler) GetTenantAssistantConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+	data := types.AssistantConfig{}
+	if tenant.AssistantConfig != nil {
+		data = *tenant.AssistantConfig
+	}
+	data.Normalize()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// updateTenantAssistantConfigInternal updates the workspace assistant config.
+func (h *TenantHandler) updateTenantAssistantConfigInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var cfg types.AssistantConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if cfg.MaxAccessLevel != "" && !cfg.MaxAccessLevel.Valid() {
+		_ = c.Error(errors.NewBadRequestError("max_access_level must be read_only, confirm or auto_write"))
+		return
+	}
+	cfg.Normalize()
+	if len([]rune(cfg.DisplayName)) > types.MaxAssistantDisplayNameRunes {
+		_ = c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"display_name must be at most %d characters", types.MaxAssistantDisplayNameRunes)))
+		return
+	}
+
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "Workspace is empty")
+		_ = c.Error(errors.NewBadRequestError("Workspace is empty"))
+		return
+	}
+
+	tenant.AssistantConfig = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			_ = c.Error(errors.NewInternalServerError("Failed to update assistant config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updatedTenant.AssistantConfig,
+		"message": "Assistant configuration updated successfully",
 	})
 }
 

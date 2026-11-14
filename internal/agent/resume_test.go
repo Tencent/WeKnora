@@ -152,10 +152,24 @@ func TestResumeReplaysSteeringAtItsOriginalBoundaries(t *testing.T) {
 	}}}}
 	_, err = f.engine.Resume(t.Context(), "sess-1", "msg-1", nil, data, answeredPrompt("call-b"))
 	require.NoError(t, err)
-	var contents []string
+	var contents, images []string
 	for _, m := range model.calls[0] {
-		contents = append(contents, m.Content)
+		if len(m.MultiContent) == 0 {
+			contents = append(contents, m.Content)
+			images = append(images, m.Images...)
+			continue
+		}
+		for _, part := range m.MultiContent {
+			switch part.Type {
+			case "text":
+				contents = append(contents, part.Text)
+			case "image_url":
+				require.NotNil(t, part.ImageURL)
+				images = append(images, part.ImageURL.URL)
+			}
+		}
 	}
+	require.Equal(t, []string{"https://img/1.png"}, images)
 	// The provider normalization can merge adjacent user messages, including
 	// the original query and the first steering message.
 	transcript := strings.Join(contents, "\n")

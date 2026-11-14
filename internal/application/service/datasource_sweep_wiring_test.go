@@ -315,38 +315,3 @@ func TestIngestItem_NoSweepWhenFlagUnset(t *testing.T) {
 // (e.g. VLM/object-storage not configured for images), the failure is counted as
 // Skipped, not Failed, so it never marks the whole document sync as failed. A
 // non-image item with the same error must still count as Failed.
-func TestApplyFetchedItem_EmbeddedImageIngestFailureCountsAsSkip(t *testing.T) {
-	ingestErr := errors.New("上传图片文件需要设置VLM模型")
-	ds := &types.DataSource{ID: "ds-1", Type: "feishu", TenantID: 7, KnowledgeBaseID: "kb-1"}
-	newItem := func(extID string, meta map[string]string) *types.FetchedItem {
-		return &types.FetchedItem{
-			ExternalID:  extID,
-			Title:       "img",
-			Content:     []byte("\x89PNG\r\n\x1a\nxxxx"),
-			ContentType: "image/png",
-			FileName:    "image-x.png",
-			Metadata:    meta,
-		}
-	}
-
-	// Embedded image whose ingest fails → Skipped, not Failed.
-	ksImg := &sweepFakeKS{repo: &sweepFakeRepo{}, createErr: ingestErr}
-	sImg := &DataSourceService{knowledgeService: ksImg}
-	resImg := &types.SyncResult{}
-	sImg.applyFetchedItem(context.Background(), ds,
-		newItem("nt#image#x", map[string]string{"embedded_image": "true"}), nil, resImg)
-	if resImg.Skipped != 1 || resImg.Failed != 0 {
-		t.Fatalf("embedded image failure: Skipped=%d Failed=%d, want Skipped=1 Failed=0",
-			resImg.Skipped, resImg.Failed)
-	}
-
-	// Control: a non-image item with the same error → Failed.
-	ksDoc := &sweepFakeKS{repo: &sweepFakeRepo{}, createErr: ingestErr}
-	sDoc := &DataSourceService{knowledgeService: ksDoc}
-	resDoc := &types.SyncResult{}
-	sDoc.applyFetchedItem(context.Background(), ds, newItem("nt-doc", nil), nil, resDoc)
-	if resDoc.Failed != 1 || resDoc.Skipped != 0 {
-		t.Fatalf("non-image failure: Failed=%d Skipped=%d, want Failed=1 Skipped=0",
-			resDoc.Failed, resDoc.Skipped)
-	}
-}

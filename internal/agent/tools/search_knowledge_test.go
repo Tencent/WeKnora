@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"strings"
 	"testing"
@@ -363,5 +364,36 @@ func TestDeduplicateResultsKeepsSiblingsImagesAndBestScore(t *testing.T) {
 	}
 	if len(out) != 6 || got["dup"] != 0.8 || out[0].ID != "child-b" {
 		t.Fatalf("dedup = %v (first %s)", got, out[0].ID)
+	}
+}
+
+func TestFormatOutputPreservesChunkType(t *testing.T) {
+	for _, chunkType := range []string{
+		"text", "summary", "image_ocr", "image_caption", "image_vector", "", `custom"<&`,
+	} {
+		t.Run(chunkType, func(t *testing.T) {
+			tool := &SearchKnowledgeTool{}
+			res := tool.formatOutput(context.Background(), []*searchResultWithMeta{{
+				SearchResult: &types.SearchResult{
+					ID: "chunk-1", KnowledgeID: "doc-1", Content: "evidence", ChunkType: chunkType,
+				},
+				KnowledgeBaseID: "kb-1",
+			}}, []string{"kb-1"}, "evidence", SearchModeHybrid)
+			rows := res.Data["results"].([]map[string]interface{})
+			if got, ok := rows[0]["chunk_type"]; !ok || got != chunkType {
+				t.Fatalf("chunk_type = %#v, present = %v; want %q", got, ok, chunkType)
+			}
+			var rendered struct {
+				Chunks []struct {
+					ChunkType string `xml:"chunk_type,attr"`
+				} `xml:"chunk"`
+			}
+			if err := xml.Unmarshal([]byte(res.Output), &rendered); err != nil {
+				t.Fatalf("invalid text output: %v", err)
+			}
+			if len(rendered.Chunks) != 1 || rendered.Chunks[0].ChunkType != chunkType {
+				t.Fatalf("text output lost chunk type %q: %s", chunkType, res.Output)
+			}
+		})
 	}
 }

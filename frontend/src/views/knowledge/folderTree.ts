@@ -24,6 +24,15 @@ export type UploadFileLike = {
 }
 
 /**
+ * A folder listed as a row or card in the document list. It is the subset of a
+ * tree node the list needs: the path to navigate to and the two counts.
+ */
+export type FolderEntry = Pick<
+  KnowledgeFolderNode,
+  'path' | 'name' | 'document_count' | 'total_count'
+>
+
+/**
  * One rendered row of the flattened tree. The root row carries the knowledge
  * base totals; the component supplies its label.
  */
@@ -147,9 +156,22 @@ export function buildFolderRows(
   return [root, ...flattenFolders(folders, expanded, 1)]
 }
 
+/** Depth-first lookup of one folder node anywhere in the tree. */
+function findFolderNode(
+  folders: KnowledgeFolderNode[],
+  path: string,
+): KnowledgeFolderNode | undefined {
+  for (const node of folders) {
+    if (node.path === path) return node
+    const found = findFolderNode(node.children || [], path)
+    if (found) return found
+  }
+  return undefined
+}
+
 /**
- * Direct sub-folders of a folder, i.e. what the document list shows as folder
- * entries while browsing it. The root's children are the top-level folders.
+ * Direct sub-folders of a folder: the rows the sidebar tree renders underneath
+ * it. The root's children are the top-level folders.
  */
 export function childFolders(
   tree: KnowledgeFolderTree | null,
@@ -157,15 +179,29 @@ export function childFolders(
 ): KnowledgeFolderNode[] {
   const folders = tree?.folders ?? []
   if (path === ROOT_FOLDER_PATH) return folders
-  const find = (nodes: KnowledgeFolderNode[]): KnowledgeFolderNode | undefined => {
-    for (const node of nodes) {
-      if (node.path === path) return node
-      const found = find(node.children || [])
-      if (found) return found
-    }
-    return undefined
+  return findFolderNode(folders, path)?.children ?? []
+}
+
+/**
+ * How many documents a folder holds: the ones stored directly in it, and the
+ * ones in its whole subtree. Returns null when the tree is unavailable or the
+ * path is not in it, so callers can fall back to the loaded document list.
+ *
+ * The two numbers differ as soon as folders nest: a parent that only groups
+ * sub-folders has 0 direct documents but a non-zero total, and showing the
+ * direct count there reads as "empty".
+ */
+export function folderDocumentCounts(
+  tree: KnowledgeFolderTree | null,
+  path: string,
+): { direct: number; total: number } | null {
+  if (!tree) return null
+  if (path === ROOT_FOLDER_PATH) {
+    return { direct: tree.root_document_count ?? 0, total: tree.total_document_count ?? 0 }
   }
-  return find(folders)?.children ?? []
+  const node = findFolderNode(tree.folders ?? [], path)
+  if (!node) return null
+  return { direct: node.document_count ?? 0, total: node.total_count ?? 0 }
 }
 
 /**

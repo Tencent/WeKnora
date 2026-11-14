@@ -39,6 +39,11 @@ const (
 // caller asks for, and the protocol package decides how (or whether) the
 // vendor can honour it.
 type Options struct {
+	// RuntimeNotice is trusted, request-scoped recovery context. Adapters append
+	// it after the conversation so stable instructions/history retain their cache
+	// prefix. Never populate it with user input or external tool output.
+	RuntimeNotice string `json:"-"`
+
 	Temperature float64 `json:"temperature"` // 温度参数
 	TopP        float64 `json:"top_p"`       // Top P 参数
 	Seed        int     `json:"seed"`        // 随机种子
@@ -73,6 +78,11 @@ type Options struct {
 	// markers; empty/short is the default 5-minute cache; long requests 1h/24h
 	// where the provider accepts it.
 	CacheRetention CacheRetention `json:"-"`
+	// Isolated marks a side call (host approval review) that must not inherit
+	// tools, provider-side conversation state, or a configured temperature.
+	// When the model accepts temperature, the request sends 0. Zero on an
+	// ordinary call still means unset.
+	Isolated bool `json:"-"`
 }
 
 // CompletionBudget is the single per-call generation cap. MaxTokens and

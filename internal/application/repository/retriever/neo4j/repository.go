@@ -89,8 +89,14 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"labels":       n.Labels(namespace),
 			})
 		}
-		if _, err := tx.Run(ctx, node_import_query, map[string]interface{}{"data": nodeData}); err != nil {
-			return nil, fmt.Errorf("failed to create nodes: %v", err)
+		// Keep driver errors recognizable by ExecuteWrite's bounded retry.
+		// Consume also catches failures reported while pulling the result.
+		result, err := tx.Run(ctx, node_import_query, map[string]interface{}{"data": nodeData})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create nodes: %w", err)
+		}
+		if _, err = result.Consume(ctx); err != nil {
+			return nil, fmt.Errorf("failed to create nodes: %w", err)
 		}
 
 		// Relationship import query
@@ -112,8 +118,12 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"target_labels": n.Labels(namespace),
 			})
 		}
-		if _, err := tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData}); err != nil {
-			return nil, fmt.Errorf("failed to create relationships: %v", err)
+		result, err = tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create relationships: %w", err)
+		}
+		if _, err = result.Consume(ctx); err != nil {
+			return nil, fmt.Errorf("failed to create relationships: %w", err)
 		}
 		return nil, nil
 	})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -50,7 +49,7 @@ type BingProvider struct {
 }
 
 // NewBingProvider creates a new Bing provider from parameters (no environment variables).
-func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Bing provider")
 	}
@@ -73,10 +72,9 @@ func (p *BingProvider) Name() string {
 // Search performs a web search using Bing Search API
 func (p *BingProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}
@@ -101,14 +99,15 @@ func (p *BingProvider) doSearch(ctx context.Context, req *http.Request) ([]*type
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusOK {
+		preview := readErrorPreview(resp.Body)
+		logger.Warnf(ctx, "[WebSearch][Bing] API returned status %d: %s", resp.StatusCode, preview)
+		return nil, fmt.Errorf("bing API returned status %d: %s", resp.StatusCode, preview)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		logger.Warnf(ctx, "[WebSearch][Bing] API returned status %d: %s", resp.StatusCode, string(body))
-		return nil, fmt.Errorf("bing API returned status %d: %s", resp.StatusCode, string(body))
+	body, err := readCapped(resp.Body, 0)
+	if err != nil {
+		return nil, err
 	}
 
 	var respData bingSearchResponse

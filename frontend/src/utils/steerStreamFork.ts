@@ -291,23 +291,54 @@ export function steerStepEvents(step: ChatMessage): ChatMessage[] {
   return events
 }
 
-/** A continue-stream replays from offset zero. Keep row identities, but rebuild
- * every segment from that log rather than appending old events onto the tail. */
-export function resetSteerTurnForReplay(list: ChatMessage[], requestId: string): ChatMessage | undefined {
+/** Rebuild the current stream generation. Approval continuations replay only
+ * their suffix, so retain an immutable baseline for each presentation segment. */
+export function resetSteerTurnForReplay(
+  list: ChatMessage[], requestId: string, resumeId = '', blockedCallId = '',
+): ChatMessage | undefined {
   const segments = list.filter(m => m.role === 'assistant' && m.request_id === requestId)
-  if (!segments.some(m => m.steerForked)) return undefined
-  for (const segment of segments) {
+  if (!requestId || segments.length === 0) return undefined
+  const sameResume = resumeId && segments.some(m => m._resumeReplayId === resumeId)
+  const boundary = resumeId ? segments.findIndex(m =>
+    ((m.agentEventStream || []) as ChatMessage[]).some(e =>
+      e.type === 'tool_call' && e.tool_call_id === blockedCallId)) : -1
+  let active = segments[0]
+  for (const [index, segment] of segments.entries()) {
+    if (resumeId && !sameResume) {
+      delete segment._resumeReplayId
+      delete segment._resumeReplayEvents
+    }
+    if (resumeId && !sameResume && (boundary < 0 || index <= boundary)) {
+      segment._resumeReplayId = resumeId
+      const events = (segment.agentEventStream || []) as ChatMessage[]
+      const blocked = events.findIndex(e => e.type === 'tool_call' && e.tool_call_id === blockedCallId)
+      // The resumed call starts the suffix in reloaded history. Events arriving
+      // while approval was pending still belong to the prefix and must survive.
+      segment._resumeReplayEvents = (blocked < 0 ? events : events.slice(0, blocked))
+        .filter(e => e.type !== 'agent_complete' && e.type !== 'stop' &&
+          !(blockedCallId && e.type === 'tool_call' && e.tool_call_id === blockedCallId))
+        .map(e => ({ ...e }))
+    }
+    const hasBaseline = resumeId && segment._resumeReplayId === resumeId
     segment.content = ''
-    segment.agentEventStream = []
+    segment.agentEventStream = hasBaseline
+      ? (segment._resumeReplayEvents as ChatMessage[]).map(e => ({ ...e })) : []
     segment._eventMap = new Map()
     segment._pendingToolCalls = new Map()
     segment.is_completed = true
     segment._steerReplayPending = true
+    if (hasBaseline) {
+      active = segment
+      delete segment._steerReplayPending
+    } else if (!resumeId) {
+      delete segment._resumeReplayId
+      delete segment._resumeReplayEvents
+    }
   }
-  segments[0].is_completed = false
-  segments[0].steerForked = false
-  delete segments[0]._steerReplayPending
-  return segments[0]
+  active.is_completed = false
+  active.steerForked = false
+  delete active._steerReplayPending
+  return active
 }
 
 /** Individual answer.done events close a message, not the running task. */

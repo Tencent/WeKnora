@@ -56,8 +56,29 @@ class AppStorageTests(unittest.TestCase):
         return yaml.safe_load(next(block for block in blocks
                                    if block.startswith(f"# {filename}\n")))
 
-    def test_default_strategy_is_unchanged(self):
+    def test_persistent_single_writer_storage_defaults_to_recreate(self):
         app = self.app(self.documents())
+        self.assertEqual(app["spec"]["strategy"], {
+            "type": "Recreate",
+        })
+
+    def test_nonpersistent_storage_defaults_to_rolling_update(self):
+        app = self.app(self.documents({"dataFiles": {"persistence": {"enabled": False}}}))
+        self.assertEqual(app["spec"]["strategy"], {
+            "type": "RollingUpdate",
+            "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
+        })
+
+    def test_shared_storage_defaults_to_rolling_update(self):
+        app = self.app(self.documents({"dataFiles": {"persistence": {
+            "accessModes": ["ReadWriteMany"],
+        }}}))
+        self.assertEqual(app["spec"]["strategy"]["type"], "RollingUpdate")
+
+    def test_explicit_rolling_update_overrides_safe_default(self):
+        app = self.app(self.documents({"app": {"strategy": {
+            "type": "RollingUpdate",
+        }}}))
         self.assertEqual(app["spec"]["strategy"], {
             "type": "RollingUpdate",
             "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
@@ -78,10 +99,7 @@ class AppStorageTests(unittest.TestCase):
 
     def test_null_strategy_falls_back_to_defaults(self):
         app = self.app(self.documents({"app": {"strategy": None}}))
-        self.assertEqual(app["spec"]["strategy"], {
-            "type": "RollingUpdate",
-            "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
-        })
+        self.assertEqual(app["spec"]["strategy"], {"type": "Recreate"})
 
     def test_invalid_strategy_is_rejected(self):
         result = render({"app": {"strategy": {"type": "Invalid"}}})
@@ -100,6 +118,32 @@ class AppStorageTests(unittest.TestCase):
         self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
         env = app["spec"]["template"]["spec"]["containers"][0]["env"]
         self.assertIn({"name": "STORAGE_TYPE", "value": "local"}, env)
+
+    def data_files_claim(self, documents):
+        return next(doc for doc in documents
+                    if doc["kind"] == "PersistentVolumeClaim"
+                    and doc["metadata"]["name"] == "audit-weknora-data-files")
+
+    def test_data_files_claim_defaults_to_read_write_once(self):
+        pvc = self.data_files_claim(self.documents())
+        self.assertEqual(pvc["spec"]["accessModes"], ["ReadWriteOnce"])
+
+    def test_data_files_access_modes_are_configurable(self):
+        """A shared filesystem can keep the chart's rolling-update default.
+
+        The claim was hard-coded to ReadWriteOnce, so an RWX storage class
+        could not be used for the chart-created volume at all: the upgrade
+        then failed with Multi-Attach and the only way out was an
+        ``existingClaim``. Setting the access modes lets that deployment keep
+        ``app.strategy.type: RollingUpdate``.
+        """
+        documents = self.documents({"dataFiles": {"persistence": {
+            "accessModes": ["ReadWriteMany"],
+        }}})
+        self.assertEqual(self.data_files_claim(documents)["spec"]["accessModes"],
+                         ["ReadWriteMany"])
+        app = self.app(documents)
+        self.assertEqual(app["spec"]["strategy"]["type"], "RollingUpdate")
 
     def test_shared_storage_example_references_existing_claim(self):
         values = self.readme_values("values-production.yaml")

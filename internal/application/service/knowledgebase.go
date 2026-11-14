@@ -29,6 +29,21 @@ var ErrInvalidTenantID = errors.New("invalid tenant ID")
 
 const kbTaskCleanupTimeout = 5 * time.Second
 
+// kbWikiCleanupTimeout bounds the wiki cleanup step (pages, folders,
+// revisions, issues) in the ProcessKBDelete defer. It is deliberately much
+// longer than kbTaskCleanupTimeout: the wiki DELETE statements themselves are
+// fast once unblocked (idx_wiki_pages_kb_id covers them), but the KB's wiki
+// workers may still be holding row locks at delete time. With a 5s budget the
+// statements were killed while waiting on those locks and all asynq retries
+// landed in the same lock window, leaving thousands of wiki rows orphaned
+// after MaxRetry was exhausted (see issue #4288).
+const kbWikiCleanupTimeout = 2 * time.Minute
+
+// kbDeleteTaskMaxRetry is the asynq retry budget for the KB delete task,
+// mirrored here so the defer can detect the final attempt and escalate
+// logging when the task is about to land in the dead letter queue.
+const kbDeleteTaskMaxRetry = 3
+
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
 	repo            interfaces.KnowledgeBaseRepository
@@ -159,6 +174,21 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		if err := s.validateVectorStoreBinding(ctx, kb.TenantID, *kb.VectorStoreID); err != nil {
 			return nil, err
 		}
+	}
+
+	// The image settings have to survive the same check the settings panel
+	// makes: a pipeline whose every action switch is off would process images
+	// by ignoring them.
+	if err := s.validateImagePipelineConfig(ctx, kb); err != nil {
+		return nil, err
+	}
+
+	if kb.QuestionGenerationConfig != nil {
+		id, err := ValidateQuestionGenerationModel(ctx, s.modelService, kb.QuestionGenerationConfig.ModelID)
+		if err != nil {
+			return nil, err
+		}
+		kb.QuestionGenerationConfig.ModelID = id
 	}
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
@@ -527,7 +557,7 @@ func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 	if err != nil {
 		return types.VLMConfig{}, fmt.Errorf("get vlm model %s: %w", next.ModelID, err)
 	}
-	if model.Type != types.ModelTypeVLLM {
+	if !model.SupportsType(types.ModelTypeVLLM) {
 		return types.VLMConfig{}, apperrors.NewBadRequestError(
 			fmt.Sprintf("vlm_config.model_id: model type is %s, want %s", model.Type, types.ModelTypeVLLM))
 	}
@@ -604,6 +634,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		// know about the image settings cannot wipe them.
 		if config.ImageProcessingConfig != nil {
 			kb.ImageProcessingConfig = *config.ImageProcessingConfig
+			// Same rule as on create: the update lands only if the pipeline the
+			// request names can actually run what it declares.
+			if err := s.validateImagePipelineConfig(ctx, kb); err != nil {
+				return nil, err
+			}
 		}
 		if config.FAQConfig != nil {
 			kb.FAQConfig = config.FAQConfig
@@ -618,6 +653,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		if config.ProfileConfig != nil {
 			profileWasEnabled = kb.ProfileConfig.IsEnabled()
 			kb.ProfileConfig = config.ProfileConfig
+		}
+		if config.ExtractConfig != nil {
+			kb.ExtractConfig = config.ExtractConfig
+			changedFields = append(changedFields, "extract_config")
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
@@ -636,6 +675,54 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			} else if config.IndexingStrategy.GraphEnabled {
 				kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
 			}
+		}
+		if config.EmbeddingModelID != nil {
+			next := strings.TrimSpace(*config.EmbeddingModelID)
+			if next != kb.EmbeddingModelID {
+				if err := s.rejectEmbeddingModelChange(ctx, kb, next); err != nil {
+					return nil, err
+				}
+				changedFields = append(changedFields, "embedding_model_id")
+				kb.EmbeddingModelID = next
+			}
+		}
+		if config.SummaryModelID != nil {
+			next := strings.TrimSpace(*config.SummaryModelID)
+			if err := s.requireModelType(ctx, next, types.ModelTypeKnowledgeQA, "summary_model_id"); err != nil {
+				return nil, err
+			}
+			if kb.SummaryModelID != next {
+				changedFields = append(changedFields, "summary_model_id")
+			}
+			kb.SummaryModelID = next
+		}
+		if config.StorageBackendID != nil {
+			changed, err := s.updateStorageBackend(ctx, kb, *config.StorageBackendID)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				changedFields = append(changedFields, "storage_backend_id")
+			}
+		}
+		if config.ASRConfig != nil {
+			if config.ASRConfig.Enabled {
+				modelID := strings.TrimSpace(config.ASRConfig.ModelID)
+				if err := s.requireModelType(ctx, modelID, types.ModelTypeASR, "asr_model_id"); err != nil {
+					return nil, err
+				}
+			}
+			kb.ASRConfig = *config.ASRConfig
+			changedFields = append(changedFields, "asr_config")
+		}
+		if config.QuestionGenerationConfig != nil {
+			next := *config.QuestionGenerationConfig
+			next.ModelID, err = ValidateQuestionGenerationModel(ctx, s.modelService, next.ModelID)
+			if err != nil {
+				return nil, err
+			}
+			kb.QuestionGenerationConfig = &next
+			changedFields = append(changedFields, "question_generation_config")
 		}
 	}
 	// Apply multimodal (vision) config only when the caller provided it,
@@ -672,6 +759,81 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+// updateStorageBackend preserves existing file locations. Echoing a binding is
+// a no-op, including for shared KBs whose storage belongs to another workspace.
+func (s *knowledgeBaseService) updateStorageBackend(
+	ctx context.Context, kb *types.KnowledgeBase, id string,
+) (bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, apperrors.NewBadRequestError("storage_backend_id cannot be empty")
+	}
+	if kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) == id {
+		return false, nil
+	}
+	if types.CallerFromContext(ctx).TenantID != kb.TenantID {
+		return false, apperrors.NewForbiddenError("只有知识库所属空间可以修改存储配置")
+	}
+	total, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+	if err != nil {
+		return false, fmt.Errorf("check files before changing storage backend: %w", err)
+	}
+	if total > 0 {
+		return false, apperrors.NewBadRequestError(
+			"Storage backend cannot be changed while the knowledge base contains files; migrate storage first")
+	}
+	next := *kb
+	next.StorageBackendID = &id
+	if err := s.applyAndValidateStorageBackend(ctx, &next); err != nil {
+		return false, err
+	}
+	kb.StorageBackendID = next.StorageBackendID
+	kb.StorageProviderConfig = next.StorageProviderConfig
+	return true, nil
+}
+
+func (s *knowledgeBaseService) rejectEmbeddingModelChange(
+	ctx context.Context, kb *types.KnowledgeBase, next string,
+) error {
+	if next == "" {
+		return apperrors.NewBadRequestError("embedding_model_id cannot be empty")
+	}
+	if err := s.requireModelType(ctx, next, types.ModelTypeEmbedding, "embedding_model_id"); err != nil {
+		return err
+	}
+	if kb.EmbeddingModelID == "" {
+		return nil
+	}
+	_, total, err := s.kgRepo.ListPagedKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID,
+		&types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
+	if err != nil {
+		return err
+	}
+	if total > 0 {
+		return apperrors.NewBadRequestError("知识库中已有文件，无法修改Embedding模型")
+	}
+	return nil
+}
+
+func (s *knowledgeBaseService) requireModelType(
+	ctx context.Context, id string, want types.ModelType, field string,
+) error {
+	if strings.TrimSpace(id) == "" {
+		return apperrors.NewBadRequestError(field + " cannot be empty")
+	}
+	if s.modelService == nil {
+		return apperrors.NewInternalServerError("model service is not configured")
+	}
+	model, err := s.modelService.GetModelByID(ctx, id)
+	if err != nil || model == nil {
+		return apperrors.NewBadRequestError(field + " does not match a model")
+	}
+	if model.Type != want {
+		return apperrors.NewBadRequestError(field + " must be a " + string(want) + " model")
+	}
+	return nil
 }
 
 // TogglePinKnowledgeBase toggles whether the calling user has pinned
@@ -891,7 +1053,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	}
 
 	task := asynq.NewTask(types.TypeKBDelete, payloadBytes,
-		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(kbDeleteTaskMaxRetry), asynq.Timeout(2*time.Hour))
 	info, err := s.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to enqueue KB delete task: %v", err)
@@ -923,11 +1085,27 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		// Wiki rows are independent of the vector engine. Run this on every
 		// return path — including SkipRetry — with its own timeout so a slow
 		// Redis queue scan cannot starve the SQL deletes.
-		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbTaskCleanupTimeout)
+		//
+		// The budget is kbWikiCleanupTimeout (not the shared 5s
+		// kbTaskCleanupTimeout): the wiki DELETEs are fast once unblocked,
+		// but in-flight wiki workers may hold row locks at delete time and a
+		// 5s budget was being exhausted while waiting on them, orphaning
+		// thousands of wiki rows after retries ran out (issue #4288).
+		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbWikiCleanupTimeout)
 		wikiErr := s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
 		cancelWiki()
 		if wikiErr != nil {
-			logger.Warnf(ctx, "Failed to clean wiki data for KB %s: %v", kbID, wikiErr)
+			if retryCount, _ := asynq.GetRetryCount(ctx); retryCount >= kbDeleteTaskMaxRetry {
+				// Retries are exhausted; the returned error sends this task
+				// to the dead letter queue. Log at ERROR so the residual wiki
+				// rows are visible to operators instead of silently orphaned.
+				logger.Errorf(ctx,
+					"Wiki cleanup for KB %s failed on final retry (attempt %d): %v. "+
+						"Wiki pages/folders/revisions/issues may be orphaned — manual cleanup required.",
+					kbID, retryCount+1, wikiErr)
+			} else {
+				logger.Warnf(ctx, "Failed to clean wiki data for KB %s: %v", kbID, wikiErr)
+			}
 			// SkipRetry would otherwise drop the task while wiki orphans
 			// remain. Promote the wiki error so asynq retries; a later
 			// attempt that succeeds at wiki cleanup can still SkipRetry.

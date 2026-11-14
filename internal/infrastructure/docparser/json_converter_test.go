@@ -386,6 +386,50 @@ func TestJsonToMarkdown_SpecialCharsInStrings(t *testing.T) {
 	})
 }
 
+func TestJsonToMarkdown_KeepsNumbersAsWritten(t *testing.T) {
+	// Decoded into a float64, an id above 2^53 changed digits.
+	input := `{"order_id": 12345678901234567890, "big": 9007199254740993, "price": 1.50, "ratio": 1e5}`
+	result, err := jsonToMarkdown([]byte(input))
+	visualReport(t, "Numbers keep the digits they were written with", input, result, err, []checkResult{
+		check("no error", err == nil),
+		check("all blocks are valid JSON", allBlocksValidJSON(result)),
+		check("order_id keeps all 20 digits", strings.Contains(result, `"order_id": 12345678901234567890`)),
+		check("2^53+1 is not rounded to 2^53", strings.Contains(result, `"big": 9007199254740993`)),
+		check("1.50 keeps its trailing zero", strings.Contains(result, `"price": 1.50`)),
+		check("1e5 keeps its exponent", strings.Contains(result, `"ratio": 1e5`)),
+	})
+}
+
+func TestJsonToMarkdown_KeepsNumbersAsWrittenAcrossChunks(t *testing.T) {
+	// Large enough to take the recursive split path.
+	items := make([]string, 0, 60)
+	for i := 0; i < 60; i++ {
+		item := fmt.Sprintf(`"item_%02d": {"id": 1234567890123456789%d, "label": "entry %d"}`, i, i%10, i)
+		items = append(items, item)
+	}
+	input := "{" + strings.Join(items, ", ") + "}"
+	result, err := jsonToMarkdown([]byte(input))
+	visualReport(t, "Numbers keep their digits in a split document", input, result, err, []checkResult{
+		check("no error", err == nil),
+		check("split into several blocks", len(splitBlocks(result)) > 1),
+		check("first id kept", strings.Contains(result, `"id": 12345678901234567890`)),
+		check("last id kept", strings.Contains(result, `"id": 12345678901234567899`)),
+	})
+}
+
+func TestJsonToMarkdown_KeepsAngleBracketsAndAmpersands(t *testing.T) {
+	// json.Marshal writes <, > and & as \u003c, \u003e and \u0026.
+	input := `{"note": "a < b && c > d", "html": "<b>bold</b>"}`
+	result, err := jsonToMarkdown([]byte(input))
+	visualReport(t, "<, > and & stay readable", input, result, err, []checkResult{
+		check("no error", err == nil),
+		check("all blocks are valid JSON", allBlocksValidJSON(result)),
+		check("comparison text kept", strings.Contains(result, `"note": "a < b && c > d"`)),
+		check("markup kept", strings.Contains(result, `"html": "<b>bold</b>"`)),
+		check("no \\u003c escapes", !strings.Contains(result, `\u003c`)),
+	})
+}
+
 func TestJsonToMarkdown_NullValues(t *testing.T) {
 	input := `{"name": "test", "value": null, "list": [null, 1, null]}`
 	result, err := jsonToMarkdown([]byte(input))

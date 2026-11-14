@@ -29,6 +29,8 @@ type Result = { available: boolean; message?: string; dimension?: number }
 async function fixture(options: {
   type?: string
   initialType?: string
+  initiallyVisible?: boolean
+  draft?: Record<string, unknown>
   edit?: boolean
   check?: (payload: any) => Promise<Result>
   save?: (payload: any) => Promise<void>
@@ -62,8 +64,9 @@ async function fixture(options: {
   }
   const toasts: string[] = []
   const visibility: boolean[] = []
-  const props = reactive<{ visible: boolean; modelType: string; modelData: any }>({
-    visible: false,
+  const props = reactive<{ visible: boolean; modelType: string; modelData: any; draft?: Record<string, unknown> }>({
+    visible: options.initiallyVisible ?? false,
+    draft: options.draft,
     modelType: options.initialType || options.type || 'chat',
     modelData: options.edit ? {
       id: 'saved-model', modelName: 'old-model', name: '', source: 'remote',
@@ -125,10 +128,43 @@ async function fixture(options: {
   props.visible = true
   await nextTick()
   await nextTick()
-  Object.assign(vm.formData, { modelName: 'draft-model', baseUrl: 'https://example.com/v1', apiKey: options.edit ? '' : 'draft-key' })
+  if (!options.draft) {
+    Object.assign(vm.formData, { modelName: 'draft-model', baseUrl: 'https://example.com/v1', apiKey: options.edit ? '' : 'draft-key' })
+  }
   vm.formRef = { validate: async () => true }
   await nextTick()
   return { vm, props, requests, saves, toasts, visibility, resolves, catalogEvents, catalogRequests, close: () => app.unmount() }
+}
+
+for (const initiallyVisible of [true, false]) {
+  for (const type of ['chat', 'embedding']) {
+    test(`${type}: assistant draft is filled ${initiallyVisible ? 'on first navigation with the dialog already open' : 'when opening an existing settings page'}`, async () => {
+      const draft = {
+        source: 'remote', provider: 'vendor', modelName: `${type}-model`,
+        displayName: 'Assistant suggestion', baseUrl: 'https://draft.example.com/v1',
+      }
+      const f = await fixture({
+        type, initiallyVisible, draft,
+        providersByType: { [type]: [{
+          value: 'vendor', label: 'Vendor', modelTypes: [type],
+          models: [{ id: `${type}-model`, type }],
+        }] },
+      })
+      try {
+        assert.equal(f.vm.activeModelType, type)
+        for (const [key, value] of Object.entries(draft)) {
+          assert.equal(f.vm.formData[key], value, `${key} is prefilled without user input`)
+        }
+        assert.deepEqual(f.catalogRequests, [{ type, force: true }])
+        assert.deepEqual(Array.from(f.vm.providerOptions, (p: any) => p.value), ['vendor'])
+        assert.deepEqual(Array.from(f.vm.catalogModelOptions, (m: any) => m.value), [`${type}-model`])
+        assert.equal(f.vm.formData.apiKey, '')
+        assert.equal(f.vm.formData.appSecret, '')
+        assert.equal(f.requests.length, 0, 'prefilling does not test the connection')
+        assert.equal(f.saves.length, 0, 'prefilling does not save the model')
+      } finally { f.close() }
+    })
+  }
 }
 
 for (const type of ['embedding', 'rerank', 'vllm', 'asr']) {

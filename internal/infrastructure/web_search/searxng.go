@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -59,7 +58,7 @@ func ValidateSearxngBaseURL(rawURL string) error {
 }
 
 // NewSearxngProvider builds a SearXNG provider from tenant parameters.
-func NewSearxngProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewSearxngProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	base := strings.TrimSpace(params.BaseURL)
 	if err := ValidateSearxngBaseURL(base); err != nil {
 		return nil, err
@@ -91,10 +90,9 @@ func (p *SearxngProvider) EmptyResultDiagnostics() string {
 // SearXNG must have `search.formats: [json]` enabled in settings.yml.
 func (p *SearxngProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	if strings.TrimSpace(query) == "" {
 		return nil, fmt.Errorf("query is empty")
 	}
@@ -128,12 +126,16 @@ func (p *SearxngProvider) Search(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("searxng returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("searxng returned status %d: %s", resp.StatusCode, readErrorPreview(resp.Body))
+	}
+
+	bodyBytes, err := readCapped(resp.Body, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	var data searxngResponse
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
 		p.lastUnresponsive = nil
 		return nil, fmt.Errorf("failed to decode SearXNG response (ensure JSON format is enabled in settings.yml): %w", err)
 	}

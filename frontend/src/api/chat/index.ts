@@ -1,14 +1,55 @@
-import { get, post, put, del, postChat, getDown } from "../../utils/request";
+import { get, post, put, del, postChat, getDown, postUpload } from "../../utils/request";
 
-export async function createSessions(data: Record<string, unknown> = {}) {
+export type SessionKind = '' | 'assistant';
+
+export interface SessionSummary {
+  id: string;
+  kind: SessionKind;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSessionRequest {
+  title?: string;
+  description?: string;
+  project_dir?: string;
+  kind?: SessionKind;
+}
+
+export async function createSessions(data: CreateSessionRequest = {}) {
   return post("/api/v1/sessions", data);
 }
 
-export async function getSessionsList(page: number, page_size: number, source?: string) {
+export interface VoiceTranscription {
+  text: string;
+  duration?: number;
+}
+
+// Transcribes a dictated clip with the agent's ASR model. The agent must have
+// audio upload enabled and an ASR model selected.
+export async function transcribeVoice(
+  audio: Blob,
+  agentId: string,
+  agentSourceTenantId?: string,
+  locale?: string,
+): Promise<{ success: boolean; data: VoiceTranscription }> {
+  const form = new FormData();
+  form.append("file", audio, "voice.wav");
+  form.append("agent_id", agentId);
+  if (agentSourceTenantId) form.append("agent_source_tenant_id", agentSourceTenantId);
+  // The backend turns the UI locale into the ASR language hint (zh-CN -> zh).
+  if (locale) form.append("locale", locale);
+  // Upstream ASR services can take a while on long clips.
+  return postUpload("/api/v1/sessions/transcriptions", form, undefined, { timeout: 120000 });
+}
+
+export async function getSessionsList(page: number, page_size: number, source?: string, kind?: SessionKind) {
   const params = new URLSearchParams({ page: String(page), page_size: String(page_size) });
   if (source) {
     params.set("source", source);
   }
+  if (kind) params.set("kind", kind);
   return get(`/api/v1/sessions?${params.toString()}`);
 }
 
@@ -170,4 +211,12 @@ export async function deleteMessageArtifact(
   return del(
     `/api/v1/sessions/${session_id}/messages/${message_id}/artifacts/${index}${query}`,
   );
+}
+
+export async function getHostApprovalMode(session_id: string) {
+  return get(`/api/v1/sessions/${encodeURIComponent(session_id)}/host-approval-mode`);
+}
+
+export async function setHostApprovalMode(session_id: string, mode: 'ask' | 'auto') {
+  return put(`/api/v1/sessions/${encodeURIComponent(session_id)}/host-approval-mode`, { mode });
 }

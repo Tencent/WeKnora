@@ -31,12 +31,29 @@ export function mcpServerKey(name: string, id = ''): string {
   return idSlug ? `weknora-${idSlug}` : 'weknora'
 }
 
-/** JSON block for clients that speak Streamable HTTP natively (Cursor, VS Code, Claude Desktop connectors). */
+/** Cursor-compatible JSON for a native Streamable HTTP connection. Other clients use their own setup format. */
 export function buildHttpClientSnippet(name: string, url: string, token: string, id = ''): string {
   return JSON.stringify(
     {
       mcpServers: {
         [mcpServerKey(name, id)]: {
+          url,
+          headers: { Authorization: `Bearer ${token || MCP_TOKEN_PLACEHOLDER}` },
+        },
+      },
+    },
+    null,
+    2,
+  )
+}
+
+/** Ready-to-copy workspace .vscode/mcp.json for a native HTTP connection. */
+export function buildVsCodeClientSnippet(name: string, url: string, token: string, id = ''): string {
+  return JSON.stringify(
+    {
+      servers: {
+        [mcpServerKey(name, id)]: {
+          type: 'http',
           url,
           headers: { Authorization: `Bearer ${token || MCP_TOKEN_PLACEHOLDER}` },
         },
@@ -53,14 +70,15 @@ export function buildClaudeCodeCommand(name: string, url: string, token: string,
   return `claude mcp add --transport http ${mcpServerKey(name, id)} ${url} --header "${auth}"`
 }
 
-/** JSON block for stdio-only clients, bridged through mcp-remote. */
+/** Fallback when native HTTP/Bearer setup is unavailable, including Claude Desktop without Request headers. */
 export function buildStdioBridgeSnippet(name: string, url: string, token: string, id = ''): string {
   return JSON.stringify(
     {
       mcpServers: {
         [mcpServerKey(name, id)]: {
           command: 'npx',
-          args: ['-y', 'mcp-remote', url, '--header', `Authorization: Bearer ${token || MCP_TOKEN_PLACEHOLDER}`],
+          args: ['-y', 'mcp-remote@0.15.1', url, '--header', 'Authorization:${WEKNORA_MCP_AUTH}'],
+          env: { WEKNORA_MCP_AUTH: `Bearer ${token || MCP_TOKEN_PLACEHOLDER}` },
         },
       },
     },

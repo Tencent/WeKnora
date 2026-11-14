@@ -66,6 +66,58 @@ func containsToken(values []string, want string) bool {
 	return false
 }
 
+func TestExtractPhrases(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want []string
+	}{
+		{"", nil},
+		{"plain text", nil},
+		{`"RAG search" and 'Go SDK'`, []string{"RAG search", "Go SDK"}},
+		{"「向量数据库」和『检索配置』", []string{"向量数据库", "检索配置"}},
+		{`"ab" "abc"`, []string{"abc"}},
+		{`"unterminated`, nil},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, extractPhrases(tc.text))
+		})
+	}
+}
+
+func TestSplitByDelimiters(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want []string
+	}{
+		{"", nil},
+		{"  RAG  search\tGo\nSDK  ", []string{"RAG", "search", "Go", "SDK"}},
+		{"向量，数据库；检索、配置。测试！完成？", []string{"向量", "数据库", "检索", "配置", "测试", "完成"}},
+		{"one,two;three!four?five", []string{"one", "two", "three", "four", "five"}},
+		{"，; \n！？", nil},
+		{"RAG-search", []string{"RAG-search"}},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, splitByDelimiters(tc.text))
+		})
+	}
+}
+
+func BenchmarkExtractPhrases(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		extractPhrases(`如何配置「向量数据库」和 "RAG search"`)
+	}
+}
+
+func BenchmarkSplitByDelimiters(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		splitByDelimiters("向量数据库，RAG search；检索配置？")
+	}
+}
+
 type recordingExpansionKBService struct {
 	interfaces.KnowledgeBaseService
 	mu     sync.Mutex

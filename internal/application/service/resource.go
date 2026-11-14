@@ -21,7 +21,9 @@ import (
 const defaultResourceGrantTTL = 2 * time.Hour
 
 type resourceCatalog struct {
-	repo interfaces.ResourceRepository
+	repo          interfaces.ResourceRepository
+	storage       interfaces.StorageBackendRepository
+	globalStorage *types.StorageBackend
 }
 
 // NewResourceCatalog creates the stable resource-reference domain service.
@@ -61,6 +63,11 @@ func (s *resourceCatalog) Register(
 		return "", err
 	}
 	if existing != nil {
+		if existing.StorageBackendID == "" && meta.StorageBackendID != "" {
+			if _, err := s.repo.BindStorageBackend(ctx, existing.ID, meta.StorageBackendID); err != nil {
+				return "", err
+			}
+		}
 		return types.BuildResourcePath(existing.Handle), nil
 	}
 
@@ -68,6 +75,9 @@ func (s *resourceCatalog) Register(
 	providerPath := physicalPath
 	if scoped {
 		providerPath = inner
+	}
+	if backendID == "" {
+		backendID = meta.StorageBackendID
 	}
 	provider := types.ParseProviderScheme(providerPath)
 	if provider == "" {
@@ -103,10 +113,50 @@ func (s *resourceCatalog) Register(
 		}
 		existing, lookupErr := s.repo.GetByTenantLocation(ctx, tenantID, locationHash)
 		if lookupErr == nil && existing != nil {
+			if existing.StorageBackendID == "" && backendID != "" {
+				if _, err := s.repo.BindStorageBackend(ctx, existing.ID, backendID); err != nil {
+					return "", err
+				}
+			}
 			return types.BuildResourcePath(existing.Handle), nil
 		}
 	}
 	return "", fmt.Errorf("failed to allocate unique resource handle")
+}
+
+// ReuseByContentHash implements interfaces.ResourceCatalog. It is the
+// content-addressed counterpart of Register's location lookup: two extractions
+// of one image from different pages land on different physical paths, so only
+// the bytes can tell that they are the same stored object.
+//
+// A blank hash, a zero tenant or an unknown payload all report "no reusable
+// resource" rather than an error, so the caller can fall through to its normal
+// write path. A missing tenant guard here would let one tenant's bytes satisfy
+// another tenant's lookup, which is why the tenant is part of the query.
+func (s *resourceCatalog) ReuseByContentHash(
+	ctx context.Context,
+	tenantID uint64,
+	contentHash string,
+) (string, bool, error) {
+	contentHash = strings.TrimSpace(contentHash)
+	if tenantID == 0 || contentHash == "" {
+		return "", false, nil
+	}
+	existing, err := s.repo.GetActiveByContentHash(ctx, tenantID, contentHash)
+	if err != nil {
+		return "", false, err
+	}
+	if existing == nil {
+		return "", false, nil
+	}
+	// A temporary row is scratch storage: nothing keeps its bytes alive once
+	// its owner finishes, so aliasing a long-lived reference onto it would let
+	// that cleanup delete a payload the reusable caller still serves. Only
+	// persistent resources are reusable.
+	if existing.Lifecycle != types.ResourceLifecyclePersistent {
+		return "", false, nil
+	}
+	return types.BuildResourcePath(existing.Handle), true, nil
 }
 
 func (s *resourceCatalog) Resolve(ctx context.Context, reference string) (*types.StoredResource, error) {

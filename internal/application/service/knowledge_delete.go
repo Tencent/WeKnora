@@ -488,10 +488,12 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		prev := knowledge.ParseStatus
 		before := *knowledge
 		knowledge.ParseStatus = types.ParseStatusDeleting
-		if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, knowledge); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).WithField("knowledge_id", knowledge.ID).
-				Errorf("DeleteKnowledgeList failed to mark as deleting")
-			return err
+		if !plan.rowsDeleted {
+			if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, knowledge); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).WithField("knowledge_id", knowledge.ID).
+					Errorf("DeleteKnowledgeList failed to mark as deleting")
+				return err
+			}
 		}
 		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing {
 			inFlightIDs = append(inFlightIDs, knowledge.ID)
@@ -615,8 +617,10 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	// gone avoids "file missing but row present" zombies that break reparse /
 	// re-delete when an earlier cleanup step failed (issue #2192). A failure below
 	// only orphans storage.
-	if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
-		return err
+	if !plan.rowsDeleted {
+		if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
+			return err
+		}
 	}
 
 	storageAdjust := int64(0)

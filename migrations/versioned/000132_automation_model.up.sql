@@ -1,0 +1,1 @@
+ALTER TABLE automations ADD COLUMN model_id VARCHAR(64) NOT NULL DEFAULT '';

@@ -121,6 +121,8 @@ curl -X POST $BASE/api/v1/models/m-1/debug -H "Authorization: Bearer $TOKEN" -F 
 
 用途：更新模型（内置模型由服务层限定 SystemAdmin）。权限：Admin+ 或 SystemAdmin（`AdminOrSystemAdmin`）。请求体：`name`、`display_name`（指针）、`description`、`parameters`（保留已存密钥）、`source`、`type`（均可选）。
 
+`source` 和 `type` 省略、设为 `null` 或空字符串时保留原值；提供非空值时更新对应字段。
+
 响应：200 `{"success":true,"data":{ModelResponse}}`
 
 ```bash

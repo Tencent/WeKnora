@@ -111,8 +111,8 @@ func TestKnowledgeImageSourcesReachFinalModelMessage(t *testing.T) {
 		require.NoError(t, err)
 		wire, err := json.Marshal(body)
 		require.NoError(t, err)
-		require.Contains(t, string(wire), "Image 1: chunk c2.")
-		require.Contains(t, string(wire), "Image 2: chunk c1.")
+		require.Contains(t, string(wire), "Image 1: chunk chunk://2.")
+		require.Contains(t, string(wire), "Image 2: chunk chunk://1.")
 	}
 }
 

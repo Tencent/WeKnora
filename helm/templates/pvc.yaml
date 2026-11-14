@@ -73,7 +73,7 @@ metadata:
     {{- include "weknora.componentLabels" (dict "component" "storage" "context" .) | nindent 4 }}
 spec:
   accessModes:
-    - ReadWriteOnce
+    {{- toYaml (.Values.dataFiles.persistence.accessModes | default (list "ReadWriteOnce")) | nindent 4 }}
   resources:
     requests:
       storage: {{ .Values.dataFiles.persistence.size }}

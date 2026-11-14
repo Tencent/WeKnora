@@ -19,25 +19,25 @@ import (
 // authenticate. The subresource therefore exposes only one logical field,
 // "credentials", with PUT replacing the whole map and DELETE wiping it.
 type DataSourceResponse struct {
-	ID                   string               `json:"id"`
+	ID                   string               `json:"id" extensions:"x-agent=data_source_id"`
 	TenantID             uint64               `json:"tenant_id"`
-	KnowledgeBaseID      string               `json:"knowledge_base_id"`
-	Name                 string               `json:"name"`
-	Type                 string               `json:"type"`
-	Config               *DataSourceConfigDTO `json:"config,omitempty"`
-	SyncSchedule         string               `json:"sync_schedule"`
-	SyncMode             string               `json:"sync_mode"`
-	Status               string               `json:"status"`
-	ConflictStrategy     string               `json:"conflict_strategy"`
-	SyncDeletions        bool                 `json:"sync_deletions"`
-	LastSyncAt           *time.Time           `json:"last_sync_at"`
+	KnowledgeBaseID      string               `json:"knowledge_base_id" extensions:"x-agent"`
+	Name                 string               `json:"name" extensions:"x-agent"`
+	Type                 string               `json:"type" extensions:"x-agent"`
+	Config               *DataSourceConfigDTO `json:"config,omitempty" extensions:"x-agent"`
+	SyncSchedule         string               `json:"sync_schedule" extensions:"x-agent"`
+	SyncMode             string               `json:"sync_mode" extensions:"x-agent"`
+	Status               string               `json:"status" extensions:"x-agent"`
+	ConflictStrategy     string               `json:"conflict_strategy" extensions:"x-agent"`
+	SyncDeletions        bool                 `json:"sync_deletions" extensions:"x-agent"`
+	LastSyncAt           *time.Time           `json:"last_sync_at" extensions:"x-agent"`
 	LastSyncCursor       json.RawMessage      `json:"last_sync_cursor,omitempty"`
 	LastSyncResult       json.RawMessage      `json:"last_sync_result,omitempty"`
 	ErrorMessage         string               `json:"error_message,omitempty"`
 	SyncLogRetentionDays int                  `json:"sync_log_retention_days"`
 	CreatedAt            time.Time            `json:"created_at"`
 	UpdatedAt            time.Time            `json:"updated_at"`
-	TotalItemsSynced     int64                `json:"total_items_synced"`
+	TotalItemsSynced     int64                `json:"total_items_synced" extensions:"x-agent"`
 	LatestSyncLog        *types.SyncLog       `json:"latest_sync_log,omitempty"`
 	// Single logical credential field — DataSource credentials are a
 	// per-connector atomic map, so "configured?" applies to the whole set.
@@ -48,7 +48,7 @@ type DataSourceResponse struct {
 // removed by construction. Type, ResourceIDs and Settings remain visible.
 type DataSourceConfigDTO struct {
 	Type        string                 `json:"type"`
-	ResourceIDs []string               `json:"resource_ids,omitempty"`
+	ResourceIDs []string               `json:"resource_ids,omitempty" extensions:"x-agent"`
 	Settings    map[string]interface{} `json:"settings,omitempty"`
 }
 

@@ -265,7 +265,7 @@ func (r *messageRepository) ListArtifactLibrary(
 		where []string
 		args  []any
 	)
-	where = append(where, "s.tenant_id = ?", "s.deleted_at IS NULL", "ma.deleted_at IS NULL")
+	where = append(where, "s.tenant_id = ?", "s.kind = ''", "s.deleted_at IS NULL", "ma.deleted_at IS NULL")
 	args = append(args, q.TenantID)
 	if q.UserID != "" {
 		where = append(where, "(s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')")

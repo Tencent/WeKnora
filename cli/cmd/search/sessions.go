@@ -48,7 +48,9 @@ type SessionsSearchOptions struct {
 // Server has no session-search endpoint; CLI pages through and filters by
 // Title / Description client-side.
 type SessionsSearchService interface {
-	GetSessionsByTenant(ctx context.Context, page, pageSize int) ([]sdk.Session, int, error)
+	GetSessionsByTenant(
+		ctx context.Context, page, pageSize int, opts ...sdk.SessionListOptions,
+	) ([]sdk.Session, int, error)
 }
 
 // NewCmdSessions builds `weknora search sessions "<query>"`. Finds chat

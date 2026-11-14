@@ -25,6 +25,13 @@ type ResourceRepository interface {
 	GetByID(ctx context.Context, id string) (*types.StoredResource, error)
 	GetByHandle(ctx context.Context, handle string) (*types.StoredResource, error)
 	GetByTenantLocation(ctx context.Context, tenantID uint64, locationHash string) (*types.StoredResource, error)
+	// BindStorageBackend fills an absent binding without replacing an existing one.
+	BindStorageBackend(ctx context.Context, id, backendID string) (*types.StoredResource, error)
+	// GetActiveByContentHash finds a live resource holding the exact same
+	// bytes. Unlike location, content is not unique: several rows may carry
+	// the same hash (duplicates registered before this lookup existed), so
+	// the oldest live row wins and the result is stable across calls.
+	GetActiveByContentHash(ctx context.Context, tenantID uint64, contentHash string) (*types.StoredResource, error)
 	MarkDeleted(ctx context.Context, id string) error
 	CreateBinding(ctx context.Context, binding *types.ResourceBinding) error
 	DeleteBinding(ctx context.Context, resourceID, ownerType, ownerID string) error
@@ -47,18 +54,38 @@ type ResourceRepository interface {
 
 // ResourceRegistration describes one physical object at registration time.
 type ResourceRegistration struct {
-	Kind         string
-	MimeType     string
-	OriginalName string
-	Size         int64
-	ContentHash  string
-	Temporary    bool
+	StorageBackendID string
+	Kind             string
+	MimeType         string
+	OriginalName     string
+	Size             int64
+	ContentHash      string
+	Temporary        bool
+}
+
+// GlobalResourceRegistrar records the concrete instance used by the process-wide writer.
+type GlobalResourceRegistrar interface {
+	RegisterGlobal(ctx context.Context, tenantID uint64, physicalPath string, meta ResourceRegistration) (string, error)
+}
+
+// ResourceStorageBindingResolver resolves legacy, unbound resources only when
+// their physical location identifies a single storage instance.
+type ResourceStorageBindingResolver interface {
+	ResolveStorageBinding(ctx context.Context, reference string) (*types.StoredResource, error)
 }
 
 // ResourceCatalog maps public resource references to internal storage
 // locations and manages their access capabilities.
 type ResourceCatalog interface {
 	Register(ctx context.Context, tenantID uint64, physicalPath string, meta ResourceRegistration) (string, error)
+	// ReuseByContentHash returns the reference of a live resource whose bytes
+	// hash to contentHash, letting a caller holding the same payload skip
+	// storing it again. ok is false when the tenant holds no such resource.
+	//
+	// Register only deduplicates by physical location, so bytes that arrive on
+	// a new path — one image extracted from several pages — would otherwise
+	// mint a second handle for a payload the tenant already has.
+	ReuseByContentHash(ctx context.Context, tenantID uint64, contentHash string) (ref string, ok bool, err error)
 	Resolve(ctx context.Context, reference string) (*types.StoredResource, error)
 	ResolvePath(ctx context.Context, value string) (string, *types.StoredResource, error)
 	Bind(ctx context.Context, reference, ownerType, ownerID, relation string) error

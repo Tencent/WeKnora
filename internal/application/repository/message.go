@@ -106,6 +106,20 @@ func (r *messageRepository) GetRecentMessagesBySession(
 	return messages, nil
 }
 
+// GetRecentUserMessages returns the newest limit user messages, oldest first.
+func (r *messageRepository) GetRecentUserMessages(
+	ctx context.Context, sessionID string, limit int,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	if err := r.db.WithContext(ctx).
+		Where("session_id = ? AND role = ?", sessionID, "user").
+		Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	slices.Reverse(messages)
+	return messages, nil
+}
+
 // SessionHasIncompleteAssistant reports whether any assistant message in the
 // session is still generating. Rewind uses this instead of paging oldest
 // messages, so a late incomplete turn is not hidden behind a 1000-row window.
@@ -264,7 +278,7 @@ func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Me
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&types.Message{}).Where(
 			"id = ? AND session_id = ?", message.ID, message.SessionID,
-		).Updates(message).Error; err != nil {
+		).Omit("context_checkpoint").Updates(message).Error; err != nil {
 			return err
 		}
 		// Updates skips zero values; written on its own so a resumed or
@@ -311,6 +325,9 @@ func (r *messageRepository) DeleteMessagesFrom(
 		}
 		if len(deleted) == 0 {
 			return nil
+		}
+		if err := invalidateDependentCheckpoints(tx, deleted[0]); err != nil {
+			return err
 		}
 		return scope().Delete(&types.Message{}).Error
 	})
@@ -387,7 +404,7 @@ func (r *messageRepository) SearchMessagesByKeyword(
 		Table("messages").
 		Select("messages.*, sessions.title as session_title").
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
-		Where("sessions.tenant_id = ?", tenantID).
+		Where("sessions.tenant_id = ? AND sessions.kind = ''", tenantID).
 		Where("messages.deleted_at IS NULL").
 		Where(contentLikeExpr, "%"+escapeLikeKeyword(keyword)+"%", likeEscapeChar)
 
@@ -427,7 +444,7 @@ func (r *messageRepository) OwnedSessionIDs(
 	query := r.db.WithContext(ctx).
 		Table("sessions").
 		Select("id").
-		Where("tenant_id = ?", tenantID).
+		Where("tenant_id = ? AND kind = ''", tenantID).
 		Where("deleted_at IS NULL").
 		Where("id IN ?", sessionIDs)
 	if ownerID != "" {

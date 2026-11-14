@@ -60,6 +60,7 @@ async function fixture(initial: SkillCatalogItem[], host = false) {
     '@/utils/skillUpgrade': skillUpgrade,
     '@/utils': {},
     '@/types/mention': { SKILL_ICON: 'tools' },
+    '@/utils/assistantDataChange': { useAssistantDataChange() {} },
     'tdesign-icons-vue-next': {},
   }
   runInNewContext(compiled, {

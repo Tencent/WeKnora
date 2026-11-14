@@ -31,6 +31,6 @@ type DataMessageResponse struct {
 
 // MessageResponse is the {"success": true, "message": ...} body.
 type MessageResponse struct {
-	Success bool   `json:"success" example:"true"`
+	Success bool   `json:"success" example:"true" extensions:"x-agent"`
 	Message string `json:"message"`
 }

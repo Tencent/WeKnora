@@ -23,7 +23,7 @@
             v-if="internalVisible && previewItem"
             class="artifact-preview-resize-handle"
             :class="{ 'artifact-preview-resize-handle--active': previewResizing }"
-            :style="{ right: `${previewWidth}px` }"
+            :style="{ right: drawerSize }"
             role="separator"
             aria-orientation="vertical"
             @mousedown.prevent="onPreviewResizeStart"
@@ -38,9 +38,10 @@
         :class="{ 'chat-artifacts-drawer--preview': !!previewItem, 'chat-artifacts-drawer--resizing': previewResizing }"
         placement="right"
         :size="drawerSize"
-        :z-index="previewItem ? 2000 : 1500"
+        :z-index="2000"
         attach="body"
         :footer="false"
+        :close-btn="true"
         :close-on-overlay-click="true"
         :close-on-esc-keydown="true"
         :destroy-on-close="false"
@@ -248,7 +249,7 @@ const previewFileType = computed(() => {
 })
 
 const drawerSize = computed(() => (
-    previewItem.value ? `${previewWidth.value}px` : `${LIST_WIDTH}px`
+    `min(${previewItem.value ? previewWidth.value : LIST_WIDTH}px, 100%)`
 ))
 
 function previewMaxWidth() {
@@ -444,7 +445,7 @@ onUnmounted(() => {
 }
 
 .artifact-drawer-header--preview {
-    padding-right: 8px;
+    padding-right: 32px;
 }
 
 .artifact-back {
@@ -602,6 +603,7 @@ onUnmounted(() => {
     bottom: 0;
     width: 12px;
     margin-left: -6px;
+    // This drawer belongs to the conversation and overlays the assistant too.
     z-index: 2002;
     cursor: col-resize;
     display: flex;
