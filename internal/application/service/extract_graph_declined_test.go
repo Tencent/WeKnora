@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
+	"github.com/stretchr/testify/require"
 )
 
 type graphReplyChat struct{ resp *types.ChatResponse }
@@ -83,6 +84,103 @@ func TestChunkExtractHandle_ModelDeclinedIsSkipNotRetry(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("Handle err = %v, wantErr %v", err, tc.wantErr)
 			}
+		})
+	}
+}
+
+type cancelingGraphChunkRepo struct {
+	graphChunkRepo
+	cancel context.CancelFunc
+	err    error
+}
+
+func (r cancelingGraphChunkRepo) GetChunkByID(context.Context, uint64, string) (*types.Chunk, error) {
+	r.cancel()
+	return r.chunk, r.err
+}
+
+type graphOutcomeTracker struct {
+	noopSpanTracker
+	terminalContextErr error
+	terminalTenant     any
+	bounded            bool
+	outcome            string
+}
+
+func (*graphOutcomeTracker) LookupStage(context.Context, string, int, string) *Span {
+	return &Span{}
+}
+
+func (*graphOutcomeTracker) BeginSubSpan(context.Context, *Span, string, string, types.JSONMap) *Span {
+	return &Span{}
+}
+
+func (t *graphOutcomeTracker) EndSpan(ctx context.Context, _ *Span, _ types.JSONMap) {
+	t.recordOutcome(ctx, "success")
+}
+
+func (t *graphOutcomeTracker) FailSpan(ctx context.Context, _ *Span, code, _ string, _ error) {
+	t.recordOutcome(ctx, code)
+}
+
+func (t *graphOutcomeTracker) recordOutcome(ctx context.Context, outcome string) {
+	t.terminalContextErr = ctx.Err()
+	t.terminalTenant = ctx.Value(types.TenantIDContextKey)
+	_, t.bounded = ctx.Deadline()
+	if t.terminalContextErr == nil {
+		t.outcome = outcome
+	}
+}
+
+type graphOutcomeKnowledgeRepo struct {
+	interfaces.KnowledgeRepository
+	tracker          *graphOutcomeTracker
+	outcomeAtRelease string
+}
+
+func (*graphOutcomeKnowledgeRepo) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
+	return nil, nil
+}
+
+func (r *graphOutcomeKnowledgeRepo) FinalizeSubtask(context.Context, string) (int, bool, error) {
+	r.outcomeAtRelease = r.tracker.outcome
+	return 0, true, nil
+}
+
+func TestChunkExtractHandle_RecordsTerminalOutcomeBeforeReleasingSlotWhenCanceled(t *testing.T) {
+	payload, err := json.Marshal(types.ExtractChunkPayload{TenantID: 1, ChunkID: "c1", KnowledgeID: "k1", Attempt: 1})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name        string
+		chunkErr    error
+		wantOutcome string
+	}{
+		{name: "failure on final attempt", chunkErr: context.Canceled, wantOutcome: "GRAPH_EXTRACT_FAILED"},
+		{name: "success after cancellation", wantOutcome: "success"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(types.WithTaskRetryMetadata(context.Background(), 2, 2))
+			defer cancel()
+			tracker := &graphOutcomeTracker{}
+			knowledges := &graphOutcomeKnowledgeRepo{tracker: tracker}
+			svc := &ChunkExtractService{
+				spanTracker:       tracker,
+				knowledgeRepo:     knowledges,
+				knowledgeBaseRepo: graphKBRepo{kb: &types.KnowledgeBase{ID: "kb1"}},
+				chunkRepo: cancelingGraphChunkRepo{
+					graphChunkRepo: graphChunkRepo{chunk: &types.Chunk{ID: "c1", KnowledgeBaseID: "kb1"}},
+					cancel:         cancel,
+					err:            tc.chunkErr,
+				},
+			}
+
+			require.ErrorIs(t, svc.Handle(ctx, asynq.NewTask(types.TypeChunkExtract, payload)), tc.chunkErr)
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.NoError(t, tracker.terminalContextErr)
+			require.True(t, tracker.bounded)
+			require.Equal(t, uint64(1), tracker.terminalTenant)
+			require.Equal(t, tc.wantOutcome, knowledges.outcomeAtRelease)
 		})
 	}
 }

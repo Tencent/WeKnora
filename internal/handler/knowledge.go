@@ -1176,15 +1176,20 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		return
 	}
 
+	if knowledges, ok := result.Data.([]*types.Knowledge); ok {
+		if err := h.attachGraphEnrichmentFailures(ctx, knowledges); err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			_ = c.Error(errors.NewInternalServerError("Failed to load graph enrichment status"))
+			return
+		}
+	}
+
 	logger.Infof(
 		ctx,
 		"Knowledge list retrieved successfully, knowledge base ID: %s, total: %d",
 		secutils.SanitizeForLog(kbID),
 		result.Total,
 	)
-	if knowledges, ok := result.Data.([]*types.Knowledge); ok {
-		h.attachGraphEnrichmentFailures(ctx, knowledges)
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
 		"data":      result.Data,
@@ -2250,7 +2255,11 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	}
 
 	h.attachLastActivity(ctx, knowledges)
-	h.attachGraphEnrichmentFailures(ctx, knowledges)
+	if err := h.attachGraphEnrichmentFailures(ctx, knowledges); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError("Failed to load graph enrichment status"))
+		return
+	}
 
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))
@@ -2336,9 +2345,9 @@ func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []
 	}
 }
 
-func (h *KnowledgeHandler) attachGraphEnrichmentFailures(ctx context.Context, knowledges []*types.Knowledge) {
+func (h *KnowledgeHandler) attachGraphEnrichmentFailures(ctx context.Context, knowledges []*types.Knowledge) error {
 	if h.spanRepo == nil {
-		return
+		return nil
 	}
 	searchable := make(map[string]*types.Knowledge)
 	ids := make([]string, 0, len(knowledges))
@@ -2349,18 +2358,18 @@ func (h *KnowledgeHandler) attachGraphEnrichmentFailures(ctx context.Context, kn
 		}
 	}
 	if len(ids) == 0 {
-		return
+		return nil
 	}
 	failed, err := h.spanRepo.GraphEnrichmentFailures(ctx, ids)
 	if err != nil {
-		logger.Warnf(ctx, "graph enrichment status lookup failed: %v", err)
-		return
+		return err
 	}
 	for _, id := range failed {
 		if k := searchable[id]; k != nil {
 			k.GraphEnrichmentFailed = true
 		}
 	}
+	return nil
 }
 
 func isParseInFlight(status string) bool {

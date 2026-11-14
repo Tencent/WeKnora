@@ -267,11 +267,13 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		// Publish the chunk outcome before the last slot can mark the
 		// document completed and make it stop polling for status.
 		if gSpan != nil {
+			spanCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 			if handleErr != nil {
-				s.tracker().FailSpan(ctx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
+				s.tracker().FailSpan(spanCtx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
 			} else {
-				s.tracker().EndSpan(ctx, gSpan, graphOut)
+				s.tracker().EndSpan(spanCtx, gSpan, graphOut)
 			}
+			cancel()
 		}
 		// Decrement the parent's enrichment counter on terminal exit so a
 		// completed (or terminally-failed) per-chunk extract releases its

@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,11 +28,12 @@ type lastActivitySpanRepo struct {
 type graphEnrichmentSpanRepo struct {
 	repository.KnowledgeSpanRepository
 	asked []string
+	err   error
 }
 
 func (r *graphEnrichmentSpanRepo) GraphEnrichmentFailures(_ context.Context, ids []string) ([]string, error) {
 	r.asked = ids
-	return []string{"failed-graph"}, nil
+	return []string{"failed-graph"}, r.err
 }
 
 func TestAttachGraphEnrichmentFailures(t *testing.T) {
@@ -39,11 +45,66 @@ func TestAttachGraphEnrichmentFailures(t *testing.T) {
 		{ID: "disabled", ParseStatus: types.ParseStatusCompleted, EnableStatus: "disabled"},
 		{ID: "unfinished", ParseStatus: types.ParseStatusFinalizing, EnableStatus: "enabled"},
 	}
-	h.attachGraphEnrichmentFailures(context.Background(), rows)
+	require.NoError(t, h.attachGraphEnrichmentFailures(context.Background(), rows))
 	assert.Equal(t, []string{"failed-graph", "clean"}, spans.asked)
 	assert.True(t, rows[0].GraphEnrichmentFailed)
 	for _, row := range rows[1:] {
 		assert.False(t, row.GraphEnrichmentFailed)
+	}
+}
+
+type graphStatusKnowledgeService struct {
+	interfaces.KnowledgeService
+	rows []*types.Knowledge
+}
+
+func (s *graphStatusKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
+	_ context.Context, _ string, page *types.Pagination, _ types.KnowledgeListFilter,
+) (*types.PageResult, error) {
+	return types.NewPageResult(int64(len(s.rows)), page, s.rows), nil
+}
+
+func (s *graphStatusKnowledgeService) GetKnowledgeBatch(context.Context, uint64, []string) ([]*types.Knowledge, error) {
+	return s.rows, nil
+}
+
+func TestKnowledgeReadsRetryGraphEnrichmentStatusAfterLookupFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct{ name, path string }{
+		{name: "paginated list", path: "/knowledge-bases/kb-1/knowledge"},
+		{name: "batch poll", path: "/batch?kb_id=kb-1&ids=failed-graph"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spans := &graphEnrichmentSpanRepo{err: errors.New("test database failure")}
+			h := &KnowledgeHandler{
+				kbService: &stubFolderKBService{},
+				kgService: &graphStatusKnowledgeService{rows: []*types.Knowledge{{
+					ID: "failed-graph", KnowledgeBaseID: "kb-1", TenantID: 1,
+					ParseStatus: types.ParseStatusCompleted, EnableStatus: "enabled",
+				}}},
+				spanRepo: spans,
+			}
+			r := gin.New()
+			r.Use(middleware.ErrorHandler(), func(c *gin.Context) {
+				ctx := types.WithExecutionTenant(c.Request.Context(), 1)
+				ctx = types.WithCaller(ctx, types.Caller{TenantID: 1, UserID: "user", Role: types.TenantRoleAdmin})
+				c.Request = c.Request.WithContext(ctx)
+				c.Next()
+			})
+			r.GET("/knowledge-bases/:id/knowledge", h.ListKnowledge)
+			r.GET("/batch", h.GetKnowledgeBatch)
+
+			failed := httptest.NewRecorder()
+			r.ServeHTTP(failed, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			require.Equal(t, http.StatusInternalServerError, failed.Code, failed.Body.String())
+			require.NotContains(t, failed.Body.String(), "test database failure")
+
+			spans.err = nil
+			retried := httptest.NewRecorder()
+			r.ServeHTTP(retried, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			require.Equal(t, http.StatusOK, retried.Code, retried.Body.String())
+			require.Contains(t, retried.Body.String(), `"graph_enrichment_failed":true`)
+		})
 	}
 }
 
