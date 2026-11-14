@@ -11001,6 +11001,28 @@ definitions:
         type: string
         x-agent: true
     type: object
+  internal_handler.CopyKnowledgeRequest:
+    properties:
+      knowledge_ids:
+        items:
+          type: string
+        maxItems: 20
+        minItems: 1
+        type: array
+      mode:
+        enum:
+        - reuse_vectors
+        type: string
+      source_kb_id:
+        type: string
+      target_kb_id:
+        type: string
+    required:
+    - knowledge_ids
+    - mode
+    - source_kb_id
+    - target_kb_id
+    type: object
   internal_handler.CopyModelRequest:
     properties:
       display_name:
@@ -21726,6 +21748,70 @@ paths:
       x-agent-hint: Reparses several documents of one knowledge base in the background;
         check them afterwards with knowledge.list parse_status. Search results change
         meanwhile.
+  /knowledge/copy:
+    post:
+      consumes:
+      - application/json
+      description: 复用已经解析的分块和向量，异步复制最多 20 篇文档，保留源文档。
+      parameters:
+      - description: 复制请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CopyKnowledgeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务信息
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.MoveKnowledgeResponse'
+              type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 复制文档到其他知识库
+      tags:
+      - 知识
+  /knowledge/copy/progress/{task_id}:
+    get:
+      parameters:
+      - description: 复制任务 ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 进度信息
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress'
+              type: object
+        "404":
+          description: 任务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取文档复制进度
+      tags:
+      - 知识
   /knowledge/folder:
     post:
       consumes:

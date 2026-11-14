@@ -3046,6 +3046,14 @@ type MoveKnowledgeResponse struct {
 	Message        string `json:"message"`
 }
 
+// CopyKnowledgeRequest selects up to 20 completed documents to copy.
+type CopyKnowledgeRequest struct {
+	KnowledgeIDs []string `json:"knowledge_ids" binding:"required,min=1,max=20"`
+	SourceKBID   string   `json:"source_kb_id" binding:"required"`
+	TargetKBID   string   `json:"target_kb_id" binding:"required"`
+	Mode         string   `json:"mode" binding:"required,oneof=reuse_vectors" enums:"reuse_vectors"`
+}
+
 // MoveKnowledge moves knowledge items from one knowledge base to another (async task).
 //
 // MoveKnowledge godoc
@@ -3063,12 +3071,43 @@ type MoveKnowledgeResponse struct {
 // @x-agent-hint "Moves up to 20 documents to another knowledge base of the same workspace; knowledge_base_id is the destination, from knowledge_base.list_move_targets. Runs in the background; follow with knowledge.get_move_progress."
 // @Router       /knowledge/move [post]
 func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
+	h.enqueueKnowledgeTransfer(c, access.KBTransferMove)
+}
+
+// CopyKnowledge queues a copy of completed documents into a compatible knowledge base.
+// @Summary      复制文档到其他知识库
+// @Description  复用已经解析的分块和向量，异步复制最多 20 篇文档，保留源文档。
+// @Tags         知识
+// @Accept       json
+// @Produce      json
+// @Param        request body handler.CopyKnowledgeRequest true "复制请求"
+// @Success      200 {object} handler.DataResponse{data=handler.MoveKnowledgeResponse} "任务信息"
+// @Failure      400 {object} errors.AppError "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/copy [post]
+func (h *KnowledgeHandler) CopyKnowledge(c *gin.Context) {
+	h.enqueueKnowledgeTransfer(c, access.KBTransferCopy)
+}
+
+func (h *KnowledgeHandler) enqueueKnowledgeTransfer(c *gin.Context, operation access.KBTransferOperation) {
 	ctx := c.Request.Context()
 
+	taskType, taskPrefix := types.TypeKnowledgeMove, "kg_move"
 	var req MoveKnowledgeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "MoveKnowledge: failed to parse request", err)
-		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+	if operation == access.KBTransferCopy {
+		taskType, taskPrefix = types.TypeKnowledgeCopy, "kg_copy"
+		var copyReq CopyKnowledgeRequest
+		if err := c.ShouldBindJSON(&copyReq); err != nil {
+			_ = c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+			return
+		}
+		req = MoveKnowledgeRequest{
+			KnowledgeIDs: copyReq.KnowledgeIDs, SourceKBID: copyReq.SourceKBID,
+			TargetKBID: copyReq.TargetKBID, Mode: copyReq.Mode,
+		}
+	} else if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
 		return
 	}
 
@@ -3135,8 +3174,8 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
-	taskID := utils.GenerateTaskID("kg_move", tenantID.(uint64), req.SourceKBID)
-	ctx, err = access.WithKBTransfer(c.Request.Context(), sourceKB, targetKB, access.KBTransferMove, taskID, false)
+	taskID := utils.GenerateTaskID(taskPrefix, tenantID.(uint64), req.SourceKBID)
+	ctx, err = access.WithKBTransfer(c.Request.Context(), sourceKB, targetKB, operation, taskID, false)
 	if err != nil {
 		_ = c.Error(kbAccessHTTPError(err))
 		return
@@ -3144,7 +3183,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if err := access.ValidateKBTransferCompatibility(sourceKB,
 		targetKB,
-		access.KBTransferMove,
+		operation,
 		req.Mode,
 		tenant); err != nil {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
@@ -3200,24 +3239,25 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		logger.Errorf(ctx, "MoveKnowledge: failed to marshal payload: %v", err)
+		logger.Errorf(ctx, "Knowledge %s: failed to marshal payload: %v", operation, err)
 		c.Error(errors.NewInternalServerError("Failed to create task"))
 		return
 	}
 
 	// Enqueue move task
-	task := asynq.NewTask(types.TypeKnowledgeMove, payloadBytes,
+	task := asynq.NewTask(taskType, payloadBytes,
 		asynq.TaskID(taskID), asynq.Queue(types.QueueMaintenance),
 		asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
-		logger.Errorf(ctx, "MoveKnowledge: failed to enqueue task: %v", err)
+		logger.Errorf(ctx, "Knowledge %s: failed to enqueue task: %v", operation, err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue task"))
 		return
 	}
 
-	logger.Infof(ctx, "MoveKnowledge: task enqueued: %s, asynq_id: %s, source: %s, target: %s, count: %d",
-		taskID, info.ID, secutils.SanitizeForLog(req.SourceKBID), secutils.SanitizeForLog(req.TargetKBID), len(req.KnowledgeIDs))
+	logger.Infof(ctx, "Knowledge %s: task enqueued: %s, asynq_id: %s, source: %s, target: %s, count: %d",
+		operation, taskID, info.ID, secutils.SanitizeForLog(req.SourceKBID),
+		secutils.SanitizeForLog(req.TargetKBID), len(req.KnowledgeIDs))
 
 	// Save initial progress
 	initialProgress := &types.KnowledgeMoveProgress{
@@ -3231,8 +3271,12 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		CreatedAt:  time.Now().Unix(),
 		UpdatedAt:  time.Now().Unix(),
 	}
-	if err := h.kgService.SaveKnowledgeMoveProgress(ctx, initialProgress); err != nil {
-		logger.Warnf(ctx, "MoveKnowledge: failed to save initial progress: %v", err)
+	saveProgress := h.kgService.SaveKnowledgeMoveProgress
+	if operation == access.KBTransferCopy {
+		saveProgress = h.kgService.SaveKnowledgeCopyProgress
+	}
+	if err := saveProgress(ctx, initialProgress); err != nil {
+		logger.Warnf(ctx, "Knowledge %s: failed to save initial progress: %v", operation, err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -3242,9 +3286,40 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 			SourceKBID:     req.SourceKBID,
 			TargetKBID:     req.TargetKBID,
 			KnowledgeCount: len(req.KnowledgeIDs),
-			Message:        "Knowledge move task started",
+			Message:        fmt.Sprintf("Knowledge %s task started", operation),
 		},
 	})
+}
+
+// GetKnowledgeCopyProgress retrieves the progress of a document copy.
+// @Summary      获取文档复制进度
+// @Tags         知识
+// @Produce      json
+// @Param        task_id path string true "复制任务 ID"
+// @Success      200 {object} handler.DataResponse{data=types.KnowledgeMoveProgress} "进度信息"
+// @Failure      404 {object} errors.AppError "任务不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/copy/progress/{task_id} [get]
+func (h *KnowledgeHandler) GetKnowledgeCopyProgress(c *gin.Context) {
+	ctx := c.Request.Context()
+	taskID := c.Param("task_id")
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	progress, err := h.kgService.GetKnowledgeCopyProgress(ctx, taskID)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	for _, kbID := range []string{progress.SourceKBID, progress.TargetKBID} {
+		if _, err := resolveHandlerKBAccess(c, kbID, h.kbService, nil, nil); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": progress})
 }
 
 // GetKnowledgeMoveProgress retrieves the progress of a knowledge move task.

@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -14,6 +15,7 @@ type KBTransferOperation string
 const (
 	KBTransferClone KBTransferOperation = "clone"
 	KBTransferMove  KBTransferOperation = "move"
+	KBTransferCopy  KBTransferOperation = "copy"
 )
 
 type kbTransferGrant struct {
@@ -45,7 +47,7 @@ func WithKBTransfer(
 		return ctx, err
 	}
 	required := types.OrgRoleViewer
-	if operation == KBTransferMove {
+	if operation != KBTransferClone {
 		required = types.OrgRoleEditor
 	}
 	if !HasKBGrant(ctx, source.ID, source.TenantID, required) ||
@@ -95,7 +97,7 @@ func withTransferGrant(
 		create:    create,
 	}
 	required := types.OrgRoleViewer
-	if operation == KBTransferMove {
+	if operation != KBTransferClone {
 		required = types.OrgRoleEditor
 	}
 	ctx = context.WithValue(ctx, types.KBGrantsContextKey, []kbGrant{
@@ -153,7 +155,8 @@ func validateTransferPair(
 	if source.ID == target.ID {
 		return fmt.Errorf("source and target knowledge bases must differ")
 	}
-	if operation != KBTransferClone && operation != KBTransferMove || create && operation != KBTransferClone {
+	if operation != KBTransferClone && operation != KBTransferMove && operation != KBTransferCopy ||
+		create && operation != KBTransferClone {
 		return ErrForbidden
 	}
 	return nil
@@ -173,7 +176,7 @@ func transferAPIScope(
 		return err
 	}
 	capability := types.APIKeyCapabilityManageKnowledgeBases
-	if operation == KBTransferMove {
+	if operation != KBTransferClone {
 		capability = types.APIKeyCapabilityIngest
 	}
 	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok && !scope.FullAccess &&
@@ -205,6 +208,18 @@ func ValidateKBTransferCompatibility(
 	}
 	if operation == KBTransferMove && mode != "reuse_vectors" && mode != "reparse" {
 		return fmt.Errorf("unknown move mode: %s", mode)
+	}
+	if operation == KBTransferCopy {
+		if mode != "reuse_vectors" || source.Type != types.KnowledgeBaseTypeDocument {
+			return fmt.Errorf("document copy requires document knowledge bases and reuse_vectors mode")
+		}
+		if !reflect.DeepEqual(source.ChunkingConfig, target.ChunkingConfig) {
+			return fmt.Errorf("source and target knowledge bases use different chunking configurations")
+		}
+		if source.IsVectorEnabled() != target.IsVectorEnabled() ||
+			source.IsKeywordEnabled() != target.IsKeywordEnabled() {
+			return fmt.Errorf("source and target knowledge bases use different search indexing configurations")
+		}
 	}
 	if (operation == KBTransferClone || mode == "reuse_vectors") && !source.SharesStoreWith(target) {
 		return fmt.Errorf("source and target knowledge bases use different vector stores; use reparse mode for moves")

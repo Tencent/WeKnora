@@ -1117,7 +1117,7 @@ func matchesKnowledgeBase(
 			if probe.SourceID == knowledgeBaseID || probe.TargetID == knowledgeBaseID {
 				return true
 			}
-		case types.TypeKnowledgeMove:
+		case types.TypeKnowledgeMove, types.TypeKnowledgeCopy:
 			if probe.SourceKBID == knowledgeBaseID || probe.TargetKBID == knowledgeBaseID {
 				return true
 			}

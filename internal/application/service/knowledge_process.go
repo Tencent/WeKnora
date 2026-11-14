@@ -42,12 +42,22 @@ func (s *knowledgeService) cloneKnowledge(
 	ctx context.Context,
 	src *types.Knowledge,
 	targetKB *types.KnowledgeBase,
+) error {
+	return s.cloneKnowledgeForTransfer(ctx, src, targetKB, access.KBTransferClone, "")
+}
+
+func (s *knowledgeService) cloneKnowledgeForTransfer(
+	ctx context.Context,
+	src *types.Knowledge,
+	targetKB *types.KnowledgeBase,
+	operation access.KBTransferOperation,
+	mode string,
 ) (err error) {
 	sourceKB, err := knowledgeWriteKB(ctx, s.kbService, src)
 	if err != nil {
 		return err
 	}
-	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, access.KBTransferClone); err != nil {
+	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, operation); err != nil {
 		return err
 	}
 	if src.ParseStatus != types.ParseStatusCompleted {
@@ -82,11 +92,29 @@ func (s *knowledgeService) cloneKnowledge(
 
 	state := knowledgeTransferState{
 		TaskID:    access.TransferTaskID(ctx),
-		Operation: access.KBTransferClone,
+		Operation: operation,
 		SourceKB:  sourceKB.ID,
 		TargetKB:  targetKB.ID,
 		SourceID:  src.ID,
+		Mode:      mode,
 		Phase:     "cloning",
+	}
+	if operation == access.KBTransferCopy {
+		fields := map[string]json.RawMessage{}
+		if len(src.Metadata) != 0 {
+			if err := json.Unmarshal(src.Metadata, &fields); err != nil {
+				return err
+			}
+		}
+		// A snapshot belongs to the destination, independent of subsequent syncs.
+		delete(fields, "datasource_id")
+		delete(fields, "external_id")
+		delete(fields, "source_resource_id")
+		dst.Metadata, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+		dst.ProcessedAt = src.ProcessedAt
 	}
 	if err := setTransferState(dst, state); err != nil {
 		return err
@@ -98,15 +126,19 @@ func (s *knowledgeService) cloneKnowledge(
 	// object is tracked for cleanup if the clone fails downstream.
 	var copiedFilePaths []string
 	if src.FilePath != "" {
-		srcKB, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, src.KnowledgeBaseID)
-		if kbErr != nil {
-			return fmt.Errorf("clone knowledge: failed to load source knowledge base: %w", kbErr)
-		}
-		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
 		dstSvc := s.resolveFileService(ctx, targetKB)
-		newPath, copyErr := copyOwnedObject(
-			ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID,
-			s.resourceCatalog, types.ResourceRelationSourceFile)
+		var newPath string
+		var copyErr error
+		if operation == access.KBTransferCopy {
+			// These KBs use the same storage instance. Copy the original
+			// without buffering large PDFs or using the image export layout.
+			newPath, copyErr = dstSvc.CopyFile(ctx, src.FilePath, dst.TenantID, dst.ID)
+		} else {
+			srcSvc := s.resolveFileServiceForPath(ctx, sourceKB, src.FilePath)
+			newPath, copyErr = copyOwnedObject(
+				ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID,
+				s.resourceCatalog, types.ResourceRelationSourceFile)
+		}
 		if copyErr != nil {
 			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
 		}
@@ -131,7 +163,7 @@ func (s *knowledgeService) cloneKnowledge(
 			return
 		}
 		marker, markerErr := transferState(stored)
-		if markerErr != nil || !matchesTransfer(ctx, marker, sourceKB, targetKB, access.KBTransferClone, src.ID, "") ||
+		if markerErr != nil || !matchesTransfer(ctx, marker, sourceKB, targetKB, operation, src.ID, mode) ||
 			stored.ParseStatus == types.ParseStatusCompleted {
 			return
 		}
@@ -152,8 +184,18 @@ func (s *knowledgeService) cloneKnowledge(
 		return err
 	}
 	dst.UpdatedAt = persisted.UpdatedAt
-	if err = s.CloneChunk(ctx, src, dst); err != nil {
+	if err = s.cloneTransferChunks(ctx, src, dst, operation); err != nil {
 		return err
+	}
+	if operation == access.KBTransferCopy {
+		current, err := s.repo.GetKnowledgeByID(ctx, src.TenantID, src.ID)
+		if err != nil {
+			return err
+		}
+		if validateTransferKnowledge(current, sourceKB) != nil ||
+			current.ParseStatus != types.ParseStatusCompleted || !current.UpdatedAt.Equal(src.UpdatedAt) {
+			return fmt.Errorf("source knowledge %s changed during copy", src.ID)
+		}
 	}
 	before := *dst
 	state.Phase = "done"
@@ -162,8 +204,17 @@ func (s *knowledgeService) cloneKnowledge(
 	}
 	dst.ParseStatus = types.ParseStatusCompleted
 	dst.EnableStatus = "enabled"
+	if operation == access.KBTransferCopy {
+		dst.EnableStatus = src.EnableStatus
+	}
 	dst.StorageSize = src.StorageSize
-	return s.repo.UpdateKnowledgeForTransfer(ctx, &before, dst)
+	if err = s.repo.UpdateKnowledgeForTransfer(ctx, &before, dst); err != nil {
+		return err
+	}
+	if operation == access.KBTransferCopy && targetKB.IsWikiAutoGenerateEnabled() {
+		_, err = EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, dst.TenantID, targetKB.ID, dst.ID)
+	}
+	return err
 }
 
 // processDocumentFromPassage handles asynchronous processing of text passages
