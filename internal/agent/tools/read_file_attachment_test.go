@@ -153,6 +153,7 @@ func TestReadFileAttachmentReportsStillParsingAfterWait(t *testing.T) {
 
 	assert.False(t, result.Success)
 	assert.Contains(t, result.Error, "still being parsed")
+	assert.True(t, result.AttachmentParsingPending)
 }
 
 func TestReadFileAttachmentRejectsDocumentsOutsideSession(t *testing.T) {
