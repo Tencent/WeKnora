@@ -78,6 +78,8 @@ func itemLen(v any) int {
 		return runeLen(item["text"])
 	case item["image"] != nil:
 		return dataURILen(item["image"].(string))
+	case item["image_base64"] != nil:
+		return dataURILen(item["image_base64"].(string))
 	case item["image_url"] != nil:
 		return dataURILen(item["image_url"].(map[string]any)["url"].(string))
 	case item["inlineData"] != nil:
@@ -118,6 +120,25 @@ func answer(path string, body map[string]any) string {
 	case strings.HasSuffix(path, "/embeddings/multimodal"):
 		n := itemLen(body["input"].([]any)[0])
 		return fmt.Sprintf(`{"data":{"embedding":[%d],"object":"embedding"}}`, n)
+	case strings.HasSuffix(path, "/contextualizedembeddings"): // Voyage: one entry per document, chunks inside
+		inputs := body["inputs"].([]any)
+		for i := len(inputs) - 1; i >= 0; i-- {
+			var n int
+			if nested, ok := inputs[i].([]any); ok {
+				n = runeLen(nested[0])
+			} else {
+				n = runeLen(inputs[i])
+			}
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"data":[{"index":0,"embedding":[%d]}]}`, i, n))
+		}
+		return `{"data":[` + strings.Join(parts, ",") + `]}`
+	case strings.HasSuffix(path, "/multimodalembeddings"): // Voyage: one content list per input
+		inputs := body["inputs"].([]any)
+		for i := len(inputs) - 1; i >= 0; i-- {
+			part := inputs[i].(map[string]any)["content"].([]any)[0]
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"embedding":[%d]}`, i, itemLen(part)))
+		}
+		return `{"data":[` + strings.Join(parts, ",") + `]}`
 	case body["messages"] != nil:
 		messages := body["messages"].([]any)
 		conversations := []any{messages}
@@ -436,6 +457,70 @@ func TestEmbeddingWireFormatPerVendor(t *testing.T) {
 				"model":   "models/gemini-embedding-2",
 				"content": map[string]any{"parts": []any{map[string]any{"text": "a"}}},
 			}}},
+		},
+		{
+			name: "voyage narrows through output_dimension and marks documents", provider: "voyage",
+			model: "voyage-4-large", base: "/v1", override: true,
+			wantPath: "/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: openAIBody("voyage-4-large", three,
+				map[string]any{"input_type": "document", "output_dimension": float64(256)}),
+		},
+		{
+			name: "voyage embeds a search query as a query at the native width", provider: "voyage",
+			model: "voyage-4", base: "/v1", query: true, texts: []string{"q"},
+			wantPath: "/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: openAIBody("voyage-4", []string{"q"}, map[string]any{"input_type": "query"}),
+		},
+		{
+			name: "voyage-finance-2 has a fixed width", provider: "voyage",
+			model: "voyage-finance-2", base: "/v1", override: true,
+			wantPath: "/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: openAIBody("voyage-finance-2", three, map[string]any{"input_type": "document"}),
+		},
+		{
+			name: "voyage takes up to a thousand texts per request", provider: "voyage",
+			model: "voyage-3.5-lite", base: "/v1", texts: texts(1001), wantRequests: 2,
+			wantPath: "/v1/embeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: openAIBody("voyage-3.5-lite", texts(1000), map[string]any{"input_type": "document"}),
+		},
+		{
+			name: "voyage contextualized sends documents flat and auto-chunked", provider: "voyage",
+			model: "voyage-context-4", base: "/v1", override: true,
+			wantPath: "/v1/contextualizedembeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model": "voyage-context-4", "inputs": strs(three), "input_type": "document",
+				"output_dimension": float64(256), "enable_auto_chunking": true, "chunk_size": float64(32000),
+			},
+		},
+		{
+			name:     "voyage contextualized queries are one-element lists without auto-chunking",
+			provider: "voyage", model: "voyage-context-3", base: "/v1", query: true, texts: []string{"q"},
+			wantPath: "/v1/contextualizedembeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model": "voyage-context-3", "inputs": []any{[]any{"q"}}, "input_type": "query",
+			},
+		},
+		{
+			name: "voyage multimodal embeds text as content parts", provider: "voyage",
+			model: "voyage-multimodal-3.5", base: "/v1", override: true,
+			wantPath: "/v1/multimodalembeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model": "voyage-multimodal-3.5", "input_type": "document", "output_dimension": float64(256),
+				"inputs": []any{
+					map[string]any{"content": []any{map[string]any{"type": "text", "text": "a"}}},
+					map[string]any{"content": []any{map[string]any{"type": "text", "text": "bb"}}},
+					map[string]any{"content": []any{map[string]any{"type": "text", "text": "ccc"}}},
+				},
+			},
+		},
+		{
+			name: "voyage-multimodal-3 has a fixed width", provider: "voyage",
+			model: "voyage-multimodal-3", base: "/v1", override: true, query: true, texts: []string{"q"},
+			wantPath: "/v1/multimodalembeddings", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model": "voyage-multimodal-3", "input_type": "query",
+				"inputs": []any{map[string]any{"content": []any{map[string]any{"type": "text", "text": "q"}}}},
+			},
 		},
 		{
 			name: "azure without api_version uses the v1 data plane", provider: "azure_openai",

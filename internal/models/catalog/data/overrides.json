@@ -2183,6 +2183,65 @@
           "off": null
         }
       }
+    ],
+    "voyage": [
+      {
+        "id": "voyage-finance-2",
+        "type": "Embedding",
+        "compat": {
+          "dimensions_field": ""
+        }
+      },
+      {
+        "id": "voyage-law-2",
+        "type": "Embedding",
+        "compat": {
+          "dimensions_field": ""
+        }
+      },
+      {
+        "id": "voyage-context-4",
+        "type": "Embedding",
+        "compat": {
+          "api": "voyage-contextualized-embeddings"
+        }
+      },
+      {
+        "id": "voyage-context-3",
+        "type": "Embedding",
+        "compat": {
+          "api": "voyage-contextualized-embeddings"
+        }
+      },
+      {
+        "id": "voyage-multimodal-3.5",
+        "type": "Embedding",
+        "compat": {
+          "api": "voyage-multimodal-embeddings",
+          "max_image_bytes": 20000000,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ]
+        }
+      },
+      {
+        "id": "voyage-multimodal-3",
+        "type": "Embedding",
+        "compat": {
+          "api": "voyage-multimodal-embeddings",
+          "max_image_bytes": 20000000,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "dimensions_field": ""
+        }
+      }
     ]
   }
 }
