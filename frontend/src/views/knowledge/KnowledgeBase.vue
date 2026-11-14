@@ -463,7 +463,8 @@ let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
 let scrollLoading = false;
-const resetPage = () => { page = 1; scrollLoading = false; };
+let documentPageGeneration = 0;
+const resetPage = () => { page = 1; scrollLoading = false; documentPageGeneration++; };
 
 // Move state — inline in card menu
 const moveMenuMode = ref<'normal' | 'targets' | 'confirm'>('normal');
@@ -2103,29 +2104,42 @@ const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrid
   }
 };
 
-const handleScroll = () => {
-  if (isFAQ.value) return;
-  if (docListLoading.value) return;
-  if (scrollLoading) return;
-  const currentKbId = kbId.value;
-  if (!currentKbId) return;
+const fillDocumentViewport = () => {
   const element = knowledgeScroll.value;
-  if (element) {
-    let pageNum = Math.ceil(total.value / pageSize)
-    const { scrollTop, scrollHeight, clientHeight } = element;
-    if (scrollTop + clientHeight >= scrollHeight - 10) {
-      if (cardList.value.length < total.value && page < pageNum) {
-        page++;
-        scrollLoading = true;
-        getKnowled({ page, page_size: pageSize, ...filterParams.value }, currentKbId).finally(() => {
-          if (isCurrentKb(currentKbId)) {
-            scrollLoading = false;
-          }
-        });
-      }
-    }
+  if (element?.clientHeight > 0 && element.scrollHeight <= element.clientHeight) {
+    handleScroll();
   }
 };
+
+const handleScroll = () => {
+  if (isFAQ.value || docListLoading.value || scrollLoading) return;
+  const currentKbId = kbId.value;
+  const element = knowledgeScroll.value;
+  if (!currentKbId || !element || element.clientHeight <= 0) return;
+  const { scrollTop, scrollHeight, clientHeight } = element;
+  if (scrollTop + clientHeight < scrollHeight - 10) return;
+  const previousCount = cardList.value.length;
+  if (previousCount >= total.value || page >= Math.ceil(total.value / pageSize)) return;
+
+  const nextPage = ++page;
+  const generation = documentPageGeneration;
+  scrollLoading = true;
+  getKnowled({ page: nextPage, page_size: pageSize, ...filterParams.value }, currentKbId).finally(async () => {
+    if (!isCurrentKb(currentKbId) || generation !== documentPageGeneration) return;
+    scrollLoading = false;
+    // A failed or empty response must not continuously retry without user input.
+    if (cardList.value.length <= previousCount) {
+      page--;
+      return;
+    }
+    await nextTick();
+    if (generation === documentPageGeneration) fillDocumentViewport();
+  });
+};
+
+// A page that fits entirely in the container cannot emit a scroll event.
+watch([knowledgeScroll, docListLoading, viewMode], fillDocumentViewport, { flush: 'post' });
+
 const getDoc = (page: number) => {
   getfDetails(details.id, page)
 };
