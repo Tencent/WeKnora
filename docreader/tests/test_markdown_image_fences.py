@@ -14,6 +14,15 @@ IMAGE = f"![example](data:image/png;base64,{PNG_B64})"
 
 
 class MarkdownImageFenceTest(unittest.TestCase):
+    def test_escaped_image_is_literal_but_even_backslashes_leave_an_image(self):
+        literal = "\\" + IMAGE
+        raw = literal + "\n\n" + "\\\\" + IMAGE
+        document = MarkdownParser().parse(raw.encode())
+        self.assertEqual(len(document.images), 1)
+        path, payload = next(iter(document.images.items()))
+        self.assertEqual(payload, PNG_B64)
+        self.assertEqual(document.content, literal + "\n\n" + "\\\\" + f"![example]({path})")
+
     def test_uploaded_markdown_preserves_fenced_images(self):
         for opening, closing in (
             ("```markdown", "```"),

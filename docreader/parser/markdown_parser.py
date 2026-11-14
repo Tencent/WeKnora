@@ -408,6 +408,13 @@ class MarkdownImageUtil:
 
         def repl(match: Match[str]) -> str:
             """Replacement function for each base64 image match."""
+            start = match.start()
+            before_escape = start
+            while before_escape > 0 and match.string[before_escape - 1] == "\\":
+                before_escape -= 1
+            if (start - before_escape) % 2:
+                return match.group(0)
+
             title = match.group(1)  # Alt text
             img_ext = match.group(2)  # Image format (png, jpg, etc.)
             img_b64 = match.group("data") or match.group("raw")
