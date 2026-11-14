@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,6 +56,13 @@ func hasRepeatedToolNotice(opts *chat.ChatOptions) bool {
 	return opts != nil && strings.Contains(opts.RuntimeNotice, `"type":"repeated_tool_calls"`)
 }
 
+type varyingDurationShell struct{ calls int }
+
+func (s *varyingDurationShell) ExecShellCommand(context.Context, string, string, string, time.Duration, map[string]string) (*sandbox.ExecuteResult, error) {
+	s.calls++
+	return &sandbox.ExecuteResult{Duration: time.Duration(s.calls) * 11 * time.Millisecond}, nil
+}
+
 // The loop from the report: unlimited iterations, and the model keeps issuing
 // the same shell command whose result is a successful empty match. The model
 // is told after the notice threshold and the turn stops at the hard limit.
@@ -68,8 +77,8 @@ func TestExecuteLoop_RepeatedSuccessfulToolCallsStopAtTheGuard(t *testing.T) {
 		cfg.MaxIterations = types.UnlimitedMaxIterations
 	})
 	engine.toolRegistry = agenttools.NewToolRegistry()
-	tool := newSequenceTool("shell_exec", "")
-	engine.toolRegistry.RegisterTool(tool)
+	executor := &varyingDurationShell{}
+	engine.toolRegistry.RegisterTool(agenttools.NewShellExecTool(executor, nil))
 
 	state := &types.AgentState{}
 	_, err := engine.executeLoop(context.Background(), state, "q", emptyMessages(), nil, "sess", "msg")
@@ -77,7 +86,7 @@ func TestExecuteLoop_RepeatedSuccessfulToolCallsStopAtTheGuard(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, maxRepeatedToolRounds, mock.callCount,
 		"the guard must stop the turn, not MaxIterations")
-	assert.Equal(t, maxRepeatedToolRounds, tool.calls)
+	assert.Equal(t, maxRepeatedToolRounds, executor.calls)
 	assert.True(t, state.IsComplete)
 	assert.Equal(t, repeatedToolRoundsStoppedAnswer, state.FinalAnswer,
 		"the user is told why the turn stopped")
@@ -272,4 +281,22 @@ func TestTrackRepeatedToolRound_WaitAgentBreaksTheStreak(t *testing.T) {
 	assert.Equal(t, 0, g.trackRepeatedToolRound([]types.ToolCall{wait}))
 	assert.Equal(t, 0, g.trackRepeatedToolRound([]types.ToolCall{shell, wait}))
 	assert.Equal(t, 1, g.trackRepeatedToolRound([]types.ToolCall{shell}), "the streak restarts after waiting")
+}
+
+func TestTrackRepeatedToolRound_PendingAttachmentDoesNotCountAsFailure(t *testing.T) {
+	g := &loopGuards{}
+	call := types.ToolCall{Name: "read_file", Args: map[string]interface{}{"path": "attachment://doc"}, Result: &types.ToolResult{AttachmentParsingPending: true, Error: "still being parsed"}}
+	for i := 0; i <= maxRepeatedToolRounds; i++ {
+		assert.Zero(t, g.trackRepeatedToolRound([]types.ToolCall{call}))
+		_, attempts, nudge := g.recordFailedToolCall(call)
+		assert.Zero(t, attempts)
+		assert.False(t, nudge)
+	}
+	call.Result = &types.ToolResult{Error: "could not be parsed"}
+	for i := 1; i <= maxRepeatedToolRounds; i++ {
+		assert.Equal(t, i, g.trackRepeatedToolRound([]types.ToolCall{call}))
+		_, attempts, nudge := g.recordFailedToolCall(call)
+		assert.Equal(t, i, attempts)
+		assert.Equal(t, i == maxConsecutiveFailedToolCalls, nudge)
+	}
 }

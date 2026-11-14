@@ -659,7 +659,9 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	b.WriteString(fmt.Sprintf("**Command**: `%s`\n", command))
 	b.WriteString(fmt.Sprintf("**Work Dir**: %s\n", workDir))
 	b.WriteString(fmt.Sprintf("**Exit Code**: %d\n", res.ExitCode))
+	timingStart := b.Len()
 	b.WriteString(fmt.Sprintf("**Duration**: %v\n", res.Duration))
+	timingEnd := b.Len()
 	if res.Killed {
 		b.WriteString("**Killed**: yes (timeout or terminated)\n")
 	}
@@ -697,6 +699,7 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		b.WriteString("\n")
 	}
 	visibleOutput := b.String()
+	outputWithoutTiming, _ := truncateShellStream(visibleOutput[:timingStart]+visibleOutput[timingEnd:], maxShellExecVisibleBytes)
 	visibleOutput, totalTruncated := truncateShellStream(visibleOutput, maxShellExecVisibleBytes)
 	truncated = truncated || errorTruncated || totalTruncated
 
@@ -739,11 +742,12 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		sessionID, res.ExitCode, res.Duration, res.Killed, truncated)
 
 	return &types.ToolResult{
-		Success:     res.Error == "" && !res.Killed,
-		Error:       errorText,
-		Output:      visibleOutput,
-		OutputFiles: outputFiles,
-		Data:        resultData,
+		Success:                  res.Error == "" && !res.Killed,
+		Error:                    errorText,
+		Output:                   visibleOutput,
+		ShellOutputWithoutTiming: outputWithoutTiming,
+		OutputFiles:              outputFiles,
+		Data:                     resultData,
 	}, nil
 }
 

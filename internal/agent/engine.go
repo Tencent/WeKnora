@@ -579,7 +579,7 @@ type loopGuards struct {
 // recordFailedToolCall tracks consecutive failures of the same model-facing
 // tool name and arguments. A successful or different call breaks the streak.
 func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, bool) {
-	if call.Result != nil && call.Result.Success {
+	if call.Result != nil && (call.Result.Success || call.Result.AttachmentParsingPending) {
 		g.resetFailedToolCallStreak()
 		return "", 0, false
 	}
@@ -617,7 +617,7 @@ func (g *loopGuards) resetFailedToolCallStreak() {
 // arguments and everything in its result that can reach the model: output,
 // error, structured data, images or their descriptions, and output files.
 // Two rounds with the same signature asked for the same thing and learned
-// nothing new.
+// nothing new, ignoring shell execution timing.
 func toolRoundSignature(calls []types.ToolCall) string {
 	type entry struct {
 		Name    string                 `json:"n"`
@@ -643,6 +643,18 @@ func toolRoundSignature(calls []types.ToolCall) string {
 			en.Success, en.Output, en.Error = r.Success, r.Output, r.Error
 			en.Data, en.Images, en.OutputFiles = r.Data, r.Images, r.OutputFiles
 			en.ImageDescriptions, en.ImageDetail, en.ImageFocus = r.ImageDescriptions, r.ImageDetail, r.ImageFocus
+			if r.ShellOutputWithoutTiming != "" {
+				en.Output = r.ShellOutputWithoutTiming
+				en.Data = make(map[string]interface{}, len(r.Data))
+				for key, value := range r.Data {
+					// The visible byte counts include the duration line too.
+					switch key {
+					case "duration_ms", "visible_original_bytes", "visible_returned_bytes", "total_truncated", "truncated":
+					default:
+						en.Data[key] = value
+					}
+				}
+			}
 		}
 		entries = append(entries, en)
 	}
@@ -662,9 +674,10 @@ func (g *loopGuards) trackRepeatedToolRound(calls []types.ToolCall) int {
 	// wait_agent's progress reaches the model outside its result: the runtime
 	// injects child messages separately, and a timeout returns the same flags
 	// every time while children keep running. Its waiting is bounded by the
-	// collaboration runtime, so a round that waits never counts as a repeat.
+	// collaboration runtime. Attachment parsing likewise progresses in the
+	// background, and read_file explicitly asks the model to keep waiting.
 	for _, tc := range calls {
-		if tc.Name == "wait_agent" {
+		if tc.Name == "wait_agent" || (tc.Result != nil && tc.Result.AttachmentParsingPending) {
 			g.lastToolRound, g.repeatedToolRounds = "", 0
 			return 0
 		}
