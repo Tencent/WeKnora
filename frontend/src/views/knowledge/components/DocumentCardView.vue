@@ -15,6 +15,7 @@ interface KnowledgeCard {
   id: string;
   knowledge_base_id?: string;
   parse_status: string;
+  graph_enrichment_failed?: boolean;
   summary_status?: string;
   description?: string;
   file_name?: string;
@@ -587,6 +588,11 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
         <div v-else class="card-content-txt" :class="{ 'is-empty': !cardSummaries.get(item.id) }">
           {{ cardSummaries.get(item.id) || t('knowledgeBase.noDocumentSummary') }}
         </div>
+        <button v-if="item.parse_status === 'completed' && item.graph_enrichment_failed" type="button"
+          class="graph-enrichment-status" :title="t('knowledgeStages.viewTrace')"
+          @click.stop="handleAction('view-trace', item)">
+          {{ t('knowledgeBase.statusGraphEnrichmentFailed') }}
+        </button>
         </div>
       </div>
 
@@ -992,6 +998,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 .card-analyze.queued { color: var(--td-text-color-secondary); }
 .card-draft { color: var(--td-warning-color); }
 .card-cancelled { color: var(--td-text-color-placeholder); }
+.graph-enrichment-status {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-warning-color);
+  cursor: pointer;
+  text-align: left;
+}
 .card-draft-tip { font-size: var(--app-text-xs); }
 .knowledge-card button:focus-visible {
   outline: 2px solid var(--app-focus-border);

@@ -52,6 +52,34 @@ func setupSpanTestRepo(t *testing.T) (KnowledgeSpanRepository, *gorm.DB) {
 	return NewKnowledgeSpanRepository(db), db
 }
 
+func TestKnowledgeSpanRepo_GraphEnrichmentFailures(t *testing.T) {
+	repo, _ := setupSpanTestRepo(t)
+	ctx := context.Background()
+	add := func(knowledge string, attempt int, name, status string) {
+		t.Helper()
+		require.NoError(t, repo.Upsert(ctx, &types.KnowledgeProcessingSpan{
+			KnowledgeID: knowledge, Attempt: attempt, SpanID: fmt.Sprint(time.Now().UnixNano()),
+			Name: name, Kind: types.SpanKindSubSpan, Status: status,
+		}))
+	}
+	chunk0, chunk1 := "postprocess.graph.chunk[0]", "postprocess.graph.chunk[1]"
+	add("mixed", 1, chunk0, types.SpanStatusFailed)
+	add("mixed", 1, chunk1, types.SpanStatusDone)
+	add("retried", 1, chunk0, types.SpanStatusFailed)
+	add("retried", 1, chunk0, types.SpanStatusDone)
+	add("rebuilt", 1, chunk0, types.SpanStatusFailed)
+	add("rebuilt", 2, "postprocess", types.SpanStatusDone)
+	add("other-stage", 1, "postprocess.summary", types.SpanStatusFailed)
+	add("skipped", 1, chunk0, types.SpanStatusSkipped)
+	add("outside-page", 1, chunk0, types.SpanStatusFailed)
+
+	ids, err := repo.GraphEnrichmentFailures(ctx, []string{
+		"mixed", "retried", "rebuilt", "other-stage", "skipped", "legacy",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"mixed"}, ids)
+}
+
 // TestKnowledgeSpanRepo_UpsertAndList covers the round-trip: a Begin
 // followed by an End for the same (kid, attempt, span_id) updates the
 // existing row in place, leaving exactly one row queryable by

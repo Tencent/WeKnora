@@ -189,6 +189,8 @@ type Knowledge struct {
 	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'" extensions:"x-agent"`
 	// Parse status of the knowledge
 	ParseStatus string `json:"parse_status" extensions:"x-agent"`
+	// GraphEnrichmentFailed is populated from processing spans for searchable documents.
+	GraphEnrichmentFailed bool `json:"graph_enrichment_failed,omitempty" gorm:"-"`
 	// PendingSubtasksCount is the outstanding enrichment subtask count
 	// (summary + question + graph chunks). Only meaningful while
 	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.

@@ -8911,6 +8911,7 @@ export default {
     batchReparseFailed: '일괄 재구축 실패',
     batchReparseSkippedInFlight: '파싱 중인 문서 {count}개를 건너뛰었습니다',
     statusCompleted: '완료',
+    statusGraphEnrichmentFailed: '검색 가능 · 그래프 추출 미완료',
     statusProcessing: '처리 중',
     statusFinalizing: '최적화 중',
     statusStalled: '멈춤 의심',

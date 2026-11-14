@@ -1176,6 +1176,14 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		return
 	}
 
+	if knowledges, ok := result.Data.([]*types.Knowledge); ok {
+		if err := h.attachGraphEnrichmentFailures(ctx, knowledges); err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			_ = c.Error(errors.NewInternalServerError("Failed to load graph enrichment status"))
+			return
+		}
+	}
+
 	logger.Infof(
 		ctx,
 		"Knowledge list retrieved successfully, knowledge base ID: %s, total: %d",
@@ -2247,6 +2255,11 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	}
 
 	h.attachLastActivity(ctx, knowledges)
+	if err := h.attachGraphEnrichmentFailures(ctx, knowledges); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError("Failed to load graph enrichment status"))
+		return
+	}
 
 	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
 		len(req.IDs), len(knowledges))
@@ -2330,6 +2343,33 @@ func (h *KnowledgeHandler) attachLastActivity(ctx context.Context, knowledges []
 	for _, k := range quiet {
 		k.StallState = verdicts[k.ID]
 	}
+}
+
+func (h *KnowledgeHandler) attachGraphEnrichmentFailures(ctx context.Context, knowledges []*types.Knowledge) error {
+	if h.spanRepo == nil {
+		return nil
+	}
+	searchable := make(map[string]*types.Knowledge)
+	ids := make([]string, 0, len(knowledges))
+	for _, k := range knowledges {
+		if k != nil && k.ParseStatus == types.ParseStatusCompleted && k.EnableStatus == "enabled" {
+			searchable[k.ID] = k
+			ids = append(ids, k.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	failed, err := h.spanRepo.GraphEnrichmentFailures(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for _, id := range failed {
+		if k := searchable[id]; k != nil {
+			k.GraphEnrichmentFailed = true
+		}
+	}
+	return nil
 }
 
 func isParseInFlight(status string) bool {

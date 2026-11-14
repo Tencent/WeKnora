@@ -8911,6 +8911,7 @@ export default {
     batchReparseFailed: 'Ошибка пакетной пересборки',
     batchReparseSkippedInFlight: 'Пропущено документов, которые ещё обрабатываются: {count}',
     statusCompleted: 'Завершено',
+    statusGraphEnrichmentFailed: 'Доступно для поиска · Извлечение графа не завершено',
     statusProcessing: 'Обработка',
     statusFinalizing: 'Оптимизация',
     statusStalled: 'Возможно, завис',

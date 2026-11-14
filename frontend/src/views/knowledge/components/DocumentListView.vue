@@ -25,6 +25,7 @@ interface KnowledgeItem {
   type?: string;
   tags?: Tag[];
   parse_status?: string;
+  graph_enrichment_failed?: boolean;
   summary_status?: string;
   updated_at?: string;
   source?: string;
@@ -372,7 +373,12 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
         </div>
 
         <div class="cell cell-status" role="cell">
-          <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
+          <button v-if="item.parse_status === 'completed' && item.graph_enrichment_failed" type="button"
+            class="graph-enrichment-status" :title="t('knowledgeStages.viewTrace')"
+            @click.stop="handleAction('view-trace', item)">
+            {{ t('knowledgeBase.statusGraphEnrichmentFailed') }}
+          </button>
+          <template v-else-if="statusByRow.get(item.id) as StatusInfo | undefined">
             <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
               variant="light" class="row-status-tag" :class="`status-${statusByRow.get(item.id)!.theme}`"
               :title="statusByRow.get(item.id)!.hint">
@@ -809,6 +815,16 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 
 .row-muted {
   color: var(--td-text-color-disabled);
+}
+
+.graph-enrichment-status {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-warning-color);
+  cursor: pointer;
+  text-align: left;
 }
 
 .row-status-tag {
