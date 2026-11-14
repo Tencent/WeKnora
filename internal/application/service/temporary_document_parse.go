@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 )
@@ -318,7 +319,38 @@ func (s *temporaryDocumentService) applyImageUnderstanding(
 func (s *temporaryDocumentService) understandImagesWithVLM(
 	ctx context.Context, vlmModelID string, images [][]byte, scanned, captionFallback bool,
 ) string {
-	model, err := s.modelService.GetVLMModel(ctx, vlmModelID)
+	return understandImagesWithVLM(ctx, s.modelService, vlmModelID, images, scanned, captionFallback)
+}
+
+// OCRScannedAttachment runs the scanned-document VLM OCR fallback for a chat
+// attachment that was parsed inline (attachment_uploads) instead of through a
+// temporary document. It applies the same gate as the temporary document path:
+// the content must be text-poor and the parse must have produced page images.
+// maxPages <= 0 uses the WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES default. Returns
+// the OCR text, or "" when OCR does not apply or yields nothing.
+func OCRScannedAttachment(
+	ctx context.Context, modelService interfaces.ModelService, vlmModelID string,
+	content string, imageRefs []types.ImageRef, maxPages int,
+) string {
+	if modelService == nil || vlmModelID == "" ||
+		approxTextContentRunes(content) >= temporaryDocumentLowTextRunes {
+		return ""
+	}
+	if maxPages <= 0 {
+		maxPages = temporaryDocumentImageOCRMaxPages()
+	}
+	pages := collectImageBytes(imageRefs, maxPages)
+	if len(pages) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(understandImagesWithVLM(ctx, modelService, vlmModelID, pages, true, false))
+}
+
+func understandImagesWithVLM(
+	ctx context.Context, modelService interfaces.ModelService, vlmModelID string,
+	images [][]byte, scanned, captionFallback bool,
+) string {
+	model, err := modelService.GetVLMModel(ctx, vlmModelID)
 	if err != nil {
 		logger.Warnf(ctx, "temporary document VLM model load failed: %v", err)
 		return ""
