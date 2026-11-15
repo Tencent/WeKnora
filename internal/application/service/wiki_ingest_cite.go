@@ -94,25 +94,22 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
-		"Content":             content,
-		"Language":            lang,
-		"PreviousSlugs":       prevSlugsText,
-		"Granularity":         string(granularity),
-		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
-		"CustomInstructions":  batchCtx.ExtractionInstructions,
-		"InstructionScope":    "wiki_extraction",
+	result, err := extractWikiSegments(content, func(segment string) (combinedExtraction, error) {
+		raw, callErr := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+			"Content": segment, "Language": lang, "PreviousSlugs": prevSlugsText,
+			"Granularity":         string(granularity),
+			"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+			"CustomInstructions":  batchCtx.ExtractionInstructions, "InstructionScope": "wiki_extraction",
+		})
+		if callErr != nil {
+			return combinedExtraction{}, callErr
+		}
+		var result combinedExtraction
+		parseErr := json.Unmarshal([]byte(cleanLLMJSON(raw)), &result)
+		return result, parseErr
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
-	}
-
-	raw = cleanLLMJSON(raw)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
-		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
