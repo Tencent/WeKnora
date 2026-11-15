@@ -90,21 +90,56 @@ type ImageEmbedder interface {
 // silently collapses a whole batch onto slot 0, which is what
 // Tencent/WeKnora#3484 was. An unfilled slot then reaches the index as an
 // empty vector, where it is stored and poisons retrieval without anything
-// failing, so a gap is an error instead. So is an index reported twice: one
-// of the two vectors belongs to some other input.
+// failing, so a gap is an error instead. So is an index reported twice when
+// the other indexes still name distinct inputs: one of the two vectors
+// belongs to some other input.
+//
+// A reply that stamps every item with the same index is different. DashScope's
+// compatible-mode qwen3.7-text-embedding-flash does this (every item is
+// index 0) while still returning one distinct vector per input, in request
+// order. Collapsing those onto slot 0 would drop the batch; keeping response
+// order matches the vectors to the texts.
 func PlaceEmbeddings(want, got int, at func(i int) (int, []float32)) ([][]float32, error) {
-	out := make([][]float32, want)
-	seen := make([]bool, want)
+	type placed struct {
+		index  int
+		vector []float32
+	}
+	items := make([]placed, got)
+	constantIndex := got > 1
+	var firstIndex int
 	for i := 0; i < got; i++ {
 		index, vector := at(i)
-		if index < 0 || index >= want {
-			return nil, fmt.Errorf("embedding index %d out of range for %d inputs", index, want)
+		items[i] = placed{index, vector}
+		if i == 0 {
+			firstIndex = index
+			continue
 		}
-		if seen[index] {
-			return nil, fmt.Errorf("embedding index %d returned twice", index)
+		if index != firstIndex {
+			constantIndex = false
 		}
-		seen[index] = true
-		out[index] = vector
+	}
+	if constantIndex && got == want {
+		out := make([][]float32, want)
+		for i, item := range items {
+			if len(item.vector) == 0 {
+				return nil, fmt.Errorf("no embedding returned for input %d of %d", i, want)
+			}
+			out[i] = item.vector
+		}
+		return out, nil
+	}
+
+	out := make([][]float32, want)
+	seen := make([]bool, want)
+	for _, item := range items {
+		if item.index < 0 || item.index >= want {
+			return nil, fmt.Errorf("embedding index %d out of range for %d inputs", item.index, want)
+		}
+		if seen[item.index] {
+			return nil, fmt.Errorf("embedding index %d returned twice", item.index)
+		}
+		seen[item.index] = true
+		out[item.index] = item.vector
 	}
 	for i, vector := range out {
 		if len(vector) == 0 {
