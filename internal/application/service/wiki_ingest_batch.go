@@ -1418,10 +1418,8 @@ func (s *wikiIngestService) mapOneDocument(
 		chunks,
 	)
 	rawRuneCount := len([]rune(content))
-	if len([]rune(content)) > maxContentForWiki {
-		content = string([]rune(content)[:maxContentForWiki])
-	}
-	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_len(raw=%d,truncated=%d)", knowledgeID, len(chunks), rawRuneCount, len([]rune(content)))
+	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_chars=%d segments=%d",
+		knowledgeID, len(chunks), rawRuneCount, len(splitWikiDocument(content)))
 
 	// Refuse to run LLM-based extraction when the document carries no real
 	// text — e.g. a scanned PDF whose pages were converted to images but where
@@ -1469,8 +1467,9 @@ func (s *wikiIngestService) mapOneDocument(
 	)
 	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
 	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
-		"content_chars": utf8.RuneCountInString(content),
-		"old_pages":     len(oldPageSlugs),
+		"content_chars":    utf8.RuneCountInString(content),
+		"content_segments": len(splitWikiDocument(content)),
+		"old_pages":        len(oldPageSlugs),
 	})
 	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 	if err != nil {
@@ -1546,7 +1545,7 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
+		summaryContent, summaryErr = s.generateWikiDocumentSummary(ctx, chatModel, map[string]string{
 			"Content":            content,
 			"Language":           lang,
 			"ExtractedSlugs":     slugListing,
@@ -1849,23 +1848,21 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 		prevSlugsText = "(none — this is a new document)"
 	}
 
-	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
-		"Content":            content,
-		"Language":           lang,
-		"PreviousSlugs":      prevSlugsText,
-		"CustomInstructions": batchCtx.ExtractionInstructions,
-		"InstructionScope":   "wiki_extraction",
+	result, err := extractWikiSegments(content, func(segment string) (combinedExtraction, error) {
+		extractionJSON, callErr := s.generateWithTemplate(
+			ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
+				"Content": segment, "Language": lang, "PreviousSlugs": prevSlugsText,
+				"CustomInstructions": batchCtx.ExtractionInstructions, "InstructionScope": "wiki_extraction",
+			})
+		if callErr != nil {
+			return combinedExtraction{}, callErr
+		}
+		var result combinedExtraction
+		parseErr := json.Unmarshal([]byte(cleanLLMJSON(extractionJSON)), &result)
+		return result, parseErr
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("combined extraction failed: %w", err)
-	}
-
-	extractionJSON = cleanLLMJSON(extractionJSON)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(extractionJSON), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse combined extraction JSON: %v\nRaw: %s", err, extractionJSON)
-		return nil, nil, nil, fmt.Errorf("parse combined extraction JSON: %w", err)
+		return nil, nil, nil, err
 	}
 
 	// Dedup pre-filter is dispatched against the wiki page repo via
@@ -2199,6 +2196,11 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		page.SourceRefs = newRefs
 	}
 
+	if len(retracts) > 0 && len(additions) == 0 && len(page.SourceRefs) == 0 {
+		err = s.wikiService.DeletePage(ctx, kbID, slug)
+		return err == nil, "retract", false, false, err
+	}
+
 	if len(additions) > 0 {
 		// Resolve SourceChunks → chunk contents in a single batched query per
 		// knowledge ID, so the <new_information> block can quote the chunks
@@ -2363,18 +2365,16 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 				page.Summary = updatedSummary
 			}
 			changed = true
-		} else if err != nil {
-			logger.Warnf(ctx, "wiki ingest: update/retract failed for slug %s: %v", slug, err)
-			// Flag addition failures so the batch can sanitize stale
-			// [[slug]] references in the doc's summary page and keep the
-			// missing page out of finalize processing.
-			// Retract-only failures don't poison anything (they leave
-			// the existing page unchanged), so don't flag those.
-			if len(additions) > 0 {
-				additionFailed = true
+			for _, r := range retracts {
+				if clearErr := page.SetPendingRetraction(r.KnowledgeID, false); clearErr != nil {
+					return false, affectedType, false, false, clearErr
+				}
 			}
-			// Preserve the error so the owning documents are retried rather than
-			// marked complete while their page contribution is missing.
+		} else {
+			if err == nil {
+				err = fmt.Errorf("empty wiki rewrite for %s", slug)
+			}
+			return false, affectedType, len(additions) > 0, false, err
 		}
 	}
 

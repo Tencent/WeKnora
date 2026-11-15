@@ -184,7 +184,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 //   - Wiki pages whose source_refs include this knowledge
 //   - Pending/in-flight wiki_ingest tasks that may create *new* pages pointing at it
 //
-// The function is deliberately best-effort and idempotent:
+// The cleanup is idempotent and returns errors so deletion can be retried:
 //   - It writes a tombstone + scrubs pending ingest ops so new pages cannot be
 //     born with a stale source_ref (guards (a) queued ingest and (b) ingest
 //     tasks mid-LLM call — both consult the tombstone before writing).
@@ -197,10 +197,8 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 //     created them). The retract handler re-queries ListPagesBySourceRef at
 //     run time, so even with an empty PageSlugs it will do the right thing —
 //     and at worst it's a cheap no-op.
-func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, knowledge *types.Knowledge) {
-	if err := s.cleanupWikiReferences(ctx, knowledge, s.wikiChunkRefsForKnowledge(ctx, knowledge)); err != nil {
-		logger.Warnf(ctx, "wiki cleanup failed: %v", err)
-	}
+func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, knowledge *types.Knowledge) error {
+	return s.cleanupWikiReferences(ctx, knowledge, s.wikiChunkRefsForKnowledge(ctx, knowledge))
 }
 
 func (s *knowledgeService) cleanupWikiReferences(
@@ -303,6 +301,9 @@ func (s *knowledgeService) cleanupWikiReferences(
 				deletedSlugs = append(deletedSlugs, page.Slug)
 			}
 		} else {
+			if err := page.SetPendingRetraction(knowledgeID, true); err != nil {
+				return errors.Join(cleanupErr, err)
+			}
 			page.SourceRefs = remaining
 			page.ChunkRefs = removeChunkRefs(page.ChunkRefs, sourceChunkRefs)
 			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
@@ -575,7 +576,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	for _, knowledge := range knowledgeList {
 		kb := knowledgeBases[knowledge.KnowledgeBaseID]
 		if kb != nil && kb.IsWikiEnabled() {
-			s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
+			if err := s.cleanupWikiOnKnowledgeDelete(ctx, knowledge); err != nil {
+				return fmt.Errorf("clean wiki references for %s: %w", knowledge.ID, err)
+			}
 		}
 	}
 

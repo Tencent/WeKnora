@@ -38,7 +38,7 @@ import (
 var ErrWikiIngestConcurrent = errors.New("concurrent wiki task active")
 
 const (
-	// maxContentForWiki limits the document content sent to LLM for wiki generation
+	// maxContentForWiki bounds each document segment sent to the wiki model.
 	maxContentForWiki = 32768
 
 	// --- Phase 3: concurrent per-KB batches (standard/Redis mode) ---------
