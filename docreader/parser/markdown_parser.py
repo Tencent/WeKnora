@@ -34,6 +34,34 @@ _ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
 _CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+# MarkItDown inlines Office drawings as image/x-wmf and image/x-emf. The
+# multimodal pipeline only decodes PNG/JPEG/GIF/BMP/WebP, so the original
+# bytes are sniffed as application/octet-stream and archived with SkipRetry.
+_OFFICE_METAFILE_EXT = {
+    "wmf": ".wmf",
+    "x-wmf": ".wmf",
+    "emf": ".emf",
+    "x-emf": ".emf",
+}
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _rasterize_office_metafile(subtype: str, data: bytes) -> bytes | None:
+    """Return PNG bytes for a WMF/EMF payload, or None when it cannot be made.
+
+    Reuses the PPTX rasterizer (ImageMagick ``convert`` when it is installed).
+    The name ends in ``.wmf`` or ``.emf``: ``rasterize_media_bytes`` selects
+    the vector path from that suffix, and ``x-wmf`` is not one of them.
+    """
+    suffix = _OFFICE_METAFILE_EXT.get(subtype.lower())
+    if suffix is None:
+        return None
+    from docreader.parser.pptx_media import rasterize_media_bytes
+
+    png = rasterize_media_bytes(f"drawing{suffix}", data)
+    if png and png.startswith(_PNG_MAGIC):
+        return png
+    return None
 
 
 def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> str:
@@ -306,6 +334,8 @@ class MarkdownImageUtil:
 
     Supported formats:
     - Base64 embedded images: ![alt](data:image/png;base64,iVBORw0...)
+    - Office metafiles (image/wmf, image/x-wmf, image/emf, image/x-emf),
+      stored as PNG after rasterization
     - Regular image links: ![alt](path/to/image.png)
     """
 
@@ -418,6 +448,19 @@ class MarkdownImageUtil:
             if not image_byte:
                 logger.error(f"Failed to decode base64 image skip it: {img_b64}")
                 return title  # Return just the alt text if decode fails
+
+            # WMF/EMF cannot be fed to a vision model. Store a PNG, or drop
+            # the drawing, instead of enqueueing a task that can only archive.
+            if img_ext.lower() in _OFFICE_METAFILE_EXT:
+                png = _rasterize_office_metafile(img_ext, image_byte)
+                if not png:
+                    logger.warning(
+                        "Skipping %s image that could not be rasterized to PNG",
+                        img_ext,
+                    )
+                    return title
+                image_byte = png
+                img_ext = "png"
 
             # Generate unique filename with original extension
             image_path = f"{uuid.uuid4()}.{img_ext}"
