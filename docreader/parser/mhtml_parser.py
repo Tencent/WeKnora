@@ -306,7 +306,10 @@ class MHTMLParser(BaseParser):
         decoded = unquote(html.unescape(_header_str(location).strip()))
         if not decoded or decoded.lower().startswith("cid:"):
             return ""
-        path = urlparse(decoded).path or decoded
+        try:
+            path = urlparse(decoded).path or decoded
+        except ValueError:
+            return ""
         filename = os.path.basename(path)
         if not filename or filename in {".", ".."}:
             return ""
