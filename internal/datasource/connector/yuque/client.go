@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -139,7 +140,9 @@ func (c *client) doRequest(ctx context.Context, method, path string, result inte
 			return lastErr
 		}
 
-		bodyPreview := truncate(string(body), 500)
+		// Gateways can return non-UTF-8 error pages. Keep the preview safe
+		// for text fields that store the resulting sync error.
+		bodyPreview := strings.ToValidUTF8(truncate(string(body), 500), "?")
 		logger.Infof(ctx, "[Yuque] %s %s → status=%d bodyLen=%d body=%s",
 			method, path, resp.StatusCode, len(body), bodyPreview)
 
