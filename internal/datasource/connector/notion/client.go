@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -273,7 +274,7 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
-			path += "?start_cursor=" + startCursor
+			path += "?start_cursor=" + url.QueryEscape(startCursor)
 		}
 
 		respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -338,7 +339,7 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
-			path += "?start_cursor=" + startCursor
+			path += "?start_cursor=" + url.QueryEscape(startCursor)
 		}
 
 		respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
