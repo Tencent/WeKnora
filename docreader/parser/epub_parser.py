@@ -87,7 +87,9 @@ class EPUBParser(BaseParser):
             ]
 
             def chapter_num(filename: str) -> int:
-                match = re.search(r"chapter(\d+)", filename, re.IGNORECASE)
+                match = re.search(
+                    r"chapter[_-]?(\d+)", posixpath.basename(filename), re.IGNORECASE
+                )
                 return int(match.group(1)) if match else 999999
 
             html_files.sort(key=chapter_num)
