@@ -94,6 +94,12 @@ def _header_str(value) -> str:
     return "".join(parts)
 
 
+def _normalize_cid_scheme(value: str) -> str:
+    if value[:4].lower() == "cid:":
+        return "cid:" + value[4:]
+    return value
+
+
 class MHTMLParser(BaseParser):
     """Parser for MHTML web archives."""
 
@@ -261,7 +267,7 @@ class MHTMLParser(BaseParser):
                 values.add(f"cid:{unquote(cid)}")
             for value in values:
                 if value:
-                    image_aliases[value] = image_path
+                    image_aliases[_normalize_cid_scheme(value)] = image_path
 
     @staticmethod
     def _image_extension(content_type: str) -> str:
@@ -516,6 +522,7 @@ class MHTMLParser(BaseParser):
             if base_name:
                 candidates.append(base_name)
             for candidate in candidates:
-                if candidate in image_aliases:
-                    img["src"] = image_aliases[candidate]
+                path = image_aliases.get(_normalize_cid_scheme(candidate))
+                if path is not None:
+                    img["src"] = path
                     break
