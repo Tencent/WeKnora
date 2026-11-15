@@ -428,7 +428,13 @@ func isHTMLPageShell(body string) bool {
 		trimmed = trimmed[:512]
 	}
 	lower := strings.ToLower(trimmed)
-	return strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html")
+	for _, prefix := range []string{"<!doctype html", "<html"} {
+		rest, ok := strings.CutPrefix(lower, prefix)
+		if ok && len(rest) > 0 && strings.ContainsRune(" \t\r\n\f/>", rune(rest[0])) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildDocURL constructs a browser URL for a Yuque doc.
