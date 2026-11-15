@@ -106,16 +106,7 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		// A Markdown tutorial can itself contain backtick fences. Use a
 		// longer outer fence so imported code cannot become document structure.
 		code := renderRichText(rt)
-		fenceLength, run := 3, 0
-		for _, char := range code {
-			if char == '`' {
-				run++
-				fenceLength = max(fenceLength, run+1)
-			} else {
-				run = 0
-			}
-		}
-		fence := strings.Repeat("`", fenceLength)
+		fence := backtickDelimiter(code, 3)
 		fmt.Fprintf(b, "%s%s\n%s\n%s\n\n", fence, lang, code, fence)
 
 	case "quote", "meeting_notes":
@@ -360,13 +351,33 @@ func richTextToString(rt notionRichText) string {
 	}
 }
 
+func backtickDelimiter(code string, minLength int) string {
+	length, run := minLength, 0
+	for _, char := range code {
+		if char == '`' {
+			run++
+			length = max(length, run+1)
+		} else {
+			run = 0
+		}
+	}
+	return strings.Repeat("`", length)
+}
+
 // applyAnnotations wraps text with Markdown formatting based on annotations.
 func applyAnnotations(text string, ann notionAnnotations) string {
 	if text == "" {
 		return text
 	}
 	if ann.Code {
-		text = "`" + text + "`"
+		delimiter := backtickDelimiter(text, 1)
+		// CommonMark removes one space on each side of a nonblank span.
+		// Add a removable pair to separate edge backticks or preserve spaces.
+		if strings.HasPrefix(text, "`") || strings.HasSuffix(text, "`") ||
+			(strings.HasPrefix(text, " ") && strings.HasSuffix(text, " ") && strings.Trim(text, " ") != "") {
+			text = " " + text + " "
+		}
+		text = delimiter + text + delimiter
 	}
 	if ann.Bold && ann.Italic {
 		text = "***" + text + "***"
