@@ -94,7 +94,9 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	result, err := extractWikiSegments(content, func(segment string) (combinedExtraction, error) {
+	result, err := extractWikiSegments(ctx, content, batchCtx.ExtractionParallel, func(
+		ctx context.Context, segment string,
+	) (combinedExtraction, error) {
 		raw, callErr := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
 			"Content": segment, "Language": lang, "PreviousSlugs": prevSlugsText,
 			"Granularity":         string(granularity),

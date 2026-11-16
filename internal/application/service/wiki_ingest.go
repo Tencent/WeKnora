@@ -1460,6 +1460,10 @@ type WikiBatchContext struct {
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
 
+	// ExtractionParallel reuses the KB's existing LLM synthesis concurrency.
+	// The per-model governor still caps calls shared across all background jobs.
+	ExtractionParallel int
+
 	// ContentInstructions and ExtractionInstructions are KB-scoped business
 	// guidance. Stable citation, merge, taxonomy and JSON rules remain in the
 	// system templates and cannot be replaced by these fields.
@@ -2455,6 +2459,30 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	if s.wikiService == nil {
 		return s.stabilizeExtractedIdentities(ctx, kbID, types.WikiPageTypeEntity, entities, nil, nil, batchCtx),
 			s.stabilizeExtractedIdentities(ctx, kbID, types.WikiPageTypeConcept, concepts, nil, nil, batchCtx)
+	}
+	// A matching URL spelling does not establish identity. Resolve occupied
+	// slugs before probing so the model can judge the old page as a candidate,
+	// rather than treating it as an unquestioned update of the same object.
+	if batchCtx != nil && batchCtx.SlugTitleMany != nil {
+		slugs := make([]string, 0, len(entities)+len(concepts))
+		for _, items := range [][]extractedItem{entities, concepts} {
+			for _, item := range items {
+				slugs = append(slugs, item.Slug)
+				slugs = append(slugs, strings.SplitN(item.Slug, "/", 2)[0]+"/"+slugify(item.Name))
+			}
+		}
+		occupied := make(map[string]string)
+		for slug, title := range batchCtx.SlugTitleMany(ctx, slugs) {
+			if title != "" {
+				occupied[slug] = normalizeWikiIdentityTitle(title)
+			}
+		}
+		for _, items := range [][]extractedItem{entities, concepts} {
+			for i := range items {
+				items[i].Slug = unoccupiedWikiExtractionSlug(items[i], occupied)
+				occupied[items[i].Slug] = normalizeWikiIdentityTitle(items[i].Name)
+			}
+		}
 	}
 
 	// Build the candidate set: for each new item, ask the repo for

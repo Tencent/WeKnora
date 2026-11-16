@@ -252,6 +252,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 			return m[kid]
 		},
 		ExtractionGranularity:  granularity,
+		ExtractionParallel:     wikiConfig.IngestReduceParallelOrDefault(10),
 		ContentInstructions:    contentInstructions,
 		ExtractionInstructions: extractionInstructions,
 	}
@@ -1419,7 +1420,7 @@ func (s *wikiIngestService) mapOneDocument(
 	)
 	rawRuneCount := len([]rune(content))
 	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_chars=%d segments=%d",
-		knowledgeID, len(chunks), rawRuneCount, len(splitWikiDocument(content)))
+		knowledgeID, len(chunks), rawRuneCount, len(splitWikiExtractionDocument(content)))
 
 	// Refuse to run LLM-based extraction when the document carries no real
 	// text — e.g. a scanned PDF whose pages were converted to images but where
@@ -1468,7 +1469,7 @@ func (s *wikiIngestService) mapOneDocument(
 	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
 	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
 		"content_chars":    utf8.RuneCountInString(content),
-		"content_segments": len(splitWikiDocument(content)),
+		"content_segments": len(splitWikiExtractionDocument(content)),
 		"old_pages":        len(oldPageSlugs),
 	})
 	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
@@ -1848,7 +1849,9 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 		prevSlugsText = "(none — this is a new document)"
 	}
 
-	result, err := extractWikiSegments(content, func(segment string) (combinedExtraction, error) {
+	result, err := extractWikiSegments(ctx, content, batchCtx.ExtractionParallel, func(
+		ctx context.Context, segment string,
+	) (combinedExtraction, error) {
 		extractionJSON, callErr := s.generateWithTemplate(
 			ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
 				"Content": segment, "Language": lang, "PreviousSlugs": prevSlugsText,

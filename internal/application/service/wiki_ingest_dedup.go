@@ -354,8 +354,8 @@ func preferWikiIdentityDisplayName(dst, src string) (name, extraAlias string) {
 }
 
 // mergeExtractedIdentity folds duplicate candidates that converged to the same
-// slug. It preserves every alias/chunk reference and keeps the richer fallback
-// text, so convergence never discards evidence before the citation/reduce pass.
+// slug. It preserves every alias/chunk reference and distinct fallback fact,
+// so convergence never discards evidence before the citation/reduce pass.
 func mergeExtractedIdentity(dst, src extractedItem) extractedItem {
 	name, extraAlias := preferWikiIdentityDisplayName(dst.Name, src.Name)
 	dst.Name = name
@@ -366,13 +366,22 @@ func mergeExtractedIdentity(dst, src extractedItem) extractedItem {
 	if len([]rune(src.Description)) > len([]rune(dst.Description)) {
 		dst.Description = src.Description
 	}
-	if len([]rune(src.Details)) > len([]rune(dst.Details)) {
-		dst.Details = src.Details
-	}
+	dst.Details = mergeWikiExtractionDetails(dst.Details, src.Details)
 	for _, chunkID := range src.SourceChunks {
 		dst.SourceChunks = appendUniqueString(dst.SourceChunks, chunkID)
 	}
 	return dst
+}
+
+func mergeWikiExtractionDetails(dst, src string) string {
+	switch {
+	case src == "" || strings.Contains(dst, src):
+		return dst
+	case dst == "" || strings.Contains(src, dst):
+		return src
+	default:
+		return dst + "\n" + src
+	}
 }
 
 func appendUniqueString(values []string, value string) []string {
