@@ -528,6 +528,7 @@ const shortcutFor = (flatIndex: number): number | undefined => {
 }
 
 const onKeyDown = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
   if (settingsVisible.value && e.key === 'Escape') {
     e.preventDefault()
     settingsVisible.value = false
@@ -553,6 +554,8 @@ const onKeyDown = (e: KeyboardEvent) => {
       item.run({ cmd: false })
     }
   } else if (e.key === 'Enter') {
+    // Let native buttons handle ordinary Enter; modified Enter remains a palette shortcut.
+    if (!e.metaKey && !e.ctrlKey && (e.target as Element | null)?.closest('button')) return
     e.preventDefault()
     primaryActionForSelected({ cmd: e.metaKey || e.ctrlKey })
   } else if (e.key === 'Escape') {
