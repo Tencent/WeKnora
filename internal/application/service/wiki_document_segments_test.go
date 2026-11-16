@@ -298,8 +298,10 @@ func TestWikiExtractionParallelKeepsDocumentOrderAndEvidence(t *testing.T) {
 				}
 				current := active.Add(1)
 				defer active.Add(-1)
-				for old := peak.Load(); current > old && !peak.CompareAndSwap(old, current); old = peak.Load() {
-					// Retry if another worker updated the maximum concurrently.
+				for old := peak.Load(); current > old; old = peak.Load() {
+					if peak.CompareAndSwap(old, current) {
+						break
+					}
 				}
 				started <- index
 				select {
