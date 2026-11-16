@@ -299,6 +299,7 @@ func (a *StreamAssembler) Fail(ch chan<- types.StreamResponse, err error) {
 	a.emit(ch, types.StreamResponse{
 		ResponseType: types.ResponseTypeError,
 		Content:      err.Error(),
+		Cause:        err,
 		Done:         true,
 		ToolCalls:    a.OrderedToolCalls(),
 		Usage:        a.Usage,

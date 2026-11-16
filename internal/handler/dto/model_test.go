@@ -375,3 +375,11 @@ func TestNewModelResponseReportsEmbeddingInputModalities(t *testing.T) {
 		})
 	}
 }
+
+func TestModelResponseKeepsWorkspaceBackupModelID(t *testing.T) {
+	model := &types.Model{Type: types.ModelTypeKnowledgeQA}
+	model.Parameters.FallbackChatModelID = "backup"
+	require.Equal(t, "backup", NewModelResponse(adminContext(), model).Parameters.FallbackChatModelID)
+	model.IsBuiltin = true
+	require.Empty(t, NewModelResponse(adminContext(), model).Parameters.FallbackChatModelID)
+}

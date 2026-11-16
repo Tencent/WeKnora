@@ -214,6 +214,7 @@ type ModelParametersDTO struct {
 	Provider            string                    `json:"provider" extensions:"x-agent"`
 	ExtraConfig         map[string]string         `json:"extra_config,omitempty" extensions:"x-agent,x-agent-detail,x-agent-keys=remote_model_name"`
 	CustomHeaders       map[string]string         `json:"custom_headers,omitempty"`
+	FallbackChatModelID string                    `json:"fallback_chat_model_id,omitempty"`
 	SupportsVision      bool                      `json:"supports_vision"`
 	ContextWindow       int                       `json:"context_window,omitempty"`
 	MaxOutputTokens     int                       `json:"max_output_tokens,omitempty"`
@@ -239,6 +240,7 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		ExtraConfig:         m.Parameters.ExtraConfig,
 		CustomHeaders:       m.Parameters.CustomHeaders,
 		SupportsVision:      m.Parameters.SupportsVision,
+		FallbackChatModelID: m.Parameters.FallbackChatModelID,
 		ContextWindow:       m.Parameters.ContextWindow,
 		MaxOutputTokens:     m.Parameters.MaxOutputTokens,
 		MaxConcurrency:      m.Parameters.MaxConcurrency,
@@ -257,6 +259,7 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		params.Spec = nil
 	}
 	if m.IsBuiltin && !canManageBuiltin {
+		params.FallbackChatModelID = ""
 		// Builtin: strip everything that could reveal per-tenant config.
 		// EmbeddingParameters and ParameterSize / Provider / InterfaceType /
 		// SupportsVision / ContextWindow / MaxOutputTokens are intentionally

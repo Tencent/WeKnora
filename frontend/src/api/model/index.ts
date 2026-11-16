@@ -69,6 +69,7 @@ export interface ModelConfig {
     // 自定义 HTTP 请求头（类似 Python OpenAI SDK 的 extra_headers），
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
+    fallback_chat_model_id?: string;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
     // 对话/VLM 的上下文窗口（token）。0 或不填表示使用后端默认 200000。
     context_window?: number;
