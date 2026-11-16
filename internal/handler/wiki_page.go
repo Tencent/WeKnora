@@ -90,6 +90,7 @@ const wikiListMaxPageSize = 200
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id      path      string  true   "Knowledge base ID"
+// @Param        source_knowledge_id query string false "Filter by source knowledge ID"
 // @Param        page_type  query     string  false  "Filter by page type; comma-separated for multiple (e.g. entity,concept)"
 // @Param        status     query     string  false  "Filter by status"
 // @Param        query      query     string  false  "Full-text search"
@@ -132,17 +133,18 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 	}
 
 	req := &types.WikiPageListRequest{
-		KnowledgeBaseID: kbID,
-		PageType:        c.Query("page_type"),
-		Status:          c.Query("status"),
-		Query:           c.Query("query"),
-		FolderID:        folderID,
-		CategoryPath:    types.StringArray(categoryPath),
-		CategoryDepth:   categoryDepth,
-		Page:            page,
-		PageSize:        pageSize,
-		SortBy:          c.DefaultQuery("sort_by", "updated_at"),
-		SortOrder:       c.DefaultQuery("sort_order", "desc"),
+		SourceKnowledgeID: strings.TrimSpace(c.Query("source_knowledge_id")),
+		KnowledgeBaseID:   kbID,
+		PageType:          c.Query("page_type"),
+		Status:            c.Query("status"),
+		Query:             c.Query("query"),
+		FolderID:          folderID,
+		CategoryPath:      types.StringArray(categoryPath),
+		CategoryDepth:     categoryDepth,
+		Page:              page,
+		PageSize:          pageSize,
+		SortBy:            c.DefaultQuery("sort_by", "updated_at"),
+		SortOrder:         c.DefaultQuery("sort_order", "desc"),
 	}
 
 	resp, err := h.wikiService.ListPages(c.Request.Context(), req)
