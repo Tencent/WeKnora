@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -669,4 +670,25 @@ func (r *taskDeadLetterRepository) DeleteByID(ctx context.Context, id int64) err
 	return r.db.WithContext(ctx).
 		Where("id = ?", id).
 		Delete(&types.TaskDeadLetter{}).Error
+}
+
+// CompareAndSwapPayload retains progress on the durable operation itself.
+// A deleted/replaced operation is never recreated by a late worker.
+func (r *taskPendingOpsRepository) CompareAndSwapPayload(
+	ctx context.Context, tenantID uint64, id int64, before, after json.RawMessage,
+) (bool, error) {
+	if !json.Valid(before) || !json.Valid(after) {
+		return false, errors.New("task checkpoint: invalid JSON payload")
+	}
+	query := r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).Where("tenant_id = ? AND id = ?", tenantID, id)
+	switch r.db.Name() {
+	case "postgres":
+		query = query.Where("payload = ?::jsonb", string(before))
+	case "mysql":
+		query = query.Where("payload = CAST(? AS JSON)", string(before))
+	default:
+		query = query.Where("CAST(payload AS TEXT) = ?", string(before))
+	}
+	result := query.Updates(map[string]interface{}{"payload": after, "fail_count": 0})
+	return result.RowsAffected == 1, result.Error
 }

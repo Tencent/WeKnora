@@ -367,8 +367,10 @@ type WikiPendingOp struct {
 	PageSlugs  []string `json:"page_slugs,omitempty"`
 	FolderIDs  []string `json:"folder_ids,omitempty"`
 
-	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
-	// constructions made outside the queue (e.g. legacy tests).
+	// Extraction holds validated segment outputs until this operation finishes.
+	Extraction *wikiExtractionProgress `json:"extraction_checkpoint,omitempty"`
+	dbPayload  json.RawMessage
+	// dbID is the source row ID; zero for synthetic/non-durable operations.
 	dbID int64 `json:"-"`
 }
 
@@ -1239,6 +1241,10 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 				KnowledgeID: r.DedupKey,
 			}
 		}
+		op.dbPayload = append(json.RawMessage(nil), r.Payload...)
+		if op.Op == WikiOpIngest && op.Extraction == nil {
+			op.Extraction = &wikiExtractionProgress{}
+		}
 		op.dbID = r.ID
 		all = append(all, op)
 	}
@@ -1360,13 +1366,12 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			continue
 		}
 
-		// Exhausted in-batch retries — archive and remove. This is the
-		// terminal failure point for the op, so release its slot in the
-		// knowledge's finalizing counter (ingest ops only; retracts are
-		// for deleted knowledge that has no counter to drain). The
-		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
-		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID, op.Attempt)
+		// Archive before removing the operation or releasing its finalizing
+		// slot: a failed archive must not discard durable extraction progress.
+		if op.Extraction != nil && len(op.Extraction.Segments) > 0 && s.deadLetterRepo == nil {
+			err := fmt.Errorf("archive checkpoint id=%d: dead-letter repository unavailable", op.dbID)
+			settleErrs = append(settleErrs, err)
+			continue
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
@@ -1383,11 +1388,16 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			}); dlErr != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to archive op %s to dead letters: %v", op.KnowledgeID, dlErr)
 				settleErrs = append(settleErrs, fmt.Errorf("archive dead letter id=%d: %w", op.dbID, dlErr))
+				continue
 			}
 		}
 		if err := s.pendingRepo.DeleteByIDs(ctx, []int64{op.dbID}); err != nil {
 			logger.Warnf(ctx, "wiki ingest: failed to drop dead-lettered row id=%d: %v", op.dbID, err)
 			settleErrs = append(settleErrs, fmt.Errorf("drop dead-lettered row id=%d: %w", op.dbID, err))
+			continue
+		}
+		if op.Op == WikiOpIngest {
+			s.finalizeWikiSubtask(ctx, op.KnowledgeID, op.Attempt)
 		}
 	}
 	return errors.Join(settleErrs...)
