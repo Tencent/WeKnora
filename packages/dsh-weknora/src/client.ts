@@ -142,10 +142,10 @@ export class WeknoraClient {
     return url.toString()
   }
 
-  private isPublicModeForbidden(error: unknown): boolean {
+  private isPublicModeForbidden(error: unknown, requestedMode: 'handle' | 'public'): boolean {
+    // Another request may have switched the client to handle mode while this one was in flight.
     return error instanceof WeknoraApiError
-      && this.config.resourceUrls === 'public'
-      && !this.publicModeBlocked
+      && requestedMode === 'public'
       && error.status === 403
       && error.message.includes('resource_urls=public')
   }
@@ -155,10 +155,11 @@ export class WeknoraClient {
     init: { method: 'GET' | 'POST', body?: unknown, query?: Record<string, string | number | undefined> },
     signal: AbortSignal,
   ): Promise<Envelope<T>> {
+    const requestedMode = this.resourceMode()
     try {
       return await this.fetchJsonOnce(path, init, signal)
     } catch (error) {
-      if (!this.isPublicModeForbidden(error)) throw error
+      if (!this.isPublicModeForbidden(error, requestedMode)) throw error
       this.publicModeBlocked = true
       return await this.fetchJsonOnce(path, init, signal)
     }
@@ -308,11 +309,12 @@ export class WeknoraClient {
         throw new WeknoraApiError(`POST ${path} failed: ${describeTransportFailure(cause, signal)}`)
       }
     }
+    const requestedMode = this.resourceMode()
     let response = await open()
     if (!response.ok) {
       const text = await response.text()
       const error = new WeknoraApiError(`POST ${path} failed with HTTP ${response.status}: ${reasonOf(text)}`, response.status)
-      if (!this.isPublicModeForbidden(error)) throw error
+      if (!this.isPublicModeForbidden(error, requestedMode)) throw error
       this.publicModeBlocked = true
       response = await open()
     }
