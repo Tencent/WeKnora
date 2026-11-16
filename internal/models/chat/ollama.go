@@ -240,6 +240,7 @@ func (c *OllamaChat) ChatStream(
 		defer close(streamChan)
 
 		var thinking api.ThinkingEmitter
+		var toolCalls []ollamaapi.ToolCall
 		err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 			// 发送思考内容（支持 Qwen3、DeepSeek 等推理模型）
 			if resp.Message.Thinking != "" {
@@ -257,6 +258,7 @@ func (c *OllamaChat) ChatStream(
 			}
 
 			if len(resp.Message.ToolCalls) > 0 {
+				toolCalls = append(toolCalls, resp.Message.ToolCalls...)
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeToolCall,
 					ToolCalls:    c.toolCallTo(resp.Message.ToolCalls),
@@ -304,10 +306,13 @@ func (c *OllamaChat) ChatStream(
 					usage.MarkPromptCacheUnsupported()
 				}
 				api.LogUsage(ctx, c.modelName, usage)
+				// Ollama sends batches of complete calls. The Agent uses the
+				// last nonempty snapshot, so finish with every call in order.
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Done:         true,
 					Usage:        usage,
+					ToolCalls:    c.toolCallTo(toolCalls),
 					// 与非流式分支一致：透传 done_reason，否则 num_predict 打满
 					// 的截断在流式里看起来像正常结束。
 					FinishReason: resp.DoneReason,
