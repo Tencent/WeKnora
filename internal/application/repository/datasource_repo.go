@@ -111,11 +111,16 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 	if ds.ID == "" {
 		return errors.New("data source id is empty")
 	}
+	// Only an explicit pause or resume may cross the paused boundary.
+	// Evaluate against the stored status in the update itself, so a worker's
+	// snapshot cannot undo a pause or resume that happened during fetching.
+	status := gorm.Expr("CASE WHEN status = ? OR ? = ? THEN status ELSE ? END",
+		types.DataSourceStatusPaused, ds.Status, types.DataSourceStatusPaused, ds.Status)
 	if err := r.db.WithContext(ctx).
 		Model(&types.DataSource{}).
 		Where("id = ?", ds.ID).
 		Updates(map[string]interface{}{
-			"status":           ds.Status,
+			"status":           status,
 			"last_sync_at":     ds.LastSyncAt,
 			"last_sync_cursor": ds.LastSyncCursor,
 			"last_sync_result": ds.LastSyncResult,

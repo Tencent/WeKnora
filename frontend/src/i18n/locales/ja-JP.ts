@@ -7141,6 +7141,10 @@ export default {
     clearRecent: 'クリア',
     retrieval: '検索設定',
     untitledSession: '無題の会話',
+    errors: {
+      knowledge: 'ナレッジベースの検索に失敗しました。再試行してください。',
+      messages: '会話内容の検索に失敗しました。再試行してください。'
+    },
     scope: {
       placeholder: 'このナレッジベース内を検索…',
       remove: '範囲を解除（Backspace）'
