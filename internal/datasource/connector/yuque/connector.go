@@ -389,6 +389,9 @@ func (c *Connector) walk(
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if !incremental {
 		return out, nil, nil
 	}
