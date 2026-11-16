@@ -38,6 +38,7 @@ func (s *wikiIngestService) wikiPageRetryContext(kbID string, previous *WikiBatc
 		return fresh
 	}
 	// identityClaims/identityPages 含 sync.Map，不能复制已使用的批次上下文。
+	fresh.OperationKeys = previous.OperationKeys
 	fresh.ContentInstructions = previous.ContentInstructions
 	fresh.ExtractionInstructions = previous.ExtractionInstructions
 	fresh.ExtractionGranularity = previous.ExtractionGranularity
