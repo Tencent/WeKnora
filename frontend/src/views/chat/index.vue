@@ -581,7 +581,13 @@ async function handleFork(messageId) {
 
     forkInFlight = true
     try {
-        const res = await forkSession(sourceSessionId, { message_id: messageId })
+        const sourceTitle = currentSession.value?.id === sourceSessionId ? currentSession.value.title?.trim() : ''
+        const suffix = t('chat.forkTitleSuffix')
+        // sessions.title holds 255 characters. Leave room for the full suffix.
+        const title = sourceTitle
+            ? Array.from(sourceTitle).slice(0, 255 - Array.from(suffix).length).join('') + suffix
+            : undefined
+        const res = await forkSession(sourceSessionId, { message_id: messageId, ...(title ? { title } : {}) })
         const data = res?.data
         if (!data?.session_id) return
 
@@ -592,11 +598,13 @@ async function handleFork(messageId) {
         stashForkLanding(data.session_id, prefill)
 
         const now = new Date().toISOString()
-        const sourceTitle = currentSession.value?.title || t('menu.newSession')
+        // Without authoritative source metadata the API chose the title. Don't
+        // substitute another chat's title or treat a failed read as a failed fork.
+        const child = title ? null : await getSession(data.session_id).catch(() => null)
         usemenuStore.updataMenuChildren({
             id: data.session_id,
             path: `chat/${data.session_id}`,
-            title: `${sourceTitle}（分支）`,
+            title: title || child?.data?.title || t('menu.newSession'),
             parent_session_id: sourceSessionId,
             isMore: false,
             isNoTitle: false,
