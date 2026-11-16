@@ -151,10 +151,12 @@ func mockSplitCloud(t *testing.T) (*MinerUCloudReader, *atomic.Int32) {
 			md := "![image](images/0.jpg) <img src=\"images/0.jpg\">\n\n" + text
 			list, _ := json.Marshal([]map[string]any{{
 				"type": "text", "text": text, "page_idx": 0, "bbox": []int{0, 0, 100, 100},
+			}, {
+				"type": "image", "img_path": "images/0.jpg", "page_idx": 2,
 			}})
 			z := zip.NewWriter(w)
 			for name, data := range map[string][]byte{
-				"full.md": []byte(md), "images/0.jpg": []byte("image"), "book_content_list.json": list,
+				"full.md": []byte(md), "images/0.jpg": createTestPNG(128, 128), "book_content_list.json": list,
 			} {
 				f, err := z.Create(name)
 				if err != nil {
@@ -173,4 +175,34 @@ func mockSplitCloud(t *testing.T) (*MinerUCloudReader, *atomic.Int32) {
 	}))
 	t.Cleanup(server.Close)
 	return &MinerUCloudReader{baseURL: server.URL, timeout: time.Second, pollInterval: time.Millisecond}, &uploads
+}
+
+func TestSplitCloudPDFPreservesImagePagesThroughStorage(t *testing.T) {
+	if _, err := exec.LookPath("qpdf"); err != nil {
+		t.Skip("qpdf required")
+	}
+	allowLoopbackSSRF(t)
+	reader, _ := mockSplitCloud(t)
+	result, err := reader.readSplitPDF(context.Background(), &types.ReadRequest{
+		FileName: "book.pdf", FileType: "pdf", FileContent: testPDF(105),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, images, err := NewImageResolver().ResolveAndStore(context.Background(), result, &captureSaveBytes{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) < 2 {
+		t.Fatalf("missing stored images: %d", len(images))
+	}
+	for _, image := range images {
+		page, source := 3, "part-1/mineru:legacy:2:1"
+		if strings.HasPrefix(image.OriginalRef, "part-2/") {
+			page, source = 103, "part-2/mineru:legacy:2:1"
+		}
+		if len(image.SourceLocators) != 1 || image.SourceLocators[0].Page != page || image.SourceLocators[0].SourceID != source {
+			t.Fatalf("image %s lost its original page and source identity: %+v", image.OriginalRef, image.SourceLocators)
+		}
+	}
 }

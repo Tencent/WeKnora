@@ -290,9 +290,10 @@ func (r *ImageResolver) saveReferencedImage(
 	if ref.Filename != "" {
 		if cached, ok := savedRefs["__filename__:"+ref.Filename]; ok {
 			stored := StoredImage{
-				OriginalRef: refPath,
-				ServingURL:  cached.ServingURL,
-				MimeType:    cached.MimeType,
+				OriginalRef:    refPath,
+				ServingURL:     cached.ServingURL,
+				MimeType:       cached.MimeType,
+				SourceLocators: ref.SourceLocators,
 			}
 			savedRefs[refPath] = stored
 			return stored, true
@@ -315,10 +316,11 @@ func (r *ImageResolver) saveReferencedImage(
 	}
 
 	stored := StoredImage{
-		OriginalRef: refPath,
-		ServingURL:  servingURL,
-		MimeType:    ref.MimeType,
-		NewlyStored: true,
+		OriginalRef:    refPath,
+		ServingURL:     servingURL,
+		MimeType:       ref.MimeType,
+		NewlyStored:    true,
+		SourceLocators: ref.SourceLocators,
 	}
 	savedRefs[refPath] = stored
 	if ref.Filename != "" {

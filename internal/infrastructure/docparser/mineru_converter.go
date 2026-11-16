@@ -141,6 +141,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	imageRefs, mdContent := c.processImages(mdContent, imagesB64)
 
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+	attachMinerUImageLocators(imageRefs, contentList, req.FileType)
 
 	logger.Infof(context.Background(), "[MinerU] Parsed successfully, markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
 
@@ -162,6 +163,7 @@ func (c *MinerUReader) readV1(ctx context.Context, req *types.ReadRequest) (*typ
 
 	mdContent = normalizeMinerUMarkdown(mdContent)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+	attachMinerUImageLocators(imageRefs, contentList, req.FileType)
 
 	logger.Infof(ctx, "[MinerU] Parsed successfully (V1), markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
 
