@@ -3036,6 +3036,14 @@ func (s *knowledgeService) reparseKnowledge(
 		}
 		manualContent = meta.Content
 	} else {
+		// A reparse reads its content back from the stored file or URL. Check
+		// that before the cleanup below: cleanup drops the current chunks and
+		// vectors first, so a row with no source would lose its index and only
+		// then be rejected as unparseable, leaving the knowledge unsearchable.
+		if !hasReparseSource(existing) {
+			logger.Warnf(ctx, "Knowledge %s has no parseable content (no file, URL, or manual content)", knowledgeID)
+			return existing, werrors.NewBadRequestError("Knowledge has no parseable content")
+		}
 		// Check the parser engine before anything is deleted: parsing runs
 		// later in a worker, so a missing engine would otherwise only show
 		// up after the old chunks and vectors are already gone.
@@ -3297,6 +3305,17 @@ func (s *knowledgeService) reparseKnowledge(
 			secutils.SanitizeForLog(knowledgeID), err)
 	}
 	return existing, werrors.NewBadRequestError("Knowledge has no parseable content")
+}
+
+// hasReparseSource reports whether the dispatch in reparseKnowledge has a
+// branch that can re-read this non-manual knowledge: a stored file, or a
+// `file_url` / `url` source. It mirrors those branches so the pre-cleanup
+// check cannot drift from the code that consumes the source.
+func hasReparseSource(knowledge *types.Knowledge) bool {
+	if knowledge.FilePath != "" {
+		return true
+	}
+	return knowledge.Source != "" && (knowledge.Type == "file_url" || knowledge.Type == "url")
 }
 
 // resetKnowledgeForReparse makes the top-level knowledge state describe the
