@@ -1957,7 +1957,10 @@ func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (
 	defer func() {
 		if err != nil && !responded.Load() && parent.Err() == nil {
 			if ctx.Err() != nil {
-				err = fmt.Errorf("image host did not respond within %s: %w", remoteImageConnectTimeout, context.DeadlineExceeded)
+				err = fmt.Errorf(
+					"image host did not respond within %s: %w",
+					remoteImageConnectTimeout, context.DeadlineExceeded,
+				)
 			}
 			if unreachableHosts != nil {
 				unreachableHosts[host] = err
@@ -1982,7 +1985,7 @@ func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (
 		case done <- res:
 		case <-ctx.Done():
 			if res.response != nil {
-				res.response.Body.Close()
+				_ = res.response.Body.Close()
 			}
 		}
 	}()
