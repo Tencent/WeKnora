@@ -342,8 +342,9 @@ class MHTMLParser(BaseParser):
                 self._rewrite_image_sources(soup, image_aliases, base_location)
             self._unwrap_whitespace_only_inline(soup)
             text_fallback = soup.get_text(separator="\n", strip=True)
-            self._escape_table_cell_pipes(soup)
             self._move_table_footer_rows_after_body(soup)
+            self._flatten_nested_tables(soup)
+            self._escape_table_cell_pipes(soup)
             markdown_text = md(str(soup), heading_style="ATX")
             result = self._normalize_markdown(markdown_text)
             if not result and text_fallback:
@@ -406,6 +407,35 @@ class MHTMLParser(BaseParser):
             for row in reversed(footer_rows):
                 last.insert_after(row.extract())
             tfoot.decompose()
+
+    @staticmethod
+    def _flatten_nested_tables(soup: BeautifulSoup) -> None:
+        """Read a table inside a table cell as that cell's text.
+
+        markdownify writes the inner table's rows and separator line into the
+        outer cell, pipes included, so the outer row gains columns and a
+        renderer drops the cells past the header. A GFM cell cannot hold a
+        table: the inner table becomes one block of the outer cell with a
+        space between its cells, the reading the DOCX parser gives a nested
+        table. Links and other inline markup of the cells are kept.
+        """
+        # An inner table follows its outer table in document order, so the
+        # innermost tables are flattened first and every row found is the
+        # table's own
+        for table in reversed(soup.find_all("table")):
+            if table.find_parent(["td", "th"]) is None:
+                continue
+            rows = table.find_all("tr")
+            cells = [
+                cell
+                for row in rows
+                for cell in row.find_all(["td", "th"], recursive=False)
+            ]
+            for cell in cells[:-1]:
+                cell.insert_after(" ")
+            for tag in table.find_all(["thead", "tbody", "tfoot"]) + rows + cells:
+                tag.unwrap()
+            table.name = "div"
 
     @staticmethod
     def _escape_table_cell_pipes(soup: BeautifulSoup) -> None:

@@ -46,8 +46,8 @@ class HTMLTableFooterTest(unittest.TestCase):
             "</td></tr><tfoot><tr><td>outer total</td></tr></tfoot></table>"
         )
 
-        # markdownify flattens the inner table into one cell; its footer row
-        # has to stay inside it rather than move after the outer body
+        # the inner table is read as the text of its outer cell; its footer
+        # row has to stay inside it rather than move after the outer body
         self.assertLess(markdown.index("inner total"), markdown.index("outer total"))
         self.assertTrue(markdown.rstrip().endswith("| outer total |"))
 
