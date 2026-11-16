@@ -324,8 +324,8 @@ func (t *ReadDocumentTool) readPage(
 			},
 		}, nil
 	}
-	chunks = fitChunksToBudget(chunks, OutputBudget(ctx)*4/5)
 	enrichChunkImageInfo(ctx, t.chunkService.GetRepository(), t.tenantFor(knowledge), chunks)
+	chunks = fitChunksToBudget(chunks, OutputBudget(ctx)*4/5)
 
 	rows := make([]readChunkRow, 0, len(chunks))
 	for _, c := range chunks {
@@ -431,19 +431,6 @@ func (t *ReadDocumentTool) readByQuery(
 	escapedRunes := func(text string) int {
 		return utf8.RuneCountInString(xmlEscape(text))
 	}
-	chunkCost := func(chunk *types.Chunk, content string) int {
-		cost := escapedRunes(content) + readDocumentChunkOverhead
-		// FAQ answers render from metadata even with question-only indexing.
-		if chunk.ChunkType == types.ChunkTypeFAQ {
-			if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
-				cost += escapedRunes(meta.StandardQuestion) + len("      <question></question>\n")
-				for _, answer := range meta.Answers {
-					cost += escapedRunes(answer) + len("      <answer></answer>\n")
-				}
-			}
-		}
-		return cost
-	}
 	emit := func(row readChunkRow, cost int) {
 		rows = append(rows, row)
 		emitted[row.chunk.ID] = true
@@ -475,7 +462,7 @@ scan:
 			}
 			if matchesAll(matchers, haystack) {
 				snippet := extractChunkMatchSnippet(c, matchers)
-				cost := chunkCost(c, content) + escapedRunes(snippet)
+				cost := readDocumentRowCost(c, content) + escapedRunes(snippet)
 				// Keep the first match even if it is oversized so the cursor advances.
 				if matchCount >= readDocumentMaxMatches || (matchCount > 0 && used+cost > budget) {
 					truncated = true
@@ -484,7 +471,7 @@ scan:
 				}
 				matchCount++
 				if prev != nil && !emitted[prev.ID] {
-					prevCost := chunkCost(prev, enrichChunkContent(prev))
+					prevCost := readDocumentRowCost(prev, enrichChunkContent(prev))
 					if used+prevCost+cost <= budget {
 						emit(readChunkRow{chunk: prev, role: "context_before"}, prevCost)
 					}
@@ -494,7 +481,7 @@ scan:
 				}
 				forceNext = true
 			} else if forceNext {
-				if cost := chunkCost(c, content); !emitted[c.ID] && used+cost <= budget {
+				if cost := readDocumentRowCost(c, content); !emitted[c.ID] && used+cost <= budget {
 					emit(readChunkRow{chunk: c, role: "context_after"}, cost)
 				}
 				forceNext = false
@@ -521,6 +508,20 @@ scan:
 	}, nil
 }
 
+func readDocumentRowCost(chunk *types.Chunk, content string) int {
+	cost := utf8.RuneCountInString(xmlEscape(content)) + readDocumentChunkOverhead
+	// FAQ answers render from metadata even with question-only indexing.
+	if chunk.ChunkType == types.ChunkTypeFAQ {
+		if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+			cost += utf8.RuneCountInString(xmlEscape(meta.StandardQuestion)) + len("      <question></question>\n")
+			for _, answer := range meta.Answers {
+				cost += utf8.RuneCountInString(xmlEscape(answer)) + len("      <answer></answer>\n")
+			}
+		}
+	}
+	return cost
+}
+
 // fitChunksToBudget keeps the leading chunks whose rendered size fits in
 // budget runes. The model sees the result rendered from Data, which the
 // registry's Output truncation never reaches, so a page must be bounded here;
@@ -528,7 +529,7 @@ scan:
 func fitChunksToBudget(chunks []*types.Chunk, budget int) []*types.Chunk {
 	used := 0
 	for i, c := range chunks {
-		used += utf8.RuneCountInString(c.Content) + readDocumentChunkOverhead
+		used += readDocumentRowCost(c, enrichChunkContent(c))
 		if used > budget && i > 0 {
 			return chunks[:i]
 		}
