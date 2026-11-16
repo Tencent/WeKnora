@@ -3252,6 +3252,10 @@ export default {
     clearRecent: '清除',
     retrieval: '檢索參數',
     untitledSession: '未命名對話',
+    errors: {
+      knowledge: '知識庫搜尋失敗，請重試。',
+      messages: '對話內容搜尋失敗，請重試。'
+    },
     hotkey: {
       select: '選擇',
       enter: '打開',
