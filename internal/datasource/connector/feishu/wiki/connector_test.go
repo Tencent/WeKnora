@@ -1215,6 +1215,36 @@ func TestClientListWikiSpaces(t *testing.T) {
 	}
 }
 
+func TestClientWikiPaginationRejectsMissingPageToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, core.TokenResponse{TenantAccessToken: "fake-token", Expire: 7200})
+	})
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, core.WikiSpaceListResponse{Data: core.WikiSpaceListData{
+			Items: []core.WikiSpace{{SpaceID: "space1"}}, HasMore: true,
+		}})
+	})
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, core.WikiNodeListResponse{Data: core.WikiNodeListData{
+			Items: []core.WikiNode{{NodeToken: "node1"}}, HasMore: true,
+		}})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	client := core.NewClient(&core.Config{AppID: "a", AppSecret: "b", BaseURL: ts.URL})
+	ctx := context.Background()
+
+	spaces, err := client.ListWikiSpaces(ctx)
+	if err == nil || !strings.Contains(err.Error(), "missing page token") || len(spaces) != 0 {
+		t.Errorf("incomplete space listing returned spaces=%v, err=%v", spaces, err)
+	}
+	nodes, err := client.ListWikiNodes(ctx, "space1", "")
+	if err == nil || !strings.Contains(err.Error(), "missing page token") || len(nodes) != 0 {
+		t.Errorf("incomplete node listing returned nodes=%v, err=%v", nodes, err)
+	}
+}
+
 func TestClientWikiPaginationRejectsRepeatedPageToken(t *testing.T) {
 	tests := []struct {
 		name     string

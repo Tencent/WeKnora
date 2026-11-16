@@ -446,7 +446,11 @@ func (s *agentService) registerMCPTools(
 	selectedIDs := append([]string(nil), config.MCPServices...)
 	config.MCPServices = nil
 	if mcpMode == "" {
-		mcpMode = "all"
+		// An unset mode means "none": an agent that never configured MCP
+		// services must not reach every enabled service in the tenant.
+		// This matches the frontend's normalizeSelectionMode and the share
+		// scope guard, both of which treat an empty mode as "none".
+		mcpMode = "none"
 	}
 	if mcpMode == "none" {
 		logger.Infof(ctx, "MCP services disabled by agent config (mode: none)")

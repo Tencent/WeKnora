@@ -605,8 +605,11 @@ func (c *notionClient) paginatePages(ctx context.Context, method, path string) (
 				errQueryResultTruncated, resp.RequestStatus.IncompleteReason, path, len(allPages))
 		}
 
-		if !resp.HasMore || resp.NextCursor == "" {
+		if !resp.HasMore {
 			break
+		}
+		if resp.NextCursor == "" {
+			return nil, fmt.Errorf("paginate %s: has_more=true without a next_cursor", path)
 		}
 		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
 		if err != nil {

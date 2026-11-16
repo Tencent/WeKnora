@@ -51,60 +51,61 @@ func (s *knowledgeBaseService) processSearchResultsAtRevisions(
 
 	// Cancellation preserves partial index data for a later retry. Exclude
 	// those hits before they can take a result slot or supply enrichment.
-	selected := make([]*types.IndexWithScore, 0, min(primaryLimit, len(chunks)))
-	selectedKnowledge := make(map[string]*types.Knowledge)
+	candidates := make([]*types.IndexWithScore, 0, len(chunks))
+	chunkIDs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
 		knowledge := knowledgeMap[chunk.KnowledgeID]
 		if knowledge == nil || knowledge.ParseStatus == types.ParseStatusCancelled {
 			continue
 		}
-		selected = append(selected, chunk)
-		selectedKnowledge[knowledge.ID] = knowledge
-		if len(selected) == primaryLimit {
-			break
-		}
+		candidates = append(candidates, chunk)
+		chunkIDs = append(chunkIDs, chunk.ChunkID)
 	}
-	if len(selected) == 0 {
+	if len(candidates) == 0 {
 		return nil, nil
 	}
-	index := s.buildChunkIndex(selected)
 
 	// Batch fetch chunks (include shared KB chunks)
-	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(index.chunkIDs))
-	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, index.chunkIDs)
+	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(chunkIDs))
+	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, chunkIDs)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
-			"chunk_ids": index.chunkIDs,
+			"chunk_ids": chunkIDs,
 		})
 		return nil, err
 	}
 	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
 
-	// A rerank score describes the text sent to the model. If a chunk
-	// changed while the model was running, it cannot seed enrichment.
-	if len(expectedRevisions) > 0 {
-		stale := make(map[string]bool)
-		allChunks = slices.DeleteFunc(allChunks, func(chunk *types.Chunk) bool {
-			if expected, ok := expectedRevisions[chunk.ID]; ok && expected != chunk.ContentRevision {
-				stale[chunk.ID] = true
-				return true
-			}
-			return false
-		})
-		if len(stale) > 0 {
-			selected = slices.DeleteFunc(selected, func(hit *types.IndexWithScore) bool {
-				return stale[hit.ChunkID]
-			})
-			index = s.buildChunkIndex(selected)
+	// A stale index hit can refer to a removed, disabled, or unsynchronized
+	// chunk. Hydrate the bounded candidate pool before spending primary slots.
+	candidateMap := make(map[string]*types.Chunk, len(allChunks))
+	for _, chunk := range allChunks {
+		candidateMap[chunk.ID] = chunk
+	}
+	selected := make([]*types.IndexWithScore, 0, min(primaryLimit, len(candidates)))
+	selectedKnowledge := make(map[string]*types.Knowledge)
+	chunkMap := make(map[string]*types.Chunk)
+	allChunks = nil
+	for _, candidate := range candidates {
+		chunk := candidateMap[candidate.ChunkID]
+		if !s.isSearchableChunk(chunk) || chunkMap[candidate.ChunkID] != nil {
+			continue
+		}
+		// A rerank score describes the scored revision. A changed chunk must
+		// neither consume a primary slot nor seed context enrichment.
+		if expected, ok := expectedRevisions[chunk.ID]; ok && expected != chunk.ContentRevision {
+			continue
+		}
+		selected = append(selected, candidate)
+		selectedKnowledge[candidate.KnowledgeID] = knowledgeMap[candidate.KnowledgeID]
+		chunkMap[chunk.ID] = chunk
+		allChunks = append(allChunks, chunk)
+		if len(selected) == primaryLimit {
+			break
 		}
 	}
-
-	// Build chunk map and collect enrichment IDs (parent, related, nearby)
-	chunkMap := make(map[string]*types.Chunk, len(allChunks))
-	for _, chunk := range allChunks {
-		chunkMap[chunk.ID] = chunk
-	}
+	index := s.buildChunkIndex(selected)
 
 	if !skipEnrichment {
 		additionalChunkIDs := s.collectEnrichmentChunkIDs(ctx, allChunks, index)

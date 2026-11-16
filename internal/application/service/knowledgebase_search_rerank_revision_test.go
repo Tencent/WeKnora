@@ -47,3 +47,40 @@ func TestRerankEnrichmentDropsChangedChunkRevision(t *testing.T) {
 	require.Equal(t, "unchanged", results[0].ID)
 	require.Equal(t, 0.91, results[0].Score)
 }
+
+func TestSearchResultsFillSlotsAfterRevisionChanges(t *testing.T) {
+	svc, db := newKnowledgeSharedAccessService(t, nil)
+	require.NoError(t, db.AutoMigrate(&types.Chunk{}))
+	search := &knowledgeBaseService{kgRepo: svc.repo, chunkRepo: repository.NewChunkRepository(db)}
+	seedKnowledge(t, db, &types.Knowledge{
+		ID: "doc", TenantID: 1, KnowledgeBaseID: "kb", Type: "file", ParseStatus: types.ParseStatusCompleted,
+	})
+	for _, chunk := range []*types.Chunk{
+		{ID: "changed", ContentRevision: 2, NextChunkID: "hidden"},
+		{ID: "valid", ContentRevision: 1, NextChunkID: "neighbor"},
+		{ID: "hidden", ContentRevision: 1},
+		{ID: "neighbor", ContentRevision: 1},
+	} {
+		chunk.TenantID = 1
+		chunk.KnowledgeID = "doc"
+		chunk.KnowledgeBaseID = "kb"
+		chunk.Content = chunk.ID
+		chunk.ChunkType = types.ChunkTypeText
+		chunk.IsEnabled = true
+		chunk.IndexStatus = "ready"
+		require.NoError(t, db.Create(chunk).Error)
+	}
+	hits := []*types.IndexWithScore{
+		{ChunkID: "changed", KnowledgeID: "doc", Score: 0.9},
+		{ChunkID: "valid", KnowledgeID: "doc", Score: 0.8},
+	}
+	results, err := search.processSearchResultsAtRevisions(
+		newSharedAccessContext(), hits, 1, false, map[string]int{"changed": 1, "valid": 1},
+	)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	require.Equal(t, "valid", results[0].ID)
+	require.Equal(t, 0.8, results[0].Score)
+	require.Equal(t, "neighbor", results[1].ID)
+	require.Equal(t, types.MatchTypeNearByChunk, results[1].MatchType)
+}
