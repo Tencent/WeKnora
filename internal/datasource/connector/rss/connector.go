@@ -195,6 +195,7 @@ func (c *Connector) walk(
 
 	cli := newClient(cfg.parseHeaders())
 	parser := gofeed.NewParser()
+	parser.JSONTranslator = &jsonFeedTranslator{}
 
 	newCursor := &rssCursor{
 		LastSyncTime: time.Now().UTC(),
@@ -339,10 +340,12 @@ func (c *Connector) resolveItem(
 
 	// Prefer full article text; fall back to feed-provided content on failure.
 	contentHTML := feedContent
+	plainText := feed.FeedType == "json" && item.Custom["content_type"] == "text/plain"
 	articleFailed := false
 	if strings.TrimSpace(item.Link) != "" {
 		if articleHTML, articleTitle, err := cli.extractArticle(ctx, item.Link); err == nil {
 			contentHTML = articleHTML
+			plainText = false
 			if item.Title == "" && articleTitle != "" {
 				title = articleTitle
 			}
@@ -352,7 +355,12 @@ func (c *Connector) resolveItem(
 		}
 	}
 
-	content := htmlToMarkdown(contentHTML)
+	var content string
+	if plainText {
+		content = plainTextToMarkdown(contentHTML)
+	} else {
+		content = htmlToMarkdown(contentHTML)
+	}
 
 	updatedAt := time.Now().UTC()
 	switch {
