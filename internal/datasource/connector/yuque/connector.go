@@ -256,7 +256,7 @@ func (c *Connector) walk(
 			// Incremental: skip if content hasn't changed.
 			if incremental && prev != nil && prev.BookDocTimes != nil {
 				if prevTimes, ok := prev.BookDocTimes[bookIDStr]; ok {
-					if prevTimes[docIDStr] == d.ContentUpdatedAt {
+					if d.ContentUpdatedAt != "" && prevTimes[docIDStr] == d.ContentUpdatedAt {
 						continue
 					}
 				}
