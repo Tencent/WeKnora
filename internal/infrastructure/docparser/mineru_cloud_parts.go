@@ -96,7 +96,8 @@ func (c *MinerUCloudReader) readCloudPart(ctx context.Context, req *types.ReadRe
 	}
 	return &types.ReadResult{
 		MarkdownContent: md, ImageRefs: refs,
-		SourceBlocks: minerUSourceBlocks(md, contentList, req.FileType),
+		SourceBlocks:  minerUSourceBlocks(md, contentList, req.FileType),
+		ImageLocators: minerUImageLocators(contentList, req.FileType),
 	}, nil
 }
 

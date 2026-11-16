@@ -99,9 +99,12 @@ func transcriptWithSegments(result *asr.TranscriptionResult) (string, []types.So
 
 // buildSourceIndex re-aims the parser's source blocks at the markdown the
 // chunker will split, and places every stored image in the original file.
-// parsed is the markdown the blocks were recorded against.
+// parsed is the markdown the blocks were recorded against. imageLocators place
+// the images the parser located itself, keyed by the image reference; the rest
+// are aimed by their offset in the markdown.
 func buildSourceIndex(
 	parsed string, blocks []types.SourceBlock, final string, images []docparser.StoredImage,
+	imageLocators map[string]types.SourceLocator,
 ) *sourceloc.Index {
 	if len(blocks) == 0 {
 		return nil
@@ -109,6 +112,18 @@ func buildSourceIndex(
 	idx := sourceloc.NewIndex(final, sourceloc.RemapBlocks(blocks, parsed, final))
 	if idx == nil {
 		return nil
+	}
+	// An image the layout reported as its own block carries the page it was
+	// rendered on, which the offset below cannot recover: a sheet whose figures
+	// sit under a single caption would hand every one of them the page of the
+	// text above.
+	for i := range images {
+		loc, ok := imageLocators[images[i].OriginalRef]
+		if !ok {
+			continue
+		}
+		loc.BBox = append([]float64(nil), loc.BBox...)
+		images[i].SourceLocators = types.SourceLocators{loc}
 	}
 	// Visit the images in document order so rune offsets are counted in one
 	// pass over the markdown instead of once per image.
@@ -127,6 +142,9 @@ func buildSourceIndex(
 	for _, f := range found {
 		runePos += utf8.RuneCountInString(final[bytePos:f.at])
 		bytePos = f.at
+		if len(images[f.image].SourceLocators) > 0 {
+			continue
+		}
 		images[f.image].SourceLocators = idx.NearestLocatorsAt(runePos)
 	}
 	return idx
