@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { marked, type Tokens } from 'marked'
 import { buildSessionMarkdown, collectAllSessionMessages } from './sessionMarkdown'
 
 const labels = {
@@ -10,6 +11,18 @@ const labels = {
   attachments: 'Attachments',
   references: 'References',
 }
+
+test('buildSessionMarkdown keeps an indented code block at the start of a message', () => {
+  const markdown = buildSessionMarkdown({
+    sessionId: 'session-1',
+    title: 'Example chat',
+    labels,
+    messages: [{ role: 'assistant', content: '\r\n    one()\r\n    two()\r\n' }],
+  })
+
+  const code = marked.lexer(markdown).find((token): token is Tokens.Code => token.type === 'code')
+  assert.equal(code?.text, 'one()\ntwo()')
+})
 
 test('collectAllSessionMessages walks backwards and returns chronological unique messages', async () => {
   const pages: Record<string, any[]> = {

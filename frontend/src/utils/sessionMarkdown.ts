@@ -91,7 +91,9 @@ export async function collectAllSessionMessages(
 function cleanMessageContent(content?: string): string {
   return String(content || '')
     .replace(KB_WEB_TAG_RE, '')
-    .trim()
+    // Leading blank lines can go, but indentation on the first content line is Markdown.
+    .replace(/^(?:[ \t]*\r?\n)+/, '')
+    .trimEnd()
 }
 
 function markdownListText(value: string): string {
