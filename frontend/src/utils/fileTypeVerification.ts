@@ -28,13 +28,16 @@ export function shouldRejectKnowledgeFileType(
   filename: string,
   validTypes?: Set<string> | string[],
 ) {
+  const extensionStart = filename.lastIndexOf(".") + 1;
+  if (extensionStart === 0 || extensionStart === filename.length) return true;
+
   const provided = validTypes
     ? validTypes instanceof Set
       ? validTypes
       : new Set(validTypes)
     : undefined;
   const allowed = provided && provided.size > 0 ? provided : DEFAULT_VALID_TYPES;
-  const type = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
+  const type = filename.substring(extensionStart).toLowerCase();
 
   return !allowed.has(type);
 }

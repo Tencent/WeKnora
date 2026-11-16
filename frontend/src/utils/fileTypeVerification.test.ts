@@ -15,6 +15,12 @@ test('shouldRejectKnowledgeFileType preserves dynamic whitelist behavior', () =>
   assert.equal(shouldRejectKnowledgeFileType('page.html', []), false)
 })
 
+test('filenames without an extension are rejected even if they match a supported type', () => {
+  assert.equal(shouldRejectKnowledgeFileType('pdf'), true)
+  assert.equal(shouldRejectKnowledgeFileType('xyz', ['xyz']), true)
+  assert.equal(shouldRejectKnowledgeFileType('report.PDF'), false)
+})
+
 test('XMind uploads work before engine discovery and respect discovered capabilities', () => {
   for (const filename of ['architecture.xmind', 'ARCHITECTURE.XMIND']) {
     assert.equal(shouldRejectKnowledgeFileType(filename), false)
