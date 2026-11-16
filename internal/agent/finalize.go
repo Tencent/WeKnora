@@ -178,9 +178,10 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		return fmt.Errorf("final answer synthesis returned no visible content")
 	}
 	_, tail := splitter.Flush()
+	truncated := isLengthFinishReason(llmResult.FinishReason)
 	_ = e.eventBus.Emit(ctx, event.Event{
 		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
-		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true},
+		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true, Truncated: truncated},
 	})
 
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
@@ -188,9 +189,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		"session_id": sessionID,
 		"answer_len": len(fullAnswer),
 	})
-	// Delegated callers must distinguish a synthesized partial answer from a
-	// completed deliverable too, including the iteration-budget fallback path.
-	if e.collaboration != nil && e.collaboration.Child != nil && isLengthFinishReason(llmResult.FinishReason) {
+	// History is rebuilt from steps, not live answer events. Record a partial
+	// synthesis for every run so reloads and delegated callers retain the cap.
+	if truncated {
 		state.RoundSteps = append(state.RoundSteps, types.AgentStep{
 			Iteration: state.CurrentRound,
 			Thought:   fullAnswer, Truncated: true, Timestamp: time.Now(),
