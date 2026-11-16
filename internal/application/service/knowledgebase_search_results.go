@@ -16,6 +16,16 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	primaryLimit int,
 	skipEnrichment bool,
 ) ([]*types.SearchResult, error) {
+	return s.processSearchResultsAtRevisions(ctx, chunks, primaryLimit, skipEnrichment, nil)
+}
+
+func (s *knowledgeBaseService) processSearchResultsAtRevisions(
+	ctx context.Context,
+	chunks []*types.IndexWithScore,
+	primaryLimit int,
+	skipEnrichment bool,
+	expectedRevisions map[string]int,
+) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
 	}
@@ -80,6 +90,11 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	for _, candidate := range candidates {
 		chunk := candidateMap[candidate.ChunkID]
 		if !s.isSearchableChunk(chunk) || chunkMap[candidate.ChunkID] != nil {
+			continue
+		}
+		// A rerank score describes the scored revision. A changed chunk must
+		// neither consume a primary slot nor seed context enrichment.
+		if expected, ok := expectedRevisions[chunk.ID]; ok && expected != chunk.ContentRevision {
 			continue
 		}
 		selected = append(selected, candidate)
