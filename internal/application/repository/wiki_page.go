@@ -459,6 +459,10 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 
 	query = r.applyWikiPageListOrder(query, req.SortBy, req.SortOrder)
+	if req.SourceKnowledgeID != "" {
+		// A source may contain same-title entity/concept pages; stabilize pagination.
+		query = query.Order("id ASC")
+	}
 
 	page := req.Page
 	if page < 1 {
