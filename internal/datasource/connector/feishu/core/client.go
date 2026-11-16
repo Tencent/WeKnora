@@ -369,7 +369,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 	for {
 		path := "/open-apis/wiki/v2/spaces?page_size=50"
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiSpaceListResponse
@@ -418,7 +418,7 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			path += "&parent_node_token=" + parentNodeToken
 		}
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiNodeListResponse

@@ -1198,6 +1198,41 @@ func TestClientDownloadDriveFile(t *testing.T) {
 	}
 }
 
+func TestClientWikiPaginationPreservesPageToken(t *testing.T) {
+	const token = "next+page&tag=%2F#end"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, core.TokenResponse{TenantAccessToken: "fake-token", Expire: 7200})
+	})
+	listPage := func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if !query.Has("page_token") {
+			writeJSON(w, map[string]any{"data": map[string]any{"has_more": true, "page_token": token}})
+			return
+		}
+		if query.Get("page_token") != token || len(query) != 2 {
+			http.Error(w, "invalid page token", http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"data": map[string]any{"items": []struct{}{{}}}})
+	}
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", listPage)
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", listPage)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	client := core.NewClient(&core.Config{AppID: "a", AppSecret: "b", BaseURL: ts.URL})
+	ctx := context.Background()
+
+	spaces, err := client.ListWikiSpaces(ctx)
+	if err != nil || len(spaces) != 1 {
+		t.Errorf("space listing returned %d results, err=%v", len(spaces), err)
+	}
+	nodes, err := client.ListWikiNodes(ctx, "space1", "")
+	if err != nil || len(nodes) != 1 {
+		t.Errorf("node listing returned %d results, err=%v", len(nodes), err)
+	}
+}
+
 func TestClientListWikiSpaces(t *testing.T) {
 	ts, cfg := fakeFeishu(nil)
 	defer ts.Close()
