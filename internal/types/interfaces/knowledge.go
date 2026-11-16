@@ -117,6 +117,7 @@ type KnowledgeService interface {
 	RegenerateKnowledgeSummary(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
 	// RequestKnowledgeSummaryRefresh enqueues an async summary refresh.
 	RequestKnowledgeSummaryRefresh(ctx context.Context, knowledgeID string) error
+	RetryFailedKnowledgeSummaries(ctx context.Context, kbID string) (submitted, failed int, err error)
 	// RegenerateChunkQuestions rebuilds the auxiliary questions for one current chunk revision.
 	RegenerateChunkQuestions(ctx context.Context, chunkID string) ([]types.GeneratedQuestion, error)
 	// UpdateManualKnowledge updates manual Markdown knowledge content.
@@ -257,6 +258,8 @@ type KnowledgeRepository interface {
 	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
+	ListFailedKnowledgeSummaries(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
+	TransitionKnowledgeSummaryStatus(ctx context.Context, knowledge *types.Knowledge, from, to string) (bool, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base
 	// with pagination. The filter struct controls optional dimensions (tag, keyword,
 	// file type, parse status, source channel, updated time range); pass a zero

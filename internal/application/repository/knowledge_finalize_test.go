@@ -521,3 +521,36 @@ func TestCompleteProcessingWithoutSubtasks(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryFailedKnowledgeSummariesSelectsAndClaimsOnlyFailedParsedDocuments(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	for _, row := range [][]any{
+		{"eligible", 1, "kb", "completed", "failed"},
+		{"succeeded", 1, "kb", "completed", "completed"},
+		{"pending", 1, "kb", "completed", "pending"},
+		{"no-summary", 1, "kb", "completed", "none"},
+		{"reparsing", 1, "kb", "pending", "failed"},
+		{"other-kb", 1, "elsewhere", "completed", "failed"},
+		{"other-workspace", 2, "kb", "completed", "failed"},
+	} {
+		require.NoError(t, db.Exec(`INSERT INTO knowledges
+			(id, tenant_id, knowledge_base_id, parse_status, summary_status)
+			VALUES (?, ?, ?, ?, ?)`, row...).Error)
+	}
+	rows, err := repo.ListFailedKnowledgeSummaries(ctx, 1, "kb")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "eligible", rows[0].ID)
+
+	claimed, err := repo.TransitionKnowledgeSummaryStatus(ctx, rows[0], types.SummaryStatusFailed, types.SummaryStatusPending)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimed, err = repo.TransitionKnowledgeSummaryStatus(ctx, rows[0], types.SummaryStatusFailed, types.SummaryStatusPending)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	rows, err = repo.ListFailedKnowledgeSummaries(ctx, 1, "kb")
+	require.NoError(t, err)
+	require.Empty(t, rows)
+}

@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -109,32 +112,40 @@ func enqueueSummaryRefresh(
 		markFailed()
 		return fmt.Errorf("summary model is not configured")
 	}
+	task, err := newSummaryRefreshTask(ctx, tracker, knowledge)
+	if err != nil {
+		markFailed()
+		return err
+	}
+	if err := repo.UpdateKnowledgeColumn(ctx, knowledge.ID, "summary_status", types.SummaryStatusPending); err != nil {
+		return err
+	}
+	if _, err := taskEnqueuer.Enqueue(task); err != nil {
+		markFailed()
+		return err
+	}
+	return nil
+}
+
+func newSummaryRefreshTask(ctx context.Context, tracker SpanTracker, knowledge *types.Knowledge) (*asynq.Task, error) {
 	if tracker == nil {
 		tracker = noopSpanTracker{}
 	}
-	language := types.LanguageFromContextOrDefault(ctx)
 	payload := types.SummaryGenerationPayload{
 		TenantID:        knowledge.TenantID,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		KnowledgeID:     knowledge.ID,
-		Language:        language,
+		Language:        types.LanguageFromContextOrDefault(ctx),
 		Attempt:         tracker.LatestAttempt(ctx, knowledge.ID),
 		Refresh:         true,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		markFailed()
-		return err
+		return nil, err
 	}
-	task := asynq.NewTask(types.TypeSummaryGeneration, payloadBytes,
-		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
-	_ = repo.UpdateKnowledgeColumn(ctx, knowledge.ID, "summary_status", types.SummaryStatusPending)
-	if _, err = taskEnqueuer.Enqueue(task); err != nil {
-		markFailed()
-		return err
-	}
-	return nil
+	return asynq.NewTask(types.TypeSummaryGeneration, payloadBytes,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute)), nil
 }
 
 // RequestKnowledgeSummaryRefresh enqueues an async summary refresh for
@@ -148,4 +159,54 @@ func (s *knowledgeService) RequestKnowledgeSummaryRefresh(
 		return err
 	}
 	return enqueueSummaryRefresh(ctx, s.repo, s.task, s.kbService, s.tracker(), knowledge)
+}
+
+// RetryFailedKnowledgeSummaries schedules independent refreshes for parsed
+// documents with failed summaries in the requested knowledge base.
+func (s *knowledgeService) RetryFailedKnowledgeSummaries(ctx context.Context, kbID string) (submitted, failed int, err error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	rows, err := s.repo.ListFailedKnowledgeSummaries(ctx, tenantID, kbID)
+	if err != nil || len(rows) == 0 {
+		return 0, 0, err
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if kb.SummaryModelID == "" {
+		return 0, 0, werrors.NewBadRequestError("summary model is not configured")
+	}
+	for _, knowledge := range rows {
+		if err := ctx.Err(); err != nil {
+			return submitted, failed, err
+		}
+		queued, err := s.retryFailedKnowledgeSummary(ctx, knowledge)
+		if err != nil {
+			failed++
+			logger.Warnf(ctx, "Failed to retry summary for %s: %v", knowledge.ID, err)
+		} else if queued {
+			submitted++
+		}
+	}
+	return submitted, failed, nil
+}
+
+func (s *knowledgeService) retryFailedKnowledgeSummary(ctx context.Context, knowledge *types.Knowledge) (bool, error) {
+	if err := access.RejectMovingKnowledge(knowledge); err != nil {
+		return false, err
+	}
+	task, err := newSummaryRefreshTask(ctx, s.tracker(), knowledge)
+	if err != nil {
+		return false, err
+	}
+	claimed, err := s.repo.TransitionKnowledgeSummaryStatus(ctx, knowledge, types.SummaryStatusFailed, types.SummaryStatusPending)
+	if err != nil || !claimed {
+		return false, err
+	}
+	if _, err := s.task.Enqueue(task); err != nil {
+		_, restoreErr := s.repo.TransitionKnowledgeSummaryStatus(
+			context.WithoutCancel(ctx), knowledge, types.SummaryStatusPending, types.SummaryStatusFailed)
+		return false, errors.Join(err, restoreErr)
+	}
+	return true, nil
 }

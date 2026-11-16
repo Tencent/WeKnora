@@ -450,6 +450,10 @@ export function generateKnowledgeBaseProfile(id: string) {
   return post(`/api/v1/knowledge-bases/${id}/profile/generate`, {});
 }
 
+export function retryFailedSummaries(kbId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/retry-failed-summaries`, {});
+}
+
 export function rebuildKBIndex(kbId: string) {
   return post(`/api/v1/knowledge-bases/${kbId}/rebuild-index`, {});
 }
