@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -212,5 +213,11 @@ func truncateForLog(s string) string {
 	if len(s) <= limit {
 		return s
 	}
-	return s[:limit] + "…"
+	// Back off to a rune boundary: git stderr can be localized or quote
+	// non-ASCII paths, and a partial rune leaves invalid UTF-8 in the log.
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
