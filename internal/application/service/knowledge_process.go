@@ -166,15 +166,15 @@ func (s *knowledgeService) cloneKnowledge(
 	return s.repo.UpdateKnowledgeForTransfer(ctx, &before, dst)
 }
 
-// processDocumentFromPassage handles asynchronous processing of text passages
+// processDocumentFromPassage processes text passages and reports processing failures.
 func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, passage []string,
-) {
+) error {
 	// Update status to processing
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		return
+		return fmt.Errorf("update passage processing status: %w", err)
 	}
 
 	// Convert passages to chunks
@@ -203,8 +203,17 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		}
 	}
 	if err := s.processChunks(ctx, kb, knowledge, chunks, opts); err != nil {
-		logger.Warnf(ctx, "process passages for knowledge %s: %v", knowledge.ID, err)
+		return fmt.Errorf("process passages for knowledge %s: %w", knowledge.ID, err)
 	}
+	// Terminal pipeline failures are acknowledged for asynchronous tasks after
+	// their failed state is saved. A synchronous caller still needs that error.
+	if knowledge.ParseStatus == types.ParseStatusFailed {
+		if knowledge.ErrorMessage != "" {
+			return errors.New(knowledge.ErrorMessage)
+		}
+		return errors.New("passage processing failed")
+	}
+	return nil
 }
 
 // ProcessChunksOptions contains options for processing chunks
