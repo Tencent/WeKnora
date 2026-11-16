@@ -62,6 +62,24 @@ func TestAnnotateSearchNotesReportsTruncatedRetrieval(t *testing.T) {
 	}
 }
 
+func TestAnnotateSearchNotesReportsExcerptedBodies(t *testing.T) {
+	t.Parallel()
+	base := "<retrieval mode=\"hybrid\">\n</retrieval>"
+	got := annotateSearchNotes(base, map[string]interface{}{
+		"results": []map[string]interface{}{
+			{"chunk_id": "chunk-1", "content_excerpt": true},
+			{"chunk_id": "chunk-2", "content_excerpt": false},
+			{"chunk_id": "chunk-3", "content_excerpt": true},
+		},
+	})
+	want := `<content_excerpts count="2">Some result bodies were shortened to fit the output size. ` +
+		`Their chunk handles and snippets are still present; call read_document(id=chunk://N, context=k) ` +
+		`for the full chunk when the excerpt is not enough.</content_excerpts>`
+	if !strings.Contains(got, want) || !strings.HasSuffix(got, "</retrieval>") {
+		t.Fatalf("annotated = %q", got)
+	}
+}
+
 func TestAnnotateGraphResult(t *testing.T) {
 	t.Parallel()
 	base := "<retrieval mode=\"graph\">\n</retrieval>"
