@@ -37,6 +37,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"regexp"
 	"strings"
@@ -127,55 +128,75 @@ var shellExecBlacklist = []struct {
 
 var shellExecTool = BaseTool{
 	name:        ToolShellExec,
-	description: legacyShellExecDescription,
+	description: shellExecDescription(sandbox.RemoteWorkspaceLayout()),
 	schema:      utils.GenerateSchema[ShellExecInput](),
 }
 
-// legacyShellExecDescription is the remote /workspace prompt text. Host
-// layouts rewrite the same copy through shellExecDescription.
-const legacyShellExecDescription = `Execute a command in the current session's isolated sandbox as root.
-The sandbox belongs to this session alone; nothing here runs on the host.
+// The shell_exec copy is written against /workspace; the scope claim and the
+// lifetime line differ between a machine one session owns and a machine
+// several sessions share; everything else is the same words for both.
+const (
+	shellExecScopeOwned = `Execute a command in the current session's isolated sandbox as root.
+The sandbox belongs to this session alone; nothing here runs on the host.`
+	shellExecScopeShared    = `Execute a command in this session's directory as root.`
+	shellExecLifetimeOwned  = `  Changes live and die with this session.`
+	shellExecLifetimeShared = `  Deleting this session removes its directory, not the machine.`
+
+	shellExecBodyTemplate = `%s
 - CWD defaults to /workspace on every call; cd does not persist.
-  work_dir selects any directory inside the session sandbox; missing directories are created as the same user.
+  work_dir selects any directory on the machine; missing directories are created as the same user.
 - Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. Read known paths directly; no mandatory discovery call.
 - Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).
 - skill_name selects a listed skill for this call. Installed skills use their Python virtualenv and Node modules;
-  host resources are staged automatically and use the system runtime until a local .venv is created.
+  host-staged resources use the system runtime until a local .venv exists.
   Scoped credentials apply to both. Example: skill_name="pdf", command="python3 report.py".
   Run bundled scripts via "$WEKNORA_SKILL_DIR/scripts/...". Omit skill_name for system commands.
 - /workspace/input contains user attachments: preserve originals. /workspace/output is the only directory collected
   for download, so it takes finished deliverables only; keep scratch and intermediate files elsewhere under /workspace.
-  apt-get is available when the sandbox network policy allows it; permanent dependencies belong in the skill installer.
+  apt-get works when the network policy allows it; permanent dependencies belong in the skill installer.
 - Install extras with skill_name set and the default work_dir:
   ` + "`" + skillPythonPackageInstallCommand + "`" + ` (no pip needed), or
   ` + "`" + skillNodePackageInstallCommand + "`" + `.
   If .venv is absent, create it with python3 -m venv --without-pip "${WEKNORA_SKILL_DIR:?}/.venv".
   Without uv, run the venv Python with -m ensurepip --upgrade before -m pip install.
-  Changes live and die with this session.
+%s
 - Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. Transport failures/timeouts are tool failures. Changing tools does not change permissions; do not repeat a denied operation through another tool.
 - stdout/stderr have independent byte limits, preserving head and tail when truncated. Full output is not automatically saved; redirect verbose commands to a workspace log when it must be retained. Binary bytes are suppressed.
-- Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.`
+- Use ![description](sandbox:<file name>) with exact links from Output files, never stdout or temporary paths.
+- For anything that may run longer than a couple of minutes use ` +
+		"`shell_exec_async`" + ` instead: short commands still return their result directly.`
+)
 
 func shellExecDescription(l sandbox.WorkspaceLayout) string {
 	if l.IsHost() {
 		root := layoutRootOrGeneric(l)
 		return fmt.Sprintf(hostShellExecDescription, root, root, root)
 	}
-	return rewriteRemoteWorkspaceCopy(legacyShellExecDescription, l)
+	scope, lifetime := shellExecScopeOwned, shellExecLifetimeOwned
+	if l.IsSharedRemote() {
+		scope, lifetime = shellExecScopeShared, shellExecLifetimeShared
+	}
+	return rewriteRemoteWorkspaceCopy(fmt.Sprintf(shellExecBodyTemplate, scope, lifetime), l)
 }
 
 const hostShellExecDescription = "Execute a command in %s. The process is OS-sandboxed on this machine.\n" +
 	"- CWD defaults to %s on every call; cd does not persist. " +
-	"work_dir must be that folder or a subdirectory.\n" +
+	"work_dir may be that folder, a subdirectory, or a directory the user already approved for this session.\n" +
 	"- Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. " +
-	"Read known paths directly.\n" +
+	"Read known paths directly. " +
+	"A path outside the workspace can be tried; if the sandbox blocks it, access is approved before it is opened.\n" +
 	"- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. " +
 	"Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).\n" +
-	"- Edit files in place under %s.\n" +
+	"- Edit files under %s when they belong there. Writing outside it can be attempted: " +
+	"the sandbox blocks the path and it is approved before it is opened. " +
+	"Deletes (rm, rmdir, unlink, git rm, git clean, find -delete) may need approval; " +
+	"deleting / or the home directory is always refused.\n" +
 	"- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. " +
-	"Do not bypass permission or policy denials through another tool.\n" +
+	"Do not bypass a user refusal by switching tools or rewriting the same action.\n" +
 	"- stdout/stderr have independent byte limits. " +
-	"Redirect verbose commands to a workspace log when output must be kept."
+	"Redirect verbose commands to a workspace log when output must be kept.\n" +
+	"- If you are not sure the command finishes within a couple of minutes, use " +
+	"`shell_exec_async` instead: short commands still return their result directly.\n"
 
 // ShellExecInput defines the input parameters for shell_exec.
 type ShellExecInput struct {
@@ -266,6 +287,7 @@ type ShellExecTool struct {
 	// inject them. Install-mode tools never invoke it.
 	envCapture       SkillEnvCapture
 	skillEnvironment *skills.Manager
+	hostApprovals    HostApprovals
 }
 
 func (t *ShellExecTool) WithSkillEnvironment(manager *skills.Manager) *ShellExecTool {
@@ -529,7 +551,10 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	// declared credentials are added only when the model names the skill.
 	// Values come from ctx (the current principal), live only for this process,
 	// and are overlaid without displacing anything the model passed via env.
-	env := input.Env
+	// Clone first: ApplyResolvedEnv writes into the map, and the approval
+	// port must keep the model's env. Stored credentials stay in the process
+	// and never reach the review model.
+	env := maps.Clone(input.Env)
 	// supplied carries the values this one call brings with it, from the env
 	// parameter and from NAME=value assignments in the command. They satisfy a
 	// required variable that is not stored yet, which is what makes "tell me
@@ -579,10 +604,18 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		execCommand = "printf %s " + sandbox.ShellQuote(base64.StdEncoding.EncodeToString([]byte(input.Stdin))) +
 			" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote(execCommand)
 	}
+	// After stdin wrapping so the child shell inherits the seat, and before
+	// the command text, which may itself assign DISPLAY.
+	execCommand = sandbox.WithSessionDisplay(execCommand)
 	output, finishOutput := shellCommandOutput(ctx, command)
 	defer finishOutput()
+	execBase := ctx
+	if layout.IsHost() {
+		input.Command = command
+		execBase = t.hostApprovalContext(ctx, input)
+	}
 	// Observe only the requested command, not skill staging or artifact probes.
-	execCtx := sandbox.WithCommandOutput(ctx, output)
+	execCtx := sandbox.WithCommandOutput(execBase, output)
 	var res *sandbox.ExecuteResult
 	var err error
 	var outputFiles []string
@@ -741,17 +774,25 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 func (t *ShellExecTool) maybeCaptureSkillEnv(
 	ctx context.Context, skillName string, pairs map[string]string, res *sandbox.ExecuteResult,
 ) {
-	if t == nil || t.envCapture == nil || t.isInstallMode() {
+	if t == nil || t.isInstallMode() {
 		return
 	}
-	if res == nil || res.ExitCode != 0 {
+	captureUsedSkillEnv(ctx, t.envCapture, skillName, pairs, res != nil && res.ExitCode == 0)
+}
+
+// captureUsedSkillEnv persists credentials a successful skill command brought
+// with it. pairs must already exclude names that were stored before the call.
+func captureUsedSkillEnv(
+	ctx context.Context, capture SkillEnvCapture, skillName string, pairs map[string]string, succeeded bool,
+) {
+	if !succeeded || capture == nil {
 		return
 	}
 	skillName = strings.TrimSpace(skillName)
 	if !sandbox.IsValidSkillName(skillName) || len(pairs) == 0 {
 		return
 	}
-	t.envCapture(ctx, skillName, pairs)
+	capture(ctx, skillName, pairs)
 }
 
 // stillMissing removes from missing every name this call supplied itself.
@@ -1080,30 +1121,359 @@ func rejectExecutableStdin(command, stdin string) string {
 	return ""
 }
 
+// maxStdinProgramDepth stops a chain of inline scripts from hiding the
+// interpreter that actually reads stdin. Past the limit the command is
+// treated as a program, so a deeper nest cannot skip review.
+const maxStdinProgramDepth = 6
+
+// stdinWrappers run another program. The interpreter may be that program
+// (env bash) rather than the first word.
+var stdinWrappers = map[string]bool{
+	"builtin": true, "command": true, "env": true, "exec": true,
+	"nice": true, "nohup": true, "stdbuf": true, "sudo": true, "time": true, "xargs": true,
+}
+
+// stdinWrapperValueOpts are wrapper flags whose next word is a value, not
+// the program they run.
+var stdinWrapperValueOpts = map[string]map[string]bool{
+	"env":    {"-u": true, "-C": true, "-S": true},
+	"nice":   {"-n": true},
+	"stdbuf": {"-i": true, "-o": true, "-e": true},
+	"sudo":   {"-u": true, "-g": true, "-C": true, "-h": true, "-p": true, "-U": true},
+	"xargs":  {"-n": true, "-L": true, "-I": true, "-P": true, "-s": true, "-d": true, "-E": true, "-a": true},
+}
+
+// shellStdinIsProgram reports whether command will execute its stdin as
+// code. A later stage can be the one that reads it (true && bash, cat | bash),
+// and a shell -c script inherits the same stdin, so the script is checked too.
+// Data commands (cat, python3 script.py, bash -c cat) stay false.
 func shellStdinIsProgram(command string) bool {
-	fields := strings.Fields(command)
-	i := 0
-	for i < len(fields) && strings.Contains(fields[i], "=") && !strings.HasPrefix(fields[i], "-") {
-		i++
+	return stdinIsProgram(command, 0)
+}
+
+func stdinIsProgram(command string, depth int) bool {
+	if depth > maxStdinProgramDepth {
+		return true
 	}
-	if i >= len(fields) {
+	for _, segment := range splitShellSegments(command) {
+		if segmentReadsStdin(segment, depth) {
+			return true
+		}
+	}
+	return false
+}
+
+func segmentReadsStdin(segment string, depth int) bool {
+	bin, args, reads, ok := programAndArgs(shellTokens(segment), depth)
+	if reads {
+		return true
+	}
+	if !ok {
 		return false
 	}
-	bin := path.Base(fields[i])
-	args := fields[i+1:]
+	if strings.ContainsAny(bin, "$`") {
+		return true
+	}
 	switch {
-	case bin == "bash" || bin == "sh" || bin == "dash" || bin == "zsh" || bin == "ksh" || bin == "ash":
+	case bin == "busybox" && len(args) > 0:
+		return segmentReadsStdin(strings.Join(args, " "), depth)
+	case bin == "eval":
+		return stdinIsProgram(strings.Join(args, " "), depth+1)
+	case isStdinShell(bin):
+		if script, ok := shellInlineScript(args); ok {
+			return stdinIsProgram(script, depth+1)
+		}
 		return interpreterReadsStdin(args, map[string]bool{"-c": true})
-	case bin == "python" || bin == "python2" || bin == "python3" || bin == "pypy" || bin == "pypy3" ||
-		strings.HasPrefix(bin, "python3.") || strings.HasPrefix(bin, "python2."):
+	case isStdinPython(bin):
+		if script, ok := flagArgument(args, "-c"); ok {
+			return inlineCodeExecutesStdin(script)
+		}
 		return interpreterReadsStdin(args, map[string]bool{"-c": true, "-m": true})
 	case bin == "node" || bin == "nodejs":
+		if script, ok := nodeInlineScript(args); ok {
+			return inlineCodeExecutesStdin(script)
+		}
 		return interpreterReadsStdin(args, map[string]bool{"-e": true, "--eval": true, "-p": true, "--print": true})
 	case bin == "perl" || bin == "ruby":
+		if script, ok := flagArgument(args, "-e"); ok {
+			return inlineCodeExecutesStdin(script)
+		}
 		return interpreterReadsStdin(args, map[string]bool{"-e": true, "-c": true})
+	case bin == "osascript":
+		return osascriptReadsStdin(args)
+	case bin == "source" || bin == ".":
+		return len(args) > 0 && isStdinPath(args[0])
+	case bin == "php":
+		return interpreterReadsStdin(args, map[string]bool{"-r": true})
+	case bin == "lua" || bin == "Rscript":
+		return interpreterReadsStdin(args, map[string]bool{"-e": true})
+	case bin == "tclsh":
+		return interpreterReadsStdin(args, nil)
 	default:
 		return false
 	}
+}
+
+func isStdinShell(bin string) bool {
+	switch bin {
+	case "ash", "bash", "dash", "ksh", "sh", "zsh":
+		return true
+	default:
+		return false
+	}
+}
+
+func isStdinPython(bin string) bool {
+	return bin == "python" || bin == "python2" || bin == "python3" || bin == "pypy" || bin == "pypy3" ||
+		strings.HasPrefix(bin, "python3.") || strings.HasPrefix(bin, "python2.")
+}
+
+// inlineCodeExecutesStdin reports whether an interpreter's -c/-e source
+// reads stdin and runs it. Printing stdin is not enough.
+func inlineCodeExecutesStdin(script string) bool {
+	lower := strings.ToLower(script)
+	reads := strings.Contains(lower, "sys.stdin") || strings.Contains(lower, "stdin.read") ||
+		strings.Contains(lower, "stdin.readline") || strings.Contains(script, "STDIN") ||
+		strings.Contains(lower, "process.stdin") || strings.Contains(lower, "/dev/stdin") ||
+		strings.Contains(lower, "open(0)") || strings.Contains(lower, "os.read(0") ||
+		strings.Contains(lower, "input()") || strings.Contains(lower, "readfilesync(0)")
+	runs := strings.Contains(lower, "exec(") || strings.Contains(lower, "eval(") ||
+		strings.Contains(lower, "compile(") || strings.Contains(lower, "os.system(") ||
+		strings.Contains(lower, "subprocess") || strings.Contains(lower, "function(") ||
+		strings.Contains(lower, "vm.run")
+	return reads && runs
+}
+
+// osascriptReadsStdin reports whether osascript will compile stdin. A script
+// file or an -e string is the program instead.
+func osascriptReadsStdin(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-e" || arg == "-l" {
+			return false
+		}
+		if !strings.HasPrefix(arg, "-") {
+			return false
+		}
+	}
+	return true
+}
+
+func programAndArgs(words []string, depth int) (bin string, args []string, reads, ok bool) {
+	i := 0
+	for i < len(words) && isEnvAssignment(words[i]) {
+		i++
+	}
+	for i < len(words) && stdinWrappers[path.Base(words[i])] {
+		name := path.Base(words[i])
+		i++
+		if name == "env" {
+			var runs bool
+			i, runs = skipEnvOptions(words, i, depth)
+			if runs {
+				return "", nil, true, true
+			}
+			continue
+		}
+		i = skipWrapperOptions(name, words, i)
+		for i < len(words) && isEnvAssignment(words[i]) {
+			i++
+		}
+	}
+	if i >= len(words) {
+		return "", nil, false, false
+	}
+	return path.Base(words[i]), words[i+1:], false, true
+}
+
+// skipEnvOptions walks env's flags and assignments. env -S takes a command
+// string, which inherits stdin, so that string is checked on its own.
+func skipEnvOptions(words []string, i, depth int) (int, bool) {
+	for i < len(words) {
+		word := words[i]
+		switch {
+		case word == "-S" && i+1 < len(words):
+			if stdinIsProgram(words[i+1], depth+1) {
+				return i, true
+			}
+			i += 2
+		case isEnvAssignment(word):
+			i++
+		case strings.HasPrefix(word, "-") && word != "-":
+			if stdinWrapperValueOpts["env"][word] {
+				i += 2
+				continue
+			}
+			i++
+		default:
+			return i, false
+		}
+	}
+	return i, false
+}
+
+func isEnvAssignment(word string) bool {
+	if word == "" || strings.HasPrefix(word, "-") || strings.HasPrefix(word, "=") {
+		return false
+	}
+	return strings.IndexByte(word, '=') > 0
+}
+
+func skipWrapperOptions(wrapper string, words []string, i int) int {
+	opts := stdinWrapperValueOpts[wrapper]
+	for i < len(words) && strings.HasPrefix(words[i], "-") && words[i] != "-" {
+		if words[i] == "--" {
+			return i + 1
+		}
+		if opts[words[i]] {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return i
+}
+
+// shellInlineScript returns the script a shell will run for -c or a combined
+// flag such as -lc. The script inherits stdin, so the caller checks it again.
+func shellInlineScript(args []string) (string, bool) {
+	for i, arg := range args {
+		if arg == "--" {
+			return "", false
+		}
+		if arg == "-c" || (strings.HasPrefix(arg, "-") &&
+			!strings.HasPrefix(arg, "--") && strings.ContainsRune(arg, 'c')) {
+			if i+1 >= len(args) {
+				return "", false
+			}
+			return args[i+1], true
+		}
+		if arg == "-" || arg == "-s" || !strings.HasPrefix(arg, "-") {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+func nodeInlineScript(args []string) (string, bool) {
+	if script, ok := flagArgument(args, "-e"); ok {
+		return script, true
+	}
+	return flagArgument(args, "--eval")
+}
+
+// flagArgument returns the value of flag, including the form -cSCRIPT.
+// A non-option before the flag belongs to an earlier operand, so it is not a match.
+func flagArgument(args []string, flag string) (string, bool) {
+	short := len(flag) == 2
+	for i, arg := range args {
+		if arg == "--" {
+			return "", false
+		}
+		if arg == flag {
+			if i+1 >= len(args) {
+				return "", false
+			}
+			return args[i+1], true
+		}
+		if short && strings.HasPrefix(arg, flag) && len(arg) > len(flag) && !strings.HasPrefix(arg, "--") {
+			return arg[len(flag):], true
+		}
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// splitShellSegments splits on separators outside quotes. Each piece can be
+// the process that reads stdin.
+func splitShellSegments(command string) []string {
+	var parts []string
+	var cur strings.Builder
+	var quote byte
+	flush := func() {
+		if s := strings.TrimSpace(cur.String()); s != "" {
+			parts = append(parts, s)
+		}
+		cur.Reset()
+	}
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		switch {
+		case quote != 0:
+			cur.WriteByte(c)
+			if c == '\\' && quote == '"' && i+1 < len(command) {
+				i++
+				cur.WriteByte(command[i])
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+		case c == '\\' && i+1 < len(command):
+			cur.WriteByte(c)
+			i++
+			cur.WriteByte(command[i])
+		case c == '\'' || c == '"':
+			quote = c
+			cur.WriteByte(c)
+		case c == '\n' || c == ';' || c == '|' || c == '&':
+			if (c == '|' || c == '&') && i+1 < len(command) && command[i+1] == c {
+				i++
+			}
+			flush()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return parts
+}
+
+// shellTokens splits one segment into words, removing quotes.
+func shellTokens(segment string) []string {
+	var words []string
+	var cur strings.Builder
+	inWord := false
+	var quote byte
+	flush := func() {
+		if inWord {
+			words = append(words, cur.String())
+		}
+		cur.Reset()
+		inWord = false
+	}
+	for i := 0; i < len(segment); i++ {
+		c := segment[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+				continue
+			}
+			if c == '\\' && quote == '"' && i+1 < len(segment) {
+				i++
+				cur.WriteByte(segment[i])
+				continue
+			}
+			cur.WriteByte(c)
+		case c == '\'' || c == '"':
+			quote = c
+			inWord = true
+		case c == '\\' && i+1 < len(segment):
+			i++
+			cur.WriteByte(segment[i])
+			inWord = true
+		case c == ' ' || c == '\t' || c == '\r':
+			flush()
+		default:
+			cur.WriteByte(c)
+			inWord = true
+		}
+	}
+	flush()
+	return words
 }
 
 func interpreterReadsStdin(args []string, programFlags map[string]bool) bool {
@@ -1122,10 +1492,15 @@ func interpreterReadsStdin(args []string, programFlags map[string]bool) bool {
 			return true
 		}
 		if !strings.HasPrefix(arg, "-") {
-			return false
+			return isStdinPath(arg)
 		}
 	}
 	return true
+}
+
+// isStdinPath names stdin as a file, so a program "file" there is stdin itself.
+func isStdinPath(arg string) bool {
+	return arg == "/dev/stdin" || arg == "/dev/fd/0"
 }
 
 // truncateShellStream reduces s to at most limit bytes by keeping the head
@@ -1143,7 +1518,9 @@ func truncateShellStream(s string, limit int) (string, bool) {
 	// on the retained size, so compute it once, then recalculate the final split.
 	marker := fmt.Sprintf("\n...[truncated %d bytes]...\n", len(s)-limit)
 	if len(marker) >= limit {
-		return s[len(s)-limit:], true
+		// Cut at the byte offset, dropping a multi-byte character the cut
+		// splits: invalid UTF-8 reaches the model as U+FFFD.
+		return strings.ToValidUTF8(s[len(s)-limit:], ""), true
 	}
 	kept := limit - len(marker)
 	head := kept / 4
@@ -1156,8 +1533,37 @@ func truncateShellStream(s string, limit int) (string, bool) {
 	}
 	var b strings.Builder
 	b.Grow(limit)
-	b.WriteString(s[:head])
+	// The head and tail cuts land on fixed byte offsets; drop a multi-byte
+	// character a cut splits instead of shipping invalid UTF-8 to the model.
+	b.WriteString(strings.ToValidUTF8(s[:head], ""))
 	b.WriteString(marker)
-	b.WriteString(s[len(s)-tail:])
+	b.WriteString(strings.ToValidUTF8(s[len(s)-tail:], ""))
 	return b.String(), true
+}
+
+// WithHostApprovals lets host commands be approved by the session owner (ask)
+// or the review model (auto). Without it the host sandbox refuses anything it
+// would have asked about.
+func (t *ShellExecTool) WithHostApprovals(h HostApprovals) *ShellExecTool {
+	if t != nil {
+		t.hostApprovals = h
+	}
+	return t
+}
+
+// hostApprovalContext attaches the approval port for one host command. The
+// spec is what the model wrote: wrapping added later by code is not reviewed.
+func (t *ShellExecTool) hostApprovalContext(ctx context.Context, input ShellExecInput) context.Context {
+	return t.hostApprovals.attach(ctx, sandbox.CommandApproval{
+		Tool: ToolShellExec, Command: input.Command, Env: input.Env, SkillName: input.SkillName,
+		Stdin: input.Stdin, StdinIsProgram: programStdin(input.Command, input.Stdin) != "",
+	})
+}
+
+// programStdin is stdin when command runs it as code, and empty otherwise.
+func programStdin(command, stdin string) string {
+	if stdin != "" && shellStdinIsProgram(command) {
+		return stdin
+	}
+	return ""
 }

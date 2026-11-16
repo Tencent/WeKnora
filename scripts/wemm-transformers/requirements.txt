@@ -1,0 +1,10 @@
+# Install torch/torchvision for the target CPU/CUDA/MPS platform separately.
+# Versions below match the WeMM model card and the validated service environment.
+transformers==5.2.0
+qwen-vl-utils==0.0.14
+accelerate>=1.1.0,<2
+fastapi>=0.115,<1
+pydantic>=2,<3
+uvicorn>=0.30,<1
+pillow>=10,<13
+httpx>=0.27,<1

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/common"
@@ -426,11 +427,7 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 				probe.Attempt, probe.KnowledgeID)
 			return
 		}
-		errMsg := "task " + t.Type() + " exhausted retries: " + taskErr.Error()
-		// 8KB is the same cap the dead-letter row uses for last_error.
-		if len(errMsg) > 8192 {
-			errMsg = errMsg[:8192]
-		}
+		errMsg := truncateKnowledgeErrorMessage("task " + t.Type() + " exhausted retries: " + taskErr.Error())
 		before, after := *row, *row
 		after.ParseStatus = types.ParseStatusFailed
 		after.ErrorMessage = errMsg
@@ -452,6 +449,22 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 		}
 		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
 	}
+}
+
+// truncateKnowledgeErrorMessage caps msg at 8KB, the same cap the dead-letter
+// row uses for last_error. The cut backs off to a rune boundary because a
+// partial multi-byte rune is invalid UTF-8, which PostgreSQL rejects, leaving
+// the knowledge stuck in its in-flight status.
+func truncateKnowledgeErrorMessage(msg string) string {
+	const maxLen = 8192
+	if len(msg) <= maxLen {
+		return msg
+	}
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return msg[:cut]
 }
 
 func markKnowledgeListDeleteFailed(
@@ -483,10 +496,7 @@ func markKnowledgeListDeleteFailed(
 		}
 	}
 
-	errMsg := "delete task exhausted retries: " + taskErr.Error()
-	if len(errMsg) > 8192 {
-		errMsg = errMsg[:8192]
-	}
+	errMsg := truncateKnowledgeErrorMessage("delete task exhausted retries: " + taskErr.Error())
 	for _, knowledgeID := range payload.KnowledgeIDs {
 		if knowledgeID == "" {
 			continue

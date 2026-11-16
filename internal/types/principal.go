@@ -46,12 +46,18 @@ func IsAPISessionOwnerID(ownerID string) bool {
 type Principal struct {
 	Type string
 	ID   string
+	// ActingVia names what acts for this principal without them present,
+	// e.g. "automation:<id>". Empty when the principal acts in person. It
+	// does not change who is authorized or StorageID: the principal still
+	// owns the run and answers its approvals.
+	ActingVia string
 }
 
 func (p Principal) Normalize() Principal {
 	return Principal{
-		Type: strings.TrimSpace(p.Type),
-		ID:   strings.TrimSpace(p.ID),
+		Type:      strings.TrimSpace(p.Type),
+		ID:        strings.TrimSpace(p.ID),
+		ActingVia: strings.TrimSpace(p.ActingVia),
 	}
 }
 
@@ -207,4 +213,74 @@ func SessionOwnerIDFromContext(ctx context.Context) string {
 	}
 	userID, _ := UserIDFromContext(ctx)
 	return userID
+}
+
+// Authentication sources recorded on sessions.owner_auth_source. The values
+// match internal/sandbox/allocation.AuthSource.
+const (
+	AuthSourceWeb             = "web"
+	AuthSourceAPITenantKey    = "api_tenant_key"
+	AuthSourceAPIPlatformKey  = "api_platform_key"
+	AuthSourceAPIDirectHeader = "api_direct_header"
+	AuthSourceAPISignedToken  = "api_signed_token"
+	AuthSourceEmbed           = "embed"
+	AuthSourceIM              = "im"
+	AuthSourceMCPEndpoint     = "mcp_endpoint"
+	AuthSourceInternal        = "internal"
+	AuthSourceUnknown         = "unknown"
+)
+
+// WithPrincipalAuthSource records how the request's principal was verified.
+func WithPrincipalAuthSource(ctx context.Context, source string) context.Context {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, PrincipalAuthSourceContextKey, source)
+}
+
+// PrincipalAuthSourceFromContext returns "" when no auth middleware ran.
+func PrincipalAuthSourceFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(PrincipalAuthSourceContextKey).(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+// StampSessionOwnerSource overwrites the owner's authentication source from
+// the verified request context. The caller's credentials only vouch for a row
+// whose owner is the caller's own owner scope; anything else (internal
+// services, a row created on someone's behalf) is recorded as internal. The
+// owner's kind is not stored: it follows from the source and user_id.
+func StampSessionOwnerSource(ctx context.Context, s *Session) {
+	if s == nil {
+		return
+	}
+	if strings.TrimSpace(s.UserID) == "" {
+		s.OwnerAuthSource = AuthSourceUnknown
+		return
+	}
+	source := PrincipalAuthSourceFromContext(ctx)
+	if _, ok := PrincipalFromContext(ctx); !ok || source == "" || SessionOwnerIDFromContext(ctx) != s.UserID {
+		s.OwnerAuthSource = AuthSourceInternal
+		return
+	}
+	s.OwnerAuthSource = source
+}
+
+// AuthSourceForBoundOwnerID describes an owner bound after creation (MCP ask,
+// embed backfill). Those binders only ever bind shared-entry or channel
+// owners, so the result can never qualify a session for a shared machine.
+func AuthSourceForBoundOwnerID(ownerID string) string {
+	switch {
+	case strings.HasPrefix(ownerID, PrincipalMCPEndpoint+":"):
+		return AuthSourceMCPEndpoint
+	case strings.HasPrefix(ownerID, PrincipalEmbedSession+":"):
+		return AuthSourceEmbed
+	default:
+		return AuthSourceInternal
+	}
 }

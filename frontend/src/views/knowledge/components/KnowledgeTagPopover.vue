@@ -1,9 +1,11 @@
 <template>
   <div class="knowledge-tag-anchor" @click.stop @mousedown.stop>
     <t-popup :visible="visible" :disabled="disabled" trigger="click" placement="bottom-left" attach="body"
-      destroy-on-close overlay-class-name="knowledge-tag-popover" :overlay-inner-style="{ padding: '12px' }"
+      destroy-on-close overlay-class-name="knowledge-tag-popover" :overlay-inner-style="{ padding: '8px' }"
       @visible-change="changeVisible">
-      <slot />
+      <span class="knowledge-tag-trigger">
+        <slot />
+      </span>
       <template #content>
         <section v-if="visible" class="tag-popover-panel" :aria-label="$t('knowledgeBase.tagEditDialogHeading')">
           <KnowledgeTagPicker :kb-id="kbId" :selected-ids="selectedIds" @update:selected-ids="selectedIds = $event"
@@ -62,12 +64,29 @@ async function save() {
 </script>
 
 <style scoped lang="less">
-.knowledge-tag-anchor { min-width: 0; width: 100%; }
-.tag-popover-panel { width: min(300px, calc(100vw - 56px)); }
-.tag-popover-panel :deep(.knowledge-tag-picker) { margin-top: 0; }
-.tag-popover-panel :deep(.tag-picker-list) { max-height: min(240px, 40vh); }
+.knowledge-tag-anchor {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+}
+.knowledge-tag-trigger {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.knowledge-tag-anchor :deep(.t-popup__reference) {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+}
+.tag-popover-panel { width: min(232px, calc(100vw - 48px)); }
+.tag-popover-panel :deep(.knowledge-tag-picker) { margin-top: 0; gap: 6px; }
+.tag-popover-panel :deep(.tag-picker-list) { max-height: min(160px, 28vh); }
+.tag-popover-panel :deep(.tag-picker-list:has(.tag-picker-empty)) { max-height: none; }
+.tag-popover-panel :deep(.tag-picker-empty) { padding: 6px 2px; }
 .tag-popover-footer {
-  display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px;
+  display: flex; align-items: center; gap: 4px; margin-top: 8px; padding-top: 8px;
   border-top: 1px solid var(--td-component-stroke);
   > span { flex: 1; font-size: var(--app-text-sm); color: var(--td-text-color-placeholder); }
 }

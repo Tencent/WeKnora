@@ -14,9 +14,11 @@ import (
 
 // retryTestServer builds a server that always answers the auth-token call and
 // routes the given target path to h, so tests can drive DoRequest's retry loop.
-func retryTestServer(target string, h http.HandlerFunc) (*httptest.Server, *Config) {
+func retryTestServer(t *testing.T, target string, h http.HandlerFunc) (*httptest.Server, *Config) {
+	t.Helper()
+	resetFeishuRequestGates(t)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, TokenResponse{
 			ApiResponse:       ApiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
@@ -29,10 +31,10 @@ func retryTestServer(target string, h http.HandlerFunc) (*httptest.Server, *Conf
 }
 
 func TestDoRequest_RetriesOn429ThenSucceeds(t *testing.T) {
-	var attempts int
-	ts, cfg := retryTestServer("/target", func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
+	var attempts atomic.Int32
+	ts, cfg := retryTestServer(t, "/target", func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		if attempts.Load() == 1 {
 			// "0" is coerced to a short delay inside the client so the test stays fast.
 			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -48,15 +50,15 @@ func TestDoRequest_RetriesOn429ThenSucceeds(t *testing.T) {
 	if err := c.DoRequest(context.Background(), http.MethodGet, "/target", nil, &resp); err != nil {
 		t.Fatalf("expected success after retry, got %v", err)
 	}
-	if attempts < 2 {
-		t.Errorf("attempts = %d, want >= 2 (should retry after 429)", attempts)
+	if attempts.Load() < 2 {
+		t.Errorf("attempts = %d, want >= 2 (should retry after 429)", attempts.Load())
 	}
 }
 
 func TestDoRequest_429ExhaustsRetries(t *testing.T) {
-	var attempts int
-	ts, cfg := retryTestServer("/target", func(w http.ResponseWriter, r *http.Request) {
-		attempts++
+	var attempts atomic.Int32
+	ts, cfg := retryTestServer(t, "/target", func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.Header().Set("Retry-After", "0")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, `{"code":99991400,"msg":"rate limited"}`)
@@ -68,15 +70,15 @@ func TestDoRequest_429ExhaustsRetries(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when 429s exceed the retry budget")
 	}
-	if attempts != 4 { // initial + 3 retries
-		t.Errorf("attempts = %d, want 4 (1 + 3 retries)", attempts)
+	if attempts.Load() != 4 { // initial + 3 retries
+		t.Errorf("attempts = %d, want 4 (1 + 3 retries)", attempts.Load())
 	}
 }
 
 func TestDoRequest_5xxRetriesOnce(t *testing.T) {
-	var attempts int
-	ts, cfg := retryTestServer("/target", func(w http.ResponseWriter, r *http.Request) {
-		attempts++
+	var attempts atomic.Int32
+	ts, cfg := retryTestServer(t, "/target", func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, `{"code":1,"msg":"internal error"}`)
 	})
@@ -89,15 +91,15 @@ func TestDoRequest_5xxRetriesOnce(t *testing.T) {
 	if err := c.DoRequest(ctx, http.MethodGet, "/target", nil, nil); err == nil {
 		t.Fatal("expected error after 5xx exhaustion")
 	}
-	if attempts != 2 { // initial + 1 retry
-		t.Errorf("attempts = %d, want 2 (5xx retries exactly once)", attempts)
+	if attempts.Load() != 2 { // initial + 1 retry
+		t.Errorf("attempts = %d, want 2 (5xx retries exactly once)", attempts.Load())
 	}
 }
 
 func TestDoRequest_4xxNotRetried(t *testing.T) {
-	var attempts int
-	ts, cfg := retryTestServer("/target", func(w http.ResponseWriter, r *http.Request) {
-		attempts++
+	var attempts atomic.Int32
+	ts, cfg := retryTestServer(t, "/target", func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"code":1,"msg":"bad request"}`)
 	})
@@ -107,16 +109,16 @@ func TestDoRequest_4xxNotRetried(t *testing.T) {
 	if err := c.DoRequest(context.Background(), http.MethodGet, "/target", nil, nil); err == nil {
 		t.Fatal("expected error on 400")
 	}
-	if attempts != 1 {
-		t.Errorf("attempts = %d, want 1 (non-429/5xx 4xx must not retry)", attempts)
+	if attempts.Load() != 1 {
+		t.Errorf("attempts = %d, want 1 (non-429/5xx 4xx must not retry)", attempts.Load())
 	}
 }
 
 func TestDownloadRawBytes_RetriesOn429ThenSucceeds(t *testing.T) {
-	var attempts int
-	ts, cfg := retryTestServer("/dl", func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
+	var attempts atomic.Int32
+	ts, cfg := retryTestServer(t, "/dl", func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		if attempts.Load() == 1 {
 			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
@@ -134,15 +136,15 @@ func TestDownloadRawBytes_RetriesOn429ThenSucceeds(t *testing.T) {
 	if string(data) != "payload-bytes" {
 		t.Errorf("data = %q, want %q", string(data), "payload-bytes")
 	}
-	if attempts < 2 {
-		t.Errorf("attempts = %d, want >= 2 (should retry download after 429)", attempts)
+	if attempts.Load() < 2 {
+		t.Errorf("attempts = %d, want >= 2 (should retry download after 429)", attempts.Load())
 	}
 }
 
 func TestDownloadRawBytes_4xxNotRetried(t *testing.T) {
-	var attempts int
-	ts, cfg := retryTestServer("/dl", func(w http.ResponseWriter, r *http.Request) {
-		attempts++
+	var attempts atomic.Int32
+	ts, cfg := retryTestServer(t, "/dl", func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
 		w.WriteHeader(http.StatusForbidden)
 	})
 	defer ts.Close()
@@ -151,33 +153,43 @@ func TestDownloadRawBytes_4xxNotRetried(t *testing.T) {
 	if _, err := c.downloadRawBytes(context.Background(), "/dl"); err == nil {
 		t.Fatal("expected error on 403")
 	}
-	if attempts != 1 {
-		t.Errorf("attempts = %d, want 1 (403 must not retry)", attempts)
+	if attempts.Load() != 1 {
+		t.Errorf("attempts = %d, want 1 (403 must not retry)", attempts.Load())
 	}
 }
 
-func TestParseRetryAfter(t *testing.T) {
-	fallback := 5 * time.Second
+func TestFeishuRateLimitWait(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
 	tests := []struct {
-		header string
-		want   time.Duration
+		reset string
+		retry string
+		want  time.Duration
 	}{
-		{"", fallback},
-		{"0", 100 * time.Millisecond},
-		{"-1", 100 * time.Millisecond}, // negative coerced to a short delay
-		{"3", 3 * time.Second},
-		{"abc", fallback}, // unparseable
+		{"", "", 10 * time.Second},
+		{"", "0", 100 * time.Millisecond},
+		{"", "-1", 100 * time.Millisecond},
+		{"3", "", 3 * time.Second},
+		{"3", "5", 5 * time.Second},
+		{"5", "3", 5 * time.Second},
+		{"abc", "2", 2 * time.Second},
+		{"", now.Add(4 * time.Second).UTC().Format(http.TimeFormat), 4 * time.Second},
+		{"NaN", "Inf", 10 * time.Second},
+		{"1e30", "abc", 10 * time.Second},
 	}
+	t.Setenv("FEISHU_RATE_LIMIT_RETRY_WAIT", "")
 	for _, tt := range tests {
-		if got := parseRetryAfter(tt.header, fallback); got != tt.want {
-			t.Errorf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.want)
+		headers := http.Header{}
+		headers.Set("x-ogw-ratelimit-reset", tt.reset)
+		headers.Set("Retry-After", tt.retry)
+		if got := feishuRateLimitWait(headers, now); got != tt.want {
+			t.Errorf("wait(reset=%q, retry=%q) = %v, want %v", tt.reset, tt.retry, got, tt.want)
 		}
 	}
 }
 
 func TestDoRequest_RejectsOversizedResponse(t *testing.T) {
 	var hits atomic.Int32
-	ts, cfg := retryTestServer("/open-apis/docx/v1/documents", func(w http.ResponseWriter, _ *http.Request) {
+	ts, cfg := retryTestServer(t, "/open-apis/docx/v1/documents", func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
 		_, _ = w.Write(bytes.Repeat([]byte("a"), 1<<20+1))
 	})
@@ -252,7 +264,9 @@ func (t countingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 // small bound and never copied whole into the returned error.
 func TestDownloadRawBytes_BoundsErrorBodies(t *testing.T) {
 	const bodySize = 1 << 20
-	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusForbidden} {
+	for _, status := range []int{
+		http.StatusTooManyRequests, http.StatusBadRequest, http.StatusInternalServerError, http.StatusForbidden,
+	} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			handler := func(w http.ResponseWriter, _ *http.Request) {
 				if status == http.StatusTooManyRequests {
@@ -261,7 +275,7 @@ func TestDownloadRawBytes_BoundsErrorBodies(t *testing.T) {
 				w.WriteHeader(status)
 				_, _ = w.Write(bytes.Repeat([]byte("a"), bodySize))
 			}
-			ts, cfg := retryTestServer("/open-apis/drive/v1/files/f/download", handler)
+			ts, cfg := retryTestServer(t, "/open-apis/drive/v1/files/f/download", handler)
 			defer ts.Close()
 
 			c := NewClient(cfg)

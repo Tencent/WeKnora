@@ -73,13 +73,15 @@ type kbProfileChatModel struct {
 	err      error
 	calls    int
 	messages []chat.Message
+	lastOpts *chat.ChatOptions
 }
 
 func (m *kbProfileChatModel) Chat(
-	_ context.Context, messages []chat.Message, _ *chat.ChatOptions,
+	_ context.Context, messages []chat.Message, opts *chat.ChatOptions,
 ) (*types.ChatResponse, error) {
 	m.calls++
 	m.messages = append([]chat.Message(nil), messages...)
+	m.lastOpts = opts
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -248,6 +250,35 @@ func TestKnowledgeBaseProfileGenerateRejectsUnparseableOutput(t *testing.T) {
 	_, err := f.service.GenerateKnowledgeBaseProfile(context.Background(), f.kb, false)
 	require.Error(t, err)
 	assert.Equal(t, types.KnowledgeBaseProfileStatusFailed, f.kb.GeneratedProfile.Status)
+}
+
+func TestKnowledgeBaseProfileMaxTokensDefaultAndEnv(t *testing.T) {
+	t.Setenv(knowledgeBaseProfileMaxTokensEnv, "")
+	assert.Equal(t, knowledgeBaseProfileDefaultMaxTokens, knowledgeBaseProfileMaxTokens())
+
+	t.Setenv(knowledgeBaseProfileMaxTokensEnv, "4096")
+	assert.Equal(t, 4096, knowledgeBaseProfileMaxTokens())
+
+	for _, bad := range []string{"abc", "0", "-5", "12.5"} {
+		t.Setenv(knowledgeBaseProfileMaxTokensEnv, bad)
+		assert.Equal(t, knowledgeBaseProfileDefaultMaxTokens, knowledgeBaseProfileMaxTokens(),
+			"invalid value %q must fall back to the default", bad)
+	}
+}
+
+func TestKnowledgeBaseProfileGenerateUsesConfiguredMaxTokens(t *testing.T) {
+	f := newKBProfileFixture(kbProfileResponse)
+	_, err := f.service.GenerateKnowledgeBaseProfile(context.Background(), f.kb, false)
+	require.NoError(t, err)
+	require.NotNil(t, f.chatModel.lastOpts)
+	assert.Equal(t, knowledgeBaseProfileDefaultMaxTokens, f.chatModel.lastOpts.MaxTokens)
+
+	t.Setenv(knowledgeBaseProfileMaxTokensEnv, "3000")
+	f2 := newKBProfileFixture(kbProfileResponse)
+	_, err = f2.service.GenerateKnowledgeBaseProfile(context.Background(), f2.kb, false)
+	require.NoError(t, err)
+	require.NotNil(t, f2.chatModel.lastOpts)
+	assert.Equal(t, 3000, f2.chatModel.lastOpts.MaxTokens)
 }
 
 func TestKnowledgeBaseProfileGenerateModelResolution(t *testing.T) {

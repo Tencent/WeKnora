@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url'
 
 /**
  * 样式守卫（棘轮）：统计 views/ components/ assets/ 里绕过设计令牌或和 TDesign 打架的写法，
- * 只允许计数下降。新增任何一处都会让测试失败；清理后请把 baseline 调低。
+ * 只允许计数下降。新增任何一处都会让测试失败；清理后请把 baseline 调低（测试会提示目标值）。
+ * 低于 baseline 不算失败：两个各自清理并下调 baseline 的 PR 先后合并时，main 不应因此变红。
+ * 注释中的示例代码不计入。
  *
  * 令牌定义在 assets/theme/theme.css（--app-radius-* / --app-text-* / --app-space-* /
  * --app-motion-* / --z-*），TDesign 全局覆盖放在 assets/theme/tdesign-overrides.less。
@@ -28,7 +30,7 @@ const RULES = [
     name: 'legacy-blue-rgba',
     why: '旧版 TDesign 蓝 rgba(0,82,217) 已不是品牌色',
     pattern: /rgba\(\s*0\s*,\s*82\s*,\s*217\s*,/g,
-    baseline: 18,
+    baseline: 7,
   },
   {
     name: 'td-token-fallback',
@@ -40,43 +42,43 @@ const RULES = [
     name: 'radius-literal',
     why: '圆角请用 var(--app-radius-xs|sm|md|lg|xl|pill)（4/6/8/10/12/999px）',
     pattern: /border(?:-[a-z]+)*-radius\s*:\s*\d+(?:\.\d+)?px/g,
-    baseline: 162,
+    baseline: 160,
   },
   {
     name: 'font-size-literal',
-    why: '字号请用 var(--app-text-2xs … 4xl)（10~24px）',
-    pattern: /font-size\s*:\s*\d+(?:\.\d+)?px/g,
-    baseline: 28,
+    why: '字号请用 var(--app-text-2xs … 4xl)（10~24px），简写写成 font: var(--app-text-sm)/1.5 …；图标尺寸用 t-icon 的 size 属性',
+    pattern: /\bfont(?:-size)?\s*:\s*\d+(?:\.\d+)?px/g,
+    baseline: 33,
   },
   {
     name: 'motion-literal',
     why: '过渡时长请用 var(--app-motion-instant|fast|base|slow)（120/150/200/300ms）',
     pattern: /transition[^;{]*?(?<![\d.])(?:0?\.\d+s|\d+ms)/g,
-    baseline: 65,
+    baseline: 64,
   },
   {
     name: 'transition-all',
     why: 'transition: all 会让无关属性也参与动画（含 layout 属性），请列出具体属性',
     pattern: /transition\s*:\s*all\b/g,
-    baseline: 78,
+    baseline: 59,
   },
   {
     name: 'important',
     why: '!important 通常意味着在和 TDesign 或自己的样式打架；全局意图的覆盖放 tdesign-overrides.less',
     pattern: /!important/g,
-    baseline: 510,
+    baseline: 414,
   },
   {
     name: 'z-index-important',
     why: 'z-index 不应靠 !important 取胜，改用 t-popup attach="body" 或 --z-* 层级令牌',
     pattern: /z-index\s*:\s*-?\d+\s*!important/g,
-    baseline: 26,
+    baseline: 23,
   },
   {
     name: 'raster-icon',
     why: 'more.png / circle.png 位图图标请换成 t-icon',
     pattern: /(more|circle)\.png/g,
-    baseline: 10,
+    baseline: 8,
   },
 ]
 
@@ -92,35 +94,64 @@ function* walk(dir) {
   }
 }
 
-function countMatches(rule) {
-  const byFile = new Map()
-  let total = 0
+// Blank out comments but keep newlines so reported line numbers stay accurate.
+// `//` only counts as a Less line comment after whitespace or at line start,
+// which leaves url(https://…) alone.
+function stripComments(text) {
+  const blank = (m) => m.replace(/[^\n]/g, ' ')
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/<!--[\s\S]*?-->/g, blank)
+    .replace(/(^|[ \t])\/\/[^\n]*/gm, blank)
+}
+
+const sources = (() => {
+  const list = []
   for (const dir of SCAN_DIRS) {
     for (const file of walk(join(SRC_ROOT, dir))) {
       const rel = relative(SRC_ROOT, file).replaceAll('\\', '/')
-      if (EXEMPT_FILES.has(rel)) continue
-      const text = readFileSync(file, 'utf8')
-      const n = (text.match(rule.pattern) ?? []).length
-      if (n > 0) {
-        byFile.set(rel, n)
-        total += n
-      }
+      if (!EXEMPT_FILES.has(rel)) list.push({ rel, text: stripComments(readFileSync(file, 'utf8')) })
     }
   }
-  return { total, byFile }
+  return list
+})()
+
+function findMatches(rule) {
+  const hits = []
+  for (const { rel, text } of sources) {
+    for (const m of text.matchAll(rule.pattern)) {
+      const line = text.slice(0, m.index).split('\n').length
+      const snippet = text.split('\n')[line - 1].trim().slice(0, 100)
+      hits.push({ rel, line, snippet })
+    }
+  }
+  return hits
+}
+
+const MAX_LISTED_HITS = 40
+
+function describeHits(hits) {
+  if (hits.length <= MAX_LISTED_HITS) {
+    return hits.map((h) => `  ${h.rel}:${h.line}  ${h.snippet}`).join('\n')
+  }
+  const byFile = new Map()
+  for (const h of hits) byFile.set(h.rel, (byFile.get(h.rel) ?? 0) + 1)
+  return [...byFile.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([f, n]) => `  ${n}\t${f}`)
+    .join('\n')
 }
 
 for (const rule of RULES) {
-  test(`style guard: ${rule.name} does not exceed baseline (${rule.baseline})`, () => {
-    const { total, byFile } = countMatches(rule)
-    const top = [...byFile.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([f, n]) => `  ${n}\t${f}`)
-      .join('\n')
+  test(`style guard: ${rule.name} does not exceed baseline (${rule.baseline})`, (t) => {
+    const hits = findMatches(rule)
     assert.ok(
-      total <= rule.baseline,
-      `${rule.name}: ${total} occurrences > baseline ${rule.baseline}.\n${rule.why}\n${top}`,
+      hits.length <= rule.baseline,
+      `${rule.name}: ${hits.length} occurrences > baseline ${rule.baseline}.\n${rule.why}\n${describeHits(hits)}`,
     )
+    if (hits.length < rule.baseline) {
+      t.diagnostic(`${rule.name}: ${hits.length} < baseline ${rule.baseline}; lower the baseline to ${hits.length}`)
+    }
   })
 }

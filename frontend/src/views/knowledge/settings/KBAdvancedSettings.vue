@@ -24,6 +24,22 @@
 
       <!-- Question Generation configuration -->
       <div v-if="localQuestionGeneration.enabled" class="subsection">
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.questionGeneration.modelLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.questionGeneration.modelDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <ModelSelector
+              model-type="KnowledgeQA"
+              :selected-model-id="localQuestionGeneration.modelId || ''"
+              :all-models="allModels"
+              clearable
+              :placeholder="$t('knowledgeEditor.advanced.questionGeneration.modelPlaceholder')"
+              @update:selected-model-id="(value: string) => { localQuestionGeneration.modelId = value; handleQuestionGenerationChange() }"
+            />
+          </div>
+        </div>
         <div class="setting-row">
           <div class="setting-info">
             <label>{{ $t('knowledgeEditor.advanced.questionGeneration.countLabel') }}</label>
@@ -183,6 +199,7 @@ import { ref, watch } from 'vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 
 interface QuestionGenerationConfig {
+  modelId?: string
   enabled: boolean
   questionCount: number
   customInstructions?: string
@@ -368,13 +385,45 @@ const handleQuestionGenerationChange = () => {
   }
 }
 
-.subsection {
-  padding: 16px 20px;
-  margin: 12px 0 0 0;
-  background: var(--td-bg-color-container);
-  border-radius: var(--app-radius-md);
-  border-left: 3px solid var(--td-brand-color);
-  position: relative;
+.kb-advanced-settings:not(.kb-advanced-settings--embedded) {
+  .setting-row:has(> .setting-control > .t-switch) {
+    align-items: center;
+
+    .setting-info {
+      flex: 1;
+      max-width: none;
+    }
+
+    .setting-control {
+      flex: none;
+      max-width: none;
+    }
+  }
+
+  .setting-row:has(+ .subsection) {
+    border-bottom: none;
+    padding-bottom: 12px;
+  }
+
+  .subsection {
+    margin-bottom: 4px;
+    padding: 0 16px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: var(--app-radius-md);
+
+    .setting-row {
+      padding: 14px 0;
+    }
+
+    .setting-row-vertical {
+      gap: 8px;
+    }
+  }
+
+  .subsection + .setting-row {
+    margin-top: 12px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
 }
 
 .required {

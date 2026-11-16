@@ -72,6 +72,32 @@ export function getSandboxToolPath(event: ToolEventLike | null | undefined): str
   return stringField(eventFields(event), 'path')
 }
 
+const ATTACHMENT_SCHEME = 'attachment://'
+
+export type AttachmentReadTarget =
+  | { kind: 'list' }
+  | { kind: 'file'; name: string }
+  | { kind: 'images'; name: string }
+  | { kind: 'image'; name: string; number: number }
+
+/**
+ * Describes a read_file target under attachment:// in user terms. The
+ * attachment ID in the path means nothing to users, so the file name comes
+ * from the tool result and is empty while the call is still running.
+ */
+export function getAttachmentReadTarget(event: ToolEventLike | null | undefined): AttachmentReadTarget | null {
+  const fields = eventFields(event)
+  const path = stringField(fields, 'path')
+  if (!path.startsWith(ATTACHMENT_SCHEME)) return null
+  const rest = path.slice(ATTACHMENT_SCHEME.length).replace(/\/+$/, '')
+  if (!rest) return { kind: 'list' }
+  const name = stringField(fields, 'file_name')
+  const image = /^[^/]+\/images(?:\/(\d+))?$/.exec(rest)
+  if (!image) return { kind: 'file', name }
+  if (image[1]) return { kind: 'image', name, number: Number(image[1]) }
+  return { kind: 'images', name }
+}
+
 export type SandboxDiffStat = {
   added: number
   removed: number

@@ -123,6 +123,11 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		Options:  make(map[string]interface{}),
 	}
 
+	// Keep request-scoped notices out of the system prefix and stored history.
+	if opts != nil && opts.RuntimeNotice != "" {
+		chatReq.Messages = append(chatReq.Messages, ollamaapi.Message{Role: "user", Content: opts.RuntimeNotice})
+	}
+
 	// 添加可选参数
 	if opts != nil {
 		chatReq.Options["temperature"] = opts.Temperature
@@ -303,6 +308,9 @@ func (c *OllamaChat) ChatStream(
 					ResponseType: types.ResponseTypeAnswer,
 					Done:         true,
 					Usage:        usage,
+					// 与非流式分支一致：透传 done_reason，否则 num_predict 打满
+					// 的截断在流式里看起来像正常结束。
+					FinishReason: resp.DoneReason,
 				}
 			}
 

@@ -58,6 +58,17 @@ func TestBuildLangfuseMessagesReasoningContent(t *testing.T) {
 	}
 }
 
+func TestBuildLangfuseMessagesRecordsImagesWithoutPayload(t *testing.T) {
+	dataURI := "data:image/png;base64," + strings.Repeat("A", 2048)
+	msgs := buildLangfuseMessages([]Message{
+		{Role: "user", Content: "look", Images: []string{dataURI, "https://example.com/a.png"}},
+	})
+	want := []string{"data:image/png (3 KB)", "https://example.com/a.png"}
+	if !reflect.DeepEqual(msgs[0]["images"], want) {
+		t.Fatalf("images = %#v; want %#v", msgs[0]["images"], want)
+	}
+}
+
 func TestConvertUsageIncludesPromptCacheCounters(t *testing.T) {
 	got := convertUsage(&types.TokenUsage{
 		PromptTokens: 1000, CompletionTokens: 50, TotalTokens: 1050,

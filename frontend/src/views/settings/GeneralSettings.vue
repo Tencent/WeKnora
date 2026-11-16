@@ -123,6 +123,8 @@
         </div>
       </div>
 
+      <HostApprovalDefaultSetting v-if="authStore.isLiteMode" />
+
       <!-- 自动下载更新开关 (Lite edition only) -->
       <div class="setting-row" v-if="authStore.isLiteMode">
         <div class="setting-info">
@@ -146,6 +148,7 @@ import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
+import HostApprovalDefaultSetting from './components/HostApprovalDefaultSetting.vue'
 import {
   useFont,
   SANS_STACKS,

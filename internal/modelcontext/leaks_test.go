@@ -79,7 +79,10 @@ func TestLeakedIdentifiersClassifiesRegisteredAndUnregistered(t *testing.T) {
 func TestLeakedIdentifiersDoesNotMatchHandlesOrPartialUUIDs(t *testing.T) {
 	registry := NewRegistry(true)
 	messages := []chat.Message{
-		{Role: "assistant", Content: "c1 d2 b3 w4 res://0001 i1 and k_3f1c2a8e_0000_4000_8000_000000000001"},
+		{
+			Role:    "assistant",
+			Content: "chunk://1 doc://2 kb://3 url://4 res://0001 i1 and k_3f1c2a8e_0000_4000_8000_000000000001",
+		},
 		{Role: "tool", Name: "x", Content: "3f1c2a8e-0000-4000-8000-00000000000"}, // one hex digit short
 	}
 	if leaks := registry.LeakedIdentifiers(messages); len(leaks) != 0 {

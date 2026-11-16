@@ -38,12 +38,11 @@ export function agentRequiresRerankModel(
 ): boolean {
   if (!config || config.kb_selection_mode === 'none') return false
 
-  const allowedTools = config.allowed_tools || []
-  // The backend falls back to DefaultAllowedTools when the list is empty,
-  // and that default includes search_knowledge.
-  if (allowedTools.length === 0) return true
+  // An unset list selects the backend's DefaultAllowedTools, which include
+  // search_knowledge. An empty list registers no built-in tool.
+  if (config.allowed_tools == null) return true
 
-  return allowedToolsInclude(allowedTools, 'search_knowledge')
+  return allowedToolsInclude(config.allowed_tools, 'search_knowledge')
 }
 
 export function getAgentNotReadyReasonKeys(

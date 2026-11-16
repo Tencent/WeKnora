@@ -50,6 +50,48 @@ type AgentConfig struct {
 	// ToolApprovalTimeoutSeconds is how long the agent waits for human approval on a flagged MCP tool.
 	// 0 means default 600 (10 minutes).
 	ToolApprovalTimeoutSeconds int `yaml:"tool_approval_timeout_seconds" json:"tool_approval_timeout_seconds"`
+	// PromptSuspendEnabled lets a run that waits on a suspendable prompt (tool
+	// approval) end after PromptHotWaitSeconds and persist its state instead of
+	// blocking up to ToolApprovalTimeoutSeconds. Unset means enabled.
+	PromptSuspendEnabled *bool `yaml:"prompt_suspend_enabled" json:"prompt_suspend_enabled"`
+	// PromptHotWaitSeconds is how long a suspendable prompt waits in memory
+	// before the run is suspended. 0 means default 120.
+	PromptHotWaitSeconds int `yaml:"prompt_hot_wait_seconds" json:"prompt_hot_wait_seconds"`
+	// PromptExpireSeconds is how long a suspended prompt stays answerable.
+	// 0 means default 604800 (7 days); a negative value never expires.
+	PromptExpireSeconds int `yaml:"prompt_expire_seconds" json:"prompt_expire_seconds"`
+}
+
+// Defaults for suspendable agent prompts.
+const (
+	DefaultPromptHotWait = 120 * time.Second
+	DefaultPromptExpire  = 7 * 24 * time.Hour
+)
+
+// PromptSuspend reports whether suspendable prompts may suspend their run.
+func (c *AgentConfig) PromptSuspend() bool {
+	return c == nil || c.PromptSuspendEnabled == nil || *c.PromptSuspendEnabled
+}
+
+// PromptHotWait returns the in-memory wait before a run is suspended.
+func (c *AgentConfig) PromptHotWait() time.Duration {
+	if c == nil || c.PromptHotWaitSeconds <= 0 {
+		return DefaultPromptHotWait
+	}
+	return time.Duration(c.PromptHotWaitSeconds) * time.Second
+}
+
+// PromptExpiry returns how long a suspended prompt stays answerable; zero
+// means it never expires.
+func (c *AgentConfig) PromptExpiry() time.Duration {
+	switch {
+	case c == nil || c.PromptExpireSeconds == 0:
+		return DefaultPromptExpire
+	case c.PromptExpireSeconds < 0:
+		return 0
+	default:
+		return time.Duration(c.PromptExpireSeconds) * time.Second
+	}
 }
 
 // IMConfig configures the IM integration service.
@@ -316,6 +358,7 @@ type OIDCUserInfoMapping struct {
 
 type OIDCAuthConfig struct {
 	Enable                bool                 `yaml:"enable"                 json:"enable"`
+	PKCEEnabled           bool                 `yaml:"pkce_enabled"           json:"pkce_enabled"`
 	IssuerURL             string               `yaml:"issuer_url"             json:"issuer_url"`
 	DiscoveryURL          string               `yaml:"discovery_url"          json:"discovery_url"`
 	ProviderDisplayName   string               `yaml:"provider_display_name"  json:"provider_display_name"`
@@ -536,7 +579,9 @@ func LoadConfig() (*Config, error) {
 	})
 
 	// 使用处理后的配置内容
-	viper.ReadConfig(strings.NewReader(result))
+	if err := viper.ReadConfig(strings.NewReader(result)); err != nil {
+		return nil, fmt.Errorf("error parsing expanded config: %w", err)
+	}
 
 	// 解析配置到结构体
 	var cfg Config
@@ -709,6 +754,9 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_ENABLE")); value != "" {
 		cfg.OIDCAuth.Enable = strings.EqualFold(value, "true")
 	}
+	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_PKCE_ENABLED")); value != "" {
+		cfg.OIDCAuth.PKCEEnabled = strings.EqualFold(value, "true")
+	}
 	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_ISSUER_URL")); value != "" {
 		cfg.OIDCAuth.IssuerURL = value
 	}
@@ -820,6 +868,10 @@ func applyAgentEnvOverrides(cfg *Config) {
 		} else if d, err := time.ParseDuration(value + "s"); err == nil {
 			cfg.Agent.ToolApprovalTimeoutSeconds = int(d.Seconds())
 		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AGENT_PROMPT_SUSPEND")); value != "" {
+		enabled := strings.EqualFold(value, "true")
+		cfg.Agent.PromptSuspendEnabled = &enabled
 	}
 }
 

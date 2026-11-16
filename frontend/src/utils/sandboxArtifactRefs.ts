@@ -22,6 +22,8 @@
  * 会被当成知识库图片走受保护图片渲染，最终显示成一张拉不出来的裂图。
  */
 
+import type { Renderer } from 'marked';
+
 import { escapeHTML } from './security.ts';
 import { renderArtifactFileIcon } from './artifactFileIcon';
 
@@ -420,4 +422,17 @@ export function artifactIndexFromEventTarget(target: EventTarget | null): number
   if (!card) return null;
   const index = Number(card.getAttribute('data-artifact-index'));
   return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+/** Links and images referencing a generated file must share its authorized
+ * preview path. Leave unrelated links to the original Markdown renderer. */
+export function installArtifactLinkRenderer(
+  renderer: Renderer,
+  options: () => Omit<Parameters<typeof renderArtifactReference>[0], 'href' | 'alt'>,
+): void {
+  const defaultLink = renderer.link;
+  renderer.link = function (token) {
+    const artifact = renderArtifactReference({ ...options(), href: token.href, alt: token.text });
+    return artifact ?? defaultLink.call(this, token);
+  };
 }

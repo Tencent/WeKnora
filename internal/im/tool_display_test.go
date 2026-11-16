@@ -116,3 +116,17 @@ func TestFormatIMToolLine_writeSandboxPendingShowsDiffStat(t *testing.T) {
 		t.Fatalf("pending write line = %q", line)
 	}
 }
+
+func TestFormatMCPToolName_capitalizesWholeFirstRune(t *testing.T) {
+	cases := map[string]string{
+		"mcp_search_docs":  "Search Docs",
+		"mcp_查询_search":    "查询 Search",
+		"mcp_élan_vital":   "Élan Vital",
+		"mcp__leading_gap": " Leading Gap",
+	}
+	for raw, want := range cases {
+		if got := formatMCPToolName(raw); got != want {
+			t.Errorf("formatMCPToolName(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}

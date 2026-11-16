@@ -37,7 +37,9 @@ func TestBochaProviderSearch(t *testing.T) {
 	defer server.Close()
 
 	bocha := &BochaProvider{client: server.Client(), baseURL: server.URL, apiKey: "sk-test", freshness: "oneWeek", summary: true}
-	results, err := bocha.Search(context.Background(), " WeKnora ", 2, true)
+	results, err := bocha.Search(context.Background(), types.WebSearchRequest{
+		Query: " WeKnora ", MaxResults: 2, IncludeDate: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +93,9 @@ func TestBochaProviderSearchDates(t *testing.T) {
 			bocha := &BochaProvider{
 				client: server.Client(), baseURL: server.URL, apiKey: "sk-test", freshness: defaultBochaFreshness,
 			}
-			results, err := bocha.Search(context.Background(), "test", 1, tt.includeDate)
+			results, err := bocha.Search(context.Background(), types.WebSearchRequest{
+				Query: "test", MaxResults: 1, IncludeDate: tt.includeDate,
+			})
 			if err != nil || len(results) != 1 {
 				t.Fatalf("results = %v, err = %v", results, err)
 			}
@@ -130,7 +134,7 @@ func TestBochaProviderHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 	bocha := &BochaProvider{client: server.Client(), baseURL: server.URL, apiKey: "bad", freshness: defaultBochaFreshness, summary: true}
-	_, err := bocha.Search(context.Background(), "test", 1, false)
+	_, err := bocha.Search(context.Background(), types.WebSearchRequest{Query: "test", MaxResults: 1})
 	if err == nil || !strings.Contains(err.Error(), "Invalid API KEY") {
 		t.Fatalf("error = %v", err)
 	}
@@ -143,7 +147,7 @@ func TestBochaProviderAPIErrorWithHTTPOK(t *testing.T) {
 	}))
 	defer server.Close()
 	bocha := &BochaProvider{client: server.Client(), baseURL: server.URL, apiKey: "sk-test", freshness: defaultBochaFreshness, summary: true}
-	_, err := bocha.Search(context.Background(), "test", 1, false)
+	_, err := bocha.Search(context.Background(), types.WebSearchRequest{Query: "test", MaxResults: 1})
 	if err == nil || !strings.Contains(err.Error(), "429") {
 		t.Fatalf("error = %v", err)
 	}
@@ -159,7 +163,7 @@ func TestBochaProviderSearchAcceptsStringAndNumericCode(t *testing.T) {
 			_, _ = w.Write([]byte(body))
 		}))
 		bocha := &BochaProvider{client: server.Client(), baseURL: server.URL, apiKey: "sk-test", freshness: defaultBochaFreshness, summary: true}
-		results, err := bocha.Search(context.Background(), "test", 1, false)
+		results, err := bocha.Search(context.Background(), types.WebSearchRequest{Query: "test", MaxResults: 1})
 		if err != nil || len(results) != 1 {
 			t.Fatalf("body %s: results = %v, err = %v", body, results, err)
 		}

@@ -105,3 +105,19 @@ func TestMCPAuthConfig_Scan_MissingKeyDegradesGracefully(t *testing.T) {
 	assert.Empty(t, scanned.Token, "encrypted token must blank out when key is missing")
 	assert.Equal(t, "b", scanned.CustomHeaders["a"], "non-secret fields must still load")
 }
+
+func TestMCPAuthConfig_ClientSecretIsEncryptedAndClientIDIsNot(t *testing.T) {
+	withAESKey(t, testAESKey32)
+	cfg := &MCPAuthConfig{AuthType: MCPAuthOAuth, ClientID: "pre-registered", ClientSecret: "client-secret-value"}
+	v, err := cfg.Value()
+	assert.NoError(t, err)
+	raw := v.([]byte)
+	assert.NotContains(t, string(raw), "client-secret-value")
+	assert.Contains(t, string(raw), `"client_id":"pre-registered"`)
+	assert.Equal(t, "client-secret-value", cfg.ClientSecret, "the caller's struct is not mutated")
+
+	var back MCPAuthConfig
+	assert.NoError(t, back.Scan(raw))
+	assert.Equal(t, "pre-registered", back.ClientID)
+	assert.Equal(t, "client-secret-value", back.ClientSecret)
+}

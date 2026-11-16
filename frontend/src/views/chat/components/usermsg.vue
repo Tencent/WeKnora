@@ -1,5 +1,5 @@
 <template>
-    <div class="user_msg_container" ref="containerRef" :class="{ 'is-embedded': embeddedMode }">
+    <div class="user_msg_container" ref="containerRef" :class="{ 'is-embedded': embeddedMode, 'is-actions-pinned': rewindConfirmOpen }">
         <!-- 显示@的知识库和文件 -->
         <div v-if="mentioned_items && mentioned_items.length > 0" class="mentioned_items">
             <span v-for="item in mentioned_items" :key="item.id" class="mentioned_tag" :class="[
@@ -23,20 +23,10 @@
                 class="user_attachment_card"
                 :class="{ 'is-previewable': canPreviewAttachment(att) }"
                 @click="openAttachmentPreview(att)">
-                <div class="attachment_card_icon">
-                    <svg viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg" width="36" height="44">
-                        <rect width="40" height="48" rx="4" fill="#4A90D9" />
-                        <path d="M8 6h16l8 8v28a2 2 0 01-2 2H8a2 2 0 01-2-2V8a2 2 0 012-2z" fill="#5BA3E8" />
-                        <path d="M24 6l8 8h-6a2 2 0 01-2-2V6z" fill="#3A7BC8" />
-                        <rect x="10" y="20" width="20" height="2" rx="1" fill="white" fill-opacity="0.9" />
-                        <rect x="10" y="26" width="20" height="2" rx="1" fill="white" fill-opacity="0.9" />
-                        <rect x="10" y="32" width="14" height="2" rx="1" fill="white" fill-opacity="0.9" />
-                    </svg>
-                </div>
+                <ArtifactFileIcon :file-name="att.file_name" />
                 <div class="attachment_card_info">
-                    <div class="attachment_card_name">{{ att.file_name }}</div>
-                    <div class="attachment_card_meta">{{ getFileExt(att.file_name) }}<span
-                            v-if="att.file_size">&nbsp;·&nbsp;{{ formatFileSize(att.file_size) }}</span></div>
+                    <div class="attachment_card_name" :title="att.file_name">{{ att.file_name }}</div>
+                    <div v-if="att.file_size" class="attachment_card_meta">{{ formatFileSize(att.file_size) }}</div>
                 </div>
             </div>
         </div>
@@ -50,27 +40,32 @@
             <div v-if="content || canFork || canRewind" class="user_msg_actions">
                 <t-tooltip v-if="content" :content="t('agent.copy')">
                     <button type="button" class="user_msg_action" :aria-label="t('agent.copy')" @click="handleCopy">
-                        <t-icon name="copy" />
+                        <ChatActionIcon name="copy" />
                     </button>
                 </t-tooltip>
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                     <button type="button" class="user_msg_action" :aria-label="forkTooltip" @click="emit('fork', messageId)">
-                        <t-icon name="git-branch" />
+                        <ChatActionIcon name="git-branch" />
                     </button>
                 </t-tooltip>
                 <t-popconfirm
                     v-if="canRewind"
-                    :content="t('chat.rewind.confirmBody')"
-                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
-                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger', size: 'small' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton'), size: 'small' }"
                     theme="warning"
                     placement="top"
-                    overlay-class-name="chat-rewind-popconfirm"
+                    :show-arrow="false"
+                    overlay-class-name="wk-popover chat-rewind-popconfirm"
+                    @visible-change="(visible) => (rewindConfirmOpen = visible)"
                     @confirm="emit('rewind', messageId)"
                 >
+                    <template #content>
+                        <div class="chat-rewind-confirm__title">{{ t('chat.rewind.confirmTitle') }}</div>
+                        <div class="chat-rewind-confirm__body">{{ t('chat.rewind.confirmBody') }}</div>
+                    </template>
                     <t-tooltip :content="rewindTooltip">
-                        <button type="button" class="user_msg_action" :aria-label="rewindTooltip" @click.stop>
-                            <t-icon name="rollback" />
+                        <button type="button" class="user_msg_action" :class="{ 'is-active': rewindConfirmOpen }" :aria-label="rewindTooltip" @click.stop>
+                            <ChatActionIcon name="rollback" />
                         </button>
                     </t-tooltip>
                 </t-popconfirm>
@@ -88,6 +83,8 @@
 import { computed, ref, watch, onMounted, nextTick } from "vue";
 import { hydrateProtectedFileImages } from '@/utils/security';
 import picturePreview from '@/components/picture-preview.vue';
+import ArtifactFileIcon from './ArtifactFileIcon.vue';
+import ChatActionIcon from '@/components/ChatActionIcon.vue';
 import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
@@ -169,6 +166,7 @@ const timestamp = computed(() => getConversationTimestampModel(props.createdAt))
 const fullTimestamp = computed(() => formatMessageTimestamp(props.createdAt));
 const handleCopy = () => copyWithToast(props.content, 'common.copySuccess', 'common.copyFailed');
 const rewindTooltip = computed(() => t('chat.rewind.tooltip'));
+const rewindConfirmOpen = ref(false);
 
 const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
@@ -189,21 +187,6 @@ const channelClass = computed(() => props.channel ? `channel-${props.channel}` :
 const containerRef = ref(null);
 const hasImages = computed(() => props.images && props.images.length > 0);
 const hasAttachments = computed(() => props.attachments && props.attachments.length > 0);
-
-const getAttachmentIcon = (fileNameOrType) => {
-    const ext = (fileNameOrType || '').split('.').pop()?.toLowerCase();
-    if (['pdf'].includes(ext)) return 'file-pdf';
-    if (['doc', 'docx'].includes(ext)) return 'file-word';
-    if (['xls', 'xlsx'].includes(ext)) return 'file-excel';
-    if (['ppt', 'pptx'].includes(ext)) return 'file-powerpoint';
-    if (['txt', 'md'].includes(ext)) return 'file';
-    if (['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac'].includes(ext)) return 'sound';
-    return 'file';
-};
-
-const getFileExt = (fileName) => {
-    return (fileName || '').split('.').pop()?.toUpperCase() || 'FILE';
-};
 
 const formatFileSize = (bytes) => {
     if (!bytes) return '';
@@ -319,32 +302,23 @@ const closePreImg = () => {
 
 .user_attachment_card {
     display: flex;
-    flex-direction: row;
     align-items: center;
     gap: 10px;
-    padding: 8px 12px;
+    box-sizing: border-box;
+    width: 240px;
+    max-width: 100%;
+    padding: 8px 12px 8px 8px;
     border-radius: var(--app-radius-md);
-    border: 1px solid var(--td-border-level-1-color);
-    background: var(--td-bg-color-container);
-    max-width: 260px;
-    min-width: 160px;
+    background: var(--td-bg-color-secondarycontainer);
     cursor: default;
 
     &.is-previewable {
         cursor: pointer;
-        transition: border-color var(--app-motion-base), box-shadow var(--app-motion-base);
+        transition: background var(--app-motion-fast) ease;
 
         &:hover {
-            border-color: var(--td-brand-color-2);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            background: var(--td-bg-color-secondarycontainer-hover);
         }
-    }
-
-    .attachment_card_icon {
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
     }
 
     .attachment_card_info {
@@ -352,12 +326,12 @@ const closePreImg = () => {
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 2px;
     }
 
     .attachment_card_name {
         font-size: var(--app-text-md);
         font-weight: 500;
+        line-height: 1.35;
         color: var(--td-text-color-primary);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -365,10 +339,11 @@ const closePreImg = () => {
     }
 
     .attachment_card_meta {
-        font-size: var(--app-text-xs);
-        color: var(--td-text-color-secondary);
+        margin-top: 2px;
+        font-size: var(--app-text-sm);
+        line-height: 1.3;
+        color: var(--td-text-color-placeholder);
         white-space: nowrap;
-        box-sizing: border-box;
     }
 }
 
@@ -454,10 +429,12 @@ html[theme-mode="dark"] {
     display: flex;
     align-items: center;
     gap: 2px;
+    color: color-mix(in srgb, var(--td-text-color-primary) 55%, transparent);
 }
 
 .user_msg_container:hover .user_msg_meta,
-.user_msg_container:focus-within .user_msg_meta {
+.user_msg_container:focus-within .user_msg_meta,
+.user_msg_container.is-actions-pinned .user_msg_meta {
     opacity: 1;
     pointer-events: auto;
 }
@@ -477,7 +454,15 @@ html[theme-mode="dark"] {
     cursor: pointer;
 }
 
-.user_msg_action:hover {
+.user_msg_action :deep(.chat-action-icon) {
+    display: block;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.user_msg_action:hover,
+.user_msg_action.is-active {
     color: var(--td-text-color-secondary);
     background: var(--td-bg-color-container-hover);
 }

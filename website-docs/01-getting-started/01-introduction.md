@@ -11,6 +11,16 @@ WeKnora（维娜拉）是腾讯开源的知识库问答系统，支持导入 PDF
   caption="WeKnora 主界面：左侧知识库与会话，右侧问答区"
   hint="展示登录后的主界面全貌：侧边栏（知识库、智能体、设置入口）与一轮带引用的问答。" />
 
+
+## v0.9.0 新增能力
+
+- [WeKnora 助手](../03-features/26-weknora-assistant.md)：解答版本、功能与配置问题，结合当前页面，以你的身份检索资料并处理任务。
+- [多智能体协作](../03-features/26-weknora-assistant.md#collaboration)：独立处理子任务，再汇总结果。
+- [自动化](../03-features/27-automations.md)：按一次性或周期计划执行重复工作。
+- [执行权限与审批](../03-features/28-agent-permissions.md)：选择只读、修改前确认或自动执行，管理有范围的授权。
+
+完整变化与升级要求见 [v0.9.0 版本说明](../07-releases/v0.9.0.md)。
+
 ## 适用场景 {#weknora-解决什么问题}
 
 | 需求 | 功能 |
@@ -113,7 +123,7 @@ flowchart TB
 - **检索**：向量 + BM25 混合检索、RRF 融合、Rerank 重排、查询改写与扩展、意图识别（greeting/chitchat/web_search 等，见 `config/prompt_templates/intent_prompts.yaml`）。
 - **问答与 Agent**：流式 SSE 问答、多轮上下文压缩、引用溯源；ReAct Agent（工具：`search_knowledge`、`read_document`、`list_documents`、`wiki_search`、`data_analysis` 等）、MCP 外部工具、Agent Skills（Docker、Cube 或 E2B 沙箱执行脚本）、Web 搜索。
 - **对话体验**：回答进行中追加要求、从任意历史提问分叉或原地回滚（带沙箱工作区检查点）、按会话调整思考强度，「产物」页跨会话汇总智能体生成的文件，详见[会话体验](../03-features/18-chat-experience.md)。
-- **多租户与安全**：RBAC 角色鉴权（默认开启，`WEKNORA_TENANT_ENABLE_RBAC`）、审计日志（默认保留 90 天）、邀请制注册（`auth.registration_mode=invite_only`，也可用旧变量 `DISABLE_REGISTRATION=true`）、OIDC 单点登录、SSRF 防护（可选仅白名单出站 `SSRF_DNS_WHITELIST_ONLY`）、敏感字段 AES-256 加密。界面提供简体中文、英文、日文、韩文和俄文。
+- **多租户与安全**：RBAC 角色鉴权（默认开启，`WEKNORA_TENANT_ENABLE_RBAC`）、审计日志（默认保留 90 天）、三档注册模式（开放注册、`invite_register` 仅限邀请注册、`invite_only` 禁止注册；旧变量 `DISABLE_REGISTRATION=true` 对应禁止注册）、OIDC 单点登录、SSRF 防护（可选仅白名单出站 `SSRF_DNS_WHITELIST_ONLY`）、敏感字段 AES-256 加密。界面提供简体中文、繁体中文、英文、日文、韩文和俄文。
 - **可观测性**：Langfuse 全链路追踪（LLM/Embedding/Rerank/VLM/ASR 调用与 token 统计）、健康检查、Swagger API 文档（`GIN_MODE=debug` 时）。
 - **生态**：REST API（`/api/v1`）+ API Key、内置 MCP Server（按空间创建端点，把 WeKnora 作为工具暴露给其他 Agent，见[MCP 集成](../03-features/08-mcp.md)）、CLI（`cli/`）、微信小程序（`miniprogram/`）、浏览器插件渠道、[本机浏览器](../05-clients/09-local-browser.md)（智能体通过 Chrome/Edge 扩展操作用户浏览器）。Lite 桌面版（macOS）可在本机沙箱中执行智能体命令。
 

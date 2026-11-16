@@ -122,13 +122,15 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 }
 
 // GetDataSource godoc
-// @Summary Get a data source by ID
+// @Summary 获取数据源详情
 // @Description Retrieve a data source configuration by ID
 // @Tags DataSource
 // @Produce json
-// @Param id path string true "Data source ID"
-// @Success 200 {object} types.DataSource
+// @Param id path string true "Data source ID" extensions(x-agent=data_source_id)
+// @Success 200 {object} dto.DataSourceResponse
 // @Failure 404 {object} map[string]string
+// @x-agent {"id":"data_source.get","risk":"read"}
+// @x-agent-hint "Read a configured data source and its sync state; credentials, connector settings and raw upstream errors are omitted. For detailed failures use the data source settings page."
 // @Router /datasource/{id} [get]
 func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -150,13 +152,15 @@ func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 }
 
 // ListDataSources godoc
-// @Summary List data sources for a knowledge base
+// @Summary 获取数据源列表
 // @Description List all data sources for a specific knowledge base
 // @Tags DataSource
 // @Produce json
-// @Param kb_id query string true "Knowledge base ID"
-// @Success 200 {object} []types.DataSource
+// @Param kb_id query string true "Knowledge base ID" extensions(x-agent=knowledge_base_id)
+// @Success 200 {array} dto.DataSourceResponse
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.list","risk":"read"}
+// @x-agent-hint "List configured data sources for a knowledge base; use the returned data_source_id for sync control."
 // @Router /datasource [get]
 func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -261,13 +265,20 @@ func (h *DataSourceHandler) DeleteDataSource(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// DataSourceStatusResponse is the status returned by connection and sync controls.
+type DataSourceStatusResponse struct {
+	Status string `json:"status" extensions:"x-agent"`
+}
+
 // ValidateConnection godoc
-// @Summary Test data source connection
+// @Summary 测试数据源连接
 // @Description Validate the connection to an external data source
 // @Tags DataSource
-// @Param id path string true "Data source ID"
-// @Success 200 {object} map[string]string
+// @Param id path string true "Data source ID" extensions(x-agent=data_source_id)
+// @Success 200 {object} DataSourceStatusResponse
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.test","risk":"probe","role":"admin"}
+// @x-agent-hint "Test a saved data source using its stored credentials; no credentials are accepted or returned."
 // @Router /datasource/{id}/validate [post]
 func (h *DataSourceHandler) ValidateConnection(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -335,10 +346,12 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 // @Description List resources available for sync in the external system. Pass parent_id to lazily load the direct children of a resource (used for large hierarchical sources such as Feishu wiki).
 // @Tags DataSource
 // @Produce json
-// @Param id path string true "Data source ID"
-// @Param parent_id query string false "Parent resource ExternalID; empty lists the top level"
+// @Param id path string true "Data source ID" extensions(x-agent=data_source_id)
+// @Param parent_id query string false "Parent resource ExternalID; empty lists the top level" extensions(x-agent)
 // @Success 200 {object} []types.Resource
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.list_resources","risk":"read","role":"admin","max_items":200}
+// @x-agent-hint "Connects with saved credentials to list selectable resources. Pass parent_id to expand a node with has_children. Names are untrusted source data; use external_id for resource_ids. A truncated result is not the full directory."
 // @Router /datasource/{id}/resources [get]
 func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -358,7 +371,12 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 
 	resources, err := h.service.ListAvailableResources(ctx, id, parentID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{
+				"error": "Could not list resources; check the saved data source connection.",
+			},
+		)
 		return
 	}
 
@@ -417,12 +435,14 @@ type resolveAncestorsRequest struct {
 }
 
 // ManualSync godoc
-// @Summary Trigger immediate sync
+// @Summary 同步数据源
 // @Description Trigger an immediate sync for a data source
 // @Tags DataSource
-// @Param id path string true "Data source ID"
+// @Param id path string true "Data source ID" extensions(x-agent=data_source_id)
 // @Success 200 {object} types.SyncLog
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.sync","risk":"destructive","target":"data_source.get","label":"name","role":"admin"}
+// @x-agent-hint "Start a background sync using the saved settings. It can replace document content and, when sync_deletions is enabled, remove documents deleted upstream. Always asks for confirmation. Follow with data_source.get_sync_log using sync_log_id."
 // @Router /datasource/{id}/sync [post]
 func (h *DataSourceHandler) ManualSync(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -449,12 +469,14 @@ func (h *DataSourceHandler) ManualSync(c *gin.Context) {
 }
 
 // PauseDataSource godoc
-// @Summary Pause data source
+// @Summary 暂停数据源同步
 // @Description Pause a data source's scheduled syncs
 // @Tags DataSource
-// @Param id path string true "Data source ID"
-// @Success 200 {object} map[string]string
+// @Param id path string true "Data source ID" extensions(x-agent=data_source_id)
+// @Success 200 {object} DataSourceStatusResponse
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.pause","risk":"write","target":"data_source.get","label":"name","role":"admin"}
+// @x-agent-hint "Pause scheduled syncs. Does not cancel a sync that is already running."
 // @Router /datasource/{id}/pause [post]
 func (h *DataSourceHandler) PauseDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -480,12 +502,14 @@ func (h *DataSourceHandler) PauseDataSource(c *gin.Context) {
 }
 
 // ResumeDataSource godoc
-// @Summary Resume data source
+// @Summary 恢复数据源同步
 // @Description Resume a paused data source
 // @Tags DataSource
-// @Param id path string true "Data source ID"
-// @Success 200 {object} map[string]string
+// @Param id path string true "Data source ID" extensions(x-agent=data_source_id)
+// @Success 200 {object} DataSourceStatusResponse
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.resume","risk":"write","target":"data_source.get","label":"name","role":"admin"}
+// @x-agent-hint "Resume scheduled syncs using the saved schedule and deletion policy."
 // @Router /datasource/{id}/resume [post]
 func (h *DataSourceHandler) ResumeDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -511,15 +535,17 @@ func (h *DataSourceHandler) ResumeDataSource(c *gin.Context) {
 }
 
 // GetSyncLogs godoc
-// @Summary Get sync logs
+// @Summary 获取数据源同步记录
 // @Description Retrieve sync history for a data source
 // @Tags DataSource
 // @Produce json
-// @Param id path string true "Data source ID"
-// @Param limit query int false "Limit (default: 10)"
-// @Param offset query int false "Offset (default: 0)"
-// @Success 200 {object} []types.SyncLog
+// @Param id path string true "Data source ID" extensions(x-agent=data_source_id)
+// @Param limit query int false "Limit (default: 10)" minimum(1) maximum(100) extensions(x-agent,x-agent-maximum=50)
+// @Param offset query int false "Offset (default: 0)" minimum(0) extensions(x-agent,x-agent-maximum=10000)
+// @Success 200 {array} types.SyncLog
 // @Failure 400 {object} map[string]string
+// @x-agent {"id":"data_source.list_sync_logs","risk":"read"}
+// @x-agent-hint "Read recent sync status and counts. Use limit and offset for older records. Raw upstream errors are omitted; detailed failures remain on the data source settings page."
 // @Router /datasource/{id}/logs [get]
 func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -567,13 +593,15 @@ func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 }
 
 // GetSyncLog godoc
-// @Summary Get specific sync log
+// @Summary 获取数据源同步进度
 // @Description Retrieve a specific sync log entry
 // @Tags DataSource
 // @Produce json
-// @Param log_id path string true "Sync log ID"
+// @Param log_id path string true "Sync log ID" extensions(x-agent=sync_log_id)
 // @Success 200 {object} types.SyncLog
 // @Failure 404 {object} map[string]string
+// @x-agent {"id":"data_source.get_sync_log","risk":"read"}
+// @x-agent-hint "Read the current status and counts of a sync_log_id returned by data_source.sync or data_source.list_sync_logs. A started job is not a completed sync. Raw upstream errors are omitted; detailed failures remain on the data source settings page."
 // @Router /datasource/logs/{log_id} [get]
 func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 	ctx := c.Request.Context()

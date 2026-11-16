@@ -1,0 +1,1 @@
+ALTER TABLE automations ADD COLUMN model_id TEXT NOT NULL DEFAULT '';

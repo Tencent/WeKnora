@@ -83,7 +83,8 @@
             v-if="props.boundStatus === 'unavailable'"
             class="option-hint change-warning"
           >
-            {{ $t('kbSettings.vectorStore.unavailableHint') }}
+            <t-icon name="error-circle" class="option-hint-icon" />
+            <span>{{ $t('kbSettings.vectorStore.unavailableHint') }}</span>
           </p>
         </div>
       </div>
@@ -269,7 +270,16 @@ onMounted(async () => {
   line-height: 1.4;
 
   &.change-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
     color: var(--td-warning-color);
+  }
+
+  .option-hint-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+    font-size: var(--app-text-base);
   }
 }
 

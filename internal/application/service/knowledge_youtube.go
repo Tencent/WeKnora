@@ -122,7 +122,8 @@ func (s *knowledgeService) CreateKnowledgeFromYouTube(ctx context.Context,
 		videoURL := youtube.VideoURL(video.id)
 		item := types.YouTubeImportItem{URL: videoURL, VideoID: video.id, Title: video.title}
 		knowledge, err := s.createKnowledgeFromURL(
-			ctx, kbID, videoURL, "", "", enableMultimodel, video.title, tagIDs, channel, processOverrides, video.folder,
+			ctx, kbID, videoURL, "", "", enableMultimodel, video.title, tagIDs, channel, processOverrides,
+			video.folder, nil,
 		)
 		var duplicate *types.DuplicateKnowledgeError
 		switch {

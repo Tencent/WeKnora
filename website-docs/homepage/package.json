@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint",
-    "audit:content": "node scripts/audit-content.mjs"
+    "audit:content": "node scripts/audit-content.mjs",
+    "prebuild": "node scripts/sync-product-screenshots.mjs",
+    "predev": "node scripts/sync-product-screenshots.mjs",
+    "test:assets": "node --test scripts/sync-product-screenshots.test.mjs"
   },
   "dependencies": {
     "next": "16.2.9",

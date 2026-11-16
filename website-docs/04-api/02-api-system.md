@@ -215,6 +215,24 @@ curl -X PUT $BASE/api/v1/system/admin/settings/default_storage_quota -H "Authori
 curl -X DELETE $BASE/api/v1/system/admin/settings/default_storage_quota -H "Authorization: Bearer $TOKEN"
 ```
 
+### GET /api/v1/system/admin/runtime/documents
+
+系统管理员按资料读取持久进度。平台 API Key 要求 `system_runtime_read`。查询参数：`status`（默认 `unfinished`，可选 `all`、`failed`、`completed`）、`page`（1–10000）、`page_size`（1–100，默认 25）、`kb_id`、`search`（标题、文件名或知识库名，最多 200 字符）。
+
+返回 `data.documents`、`total`、`page`、`page_size`。每份资料包含当前 `attempt`、`ingestion_status`、`wiki_status`、`wiki_pending`、`wiki_retries`、`failure_count`、`can_start` 和阶段元数据 `stages`。`ingestion_status=ready` 表示主要入库已完成；`wiki_status` 单独表示后续 Wiki 状态。历史失败计数与当前状态独立。
+
+### GET /api/v1/system/admin/runtime/documents/:knowledge_id
+
+权限同列表接口。返回 `data.document`、`failures` 和 `has_more_failures`。失败记录按时间倒序，最多 50 条；错误预览最多 2048 字符。原任务载荷及阶段输入、输出不返回。资料不存在或已删除返回 404。
+
+### POST /api/v1/system/admin/runtime/documents/wiki-start
+
+系统管理员启动已有的可领取 Wiki 待办，平台 API Key 要求 `system_runtime_manage`。单份请求为 `{"knowledge_id":"doc-id","count":1}`；批量请求为 `{"count":10,"knowledge_base_id":"kb-id","search":"可选搜索"}`，数量范围 1–100。
+
+只安排已完成主要入库且启用 Wiki 的资料，按待办最早 ID 排序，每次最多扫描 1000 个候选；跳过处理中或已有同一触发任务的资料。不会创建新的资料待办、重置失败次数或移除失败历史。返回 `data.requested`、`started`（此次接收的资料数）、`already_queued`（候选扫描中已存在的触发任务数）。数量只限制本次提交，现有自动队列仍继续运行。
+
+队列中途不可用返回 503，`data` 保留已经接收的数量。稳定任务 ID 避免重复请求创建相同触发任务；资料完成情况由进度接口读取。启动继续受原知识库和模型并发限制，成功入队操作写入系统审计日志。
+
 ### GET /api/v1/system/admin/runtime/queues
 
 用途：asynq 队列深度与并发状态（Lite 模式返回 `available:false`；平台 key 需 `system_runtime_read|manage`）。
@@ -280,6 +298,18 @@ curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 
 路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。
 
+
+## 平台用户管理
+
+以下接口仅系统管理员的用户会话可访问，API Key 不开放。
+
+### GET /api/v1/system/admin/users
+
+分页列出整个部署的用户。查询参数 `offset` 默认 0；`limit` 默认 50，最大 200。响应为未包装对象 `{"users":[UserInfo],"offset":0,"limit":50,"has_more":false}`，不返回密码或哈希。
+
+### POST /api/v1/system/admin/users/status
+
+请求体 `{"user_id":"目标用户 ID","is_active":false}`，两个字段都必填。停用会吊销目标用户的已有会话；不能停用自己或最后一位启用的系统管理员（400），用户不存在返回 404。成功返回 `{"message":"User status updated","user":UserInfo,"is_active":false}`。创建账号与重置密码仍使用上文的 `/users/create`、`/users/reset-password`。
 
 ## 模型目录（/api/v1/system/admin/model-catalog）
 

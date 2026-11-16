@@ -17,6 +17,8 @@ func backendUnavailableReason() string { return unavailableReason }
 
 func backendVersion() string { return "" }
 
+func backendPDFInvalidStructure(_ error) (malformed, typed bool) { return false, false }
+
 func backendConvert(_ []byte, _ Options) (*Result, error) {
 	// Convert checks Available first, so this is only reachable if a caller
 	// bypasses it.

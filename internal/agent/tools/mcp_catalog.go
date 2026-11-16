@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -324,13 +325,44 @@ func (c *MCPCatalog) visibleTools(ctx context.Context, id string, tools []*MCPTo
 	if err != nil {
 		return nil, fmt.Errorf("MCP tool permissions are temporarily unavailable")
 	}
+	offered, err := c.offeredTools(ctx, id, tools)
+	if err != nil {
+		return nil, fmt.Errorf("MCP tool permissions are temporarily unavailable")
+	}
 	visible := make([]*MCPTool, 0, len(tools))
 	for _, tool := range tools {
-		if policies[tool.mcpTool.Name] {
+		if policies[tool.mcpTool.Name] && offered(tool) {
 			visible = append(visible, tool)
 		}
 	}
 	return visible, nil
+}
+
+// offeredTools reports which tools the run's access level offers at all: a
+// read-only run is not shown tools that change data.
+func (c *MCPCatalog) offeredTools(ctx context.Context, id string, tools []*MCPTool) (func(*MCPTool) bool, error) {
+	level := types.AccessLevelFromContext(ctx)
+	if level != types.AssistantAccessReadOnly {
+		return func(*MCPTool) bool { return true }, nil
+	}
+	definitions := make([]*types.MCPTool, 0, len(tools))
+	for _, tool := range tools {
+		definitions = append(definitions, tool.mcpTool)
+	}
+	risks := make(map[string]policy.Risk, len(tools))
+	if ranker, ok := c.gate.(interface {
+		ToolRisks(context.Context, uint64, string, []*types.MCPTool) (map[string]policy.Risk, error)
+	}); ok {
+		var err error
+		if risks, err = ranker.ToolRisks(ctx, c.tenantID, id, definitions); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, definition := range definitions {
+			risks[definition.Name] = approval.DeclaredRisk(definition)
+		}
+	}
+	return func(tool *MCPTool) bool { return policy.Offered(level, risks[tool.mcpTool.Name]) }, nil
 }
 
 func (c *MCPCatalog) checkEnabled(ctx context.Context, tool *MCPTool) error {

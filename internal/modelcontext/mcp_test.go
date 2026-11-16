@@ -175,10 +175,12 @@ func TestMCPStringArgumentsDecodeResourcesAndKeepOtherToolsOpaque(t *testing.T) 
 	r.ModelToolResultForTool("discover_mcp_tools", &types.ToolResult{
 		Success: true, Output: `{"tool_ref":"` + mcpTestRef + `"}`,
 	})
-	raw := `{"tool_ref":"mt1","arguments":"{\"file\":\"res://0001\",\"knowledge_id\":\"d1\"}"}`
+	r.RegisterWeb("https://example.com/page", "")
+	raw := `{"tool_ref":"mt1","arguments":"{\"file\":\"res://0001\",\"knowledge_id\":\"d1\",\"link\":\"url://1\"}"}`
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: "call_mcp_tool", Arguments: raw}}}
 	r.DecodeToolCalls(calls)
-	require.JSONEq(t, `{"tool_ref":"`+mcpTestRef+`","arguments":{"file":"`+resource+`","knowledge_id":"d1"}}`,
+	require.JSONEq(t, `{"tool_ref":"`+mcpTestRef+`","arguments":{"file":"`+resource+`","knowledge_id":"d1",`+
+		`"link":"https://example.com/page"}}`,
 		calls[0].Function.Arguments)
 	require.Equal(t, raw, calls[0].ModelArguments)
 	require.Empty(t, calls[0].UnresolvedHandles)

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   formatToolTitleWithDetail,
+  getAttachmentReadTarget,
   getEventSkillName,
   getReadSkillTarget,
   getSandboxToolPath,
@@ -12,6 +13,24 @@ import {
   skillFileListItems,
   skillScriptTitleCommand,
 } from './skillToolDisplay.ts'
+
+test('getAttachmentReadTarget names attachments instead of their IDs', () => {
+  assert.equal(getAttachmentReadTarget({ arguments: { path: '/workspace/a.txt' } }), null)
+  assert.deepEqual(getAttachmentReadTarget({ arguments: { path: 'attachment://' } }), { kind: 'list' })
+  assert.deepEqual(getAttachmentReadTarget({ arguments: { path: 'attachment://att_1' } }), { kind: 'file', name: '' })
+  assert.deepEqual(
+    getAttachmentReadTarget({ arguments: { path: 'attachment://att_1' }, tool_data: { file_name: '指引.docx' } }),
+    { kind: 'file', name: '指引.docx' },
+  )
+  assert.deepEqual(
+    getAttachmentReadTarget({ arguments: { path: 'attachment://att_1/images' }, tool_data: { file_name: 'a.pdf' } }),
+    { kind: 'images', name: 'a.pdf' },
+  )
+  assert.deepEqual(
+    getAttachmentReadTarget({ arguments: { path: 'attachment://att_1/images/3' }, tool_data: { file_name: 'a.pdf' } }),
+    { kind: 'image', name: 'a.pdf', number: 3 },
+  )
+})
 
 test('formatToolTitleWithDetail quotes a skill or path detail', () => {
   assert.equal(formatToolTitleWithDetail('读取技能', 'pdf-processing'), '读取技能：「pdf-processing」')

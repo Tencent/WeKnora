@@ -20,7 +20,7 @@ import (
 // both spellings need the same assertions. For example:
 //
 //	docker run -d --rm -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=weknora -p 55432:5432 \
-//	  paradedb/paradedb:v0.22.6-pg17
+//	  paradedb/paradedb:v0.25.11-pg17
 //	WEKNORA_REPOSITORY_TEST_POSTGRES_DSN=postgres://postgres:pg@localhost:55432/weknora?sslmode=disable
 //
 // Both runs apply the real chunk_images migration, so the triggers and the
@@ -279,6 +279,75 @@ func TestListImageAssets_AttributeFiltersAndRules(t *testing.T) {
 
 		disabled := false
 		require.Empty(t, list(types.ImageAssetQuery{IsEnabled: &disabled}))
+	})
+}
+
+func TestListImageAssets_KnowledgeIDFilter(t *testing.T) {
+	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
+		fx := newImageFixture(t, db)
+		// addRaw writes into the fixture's default document; a second chunk in
+		// another document of the same KB gives the filter something to exclude.
+		defaultDoc := fx.addRaw("text", 0,
+			`[{"url":"local://a.png","original_url":"local://a.png","caption":"a","ocr_text":""}]`)
+		other := &types.Chunk{
+			ID:              uuid.NewString(),
+			TenantID:        1,
+			KnowledgeBaseID: fx.kbID,
+			KnowledgeID:     "doc-other-" + fx.kbID[:8],
+			Content:         "x",
+			ChunkType:       "text",
+			IsEnabled:       true,
+			ImageInfo:       `[{"url":"local://b.png","original_url":"local://b.png","caption":"b","ocr_text":""}]`,
+			CreatedAt:       fx.base,
+			UpdatedAt:       fx.base,
+		}
+		require.NoError(t, db.Create(other).Error)
+
+		rows, total := fx.list(types.ImageAssetQuery{
+			KnowledgeIDs: []string{defaultDoc.KnowledgeID},
+			SortField:    types.ImageAssetField{Builtin: "created_at"},
+		})
+		require.EqualValues(t, 1, total, "the total reflects the filtered scope")
+		require.Equal(t, []string{"local://a.png"}, rowURLs(t, rows))
+
+		rows, total = fx.list(types.ImageAssetQuery{
+			KnowledgeIDs: []string{defaultDoc.KnowledgeID, other.KnowledgeID},
+		})
+		require.EqualValues(t, 2, total)
+		require.ElementsMatch(t, []string{"local://a.png", "local://b.png"}, rowURLs(t, rows))
+	})
+}
+
+func TestListImageAssets_KnowledgeIDFilterKeepsSharedImage(t *testing.T) {
+	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
+		fx := newImageFixture(t, db)
+		shared := `[{"url":"https://example.com/logo.png","original_url":"","caption":"logo","ocr_text":""}]`
+		older := fx.addRaw("text", 0, shared)
+		// The same image on a newer chunk of another document wins the
+		// knowledge-base-wide de-duplication.
+		newer := &types.Chunk{
+			ID:              uuid.NewString(),
+			TenantID:        1,
+			KnowledgeBaseID: fx.kbID,
+			KnowledgeID:     "doc-newer-" + fx.kbID[:8],
+			Content:         "x",
+			ChunkType:       "text",
+			IsEnabled:       true,
+			ImageInfo:       shared,
+			CreatedAt:       fx.base.Add(5 * time.Minute),
+			UpdatedAt:       fx.base.Add(5 * time.Minute),
+		}
+		require.NoError(t, db.Create(newer).Error)
+
+		rows, total := fx.list(types.ImageAssetQuery{KnowledgeIDs: []string{older.KnowledgeID}})
+		require.EqualValues(t, 1, total, "the older document still lists its copy")
+		require.Len(t, rows, 1)
+		require.Equal(t, older.ID, rows[0].ChunkID)
+
+		rows, total = fx.list(types.ImageAssetQuery{KnowledgeIDs: []string{older.KnowledgeID, newer.KnowledgeID}})
+		require.EqualValues(t, 1, total, "copies inside the scope still de-duplicate")
+		require.Len(t, rows, 1)
+		require.Equal(t, newer.ID, rows[0].ChunkID)
 	})
 }
 

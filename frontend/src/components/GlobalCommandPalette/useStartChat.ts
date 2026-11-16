@@ -26,15 +26,10 @@ export function useStartChat() {
     const q = (query || '').trim()
     if (!q) return
 
-    if (kbIds.length > 0) {
-      settingsStore.selectKnowledgeBases(kbIds)
-    }
-    for (const fid of fileIds) {
-      settingsStore.addFile(fid)
-    }
+    settingsStore.prepareNewChatReferences(kbIds, fileIds)
 
     menuStore.setPrefillQuery(q)
-    router.push('/platform/creatChat')
+    void router.push('/platform/creatChat').finally(() => settingsStore.consumeNewChatReferences())
   }
 
   return { startChat }

@@ -16,14 +16,17 @@
             :class="{ 'sq-refresh-spin': loading }"
           />
         </button>
+        <AssistantActionButton v-if="entries.length" icon-only
+          :label="t('assistant.actions.summarizeActivity', { count: entries.length })"
+          :query="activityAssistantQuery" :disabled="loading" />
       </div>
       <p class="section-desc">{{ t('knowledgeEditor.activity.description') }}</p>
-      <p v-if="hasActiveFilters" class="kb-activity-filter-bar">
+      <div v-if="hasActiveFilters" class="kb-activity-filter-bar">
         <span>{{ filterSummaryText }}</span>
         <button type="button" class="kb-activity-clear-filters" @click="clearFilters">
           {{ t('knowledgeEditor.activity.clearFilters') }}
         </button>
-      </p>
+      </div>
     </div>
 
     <div class="section-body kb-activity-body">
@@ -166,6 +169,9 @@
                   <span v-if="activityAPIKeyName(row)" class="audit-actor-key">
                     {{ actorAPIKeyLabel(row) }}
                   </span>
+                  <span v-if="activityViaAssistant(row)" class="audit-actor-key">
+                    {{ t('knowledgeEditor.activity.viaAssistant') }}
+                  </span>
                 </div>
               </template>
               <template #outcome="{ row }">
@@ -262,6 +268,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
@@ -345,6 +352,17 @@ const columns = computed(() => [
 ])
 
 const hasActiveFilters = computed(() => Boolean(action.value || outcome.value))
+const activityAssistantQuery = computed(() => t('assistant.prompts.summarizeActivity', {
+  scope: JSON.stringify({
+    knowledge_base_id: props.kbId,
+    action: action.value,
+    outcome: outcome.value,
+    loaded_entry_ids: entries.value.map(entry => entry.id),
+    newest_at: entries.value[0]?.created_at,
+    oldest_at: entries.value.at(-1)?.created_at,
+    has_more: hasMore.value,
+  }),
+}))
 
 const filterSummaryText = computed(() => {
   const parts: string[] = []
@@ -523,10 +541,14 @@ function actorAPIKeyLabel(entry: KnowledgeBaseActivity): string {
 function actorLabel(entry: KnowledgeBaseActivity): string {
   const person = actorPersonLabel(entry)
   const keyName = activityAPIKeyName(entry)
-  if (keyName) {
-    return t('knowledgeEditor.activity.actorWithAPIKey', { actor: person, name: keyName })
-  }
-  return person
+  const label = keyName
+    ? t('knowledgeEditor.activity.actorWithAPIKey', { actor: person, name: keyName })
+    : person
+  return activityViaAssistant(entry) ? `${label} · ${t('knowledgeEditor.activity.viaAssistant')}` : label
+}
+
+function activityViaAssistant(entry: KnowledgeBaseActivity): boolean {
+  return details(entry).via === 'agent'
 }
 
 function activityAPIKeyName(entry: KnowledgeBaseActivity): string {
@@ -655,6 +677,21 @@ function identifierFields(entry: KnowledgeBaseActivity): DetailField[] {
       key: 'apiKeyId',
       label: t('knowledgeEditor.activity.expanded.apiKeyId'),
       value: keyId,
+    })
+  }
+  const value = details(entry)
+  if (value.via === 'agent' && value.agent_session_id) {
+    fields.push({
+      key: 'agentSessionId',
+      label: t('knowledgeEditor.activity.expanded.agentSessionId'),
+      value: String(value.agent_session_id),
+    })
+  }
+  if (value.via === 'agent' && value.agent_operation) {
+    fields.push({
+      key: 'agentOperation',
+      label: t('knowledgeEditor.activity.expanded.agentOperation'),
+      value: String(value.agent_operation),
     })
   }
   return fields

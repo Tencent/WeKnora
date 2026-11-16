@@ -13,9 +13,11 @@ import { updateMyPreferences } from '@/api/auth'
 import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
 import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
+import GallerySourcePicker from './GallerySourcePicker.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -49,6 +51,12 @@ const loadMoreEl = ref<HTMLElement | null>(null)
 const imageRatios = ref<Record<string, number>>({})
 let cardObserver: ResizeObserver | undefined
 let scrollObserver: ResizeObserver | undefined
+
+// Source-document restriction (the "filter by document" picker). An empty
+// array means every document of the KB; otherwise only images whose owning
+// document is listed are fetched. Edited from the toolbar's source panel.
+const sourceDocIds = ref<string[]>([])
+const sourcePickerVisible = ref(false)
 
 // Attribute selections for free-text ("keywords") attributes: namespaced attr
 // id -> literal values (OR within the attribute, AND across attributes).
@@ -107,6 +115,12 @@ const blobByRawUrl = new Map<string, string>()
 // Fetches in flight, so the grid and the viewer asking for the same image at
 // once share one request.
 const inflight = new Map<string, Promise<string>>()
+let imageRequests = new AbortController()
+
+function abortImageRequests(): void {
+  imageRequests.abort()
+  inflight.clear()
+}
 
 /** Revoke every cached object URL whose raw URL is not in keep. */
 function releaseBlobs(keep: Set<string> = new Set()): void {
@@ -117,13 +131,17 @@ function releaseBlobs(keep: Set<string> = new Set()): void {
   }
 }
 
-async function fetchBlobUrl(rawUrl: string): Promise<string> {
+async function fetchBlobUrl(rawUrl: string, signal: AbortSignal): Promise<string> {
   const req = galleryImageRequest(rawUrl, props.knowledgeBaseId)
   if (!req) return rawUrl
   try {
-    const resp = await fetch(req.url, { headers: req.headers })
-    if (!resp.ok) return rawUrl
-    const objectUrl = URL.createObjectURL(await resp.blob())
+    const resp = await fetch(req.url, { headers: req.headers, signal })
+    if (!resp.ok || signal.aborted) return rawUrl
+    const blob = await resp.blob()
+    // Cancellation can race with a completed body read. Never create a URL
+    // after this query's cleanup, even if the response ignored the abort.
+    if (signal.aborted) return rawUrl
+    const objectUrl = URL.createObjectURL(blob)
     blobByRawUrl.set(rawUrl, objectUrl)
     return objectUrl
   } catch {
@@ -132,11 +150,15 @@ async function fetchBlobUrl(rawUrl: string): Promise<string> {
 }
 
 function resolveImageSrc(rawUrl: string): Promise<string> {
+  if (imageRequests.signal.aborted) return Promise.resolve(rawUrl)
   const cached = blobByRawUrl.get(rawUrl)
   if (cached) return Promise.resolve(cached)
   let pending = inflight.get(rawUrl)
   if (!pending) {
-    pending = fetchBlobUrl(rawUrl).finally(() => inflight.delete(rawUrl))
+    pending = fetchBlobUrl(rawUrl, imageRequests.signal).finally(() => {
+      // A newer query may already have started the same URL's replacement.
+      if (inflight.get(rawUrl) === pending) inflight.delete(rawUrl)
+    })
     inflight.set(rawUrl, pending)
   }
   return pending
@@ -210,6 +232,15 @@ function onThumbError(id: string) {
 const ATTR_NAMESPACE = 'knowledgeEditor.wikiBrowser.gallery.attr'
 
 const sanitizeKey = (id: string) => id.replace(/[:.]/g, '_')
+
+const IMAGE_SOURCE_PAGE_ATTR = 'source.page'
+const IMAGE_SOURCE_INDEX_ATTR = 'source.image_index'
+
+/** 解析器页码从 1 开始；旧数据或非法属性不展示页码。 */
+function imagePage(img: ImageAsset): number | null {
+  const page = img.attrs?.[IMAGE_SOURCE_PAGE_ATTR]
+  return typeof page === 'number' && Number.isSafeInteger(page) && page > 0 ? page : null
+}
 
 /** The pipeline's own wording for an attribute, keyed by its source-local name. */
 function pipelineKey(attr: GalleryResolvedAttr, suffix = ''): string {
@@ -309,7 +340,8 @@ const isNarrowed = computed(
   () =>
     !!keyword.value.trim() ||
     Object.keys(activeRules.value).length > 0 ||
-    Object.keys(activeSelections.value).length > 0,
+    Object.keys(activeSelections.value).length > 0 ||
+    sourceDocIds.value.length > 0,
 )
 
 function verdictOf(attrId: string, value: string): Verdict {
@@ -355,10 +387,20 @@ function clearFilters(): void {
   reload()
 }
 
-/** The empty state's way back: forget the keyword as well. */
+/** The empty state's way back: forget the keyword and source documents as well. */
 function clearAll(): void {
+  if (sourceTimer) clearTimeout(sourceTimer)
   keyword.value = ''
+  sourceDocIds.value = []
   clearFilters()
+}
+
+/** Ticked in the source panel: restrict the listing to these documents. */
+let sourceTimer: ReturnType<typeof setTimeout> | undefined
+function onSourceDocsChange(ids: string[]): void {
+  sourceDocIds.value = ids
+  if (sourceTimer) clearTimeout(sourceTimer)
+  sourceTimer = setTimeout(() => reload(), 300)
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +471,7 @@ function buildParams(): ImageListParams {
     sortOrder: sortOrder.value,
     attrFilters: Object.keys(selections).length ? selections : undefined,
     attrRules: Object.keys(rules).length ? rules : undefined,
+    knowledgeIds: sourceDocIds.value.length ? sourceDocIds.value : undefined,
     pageSize,
   }
 }
@@ -474,6 +517,8 @@ function loadMore(): Promise<boolean> {
 
 function resetResults() {
   listToken++
+  abortImageRequests()
+  imageRequests = new AbortController()
   viewerOpen.value = false
   items.value = []
   total.value = 0
@@ -541,7 +586,12 @@ function onOpenSource(knowledgeId: string) {
 }
 
 function attrRows(img: ImageAsset): GalleryAttrRow[] {
-  return Object.entries(img.attrs || {}).map(([name, raw]) => {
+  // 原文序号仅供稳定排序；页码用用户可读的名称展示，避免泄露内部属性键。
+  return Object.entries(img.attrs || {}).filter(([name]) => name !== IMAGE_SOURCE_INDEX_ATTR
+    && (name !== IMAGE_SOURCE_PAGE_ATTR || imagePage(img) !== null)).map(([name, raw]) => {
+    if (name === IMAGE_SOURCE_PAGE_ATTR) {
+      return { key: name, label: t(`${NS}.attr.builtin_page`), value: String(imagePage(img)) }
+    }
     const attr = findAttrByRawName(name)
     return {
       key: name,
@@ -560,17 +610,19 @@ function sourceLabel(img: ImageAsset): string {
 // ---------------------------------------------------------------------------
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
+  abortImageRequests()
   cardObserver?.disconnect()
   scrollObserver?.disconnect()
   releaseBlobs()
 })
 
-// Newest first unless the contract no longer offers it; picking by id keeps
-// the default independent of source registration order.
-const DEFAULT_SORT_ID = 'builtin:created_at'
+// 按字段 ID 选择页码升序；未开放页码排序时回退创建时间降序。
+const DEFAULT_SORT_ID = 'builtin:page'
+const LEGACY_DEFAULT_SORT_ID = 'builtin:created_at'
 
 let initToken = 0
 
@@ -581,11 +633,15 @@ async function initGallery() {
   const token = ++initToken
   resetResults()
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   error.value = ''
   keyword.value = ''
   sortBy.value = ''
+  sortOrder.value = 'desc'
   attrSelections.value = {}
   attrVerdicts.value = {}
+  sourceDocIds.value = []
+  sourcePickerVisible.value = false
   releaseBlobs()
   configLoaded.value = false
   config.value = { attribute_sources: [], attributes: [], mode: 'all', status: {} }
@@ -603,7 +659,11 @@ async function initGallery() {
     // default search still work.
   }
   if (!sortBy.value && sortAttrs.value.length) {
-    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id ?? sortAttrs.value[0].id
+    // 页码是画廊显式选择的默认排序；未开放该能力时保留创建时间降序。
+    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id
+      ?? sortAttrs.value.find((a) => a.id === LEGACY_DEFAULT_SORT_ID)?.id
+      ?? sortAttrs.value[0].id
+    sortOrder.value = sortBy.value === DEFAULT_SORT_ID ? 'asc' : 'desc'
   }
   await reload()
 }
@@ -655,6 +715,33 @@ watch(
         >
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
+
+        <t-popup
+          v-model:visible="sourcePickerVisible"
+          trigger="click"
+          placement="bottom-right"
+          overlay-class-name="gallery-toolbar-popup"
+          :overlay-inner-style="{ padding: 0 }"
+        >
+          <button
+            type="button"
+            class="ig-tool-btn"
+            :class="{ active: sourcePickerVisible || sourceDocIds.length > 0 }"
+            :aria-expanded="sourcePickerVisible"
+          >
+            <t-icon name="file" size="16px" />
+            {{ t(`${NS}.sourceFilter`) }}
+            <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
+          </button>
+          <template #content>
+            <GallerySourcePicker
+              :kb-id="props.knowledgeBaseId"
+              :visible="sourcePickerVisible"
+              :selected="sourceDocIds"
+              @update:selected="onSourceDocsChange"
+            />
+          </template>
+        </t-popup>
 
         <t-popup
           v-model:visible="filterPanelVisible"
@@ -852,6 +939,9 @@ watch(
                 <t-icon name="image-error" size="20px" />
                 <span>{{ t(`${NS}.imageLoadError`) }}</span>
               </div>
+              <span v-if="imagePage(img) !== null" class="ig-card__page">
+                {{ t(`${NS}.sourcePage`, { page: imagePage(img) }) }}
+              </span>
               <span v-if="!img.is_enabled" class="ig-card__badge">
                 {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
               </span>
@@ -861,7 +951,7 @@ watch(
                 {{ img.caption || t(`${NS}.noCaption`) }}
               </div>
               <div class="ig-card__source" :title="sourceLabel(img)">
-                <t-icon name="file" size="12px" />
+                <t-icon name="file" size="14px" />
                 <span>{{ sourceLabel(img) }}</span>
               </div>
             </div>
@@ -888,10 +978,12 @@ watch(
       :thumb-urls="thumbUrls"
       :resolve-src="resolveImageSrc"
       :attr-rows="attrRows"
+      :can-edit="props.canEdit"
       @select="(i: number) => (viewerIndex = i)"
       @load-more="onViewerLoadMore"
       @close="closeViewer"
       @open-source="onOpenSource"
+      @saved="closeViewer(); reload()"
     />
   </div>
 </template>
@@ -1308,6 +1400,18 @@ watch(
     text-align: center;
   }
 
+  &__page {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    font-size: var(--app-text-sm);
+    pointer-events: none;
+  }
+
   &__badge {
     position: absolute;
     top: 8px;
@@ -1347,6 +1451,8 @@ watch(
     min-width: 0;
     color: var(--td-text-color-placeholder);
     font-size: var(--app-text-sm);
+
+    .t-icon { flex-shrink: 0; }
 
     span {
       min-width: 0;

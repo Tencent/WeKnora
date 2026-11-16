@@ -20,11 +20,11 @@ func TestMCPAnswerCannotBorrowDirectoryOrHistoricalKnowledgeCitations(t *testing
 	result := &types.ToolResult{Success: true, Output: "标题: AI 玩法\nAI摘要: Computer Use 案例\n链接: " + article}
 	modelOutput := r.ModelToolResultForTool("call_mcp_tool", result)
 	require.True(t, strings.HasPrefix(modelOutput, result.Output), "external payload is preserved")
-	require.Contains(t, modelOutput, `<source id="w1" url="`+article+`"/>`)
+	require.Contains(t, modelOutput, `<source id="url://1" url="`+article+`"/>`)
 	require.Equal(t, modelOutput, r.ModelToolResultForTool("call_mcp_tool", result),
 		"rebuilding context keeps stable handles")
 	r.EncodeMessages(history) // Replaying history must not promote its citations.
-	raw := `玩法<ref id="c3"/> 动画<ref id="c1"/> 对话<ref id="c2"/> 来源<ref id="w1"/>`
+	raw := `玩法<ref id="chunk://3"/> 动画<ref id="chunk://1"/> 对话<ref id="chunk://2"/> 来源<ref id="url://1"/>`
 	want := `玩法 动画 对话 来源<web url="` + article + `" title="" />`
 	require.Equal(t, want, r.DecodeOutputText(raw))
 	decoder := r.StreamDecoder()
@@ -37,7 +37,7 @@ func TestMCPAnswerCannotBorrowDirectoryOrHistoricalKnowledgeCitations(t *testing
 
 	// Directory handles remain usable to retrieve the actual FAQ.
 	calls := []types.LLMToolCall{{Function: types.FunctionCall{
-		Name: "list_knowledge_chunks", Arguments: `{"faq_id":"c1"}`,
+		Name: "list_knowledge_chunks", Arguments: `{"faq_id":"chunk://1"}`,
 	}}}
 	r.DecodeToolCalls(calls)
 	require.JSONEq(t, `{"faq_id":"faq-1"}`, calls[0].Function.Arguments)
@@ -49,9 +49,9 @@ func TestMCPAnswerCannotBorrowDirectoryOrHistoricalKnowledgeCitations(t *testing
 	}})
 	r.RegisterContextChunk(ChunkReference{ChunkID: "faq-1"})
 	r.EncodeMessages(history)
-	require.Contains(t, r.DecodeOutputText(`<ref id="c1"/>`), `chunk_id="faq-1"`,
+	require.Contains(t, r.DecodeOutputText(`<ref id="chunk://1"/>`), `chunk_id="faq-1"`,
 		"fresh KB evidence is still citable in a mixed-source answer")
-	require.Empty(t, r.DecodeOutputText(`<ref id="c2"/><ref id="c3"/>`))
+	require.Empty(t, r.DecodeOutputText(`<ref id="chunk://2"/><ref id="chunk://3"/>`))
 }
 
 func TestToolArgumentsAloneDoNotAuthorizeCitations(t *testing.T) {
@@ -60,9 +60,9 @@ func TestToolArgumentsAloneDoNotAuthorizeCitations(t *testing.T) {
 		{Function: chat.FunctionCall{Name: "list_knowledge_chunks", Arguments: `{"faq_id":"faq-real"}`}},
 		{Function: chat.FunctionCall{Name: "web_fetch", Arguments: `{"items":[{"url":"https://example.com/unread"}]}`}},
 	}}})
-	require.Empty(t, r.DecodeOutputText(`<ref id="c1"/><ref id="w1"/>`))
+	require.Empty(t, r.DecodeOutputText(`<ref id="chunk://1"/><ref id="url://1"/>`))
 	r.ModelToolResultForTool("call_mcp_tool", &types.ToolResult{Success: false, Error: "https://example.com/error"})
-	require.Empty(t, r.DecodeOutputText(`<ref id="w2"/>`))
+	require.Empty(t, r.DecodeOutputText(`<ref id="url://2"/>`))
 }
 
 func TestCurrentLegacySourceResultsRemainCitableButHistoryDoesNot(t *testing.T) {
@@ -72,12 +72,12 @@ func TestCurrentLegacySourceResultsRemainCitableButHistoryDoesNot(t *testing.T) 
 	} {
 		r := NewRegistry(true)
 		r.EncodeMessages([]chat.Message{{Role: "tool", Name: "wiki_read_page", Content: output}})
-		require.Empty(t, r.DecodeOutputText(`<ref id="c1"/>`))
+		require.Empty(t, r.DecodeOutputText(`<ref id="chunk://1"/>`))
 		result := &types.ToolResult{Success: true, Output: output}
 		modelOutput := r.ModelToolResultForTool("wiki_read_page", result)
-		require.Contains(t, modelOutput, "c1")
+		require.Contains(t, modelOutput, "chunk://1")
 		require.Equal(t, output, result.Output)
-		require.Contains(t, r.DecodeOutputText(`<ref id="c1"/>`), `chunk_id="chunk-real"`)
+		require.Contains(t, r.DecodeOutputText(`<ref id="chunk://1"/>`), `chunk_id="chunk-real"`)
 	}
 }
 
@@ -126,7 +126,7 @@ func TestMCPSourceCandidatesAreBoundedAndOnlyForSuccessfulExternalResults(t *tes
 			Success: tc.success, Output: "https://example.com/page",
 		})
 		require.NotContains(t, output, "<external_source_candidates>")
-		require.Empty(t, r.DecodeOutputText(`<ref id="w1"/>`))
+		require.Empty(t, r.DecodeOutputText(`<ref id="url://1"/>`))
 	}
 	r = NewRegistry(true)
 	require.Equal(t, "No links", r.ModelToolResultForTool("call_mcp_tool", &types.ToolResult{

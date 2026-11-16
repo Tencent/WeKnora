@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,11 +29,34 @@ const (
 	knowledgeBaseProfileDebounce = 30 * time.Second
 	// knowledgeBaseProfileTaskTimeout bounds one aggregation plus model call.
 	knowledgeBaseProfileTaskTimeout = 5 * time.Minute
-	// knowledgeBaseProfileMaxTokens bounds the JSON reply; the fields are short.
-	knowledgeBaseProfileMaxTokens = 800
 	// knowledgeBaseProfileTagBatch bounds the IN-list of one tag lookup.
 	knowledgeBaseProfileTagBatch = 500
 )
+
+const (
+	// knowledgeBaseProfileDefaultMaxTokens is the default completion budget
+	// for the description model call. The JSON reply itself is short, but
+	// reasoning-style models can spend a small budget on thinking even when
+	// thinking is disabled, returning an empty completion that fails the
+	// whole description (issue #4221) — so the default keeps headroom.
+	knowledgeBaseProfileDefaultMaxTokens = 2048
+	// knowledgeBaseProfileMaxTokensEnv lets an operator raise (or lower) the
+	// completion budget without a rebuild; see .env.example.
+	knowledgeBaseProfileMaxTokensEnv = "KNOWLEDGE_BASE_PROFILE_MAX_TOKENS"
+)
+
+// knowledgeBaseProfileMaxTokens returns the completion budget for the
+// description model call: the env override when it parses to a positive
+// integer, the built-in default otherwise (invalid or non-positive values
+// fall back silently so one bad variable cannot break generation).
+func knowledgeBaseProfileMaxTokens() int {
+	if raw := strings.TrimSpace(os.Getenv(knowledgeBaseProfileMaxTokensEnv)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	return knowledgeBaseProfileDefaultMaxTokens
+}
 
 var (
 	// ErrKnowledgeBaseProfileUnsupported aliases the types sentinel.
@@ -342,7 +367,7 @@ func (s *KnowledgeBaseProfileService) describeAggregate(
 	response, err := chatModel.Chat(types.WithLLMCallMetadata(ctx, "knowledge_base_description", ""), []chat.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
-	}, &chat.ChatOptions{Temperature: 0.2, MaxTokens: knowledgeBaseProfileMaxTokens, Thinking: &thinking})
+	}, &chat.ChatOptions{Temperature: 0.2, MaxTokens: knowledgeBaseProfileMaxTokens(), Thinking: &thinking})
 	if err != nil {
 		return nil, fmt.Errorf("generate knowledge base description: %w", err)
 	}

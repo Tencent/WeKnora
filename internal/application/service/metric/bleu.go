@@ -68,6 +68,9 @@ func (b *BLEUMetric) Compute(metricInput *types.MetricInput) float64 {
 	for i := range b.weights {
 		w := b.weights[i]
 		pn := ps[i]
+		if !b.smoothing && w > 0 && pn == 0 {
+			return 0
+		}
 		if pn > 0.0 {
 			overlap++
 			s += w * math.Log(pn)

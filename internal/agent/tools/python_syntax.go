@@ -64,6 +64,9 @@ func pythonSyntaxErrorHint(stderr string) string {
 // is immediately followed by a non-keyword identifier — the parse error
 // `"这不是一个"大干快上` produces. `"hello" if x` is left alone.
 func firstBrokenPythonQuote(src string) (int, bool) {
+	// Python normalizes physical line endings even inside string literals.
+	// Keep this inspection-only copy consistent with the Python tokenizer.
+	src = strings.ReplaceAll(strings.ReplaceAll(src, "\r\n", "\n"), "\r", "\n")
 	line := 1
 	for i := 0; i < len(src); {
 		switch src[i] {
@@ -93,7 +96,11 @@ func firstBrokenPythonQuote(src string) (int, bool) {
 			for j < len(src) && (src[j] == ' ' || src[j] == '\t' || src[j] == '\r') {
 				j++
 			}
-			if ident, isKw := peekPythonIdent(src, j); ident != "" && !isKw {
+			// Prefixes on an adjacent literal are legal implicit concatenation,
+			// not a bare identifier after an accidentally closed quote. The next
+			// loop iteration still scans that literal for unterminated quotes.
+			_, _, _, _, adjacentLiteral := pythonStringStart(src, j)
+			if ident, isKw := peekPythonIdent(src, j); ident != "" && !isKw && !adjacentLiteral {
 				return endLine, true
 			}
 		}

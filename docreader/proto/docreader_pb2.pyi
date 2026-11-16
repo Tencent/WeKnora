@@ -6,6 +6,32 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class PreprocessImageRequest(_message.Message):
+    __slots__ = ("image",)
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    image: bytes
+    def __init__(self, image: _Optional[bytes] = ...) -> None: ...
+
+class PreprocessImageResponse(_message.Message):
+    __slots__ = ("image", "fallback_needed", "theta", "residual", "flip", "n_boxes", "n_kept", "status")
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    FALLBACK_NEEDED_FIELD_NUMBER: _ClassVar[int]
+    THETA_FIELD_NUMBER: _ClassVar[int]
+    RESIDUAL_FIELD_NUMBER: _ClassVar[int]
+    FLIP_FIELD_NUMBER: _ClassVar[int]
+    N_BOXES_FIELD_NUMBER: _ClassVar[int]
+    N_KEPT_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    image: bytes
+    fallback_needed: bool
+    theta: float
+    residual: float
+    flip: bool
+    n_boxes: int
+    n_kept: int
+    status: str
+    def __init__(self, image: _Optional[bytes] = ..., fallback_needed: bool = ..., theta: _Optional[float] = ..., residual: _Optional[float] = ..., flip: bool = ..., n_boxes: _Optional[int] = ..., n_kept: _Optional[int] = ..., status: _Optional[str] = ...) -> None: ...
+
 class ReadConfig(_message.Message):
     __slots__ = ("parser_engine", "parser_engine_overrides")
     class ParserEngineOverridesEntry(_message.Message):
@@ -149,3 +175,15 @@ class ListEnginesResponse(_message.Message):
     ENGINES_FIELD_NUMBER: _ClassVar[int]
     engines: _containers.RepeatedCompositeFieldContainer[ParserEngineInfo]
     def __init__(self, engines: _Optional[_Iterable[_Union[ParserEngineInfo, _Mapping]]] = ...) -> None: ...
+
+class GetInfoRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class GetInfoResponse(_message.Message):
+    __slots__ = ("version", "commit_id")
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_ID_FIELD_NUMBER: _ClassVar[int]
+    version: str
+    commit_id: str
+    def __init__(self, version: _Optional[str] = ..., commit_id: _Optional[str] = ...) -> None: ...

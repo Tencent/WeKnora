@@ -49,6 +49,13 @@ const (
 	// parsing the backwards-compatible English error message.
 	ErrModelInUse ErrorCode = 2300
 
+	// Import prerequisite errors (2400-2499).
+	// The dedicated code lets the datasource sync path distinguish permanent
+	// configuration-mismatch rejections (VLM/ASR not configured for an
+	// image/audio import) from retryable ingest failures without parsing
+	// message text. HTTP semantics are identical to a bad request.
+	ErrImportPrerequisiteMissing ErrorCode = 2400
+
 	// Add more error codes here
 )
 
@@ -75,6 +82,19 @@ func (e *AppError) WithDetails(details any) *AppError {
 func NewBadRequestError(message string) *AppError {
 	return &AppError{
 		Code:     ErrBadRequest,
+		Message:  message,
+		HTTPCode: http.StatusBadRequest,
+	}
+}
+
+// NewImportPrerequisiteError creates the typed HTTP 400 returned when an
+// import requires a model (VLM for images, ASR for audio) that the target
+// knowledge base has not configured. The message stays user-facing; the code
+// lets the datasource sync path treat the rejection as permanent instead of
+// retrying a task that cannot succeed until the operator configures a model.
+func NewImportPrerequisiteError(message string) *AppError {
+	return &AppError{
+		Code:     ErrImportPrerequisiteMissing,
 		Message:  message,
 		HTTPCode: http.StatusBadRequest,
 	}

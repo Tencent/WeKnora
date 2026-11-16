@@ -8,7 +8,8 @@ trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/scripts/git-hooks" "$fixture/bin"
 cp "$repo_root/scripts/git-hooks/common.sh" "$fixture/scripts/git-hooks/"
 export HOOK_TEST_LOG="$fixture/go.log"
-export LOG_FORMAT="developer-custom-template"
+export LOG_FORMAT="legacy: %msg"
+export WEKNORA_LOG_FORMAT="developer: %msg"
 cat > "$fixture/bin/go" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -19,7 +20,7 @@ case "$1" in
     printf '%s\n' example/internal/agent/tools example/internal/application/service example/docreader/proto
     ;;
   vet|test)
-    if [[ "$1" == test && -n "${LOG_FORMAT:-}" ]]; then
+    if [[ "$1" == test && ( -n "${WEKNORA_LOG_FORMAT:-}" || "${WEKNORA_LOG_FORMAT+x}" != x ) ]]; then
       echo "App tests inherited the developer log template" >&2
       exit 1
     fi

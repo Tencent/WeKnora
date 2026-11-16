@@ -30,12 +30,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/handler"
-	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/joho/godotenv"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -194,25 +192,18 @@ func main() {
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
 	execPath, errPath := os.Executable()
-	// A packaged .app keeps config under Contents/Resources. wails dev also
-	// runs from a .app, but that bundle has no copied config; stay in the
-	// repo and use config/ there.
-	if errPath == nil && strings.Contains(execPath, ".app/Contents/MacOS") {
-		resPath := filepath.Join(filepath.Dir(filepath.Dir(execPath)), "Resources")
-		if _, err := os.Stat(filepath.Join(resPath, "config", "config.yaml")); err == nil {
-			_ = os.Chdir(resPath)
-		}
+	configRoot, hasConfigRoot := "", false
+	if errPath == nil {
+		configRoot, hasConfigRoot = desktopConfigRoot(execPath)
 	}
-	if _, err := os.Stat(filepath.Join("config", "config.yaml")); os.IsNotExist(err) {
-		// wails dev 的 cwd 是 cmd/desktop。仓库配置在上两级。
-		repoRoot := filepath.Clean(filepath.Join("..", ".."))
-		if _, err := os.Stat(filepath.Join(repoRoot, "config", "config.yaml")); err == nil {
-			_ = os.Chdir(repoRoot)
-		}
+	if hasConfigRoot {
+		_ = os.Chdir(configRoot)
 	}
 
-	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded
-	_ = godotenv.Load()
+	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded.
+	if err := loadDesktopEnv(configRoot, hasConfigRoot); err != nil {
+		panic(err)
+	}
 	// wails dev picks up the repo .env, which may ask for Redis streams
 	// without REDIS_ADDR. go-redis then dials localhost:6379 and aborts
 	// startup. Lite has no Redis; keep the in-memory stream manager.
@@ -240,18 +231,14 @@ func main() {
 	}
 	runtime.LogStartupEnv(context.Background())
 
+	// Install prefs readers before BuildContainer. The host sandbox is created
+	// during that call and keeps the loader functions it was given; decorating
+	// the container afterwards does not rebuild it.
+	container.SetHostApprovalModeLoader(LoadApprovalMode)
+	container.SetHostProjectDirsLoader(LoadProjectDirs)
+
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
-	if err := c.Decorate(func(container.HostApprovalModeLoader) container.HostApprovalModeLoader {
-		return LoadApprovalMode
-	}); err != nil {
-		panic(fmt.Sprintf("wire desktop approval mode: %v", err))
-	}
-	if err := c.Decorate(func(session.HostProjectDirsLoader) session.HostProjectDirsLoader {
-		return LoadProjectDirs
-	}); err != nil {
-		panic(fmt.Sprintf("wire desktop project dirs: %v", err))
-	}
 
 	// Initialize the WeKnora App struct
 	app := NewApp()

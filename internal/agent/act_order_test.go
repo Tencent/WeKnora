@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -89,6 +90,26 @@ func TestParallelReadsRespectMutationBarriers(t *testing.T) {
 	}
 }
 
+func TestToolExecContextCarriesTheChatTurnRequestID(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = tools.NewToolRegistry()
+	var got string
+	engine.toolRegistry.RegisterTool(&orderedTestTool{
+		BaseTool: tools.NewBaseTool(tools.ToolReadFile, "", json.RawMessage(`{"type":"object"}`)),
+		run: func(ctx context.Context) *types.ToolResult {
+			meta, ok := tools.ToolExecFromContext(ctx)
+			require.True(t, ok)
+			got = meta.RequestID
+			return &types.ToolResult{Success: true}
+		},
+	})
+	ctx := context.WithValue(context.Background(), types.RequestIDContextKey, "turn-9")
+	engine.executeToolCallsParallel(ctx, &types.ChatResponse{ToolCalls: []types.LLMToolCall{
+		{ID: "a", Function: types.FunctionCall{Name: tools.ToolReadFile, Arguments: `{}`}},
+	}}, &types.AgentStep{}, 0, "session", "message")
+	require.Equal(t, "turn-9", got)
+}
+
 func TestParallelToolPanicFailsOnlyThatCall(t *testing.T) {
 	engine := newTestEngine(t, &mockChat{})
 	engine.toolRegistry = tools.NewToolRegistry()
@@ -112,4 +133,24 @@ func TestParallelToolPanicFailsOnlyThatCall(t *testing.T) {
 	require.False(t, step.ToolCalls[0].Result.Success)
 	require.Contains(t, step.ToolCalls[0].Result.Error, "internal error")
 	require.True(t, step.ToolCalls[1].Result.Success)
+}
+
+func TestToolOutcomeKeepsLiveDataChangeOutOfModelAndHistory(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	marker := map[string]any{"operation": "agent.delete", "area": "agent"}
+	call := types.ToolCall{Name: tools.ToolRunOperation, Result: &types.ToolResult{
+		Success: true, Output: "done", Data: map[string]any{"data_change": marker},
+	}}
+	var outcomes []event.AgentToolResultData
+	engine.eventBus.On(event.EventAgentToolResult, func(_ context.Context, evt event.Event) error {
+		outcomes = append(outcomes, evt.Data.(event.AgentToolResultData))
+		return nil
+	})
+	engine.emitToolOutcome(context.Background(), call, 0, "session")
+	require.Len(t, outcomes, 1)
+	require.Equal(t, marker, outcomes[0].Data["data_change"])
+	messages := engine.appendToolResults(nil, types.AgentStep{ToolCalls: []types.ToolCall{call}})
+	require.Equal(t, "done", messages[len(messages)-1].Content)
+	stored := tools.SanitizeAgentStepsForStorage([]types.AgentStep{{ToolCalls: []types.ToolCall{call}}})
+	require.NotContains(t, stored[0].ToolCalls[0].Result.Data, "data_change")
 }

@@ -49,16 +49,20 @@ if [ -z "$anydoc_version" ]; then
   exit 1
 fi
 
-# document_to_markdown is private in published anydoc. Copy the pinned version
-# and re-export that one function so anydoc-go can keep the official serializer.
+# Include a patch revision so changes to our patches invalidate existing copies
+# even when the upstream anydoc version stays the same.
+anydoc_patch_id="$anydoc_version-zip9-v1"
+
+# Copy the pinned version, expose the official serializer, and upgrade zip to
+# the fixed major version (upstream anydoc 0.2.4 still requires zip ^8.6.0).
 prepare_patched_anydoc() {
   local dest="$crate_dir/patched-anydoc"
-  # The marker records which version was patched: after a version bump the
+  # The marker records the upstream version and patch revision: after a bump the
   # copy left by the previous build is the wrong crate, and reusing it would
   # fail deep inside cargo's patch resolution instead of here. Cargo.toml is
   # required too: a truncated leftover with only the marker would otherwise
   # skip the copy and fail with "failed to read .../Cargo.toml".
-  if [ -f "$dest/.weknora-patched" ] && [ "$(cat "$dest/.weknora-patched")" = "$anydoc_version" ] && [ -f "$dest/Cargo.toml" ]; then
+  if [ -f "$dest/.weknora-patched" ] && [ "$(cat "$dest/.weknora-patched")" = "$anydoc_patch_id" ] && [ -f "$dest/Cargo.toml" ]; then
     return
   fi
 
@@ -91,7 +95,24 @@ prepare_patched_anydoc() {
   fi
   sed -i.bak 's/^use render::markdown::document_to_markdown;/pub use render::markdown::document_to_markdown;/' "$dest/src/lib.rs"
   rm -f "$dest/src/lib.rs.bak"
-  printf '%s\n' "$anydoc_version" > "$dest/.weknora-patched"
+  # RUSTSEC-2026-0367/0368/0369 have no fix in zip 8.x. Only change zip's
+  # version, preserving its deflate feature and disabled default features.
+  # Fail on upstream manifest changes rather than silently leaving zip unpatched.
+  if ! awk '
+    /^\[/ { in_zip = ($0 == "[dependencies.zip]") }
+    in_zip && /^version = / {
+      if ($0 != "version = \"8.6.0\"") exit 1
+      $0 = "version = \"9\""
+      patched++
+    }
+    { print }
+    END { if (patched != 1) exit 1 }
+  ' "$dest/Cargo.toml" > "$dest/Cargo.toml.tmp"; then
+    echo "error: anydoc $anydoc_version no longer has the expected zip 8.6.0 dependency" >&2
+    exit 1
+  fi
+  mv "$dest/Cargo.toml.tmp" "$dest/Cargo.toml"
+  printf '%s\n' "$anydoc_patch_id" > "$dest/.weknora-patched"
   rm -rf "$crate_dir/.anydoc-unpack" "$crate_dir/.anydoc-$anydoc_version.crate"
 }
 

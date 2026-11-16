@@ -107,8 +107,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # Service name must be "redis" - app references this
-  name: redis
+  name: {{ include "weknora.serviceName" (dict "component" "redis" "context" .) | quote }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "weknora.componentLabels" (dict "component" "cache" "context" .) | nindent 4 }}

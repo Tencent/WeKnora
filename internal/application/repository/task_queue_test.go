@@ -1038,6 +1038,55 @@ func TestTaskPendingOps_DrainUnclaimedAndReleaseRollsBackOnReleaseFailure(t *tes
 	assert.Equal(t, int64(1), count)
 }
 
+func TestTaskPendingOps_DiscardUnclaimedPreservesLiveKeys(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	discarder, ok := repo.(interfaces.TaskPendingOpsDiscarder)
+	require.True(t, ok)
+	ctx := context.Background()
+	for _, op := range []*types.TaskPendingOp{
+		wikiLane("kb-1", "retract", "k-unclaimed"),
+		wikiLane("kb-1", "ingest", "k-unclaimed"),
+		wikiLane("kb-1", "retract", "k-stale"),
+		wikiLane("kb-1", "retract", "k-live"),
+		wikiLane("kb-1", "ingest", "k-live"),
+		wikiLane("kb-1", "ingest", "k-other-op"),
+		wikiLane("kb-2", "retract", "k-other-kb"),
+	} {
+		require.NoError(t, repo.Enqueue(ctx, op))
+	}
+	staleBefore := time.Now().Add(-time.Hour)
+	require.NoError(t, db.Exec(
+		`UPDATE task_pending_ops SET claimed_at = ? WHERE dedup_key = 'k-stale'`,
+		staleBefore.Add(-time.Minute),
+	).Error)
+	require.NoError(t, db.Exec(
+		`UPDATE task_pending_ops SET claimed_at = ? WHERE dedup_key = 'k-live' AND op = 'retract'`,
+		time.Now(),
+	).Error)
+
+	require.NoError(t, discarder.DiscardUnclaimed(
+		ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "retract", staleBefore,
+	))
+
+	var rows []types.TaskPendingOp
+	require.NoError(t, db.Where("task_type = ? AND scope = ?", types.TypeWikiIngest, types.TaskScopeKnowledgeBase).
+		Order("scope_id, id").Find(&rows).Error)
+	var got []string
+	for _, row := range rows {
+		got = append(got, row.ScopeID+"/"+row.Op+"/"+row.DedupKey)
+	}
+	assert.Equal(t, []string{
+		"kb-1/ingest/k-unclaimed",
+		"kb-1/retract/k-live",
+		"kb-1/ingest/k-live",
+		"kb-1/ingest/k-other-op",
+		"kb-2/retract/k-other-kb",
+	}, got)
+
+	assert.Error(t, discarder.DiscardUnclaimed(ctx, "", types.TaskScopeKnowledgeBase, "kb-1", "retract", staleBefore))
+}
+
 func TestTaskPendingOps_ClaimableCountMatchesClaimBatch(t *testing.T) {
 	db := setupTaskQueueTestDB(t)
 	repo := NewTaskPendingOpsRepository(db)

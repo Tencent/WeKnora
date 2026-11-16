@@ -3,9 +3,38 @@ import test from 'node:test'
 
 import {
   groupPostprocessGraphSpans,
+  postprocessElapsedMs,
   summarizePostprocessTasks,
   type KnowledgeTraceNode,
 } from './knowledgeTrace.ts'
+
+test('postprocess duration follows asynchronous workers instead of enqueue completion', () => {
+  const stage: KnowledgeTraceNode = {
+    name: 'postprocess', kind: 'stage', status: 'done',
+    started_at: '2026-10-25T00:00:00.000Z',
+    finished_at: '2026-10-25T00:00:00.032Z',
+    duration_ms: 32,
+    children: [{
+      name: 'postprocess.wiki', kind: 'subspan', status: 'running',
+      started_at: '2026-10-25T00:00:01.000Z',
+    }],
+  }
+
+  const afterEnqueue = Date.parse('2026-10-25T00:02:00.000Z')
+  assert.equal(postprocessElapsedMs(stage, afterEnqueue), 120_000)
+  assert.equal(stage.duration_ms, 32, 'the stored stage duration still measures enqueue work')
+
+  stage.children![0].status = 'done'
+  stage.children![0].finished_at = '2026-10-25T00:03:00.000Z'
+  assert.equal(postprocessElapsedMs(stage, afterEnqueue + 60_000), 180_000)
+
+  stage.children = [{ name: 'postprocess.wiki', kind: 'subspan', status: 'pending' }]
+  assert.equal(postprocessElapsedMs(stage, afterEnqueue), 120_000,
+    'queued workers must not make the stage appear complete')
+  stage.children = []
+  assert.equal(postprocessElapsedMs(stage, afterEnqueue), null,
+    'a stage without asynchronous work keeps its own duration')
+})
 
 function graphChunk(index: number, overrides: Partial<KnowledgeTraceNode> = {}): KnowledgeTraceNode {
   return {

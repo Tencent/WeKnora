@@ -91,9 +91,12 @@ test('mid-run send is limited to agent sessions', () => {
   assert.match(chatView, /:canSteer="isAgentStreamSession\(\)"/)
 
   const fnStart = inputField.indexOf('const createSession = async')
-  const fn = inputField.slice(fnStart, fnStart + 1600)
+  const fnEnd = inputField.indexOf('const updateAgentModeDropdownPosition =', fnStart)
+  const fn = inputField.slice(fnStart, fnEnd)
   assert.notEqual(fnStart, -1)
+  assert.ok(fnEnd > fnStart)
   assert.match(fn, /if \(!props\.canSteer\)/)
+  assert.ok(fn.includes("emit('steer-msg'"))
   // The guard must come before anything queues the message.
   assert.ok(
     fn.indexOf('props.canSteer') < fn.indexOf("emit('steer-msg'"),

@@ -1,6 +1,10 @@
 package types
 
 import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,7 +37,7 @@ type TemporaryDocument struct {
 	Status            string         `json:"status" gorm:"type:varchar(16);not null;index"`
 	Content           string         `json:"-" gorm:"type:text"`
 	Chunks            JSON           `json:"-" gorm:"type:jsonb;not null;default:'[]'"`
-	ImageRefs         JSON           `json:"image_refs,omitempty" gorm:"type:jsonb;not null;default:'[]'"`
+	ImageRefs         JSON           `json:"image_refs,omitempty" gorm:"type:jsonb;not null;default:'[]'" swaggertype:"array,object"`
 	Metadata          JSON           `json:"metadata,omitempty" gorm:"type:jsonb;not null;default:'{}'"`
 	ProcessingOptions JSON           `json:"-" gorm:"type:jsonb;not null;default:'{}'"`
 	TokenCount        int            `json:"token_count" gorm:"not null;default:0"`
@@ -48,6 +52,33 @@ type TemporaryDocument struct {
 }
 
 func (TemporaryDocument) TableName() string { return "temporary_documents" }
+
+// TemporaryDocumentImageDescriptionsKey is the metadata key under which
+// vision-model descriptions of the document's images are cached.
+const TemporaryDocumentImageDescriptionsKey = "attachment_image_descriptions"
+
+// ForClient returns a copy without server-side caches in Metadata, for API
+// responses. The receiver is not modified.
+func (d *TemporaryDocument) ForClient() *TemporaryDocument {
+	if d == nil {
+		return nil
+	}
+	out := *d
+	var metadata map[string]json.RawMessage
+	if len(d.Metadata) == 0 || json.Unmarshal(d.Metadata, &metadata) != nil {
+		return &out
+	}
+	if _, ok := metadata[TemporaryDocumentImageDescriptionsKey]; !ok {
+		return &out
+	}
+	delete(metadata, TemporaryDocumentImageDescriptionsKey)
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return &out
+	}
+	out.Metadata = JSON(encoded)
+	return &out
+}
 
 func (d *TemporaryDocument) BeforeCreate(_ *gorm.DB) error {
 	if d.ID == "" {
@@ -84,6 +115,48 @@ type TemporaryDocumentImage struct {
 	OriginalRef string `json:"original_ref,omitempty"`
 	URL         string `json:"url"`
 	MimeType    string `json:"mime_type,omitempty"`
+}
+
+// ViewableImages lists the images an agent can look at, in the order they are
+// numbered: the stored images of the parsed text, or the upload itself when it
+// is an image the parser stored nothing for.
+func (d *TemporaryDocument) ViewableImages() []TemporaryDocumentImage {
+	var refs []TemporaryDocumentImage
+	_ = json.Unmarshal(d.ImageRefs, &refs)
+	images := refs[:0]
+	for _, ref := range refs {
+		if strings.TrimSpace(ref.URL) != "" {
+			images = append(images, ref)
+		}
+	}
+	if len(images) == 0 && strings.HasPrefix(d.MimeType, "image/") && strings.TrimSpace(d.ResourceRef) != "" {
+		images = append(images, TemporaryDocumentImage{URL: d.ResourceRef, MimeType: d.MimeType})
+	}
+	return images
+}
+
+var markdownImageRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)`)
+
+// NumberAttachmentImages marks every markdown image that refers to one of
+// images with its 1-based position, so a reader of the text knows which image
+// to request. Unknown references are left unmarked.
+func NumberAttachmentImages(content string, images []TemporaryDocumentImage) string {
+	if len(images) == 0 || !strings.Contains(content, "![") {
+		return content
+	}
+	positions := make(map[string]int, len(images))
+	for i, image := range images {
+		if _, seen := positions[image.URL]; !seen {
+			positions[image.URL] = i + 1
+		}
+	}
+	return markdownImageRefPattern.ReplaceAllStringFunc(content, func(match string) string {
+		groups := markdownImageRefPattern.FindStringSubmatch(match)
+		if n, ok := positions[groups[1]]; ok {
+			return fmt.Sprintf("%s [image #%d]", match, n)
+		}
+		return match
+	})
 }
 
 type TemporaryDocumentTaskPayload struct {

@@ -33,24 +33,24 @@ const (
 
 // WikiLintIssue represents a single lint finding
 type WikiLintIssue struct {
-	Type     WikiLintIssueType     `json:"type"`
-	Severity WikiLintIssueSeverity `json:"severity"`
-	PageSlug string                `json:"page_slug"`
+	Type     WikiLintIssueType     `json:"type" extensions:"x-agent"`
+	Severity WikiLintIssueSeverity `json:"severity" extensions:"x-agent"`
+	PageSlug string                `json:"page_slug" extensions:"x-agent=slug"`
 	// TargetSlug identifies the other page involved in the issue (e.g. the
 	// broken link target, or the entity slug for a missing cross-ref). It is
 	// the structured field used by AutoFix instead of parsing Description.
-	TargetSlug  string `json:"target_slug,omitempty"`
-	Description string `json:"description"`
-	AutoFixable bool   `json:"auto_fixable"`
+	TargetSlug  string `json:"target_slug,omitempty" extensions:"x-agent"`
+	Description string `json:"description" extensions:"x-agent"`
+	AutoFixable bool   `json:"auto_fixable" extensions:"x-agent"`
 }
 
 // WikiLintReport is the complete lint report for a wiki KB
 type WikiLintReport struct {
 	KnowledgeBaseID string           `json:"knowledge_base_id"`
 	Issues          []WikiLintIssue  `json:"issues"`
-	HealthScore     int              `json:"health_score"` // 0-100
+	HealthScore     int              `json:"health_score" extensions:"x-agent"` // 0-100
 	Stats           *types.WikiStats `json:"stats"`
-	Summary         string           `json:"summary"`
+	Summary         string           `json:"summary" extensions:"x-agent"`
 }
 
 // WikiLintService provides wiki health checking capabilities
@@ -164,7 +164,9 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 
 			// Check 2: Broken links — outlinks pointing at slugs that
 			// don't exist in the live set.
-			for _, outLink := range page.OutLinks {
+			// Historical OutLinks can contain escaped aliases and code
+			// examples. Validate the current body without rewriting the page.
+			for _, outLink := range wikiOutLinks(page.Content) {
 				if !slugSet[outLink] {
 					issues = append(issues, WikiLintIssue{
 						Type:        LintIssueBrokenLink,
@@ -238,8 +240,8 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		}
 		for _, page := range pages {
 			lowerContent := strings.ToLower(page.Content)
-			outLinkSet := make(map[string]struct{}, len(page.OutLinks))
-			for _, l := range page.OutLinks {
+			outLinkSet := make(map[string]struct{})
+			for _, l := range wikiOutLinks(page.Content) {
 				outLinkSet[l] = struct{}{}
 			}
 			for slug, title := range entitySlugs {
@@ -367,7 +369,19 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 				continue
 			}
 			target := issue.TargetSlug
-			page.Content = strings.ReplaceAll(page.Content, "[["+target+"]]", target)
+			updated, changed := rewriteMarkdownWikiLinks(page.Content, func(link markdownWikiLink) string {
+				if link.slug != target {
+					return page.Content[link.start:link.end]
+				}
+				if link.display != "" {
+					return link.display
+				}
+				return link.slug
+			})
+			if !changed {
+				continue
+			}
+			page.Content = updated
 			if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err == nil {
 				fixed++
 			}

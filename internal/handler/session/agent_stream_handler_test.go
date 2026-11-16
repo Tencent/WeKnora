@@ -76,3 +76,131 @@ func TestAgentStreamHandlerInternalErrorKeepsErrorType(t *testing.T) {
 	require.Equal(t, types.ResponseTypeError, evt.Type)
 	require.True(t, evt.Done)
 }
+
+func TestAgentStreamHandlerForwardsOperationDataChange(t *testing.T) {
+	streams := &capturingStreamManager{}
+	h := NewAgentStreamHandler(
+		context.Background(), "sess-1", "msg-1", "req-1", 1, time.Now(),
+		&types.Message{}, streams, nil, nil, nil, nil,
+	)
+	marker := map[string]any{"operation": "agent.delete", "area": "agent"}
+	err := h.handleToolResult(context.Background(), event.Event{
+		Type: event.EventAgentToolResult,
+		Data: event.AgentToolResultData{
+			ToolName: "run_operation", Success: true, Data: map[string]any{"data_change": marker},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, streams.events, 1)
+	require.Equal(t, types.ResponseTypeToolResult, streams.events[0].Type)
+	require.Equal(t, marker, streams.events[0].Data["data_change"])
+}
+
+func TestAgentStreamHandlerProgressIsSeparateFromReasoningAndFinalAnswer(t *testing.T) {
+	streams := &capturingStreamManager{}
+	bus := event.NewEventBus()
+	h := NewAgentStreamHandler(
+		context.Background(),
+		"s",
+		"m",
+		"r",
+		1,
+		time.Now(),
+		&types.Message{},
+		streams,
+		bus,
+		nil,
+		nil,
+		nil,
+	)
+	h.Subscribe()
+	require.NoError(
+		t,
+		bus.Emit(
+			t.Context(),
+			event.Event{
+				ID:   "progress-1",
+				Type: event.EventAgentProgress,
+				Data: event.AgentProgressData{Content: "Two tasks finished; one awaits approval.", Iteration: 3},
+			},
+		),
+	)
+	require.Len(t, streams.events, 1)
+	e := streams.events[0]
+	require.Equal(t, types.ResponseTypeProgress, e.Type)
+	require.Equal(t, "progress-1", e.Data["event_id"])
+	require.Equal(t, 3, e.Data["iteration"])
+	require.True(t, e.Done)
+	require.Empty(t, h.finalAnswer)
+	require.Empty(t, h.answerSegments)
+	require.Empty(t, h.eventStartTimes)
+}
+
+func TestPageButtonKeepsTheAnswerBeforeIt(t *testing.T) {
+	h := NewAgentStreamHandler(
+		context.Background(), "s", "m", "r", 1, time.Now(), &types.Message{},
+		&capturingStreamManager{}, nil, nil, nil, nil,
+	)
+	ctx := context.Background()
+	answer := func(id, content string) {
+		require.NoError(t, h.handleFinalAnswer(ctx, event.Event{
+			ID: id, Type: event.EventAgentFinalAnswer, Data: event.AgentFinalAnswerData{Content: content},
+		}))
+	}
+	call := func(name string, args map[string]any) {
+		require.NoError(t, h.handleToolCall(ctx, event.Event{
+			ID: "call", Type: event.EventAgentToolCall,
+			Data: event.AgentToolCallData{ToolCallID: "c-" + name, ToolName: name, Arguments: args},
+		}))
+	}
+
+	answer("a1", "the report")
+	call("open_page", nil)
+	call("open_page", map[string]any{"page": "agents"})
+	require.Equal(t, "the report", h.finalAnswer, "a page button follows the answer")
+
+	call("view_page", map[string]any{"page": "settings"})
+	require.Empty(t, h.finalAnswer, "viewing a page is more work, so the text was a preamble")
+
+	answer("a2", "second report")
+	require.NoError(t, h.handleProgress(ctx, event.Event{
+		ID: "a2", Type: event.EventAgentProgress, Data: event.AgentProgressData{Content: "second report"},
+	}))
+	require.Empty(t, h.finalAnswer, "progress with the answer's id retracts it")
+}
+
+func TestProtocolAnswerReplacementOnlyResetsMatchingSegment(t *testing.T) {
+	streams := &capturingStreamManager{}
+	h := NewAgentStreamHandler(
+		context.Background(),
+		"s",
+		"m",
+		"r",
+		1,
+		time.Now(),
+		&types.Message{},
+		streams,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	send := func(id, content string, replace bool) {
+		require.NoError(
+			t,
+			h.handleFinalAnswer(context.Background(), event.Event{
+				ID: id, Type: event.EventAgentFinalAnswer,
+				Data: event.AgentFinalAnswerData{Content: content, Replace: replace},
+			}),
+		)
+	}
+	send("prior", "Earlier legitimate answer.", false)
+	send("current", "refs\nprivate prefix", false)
+	send("current", "", true)
+	send("current", "## 进展\ncomplete report", false)
+	require.Equal(t, "Earlier legitimate answer.", h.findAnswerSegment("prior").content)
+	require.Equal(t, "## 进展\ncomplete report", h.findAnswerSegment("current").content)
+	require.NotContains(t, h.finalAnswer, "private prefix")
+	require.Equal(t, true, streams.events[2].Data["replace"])
+	require.Equal(t, "current", streams.events[2].Data["event_id"])
+}

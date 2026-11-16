@@ -46,7 +46,7 @@ func storageTenantID(c *gin.Context) uint64 { return c.GetUint64(types.TenantIDC
 // @Description  List all storage backend instances for the current workspace, with credentials masked. The workspace default backend id is returned alongside the list.
 // @Tags         StorageBackend
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}   "List of storage backends and default_storage_backend_id"
+// @Success      200  {object}  handler.ListResponse   "List of storage backends and default_storage_backend_id"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -76,7 +76,7 @@ func (h *StorageBackendHandler) List(c *gin.Context) {
 // @Tags         StorageBackend
 // @Produce      json
 // @Param        id   path      string  true  "Storage backend ID"
-// @Success      200  {object}  map[string]interface{}   "Storage backend details"
+// @Success      200  {object}  handler.DataResponse{data=types.StorageBackend}   "Storage backend details"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError          "Storage backend not found"
 // @Security     Bearer
@@ -102,7 +102,7 @@ func (h *StorageBackendHandler) Get(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      storageBackendRequest    true  "Storage backend configuration"
-// @Success      201      {object}  map[string]interface{}   "Created storage backend"
+// @Success      201      {object}  handler.DataResponse{data=types.StorageBackend}   "Created storage backend"
 // @Failure      400      {object}  apperrors.AppError          "Invalid request, validation, or connectivity test failure"
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
 // @Failure      409      {object}  apperrors.AppError          "A storage backend with this name already exists"
@@ -131,7 +131,7 @@ func (h *StorageBackendHandler) Create(c *gin.Context) {
 // @Produce      json
 // @Param        id       path      string                   true  "Storage backend ID"
 // @Param        request  body      storageBackendRequest    true  "Updated storage backend fields"
-// @Success      200      {object}  map[string]interface{}   "Updated storage backend"
+// @Success      200      {object}  handler.DataResponse{data=types.StorageBackend}   "Updated storage backend"
 // @Failure      400      {object}  apperrors.AppError          "Immutable field change, read-only backend, validation, or connectivity failure"
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404      {object}  apperrors.AppError          "Storage backend not found"
@@ -163,7 +163,7 @@ func (h *StorageBackendHandler) Update(c *gin.Context) {
 // @Tags         StorageBackend
 // @Produce      json
 // @Param        id   path      string  true  "Storage backend ID"
-// @Success      200  {object}  map[string]interface{}   "Deletion success"
+// @Success      200  {object}  handler.SuccessResponse   "Deletion success"
 // @Failure      400  {object}  apperrors.AppError          "Backend is default, bound, read-only, or legacy alias"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError          "Storage backend not found"
@@ -184,7 +184,7 @@ func (h *StorageBackendHandler) Delete(c *gin.Context) {
 // @Tags         StorageBackend
 // @Produce      json
 // @Param        id   path      string  true  "Storage backend ID"
-// @Success      200  {object}  map[string]interface{}   "Default set successfully"
+// @Success      200  {object}  handler.SuccessResponse   "Default set successfully"
 // @Failure      400  {object}  apperrors.AppError          "Backend is not active"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError          "Storage backend not found"
@@ -206,7 +206,7 @@ func (h *StorageBackendHandler) SetDefault(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      storageBackendRequest    true  "Storage backend configuration to test"
-// @Success      200      {object}  map[string]interface{}   "Connectivity test result (success, error)"
+// @Success      200      {object}  handler.SuccessErrorResponse   "Connectivity test result (success, error)"
 // @Failure      400      {object}  apperrors.AppError          "Invalid request or validation error"
 // @Failure      401      {object}  map[string]interface{}   "Unauthorized"
 // @Security     Bearer
@@ -236,7 +236,7 @@ func (h *StorageBackendHandler) TestRaw(c *gin.Context) {
 // @Tags         StorageBackend
 // @Produce      json
 // @Param        id   path      string  true  "Storage backend ID"
-// @Success      200  {object}  map[string]interface{}   "Connectivity test result (success, error)"
+// @Success      200  {object}  handler.SuccessErrorResponse   "Connectivity test result (success, error)"
 // @Failure      401  {object}  map[string]interface{}   "Unauthorized"
 // @Failure      404  {object}  apperrors.AppError          "Storage backend not found"
 // @Security     Bearer
@@ -264,7 +264,7 @@ func (h *StorageBackendHandler) TestByID(c *gin.Context) {
 // @Description  Return the storage provider types allowed by STORAGE_ALLOW_LIST for UI form generation (e.g. local, minio, cos, tos, s3, oss, ks3, obs).
 // @Tags         StorageBackend
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}   "List of allowed storage provider types"
+// @Success      200  {object}  handler.DataResponse{data=[]string}   "List of allowed storage provider types"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /storage-backends/types [get]

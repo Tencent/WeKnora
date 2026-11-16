@@ -44,6 +44,19 @@ test('buildShellExecView parses legacy markdown output when streams were strippe
   assert.equal(view.stderr, 'warn')
 })
 
+test('shell job payload renders like a shell result with work metadata', () => {
+  const view = buildShellExecView({
+    display_type: 'shell_exec', work_id: 'sj_0123', state: 'succeeded',
+    command: 'make build', work_dir: '/workspace', exit_code: 0,
+    duration_ms: 1200, stdout: 'ok', stderr: '', truncated: false,
+    from_bytes: { stdout: 0, stderr: 0 }, total_bytes: { stdout: 2, stderr: 0 },
+    omitted_bytes: { stdout: 0, stderr: 0 },
+  }, {})
+  assert.equal(view.command, 'make build')
+  assert.equal(view.exitCode, 0)
+  assert.equal(view.stdout, 'ok')
+})
+
 test('previewShellCommand collapses whitespace and truncates', () => {
   assert.equal(previewShellCommand('ls   -la'), 'ls -la')
   assert.equal(previewShellCommand('abcdefghij', 8), 'abcdefg…')

@@ -74,10 +74,20 @@ test('does not require rerank for wiki-only tools', () => {
 })
 
 test('matches backend default-tool behavior', () => {
+  // Never set: the backend's default tools, which include search_knowledge.
+  assert.equal(agentRequiresRerankModel({
+    kb_selection_mode: 'all',
+    allowed_tools: undefined,
+  }), true)
+  assert.equal(agentRequiresRerankModel({
+    kb_selection_mode: 'all',
+    allowed_tools: null,
+  }), true)
+  // Empty: no built-in tools, so nothing calls the reranker.
   assert.equal(agentRequiresRerankModel({
     kb_selection_mode: 'all',
     allowed_tools: [],
-  }), true)
+  }), false)
   assert.equal(agentRequiresRerankModel({
     kb_selection_mode: 'none',
     allowed_tools: [],
@@ -129,7 +139,7 @@ test('getAgentNotReadyReasonKeys does not treat current shared context as shared
   ), ['summary_model'])
 })
 
-test('getAgentNotReadyReasonKeys treats empty allowed_tools as ready via backend defaults', () => {
+test('getAgentNotReadyReasonKeys treats an empty allowed_tools with a rerank model as ready', () => {
   assert.deepEqual(getAgentNotReadyReasonKeys(
     {
       model_id: 'chat-1',

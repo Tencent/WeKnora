@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -400,11 +401,30 @@ func (c *Connector) item(ctx context.Context, p *project, ref, file string) (typ
 		return types.FetchedItem{}, err
 	}
 	id := fmt.Sprintf("gitlab:%s:%d:%s:%s", c.canonicalBase, p.ID, ref, file)
+	title := p.PathWithNamespace + "/" + file
+	// A file emptied by a commit still exists at this path, and ingestion reads
+	// an item with no content and no URL as "nothing to sync" (see
+	// datasource_service applyFetchedItem): the sync is acknowledged as
+	// successful while the body indexed from an earlier commit stays fully
+	// searchable. Nothing revisits it afterwards either — a full sync sees the
+	// file present in the tree, and an incremental sync only walks the diffs of
+	// commits newer than the recorded head, which the emptying commit already
+	// moved past.
+	//
+	// Emitting the file's path as its content replaces the stale body instead,
+	// which is what the Notion (b9be7d0d), Confluence and IMA (b71b31c8)
+	// connectors already do for the same case. The check is on length alone, not
+	// on TrimSpace: a blob that holds only whitespace still carries content the
+	// repository has, and only a zero-byte blob has none.
+	if len(body) == 0 {
+		logger.Infof(ctx, "[GitLab] %s is empty, syncing its path only", title)
+		body = []byte("# " + title + "\n")
+	}
 	// UpdatedAt is intentionally left unset: the file's last commit time is not
 	// fetched here, and a fetch timestamp would be a fabricated source time.
 	return types.FetchedItem{
 		ExternalID:       id,
-		Title:            p.PathWithNamespace + "/" + file,
+		Title:            title,
 		FileName:         knowledgeRelativePath(p.Name, ref, file),
 		Content:          body,
 		ContentType:      "text/plain",

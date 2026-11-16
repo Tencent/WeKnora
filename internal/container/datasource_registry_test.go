@@ -37,3 +37,17 @@ func TestConnectorRegistryIncludesSeafile(t *testing.T) {
 		t.Fatal("Seafile connector must implement datasource.FullStreamingConnector")
 	}
 }
+
+func TestConnectorRegistryIncludesNextcloud(t *testing.T) {
+	registry, err := initConnectorRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector, err := registry.Get(types.ConnectorTypeNextcloud)
+	if err != nil {
+		t.Fatalf("Nextcloud connector is not registered: %v", err)
+	}
+	if _, ok := connector.(datasource.FullStreamingConnector); !ok {
+		t.Fatal("Nextcloud must support resumable full sync with deletion reconciliation")
+	}
+}

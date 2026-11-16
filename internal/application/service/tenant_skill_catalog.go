@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,14 +54,16 @@ func ServedInfoOf(row *types.TenantSkillEntity) *SkillServedInfo {
 
 // SkillCatalogView is a tenant skill definition plus its sandbox installations.
 type SkillCatalogView struct {
-	ID            string                    `json:"id"`
-	Name          string                    `json:"name"`
-	Version       string                    `json:"version,omitempty"`
-	Description   string                    `json:"description,omitempty"`
+	ID            string                    `json:"id" extensions:"x-agent=catalog_skill_id"`
+	Name          string                    `json:"name" extensions:"x-agent"`
+	Version       string                    `json:"version,omitempty" extensions:"x-agent"`
+	Description   string                    `json:"description,omitempty" extensions:"x-agent"`
 	BundleSHA256  string                    `json:"bundle_sha256,omitempty"`
 	CreatedAt     time.Time                 `json:"created_at"`
 	UpdatedAt     time.Time                 `json:"updated_at"`
 	Installations []SkillCatalogInstallView `json:"installations"`
+	// InstalledOn lists the sandbox config ids of Installations.
+	InstalledOn []string `json:"installed_on" extensions:"x-agent"`
 }
 
 // ListCatalog returns every workspace skill definition and which sandbox
@@ -146,6 +149,13 @@ func (s *TenantSkillService) ListCatalog(
 			CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		}
 		out = append(out, catalogView(synthetic, []*types.TenantSkillEntity{row}, configByID))
+	}
+	for i := range out {
+		for _, install := range out[i].Installations {
+			if !slices.Contains(out[i].InstalledOn, install.SandboxConfigID) {
+				out[i].InstalledOn = append(out[i].InstalledOn, install.SandboxConfigID)
+			}
+		}
 	}
 	return out, nil
 }

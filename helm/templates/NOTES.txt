@@ -28,7 +28,7 @@ WeKnora is accessible via Ingress:
 To access WeKnora, use port-forwarding:
 
   # Frontend (Web UI)
-  kubectl port-forward svc/frontend -n {{ .Release.Namespace }} 8080:80
+  kubectl port-forward svc/{{ include "weknora.serviceName" (dict "component" "frontend" "context" .) }} -n {{ .Release.Namespace }} 8080:80
 
   # Then open: http://localhost:8080
 
@@ -113,7 +113,7 @@ which is deprecated and no longer read by the app):
     --set neo4j.password=<your-secure-password>
 
 Access Neo4j Browser:
-  kubectl port-forward svc/neo4j -n {{ .Release.Namespace }} 7474:7474 7687:7687
+  kubectl port-forward svc/{{ include "weknora.serviceName" (dict "component" "neo4j" "context" .) }} -n {{ .Release.Namespace }} 7474:7474 7687:7687
   # Open: http://localhost:7474
 
 {{- end }}

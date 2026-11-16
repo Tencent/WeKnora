@@ -434,6 +434,10 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status NOT IN ?",
 			tenantID, kbID, []string{"failed", "deleting"})
 
+	if params.ExcludeKnowledgeID != "" {
+		query = query.Where("id <> ?", params.ExcludeKnowledgeID)
+	}
+
 	switch params.Type {
 	case "file":
 		if params.DataSourceID != "" && params.ExternalID != "" {
@@ -807,6 +811,18 @@ func (r *knowledgeRepository) CountKnowledgeByKnowledgeBaseID(
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?",
 			tenantID, kbID, types.ParseStatusDeleting).
+		Count(&count).Error
+	return count, err
+}
+
+// CountAllKnowledgeByKnowledgeBaseID counts every non-soft-deleted row,
+// including deleting entries whose external index cleanup may have failed.
+func (r *knowledgeRepository) CountAllKnowledgeByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
 		Count(&count).Error
 	return count, err
 }

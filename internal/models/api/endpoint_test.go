@@ -8,8 +8,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestEndpointRequestIdentity(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	// One endpoint is shared by different sessions. Static model headers must
+	// neither merge them nor leak one session into a call without a session.
+	ep := Endpoint{
+		Auth: BearerAuth("test-key"),
+		Headers: map[string]string{
+			"X-Conversation-ID": "static-id", "User-Agent": "custom-client",
+			"X-Custom": "preserved",
+		},
+	}
+	for _, sessionID := range []string{"session-a", "session-b", ""} {
+		t.Run("session="+sessionID, func(t *testing.T) {
+			ctx := types.WithSessionID(context.Background(), sessionID)
+			for _, stream := range []bool{false, true} {
+				req, _, err := ep.NewRequest(ctx, "http://127.0.0.1/v1/chat/completions", map[string]any{}, stream)
+				require.NoError(t, err)
+				require.Equal(t, sessionID, req.Header.Get("X-Conversation-ID"))
+				require.Equal(t, "WeKnora", req.UserAgent())
+				require.Equal(t, "preserved", req.Header.Get("X-Custom"))
+				require.Equal(t, "Bearer test-key", req.Header.Get("Authorization"))
+				if sessionID == "" {
+					require.NotContains(t, req.Header, "X-Conversation-Id")
+				}
+			}
+			require.Equal(t, "static-id", ep.Headers["X-Conversation-ID"])
+		})
+	}
+}
 
 func TestDoKeepsHeadersOnHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

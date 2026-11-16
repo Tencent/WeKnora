@@ -8,6 +8,7 @@ import {
   childFolders,
   folderAncestorPaths,
   folderBreadcrumbs,
+  folderDocumentCounts,
   folderOptionFromPath,
   folderPathExists,
   isFilteringDocuments,
@@ -154,6 +155,46 @@ test('tree rows carry the recursive total, which is how much a folder contains',
   assert.equal(root.totalCount, 7)
   assert.equal(handbook.totalCount, 4)
   assert.equal(handbook.documentCount, 1)
+})
+
+// The breadcrumb and the empty state both report the folder's size, which is the
+// recursive total once connector-produced trees nest. `direct` stays available so
+// a caller can tell an empty folder from one whose documents live below it.
+test('folder counts separate a folder from its whole subtree', () => {
+  assert.deepEqual(folderDocumentCounts(tree, ROOT_FOLDER_PATH), { direct: 2, total: 7 })
+  assert.deepEqual(folderDocumentCounts(tree, 'handbook'), { direct: 1, total: 4 })
+  assert.deepEqual(folderDocumentCounts(tree, 'handbook/onboarding'), { direct: 2, total: 3 })
+  assert.deepEqual(folderDocumentCounts(tree, 'handbook/onboarding/day-one'), { direct: 1, total: 1 })
+
+  // A path that is no longer in the tree and an unloaded tree both leave the
+  // caller to fall back to the document list it did load.
+  assert.equal(folderDocumentCounts(tree, 'handbook/gone'), null)
+  assert.equal(folderDocumentCounts(null, ROOT_FOLDER_PATH), null)
+  assert.equal(folderDocumentCounts(null, 'handbook'), null)
+})
+
+// The regression this guards: the deployed DingTalk tree has a folder whose
+// documents all sit one level down, so its direct count is 0. Reading that as
+// the folder's size made the sidebar and the empty state claim it was empty.
+test('a folder that only groups sub-folders still reports a total', () => {
+  const grouped = {
+    root_document_count: 0,
+    total_document_count: 5,
+    folders: [{
+      path: '天诛渗透攻防',
+      name: '天诛渗透攻防',
+      document_count: 0,
+      total_count: 5,
+      children: [
+        { path: '天诛渗透攻防/FAQ', name: 'FAQ', document_count: 2, total_count: 2 },
+        { path: '天诛渗透攻防/售后', name: '售后', document_count: 2, total_count: 2 },
+        { path: '天诛渗透攻防/2024使用培训视频', name: '2024使用培训视频', document_count: 1, total_count: 1 },
+      ],
+    }],
+  }
+  assert.deepEqual(folderDocumentCounts(grouped, '天诛渗透攻防'), { direct: 0, total: 5 })
+  const counts = folderDocumentCounts(grouped, '天诛渗透攻防')!
+  assert.equal(counts.total - counts.direct, 5, 'all five documents are below the folder')
 })
 
 // Browsing a folder shows its own sub-folders as list entries, which is what

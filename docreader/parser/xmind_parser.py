@@ -45,9 +45,13 @@ def _topic_from_json(value: object) -> _Topic | None:
     topics: list[_Topic] = []
     children = value.get("children")
     if isinstance(children, dict):
-        attached = children.get("attached")
-        if isinstance(attached, list):
-            for child in attached:
+        # All four groups contain recursive topics in the XMind JSON schema.
+        # Keep their text and notes, as the classic XML parser already does.
+        for group_name in ("attached", "detached", "summary", "callout"):
+            group = children.get(group_name)
+            if not isinstance(group, list):
+                continue
+            for child in group:
                 topic = _topic_from_json(child)
                 if topic is not None:
                     topics.append(topic)
@@ -164,6 +168,11 @@ def _read_content_entry(content: bytes) -> tuple[str, bytes]:
         raise ValueError("invalid XMind archive") from exc
 
 
+def _single_line_title(value: str) -> str:
+    """Keep title line breaks from becoming Markdown headings or list items."""
+    return " ".join(line.strip() for line in value.splitlines() if line.strip())
+
+
 def _render_topic(topic: _Topic, depth: int) -> tuple[list[str], int, int]:
     lines: list[str] = []
     topic_count = 0
@@ -171,7 +180,7 @@ def _render_topic(topic: _Topic, depth: int) -> tuple[list[str], int, int]:
     child_depth = depth
 
     if topic.title:
-        lines.append(f"{'  ' * depth}- {topic.title}")
+        lines.append(f"{'  ' * depth}- {_single_line_title(topic.title)}")
         topic_count = 1
         child_depth += 1
         if topic.note:
@@ -201,7 +210,7 @@ def _render_sheets(sheets: list[_Sheet]) -> tuple[str, int, int, int]:
         lines, sheet_topics, sheet_notes = _render_topic(sheet.root_topic, 0)
         if not lines:
             continue
-        title = sheet.title or f"Sheet {index}"
+        title = _single_line_title(sheet.title) or f"Sheet {index}"
         rendered_sheets.append(f"# {title}\n\n" + "\n".join(lines))
         topic_count += sheet_topics
         note_count += sheet_notes

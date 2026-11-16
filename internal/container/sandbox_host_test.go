@@ -72,8 +72,8 @@ func TestHostSandboxManagerNilWhenAvailableFails(t *testing.T) {
 	}))
 }
 
-func TestDefaultHostSessionRootUsesWeKnoraLite(t *testing.T) {
-	require.Equal(t, "/Users/dev/Documents/WeKnoraLite", defaultHostSessionRoot("/Users/dev"))
+func TestDefaultHostSessionRootUsesDotWeknora(t *testing.T) {
+	require.Equal(t, "/Users/dev/.weknora/sessions", defaultHostSessionRoot("/Users/dev"))
 }
 
 func TestDefaultHostSkillsRootIsDotWeknora(t *testing.T) {
@@ -117,13 +117,25 @@ func TestHostModeLookupDelegatesToParseApprovalMode(t *testing.T) {
 		return hostModeLookup(func() string { return stored }).ModeForSession(context.Background(), "session-1")
 	}
 	require.Equal(t, localsandbox.ModeAsk, lookup("ask"))
+	require.Equal(t, localsandbox.ModeAuto, lookup("auto"))
 	require.Equal(t, localsandbox.ModeFull, lookup("full"))
-	require.Equal(t, localsandbox.ModeAuto, lookup("yolo"))
-	require.Equal(t, localsandbox.ModeAuto, lookup(""))
+	require.Equal(t, localsandbox.ModeAsk, lookup("yolo"))
+	require.Equal(t, localsandbox.ModeAsk, lookup(""))
 }
 
-func TestHostModeLookupNilLoaderMeansAuto(t *testing.T) {
+func TestHostModeLookupNilLoaderMeansAsk(t *testing.T) {
 	require.Nil(t, hostModeLookup(nil))
+}
+
+func TestHostModeLookupSeesModeInstalledAfterTheSandboxIsBuilt(t *testing.T) {
+	lookup := hostModeLookup(provideHostApprovalModeLoader())
+	require.NotNil(t, lookup)
+	require.Equal(t, localsandbox.ModeAsk, lookup.ModeForSession(context.Background(), "session-1"))
+
+	SetHostApprovalModeLoader(func() string { return "auto" })
+	t.Cleanup(func() { SetHostApprovalModeLoader(nil) })
+
+	require.Equal(t, localsandbox.ModeAuto, lookup.ModeForSession(context.Background(), "session-1"))
 }
 
 func TestHostLookupsComeFromProvidedLoaders(t *testing.T) {

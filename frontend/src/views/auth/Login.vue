@@ -363,6 +363,7 @@ import {
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { getApiBaseUrl } from '@/utils/api-base'
 
 // Import screenshot images
 import screenshot1 from '@/assets/img/screenshot-1.svg'
@@ -596,7 +597,7 @@ const persistLoginResponse = async (response: any, skipRedirect = false) => {
   router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
-const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
+const getBackendOIDCRedirectURI = () => `${window.location.origin}${getApiBaseUrl()}/api/v1/auth/oidc/callback`
 
 const loadOIDCConfig = async () => {
   try {
@@ -1670,6 +1671,8 @@ onMounted(async () => {
 @media (max-width: 768px) {
   .login-layout {
     flex-direction: column;
+    padding-top: 64px;
+    box-sizing: border-box;
   }
 
   .knowledge-node:nth-of-type(n + 9) {
@@ -1713,6 +1716,7 @@ onMounted(async () => {
   }
 
   .form-section {
+    order: -1;
     flex: 0 0 auto;
     padding: 24px;
   }
@@ -1777,6 +1781,10 @@ onMounted(async () => {
     right: 14px;
     gap: 6px;
     flex-wrap: wrap;
+
+    .link-text {
+      display: none;
+    }
 
     .header-link {
       padding: 7px 10px;

@@ -93,28 +93,54 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		var contentList []string
-		for _, indexInfo := range indexInfoList {
-			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
-		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
-		if err != nil {
-			return err
-		}
-
-		batchSize := 40
-		chunks := utils.ChunkSlice(indexInfoList, batchSize)
-
-		// Use concurrent batch saving for better performance
-		// Limit concurrency to avoid overwhelming the backend
-		const maxConcurrency = 5
-		if len(chunks) <= maxConcurrency {
-			// For small number of batches, use simple concurrency
-			return v.concurrentBatchSave(ctx, chunks, embeddings, batchSize)
+		const (
+			batchSize      = 40
+			maxConcurrency = 5
+			windowSize     = batchSize * maxConcurrency
+		)
+		// Image indexing supplies vectors in the original row order. Validate
+		// the full list before any writes, then give each window its own view;
+		// the same precomputed embedder may be shared by multiple engines.
+		precomputed, isPrecomputed := embedder.(*precomputedEmbedder)
+		if isPrecomputed {
+			if _, err := precomputed.take(len(indexInfoList)); err != nil {
+				return err
+			}
 		}
 
-		// For large number of batches, use bounded concurrency
-		return v.boundedConcurrentBatchSave(ctx, chunks, embeddings, batchSize, maxConcurrency)
+		// Bound both embedding inputs and returned vectors, not just DB write
+		// concurrency. Finish saving a window before embedding the next one so
+		// text indexing does not retain every generated vector at once.
+		for start := 0; start < len(indexInfoList); start += windowSize {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			end := min(start+windowSize, len(indexInfoList))
+			window := indexInfoList[start:end]
+			contentList := make([]string, len(window))
+			for i, indexInfo := range window {
+				contentList[i] = sanitizeForEmbedding(ctx, indexInfo.Content)
+			}
+			windowEmbedder := embedder
+			if isPrecomputed {
+				windowEmbedder = &precomputedEmbedder{
+					Embedder: precomputed.Embedder,
+					vectors:  precomputed.vectors[start:end],
+				}
+			}
+			embeddings, err := batchEmbedWithBackoff(ctx, windowEmbedder, contentList)
+			if err != nil {
+				return err
+			}
+			if len(embeddings) != len(window) {
+				return fmt.Errorf("embedding model returned %d embeddings for %d inputs", len(embeddings), len(window))
+			}
+			chunks := utils.ChunkSlice(window, batchSize)
+			if err := v.concurrentBatchSave(ctx, chunks, embeddings, batchSize); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	// For non-vector retrieval, use concurrent batch saving as well
@@ -185,38 +211,6 @@ func (v *KeywordsVectorHybridRetrieveEngineService) concurrentBatchSave(
 	g, ctx := errgroup.WithContext(ctx)
 	for i, indexChunk := range chunks {
 		g.Go(func() error {
-			params := make(map[string]any)
-			embeddingMap := make(map[string][]float32)
-			for j, indexInfo := range indexChunk {
-				embeddingMap[indexInfo.SourceID] = embeddings[i*batchSize+j]
-			}
-			params["embedding"] = embeddingMap
-			return v.indexRepository.BatchSave(ctx, indexChunk, params)
-		})
-	}
-	return g.Wait()
-}
-
-// boundedConcurrentBatchSave saves batches with bounded concurrency using semaphore pattern
-func (v *KeywordsVectorHybridRetrieveEngineService) boundedConcurrentBatchSave(
-	ctx context.Context,
-	chunks [][]*types.IndexInfo,
-	embeddings [][]float32,
-	batchSize int,
-	maxConcurrency int,
-) error {
-	g, ctx := errgroup.WithContext(ctx)
-	sem := make(chan struct{}, maxConcurrency)
-
-	for i, indexChunk := range chunks {
-		g.Go(func() error {
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-
 			params := make(map[string]any)
 			embeddingMap := make(map[string][]float32)
 			for j, indexInfo := range indexChunk {

@@ -51,7 +51,7 @@ type CatalogProviderView struct {
 // CatalogRevision is one earlier published overlay.
 type CatalogRevision struct {
 	Version   uint64          `json:"version"`
-	Overlay   json.RawMessage `json:"overlay"`
+	Overlay   json.RawMessage `json:"overlay" swaggertype:"object"`
 	UpdatedBy string          `json:"updated_by"`
 	UpdatedAt time.Time       `json:"updated_at"`
 }
@@ -62,7 +62,7 @@ type CatalogState struct {
 	AppliedVersion  uint64                `json:"applied_version"`
 	Version         uint64                `json:"version"`
 	Baseline        string                `json:"baseline"`
-	Overlay         json.RawMessage       `json:"overlay"`
+	Overlay         json.RawMessage       `json:"overlay" swaggertype:"object"`
 	History         []CatalogRevision     `json:"history"`
 	Builtin         []CatalogProviderView `json:"builtin"`
 	Deployment      []CatalogProviderView `json:"deployment"`
@@ -74,7 +74,7 @@ type CatalogState struct {
 type CatalogUpdate struct {
 	Version  uint64          `json:"version"`
 	Baseline string          `json:"baseline"`
-	Overlay  json.RawMessage `json:"overlay"`
+	Overlay  json.RawMessage `json:"overlay" swaggertype:"object"`
 }
 
 // ModelCatalogService persists console overlays independently of the mounted

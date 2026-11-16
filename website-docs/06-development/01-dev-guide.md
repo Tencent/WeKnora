@@ -10,7 +10,7 @@ WeKnora 由三个可独立开发的进程组成：
 | --- | --- | --- | --- |
 | 主后端 `app` | `cmd/server` + `internal/` | Go | **Go 1.26.0**（`go.mod` 中 `go 1.26.0`），需 CGO（DuckDB、sqlite-vec 绑定） |
 | 文档解析服务 `docreader` | `docreader/` | Python + gRPC | **Python >= 3.10.18**（`docreader/pyproject.toml` 中 `requires-python`），依赖用 **uv** 管理（仓库含 `uv.lock`，Docker 内 `uv sync --locked`） |
-| 前端 `frontend` | `frontend/` | Node.js + Vue 3 | Node 22 系（`devDependencies` 含 `@tsconfig/node22`、`@types/node ^22`），Vite 7 + TypeScript ~6.0 + Vue 3.5 + TDesign，版本号 `0.8.2` |
+| 前端 `frontend` | `frontend/` | Node.js + Vue 3 | Node 22 系（`devDependencies` 含 `@tsconfig/node22`、`@types/node ^22`），Vite 7 + TypeScript ~6.0 + Vue 3.5 + TDesign，版本号 `0.8.3` |
 | CLI | `cli/`（独立 Go module） | Go | Go 1.26（`.github/workflows/cli.yml` 矩阵 `go: ['1.26']`） |
 
 推荐额外安装的开发工具：
@@ -56,7 +56,24 @@ make dev-stop     # 停止
 make dev-restart  # 重启
 ```
 
-前端 dev server 监听 `5173`（`frontend/vite.config.ts` 中 `server.port: 5173`），并把 `/api` 与 `/files` 代理到本地后端（`DEV_PROXY_TARGET`）。`vite preview`（端口 `4173`）用生产构建产物起服务，是最接近 release 镜像的验证环境。
+前端 dev server 监听 `5173`（`frontend/vite.config.ts` 中 `server.port: 5173`），把 `/api`、`/files` 与 `/mcp/` 代理到后端。代理目标依次取进程环境变量 `VITE_DEV_PROXY_TARGET`、`FRONTEND_BACKEND_URL`，两者都未设置或为空时使用 `http://localhost:8080`。`DEV_PROXY_TARGET` 是配置文件中的内部常量，不是环境变量。
+
+连接远程后端时，可在仓库根目录的 `.env.local` 中设置（将示例地址替换为实际后端地址）：
+
+```bash
+VITE_DEV_PROXY_TARGET=https://kb.example.com
+```
+
+然后在仓库根目录运行 `make dev-frontend`；脚本会先加载根目录 `.env`，再用 `.env.local` 覆盖，并将变量导出给 Vite。修改代理目标后需要重启前端开发服务器。
+
+如果直接在 `frontend/` 目录运行 npm 命令，应显式传入环境变量；该方式不会经过脚本加载仓库根目录的环境文件：
+
+```bash
+cd frontend
+VITE_DEV_PROXY_TARGET=https://kb.example.com npm run dev
+```
+
+`vite preview`（端口 `4173`）用生产构建产物起服务，是最接近 release 镜像的验证环境。它使用相同的代理路径和目标选择规则，可在 `frontend/` 目录执行 `npm run build` 后，用 `VITE_DEV_PROXY_TARGET=https://kb.example.com npm run preview` 连接远程后端。
 
 ### docker-compose.dev.yml 服务清单 {#_2-1-docker-compose-dev-yml-服务清单}
 
@@ -64,7 +81,7 @@ make dev-restart  # 重启
 
 | 服务 | 镜像 | 端口（默认） | 启动条件 |
 | --- | --- | --- | --- |
-| `postgres` | `paradedb/paradedb:v0.22.6-pg17`（自带 pg_search/BM25） | `5432` | 默认启动 |
+| `postgres` | `paradedb/paradedb:v0.25.11-pg17`（自带 pg_search/BM25） | `5432` | 默认启动 |
 | `redis` | `redis:7.0-alpine`（`--requirepass`） | `6379` | 默认启动 |
 | `docreader` | 本地构建 `docker/Dockerfile.docreader` | `50051`（gRPC） | 默认启动 |
 | `searxng`（+`searxng-init`） | `searxng/searxng:latest` | `127.0.0.1:8888` | `--searxng` / `--full`（compose profile `searxng`） |
@@ -120,7 +137,7 @@ make package-mac-app  # 打 macOS .app（scripts/package-mac-app.sh）
 | `fmt` | `go fmt ./...` |
 | `lint` | `golangci-lint run` |
 | `deps` | `go mod download` |
-| `docs` | `swag init -g ./cmd/server/main.go -o ./docs --parseDependency --parseInternal` 生成 Swagger 文档 |
+| `docs` | `swag init`（参数见 Makefile，含 `--overridesFile ./docs/swag.overrides`）生成 Swagger 文档 |
 | `install-swagger` | 安装 `swag` CLI |
 
 ### Docker 镜像与服务管理 {#_3-2-docker-镜像与服务管理}

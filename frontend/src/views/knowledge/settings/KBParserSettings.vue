@@ -209,18 +209,51 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
     }))
 }
 
+// The "(default)" badge has to name the engine ingestion will actually pick, so
+// it is computed from the backend routing rather than from availability order:
+//   preferAnydocWhenAvailable in internal/infrastructure/docparser/engines.go
+//   simpleFormats in internal/infrastructure/docparser/builtin_converter.go
+//   defaultParserEngineByType in internal/types/knowledgebase.go
+// DefaultParserEngine returns "" when nothing is pinned for a type, which sends
+// simple formats to the Go reader and everything else to docreader builtin.
+const simpleFileTypes = new Set([
+  'md', 'markdown', 'txt', 'text', 'csv', 'json',
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+  'mp3', 'wav', 'm4a', 'flac', 'ogg',
+])
+
+// anydoc has no document model for PDF, so the backend never defaults to it.
+const noAnydocFileTypes = new Set(['pdf'])
+
+const pinnedEngineByFileType: Record<string, string> = {
+  ppt: 'markitdown',
+  pptx: 'markitdown',
+}
+
+function defaultEngineForFileType(
+  engines: { name: string; available: boolean; fileTypes: string[] }[],
+  ext: string,
+): string {
+  const usable = (name: string) =>
+    engines.some(e => e.available && e.name === name && e.fileTypes.includes(ext))
+  if (!simpleFileTypes.has(ext) && !noAnydocFileTypes.has(ext) && usable('anydoc')) {
+    return 'anydoc'
+  }
+  const pinned = pinnedEngineByFileType[ext]
+  if (pinned && usable(pinned)) return pinned
+  const unpinned = simpleFileTypes.has(ext) ? 'simple' : 'builtin'
+  return usable(unpinned) ? unpinned : ''
+}
+
 function pickDefaultEngineName(
-  engines: { name: string; available: boolean }[],
+  engines: { name: string; available: boolean; fileTypes: string[] }[],
   extensions: string[],
 ): string {
-  const available = engines.filter(e => e.available)
-  const simpleExts = new Set(['md', 'markdown', 'txt', 'csv', 'json'])
-  const allSimple = extensions.length > 0 && extensions.every(ext => simpleExts.has(ext))
-  if (!allSimple) {
-    const anydoc = available.find(e => e.name === 'anydoc')
-    if (anydoc) return anydoc.name
-  }
-  return available[0]?.name ?? ''
+  const perFileType = extensions.map(ext => defaultEngineForFileType(engines, ext))
+  const first = perFileType[0] ?? ''
+  // One dropdown serves the whole group, so only badge a default when every
+  // member of the group routes to the same engine.
+  return perFileType.every(name => name === first) ? first : ''
 }
 
 function hasAvailableEngine(extensions: string[]): boolean {

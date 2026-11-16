@@ -40,6 +40,20 @@ const roleOrder = (role?: string): number => {
   return 2
 }
 
+function compareMessageTimes(left: string, right: string): number {
+  const a = Date.parse(left), b = Date.parse(right)
+  const validA = Number.isFinite(a), validB = Number.isFinite(b)
+  if (!validA || !validB) {
+    if (validA !== validB) return validA ? 1 : -1
+    return left.localeCompare(right)
+  }
+  // Go's RFC3339Nano timestamps may carry precision below Date's milliseconds.
+  const remainder = (value: string) => Number(
+    (value.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/i)?.[1] || '').padEnd(9, '0').slice(3, 9),
+  )
+  return a - b || remainder(left) - remainder(right)
+}
+
 export async function collectAllSessionMessages(
   fetchPage: SessionMessagePageFetcher,
   pageSize = 100,
@@ -69,7 +83,7 @@ export async function collectAllSessionMessages(
       return true
     })
     .sort((a, b) => {
-      const timeCompare = String(a.created_at || '').localeCompare(String(b.created_at || ''))
+      const timeCompare = compareMessageTimes(a.created_at || '', b.created_at || '')
       return timeCompare || roleOrder(a.role) - roleOrder(b.role)
     })
 }

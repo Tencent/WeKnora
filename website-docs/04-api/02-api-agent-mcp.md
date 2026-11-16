@@ -26,6 +26,12 @@ curl $BASE/api/v1/agents/placeholders -H "Authorization: Bearer $TOKEN"
 curl $BASE/api/v1/agents/type-presets -H "Authorization: Bearer $TOKEN"
 ```
 
+### GET /api/v1/agents/tools
+
+用途：获取智能体可选的内置工具目录，权限 Viewer+。响应 `{"success":true,"data":{"tools":[...],"default_tools":[...],"switch_managed_tools":[...]}}`；每项工具带 `requirement.any_of` / `all_of` 知识库能力要求，编辑器据此判断是否可选。
+
+创建或更新时新增未知工具名返回 400；已存储的未知项保留，响应顶层 `allowed_tools_warnings.kept_unknown` 列出这些名称。由独立开关管理的工具及无后继的旧技能工具从列表移除，`allowed_tools_warnings.dropped` 返回移除项。旧检索工具名会映射为后继工具，重复项去重。
+
 ### POST /api/v1/agents
 
 用途：创建自定义 Agent。权限：Contributor+。
@@ -37,7 +43,7 @@ curl $BASE/api/v1/agents/type-presets -H "Authorization: Bearer $TOKEN"
 | `avatar` | string | 否 | 头像/emoji |
 | `config` | object | 否 | Agent 配置（`types.CustomAgentConfig`，见下） |
 
-`config` 主要字段：`agent_mode`（`quick-answer`/`smart-reasoning`）、`agent_type`（`rag-qa/wiki-qa/hybrid-rag-wiki/data-analysis/custom`）、`system_prompt`、`model_id`、`temperature`（0-2，非法返回 code 2103）、`max_iterations`（1-20，非法返回 code 2102）、`allowed_tools`（智能推理必填至少一个，code 2101）、`mcp_selection_mode`/`mcp_services`、`skills_selection_mode`、`kb_selection_mode`/`knowledge_bases`、`web_search_enabled`、`question_suggestions` 等（完整定义见 `internal/types/custom_agent.go`）。
+`config` 主要字段：`agent_mode`（`quick-answer`/`smart-reasoning`，省略时默认为 `smart-reasoning`）、`agent_type`（`rag-qa/wiki-qa/hybrid-rag-wiki/data-analysis/custom`）、`system_prompt`、`model_id`、`temperature`（0-2，非法返回 code 2103）、`max_iterations`（1-20，非法返回 code 2102）、`allowed_tools`（未设置/null 使用默认工具，显式 `[]` 不选内置工具；联网、记忆、MCP 与沙箱按独立配置注册）、`mcp_selection_mode`/`mcp_services`、`skills_selection_mode`、`kb_selection_mode`/`knowledge_bases`、`web_search_enabled`、`question_suggestions` 等（完整定义见 `internal/types/custom_agent.go`）。
 
 响应：201 `{"success":true,"data":{id,name,description,avatar,is_builtin,created_by,config,creator_name,...}}`
 
@@ -68,13 +74,44 @@ curl $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/agents/:id
 
-用途：更新 Agent。权限：创建者 OR Admin+。请求体：`name/description/avatar/config`（均可选）。Agent 已分享到组织时，新加入知识库范围的知识库须是调用者可分享的（知识库创建者或 Admin+，改为 `all` 需要 Admin+），否则 403。
+用途：更新 Agent。权限：创建者 OR Admin+。请求体：`name/description/avatar/config`。`name` 必填；省略 `avatar` 保留原头像；`config` 整体替换，省略的配置项不会保留原值，只改个别设置请用 `PATCH`。Agent 已分享到组织时，新加入知识库范围的知识库须是调用者可分享的（知识库创建者或 Admin+，改为 `all` 需要 Admin+），否则 403。
 
 响应：200 `{"success":true,"data":{Agent}}`
 
 ```bash
 curl -X PUT $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"description":"更新描述"}'
+  -H 'Content-Type: application/json' -d '{"name":"客服助手","description":"更新描述","config":{...}}'
+```
+
+### PATCH /api/v1/agents/:id
+
+用途：部分更新 Agent，只修改请求中出现的字段，其余配置（包括头像）保持不变。权限与 `PUT` 相同：创建者 OR Admin+；API key `manage_agents`/full。复用 `PUT` 校验（包括上面的组织分享知识库范围规则），并额外校验技能名称。
+
+请求体字段（均可选）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | 名称，不能为空白 |
+| `description` | string | 描述 |
+| `agent_mode` | string | `quick-answer` / `smart-reasoning`。MCP 与技能只在 `smart-reasoning` 下运行；切到该模式会打开多轮对话 |
+| `system_prompt` | string | 完整的系统提示词（整段替换） |
+| `model_id` | string | 对话模型 ID |
+| `kb_selection_mode` | string | `all` / `selected` / `none` |
+| `knowledge_bases` | string[] | 选中的知识库 ID，整体替换；未同时传 `kb_selection_mode` 时模式切换为 `selected` |
+| `mcp_selection_mode` | string | `all` / `selected` / `none` |
+| `mcp_services` | string[] | 选中的 MCP 服务 ID，整体替换；未同时传 `mcp_selection_mode` 时模式切换为 `selected` |
+| `skills_selection_mode` | string | `all` / `selected` / `none`；`all` 和 `none` 清空选中的技能名称 |
+| `selected_skills` | string[] | 最多 50 个技能名称（不是 ID），整体替换；未同时传 `skills_selection_mode` 时模式切换为 `selected` |
+| `web_search_enabled` | bool | 是否启用联网搜索 |
+| `multi_turn_enabled` | bool | 是否启用多轮对话 |
+
+技能名称来自 `GET /api/v1/skills?sandbox_config_id=<agent.config.sandbox_config_id>`，只在 `smart-reasoning` 模式生效。PATCH 后模式为 `selected` 时，所有名称必须是该工作空间、该沙箱当前可用的技能；不可用或未知名称返回 400 并列出名称。未绑定沙箱时，通过 PATCH 将技能设为 `all` 或 `selected`（包括只传 `selected_skills`）返回 400，须先在智能体编辑器选择沙箱。
+
+响应：200 `{"success":true,"data":{Agent}}`；`agent_mode` 或 selection mode 取值非法、名称为空、技能列表超过 50 项或上述技能校验失败时 400，Agent 不存在时 404。
+
+```bash
+curl -X PATCH $BASE/api/v1/agents/agent-1 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"model_id":"model-2","knowledge_bases":["kb-1","kb-2"]}'
 ```
 
 ### DELETE /api/v1/agents/:id
@@ -131,11 +168,11 @@ curl "$BASE/api/v1/agents/agent-1/suggested-questions?limit=6" -H "X-API-Key: $A
 | `transport_type` | string | 是 | `sse` / `http-streamable`；`stdio` 出于安全原因被拒绝 |
 | `url` | *string | 否 | 服务 URL（SSE/HTTP） |
 | `headers` | map[string]string | 否 | HTTP 头 |
-| `auth_config` | object | 否 | `auth_type`(`api_key/bearer/oauth`)、`api_key_header`、`custom_headers`、`scopes`、`auth_server_metadata_url`（密钥走 credentials 子资源） |
+| `auth_config` | object | 否 | `auth_type`(`api_key/bearer/oauth`)、`api_key_header`、`custom_headers`、`scopes`、`auth_server_metadata_url`、`client_id`（OAuth 预注册客户端，留空则动态客户端注册；空字符串清除）（密钥与 `client_secret` 走 credentials 子资源，创建时可随请求体提交） |
 | `advanced_config` | object | 否 | `{timeout,retry_count,retry_delay}`，默认 30 秒 / 3 次 / 1 秒；`timeout` 大于 60 秒时也会延长 Agent 单次调用该服务工具的等待窗口 |
 | `stdio_config` / `env_vars` | object | 否 | 仅为兼容旧数据保留；stdio 已禁用，不生效 |
 
-响应：200 `{"success":true,"data":{MCPServiceResponse}}`（含 `credentials:{api_key:{configured},token:{configured}}`；已同步工具目录的服务还带 `catalog:{tool_count,stale,synced_at}`）
+响应：200 `{"success":true,"data":{MCPServiceResponse}}`（含 `credentials:{api_key:{configured},token:{configured},client_secret:{configured}}`；已同步工具目录的服务还带 `catalog:{tool_count,stale,synced_at}`）
 
 ```bash
 curl -X POST $BASE/api/v1/mcp-services -H "Authorization: Bearer $TOKEN" \
@@ -242,9 +279,9 @@ curl $BASE/api/v1/mcp-services/mcp-1/resources -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/mcp-services/:id/credentials
 
-用途：设置密钥（`api_key`/`token`，指针字段，省略保留）。权限：Admin+。Handler: `internal/handler/mcp_credentials.go`
+用途：设置密钥（`api_key`/`token`/`client_secret`，指针字段，省略保留）。权限：Admin+。Handler: `internal/handler/mcp_credentials.go`
 
-响应：200 `{"success":true,"data":{"fields":{"api_key":{"configured"},"token":{"configured"}}}}`
+响应：200 `{"success":true,"data":{"fields":{"api_key":{"configured"},"token":{"configured"},"client_secret":{"configured"}}}}`
 
 ```bash
 curl -X PUT $BASE/api/v1/mcp-services/mcp-1/credentials -H "Authorization: Bearer $TOKEN" \
@@ -253,7 +290,7 @@ curl -X PUT $BASE/api/v1/mcp-services/mcp-1/credentials -H "Authorization: Beare
 
 ### DELETE /api/v1/mcp-services/:id/credentials/:field
 
-用途：删除凭证字段（`api_key` 或 `token`）。权限：Admin+。响应：204。
+用途：删除凭证字段（`api_key`、`token` 或 `client_secret`）。权限：Admin+。响应：204。
 
 ```bash
 curl -X DELETE $BASE/api/v1/mcp-services/mcp-1/credentials/token -H "Authorization: Bearer $TOKEN"
@@ -306,6 +343,21 @@ curl -i "$BASE/api/v1/mcp-oauth/callback?code=xxx&state=yyy"
 ```bash
 curl -X POST $BASE/api/v1/mcp-services/mcp-1/oauth/authorize-url -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"redirect_uri":"'$BASE'/api/v1/mcp-oauth/callback"}'
+```
+
+### POST /api/v1/mcp-services/:id/oauth/assertion
+
+用途：以 JWT Bearer 授权（RFC 7523）为本人获取 OAuth token，无需浏览器跳转。适用于 WeKnora 部署在其他应用之后、由该应用负责登录并代用户调用 WeKnora 的场景：该应用签发代表当前用户的断言（如 MCP Enterprise-Managed Authorization 使用的 ID-JAG），WeKnora 原样提交给授权服务器，由授权服务器校验。使用该服务已注册的 OAuth 客户端（不会进行动态客户端注册；尚无客户端时返回 400）。获得的 token 与授权回调保存的 token 相同，后续刷新、状态查询与吊销不变。权限：Viewer+。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `assertion` | string | 是 | 提交给授权服务器的 JWT 断言（请求体上限 16 KiB） |
+
+响应：200，`data` 与 `oauth/status` 相同。授权服务器拒绝断言（4xx，或 2xx 响应体含 OAuth `error`）时返回 400 并附 OAuth 错误码；授权服务器 5xx 或网络错误返回 500。
+
+```bash
+curl -X POST $BASE/api/v1/mcp-services/mcp-1/oauth/assertion -H "X-API-Key: $API_KEY" \
+  -H "X-External-User-ID: user-1" -H 'Content-Type: application/json' -d '{"assertion":"'$ASSERTION'"}'
 ```
 
 ### GET /api/v1/mcp-services/:id/oauth/status

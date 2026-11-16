@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { MAX_FILE_SIZE_MB } from '@/utils';
+import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import {
   deleteTemporaryAttachment,
@@ -216,22 +217,6 @@ const formatFileSize = (bytes: number): string => {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 };
 
-const getFileExt = (fileName: string): string => {
-  return fileName.split('.').pop()?.toUpperCase() || 'FILE';
-};
-
-const getFileIcon = (fileName: string): string => {
-  const ext = fileName.split('.').pop()?.toLowerCase();
-  if (['pdf'].includes(ext || '')) return 'file-pdf';
-  if (['doc', 'docx'].includes(ext || '')) return 'file-word';
-  if (['xls', 'xlsx'].includes(ext || '')) return 'file-excel';
-  if (['ppt', 'pptx'].includes(ext || '')) return 'file-powerpoint';
-  if (['epub', 'mhtml'].includes(ext || '')) return 'file';
-  if (['txt', 'md'].includes(ext || '')) return 'file';
-  if (['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac'].includes(ext || '')) return 'sound';
-  return 'file';
-};
-
 const statusLabel = (attachment: AttachmentFile): string => {
   if (attachment.status === 'uploading') return t('chat.attachmentUploading', { progress: attachment.progress || 0 });
   if (attachment.status === 'uploaded' || attachment.status === 'processing') return t('chat.attachmentParsing');
@@ -278,19 +263,10 @@ defineExpose({
         :key="attachment.id"
         class="attachment-preview-item"
       >
-        <div class="attachment-preview-icon">
-          <svg viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="38">
-            <rect width="40" height="48" rx="4" fill="#4A90D9"/>
-            <path d="M8 6h16l8 8v28a2 2 0 01-2 2H8a2 2 0 01-2-2V8a2 2 0 012-2z" fill="#5BA3E8"/>
-            <path d="M24 6l8 8h-6a2 2 0 01-2-2V6z" fill="#3A7BC8"/>
-            <rect x="10" y="20" width="20" height="2" rx="1" fill="white" fill-opacity="0.9"/>
-            <rect x="10" y="26" width="20" height="2" rx="1" fill="white" fill-opacity="0.9"/>
-            <rect x="10" y="32" width="14" height="2" rx="1" fill="white" fill-opacity="0.9"/>
-          </svg>
-        </div>
+        <ArtifactFileIcon :file-name="attachment.name" />
         <div class="attachment-preview-info">
-          <div class="attachment-preview-name">{{ attachment.name }}</div>
-          <div class="attachment-preview-meta">{{ getFileExt(attachment.name) }}&nbsp;·&nbsp;{{ formatFileSize(attachment.size) }}</div>
+          <div class="attachment-preview-name" :title="attachment.name">{{ attachment.name }}</div>
+          <div class="attachment-preview-meta">{{ formatFileSize(attachment.size) }}</div>
           <div v-if="attachment.status !== 'local'" class="attachment-preview-status" :class="`is-${attachment.status}`">
             <span v-if="attachment.status === 'uploading' || attachment.status === 'uploaded' || attachment.status === 'processing'" class="attachment-status-spinner" />
             {{ statusLabel(attachment) }}
@@ -330,13 +306,6 @@ defineExpose({
   max-width: 240px;
   min-width: 140px;
   cursor: default;
-
-  .attachment-preview-icon {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
 
   .attachment-preview-info {
     flex: 1;

@@ -261,6 +261,15 @@ func (c *Connector) walk(
 			}
 
 			resolved := c.resolveItem(ctx, cli, feed, item, feedURL, itemID, feedContent)
+			if incremental && resolved.articleFailed && prevItems[itemID] != "" && prevSignals[itemID] != "" {
+				// A cached signal records a successful resolution. Preserve its body
+				// and old signal so a changed entry retries without replacing the full
+				// article with a summary, including across repeated failures.
+				newCursor.FeedItems[feedURL][itemID] = prevItems[itemID]
+				newCursor.FeedSignals[feedURL][itemID] = prevSignals[itemID]
+				skipped++
+				continue
+			}
 			if incremental && prevItems != nil && isLegacyFingerprint(prevItems[itemID]) {
 				switch {
 				case legacyContentFingerprint(string(resolved.item.Content)) == prevItems[itemID]:

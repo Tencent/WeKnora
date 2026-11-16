@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -21,12 +22,37 @@ const (
 	// 主要目的是控制单次 HTTP 请求的尾延迟，超过则自动拆批。
 	streamLoadMaxBatchBytes = 1 << 20 // 1 MiB
 
+	// maxStreamLoadResponseBytes 是 Stream Load 结果体的解析上限。
+	//
+	// Doris 正常只回几百字节控制 JSON（TxnId/Label/Status/计数），即便
+	// "Publish Timeout" 也只是同量级。1 MiB 远高于合法响应，同时避免一个
+	// 行为异常的 FE/BE（或被代理改写的响应）让进程按对方意愿分配内存。
+	maxStreamLoadResponseBytes = 1 << 20
+
+	// maxStreamLoadErrorPreviewBytes 限制失败响应被回显进错误与日志的字节数。
+	//
+	// 失败体来自对端，内容不可控；整段拼进 error 会被调用方记入日志，
+	// 因此只保留预览，并按 rune 边界收敛（common.TruncateUTF8Bytes）。
+	maxStreamLoadErrorPreviewBytes = 4 << 10
+
 	// HTTP 头 Authorization 用 Basic auth；Stream Load 也支持 token，
 	// 这里走最常用的用户名/密码方案与 MySQL 协议保持一致。
 	headerAuthorization = "Authorization"
 	headerExpect        = "Expect"
 	headerContentType   = "Content-Type"
 )
+
+// readStreamLoadResponse 读取成功的 Stream Load 结果体，超过上限即拒绝。
+func readStreamLoadResponse(body io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxStreamLoadResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read stream load response: %w", err)
+	}
+	if len(data) > maxStreamLoadResponseBytes {
+		return nil, fmt.Errorf("stream load response exceeds %d bytes", maxStreamLoadResponseBytes)
+	}
+	return data, nil
+}
 
 // streamLoadResponse 是 Doris FE/BE 返回的 Stream Load 结果体。
 //
@@ -176,17 +202,21 @@ func (r *dorisRepository) streamLoadOnce(ctx context.Context,
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read stream load response: %w", err)
-	}
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("stream load HTTP %d: %s", resp.StatusCode, string(respBody))
+		preview, _ := io.ReadAll(io.LimitReader(resp.Body, maxStreamLoadErrorPreviewBytes+1))
+		return fmt.Errorf("stream load HTTP %d: %s", resp.StatusCode,
+			common.TruncateUTF8Bytes(string(preview), maxStreamLoadErrorPreviewBytes))
+	}
+
+	respBody, err := readStreamLoadResponse(resp.Body)
+	if err != nil {
+		return err
 	}
 
 	var result streamLoadResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("decode stream load response: %w (raw=%s)", err, string(respBody))
+		return fmt.Errorf("decode stream load response: %w (raw=%s)", err,
+			common.TruncateUTF8Bytes(string(respBody), maxStreamLoadErrorPreviewBytes))
 	}
 
 	switch result.Status {

@@ -36,13 +36,15 @@ func NewMCPCredentialsHandler(svc interfaces.MCPServiceService) *MCPCredentialsH
 	return &MCPCredentialsHandler{svc: svc}
 }
 
-// mcpCredentialsPutRequest is the body shape for PUT /credentials. Both
+// mcpCredentialsPutRequest is the body shape for PUT /credentials. The
 // fields are pointers so the handler can distinguish "absent" (preserve)
 // from "present and empty" (treat as no-op; clients should call DELETE to
 // remove a credential). Non-empty values replace the stored secret.
 type mcpCredentialsPutRequest struct {
 	APIKey *string `json:"api_key,omitempty"`
 	Token  *string `json:"token,omitempty"`
+	// ClientSecret is the secret of a pre-registered OAuth client.
+	ClientSecret *string `json:"client_secret,omitempty"`
 }
 
 // Put writes (creates or replaces) one or more credential fields on the MCP
@@ -56,8 +58,8 @@ type mcpCredentialsPutRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                  true  "MCP 服务 ID"
-// @Param        request  body      map[string]interface{}  true  "{api_key?: string, token?: string}"
-// @Success      200      {object}  map[string]interface{}  "写入后的凭据状态"
+// @Param        request  body      map[string]interface{}  true  "{api_key?, token?, client_secret?: string}"
+// @Success      200      {object}  handler.DataResponse{data=dto.CredentialsResponse}  "写入后的凭据状态"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
@@ -80,7 +82,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 
 	// Nothing to do — but rather than 400 (benign no-op), look up current
 	// state and return it. Client treats this identically to a real save.
-	if req.APIKey == nil && req.Token == nil {
+	if req.APIKey == nil && req.Token == nil && req.ClientSecret == nil {
 		svc, err := h.svc.GetMCPServiceByID(ctx, tenantID, serviceID)
 		if err != nil || svc == nil {
 			c.Error(errors.NewNotFoundError("MCP service not found"))
@@ -88,14 +90,15 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.CredentialsResponse{
 			Fields: map[string]dto.CredentialFieldMetadata{
-				"api_key": {Configured: svc.AuthConfig != nil && svc.AuthConfig.APIKey != ""},
-				"token":   {Configured: svc.AuthConfig != nil && svc.AuthConfig.Token != ""},
+				"api_key":       {Configured: svc.AuthConfig != nil && svc.AuthConfig.APIKey != ""},
+				"token":         {Configured: svc.AuthConfig != nil && svc.AuthConfig.Token != ""},
+				"client_secret": {Configured: svc.AuthConfig != nil && svc.AuthConfig.ClientSecret != ""},
 			},
 		}})
 		return
 	}
 
-	updated, err := h.svc.UpdateMCPCredentials(ctx, tenantID, serviceID, req.APIKey, req.Token)
+	updated, err := h.svc.UpdateMCPCredentials(ctx, tenantID, serviceID, req.APIKey, req.Token, req.ClientSecret)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"service_id": secutils.SanitizeForLog(serviceID),
@@ -106,15 +109,17 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 
 	resp := dto.CredentialsResponse{
 		Fields: map[string]dto.CredentialFieldMetadata{
-			"api_key": {Configured: updated.AuthConfig != nil && updated.AuthConfig.APIKey != ""},
-			"token":   {Configured: updated.AuthConfig != nil && updated.AuthConfig.Token != ""},
+			"api_key":       {Configured: updated.AuthConfig != nil && updated.AuthConfig.APIKey != ""},
+			"token":         {Configured: updated.AuthConfig != nil && updated.AuthConfig.Token != ""},
+			"client_secret": {Configured: updated.AuthConfig != nil && updated.AuthConfig.ClientSecret != ""},
 		},
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
 // DeleteField removes one credential field. Recognized fields: "api_key",
-// "token". Returns 204 on success (even if the field was already empty).
+// "token", "client_secret". Returns 204 on success (even if the field was
+// already empty).
 //
 // DeleteField godoc
 // @Summary      移除 MCP 服务的单个凭据字段
@@ -122,7 +127,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 // @Tags         MCP服务
 // @Produce      json
 // @Param        id     path      string  true  "MCP 服务 ID"
-// @Param        field  path      string  true  "字段名（api_key | token）"
+// @Param        field  path      string  true  "字段名（api_key | token | client_secret）"
 // @Success      204
 // @Failure      400  {object}  errors.AppError  "字段名非法"
 // @Failure      404  {object}  errors.AppError  "服务不存在"
@@ -138,7 +143,7 @@ func (h *MCPCredentialsHandler) DeleteField(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
-	if field != "api_key" && field != "token" {
+	if field != "api_key" && field != "token" && field != "client_secret" {
 		c.Error(errors.NewBadRequestError("unknown credential field: " + secutils.SanitizeForLog(field)))
 		return
 	}

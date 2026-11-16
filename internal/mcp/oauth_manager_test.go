@@ -95,7 +95,7 @@ func TestOAuthManagerKeepsTheRegisteredClientSecret(t *testing.T) {
 	require.Equal(t, "registered-client", stored.ClientID)
 	require.Equal(t, "registered-secret", stored.ClientSecret)
 
-	_, _, err = manager.CompleteAuthorization(ctx, state, "code")
+	_, err = manager.CompleteAuthorization(ctx, state, "code")
 	require.NoError(t, err)
 	require.Equal(t, "registered-secret", tokenRequestSecret)
 

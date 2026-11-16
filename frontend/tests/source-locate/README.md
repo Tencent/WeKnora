@@ -2,7 +2,7 @@
 
 From `frontend`, run `npm run dev -- --host 127.0.0.1 --port 5199`, then open
 `http://127.0.0.1:5199/tests/source-locate/index.html` in a browser.
-The page runs 52 cases against the actual Vue previews, PDF.js, docx-preview,
+The page runs 55 cases against the actual Vue previews, PDF.js, docx-preview,
 SheetJS and EPUB renderer. Each result is displayed as PASS/FAIL. The page is
 outside the production entry point and is not included in the app build.
 
@@ -51,6 +51,12 @@ duplicate sources, missing source scopes, and changed numeric values. DOM anchor
 cases verify that a citation keeps all preceding sentences since the previous
 citation. Private Markdown fixtures must provide `request.sourceMarkdown` before
 markup stripping; `highlightText` asserts the exact highlighted source paragraphs.
+
+Manual Markdown cases cover table-and-paragraph citations without source locators,
+scrolling to the highlighted passage, and rejecting changed or duplicate evidence.
+Run `npm test -- src/components/ChatReferenceSourceView.test.ts` to also verify
+manual citation routing, Markdown preview type, same-document citation changes,
+summary/card behavior, and stale or mismatched chunk rejection.
 
 Chunk-boundary cases assert complete original paragraph context when a child
 ends or starts mid-paragraph. Candidate paragraphs must intersect a uniquely

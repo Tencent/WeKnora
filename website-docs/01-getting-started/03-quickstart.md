@@ -4,6 +4,10 @@
 
 使用前需先完成[安装部署](02-installation.md)，并准备可用的对话模型和向量模型。
 
+::: tip 需要使用帮助？
+在页面侧边栏打开 [WeKnora 助手](../03-features/26-weknora-assistant.md)，可查询产品文档、检查解析结果或获得配置说明。首次使用建议选择「只读」或「修改前确认」，先核对操作范围。
+:::
+
 ## 开始之前 {#_1-开始之前}
 
 - 启动服务：按[安装部署](./02-installation.md)启动后，前端在 `http://localhost`，后端在 `http://localhost:8080`；
@@ -22,7 +26,7 @@
 注册要求与部署差异：
 
 - 用户名 2–50 个字符；密码为 8–32 位，至少包含字母和数字。启用复杂密码策略后，还须同时包含大小写字母和特殊字符，界面与 API 使用同一策略；
-- 团队部署可关闭公开注册，之后通过邀请链接添加成员。可设置 `DISABLE_REGISTRATION=true`（启动时把注册模式强制为 `invite_only`），或由系统管理员在「设置 → 系统」将 `auth.registration_mode` 改成 `invite_only`（立即生效，不用重启）；
+- 团队部署需要通过邀请链接让新成员注册时，由系统管理员在「设置 → 系统设置」把 `auth.registration_mode` 设为 `invite_register`（立即生效）。`invite_only` / `DISABLE_REGISTRATION=true` 表示禁止密码注册，邀请也不能创建新账号，只允许已有账号登录后加入；
 - 如果部署把默认空间策略设成了 `tenantless`（`auth.default_tenant_mode`），注册后**不会**自动建空间，而是被引导到 `/onboarding/workspace`，需要先自建或接受邀请加入一个空间才能继续；
 - 桌面应用免注册，启动即自动创建本地账号并登录；Lite 单二进制在浏览器中访问时仍需注册和登录。
 

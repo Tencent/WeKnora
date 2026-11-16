@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -43,6 +44,21 @@ type AgentEngine interface {
 	// end on a stored turn, so later turns start from them. Nil (default)
 	// keeps compaction local to the turn. Must be called before Execute.
 	SetContextCheckpointSink(sink types.ContextCheckpointSink)
+
+	// EnableSuspension lets a user prompt end the run so it can be resumed
+	// later instead of blocking. request is the caller's
+	// types.ResumableAgentRequest. Must be called before Execute.
+	EnableSuspension(request json.RawMessage)
+
+	// SetRunMode says whether the client can render and answer prompts
+	// (ask_user, approvals). Must be called before Execute or Resume.
+	SetRunMode(mode types.RunMode)
+
+	// Resume continues a suspended run from its saved snapshot, delivering
+	// the answered prompt to the call it was blocked on. Use instead of
+	// Execute; EnableSuspension still applies.
+	Resume(ctx context.Context, sessionID, messageID string, llmContext []chat.Message,
+		snapshot []byte, answered *types.AgentPrompt) (*types.AgentState, error)
 }
 
 // AgentService defines the interface for agent-related operations

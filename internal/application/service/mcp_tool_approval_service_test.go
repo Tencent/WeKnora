@@ -94,7 +94,9 @@ func TestMCPToolApprovalServiceSetPolicyWritesBothFieldsOnce(t *testing.T) {
 	svc, _ := newMCPToolApprovalServiceForTest(t)
 	ctx := context.Background()
 
-	require.NoError(t, svc.SetPolicy(ctx, 1, "svc-1", "get_forecast", boolPtr(true), boolPtr(false)))
+	require.NoError(t, svc.SetPolicy(ctx, 1, "svc-1", "get_forecast", types.MCPToolPolicyPatch{
+		RequireApproval: boolPtr(true), Enabled: boolPtr(false),
+	}))
 	required, err := svc.IsRequired(ctx, 1, "svc-1", "get_forecast")
 	require.NoError(t, err)
 	require.True(t, required)
@@ -105,7 +107,7 @@ func TestMCPToolApprovalServiceSetPolicyWritesBothFieldsOnce(t *testing.T) {
 
 func TestMCPToolApprovalServiceSetPolicyRejectsEmptyPatch(t *testing.T) {
 	svc, _ := newMCPToolApprovalServiceForTest(t)
-	err := svc.SetPolicy(context.Background(), 1, "svc-1", "get_forecast", nil, nil)
+	err := svc.SetPolicy(context.Background(), 1, "svc-1", "get_forecast", types.MCPToolPolicyPatch{})
 	require.Error(t, err)
 }
 
@@ -113,4 +115,37 @@ func TestMCPToolApprovalServiceUnknownService(t *testing.T) {
 	svc, _ := newMCPToolApprovalServiceForTest(t)
 	err := svc.SetEnabled(context.Background(), 1, "missing", "tool", false)
 	require.ErrorContains(t, err, "not found")
+}
+
+func TestMCPToolApprovalServiceObservedRiskOnlyRises(t *testing.T) {
+	svc, _ := newMCPToolApprovalServiceForTest(t)
+	ctx := context.Background()
+
+	require.NoError(t, svc.ObserveRisk(ctx, 1, "svc-1", "get_forecast", "read"))
+	require.NoError(t, svc.ObserveRisk(ctx, 1, "svc-1", "get_forecast", "write"))
+	require.NoError(t, svc.ObserveRisk(ctx, 1, "svc-1", "get_forecast", "read"))
+	row, err := svc.Policy(ctx, 1, "svc-1", "get_forecast")
+	require.NoError(t, err)
+	require.Equal(t, "write", row.ObservedRisk)
+	require.True(t, row.Enabled, "recording a risk does not disable the tool")
+	require.False(t, row.RequireApproval)
+
+	risk := "read"
+	require.NoError(t, svc.SetPolicy(ctx, 1, "svc-1", "get_forecast", types.MCPToolPolicyPatch{Risk: &risk}))
+	row, err = svc.Policy(ctx, 1, "svc-1", "get_forecast")
+	require.NoError(t, err)
+	require.Equal(t, "read", row.Risk)
+	require.Equal(t, "write", row.ObservedRisk)
+}
+
+func TestMCPToolApprovalServiceRejectsUnknownRisk(t *testing.T) {
+	svc, _ := newMCPToolApprovalServiceForTest(t)
+	risk := "harmless"
+	err := svc.SetPolicy(context.Background(), 1, "svc-1", "get_forecast", types.MCPToolPolicyPatch{Risk: &risk})
+	require.ErrorIs(t, err, types.ErrInvalidMCPToolPolicy)
+	observed := "read"
+	err = svc.SetPolicy(context.Background(), 1, "svc-1", "get_forecast", types.MCPToolPolicyPatch{
+		ObservedRisk: &observed,
+	})
+	require.Error(t, err, "the observed risk is not editable")
 }

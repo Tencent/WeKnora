@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 )
 
 func validSessionSandboxBinding(key SessionSandboxKey, sandboxID string) SessionSandboxBinding {
@@ -529,4 +531,125 @@ func TestMemoryLifecycleLockHonorsContextAndCallbackError(t *testing.T) {
 		return want
 	})
 	require.ErrorIs(t, err, want)
+}
+
+const userKeySessionID = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+func testUserMachine() allocation.UserMachine {
+	return allocation.UserMachine{OwnerTenantID: 42, OwnerID: "u-1", ConfigTenantID: 42, ConfigID: "cfg-1"}
+}
+
+func userMachineKey() SessionSandboxKey {
+	return SessionSandboxKey{TenantID: 42, User: testUserMachine()}
+}
+
+func validUserBinding(sandboxID string) SessionSandboxBinding {
+	m := testUserMachine()
+	return SessionSandboxBinding{
+		Version: UserSandboxBindingVersion, Provider: SandboxTypeCube, TenantID: 42,
+		SandboxID: sandboxID, TemplateID: "tpl", CreatedAt: time.Now().UTC(),
+		ConfigID: m.ConfigID, OwnerID: m.OwnerID, ConfigTenantID: m.ConfigTenantID,
+	}
+}
+
+func TestSessionSandboxKeyShapes(t *testing.T) {
+	machine := userMachineKey()
+	require.NoError(t, machine.Validate())
+	require.True(t, machine.IsUserScoped())
+	require.True(t, machine.IsUserMachine())
+
+	scoped := SessionSandboxKey{TenantID: 42, SessionID: userKeySessionID, User: testUserMachine()}
+	require.NoError(t, scoped.Validate())
+	require.False(t, scoped.IsUserMachine())
+	require.Equal(t, machine, scoped.Machine())
+
+	legacy := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+	require.Equal(t, legacy, legacy.Machine())
+	require.False(t, legacy.IsUserScoped())
+
+	require.Error(t, SessionSandboxKey{TenantID: 43, User: testUserMachine()}.Validate(),
+		"the key tenant must be the machine's owner tenant")
+	require.Error(t, SessionSandboxKey{TenantID: 42, SessionID: "not-a-uuid", User: testUserMachine()}.Validate())
+}
+
+func TestUserBindingValidation(t *testing.T) {
+	key := userMachineKey()
+	require.NoError(t, validUserBinding("sb-1").Validate(key))
+
+	wrongVersion := validUserBinding("sb-1")
+	wrongVersion.Version = SessionSandboxBindingVersion
+	require.Error(t, wrongVersion.Validate(key))
+
+	wrongOwner := validUserBinding("sb-1")
+	wrongOwner.OwnerID = "u-2"
+	require.Error(t, wrongOwner.Validate(key))
+
+	withSession := validUserBinding("sb-1")
+	withSession.SessionID = userKeySessionID
+	require.Error(t, withSession.Validate(key))
+
+	scoped := SessionSandboxKey{TenantID: 42, SessionID: userKeySessionID, User: testUserMachine()}
+	require.Error(t, validUserBinding("sb-1").Validate(scoped), "bindings are addressed by the machine key only")
+
+	// A legacy binding still validates exactly as before.
+	legacyKey := SessionSandboxKey{TenantID: 42, SessionID: "session-a"}
+	require.NoError(t, validSessionSandboxBinding(legacyKey, "sb-2").Validate(legacyKey))
+}
+
+func TestMemoryStoreHoldsUserMachineBindings(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemorySessionSandboxBindingStore()
+	key := userMachineKey()
+	created, err := store.Create(ctx, key, validUserBinding("sb-1"))
+	require.NoError(t, err)
+	require.True(t, created)
+	got, err := store.Get(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "sb-1", got.SandboxID)
+
+	keys, err := store.listTenantBindingKeys(ctx, 42)
+	require.NoError(t, err)
+	require.Empty(t, keys, "the session-binding scan never returns user machines")
+}
+
+func TestMemoryLifecycleLockSerializesUserMachineAndItsSession(t *testing.T) {
+	store := NewMemorySessionSandboxBindingStore()
+	machine := userMachineKey()
+	scoped := SessionSandboxKey{TenantID: 42, SessionID: userKeySessionID, User: testUserMachine()}
+	var active atomic.Int32
+	var overlapped atomic.Bool
+	start := make(chan struct{})
+	done := make(chan error, 2)
+
+	for _, key := range []SessionSandboxKey{machine, scoped} {
+		go func(key SessionSandboxKey) {
+			<-start
+			done <- store.WithLifecycleLock(context.Background(), key, func(context.Context) error {
+				if active.Add(1) != 1 {
+					overlapped.Store(true)
+				}
+				time.Sleep(20 * time.Millisecond)
+				active.Add(-1)
+				return nil
+			})
+		}(key)
+	}
+	close(start)
+
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+	require.False(t, overlapped.Load())
+}
+
+func TestMemoryGetRejectsSessionOnUserMachineBinding(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemorySessionSandboxBindingStore()
+	created, err := store.Create(ctx, userMachineKey(), validUserBinding("sb-1"))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	scoped := SessionSandboxKey{TenantID: 42, SessionID: userKeySessionID, User: testUserMachine()}
+	got, err := store.Get(ctx, scoped)
+	require.Nil(t, got)
+	require.ErrorContains(t, err, "validate sandbox binding: sandbox binding must be addressed by its user machine key")
 }

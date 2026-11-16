@@ -210,7 +210,13 @@ func TestSummarizerInputIsFittedToTheWindow(t *testing.T) {
 	msgs := []chat.Message{{Role: "system", Content: "you are an agent"}}
 	for i := 0; i < 150; i++ {
 		id := fmt.Sprintf("turn-%03d", i)
-		msgs = append(msgs, storedTurn(id, 1, "/workspace/"+id+".txt")...)
+		// Keep the path count below the retention cap so this tests input
+		// truncation independently of oldest-path eviction.
+		path := "/workspace/shared.txt"
+		if i == 0 {
+			path = "/workspace/turn-000.txt"
+		}
+		msgs = append(msgs, storedTurn(id, 1, path)...)
 	}
 	msgs = append(msgs, chat.Message{Role: "user", Content: "next"})
 

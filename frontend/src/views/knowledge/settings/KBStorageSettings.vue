@@ -21,7 +21,10 @@
               </span>
             </t-option>
           </t-select>
-          <p v-if="props.hasFiles" class="option-hint change-warning">{{ $t('kbSettings.storage.migrateHint') }}</p>
+          <p v-if="props.hasFiles" class="option-hint locked-hint">
+            <t-icon name="lock-on" class="locked-hint-icon" />
+            <span>{{ $t('kbSettings.storage.migrateHint') }}</span>
+          </p>
           <p v-else-if="selected" class="option-hint">{{ selected.config.endpoint || selected.config.bucket_name || selected.config.path_prefix || $t('kbSettings.storage.localStorage') }}</p>
           <a href="javascript:void(0)" class="go-settings" @click.prevent="goToSettings">{{ $t('kbSettings.storage.manageInstances') }}</a>
         </div>
@@ -65,5 +68,5 @@ onMounted(load)
 
 <style scoped lang="less">
 .section-header{margin-bottom:20px}.section-header h2{font-size:var(--app-text-3xl);margin:0 0 6px}.section-description,.desc,.option-hint{color:var(--td-text-color-secondary)}
-.setting-row{display:flex;justify-content:space-between;gap:28px}.setting-info{flex:1}.setting-control{width:45%;min-width:300px}.select-option{display:flex;align-items:center;gap:8px}.option-hint{font-size:var(--app-text-sm);margin:8px 0}.change-warning{color:var(--td-warning-color)}.go-settings{font-size:var(--app-text-md);color:var(--td-brand-color)}.loading-inline{display:flex;gap:8px}
+.setting-row{display:flex;justify-content:space-between;gap:28px}.setting-info{flex:1}.setting-control{width:45%;min-width:300px}.select-option{display:flex;align-items:center;gap:8px}.option-hint{font-size:var(--app-text-sm);margin:8px 0}.locked-hint{display:flex;align-items:flex-start;gap:6px;line-height:18px}.locked-hint-icon{flex-shrink:0;margin-top:2px;font-size:var(--app-text-base);color:var(--td-text-color-placeholder)}.go-settings{font-size:var(--app-text-md);color:var(--td-brand-color)}.loading-inline{display:flex;gap:8px}
 </style>

@@ -14,6 +14,7 @@ export const dataSources: Integration[] = [
   { name: "Notion", logo: "notion.ico" },
   { name: "语雀", logo: "yuque.ico" },
   { name: "RSS", logo: "rss.svg" },
+  { name: "Seafile", logo: "seafile.png" },
 ];
 
 export const clients: Integration[] = [

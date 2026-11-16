@@ -36,7 +36,7 @@ type EvaluationRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      EvaluationRequest  true  "评估请求参数"
-// @Success      200      {object}  map[string]interface{}  "评估任务"
+// @Success      200      {object}  handler.DataResponse{data=types.EvaluationDetail}  "评估任务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -99,7 +99,7 @@ type GetEvaluationRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        task_id  query     string  true  "评估任务ID"
-// @Success      200      {object}  map[string]interface{}  "评估结果"
+// @Success      200      {object}  handler.DataResponse{data=types.EvaluationDetail}  "评估结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth

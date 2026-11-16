@@ -59,7 +59,7 @@ func TestRuntimePrerequisiteReportValidation(t *testing.T) {
 			fx.sandboxMgr.files = map[string][]byte{
 				path.Join(installSkillDir, ".weknora/install-report.json"): []byte(raw),
 			}
-			err := fx.svc.verifyRuntimePrerequisites(context.Background(), fx.sandboxMgr, "session", installSkillDir)
+			_, err := fx.svc.verifyRuntimePrerequisites(context.Background(), fx.sandboxMgr, "session", installSkillDir)
 			var gate *skillVerificationError
 			require.ErrorAs(t, err, &gate)
 			require.True(t, gate.Repairable)
@@ -76,13 +76,26 @@ func TestRuntimePrerequisitesResolveSkillLocalCLI(t *testing.T) {
 		path.Join(dir, ".weknora/install-report.json"): []byte(`{"commands":["weknora-test-cli"],"blockers":[]}`),
 	}
 	mgr := runtimeProbeManager{fx.sandboxMgr}
-	err := fx.svc.verifyRuntimePrerequisites(context.Background(), mgr, "session", dir)
+	_, err := fx.svc.verifyRuntimePrerequisites(context.Background(), mgr, "session", dir)
 	var gate *skillVerificationError
 	require.ErrorAs(t, err, &gate)
 	require.True(t, gate.Repairable)
 	require.Contains(t, err.Error(), "weknora-test-cli")
 	require.NoError(t, os.WriteFile(path.Join(binDir, "weknora-test-cli"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
-	require.NoError(t, fx.svc.verifyRuntimePrerequisites(context.Background(), mgr, "session", dir))
+	_, err = fx.svc.verifyRuntimePrerequisites(context.Background(), mgr, "session", dir)
+	require.NoError(t, err)
+}
+
+func TestRuntimePrerequisiteNotesDoNotFailInstall(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.sandboxMgr.files = map[string][]byte{
+		path.Join(installSkillDir, ".weknora/install-report.json"): []byte(
+			`{"commands":[],"blockers":[],"notes":["SKILL.md CLI usage is a no-op; use the module API", "  "]}`,
+		),
+	}
+	notes, err := fx.svc.verifyRuntimePrerequisites(context.Background(), fx.sandboxMgr, "session", installSkillDir)
+	require.NoError(t, err)
+	require.Equal(t, []string{"SKILL.md CLI usage is a no-op; use the module API"}, notes)
 }
 
 func TestRunInstallDoesNotSnapshotUnresolvedExternalPrerequisites(t *testing.T) {

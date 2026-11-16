@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -162,15 +163,17 @@ func extractSnippetForQueries(content string, queries []string) string {
 		return content
 	}
 
-	matchStr := content[earliest:earliestEnd]
-	before := content[:earliest]
-	after := content[earliestEnd:]
-
-	beforeRunes := []rune(before)
+	// Lowercasing can change UTF-8 byte lengths, so map the match back to
+	// rune offsets before slicing the original content.
+	startRune := utf8.RuneCountInString(lowered[:earliest])
+	endRune := utf8.RuneCountInString(lowered[:earliestEnd])
+	runes := []rune(content)
+	matchStr := string(runes[startRune:endRune])
+	beforeRunes := runes[:startRune]
 	if len(beforeRunes) > snippetContextRunes {
 		beforeRunes = beforeRunes[len(beforeRunes)-snippetContextRunes:]
 	}
-	afterRunes := []rune(after)
+	afterRunes := runes[endRune:]
 	if len(afterRunes) > snippetContextRunes {
 		afterRunes = afterRunes[:snippetContextRunes]
 	}

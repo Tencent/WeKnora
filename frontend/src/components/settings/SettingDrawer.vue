@@ -581,6 +581,8 @@ const handleCancel = () => {
   bottom: 0;
   width: 12px;
   margin-left: -6px;
+  // Its inline right is the drawer width; a docked assistant panel adds to it.
+  margin-right: var(--assistant-dock-width, 0px);
   cursor: col-resize;
   z-index: 2501;
   display: flex;

@@ -26,6 +26,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // SandboxShellRunner is the narrow subset of sandbox behaviour the
@@ -52,7 +53,8 @@ var gitSHAPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // WorkspaceCheckpointer commits /workspace after each agent turn.
 type WorkspaceCheckpointer struct {
-	runner SandboxShellRunner
+	runner   SandboxShellRunner
+	activity interfaces.ActivityRegistry
 }
 
 // NewWorkspaceCheckpointer wires a checkpointer. A nil runner yields a
@@ -60,6 +62,34 @@ type WorkspaceCheckpointer struct {
 // degradation contract used by ArtifactCollector.
 func NewWorkspaceCheckpointer(runner SandboxShellRunner) *WorkspaceCheckpointer {
 	return &WorkspaceCheckpointer{runner: runner}
+}
+
+// WithActivityRegistry makes Checkpoint flag commits taken while background
+// work is live. Without a registry every checkpoint is unflagged.
+func (c *WorkspaceCheckpointer) WithActivityRegistry(activity interfaces.ActivityRegistry) *WorkspaceCheckpointer {
+	if c != nil {
+		c.activity = activity
+	}
+	return c
+}
+
+// backgroundActive reports whether background work is live in the session. A
+// failed lookup counts as live: an unusable fork point is recoverable, a rewind
+// onto a half-written tree is not.
+func (c *WorkspaceCheckpointer) backgroundActive(ctx context.Context, sessionID string) bool {
+	if c.activity == nil {
+		return false
+	}
+	tenantID, ok := types.SandboxTenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return false
+	}
+	live, err := c.activity.List(ctx, interfaces.SessionRef{TenantID: tenantID, SessionID: sessionID})
+	if err != nil {
+		logger.Warnf(ctx, "[WorkspaceCheckpointer] background lookup failed session=%s: %v", sessionID, err)
+		return true
+	}
+	return len(live) > 0
 }
 
 // checkpointScript renders the idempotent init-and-commit script.
@@ -76,13 +106,19 @@ func NewWorkspaceCheckpointer(runner SandboxShellRunner) *WorkspaceCheckpointer 
 //     message with no checkpoint and making it unusable as a fork point. With
 //     it, every turn has exactly one checkpoint and fork boundaries are always
 //     resolvable.
-func checkpointScript(workspace, gitDir, messageID string) string {
+func checkpointScriptFor(l sandbox.WorkspaceLayout, messageID string) string {
 	return fmt.Sprintf(`set -e
 %s
 %s
 git_ws add -A
 git_ws commit -q --allow-empty -m 'turn:%s'
-git_ws rev-parse HEAD`, gitWorkspacePreamble(workspace, gitDir), gitWorkspaceEnsureRepo(), messageID)
+git_ws rev-parse HEAD`, gitWorkspacePreambleFor(l), gitWorkspaceEnsureRepo(), messageID)
+}
+
+func checkpointScript(workspace, gitDir, messageID string) string {
+	return checkpointScriptFor(sandbox.WorkspaceLayout{
+		Origin: sandbox.WorkspaceOriginRemote, Root: workspace, GitDir: gitDir,
+	}, messageID)
 }
 
 // Checkpoint commits /workspace and returns the resulting checkpoint, or nil
@@ -106,19 +142,26 @@ func (c *WorkspaceCheckpointer) Checkpoint(
 		return nil
 	}
 
+	layout, err := workspaceLayoutFor(ctx, c.runner, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "[WorkspaceCheckpointer] layout unavailable session=%s: %v", sessionID, err)
+		return nil
+	}
+	command := checkpointScriptFor(layout, messageID)
+	// Read before committing: no tool runs while the turn is finishing, so no
+	// background work can start between this read and the commit.
+	backgroundActive := c.backgroundActive(ctx, sessionID)
 	var result *sandbox.ExecuteResult
-	var err error
-	command := checkpointScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, messageID)
 	if runner, ok := c.runner.(sandbox.SessionInstallShellExecutor); ok {
 		// Git operates on the existing workspace. Do not prepare artifact/input
 		// directories or let a late checkpoint provision a replacement sandbox.
 		result, err = runner.ExecShellCommandWithOptions(ctx, sessionID, command, sandbox.ShellExecOptions{
-			WorkDir: sandbox.SessionWorkspaceRoot, Timeout: workspaceCheckpointTimeout,
+			WorkDir: layout.Root, Timeout: workspaceCheckpointTimeout,
 			SkipWorkspacePrep: true, ExpectedSandboxID: sandboxID,
 		})
 	} else {
 		result, err = c.runner.ExecShellCommand(ctx, sessionID, command,
-			sandbox.SessionWorkspaceRoot, workspaceCheckpointTimeout, nil)
+			layout.Root, workspaceCheckpointTimeout, nil)
 	}
 	if err != nil {
 		logger.Warnf(ctx, "[WorkspaceCheckpointer] exec failed session=%s message=%s: %v",
@@ -146,9 +189,10 @@ func (c *WorkspaceCheckpointer) Checkpoint(
 	}
 
 	return &types.SandboxCheckpoint{
-		SandboxID:   sandboxID,
-		CommitSHA:   sha,
-		CommittedAt: time.Now().UTC(),
+		SandboxID:        sandboxID,
+		CommitSHA:        sha,
+		CommittedAt:      time.Now().UTC(),
+		BackgroundActive: backgroundActive,
 	}
 }
 

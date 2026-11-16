@@ -43,13 +43,16 @@ type fileOps struct {
 
 func appendUnique(list []string, path string) []string {
 	path = strings.TrimSpace(path)
-	if path == "" || len(list) >= maxTrackedFilePaths {
+	if path == "" {
 		return list
 	}
 	for _, existing := range list {
 		if existing == path {
 			return list
 		}
+	}
+	if len(list) >= maxTrackedFilePaths {
+		list = list[len(list)-maxTrackedFilePaths+1:]
 	}
 	return append(list, path)
 }
@@ -63,7 +66,7 @@ func extractFileOps(previousSummary string, groups ...[]chat.Message) fileOps {
 	ops.inherit(previousSummary)
 	for _, group := range groups {
 		for _, msg := range group {
-			ops.inherit(msg.Content)
+			ops.inherit(messageText(msg))
 			for _, tc := range msg.ToolCalls {
 				path := toolCallPath(tc.Function.Arguments)
 				if path == "" {

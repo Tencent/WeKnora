@@ -311,6 +311,71 @@ func TestHostSkillsForRunNeedsFilesOnDisk(t *testing.T) {
 	require.Equal(t, "pdf", got[0].Name)
 }
 
+func desktopFixture(t *testing.T) *effectiveFixture {
+	t.Helper()
+	fx := newEffectiveFixture(t)
+	fx.configs.entity.Config.DesktopEnabled = true
+	return fx
+}
+
+func TestEffectiveTenantSkillsAddsTheBuiltinBrowserSkillOnDesktopConfigs(t *testing.T) {
+	got := desktopFixture(t).derive(context.Background())
+
+	require.ElementsMatch(t, []string{"ready-enabled", "second-ready", "agent-browser"}, skillNames(got))
+	builtin := got[len(got)-1]
+	require.True(t, builtin.Builtin)
+	require.Equal(t, uint64(7), builtin.TenantID)
+	require.Equal(t, "cfg-1", builtin.SandboxConfigID)
+	require.Contains(t, builtin.Instructions, "agent-browser open")
+}
+
+func TestEffectiveTenantSkillsOmitsTheBuiltinBrowserSkillWithoutADesktop(t *testing.T) {
+	got := newEffectiveFixture(t).derive(context.Background())
+
+	require.NotContains(t, skillNames(got), "agent-browser")
+}
+
+func TestEffectiveTenantSkillsOffersTheBuiltinWithoutASkillImage(t *testing.T) {
+	fx := desktopFixture(t)
+	fx.configs.entity.Config.SkillImage = nil
+
+	require.Equal(t, []string{"agent-browser"}, skillNames(fx.derive(context.Background())))
+}
+
+func TestEffectiveTenantSkillsKeepsTheBuiltinWhenTheListingFails(t *testing.T) {
+	fx := desktopFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.Equal(t, []string{"agent-browser"}, skillNames(fx.derive(ctx)))
+}
+
+func TestEffectiveTenantSkillsLetsAnInstalledSkillReplaceTheBuiltin(t *testing.T) {
+	fx := desktopFixture(t)
+	require.NoError(t, fx.skills.CreateSkill(context.Background(), &types.TenantSkillEntity{
+		ID: "sk-own", Name: "agent-browser", TenantID: 7, SandboxConfigID: "cfg-1",
+		Status: types.SkillStatusReady, Enabled: true,
+	}))
+
+	got := fx.derive(context.Background())
+
+	count := 0
+	for _, row := range got {
+		if row.Name == "agent-browser" {
+			count++
+			require.False(t, row.Builtin, "the administrator's own skill must win")
+		}
+	}
+	require.Equal(t, 1, count)
+}
+
+func TestListUsableSkillsIncludesTheBuiltinBrowserSkill(t *testing.T) {
+	fx := desktopFixture(t)
+	svc := &TenantSkillService{configs: fx.configs, skills: fx.skills}
+
+	require.Contains(t, skillNames(svc.ListUsableSkills(context.Background(), 7, "cfg-1")), "agent-browser")
+}
+
 func TestListUsableSkillsOnHostUsesDiskNotSnapshot(t *testing.T) {
 	repo := newInstallSkillRepo()
 	for _, row := range []*types.TenantSkillEntity{

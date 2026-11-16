@@ -53,7 +53,9 @@ async function fixture() {
       if (name === 'vue' || name === 'marked') return require(name)
       if (name === 'vue-router') return { useRouter: () => ({}), useRoute: () => ({ query: {} }) }
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
-      if (name === '@/stores/menu') return { useMenuStore: () => ({}) }
+      if (name === '@/stores/assistant') return { useAssistantStore: () => ({ visible: false }) }
+      if (name === '@/composables/useAssistantPageContext') return { useAssistantPageContext() {} }
+      if (name === '@/utils/assistantDataChange') return { useAssistantDataChange() {} }
       if (name === '@/stores/settings') return { useSettingsStore: () => ({}) }
       if (name === '@/api/wiki') return api
       if (name === 'tdesign-vue-next') return { MessagePlugin: { success() {}, error() {} } }
@@ -135,6 +137,23 @@ test('Markdown caller handles prototype names, missing titles and explicit label
     await f.vm.refreshSelectedPage()
     assert.match(f.vm.renderMarkdown('[[constructor]] [[__proto__]]'), />构造函数<\/a>.*>原型<\/a>/)
     assert.equal(f.errors.length, 0)
+  } finally { f.close() }
+})
+
+test('reader renders relative Markdown document links as formatted text', async () => {
+  const f = await fixture()
+  try {
+    const html = f.vm.renderMarkdown('[**Lark**](../lark.md) [gateway][doc]\n\n[doc]: rdm/gateway.MD?rev=1#setup')
+    assert.equal(html, '<p><strong>Lark</strong> gateway</p>\n')
+
+    const ordinary = [
+      '[external](https://example.com/guide.md)', '[host](//example.com/guide.md)',
+      '[site](/docs/guide.md)', '[fragment](#guide.md)', '[file](manual.pdf)',
+      '![diagram](diagram.png)', '`[source](../guide.md)`',
+    ].join(' ')
+    const { marked } = require('marked')
+    assert.equal(f.vm.renderMarkdown(ordinary), marked.parse(ordinary))
+    assert.match(marked.parse('[doc](guide.md)'), /href="guide.md"/)
   } finally { f.close() }
 })
 

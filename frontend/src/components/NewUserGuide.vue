@@ -1,20 +1,40 @@
 <template>
   <SpotlightGuide v-model:active="active" :steps="steps" step-i18n-prefix="newUserGuide.steps"
-    labels-prefix="newUserGuide" @finish="onFinish" @step-change="onStepChange" />
+    :labels-prefix="assistantOnly ? 'assistantEntryGuide' : 'newUserGuide'"
+    @finish="onFinish" @step-change="onStepChange" />
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import SpotlightGuide from '@/components/SpotlightGuide.vue'
-import { GLOBAL_USER_GUIDE_KEY, OPEN_NEW_USER_GUIDE_EVENT } from '@/config/contextualGuides'
+import {
+  ASSISTANT_ENTRY_GUIDE_KEY,
+  GLOBAL_USER_GUIDE_KEY,
+  OPEN_NEW_USER_GUIDE_EVENT,
+  isGlobalUserGuideDone,
+} from '@/config/contextualGuides'
+import { useAssistantStore } from '@/stores/assistant'
 import { useUIStore } from '@/stores/ui'
 import type { SpotlightGuideStep } from '@/types/spotlightGuide'
 
 const uiStore = useUIStore()
+const assistant = useAssistantStore()
+const active = ref(false)
+const assistantOnly = ref(false)
+let openTimer: ReturnType<typeof setTimeout> | null = null
 let settingsOpenedByGuide = false
 
-const steps = computed<SpotlightGuideStep[]>(() => [
+const assistantStep = computed<SpotlightGuideStep>(() => ({
+  key: 'assistant',
+  target: '[data-guide="assistant-entry"]',
+  placement: assistant.entry === 'launcher' ? 'left' : 'right',
+  interact: assistantOnly.value,
+  optional: !assistantOnly.value,
+}))
+
+const steps = computed<SpotlightGuideStep[]>(() => assistantOnly.value ? [assistantStep.value] : [
   { key: 'welcome' },
+  ...(assistant.entry !== 'palette' ? [assistantStep.value] : []),
   {
     key: 'knowledge',
     target: '[data-guide="nav-knowledge-bases"]',
@@ -52,8 +72,6 @@ const steps = computed<SpotlightGuideStep[]>(() => [
   { key: 'done' },
 ])
 
-const active = ref(false)
-
 const closeGuideSettings = () => {
   if (settingsOpenedByGuide) {
     uiStore.closeSettings()
@@ -63,6 +81,7 @@ const closeGuideSettings = () => {
 
 const onFinish = () => {
   localStorage.setItem(GLOBAL_USER_GUIDE_KEY, '1')
+  localStorage.setItem(ASSISTANT_ENTRY_GUIDE_KEY, '1')
   closeGuideSettings()
 }
 
@@ -72,27 +91,53 @@ const onStepChange = ({ toKey }: { toKey: string }) => {
   }
 }
 
-const open = () => {
+const handleOpenEvent = () => {
+  if (active.value) return
+  if (openTimer) clearTimeout(openTimer)
+  assistantOnly.value = false
   active.value = true
 }
 
-const handleOpenEvent = () => {
-  if (active.value) return
-  open()
+const scheduleAutoGuide = () => {
+  if (openTimer) clearTimeout(openTimer)
+  openTimer = null
+  if (active.value || isGlobalUserGuideDone()) return
+
+  const upgrading = localStorage.getItem(GLOBAL_USER_GUIDE_KEY) === '1'
+  if (upgrading && (assistant.visible || assistant.entry === 'palette')) {
+    // The user has already opened the assistant, or chose to hide its entry.
+    localStorage.setItem(ASSISTANT_ENTRY_GUIDE_KEY, '1')
+    return
+  }
+  if (uiStore.showSettingsModal) return
+
+  openTimer = setTimeout(() => {
+    openTimer = null
+    if (active.value || isGlobalUserGuideDone()) return
+    assistantOnly.value = upgrading
+    active.value = true
+  }, 700)
 }
+
+watch(
+  () => [assistant.visible, assistant.entry, uiStore.showSettingsModal],
+  () => {
+    if (active.value && assistantOnly.value && (assistant.visible || assistant.entry === 'palette')) {
+      active.value = false
+      onFinish()
+      return
+    }
+    scheduleAutoGuide()
+  },
+)
 
 onMounted(() => {
   window.addEventListener(OPEN_NEW_USER_GUIDE_EVENT, handleOpenEvent)
-  if (localStorage.getItem(GLOBAL_USER_GUIDE_KEY) !== '1') {
-    window.setTimeout(() => {
-      if (localStorage.getItem(GLOBAL_USER_GUIDE_KEY) !== '1') {
-        open()
-      }
-    }, 700)
-  }
+  scheduleAutoGuide()
 })
 
 onBeforeUnmount(() => {
+  if (openTimer) clearTimeout(openTimer)
   window.removeEventListener(OPEN_NEW_USER_GUIDE_EVENT, handleOpenEvent)
   closeGuideSettings()
 })

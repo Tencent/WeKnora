@@ -53,10 +53,6 @@
   --vp-code-block-bg: #0d1626;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
 body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

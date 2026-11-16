@@ -183,6 +183,9 @@ func (s *TenantSkillSource) LoadSkillFile(name, relativePath string) (*SkillFile
 	if err != nil {
 		return nil, err
 	}
+	if row.Builtin {
+		return nil, fmt.Errorf("file not found in skill %s: %s", name, relativePath)
+	}
 	clean, err := safeSkillRelPath(relativePath)
 	if err != nil {
 		return nil, err
@@ -223,6 +226,9 @@ func (s *TenantSkillSource) ListSkillFiles(name string) ([]string, error) {
 	row, err := s.row(name)
 	if err != nil {
 		return nil, err
+	}
+	if row.Builtin {
+		return []string{SkillFileName}, nil
 	}
 	archive, err := s.bundleArchive(row)
 	if err != nil {

@@ -360,3 +360,40 @@ func TestMCPHistoryRestoresAdvertisedFunctions(t *testing.T) {
 		}
 	})
 }
+
+func TestMCPExposureRestorePreservesUncalledDefinitionsAndCurrentPolicy(t *testing.T) {
+	ctx, original, _, _, _ := catalogFixture(t, 1)
+	described, err := original.ExecuteTool(
+		ctx,
+		ToolDiscoverMCPTools,
+		json.RawMessage(`{"mode":"describe","server_id":"server-1","tool_name":"tool_000"}`),
+	)
+	require.NoError(t, err)
+	require.True(t, described.Success)
+	refs := original.MCPExposureSnapshot()
+	require.Len(t, refs, 1)
+	for _, mode := range []string{"same", "disabled", "changed-schema"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, r, c, gate, _ := catalogFixture(t, 1)
+			available, _, err := c.snapshot(ctx, "server-1", false)
+			require.NoError(t, err)
+			if mode == "disabled" {
+				gate.disabled["server-1/tool_000"] = true
+			}
+			if mode == "changed-schema" {
+				available[0].mcpTool.InputSchema = json.RawMessage(
+					`{"type":"object","properties":{"new":{"type":"string"}}}`,
+				)
+			}
+			r.mcpPrepared = true
+			r.RestoreMCPExposure(refs)
+			r.RefreshMCPTools(ctx)
+			if mode == "same" {
+				require.Len(t, MCPToolNamesByServiceID(r)["server-1"], 1)
+				require.Equal(t, refs, r.MCPExposureSnapshot())
+			} else {
+				require.Empty(t, MCPToolNamesByServiceID(r)["server-1"])
+			}
+		})
+	}
+}

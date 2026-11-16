@@ -35,12 +35,25 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
+	"github.com/Tencent/WeKnora/internal/envfile"
+	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 func main() {
+	// Load dotenv configuration before any container provider reads it.
+	// Explicit ENV_FILE is honored on every build; automatic .env.lite
+	// discovery is scoped to Lite builds (internal/handler.Edition is
+	// injected at build time), so a standard binary built in the repo root
+	// never picks up Lite defaults. Process variables remain authoritative.
+	if err := envfile.Load(handler.Edition == "lite"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+	// Dotenv loading happens after the logger package initialized, so
+	// re-apply file-based LOG_LEVEL / LOG_PATH (mirrors cmd/desktop).
+	logger.ConfigureFromEnv()
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)

@@ -4,20 +4,27 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
+	infrawebsearch "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // PluginWebFetch fetches full page content for reranked web search results.
 // It runs between CHUNK_RERANK and CHUNK_MERGE, replacing snippet content
 // with the full page text for the top N web results.
-type PluginWebFetch struct{}
+type PluginWebFetch struct {
+	webSearch interfaces.WebSearchService
+}
 
-// NewPluginWebFetch creates and registers a new PluginWebFetch instance
-func NewPluginWebFetch(eventManager *EventManager) *PluginWebFetch {
-	res := &PluginWebFetch{}
+// pipelineRemoteFetchTimeout matches the local pipeline fetcher budget.
+const pipelineRemoteFetchTimeout = 15 * time.Second
+
+// NewPluginWebFetch creates and registers a new PluginWebFetch instance.
+func NewPluginWebFetch(eventManager *EventManager, webSearch interfaces.WebSearchService) *PluginWebFetch {
+	res := &PluginWebFetch{webSearch: webSearch}
 	eventManager.Register(res)
 	return res
 }
@@ -70,6 +77,7 @@ func (p *PluginWebFetch) OnEvent(
 	}
 	results := make([]fetchResult, len(webResults))
 	var wg sync.WaitGroup
+	fetcher := p.pageFetcher(ctx, chatManage.WebSearchProviderID)
 
 	for i, r := range webResults {
 		wg.Add(1)
@@ -79,7 +87,7 @@ func (p *PluginWebFetch) OnEvent(
 			if fetchURL == "" {
 				return
 			}
-			content, err := web_fetch.FetchURLContent(ctx, fetchURL)
+			content, err := fetchPage(ctx, fetcher, fetchURL)
 			results[idx] = fetchResult{idx: idx, content: content, err: err}
 		}(i, r)
 	}
@@ -115,3 +123,27 @@ func (p *PluginWebFetch) OnEvent(
 
 // webFetchMaxRunes caps the fetched page text kept per web result.
 const webFetchMaxRunes = 8000
+
+// pageFetcher uses the local reader when no provider is selected or it cannot be loaded.
+func (p *PluginWebFetch) pageFetcher(ctx context.Context, providerID string) interfaces.WebFetcher {
+	if p.webSearch == nil || strings.TrimSpace(providerID) == "" {
+		return infrawebsearch.LocalFetcher()
+	}
+	client, err := p.webSearch.Resolve(ctx, providerID)
+	if err != nil {
+		logger.Warnf(ctx, "[WebFetch] provider %s unavailable, using local reader: %v", providerID, err)
+		return infrawebsearch.LocalFetcher()
+	}
+	return client
+}
+
+// fetchPage reads through the configured provider inside the quick-answer budget.
+func fetchPage(ctx context.Context, fetcher interfaces.WebFetcher, fetchURL string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, pipelineRemoteFetchTimeout)
+	defer cancel()
+	page, err := fetcher.Fetch(infrawebsearch.WithPipelineFetch(ctx), fetchURL)
+	if err != nil {
+		return "", err
+	}
+	return page.Content, nil
+}
