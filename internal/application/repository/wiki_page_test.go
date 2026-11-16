@@ -403,7 +403,8 @@ func TestListByTypeLight_Pagination(t *testing.T) {
 	ctx := context.Background()
 
 	for _, s := range []string{"entity/a", "entity/b", "entity/c", "entity/d", "entity/e"} {
-		require.NoError(t, db.Create(makeWikiPage("kb-a", s, types.WikiPageTypeEntity, types.WikiPageStatusPublished)).Error)
+		page := makeWikiPage("kb-a", s, types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+		require.NoError(t, db.Create(page).Error)
 	}
 
 	page1, total1, err := repo.ListByTypeLight(ctx, "kb-a", types.WikiPageTypeEntity, 2, 0)
@@ -500,7 +501,8 @@ func TestListByTypeLight_ClampsLimit(t *testing.T) {
 		// Use a stable, zero-padded suffix so title ordering is
 		// deterministic for the cap assertion below.
 		slug += string(rune('a'+(i/26)%26)) + string(rune('a'+i%26))
-		require.NoError(t, db.Create(makeWikiPage("kb-cap", slug, types.WikiPageTypeEntity, types.WikiPageStatusPublished)).Error)
+		page := makeWikiPage("kb-cap", slug, types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+		require.NoError(t, db.Create(page).Error)
 	}
 
 	// limit=0 falls back to the default of 50.
