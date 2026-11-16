@@ -403,8 +403,7 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		}
 		children, err := c.getBlockChildrenRecursive(ctx, allBlocks[i].ID, depth+1)
 		if err != nil {
-			logger.Warnf(ctx, "[Notion] failed to get children for block %s (depth %d): %v", allBlocks[i].ID, depth, err)
-			continue
+			return nil, err
 		}
 		allBlocks[i].Children = children
 	}

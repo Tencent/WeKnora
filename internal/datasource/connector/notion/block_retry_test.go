@@ -56,6 +56,9 @@ func (f *blockRetryFixture) pageBlocks(w http.ResponseWriter, r *http.Request) {
 	case "child":
 		_, _ = w.Write([]byte(`{"results":[{"id":"child","type":"child_page",` +
 			`"child_page":{"title":"Child"}}],"has_more":false}`))
+	case "nested":
+		_, _ = w.Write([]byte("{\"results\":[{\"id\":\"child\",\"type\":\"toggle\",\"has_children\":true," +
+			"\"toggle\":{\"rich_text\":[{\"plain_text\":\"Parent\"}]}}],\"has_more\":false}"))
 	case "later_page":
 		if r.URL.Query().Get("start_cursor") == "later" {
 			f.content(w)
@@ -96,7 +99,7 @@ func newBlockRetryFixture(t *testing.T, mode string) (*blockRetryFixture, *types
 }
 
 func TestNotionBlockFailurePreservesRetry(t *testing.T) {
-	for _, mode := range []string{"page", "server_error", "later_page", "child"} {
+	for _, mode := range []string{"page", "server_error", "later_page", "child", "nested"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture, config := newBlockRetryFixture(t, mode)
 			oldTime := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
