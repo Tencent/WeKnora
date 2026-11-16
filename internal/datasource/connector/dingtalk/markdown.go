@@ -557,16 +557,15 @@ func humanSize(size int64) string {
 		return ""
 	}
 	const unit = 1024
-	switch {
-	case size < unit:
-		return fmt.Sprintf("%.1f B", float64(size))
-	case size < unit*unit:
-		return fmt.Sprintf("%.1f KB", float64(size)/unit)
-	case size < unit*unit*unit:
-		return fmt.Sprintf("%.1f MB", float64(size)/(unit*unit))
-	default:
-		return fmt.Sprintf("%.1f GB", float64(size)/(unit*unit*unit))
+	units := []string{"B", "KB", "MB", "GB"}
+	value := float64(size)
+	i := 0
+	// Also move up when the value would round to "1024.0", so 1048575 bytes reads 1.0 MB, not 1024.0 KB.
+	for i < len(units)-1 && (value >= unit || fmt.Sprintf("%.1f", value) == "1024.0") {
+		value /= unit
+		i++
 	}
+	return fmt.Sprintf("%.1f %s", value, units[i])
 }
 
 // oneLine collapses a value that is rendered inline so an embedded line break
