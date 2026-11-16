@@ -13,6 +13,7 @@ import (
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"github.com/volcengine/ve-tos-golang-sdk/v2/tos"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -26,9 +27,11 @@ func DeleteAndVerifyAbsent(ctx context.Context, backend interfaces.FileService, 
 		if reader == nil {
 			return errors.Join(deleteErr, fmt.Errorf("storage returned no read result"))
 		}
-		defer reader.Close()
 		// MinIO opens objects lazily. EOF also proves an empty object exists.
 		_, err = io.ReadFull(reader, make([]byte, 1))
+		if closeErr := reader.Close(); closeErr != nil {
+			logger.Warnf(ctx, "Failed to close original verification reader: %v", closeErr)
+		}
 		if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return errors.Join(deleteErr, fmt.Errorf("original object still exists"))
 		}

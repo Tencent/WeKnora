@@ -18,7 +18,9 @@ type originalCleanupRepo struct {
 	marked   int
 }
 
-func (r *originalCleanupRepo) FindOriginalForCleanup(context.Context, uint64, string, string) (*types.StoredResource, bool, error) {
+func (r *originalCleanupRepo) FindOriginalForCleanup(
+	context.Context, uint64, string, string,
+) (*types.StoredResource, bool, error) {
 	return r.resource, r.shared, nil
 }
 
@@ -51,7 +53,9 @@ type originalCleanupResolver struct {
 	ids     []string
 }
 
-func (r *originalCleanupResolver) ResolveFileService(_ context.Context, _ *types.Tenant, id, provider, _ string) (interfaces.FileService, string, error) {
+func (r *originalCleanupResolver) ResolveFileService(
+	_ context.Context, _ *types.Tenant, id, provider, _ string,
+) (interfaces.FileService, string, error) {
 	r.ids = append(r.ids, id)
 	return r.backend, provider, nil
 }
@@ -98,10 +102,12 @@ func TestCleanupOriginalKeepsSharedObject(t *testing.T) {
 	resolver := &originalCleanupResolver{}
 	catalog := &fakeCatalog{releaseRemaining: map[string]int64{ref: 1}}
 	service := &knowledgeBaseService{repo: repo, storageResolver: resolver, resourceCatalog: catalog}
-	if err := service.cleanupOriginal(context.Background(), &types.Tenant{ID: 7}, "kb", &types.Knowledge{ID: "doc", FilePath: ref}); err != nil {
+	document := &types.Knowledge{ID: "doc", FilePath: ref}
+	if err := service.cleanupOriginal(context.Background(), &types.Tenant{ID: 7}, "kb", document); err != nil {
 		t.Fatal(err)
 	}
 	if len(resolver.ids) != 0 || repo.marked != 0 || len(catalog.releases) != 1 {
-		t.Fatalf("shared original not preserved: resolve=%v marked=%d releases=%v", resolver.ids, repo.marked, catalog.releases)
+		t.Fatalf("shared original not preserved: resolve=%v marked=%d releases=%v",
+			resolver.ids, repo.marked, catalog.releases)
 	}
 }

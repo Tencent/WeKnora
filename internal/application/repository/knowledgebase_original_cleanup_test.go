@@ -11,7 +11,13 @@ import (
 
 func TestFindOriginalForCleanup(t *testing.T) {
 	db := setupKBTestDB(t)
-	require.NoError(t, db.Exec("CREATE TABLE knowledges (id TEXT PRIMARY KEY, tenant_id INTEGER, knowledge_base_id TEXT, file_path TEXT, deleted_at DATETIME)").Error)
+	require.NoError(t, db.Exec(`CREATE TABLE knowledges (
+		id TEXT PRIMARY KEY,
+		tenant_id INTEGER,
+		knowledge_base_id TEXT,
+		file_path TEXT,
+		deleted_at DATETIME
+	)`).Error)
 	require.NoError(t, db.AutoMigrate(&types.StoredResource{}, &types.ResourceBinding{}))
 	ctx := context.Background()
 	repo := &knowledgeBaseRepository{db: db}
@@ -22,7 +28,10 @@ func TestFindOriginalForCleanup(t *testing.T) {
 		Provider: "local", PhysicalPath: "local://7/doc.pdf", LocationHash: "location",
 	}
 	require.NoError(t, db.Create(resource).Error)
-	require.NoError(t, db.Exec("INSERT INTO knowledges (id, tenant_id, knowledge_base_id, file_path) VALUES (?, ?, ?, ?)", "doc", 7, "kb", ref).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO knowledges (id, tenant_id, knowledge_base_id, file_path) VALUES (?, ?, ?, ?)",
+		"doc", 7, "kb", ref,
+	).Error)
 	binding := &types.ResourceBinding{
 		ResourceID: resource.ID, TenantID: 7, OwnerType: types.ResourceOwnerKnowledge, OwnerID: "doc",
 	}

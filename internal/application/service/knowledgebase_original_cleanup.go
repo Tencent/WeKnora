@@ -17,7 +17,9 @@ type kbOriginalCleanupRepository interface {
 	MarkOriginalDeleted(context.Context, uint64, string) error
 }
 
-func (s *knowledgeBaseService) cleanupOriginals(ctx context.Context, tenantID uint64, kbID string, documents []*types.Knowledge) error {
+func (s *knowledgeBaseService) cleanupOriginals(
+	ctx context.Context, tenantID uint64, kbID string, documents []*types.Knowledge,
+) error {
 	var tenant *types.Tenant
 	for _, document := range documents {
 		if strings.TrimSpace(document.FilePath) == "" {
@@ -122,7 +124,9 @@ func (s *knowledgeBaseService) resolveOriginalStorage(
 	if s.storageResolver == nil {
 		return nil, "", fmt.Errorf("original storage resolver unavailable")
 	}
-	driver, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, storageurl.LocalStorageBaseDir())
+	driver, resolvedProvider, err := s.storageResolver.ResolveFileService(
+		ctx, tenant, backendID, provider, storageurl.LocalStorageBaseDir(),
+	)
 	if err != nil {
 		return nil, "", err
 	}

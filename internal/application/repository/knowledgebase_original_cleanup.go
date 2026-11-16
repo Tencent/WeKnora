@@ -8,13 +8,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func (r *knowledgeBaseRepository) FindOriginalForCleanup(ctx context.Context, tenantID uint64, kbID, ref string) (*types.StoredResource, bool, error) {
+func (r *knowledgeBaseRepository) FindOriginalForCleanup(
+	ctx context.Context, tenantID uint64, kbID, ref string,
+) (*types.StoredResource, bool, error) {
 	db := r.db.WithContext(ctx)
 	var resource *types.StoredResource
 	paths := []string{ref}
 	if handle, ok := types.ParseResourcePath(ref); ok {
 		resource = &types.StoredResource{}
-		if err := db.Unscoped().Where("tenant_id = ? AND handle = ?", tenantID, handle).Take(resource).Error; err != nil {
+		if err := db.Unscoped().Where("tenant_id = ? AND handle = ?", tenantID, handle).
+			Take(resource).Error; err != nil {
 			return nil, false, fmt.Errorf("find original resource: %w", err)
 		}
 		paths = append(paths, resource.PhysicalPath)
