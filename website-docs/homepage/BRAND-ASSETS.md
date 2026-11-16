@@ -20,7 +20,7 @@ Paths below written as `public/brand/…`, `public/brands/…` and `public/produ
 
 ## Community showcase
 
-The eight logos below were copied from the maintainer-supplied `素材包.zip` on 2026-10-29. They are served locally from `public/docs/_home/adopters/`, preserving the original artwork and proportions; only trailing whitespace in the Lighthouse SVG was normalized. Cards and company names follow the site theme; only the logo image has a light backing, softened to blue-gray in dark mode. Multiply blending merges white image backgrounds into that backing without inverting or redrawing the marks. `app/adopters.ts` contains concise display copy based on the supplied use cases and [the public showcase issue](https://github.com/Tencent/WeKnora/issues/4801).
+The eight logos below were copied from the maintainer-supplied `素材包.zip` on 2026-10-29. They are served locally from `public/docs/_home/adopters/`, preserving the original artwork and proportions; only trailing whitespace in the Lighthouse SVG was normalized. The entire logo card keeps a white background and dark company names in both themes, so white image canvases share the same surface. Original logo colors are preserved without filters or blending; there is no separate inner backing. The section and hover details follow the site theme. `app/adopters.ts` contains concise display copy based on the supplied use cases and [the public showcase issue](https://github.com/Tencent/WeKnora/issues/4801).
 
 | Brand | Supplied file | Local file | Source |
 | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ The eight logos below were copied from the maintainer-supplied `素材包.zip` o
 
 - The retained metadata records 智达创客 as POC according to its public submission, correcting `status: "online"` in the supplied JSON. ClawPro and Lighthouse are recorded as ecosystem integrations to describe their knowledge-base integration and deployment-template roles. Adoption stages are not displayed in the cards.
 - The pack's reversed settings for 赛乐医疗 and 智达创客 are corrected to match the artwork: 赛乐医疗 uses A (horizontal logo only); 智达创客, ClawPro, and Lighthouse use B (square logo beside the name). The other four brands use A. Logos keep their original proportions in both layouts. 智达创客 uses CSS scaling to hide only the source image's excessive blank margin; the complete mark and original file are preserved.
-- The retained ClawPro link points to its [official product overview](https://cloud.tencent.com/document/product/213/129156), instead of the general cloud-server documentation index in the pack. Public website/product links are currently not displayed in the cards.
+- The retained ClawPro link points to its [official product overview](https://cloud.tencent.com/document/product/213/129156), instead of the general cloud-server documentation index in the pack. Brands with a public website/product link display an external-link icon beside the hover-detail title.
 - Descriptions summarize reported use cases; they are not attributed testimonials. The displayed roster is limited to the eight brands in the supplied pack. Issue #4801 provides source references and accepts submissions/removal requests; additional submissions are not added to the display automatically.
 
 ## Product screenshots

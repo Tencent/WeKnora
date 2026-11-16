@@ -8,12 +8,13 @@
 .viewport { overflow: hidden; padding-block: 6px; mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
 .track { display: flex; width: max-content; animation: drift 60s linear infinite; }
 .group { display: flex; flex-shrink: 0; align-items: center; gap: 32px; list-style: none; padding: 0 32px 0 0; margin: 0; }
-.logo { display: flex; align-items: center; justify-content: center; width: max-content; min-width: 136px; height: 64px; padding: 8px 16px; text-align: center; background: var(--wk-surface); border: 1px solid var(--wk-rule); border-radius: 4px; }
-.logoMark { display: flex; flex-shrink: 0; align-items: center; justify-content: center; height: 46px; max-width: 224px; padding: 2px; overflow: hidden; background: var(--wk-logo-ground); border-radius: 3px; }
-.logoMark img { display: block; width: 100%; height: 100%; object-fit: contain; mix-blend-mode: multiply; }
+/* Keep original brand artwork on one white surface in both themes. */
+.logo { display: flex; align-items: center; justify-content: center; width: max-content; min-width: 136px; height: 64px; padding: 8px 16px; text-align: center; background: var(--wk-logo-ground); border: 1px solid rgba(16, 31, 56, .12); border-radius: 4px; }
+.logoMark { display: flex; flex-shrink: 0; align-items: center; justify-content: center; height: 46px; max-width: 224px; padding: 2px; overflow: hidden; border-radius: 3px; }
+.logoMark img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .logo[data-variant="B"] { gap: 12px; }
 .logo[data-variant="B"] .logoMark { flex: 0 0 44px; width: 44px; height: 44px; }
-.logoName { color: var(--wk-ink); font-size: 14px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.logoName { color: var(--wk-ink-deep); font-size: 14px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
 .showcase[data-paused="true"] .track { animation-play-state: paused; }
 @media (hover: hover) { .viewport:hover .track { animation-play-state: paused; } }
 @keyframes drift { to { transform: translateX(-50%); } }
@@ -27,10 +28,7 @@
 .tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 10px 0 12px; list-style: none; }
 .tags li { padding: 3px 8px; background: color-mix(in srgb, var(--wk-gold) 10%, transparent); border-radius: 4px; color: var(--wk-accent-text); font-size: 12px; line-height: 1.5; }
 .tags .industry { background: var(--wk-paper-2); color: var(--wk-ink-soft); }
-:global(.dark) .logo, :global(.dark) .details { background: var(--wk-paper-3); }
-/* Keep unmodified dark lettering legible without bright white cards or logo inversion. */
-:global(.dark) .logoMark { background: #dce3ed; }
-:global(.dark) .details { box-shadow: 0 12px 32px -8px #0009; }
+:global(.dark) .details { background: var(--wk-paper-3); box-shadow: 0 12px 32px -8px #0009; }
 /* Keyboard users get a stationary, scrollable row with one focusable copy. */
 .showcase[data-manual="true"] .viewport { overflow-x: auto; mask-image: none; scrollbar-width: thin; }
 .showcase[data-manual="true"] .track { animation: none; }
