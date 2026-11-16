@@ -1506,7 +1506,9 @@ func (a *Adapter) decrypt(encrypted string) ([]byte, error) {
 	// must be checked here: this runs on the webhook body before the
 	// verification token is compared.
 	if len(ciphertext) < aes.BlockSize || len(ciphertext)%aes.BlockSize != 0 {
-		return nil, fmt.Errorf("ciphertext length %d is not a positive multiple of the %d-byte AES block", len(ciphertext), aes.BlockSize)
+		return nil, fmt.Errorf(
+			"ciphertext length %d is not a positive multiple of the %d-byte AES block", len(ciphertext), aes.BlockSize,
+		)
 	}
 
 	iv := ciphertext[:aes.BlockSize]
