@@ -282,11 +282,12 @@ func (c *Connector) walk(
 			return nil, nil, fmt.Errorf("list KB %s: %w", kbID, err)
 		}
 
-		// present holds every logical_key IMA listed this cycle; it drives
-		// delete detection. syncedLogical holds only the keys we actually
-		// resolved this cycle and is what gets persisted as the cursor, so a
-		// transient failure is retried next run rather than being remembered
-		// as "unchanged" forever.
+		var prevSet map[string]string
+		if incremental && prev != nil {
+			prevSet = prev.KBLogical[kbID]
+		}
+		// The full listing determines absence; the cursor tracks the last
+		// resolved version of each known document.
 		present := make(map[string]struct{}, len(files))
 		syncedLogical := make(map[string]string, len(files))
 		keys := make([]string, len(files))
@@ -302,18 +303,13 @@ func (c *Connector) walk(
 			key := keys[i]
 
 			// Incremental skip / replacement detection.
-			if incremental && prev != nil && prev.KBLogical != nil {
-				if prevSet, ok := prev.KBLogical[kbID]; ok {
-					if prevMediaID, seen := prevSet[key]; seen {
-						if prevMediaID == f.MediaID {
-							// Unchanged: carry the entry forward so it is not
-							// re-fetched next cycle either.
-							syncedLogical[key] = f.MediaID
-							continue
-						}
-						replaced++ // media_id changed → replacement, fall through to re-fetch
-					}
+			prevMediaID, seen := prevSet[key]
+			if seen {
+				if prevMediaID == f.MediaID {
+					syncedLogical[key] = prevMediaID
+					continue
 				}
+				replaced++
 			}
 
 			item, outcome := fetchOneMedia(ctx, cli, kbID, key, f, folderPath)
@@ -330,9 +326,11 @@ func (c *Connector) walk(
 				// so we do not pay for get_media_info on every future sync.
 				syncedLogical[key] = f.MediaID
 			case fetchFailed:
-				// Transient: leave the key out of the cursor so the next run
-				// retries. `present` still contains it, so it is not mistaken
-				// for a deletion.
+				// Keep an existing document tracked for deletion, but retain
+				// its old version so a replacement is still retried.
+				if seen {
+					syncedLogical[key] = prevMediaID
+				}
 				failed++
 			}
 		}
@@ -341,18 +339,14 @@ func (c *Connector) walk(
 		// from the listing, so neither a same-name replacement (media_id churns
 		// but logical_key stays) nor a failed download fires a spurious delete.
 		deleted := 0
-		if incremental && prev != nil && prev.KBLogical != nil {
-			if prevSet, ok := prev.KBLogical[kbID]; ok {
-				for prevKey := range prevSet {
-					if _, still := present[prevKey]; !still {
-						out = append(out, types.FetchedItem{
-							ExternalID:       prevKey,
-							IsDeleted:        true,
-							SourceResourceID: kbID,
-						})
-						deleted++
-					}
-				}
+		for prevKey := range prevSet {
+			if _, still := present[prevKey]; !still {
+				out = append(out, types.FetchedItem{
+					ExternalID:       prevKey,
+					IsDeleted:        true,
+					SourceResourceID: kbID,
+				})
+				deleted++
 			}
 		}
 
