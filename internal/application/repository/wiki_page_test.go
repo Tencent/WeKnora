@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -177,7 +178,7 @@ func TestList_WikiPathSortReturnsCategorizedPagesFirst(t *testing.T) {
 		makeWikiPage("kb-a", "entity/001-root", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
 	}
 	for _, p := range pages {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	got, total, err := repo.List(ctx, &types.WikiPageListRequest{
@@ -213,7 +214,7 @@ func TestList_CategoryPathFilterMatchesOnSQLite(t *testing.T) {
 		makeWikiPage("kb-c", "entity/root", entity, published),
 	}
 	for _, p := range pages {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	depth := 1
@@ -259,7 +260,7 @@ func TestList_QuerySearchesSQLiteTextFieldsAndEscapesWildcards(t *testing.T) {
 	wildcard := makeWikiPage("kb-search", "entity/wildcard", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 	wildcard.Title = "literal_%_token"
 	for _, page := range []*types.WikiPage{title, content, alias, wildcard} {
-		require.NoError(t, repo.Create(ctx, page))
+		require.NoError(t, db.Create(page).Error)
 	}
 
 	for _, tc := range []struct {
@@ -328,7 +329,7 @@ func TestFolderTree_CRUDAndChildListing(t *testing.T) {
 	pArch := makeCategorizedWikiPage("kb-f", "entity/a3", types.WikiPageTypeEntity, types.WikiPageStatusArchived, "AI")
 	pArch.FolderID = "f-ai"
 	for _, p := range []*types.WikiPage{pAI, pLLM, pArch} {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	aiCount, err := repo.CountPagesInFolder(ctx, "kb-f", "f-ai")
@@ -374,7 +375,7 @@ func TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived(t *testing.T) 
 		makeWikiPage("kb-other", "entity/leaked", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
 	}
 	for _, p := range pages {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	entries, total, err := repo.ListByTypeLight(ctx, "kb-a", types.WikiPageTypeEntity, 50, 0)
@@ -402,7 +403,7 @@ func TestListByTypeLight_Pagination(t *testing.T) {
 	ctx := context.Background()
 
 	for _, s := range []string{"entity/a", "entity/b", "entity/c", "entity/d", "entity/e"} {
-		require.NoError(t, repo.Create(ctx, makeWikiPage("kb-a", s, types.WikiPageTypeEntity, types.WikiPageStatusPublished)))
+		require.NoError(t, db.Create(makeWikiPage("kb-a", s, types.WikiPageTypeEntity, types.WikiPageStatusPublished)).Error)
 	}
 
 	page1, total1, err := repo.ListByTypeLight(ctx, "kb-a", types.WikiPageTypeEntity, 2, 0)
@@ -465,7 +466,7 @@ func TestListPagesCursorExcludesArchivedPages(t *testing.T) {
 	}
 	pages[3].KnowledgeBaseID = "kb-other"
 	for _, p := range pages {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	first, next, err := repo.ListPagesCursor(ctx, "kb-lint", "", 1)
@@ -499,7 +500,7 @@ func TestListByTypeLight_ClampsLimit(t *testing.T) {
 		// Use a stable, zero-padded suffix so title ordering is
 		// deterministic for the cap assertion below.
 		slug += string(rune('a'+(i/26)%26)) + string(rune('a'+i%26))
-		require.NoError(t, repo.Create(ctx, makeWikiPage("kb-cap", slug, types.WikiPageTypeEntity, types.WikiPageStatusPublished)))
+		require.NoError(t, db.Create(makeWikiPage("kb-cap", slug, types.WikiPageTypeEntity, types.WikiPageStatusPublished)).Error)
 	}
 
 	// limit=0 falls back to the default of 50.
@@ -528,7 +529,7 @@ func TestCountOrphans_SQLiteCountsEmptyInLinks(t *testing.T) {
 	otherKB.InLinks = types.StringArray{}
 
 	for _, p := range []*types.WikiPage{orphan, linked, indexPage, otherKB} {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	got, err := repo.CountOrphans(ctx, "kb-orphans")
@@ -556,7 +557,7 @@ func TestCountOrphans_CountsJSONNullInLinks(t *testing.T) {
 			linked := makeWikiPage(kbID, "entity/linked", entity, published)
 			linked.InLinks = types.StringArray{"entity/null"}
 			for _, p := range []*types.WikiPage{nullLinks, emptyLinks, linked} {
-				require.NoError(t, repo.Create(ctx, p))
+				require.NoError(t, db.Create(p).Error)
 			}
 
 			var stored string
@@ -588,7 +589,7 @@ func TestWikiStatsQueriesExcludeArchivedPages(t *testing.T) {
 	otherKB := makeWikiPage("kb-other", "entity/other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 
 	for _, p := range []*types.WikiPage{live, archived, indexPage, otherKB} {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	counts, err := repo.CountByType(ctx, "kb-stats")
@@ -641,7 +642,7 @@ func TestUpdateWithRevisionRollsBackSnapshotOnVersionConflict(t *testing.T) {
 	ctx := context.Background()
 
 	page := makeWikiPage("kb-tx", "concept/tx", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
-	require.NoError(t, repo.Create(ctx, page))
+	require.NoError(t, db.Create(page).Error)
 
 	// Simulate a writer working from a stale read: it expects v1 while the
 	// row has already moved on.
@@ -665,7 +666,7 @@ func TestUpdateWithRevisionIgnoresDuplicateSnapshot(t *testing.T) {
 	ctx := context.Background()
 
 	page := makeWikiPage("kb-dup", "concept/dup", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
-	require.NoError(t, repo.Create(ctx, page))
+	require.NoError(t, db.Create(page).Error)
 	require.NoError(t, repo.UpdateWithRevision(ctx, page, makeWikiRevision(page, 1, types.WikiEditSourceUser)))
 	require.Equal(t, 2, page.Version)
 
@@ -682,7 +683,7 @@ func TestPruneRevisionsKeepsHumanEditsUntilHardCap(t *testing.T) {
 	ctx := context.Background()
 
 	page := makeWikiPage("kb-prune", "concept/prune", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
-	require.NoError(t, repo.Create(ctx, page))
+	require.NoError(t, db.Create(page).Error)
 
 	// v1 is a human edit buried under a long tail of pipeline rewrites.
 	require.NoError(t, db.Create(makeWikiRevision(page, 1, types.WikiEditSourceUser)).Error)
@@ -724,8 +725,8 @@ func TestDeleteRevisionsByPageOnlyTouchesThatPage(t *testing.T) {
 
 	victim := makeWikiPage("kb-del", "concept/victim", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
 	bystander := makeWikiPage("kb-del", "concept/bystander", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
-	require.NoError(t, repo.Create(ctx, victim))
-	require.NoError(t, repo.Create(ctx, bystander))
+	require.NoError(t, db.Create(victim).Error)
+	require.NoError(t, db.Create(bystander).Error)
 	require.NoError(t, db.Create(makeWikiRevision(victim, 1, types.WikiEditSourceUser)).Error)
 	require.NoError(t, db.Create(makeWikiRevision(bystander, 1, types.WikiEditSourceUser)).Error)
 
@@ -750,7 +751,7 @@ func TestDeleteByKnowledgeBaseIDScopesSoftAndHardDeletes(t *testing.T) {
 	)
 	otherTenant.TenantID = 2
 	for _, p := range []*types.WikiPage{victim, otherKB, otherTenant} {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 	require.NoError(t, db.Create(makeWikiRevision(victim, 1, types.WikiEditSourceUser)).Error)
 	require.NoError(t, db.Create(makeWikiRevision(otherKB, 1, types.WikiEditSourceUser)).Error)
@@ -883,7 +884,7 @@ func TestSearchAcross_RanksTitleAboveContentAndStaysInRequestedKBs(t *testing.T)
 	outside.Title = "王新"
 
 	for _, p := range []*types.WikiPage{titleHit, contentHit, archived, outside} {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	pages, err := repo.SearchAcross(ctx, []string{"kb-a", "kb-b"}, "王新", 10)
@@ -902,8 +903,8 @@ func TestSearch_UsesSharedAcrossQueryForSingleKB(t *testing.T) {
 	hit.Title = "部署"
 	miss := makeWikiPage("kb-b", "concept/deploy-other", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
 	miss.Title = "部署"
-	require.NoError(t, repo.Create(ctx, hit))
-	require.NoError(t, repo.Create(ctx, miss))
+	require.NoError(t, db.Create(hit).Error)
+	require.NoError(t, db.Create(miss).Error)
 
 	pages, err := repo.Search(ctx, "kb-a", "部署", 10)
 	require.NoError(t, err)
@@ -920,7 +921,7 @@ func TestSearchAcross_ClampsLimit(t *testing.T) {
 		p := makeWikiPage("kb-a", "entity/p"+strconv.Itoa(i), types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 		p.Title = "match-term"
 		p.UpdatedAt = time.Now().Add(time.Duration(i) * time.Minute)
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "match-term", 2)
@@ -950,7 +951,7 @@ func TestFindSimilarPagesSQLiteRanksAndFiltersCandidates(t *testing.T) {
 	otherKB := makeWikiPage("kb-b", "entity/acme-other", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 	otherKB.Title = "Acme Corporation"
 	for _, page := range []*types.WikiPage{exact, partial, unrelated, archived, wrongType, otherKB} {
-		require.NoError(t, repo.Create(ctx, page))
+		require.NoError(t, db.Create(page).Error)
 	}
 
 	pages, err := repo.FindSimilarPages(ctx, "kb-a", "Acme Corporation", nil, 1)
@@ -977,8 +978,8 @@ func TestFindSimilarPagesSQLiteOrdersEqualScoresBySlug(t *testing.T) {
 	zulu.Title = "Acme"
 	alpha := makeWikiPage("kb-a", "entity/alpha", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 	alpha.Title = "Acme"
-	require.NoError(t, repo.Create(ctx, zulu))
-	require.NoError(t, repo.Create(ctx, alpha))
+	require.NoError(t, db.Create(zulu).Error)
+	require.NoError(t, db.Create(alpha).Error)
 
 	pages, err := repo.FindSimilarPages(ctx, "kb-a", "Acme", nil, 10)
 	require.NoError(t, err)
@@ -1008,7 +1009,7 @@ func TestSearchAcross_SQLiteLikeEscapesWildcards(t *testing.T) {
 	plain := makeWikiPage("kb-a", "entity/plain", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 	plain.Title = "axb"
 	for _, p := range []*types.WikiPage{literalPct, other, literalUnderscore, plain} {
-		require.NoError(t, repo.Create(ctx, p))
+		require.NoError(t, db.Create(p).Error)
 	}
 
 	pages, err := repo.SearchAcross(ctx, []string{"kb-a"}, "%", 10)
@@ -1051,10 +1052,61 @@ func TestFindSimilarPagesSQLitePunctuationVariants(t *testing.T) {
 	repo := NewWikiPageRepository(db)
 	page := makeWikiPage("kb-a", "entity/a-b", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
 	page.Title = "A-B"
-	require.NoError(t, repo.Create(context.Background(), page))
+	require.NoError(t, db.Create(page).Error)
 
 	pages, err := repo.FindSimilarPages(context.Background(), "kb-a", "A B", nil, 10)
 	require.NoError(t, err)
 	require.Len(t, pages, 1)
 	assert.Equal(t, page.Slug, pages[0].Slug)
+}
+
+func TestCreateWikiPageRequiresActiveKnowledgeBase(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	require.NoError(t, db.Exec(knowledgeBasesTestDDL).Error)
+	kb := makeKB(nil)
+	require.NoError(t, db.Create(kb).Error)
+	ctx := context.Background()
+	wiki := NewWikiPageRepository(db)
+	wrongTenant := makeWikiPage(kb.ID, "entity/wrong-owner", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	wrongTenant.TenantID = kb.TenantID + 1
+	require.ErrorIs(t, wiki.Create(ctx, wrongTenant), ErrKnowledgeBaseNotFound)
+
+	page := makeWikiPage(kb.ID, "entity/before-delete", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	require.NoError(t, wiki.Create(ctx, page))
+
+	require.NoError(t, NewKnowledgeBaseRepository(db).DeleteKnowledgeBase(ctx, kb.ID))
+	require.NoError(t, wiki.DeleteByKnowledgeBaseID(ctx, kb.TenantID, kb.ID))
+	late := makeWikiPage(kb.ID, "entity/late", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	require.ErrorIs(t, wiki.Create(ctx, late), ErrKnowledgeBaseNotFound)
+
+	var rows int64
+	require.NoError(t, db.Model(&types.WikiPage{}).Where("knowledge_base_id = ?", kb.ID).Count(&rows).Error)
+	require.Zero(t, rows)
+}
+
+func TestCreateWikiPageWaitsForKnowledgeBaseDeletionPostgres(t *testing.T) {
+	db := setupWikiSnapshotPostgresDB(t)
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}))
+	kb := makeKB(nil)
+	require.NoError(t, db.Create(kb).Error)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	deleting := db.WithContext(ctx).Begin()
+	require.NoError(t, deleting.Error)
+	defer deleting.Rollback()
+	require.NoError(t, NewKnowledgeBaseRepository(deleting).DeleteKnowledgeBase(ctx, kb.ID))
+
+	late := makeWikiPage(kb.ID, "entity/late", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SET LOCAL lock_timeout = '100ms'").Error; err != nil {
+			return err
+		}
+		return NewWikiPageRepository(tx).Create(ctx, late)
+	})
+	var lockError *pgconn.PgError
+	require.ErrorAs(t, err, &lockError)
+	require.Equal(t, "55P03", lockError.Code)
+
+	require.NoError(t, deleting.Commit().Error)
+	require.ErrorIs(t, NewWikiPageRepository(db).Create(ctx, late), ErrKnowledgeBaseNotFound)
 }
