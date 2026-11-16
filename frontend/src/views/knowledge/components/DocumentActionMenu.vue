@@ -64,7 +64,11 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   </div>
 
   <!-- 重建知识 (in-flight: no popconfirm, just emits) -->
-  <div v-if="isParseInFlight" class="doc-action-menu-item" @click.stop="emit('reparse')">
+  <div v-if="item.parse_status === 'deferred'" class="doc-action-menu-item" @click.stop="emit('reparse')">
+    <t-icon class="icon" name="play-circle" />
+    <span>{{ $t('knowledgeBase.startParse') }}</span>
+  </div>
+  <div v-else-if="isParseInFlight" class="doc-action-menu-item" @click.stop="emit('reparse')">
     <t-icon class="icon" name="refresh" />
     <span>{{ $t('knowledgeBase.rebuildDocument') }}</span>
   </div>

@@ -499,6 +499,7 @@ export function uploadKnowledgeFile(
     tag_ids?: string[]
     fileName?: string
     process_config?: KnowledgeProcessOverrides | string
+    defer_parsing?: 'true' | 'false'
     [key: string]: any
   } = { file: new File([], '') },
   onProgress?: (progressEvent: any) => void,
@@ -626,6 +627,10 @@ export function updateManualKnowledge(
   data: { title: string; content: string; status: string; process_config?: KnowledgeProcessOverrides },
 ) {
   return put(`/api/v1/knowledge/manual/${id}`, data);
+}
+
+export function startDeferredKnowledge(id: string) {
+  return post(`/api/v1/knowledge/${id}/start-parse`, {});
 }
 
 export function reparseKnowledge(id: string, data?: { process_config?: KnowledgeProcessOverrides }) {

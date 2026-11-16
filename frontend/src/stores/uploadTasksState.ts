@@ -62,6 +62,7 @@ export function itemPhase(item: UploadItem): ItemPhase {
     // graph enrichment keeps running in the background.
     case 'finalizing':
     case 'completed':
+    case 'deferred':
       return 'ready'
     case 'failed':
       return 'failed'

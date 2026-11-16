@@ -30,14 +30,23 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	return s.createKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName,
-		tagIDs, channel, processOverrides, nil)
+		tagIDs, channel, processOverrides, nil, false)
+}
+
+// CreateDeferredKnowledgeFromFile stores a file without scheduling ingestion.
+func (s *knowledgeService) CreateDeferredKnowledgeFromFile(ctx context.Context,
+	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool,
+	customFileName string, tagIDs []string, channel string, processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	return s.createKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName,
+		tagIDs, channel, processOverrides, nil, true)
 }
 
 func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool,
 	customFileName string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
-	replacement *knowledgeReplacement,
+	replacement *knowledgeReplacement, deferParsing bool,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -196,6 +205,10 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 		Metadata:         metadataJSON,
 	}
 
+	if deferParsing {
+		knowledge.ParseStatus = types.ParseStatusDeferred
+	}
+
 	if processOverrides != nil {
 		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
 			logger.Errorf(ctx, "Failed to set process overrides: %v", err)
@@ -231,50 +244,18 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 		return nil, err
 	}
 
-	// Enqueue document processing task to Asynq
-	logger.Info(ctx, "Enqueuing document processing task to Asynq")
-	enableMultimodelValue := eff.EnableMultimodel
-
-	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
-	questionCount := eff.QuestionGenerationConfig.QuestionCount
-	if questionCount <= 0 {
-		questionCount = 3
-	}
-
-	lang := types.LanguageFromContextOrDefault(ctx)
-	taskPayload := types.DocumentProcessPayload{
-		TenantID:                 tenantID,
-		KnowledgeID:              knowledge.ID,
-		KnowledgeBaseID:          kbID,
-		FilePath:                 filePath,
-		FileName:                 safeFilename,
-		FileType:                 getFileType(safeFilename),
-		EnableMultimodel:         enableMultimodelValue,
-		EnableQuestionGeneration: enableQuestionGeneration,
-		QuestionCount:            questionCount,
-		Language:                 lang,
-	}
-
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
-		s.markKnowledgeEnqueueFailed(ctx, knowledge)
+	if deferParsing {
 		recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
-			"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
+			"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{
 				"title": knowledge.Title, "source_type": "file", "file_type": knowledge.FileType,
-				"processing_status": "failed", "failure_stage": "enqueue",
+				"processing_status": types.ParseStatusDeferred, "trigger": kbActivityTrigger(ctx),
 			})
-		// 即使入队失败，也返回knowledge，因为文件已保存
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(
-		types.TypeDocumentProcess,
-		payloadBytes,
-		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
-	)
-	info, err := s.task.Enqueue(task)
+	// Enqueue document processing task to Asynq
+	logger.Info(ctx, "Enqueuing document processing task to Asynq")
+	info, err := s.enqueueStoredFile(ctx, knowledge, eff)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
 		s.markKnowledgeEnqueueFailed(ctx, knowledge)
@@ -303,6 +284,35 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
+}
+
+// enqueueStoredFile submits the same first processing job for immediate and deferred uploads.
+func (s *knowledgeService) enqueueStoredFile(
+	ctx context.Context, knowledge *types.Knowledge, eff types.EffectiveProcessConfig,
+) (*asynq.TaskInfo, error) {
+	questionCount := eff.QuestionGenerationConfig.QuestionCount
+	if questionCount <= 0 {
+		questionCount = 3
+	}
+	payload := types.DocumentProcessPayload{
+		TenantID:                 knowledge.TenantID,
+		KnowledgeID:              knowledge.ID,
+		KnowledgeBaseID:          knowledge.KnowledgeBaseID,
+		FilePath:                 knowledge.FilePath,
+		FileName:                 knowledge.FileName,
+		FileType:                 knowledge.FileType,
+		EnableMultimodel:         eff.EnableMultimodel,
+		EnableQuestionGeneration: eff.QuestionGenerationConfig.Enabled,
+		QuestionCount:            questionCount,
+		Language:                 types.LanguageFromContextOrDefault(ctx),
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return s.task.Enqueue(asynq.NewTask(types.TypeDocumentProcess, bytes,
+		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...))
 }
 
 // CreateKnowledgeFromURL creates a knowledge entry from a URL source

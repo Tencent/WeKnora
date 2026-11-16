@@ -93,7 +93,7 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 			return nil, err
 		}
 		created, err = s.createKnowledgeFromFile(plan.ctx, previous.KnowledgeBaseID, file, metadata,
-			nil, item.FileName, tagIDs, channel, nil, replacement)
+			nil, item.FileName, tagIDs, channel, nil, replacement, false)
 	} else {
 		created, err = s.createKnowledgeFromURL(plan.ctx, previous.KnowledgeBaseID, item.URL, item.FileName,
 			"", nil, item.Title, tagIDs, channel, nil, replacement)

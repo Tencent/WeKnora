@@ -2976,6 +2976,44 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	return knowledge, nil
 }
 
+// StartDeferredKnowledge starts the first ingestion of a previously stored file.
+func (s *knowledgeService) StartDeferredKnowledge(ctx context.Context, id string) (*types.Knowledge, error) {
+	knowledge, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, id)
+	if err != nil {
+		return nil, err
+	}
+	if knowledge.ParseStatus != types.ParseStatusDeferred || knowledge.Type != "file" || knowledge.FilePath == "" {
+		return nil, werrors.NewConflictError("knowledge is not a deferred file upload")
+	}
+	overrides, err := knowledge.ProcessOverrides()
+	if err != nil {
+		return nil, err
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	if err := s.preflightReparseEngine(ctx, knowledge, eff); err != nil {
+		return nil, err
+	}
+	started, err := s.repo.TransitionDeferredKnowledge(ctx, knowledge, types.ParseStatusDeferred, types.ParseStatusPending)
+	if err != nil {
+		return nil, err
+	}
+	if !started {
+		return nil, werrors.NewConflictError("deferred file status changed")
+	}
+	info, err := s.enqueueStoredFile(ctx, knowledge, eff)
+	if err != nil {
+		_, restoreErr := s.repo.TransitionDeferredKnowledge(
+			context.WithoutCancel(ctx), knowledge, types.ParseStatusPending, types.ParseStatusDeferred)
+		return nil, errors.Join(err, restoreErr)
+	}
+	knowledge.ParseStatus = types.ParseStatusPending
+	recordKBActivity(ctx, s.audit, knowledge.TenantID, knowledge.KnowledgeBaseID, types.AuditActionKnowledgeReparseStarted,
+		"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{"title": knowledge.Title, "task_id": info.ID})
+	enqueueDataTableSummaryIfNeeded(ctx, s.task, knowledge.TenantID, knowledge.ID, knowledge.FileName,
+		knowledge.FileType, kb.SummaryModelID, kb.EmbeddingModelID)
+	return knowledge, nil
+}
+
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
 // This method reuses the logic from UpdateManualKnowledge for resource cleanup and async parsing.
 func (s *knowledgeService) ReparseKnowledge(
@@ -3002,6 +3040,10 @@ func (s *knowledgeService) reparseKnowledge(
 	if err != nil {
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
+	}
+
+	if existing.ParseStatus == types.ParseStatusDeferred {
+		return nil, werrors.NewConflictError("use start-parse to process a deferred file upload")
 	}
 
 	tenantID := existing.TenantID

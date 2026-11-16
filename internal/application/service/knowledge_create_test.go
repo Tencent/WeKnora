@@ -3,12 +3,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -371,4 +373,77 @@ func newMultipartFileHeader(t *testing.T, filename string, content string) *mult
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	require.NoError(t, req.ParseMultipartForm(1024))
 	return req.MultipartForm.File["file"][0]
+}
+
+type deferredUploadRepo struct {
+	createKnowledgeFileRepoStub
+}
+
+func (r *deferredUploadRepo) GetKnowledgeByID(context.Context, uint64, string) (*types.Knowledge, error) {
+	return r.createdKnowledge, nil
+}
+
+func (r *deferredUploadRepo) TransitionDeferredKnowledge(_ context.Context, k *types.Knowledge, from, to string) (bool, error) {
+	if r.createdKnowledge.ID != k.ID || r.createdKnowledge.ParseStatus != from {
+		return false, nil
+	}
+	r.createdKnowledge.ParseStatus = to
+	return true, nil
+}
+
+type deferredUploadTaskQueue struct {
+	tasks []*asynq.Task
+	err   error
+}
+
+func (q *deferredUploadTaskQueue) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	if q.err != nil {
+		return nil, q.err
+	}
+	q.tasks = append(q.tasks, task)
+	return &asynq.TaskInfo{ID: "document-task"}, nil
+}
+
+func TestDeferredUploadStartsOnlyWhenRequested(t *testing.T) {
+	repo := &deferredUploadRepo{}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	queue := &deferredUploadTaskQueue{}
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 1}
+	svc := &knowledgeService{
+		repo: repo, kbService: &createKnowledgeFileKBServiceStub{kb: kb}, fileSvc: fileSvc, task: queue,
+	}
+
+	ctx := newCreateKnowledgeFileContext()
+	knowledge, err := svc.CreateDeferredKnowledgeFromFile(ctx, kb.ID,
+		newMultipartFileHeader(t, "document.md", "# Saved document"), nil, nil, "", nil, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusDeferred, knowledge.ParseStatus)
+	require.Equal(t, "stored/"+knowledge.ID, knowledge.FilePath)
+	require.Equal(t, "disabled", knowledge.EnableStatus)
+	require.Empty(t, queue.tasks)
+
+	ctx, err = access.WithKBTaskWrite(ctx, kb, 1)
+	require.NoError(t, err)
+	_, err = svc.ReparseKnowledge(ctx, knowledge.ID, nil)
+	require.Error(t, err)
+	require.Empty(t, queue.tasks)
+
+	queue.err = errors.New("queue unavailable")
+	_, err = svc.StartDeferredKnowledge(ctx, knowledge.ID)
+	require.ErrorIs(t, err, queue.err)
+	require.Equal(t, types.ParseStatusDeferred, repo.createdKnowledge.ParseStatus)
+
+	queue.err = nil
+	started, err := svc.StartDeferredKnowledge(ctx, knowledge.ID)
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusPending, started.ParseStatus)
+	_, err = svc.StartDeferredKnowledge(ctx, knowledge.ID)
+	require.Error(t, err)
+	require.Len(t, queue.tasks, 1)
+	require.Equal(t, types.TypeDocumentProcess, queue.tasks[0].Type())
+	var payload types.DocumentProcessPayload
+	require.NoError(t, json.Unmarshal(queue.tasks[0].Payload(), &payload))
+	require.Equal(t, knowledge.ID, payload.KnowledgeID)
+	require.Equal(t, knowledge.FilePath, payload.FilePath)
+	require.Equal(t, 1, fileSvc.saveCalls)
 }
