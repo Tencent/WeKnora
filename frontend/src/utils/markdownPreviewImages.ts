@@ -1,3 +1,5 @@
+import { marked } from 'marked'
+
 import { normalizeFolderPath } from '../views/knowledge/folderTree.ts'
 import { isSafePreviewImageHref } from './documentPreviewMarkdown.ts'
 
@@ -207,11 +209,46 @@ async function findExactFiles(
 
 function relativeImageSpans(markdown: string): ImageHrefSpan[] {
   const hidden = hiddenSpans(markdown)
-  return imageHrefSpans(markdown).filter(span => {
+  const spans = imageHrefSpans(markdown).filter(span => {
     if (hidden.some(([start, end]) => span.start >= start && span.start < end)) return false
     const decoded = decodePreviewHref(span.href)
     return decoded != null && isKnowledgeRelativeHref(decoded)
   })
+  const indented = spans.filter(({ start }) => {
+    const lineStart = markdown.lastIndexOf('\n', start - 1) + 1
+    return /^(?: {0,3}\t| {4})/.test(markdown.slice(lineStart, start))
+  })
+  if (!indented.length) return spans
+
+  const visible = visibleIndentedImageSpans(markdown, indented)
+  const indentedSet = new Set(indented)
+  return spans.filter(span => !indentedSet.has(span) || visible.has(span))
+}
+
+function visibleIndentedImageSpans(markdown: string, spans: ImageHrefSpan[]): Set<ImageHrefSpan> {
+  // Indentation can mean code or a continuation of a list item. Tag each
+  // candidate in a copy of the source so the lexer can tell occurrences apart,
+  // even when the same image also appears as literal code in the document.
+  let marker = 'weknorapreviewimagespan'
+  while (markdown.includes(marker)) marker += 'x'
+  const parts: string[] = []
+  let previous = 0
+  spans.forEach(({ start }, index) => {
+    parts.push(markdown.slice(previous, start), `${marker}${index}x`)
+    previous = start
+  })
+  parts.push(markdown.slice(previous))
+
+  const markerPattern = new RegExp(`${marker}(\\d+)x`, 'g')
+  const visible = new Set<ImageHrefSpan>()
+  marked.walkTokens(marked.lexer(parts.join('')), token => {
+    const source = token.type === 'image' ? token.href : token.type === 'html' ? token.raw : ''
+    for (const match of source.matchAll(markerPattern)) {
+      const span = spans[Number(match[1])]
+      if (span) visible.add(span)
+    }
+  })
+  return visible
 }
 
 function imageHrefSpans(markdown: string): ImageHrefSpan[] {
@@ -261,13 +298,28 @@ function parseMarkdownImage(markdown: string, imageStart: number): (ImageHrefSpa
     if (hrefEnd < 0) return null
     i = hrefEnd + 1
   } else {
-    while (i < markdown.length && !/[\s)]/.test(markdown[i])) i += 1
+    let depth = 0
+    while (i < markdown.length && !/\s/.test(markdown[i])) {
+      const char = markdown[i]
+      if (char === '\\' && /[()]/.test(markdown[i + 1] || '')) {
+        i += 2
+        continue
+      }
+      if (char === '(') depth += 1
+      if (char === ')') {
+        if (depth === 0) break
+        depth -= 1
+      }
+      i += 1
+    }
+    if (depth !== 0) return null
     hrefEnd = i
   }
   while (i < markdown.length && markdown[i] !== ')') i += 1
   if (markdown[i] !== ')') return null
   if (hrefEnd <= hrefStart) return null
-  return { href: markdown.slice(hrefStart, hrefEnd), start: hrefStart, end: hrefEnd }
+  const href = markdown.slice(hrefStart, hrefEnd).replace(/\\([()])/g, '$1')
+  return { href, start: hrefStart, end: hrefEnd }
 }
 
 function parseHtmlImage(markdown: string, tagStart: number): (ImageHrefSpan & { end: number }) | null {
@@ -331,13 +383,6 @@ function hiddenSpans(markdown: string): Array<[number, number]> {
     spans.push([index, index + match[0].length])
   }
   for (const match of markdown.matchAll(/`+[^`\n]*`+/g)) {
-    const index = match.index ?? 0
-    if (spans.some(([start, end]) => index >= start && index < end)) continue
-    spans.push([index, index + match[0].length])
-  }
-  // CommonMark indented code: a line of four spaces or a tab. Fenced blocks
-  // are already hidden, so this only catches the literal code they do not.
-  for (const match of markdown.matchAll(/^(?: {4}|\t).*$/gm)) {
     const index = match.index ?? 0
     if (spans.some(([start, end]) => index >= start && index < end)) continue
     spans.push([index, index + match[0].length])
