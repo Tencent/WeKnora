@@ -304,21 +304,26 @@ function isEscaped(text: string, index: number): boolean {
 
 function hiddenSpans(markdown: string): Array<[number, number]> {
   const spans: Array<[number, number]> = []
-  const fenceRe = /^ {0,3}(`{3,}|~{3,}).*$/gm
-  const opens: Array<{ index: number; marker: string }> = []
+  const fenceRe = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)\r?$/gm
+  let open: { index: number; marker: string } | null = null
   for (const match of markdown.matchAll(fenceRe)) {
     const marker = match[1]
+    const rest = match[2]
     const index = match.index ?? 0
-    const last = opens[opens.length - 1]
-    if (last && last.marker[0] === marker[0] && marker.length >= last.marker.length) {
-      const lineEnd = markdown.indexOf('\n', index + match[0].length)
-      spans.push([last.index, lineEnd < 0 ? markdown.length : lineEnd + 1])
-      opens.pop()
-    } else {
-      opens.push({ index, marker })
+    if (open) {
+      // Fences do not nest: other delimiters and info strings are literal code.
+      // Match marked's closing rule: only spaces may follow the delimiter.
+      if (open.marker[0] === marker[0] && marker.length >= open.marker.length && /^ *$/.test(rest)) {
+        const lineEnd = markdown.indexOf('\n', index + match[0].length)
+        spans.push([open.index, lineEnd < 0 ? markdown.length : lineEnd + 1])
+        open = null
+      }
+    } else if (marker[0] !== '`' || !rest.includes('`')) {
+      // A backtick fence cannot contain backticks in its info string.
+      open = { index, marker }
     }
   }
-  for (const open of opens) spans.push([open.index, markdown.length])
+  if (open) spans.push([open.index, markdown.length])
 
   for (const match of markdown.matchAll(/<!--[\s\S]*?-->/g)) {
     const index = match.index ?? 0
