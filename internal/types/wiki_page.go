@@ -912,3 +912,45 @@ func (p *WikiPage) BuiltFrom(knowledgeIDs map[string]struct{}) bool {
 	}
 	return false
 }
+
+// SetPendingRetraction prevents public mirrors from exposing a shared page
+// between removal of a source reference and successful rewriting of its body.
+func (p *WikiPage) SetPendingRetraction(knowledgeID string, pending bool) error {
+	metadata, err := p.PageMetadata.Map()
+	if err != nil {
+		return err
+	}
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	var ids []string
+	if raw, ok := metadata["pending_retractions"]; ok {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &ids); err != nil {
+			return err
+		}
+	}
+	out := make([]string, 0, len(ids)+1)
+	for _, id := range ids {
+		if id != knowledgeID {
+			out = append(out, id)
+		}
+	}
+	if pending {
+		out = append(out, knowledgeID)
+	}
+	if len(out) == 0 {
+		delete(metadata, "pending_retractions")
+	} else {
+		metadata["pending_retractions"] = out
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	p.PageMetadata = JSON(data)
+	return nil
+}

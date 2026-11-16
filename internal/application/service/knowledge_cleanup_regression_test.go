@@ -65,6 +65,9 @@ func TestDeleteWikiRemovesEveryChunkType(t *testing.T) {
 	require.Len(t, meta.updated, 1)
 	require.Equal(t, types.StringArray{"other-chunk"}, meta.updated[0].ChunkRefs)
 	require.Equal(t, types.StringArray{"other-doc"}, meta.updated[0].SourceRefs)
+	metadata, err := meta.updated[0].PageMetadata.Map()
+	require.NoError(t, err)
+	require.Equal(t, []interface{}{"doc"}, metadata["pending_retractions"])
 }
 
 type cleanupKBFailure struct {

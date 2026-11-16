@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -185,4 +186,10 @@ type TaskDeadLetterRepository interface {
 	// DeleteByID drops a single dead letter (e.g. after operators have
 	// requeued the task manually).
 	DeleteByID(ctx context.Context, id int64) error
+}
+
+// TaskPendingOpsPayloadCheckpointer persists progress without replacing a
+// newer worker's payload. A successful advance resets consecutive failures.
+type TaskPendingOpsPayloadCheckpointer interface {
+	CompareAndSwapPayload(ctx context.Context, tenantID uint64, id int64, before, after json.RawMessage) (bool, error)
 }

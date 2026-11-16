@@ -38,7 +38,7 @@ import (
 var ErrWikiIngestConcurrent = errors.New("concurrent wiki task active")
 
 const (
-	// maxContentForWiki limits the document content sent to LLM for wiki generation
+	// maxContentForWiki bounds each document segment sent to the wiki model.
 	maxContentForWiki = 32768
 
 	// --- Phase 3: concurrent per-KB batches (standard/Redis mode) ---------
@@ -367,8 +367,10 @@ type WikiPendingOp struct {
 	PageSlugs  []string `json:"page_slugs,omitempty"`
 	FolderIDs  []string `json:"folder_ids,omitempty"`
 
-	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
-	// constructions made outside the queue (e.g. legacy tests).
+	// Extraction holds validated segment outputs until this operation finishes.
+	Extraction *wikiExtractionProgress `json:"extraction_checkpoint,omitempty"`
+	dbPayload  json.RawMessage
+	// dbID is the source row ID; zero for synthetic/non-durable operations.
 	dbID int64 `json:"-"`
 }
 
@@ -1239,6 +1241,10 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 				KnowledgeID: r.DedupKey,
 			}
 		}
+		op.dbPayload = append(json.RawMessage(nil), r.Payload...)
+		if op.Op == WikiOpIngest && op.Extraction == nil {
+			op.Extraction = &wikiExtractionProgress{}
+		}
 		op.dbID = r.ID
 		all = append(all, op)
 	}
@@ -1360,13 +1366,12 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			continue
 		}
 
-		// Exhausted in-batch retries — archive and remove. This is the
-		// terminal failure point for the op, so release its slot in the
-		// knowledge's finalizing counter (ingest ops only; retracts are
-		// for deleted knowledge that has no counter to drain). The
-		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
-		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID, op.Attempt)
+		// Archive before removing the operation or releasing its finalizing
+		// slot: a failed archive must not discard durable extraction progress.
+		if op.Extraction != nil && len(op.Extraction.Segments) > 0 && s.deadLetterRepo == nil {
+			err := fmt.Errorf("archive checkpoint id=%d: dead-letter repository unavailable", op.dbID)
+			settleErrs = append(settleErrs, err)
+			continue
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
@@ -1383,11 +1388,16 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			}); dlErr != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to archive op %s to dead letters: %v", op.KnowledgeID, dlErr)
 				settleErrs = append(settleErrs, fmt.Errorf("archive dead letter id=%d: %w", op.dbID, dlErr))
+				continue
 			}
 		}
 		if err := s.pendingRepo.DeleteByIDs(ctx, []int64{op.dbID}); err != nil {
 			logger.Warnf(ctx, "wiki ingest: failed to drop dead-lettered row id=%d: %v", op.dbID, err)
 			settleErrs = append(settleErrs, fmt.Errorf("drop dead-lettered row id=%d: %w", op.dbID, err))
+			continue
+		}
+		if op.Op == WikiOpIngest {
+			s.finalizeWikiSubtask(ctx, op.KnowledgeID, op.Attempt)
 		}
 	}
 	return errors.Join(settleErrs...)
@@ -1459,6 +1469,10 @@ type WikiBatchContext struct {
 	// Already Normalize()'d — consumers can assume it is one of the
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
+
+	// ExtractionParallel reuses the KB's existing LLM synthesis concurrency.
+	// The per-model governor still caps calls shared across all background jobs.
+	ExtractionParallel int
 
 	// ContentInstructions and ExtractionInstructions are KB-scoped business
 	// guidance. Stable citation, merge, taxonomy and JSON rules remain in the
@@ -2455,6 +2469,30 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 	if s.wikiService == nil {
 		return s.stabilizeExtractedIdentities(ctx, kbID, types.WikiPageTypeEntity, entities, nil, nil, batchCtx),
 			s.stabilizeExtractedIdentities(ctx, kbID, types.WikiPageTypeConcept, concepts, nil, nil, batchCtx)
+	}
+	// A matching URL spelling does not establish identity. Resolve occupied
+	// slugs before probing so the model can judge the old page as a candidate,
+	// rather than treating it as an unquestioned update of the same object.
+	if batchCtx != nil && batchCtx.SlugTitleMany != nil {
+		slugs := make([]string, 0, len(entities)+len(concepts))
+		for _, items := range [][]extractedItem{entities, concepts} {
+			for _, item := range items {
+				slugs = append(slugs, item.Slug)
+				slugs = append(slugs, strings.SplitN(item.Slug, "/", 2)[0]+"/"+slugify(item.Name))
+			}
+		}
+		occupied := make(map[string]string)
+		for slug, title := range batchCtx.SlugTitleMany(ctx, slugs) {
+			if title != "" {
+				occupied[slug] = normalizeWikiIdentityTitle(title)
+			}
+		}
+		for _, items := range [][]extractedItem{entities, concepts} {
+			for i := range items {
+				items[i].Slug = unoccupiedWikiExtractionSlug(items[i], occupied)
+				occupied[items[i].Slug] = normalizeWikiIdentityTitle(items[i].Name)
+			}
+		}
 	}
 
 	// Build the candidate set: for each new item, ask the repo for

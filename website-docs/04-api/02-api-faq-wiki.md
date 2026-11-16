@@ -192,6 +192,12 @@ curl $BASE/api/v1/faq/import/progress/task-1 -H "X-API-Key: $API_KEY"
 
 ## Wiki（/api/v1/knowledgebase/:kb_id/wiki）
 
+### 来源撤回中的页面
+
+删除源文档时，独占该来源的生成页面会被删除；共享页面移除对应的 `source_refs` 后，正文通过异步任务改写。此期间页面的 `page_metadata.pending_retractions` 保存待撤回的文档 ID 数组；只有改写成功，才清除对应 ID。失败或空的改写结果保留标记并进入任务重试，来源清理失败也会返回删除错误。
+
+将 Wiki 镜像到公开网站的调用方应在该数组非空时隐藏页面，避免展示尚未移除的正文贡献；仅检查 `source_refs` 不能判断正文已完成撤回。标记为空时字段省略。此标记不自动限制知识库内已有权限的阅读接口，也不代表模型生成内容已通过人工审核。
+
 注意此组前缀为 `/knowledgebase/:kb_id/wiki`（单数，无连字符）。Handler: `internal/handler/wiki_page.go`。本组响应多为**原始对象**（不带 `success` 包装）。
 
 ### GET /api/v1/knowledgebase/:kb_id/wiki/pages
