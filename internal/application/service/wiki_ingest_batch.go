@@ -1478,13 +1478,12 @@ func (s *wikiIngestService) mapOneDocument(
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
-	// On failure we fall back to the legacy single-shot extractor so the doc
-	// still gets ingested, just without chunk-level citations.
+	// Each validated segment is durably saved; failures retry this same path
+	// without regenerating completed segments or dropping chunk citations.
 	var (
 		extractedEntities []extractedItem
 		extractedConcepts []extractedItem
 		slugItems         map[string]extractedItem
-		pass0Failed       bool
 	)
 	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
 	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
@@ -1492,22 +1491,20 @@ func (s *wikiIngestService) mapOneDocument(
 		"content_segments": len(splitWikiExtractionDocument(content)),
 		"old_pages":        len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(
+		ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx, &op,
+	)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
-		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
-		if err != nil {
-			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
-			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
-			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
-			return nil, nil, err
-		}
+		failCtx, cancel := wikiIngestCleanupContext(ctx)
+		defer cancel()
+		s.tracker().FailSpan(failCtx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
+		s.tracker().FailSpan(failCtx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
+		return nil, nil, err
 	}
 	s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
 		"entities":         len(extractedEntities),
 		"concepts":         len(extractedConcepts),
-		"pass0_fallback":   pass0Failed,
+		"pass0_fallback":   false,
 		"entities_preview": previewExtractedItems(extractedEntities, 8),
 		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
 	})
@@ -1554,13 +1551,12 @@ func (s *wikiIngestService) mapOneDocument(
 		"content_chars":   utf8.RuneCountInString(content),
 		"extracted_slugs": len(summaryExtractedPages),
 	})
-	var classifySpan *Span
-	if !pass0Failed {
-		classifySpan = s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.classify", types.SpanKindSubSpan, types.JSONMap{
+	classifySpan := s.tracker().BeginSubSpan(
+		ctx, wikiSpan, "postprocess.wiki.classify", types.SpanKindSubSpan, types.JSONMap{
 			"chunks":     len(chunks),
 			"candidates": len(extractedEntities) + len(extractedConcepts),
-		})
-	}
+		},
+	)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -1586,13 +1582,6 @@ func (s *wikiIngestService) mapOneDocument(
 	}()
 	go func() {
 		defer wg.Done()
-		// Skip citation pass when Pass 0 has fallen back to the legacy path —
-		// the legacy output already contains paraphrased Details, so chunk
-		// citations would be redundant and we'd spend LLM calls for nothing.
-		if pass0Failed {
-			citations = map[string][]string{}
-			return
-		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
 		citations, newSlugs, batchCount = s.classifyChunkCitations(
 			ctx, chatModel, candidatesXML, wikiCitationChunks(chunks), lang, batchCtx,
@@ -1797,7 +1786,7 @@ func (s *wikiIngestService) mapOneDocument(
 			"preserved_slugs=%d pass0_fallback=%v elapsed=%s",
 		knowledgeID, previewText(docTitle, 80),
 		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, len(newSlugs),
-		len(updates), reparseOverlap, preservedCount, pass0Failed,
+		len(updates), reparseOverlap, preservedCount, false,
 		time.Since(docStartedAt).Round(time.Millisecond),
 	)
 
@@ -1820,7 +1809,7 @@ func (s *wikiIngestService) mapOneDocument(
 		"preserved_slugs":  preservedCount,
 		"extracted_pages":  len(extractedPages),
 		"summary_chars":    utf8.RuneCountInString(docSummary),
-		"pass0_fallback":   pass0Failed,
+		"pass0_fallback":   false,
 		"classify_batches": batchCount,
 		"summary_preview":  previewText(docSummaryLine, 160),
 	}
@@ -1833,76 +1822,6 @@ func (s *wikiIngestService) mapOneDocument(
 		MapStats:    mapStats,
 		WikiSpan:    wikiSpan,
 	}, updates, nil
-}
-
-func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
-	ctx context.Context,
-	chatModel chat.Chat,
-	kbID string,
-	content, lang string,
-	oldPageSlugs map[string]bool,
-	batchCtx *WikiBatchContext,
-) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
-	// Only entity/* and concept/* slugs are relevant for LLM slug-continuity —
-	// summary slugs are code-generated from the knowledge ID and never appear
-	// in the extraction output, so including them just wastes tokens and risks
-	// confusing the model.
-	var prevSlugsText string
-	if len(oldPageSlugs) > 0 {
-		var sb strings.Builder
-		for slug := range oldPageSlugs {
-			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
-				continue
-			}
-			fmt.Fprintf(&sb, "- %s\n", slug)
-		}
-		prevSlugsText = sb.String()
-	}
-	if prevSlugsText == "" {
-		prevSlugsText = "(none — this is a new document)"
-	}
-
-	result, err := extractWikiSegments(ctx, content, batchCtx.ExtractionParallel, func(
-		ctx context.Context, segment string,
-	) (combinedExtraction, error) {
-		extractionJSON, callErr := s.generateWithTemplate(
-			ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
-				"Content": segment, "Language": lang, "PreviousSlugs": prevSlugsText,
-				"CustomInstructions": batchCtx.ExtractionInstructions, "InstructionScope": "wiki_extraction",
-			})
-		if callErr != nil {
-			return combinedExtraction{}, callErr
-		}
-		var result combinedExtraction
-		parseErr := json.Unmarshal([]byte(cleanLLMJSON(extractionJSON)), &result)
-		return result, parseErr
-	})
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	// Dedup pre-filter is dispatched against the wiki page repo via
-	// pg_trgm (see deduplicateExtractedBatch). Until the trgm path
-	// lands the dedup pre-filter degrades to "no dedup" which is the
-	// safe default — the LLM merge call simply doesn't get a candidate
-	// list and the items pass through unchanged.
-	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
-	)
-
-	slugItems := make(map[string]extractedItem)
-	for _, item := range result.Entities {
-		if item.Slug != "" && item.Name != "" {
-			slugItems[item.Slug] = item
-		}
-	}
-	for _, item := range result.Concepts {
-		if item.Slug != "" && item.Name != "" {
-			slugItems[item.Slug] = item
-		}
-	}
-
-	return result.Entities, result.Concepts, slugItems, nil
 }
 
 // resolveSlugUpdateLanguage picks the language the editor prompt should write
