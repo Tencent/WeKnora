@@ -945,8 +945,11 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 			return nil, err
 		}
 		all = append(all, files...)
-		if !hasMore || next == "" {
+		if !hasMore {
 			break
+		}
+		if next == "" {
+			return nil, fmt.Errorf("feishu drive file pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[next]; exists {
 			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
