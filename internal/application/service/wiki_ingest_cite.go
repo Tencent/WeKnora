@@ -78,20 +78,8 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
 ) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
-	var prevSlugsText string
-	if len(oldPageSlugs) > 0 {
-		var sb strings.Builder
-		for slug := range oldPageSlugs {
-			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
-				continue
-			}
-			fmt.Fprintf(&sb, "- %s\n", slug)
-		}
-		prevSlugsText = sb.String()
-	}
-	if prevSlugsText == "" {
-		prevSlugsText = "(none — this is a new document)"
-	}
+	ctx = withWikiProcessingScope(ctx, processingDocument(ctx), kbID)
+	prevSlugsText := s.wikiPreviousSlugInput(ctx, chatModel, oldPageSlugs)
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
 	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
@@ -210,6 +198,7 @@ func splitChunksIntoCitationBatches(chunks []*types.Chunk) []chunkBatch {
 // renderCandidateSlugsXML renders candidate slugs as a compact list suitable
 // for the prompt's <candidate_slugs> block.
 func renderCandidateSlugsXML(entities, concepts []extractedItem) string {
+	entities, concepts = sortedWikiCacheItems(entities), sortedWikiCacheItems(concepts)
 	var sb strings.Builder
 	write := func(item extractedItem, kind string) {
 		aliases := ""

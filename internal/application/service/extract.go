@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -182,6 +183,7 @@ func enqueueDataTableSummaryIfNeeded(
 
 // ChunkExtractService is a service for extracting chunks
 type ChunkExtractService struct {
+	processingCache   *processingcache.Runtime
 	template          *types.PromptTemplateStructured
 	modelService      interfaces.ModelService
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
@@ -353,8 +355,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
+	graph, err := s.extractGraphCached(ctx, chatModel, template, p.TenantID, knowledgeID, chunk.Content)
 	if errors.Is(err, chatpipeline.ErrModelDeclined) {
 		// The model answered in prose (e.g. declined a table-of-contents
 		// chunk). Replaying the same input cannot help, so finish the task
@@ -428,6 +429,7 @@ type DataTableSummaryPayload struct {
 
 // DataTableSummaryService is a service for extracting tables
 type DataTableSummaryService struct {
+	processingCache      *processingcache.Runtime
 	modelService         interfaces.ModelService
 	knowledgeBaseService interfaces.KnowledgeBaseService
 	knowledgeService     interfaces.KnowledgeService
@@ -480,6 +482,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	ctx = logger.WithRequestID(ctx, uuid.New().String())
 	ctx = logger.WithField(ctx, "knowledge", payload.KnowledgeID)
 	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
+	ctx = withProcessingDocument(ctx, payload.KnowledgeID)
 
 	logger.Infof(ctx, "Processing table extraction for knowledge: %s", payload.KnowledgeID)
 
@@ -849,7 +852,7 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	response, err := s.tableCachedResponse(ctx, chatModel, "document.table_summary.v1", []chat.Message{
 		{Role: "user", Content: prompt},
 	}, &chat.ChatOptions{
 		Temperature: 0.3,
@@ -877,7 +880,7 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 
 	// Call LLM once for all columns
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	response, err := s.tableCachedResponse(ctx, chatModel, "document.table_columns.v1", []chat.Message{
 		{Role: "user", Content: prompt},
 	}, &chat.ChatOptions{
 		Temperature: 0.3,

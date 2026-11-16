@@ -1,3 +1,4 @@
+// Package vlm provides vision model clients and request options.
 package vlm
 
 import (
@@ -36,6 +37,9 @@ type VLM interface {
 // row, the knowledge base and the per-action switch from overriding each other
 // by accident: an unset field never writes anything.
 type PredictOptions struct {
+	// RequireComplete asks providers to reject replies without a confirmed
+	// completion status before their output is admitted to persistent caches.
+	RequireComplete bool
 	// Thinking pins the thinking switch for this call. Leaving a reasoning model
 	// on costs a vision call more than it returns it: the completion budget goes
 	// to reasoning, and at the vision default temperature the answer can come
@@ -43,6 +47,20 @@ type PredictOptions struct {
 	// An OCR caller cannot tell that apart from an image with no text, so the
 	// switch is per-action rather than per-model.
 	Thinking *bool
+}
+
+func validateCompletionReason(reason string, required bool) error {
+	if !required {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "length", "max_tokens", "incomplete":
+		return fmt.Errorf("%w (finish_reason=%q)", ErrTruncatedCompletion, reason)
+	case "stop", "end_turn":
+		return nil
+	default:
+		return fmt.Errorf("VLM completion not confirmed (finish_reason=%q)", reason)
+	}
 }
 
 // Config holds the configuration needed to create a VLM instance.

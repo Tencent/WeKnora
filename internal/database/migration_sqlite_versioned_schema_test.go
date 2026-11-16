@@ -48,6 +48,7 @@ var versionedSQLiteTables = []string{
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
 	"credential_vault_items",
+	"processing_cache",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the

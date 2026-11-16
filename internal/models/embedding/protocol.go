@@ -100,6 +100,13 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 	}
 
 	return &protocolEmbedder{
+		cacheIdentity: processingCacheDigest(map[string]any{
+			"schema": 1, "config": config, "provider": vendor.ID,
+			"api": resolved.EmbeddingAPI, "settings": settings,
+			"base_url": endpoint.BaseURL, "url": endpoint.URL,
+			"model": endpoint.Model, "query": endpoint.Query, "headers": endpoint.Headers,
+			"default_api_key": vendor.DefaultAPIKey, "auth_style": vendor.AuthStyleFor(vendor.API),
+		}),
 		inner:          client,
 		images:         images,
 		settings:       settings,
@@ -115,7 +122,8 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 // itself: splitting a batch that exceeds the documented per-request ceiling,
 // and telling the vendor which side of a search a text is on.
 type protocolEmbedder struct {
-	inner api.Embedder
+	cacheIdentity string
+	inner         api.Embedder
 	// images is nil unless the model and the endpoint both take images.
 	images     api.ImageEmbedder
 	settings   api.EmbeddingsSettings

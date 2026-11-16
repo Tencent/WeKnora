@@ -149,6 +149,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if setter, ok := e.(interface{ SetSupportsDimensionOverride(bool) }); ok {
 		setter.SetSupportsDimensionOverride(config.SupportsDimensionOverride)
 	}
+	cacheIdentity := effectiveProcessingCacheIdentity(config, e)
 	// Innermost: gate the real provider round-trips (including the per-sub-batch
 	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
 	// concurrencyEmbedder for why this sits below the observability decorators.
@@ -159,7 +160,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if langfuse.GetManager().Enabled() {
 		e = &langfuseEmbedder{inner: e}
 	}
-	return e, nil
+	return &processingCacheEmbedder{Embedder: e, identity: cacheIdentity}, nil
 }
 
 func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {

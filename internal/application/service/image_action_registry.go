@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -352,8 +353,9 @@ const resultSkippedDisabled = "skipped_disabled"
 // hands out no VLM handle: talking to a model is the action's business, reached
 // only through execute.
 type runContext struct {
-	payload *types.ImageMultimodalPayload
-	model   vlm.VLM
+	processingCache *processingcache.Runtime
+	payload         *types.ImageMultimodalPayload
+	model           vlm.VLM
 	// preprocessor straightens the page before OCR. Nil when the document
 	// service is not wired into this build — see imagePreprocessor.
 	preprocessor imagePreprocessor
@@ -544,8 +546,7 @@ func (r *runContext) predictOCR(ctx context.Context, prompt string) (string, err
 func (r *runContext) think(ctx context.Context, prompt, key string) (string, error) {
 	on := r.BoolParamOr(key, false)
 	r.out[key] = on
-	return r.model.PredictWithOptions(ctx, [][]byte{r.imageBytes}, prompt,
-		&vlm.PredictOptions{Thinking: &on})
+	return r.cachedImagePrediction(ctx, prompt, key, on)
 }
 
 func (r *runContext) fieldByKey(key string) (types.ImageFieldDef, bool) {
@@ -793,7 +794,7 @@ func runPreprocessAction(ctx context.Context, r *runContext) error {
 	}
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	rectified, fallback, err := r.preprocessor.PreprocessImage(callCtx, r.imageBytes)
+	rectified, fallback, err := r.cachedImagePreprocess(callCtx)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Preprocess failed for %s: %v", r.payload.ImageURL, err)
 		r.out[keyPreprocessResult] = "failed"

@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils"
+	"github.com/Tencent/WeKnora/internal/processingcache"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"golang.org/x/sync/errgroup"
@@ -43,6 +44,7 @@ var embeddingImagePayloadPatterns = []*regexp.Regexp{
 type KeywordsVectorHybridRetrieveEngineService struct {
 	indexRepository interfaces.RetrieveEngineRepository
 	engineType      types.RetrieverEngineType
+	processingCache *processingcache.Runtime
 }
 
 // NewKVHybridRetrieveEngine creates a new instance of the hybrid retrieval engine
@@ -73,11 +75,17 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		vectors, err := v.embedTextWindow(
+			ctx,
+			embedder,
+			[]*types.IndexInfo{indexInfo},
+			[]string{v.embeddingText(ctx, indexInfo.Content)},
+			true,
+		)
 		if err != nil {
 			return err
 		}
-		embeddingMap[indexInfo.SourceID] = embedding
+		embeddingMap[indexInfo.SourceID] = vectors[0]
 	}
 	params["embedding"] = embeddingMap
 	return v.indexRepository.Save(ctx, indexInfo, params)
@@ -119,7 +127,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 			window := indexInfoList[start:end]
 			contentList := make([]string, len(window))
 			for i, indexInfo := range window {
-				contentList[i] = sanitizeForEmbedding(ctx, indexInfo.Content)
+				contentList[i] = v.embeddingText(ctx, indexInfo.Content)
 			}
 			windowEmbedder := embedder
 			if isPrecomputed {
@@ -128,7 +136,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 					vectors:  precomputed.vectors[start:end],
 				}
 			}
-			embeddings, err := batchEmbedWithBackoff(ctx, windowEmbedder, contentList)
+			embeddings, err := v.embedTextWindow(ctx, windowEmbedder, window, contentList, false)
 			if err != nil {
 				return err
 			}

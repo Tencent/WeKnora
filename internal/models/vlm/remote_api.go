@@ -60,10 +60,11 @@ func vlmMaxTokens() int {
 // dialect (max_tokens field, sampling restrictions, protocol) is resolved
 // exactly like it is for chat models.
 type RemoteAPIVLM struct {
-	modelName   string
-	modelID     string
-	chat        chat.Chat
-	temperature float64
+	cacheIdentity string
+	modelName     string
+	modelID       string
+	chat          chat.Chat
+	temperature   float64
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -101,12 +102,14 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RemoteAPIVLM{
+	v := &RemoteAPIVLM{
 		modelName:   config.ModelName,
 		modelID:     config.ModelID,
 		chat:        client,
 		temperature: temp,
-	}, nil
+	}
+	v.cacheIdentity = remoteVLMIdentity(v)
+	return v, nil
 }
 
 // Predict sends images with a text prompt through the chat client.
@@ -161,6 +164,9 @@ func (v *RemoteAPIVLM) PredictWithOptions(
 		// Non-empty partial output is still incomplete and must not be indexed
 		// as successful OCR. Returning an error also marks the model trace failed.
 		return "", fmt.Errorf("%w at %d tokens (finish_reason=length)", ErrTruncatedCompletion, maxTokens)
+	}
+	if err := validateCompletionReason(resp.FinishReason, opts != nil && opts.RequireComplete); err != nil {
+		return "", err
 	}
 	logger.Infof(ctx, "[VLM] response received, len=%d", len(content))
 	return content, nil

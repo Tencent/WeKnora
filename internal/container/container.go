@@ -814,6 +814,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// (which is not encoded in the local:// URL).
 	must(container.Invoke(registerChatLocalImageResolver))
 
+	must(container.Invoke(wireProcessingCache))
+
 	// Router configuration
 	logger.Debugf(ctx, "[Container] Registering router and starting task server...")
 	must(container.Provide(router.NewRouter))
@@ -1834,6 +1836,10 @@ func initRetrieveEngineRegistry(
 				}
 			}
 		}
+	}
+	cache := newProcessingCache(db, cfg)
+	for _, engine := range registry.GetAllRetrieveEngineServices() {
+		attachProcessingCache(engine, cache)
 	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {

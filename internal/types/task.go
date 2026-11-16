@@ -394,6 +394,8 @@ type SummaryGenerationPayload struct {
 	// chunk edits. Refresh tasks are not part of the parse attempt's pending
 	// subtask counter and update existing summary chunks in place.
 	Refresh bool `json:"refresh,omitempty"`
+	// BypassCache distinguishes explicit regeneration from automatic refresh.
+	BypassCache bool `json:"bypass_cache,omitempty"`
 	// Attempt links this task to the parent parse attempt so the worker
 	// can record a postprocess.summary subspan under the right attempt's
 	// postprocess stage. See QuestionGenerationPayload.Attempt notes.

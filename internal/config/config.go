@@ -18,6 +18,7 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
+	ProcessingCache *ProcessingCacheConfig `yaml:"processing_cache" json:"processing_cache"`
 	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
 	Server          *ServerConfig          `yaml:"server"           json:"server"`
 	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
