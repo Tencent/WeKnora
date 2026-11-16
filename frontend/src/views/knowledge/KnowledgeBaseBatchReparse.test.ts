@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
+import * as youtube from '../../utils/youtube.ts'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
 
 type Row = {
@@ -94,7 +95,7 @@ async function setup(t: TestContext, initialRows: Row[] = [row('doc')]) {
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': { permissionCanEditKB: () => true, permissionCanManageKB: () => true },
     '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
-    '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
+    '@/utils/knowledgeProcessingStall': stall, '@/utils/youtube': youtube, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': {
       batchQueryKnowledge, batchReparseKnowledge,
       listKnowledgeFolders: async () => ({ data: { folders: [{ path: 'other', name: 'other' }] } }),
