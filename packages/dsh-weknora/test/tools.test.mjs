@@ -51,6 +51,42 @@ test('the default composition registers exactly the four documented tools', asyn
   ])
 })
 
+test('cancelling one unscoped search does not cancel a concurrent search', async (t) => {
+  const config = resolveConfig({ baseUrl: 'https://weknora.example/api/v1' })
+  const search = createTools(new WeknoraClient(config), config).find(tool => tool.name === 'weknora_search')
+  const controller = new AbortController()
+  const scopes = []
+  let listings = 0
+  t.mock.method(globalThis, 'fetch', async (url, { signal, body }) => {
+    const { pathname } = new URL(url)
+    if (pathname === '/api/v1/knowledge-bases') {
+      listings++
+      if (listings === 1) {
+        return await new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      }
+      return Response.json({ data: [{ id: 'kb-visible' }] })
+    }
+    if (pathname === '/api/v1/knowledge-search') {
+      scopes.push(JSON.parse(body).knowledge_base_ids)
+    }
+    return Response.json({ data: [] })
+  })
+
+  const cancelled = search.execute({ query: 'first' }, { signal: controller.signal })
+  const active = search.execute({ query: 'second' }, exec)
+  controller.abort()
+  const [first, second] = await Promise.allSettled([cancelled, active])
+
+  assert.equal(first.status, 'rejected')
+  assert.match(first.reason.message, /the call was cancelled/)
+  assert.equal(second.status, 'fulfilled', String(second.reason))
+  await search.execute({ query: 'third' }, exec)
+  assert.deepEqual(scopes, [['kb-visible'], ['kb-visible']])
+  assert.equal(listings, 2)
+})
+
 test('list_knowledge_bases renders ids the model can pass back', async () => {
   const { byName } = await toolset()
   const { value, text } = await call(byName.get('weknora_list_knowledge_bases'), {})
