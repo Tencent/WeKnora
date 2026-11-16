@@ -347,17 +347,17 @@ func (c *client) ListBookDocs(ctx context.Context, bookID int64) ([]v2Doc, error
 		if len(resp.Data) < defaultPageSize {
 			break
 		}
-		// meta.total counts the whole listing, so a page that reaches it is the
-		// last one; asking for the next offset would only fetch an empty page.
-		if resp.Meta.Total > 0 && offset+len(resp.Data) >= resp.Meta.Total {
-			break
-		}
 		// Same repeated-page guard as the repo listing: a gateway that ignores
-		// offset hands back the identical full page forever.
+		// offset can hand back the same full page, even at the advertised end.
 		firstID := resp.Data[0].ID
 		if firstID != 0 && firstID == lastFirstID {
 			logger.Warnf(ctx, "[Yuque] %s pagination repeated page at offset %d; aborting", basePath, offset)
 			return nil, fmt.Errorf("yuque %s pagination repeated page at offset %d", basePath, offset)
+		}
+		// meta.total counts the whole listing. Once a new page reaches it,
+		// the next offset would only fetch an empty page.
+		if resp.Meta.Total > 0 && offset+len(resp.Data) >= resp.Meta.Total {
+			break
 		}
 		lastFirstID = firstID
 		offset += defaultPageSize
