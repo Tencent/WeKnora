@@ -709,6 +709,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	_ = eg.Wait()
 
+	batchCtx.OperationKeys = make(map[string]string)
+	for _, op := range pendingOps {
+		if op.dbID != 0 && op.Extraction != nil && op.Extraction.Mapped != nil {
+			batchCtx.OperationKeys[op.KnowledgeID] = fmt.Sprintf("%d:%s", op.dbID, op.Extraction.Mapped.InputKey)
+		}
+	}
+
 	// Re-read identity claims after every map worker has chosen a slug so
 	// concurrent romanizations of the same title collapse before taxonomy
 	// planning and Reduce lock by slug.
@@ -719,8 +726,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// single pass assigns every new entity/concept slug a coherent category_path
 	// that reuses existing folders. Reduce then only applies the plan to pages
 	// that don't already have a category (user-curated pages are never churned).
-	batchCtx.PlannedFolderID = s.resolvePlannedFolders(ctx, kb,
-		s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang))
+	batchCtx.PlannedFolderID, err = s.planResumableWikiFolders(ctx, chatModel, kb, slugUpdates, lang, pendingOps)
+	if err != nil {
+		return fmt.Errorf("wiki ingest: checkpoint folder plan: %w", err)
+	}
 
 	// 2. REDUCE PHASE (Parallel upserting grouped by Slug)
 	egReduce, reduceCtx := errgroup.WithContext(ctx)
@@ -796,9 +805,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// 归并失败交给下方统一分类；这里仅返回获取锁的错误。
 				return nil
 			})
-			if lockErr != nil {
+			if lockErr != nil && reduceErr == nil {
 				collectUnapplied(updates)
-				// ctx cancelled (batch timeout / shutdown) — stop quietly.
+				if reduceCtx.Err() == nil {
+					logger.Warnf(reduceCtx, "wiki ingest: lock failed for slug %s: %v", slug, lockErr)
+				}
 				return nil
 			}
 			if !acquired {
@@ -1475,6 +1486,17 @@ func (s *wikiIngestService) mapOneDocument(
 	// does not leak into citation strings that downstream LLM prompts may
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
+	mapInputKey := wikiMappedInputKey(content+"\x00"+docTitle, lang, chatModel, batchCtx)
+	if op.Extraction != nil && op.Extraction.Mapped != nil && op.Extraction.Mapped.InputKey == mapInputKey {
+		mapped := op.Extraction.Mapped
+		if mapped.Result == nil {
+			return nil, nil, errors.New("wiki progress: mapped result is missing")
+		}
+		result := *mapped.Result
+		result.WikiSpan = wikiSpan
+		logger.Infof(ctx, "wiki ingest: resume mapped knowledge %s updates=%d", knowledgeID, len(mapped.Updates))
+		return &result, mapped.Updates, nil
+	}
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
@@ -1595,6 +1617,9 @@ func (s *wikiIngestService) mapOneDocument(
 		})
 	}()
 	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 
 	// Merge citations back into the item structs (non-failing; items without
 	// citations simply keep their Description+Details fallback).
@@ -1814,14 +1839,18 @@ func (s *wikiIngestService) mapOneDocument(
 		"summary_preview":  previewText(docSummaryLine, 160),
 	}
 
-	return &docIngestResult{
+	result := &docIngestResult{
 		KnowledgeID: knowledgeID,
 		DocTitle:    docTitle,
 		Summary:     docSummaryLine,
 		Pages:       extractedPages,
 		MapStats:    mapStats,
 		WikiSpan:    wikiSpan,
-	}, updates, nil
+	}
+	if err := s.saveWikiMappedDocument(ctx, payload.TenantID, &op, &wikiMappedDocument{InputKey: mapInputKey, Result: result, Updates: updates}); err != nil {
+		return nil, nil, err
+	}
+	return result, updates, nil
 }
 
 // resolveSlugUpdateLanguage picks the language the editor prompt should write
@@ -2031,6 +2060,17 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 	}
 
 	affectedType = "ingest"
+	if exists {
+		pending, checkErr := pendingWikiPageUpdates(page, updates, batchCtx)
+		if checkErr != nil {
+			return false, affectedType, false, false, checkErr
+		}
+		if len(pending) == 0 {
+			logger.Debugf(ctx, "wiki ingest: reuse completed page %s", slug)
+			return true, affectedType, false, false, nil
+		}
+		updates = pending
+	}
 
 	var summaryUpdate *SlugUpdate
 	var retracts []SlugUpdate
@@ -2063,6 +2103,10 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 
 		if err = s.checkWikiPageRetrySources(ctx, kbID, updates); err != nil {
 			return false, "", false, false, err
+		}
+		if err = recordWikiPageOperations(page, updates, batchCtx); err != nil {
+			return false, affectedType, false, false, err
+
 		}
 		if exists {
 			// A summary rewrite can drop table rows too, and the refusal has
@@ -2333,6 +2377,9 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		// the existing refs; addition rounds append the newly-cited chunks
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
+		if err = recordWikiPageOperations(page, updates, batchCtx); err != nil {
+			return false, affectedType, false, false, err
+		}
 		if exists {
 			// A retraction removes a deleted document's contribution on
 			// purpose, so this write is allowed to drop the table rows that

@@ -1417,7 +1417,7 @@ type docIngestResult struct {
 	// been materialised — see the EndSpan call near the end of
 	// ProcessWikiIngest. nil when no parent attempt was found, in which
 	// case the tracker helpers are all no-ops anyway.
-	WikiSpan *Span
+	WikiSpan *Span `json:"-"`
 }
 
 // WikiBatchContext holds shared data across Map and Reduce phases.
@@ -1435,6 +1435,9 @@ type docIngestResult struct {
 // free; the cache is per-batch and goroutine-local-via-mutex (sync.Map
 // would also work but mutex keeps the surface small).
 type WikiBatchContext struct {
+	// OperationKeys identifies durable page contributions across task retries.
+	OperationKeys map[string]string
+
 	// SlugTitle resolves a slug to its current title (or "" if missing).
 	// Backed by ListBySlugs; cache is populated as callers ask, so we
 	// only pay for the slugs we actually look at.

@@ -17,12 +17,14 @@ import (
 // Progress belongs to the durable pending operation, not to a worker or Redis
 // lease. Successful consumption/deletion removes it along with that operation.
 type wikiExtractionProgress struct {
-	Version     int                        `json:"version"`
-	Fingerprint string                     `json:"fingerprint"`
-	Total       int                        `json:"total"`
-	Segments    map[string]json.RawMessage `json:"segments"`
-	mu          sync.Mutex
-	persisted   json.RawMessage
+	Version       int                        `json:"version"`
+	Fingerprint   string                     `json:"fingerprint"`
+	Total         int                        `json:"total"`
+	Segments      map[string]json.RawMessage `json:"segments"`
+	PreviousSlugs *string                    `json:"previous_slugs,omitempty"`
+	Mapped        *wikiMappedDocument        `json:"mapped,omitempty"`
+	mu            sync.Mutex
+	persisted     json.RawMessage
 }
 
 type wikiSegmentExtractor func(context.Context, string) (combinedExtraction, error)
@@ -50,13 +52,19 @@ func (s *wikiIngestService) resumableWikiExtraction(
 	for i, segment := range segments {
 		layout[i] = wikiExtractionDigest([]byte(segment))
 	}
+	stableRecipe := make(map[string]string, len(recipe))
+	for k, v := range recipe {
+		if k != "PreviousSlugs" {
+			stableRecipe[k] = v
+		}
+	}
 	encoded, err := json.Marshal(struct {
 		Version            int
 		ModelID, ModelName string
 		Recipe             map[string]string
 		Layout             []string
 		MaxTokens          int
-	}{1, model.GetModelID(), model.GetModelName(), recipe, layout, wikiLLMMaxTokens})
+	}{2, model.GetModelID(), model.GetModelName(), stableRecipe, layout, wikiLLMMaxTokens})
 	if err != nil {
 		return nil, err
 	}
@@ -66,15 +74,40 @@ func (s *wikiIngestService) resumableWikiExtraction(
 	}
 	progress := op.Extraction
 	progress.mu.Lock()
-	progress.persisted = append(json.RawMessage(nil), op.dbPayload...)
-	if progress.Version != 1 || progress.Fingerprint != fingerprint {
-		progress.Version = 1
+	if len(progress.persisted) == 0 {
+		progress.persisted = append(json.RawMessage(nil), op.dbPayload...)
+	}
+	if progress.Version == 1 && len(progress.Segments) > 0 {
+		legacy, _ := json.Marshal(struct {
+			Version            int
+			ModelID, ModelName string
+			Recipe             map[string]string
+			Layout             []string
+			MaxTokens          int
+		}{1, model.GetModelID(), model.GetModelName(), recipe, layout, wikiLLMMaxTokens})
+		if progress.Fingerprint != wikiExtractionDigest(legacy) {
+			progress.mu.Unlock()
+			return nil, errors.New("wiki extraction: legacy checkpoint input changed; preserving saved blocks")
+		}
+		progress.Version = 2
+		progress.Fingerprint = fingerprint
+		previous := recipe["PreviousSlugs"]
+		progress.PreviousSlugs = &previous
+	}
+	if progress.Version != 2 || progress.Fingerprint != fingerprint {
+		progress.Version = 2
 		progress.Fingerprint = fingerprint
 		progress.Total = len(segments)
 		progress.Segments = make(map[string]json.RawMessage)
+		progress.Mapped = nil
+		previous := recipe["PreviousSlugs"]
+		progress.PreviousSlugs = &previous
 	}
 	if progress.Segments == nil {
 		progress.Segments = make(map[string]json.RawMessage)
+	}
+	if progress.PreviousSlugs != nil {
+		recipe["PreviousSlugs"] = *progress.PreviousSlugs
 	}
 	resumed := len(progress.Segments)
 	progress.mu.Unlock()
@@ -108,7 +141,7 @@ func (s *wikiIngestService) resumableWikiExtraction(
 			segments[k] = v
 		}
 		segments[key] = data
-		next := &wikiExtractionProgress{Version: 1, Fingerprint: fingerprint, Total: progress.Total, Segments: segments}
+		next := &wikiExtractionProgress{Version: 2, Fingerprint: fingerprint, Total: progress.Total, Segments: segments, PreviousSlugs: progress.PreviousSlugs, Mapped: progress.Mapped}
 		nextOp := *op
 		nextOp.Extraction = next
 		payload, err := json.Marshal(nextOp)
