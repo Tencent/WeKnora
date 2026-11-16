@@ -54,8 +54,10 @@ func TestDocumentScopedAgentRequestCannotCombineWholeLibrary(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			service := &qaDocumentScopeSession{}
 			h := &Handler{sessionService: service, customAgentService: &resolveOwnAgentStub{
-				agent: &types.CustomAgent{ID: "agent", TenantID: 7,
-					Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning}},
+				agent: &types.CustomAgent{
+					ID: "agent", TenantID: 7,
+					Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning},
+				},
 			}}
 			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 			ctx.Params = gin.Params{{Key: "session_id", Value: "session"}}

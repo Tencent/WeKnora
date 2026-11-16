@@ -270,8 +270,10 @@ func TestRestrictedFollowUpSetIDCannotBypassKeyBinding(t *testing.T) {
 	require.NoError(t, err)
 	set.ConfigHash = followUpCacheHash(verified, message.ExecutionContext)
 	attribution := &types.SuggestionAttribution{SuggestionSetID: set.ID, QuestionID: set.Questions[0].ID}
-	for _, other := range []context.Context{scopedFollowUpContext(100, "allowed-kb"),
-		context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))} {
+	for _, other := range []context.Context{
+		scopedFollowUpContext(100, "allowed-kb"),
+		context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7)),
+	} {
 		err := service.RecordEvent(other, set.SessionID, set.ID, attribution.QuestionID, types.SuggestionEventClick)
 		require.Error(t, err)
 		require.Error(t, service.ValidateAttribution(other, set.SessionID, set.Questions[0].Text, attribution))

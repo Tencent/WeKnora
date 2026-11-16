@@ -27,16 +27,20 @@ func TestRestrictedAgentDocumentTargetsRejectPartialAuthorization(t *testing.T) 
 	ctx := types.WithCaller(context.Background(), types.Caller{TenantID: 7})
 	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{KeyID: 11, KnowledgeBaseIDs: []string{"hr"}})
 	document := func(id, kb, status string) *types.Knowledge {
-		return &types.Knowledge{ID: id, KnowledgeBaseID: kb, TenantID: 7,
-			EnableStatus: status, ParseStatus: types.ParseStatusCompleted}
+		return &types.Knowledge{
+			ID: id, KnowledgeBaseID: kb, TenantID: 7,
+			EnableStatus: status, ParseStatus: types.ParseStatusCompleted,
+		}
 	}
 	lookup := restrictedDocumentLookup{docs: []*types.Knowledge{
 		document("allowed", "hr", "enabled"),
 		document("sibling", "hr", "enabled"),
 		document("foreign", "finance", "enabled"),
 		document("disabled", "hr", "disabled"),
-		{ID: "wrong-owner", KnowledgeBaseID: "hr", TenantID: 8,
-			EnableStatus: "enabled", ParseStatus: types.ParseStatusCompleted},
+		{
+			ID: "wrong-owner", KnowledgeBaseID: "hr", TenantID: 8,
+			EnableStatus: "enabled", ParseStatus: types.ParseStatusCompleted,
+		},
 	}}
 	bases := &suggestionKBService{kbs: map[string]*types.KnowledgeBase{"hr": {ID: "hr", TenantID: 7}}}
 	targets, err := buildRestrictedAgentDocumentTargets(ctx, lookup, bases, 7, []string{"allowed", "allowed"})
