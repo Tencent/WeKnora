@@ -154,7 +154,7 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	case "image":
 		file, caption := extractFileAndCaption(block.RawContent)
 		url := file.GetURL()
-		b.WriteString(fmt.Sprintf("![%s](%s)\n\n", caption, url))
+		fmt.Fprintf(b, "![%s](%s)\n\n", caption, markdownDestinationEscaper.Replace(url))
 		if url != "" {
 			*attachments = append(*attachments, attachment{
 				URL:      url,
@@ -174,11 +174,11 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		} else {
 			caption = url
 		}
-		b.WriteString(fmt.Sprintf("[%s](%s)\n\n", caption, url))
+		fmt.Fprintf(b, "[%s](%s)\n\n", caption, markdownDestinationEscaper.Replace(url))
 
 	case "embed":
 		url := extractString(block.RawContent, "url")
-		b.WriteString(fmt.Sprintf("[%s](%s)\n\n", url, url))
+		fmt.Fprintf(b, "[%s](%s)\n\n", url, markdownDestinationEscaper.Replace(url))
 
 	case "link_to_page":
 		// Render as a link; the actual page title is not available in block data
@@ -255,7 +255,7 @@ func renderMediaBlock(b *strings.Builder, block notionBlock, attachments *[]atta
 	if name == "" {
 		name = fileNameFromURL(url, block.Type)
 	}
-	b.WriteString(fmt.Sprintf("[%s](%s)\n\n", name, url))
+	fmt.Fprintf(b, "[%s](%s)\n\n", name, markdownDestinationEscaper.Replace(url))
 	if url != "" {
 		*attachments = append(*attachments, attachment{
 			URL:      url,
@@ -297,6 +297,9 @@ func renderTable(b *strings.Builder, block notionBlock) {
 	b.WriteString("\n")
 }
 
+// Backslash-escape Markdown delimiters without changing the underlying URL.
+var markdownDestinationEscaper = strings.NewReplacer("\\", "\\\\", "(", "\\(", ")", "\\)")
+
 // --- Rich text rendering ---
 
 // renderRichText converts a slice of rich text elements to Markdown.
@@ -306,7 +309,7 @@ func renderRichText(texts []notionRichText) string {
 		text := richTextToString(rt)
 		text = applyAnnotations(text, rt.Annotations)
 		if rt.Href != "" && !rt.Annotations.Code {
-			text = fmt.Sprintf("[%s](%s)", text, rt.Href)
+			text = fmt.Sprintf("[%s](%s)", text, markdownDestinationEscaper.Replace(rt.Href))
 		}
 		b.WriteString(text)
 	}
