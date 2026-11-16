@@ -403,6 +403,15 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		}
 		children, err := c.getBlockChildrenRecursive(ctx, allBlocks[i].ID, depth+1)
 		if err != nil {
+			// A cross-page synced_block whose source page is not shared with the
+			// integration (or was trashed) still reports has_children=true while
+			// GET /v1/blocks/{id}/children deterministically returns 404. Skip the
+			// inaccessible subtree instead of aborting the whole page and sync run.
+			if errors.Is(err, datasource.ErrResourceNotFound) {
+				logger.Warnf(ctx, "[Notion] failed to get children for block %s (depth %d): %v",
+					allBlocks[i].ID, depth, err)
+				continue
+			}
 			return nil, err
 		}
 		allBlocks[i].Children = children
