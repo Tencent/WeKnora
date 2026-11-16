@@ -137,7 +137,10 @@ func (h *MessageSuggestionHandler) RecordEvent(c *gin.Context) {
 }
 
 func (h *MessageSuggestionHandler) writeError(c *gin.Context, err error) {
+	var appErr *apperrors.AppError
 	switch {
+	case errors.As(err, &appErr):
+		c.Error(appErr)
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		c.Error(apperrors.NewNotFoundError("suggestions not found"))
 	// apperrors.ErrSessionNotFound is a bare errors.New (not wrapping

@@ -263,6 +263,31 @@ func (s *agentService) CreateAgentEngine(
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
+	if config.DocumentScoped {
+		// Whole-library summaries and automatically registered tools may expose
+		// information beyond the documents chosen for this turn.
+		toolRegistry.RestrictTools(config.AllowedTools)
+		selectedDocs, err := s.getSelectedDocumentInfos(ctx, config.KnowledgeIDs)
+		if err != nil {
+			return nil, err
+		}
+		if len(selectedDocs) != len(uniqueNonEmptyStrings(config.KnowledgeIDs)) {
+			return nil, fmt.Errorf("one or more selected documents are no longer readable")
+		}
+		for _, doc := range selectedDocs {
+			if !slices.ContainsFunc(config.SearchTargets, func(target *types.SearchTarget) bool {
+				return target.KnowledgeBaseID == doc.KnowledgeBaseID &&
+					slices.Contains(target.KnowledgeIDs, doc.KnowledgeID)
+			}) {
+				return nil, fmt.Errorf("selected document changed scope")
+			}
+		}
+		engine := agent.NewAgentEngine(config, chatModel, toolRegistry, eventBus, nil, selectedDocs,
+			sessionID, config.ResolveSystemPrompt(false))
+		engine.SetAppConfig(s.cfg)
+		toolRegistry.BindSession(sessionID)
+		return engine, nil
+	}
 	s.registerMCPTools(ctx, toolRegistry, config)
 	s.registerOperationTools(ctx, toolRegistry, config)
 	registerProductDocTools(ctx, toolRegistry, config)

@@ -3374,6 +3374,10 @@ func (s *installSessionService) AgentQA(context.Context, *types.QARequest, *even
 	return nil
 }
 
+func (s *installSessionService) AuthorizeRestrictedAgentDocuments(context.Context, uint64, []string) error {
+	panic("unexpected document scope validation")
+}
+
 type installModelService struct {
 	// missing names models the workspace can no longer resolve, e.g. one the
 	// installer agent still points at after it was deleted.
