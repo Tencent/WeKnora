@@ -38,7 +38,7 @@ export function AdopterShowcase() {
     onKeyDown={event => { if (event.key === "Escape") setActive(null); }}>
     <div ref={inner} className={`${s.shell} ${a.inner}`}>
       <div className={a.heading} onPointerEnter={event => { if (event.pointerType === "mouse") setActive(null); }}>
-        <h2 id="adopters-title">企业案例</h2>
+        <h2 id="adopters-title">谁在使用 WeKnora</h2>
         <a className={a.join} href={adopterIssue} target="_blank" rel="noreferrer">分享你的实践 <Icon name="arrow" /></a>
       </div>
       <div id="adopter-logos" className={a.viewport}>
