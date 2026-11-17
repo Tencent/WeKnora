@@ -226,6 +226,8 @@ type KnowledgeService interface {
 	ProcessKnowledgeListDelete(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks
 	ProcessKnowledgeListReparse(ctx context.Context, t *asynq.Task) error
+	// ProcessKnowledgeListReembed handles Asynq knowledge list re-embed tasks
+	ProcessKnowledgeListReembed(ctx context.Context, t *asynq.Task) error
 	// GetKBCloneProgress retrieves the progress of a knowledge base clone task
 	GetKBCloneProgress(ctx context.Context, taskID string) (*types.KBCloneProgress, error)
 	// SaveKBCloneProgress saves the progress of a knowledge base clone task

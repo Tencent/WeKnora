@@ -27,8 +27,9 @@ import (
 // dim-less keywords index). Missing "chunk_enabled" → IndexInfo's own
 // IsEnabled field is used as-is.
 
-// Save indexes a single chunk. Idempotent: _id is set to chunk_id so
-// re-indexing the same chunk overwrites instead of creating a duplicate.
+// Save indexes a single index entry. Idempotent: _id is derived from the
+// entry's source id (see documentID), so re-indexing the same entry
+// overwrites instead of creating a duplicate.
 func (r *Repository) Save(
 	ctx context.Context,
 	info *types.IndexInfo,
@@ -59,7 +60,7 @@ func (r *Repository) Save(
 	}
 	req := osapi.IndexReq{
 		Index:      targetIndex,
-		DocumentID: info.ChunkID, // _id = chunk_id (idempotent)
+		DocumentID: documentID(info),
 		Body:       bytes.NewReader(doc),
 	}
 	resp, err := r.client.Index(ctx, req)
@@ -136,6 +137,20 @@ func (r *Repository) BatchSave(
 	return inspectBulkResponse(io.LimitReader(resp.Inspect().Response.Body, 64<<20))
 }
 
+// documentID returns the OpenSearch _id for an index entry. One chunk can
+// own several entries that share its chunk_id: the chunk text itself plus
+// one entry per generated question or FAQ similar question. Each entry has
+// its own source_id (equal to chunk_id for the chunk text), so keying _id on
+// source_id keeps writes idempotent per entry without letting a chunk's
+// entries overwrite one another. Falls back to chunk_id when a caller leaves
+// source_id empty.
+func documentID(info *types.IndexInfo) string {
+	if info.SourceID != "" {
+		return info.SourceID
+	}
+	return info.ChunkID
+}
+
 // estimateBulkBodyBytes returns a rough NDJSON size in bytes. Slight
 // overestimate so the cap fires before real allocation. Per-item:
 //   - action header `{"index":{"_index":"...","_id":"..."}}\n` ≈ 100B
@@ -153,7 +168,7 @@ func buildBulkBody(alias string, infos []*types.IndexInfo, emb [][]float32, para
 		action := map[string]any{
 			"index": map[string]any{
 				"_index": alias,
-				"_id":    info.ChunkID,
+				"_id":    documentID(info),
 			},
 		}
 		actionJSON, err := json.Marshal(action)
