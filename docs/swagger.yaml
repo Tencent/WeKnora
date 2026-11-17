@@ -13078,6 +13078,15 @@ definitions:
         example: true
         type: boolean
     type: object
+  internal_handler.RebuildIndexRequest:
+    properties:
+      mode:
+        description: Mode is "reparse" (the default) or "reembed".
+        enum:
+        - reparse
+        - reembed
+        type: string
+    type: object
   internal_handler.RefreshTokenResponse:
     properties:
       access_token:
@@ -20731,15 +20740,24 @@ paths:
         with one model call. A description the user wrote is kept.
   /knowledge-bases/{id}/rebuild-index:
     post:
+      consumes:
+      - application/json
       description: |-
         索引策略变更后，把知识库下全部文档提交重新解析。前端知识库设置弹窗
         (KnowledgeBaseEditorModal) 在保存新策略后调用此接口，此前该路由在后端缺失，调用返回 404。
+        mode=reembed rebuilds the index entries from the stored chunks and generated
+        questions instead, calling only the embedding model (no re-parse, no LLM or VLM calls).
       parameters:
       - description: 知识库ID
         in: path
         name: id
         required: true
         type: string
+      - description: Rebuild mode, defaults to reparse
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_handler.RebuildIndexRequest'
       produces:
       - application/json
       responses:

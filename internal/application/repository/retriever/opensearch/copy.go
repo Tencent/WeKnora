@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -57,9 +59,10 @@ func transformSourceID(sourceID, chunkID, targetChunkID string) string {
 // synchronously and paginates; the large-batch background-task path is a
 // later change.
 //
-// NOTE: from/size pagination is bounded by the index's max_result_window
-// (default 10000). Copies larger than that require the scroll-based async
-// path (a later change).
+// The scan is limited to the source knowledge ids being copied, so the
+// from/size pagination, which is bounded by the index's max_result_window
+// (default 10000), applies to the documents of those knowledge entries
+// rather than to the whole knowledge base.
 func (r *Repository) CopyIndices(
 	ctx context.Context,
 	sourceKnowledgeBaseID string,
@@ -82,10 +85,11 @@ func (r *Repository) CopyIndices(
 		return err
 	}
 	alias := r.indexAlias(dimension)
+	sourceKnowledgeIDs := slices.Sorted(maps.Keys(sourceToTargetKBIDMap))
 
 	var total int64
 	for from := 0; ; from += copyBatchSize {
-		docs, err := r.copyScanBatch(ctx, alias, sourceKnowledgeBaseID, from, copyBatchSize)
+		docs, err := r.copyScanBatch(ctx, alias, sourceKnowledgeBaseID, sourceKnowledgeIDs, from, copyBatchSize)
 		if err != nil {
 			return err
 		}
@@ -94,7 +98,6 @@ func (r *Repository) CopyIndices(
 		}
 		infos := make([]*types.IndexInfo, 0, len(docs))
 		embMap := make(map[string][]float32, len(docs))
-		enabledMap := make(map[string]bool, len(docs))
 		for i := range docs {
 			d := &docs[i]
 			targetChunkID, ok := sourceToTargetChunkIDMap[d.ChunkID]
@@ -114,7 +117,6 @@ func (r *Repository) CopyIndices(
 				// the Elasticsearch driver's convention.
 				embMap[targetSourceID] = d.Embedding
 			}
-			enabledMap[targetChunkID] = d.IsEnabled
 			infos = append(infos, &types.IndexInfo{
 				Content:         d.Content,
 				SourceID:        targetSourceID,
@@ -129,10 +131,10 @@ func (r *Repository) CopyIndices(
 			})
 		}
 		if len(infos) > 0 {
-			params := map[string]any{
-				"embedding":     embMap,
-				"chunk_enabled": enabledMap,
-			}
+			// No chunk_enabled overlay: it is keyed by chunk_id and would force
+			// one value onto every document of a chunk, while each copied
+			// document already carries its own is_enabled.
+			params := map[string]any{"embedding": embMap}
 			if err := r.BatchSave(ctx, infos, params); err != nil {
 				return fmt.Errorf("opensearch: CopyIndices batch save: %w", err)
 			}
@@ -148,10 +150,11 @@ func (r *Repository) CopyIndices(
 	return nil
 }
 
-// copyScanBatch reads one page of docs belonging to sourceKB from the per-dim
-// index, decoding the full _source (including the embedding vector).
+// copyScanBatch reads one page of docs belonging to the given knowledge ids of
+// sourceKB from the per-dim index, decoding the full _source (including the
+// embedding vector).
 func (r *Repository) copyScanBatch(
-	ctx context.Context, index, sourceKB string, from, size int,
+	ctx context.Context, index, sourceKB string, knowledgeIDs []string, from, size int,
 ) ([]copySourceDoc, error) {
 	body, err := json.Marshal(map[string]any{
 		"from": from,
@@ -160,6 +163,7 @@ func (r *Repository) copyScanBatch(
 			"bool": map[string]any{
 				"filter": []any{
 					map[string]any{"term": map[string]any{"knowledge_base_id": sourceKB}},
+					map[string]any{"terms": map[string]any{"knowledge_id": knowledgeIDs}},
 				},
 			},
 		},
