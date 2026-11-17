@@ -269,7 +269,10 @@ func serveResourceGrants(
 	}
 	handler := func(c *gin.Context) {
 		ctx := c.Request.Context()
-		resource, err := resourceCatalog.ResolveAccessGrant(ctx, c.Param("token"))
+		// A display-only filename suffix keeps image URLs compatible with IM
+		// clients without changing the opaque, base64url grant token.
+		token, _, _ := strings.Cut(c.Param("token"), ".")
+		resource, err := resourceCatalog.ResolveAccessGrant(ctx, token)
 		if err != nil || resource == nil {
 			c.Status(http.StatusNotFound)
 			return
