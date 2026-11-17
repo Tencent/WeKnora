@@ -544,10 +544,14 @@ func TestRetryFailedKnowledgeSummariesSelectsAndClaimsOnlyFailedParsedDocuments(
 	require.Len(t, rows, 1)
 	require.Equal(t, "eligible", rows[0].ID)
 
-	claimed, err := repo.TransitionKnowledgeSummaryStatus(ctx, rows[0], types.SummaryStatusFailed, types.SummaryStatusPending)
+	claimed, err := repo.TransitionKnowledgeSummaryStatus(
+		ctx, rows[0], types.SummaryStatusFailed, types.SummaryStatusPending,
+	)
 	require.NoError(t, err)
 	require.True(t, claimed)
-	claimed, err = repo.TransitionKnowledgeSummaryStatus(ctx, rows[0], types.SummaryStatusFailed, types.SummaryStatusPending)
+	claimed, err = repo.TransitionKnowledgeSummaryStatus(
+		ctx, rows[0], types.SummaryStatusFailed, types.SummaryStatusPending,
+	)
 	require.NoError(t, err)
 	require.False(t, claimed)
 	rows, err = repo.ListFailedKnowledgeSummaries(ctx, 1, "kb")

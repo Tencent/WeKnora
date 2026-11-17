@@ -163,7 +163,9 @@ func (s *knowledgeService) RequestKnowledgeSummaryRefresh(
 
 // RetryFailedKnowledgeSummaries schedules independent refreshes for parsed
 // documents with failed summaries in the requested knowledge base.
-func (s *knowledgeService) RetryFailedKnowledgeSummaries(ctx context.Context, kbID string) (submitted, failed int, err error) {
+func (s *knowledgeService) RetryFailedKnowledgeSummaries(
+	ctx context.Context, kbID string,
+) (submitted, failed int, err error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	rows, err := s.repo.ListFailedKnowledgeSummaries(ctx, tenantID, kbID)
 	if err != nil || len(rows) == 0 {
@@ -199,7 +201,9 @@ func (s *knowledgeService) retryFailedKnowledgeSummary(ctx context.Context, know
 	if err != nil {
 		return false, err
 	}
-	claimed, err := s.repo.TransitionKnowledgeSummaryStatus(ctx, knowledge, types.SummaryStatusFailed, types.SummaryStatusPending)
+	claimed, err := s.repo.TransitionKnowledgeSummaryStatus(
+		ctx, knowledge, types.SummaryStatusFailed, types.SummaryStatusPending,
+	)
 	if err != nil || !claimed {
 		return false, err
 	}

@@ -108,7 +108,9 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	// the handler re-validates ownership before enqueueing.
 	kbRebuild := g.apiKeyGroup(r.Group("/knowledge-bases/:id"), apiKeyIngest(apiKeyFullAccess()))
 	kbRebuild.POST("/rebuild-index", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RebuildKnowledgeBaseIndex)
-	kbRebuild.POST("/retry-failed-summaries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RetryFailedKnowledgeSummaries)
+	kbRebuild.POST("/retry-failed-summaries",
+		g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RetryFailedKnowledgeSummaries,
+	)
 
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	kgrp := r.Group("/knowledge")

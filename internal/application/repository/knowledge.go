@@ -116,7 +116,8 @@ func (r *knowledgeRepository) TransitionKnowledgeSummaryStatus(
 	ctx context.Context, knowledge *types.Knowledge, from, to string,
 ) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?", knowledge.ID, knowledge.TenantID, knowledge.KnowledgeBaseID).
+		Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?",
+			knowledge.ID, knowledge.TenantID, knowledge.KnowledgeBaseID).
 		Where("parse_status = ? AND summary_status = ?", types.ParseStatusCompleted, from).
 		Update("summary_status", to)
 	return result.RowsAffected == 1, result.Error
