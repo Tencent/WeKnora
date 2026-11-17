@@ -1,4 +1,4 @@
-// Aspect-ratio handling for imageprep.
+// Package imageprep normalizes images before they are handed to a vision model.
 //
 // Some vision preprocessors reject images whose aspect ratio is extreme:
 // vLLM, for one, fails an image whose absolute aspect ratio reaches 200 with
