@@ -317,6 +317,18 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		logger.Infof(ctx, "Multi-turn disabled by custom agent, clearing history")
 	}
 
+	// Carry the agent's retain_retrieval_history into the pipeline. Without
+	// it the flag only redacted history tool results in the agent engine's
+	// LLM context, while the KnowledgeQA merge stage still injected previous
+	// turns' references into this turn's results (issue #5613): a
+	// quick-answer agent with the flag off showed last turn's documents in
+	// this turn's retrieval-results panel.
+	retainRetrievalHistory := customAgent.Config.RetainRetrievalHistory
+	cm.RetainRetrievalHistory = &retainRetrievalHistory
+	if !retainRetrievalHistory {
+		logger.Infof(ctx, "Agent opted out of retaining retrieval history, history references will not be merged")
+	}
+
 	// FAQ strategy settings
 	cm.FAQPriorityEnabled = customAgent.Config.FAQPriorityEnabled
 	cm.FAQDirectAnswerThreshold = customAgent.Config.FAQDirectAnswerThreshold
