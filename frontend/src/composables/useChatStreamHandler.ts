@@ -723,7 +723,15 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         const events = [...(item.agentEventStream as ChatMessage[])]
         promptCards.sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
         for (const card of promptCards) {
-          if (events.some(e => isPromptCard(e) && e.pending_id === card.pending_id)) continue
+          const existing = events.findIndex(e => isPromptCard(e) && e.pending_id === card.pending_id)
+          if (existing >= 0) {
+            // Step snapshots lack durable approval state. Keep their timeline
+            // position and metadata, but take the status and expiry from the prompt.
+            if (card.type === 'tool_approval_required' && !events[existing].suspendable) {
+              events[existing] = { ...events[existing], ...card }
+            }
+            continue
+          }
           // Replace ask_user's tool-result fallback with the authoritative row.
           const fallback = events.findIndex(e => e.pending_id === `history-${card.tool_call_id}` && !card.delegated_task)
           if (fallback >= 0) events.splice(fallback, 1)

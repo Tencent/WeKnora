@@ -35,11 +35,12 @@
       </span>
       <t-popup v-if="!batchMode" v-model:visible="menuOpen" :overlay-class-name="menuOverlayClass" trigger="click" destroy-on-close
         placement="bottom-right" @visible-change="onMenuVisibleChange">
-        <button type="button" class="menu-more-wrap" :aria-label="t('chatHeader.moreActions')" aria-haspopup="menu" :aria-expanded="menuOpen" @click.stop>
+        <button ref="menuTrigger" type="button" class="menu-more-wrap" :aria-label="t('chatHeader.moreActions')" aria-haspopup="menu" :aria-expanded="menuOpen"
+          @keydown.esc="dismissMenu" @click.stop>
           <t-icon name="ellipsis" class="menu-more" />
         </button>
         <template #content>
-          <div class="card-menu" @click.stop>
+          <div class="card-menu" @click.stop @keydown.esc="dismissMenu">
             <template v-if="menuMode === 'menu'">
               <template v-for="(option, index) in menuOptions" :key="option.value">
                 <div v-if="shouldShowDividerBefore(option.value, index)" class="session-action-menu__divider" />
@@ -113,6 +114,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const menuOpen = ref(false)
+const menuTrigger = ref<HTMLButtonElement | null>(null)
 const menuMode = ref<MenuMode>('menu')
 const titleEditing = ref(false)
 const titleDraft = ref('')
@@ -152,6 +154,15 @@ const apiOwnerTag = computed<ApiOwnerTag | null>(() => {
   }
   return null
 })
+
+function dismissMenu(event: KeyboardEvent): void {
+  if (!menuOpen.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  menuOpen.value = false
+  menuMode.value = 'menu'
+  nextTick(() => menuTrigger.value?.focus())
+}
 
 const onMenuVisibleChange = (visible: boolean): void => {
   if (!visible) menuMode.value = 'menu'

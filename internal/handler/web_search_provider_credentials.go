@@ -37,6 +37,20 @@ type webSearchCredentialsPutRequest struct {
 	APIKey *string `json:"api_key,omitempty"`
 }
 
+// Put godoc
+// @Summary      设置联网搜索服务商凭据
+// @Description  写入 api_key；省略时返回当前配置状态
+// @Tags         联网搜索
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "服务商 ID"
+// @Param        request  body      map[string]interface{}  true  "{api_key?: string}"
+// @Success      200      {object}  handler.DataResponse{data=dto.CredentialsResponse}  "写入后的凭据状态"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      404      {object}  errors.AppError         "服务商不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /web-search-providers/{id}/credentials [put]
 func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)
@@ -79,6 +93,19 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField godoc
+// @Summary      移除联网搜索服务商的凭据字段
+// @Description  删除指定字段的存储凭据；当前仅支持 api_key；删除已为空的字段是幂等的
+// @Tags         联网搜索
+// @Produce      json
+// @Param        id     path      string  true  "服务商 ID"
+// @Param        field  path      string  true  "字段名（api_key）"
+// @Success      204
+// @Failure      400  {object}  errors.AppError  "字段名非法"
+// @Failure      404  {object}  errors.AppError  "服务商不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /web-search-providers/{id}/credentials/{field} [delete]
 func (h *WebSearchProviderCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)

@@ -694,3 +694,124 @@ func TestReadBitableRecords_CapsFieldPages(t *testing.T) {
 		t.Errorf("hitting the cap must log a warning, log tail: %s", log)
 	}
 }
+
+// An incomplete page listing cannot prove the document or table is complete.
+// Before these guards the loops treated a missing or repeated page token as
+// "no more pages", silently dropping the rest of the blocks, columns or rows.
+func TestListDocumentBlocks_RejectsIncompletePagination(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+		page func(token string) map[string]any
+	}{
+		{
+			name: "missing token",
+			want: "has_more=true with a missing page token",
+			page: func(string) map[string]any {
+				return map[string]any{
+					"items": []map[string]any{{"block_id": "b1"}}, "has_more": true,
+				}
+			},
+		},
+		{
+			name: "repeated token",
+			want: "repeated page token",
+			page: func(token string) map[string]any {
+				id := "b1"
+				if token != "" {
+					id = "b2"
+				}
+				return map[string]any{
+					"items": []map[string]any{{"block_id": id}}, "has_more": true, "page_token": "p2",
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"code": 0, "data": tc.page(r.URL.Query().Get("page_token")),
+				})
+			}))
+			defer srv.Close()
+
+			c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
+			blocks, err := c.listDocumentBlocks(context.Background(), "doc123")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if len(blocks) != 0 {
+				t.Errorf("blocks = %v, want none", blocks)
+			}
+		})
+	}
+}
+
+func TestReadBitableRecords_RejectsIncompletePagination(t *testing.T) {
+	oneField := map[string]any{"items": []map[string]any{{"field_name": "Name"}}, "has_more": false}
+	for _, tc := range []struct {
+		name    string
+		want    string
+		fields  map[string]any
+		records map[string]any
+	}{
+		{
+			name: "fields missing token",
+			want: "bitable field pagination: has_more=true with a missing page token",
+			fields: map[string]any{
+				"items": []map[string]any{{"field_name": "Name"}}, "has_more": true,
+			},
+		},
+		{
+			name:   "records missing token",
+			want:   "bitable record pagination: has_more=true with a missing page token",
+			fields: oneField,
+			records: map[string]any{
+				"items": []map[string]any{{"fields": map[string]any{"Name": "x"}}}, "has_more": true,
+			},
+		},
+		{
+			name:    "records repeated token",
+			want:    "bitable record pagination repeated page token",
+			fields:  oneField,
+			records: nil, // scripted by token below
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+					_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
+				case strings.HasSuffix(r.URL.Path, "/fields"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": tc.fields})
+				case strings.HasSuffix(r.URL.Path, "/records/search"):
+					data := tc.records
+					if data == nil {
+						// Both pages advertise the same token: the connector must
+						// stop rather than re-read it forever.
+						data = map[string]any{
+							"items":      []map[string]any{{"fields": map[string]any{"Name": "x"}}},
+							"has_more":   true,
+							"page_token": "r2",
+						}
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": data})
+				}
+			}))
+			defer srv.Close()
+
+			c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
+			rows, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if rows != nil {
+				t.Errorf("rows = %v, want none", rows)
+			}
+		})
+	}
+}

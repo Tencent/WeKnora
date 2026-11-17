@@ -22,9 +22,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// wikiLinkRegex matches [[wiki-link]] syntax in markdown content
-var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-
 // wikiInlineChunkCitationRegex matches internal short handles emitted by the
 // wiki ingest prompt while it classifies supporting chunks. The stable source
 // relationship lives in WikiPage.ChunkRefs, so these handles have no meaning
@@ -1383,25 +1380,7 @@ func isInvalidWikiSearchQuery(err error) bool {
 
 // parseOutLinks extracts [[wiki-link]] slugs from markdown content
 func (s *wikiPageService) parseOutLinks(content string) types.StringArray {
-	matches := wikiLinkRegex.FindAllStringSubmatch(content, -1)
-	seen := make(map[string]bool)
-	var links types.StringArray
-
-	for _, match := range matches {
-		if len(match) > 1 {
-			slug := strings.TrimSpace(match[1])
-			// Handle [[slug|display name]] format — slug is the first part
-			if parts := strings.SplitN(slug, "|", 2); len(parts) == 2 {
-				slug = strings.TrimSpace(parts[0])
-			}
-			slug = normalizeSlug(slug)
-			if slug != "" && !seen[slug] {
-				seen[slug] = true
-				links = append(links, slug)
-			}
-		}
-	}
-	return links
+	return wikiOutLinks(content)
 }
 
 // normalizeSlug normalizes a wiki link slug
@@ -1427,30 +1406,17 @@ func slugNamespace(slug string) string {
 // untouched. Display text is preserved verbatim. This is a pure helper — the
 // resolution policy lives entirely in the callback.
 func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string) (string, bool)) (string, bool) {
-	changed := false
-	out := wikiLinkRegex.ReplaceAllStringFunc(content, func(match string) string {
-		inner := match[2 : len(match)-2]
-		rawSlug := inner
-		display := ""
-		if parts := strings.SplitN(inner, "|", 2); len(parts) == 2 {
-			rawSlug = parts[0]
-			display = strings.TrimSpace(parts[1])
+	return rewriteMarkdownWikiLinks(content, func(link markdownWikiLink) string {
+		newSlug, ok := resolve(link.slug, link.display)
+		if !ok || newSlug == "" || newSlug == link.slug {
+			return content[link.start:link.end]
 		}
-		norm := normalizeSlug(rawSlug)
-		if norm == "" {
-			return match
+		replacement := "[[" + newSlug
+		if link.display != "" {
+			replacement += link.separator + link.display
 		}
-		newSlug, ok := resolve(norm, display)
-		if !ok || newSlug == "" || newSlug == norm {
-			return match
-		}
-		changed = true
-		if display != "" {
-			return "[[" + newSlug + "|" + display + "]]"
-		}
-		return "[[" + newSlug + "]]"
+		return replacement + "]]"
 	})
-	return out, changed
 }
 
 // RepairContentLinks rewrites [[slug]] / [[slug|display]] references in
