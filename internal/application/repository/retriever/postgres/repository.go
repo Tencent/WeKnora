@@ -818,11 +818,14 @@ func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
 		placeholders[i] = "?"
 		vars[i] = id
 	}
+	// ParadeDB can reject score-ordered BM25 queries with column comparisons
+	// in the filter. Use a prefix test for generated-question source IDs.
 	return clause.Expr{
 		SQL: fmt.Sprintf(
-			"NOT (knowledge_base_id IN (%s) AND %s)",
+			"NOT (knowledge_base_id IN (%s) AND source_type = %d AND chunk_id <> '' "+
+				"AND starts_with(source_id, chunk_id || '-'))",
 			strings.Join(placeholders, ", "),
-			types.GeneratedQuestionRowPredicate(""),
+			types.ChunkSourceType,
 		),
 		Vars: vars,
 	}
