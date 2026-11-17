@@ -56,6 +56,13 @@ type PipelineRequest struct {
 	// CitationEnabled controls only final knowledge/web source citations. Nil
 	// defaults to true for requests and agents created before this option existed.
 	CitationEnabled *bool `json:"citation_enabled,omitempty"`
+	// RetainRetrievalHistory controls whether previous turns' retrieval
+	// references are merged into this turn's results by the merge stage
+	// (issue #5613). Nil keeps the legacy behavior (inject) for callers
+	// that never set it — plain KnowledgeQA sessions and the retrieval API.
+	// An agent sets it from its retain_retrieval_history config, so false
+	// means this turn shows only its own freshly retrieved results.
+	RetainRetrievalHistory *bool `json:"retain_retrieval_history,omitempty"`
 
 	// Rewrite parameters
 	EnableRewrite        bool   `json:"enable_rewrite"`
@@ -340,6 +347,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			FallbackResponse:         c.FallbackResponse,
 			FallbackPrompt:           c.FallbackPrompt,
 			CitationEnabled:          c.CitationEnabled,
+			RetainRetrievalHistory:   c.RetainRetrievalHistory,
 			EnableRewrite:            c.EnableRewrite,
 			EnableQueryExpansion:     c.EnableQueryExpansion,
 			RewritePromptSystem:      c.RewritePromptSystem,

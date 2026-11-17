@@ -317,6 +317,18 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		logger.Infof(ctx, "Multi-turn disabled by custom agent, clearing history")
 	}
 
+	// Carry the agent's retain_retrieval_history into the pipeline. Without
+	// it the flag only redacted history tool results in the agent engine's
+	// LLM context, while the KnowledgeQA merge stage still injected previous
+	// turns' references into this turn's results (issue #5613): a
+	// quick-answer agent with the flag off showed last turn's documents in
+	// this turn's retrieval-results panel.
+	retainRetrievalHistory := customAgent.Config.RetainRetrievalHistory
+	cm.RetainRetrievalHistory = &retainRetrievalHistory
+	if !retainRetrievalHistory {
+		logger.Infof(ctx, "Agent opted out of retaining retrieval history, history references will not be merged")
+	}
+
 	// FAQ strategy settings
 	cm.FAQPriorityEnabled = customAgent.Config.FAQPriorityEnabled
 	cm.FAQDirectAnswerThreshold = customAgent.Config.FAQDirectAnswerThreshold
@@ -392,4 +404,27 @@ func (s *sessionService) restrictMentionsToAgentScope(
 		len(kbIDs), len(filteredKBs), len(knowledgeIDs), len(filteredKnowledge))
 
 	return filteredKBs, filteredKnowledge
+}
+
+// resolveKnowledgeQARerankModel fills the KnowledgeQA pipeline's rerank model
+// the same way the retrieval API path resolves it (issue #1800): the tenant's
+// RetrievalConfig, else the tenant's first rerank model. Nothing populated
+// RerankModelID on this path, so the rerank stage skipped with
+// "empty_model_id" and quick answers returned the full retrieval order while
+// the search API reranked the same tenant setting. Agent overrides win by
+// construction — callers only ask here when the override left it empty.
+func (s *sessionService) resolveKnowledgeQARerankModel(ctx context.Context, current string) string {
+	if current != "" {
+		return current
+	}
+	var rc *types.RetrievalConfig
+	if tenantInfo, ok := types.TenantInfoFromContext(ctx); ok && tenantInfo != nil {
+		rc = tenantInfo.RetrievalConfig
+	}
+	modelID, _, err := resolveRerankModelID(ctx, s.modelService, "", rc)
+	if err != nil {
+		logger.Warnf(ctx, "Rerank model resolution failed, KnowledgeQA runs unranked: %v", err)
+		return ""
+	}
+	return modelID
 }

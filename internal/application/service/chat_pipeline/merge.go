@@ -151,12 +151,25 @@ func (p *PluginMerge) dedup(ctx context.Context, label string, results []*types.
 }
 
 // injectHistoryResults appends relevant history references to the current results
-// and deduplicates the combined set.
+// and deduplicates the combined set. It is skipped when the caller opted out
+// of retaining retrieval history (RetainRetrievalHistory=false, issue #5613):
+// without the gate, a quick-answer agent with the flag off still showed the
+// previous turn's documents in this turn's retrieval results, because the
+// merge stage re-injected them even though the agent engine had redacted the
+// history tool results from the LLM context. A nil flag keeps the legacy
+// behavior (inject) for callers that never set it.
 func (p *PluginMerge) injectHistoryResults(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	current []*types.SearchResult,
 ) []*types.SearchResult {
+	if chatManage.RetainRetrievalHistory != nil && !*chatManage.RetainRetrievalHistory {
+		pipelineInfo(ctx, "Merge", "history_inject_skipped", map[string]interface{}{
+			"session_id": chatManage.SessionID,
+			"reason":     "retain_retrieval_history=false",
+		})
+		return current
+	}
 	historyResults := filterHistoryResults(ctx, chatManage, current)
 	if len(historyResults) == 0 {
 		return current
