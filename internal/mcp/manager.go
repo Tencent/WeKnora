@@ -124,9 +124,9 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 		m.clientsMu.Unlock()
 		return nil, err
 	}
-	if client, exists := m.clients[key]; exists && client.IsConnected() {
+	if client, exists := m.clients[key]; exists {
 		managed, owned := client.(*managedMCPClient)
-		if !owned || managed.version.Equal(service.UpdatedAt) {
+		if client.IsConnected() && (!owned || managed.version.Equal(service.UpdatedAt)) {
 			m.clientsMu.Unlock()
 			return client, nil
 		}
@@ -495,14 +495,23 @@ func (m *MCPManager) cleanupIdleConnections() {
 
 // removeDisconnectedClients removes clients that are no longer connected
 func (m *MCPManager) removeDisconnectedClients() {
+	retired := make(map[string]MCPClient)
 	m.clientsMu.Lock()
-	defer m.clientsMu.Unlock()
-
 	for serviceID, client := range m.clients {
 		if !client.IsConnected() {
+			retired[serviceID] = client
 			delete(m.clients, serviceID)
-			logger.GetLogger(m.ctx).Infof("Removed disconnected MCP client: %s", serviceID)
 		}
+	}
+	m.clientsMu.Unlock()
+
+	// The transport may already be closed, but the managed wrapper still owns
+	// its connection lifetime. Release it outside the lock like explicit closes.
+	for serviceID, client := range retired {
+		if err := client.Disconnect(); err != nil {
+			logger.GetLogger(m.ctx).Errorf("Failed to disconnect MCP client %s: %v", serviceID, err)
+		}
+		logger.GetLogger(m.ctx).Infof("Removed disconnected MCP client: %s", serviceID)
 	}
 }
 

@@ -183,7 +183,12 @@ def _read_sheet_dataframe(
     # "N/A", "NA", "NULL", "None", "NaN" or "n/a" as missing, and its pair is
     # dropped, though the cell says "not applicable" or "none". Blank cells are
     # then read as "", which parse_into_text skips like a missing value.
-    df = excel_file.parse(sheet_name=sheet_name, header=None, keep_default_na=False)
+    # Preserve the cell types supplied by the engine. Column inference otherwise
+    # turns text identifiers ("00123", "1e5") into numbers; iterrows can then
+    # coerce a numeric row to floats and lose precision in long identifiers.
+    df = excel_file.parse(
+        sheet_name=sheet_name, header=None, keep_default_na=False, dtype=object
+    )
     if xlsx_first_row_as_header and len(df.index) >= 2:
         df.columns = _stable_header_labels(df.iloc[0].tolist())
         return df.iloc[1:].copy()

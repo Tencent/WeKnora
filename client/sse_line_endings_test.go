@@ -65,6 +65,39 @@ func TestAgentSSEFragmentedMixedLineEndings(t *testing.T) {
 	}
 }
 
+func TestStreamingReadersIgnoreOneLeadingSSEBOM(t *testing.T) {
+	const frame = "\ufeffdata: {\"response_type\":\"answer\",\"content\":\"left\ufeffright\"}\r\n\r\n" +
+		"\ufeffdata: {\"response_type\":\"answer\",\"content\":\"ignored field\"}\r\n\r\n"
+	for _, api := range []string{"agent", "knowledge", "continue"} {
+		t.Run(api, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, frame)
+			}))
+			defer srv.Close()
+			c := NewClient(srv.URL)
+			var contents []string
+			cb := func(e *StreamResponse) error { contents = append(contents, e.Content); return nil }
+			var err error
+			switch api {
+			case "agent":
+				err = c.AgentQAStreamWithRequest(context.Background(), "sess", &AgentQARequest{Query: "q"},
+					func(e *AgentStreamResponse) error { contents = append(contents, e.Content); return nil })
+			case "knowledge":
+				err = c.KnowledgeQAStream(context.Background(), "sess", &KnowledgeQARequest{Query: "q"}, cb)
+			case "continue":
+				err = c.ContinueStream(context.Background(), "sess", "msg", cb)
+			}
+			if err != nil {
+				t.Fatalf("stream failed: %v", err)
+			}
+			if len(contents) != 1 || contents[0] != "left\ufeffright" {
+				t.Fatalf("callbacks = %q, want [\"left\\ufeffright\"]", contents)
+			}
+		})
+	}
+}
+
 func TestAgentSSEBareCRDispatchesBeforeEOF(t *testing.T) {
 	reader, writer := io.Pipe()
 	defer func() { _ = reader.Close() }()

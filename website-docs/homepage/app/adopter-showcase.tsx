@@ -51,7 +51,7 @@ export function AdopterShowcase() {
                 onPointerEnter={event => { if (event.pointerType === "mouse") showDetails(index, event.currentTarget); }}
                 onFocus={event => { if (event.currentTarget.matches(":focus-visible")) { setManual(true); showDetails(index, event.currentTarget, true); } }}
                 onClick={event => { if (active?.index === index) setActive(null); else showDetails(index, event.currentTarget); }}>
-                <span className={a.logoMark}>
+                <span className={a.logoMark} style={{ aspectRatio: `${adopter.logoSize.width} / ${adopter.logoSize.height}` }}>
                   <Image src={`${homeAssets}/adopters/${adopter.logo}`} alt="" width={adopter.logoSize.width} height={adopter.logoSize.height} style={adopter.logoScale ? { transform: `scale(${adopter.logoScale})` } : undefined} />
                 </span>
                 {adopter.variant === "B" && <span className={a.logoName}>{adopter.name}</span>}
@@ -62,7 +62,12 @@ export function AdopterShowcase() {
       </div>
       {/* Outside the clipped marquee so details can float over the next section. */}
       {adopters.map((adopter, index) => <div key={adopter.name} id={`adopter-details-${index}`} className={a.details} hidden={active?.index !== index} style={{ left: active?.left ?? 0 }} role="region" aria-labelledby={`adopter-name-${index}`}>
-        <h3 id={`adopter-name-${index}`}>{adopter.name}</h3>
+        <h3 id={`adopter-name-${index}`}>
+          {adopter.name}
+          {adopter.link && <a className={a.detailLink} href={adopter.link.href} target="_blank" rel="noopener noreferrer" aria-label={`${adopter.name}：${adopter.link.label}（在新标签页打开）`} title={adopter.link.label}>
+            <Icon name="external" />
+          </a>}
+        </h3>
         <ul className={a.tags} aria-label="行业与应用场景">
           <li className={a.industry}>{adopter.industry}</li>
           {adopter.useCases.map(useCase => <li key={useCase}>{useCase}</li>)}
