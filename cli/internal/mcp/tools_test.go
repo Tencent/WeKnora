@@ -187,6 +187,7 @@ func callTool(t *testing.T, c *mcpsdk.ClientSession, name string, args any, out 
 			t.Fatalf("decode %s output: %v\nraw=%s", name, err, b)
 		}
 	}
+	validateToolOutput(t, c, name, res)
 	return res
 }
 
@@ -348,13 +349,16 @@ func TestTool_DocList_InvalidEndTime(t *testing.T) {
 }
 
 func TestTool_DocView(t *testing.T) {
-	svc := &fakeSvc{getDoc: &sdk.Knowledge{ID: "k1", FileName: "a.pdf"}}
+	svc := &fakeSvc{getDoc: &sdk.Knowledge{
+		ID: "k1", FileName: "a.pdf", Metadata: json.RawMessage(`{"source":"web","rank":2}`),
+	}}
 	c, _ := newTestServer(t, svc)
 	var out sdk.Knowledge
 	callTool(t, c, "doc_view", map[string]any{"doc_id": "k1"}, &out)
 	if out.ID != "k1" {
 		t.Errorf("got %+v", out)
 	}
+	assert.JSONEq(t, `{"source":"web","rank":2}`, string(out.Metadata))
 }
 
 func TestTool_DocDownload_Text(t *testing.T) {
