@@ -88,8 +88,10 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	}
 	fileType := getFileType(safeFileName)
 
-	// ReparseKnowledge reuses the stored overrides as-is, so check them against
-	// the new file type here.
+	// The stored overrides are carried over into the replacement. The nil
+	// reparse below refreshes their graph pins from the KB's current
+	// strategy, but every other field is validated here as-is against the
+	// new file type.
 	overrides, err := existing.ProcessOverrides()
 	if err != nil {
 		return nil, err
