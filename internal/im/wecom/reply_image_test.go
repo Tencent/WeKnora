@@ -98,7 +98,8 @@ func TestSendReplyWithoutImageKeepsStreamResponse(t *testing.T) {
 	client := &LongConnClient{conn: conn}
 	incoming := &im.IncomingMessage{Extra: map[string]string{"req_id": "req-image"}}
 
-	if err := client.SendReply(context.Background(), incoming, &im.ReplyMessage{Content: "plain **text**"}); err != nil {
+	err := client.SendReply(context.Background(), incoming, &im.ReplyMessage{Content: "plain **text**"})
+	if err != nil {
 		t.Fatalf("SendReply: %v", err)
 	}
 
