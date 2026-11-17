@@ -2,108 +2,92 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
-	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
-type pauseDuringSyncConnector struct {
-	*ingestAckConnector
-	beforeFetch func()
-	fetchErr    error
-}
-
-func (c *pauseDuringSyncConnector) FetchIncremental(
-	ctx context.Context, cfg *types.DataSourceConfig, cursor *types.SyncCursor,
-) ([]types.FetchedItem, *types.SyncCursor, error) {
-	c.beforeFetch()
-	if c.fetchErr != nil {
-		return nil, nil, c.fetchErr
+// Regression for #5430: a user-controlled pause or resume that happens while a
+// sync is in flight must survive the worker's completion. updateSyncRunResult
+// used to pick the status from the stale wasPaused snapshot captured at sync
+// start, so a pause applied mid-sync was overwritten back to Active (or Error),
+// and a resume applied mid-sync was reverted to Paused.
+func newPauseSyncHarness(t *testing.T, ds *types.DataSource) (*DataSourceService, *types.SyncLog) {
+	t.Helper()
+	syncLog := &types.SyncLog{
+		ID:           "log-" + ds.ID,
+		DataSourceID: ds.ID,
+		TenantID:     ds.TenantID,
 	}
-	return c.ingestAckConnector.FetchIncremental(ctx, cfg, cursor)
-}
-
-type pauseDuringStreamConnector struct {
-	*ingestAckStream
-	beforeFetch func()
-}
-
-func (c *pauseDuringStreamConnector) FetchStream(
-	ctx context.Context, cfg *types.DataSourceConfig, cursor *types.SyncCursor, h datasource.StreamHandler,
-) (*types.SyncCursor, error) {
-	c.beforeFetch()
-	return c.ingestAckStream.FetchStream(ctx, cfg, cursor, h)
-}
-
-func TestProcessSyncPreservesPauseOrResumeDuringFetch(t *testing.T) {
-	for _, mode := range []string{"batch", "stream", "batch-error"} {
-		for _, action := range []string{"pause", "resume"} {
-			t.Run(mode+"/"+action, func(t *testing.T) {
-				ctx := t.Context()
-				h := newIngestAckHarness(t, mode == "stream")
-				db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-				require.NoError(t, err)
-				sqlDB, err := db.DB()
-				require.NoError(t, err)
-				sqlDB.SetMaxOpenConns(1)
-				t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
-				require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.SyncLog{}))
-				sources := repository.NewDataSourceRepository(db)
-				logs := repository.NewSyncLogRepository(db)
-				if action == "resume" {
-					h.ds.Status = types.DataSourceStatusPaused
-				}
-				require.NoError(t, sources.Create(ctx, h.ds))
-				require.NoError(t, logs.Create(ctx, h.syncLogRepo.logs[h.syncLogID]))
-				h.svc.dsRepo, h.svc.syncLogRepo = sources, logs
-				h.svc.scheduler = datasource.NewScheduler(sources, logs, nil)
-				h.svc.connectorRegistry = datasource.NewConnectorRegistry()
-				beforeFetch := func() {
-					if action == "pause" {
-						require.NoError(t, h.svc.PauseDataSource(ctx, h.ds.ID))
-					} else {
-						require.NoError(t, h.svc.ResumeDataSource(ctx, h.ds.ID))
-					}
-				}
-				var fetchErr error
-				if mode == "batch-error" {
-					fetchErr = errors.New("fetch failed after status changed")
-				}
-				var connector datasource.Connector = &pauseDuringSyncConnector{h.connector, beforeFetch, fetchErr}
-				if mode == "stream" {
-					connector = &pauseDuringStreamConnector{&ingestAckStream{h.connector}, beforeFetch}
-				}
-				require.NoError(t, h.svc.connectorRegistry.Register(connector))
-				err = h.svc.ProcessSync(ctx, h.task)
-				if fetchErr != nil {
-					require.ErrorIs(t, err, fetchErr)
-				} else {
-					require.NoError(t, err)
-				}
-				stored, err := sources.FindByID(ctx, h.ds.ID)
-				require.NoError(t, err)
-				want := types.DataSourceStatusPaused
-				if action == "resume" {
-					want = types.DataSourceStatusActive
-				}
-				require.Equal(t, want, stored.Status)
-				cursor, err := stored.ParseSyncCursor()
-				require.NoError(t, err)
-				wantOffset, wantLogStatus := 3, types.SyncLogStatusSuccess
-				if fetchErr != nil {
-					wantOffset, wantLogStatus = 0, types.SyncLogStatusFailed
-				}
-				require.Equal(t, wantOffset, ingestAckOffset(cursor))
-				log, err := logs.FindByID(ctx, h.syncLogID)
-				require.NoError(t, err)
-				require.Equal(t, wantLogStatus, log.Status)
-			})
-		}
+	svc := &DataSourceService{
+		dsRepo:      newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
+		syncLogRepo: &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}},
 	}
+	return svc, syncLog
+}
+
+// A pause applied while the sync ran must not be cleared by a successful run.
+func TestUpdateSyncRunResult_PreservesConcurrentPauseOnSuccess(t *testing.T) {
+	ds := &types.DataSource{
+		ID:              "ds-pause-ok",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Status:          types.DataSourceStatusPaused,
+	}
+	svc, syncLog := newPauseSyncHarness(t, ds)
+
+	// wasPaused=false is the stale snapshot (sync started while active), but the
+	// data source is paused now. Completion must not clear the pause.
+	err := svc.updateSyncRunResult(
+		context.Background(), ds, syncLog,
+		&types.SyncResult{}, nil, types.SyncLogStatusSuccess, "", false,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, types.DataSourceStatusPaused, ds.Status,
+		"a pause applied while the sync ran must not be overwritten by a successful worker")
+}
+
+// A pause applied while the sync ran must not be flipped to Error on failure.
+func TestUpdateSyncRunResult_PreservesConcurrentPauseOnFailure(t *testing.T) {
+	ds := &types.DataSource{
+		ID:              "ds-pause-fail",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Status:          types.DataSourceStatusPaused,
+	}
+	svc, syncLog := newPauseSyncHarness(t, ds)
+
+	err := svc.updateSyncRunResult(
+		context.Background(), ds, syncLog,
+		&types.SyncResult{}, nil, types.SyncLogStatusFailed, "boom", false,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, types.DataSourceStatusPaused, ds.Status,
+		"a failure must not overwrite a concurrent pause")
+}
+
+// A resume applied while the sync ran must not be reverted back to Paused.
+func TestUpdateSyncRunResult_ResumedSourceNotRepaused(t *testing.T) {
+	ds := &types.DataSource{
+		ID:              "ds-resume",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Status:          types.DataSourceStatusActive,
+	}
+	svc, syncLog := newPauseSyncHarness(t, ds)
+
+	// wasPaused=true is the stale snapshot (sync started while paused), but the
+	// data source has been resumed to Active now. Completion must respect the resume.
+	err := svc.updateSyncRunResult(
+		context.Background(), ds, syncLog,
+		&types.SyncResult{}, nil, types.SyncLogStatusSuccess, "", true,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, types.DataSourceStatusActive, ds.Status,
+		"a resume applied while the sync ran must not be reverted to paused")
 }

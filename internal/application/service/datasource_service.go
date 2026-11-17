@@ -726,7 +726,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Connector not found: %s", ds.Type)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
+		if ds.Status != types.DataSourceStatusPaused {
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
@@ -742,7 +742,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
+		if ds.Status != types.DataSourceStatusPaused {
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
@@ -799,7 +799,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
+		if ds.Status != types.DataSourceStatusPaused {
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
@@ -822,7 +822,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Failed to get tenant info: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
+		if ds.Status != types.DataSourceStatusPaused {
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
@@ -1410,14 +1410,16 @@ func (s *DataSourceService) updateSyncRunResult(
 		logger.Errorf(ctx, "failed to update sync log: %v", logErr)
 	}
 
-	if status == types.SyncLogStatusFailed {
-		if !wasPaused {
+	// Persist the sync result, but leave a user-controlled pause state intact:
+	// a pause or resume that happened while this worker was in flight must not
+	// be overwritten by the status computed from this worker's stale snapshot.
+	// Only transition the status when the data source is not currently paused.
+	if ds.Status != types.DataSourceStatusPaused {
+		if status == types.SyncLogStatusFailed {
 			ds.Status = types.DataSourceStatusError
+		} else {
+			ds.Status = types.DataSourceStatusActive
 		}
-	} else if wasPaused {
-		ds.Status = types.DataSourceStatusPaused
-	} else {
-		ds.Status = types.DataSourceStatusActive
 	}
 	ds.ErrorMessage = errorMessage
 	ds.LastSyncResult = resultJSON
