@@ -671,6 +671,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import ModelSelector from '@/components/ModelSelector.vue'
 import KBParserSettings from '../settings/KBParserSettings.vue'
 import GraphSettings from '../settings/GraphSettings.vue'
+import { cloneGraphSchema, graphSchemaError, type GraphSchema } from '@/types/graphSchema'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
@@ -750,10 +751,11 @@ interface UploadUIState {
   questionGenerationConfig: { enabled: boolean; questionCount: number; customInstructions?: string }
   nodeExtractConfig: {
     enabled: boolean
+    schema?: GraphSchema
     text: string
     tags: string[]
-    nodes: Array<{ name: string; attributes: string[] }>
-    relations: Array<{ node1: string; node2: string; type: string }>
+    nodes: Array<{ name: string; attributes: string[]; entity_type?: string }>
+    relations: Array<{ node1: string; node2: string; type: string; source_type?: string; target_type?: string }>
     customInstructions?: string
   }
   graphEnabled: boolean
@@ -1180,7 +1182,9 @@ function getSectionNavStatus(
       if (!uiState.value.graphEnabled || !uiState.value.nodeExtractConfig.enabled) {
         return { status: t('uploadConfirm.statusOff'), statusTone: 'muted' }
       }
-      const tagCount = uiState.value.nodeExtractConfig.tags?.length ?? 0
+      const graphConfig = uiState.value.nodeExtractConfig
+      const tagCount = graphConfig.schema?.enabled
+        ? graphConfig.schema.relation_types.length : graphConfig.tags?.length ?? 0
       if (tagCount > 0) {
         return { status: t('uploadConfirm.summaryGraphTagsValue', { count: tagCount }) }
       }
@@ -1249,6 +1253,7 @@ function createDefaultUIState(): UploadUIState {
     questionGenerationConfig: { enabled: true, questionCount: 3, customInstructions: '' },
     nodeExtractConfig: {
       enabled: false,
+      schema: cloneGraphSchema(),
       text: '',
       tags: [],
       nodes: [],
@@ -1307,10 +1312,11 @@ function initFromKbInfo(kb: any) {
     },
     nodeExtractConfig: {
       enabled: !!kb.extract_config?.enabled && !!kb.indexing_strategy?.graph_enabled,
+      schema: cloneGraphSchema(kb.extract_config?.schema),
       text: kb.extract_config?.text || '',
       tags: kb.extract_config?.tags || [],
       nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
-        name: node.name,
+        ...node,
         attributes: node.attributes || [],
       })),
       relations: kb.extract_config?.relations || [],
@@ -1376,6 +1382,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     graph_enabled: state.nodeExtractConfig.enabled && state.graphEnabled,
     extract_config: {
       enabled: state.nodeExtractConfig.enabled,
+      schema: cloneGraphSchema(state.nodeExtractConfig.schema),
       text: state.nodeExtractConfig.text,
       tags: state.nodeExtractConfig.tags,
       nodes: state.nodeExtractConfig.nodes,
@@ -1459,10 +1466,11 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   }
   const ec = o.extract_config
   if (ec) {
+    if (ec.schema != null) s.nodeExtractConfig.schema = cloneGraphSchema(ec.schema)
     if (ec.enabled != null) s.nodeExtractConfig.enabled = ec.enabled
     if (ec.text != null) s.nodeExtractConfig.text = ec.text
     if (ec.tags) s.nodeExtractConfig.tags = ec.tags
-    if (ec.nodes) s.nodeExtractConfig.nodes = ec.nodes.map(n => ({ name: n.name, attributes: n.attributes || [] }))
+    if (ec.nodes) s.nodeExtractConfig.nodes = ec.nodes.map(n => ({ ...n, attributes: n.attributes || [] }))
     if (ec.relations) s.nodeExtractConfig.relations = ec.relations
     if (ec.custom_instructions != null) s.nodeExtractConfig.customInstructions = ec.custom_instructions
   }
@@ -1644,6 +1652,13 @@ const handleCancel = () => {
 const imagePipelineInvalid = ref(false)
 
 const handleConfirm = () => {
+  if (uiState.value.graphEnabled && uiState.value.nodeExtractConfig.enabled) {
+    const error = graphSchemaError(cloneGraphSchema(uiState.value.nodeExtractConfig.schema))
+    if (error) {
+      MessagePlugin.warning(t(`graphSettings.schema.errors.${error}`))
+      return
+    }
+  }
   if (props.mode === 'file' && batchItemCount.value === 0) {
     MessagePlugin.warning(t('uploadConfirm.noItems'))
     return

@@ -239,6 +239,9 @@ func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTyp
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {
 		return werrors.NewBadRequestError(err.Error())
 	}
+	if err := eff.ExtractConfig.ValidateSchema(); err != nil {
+		return werrors.NewBadRequestError(err.Error())
+	}
 	if eff.EnableMultimodel {
 		if err := ValidateImagePipelineParams(eff.ImagePipelineID, eff.ImagePipelineParams); err != nil {
 			return werrors.NewBadRequestError(err.Error())
@@ -362,16 +365,19 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 	}
 	result := base
 	result.Enabled = override.Enabled
+	if override.Schema != nil {
+		result.Schema = override.Schema
+	}
 	if override.Text != "" {
 		result.Text = override.Text
 	}
-	if len(override.Tags) > 0 {
+	if override.Tags != nil {
 		result.Tags = override.Tags
 	}
-	if len(override.Nodes) > 0 {
+	if override.Nodes != nil {
 		result.Nodes = override.Nodes
 	}
-	if len(override.Relations) > 0 {
+	if override.Relations != nil {
 		result.Relations = override.Relations
 	}
 	if override.CustomInstructions != "" {

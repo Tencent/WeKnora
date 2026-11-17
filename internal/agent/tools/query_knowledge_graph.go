@@ -17,6 +17,7 @@ import (
 type graphConfigSummary struct {
 	Nodes     []string
 	Relations []string
+	Schema    *types.GraphSchema
 }
 
 var errGraphQueryPanicked = errors.New("knowledge graph query failed with an internal error")
@@ -35,6 +36,10 @@ var queryKnowledgeGraphTool = BaseTool{
 type QueryKnowledgeGraphInput struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of kb://N knowledge base handles to query"`
 	Query            string   `json:"query" jsonschema:"Query content (entity name or query text)"`
+	EntityType       string   `json:"entity_type,omitempty" jsonschema:"Optional exact schema entity type for the query seeds"`
+	RelationType     string   `json:"relation_type,omitempty" jsonschema:"Optional exact schema relation type"`
+	Direction        string   `json:"direction,omitempty" jsonschema:"Optional relation direction from the seed: in or out"`
+	TargetType       string   `json:"target_type,omitempty" jsonschema:"Optional exact schema neighbor entity type"`
 }
 
 // QueryKnowledgeGraphTool queries the knowledge graph for entities and relationships
@@ -332,13 +337,34 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			res.kb = kb
 
 			// Check if graph extraction is enabled
-			if kb.ExtractConfig == nil || (len(kb.ExtractConfig.Nodes) == 0 && len(kb.ExtractConfig.Relations) == 0) {
+			if kb.ExtractConfig == nil || (!kb.ExtractConfig.HasSchema() &&
+				len(kb.ExtractConfig.Nodes) == 0 && len(kb.ExtractConfig.Relations) == 0) {
 				res.err = fmt.Errorf("graph extraction not configured")
 				return
 			}
 
 			var errs []string
-			lookup, err := t.queryGraph(ctx, id, terms)
+			var queries []types.GraphQuery
+			if input.EntityType != "" || input.RelationType != "" || input.Direction != "" || input.TargetType != "" {
+				if !kb.ExtractConfig.HasSchema() {
+					res.err = fmt.Errorf("schema filters require schema mode for this knowledge base")
+					return
+				}
+				if err := kb.ExtractConfig.Schema.Validate(); err != nil {
+					res.err = err
+					return
+				}
+				for _, term := range terms {
+					q := types.GraphQuery{Name: term, EntityType: input.EntityType, RelationType: input.RelationType,
+						Direction: input.Direction, TargetType: input.TargetType}
+					if err := kb.ExtractConfig.Schema.ValidateQuery(q); err != nil {
+						res.err = err
+						return
+					}
+					queries = append(queries, q)
+				}
+			}
+			lookup, err := t.queryGraph(ctx, id, terms, queries)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("graph query failed: %v", err))
 			}
@@ -420,7 +446,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			}
 		}
 		for _, rel := range result.relations {
-			key := rel.Node1 + "\x00" + rel.Type + "\x00" + rel.Node2
+			identity, _ := json.Marshal([5]string{rel.Node1, rel.SourceType, rel.Type, rel.Node2, rel.TargetType})
+			key := string(identity)
 			if seenRelations[key] {
 				continue
 			}
@@ -452,9 +479,16 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	allResults := append(graphHits, textHits...)
 	relationData := make([]map[string]interface{}, 0, len(relations))
 	for _, rel := range relations {
-		relationData = append(relationData, map[string]interface{}{
+		data := map[string]interface{}{
 			"source": rel.Node1, "type": rel.Type, "target": rel.Node2,
-		})
+		}
+		if rel.SourceType != "" {
+			data["source_type"] = rel.SourceType
+		}
+		if rel.TargetType != "" {
+			data["target_type"] = rel.TargetType
+		}
+		relationData = append(relationData, data)
 	}
 
 	if len(allResults) == 0 && len(relations) == 0 {
@@ -515,7 +549,14 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	if len(relations) > 0 {
 		output += "=== 🔗 Relations ===\n"
 		for _, rel := range relations {
-			output += fmt.Sprintf("  - %s --[%s]--> %s\n", rel.Node1, rel.Type, rel.Node2)
+			source, target := rel.Node1, rel.Node2
+			if rel.SourceType != "" {
+				source += " (" + rel.SourceType + ")"
+			}
+			if rel.TargetType != "" {
+				target += " (" + rel.TargetType + ")"
+			}
+			output += fmt.Sprintf("  - %s --[%s]--> %s\n", source, rel.Type, target)
 		}
 		output += "\n"
 	}
@@ -537,6 +578,12 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			output += fmt.Sprintf("  ✓ Relationship Types (%d): %v\n", len(config.Relations), config.Relations)
 		} else {
 			output += "  ⚠️ No relationship types configured\n"
+		}
+		if config.Schema != nil && config.Schema.Enabled {
+			for _, relation := range config.Schema.RelationTypes {
+				output += fmt.Sprintf("  - Schema: %s --[%s]--> %s\n",
+					relation.SourceType, relation.Name, relation.TargetType)
+			}
 		}
 		output += "\n"
 	}
@@ -637,14 +684,41 @@ type graphLookup struct {
 // returns nothing.
 func (t *QueryKnowledgeGraphTool) queryGraph(
 	ctx context.Context, kbID string, terms []string,
+	schemaQueries ...[]types.GraphQuery,
 ) (graphLookup, error) {
 	if t.graphRepo == nil || len(terms) == 0 {
 		return graphLookup{}, nil
 	}
-	graph, err := t.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: kbID}, terms)
+	namespace := types.NameSpace{KnowledgeBase: kbID}
+	var graph *types.GraphData
+	var err error
+	var typedLookup graphLookup
+	if adapter, ok := t.graphRepo.(interfaces.SchemaGraphRepository); ok &&
+		len(schemaQueries) > 0 && len(schemaQueries[0]) > 0 {
+		graph, err = adapter.SearchNodeWithSchema(ctx, namespace, schemaQueries[0])
+		if err != nil {
+			return graphLookup{}, err
+		}
+		typedLookup, err = t.validateGraphEvidence(ctx, kbID, graph)
+		if err != nil || typedLookup.chunksTotal > 0 {
+			return typedLookup, err
+		}
+		// Relax semantic hints only after live evidence and scope validation.
+		// The name lookup below passes through exactly the same checks.
+	}
+	graph, err = t.graphRepo.SearchNode(ctx, namespace, terms)
 	if err != nil {
 		return graphLookup{}, err
 	}
+	lookup, err := t.validateGraphEvidence(ctx, kbID, graph)
+	lookup.candidatesValidated += typedLookup.candidatesValidated
+	lookup.validationLimited = lookup.validationLimited || typedLookup.validationLimited
+	return lookup, err
+}
+
+func (t *QueryKnowledgeGraphTool) validateGraphEvidence(
+	ctx context.Context, kbID string, graph *types.GraphData,
+) (graphLookup, error) {
 	if graph == nil {
 		return graphLookup{}, nil
 	}
@@ -868,6 +942,11 @@ func summarizeGraphConfig(config *types.ExtractConfig) graphConfigSummary {
 	if config == nil {
 		return graphConfigSummary{}
 	}
+	if config.HasSchema() {
+		return graphConfigSummary{
+			Nodes: config.Schema.EntityNames(), Relations: config.Schema.RelationNames(), Schema: config.Schema,
+		}
+	}
 
 	return graphConfigSummary{
 		Nodes:     uniqueSortedNodeNames(config.Nodes),
@@ -919,6 +998,7 @@ func graphConfigsToData(graphConfigs map[string]graphConfigSummary) map[string]m
 		data[kbID] = map[string]interface{}{
 			"nodes":     config.Nodes,
 			"relations": config.Relations,
+			"schema":    config.Schema,
 		}
 	}
 	return data
@@ -967,18 +1047,28 @@ func buildGraphVisualizationData(
 	edges := make([]map[string]interface{}, 0)
 
 	seenEntities := make(map[string]bool)
-	addEntity := func(name string) {
-		if name == "" || seenEntities["entity:"+name] {
-			return
+	addEntity := func(name, entityType string) string {
+		id := "entity:" + name
+		if entityType != "" {
+			identity, _ := json.Marshal([2]string{name, entityType})
+			id = "entity-schema:" + string(identity)
 		}
-		seenEntities["entity:"+name] = true
-		nodes = append(nodes, map[string]interface{}{"id": "entity:" + name, "label": name, "type": "entity"})
+		if name == "" || seenEntities[id] {
+			return id
+		}
+		seenEntities[id] = true
+		node := map[string]interface{}{"id": id, "label": name, "type": "entity"}
+		if entityType != "" {
+			node["entity_type"] = entityType
+		}
+		nodes = append(nodes, node)
+		return id
 	}
 	for _, rel := range relations {
-		addEntity(rel.Node1)
-		addEntity(rel.Node2)
+		source := addEntity(rel.Node1, rel.SourceType)
+		target := addEntity(rel.Node2, rel.TargetType)
 		edges = append(edges, map[string]interface{}{
-			"source": "entity:" + rel.Node1, "target": "entity:" + rel.Node2, "label": rel.Type,
+			"source": source, "target": target, "label": rel.Type,
 		})
 	}
 	for i, result := range results {

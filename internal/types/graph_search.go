@@ -64,6 +64,7 @@ type GraphSearchCandidates struct {
 type GraphSearchEntity struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
+	EntityType     string   `json:"entity_type,omitempty"`
 	KnowledgeID    string   `json:"knowledge_id"`
 	Attributes     []string `json:"attributes"`
 	SourceChunkIDs []string `json:"source_chunk_ids"`

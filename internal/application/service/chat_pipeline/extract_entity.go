@@ -91,9 +91,11 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 
 	// Check if any knowledge base has ExtractConfig enabled and collect their IDs
 	enabledKBSet := make(map[string]struct{})
+	needsLegacySeeds := false
 	for _, kb := range kbs {
 		if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled {
 			enabledKBSet[kb.ID] = struct{}{}
+			needsLegacySeeds = needsLegacySeeds || !kb.ExtractConfig.HasSchema()
 		}
 	}
 	if len(enabledKBSet) == 0 {
@@ -108,22 +110,45 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	}
 	chatManage.EntityKBIDs = enabledKBIDs
 
-	template := &types.PromptTemplateStructured{
-		Description: p.template.Description,
-		Examples:    p.template.Examples,
+	chatManage.Entity = nil
+	chatManage.EntityQueries = make(map[string][]types.GraphQuery)
+	// Resolve each domain independently; reuse only identical schema documents.
+	cache := make(map[string][]types.GraphQuery)
+	for _, kb := range kbs {
+		if kb.ExtractConfig == nil || !kb.ExtractConfig.Enabled || !kb.ExtractConfig.HasSchema() {
+			continue
+		}
+		schemaJSON, _ := json.Marshal(kb.ExtractConfig.Schema)
+		queries, cached := cache[string(schemaJSON)]
+		if !cached {
+			queries, err = ExtractSchemaQueries(ctx, model, kb.ExtractConfig.Schema, query)
+			if err != nil {
+				logger.Warnf(ctx, "schema query extraction failed for KB %s: %v; using name-only seeds", kb.ID, err)
+				queries = nil
+				needsLegacySeeds = true
+			}
+			cache[string(schemaJSON)] = queries
+		}
+		if len(queries) != 0 {
+			chatManage.EntityQueries[kb.ID] = queries
+		}
 	}
-	extractor := NewExtractor(model, template)
-	graph, err := extractor.Extract(ctx, query)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to extract entities, session_id: %s, error: %v", chatManage.SessionID, err)
-		return next()
+	if needsLegacySeeds {
+		template := &types.PromptTemplateStructured{
+			Description: p.template.Description,
+			Examples:    p.template.Examples,
+		}
+		extractor := NewExtractor(model, template)
+		graph, err := extractor.Extract(ctx, query)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to extract entities, session_id: %s, error: %v", chatManage.SessionID, err)
+		}
+		if graph != nil {
+			for _, node := range graph.Node {
+				chatManage.Entity = append(chatManage.Entity, node.Name)
+			}
+		}
 	}
-	nodes := []string{}
-	for _, node := range graph.Node {
-		nodes = append(nodes, node.Name)
-	}
-	logger.Debugf(ctx, "extracted node: %v", nodes)
-	chatManage.Entity = nodes
 	return next()
 }
 
@@ -186,6 +211,9 @@ func NewExtractor(
 
 // Extract extracts entities from content
 func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphData, error) {
+	if e.template.Schema != nil && e.template.Schema.Enabled {
+		return e.extractWithSchema(ctx, content)
+	}
 	generator := NewQAPromptGenerator(e.formater, e.template)
 
 	// logger.Debugf(ctx, "chat system: %s", generator.System(ctx))

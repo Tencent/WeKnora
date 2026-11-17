@@ -5453,7 +5453,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据标签生成示例文本",
+                "description": "根据关系标签或启用的图谱 Schema 生成示例文本",
                 "consumes": [
                     "application/json"
                 ],
@@ -29986,6 +29986,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation"
                     }
                 },
+                "schema": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema"
+                },
                 "tags": {
                     "description": "Tags are the entity labels extraction may use.",
                     "type": "array",
@@ -30717,6 +30720,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.GraphEntityType": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.GraphNode": {
             "type": "object",
             "properties": {
@@ -30732,6 +30746,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "entity_type": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 }
@@ -30746,8 +30763,51 @@ const docTemplate = `{
                 "node2": {
                     "type": "string"
                 },
+                "source_type": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.GraphRelationType": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "source_type": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.GraphSchema": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "entity_types": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphEntityType"
+                    }
+                },
+                "relation_types": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelationType"
+                    }
                 }
             }
         },
@@ -30759,6 +30819,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "entity_type": {
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -40049,6 +40112,9 @@ const docTemplate = `{
                 "model_id": {
                     "type": "string"
                 },
+                "schema": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema"
+                },
                 "tags": {
                     "type": "array",
                     "items": {
@@ -40381,42 +40447,26 @@ const docTemplate = `{
                 "nodeExtract": {
                     "type": "object",
                     "properties": {
+                        "customInstructions": {
+                            "type": "string"
+                        },
                         "enabled": {
                             "type": "boolean"
                         },
                         "nodes": {
                             "type": "array",
                             "items": {
-                                "type": "object",
-                                "properties": {
-                                    "attributes": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        }
-                                    },
-                                    "name": {
-                                        "type": "string"
-                                    }
-                                }
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode"
                             }
                         },
                         "relations": {
                             "type": "array",
                             "items": {
-                                "type": "object",
-                                "properties": {
-                                    "node1": {
-                                        "type": "string"
-                                    },
-                                    "node2": {
-                                        "type": "string"
-                                    },
-                                    "type": {
-                                        "type": "string"
-                                    }
-                                }
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation"
                             }
+                        },
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema"
                         },
                         "tags": {
                             "type": "array",
@@ -40554,6 +40604,9 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation"
                             }
+                        },
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema"
                         },
                         "tags": {
                             "type": "array",
@@ -43047,12 +43100,17 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "model_id",
-                "tags",
                 "text"
             ],
             "properties": {
+                "custom_instructions": {
+                    "type": "string"
+                },
                 "model_id": {
                     "type": "string"
+                },
+                "schema": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema"
                 },
                 "tags": {
                     "type": "array",

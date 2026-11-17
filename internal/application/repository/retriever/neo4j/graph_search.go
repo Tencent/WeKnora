@@ -23,6 +23,7 @@ func graphSearchProjection(alias string) string {
 	return alias + ` {
 		id: elementId(` + alias + `),
 		name: substring(` + alias + `.name, 0, 513),
+		entity_type: substring(` + alias + `.entity_type, 0, 129),
 		knowledge_id: substring(` + alias + `.kg, 0, 129),
 		chunks: [c IN ` + alias + `.chunks[..513] | substring(c, 0, 129)],
 		attributes: [a IN ` + alias + `.attributes[..21] | substring(a, 0, 1001)]
@@ -35,11 +36,15 @@ func (n *Neo4jRepository) graphSearchLabel(namespace types.NameSpace) (string, e
 	if namespace.KnowledgeBase == "" || namespace.Knowledge != "" {
 		return "", fmt.Errorf("graph search requires exactly one knowledge base")
 	}
+	return n.quotedGraphLabel(namespace), nil
+}
+
+func (n *Neo4jRepository) quotedGraphLabel(namespace types.NameSpace) string {
 	labels := n.Labels(namespace)
 	for i, label := range labels {
 		labels[i] = "`" + strings.ReplaceAll(label, "`", "``") + "`"
 	}
-	return strings.Join(labels, ":"), nil
+	return strings.Join(labels, ":")
 }
 
 // SearchGraph returns ranked seed entities and a bounded one-hop neighbourhood.
@@ -164,6 +169,13 @@ func decodeGraphSearchProjection(record *neo4j.Record, alias string) (*types.Gra
 		return nil, fmt.Errorf("invalid graph node projection")
 	}
 	node := &types.GraphNode{}
+	if props["entity_type"] != nil {
+		value, ok := props["entity_type"].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid graph node entity_type")
+		}
+		node.EntityType = value
+	}
 	for key, dest := range map[string]*string{"id": &node.ID, "name": &node.Name, "knowledge_id": &node.KnowledgeID} {
 		value, ok := props[key].(string)
 		if !ok || value == "" {

@@ -45,7 +45,7 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	entity := chatManage.Entity
-	if len(entity) == 0 {
+	if len(entity) == 0 && len(chatManage.EntityQueries) == 0 {
 		logger.Infof(ctx, "No entity found")
 		return next()
 	}
@@ -91,7 +91,33 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 			continue
 		}
 		group.Go(func() error {
-			graph, err := p.graphRepo.SearchNode(ctx, namespace, entity)
+			var graph *types.GraphData
+			var err error
+			if queries := chatManage.EntityQueries[namespace.KnowledgeBase]; len(queries) != 0 {
+				if schemaRepo, ok := p.graphRepo.(interfaces.SchemaGraphRepository); ok {
+					graph, err = schemaRepo.SearchNodeWithSchema(ctx, namespace, queries)
+					var usable bool
+					if err == nil {
+						usable, err = p.hasUsableGraphEvidence(ctx, graph, namespace, chatManage.SearchTargets)
+					}
+					// Relax only semantic hints; keep namespace and SQL grants.
+					if err == nil && !usable {
+						names := make([]string, 0, len(queries))
+						for _, q := range queries {
+							names = append(names, q.Name)
+						}
+						graph, err = p.graphRepo.SearchNode(ctx, namespace, names)
+					}
+				} else {
+					names := make([]string, 0, len(queries))
+					for _, q := range queries {
+						names = append(names, q.Name)
+					}
+					graph, err = p.graphRepo.SearchNode(ctx, namespace, names)
+				}
+			} else {
+				graph, err = p.graphRepo.SearchNode(ctx, namespace, entity)
+			}
 			if err != nil {
 				logger.Errorf(
 					ctx,
@@ -182,6 +208,56 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	return next()
 }
 
+func (p *PluginSearchEntity) hasUsableGraphEvidence(
+	ctx context.Context, graph *types.GraphData, namespace types.NameSpace, targets types.SearchTargets,
+) (bool, error) {
+	if graph == nil {
+		return false, nil
+	}
+	// Include already-seen evidence: a valid typed hit is not a miss merely
+	// because text retrieval has already returned its chunk.
+	chunkIDs := filterSeenChunk(ctx, graph, nil)
+	if len(chunkIDs) == 0 {
+		return false, nil
+	}
+	// Shared KBs need cross-tenant lookups, followed by exact scope checks.
+	chunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
+	if err != nil {
+		return false, err
+	}
+	var candidates []*types.Chunk
+	var knowledgeIDs []string
+	for _, chunk := range chunks {
+		if chunk == nil || !chunk.IsEnabled || chunk.KnowledgeBaseID != namespace.KnowledgeBase ||
+			(namespace.Knowledge != "" && chunk.KnowledgeID != namespace.Knowledge) ||
+			!entityChunkInScope(chunk, targets) {
+			continue
+		}
+		candidates = append(candidates, chunk)
+		if !slices.Contains(knowledgeIDs, chunk.KnowledgeID) {
+			knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
+		}
+	}
+	if len(candidates) == 0 {
+		return false, nil
+	}
+	knowledges, err := p.knowledgeRepo.GetKnowledgeBatchByIDOnly(ctx, knowledgeIDs)
+	if err != nil {
+		return false, err
+	}
+	for _, knowledge := range knowledges {
+		if knowledge == nil || knowledge.KnowledgeBaseID != namespace.KnowledgeBase {
+			continue
+		}
+		for _, chunk := range candidates {
+			if chunk.KnowledgeID == knowledge.ID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func entityChunkInScope(chunk *types.Chunk, targets types.SearchTargets) bool {
 	for _, target := range targets {
 		if target == nil || target.KnowledgeBaseID != chunk.KnowledgeBaseID {
@@ -216,6 +292,9 @@ func filterSeenChunk(ctx context.Context, graph *types.GraphData, searchResult [
 
 	chunkIDs := []string{}
 	for _, node := range graph.Node {
+		if node == nil {
+			continue
+		}
 		for _, chunkID := range node.Chunks {
 			// Every chunk of every matched node was fetched and passed on;
 			// entity search runs on an empty result list, so nothing was

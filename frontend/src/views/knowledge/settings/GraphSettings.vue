@@ -68,8 +68,34 @@
         </div>
       </div>
 
+      <div v-if="localGraphExtract.enabled" class="setting-row">
+        <div class="setting-info">
+          <label>
+            {{ t('graphSettings.schema.label') }}
+            <t-tooltip :content="t('graphSettings.schema.modeDescription')" placement="top-left">
+              <t-button variant="text" shape="square" size="small"
+                :aria-label="t('graphSettings.schema.modeDescription')">
+                <template #icon><t-icon name="help-circle" /></template>
+              </t-button>
+            </t-tooltip>
+          </label>
+        </div>
+        <div class="setting-control schema-mode-control">
+          <t-button v-if="localGraphExtract.schema.enabled" variant="text"
+            @click="schemaPreviewVisible = true">
+            <template #icon><t-icon name="browse" /></template>
+            {{ t('graphSettings.schema.previewAction') }}
+          </t-button>
+          <t-switch v-model="localGraphExtract.schema.enabled" @change="handleConfigChange" />
+        </div>
+      </div>
+      <GraphSchemaEditor v-if="localGraphExtract.enabled && localGraphExtract.schema.enabled"
+        :schema="localGraphExtract.schema" @update:schema="handleSchemaChange" />
+      <GraphSchemaPreview v-if="schemaPreviewVisible && localGraphExtract.enabled && localGraphExtract.schema.enabled"
+        v-model:visible="schemaPreviewVisible" :schema="localGraphExtract.schema" />
+
       <!-- 关系类型配置 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+      <div v-if="legacyMode" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.tagsLabel') }}</label>
           <p class="desc">{{ t('graphSettings.tagsDescription') }}</p>
@@ -117,7 +143,7 @@
               v-if="canRunGraphExtract"
               theme="default"
               size="medium"
-              :disabled="!modelStatus.llm.available"
+              :disabled="!modelStatus.llm.available || !!schemaError"
               :loading="textFabring"
               @click="handleFabriText"
               class="gen-text-btn"
@@ -153,11 +179,15 @@
               <div class="node-header">
                 <t-icon name="user" class="node-icon" />
                 <t-input
-                  v-model="node.name"
+                  :model-value="node.name"
                   :placeholder="t('graphSettings.nodeNamePlaceholder')"
-                  @change="handleNodesChange"
+                  @change="renameExampleNode(nodeIndex, String($event))"
                   class="node-name-input"
                 />
+                <t-select v-if="localGraphExtract.schema.enabled" :model-value="node.entity_type"
+                  :options="exampleTypeOptions" :placeholder="t('graphSettings.schema.entityTypes')"
+                  :aria-label="t('graphSettings.schema.entityTypes')" class="node-type-select"
+                  @change="changeExampleNodeType(nodeIndex, String($event))" />
                 <t-button
                   theme="default"
                   size="small"
@@ -166,7 +196,7 @@
                   <t-icon name="delete" />
                 </t-button>
               </div>
-              <div class="node-attributes">
+              <div v-if="legacyMode" class="node-attributes">
                 <div v-for="(attribute, attrIndex) in node.attributes" :key="attrIndex" class="attribute-item">
                   <t-input
                     v-model="node.attributes[attrIndex]"
@@ -222,6 +252,7 @@
           <div class="relation-list">
             <div v-for="(relation, index) in localGraphExtract.relations" :key="index" class="relation-item">
               <t-select
+                v-if="legacyMode"
                 v-model="relation.node1"
                 :placeholder="t('graphSettings.selectEntity')"
                 @change="handleRelationsChange"
@@ -234,8 +265,13 @@
                   :label="node.name"
                 />
               </t-select>
+              <t-select v-else :model-value="exampleEndpointValue(relation.node1, relation.source_type)"
+                :options="exampleNodeOptions(relation.source_type)" class="relation-select"
+                :placeholder="t('graphSettings.schema.source')"
+                @change="changeExampleEndpoint(index, 'source', String($event))" />
               <t-icon name="arrow-right" class="relation-arrow" />
               <t-select
+                v-if="legacyMode"
                 v-model="relation.type"
                 :placeholder="t('graphSettings.selectRelationType')"
                 clearable
@@ -251,8 +287,13 @@
                   :label="tag"
                 />
               </t-select>
+              <t-select v-else :model-value="exampleRelationKey(relation)"
+                :options="exampleRelationOptions" class="relation-select"
+                :placeholder="t('graphSettings.selectRelationType')"
+                @change="changeExampleRelationType(index, String($event))" />
               <t-icon name="arrow-right" class="relation-arrow" />
               <t-select
+                v-if="legacyMode"
                 v-model="relation.node2"
                 :placeholder="t('graphSettings.selectEntity')"
                 @change="handleRelationsChange"
@@ -265,6 +306,10 @@
                   :label="node.name"
                 />
               </t-select>
+              <t-select v-else :model-value="exampleEndpointValue(relation.node2, relation.target_type)"
+                :options="exampleNodeOptions(relation.target_type)" class="relation-select"
+                :placeholder="t('graphSettings.schema.target')"
+                @change="changeExampleEndpoint(index, 'target', String($event))" />
               <t-button
                 theme="default"
                 size="small"
@@ -294,6 +339,9 @@
       </div>
 
       <!-- 提取操作按钮 -->
+      <p v-if="localGraphExtract.enabled && invalidSchemaExample" class="schema-example-error" role="alert">
+        {{ t('graphSettings.schema.invalidExample') }}
+      </p>
       <div v-if="localGraphExtract.enabled" class="setting-row">
         <div class="setting-info">
           <label>{{ t('graphSettings.extractActionsLabel') }}</label>
@@ -304,7 +352,7 @@
             <t-button
               v-if="canRunGraphExtract"
               theme="primary"
-              :disabled="!modelStatus.llm.available || !localGraphExtract.text"
+              :disabled="!modelStatus.llm.available || !localGraphExtract.text || !!schemaError"
               :loading="extracting"
               @click="handleExtract"
             >
@@ -312,6 +360,7 @@
             </t-button>
             <t-button
               theme="default"
+              :disabled="!!schemaError"
               @click="defaultExtractExample"
             >
               {{ t('graphSettings.defaultExample') }}
@@ -337,6 +386,9 @@ import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } f
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useAuthStore } from '@/stores/auth'
 import { docsUrl } from '@/utils/docsUrl'
+import GraphSchemaEditor from './GraphSchemaEditor.vue'
+import GraphSchemaPreview from './GraphSchemaPreview.vue'
+import { cloneGraphSchema, graphSchemaError, type GraphSchema } from '@/types/graphSchema'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -353,6 +405,7 @@ interface GraphExtractConfig {
   nodes: Node[]
   relations: Relation[]
   customInstructions?: string
+  schema?: GraphSchema
 }
 
 interface Props {
@@ -377,12 +430,90 @@ const modelStatus = computed(() => ({
 }))
 
 // 本地状态
-const localGraphExtract = ref<GraphExtractConfig>({
-  ...props.graphExtract,
-  nodes: props.graphExtract.nodes || [],
-  relations: props.graphExtract.relations || [],
-  customInstructions: props.graphExtract.customInstructions || ''
+const cloneConfig = (value: GraphExtractConfig): GraphExtractConfig & { schema: GraphSchema } => ({
+  ...value,
+  tags: [...(value.tags || [])],
+  nodes: (value.nodes || []).map(node => ({ ...node, attributes: [...(node.attributes || [])] })),
+  relations: (value.relations || []).map(relation => ({ ...relation })),
+  customInstructions: value.customInstructions || '',
+  schema: cloneGraphSchema(value.schema),
 })
+const localGraphExtract = ref(cloneConfig(props.graphExtract))
+const legacyMode = computed(() => localGraphExtract.value.enabled && !localGraphExtract.value.schema.enabled)
+const schemaPreviewVisible = ref(false)
+const schemaError = computed(() => graphSchemaError(localGraphExtract.value.schema))
+const invalidSchemaExample = computed(() => {
+  const { schema, nodes, relations } = localGraphExtract.value
+  if (!schema.enabled || schemaError.value || (!nodes.length && !relations.length)) return false
+  const types = new Set(schema.entity_types.map(entity => entity.name))
+  const identities = new Set<string>()
+  for (const node of nodes) {
+    const key = JSON.stringify([node.name, node.entity_type])
+    if (!node.name.trim() || !node.entity_type || !types.has(node.entity_type) || identities.has(key)) return true
+    identities.add(key)
+  }
+  return relations.some(relation =>
+    !identities.has(JSON.stringify([relation.node1, relation.source_type])) ||
+    !identities.has(JSON.stringify([relation.node2, relation.target_type])) ||
+    !schema.relation_types.some(type => type.name === relation.type &&
+      type.source_type === relation.source_type && type.target_type === relation.target_type))
+})
+watch(() => localGraphExtract.value.enabled && localGraphExtract.value.schema.enabled, active => {
+  if (!active) schemaPreviewVisible.value = false
+})
+const exampleTypeOptions = computed(() => localGraphExtract.value.schema.entity_types
+  .filter(entity => entity.name).map(entity => ({ label: entity.name, value: entity.name })))
+const exampleNodeKey = (name: string, type?: string) => name ? JSON.stringify([name, type || '']) : ''
+const exampleNodeOptions = (type?: string) => localGraphExtract.value.nodes
+  .filter(node => node.name && node.entity_type && (!type || node.entity_type === type))
+  .map(node => ({ label: `${node.name} (${node.entity_type})`, value: exampleNodeKey(node.name, node.entity_type) }))
+const exampleEndpointValue = (name: string, type?: string) =>
+  type && exampleNodeOptions(type).some(option => option.value === exampleNodeKey(name, type))
+    ? exampleNodeKey(name, type) : ''
+const exampleRelationKey = (relation: Relation) =>
+  localGraphExtract.value.schema.relation_types.some(type => type.name === relation.type &&
+    type.source_type === relation.source_type && type.target_type === relation.target_type)
+    ? JSON.stringify([relation.type, relation.source_type, relation.target_type]) : ''
+const exampleRelationOptions = computed(() => localGraphExtract.value.schema.relation_types
+  .filter(relation => relation.name && relation.source_type && relation.target_type)
+  .map(relation => ({
+    label: `${relation.source_type} → ${relation.name} → ${relation.target_type}`,
+    value: JSON.stringify([relation.name, relation.source_type, relation.target_type]),
+  })))
+const changeExampleEndpoint = (index: number, direction: 'source' | 'target', value: string) => {
+  const [name, type] = JSON.parse(value) as string[]
+  const relation = localGraphExtract.value.relations[index]
+  if (direction === 'source') { relation.node1 = name; relation.source_type = type }
+  else { relation.node2 = name; relation.target_type = type }
+  handleConfigChange()
+}
+const changeExampleRelationType = (index: number, value: string) => {
+  const [name, source, target] = JSON.parse(value) as string[]
+  const relation = localGraphExtract.value.relations[index]
+  if (relation.source_type !== source) relation.node1 = ''
+  if (relation.target_type !== target) relation.node2 = ''
+  Object.assign(relation, { type: name, source_type: source, target_type: target })
+  handleConfigChange()
+}
+const updateExampleNode = (index: number, name: string, type?: string) => {
+  const node = localGraphExtract.value.nodes[index]
+  for (const relation of localGraphExtract.value.relations) {
+    if (relation.node1 === node.name && (!localGraphExtract.value.schema.enabled || relation.source_type === node.entity_type)) {
+      relation.node1 = name
+      if (localGraphExtract.value.schema.enabled) relation.source_type = type
+    }
+    if (relation.node2 === node.name && (!localGraphExtract.value.schema.enabled || relation.target_type === node.entity_type)) {
+      relation.node2 = name
+      if (localGraphExtract.value.schema.enabled) relation.target_type = type
+    }
+  }
+  Object.assign(node, { name, entity_type: type })
+  handleConfigChange()
+}
+const renameExampleNode = (index: number, name: string) =>
+  updateExampleNode(index, name, localGraphExtract.value.nodes[index].entity_type)
+const changeExampleNodeType = (index: number, type: string) =>
+  updateExampleNode(index, localGraphExtract.value.nodes[index].name, type)
 
 // 加载状态
 const tagFabring = ref(false)
@@ -399,28 +530,20 @@ const graphAvailabilityMessage = computed(() => {
 
 // Watch for prop changes
 watch(() => props.graphExtract, (newVal) => {
-  localGraphExtract.value = {
-    ...newVal,
-    nodes: newVal.nodes || [],
-    relations: newVal.relations || [],
-    customInstructions: newVal.customInstructions || ''
-  }
+  localGraphExtract.value = cloneConfig(newVal)
 }, { deep: true })
 
 // 处理配置变更
 const handleConfigChange = () => {
-  emit('update:graphExtract', localGraphExtract.value)
+  emit('update:graphExtract', cloneConfig(localGraphExtract.value))
+}
+const handleSchemaChange = (schema: GraphSchema) => {
+  localGraphExtract.value.schema = cloneGraphSchema(schema)
+  handleConfigChange()
 }
 
 // 处理启用/禁用切换
 const handleEnabledChange = () => {
-  // 当关闭提取功能时，清空示例数据，但保留自定义指令以便再次启用时恢复。
-  if (!localGraphExtract.value.enabled) {
-    localGraphExtract.value.text = ''
-    localGraphExtract.value.tags = []
-    localGraphExtract.value.nodes = []
-    localGraphExtract.value.relations = []
-  }
   handleConfigChange()
 }
 
@@ -447,13 +570,17 @@ const addNode = () => {
   }
   localGraphExtract.value.nodes.push({
     name: '',
-    attributes: []
+    attributes: [],
+    ...(localGraphExtract.value.schema.enabled ? { entity_type: exampleTypeOptions.value[0]?.value || '' } : {}),
   })
   handleNodesChange()
 }
 
 const removeNode = (index: number) => {
-  localGraphExtract.value.nodes.splice(index, 1)
+  const [removed] = localGraphExtract.value.nodes.splice(index, 1)
+  localGraphExtract.value.relations = localGraphExtract.value.relations.filter(relation =>
+    !(relation.node1 === removed.name && (!localGraphExtract.value.schema.enabled || relation.source_type === removed.entity_type)) &&
+    !(relation.node2 === removed.name && (!localGraphExtract.value.schema.enabled || relation.target_type === removed.entity_type)))
   handleNodesChange()
 }
 
@@ -507,12 +634,17 @@ const handleFabriText = async () => {
     MessagePlugin.warning(t('graphSettings.completeModelConfig'))
     return
   }
+  if (schemaError.value) {
+    MessagePlugin.warning(t(`graphSettings.schema.errors.${schemaError.value}`))
+    return
+  }
   
   textFabring.value = true
   try {
     const response = await fabriText({
       tags: localGraphExtract.value.tags,
-      model_id: props.modelId
+      model_id: props.modelId,
+      ...(localGraphExtract.value.schema.enabled ? { schema: cloneGraphSchema(localGraphExtract.value.schema) } : {}),
     })
     localGraphExtract.value.text = response.text || ''
     handleTextChange()
@@ -536,13 +668,19 @@ const handleExtract = async () => {
     MessagePlugin.warning(t('graphSettings.pleaseInputText'))
     return
   }
+  if (schemaError.value) {
+    MessagePlugin.warning(t(`graphSettings.schema.errors.${schemaError.value}`))
+    return
+  }
   
   extracting.value = true
   try {
     const response = await extractTextRelations({
       text: localGraphExtract.value.text,
       tags: localGraphExtract.value.tags,
-      model_id: props.modelId
+      model_id: props.modelId,
+      custom_instructions: localGraphExtract.value.customInstructions,
+      ...(localGraphExtract.value.schema.enabled ? { schema: cloneGraphSchema(localGraphExtract.value.schema) } : {}),
     })
     localGraphExtract.value.nodes = response.nodes || []
     localGraphExtract.value.relations = response.relations || []
@@ -558,6 +696,25 @@ const handleExtract = async () => {
 
 // 默认示例
 const defaultExtractExample = () => {
+  if (localGraphExtract.value.schema.enabled) {
+    if (schemaError.value) return
+    const schema = localGraphExtract.value.schema
+    localGraphExtract.value.nodes = schema.entity_types.map((entity, index) => ({
+      name: `${entity.name}_${index + 1}`, entity_type: entity.name, attributes: [],
+    }))
+    const names = new Map(localGraphExtract.value.nodes.map(node => [node.entity_type, node.name]))
+    localGraphExtract.value.relations = schema.relation_types.map(relation => ({
+      node1: names.get(relation.source_type)!, node2: names.get(relation.target_type)!,
+      type: relation.name, source_type: relation.source_type, target_type: relation.target_type,
+    }))
+    localGraphExtract.value.text = [
+      ...localGraphExtract.value.nodes.map(node => `${node.name}: ${node.entity_type}.`),
+      ...localGraphExtract.value.relations.map(relation => `${relation.node1} --${relation.type}--> ${relation.node2}.`),
+    ].join('\n')
+    handleConfigChange()
+    MessagePlugin.success(t('graphSettings.exampleLoaded'))
+    return
+  }
   localGraphExtract.value.text = `"Romeo and Juliet" is a tragedy written by William Shakespeare early in his career, and is one of the most frequently performed plays in world literature. The play follows two young lovers from feuding families in Verona, Italy — the Montagues and the Capulets. Written around 1594-1596, it was first published in quarto in 1597. The full title is "The Most Excellent and Lamentable Tragedy of Romeo and Juliet." The story has been adapted countless times for stage, film, and other media.`
   localGraphExtract.value.tags = ['Author', 'Alias']
   localGraphExtract.value.nodes = [
@@ -621,6 +778,17 @@ onMounted(async () => {
 <style lang="less" scoped>
 .graph-settings {
   width: 100%;
+}
+.schema-mode-control { display: flex; align-items: center; gap: 12px; }
+.schema-example-error { color: var(--td-error-color); font-size: var(--app-text-md); line-height: 1.5; }
+.node-type-select { width: 160px; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .node-header { flex-wrap: wrap; }
+  .node-type-select { width: 100%; }
+  .relation-item { flex-wrap: wrap;
+    .relation-select { min-width: 0; flex-basis: 100%; }
+    .relation-arrow { display: none; }
+  }
 }
 
 .section-header {
