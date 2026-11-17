@@ -86,7 +86,8 @@ func TestBuildSourceIndexFollowsRewritesAndPlacesImages(t *testing.T) {
 // page 26. Each image reference is rewritten to a serving URL, as ingestion does
 // before the chunker runs.
 func sheetMarkdown(count int) (parsed, final string, images []docparser.StoredImage,
-	locators map[string]types.SourceLocator) {
+	locators map[string]types.SourceLocator,
+) {
 	var parsedB, finalB strings.Builder
 	parsedB.WriteString("图签文字")
 	finalB.WriteString("图签文字")

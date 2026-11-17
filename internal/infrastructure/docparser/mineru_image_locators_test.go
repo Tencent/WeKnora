@@ -196,10 +196,16 @@ func TestMinerUImageLocatorsSkipLayoutlessPayloads(t *testing.T) {
 	require.Nil(t, minerUImageLocators(nil, "pdf"))
 	require.Nil(t, minerUImageLocators([]byte(`[{"type":"image","img_path":"images/a.jpg","page_idx":0}]`), "pdf"))
 	require.Nil(t, minerUImageLocators([]byte(`{"schema":"docvortex.model","schema_version":"2.0","pages":[]}`), "pdf"))
-	require.Nil(t, minerUImageLocators([]byte(`{"schema":"docvortex.middle","schema_version":"9.0","pages":[]}`), "pdf"))
-	require.Nil(t, minerUImageLocators([]byte(`{"schema":"docvortex.middle","schema_version":"2.0","pages":[
-		{"blocks":[{"type":"image","index":0,"content":[{"type":"image_body","image_path":"images/a.jpg"}]}]}]}`), "pdf"))
-	require.Nil(t, minerUImageLocators([]byte(`{"schema":"docvortex.middle","schema_version":"2.0","pages":[]}`), "pdf"))
+	wrongVersion := `{"schema":"docvortex.middle","schema_version":"9.0","pages":[]}`
+	require.Nil(t, minerUImageLocators([]byte(wrongVersion), "pdf"))
+
+	// A page whose image block names no file places nothing.
+	noPath := `{"schema":"docvortex.middle","schema_version":"2.0","pages":[
+		{"blocks":[{"type":"image","index":0,"content":[{"type":"image_body","image_path":"images/a.jpg"}]}]}]}`
+	require.Nil(t, minerUImageLocators([]byte(noPath), "pdf"))
+
+	empty := `{"schema":"docvortex.middle","schema_version":"2.0","pages":[]}`
+	require.Nil(t, minerUImageLocators([]byte(empty), "pdf"))
 }
 
 // Two blocks naming the same file keep the first, so a repeated reference
