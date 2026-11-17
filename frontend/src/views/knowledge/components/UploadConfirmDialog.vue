@@ -958,6 +958,7 @@ const dialogTitle = computed(() => {
 const confirmButtonText = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.confirmManual')
   if (props.mode === 'reparse') return t('uploadConfirm.confirmReparse')
+  if (props.mode === 'file' && deferParsing.value) return t('uploadConfirm.deferParsing')
   return t('uploadConfirm.confirm')
 })
 
