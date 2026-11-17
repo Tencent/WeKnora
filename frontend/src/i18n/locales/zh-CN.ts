@@ -3252,6 +3252,10 @@ export default {
     clearRecent: '清除',
     retrieval: '检索参数',
     untitledSession: '未命名对话',
+    errors: {
+      knowledge: '知识库搜索失败，请重试。',
+      messages: '对话内容搜索失败，请重试。'
+    },
     hotkey: {
       select: '选择',
       enter: '打开',

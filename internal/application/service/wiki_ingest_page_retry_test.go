@@ -223,6 +223,7 @@ func newWikiPageRetryReducerWithDB(
 	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 	service := NewWikiPageService(apprepo.NewWikiPageRepository(db), nil, nil, nil, nil, nil)
 	// 每轮使用独立数据库并关闭连接，重复 race 测试不会复用上轮页面。
+	seedWikiTestKnowledgeBase(t, db, "kb-row-guard", 1)
 	_, err = service.CreatePage(context.Background(), &types.WikiPage{
 		TenantID: 1, KnowledgeBaseID: "kb-row-guard", Slug: "entity/alpha",
 		Title: "Alpha", PageType: types.WikiPageTypeEntity, Content: "ALPHA_BASE",

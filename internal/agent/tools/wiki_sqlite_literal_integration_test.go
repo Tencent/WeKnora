@@ -65,19 +65,19 @@ func TestWikiSearchLiteralSQLiteIntegration(t *testing.T) {
 			fmt.Sprintf("id-%d", i), "kb-1", fmt.Sprintf("concept/item-%d", i),
 			value, "How to use "+value,
 		)
-		if err := repo.Create(context.Background(), page); err != nil {
+		if err := db.Create(page).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
 	// A matching title in another tenant and KB must not enter the allowed scope.
 	outsider := newPublishedPage("outside", "kb-2", "concept/outside", "C++", "C++")
 	outsider.TenantID = 2
-	if err := repo.Create(context.Background(), outsider); err != nil {
+	if err := db.Create(outsider).Error; err != nil {
 		t.Fatal(err)
 	}
 	// Prevent wildcard or regex semantics from matching a decoy.
 	decoy := newPublishedPage("decoy", "kb-1", "concept/decoy", "axb", "axb")
-	if err := repo.Create(context.Background(), decoy); err != nil {
+	if err := db.Create(decoy).Error; err != nil {
 		t.Fatal(err)
 	}
 	tool := NewWikiSearchTool(

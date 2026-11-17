@@ -95,7 +95,9 @@ func TestLiteMultimodalShortfallLetsLastImageFinalize(t *testing.T) {
 
 	images2 := &orphanTaskEnqueuer{}
 	imageSvc := &ImageMultimodalService{taskEnqueuer: images2}
-	require.NoError(t, imageSvc.checkAndFinalizeAllImages(context.Background(), liteImagePayload(knowledge.ID, 1)))
+	var payload types.ImageMultimodalPayload
+	require.NoError(t, json.Unmarshal(enqueuer.imageTasks[0].Payload(), &payload))
+	require.NoError(t, imageSvc.checkAndFinalizeAllImages(context.Background(), payload))
 
 	assert.Len(t, postProcessPayloads(t, images2.enqueued), 1)
 	_, ok := liteCounter(knowledge.ID)

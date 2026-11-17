@@ -166,15 +166,15 @@ func (s *knowledgeService) cloneKnowledge(
 	return s.repo.UpdateKnowledgeForTransfer(ctx, &before, dst)
 }
 
-// processDocumentFromPassage handles asynchronous processing of text passages
+// processDocumentFromPassage processes text passages and reports processing failures.
 func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, passage []string,
-) {
+) error {
 	// Update status to processing
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		return
+		return fmt.Errorf("update passage processing status: %w", err)
 	}
 
 	// Convert passages to chunks
@@ -203,8 +203,17 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		}
 	}
 	if err := s.processChunks(ctx, kb, knowledge, chunks, opts); err != nil {
-		logger.Warnf(ctx, "process passages for knowledge %s: %v", knowledge.ID, err)
+		return fmt.Errorf("process passages for knowledge %s: %w", knowledge.ID, err)
 	}
+	// Terminal pipeline failures are acknowledged for asynchronous tasks after
+	// their failed state is saved. A synchronous caller still needs that error.
+	if knowledge.ParseStatus == types.ParseStatusFailed {
+		if knowledge.ErrorMessage != "" {
+			return errors.New(knowledge.ErrorMessage)
+		}
+		return errors.New("passage processing failed")
+	}
+	return nil
 }
 
 // ProcessChunksOptions contains options for processing chunks
@@ -1504,7 +1513,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// "finalizing". When we DO return an error asynq will retry, so
 		// we only drain on the final attempt.
 		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID, "summary",
-			retErr, false, isFinalAsynqAttempt(ctx))
+			retErr, false, isFinalAsynqAttempt(ctx), payload.Attempt)
 		// Every terminal exit changes what the knowledge-base aggregation
 		// sees (a new profile, a cleared one, or a document that will never
 		// get one), so the debounced refresh is requested regardless of
@@ -1891,7 +1900,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// unwind LIFO, so this one declared first executes last.
 	defer func() {
 		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID, "question_legacy",
-			retErr, superseded, isFinalAsynqAttempt(ctx))
+			retErr, superseded, isFinalAsynqAttempt(ctx), payload.Attempt)
 	}()
 	defer func() {
 		logger.Infof(
@@ -2281,7 +2290,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	defer func() {
 		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID,
 			fmt.Sprintf("question_batch[%d]", payload.BatchIndex),
-			retErr, superseded, isFinalAsynqAttempt(ctx))
+			retErr, superseded, isFinalAsynqAttempt(ctx), payload.Attempt)
 	}()
 	defer func() {
 		logger.Infof(ctx,
@@ -3027,6 +3036,14 @@ func (s *knowledgeService) reparseKnowledge(
 		}
 		manualContent = meta.Content
 	} else {
+		// Check the parser engine before anything is deleted: parsing runs
+		// later in a worker, so a missing engine would otherwise only show
+		// up after the old chunks and vectors are already gone.
+		if err := s.preflightReparseEngine(ctx, existing, reparseEff); err != nil {
+			logger.Warnf(ctx, "Reparse rejected, parser engine unavailable for knowledge %s: %v", knowledgeID, err)
+			return nil, err
+		}
+
 		// Cleanup synchronously; manual knowledge is cleaned up by its worker.
 		logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
 		if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
@@ -3696,6 +3713,34 @@ func (s *knowledgeService) UpdateImageInfo(
 	return nil
 }
 
+// settleKnowledgeBaseReadFailure decides what a parse task does when its
+// knowledge base cannot be loaded. A missing KB is permanent: settle the row
+// as failed and acknowledge the task. Any other read error is transient:
+// return it so the queue retries, instead of turning a database blip into a
+// permanently failed document. The datasource sync path makes the same
+// distinction for its metadata reads.
+func (s *knowledgeService) settleKnowledgeBaseReadFailure(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	readErr error,
+	logPrefix string,
+) error {
+	if !errors.Is(readErr, repository.ErrKnowledgeBaseNotFound) {
+		logger.Errorf(ctx, "%s: failed to read knowledge base: %v", logPrefix, readErr)
+		return fmt.Errorf("read knowledge base %s: %w", knowledge.KnowledgeBaseID, readErr)
+	}
+	logger.Warnf(ctx, "%s: knowledge base %s no longer exists, settling knowledge %s as failed",
+		logPrefix, knowledge.KnowledgeBaseID, knowledge.ID)
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", readErr)
+	knowledge.UpdatedAt = time.Now()
+	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		// Retry: acknowledging now would leave the terminal state unwritten.
+		return fmt.Errorf("mark knowledge %s failed: %w", knowledge.ID, err)
+	}
+	return nil
+}
+
 // ProcessManualUpdate handles Asynq manual knowledge update tasks.
 // It performs cleanup of old indexes/chunks (when NeedCleanup is true) and re-indexes the content.
 func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Task) error {
@@ -3754,12 +3799,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
-		logger.Errorf(ctx, "ProcessManualUpdate: failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		return nil
+		return s.settleKnowledgeBaseReadFailure(ctx, knowledge, err, "ProcessManualUpdate")
 	}
 	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
 		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
@@ -3915,12 +3955,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// 获取知识库信息
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		return nil
+		return s.settleKnowledgeBaseReadFailure(ctx, knowledge, err, "ProcessDocument")
 	}
 	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
 		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
@@ -4481,6 +4516,9 @@ func (s *knowledgeService) convert(
 	}
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	if err == nil && result == nil {
+		err = fmt.Errorf("document parser returned no result")
+	}
 	// Parser resource limits are permanent document rejections, not transient reader failures.
 	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
 		result, err = &types.ReadResult{Error: err.Error()}, nil
@@ -4587,16 +4625,58 @@ func isLikelyRateLimitError(err error) bool {
 func (s *knowledgeService) resolveDocReader(
 	ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string,
 ) interfaces.DocReader {
-	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, docparser.ReaderDeps{
-		Overrides:               overrides,
-		Remote:                  s.documentReader,
-		WeKnoraCloudCredentials: s.tenantService.GetWeKnoraCloudCredentials,
-	})
+	deps := docparser.ReaderDeps{
+		Overrides: overrides,
+		Remote:    s.documentReader,
+	}
+	if s.tenantService != nil {
+		deps.WeKnoraCloudCredentials = s.tenantService.GetWeKnoraCloudCredentials
+	}
+	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, deps)
 	if err != nil {
 		logger.Warnf(ctx, "[resolveDocReader] engine=%q fileType=%q unusable: %v", engine, fileType, err)
 		return nil
 	}
 	return reader
+}
+
+// preflightReparseEngine checks that the parser engine a reparse will use can
+// be created, with the same engine and override resolution as the parse
+// worker. It does not parse anything. Call it before cleanup so an unavailable
+// engine rejects the request while the old content is still in place.
+func (s *knowledgeService) preflightReparseEngine(
+	ctx context.Context, knowledge *types.Knowledge, eff types.EffectiveProcessConfig,
+) error {
+	var fileType string
+	isURL := false
+	switch {
+	case knowledge.FilePath != "":
+		fileType = getFileType(knowledge.FileName)
+	case knowledge.Type == "file_url" && knowledge.Source != "":
+		fileType = knowledge.FileType
+	case knowledge.Type == "url" && knowledge.Source != "":
+		isURL = true
+	default:
+		return nil // nothing will be parsed; reparse handles this case itself
+	}
+
+	var uploadOverrides map[string]string
+	if po, err := knowledge.ProcessOverrides(); err == nil && po != nil {
+		uploadOverrides = po.ParserEngineOverrides
+	}
+	overrides := MergeParserEngineOverrides(s.getParserEngineOverridesFromContext(ctx), uploadOverrides)
+	applyParserRuleOverrides(overrides, eff.ChunkingConfig, fileType)
+
+	engine := eff.ChunkingConfig.ResolveParserEngine(fileType)
+	if isURL {
+		engine = eff.ChunkingConfig.ResolveParserEngine("url")
+	}
+	if s.resolveDocReader(ctx, engine, fileType, isURL, overrides) == nil {
+		return werrors.NewBadRequestError(fmt.Sprintf(
+			"Parser engine %q is not available, so the document was not reparsed and its existing content is kept. "+
+				"Check the parser engine settings or the document parsing service.", engine))
+	}
+	return nil
 }
 
 // failKnowledge marks knowledge as failed (only on last retry) and returns an error.
@@ -4641,21 +4721,14 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	attempt := attemptFromCtx(ctx)
 	lang := types.LanguageFromContextOrDefault(ctx)
 	redisKey := multimodalPendingKey(knowledge.ID)
+	counterBatch := uuid.NewString()
 	// The counter has to be seeded BEFORE the first task is enqueued: an image
 	// task that finishes early would otherwise decrement a key we are about to
 	// overwrite, and its slot would be counted twice. The cost of seeding
 	// first is that a slot whose task never reaches the queue has no owner to
 	// drain it — releaseUnownedMultimodalSlots settles that after the fan-out.
-	counterSeeded := false
-	if s.redisClient != nil {
-		if err := s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err(); err != nil {
-			logger.Warnf(ctx, "Failed to set multimodal pending count for %s: %v", knowledge.ID, err)
-		} else {
-			counterSeeded = true
-		}
-	} else {
-		liteMultimodalSet(redisKey, int64(len(images)))
-		counterSeeded = true
+	if err := seedMultimodalCounter(ctx, s.redisClient, redisKey, counterBatch, int64(len(images))); err != nil {
+		return fmt.Errorf("seed multimodal counter for %s: %w", knowledge.ID, err)
 	}
 
 	// Resolve the image pipeline settings once for the whole fan-out: the image
@@ -4702,6 +4775,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ImageSourceType:     imageSourceType,
 			Attempt:             attempt,
 			ImageIndex:          idx,
+			CounterBatch:        counterBatch,
 			SourceLocators:      img.SourceLocators,
 			ImageVectorEnabled:  &eff.ImageVectorEnabled,
 		}
@@ -4724,7 +4798,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	}
 
 	return s.releaseUnownedMultimodalSlots(
-		ctx, knowledge, redisKey, counterSeeded, len(images), enqueued,
+		ctx, knowledge, redisKey, counterBatch, len(images), enqueued,
 	)
 }
 
@@ -4742,8 +4816,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 func (s *knowledgeService) releaseUnownedMultimodalSlots(
 	ctx context.Context,
 	knowledge *types.Knowledge,
-	redisKey string,
-	counterSeeded bool,
+	redisKey, counterBatch string,
 	planned, enqueued int,
 ) error {
 	if enqueued == 0 {
@@ -4753,15 +4826,13 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 		logger.Warnf(ctx,
 			"[ImageMultimodal] No image task enqueued for %s (planned=%d); enqueueing post-process directly",
 			knowledge.ID, planned)
-		if counterSeeded {
-			// Detached like the shortfall path below: a cancelled parent
-			// context would otherwise leave the seeded key to expire on its
-			// own 24h TTL.
-			dctx, cancel := context.WithTimeout(
-				context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
-			s.delMultimodalCounter(dctx, redisKey)
-			cancel()
-		}
+		// Detached like the shortfall path below: a cancelled parent
+		// context would otherwise leave the seeded key to expire on its
+		// own 24h TTL.
+		dctx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+		deleteMultimodalCounter(dctx, s.redisClient, redisKey, counterBatch)
+		cancel()
 		return s.enqueueKnowledgePostProcessTask(ctx, knowledge)
 	}
 
@@ -4769,14 +4840,6 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 	if shortfall <= 0 {
 		return nil
 	}
-	if !counterSeeded {
-		// Seeding failed, so the key is absent and the first image to finish
-		// already drives post-process through the missing-key fallback in
-		// checkAndFinalizeAllImages. Decrementing here would only create the
-		// key below zero and finalize before the siblings are done.
-		return nil
-	}
-
 	logger.Warnf(ctx,
 		"[ImageMultimodal] Releasing %d un-enqueued image slot(s) for %s (planned=%d enqueued=%d)",
 		shortfall, knowledge.ID, planned, enqueued)
@@ -4785,7 +4848,7 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 	// cancelled mid-fan-out (graceful shutdown) must not skip the release.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
-	pending, err := s.decrMultimodalSlots(rctx, redisKey, int64(shortfall))
+	pending, current, err := s.decrMultimodalSlots(rctx, redisKey, counterBatch, int64(shortfall))
 	if err != nil {
 		// Giving up here puts the row back in the state this whole fix exists
 		// to remove: a counter no task can drain, recovered only by the
@@ -4797,26 +4860,16 @@ func (s *knowledgeService) releaseUnownedMultimodalSlots(
 			shortfall, knowledge.ID, multimodalSlotReleaseAttempts, err)
 		return nil
 	}
-	if pending <= 0 {
+	if current && pending <= 0 {
 		// Every enqueued sibling had already finished, so the release owns the
 		// finalize. Ordering is safe either way: the slots we just drained have
 		// no task behind them, so exactly one path reaches zero.
 		if err := s.enqueueKnowledgePostProcessTask(ctx, knowledge); err != nil {
 			return err
 		}
-		s.delMultimodalCounter(rctx, redisKey)
+		deleteMultimodalCounter(rctx, s.redisClient, redisKey, counterBatch)
 	}
 	return nil
-}
-
-// delMultimodalCounter removes the fan-in counter from Redis, or from the
-// in-process stand-in in Lite mode.
-func (s *knowledgeService) delMultimodalCounter(ctx context.Context, redisKey string) {
-	if s.redisClient == nil {
-		liteMultimodalDel(redisKey)
-		return
-	}
-	s.redisClient.Del(ctx, redisKey)
 }
 
 // multimodalSlotReleaseAttempts bounds the retry on the release decrement.
@@ -4841,16 +4894,13 @@ const multimodalSlotReleaseBackoff = 100 * time.Millisecond
 // decrMultimodalSlots decrements the fan-in counter by `by`, retrying transient
 // Redis failures, and returns the resulting count.
 func (s *knowledgeService) decrMultimodalSlots(
-	ctx context.Context, redisKey string, by int64,
-) (int64, error) {
-	if s.redisClient == nil {
-		return liteMultimodalDecrBy(redisKey, by), nil
-	}
+	ctx context.Context, redisKey, counterBatch string, by int64,
+) (int64, bool, error) {
 	var lastErr error
 	for attempt := 1; attempt <= multimodalSlotReleaseAttempts; attempt++ {
-		pending, err := s.redisClient.DecrBy(ctx, redisKey, by).Result()
+		pending, current, err := decrementMultimodalCounter(ctx, s.redisClient, redisKey, counterBatch, by)
 		if err == nil {
-			return pending, nil
+			return pending, current, nil
 		}
 		lastErr = err
 		if attempt == multimodalSlotReleaseAttempts {
@@ -4861,10 +4911,10 @@ func (s *knowledgeService) decrMultimodalSlots(
 		select {
 		case <-time.After(time.Duration(attempt) * multimodalSlotReleaseBackoff):
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return 0, false, ctx.Err()
 		}
 	}
-	return 0, lastErr
+	return 0, false, lastErr
 }
 
 // enqueueKnowledgePostProcessTask hands a knowledge to the post-process
