@@ -222,6 +222,12 @@ type AgentFinalAnswerData struct {
 	// complete. Carried on both the content event and the Done marker,
 	// because a live-streamed answer only learns of the cap at the close.
 	Truncated bool `json:"truncated,omitempty"`
+	// Usage carries the provider's token usage from the stream's final chunk
+	// as *types.TokenUsage, so the KnowledgeQA turn can report it on the
+	// complete event and persist it with the message (issue #3865). Interface
+	// type and json:"-": internal-only, never serialized to the SSE wire,
+	// and the event package stays free of a types import.
+	Usage interface{} `json:"-"`
 }
 
 // ContextCompactedData reports that older conversation was replaced by a

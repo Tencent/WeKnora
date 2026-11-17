@@ -46,11 +46,20 @@ func newClient(headers map[string]string) *client {
 // headers are only attached when withAuthHeaders is true (feed fetches); article
 // pages on third-party domains must not receive feed credentials.
 func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAuthHeaders bool) ([]byte, error) {
+	body, _, err := c.fetchWithURL(ctx, rawURL, maxSize, withAuthHeaders)
+	return body, err
+}
+
+// fetchWithURL also returns the final response URL after redirects, which is
+// the base against which relative article links and images must be resolved.
+func (c *client) fetchWithURL(
+	ctx context.Context, rawURL string, maxSize int64, withAuthHeaders bool,
+) ([]byte, *url.URL, error) {
 	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
-		return nil, fmt.Errorf("URL rejected: %w", err)
+		return nil, nil, fmt.Errorf("URL rejected: %w", err)
 	}
 	if _, err := url.Parse(rawURL); err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
+		return nil, nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
@@ -58,7 +67,7 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if withAuthHeaders {
@@ -76,22 +85,22 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAu
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch failed: %w", err)
+		return nil, nil, fmt.Errorf("fetch failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d %s", resp.StatusCode, resp.Status)
+		return nil, nil, fmt.Errorf("HTTP %d %s", resp.StatusCode, resp.Status)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("read body failed: %w", err)
+		return nil, nil, fmt.Errorf("read body failed: %w", err)
 	}
 	if int64(len(body)) > maxSize {
-		return nil, fmt.Errorf("response exceeds maximum size (%d bytes)", maxSize)
+		return nil, nil, fmt.Errorf("response exceeds maximum size (%d bytes)", maxSize)
 	}
-	return body, nil
+	return body, resp.Request.URL, nil
 }
 
 // fetchFeed retrieves the raw bytes of a feed document.
@@ -104,12 +113,11 @@ func (c *client) fetchFeed(ctx context.Context, feedURL string) ([]byte, error) 
 // error if the page can't be fetched or no readable content is found, so the
 // caller can fall back to feed-provided content.
 func (c *client) extractArticle(ctx context.Context, articleURL string) (contentHTML, title string, err error) {
-	body, err := c.fetch(ctx, articleURL, maxArticleSize, false)
+	body, pageURL, err := c.fetchWithURL(ctx, articleURL, maxArticleSize, false)
 	if err != nil {
 		return "", "", err
 	}
 
-	pageURL, _ := url.Parse(articleURL)
 	article, err := readability.FromReader(bytes.NewReader(body), pageURL)
 	if err != nil {
 		return "", "", fmt.Errorf("readability parse: %w", err)

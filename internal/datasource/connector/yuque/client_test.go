@@ -258,6 +258,7 @@ func TestClient_4xxNotRetried(t *testing.T) {
 
 func TestParseRetryAfter(t *testing.T) {
 	fallback := 5 * time.Second
+	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	tests := []struct {
 		header string
 		want   time.Duration
@@ -266,10 +267,12 @@ func TestParseRetryAfter(t *testing.T) {
 		{"0", 100 * time.Millisecond},
 		{"-1", 100 * time.Millisecond}, // negative coerced
 		{"3", 3 * time.Second},
+		{now.Add(30 * time.Second).Format(http.TimeFormat), 30 * time.Second},
+		{now.Add(-time.Second).Format(http.TimeFormat), 100 * time.Millisecond},
 		{"abc", fallback}, // unparseable
 	}
 	for _, tt := range tests {
-		if got := parseRetryAfter(tt.header, fallback); got != tt.want {
+		if got := parseRetryAfter(tt.header, fallback, now); got != tt.want {
 			t.Errorf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.want)
 		}
 	}

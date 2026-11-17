@@ -26,7 +26,7 @@ async function fixture(options: {
 } = {}) {
   const props = reactive({ target: options.target || target, active: true })
   const requests: string[] = [], events: string[] = []
-  let preview: any, mounts = 0
+  let preview: any, mounts = 0, kbLookups = 0
   const exports: any = {}
   const Preview = defineComponent({
     props: { knowledgeId: String, confluenceBaseUrl: String, fileType: String, fileName: String, locate: Object, sourceMode: Boolean, active: Boolean, toolbarTarget: Object, fillHeight: Boolean },
@@ -36,6 +36,16 @@ async function fixture(options: {
     if (name === 'vue') return require('vue')
     if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
     if (name === 'vue-router') return { useRouter: () => ({ resolve: () => ({ href: '/knowledge' }) }) }
+    // The KB-name lookup rides the shared keyed cache; in the sandbox it
+    // resolves instantly so the provenance line renders deterministically.
+    if (name === '@/stores/chatResources') return {
+      useChatResourcesStore: () => ({
+        fetchKnowledgeBaseById: async () => {
+          kbLookups++
+          return { name: '测试知识库' }
+        },
+      }),
+    }
     if (name === '@/api/knowledge-base/index') return {
       getKnowledgeDetails: async (id: string) => {
         const firstRequest = requests.length === 0
@@ -53,19 +63,20 @@ async function fixture(options: {
     if (name.startsWith('@/utils/')) return require(`../utils/${name.slice('@/utils/'.length)}.ts`)
     throw new Error(`Unexpected import: ${name}`)
   } })
-  type Host = { parent?: Host; children: Host[] }
+  type Host = { parent?: Host; children: Host[]; text?: string }
   const node = (): Host => ({ children: [] })
   const renderer = createRenderer<Host, Host>({
-    createElement: node, createText: node, createComment: node,
+    createElement: node, createText: (text: string) => ({ ...node(), text }), createComment: node,
     insert(child, parent) { child.parent = parent; parent.children.push(child) },
     remove(child) { const siblings = child.parent?.children; if (siblings) siblings.splice(siblings.indexOf(child), 1) },
-    setElementText() {}, setText() {}, patchProp() {}, parentNode: el => el.parent || null, nextSibling: () => null,
+    setElementText(el, text) { el.text = text }, setText(el, text) { el.text = text }, patchProp() {}, parentNode: el => el.parent || null, nextSibling: () => null,
   })
   const app = renderer.createApp({ setup: () => () => h(exports.default, { ...props, onUnavailable: () => events.push('unavailable') }) })
   for (const name of ['t-button', 't-icon', 't-loading']) app.component(name, { render: () => null })
-  app.mount(node())
+  const root = node()
+  app.mount(root)
   await flush()
-  return { props, requests, events, preview: () => preview, mounts: () => mounts, dispose: () => app.unmount() }
+  return { props, requests, events, preview: () => preview, mounts: () => mounts, kbLookups: () => kbLookups, dispose: () => app.unmount(), root }
 }
 
 test('manual citation opens Markdown with raw chunk evidence even without source locators', async t => {
@@ -144,6 +155,7 @@ test('Confluence citation passes the document site to the Markdown preview', asy
 test('another Confluence citation retries failed details without restarting the Markdown preview', async t => {
   const confluenceTarget = {
     ...target, knowledgeId: 'confluence-doc', knowledgeSource: 'upload', fileName: 'Confluence page.md',
+    knowledgeBaseId: 'kb-77',
   }
   const f = await fixture({
     target: confluenceTarget,
@@ -152,6 +164,7 @@ test('another Confluence citation retries failed details without restarting the 
   })
   t.after(f.dispose)
   assert.equal(f.preview().confluenceBaseUrl, '')
+  assert.ok(nodeText(f.root).includes('测试知识库'))
   const initialFileType = f.preview().fileType
 
   f.props.target = { ...confluenceTarget, chunkId: 'chunk-2', anchorText: 'The second cited paragraph.' }
@@ -159,6 +172,26 @@ test('another Confluence citation retries failed details without restarting the 
 
   assert.equal(f.preview().confluenceBaseUrl, 'https://team.atlassian.net/wiki')
   assert.equal(f.preview().fileType, initialFileType)
+  assert.ok(nodeText(f.root).includes('测试知识库'))
+  assert.equal(f.kbLookups(), 1)
   assert.equal(f.mounts(), 1)
   assert.deepEqual(f.requests.filter(r => r.startsWith('details:')), ['details:confluence-doc', 'details:confluence-doc'])
+})
+
+function nodeText(root: any): string {
+  const walk = (n: any): string => (n.text || '') + (n.children || []).map(walk).join('')
+  return walk(root)
+}
+
+test('citation header shows the source knowledge base name', async t => {
+  // 多库/跨租户检索的溯源: 引用卡头部应显示被引文档所属知识库。
+  const kbTarget = { ...target, knowledgeBaseId: 'kb-77' }
+  const f = await fixture({ target: kbTarget }); t.after(f.dispose)
+  await flush()
+  assert.ok(nodeText(f.root).includes('测试知识库'), 'KB name line must render under the title')
+
+  // 无 KB id 的引用(如手工知识)不应渲染空行
+  const f2 = await fixture(); t.after(f2.dispose)
+  await flush()
+  assert.ok(!nodeText(f2.root).includes('测试知识库'), 'no KB id, no provenance line')
 })

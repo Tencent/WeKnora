@@ -4,6 +4,9 @@
       <ArtifactFileIcon :file-name="displayName" />
       <div class="reference-source__meta-main">
         <h4 class="reference-source__title" :title="displayTitle">{{ displayTitle }}</h4>
+        <p v-if="kbName" class="reference-source__kb" :title="kbName">
+          <t-icon name="folder" size="14px" />{{ kbName }}
+        </p>
         <p v-if="statusText" class="reference-source__status" :class="`is-${status}`">{{ statusText }}</p>
       </div>
       <div ref="toolbarSlot" class="reference-source__toolbar" />
@@ -67,6 +70,7 @@ import { useRouter } from 'vue-router'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from '@/views/chat/components/ArtifactFileIcon.vue'
 import { getChunkByIdOnly, getKnowledgeDetails } from '@/api/knowledge-base/index'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { isKnownPreviewableFile, resolveFilePreviewExt } from '@/utils/filePreview'
 import type { ReferenceSourceTarget } from '@/utils/referenceSources'
 import {
@@ -94,6 +98,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const router = useRouter()
+const chatResources = useChatResourcesStore()
+// Provenance of the cited document: multi-KB (and cross-tenant shared) answers
+// need the source knowledge base visible, not only the document title.
+const kbName = ref('')
 
 type Mode = 'loading' | 'file' | 'web' | 'none'
 type Status = 'idle' | 'locating' | 'found' | 'page' | 'block' | 'ambiguous' | 'stale' | 'missing' | 'partial'
@@ -342,6 +350,21 @@ function openWebSource() {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+// Citation changes within the same knowledge base keep its provenance visible.
+watch(
+  () => props.target.knowledgeBaseId,
+  (kbId, _previousId, onCleanup) => {
+    kbName.value = ''
+    if (!kbId) return
+    let current = true
+    onCleanup(() => { current = false })
+    chatResources.fetchKnowledgeBaseById(kbId)
+      .then(kb => { if (current) kbName.value = kb?.name || '' })
+      .catch(() => {})
+  },
+  { immediate: true },
+)
+
 watch(
   () => [props.target.chunkId, props.target.knowledgeId, props.target.anchorText],
   () => void load(),
@@ -380,6 +403,24 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.reference-source__kb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  .t-icon {
+    flex-shrink: 0;
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .reference-source__status {
