@@ -7,8 +7,7 @@ import zipfile
 
 import openpyxl
 
-from docreader.parser.xlsx_repair import repair_xlsx_bytes
-
+from docreader.parser.xlsx_repair import repair_xlsx_bytes, strip_unreadable_ranges_xlsx
 
 _SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _CONTENT_TYPES = "http://schemas.openxmlformats.org/package/2006/content-types"
@@ -130,6 +129,63 @@ class TestSharedStringsRepair(unittest.TestCase):
 
     def test_non_zip_input_is_unchanged(self):
         self.assertIsNone(repair_xlsx_bytes(b"not an XLSX"))
+
+
+class TestRangeAttributeSyntax(unittest.TestCase):
+    def _workbook(self, attribute):
+        book = openpyxl.Workbook()
+        book.active["A1"] = "preserved"
+        buffer = io.BytesIO()
+        book.save(buffer)
+        book.close()
+        with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as archive:
+            files = {name: archive.read(name) for name in archive.namelist()}
+        fragment = (
+            f'<dataValidations count="1"><dataValidation type="list" {attribute}>'
+            '<formula1>"yes,no"</formula1></dataValidation></dataValidations>'
+        )
+        path = "xl/worksheets/sheet1.xml"
+        files[path] = files[path].replace(b"<pageMargins", fragment.encode() + b"<pageMargins")
+        return _archive_bytes(files)
+
+    def test_invalid_range_accepts_xml_attribute_syntax(self):
+        for attribute in ("sqref='C:C'", 'sqref = "C:C"', "sqref\t=\n'C:C'"):
+            with self.subTest(attribute=attribute):
+                original = self._workbook(attribute)
+                with self.assertRaises(TypeError):
+                    _read_values(original)
+                repaired = strip_unreadable_ranges_xlsx(original)
+                self.assertIsNotNone(repaired)
+                self.assertEqual(_read_values(repaired), [("preserved",)])
+
+    def test_encoded_valid_range_is_not_removed(self):
+        original = self._workbook('sqref="A1&#58;A2"')
+        self.assertEqual(_read_values(original), [("preserved",)])
+        self.assertIsNone(strip_unreadable_ranges_xlsx(original))
+
+    def test_single_quoted_valid_range_is_unchanged(self):
+        original = self._workbook("sqref = 'A1:A2'")
+        self.assertEqual(_read_values(original), [("preserved",)])
+        self.assertIsNone(strip_unreadable_ranges_xlsx(original))
+
+    def test_malformed_attribute_is_not_silently_repaired(self):
+        for attribute in ('sqref="A1&missing;"', 'sqref="C:C\''):
+            with self.subTest(attribute=attribute):
+                original = self._workbook(attribute)
+                self.assertIsNone(strip_unreadable_ranges_xlsx(original))
+
+    def test_opposite_quote_in_range_is_removed(self):
+        original = self._workbook('sqref="A1\'"')
+        with self.assertRaises(TypeError):
+            _read_values(original)
+        repaired = strip_unreadable_ranges_xlsx(original)
+        self.assertIsNotNone(repaired)
+        self.assertEqual(_read_values(repaired), [("preserved",)])
+
+    def test_prompt_text_is_not_a_range_attribute(self):
+        original = self._workbook('prompt="type sqref=\'C:C\'" sqref="A1"')
+        self.assertEqual(_read_values(original), [("preserved",)])
+        self.assertIsNone(strip_unreadable_ranges_xlsx(original))
 
 
 if __name__ == "__main__":

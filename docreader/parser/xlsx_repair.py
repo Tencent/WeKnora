@@ -66,7 +66,10 @@ _SQREF_ELEMENT_RE = re.compile(
     r"<(?P<tag>(?:\w+:)?(?:dataValidation|scenarios))\b[^>]*?(?:/>|>.*?</(?P=tag)>)",
     re.DOTALL,
 )
-_SQREF_ATTR_RE = re.compile(r'\bsqref="([^"]*)"')
+_XML_ATTR_RE = re.compile(
+    r"""(?P<name>[^\s=<>/]+)\s*=\s*(?P<quoted>(?P<quote>["']).*?(?P=quote))""",
+    re.DOTALL,
+)
 
 
 def strip_unreadable_ranges_xlsx(content: bytes) -> bytes | None:
@@ -107,11 +110,25 @@ def _unreadable(element: str) -> bool:
     """True when openpyxl would fail to build this element's range."""
     from openpyxl.worksheet.cell_range import MultiCellRange
 
-    match = _SQREF_ATTR_RE.search(element)
-    if match is None:
+    # Consume whole attributes so text like sqref='C:C' inside a prompt is
+    # not mistaken for the actual range. Stop at the opening tag's end.
+    previous = 0
+    for match in _XML_ATTR_RE.finditer(element):
+        if ">" in element[previous:match.start()]:
+            return False
+        previous = match.end()
+        if match.group("name") == "sqref":
+            break
+    else:
         return False
     try:
-        MultiCellRange(match.group(1))
+        # XML permits either quote style, whitespace around '=', and character
+        # references. Validate the decoded value, as openpyxl itself does.
+        value = ET.fromstring(f"<range sqref={match.group('quoted')}/>").get("sqref")
+    except ET.ParseError:
+        return False
+    try:
+        MultiCellRange(value)
     except Exception:  # noqa: BLE001 - mirrors openpyxl's own bare except
         return True
     return False
