@@ -383,7 +383,9 @@ func (r *deferredUploadRepo) GetKnowledgeByID(context.Context, uint64, string) (
 	return r.createdKnowledge, nil
 }
 
-func (r *deferredUploadRepo) TransitionDeferredKnowledge(_ context.Context, k *types.Knowledge, from, to string) (bool, error) {
+func (r *deferredUploadRepo) TransitionDeferredKnowledge(
+	_ context.Context, k *types.Knowledge, from, to string,
+) (bool, error) {
 	if r.createdKnowledge.ID != k.ID || r.createdKnowledge.ParseStatus != from {
 		return false, nil
 	}

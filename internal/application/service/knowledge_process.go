@@ -2993,7 +2993,9 @@ func (s *knowledgeService) StartDeferredKnowledge(ctx context.Context, id string
 	if err := s.preflightReparseEngine(ctx, knowledge, eff); err != nil {
 		return nil, err
 	}
-	started, err := s.repo.TransitionDeferredKnowledge(ctx, knowledge, types.ParseStatusDeferred, types.ParseStatusPending)
+	started, err := s.repo.TransitionDeferredKnowledge(
+		ctx, knowledge, types.ParseStatusDeferred, types.ParseStatusPending,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -3007,8 +3009,10 @@ func (s *knowledgeService) StartDeferredKnowledge(ctx context.Context, id string
 		return nil, errors.Join(err, restoreErr)
 	}
 	knowledge.ParseStatus = types.ParseStatusPending
-	recordKBActivity(ctx, s.audit, knowledge.TenantID, knowledge.KnowledgeBaseID, types.AuditActionKnowledgeReparseStarted,
-		"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{"title": knowledge.Title, "task_id": info.ID})
+	recordKBActivity(ctx, s.audit, knowledge.TenantID, knowledge.KnowledgeBaseID,
+		types.AuditActionKnowledgeReparseStarted, "knowledge", knowledge.ID, types.AuditOutcomeAccepted,
+		map[string]any{"title": knowledge.Title, "task_id": info.ID},
+	)
 	enqueueDataTableSummaryIfNeeded(ctx, s.task, knowledge.TenantID, knowledge.ID, knowledge.FileName,
 		knowledge.FileType, kb.SummaryModelID, kb.EmbeddingModelID)
 	return knowledge, nil

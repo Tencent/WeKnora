@@ -444,7 +444,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 			create = h.kgService.CreateDeferredKnowledgeFromFile
 		}
 	}
-	knowledge, err := create(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	knowledge, err := create(
+		ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides,
+	)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
