@@ -103,10 +103,12 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				SET n:WEKNORA_SCHEMA_ENTITY, n.schema_scope = $scope`,
 				map[string]interface{}{"kg": namespace.Knowledge, "scope": namespace.KnowledgeBase})
 			if err != nil {
-				return nil, fmt.Errorf("failed to upgrade schema entities; rebuild graphs with duplicate identities: %w", err)
+				return nil, fmt.Errorf(
+					"failed to upgrade schema entities; rebuild graphs with duplicate identities: %w", err)
 			}
 			if _, err := upgrade.Consume(ctx); err != nil {
-				return nil, fmt.Errorf("failed to upgrade schema entities; rebuild graphs with duplicate identities: %w", err)
+				return nil, fmt.Errorf(
+					"failed to upgrade schema entities; rebuild graphs with duplicate identities: %w", err)
 			}
 		}
 		// Merge with namespace labels first so pre-label typed nodes upgrade in place.
@@ -257,7 +259,7 @@ func (n *Neo4jRepository) ensureSchemaConstraint(ctx context.Context) error {
 	}
 	// Schema DDL must run in a separate transaction from entity writes.
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	defer func() { _ = session.Close(ctx) }()
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		result, err := tx.Run(ctx, schemaEntityConstraintQuery, nil)
 		if err != nil {
@@ -327,6 +329,7 @@ func graphTypePredicate(node, entityType, label string) string {
 		entityType, node, entityType, label, node, node, graphTypeLabelPrefix)
 }
 
+// SearchNodeWithSchema searches bounded one-hop relations using optional schema hints.
 func (n *Neo4jRepository) SearchNodeWithSchema(
 	ctx context.Context, namespace types.NameSpace, queries []types.GraphQuery,
 ) (*types.GraphData, error) {
@@ -337,7 +340,9 @@ func (n *Neo4jRepository) SearchNodeWithSchema(
 	return n.search(ctx, query, params)
 }
 
-func (n *Neo4jRepository) search(ctx context.Context, query string, params map[string]interface{}) (*types.GraphData, error) {
+func (n *Neo4jRepository) search(
+	ctx context.Context, query string, params map[string]interface{},
+) (*types.GraphData, error) {
 	if n.driver == nil {
 		logger.Warnf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil, nil
@@ -505,8 +510,10 @@ func schemaGraphSearchCypher(labelExpr string, queries []types.GraphQuery) (stri
 		    (q.direction = 'in' AND endNode(r) = n))
 		  AND NOT ANY(previous IN earlier_seeds WHERE previous.node IN [n, m]
 		    AND (previous.query.relation_type = '' OR type(r) = previous.query.relation_type)
-		    AND ((previous.node = n AND ` + graphTypePredicate("m", "previous.query.target_type", "previous.query.target_label") + `) OR
-		      (previous.node = m AND ` + graphTypePredicate("n", "previous.query.target_type", "previous.query.target_label") + `))
+		    AND ((previous.node = n AND ` +
+		graphTypePredicate("m", "previous.query.target_type", "previous.query.target_label") + `) OR
+		      (previous.node = m AND ` +
+		graphTypePredicate("n", "previous.query.target_type", "previous.query.target_label") + `))
 		    AND (previous.query.direction = '' OR
 		      (previous.query.direction = 'out' AND startNode(r) = previous.node) OR
 		      (previous.query.direction = 'in' AND endNode(r) = previous.node)))

@@ -29,7 +29,9 @@ type schemaSequenceChat struct {
 	messages  []chat.Message
 }
 
-func (m *schemaSequenceChat) Chat(_ context.Context, messages []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
+func (m *schemaSequenceChat) Chat(
+	_ context.Context, messages []chat.Message, _ *chat.ChatOptions,
+) (*types.ChatResponse, error) {
 	m.messages = append([]chat.Message(nil), messages...)
 	m.calls++
 	if m.err != nil {
@@ -41,7 +43,9 @@ func (m *schemaSequenceChat) Chat(_ context.Context, messages []chat.Message, _ 
 	return m.responses[m.calls-1], nil
 }
 
-const validSchemaExtraction = `{"entities":[{"id":"e1","name":"Alex","type":"Person"},{"id":"e2","name":"Alex","type":"Company"}],"relations":[{"source":"e1","target":"e2","type":"WORKS_AT"}]}`
+const validSchemaExtraction = `{"entities":[{"id":"e1","name":"Alex","type":"Person"},` +
+	`{"id":"e2","name":"Alex","type":"Company"}],` +
+	`"relations":[{"source":"e1","target":"e2","type":"WORKS_AT"}]}`
 
 func TestSchemaExtractorValidatesAndRepairsOnce(t *testing.T) {
 	invalid := strings.Replace(validSchemaExtraction, `"WORKS_AT"`, `"UNKNOWN"`, 1)
@@ -131,7 +135,9 @@ func TestSchemaExtractorUsesOnlyValidTypedExamples(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(raw, &copied))
 			tc.edit(&copied)
-			model := &schemaSequenceChat{responses: []*types.ChatResponse{{Content: validSchemaExtraction, FinishReason: "stop"}}}
+			model := &schemaSequenceChat{responses: []*types.ChatResponse{
+				{Content: validSchemaExtraction, FinishReason: "stop"},
+			}}
 			extractor := NewExtractor(model, &types.PromptTemplateStructured{
 				Schema: extractionTestSchema(), Examples: []types.GraphData{copied},
 			})
@@ -159,18 +165,25 @@ func TestExtractSchemaQueriesUsesOptionalDirectedHints(t *testing.T) {
 		content   string
 		wantError bool
 	}{
-		{"outgoing", `{"queries":[{"name":"Alex","entity_type":"Person","relation_type":"WORKS_AT","direction":"out","target_type":"Company"}]}`, false},
-		{"incoming", `{"queries":[{"name":"Alex","entity_type":"Company","relation_type":"WORKS_AT","direction":"in","target_type":"Person"}]}`, false},
-		{"uncertain hints", `{"queries":[{"name":"Alex","entity_type":"","relation_type":"","direction":"","target_type":""}]}`, false},
+		{"outgoing", `{"queries":[{"name":"Alex","entity_type":"Person",` +
+			`"relation_type":"WORKS_AT","direction":"out","target_type":"Company"}]}`, false},
+		{"incoming", `{"queries":[{"name":"Alex","entity_type":"Company",` +
+			`"relation_type":"WORKS_AT","direction":"in","target_type":"Person"}]}`, false},
+		{"uncertain hints", `{"queries":[{"name":"Alex","entity_type":"",` +
+			`"relation_type":"","direction":"","target_type":""}]}`, false},
 		{"no named seeds", `{"queries":[]}`, false},
-		{"wrong endpoints", `{"queries":[{"name":"Alex","entity_type":"Company","relation_type":"WORKS_AT","direction":"out","target_type":"Person"}]}`, true},
-		{"unknown type", `{"queries":[{"name":"Alex","entity_type":"Unknown","relation_type":"","direction":"","target_type":""}]}`, true},
-		{"extra property", `{"queries":[{"name":"Alex","entity_type":"","relation_type":"","direction":"","target_type":"","cypher":"MATCH (n)"}]}`, true},
+		{"wrong endpoints", `{"queries":[{"name":"Alex","entity_type":"Company",` +
+			`"relation_type":"WORKS_AT","direction":"out","target_type":"Person"}]}`, true},
+		{"unknown type", `{"queries":[{"name":"Alex","entity_type":"Unknown",` +
+			`"relation_type":"","direction":"","target_type":""}]}`, true},
+		{"extra property", `{"queries":[{"name":"Alex","entity_type":"","relation_type":"",` +
+			`"direction":"","target_type":"","cypher":"MATCH (n)"}]}`, true},
 		{"missing fields", `{"queries":[{"name":"Alex"}]}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &schemaSequenceChat{responses: []*types.ChatResponse{{Content: tc.content, FinishReason: "stop"}}}
-			queries, err := ExtractSchemaQueries(context.Background(), model, extractionTestSchema(), "Where does Alex work?")
+			queries, err := ExtractSchemaQueries(
+				context.Background(), model, extractionTestSchema(), "Where does Alex work?")
 			require.Equal(t, 1, model.calls)
 			if tc.wantError {
 				require.Error(t, err)
@@ -199,11 +212,14 @@ func (*schemaKBRepo) GetKnowledgeBaseByIDs(_ context.Context, ids []string) ([]*
 func TestSchemaQueryPluginReusesIdenticalDomainsWithoutLegacyCall(t *testing.T) {
 	t.Setenv("NEO4J_ENABLE", "true")
 	model := &schemaSequenceChat{responses: []*types.ChatResponse{{
-		Content:      `{"queries":[{"name":"Alex","entity_type":"Person","relation_type":"","direction":"","target_type":""}]}`,
+		Content: `{"queries":[{"name":"Alex","entity_type":"Person",` +
+			`"relation_type":"","direction":"","target_type":""}]}`,
 		FinishReason: "stop",
 	}}}
-	plugin := &PluginExtractEntity{modelService: &stubModelService{model: model}, knowledgeBaseRepo: &schemaKBRepo{},
-		template: &types.PromptTemplateStructured{Description: "legacy"}}
+	plugin := &PluginExtractEntity{
+		modelService: &stubModelService{model: model}, knowledgeBaseRepo: &schemaKBRepo{},
+		template: &types.PromptTemplateStructured{Description: "legacy"},
+	}
 	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{
 		Query: "Where does Alex work?",
 		SearchTargets: types.SearchTargets{

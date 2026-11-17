@@ -143,8 +143,10 @@ func TestAddGraphKeepsTypedIdentityAndOmitsProperties(t *testing.T) {
 				{Name: "Alex", EntityType: "Company"},
 				{Name: "Legacy", Attributes: []string{"retained"}},
 			},
-			Relation: []*types.GraphRelation{{Node1: "Alex", Node2: "Alex", Type: "WORKS_AT",
-				SourceType: "Person", TargetType: "Company"}},
+			Relation: []*types.GraphRelation{{
+				Node1: "Alex", Node2: "Alex", Type: "WORKS_AT",
+				SourceType: "Person", TargetType: "Company",
+			}},
 		}}))
 	assert.Equal(t, schemaEntityConstraintQuery, tx.queries[0])
 	assert.Contains(t, tx.queries[2], "SET n:WEKNORA_SCHEMA_ENTITY, n.schema_scope = $scope")
@@ -206,14 +208,18 @@ func TestTypedGraphIdentityScope(t *testing.T) {
 	person := graphWriteIdentity("Alex", "Person", scope)
 	assert.Equal(t, person, graphWriteIdentity("Alex", "Person", scope))
 	assert.NotEqual(t, person, graphWriteIdentity("Alex", "Company", scope))
-	assert.NotEqual(t, person, graphWriteIdentity("Alex", "Person", types.NameSpace{KnowledgeBase: "kb", Knowledge: "other"}))
-	assert.NotEqual(t, person, graphWriteIdentity("Alex", "Person", types.NameSpace{KnowledgeBase: "other", Knowledge: "doc"}))
+	assert.NotEqual(t, person, graphWriteIdentity("Alex", "Person",
+		types.NameSpace{KnowledgeBase: "kb", Knowledge: "other"}))
+	assert.NotEqual(t, person, graphWriteIdentity("Alex", "Person",
+		types.NameSpace{KnowledgeBase: "other", Knowledge: "doc"}))
 	repo := NewNeo4jRepository(nil).(*Neo4jRepository)
 	assert.Equal(t, []string{"ENTITYkb", "ENTITYdoc"}, repo.graphWriteLabels(scope, ""))
 }
 
 func TestGraphTypeLabelsPreserveExactNames(t *testing.T) {
-	for _, name := range []string{"Person", "person", "A-B", "A_B", "ENTITYkb", "TYPE_Person", "\u4f01\u4e1a`\u7c7b\u578b"} {
+	for _, name := range []string{
+		"Person", "person", "A-B", "A_B", "ENTITYkb", "TYPE_Person", "\u4f01\u4e1a`\u7c7b\u578b",
+	} {
 		assert.Equal(t, "TYPE_"+name, graphTypeLabel(name))
 		assert.Equal(t, []string{"TYPE_" + name}, graphTypeLabels(name))
 	}

@@ -14,7 +14,8 @@ func TestExtractConfigOverrideListsRoundtrip(t *testing.T) {
 	}{
 		{"omitted", `{"enabled":true}`},
 		{"empty", `{"enabled":true,"tags":[],"nodes":[],"relations":[]}`},
-		{"nonempty", `{"enabled":true,"tags":["WORKS_AT"],"nodes":[{"name":"Alex"}],"relations":[{"node1":"Alex","node2":"Acme","type":"WORKS_AT"}]}`},
+		{"nonempty", `{"enabled":true,"tags":["WORKS_AT"],"nodes":[{"name":"Alex"}],` +
+			`"relations":[{"node1":"Alex","node2":"Acme","type":"WORKS_AT"}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var config ExtractConfig

@@ -53,7 +53,9 @@ func TestGraphSchemaParseExtraction(t *testing.T) {
 	schema := testGraphSchema()
 	validator, err := CompileGraphJSONSchema(schema.ExtractionJSONSchema())
 	require.NoError(t, err)
-	const valid = `{"entities":[{"id":"e1","name":"Alex","type":"Person"},{"id":"e2","name":"Alex","type":"Company"}],"relations":[{"source":"e1","target":"e2","type":"WORKS_AT"}]}`
+	const valid = `{"entities":[{"id":"e1","name":"Alex","type":"Person"},` +
+		`{"id":"e2","name":"Alex","type":"Company"}],` +
+		`"relations":[{"source":"e1","target":"e2","type":"WORKS_AT"}]}`
 	graph, err := schema.ParseExtraction(valid, validator)
 	require.NoError(t, err)
 	require.Len(t, graph.Node, 2)
@@ -68,7 +70,8 @@ func TestGraphSchemaParseExtraction(t *testing.T) {
 		{"duplicate id", strings.Replace(valid, `"id":"e2"`, `"id":"e1"`, 1)},
 		{"duplicate identity", strings.Replace(valid, `"type":"Company"`, `"type":"Person"`, 1)},
 		{"missing reference", strings.Replace(valid, `"target":"e2"`, `"target":"e9"`, 1)},
-		{"wrong relation endpoints", strings.Replace(valid, `"source":"e1","target":"e2"`, `"source":"e2","target":"e1"`, 1)},
+		{"wrong relation endpoints", strings.Replace(
+			valid, `"source":"e1","target":"e2"`, `"source":"e2","target":"e1"`, 1)},
 		{"missing required field", `{"entities":[]}`},
 		{"extra root", `{"entities":[],"relations":[],"attributes":[]}`},
 		{"null", `null`},
@@ -86,7 +89,8 @@ func TestGraphSchemaParseExtraction(t *testing.T) {
 		schema.RelationTypes = nil
 		validator, err := CompileGraphJSONSchema(schema.ExtractionJSONSchema())
 		require.NoError(t, err)
-		_, err = schema.ParseExtraction(`{"entities":[{"id":"e1","name":"Alex","type":"Person"}],"relations":[]}`, validator)
+		_, err = schema.ParseExtraction(
+			`{"entities":[{"id":"e1","name":"Alex","type":"Person"}],"relations":[]}`, validator)
 		require.NoError(t, err)
 		_, err = schema.ParseExtraction(valid, validator)
 		require.Error(t, err)
@@ -136,15 +140,33 @@ func TestGraphSchemaQueryMatchesRequestedRelation(t *testing.T) {
 		query   GraphQuery
 		wantErr bool
 	}{
-		{"works at outgoing", GraphQuery{Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", Direction: "out", TargetType: "Company"}, false},
-		{"works at incoming", GraphQuery{Name: "Acme", EntityType: "Company", RelationType: "WORKS_AT", Direction: "in", TargetType: "Person"}, false},
-		{"owns outgoing", GraphQuery{Name: "Acme", EntityType: "Company", RelationType: "OWNS", Direction: "out", TargetType: "Person"}, false},
-		{"owns incoming", GraphQuery{Name: "Alex", EntityType: "Person", RelationType: "OWNS", Direction: "in", TargetType: "Company"}, false},
-		{"cannot borrow owns endpoints", GraphQuery{Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", Direction: "in", TargetType: "Company"}, true},
-		{"cannot borrow works at endpoints", GraphQuery{Name: "Alex", EntityType: "Person", RelationType: "OWNS", Direction: "out", TargetType: "Company"}, true},
-		{"unknown source still checks target", GraphQuery{Name: "Alex", RelationType: "WORKS_AT", Direction: "in", TargetType: "Company"}, true},
-		{"unknown target still checks source", GraphQuery{Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", Direction: "in"}, true},
-		{"uncertain direction accepts valid endpoints", GraphQuery{Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", TargetType: "Company"}, false},
+		{"works at outgoing", GraphQuery{
+			Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", Direction: "out", TargetType: "Company",
+		}, false},
+		{"works at incoming", GraphQuery{
+			Name: "Acme", EntityType: "Company", RelationType: "WORKS_AT", Direction: "in", TargetType: "Person",
+		}, false},
+		{"owns outgoing", GraphQuery{
+			Name: "Acme", EntityType: "Company", RelationType: "OWNS", Direction: "out", TargetType: "Person",
+		}, false},
+		{"owns incoming", GraphQuery{
+			Name: "Alex", EntityType: "Person", RelationType: "OWNS", Direction: "in", TargetType: "Company",
+		}, false},
+		{"cannot borrow owns endpoints", GraphQuery{
+			Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", Direction: "in", TargetType: "Company",
+		}, true},
+		{"cannot borrow works at endpoints", GraphQuery{
+			Name: "Alex", EntityType: "Person", RelationType: "OWNS", Direction: "out", TargetType: "Company",
+		}, true},
+		{"unknown source still checks target", GraphQuery{
+			Name: "Alex", RelationType: "WORKS_AT", Direction: "in", TargetType: "Company",
+		}, true},
+		{"unknown target still checks source", GraphQuery{
+			Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", Direction: "in",
+		}, true},
+		{"uncertain direction accepts valid endpoints", GraphQuery{
+			Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT", TargetType: "Company",
+		}, false},
 		{"name only", GraphQuery{Name: "Alex"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

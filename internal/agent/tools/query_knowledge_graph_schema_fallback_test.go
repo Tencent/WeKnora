@@ -19,7 +19,7 @@ type schemaFallbackGraphRepo struct {
 }
 
 func (s *schemaFallbackGraphRepo) SearchNodeWithSchema(
-	_ context.Context, namespace types.NameSpace, queries []types.GraphQuery,
+	_ context.Context, _ types.NameSpace, _ []types.GraphQuery,
 ) (*types.GraphData, error) {
 	s.typedCalls++
 	return s.typedGraph, s.typedErr
@@ -115,10 +115,14 @@ func TestQueryKnowledgeGraphSchemaFallbackValidatesEvidenceAndScope(t *testing.T
 				}
 				chunks := &graphEvidenceChunkRepo{stubGraphChunkRepo: stubGraphChunkRepo{
 					chunks: map[string]*types.Chunk{
-						"c-a": {ID: "c-a", KnowledgeBaseID: "kb-1", KnowledgeID: "doc-a",
-							IsEnabled: true, Content: "Alex works at Acme."},
-						"c-b": {ID: "c-b", KnowledgeBaseID: "kb-1", KnowledgeID: "doc-b",
-							IsEnabled: true, Content: "Out of scope."},
+						"c-a": {
+							ID: "c-a", KnowledgeBaseID: "kb-1", KnowledgeID: "doc-a",
+							IsEnabled: true, Content: "Alex works at Acme.",
+						},
+						"c-b": {
+							ID: "c-b", KnowledgeBaseID: "kb-1", KnowledgeID: "doc-b",
+							IsEnabled: true, Content: "Out of scope.",
+						},
 					},
 				}}
 				if tc.evidenceFail {

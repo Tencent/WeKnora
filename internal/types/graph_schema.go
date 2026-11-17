@@ -17,11 +17,13 @@ type GraphSchema struct {
 	RelationTypes []GraphRelationType `json:"relation_types" yaml:"relation_types"`
 }
 
+// GraphEntityType declares an allowed entity type.
 type GraphEntityType struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
+// GraphRelationType declares a relation and its directed endpoint types.
 type GraphRelationType struct {
 	Name        string `json:"name" yaml:"name"`
 	SourceType  string `json:"source_type" yaml:"source_type"`
@@ -29,6 +31,7 @@ type GraphRelationType struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
+// Validate checks enabled schema definitions and their type references.
 func (s *GraphSchema) Validate() error {
 	if s == nil || !s.Enabled {
 		return nil
@@ -69,6 +72,7 @@ func validGraphTypeName(name string) bool {
 		!strings.ContainsAny(name, "\x00\r\n")
 }
 
+// EntityNames returns the declared entity type names in definition order.
 func (s *GraphSchema) EntityNames() []string {
 	names := make([]string, 0, len(s.EntityTypes))
 	for _, entity := range s.EntityTypes {
@@ -77,6 +81,7 @@ func (s *GraphSchema) EntityNames() []string {
 	return names
 }
 
+// RelationNames returns distinct relation names in definition order.
 func (s *GraphSchema) RelationNames() []string {
 	names := []string{}
 	for _, relation := range s.RelationTypes {
@@ -87,6 +92,7 @@ func (s *GraphSchema) RelationNames() []string {
 	return names
 }
 
+// AllowsRelation checks an exact directed relation definition.
 func (s *GraphSchema) AllowsRelation(name, source, target string) bool {
 	for _, relation := range s.RelationTypes {
 		if relation.Name == name && relation.SourceType == source && relation.TargetType == target {
@@ -96,6 +102,7 @@ func (s *GraphSchema) AllowsRelation(name, source, target string) bool {
 	return false
 }
 
+// ValidateSchema checks the schema when graph extraction is enabled.
 func (e *ExtractConfig) ValidateSchema() error {
 	if e == nil || !e.Enabled {
 		return nil
@@ -103,6 +110,7 @@ func (e *ExtractConfig) ValidateSchema() error {
 	return e.Schema.Validate()
 }
 
+// HasSchema reports whether schema mode is configured and enabled.
 func (e *ExtractConfig) HasSchema() bool {
 	return e != nil && e.Schema != nil && e.Schema.Enabled
 }
@@ -138,6 +146,7 @@ func (s *GraphSchema) ExtractionJSONSchema() map[string]any {
 	}, []string{"entities", "relations"})
 }
 
+// CompileGraphJSONSchema compiles an in-memory graph output validation schema.
 func CompileGraphJSONSchema(document map[string]any) (*jsonschema.Schema, error) {
 	compiler := jsonschema.NewCompiler()
 	const url = "https://weknora.invalid/graph-output.json"
@@ -228,6 +237,7 @@ type GraphQuery struct {
 	TargetType   string `json:"target_type"`
 }
 
+// ValidateQuery checks optional hints against the schema's directed relations.
 func (s *GraphSchema) ValidateQuery(q GraphQuery) error {
 	if strings.TrimSpace(q.Name) == "" || utf8.RuneCountInString(q.Name) > 512 {
 		return fmt.Errorf("invalid graph query name")

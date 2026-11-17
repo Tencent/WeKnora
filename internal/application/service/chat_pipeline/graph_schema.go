@@ -113,7 +113,9 @@ func schemaExampleJSON(example types.GraphData) (string, bool) {
 }
 
 // ExtractSchemaQueries uses types as optional hints, never as access scopes.
-func ExtractSchemaQueries(ctx context.Context, model chat.Chat, schema *types.GraphSchema, query string) ([]types.GraphQuery, error) {
+func ExtractSchemaQueries(
+	ctx context.Context, model chat.Chat, schema *types.GraphSchema, query string,
+) ([]types.GraphQuery, error) {
 	if err := schema.Validate(); err != nil {
 		return nil, err
 	}
@@ -128,8 +130,9 @@ func ExtractSchemaQueries(ctx context.Context, model chat.Chat, schema *types.Gr
 				"type": "object", "additionalProperties": false,
 				"required": []string{"name", "entity_type", "relation_type", "direction", "target_type"},
 				"properties": map[string]any{
-					"name":        map[string]any{"type": "string", "minLength": 1, "maxLength": 512},
-					"entity_type": optionalEnum(schema.EntityNames()), "target_type": optionalEnum(schema.EntityNames()),
+					"name":          map[string]any{"type": "string", "minLength": 1, "maxLength": 512},
+					"entity_type":   optionalEnum(schema.EntityNames()),
+					"target_type":   optionalEnum(schema.EntityNames()),
 					"relation_type": optionalEnum(schema.RelationNames()),
 					"direction":     optionalEnum([]string{"in", "out"}),
 				},
@@ -145,7 +148,8 @@ func ExtractSchemaQueries(ctx context.Context, model chat.Chat, schema *types.Gr
 	prompt := "Identify named entity search seeds and relevant one-hop relations from the question. " +
 		"Do not invent entity names. Use exact schema names. direction is relative to the named seed: " +
 		"out for outgoing, in for incoming. target_type is the neighbor type. " +
-		"Use empty strings for uncertain type, relation or direction; return an empty queries array if there are no named seeds. " +
+		"Use empty strings for uncertain type, relation or direction; " +
+		"return an empty queries array if there are no named seeds. " +
 		"Return only JSON following this output schema:\n" + string(output) + "\nDomain schema:\n" + string(domain)
 	thinking := false
 	response, err := model.Chat(types.WithLLMCallMetadata(ctx, "entity_query", ""),
@@ -154,7 +158,8 @@ func ExtractSchemaQueries(ctx context.Context, model chat.Chat, schema *types.Gr
 	if err != nil {
 		return nil, err
 	}
-	if response == nil || IsLengthFinishReason(response.FinishReason) || response.FinishReason == types.FinishReasonIncomplete {
+	if response == nil || IsLengthFinishReason(response.FinishReason) ||
+		response.FinishReason == types.FinishReasonIncomplete {
 		return nil, fmt.Errorf("empty or truncated schema query response")
 	}
 	content := NewFormater().extractContent(ctx, response.Content)

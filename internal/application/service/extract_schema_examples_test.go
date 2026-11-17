@@ -17,7 +17,9 @@ type schemaExampleChat struct {
 	messages []chat.Message
 }
 
-func (c *schemaExampleChat) Chat(_ context.Context, messages []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
+func (c *schemaExampleChat) Chat(
+	_ context.Context, messages []chat.Message, _ *chat.ChatOptions,
+) (*types.ChatResponse, error) {
 	c.messages = append([]chat.Message(nil), messages...)
 	return c.resp, nil
 }
@@ -28,7 +30,9 @@ type schemaExampleGraphRepo struct {
 	graphs    []*types.GraphData
 }
 
-func (r *schemaExampleGraphRepo) AddGraph(_ context.Context, namespace types.NameSpace, graphs []*types.GraphData) error {
+func (r *schemaExampleGraphRepo) AddGraph(
+	_ context.Context, namespace types.NameSpace, graphs []*types.GraphData,
+) error {
 	r.namespace, r.graphs = namespace, graphs
 	return nil
 }
@@ -56,7 +60,8 @@ func TestChunkExtractHandle_EmptyRelationOverrideReachesPrompt(t *testing.T) {
 		},
 	}))
 	model := &schemaExampleChat{graphReplyChat: graphReplyChat{resp: &types.ChatResponse{
-		Content: `{"entities":[{"id":"e1","name":"Actual person","type":"Person"}],"relations":[]}`, FinishReason: "stop",
+		Content:      `{"entities":[{"id":"e1","name":"Actual person","type":"Person"}],"relations":[]}`,
+		FinishReason: "stop",
 	}}}
 	repo := &schemaExampleGraphRepo{}
 	svc := &ChunkExtractService{
@@ -68,9 +73,11 @@ func TestChunkExtractHandle_EmptyRelationOverrideReachesPrompt(t *testing.T) {
 			ExtractConfig: &types.ExtractConfig{
 				Enabled: true,
 				Schema: &types.GraphSchema{
-					Enabled:       true,
-					EntityTypes:   []types.GraphEntityType{{Name: "Person"}, {Name: "Company"}},
-					RelationTypes: []types.GraphRelationType{{Name: "WORKS_AT", SourceType: "Person", TargetType: "Company"}},
+					Enabled:     true,
+					EntityTypes: []types.GraphEntityType{{Name: "Person"}, {Name: "Company"}},
+					RelationTypes: []types.GraphRelationType{{
+						Name: "WORKS_AT", SourceType: "Person", TargetType: "Company",
+					}},
 				},
 				Text: "Alex works at Acme.",
 				Nodes: []*types.GraphNode{
@@ -123,7 +130,8 @@ func TestChunkExtractHandle_SchemaExamplesReachPrompt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &schemaExampleChat{graphReplyChat: graphReplyChat{resp: &types.ChatResponse{
-				Content: `{"entities":[{"id":"e1","name":"Actual person","type":"Person"}],"relations":[]}`, FinishReason: "stop",
+				Content:      `{"entities":[{"id":"e1","name":"Actual person","type":"Person"}],"relations":[]}`,
+				FinishReason: "stop",
 			}}}
 			repo := &schemaExampleGraphRepo{}
 			svc := &ChunkExtractService{
@@ -138,7 +146,10 @@ func TestChunkExtractHandle_SchemaExamplesReachPrompt(t *testing.T) {
 							{Name: "Alex", EntityType: "Company"},
 						},
 						Relations: []*types.GraphRelation{
-							{Node1: "Alex", Node2: "Alex", Type: "WORKS_AT", SourceType: "Person", TargetType: "Company"},
+							{
+								Node1: "Alex", Node2: "Alex", Type: "WORKS_AT",
+								SourceType: "Person", TargetType: "Company",
+							},
 						},
 					},
 				}},

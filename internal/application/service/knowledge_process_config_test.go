@@ -363,17 +363,22 @@ func TestResolveProcessConfig_ExtractConfigListOverrides(t *testing.T) {
 				{"omitted inherits", `{}`, 1},
 				{"null inherits", `{"tags":null,"nodes":null,"relations":null}`, 1},
 				{"empty clears", `{"tags":[],"nodes":[],"relations":[]}`, 0},
-				{"nonempty replaces", `{"tags":["new-tag"],"nodes":[{"name":"New"}],"relations":[{"node1":"New","node2":"Other","type":"NEW_RELATION"}]}`, 1},
+				{"nonempty replaces", `{"tags":["new-tag"],"nodes":[{"name":"New"}],` +
+					`"relations":[{"node1":"New","node2":"Other","type":"NEW_RELATION"}]}`, 1},
 			} {
-				t.Run(strconv.FormatBool(schemaEnabled)+"/"+strconv.FormatBool(enabled)+"/"+tc.name, func(t *testing.T) {
+				name := strconv.FormatBool(schemaEnabled) + "/" + strconv.FormatBool(enabled) + "/" + tc.name
+				t.Run(name, func(t *testing.T) {
 					kbConfig := base
-					kbConfig.Schema = &types.GraphSchema{Enabled: schemaEnabled, EntityTypes: []types.GraphEntityType{{Name: "Person"}}}
+					kbConfig.Schema = &types.GraphSchema{
+						Enabled: schemaEnabled, EntityTypes: []types.GraphEntityType{{Name: "Person"}},
+					}
 					kb := &types.KnowledgeBase{ExtractConfig: &kbConfig}
 					var override types.ExtractConfig
 					require.NoError(t, json.Unmarshal([]byte(tc.input), &override))
 					override.Enabled = enabled
 					knowledge := &types.Knowledge{}
-					require.NoError(t, knowledge.SetProcessOverrides(&types.KnowledgeProcessOverrides{ExtractConfig: &override}))
+					require.NoError(t, knowledge.SetProcessOverrides(
+						&types.KnowledgeProcessOverrides{ExtractConfig: &override}))
 					persisted, err := knowledge.ProcessOverrides()
 					require.NoError(t, err)
 					got := ResolveProcessConfig(kb, persisted).ExtractConfig

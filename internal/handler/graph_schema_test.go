@@ -30,7 +30,9 @@ func TestSchemaConfigDoesNotRequireLegacyExamples(t *testing.T) {
 }
 
 func TestGraphSchemaInitializationDTOs(t *testing.T) {
-	data := []byte(`{"nodeExtract":{"enabled":true,"schema":{"enabled":true,"entity_types":[{"name":"Person"}],"relation_types":[]},"customInstructions":"Only named people"}}`)
+	data := []byte(`{"nodeExtract":{"enabled":true,` +
+		`"schema":{"enabled":true,"entity_types":[{"name":"Person"}],"relation_types":[]},` +
+		`"customInstructions":"Only named people"}}`)
 	var initial InitializationRequest
 	require.NoError(t, json.Unmarshal(data, &initial))
 	require.True(t, initial.NodeExtract.Schema.Enabled)
@@ -62,7 +64,8 @@ func TestGraphSchemaInitializationPreservesTypedExamples(t *testing.T) {
 		"schema":{"enabled":true,"entity_types":[{"name":"Person"},{"name":"Company"}],
 			"relation_types":[{"name":"WORKS_AT","source_type":"Person","target_type":"Company"}]},
 		"text":"Alex works at Alex.",
-		"nodes":[{"name":"Alex","entity_type":"Person","attributes":[]},{"name":"Alex","entity_type":"Company","attributes":[]}],
+		"nodes":[{"name":"Alex","entity_type":"Person","attributes":[]},
+			{"name":"Alex","entity_type":"Company","attributes":[]}],
 		"relations":[{"node1":"Alex","node2":"Alex","type":"WORKS_AT","source_type":"Person","target_type":"Company"}]
 	}}`)
 	var initial InitializationRequest

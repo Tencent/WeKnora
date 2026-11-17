@@ -26,7 +26,9 @@ type fabriTextChat struct {
 	err      error
 }
 
-func (m *fabriTextChat) Chat(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
+func (m *fabriTextChat) Chat(
+	_ context.Context, messages []chat.Message, _ *chat.ChatOptions,
+) (*types.ChatResponse, error) {
 	m.messages = messages
 	return m.response, m.err
 }

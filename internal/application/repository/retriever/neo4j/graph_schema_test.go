@@ -18,8 +18,10 @@ import (
 func TestSchemaGraphSearchParametersAndScope(t *testing.T) {
 	repo := NewNeo4jRepository(nil).(*Neo4jRepository)
 	scope := types.NameSpace{KnowledgeBase: "kb", Knowledge: "doc"}
-	hints := []types.GraphQuery{{Name: "Alex' MATCH (n)", EntityType: "Person", RelationType: "WORKS_AT",
-		Direction: "out", TargetType: "Company"}}
+	hints := []types.GraphQuery{{
+		Name: "Alex' MATCH (n)", EntityType: "Person", RelationType: "WORKS_AT",
+		Direction: "out", TargetType: "Company",
+	}}
 	label := repo.quotedGraphLabel(scope)
 	query, params := schemaGraphSearchCypher(label, hints)
 	require.Equal(t, "`ENTITYkb`:`ENTITYdoc`", label)
@@ -55,8 +57,10 @@ func TestSchemaGraphSearchParametersAndScope(t *testing.T) {
 }
 
 func TestSchemaGraphSearchDeduplicatesIdenticalHintsBeforeSeedBudget(t *testing.T) {
-	hint := types.GraphQuery{Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT",
-		Direction: "out", TargetType: "Company"}
+	hint := types.GraphQuery{
+		Name: "Alex", EntityType: "Person", RelationType: "WORKS_AT",
+		Direction: "out", TargetType: "Company",
+	}
 	var repeated []types.GraphQuery
 	for i := 0; i < 8; i++ {
 		repeated = append(repeated, hint)
@@ -108,7 +112,8 @@ func TestSchemaGraphIntegration(t *testing.T) {
 		},
 	}
 	for _, doc := range []string{"doc1", "doc2"} {
-		require.NoError(t, repo.AddGraph(ctx, types.NameSpace{KnowledgeBase: kb, Knowledge: doc}, []*types.GraphData{graph, graph}))
+		require.NoError(t, repo.AddGraph(ctx,
+			types.NameSpace{KnowledgeBase: kb, Knowledge: doc}, []*types.GraphData{graph, graph}))
 	}
 	for _, tc := range []struct {
 		name      string
@@ -116,9 +121,15 @@ func TestSchemaGraphIntegration(t *testing.T) {
 		hint      types.GraphQuery
 		wantNodes int
 	}{
-		{"whole KB", "", types.GraphQuery{Name: "Alex", EntityType: "Person", Direction: "out", RelationType: "WORKS_AT"}, 4},
-		{"single doc", "doc1", types.GraphQuery{Name: "Alex", EntityType: "Person", Direction: "out", TargetType: "Company"}, 2},
-		{"incoming", "doc2", types.GraphQuery{Name: "Alex", EntityType: "Company", Direction: "in", TargetType: "Person"}, 2},
+		{"whole KB", "", types.GraphQuery{
+			Name: "Alex", EntityType: "Person", Direction: "out", RelationType: "WORKS_AT",
+		}, 4},
+		{"single doc", "doc1", types.GraphQuery{
+			Name: "Alex", EntityType: "Person", Direction: "out", TargetType: "Company",
+		}, 2},
+		{"incoming", "doc2", types.GraphQuery{
+			Name: "Alex", EntityType: "Company", Direction: "in", TargetType: "Person",
+		}, 2},
 		{"wrong direction", "", types.GraphQuery{Name: "Alex", EntityType: "Company", Direction: "out"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,7 +147,8 @@ func TestSchemaGraphIntegration(t *testing.T) {
 	}
 	t.Run("duplicate seeds retain each edge once", func(t *testing.T) {
 		result, err := repo.SearchNodeWithSchema(ctx, types.NameSpace{KnowledgeBase: kb}, []types.GraphQuery{
-			{Name: "Alex"}, {Name: "Alex", EntityType: "Person", Direction: "out"},
+			{Name: "Alex"},
+			{Name: "Alex", EntityType: "Person", Direction: "out"},
 			{Name: "Alex", EntityType: "Company", Direction: "in"},
 		})
 		require.NoError(t, err)
@@ -253,7 +265,8 @@ func TestSchemaGraphIntegration(t *testing.T) {
 		found, err := driver.ExecuteQuery(ctx, db, "MATCH (n:"+repo.quotedGraphLabel(concurrentScope)+") RETURN n",
 			nil, driver.EagerResultTransformer)
 		require.NoError(t, err)
-		require.Len(t, found.Records, 2, "same name but different types remain distinct, each type merges across chunks")
+		require.Len(t, found.Records, 2,
+			"same name but different types remain distinct, each type merges across chunks")
 		for _, record := range found.Records {
 			node, _, err := driver.GetRecordValue[driver.Node](record, "n")
 			require.NoError(t, err)
@@ -291,8 +304,10 @@ func TestSchemaGraphIntegration(t *testing.T) {
 		endpointScope := types.NameSpace{KnowledgeBase: kb, Knowledge: "endpoints"}
 		specialType := "\u4f01\u4e1a` MATCH (other) DETACH DELETE other //"
 		require.NoError(t, repo.AddGraph(ctx, endpointScope, []*types.GraphData{{
-			Relation: []*types.GraphRelation{{Node1: "OnlySource", SourceType: specialType,
-				Node2: "OnlyTarget", TargetType: "Company", Type: "WORKS_AT"}},
+			Relation: []*types.GraphRelation{{
+				Node1: "OnlySource", SourceType: specialType,
+				Node2: "OnlyTarget", TargetType: "Company", Type: "WORKS_AT",
+			}},
 		}}))
 		nodes, err := driver.ExecuteQuery(ctx, db, "MATCH (n:"+repo.quotedGraphLabel(endpointScope)+") RETURN n",
 			nil, driver.EagerResultTransformer)

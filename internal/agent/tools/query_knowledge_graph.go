@@ -36,9 +36,9 @@ var queryKnowledgeGraphTool = BaseTool{
 type QueryKnowledgeGraphInput struct {
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of kb://N knowledge base handles to query"`
 	Query            string   `json:"query" jsonschema:"Query content (entity name or query text)"`
-	EntityType       string   `json:"entity_type,omitempty" jsonschema:"Optional exact schema entity type for the query seeds"`
+	EntityType       string   `json:"entity_type,omitempty" jsonschema:"Optional exact schema seed entity type"`
 	RelationType     string   `json:"relation_type,omitempty" jsonschema:"Optional exact schema relation type"`
-	Direction        string   `json:"direction,omitempty" jsonschema:"Optional relation direction from the seed: in or out"`
+	Direction        string   `json:"direction,omitempty" jsonschema:"Optional direction from seed: in or out"`
 	TargetType       string   `json:"target_type,omitempty" jsonschema:"Optional exact schema neighbor entity type"`
 }
 
@@ -355,8 +355,10 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 					return
 				}
 				for _, term := range terms {
-					q := types.GraphQuery{Name: term, EntityType: input.EntityType, RelationType: input.RelationType,
-						Direction: input.Direction, TargetType: input.TargetType}
+					q := types.GraphQuery{
+						Name: term, EntityType: input.EntityType, RelationType: input.RelationType,
+						Direction: input.Direction, TargetType: input.TargetType,
+					}
 					if err := kb.ExtractConfig.Schema.ValidateQuery(q); err != nil {
 						res.err = err
 						return

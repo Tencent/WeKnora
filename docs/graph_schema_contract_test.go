@@ -47,7 +47,8 @@ func TestGraphSchemaContract(t *testing.T) {
 			if spec.Definitions["internal_handler.FabriTextRequest"].Properties["schema"] == nil {
 				t.Error("text generation request must document the optional schema")
 			}
-			initial := spec.Definitions["internal_handler.InitializationRequest"].Properties["nodeExtract"].(map[string]any)
+			initialRequest := spec.Definitions["internal_handler.InitializationRequest"]
+			initial := initialRequest.Properties["nodeExtract"].(map[string]any)
 			properties := initial["properties"].(map[string]any)
 			for field, model := range map[string]string{"nodes": "GraphNode", "relations": "GraphRelation"} {
 				array := properties[field].(map[string]any)
