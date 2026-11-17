@@ -360,7 +360,9 @@ type failedStreamChat struct {
 	err error
 }
 
-func (m *failedStreamChat) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+func (m *failedStreamChat) ChatStream(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	return nil, m.err
 }
 
@@ -405,12 +407,18 @@ func TestStreamFallsBackBeforeOutput(t *testing.T) {
 			models := &fallbackStreamModels{primary: primary, backup: &openStreamChat{
 				closeStream: true,
 				chunks: []types.StreamResponse{
-					{ResponseType: types.ResponseTypeAnswer, Content: "backup answer", Done: true, FinishReason: "stop"},
+					{
+						ResponseType: types.ResponseTypeAnswer,
+						Content:      "backup answer",
+						Done:         true,
+						FinishReason: "stop",
+					},
 				},
 			}}
 			plugin := &PluginChatCompletionStream{modelService: models}
 			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
-			require.Nil(t, plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, request, func() *PluginError { return nil }))
+			result := plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, request, func() *PluginError { return nil })
+			require.Nil(t, result)
 			require.Eventually(t, func() bool {
 				for _, answer := range bus.finalAnswerEvents() {
 					if answer.Done {

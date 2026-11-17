@@ -30,7 +30,8 @@ func isRetryableChatFailure(err error) bool {
 }
 
 func (p *PluginChatCompletionStream) startFallbackChatStream(
-	ctx context.Context, request *types.ChatManage, messages []chat.Message, options *chat.ChatOptions, cancelPrimary context.CancelFunc, cause error,
+	ctx context.Context, request *types.ChatManage, messages []chat.Message, options *chat.ChatOptions,
+	cancelPrimary context.CancelFunc, cause error,
 ) (<-chan types.StreamResponse, error) {
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	// A shared knowledge base grants access to its selected model. It does

@@ -138,7 +138,8 @@ type ModelParameters struct {
 	// FallbackChatModelID is an optional replacement for this workspace model's
 	// streaming answer when its provider fails before producing content.
 	FallbackChatModelID string `yaml:"fallback_chat_model_id,omitempty" json:"fallback_chat_model_id,omitempty"`
-	SupportsVision      bool   `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	// SupportsVision indicates whether the model accepts image or multimodal input.
+	SupportsVision bool `yaml:"supports_vision" json:"supports_vision"`
 	// ContextWindow is the model's total context window in tokens and
 	// MaxOutputTokens the most it emits in one response. Both are provider
 	// facts the agent cannot discover but has to act on: the context window is

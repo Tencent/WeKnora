@@ -281,7 +281,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				incomplete := response.ResponseType == types.ResponseTypeAnswer && response.Done &&
 					response.FinishReason == types.FinishReasonIncomplete
 				if !fallbackAttempted && !startedResponse && len(response.ToolCalls) == 0 &&
-					(incomplete || (response.ResponseType == types.ResponseTypeError && isRetryableChatFailure(response.Cause))) {
+					(incomplete || (response.ResponseType == types.ResponseTypeError &&
+						isRetryableChatFailure(response.Cause))) {
 					fallbackAttempted = true
 					cause := response.Cause
 					if cause == nil {
