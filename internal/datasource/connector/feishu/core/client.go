@@ -474,47 +474,9 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 	return node, nil
 }
 
-// listAllWikiNodesRecursive recursively lists all nodes under a wiki space.
-// It walks the tree depth-first to discover all nested documents.
+// listAllWikiNodesRecursive lists a space in provider depth-first order.
 func (c *Client) listAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]WikiNode, error) {
-	// Start with top-level nodes
-	topNodes, err := c.ListWikiNodes(ctx, spaceID, "")
-	if err != nil {
-		return nil, err
-	}
-
-	var allNodes []WikiNode
-	var failures []WikiNodeListFailure
-	var walk func(nodes []WikiNode)
-
-	walk = func(nodes []WikiNode) {
-		for _, node := range nodes {
-			allNodes = append(allNodes, node)
-
-			// Recurse into child nodes if this node has children
-			if node.HasChild {
-				children, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
-				if err != nil {
-					wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-					failures = append(failures, WikiNodeListFailure{
-						Node: node,
-						Err:  wrappedErr,
-					})
-					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-						spaceID, node.NodeToken, err)
-					continue
-				}
-				walk(children)
-			}
-		}
-	}
-
-	walk(topNodes)
-	if len(failures) > 0 {
-		return allNodes, &PartialWikiNodeListError{Failures: failures}
-	}
-
-	return allNodes, nil
+	return c.walkWikiDirectories(ctx, spaceID, nil)
 }
 
 // ListWikiNodesRecursiveFrom returns a wiki node and all descendants below it.
@@ -539,51 +501,7 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 	if !root.HasChild {
 		return nil, nil
 	}
-
-	children, err := c.ListWikiNodes(ctx, spaceID, root.NodeToken)
-	if err != nil {
-		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
-		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-			spaceID, root.NodeToken, err)
-		return nil, &PartialWikiNodeListError{
-			Failures: []WikiNodeListFailure{{
-				Node: root,
-				Err:  wrappedErr,
-			}},
-		}
-	}
-
-	var allNodes []WikiNode
-	var failures []WikiNodeListFailure
-	var walk func(nodes []WikiNode)
-
-	walk = func(nodes []WikiNode) {
-		for _, node := range nodes {
-			allNodes = append(allNodes, node)
-			if !node.HasChild {
-				continue
-			}
-
-			grandChildren, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
-			if err != nil {
-				wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-				failures = append(failures, WikiNodeListFailure{
-					Node: node,
-					Err:  wrappedErr,
-				})
-				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-					spaceID, node.NodeToken, err)
-				continue
-			}
-			walk(grandChildren)
-		}
-	}
-
-	walk(children)
-	if len(failures) > 0 {
-		return allNodes, &PartialWikiNodeListError{Failures: failures}
-	}
-	return allNodes, nil
+	return c.walkWikiDirectories(ctx, spaceID, &root)
 }
 
 // getDocumentRawContent retrieves the raw text content of a Feishu docx document.
