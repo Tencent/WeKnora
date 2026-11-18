@@ -570,7 +570,8 @@ func (s *customAgentService) getSuggestedQuestions(
 		limit = suggestionMaxLimit
 	}
 
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs, s.scopedKnowledgeKBResolver()); err != nil {
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs,
+		s.scopedKnowledgeKBResolver()); err != nil {
 		return nil, err
 	}
 	scopeTagIDs := flattenTagScopeIDs(tagScopes)
