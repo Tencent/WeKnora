@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import * as graphExtractValidation from './graphExtractValidation'
 
 const { descriptor } = parse(readFileSync(new URL('./GraphSettings.vue', import.meta.url), 'utf8'))
 const script = compileScript(descriptor, { id: 'graph-settings-test', inlineTemplate: true }).content
@@ -84,6 +85,7 @@ function fixture(t: TestContext, embedded: boolean) {
         fabriText: () => assert.fail('Availability checks must not generate text'),
         fabriTag: () => assert.fail('Availability checks must not generate tags'),
       }
+      if (name === './graphExtractValidation') return graphExtractValidation
       throw new Error(`Unexpected import: ${name}`)
     },
   })

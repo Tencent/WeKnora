@@ -640,6 +640,7 @@
 
                   <div v-if="isGraphSectionAvailable" v-show="activeSection === 'graph'" class="section">
                     <GraphSettings
+                      ref="graphSettingsRef"
                       :graph-extract="uiState.nodeExtractConfig"
                       :model-id="llmModelId"
                       :all-models="allModels"
@@ -671,6 +672,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import ModelSelector from '@/components/ModelSelector.vue'
 import KBParserSettings from '../settings/KBParserSettings.vue'
 import GraphSettings from '../settings/GraphSettings.vue'
+import { getGraphExtractIssues } from '../settings/graphExtractValidation'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
@@ -828,6 +830,7 @@ const tagsLoading = ref(false)
 const tagsLoadFailed = ref(false)
 const chunkingMoreOpen = ref(false)
 const activeSection = ref<ConfigSectionKey>('tags')
+const graphSettingsRef = ref<any>()
 const uiState = ref<UploadUIState>(createDefaultUIState())
 // Destination folder for this batch. Pre-filled from the sidebar tree, but
 // editable here so browsing a folder never silently decides where files land.
@@ -1631,6 +1634,21 @@ const validateBeforeConfirm = (): boolean => {
     MessagePlugin.warning(t('uploadConfirm.asrModelSelectRequired'))
     goToSection('asr')
     return false
+  }
+
+  // 图谱抽取必填项校验（与后端 validateExtractConfig 同规则）：
+  // process overrides 里 extract_config.enabled=true 但 few-shot 为空时，
+  // 保存/重解析会在后端撞 400，这里提前拦截并引导到图谱分区。
+  if (uiState.value.nodeExtractConfig.enabled) {
+    const graphIssues = getGraphExtractIssues(uiState.value.nodeExtractConfig)
+    if (graphIssues.length > 0) {
+      MessagePlugin.warning(t('graphSettings.extractIncompleteWarning'))
+      if (isGraphSectionAvailable.value) {
+        goToSection('graph')
+        nextTick(() => graphSettingsRef.value?.validate?.())
+      }
+      return false
+    }
   }
   return true
 }

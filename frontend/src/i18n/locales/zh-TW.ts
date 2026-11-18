@@ -6919,7 +6919,17 @@ export default {
     checkingAvailability: '正在檢查知識圖譜服務…',
     checkAvailabilityFailed: '無法檢查知識圖譜服務，請重試。',
     disabledWarning: '知識圖譜資料庫未啟用，實體關係提取功能將無法使用',
-    howToEnable: '如何啟用知識圖譜？'
+    howToEnable: '如何啟用知識圖譜？',
+    requiredReminder: '開啟提取後，關係類型、範本文字、實體和關係均為必填項（作為大模型抽取的範例），可用「產生隨機標籤/文字」或「預設範例」快速填寫',
+    extractIncompleteWarning: '知識圖譜抽取設定不完整：請補全範本文字、關係類型、實體和關係後再儲存',
+    textRequired: '請填寫範本文字',
+    tagsRequired: '請至少新增一個關係類型',
+    tagsItemEmpty: '關係類型中存在空項',
+    nodesRequired: '請至少新增一個實體（可先填寫範本文字後點擊「開始擷取」自動產生）',
+    nodesDuplicate: '實體名稱不能重複',
+    relationsRequired: '請至少新增一筆關係（可先填寫範本文字後點擊「開始擷取」自動產生）',
+    relationIncomplete: '存在未填完整的關係（實體/關係類型不能為空）',
+    relationNodeMismatch: '關係引用的實體在實體清單中不存在'
   },
   retrievalSettings: {
     recallTab: '召回',

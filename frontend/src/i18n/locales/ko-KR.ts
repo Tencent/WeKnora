@@ -6918,7 +6918,17 @@ export default {
     checkingAvailability: '지식 그래프 사용 가능 여부를 확인하는 중…',
     checkAvailabilityFailed: '지식 그래프 사용 가능 여부를 확인할 수 없습니다. 다시 시도해 주세요.',
     disabledWarning: '지식 그래프 데이터베이스가 활성화되지 않아 엔티티 관계 추출 기능을 사용할 수 없습니다',
-    howToEnable: '지식 그래프를 활성화하는 방법?'
+    howToEnable: '지식 그래프를 활성화하는 방법?',
+    requiredReminder: '추출을 활성화하면 관계 유형, 예시 텍스트, 엔티티, 관계가 모두 필수입니다(LLM 추출의 few-shot 예시로 사용). 랜덤 태그/텍스트 생성 또는 기본 예시로 빠르게 채울 수 있습니다',
+    extractIncompleteWarning: '지식 그래프 추출 설정이 불완전합니다. 예시 텍스트, 관계 유형, 엔티티, 관계를 입력한 후 저장하세요',
+    textRequired: '예시 텍스트를 입력하세요',
+    tagsRequired: '관계 유형을 하나 이상 추가하세요',
+    tagsItemEmpty: '빈 관계 유형이 있습니다',
+    nodesRequired: '엔티티를 하나 이상 추가하세요(예시 텍스트 입력 후 "추출 시작"을 클릭하면 자동 생성됩니다)',
+    nodesDuplicate: '엔티티 이름은 중복될 수 없습니다',
+    relationsRequired: '관계를 하나 이상 추가하세요(예시 텍스트 입력 후 "추출 시작"을 클릭하면 자동 생성됩니다)',
+    relationIncomplete: '완전히 입력되지 않은 관계가 있습니다(엔티티/관계 유형은 비울 수 없습니다)',
+    relationNodeMismatch: '관계가 참조하는 엔티티가 엔티티 목록에 없습니다'
   },
   retrievalSettings: {
     recallTab: '검색 후보',
