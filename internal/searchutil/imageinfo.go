@@ -518,6 +518,9 @@ func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) str
 	// trim is applied to HTML only. An attribute value may be padded, while a
 	// Markdown target is looked up exactly as written so that the keys this
 	// function matches on stay the ones it has always matched on.
+	// contentEmbedded records the URLs the injection pass matched in
+	// content; the extras loop below appends only the others.
+	contentEmbedded := make(map[string]bool)
 	appendFor := func(locs [][]int, urlGroup int, trim bool) {
 		for _, loc := range locs {
 			start, end := loc[2*urlGroup], loc[2*urlGroup+1]
@@ -532,6 +535,7 @@ func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) str
 			if !found || imgInfo == nil {
 				continue
 			}
+			contentEmbedded[key] = true
 			metadata := buildImageInfoMarkdownMetadata(imgInfo)
 			if metadata == "" {
 				continue
@@ -539,12 +543,50 @@ func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) str
 			injections = append(injections, injection{at: loc[1], text: "\n\n" + metadata})
 		}
 	}
-	appendFor(MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1), 2, false)
-	appendFor(HTMLImageSrcRegex.FindAllStringSubmatchIndex(content, -1), HTMLImageSrcURLGroup, true)
+	markdownLocs := MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1)
+	htmlLocs := HTMLImageSrcRegex.FindAllStringSubmatchIndex(content, -1)
+	appendFor(markdownLocs, 2, false)
+	appendFor(htmlLocs, HTMLImageSrcURLGroup, true)
 
 	sort.Slice(injections, func(i, j int) bool { return injections[i].at > injections[j].at })
 	for _, inj := range injections {
 		content = content[:inj.at] + inj.text + content[inj.at:]
+	}
+
+	// Image-derived chunks (image_caption / image_ocr) carry their caption
+	// or OCR text as bare content: there is no Markdown or <img> for the
+	// injection pass to enrich, so the image's resource:// handle never
+	// reaches the model. A vision model that correctly recognizes the
+	// described image then invents a handle, and the frontend renders the
+	// fabricated reference as a broken image (#5606). Append every image
+	// whose URL is not already embedded, in image_info order, so the handle
+	// and its description travel together — mirroring what the non-chat
+	// variant has always done with <image> extras.
+	if len(markdownLocs) > 0 || len(htmlLocs) > 0 {
+		// A passage that already embeds at least one image keeps the
+		// long-standing behavior: only in-content images are enriched,
+		// and entries for other pages stay out (orphan thumbnails of a
+		// parent passage must not leak into the context).
+		return content
+	}
+	var extras []string
+	for i := range imageInfos {
+		url := strings.TrimSpace(imageInfos[i].URL)
+		if url == "" {
+			url = strings.TrimSpace(imageInfos[i].OriginalURL)
+		}
+		if url == "" {
+			continue
+		}
+		if block := BuildImageInfoMarkdownWithURL(url, &imageInfos[i]); block != "" {
+			extras = append(extras, block)
+		}
+	}
+	if len(extras) > 0 {
+		if strings.TrimSpace(content) != "" {
+			content += "\n\n"
+		}
+		content += strings.Join(extras, "\n\n")
 	}
 	return content
 }

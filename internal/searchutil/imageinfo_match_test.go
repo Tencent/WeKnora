@@ -145,6 +145,73 @@ func TestEnrichContentWithImageInfoForChat_EnrichesRepeatedImagesOnceEach(t *tes
 	}
 }
 
+// Issue: https://github.com/Tencent/WeKnora/issues/5606
+// An image_caption / image_ocr chunk is bare caption/OCR text: no Markdown
+// or <img> exists for the injection pass to enrich, so the image's URL never
+// reached the model and a vision model invented resource:// handles that
+// rendered as broken images. The extras pass must append the image with its
+// handle and description together.
+func TestEnrichContentWithImageInfoForChat_BareImageChunkAppendsWithHandle(t *testing.T) {
+	content := "三角形的费马点示意图，点 P 位于三角形 ABC 内部"
+	raw, _ := json.Marshal([]types.ImageInfo{{
+		URL:     "resource://AbCdEfGhIjKlMnOpQrStUv",
+		Caption: "费马点问题图 1",
+		OCRText: "三角形 ABC 内部一点 P",
+	}})
+
+	got := EnrichContentWithImageInfoForChat(content, string(raw))
+
+	for _, want := range []string{
+		content,
+		"![费马点问题图 1](resource://AbCdEfGhIjKlMnOpQrStUv)",
+		"> **Image caption:** 费马点问题图 1",
+		"> **Image text (OCR):** 三角形 ABC 内部一点 P",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in enriched bare chunk:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "<image") {
+		t.Fatalf("chat context should be Markdown-only: %s", got)
+	}
+}
+
+// Issue: https://github.com/Tencent/WeKnora/issues/5606
+// OriginalURL-only entries (legacy chunks that persisted the provider URL)
+// must also be appended when content is a bare image chunk.
+func TestEnrichContentWithImageInfoForChat_BareImageChunkUsesOriginalURLFallback(t *testing.T) {
+	content := "双曲函数证明中的公式截图"
+	raw, _ := json.Marshal([]types.ImageInfo{{
+		OriginalURL: "local://images/formula-2.png",
+		OCRText:     "sinh x = (e^x - e^-x) / 2",
+	}})
+
+	got := EnrichContentWithImageInfoForChat(content, string(raw))
+
+	if !strings.Contains(got, "![image](local://images/formula-2.png)") {
+		t.Fatalf("expected the OriginalURL handle in the extras: %s", got)
+	}
+	if !strings.Contains(got, "> **Image text (OCR):** sinh x = (e^x - e^-x) / 2") {
+		t.Fatalf("expected the OCR text beside the handle: %s", got)
+	}
+}
+
+// Issue: https://github.com/Tencent/WeKnora/issues/5606
+// Empty content with image_info (an OCR chunk whose text is blank must not
+// happen in practice, but the chat enrich must not emit a leading blank).
+func TestEnrichContentWithImageInfoForChat_BareEmptyContentHasNoLeadingBlank(t *testing.T) {
+	raw, _ := json.Marshal([]types.ImageInfo{{
+		URL:     "resource://AbCdEfGhIjKlMnOpQrStUv",
+		Caption: "only a caption",
+	}})
+
+	got := EnrichContentWithImageInfoForChat("", string(raw))
+
+	if !strings.HasPrefix(got, "![only a caption](resource://AbCdEfGhIjKlMnOpQrStUv)") {
+		t.Fatalf("expected the image block to start the passage: %s", got)
+	}
+}
+
 func TestBuildImageInfoMarkdownWithURL(t *testing.T) {
 	got := BuildImageInfoMarkdownWithURL(
 		"resource://AbCdEfGhIjKlMnOpQrStUv",
