@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,4 +147,59 @@ func TestSplitExpiredWikiHoldsUsesLatestActivity(t *testing.T) {
 	require.Len(t, kept, 2)
 	assert.Equal(t, "row-old-recent-beat", kept[0].ID)
 	assert.Equal(t, "row-recent", kept[1].ID)
+}
+
+// Wiki retries supersede open subspans without advancing the knowledge row.
+// A fresh retry heartbeat must not prevent recovery of a lost KB trigger.
+func TestHousekeepingRearmsWikiDespiteRetryHeartbeats(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	ctx := context.Background()
+	queue := &wikiGuardTaskQueue{}
+	svc := newHousekeepingSvcForTest(db)
+	svc.task = queue
+	stale := time.Now().Add(-72 * time.Hour)
+	tracker := NewSpanTracker(repository.NewKnowledgeSpanRepository(db), db)
+	wiki := &wikiIngestService{spanTracker: tracker}
+	for _, id := range []string{"k-retry-1", "k-retry-2"} {
+		require.NoError(t, db.Exec(
+			`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, parse_status,
+			 summary_status, pending_subtasks_count, updated_at)
+			 VALUES (?, 7, 'kb-retry', ?, ?, 1, ?)`,
+			id, types.ParseStatusFinalizing, types.SummaryStatusCompleted, stale,
+		).Error)
+		insertWikiPendingOp(t, db, "kb-retry", id)
+		insertTreeSpan(t, db, id, "post", "", types.StagePostProcess, types.SpanKindStage,
+			types.SpanStatusDone, stale)
+		for range 3 {
+			require.NotNil(t, wiki.beginWikiSubspan(ctx, id, nil))
+		}
+		var superseded int64
+		require.NoError(t, db.Model(&types.KnowledgeProcessingSpan{}).
+			Where("knowledge_id = ? AND error_code = ?", id, "TASK_SUPERSEDED").Count(&superseded).Error)
+		require.Equal(t, int64(2), superseded)
+		var row types.Knowledge
+		require.NoError(t, db.First(&row, "id = ?", id).Error)
+		require.WithinDuration(t, stale, row.UpdatedAt, time.Second)
+	}
+
+	// An active non-Wiki row still has the ordinary heartbeat protection.
+	insertKnowledge(t, db, "k-active", types.ParseStatusProcessing, stale)
+	insertSpan(t, db, "k-active", 1, "active", types.SpanStatusRunning, time.Now())
+	svc.runSweep(ctx)
+	svc.runSweep(ctx)
+
+	require.Len(t, queue.tasks, 1, "fresh retry spans must not block the lost Wiki trigger; repeated sweeps must throttle it")
+	assert.Equal(t, types.TypeWikiIngest, queue.tasks[0].Type())
+	var payload WikiIngestPayload
+	require.NoError(t, json.Unmarshal(queue.tasks[0].Payload(), &payload))
+	assert.Equal(t, "kb-retry", payload.KnowledgeBaseID)
+	assert.Equal(t, uint64(7), payload.TenantID)
+	for _, id := range []string{"k-retry-1", "k-retry-2"} {
+		status, _ := readKnowledgeStatus(t, db, id)
+		assert.Equal(t, types.ParseStatusFinalizing, status)
+		assert.Equal(t, int64(1), countWikiOps(t, db, id))
+		assert.Equal(t, types.SummaryStatusCompleted, readSummaryStatus(t, db, id))
+	}
+	status, _ := readKnowledgeStatus(t, db, "k-active")
+	assert.Equal(t, types.ParseStatusProcessing, status)
 }
