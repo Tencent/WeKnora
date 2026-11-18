@@ -362,6 +362,7 @@ import {
   type InviteLookup,
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { setI18nLanguage } from '@/i18n'
 import { useI18n } from 'vue-i18n'
 import { getApiBaseUrl } from '@/utils/api-base'
 
@@ -381,7 +382,7 @@ const { formatRole, roleIcon } = useRoleLabel()
 const modules = [Autoplay, EffectFade, Pagination]
 
 // Carousel slides data
-const slides = [
+const slides = computed(() => [
   {
     image: screenshot4,
     title: t('platform.carousel.agenticRagTitle'),
@@ -402,7 +403,7 @@ const slides = [
     title: t('platform.carousel.smartDocRetrievalTitle'),
     description: t('platform.carousel.smartDocRetrievalDesc')
   }
-]
+])
 
 // Form references
 const formRef = ref()
@@ -518,9 +519,8 @@ const toggleLanguageMenu = () => {
 }
 
 // Select language
-const selectLanguage = (lang: string) => {
-  locale.value = lang
-  localStorage.setItem('locale', lang)
+const selectLanguage = async (lang: string) => {
+  await setI18nLanguage(lang)
   showLanguageMenu.value = false
   MessagePlugin.success(t('language.languageSaved'))
 }

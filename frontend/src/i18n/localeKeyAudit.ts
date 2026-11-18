@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -14,7 +14,8 @@ import {
   REGISTERED_AUDIT_ACTION_ENTRIES,
 } from './auditActionRegistry.ts'
 import { AUDIT_ACTION_LOCALE_DEFAULTS, getAuditActionLocaleDefault } from './auditActionLocaleDefaults.ts'
-import { writeLocaleModule } from './localeSerialize.ts'
+import { LOCALE_DOMAINS, splitLocaleBundleByDomain } from './locales/domains.ts'
+import { writeLocaleBarrelModule, writeLocaleModule } from './localeSerialize.ts'
 
 import enUS from './locales/en-US.ts'
 import jaJP from './locales/ja-JP.ts'
@@ -702,7 +703,13 @@ export function writePrunedLocaleFiles(
   localesDir = LOCALES_DIR,
 ): void {
   for (const localeName of LOCALE_ORDER) {
-    writeLocaleModule(join(localesDir, `${localeName}.ts`), bundles[localeName])
+    const localeDir = join(localesDir, localeName)
+    mkdirSync(localeDir, { recursive: true })
+    const byDomain = splitLocaleBundleByDomain(bundles[localeName])
+    for (const domain of LOCALE_DOMAINS) {
+      writeLocaleModule(join(localeDir, `${domain}.ts`), byDomain[domain])
+    }
+    writeLocaleBarrelModule(join(localesDir, `${localeName}.ts`), localeName, LOCALE_DOMAINS)
   }
 }
 
@@ -712,9 +719,22 @@ export async function loadLocaleBundlesFromDisk(
   localesDir = LOCALES_DIR,
 ): Promise<Record<LocaleName, LocaleTree>> {
   const bundles = {} as Record<LocaleName, LocaleTree>
+  const cacheBust = Date.now()
   for (const localeName of LOCALE_ORDER) {
+    const localeDir = join(localesDir, localeName)
+    if (existsSync(localeDir)) {
+      const merged: LocaleTree = {}
+      for (const domain of LOCALE_DOMAINS) {
+        const domainPath = join(localeDir, `${domain}.ts`)
+        if (!existsSync(domainPath)) continue
+        const mod = await import(`${pathToFileURL(domainPath).href}?disk=${cacheBust}`)
+        Object.assign(merged, structuredClone(mod.default) as LocaleTree)
+      }
+      bundles[localeName] = merged
+      continue
+    }
     const filePath = join(localesDir, `${localeName}.ts`)
-    const mod = await import(`${pathToFileURL(filePath).href}?disk=${Date.now()}`)
+    const mod = await import(`${pathToFileURL(filePath).href}?disk=${cacheBust}`)
     bundles[localeName] = structuredClone(mod.default) as LocaleTree
   }
   return bundles
@@ -727,6 +747,31 @@ export async function loadFullLocaleBundlesFromGit(
   try {
     const bundles = {} as Record<LocaleName, LocaleTree>
     for (const localeName of LOCALE_ORDER) {
+      let hasDomainTree = false
+      const merged: LocaleTree = {}
+      for (const domain of LOCALE_DOMAINS) {
+        const domainRelPath = `frontend/src/i18n/locales/${localeName}/${domain}.ts`
+        try {
+          const domainContent = execSync(`git show ${ref}:${domainRelPath}`, {
+            cwd: REPO_ROOT,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+          })
+          hasDomainTree = true
+          const tempDomainDir = join(tempDir, localeName)
+          mkdirSync(tempDomainDir, { recursive: true })
+          const domainFile = join(tempDomainDir, `${domain}.ts`)
+          writeFileSync(domainFile, domainContent, 'utf8')
+          const mod = await import(pathToFileURL(domainFile).href)
+          Object.assign(merged, structuredClone(mod.default) as LocaleTree)
+        } catch {
+          // Ref may predate domain split; fall back below when no domain files exist.
+        }
+      }
+      if (hasDomainTree) {
+        bundles[localeName] = merged
+        continue
+      }
       const relativePath = `frontend/src/i18n/locales/${localeName}.ts`
       const content = execSync(`git show ${ref}:${relativePath}`, {
         cwd: REPO_ROOT,

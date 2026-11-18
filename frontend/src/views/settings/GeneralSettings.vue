@@ -145,6 +145,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { setI18nLanguage } from '@/i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
@@ -224,23 +225,22 @@ const isAutoCheckUpdateEnabled = computed({
 })
 
 // 初始化加载
-onMounted(() => {
+onMounted(async () => {
   // 从 localStorage 加载语言设置
   const savedLocale = localStorage.getItem('locale')
   if (savedLocale) {
-    localLanguage.value = savedLocale
-    locale.value = savedLocale
+    const applied = await setI18nLanguage(savedLocale)
+    localLanguage.value = applied
   } else {
     localLanguage.value = locale.value
   }
 })
 
 // 处理语言变化
-const handleLanguageChange = () => {
-  locale.value = localLanguage.value
-  localStorage.setItem('locale', localLanguage.value)
+const handleLanguageChange = async () => {
+  localLanguage.value = await setI18nLanguage(localLanguage.value)
   MessagePlugin.success(t('language.languageSaved'))
-    }
+}
 
 // 处理主题变化
 const handleThemeChange = (val: ThemeMode) => {
