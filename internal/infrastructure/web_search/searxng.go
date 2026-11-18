@@ -37,22 +37,34 @@ type SearxngProvider struct {
 // the service-layer parameter validation and the provider constructor so that
 // "save" and "use" never disagree.
 func ValidateSearxngBaseURL(rawURL string) error {
+	return validateSearchBaseURL(rawURL, "SearXNG")
+}
+
+// ValidateOptionalSearchBaseURL validates a custom commercial search endpoint.
+func ValidateOptionalSearchBaseURL(rawURL string) error {
+	if strings.TrimSpace(rawURL) == "" {
+		return nil
+	}
+	return validateSearchBaseURL(rawURL, "search")
+}
+
+func validateSearchBaseURL(rawURL, provider string) error {
 	base := strings.TrimSpace(rawURL)
 	if base == "" {
-		return fmt.Errorf("base_url is required for SearXNG provider")
+		return fmt.Errorf("base_url is required for %s provider", provider)
 	}
 	parsed, err := url.Parse(base)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("invalid SearXNG base_url: must be an absolute http(s) URL")
+		return fmt.Errorf("invalid %s base_url: must be an absolute http(s) URL", provider)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("invalid SearXNG base_url scheme: %s", parsed.Scheme)
+		return fmt.Errorf("invalid %s base_url scheme: %s", provider, parsed.Scheme)
 	}
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("invalid SearXNG base_url: must not contain query or fragment")
+		return fmt.Errorf("invalid %s base_url: must not contain query or fragment", provider)
 	}
 	if err := utils.ValidateURLForSSRF(base); err != nil {
-		return fmt.Errorf("invalid SearXNG base_url: %w", err)
+		return fmt.Errorf("invalid %s base_url: %w", provider, err)
 	}
 	return nil
 }

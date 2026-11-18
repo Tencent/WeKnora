@@ -232,12 +232,15 @@
         >
           <h4 class="setting-drawer__section-title">{{ t('webSearchSettings.credentialsSection', '连接配置') }}</h4>
 
-          <div v-if="selectedProviderType?.requires_base_url" class="form-item">
-            <label class="form-label required">{{ t('webSearchSettings.baseUrlLabel') }}</label>
+          <div v-if="selectedProviderType?.requires_base_url || ['bing', 'google'].includes(selectedProviderType?.id || '')" class="form-item">
+            <label class="form-label" :class="{ required: selectedProviderType?.requires_base_url }">{{ t('webSearchSettings.baseUrlLabel') }}</label>
             <t-input
               v-model="providerForm.parameters.base_url"
-              :placeholder="t('webSearchSettings.baseUrlPlaceholder')"
+              :placeholder="selectedProviderType?.id === 'bing' ? 'https://example.com/v7.0/search' : selectedProviderType?.id === 'google' ? 'https://example.com/' : t('webSearchSettings.baseUrlPlaceholder')"
             />
+            <small v-if="selectedProviderType?.id === 'bing' || selectedProviderType?.id === 'google'">
+              {{ t('webSearchSettings.customSearchEndpointHint', 'Optional. Bing: enter the full search endpoint. Google: enter the API base URL; customsearch/v1 is appended.') }}
+            </small>
           </div>
 
           <!--

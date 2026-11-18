@@ -2589,6 +2589,7 @@ export default {
     apiKeyOptionalLabel: 'APIキー（任意）',
     baseUrlLabel: 'インスタンスURL',
     baseUrlPlaceholder: 'https://searxng.example.com',
+    customSearchEndpointHint: '任意。Bing は検索エンドポイント全体を、Google は API のベース URL を入力してください。Google には customsearch/v1 が追加されます。',
     apiKeyPlaceholder: 'APIキーを入力',
     clients: {
       label: '検索とページ読み取り',
