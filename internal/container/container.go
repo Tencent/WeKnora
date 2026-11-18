@@ -2066,6 +2066,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 		Type: "deepseek", Search: infra_web_search.NewDeepSeekProvider, Fetch: infra_web_search.NewDeepSeekFetch,
 	})
 	registry.Add(infra_web_search.Spec{Type: "searchapi", Filters: true, Search: infra_web_search.NewSearchAPIProvider})
+	registry.Add(infra_web_search.Spec{Type: "sofya", Filters: true, Search: infra_web_search.NewSofyaProvider})
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and

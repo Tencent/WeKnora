@@ -111,3 +111,17 @@ func TestValidateProviderParametersSearchAPI(t *testing.T) {
 		t.Fatal("blank SearchApi API key was accepted")
 	}
 }
+
+func TestValidateProviderParametersSofya(t *testing.T) {
+	valid := types.WebSearchProviderParameters{APIKey: "ay_live_test"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSofya, valid); err != nil {
+		t.Fatalf("valid Sofya parameters rejected: %v", err)
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeSofya) {
+		t.Fatal("Sofya provider type is not accepted")
+	}
+	blank := types.WebSearchProviderParameters{APIKey: "   "}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSofya, blank); err == nil {
+		t.Fatal("blank Sofya API key was accepted")
+	}
+}

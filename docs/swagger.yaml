@@ -9906,6 +9906,7 @@ definitions:
     - serply
     - deepseek
     - searchapi
+    - sofya
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBrave
@@ -9924,6 +9925,7 @@ definitions:
     - WebSearchProviderTypeSerply
     - WebSearchProviderTypeDeepSeek
     - WebSearchProviderTypeSearchAPI
+    - WebSearchProviderTypeSofya
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       clients:
