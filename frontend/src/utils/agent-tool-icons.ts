@@ -57,6 +57,9 @@ export function getAgentToolIconName(
   if (toolName === 'shell_exec') {
     return 'terminal'
   }
+  if (toolName === 'run_javascript') {
+    return 'code'
+  }
   if (toolName === 'list_sandbox_files') {
     return 'folder'
   }

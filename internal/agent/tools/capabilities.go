@@ -57,6 +57,9 @@ type ToolRequirement struct {
 // as always available / file-consuming (permissive fallback: unknown MCP
 // tools shouldn't silently break).
 var ToolCapabilityRequirements = map[string]ToolRequirement{
+	// The script composes whatever tools the run already has; it adds no KB
+	// requirement of its own.
+	ToolRunJavaScript: {},
 	// ---- base / reasoning (no KB dependency, no file consumption) ----
 	"thinking":   {},
 	"todo_write": {},

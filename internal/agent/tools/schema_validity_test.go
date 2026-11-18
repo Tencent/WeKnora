@@ -14,6 +14,7 @@ func TestBuiltInToolSchemasAreValidJSON(t *testing.T) {
 		ToolListDocuments:       listDocumentsTool.schema,
 		ToolQueryKnowledgeGraph: queryKnowledgeGraphTool.schema,
 		ToolThinking:            sequentialThinkingTool.schema,
+		ToolRunJavaScript:       NewJavaScriptTool(NewToolRegistry()).Parameters(),
 	}
 	wikiSearch := NewWikiSearchTool(nil, nil, NewWikiScopesFromKBIDs([]string{"kb"}), nil)
 	wikiRead := NewWikiReadPageTool(nil, nil, NewWikiScopesFromKBIDs([]string{"kb"}), nil)

@@ -53,6 +53,7 @@ export const TOOL_CAPABILITY_REQUIREMENTS: Record<string, ToolRequirement> = {
   // ---- base / reasoning (no KB dependency) ----
   thinking: {},
   todo_write: {},
+  run_javascript: {},
   ask_user: {},
 
   // ---- RAG / chunk retrieval (need at least one chunk-indexed KB) ----

@@ -248,6 +248,9 @@ const (
 	ResponseTypeInstallOutput ResponseType = "install_output"
 	// ResponseTypeCommandOutput updates the pending tool card without completing it.
 	ResponseTypeCommandOutput ResponseType = "command_output"
+	// ResponseTypeJavaScriptProgress updates one nested call inside a
+	// run_javascript tool card without completing it.
+	ResponseTypeJavaScriptProgress ResponseType = "javascript_progress"
 	// ResponseTypeWorkStarted is a background work event of shared design §7.
 	// Features emit it through service.BackgroundEventEmitter, which picks the stream.
 	ResponseTypeWorkStarted ResponseType = "work_started"

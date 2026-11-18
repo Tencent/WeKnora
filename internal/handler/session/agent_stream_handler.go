@@ -162,6 +162,7 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentToolCall, h.handleToolCall)
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
 	h.eventBus.On(event.EventAgentCommandOutput, h.handleCommandOutput)
+	h.eventBus.On(event.EventAgentJavaScriptProgress, h.handleJavaScriptProgress)
 	h.eventBus.On(event.EventAgentReferences, h.handleReferences)
 	h.eventBus.On(event.EventMemoryRecalled, h.handleMemoryRecalled)
 	h.eventBus.On(event.EventContextCompacted, h.handleContextCompacted)
@@ -267,6 +268,36 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 }
 
 // handleToolCall handles tool call events
+// handleJavaScriptProgress forwards one nested run_javascript call to the
+// outer tool card. It is a live-only update; the final tool result still
+// carries the complete call table for history replay.
+func (h *AgentStreamHandler) handleJavaScriptProgress(_ context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.JavaScriptProgressData)
+	if !ok {
+		return nil
+	}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeJavaScriptProgress,
+		Done:      false,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tool_call_id":   data.ToolCallID,
+			"nested_call_id": data.NestedCallID,
+			"tool_name":      data.ToolName,
+			"phase":          data.Phase,
+			"index":          data.Index,
+			"success":        data.Success,
+			"duration_ms":    data.DurationMS,
+			"chars":          data.Chars,
+			"error":          data.Error,
+		},
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append javascript progress event failed", "error", err)
+	}
+	return nil
+}
+
 func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentToolCallData)
 	if !ok {

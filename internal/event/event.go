@@ -55,9 +55,12 @@ const (
 	EventAgentCommandOutput EventType = "command_output" // bounded command output
 	EventAgentToolCall      EventType = "tool_call"      // 工具调用通知
 	EventAgentToolResult    EventType = "tool_result"    // 工具结果
-	EventAgentReflection    EventType = "reflection"     // Agent 反思
-	EventAgentReferences    EventType = "references"     // 知识引用
-	EventAgentFinalAnswer   EventType = "final_answer"   // 最终答案
+	// EventAgentJavaScriptProgress reports one nested tool call inside a
+	// run_javascript script, so the UI can show live orchestration progress.
+	EventAgentJavaScriptProgress EventType = "javascript_progress"
+	EventAgentReflection         EventType = "reflection"   // Agent 反思
+	EventAgentReferences         EventType = "references"   // 知识引用
+	EventAgentFinalAnswer        EventType = "final_answer" // 最终答案
 
 	// MCP tool human approval (issue #1173)
 	EventToolApprovalRequired EventType = "tool_approval_required"

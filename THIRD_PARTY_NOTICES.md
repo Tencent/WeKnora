@@ -60,6 +60,20 @@ Windows installers place them next to the installed executable.
 - Copyright: 2019 Yusuke Inuzuka. Modifications by WeKnora: none.
 - Source: [upstream repository](https://github.com/yuin/goldmark/tree/v1.8.2).
 
+## QJS and Wazero
+
+- Components: `github.com/fastschema/qjs` v0.0.6 and `github.com/tetratelabs/wazero` v1.9.0.
+- Used by the `run_javascript` agent tool to execute model-written scripts in a
+  QuickJS WebAssembly sandbox. The embedded `qjs.wasm` contains QuickJS.
+- Licenses: QJS is MIT, reproduced in [`licenses/qjs-MIT.txt`](licenses/qjs-MIT.txt);
+  Wazero is Apache-2.0, reproduced in
+  [`licenses/wazero-Apache-2.0.txt`](licenses/wazero-Apache-2.0.txt).
+- Copyright: QJS project contributors; QuickJS by Fabrice Bellard and Charlie
+  Gordon; Wazero by the Tetrate Wazero authors. Modifications by WeKnora: none.
+- Sources: [QJS](https://github.com/fastschema/qjs/tree/v0.0.6),
+  [Wazero](https://github.com/tetratelabs/wazero/tree/v1.9.0), and
+  [QuickJS](https://bellard.org/quickjs/).
+
 ## Build-only component
 
 The Windows installer template in `cmd/desktop/build/windows/installer/project.nsi`
