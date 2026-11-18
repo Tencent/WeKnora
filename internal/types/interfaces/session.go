@@ -19,6 +19,10 @@ type SessionService interface {
 	// GetOwnedSession gets a session strictly within the caller's owner scope
 	// (no Admin+ API-key fallback). Write/mutation endpoints must use this so a
 	// tenant admin cannot alter API-key sessions they can only read.
+	// ScopedKnowledgeKBResolver exposes the knowledge-ID to KB resolver used
+	// by HTTP handlers for KB-scoped API key authorization (#5561).
+	ScopedKnowledgeKBResolver() types.ScopedKnowledgeResolver
+
 	GetOwnedSession(ctx context.Context, id string) (*types.Session, error)
 	// GetSessionByID loads a session by tenant and id without user scoping.
 	GetSessionByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error)

@@ -570,7 +570,7 @@ func (s *customAgentService) getSuggestedQuestions(
 		limit = suggestionMaxLimit
 	}
 
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs, s.scopedKnowledgeKBResolver()); err != nil {
 		return nil, err
 	}
 	scopeTagIDs := flattenTagScopeIDs(tagScopes)
@@ -1130,6 +1130,34 @@ func wikiSuggestionFromPage(page *types.WikiPage, locale string) string {
 // maxSuggestionKnowledgeIDs bounds the per-document lookups below; a
 // suggestion scope is a handful of @mentioned or retrieved documents.
 const maxSuggestionKnowledgeIDs = 50
+
+// scopedKnowledgeKBResolver maps knowledge IDs to their owning knowledge
+// bases for a KB-scoped API key, using the same per-document readability
+// check readableSuggestionKnowledgeIDs applies (#5561). Unknown or unreadable
+// documents map to an empty KB and are rejected by the authorize step.
+func (s *customAgentService) scopedKnowledgeKBResolver() types.ScopedKnowledgeResolver {
+	return func(ctx context.Context, knowledgeIDs []string) (map[string]string, error) {
+		out := make(map[string]string, len(knowledgeIDs))
+		for _, id := range knowledgeIDs {
+			out[id] = ""
+		}
+		if s.knowledgeRepo == nil {
+			return out, nil
+		}
+		permissions := access.NewKBPermissions(ctx, s.kbShareService)
+		for _, id := range knowledgeIDs {
+			knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, id)
+			if err != nil || knowledge == nil {
+				continue
+			}
+			ok, err := permissions.Check(knowledge.KnowledgeBaseID, knowledge.TenantID, types.OrgRoleViewer)
+			if err == nil && ok {
+				out[id] = knowledge.KnowledgeBaseID
+			}
+		}
+		return out, nil
+	}
+}
 
 // readableSuggestionKnowledgeIDs keeps the documents the caller may read.
 // KB IDs are filtered the same way in groupKBIDsByEffectiveTenant, but

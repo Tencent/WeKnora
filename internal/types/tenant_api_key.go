@@ -386,19 +386,66 @@ func AuthorizeTenantAPIKeyKnowledgeBases(ctx context.Context, kbIDs ...string) e
 	return nil
 }
 
+// maxScopedAPIKeyKnowledgeIDs caps how many explicit knowledge_ids a single
+// KB-scoped API-key request may select. Document-only selection is a bounded
+// fan-in: a cap keeps one request from enumerating a library.
+const maxScopedAPIKeyKnowledgeIDs = 100
+
+// ScopedKnowledgeResolver maps knowledge IDs to the knowledge bases that own
+// them, for callers the server has already authenticated. A KB ID of "" marks
+// an unknown knowledge ID. Implementations must resolve against the caller's
+// readable libraries, mirroring GetKnowledgeBatchWithSharedAccess.
+type ScopedKnowledgeResolver func(
+	ctx context.Context, knowledgeIDs []string,
+) (kbByKnowledgeID map[string]string, err error)
+
 // AuthorizeTenantAPIKeyKnowledgeTargets rejects KB-restricted API key callers
-// that reference knowledge_ids without a verified KB binding, or kb_ids outside
-// the allow-list.
-func AuthorizeTenantAPIKeyKnowledgeTargets(ctx context.Context, kbIDs, knowledgeIDs []string) error {
+// that reference kb_ids outside the allow-list, or knowledge_ids whose owning
+// knowledge base is unknown, unreadable, or outside the allow-list (#5561).
+//
+// knowledge_ids used to be rejected outright because the scope could not
+// verify which KB a document belongs to before retrieval ran. The resolver
+// parameter supplies that mapping: every requested document must resolve to
+// a KB the caller can read and the key allows. Combining knowledge_ids with
+// kb_ids (or any other whole-library selector) is rejected: the explicit
+// document selection is the sole target set for the turn.
+func AuthorizeTenantAPIKeyKnowledgeTargets(
+	ctx context.Context, kbIDs, knowledgeIDs []string, resolve ScopedKnowledgeResolver,
+) error {
 	scope, ok := TenantAPIKeyScopeFromContext(ctx)
 	if !ok || !scope.IsKnowledgeBaseRestricted() {
 		return nil
 	}
-	if len(knowledgeIDs) > 0 {
-		return errors.NewForbiddenError("API key scope does not allow knowledge_ids without a verified knowledge base")
+	if len(knowledgeIDs) == 0 {
+		if len(kbIDs) > 0 && !scope.AllowsKnowledgeBases(kbIDs) {
+			return errors.NewForbiddenError("API key scope does not allow one or more knowledge bases")
+		}
+		return nil
 	}
-	if len(kbIDs) > 0 && !scope.AllowsKnowledgeBases(kbIDs) {
-		return errors.NewForbiddenError("API key scope does not allow one or more knowledge bases")
+	if len(kbIDs) > 0 {
+		return errors.NewBadRequestError(
+			"knowledge_ids cannot be combined with knowledge_base_ids on a scoped API key")
+	}
+	if len(knowledgeIDs) > maxScopedAPIKeyKnowledgeIDs {
+		return errors.NewBadRequestError(fmt.Sprintf(
+			"knowledge_ids is limited to %d items on a scoped API key", maxScopedAPIKeyKnowledgeIDs))
+	}
+	if resolve == nil {
+		return errors.NewForbiddenError(
+			"API key scope does not allow knowledge_ids without a verified knowledge base")
+	}
+	kbByKnowledgeID, err := resolve(ctx, knowledgeIDs)
+	if err != nil {
+		return fmt.Errorf("resolve knowledge_ids for API key scope: %w", err)
+	}
+	for _, knowledgeID := range knowledgeIDs {
+		kbID, known := kbByKnowledgeID[knowledgeID]
+		if !known || kbID == "" {
+			return errors.NewForbiddenError("API key scope does not allow one or more knowledge_ids")
+		}
+		if !scope.AllowsKnowledgeBase(kbID) {
+			return errors.NewForbiddenError("API key scope does not allow one or more knowledge_ids")
+		}
 	}
 	return nil
 }

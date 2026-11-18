@@ -1170,7 +1170,7 @@ func (h *WikiPageHandler) SearchPagesAcross(c *gin.Context) {
 			"at least one knowledge_base_id or knowledge_base_ids must be provided"))
 		return
 	}
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, nil); err != nil {
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, nil, nil); err != nil {
 		_ = c.Error(err)
 		return
 	}

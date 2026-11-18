@@ -23,6 +23,16 @@ type stubSearchSessionService struct {
 	lastOpts *types.KnowledgeSearchOptions
 }
 
+func (s *stubSearchSessionService) ScopedKnowledgeKBResolver() types.ScopedKnowledgeResolver {
+	return func(_ context.Context, knowledgeIDs []string) (map[string]string, error) {
+		out := make(map[string]string, len(knowledgeIDs))
+		for _, id := range knowledgeIDs {
+			out[id] = "kb-1"
+		}
+		return out, nil
+	}
+}
+
 func (s *stubSearchSessionService) SearchKnowledge(
 	_ context.Context, _ []string, _ []string, _ []types.TagScope, _ string, opts *types.KnowledgeSearchOptions,
 ) (*types.RetrievalResult, error) {

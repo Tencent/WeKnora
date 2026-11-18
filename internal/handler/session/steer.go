@@ -1107,8 +1107,13 @@ func (h *Handler) applyFollowUpMentions(ctx context.Context, followUp *qaRequest
 	followUp.tagScopes = mergeTagScopesFromRequestIDs(
 		tagScopesFromMentionedItems(reqs), followUp.tagIDs, followUp.knowledgeBaseIDs)
 
+	var scopedKnowledgeResolver types.ScopedKnowledgeResolver
+	if h.sessionService != nil {
+		scopedKnowledgeResolver = h.sessionService.ScopedKnowledgeKBResolver()
+	}
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(
 		ctx, followUp.knowledgeBaseIDs, followUp.knowledgeIDs,
+		scopedKnowledgeResolver,
 	); err != nil {
 		logger.Warnf(ctx, "dropping follow-up mentions outside API key KB scope: %v", err)
 		restoreFollowUpMentions(followUp, snapshot)

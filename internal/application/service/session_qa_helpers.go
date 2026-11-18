@@ -73,7 +73,7 @@ func (s *sessionService) resolveKnowledgeBases(
 		kbIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent, req.Session.TenantID)
 	}
 
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, requestedKBIDs, req.KnowledgeIDs); err != nil {
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, requestedKBIDs, req.KnowledgeIDs, s.ScopedKnowledgeKBResolver()); err != nil {
 		return nil, nil, err
 	}
 	kbIDs, err = types.FilterKnowledgeBasesForTenantAPIKeyScope(ctx, requestedKBIDs, kbIDs)
@@ -81,6 +81,33 @@ func (s *sessionService) resolveKnowledgeBases(
 		return nil, nil, err
 	}
 	return kbIDs, knowledgeIDs, nil
+}
+
+// scopedKnowledgeKBResolver maps knowledge IDs to their owning knowledge
+// bases using the same shared-access resolution buildSearchTargets applies,
+// so a KB-scoped API key can select explicit documents whose KB it allows
+// (#5561). Unknown or unreadable documents map to an empty KB.
+func (s *sessionService) ScopedKnowledgeKBResolver() types.ScopedKnowledgeResolver {
+	return func(ctx context.Context, knowledgeIDs []string) (map[string]string, error) {
+		tenantID, ok := types.TenantIDFromContext(ctx)
+		if !ok {
+			return nil, fmt.Errorf("workspace ID not found in context")
+		}
+		items, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]string, len(knowledgeIDs))
+		for _, id := range knowledgeIDs {
+			out[id] = ""
+		}
+		for _, k := range items {
+			if k != nil {
+				out[k.ID] = k.KnowledgeBaseID
+			}
+		}
+		return out, nil
+	}
 }
 
 // questionOriginAnchor returns the knowledge base a picked suggested question

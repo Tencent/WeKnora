@@ -9,7 +9,7 @@ func TestAuthorizeTenantAPIKeyKnowledgeTargetsRejectsKnowledgeIDs(t *testing.T) 
 	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
 		KnowledgeBaseIDs: StringArray{"kb-1"},
 	})
-	err := AuthorizeTenantAPIKeyKnowledgeTargets(ctx, []string{"kb-1"}, []string{"doc-1"})
+	err := AuthorizeTenantAPIKeyKnowledgeTargets(ctx, []string{"kb-1"}, []string{"doc-1"}, nil)
 	if err == nil {
 		t.Fatal("expected forbidden when knowledge_ids supplied under KB-restricted key")
 	}
@@ -19,7 +19,7 @@ func TestAuthorizeTenantAPIKeyKnowledgeTargetsAllowsUnspecifiedTargets(t *testin
 	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
 		KnowledgeBaseIDs: StringArray{"kb-1"},
 	})
-	err := AuthorizeTenantAPIKeyKnowledgeTargets(ctx, nil, nil)
+	err := AuthorizeTenantAPIKeyKnowledgeTargets(ctx, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("expected unspecified targets to be allowed, got %v", err)
 	}

@@ -33,6 +33,16 @@ func (s *steerOwnedSessionStub) GetOwnedSession(_ context.Context, id string) (*
 	return &types.Session{ID: id}, nil
 }
 
+func (s *steerOwnedSessionStub) ScopedKnowledgeKBResolver() types.ScopedKnowledgeResolver {
+	return func(_ context.Context, knowledgeIDs []string) (map[string]string, error) {
+		out := make(map[string]string, len(knowledgeIDs))
+		for _, id := range knowledgeIDs {
+			out[id] = "kb-1"
+		}
+		return out, nil
+	}
+}
+
 type steerMessageLookupStub struct {
 	interfaces.MessageService
 	msg *types.Message
