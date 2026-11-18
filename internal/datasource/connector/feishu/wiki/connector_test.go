@@ -572,6 +572,31 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 	if len(ancestors) != 0 {
 		t.Fatalf("want no ancestors for a space selection, got %+v", ancestors)
 	}
+
+	// A deleted node (or a node under a deleted/unshared space) must NOT add
+	// its space or broken parents to ancestors, while valid selections alongside
+	// it still resolve in top-down order.
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"deleted-space:nt-deleted", "space1:nt-deleted"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(deleted) error: %v", err)
+	}
+	if len(ancestors) != 0 {
+		t.Fatalf("deleted selections must not return unexpandable space ancestors, got %+v", ancestors)
+	}
+
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(),
+		makeConfig(cfg, nil),
+		[]string{"deleted-space:nt-deleted", "space1:nt-grandchild"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(mixed) error: %v", err)
+	}
+	if !slices.Equal(ancestors, []string{"space1", "space1:nt-root", "space1:nt-child"}) {
+		t.Fatalf("want [space1 space1:nt-root space1:nt-child], got %+v", ancestors)
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────

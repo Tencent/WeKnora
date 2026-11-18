@@ -1471,6 +1471,35 @@ func (s *DataSourceService) cancelSyncLog(
 	return nil
 }
 
+func mergeDeletedItems(cur, prev []types.SyncDeletedItem) []types.SyncDeletedItem {
+	if len(prev) == 0 {
+		return cur
+	}
+	out := make([]types.SyncDeletedItem, 0, min(len(cur)+len(prev), maxSyncResultErrors))
+	for _, d := range cur {
+		if len(out) >= maxSyncResultErrors {
+			return out
+		}
+		out = append(out, d)
+	}
+	for _, p := range prev {
+		if len(out) >= maxSyncResultErrors {
+			break
+		}
+		seen := false
+		for _, existing := range out {
+			if existing.ExternalID == p.ExternalID && existing.SourceResourceID == p.SourceResourceID {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func (s *DataSourceService) updateSyncRunResult(
 	ctx context.Context,
 	ds *types.DataSource,
@@ -1507,12 +1536,15 @@ func (s *DataSourceService) updateSyncRunResult(
 	}
 	ds.ErrorMessage = errorMessage
 	dsResultJSON := resultJSON
-	if status == types.SyncLogStatusFailed && result != nil && len(result.DeletedItems) == 0 {
+	if status == types.SyncLogStatusFailed && result != nil {
 		if prev, err := ds.ParseSyncResult(); err == nil && prev != nil && len(prev.DeletedItems) > 0 {
-			merged := *result
-			merged.DeletedItems = prev.DeletedItems
-			if b, merr := merged.ToJSON(); merr == nil {
-				dsResultJSON = b
+			mergedItems := mergeDeletedItems(result.DeletedItems, prev.DeletedItems)
+			if len(mergedItems) > len(result.DeletedItems) {
+				merged := *result
+				merged.DeletedItems = mergedItems
+				if b, merr := merged.ToJSON(); merr == nil {
+					dsResultJSON = b
+				}
 			}
 		}
 	}

@@ -674,3 +674,146 @@ func TestProcessSync_FeishuDeletedDocSweepsAttachmentSubItemsAndPreservesParentT
 	assert.Equal(t, folderToken, res4.DeletedItems[1].ExternalID)
 	assert.Equal(t, "父目录文档", res4.DeletedItems[1].Title)
 }
+
+// TestProcessSync_FeishuDriveNestedShortcutSyncsThenReconcilesDeletion ensures
+// a directly selected shortcut inside a Drive sub-folder ("root:shortcut-tok")
+// is NOT misclassified as deleted while live (even though ExpandDriveShortcut
+// swaps Token to TargetToken), and properly deletes its target + attachments
+// once the shortcut is actually removed in Feishu Drive.
+func TestProcessSync_FeishuDriveNestedShortcutSyncsThenReconcilesDeletion(t *testing.T) {
+	srv := newFeishuSelectedNodeServer(t, "unused")
+	var nestedShortcut core.DriveFile
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"token":"shortcut-nested",
+		"name":"快捷方式规范",
+		"type":"shortcut",
+		"modified_time":"100",
+		"shortcut_info":{"target_token":"obj-shortcut-target","target_type":"docx"}
+	}`), &nestedShortcut))
+
+	srv.driveFiles["root-folder"] = []core.DriveFile{
+		{Token: "sub-folder", Name: "子目录", Type: "folder", ParentToken: "root-folder", ModifiedTime: "100"},
+		{Token: "file-b", Name: "存活云盘文档.md", Type: "file", ParentToken: "root-folder", ModifiedTime: "100"},
+	}
+	srv.driveFiles["sub-folder"] = []core.DriveFile{nestedShortcut}
+	srv.docxText["obj-shortcut-target"] = "快捷方式指向的正文"
+	srv.docxAttach["obj-shortcut-target"] = "att-shortcut-1"
+
+	svc, ds, logRepo, ks := newFeishuSyncServiceHarness(
+		t, srv, types.ConnectorTypeFeishuDrive,
+		[]string{"root-folder:shortcut-nested", "root-folder:file-b"}, true,
+	)
+
+	// Round 1: nested shortcut syncs target docx + attachment without false deletion.
+	log1, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-sc-1")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log1.Status)
+	assert.Equal(t, 3, log1.ItemsCreated, "shortcut attachment + shortcut docx + file-b")
+	assert.Equal(t, 0, log1.ItemsDeleted)
+	attExtID := types.SubtreeChildID("obj-shortcut-target", "file", "att-shortcut-1")
+	require.NotNil(t, ks.repo.live[ds.ID+"|obj-shortcut-target"])
+	require.NotNil(t, ks.repo.live[ds.ID+"|"+attExtID])
+	assert.Contains(t, ks.contents["obj-shortcut-target"], "快捷方式指向的正文")
+
+	// Round 2: incremental no-op keeps nested shortcut intact.
+	log2, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-sc-2")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log2.Status)
+	assert.Equal(t, 0, log2.ItemsDeleted)
+	assert.NotNil(t, ks.repo.live[ds.ID+"|obj-shortcut-target"])
+
+	// Round 3: delete the nested shortcut in Feishu Drive and update file-b.
+	srv.mu.Lock()
+	srv.driveFiles["sub-folder"] = []core.DriveFile{}
+	srv.driveFiles["root-folder"][1].ModifiedTime = "200"
+	srv.mu.Unlock()
+
+	log3, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-sc-3")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log3.Status)
+	assert.Equal(t, 1, log3.ItemsDeleted)
+	assert.Equal(t, 1, log3.ItemsUpdated)
+	assert.Nil(t, ks.repo.live[ds.ID+"|obj-shortcut-target"])
+	assert.Nil(t, ks.repo.live[ds.ID+"|"+attExtID], "shortcut attachment sub-item must also be swept")
+
+	res3, err := log3.ParseResult()
+	require.NoError(t, err)
+	require.Len(t, res3.DeletedItems, 1)
+	assert.Equal(t, "快捷方式规范", res3.DeletedItems[0].Title)
+}
+
+// TestProcessSync_FeishuMidStreamFailurePreservesUnseenDeletedItemTitles verifies
+// that if a sync round processes an earlier deleted selection (len(DeletedItems) == 1)
+// and then aborts mid-stream on a subsequent selection before reaching later
+// deleted selections, ds.LastSyncResult merges unseen prior DeletedItems so
+// later deleted selections do not lose their cached titles on recovery.
+func TestProcessSync_FeishuMidStreamFailurePreservesUnseenDeletedItemTitles(t *testing.T) {
+	const (
+		spaceID = "space-mid-fail"
+		tokenA  = "node-del-a"
+		tokenB  = "node-mid-b"
+		tokenC  = "node-del-c"
+	)
+	srv := newFeishuSelectedNodeServer(t, spaceID)
+	srv.nodes[tokenA] = core.WikiNode{
+		SpaceID: spaceID, NodeToken: tokenA, ObjToken: "obj-a",
+		ObjType: "docx", Title: "已删文档 A", ObjEditTime: "100",
+	}
+	srv.nodes[tokenB] = core.WikiNode{
+		SpaceID: spaceID, NodeToken: tokenB, ObjToken: "obj-b",
+		ObjType: "docx", Title: "中间文档 B", ObjEditTime: "100",
+	}
+	srv.nodes[tokenC] = core.WikiNode{
+		SpaceID: spaceID, NodeToken: tokenC, ObjToken: "obj-c",
+		ObjType: "docx", Title: "已删文档 C", ObjEditTime: "100",
+	}
+	srv.docxText["obj-a"] = "A"
+	srv.docxText["obj-b"] = "B"
+	srv.docxText["obj-c"] = "C"
+
+	svc, ds, logRepo, _ := newFeishuSyncServiceHarness(
+		t, srv, types.ConnectorTypeFeishu,
+		[]string{spaceID + ":" + tokenA, spaceID + ":" + tokenB, spaceID + ":" + tokenC},
+		true,
+	)
+
+	// Round 1: initial sync indexes A, B, C.
+	_, err := runFeishuSyncRound(t, svc, ds, logRepo, "mid-1")
+	require.NoError(t, err)
+
+	// Round 2: both A and C are deleted in Feishu -> KB rows removed, titles cached.
+	srv.mu.Lock()
+	srv.deletedTokens[tokenA] = true
+	srv.deletedTokens[tokenC] = true
+	srv.mu.Unlock()
+	log2, err := runFeishuSyncRound(t, svc, ds, logRepo, "mid-2")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log2.Status)
+
+	// Round 3: A (131005) is processed first, then B fails with 131006 BEFORE C is reached.
+	srv.mu.Lock()
+	srv.deniedTokens[tokenB] = true
+	srv.mu.Unlock()
+	log3, err := runFeishuSyncRound(t, svc, ds, logRepo, "mid-3")
+	require.Error(t, err)
+	assert.Equal(t, types.SyncLogStatusFailed, log3.Status)
+
+	dsResAfterFail, err := ds.ParseSyncResult()
+	require.NoError(t, err)
+	require.Len(t, dsResAfterFail.DeletedItems, 2, "ds.LastSyncResult must retain unseen C alongside A")
+	assert.Equal(t, "已删文档 A", dsResAfterFail.DeletedItems[0].Title)
+	assert.Equal(t, "已删文档 C", dsResAfterFail.DeletedItems[1].Title)
+
+	// Round 4: B recovers -> C must still resolve its cached title "已删文档 C".
+	srv.mu.Lock()
+	srv.deniedTokens[tokenB] = false
+	srv.mu.Unlock()
+	log4, err := runFeishuSyncRound(t, svc, ds, logRepo, "mid-4")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log4.Status)
+	res4, err := log4.ParseResult()
+	require.NoError(t, err)
+	require.Len(t, res4.DeletedItems, 2)
+	assert.Equal(t, "已删文档 A", res4.DeletedItems[0].Title)
+	assert.Equal(t, "已删文档 C", res4.DeletedItems[1].Title)
+}

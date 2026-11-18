@@ -1059,6 +1059,9 @@ func WalkDriveTree(
 		}
 
 		for _, f := range entries {
+			if f.ParentToken == "" {
+				f.ParentToken = folderToken
+			}
 			switch f.Type {
 			case "folder":
 				name := SanitizeFileName(f.Name)
@@ -1090,6 +1093,7 @@ func ExpandDriveShortcut(f DriveFile) (DriveFile, bool) {
 	if f.ShortcutInfo == nil || f.ShortcutInfo.TargetToken == "" || f.ShortcutInfo.TargetType == "folder" {
 		return DriveFile{}, false
 	}
+	f.ShortcutToken = f.Token
 	f.Token, f.Type = f.ShortcutInfo.TargetToken, f.ShortcutInfo.TargetType
 	f.ShortcutInfo = nil
 	return f, true

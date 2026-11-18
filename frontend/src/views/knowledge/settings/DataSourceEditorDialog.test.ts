@@ -722,6 +722,80 @@ test('Confluence Cloud folder-limited spaces do not misclassify unexpanded live 
     await flush()
     assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [])
     assert.deepEqual([...f.vm.selectedResourceIds], ['page:101:999'])
+
+    // Selecting the whole space subsumes hidden/vanished page:<spaceId>:<pageId>
+    // selections instead of leaving stale page IDs alongside the space ID.
+    f.vm.toggleResource('101')
+    assert.deepEqual([...f.vm.selectedResourceIds], ['101'])
+    assert.equal(f.vm.selectedResourceCount, 1)
+    f.vm.toggleResource('101')
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+    assert.equal(f.vm.selectedResourceCount, 0)
+  } finally { f.close() }
+})
+
+test('selecting a DingTalk workspace or folder subsumes vanished child selections', async () => {
+  const wsId = 'ws-eng'
+  const folderId = 'dingtalk:v1?node=folder-1&workspace=ws-eng'
+  const vanishedDocId = 'dingtalk:v1?ancestor=folder-1&node=doc-deleted&workspace=ws-eng'
+  const f = await fixture({
+    type: 'dingtalk',
+    resources: [
+      { external_id: wsId, name: '研发空间', type: 'workspace', has_children: true },
+      { external_id: folderId, name: '架构目录', type: 'folder', parent_id: wsId, has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-dingtalk-cover',
+      name: 'DingTalk',
+      type: 'dingtalk',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [vanishedDocId], settings: {} },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    await f.vm.ensureChildrenLoaded(wsId)
+    f.vm.toggleResource(folderId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [folderId])
+    assert.equal(f.vm.resourceRowState(wsId), 'indeterminate')
+    f.vm.toggleResource(wsId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+    f.vm.toggleResource(wsId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [wsId])
+  } finally { f.close() }
+})
+
+test('editing a Feishu Drive source does not overwrite saved sub-selections before save', async () => {
+  const f = await fixture({
+    type: 'feishu_drive',
+    resources: [
+      { external_id: 'root-folder', name: '研发云盘', type: 'drive_folder', has_children: true },
+      { external_id: 'root-folder:sub', name: '架构子目录', type: 'folder', parent_id: 'root-folder', has_children: true },
+      { external_id: 'root-folder:shortcut-1', name: '快捷方式规范', type: 'shortcut', parent_id: 'root-folder:sub', has_children: false },
+    ],
+    dataSource: {
+      id: 'ds-drive-edit',
+      name: 'Feishu Drive',
+      type: 'feishu_drive',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: ['root-folder:shortcut-1'], settings: { parse_mode: 'blocks' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    await flush()
+    assert.equal(f.calls.some(c => c.method === 'updateDataSource'), false)
+    assert.deepEqual([...f.vm.selectedResourceIds], ['root-folder:shortcut-1'])
   } finally { f.close() }
 })
 

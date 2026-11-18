@@ -299,10 +299,27 @@ function seafileWithin(id: string, parent: string): boolean {
     (parentPath === '/' || path === parentPath || path.startsWith(parentPath + '/'))
 }
 
+function dingtalkWithin(sel: string, ancestorId: string): boolean {
+  if (!sel.startsWith('dingtalk:v1?')) return false
+  try {
+    const selParams = new URL('https://weknora.local/?' + sel.slice('dingtalk:v1?'.length)).searchParams
+    const selWs = selParams.get('workspace')
+    if (!selWs) return false
+    if (!ancestorId.startsWith('dingtalk:v1?')) return selWs === ancestorId
+    const ancParams = new URL('https://weknora.local/?' + ancestorId.slice('dingtalk:v1?'.length)).searchParams
+    const ancNode = ancParams.get('node')
+    return selWs === ancParams.get('workspace') && !!ancNode && selParams.getAll('ancestor').includes(ancNode)
+  } catch {
+    return false
+  }
+}
+
 function isSelectionWithin(type: string, sel: string, ancestorId: string): boolean {
   if (isSeafileConnector(type)) return seafileWithin(sel, ancestorId)
   if (type === 'nextcloud') return ancestorId === '/' || sel === ancestorId || sel.startsWith(ancestorId + '/')
   if (isFeishuFamilyConnector(type)) return !ancestorId.includes(':') && sel.startsWith(`${ancestorId}:`)
+  if (type === 'confluence') return !ancestorId.includes(':') && sel.startsWith(`page:${ancestorId}:`)
+  if (type === 'dingtalk') return dingtalkWithin(sel, ancestorId)
   return false
 }
 
@@ -360,7 +377,13 @@ async function loadDriveRoot() {
   if (selectedResourceIds.value.some(id => id.split(':')[0] !== token)) {
     selectedResourceIds.value = selectedResourceIds.value.filter(id => id.split(':')[0] === token)
   }
-  form.value.config.resource_ids = [token]
+  const savedRids = props.dataSource?.config?.resource_ids || []
+  const savedRoot = savedRids.length > 0 ? String(savedRids[0] || '').split(':')[0] : ''
+  const rootUnchangedInEdit = isEdit.value && savedRoot === token
+  if (!rootUnchangedInEdit) {
+    form.value.config.resource_ids =
+      selectedResourceIds.value.length > 0 ? [...selectedResourceIds.value] : [token]
+  }
   driveRootLoaded.value = false
   loadingResources.value = true
   try {
@@ -368,11 +391,10 @@ async function loadDriveRoot() {
     // picker, obtained through the same guard: an answer without an id is a
     // reported failure instead of a listing against an empty id, and two quick
     // Enter presses share one create instead of leaving a second paused row
-    // behind. Drive additionally needs the new folder_token stored before it
-    // lists (the listing reads the token from the row), so it flushes the form
-    // even in edit mode — which the generic picker deliberately does not do,
-    // leaving the existing row untouched until submit.
-    const dsId = await ensureTempDataSource(true)
+    // behind. Drive only flushes in edit mode when the user changed folder_token
+    // (otherwise the saved row already carries the root prefix and opening
+    // Step 2 + cancelling must not clobber saved sub-resource selections).
+    const dsId = await ensureTempDataSource(!rootUnchangedInEdit)
     if (!dsId) return
 
     const res = await listResources(dsId)

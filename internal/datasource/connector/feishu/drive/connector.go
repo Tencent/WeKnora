@@ -121,6 +121,9 @@ func (c *DriveConnector) ListResources(
 
 	resources := make([]types.Resource, 0, len(files))
 	for _, f := range files {
+		if f.ParentToken == "" {
+			f.ParentToken = folderToken
+		}
 		resources = append(resources, c.driveFileToResource(rootFolderToken, f))
 	}
 	return resources, nil
@@ -159,11 +162,10 @@ func (c *DriveConnector) ResolveResourceAncestors(
 	rootSelections := make(map[string][]selection)
 	for _, rid := range resourceIDs {
 		rootFolderToken, fileToken := parseDriveResourceID(rid)
-		if fileToken == "" {
+		if rootFolderToken == "" || fileToken == "" {
 			// A root-level selection is already a top-level node; nothing to reveal.
 			continue
 		}
-		add(rootFolderToken)
 		rootSelections[rootFolderToken] = append(rootSelections[rootFolderToken], selection{fileToken})
 	}
 
@@ -176,30 +178,38 @@ func (c *DriveConnector) ResolveResourceAncestors(
 		for _, s := range sels {
 			remaining[s.fileToken] = true
 		}
-		// parentChain[fileToken] = resourceID of its parent folder
-		parentChain := make(map[string]string)
+		parentFolder := make(map[string]string)
+		visited := make(map[string]bool)
 
 		queue := []string{rootFolderToken}
 		for len(queue) > 0 && len(remaining) > 0 {
 			cur := queue[0]
 			queue = queue[1:]
+			if visited[cur] {
+				continue
+			}
+			visited[cur] = true
 
 			files, err := client.ListDriveFilesAllPages(ctx, cur)
 			if err != nil {
 				logger.Warnf(ctx, "[FeishuDrive] resolve ancestors: list %s: %v", cur, err)
-				break // best-effort: stop this root's traversal
+				continue
 			}
 			for _, f := range files {
+				matchedToken := ""
 				if remaining[f.Token] {
-					delete(remaining, f.Token)
-					// Record the parent chain from root down to this file's parent.
-					chain := buildDriveAncestorChain(rootFolderToken, cur, parentChain)
-					for _, a := range chain {
+					matchedToken = f.Token
+				} else if f.ShortcutInfo != nil && remaining[f.ShortcutInfo.TargetToken] {
+					matchedToken = f.ShortcutInfo.TargetToken
+				}
+				if matchedToken != "" {
+					delete(remaining, matchedToken)
+					for _, a := range buildDriveAncestorChain(rootFolderToken, cur, parentFolder) {
 						add(a)
 					}
 				}
-				if f.Type == "folder" {
-					parentChain[f.Token] = makeDriveResourceID(rootFolderToken, cur)
+				if f.Type == "folder" && !visited[f.Token] {
+					parentFolder[f.Token] = cur
 					queue = append(queue, f.Token)
 				}
 			}
@@ -209,19 +219,23 @@ func (c *DriveConnector) ResolveResourceAncestors(
 	return ancestors, nil
 }
 
-// buildDriveAncestorChain walks the parentChain map from cur up to root,
-// returning the resourceIDs (root, ... , cur's parent) in root-first order.
-func buildDriveAncestorChain(rootFolderToken, cur string, parentChain map[string]string) []string {
-	var chain []string
-	node := cur
-	for node != "" && node != rootFolderToken {
-		parent, ok := parentChain[node]
+// buildDriveAncestorChain walks parentFolder from cur (the folder directly
+// containing the matched selection) up to rootFolderToken, returning the
+// picker resourceIDs (rootFolderToken, ..., cur) in root-first order.
+func buildDriveAncestorChain(rootFolderToken, cur string, parentFolder map[string]string) []string {
+	var folders []string
+	for node := cur; node != "" && node != rootFolderToken; {
+		folders = append(folders, makeDriveResourceID(rootFolderToken, node))
+		parent, ok := parentFolder[node]
 		if !ok {
 			break
 		}
-		chain = append([]string{parent}, chain...)
-		_, parentFolderToken := parseDriveResourceID(parent)
-		node = parentFolderToken
+		node = parent
+	}
+	chain := make([]string, 0, len(folders)+1)
+	chain = append(chain, rootFolderToken)
+	for i := len(folders) - 1; i >= 0; i-- {
+		chain = append(chain, folders[i])
 	}
 	return chain
 }
@@ -534,15 +548,27 @@ func isDriveNotFolderError(err error) bool {
 	return strings.Contains(s, "1061002") || strings.Contains(s, "params error")
 }
 
-// filterDriveFileByToken returns only the entries whose Token matches token.
+// filterDriveFileByToken returns the entries matching token, preferring the
+// Drive entry's own token (ShortcutToken for expanded shortcuts, Token for
+// regular files) and falling back to expanded target Token when no direct entry
+// carries token.
 func filterDriveFileByToken(files []core.DriveFile, token string) []core.DriveFile {
-	var out []core.DriveFile
+	var exact, byTarget []core.DriveFile
 	for _, f := range files {
-		if f.Token == token {
-			out = append(out, f)
+		entryToken := f.Token
+		if f.ShortcutToken != "" {
+			entryToken = f.ShortcutToken
+		}
+		if entryToken == token {
+			exact = append(exact, f)
+		} else if f.Token == token {
+			byTarget = append(byTarget, f)
 		}
 	}
-	return out
+	if len(exact) > 0 {
+		return exact
+	}
+	return byTarget
 }
 
 // driveRootFolderToken extracts the user-supplied root folder_token from the
