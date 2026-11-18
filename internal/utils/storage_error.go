@@ -13,6 +13,8 @@ func SanitizeStorageConnectivityError(err error) string {
 	}
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "OSS ECS RAM role credentials unavailable"):
+		return "无法获取 ECS RAM 角色临时凭据，请检查实例是否绑定角色，以及进程或容器能否访问 ECS 元数据服务"
 	case strings.Contains(msg, "Endpoint url cannot have fully qualified paths"):
 		return "Endpoint 地址格式错误：请去除 http:// 或 https:// 前缀，只填写域名或 IP 地址和端口（例如：minio.example.com:9000）"
 	case strings.Contains(msg, "no such host"):

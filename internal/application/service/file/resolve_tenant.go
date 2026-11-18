@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -41,7 +42,8 @@ func ResolveTenantFileServiceWithFallback(
 	if globalStorageType == "" {
 		globalStorageType = "local"
 	}
-	if provider == globalStorageType && globalFileService != nil {
+	if !errors.Is(err, types.ErrOSSRoleRequiresEnvironment) &&
+		provider == globalStorageType && globalFileService != nil {
 		logger.Warnf(
 			ctx,
 			"[Router] %s tenant storage config missing or invalid, fallback to global file "+

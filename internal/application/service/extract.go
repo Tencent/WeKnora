@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -632,6 +633,9 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
 	}
 
 	resolvedSvc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, resources.tenant, backendID, provider, baseDir)
+	if errors.Is(err, types.ErrOSSRoleRequiresEnvironment) {
+		return filesvc.NewUnavailableFileService(err)
+	}
 	if err != nil {
 		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s, fallback to default: %v", provider, err)
 		return s.fileService
