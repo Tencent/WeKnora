@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +53,8 @@ func (s *vectorStoreService) TestConnection(
 		return testWeaviateConnection(ctx, config)
 	case types.DorisRetrieverEngineType:
 		return testDorisConnection(ctx, config)
+	case types.OracleRetrieverEngineType:
+		return oracleConnectionTester(ctx, config)
 	case types.OpenSearchRetrieverEngineType:
 		return testOpenSearchConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
@@ -349,6 +352,65 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 		return strings.TrimSpace(version[i+len("Doris-"):]), nil
 	}
 	return version, nil
+}
+
+// oracleConnectionTester is replaced in tests that have no Oracle server.
+var oracleConnectionTester = testOracleConnection
+
+// testOracleConnection pings Oracle and returns version_full (e.g.
+// "23.7.0.25.01"). Versions before 23.6 are rejected here instead of failing
+// later: before 23ai there is no VECTOR type, and 23.4/23.5 cannot run DML on
+// tables with an HNSW index (see oracleVersionSupported).
+func testOracleConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
+	defer cancel()
+
+	db, err := secutils.OpenOracleDB(secutils.OracleConnParams{
+		Addr: config.Addr, Service: config.Database, Username: config.Username, Password: config.Password,
+		UseTLS: config.UseTLS, Wallet: config.Wallet, WalletDir: config.WalletDir,
+	}, true)
+	if err != nil {
+		return "", errors.NewBadRequestError("failed to create oracle connection: invalid configuration")
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := db.PingContext(testCtx); err != nil {
+		logger.Warnf(ctx, "Oracle connection test failed: %v", err)
+		return "", errors.NewBadRequestError(
+			"failed to connect to oracle: connection refused, unknown service name or authentication failed")
+	}
+
+	var version string
+	if err := db.QueryRowContext(testCtx,
+		"SELECT version_full FROM product_component_version WHERE product LIKE 'Oracle%' FETCH FIRST 1 ROWS ONLY",
+	).Scan(&version); err != nil {
+		logger.Warnf(ctx, "Oracle version detection failed: %v", err)
+		return "", nil
+	}
+	if !oracleVersionSupported(version) {
+		return version, errors.NewBadRequestError("oracle " + version +
+			" is not supported; Oracle AI Database 23.6 or later (23ai RU 23.6 or 26ai) is required")
+	}
+	return version, nil
+}
+
+// oracleVersionSupported reports whether a version_full string is 23.6 or
+// later. Transactional HNSW indexes (DML on an indexed table) arrived in RU
+// 23.6; 26ai reports 23.26.x. Unparseable versions are let through, like an
+// undetectable version.
+func oracleVersionSupported(version string) bool {
+	parts := strings.SplitN(version, ".", 3)
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return true
+	}
+	minor := 0
+	if len(parts) > 1 {
+		if minor, err = strconv.Atoi(parts[1]); err != nil {
+			return true
+		}
+	}
+	return major > 23 || (major == 23 && minor >= 6)
 }
 
 // testOpenSearchConnection verifies the cluster is reachable, runs a

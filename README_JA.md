@@ -335,7 +335,7 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 |----------------|--------|
 | [大規模モデル](https://weknora.weixin.qq.com/docs/03-features/06-models) | 29 の組み込みベンダー。OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen（Alibaba Cloud）/ Zhipu / Hunyuan / Doubao（Volcengine）/ Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama など |
 | Embedding | Ollama / BGE / GTE / Zhipu / OpenAI 互換 API |
-| ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
+| ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Oracle AI Database / Tencent VectorDB |
 | [オブジェクトストレージ](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | ローカル / Tencent Cloud COS / MinIO / AWS S3 / 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 / 華為雲 OBS |
 | [文書フォーマット](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 画像 |
 | [データソース](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | Feishu ナレッジベース / Feishu クラウドドライブ / Lark / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / Seafile / RSS |

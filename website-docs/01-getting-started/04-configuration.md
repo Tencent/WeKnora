@@ -183,13 +183,14 @@ flowchart LR
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
-| `RETRIEVE_DRIVER` | postgres | 检索引擎：`postgres` / `elasticsearch_v7` / `elasticsearch_v8` / `qdrant` / `milvus` / `weaviate` / `opensearch` / `doris` / `tencent_vectordb` / `sqlite`（Lite）；可逗号分隔多引擎并行 |
+| `RETRIEVE_DRIVER` | postgres | 检索引擎：`postgres` / `elasticsearch_v7` / `elasticsearch_v8` / `qdrant` / `milvus` / `weaviate` / `opensearch` / `doris` / `oracle` / `tencent_vectordb` / `sqlite`（Lite）；可逗号分隔多引擎并行 |
 | `ELASTICSEARCH_ADDR/USERNAME/PASSWORD/INDEX` | 空 | Elasticsearch |
 | `QDRANT_HOST/PORT/COLLECTION/API_KEY/USE_TLS` | qdrant / 6334 / weknora_embeddings / 空 / false | Qdrant |
 | `MILVUS_ADDRESS/COLLECTION/METRIC_TYPE/...` | milvus:19530 / weknora_embeddings / IP | Milvus |
 | `OPENSEARCH_ADDR/USERNAME/PASSWORD/INDEX/INSECURE_SKIP_VERIFY` | 空 | OpenSearch |
 | `WEAVIATE_HOST/GRPC_ADDRESS/SCHEME/AUTH_ENABLED/API_KEY` | 空 | Weaviate |
 | `DORIS_ADDR/HTTP_PORT/DATABASE/USERNAME/PASSWORD/TABLE_PREFIX/COMPAT_MODE` | 空 | Apache Doris 4.1+ |
+| `ORACLE_ADDR/SERVICE_NAME/USERNAME/PASSWORD/USE_TLS/WALLET_DIR/TABLE_PREFIX` | 空 | Oracle AI Database 23.6+（23ai RU 23.6 或 26ai）；`WALLET_DIR` 可选（mTLS） |
 | `TENCENT_VECTORDB_ADDR/USERNAME/API_KEY/DATABASE/COLLECTION/REPLICA_NUMBER` | 空 | 腾讯云 VectorDB |
 | `MULTI_STORE_RETRIEVE_TIMEOUT_SEC` | 空 | 多引擎并行检索超时 |
 | `NEO4J_ENABLE` / `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | 空 / bolt://neo4j:7687 / neo4j / password | 知识图谱唯一开关（`ENABLE_GRAPH_RAG` 自 v0.1.6 起废弃） |

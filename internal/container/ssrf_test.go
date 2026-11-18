@@ -22,6 +22,10 @@ func TestValidateRuntimeVectorStoreAddressesRejectsUnsafeEndpoints(t *testing.T)
 		{EngineType: types.MilvusRetrieverEngineType, ConnectionConfig: types.ConnectionConfig{Addr: "169.254.169.254:19530"}},
 		{EngineType: types.WeaviateRetrieverEngineType, ConnectionConfig: types.ConnectionConfig{Host: "https://example.com", GrpcAddress: "169.254.169.254:50051"}},
 		{EngineType: types.DorisRetrieverEngineType, ConnectionConfig: types.ConnectionConfig{Addr: "169.254.169.254:9030"}},
+		{
+			EngineType:       types.OracleRetrieverEngineType,
+			ConnectionConfig: types.ConnectionConfig{Addr: "169.254.169.254:1521"},
+		},
 		{EngineType: types.TencentVectorDBRetrieverEngineType, ConnectionConfig: types.ConnectionConfig{Addr: "169.254.169.254:80"}},
 	}
 	for _, store := range tests {

@@ -90,6 +90,7 @@ var validEngineTypes = map[RetrieverEngineType]bool{
 	MilvusRetrieverEngineType:          true,
 	WeaviateRetrieverEngineType:        true,
 	DorisRetrieverEngineType:           true,
+	OracleRetrieverEngineType:          true,
 	TencentVectorDBRetrieverEngineType: true,
 	OpenSearchRetrieverEngineType:      true,
 }
@@ -135,7 +136,8 @@ type ConnectionConfig struct {
 	// TLS on gRPC connections — InsecureSkipVerify only controls
 	// *verification* of an already-TLS connection.
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify" json:"insecure_skip_verify,omitempty"`
-	// Qdrant
+	// Qdrant (Host/Port/UseTLS). UseTLS is also read by Oracle, where it
+	// switches the connection to TCPS.
 	Host   string `yaml:"host" json:"host,omitempty"`
 	Port   int    `yaml:"port" json:"port,omitempty"`
 	UseTLS bool   `yaml:"use_tls" json:"use_tls,omitempty"`
@@ -143,7 +145,8 @@ type ConnectionConfig struct {
 	GrpcAddress string `yaml:"grpc_address" json:"grpc_address,omitempty"`
 	Scheme      string `yaml:"scheme" json:"scheme,omitempty"`
 	// Database name used by engines that support database-level namespaces
-	// (currently Milvus, Tencent VectorDB, and Doris).
+	// (currently Milvus, Tencent VectorDB, and Doris). Oracle stores its
+	// service name (e.g. FREEPDB1) here.
 	Database string `yaml:"database" json:"database,omitempty"`
 	// Postgres
 	UseDefaultConnection bool `yaml:"use_default_connection" json:"use_default_connection,omitempty"`
@@ -151,13 +154,20 @@ type ConnectionConfig struct {
 	// Addr is reused for the MySQL protocol "host:9030"; HTTPPort + the host of Addr
 	// together form the FE HTTP endpoint used by Stream Load.
 	HTTPPort int `yaml:"http_port" json:"http_port,omitempty"`
+	// Oracle (optional): uploaded auto-login wallet, stored as base64 of
+	// cwallet.sso (AES-GCM encrypted at rest, masked in responses). Setting it
+	// enables mTLS; UseTLS alone enables one-way TLS (TCPS).
+	Wallet string `yaml:"wallet" json:"wallet,omitempty"`
+	// WalletDir is a wallet directory for operator-controlled env config only
+	// (ORACLE_WALLET_DIR). Never accepted from API input.
+	WalletDir string `yaml:"-" json:"-"`
 	// Version is the detected server version (e.g., "7.10.1", "16.2", "1.12.6").
 	// Auto-populated by TestConnection on successful connectivity check.
 	Version string `yaml:"version" json:"version,omitempty"`
 }
 
 // Value implements the driver.Valuer interface.
-// Encrypts Password and APIKey before persisting to database.
+// Encrypts Password, APIKey and Wallet before persisting to database.
 func (c ConnectionConfig) Value() (driver.Value, error) {
 	if key := utils.GetAESKey(); key != nil {
 		if c.Password != "" {
@@ -170,12 +180,17 @@ func (c ConnectionConfig) Value() (driver.Value, error) {
 				c.APIKey = encrypted
 			}
 		}
+		if c.Wallet != "" {
+			if encrypted, err := utils.EncryptAESGCM(c.Wallet, key); err == nil {
+				c.Wallet = encrypted
+			}
+		}
 	}
 	return json.Marshal(c)
 }
 
 // Scan implements the sql.Scanner interface.
-// Decrypts Password and APIKey after loading from database.
+// Decrypts Password, APIKey and Wallet after loading from database.
 func (c *ConnectionConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -197,6 +212,11 @@ func (c *ConnectionConfig) Scan(value interface{}) error {
 		return fmt.Errorf("decrypt vector store connection api_key: %w", err)
 	}
 	c.APIKey = apiKey
+	wallet, err := utils.DecryptStoredSecret(c.Wallet)
+	if err != nil {
+		return fmt.Errorf("decrypt vector store connection wallet: %w", err)
+	}
+	c.Wallet = wallet
 	return nil
 }
 
@@ -221,13 +241,16 @@ func (c ConnectionConfig) GetEndpoint() string {
 	return ""
 }
 
-// MaskSensitiveFields returns a copy with Password and APIKey replaced by the
+// MaskSensitiveFields returns a copy with Password, APIKey and Wallet replaced by the
 // shared RedactedSecretPlaceholder. Empty values stay empty so the frontend
 // can distinguish "set (hidden)" from "not set" without an extra flag.
 func (c ConnectionConfig) MaskSensitiveFields() ConnectionConfig {
 	masked := c
 	if masked.Password != "" {
 		masked.Password = RedactedSecretPlaceholder
+	}
+	if masked.Wallet != "" {
+		masked.Wallet = RedactedSecretPlaceholder
 	}
 	if masked.APIKey != "" {
 		masked.APIKey = RedactedSecretPlaceholder
@@ -323,6 +346,18 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 			return c.CollectionName
 		}
 		return "weknora_embeddings"
+	case OracleRetrieverEngineType:
+		// Table base name (per-dimension tables are suffixed with _<dim>),
+		// resolved like the repository does, so names that map to the same
+		// Oracle table (e.g. differing only in case) are duplicates.
+		name := c.CollectionPrefix
+		if name == "" {
+			name = c.CollectionName
+		}
+		if base, ok := OracleTableBase(name); ok {
+			return base
+		}
+		return "WEKNORA_EMBEDDINGS"
 	default:
 		return c.IndexName
 	}
@@ -469,6 +504,44 @@ const (
 // validIndexNamePattern restricts index/collection names to safe characters.
 // Must start with a letter, followed by alphanumeric, underscore, or hyphen. Max 128 chars.
 var validIndexNamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,127}$`)
+
+// OracleTableBaseMaxLen bounds an Oracle table base name so that
+// <base>_<dim> plus the index suffixes (_VEC, _TXT, _LEX, ...) stay within
+// Oracle's 128-byte identifier limit.
+const OracleTableBaseMaxLen = 100
+
+var oracleTableBasePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+
+// OracleTableBase turns a table prefix into the unquoted Oracle identifier
+// used as the table base: upper case, with '-' mapped to '_' (env prefixes
+// may contain it). ok is false for anything else that is not a safe
+// identifier; the caller then falls back to the default name.
+func OracleTableBase(name string) (base string, ok bool) {
+	base = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(name), "-", "_"))
+	if len(base) > OracleTableBaseMaxLen || !oracleTableBasePattern.MatchString(base) {
+		return "", false
+	}
+	return base, true
+}
+
+// ValidateOracleIndexConfig rejects Oracle table prefixes that the repository
+// would rewrite or replace with the default, so every accepted prefix maps to
+// a table of its own. Only letters, digits and underscores are allowed.
+func ValidateOracleIndexConfig(ic IndexConfig) error {
+	for field, name := range map[string]string{
+		"collection_prefix": ic.CollectionPrefix, "collection_name": ic.CollectionName,
+	} {
+		if name == "" {
+			continue
+		}
+		if len(name) > OracleTableBaseMaxLen || !oracleTableBasePattern.MatchString(name) {
+			return errors.NewValidationError(fmt.Sprintf(
+				"%s for oracle must start with a letter and contain only letters, digits, or underscores (max %d)",
+				field, OracleTableBaseMaxLen))
+		}
+	}
+	return nil
+}
 
 // ValidateIndexConfig checks IndexConfig fields for safe values.
 // Call this from the service layer before persisting a VectorStore.
@@ -637,7 +710,7 @@ func resolveTencentVectorDBReplicaNumber(lookup EnvLookupFunc) int {
 // (defense-in-depth validation in the service layer).
 type VectorStoreFieldInfo struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"` // "string", "number", "boolean"
+	Type        string `json:"type"` // "string", "number", "boolean", "file" (sent as base64)
 	Required    bool   `json:"required"`
 	Sensitive   bool   `json:"sensitive,omitempty"`
 	Default     any    `json:"default,omitempty"`
@@ -758,6 +831,30 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "collection_prefix", Type: "string", Required: false, Description: "Table Prefix", Default: "weknora_embeddings"},
 				{Name: "buckets_num", Type: "number", Required: false, Description: "Buckets per table", Default: 10},
 				{Name: "replication_num", Type: "number", Required: false, Description: "Replication Num", Default: 1},
+			},
+		},
+		{
+			Type:        "oracle",
+			DisplayName: "Oracle AI Database",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{
+					Name: "addr", Type: "string", Required: true,
+					Description: "Address (host:port)", Default: "oracle:1521",
+				},
+				{Name: "database", Type: "string", Required: true, Description: "Service Name", Default: "FREEPDB1"},
+				{Name: "username", Type: "string", Required: true, Description: "Username"},
+				{Name: "password", Type: "string", Required: true, Sensitive: true, Description: "Password"},
+				{Name: "use_tls", Type: "boolean", Required: false, Description: "Use TLS (TCPS)", Default: false},
+				{
+					Name: "wallet", Type: "file", Required: false, Sensitive: true,
+					Description: "Optional wallet for mTLS (e.g. Autonomous Database): Wallet_*.zip or cwallet.sso",
+				},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{
+					Name: "collection_prefix", Type: "string", Required: false,
+					Description: "Table Prefix", Default: "weknora_embeddings",
+				},
 			},
 		},
 		{
@@ -979,6 +1076,23 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			},
 			IndexConfig: IndexConfig{
 				CollectionPrefix: envLookup("DORIS_TABLE_PREFIX"),
+			},
+		}
+	case "oracle":
+		return &VectorStore{
+			ID:         "__env_oracle__",
+			Name:       "Oracle AI Database",
+			EngineType: OracleRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:      envLookup("ORACLE_ADDR"),
+				Database:  envLookup("ORACLE_SERVICE_NAME"),
+				Username:  envLookup("ORACLE_USERNAME"),
+				Password:  envLookup("ORACLE_PASSWORD"),
+				UseTLS:    strings.EqualFold(envLookup("ORACLE_USE_TLS"), "true"),
+				WalletDir: envLookup("ORACLE_WALLET_DIR"),
+			},
+			IndexConfig: IndexConfig{
+				CollectionPrefix: envLookup("ORACLE_TABLE_PREFIX"),
 			},
 		}
 	default:

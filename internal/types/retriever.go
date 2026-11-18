@@ -13,6 +13,7 @@ const (
 	MilvusRetrieverEngineType          RetrieverEngineType = "milvus"
 	WeaviateRetrieverEngineType        RetrieverEngineType = "weaviate"
 	DorisRetrieverEngineType           RetrieverEngineType = "doris"
+	OracleRetrieverEngineType          RetrieverEngineType = "oracle"
 	SQLiteRetrieverEngineType          RetrieverEngineType = "sqlite"
 	TencentVectorDBRetrieverEngineType RetrieverEngineType = "tencent_vectordb"
 	// OpenSearchRetrieverEngineType identifies the OpenSearch k-NN driver

@@ -174,8 +174,10 @@ func TestBuildEnvVectorStores(t *testing.T) {
 	})
 
 	t.Run("all supported drivers", func(t *testing.T) {
-		stores := BuildEnvVectorStores("postgres,sqlite,elasticsearch_v8,elasticsearch_v7,qdrant,milvus,weaviate,doris,tencent_vectordb", lookup)
-		require.Len(t, stores, 9)
+		drivers := "postgres,sqlite,elasticsearch_v8,elasticsearch_v7,qdrant,milvus,weaviate," +
+			"doris,oracle,tencent_vectordb"
+		stores := BuildEnvVectorStores(drivers, lookup)
+		require.Len(t, stores, 10)
 
 		ids := make([]string, len(stores))
 		for i, s := range stores {
@@ -189,6 +191,7 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		assert.Contains(t, ids, "__env_milvus__")
 		assert.Contains(t, ids, "__env_weaviate__")
 		assert.Contains(t, ids, "__env_doris__")
+		assert.Contains(t, ids, "__env_oracle__")
 		assert.Contains(t, ids, "__env_tencent_vectordb__")
 	})
 
@@ -232,6 +235,29 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		assert.Equal(t, "root", stores[0].ConnectionConfig.Username)
 		assert.Equal(t, "doris-pass", stores[0].ConnectionConfig.Password)
 		assert.Equal(t, "weknora_embeddings", stores[0].IndexConfig.CollectionPrefix)
+	})
+
+	t.Run("oracle env store", func(t *testing.T) {
+		stores := BuildEnvVectorStores("oracle", mockEnvLookup(map[string]string{
+			"ORACLE_ADDR":         "adb.example.com:1522",
+			"ORACLE_SERVICE_NAME": "db_high.adb.oraclecloud.com",
+			"ORACLE_USERNAME":     "weknora",
+			"ORACLE_PASSWORD":     "secret",
+			"ORACLE_USE_TLS":      "TRUE",
+			"ORACLE_WALLET_DIR":   "/wallets/adb",
+			"ORACLE_TABLE_PREFIX": "kb_vectors",
+		}))
+		require.Len(t, stores, 1)
+		s := stores[0]
+		assert.Equal(t, "__env_oracle__", s.ID)
+		assert.Equal(t, OracleRetrieverEngineType, s.EngineType)
+		assert.Equal(t, "adb.example.com:1522", s.ConnectionConfig.Addr)
+		assert.Equal(t, "db_high.adb.oraclecloud.com", s.ConnectionConfig.Database)
+		assert.Equal(t, "weknora", s.ConnectionConfig.Username)
+		assert.Equal(t, "secret", s.ConnectionConfig.Password)
+		assert.True(t, s.ConnectionConfig.UseTLS)
+		assert.Equal(t, "/wallets/adb", s.ConnectionConfig.WalletDir)
+		assert.Equal(t, "kb_vectors", s.IndexConfig.CollectionPrefix)
 	})
 
 	t.Run("doris env store handles invalid http port gracefully", func(t *testing.T) {
@@ -312,7 +338,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 	types := GetVectorStoreTypes()
 
 	t.Run("returns supported external engine types (excludes postgres and sqlite)", func(t *testing.T) {
-		assert.Len(t, types, 7)
+		assert.Len(t, types, 8)
 	})
 
 	t.Run("type names match engine constants", func(t *testing.T) {
@@ -326,6 +352,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.Contains(t, typeNames, "tencent_vectordb")
 		assert.Contains(t, typeNames, "weaviate")
 		assert.Contains(t, typeNames, "doris")
+		assert.Contains(t, typeNames, "oracle")
 		assert.Contains(t, typeNames, "opensearch")
 		assert.NotContains(t, typeNames, "postgres")
 		assert.NotContains(t, typeNames, "sqlite")
@@ -508,6 +535,7 @@ func TestIsValidEngineType(t *testing.T) {
 		MilvusRetrieverEngineType,
 		WeaviateRetrieverEngineType,
 		DorisRetrieverEngineType,
+		OracleRetrieverEngineType,
 		TencentVectorDBRetrieverEngineType,
 	}
 	for _, et := range validTypes {
@@ -579,6 +607,22 @@ func TestConnectionConfig_ValueScan(t *testing.T) {
 		assert.Equal(t, "sk-api-key", scanned.APIKey)
 		assert.Equal(t, "http://es:9200", scanned.Addr)
 		assert.Equal(t, "elastic", scanned.Username)
+	})
+
+	t.Run("encrypts the oracle wallet on Value, decrypts on Scan; wallet_dir is never serialized", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", testAESKey)
+		original := ConnectionConfig{Addr: "db:1522", Wallet: "c3NvLWJ5dGVz", WalletDir: "/env/only"}
+		raw, err := original.Value()
+		require.NoError(t, err)
+		var intermediate map[string]interface{}
+		require.NoError(t, json.Unmarshal(raw.([]byte), &intermediate))
+		assert.True(t, strings.HasPrefix(intermediate["wallet"].(string), "enc:v1:"))
+		assert.NotContains(t, intermediate, "wallet_dir")
+
+		var scanned ConnectionConfig
+		require.NoError(t, scanned.Scan(raw.([]byte)))
+		assert.Equal(t, "c3NvLWJ5dGVz", scanned.Wallet)
+		assert.Empty(t, scanned.WalletDir)
 	})
 
 	t.Run("skips encryption when fields are empty", func(t *testing.T) {
@@ -707,6 +751,8 @@ func TestConnectionConfig_MaskSensitiveFields(t *testing.T) {
 		masked := c.MaskSensitiveFields()
 		assert.Equal(t, RedactedSecretPlaceholder, masked.Password)
 		assert.Equal(t, RedactedSecretPlaceholder, masked.APIKey)
+		assert.Empty(t, masked.Wallet)
+		assert.Equal(t, RedactedSecretPlaceholder, ConnectionConfig{Wallet: "x"}.MaskSensitiveFields().Wallet)
 		assert.Equal(t, "http://es:9200", masked.Addr)
 		assert.Equal(t, "elastic", masked.Username)
 	})
@@ -1158,6 +1204,44 @@ func TestValidateIndexConfig(t *testing.T) {
 		ic := IndexConfig{CollectionPrefix: "custom_prefix"}
 		assert.Equal(t, "custom_prefix", ic.GetIndexNameOrDefault(DorisRetrieverEngineType))
 	})
+
+	t.Run("oracle GetIndexNameOrDefault", func(t *testing.T) {
+		oracle := OracleRetrieverEngineType
+		assert.Equal(t, "WEKNORA_EMBEDDINGS", IndexConfig{}.GetIndexNameOrDefault(oracle))
+		spelledOut := IndexConfig{CollectionPrefix: "weknora_embeddings"}
+		assert.Equal(t, "WEKNORA_EMBEDDINGS", spelledOut.GetIndexNameOrDefault(oracle),
+			"the default spelled out is the same table")
+		assert.Equal(t, "CUSTOM_PREFIX", IndexConfig{CollectionPrefix: "custom_prefix"}.GetIndexNameOrDefault(oracle))
+		assert.Equal(t, "CUSTOM_PREFIX", IndexConfig{CollectionPrefix: "Custom_Prefix"}.GetIndexNameOrDefault(oracle),
+			"prefixes differing only in case are duplicates")
+		assert.Equal(t, "BY_NAME", IndexConfig{CollectionName: "by_name"}.GetIndexNameOrDefault(oracle),
+			"collection_name is used when no prefix is set, like the repository")
+		assert.Equal(t, "MY_KB", IndexConfig{CollectionPrefix: "my-kb"}.GetIndexNameOrDefault(oracle),
+			"env prefixes with '-' map like the repository")
+	})
+
+	t.Run("oracle table prefix validation", func(t *testing.T) {
+		for _, ok := range []string{"", "a", "kb_vectors", "KB1", strings.Repeat("a", OracleTableBaseMaxLen)} {
+			assert.NoError(t, ValidateOracleIndexConfig(IndexConfig{CollectionPrefix: ok}), ok)
+			assert.NoError(t, ValidateOracleIndexConfig(IndexConfig{CollectionName: ok}), ok)
+		}
+		for _, bad := range []string{
+			"my-kb", "1abc", "_abc", "a b", "a;DROP TABLE t", strings.Repeat("a", OracleTableBaseMaxLen+1),
+		} {
+			assert.Error(t, ValidateOracleIndexConfig(IndexConfig{CollectionPrefix: bad}), bad)
+			assert.Error(t, ValidateOracleIndexConfig(IndexConfig{CollectionName: bad}), bad)
+		}
+	})
+
+	t.Run("OracleTableBase", func(t *testing.T) {
+		base, ok := OracleTableBase("kb_vectors")
+		assert.True(t, ok)
+		assert.Equal(t, "KB_VECTORS", base)
+		_, ok = OracleTableBase(strings.Repeat("a", OracleTableBaseMaxLen+1))
+		assert.False(t, ok)
+		_, ok = OracleTableBase("")
+		assert.False(t, ok)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1466,6 +1550,7 @@ func TestOpenSearchRetrieverEngineType_DistinctFromExisting(t *testing.T) {
 		MilvusRetrieverEngineType,
 		WeaviateRetrieverEngineType,
 		DorisRetrieverEngineType,
+		OracleRetrieverEngineType,
 		SQLiteRetrieverEngineType,
 		TencentVectorDBRetrieverEngineType,
 	}

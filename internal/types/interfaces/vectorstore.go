@@ -28,7 +28,8 @@ type EngineFactory func(ctx context.Context, store types.VectorStore) (RetrieveE
 type VectorStoreService interface {
 	// CreateStore validates and creates a new vector store.
 	CreateStore(ctx context.Context, store *types.VectorStore) error
-	// UpdateStore updates an existing vector store (name only).
+	// UpdateStore updates an existing vector store: the name, plus the Oracle
+	// wallet when ConnectionConfig.Wallet is set (omitted = keep current).
 	UpdateStore(ctx context.Context, store *types.VectorStore) error
 	// DeleteStore deletes a vector store by tenant + id.
 	// Rejects deletion when any active knowledge base is bound to the store

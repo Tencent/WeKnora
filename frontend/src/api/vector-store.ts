@@ -24,7 +24,7 @@ export interface VectorStoreTypeInfo {
 
 export interface FieldSchema {
   name: string
-  type: 'string' | 'number' | 'boolean'
+  type: 'string' | 'number' | 'boolean' | 'file'
   required: boolean
   sensitive?: boolean
   description?: string
@@ -57,7 +57,8 @@ export function createVectorStore(data: Partial<VectorStoreEntity>) {
   return post('/api/v1/vector-stores', data)
 }
 
-export function updateVectorStore(id: string, data: Partial<VectorStoreEntity>) {
+// `wallet` (base64) replaces an Oracle store's wallet; omit it to keep the current one.
+export function updateVectorStore(id: string, data: Partial<VectorStoreEntity> & { wallet?: string }) {
   return put(`/api/v1/vector-stores/${id}`, data)
 }
 

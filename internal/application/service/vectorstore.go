@@ -62,6 +62,10 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		return err
 	}
 
+	if err := normalizeWallet(store.EngineType, &store.ConnectionConfig); err != nil {
+		return err
+	}
+
 	// 2.1. SSRF validation on user-supplied addresses (whitelist-first).
 	// Placed before any network I/O (step 5 TestConnection, step 7 registry
 	// factory) so a blocked address never triggers an outbound connection.
@@ -74,10 +78,16 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		return err
 	}
 
-	// 2.6. Engine-specific index config validation (OpenSearch HNSW bounds).
-	// Create-only: UpdateStore mutates just the name, so this is not re-run there.
+	// 2.6. Engine-specific index config validation (OpenSearch HNSW bounds,
+	// Oracle table prefix).
+	// Create-only: UpdateStore never changes the index config, so this is not re-run there.
 	if store.EngineType == types.OpenSearchRetrieverEngineType {
 		if err := validateOpenSearchIndexConfig(store.IndexConfig); err != nil {
+			return err
+		}
+	}
+	if store.EngineType == types.OracleRetrieverEngineType {
+		if err := types.ValidateOracleIndexConfig(store.IndexConfig); err != nil {
 			return err
 		}
 	}
@@ -133,9 +143,10 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 	return nil
 }
 
-// UpdateStore updates an existing vector store (name only).
-// NOTE: If connection_config or index_config become mutable in the future,
-// registry re-registration must be added here (unregister old + register new).
+// UpdateStore updates an existing vector store: the name, plus the Oracle
+// wallet when ConnectionConfig.Wallet is set (the engine is then re-registered).
+// NOTE: If other connection_config or index_config fields become mutable in
+// the future, they need the same test-before-write and re-registration.
 func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.VectorStore) error {
 	if store.TenantID == 0 {
 		return errors.NewValidationError("tenant_id is required")
@@ -145,7 +156,57 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 	}
 
 	logger.Infof(ctx, "Updating vector store: tenant=%d, id=%s", store.TenantID, store.ID)
-	return s.repo.Update(ctx, store)
+	// The new wallet is validated and connection-tested before any write, so
+	// a rejected wallet leaves the stored row and the registered engine as is.
+	var rotated *types.VectorStore
+	if store.ConnectionConfig.Wallet != "" {
+		var err error
+		if rotated, err = s.prepareWallet(ctx, store); err != nil {
+			return err
+		}
+	}
+	if err := s.repo.Update(ctx, store); err != nil {
+		return err
+	}
+	if rotated == nil {
+		return nil
+	}
+	if err := s.repo.UpdateConnectionConfig(ctx, rotated); err != nil {
+		return err
+	}
+	// The replaced engine is not closed (the registry has no Close hook yet);
+	// its pool drains via ConnMaxLifetime.
+	s.registerInRegistry(ctx, rotated)
+	return nil
+}
+
+// prepareWallet builds the rotated Oracle store for a wallet replacement and
+// runs the same connection test as CreateStore on it, without writing
+// anything. The wallet is the only connection setting that may change after
+// creation: the endpoint, and thus where the vectors live, stays the same.
+func (s *vectorStoreService) prepareWallet(ctx context.Context, update *types.VectorStore) (*types.VectorStore, error) {
+	existing, err := s.repo.GetByID(ctx, update.TenantID, update.ID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, errors.NewNotFoundError("vector store not found")
+	}
+	if err := normalizeWallet(existing.EngineType, &update.ConnectionConfig); err != nil {
+		return nil, err
+	}
+	rotated := *existing
+	rotated.Name = update.Name
+	rotated.ConnectionConfig.Wallet = update.ConnectionConfig.Wallet
+	version, err := s.TestConnection(ctx, rotated.EngineType, rotated.ConnectionConfig)
+	if err != nil {
+		return nil, errors.NewBadRequestError(
+			fmt.Sprintf("connection test failed: %s. Ensure the server is reachable before saving.", err.Error()))
+	}
+	if version != "" {
+		rotated.ConnectionConfig.Version = version
+	}
+	return &rotated, nil
 }
 
 // DeleteStore deletes a vector store by tenant + id, after verifying that no
@@ -467,6 +528,16 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 		if config.Database == "" {
 			return errors.NewValidationError("database is required for doris")
 		}
+	case types.OracleRetrieverEngineType:
+		if config.Addr == "" {
+			return errors.NewValidationError("addr is required for oracle (host:port)")
+		}
+		if config.Database == "" {
+			return errors.NewValidationError("database (service name) is required for oracle")
+		}
+		if config.Username == "" || config.Password == "" {
+			return errors.NewValidationError("username and password are required for oracle")
+		}
 	case types.OpenSearchRetrieverEngineType:
 		if config.Addr == "" {
 			return errors.NewValidationError("addr is required for opensearch")
@@ -474,6 +545,24 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 	case types.SQLiteRetrieverEngineType:
 		// No connection config needed for SQLite
 	}
+	return nil
+}
+
+// normalizeWallet validates an uploaded Oracle wallet (base64 of a wallet ZIP
+// or cwallet.sso) and replaces it with the base64 cwallet.sso that is stored
+// and used at connect time. Other engines do not accept a wallet.
+func normalizeWallet(engineType types.RetrieverEngineType, config *types.ConnectionConfig) error {
+	if config.Wallet == "" {
+		return nil
+	}
+	if engineType != types.OracleRetrieverEngineType {
+		return errors.NewValidationError("wallet is only supported for oracle")
+	}
+	normalized, err := secutils.NormalizeOracleWallet(config.Wallet)
+	if err != nil {
+		return errors.NewValidationError(err.Error())
+	}
+	config.Wallet = normalized
 	return nil
 }
 
@@ -506,7 +595,8 @@ func validateConnectionAddrSSRF(engineType types.RetrieverEngineType, config typ
 		types.OpenSearchRetrieverEngineType,
 		types.MilvusRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType:
+		types.DorisRetrieverEngineType,
+		types.OracleRetrieverEngineType:
 		// Single address field: a URL (es/opensearch) or bare host:port
 		// (milvus/tencent/doris). ValidateURLForSSRF normalises both.
 		return check(config.Addr)
@@ -564,6 +654,9 @@ func (s *vectorStoreService) TestRawConnection(
 	//    driver's internal default (e.g. milvus empty addr -> localhost:19530),
 	//    which would otherwise dial an internal host unchecked.
 	if err := validateConnectionConfig(engineType, config); err != nil {
+		return "", err
+	}
+	if err := normalizeWallet(engineType, &config); err != nil {
 		return "", err
 	}
 	// 3. SSRF policy on every user-supplied address field.

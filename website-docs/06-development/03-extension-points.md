@@ -248,6 +248,7 @@ const (
     MilvusRetrieverEngineType          RetrieverEngineType = "milvus"
     WeaviateRetrieverEngineType        RetrieverEngineType = "weaviate"
     DorisRetrieverEngineType           RetrieverEngineType = "doris"
+    OracleRetrieverEngineType          RetrieverEngineType = "oracle"
     SQLiteRetrieverEngineType          RetrieverEngineType = "sqlite"
     TencentVectorDBRetrieverEngineType RetrieverEngineType = "tencent_vectordb"
     OpenSearchRetrieverEngineType      RetrieverEngineType = "opensearch"
@@ -256,7 +257,7 @@ const (
 
 ### 现有实现
 
-均在 `internal/application/repository/retriever/` 下：`postgres/`（pgvector + BM25/ParadeDB）、`elasticsearch/v7/`、`elasticsearch/v8/`、`qdrant/`、`milvus/`、`weaviate/`、`doris/`、`sqlite/`（sqlite-vec + FTS5）、`tencentvectordb/`、`opensearch/`。
+均在 `internal/application/repository/retriever/` 下：`postgres/`（pgvector + BM25/ParadeDB）、`elasticsearch/v7/`、`elasticsearch/v8/`、`qdrant/`、`milvus/`、`weaviate/`、`doris/`、`oracle/`（AI Vector Search + Oracle Text）、`sqlite/`（sqlite-vec + FTS5）、`tencentvectordb/`、`opensearch/`。
 
 ### 新增步骤
 

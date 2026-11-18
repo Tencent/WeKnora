@@ -47,6 +47,7 @@ import (
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
+	oracleRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/oracle"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
@@ -1801,6 +1802,39 @@ func initRetrieveEngineRegistry(
 				log.Errorf("Register doris retrieve engine failed: %v", err)
 			} else {
 				log.Infof("Register doris retrieve engine success: %s db=%s", dorisAddr, dorisDatabase)
+			}
+		}
+	}
+	if slices.Contains(retrieveDriver, "oracle") {
+		oracleAddr := os.Getenv("ORACLE_ADDR")
+		if oracleAddr == "" {
+			oracleAddr = "oracle:1521"
+		}
+		oracleService := os.Getenv("ORACLE_SERVICE_NAME")
+		if oracleService == "" {
+			oracleService = "FREEPDB1"
+		}
+		// Env config is operator-controlled, so the SSRF dialer is not used
+		// (same trust level as the Doris env path).
+		oracleDB, err := secutils.OpenOracleDB(secutils.OracleConnParams{
+			Addr: oracleAddr, Service: oracleService,
+			Username: os.Getenv("ORACLE_USERNAME"), Password: os.Getenv("ORACLE_PASSWORD"),
+			UseTLS:    strings.EqualFold(os.Getenv("ORACLE_USE_TLS"), "true"),
+			WalletDir: os.Getenv("ORACLE_WALLET_DIR"),
+		}, false)
+		if err != nil {
+			log.Errorf("Create oracle client failed: %v", err)
+		} else {
+			oracleDB.SetMaxOpenConns(10)
+			oracleDB.SetMaxIdleConns(2)
+			oracleDB.SetConnMaxLifetime(time.Hour)
+			oracleRepository := oracleRepo.NewOracleRetrieveEngineRepository(oracleDB, nil)
+			if err := registry.Register(
+				retriever.NewKVHybridRetrieveEngine(oracleRepository, types.OracleRetrieverEngineType),
+			); err != nil {
+				log.Errorf("Register oracle retrieve engine failed: %v", err)
+			} else {
+				log.Infof("Register oracle retrieve engine success: %s/%s", oracleAddr, oracleService)
 			}
 		}
 	}

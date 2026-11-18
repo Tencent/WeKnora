@@ -19,6 +19,15 @@ func TestRetrieverEngineMappingIncludesTencentVectorDBHybridCapabilities(t *test
 	})
 }
 
+func TestRetrieverEngineMappingIncludesOracleHybridCapabilities(t *testing.T) {
+	mapping := GetRetrieverEngineMapping()
+	for _, rt := range []RetrieverType{KeywordsRetrieverType, VectorRetrieverType} {
+		assert.Contains(t, mapping["oracle"], RetrieverEngineParams{
+			RetrieverType: rt, RetrieverEngineType: OracleRetrieverEngineType,
+		})
+	}
+}
+
 func TestResolveMinerUParseMethod(t *testing.T) {
 	trueValue := true
 	falseValue := false
