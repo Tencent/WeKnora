@@ -639,7 +639,8 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 			}
 		}
 
-		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
+		headerPlan := t.probeExcelHeaderPlan(ctx, filename, sheetNames)
+		createTableSQL := buildExcelCreateTableSQLWithHeaderPlan(tableName, filename, sheetNames, headerPlan)
 
 		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
@@ -713,6 +714,171 @@ func (t *DataAnalysisTool) listExcelSheetsFromSpatial(ctx context.Context, filen
 		return nil, fmt.Errorf("error iterating sheet metadata rows: %w", err)
 	}
 	return names, nil
+}
+
+// excelHeaderPlan is the outcome of probing a workbook's leading rows:
+// Skip counts the physical rows to drop before the real header row, and
+// Headers holds the promoted header values (empty unless Skip > 0).
+type excelHeaderPlan struct {
+	Skip    int
+	Headers []string
+}
+
+// nonEmptyCells counts the non-blank cells of a probe row. Merged title
+// rows report as a single non-empty cell because the merged range leaves
+// the remaining cells blank.
+func nonEmptyCells(row []string) int {
+	n := 0
+	for _, cell := range row {
+		if strings.TrimSpace(cell) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// detectExcelHeaderPlan inspects the first physical rows of a workbook and
+// decides whether a merged banner row sits above the real header. The
+// pattern from #5627: row 1 is a cross-column merged title (one non-empty
+// cell) while row 2 is a real multi-column header (two or more non-empty
+// cells). read_xlsx always treats row 1 as the header, so such a workbook
+// collapses to a single column. Plain workbooks (row 1 already the header)
+// keep the legacy header=true path untouched.
+func detectExcelHeaderPlan(rows [][]string) excelHeaderPlan {
+	if len(rows) < 2 {
+		return excelHeaderPlan{}
+	}
+	if nonEmptyCells(rows[0]) == 1 && nonEmptyCells(rows[1]) >= 2 {
+		headers := make([]string, 0, len(rows[1]))
+		for _, cell := range rows[1] {
+			headers = append(headers, strings.TrimSpace(cell))
+		}
+		return excelHeaderPlan{Skip: 1, Headers: headers}
+	}
+	return excelHeaderPlan{}
+}
+
+// sqlDoubleQuoteEscape doubles embedded double quotes for a quoted SQL
+// identifier or alias literal.
+func sqlDoubleQuoteEscape(s string) string {
+	return strings.ReplaceAll(s, "\"", "\"\"")
+}
+
+// buildExcelCreateTableSQLWithHeaderPlan assembles the CREATE TABLE
+// statement used by LoadFromExcel, honoring a merged-banner skip plan.
+// With an empty plan it reproduces buildExcelCreateTableSQL verbatim; with
+// Skip > 0 the workbook is read with header=false, the banner rows are
+// dropped via a row-number filter, and the probed header values are
+// promoted to quoted column aliases so downstream SQL and data_schema see
+// real column names (#5627).
+func buildExcelCreateTableSQLWithHeaderPlan(
+	tableName, filename string, sheetNames []string, plan excelHeaderPlan,
+) string {
+	if plan.Skip <= 0 || len(plan.Headers) == 0 {
+		return buildExcelCreateTableSQL(tableName, filename, sheetNames)
+	}
+	escFile := sqlSingleQuoteEscape(filename)
+	columns := len(plan.Headers)
+
+	buildSelect := func(sheet string) string {
+		selects := make([]string, 0, columns+1)
+		for i, header := range plan.Headers {
+			alias := sqlDoubleQuoteEscape(header)
+			if alias == "" {
+				alias = fmt.Sprintf("col%d", i)
+			}
+			selects = append(selects, fmt.Sprintf("col%d AS \"%s\"", i, alias))
+		}
+		readOpts := "header=false, all_varchar=true"
+		if sheet != "" {
+			readOpts += fmt.Sprintf(", sheet = '%s'", sqlSingleQuoteEscape(sheet))
+		}
+		inner := fmt.Sprintf(
+			"SELECT *, row_number() OVER () AS __excel_row FROM read_xlsx('%s', %s)",
+			escFile, readOpts,
+		)
+		outer := strings.Join(selects, ", ")
+		if sheet != "" {
+			outer += fmt.Sprintf(", '%s' AS %s", sqlSingleQuoteEscape(sheet), excelSheetNameColumn)
+		}
+		return fmt.Sprintf("SELECT %s FROM (%s) WHERE __excel_row > %d", outer, inner, plan.Skip)
+	}
+
+	var body string
+	switch {
+	case len(sheetNames) <= 1:
+		sheet := ""
+		if len(sheetNames) == 1 {
+			sheet = sheetNames[0]
+		}
+		body = buildSelect(sheet)
+	default:
+		parts := make([]string, 0, len(sheetNames))
+		for _, sheet := range sheetNames {
+			parts = append(parts, buildSelect(sheet))
+		}
+		body = strings.Join(parts, "\nUNION ALL BY NAME\n")
+	}
+	return fmt.Sprintf("CREATE TABLE \"%s\" AS %s", tableName, body)
+}
+
+// probeExcelHeaderPlan reads the first physical rows of the workbook
+// (header=false) and returns the merged-banner skip plan. The probe is
+// best-effort: any error keeps the legacy header=true load path, and
+// multi-sheet workbooks skip the probe entirely because a single skip
+// cannot be applied uniformly across sheets with different front
+// matter (#5627).
+func (t *DataAnalysisTool) probeExcelHeaderPlan(
+	ctx context.Context, filename string, sheetNames []string,
+) excelHeaderPlan {
+	if len(sheetNames) > 1 {
+		return excelHeaderPlan{}
+	}
+	sheet := ""
+	if len(sheetNames) == 1 {
+		sheet = sheetNames[0]
+	}
+	readOpts := "header=false, all_varchar=true"
+	if sheet != "" {
+		readOpts += fmt.Sprintf(", sheet = '%s'", sqlSingleQuoteEscape(sheet))
+	}
+	query := fmt.Sprintf(
+		"SELECT * FROM read_xlsx('%s', %s) LIMIT 3",
+		sqlSingleQuoteEscape(filename), readOpts,
+	)
+	rows, err := t.db.QueryContext(ctx, query)
+	if err != nil {
+		return excelHeaderPlan{}
+	}
+	defer func() { _ = rows.Close() }()
+	columns, err := rows.Columns()
+	if err != nil || len(columns) == 0 {
+		return excelHeaderPlan{}
+	}
+	probe := make([][]string, 0, 3)
+	values := make([]sql.NullString, len(columns))
+	scans := make([]interface{}, len(columns))
+	for i := range values {
+		scans[i] = &values[i]
+	}
+	for rows.Next() {
+		if err := rows.Scan(scans...); err != nil {
+			return excelHeaderPlan{}
+		}
+		row := make([]string, len(columns))
+		for i, v := range values {
+			if v.Valid {
+				row[i] = v.String
+			} else {
+				row[i] = ""
+			}
+		}
+		probe = append(probe, row)
+	}
+	if err := rows.Err(); err != nil {
+		return excelHeaderPlan{}
+	}
+	return detectExcelHeaderPlan(probe)
 }
 
 // buildExcelCreateTableSQL assembles the CREATE TABLE statement used by
@@ -899,7 +1065,7 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get table schema: %v", err)
 		return nil, fmt.Errorf("failed to get table schema: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Parse column information
 	columns := make([]ColumnInfo, 0)
