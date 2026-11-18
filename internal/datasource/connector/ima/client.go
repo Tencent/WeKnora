@@ -180,7 +180,24 @@ func (c *client) callAPIAt(
 		logger.Infof(ctx, "[IMA] POST %s → status=%d bodyLen=%d", label, resp.StatusCode, len(respBody))
 
 		// HTTP-level auth failures: surface as ErrInvalidCredentials.
+		// IMA reports throttling as HTTP 403 with business code 200001 in
+		// the body (「请求频率超限」); treating that as a credential
+		// failure marks a healthy source as error and stops scheduling
+		// until re-auth (#5198). Parse the envelope on 401/403 first and
+		// route a rate-limit code to the retry path; anything else — or an
+		// unparsable body — keeps the credential mapping.
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			var env apiEnvelope
+			if json.Unmarshal(respBody, &env) == nil {
+				if isIMARateLimitCode(env.statusCode()) && attempt < maxRetries {
+					lastErr = fmt.Errorf("ima rate limited: status=%d code=%d msg=%s",
+						resp.StatusCode, env.statusCode(), env.message())
+					if sErr := sleepCtx(ctx, backoff[minInt(attempt, len(backoff)-1)]); sErr != nil {
+						return sErr
+					}
+					continue
+				}
+			}
 			return fmt.Errorf("%w: status=%d body=%s",
 				datasource.ErrInvalidCredentials, resp.StatusCode, bodyPreview)
 		}
@@ -228,7 +245,7 @@ func (c *client) callAPIAt(
 				return fmt.Errorf("%w: ima code=%d msg=%s",
 					datasource.ErrInvalidCredentials, code, env.message())
 			}
-			if code == 110021 && attempt < maxRetries {
+			if isIMARateLimitCode(code) && attempt < maxRetries {
 				lastErr = fmt.Errorf("ima rate limited: code=%d msg=%s", code, env.message())
 				if sErr := sleepCtx(ctx, backoff[minInt(attempt, len(backoff)-1)]); sErr != nil {
 					return sErr
@@ -247,6 +264,13 @@ func (c *client) callAPIAt(
 	}
 	return lastErr
 }
+
+// imaRateLimitCodes are the business codes IMA uses for throttling:
+// 110021 on the open-platform path and 200001 on the media/note path
+// (observed as HTTP 403 with「请求频率超限」in the body, #5198).
+var imaRateLimitCodes = map[int]bool{110021: true, 200001: true}
+
+func isIMARateLimitCode(code int) bool { return imaRateLimitCodes[code] }
 
 // SearchKnowledgeBase — POST /search_knowledge_base. Empty query returns the
 // list of every knowledge base visible to the current token (see api.md §7).
