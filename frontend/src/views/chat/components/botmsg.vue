@@ -142,6 +142,14 @@
             :message-id="messageIdForArtifacts"
             :artifacts="liveArtifacts"
             :preview-index="artifactPreviewIndex"
+            :allow-add-to-knowledge="!embeddedMode"
+        />
+        <AddArtifactToKnowledgeDialog
+            v-model:visible="addToKbVisible"
+            :session-id="sessionId"
+            :message-id="messageIdForArtifacts"
+            :artifact-index="addToKbIndex"
+            :file-name="addToKbFileName"
         />
     </div>
 </template>
@@ -157,7 +165,8 @@ import AssistantActionsButton from '@/components/assistant/AssistantActionsButto
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
+import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue'
+import AddArtifactToKnowledgeDialog from './AddArtifactToKnowledgeDialog.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
@@ -166,6 +175,8 @@ import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImage
 import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
 import {
     artifactIndexFromEventTarget,
+    artifactKnowledgeIndexFromEventTarget,
+    artifactNameFromEventTarget,
     hydrateArtifactImages,
     isArtifactRefHref,
     renderArtifactReference,
@@ -373,6 +384,7 @@ const artifactRefLabels = computed(() => ({
     previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
     missingHint: t('agent.artifactDrawer.inlineMissing'),
     deletedHint: t('agent.artifactDrawer.inlineDeleted'),
+    addToKnowledge: props.embeddedMode ? '' : t('agent.artifactDrawer.addToKnowledge'),
 }));
 
 const preview = (url) => {
@@ -507,9 +519,27 @@ const handleAddToKnowledge = () => {
     MessagePlugin.info(t('chat.editorOpened'));
 };
 
+const addToKbVisible = ref(false);
+const addToKbIndex = ref(0);
+const addToKbFileName = ref('');
+
+function openAddToKnowledgeFromCard(index, fileName) {
+    if (!messageIdForArtifacts.value) return;
+    addToKbIndex.value = index;
+    addToKbFileName.value = fileName || '';
+    addToKbVisible.value = true;
+}
+
 // 处理 markdown-content 中图片的点击事件
 const handleMarkdownImageClick = (e) => {
     const target = e.target;
+    const kbIndex = artifactKnowledgeIndexFromEventTarget(target);
+    if (kbIndex !== null) {
+        e.preventDefault();
+        e.stopPropagation();
+        openAddToKnowledgeFromCard(kbIndex, artifactNameFromEventTarget(target));
+        return;
+    }
     const artifactIndex = artifactIndexFromEventTarget(target);
     if (artifactIndex !== null) {
         e.preventDefault();
@@ -525,6 +555,16 @@ const handleMarkdownImageClick = (e) => {
             preview(src);
         }
     }
+};
+
+const handleMarkdownArtifactKeydown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const target = e.target;
+    const kbIndex = artifactKnowledgeIndexFromEventTarget(target);
+    if (kbIndex === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openAddToKnowledgeFromCard(kbIndex, artifactNameFromEventTarget(target));
 };
 
 watch(renderedHTML, () => {
@@ -550,6 +590,7 @@ onMounted(async () => {
     nextTick(async () => {
         if (parentMd.value) {
             parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
+            parentMd.value.addEventListener('keydown', handleMarkdownArtifactKeydown, true);
         }
         rebindCitations();
         await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
@@ -561,6 +602,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
     if (parentMd.value) {
         parentMd.value.removeEventListener('click', handleMarkdownImageClick, true);
+        parentMd.value?.removeEventListener('keydown', handleMarkdownArtifactKeydown, true);
     }
 });
 </script>

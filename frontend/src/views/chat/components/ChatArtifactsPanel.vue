@@ -21,6 +21,19 @@
         variant="text"
         shape="square"
         size="small"
+        :title="$t('agent.artifactDrawer.addToKnowledge')"
+        :aria-label="$t('agent.artifactDrawer.addToKnowledge')"
+        @click="openAddToKnowledge(previewItem)"
+      >
+        <template #icon>
+          <t-icon name="bookmark-add" size="16px" />
+        </template>
+      </t-button>
+      <t-button
+        class="artifact-download"
+        variant="text"
+        shape="square"
+        size="small"
         :title="$t('agent.artifactDrawer.download')"
         :aria-label="$t('agent.artifactDrawer.download')"
         :loading="isDownloading(previewItem)"
@@ -128,6 +141,19 @@
             variant="text"
             shape="square"
             size="small"
+            :title="$t('agent.artifactDrawer.addToKnowledge')"
+            :aria-label="$t('agent.artifactDrawer.addToKnowledge')"
+            @click.stop="openAddToKnowledge(item)"
+          >
+            <template #icon>
+              <t-icon name="bookmark-add" size="16px" />
+            </template>
+          </t-button>
+          <t-button
+            class="artifact-download"
+            variant="text"
+            shape="square"
+            size="small"
             :title="$t('agent.artifactDrawer.download')"
             :aria-label="$t('agent.artifactDrawer.download')"
             :loading="isDownloading(item)"
@@ -154,6 +180,14 @@
         </li>
       </ul>
     </template>
+
+    <AddArtifactToKnowledgeDialog
+      v-model:visible="addToKbVisible"
+      :session-id="sessionId"
+      :message-id="addToKbItem?.messageId || ''"
+      :artifact-index="addToKbItem?.index ?? 0"
+      :file-name="addToKbItem?.file_name || ''"
+    />
   </div>
 </template>
 
@@ -172,6 +206,7 @@ import { useChatSandboxPanel, type ArtifactPanelFocusState } from '@/composables
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from './ArtifactFileIcon.vue'
+import AddArtifactToKnowledgeDialog from './AddArtifactToKnowledgeDialog.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -196,6 +231,8 @@ const confirmDelete = useConfirmDelete()
 const previewActions = ref<HTMLElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 const previewItem = ref<SessionArtifactItem | null>(null)
+const addToKbVisible = ref(false)
+const addToKbItem = ref<SessionArtifactItem | null>(null)
 const downloading = reactive<Record<string, boolean>>({})
 const deleting = reactive<Record<string, boolean>>({})
 const focusedMessageId = ref<string | null>(null)
@@ -216,6 +253,11 @@ const previewFileType = computed(() => {
 
 function downloadKey(item: SessionArtifactItem): string {
   return `${item.messageId}:${item.index}`
+}
+
+function openAddToKnowledge(item: SessionArtifactItem) {
+  addToKbItem.value = item
+  addToKbVisible.value = true
 }
 
 function isDownloading(item: SessionArtifactItem): boolean {

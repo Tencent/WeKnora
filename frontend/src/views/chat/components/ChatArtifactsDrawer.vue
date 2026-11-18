@@ -67,6 +67,20 @@
                 </div>
                 <div class="artifact-drawer-header-title" :title="previewItem.file_name">{{ previewItem.file_name }}</div>
                 <t-button
+                    v-if="allowAddToKnowledge !== false"
+                    class="artifact-download"
+                    variant="text"
+                    shape="square"
+                    size="small"
+                    :title="$t('agent.artifactDrawer.addToKnowledge')"
+                    :aria-label="$t('agent.artifactDrawer.addToKnowledge')"
+                    @click="openAddToKnowledge(previewItem)"
+                >
+                    <template #icon>
+                        <t-icon name="bookmark-add" size="16px" />
+                    </template>
+                </t-button>
+                <t-button
                     class="artifact-download"
                     variant="text"
                     shape="square"
@@ -139,6 +153,20 @@
                     </template>
                 </t-button>
                 <t-button
+                    v-if="allowAddToKnowledge !== false"
+                    class="artifact-download"
+                    variant="text"
+                    shape="square"
+                    size="small"
+                    :title="$t('agent.artifactDrawer.addToKnowledge')"
+                    :aria-label="$t('agent.artifactDrawer.addToKnowledge')"
+                    @click.stop="openAddToKnowledge(item)"
+                >
+                    <template #icon>
+                        <t-icon name="bookmark-add" size="16px" />
+                    </template>
+                </t-button>
+                <t-button
                     class="artifact-download"
                     variant="text"
                     shape="square"
@@ -154,6 +182,14 @@
             </li>
         </ul>
     </t-drawer>
+
+    <AddArtifactToKnowledgeDialog
+        v-model:visible="addToKbVisible"
+        :session-id="sessionId"
+        :message-id="messageId"
+        :artifact-index="addToKbItem?.index ?? 0"
+        :file-name="addToKbItem?.file_name || ''"
+    />
 </template>
 
 <script setup lang="ts">
@@ -183,6 +219,7 @@ import { downloadArtifact, listMessageArtifacts, type ArtifactMeta } from '@/api
 import { getFileIcon } from '@/utils/files'
 import { resolveFilePreviewExt } from '@/utils/filePreview'
 import DocumentPreview from '@/components/document-preview.vue'
+import AddArtifactToKnowledgeDialog from './AddArtifactToKnowledgeDialog.vue'
 
 const LIST_WIDTH = 440
 const PREVIEW_WIDTH_KEY = 'weknora-chat-artifact-preview-width'
@@ -200,6 +237,8 @@ const props = defineProps<{
      * where the user already picked the file.
      */
     previewIndex?: number | null
+    /** Embed visitors cannot write to workspace KBs; hide the shortcut. */
+    allowAddToKnowledge?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -233,6 +272,13 @@ const previewItem = ref<ArtifactMeta | null>(null)
 const previewOpenedDirectly = ref(false)
 const previewWidth = ref(PREVIEW_DEFAULT_WIDTH)
 const previewResizing = ref(false)
+const addToKbVisible = ref(false)
+const addToKbItem = ref<ArtifactMeta | null>(null)
+
+function openAddToKnowledge(item: ArtifactMeta) {
+    addToKbItem.value = item
+    addToKbVisible.value = true
+}
 
 let previewResizeStartX = 0
 let previewResizeStartWidth = 0

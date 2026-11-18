@@ -28,6 +28,7 @@ type Handler struct {
 	streamManager        interfaces.StreamManager        // Manager for handling streaming responses
 	config               *config.Config                  // Application configuration
 	knowledgebaseService interfaces.KnowledgeBaseService // Service for managing knowledge bases
+	knowledgeService     interfaces.KnowledgeService     // Service for creating knowledge from artifact files
 	customAgentService   interfaces.CustomAgentService   // Service for managing custom agents
 	tenantService        interfaces.TenantService        // Service for loading tenant (shared agent context)
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
@@ -93,6 +94,7 @@ func NewHandler(
 	streamManager interfaces.StreamManager,
 	config *config.Config,
 	knowledgebaseService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
 	customAgentService interfaces.CustomAgentService,
 	tenantService interfaces.TenantService,
 	agentShareService interfaces.AgentShareService,
@@ -130,6 +132,7 @@ func NewHandler(
 		streamManager:         streamManager,
 		config:                config,
 		knowledgebaseService:  knowledgebaseService,
+		knowledgeService:      knowledgeService,
 		customAgentService:    customAgentService,
 		tenantService:         tenantService,
 		agentShareService:     agentShareService,

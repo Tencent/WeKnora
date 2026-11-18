@@ -736,6 +736,27 @@
     line-height: 1.3;
     color: var(--td-text-color-placeholder);
   }
+  // Quick action on an inline artifact card: import the file into a KB.
+  :deep(.artifact-ref-card__kb) {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-left: 2px;
+    border-radius: var(--app-radius-sm);
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      background: var(--td-bg-color-container-hover);
+      outline: none;
+    }
+  }
 
   .chat-markdown-hljs();
 }

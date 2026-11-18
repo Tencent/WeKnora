@@ -13,7 +13,7 @@ import {
   type ArtifactRefMeta,
 } from './sandboxArtifactRefs.ts'
 
-const labels = { previewHint: '点击预览', missingHint: '文件不可用', deletedHint: '文件已删除' }
+const labels = { previewHint: '点击预览', missingHint: '文件不可用', deletedHint: '文件已删除', addToKnowledge: '加入知识库' }
 
 test('inline file cards reuse the drawer icon and keep filenames escaped', () => {
   for (const name of ['report.pdf', 'table.xlsx', 'notes.docx', 'slides.pptx', 'chart.html', 'bad.<img src=x onerror=alert(1)>']) {
@@ -121,6 +121,8 @@ test('renderArtifactReference renders non-image artifacts as a clickable card', 
   assert.ok(html?.includes('role="button"'))
   assert.ok(html?.includes('市场画像评分_e7edba.html'))
   assert.ok(html?.includes('点击预览'))
+  assert.ok(html?.includes('data-artifact-kb-index="0"'))
+  assert.ok(html?.includes('加入知识库'))
   assert.ok(!html?.includes('<img'))
 })
 
