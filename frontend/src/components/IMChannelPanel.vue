@@ -390,6 +390,26 @@
               </template>
             </template>
 
+            <template v-if="formData.platform === 'line'">
+              <div class="platform-link-hint">
+                <a href="https://developers.line.biz/console/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.lineConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Channel Secret</label>
+                <t-input v-model="formData.credentials.channel_secret" type="password"
+                  placeholder="Channel Secret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Channel Access Token</label>
+                <t-input v-model="formData.credentials.channel_access_token" type="password"
+                  placeholder="Channel Access Token (long-lived)" />
+              </div>
+            </template>
+
             <!-- DingTalk credentials -->
             <template v-if="formData.platform === 'dingtalk'">
               <div class="platform-link-hint">
@@ -679,6 +699,7 @@ const platformOptions = computed(() => ([
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
   { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
   { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
+  { value: 'line' as IMPlatform, label: t('agentEditor.im.line'), logo: '' },
 ]));
 
 const localeOptions = computed(() => ([
