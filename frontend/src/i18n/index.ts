@@ -147,7 +147,7 @@ export async function loadLocaleMessages(rawLocale: string): Promise<SupportedMa
   const task = LOCALE_LOADERS[target]()
     .then((mod) => {
       const embedSeed = embedSeedMessages.get(target)
-      const bundle = embedSeed ? mergePlainRecords(mod.default, embedSeed) : mod.default
+      const bundle = embedSeed ? mergePlainRecords(embedSeed, mod.default) : mod.default
       i18n.global.setLocaleMessage(target, bundle as never)
       loadedLocales.add(target)
       return target
@@ -178,7 +178,7 @@ export function seedEmbedLocaleMessages(
     embedSeedMessages.set(locale, seed)
     if (loadedLocales.has(locale)) {
       const current = i18n.global.getLocaleMessage(locale) as unknown as Record<string, unknown>
-      i18n.global.setLocaleMessage(locale, mergePlainRecords(current, seed) as never)
+      i18n.global.setLocaleMessage(locale, mergePlainRecords(seed, current) as never)
     } else {
       i18n.global.setLocaleMessage(locale, seed as never)
     }
@@ -186,8 +186,14 @@ export function seedEmbedLocaleMessages(
   return syncEmbedSharedLocale(activeLocale)
 }
 
+let languageSwitchSeq = 0
+
 export async function setI18nLanguage(rawLocale: string): Promise<SupportedMainLocale> {
+  const seq = ++languageSwitchSeq
   const target = await loadLocaleMessages(rawLocale)
+  if (seq !== languageSwitchSeq) {
+    return normalizeMainLocale(i18n.global.locale.value)
+  }
   i18n.global.locale.value = target
   writeStoredLocale(target)
   return target

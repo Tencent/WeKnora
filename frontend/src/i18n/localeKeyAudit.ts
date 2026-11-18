@@ -196,7 +196,7 @@ export function collectLocaleKeys(root: unknown): Set<string> {
 
 function isAuditableSourceFile(path: string): boolean {
   if (!SOURCE_EXTENSIONS.test(path)) return false
-  if (path.includes('/i18n/locales/')) return false
+  if (path.replaceAll('\\', '/').includes('/i18n/locales/')) return false
   if (TEST_FILE_PATTERN.test(path)) return false
   return true
 }
@@ -751,22 +751,24 @@ export async function loadFullLocaleBundlesFromGit(
       const merged: LocaleTree = {}
       for (const domain of LOCALE_DOMAINS) {
         const domainRelPath = `frontend/src/i18n/locales/${localeName}/${domain}.ts`
+        let domainContent: string
         try {
-          const domainContent = execSync(`git show ${ref}:${domainRelPath}`, {
+          domainContent = execSync(`git show ${ref}:${domainRelPath}`, {
             cwd: REPO_ROOT,
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
           })
-          hasDomainTree = true
-          const tempDomainDir = join(tempDir, localeName)
-          mkdirSync(tempDomainDir, { recursive: true })
-          const domainFile = join(tempDomainDir, `${domain}.ts`)
-          writeFileSync(domainFile, domainContent, 'utf8')
-          const mod = await import(pathToFileURL(domainFile).href)
-          Object.assign(merged, structuredClone(mod.default) as LocaleTree)
         } catch {
           // Ref may predate domain split; fall back below when no domain files exist.
+          continue
         }
+        hasDomainTree = true
+        const tempDomainDir = join(tempDir, localeName)
+        mkdirSync(tempDomainDir, { recursive: true })
+        const domainFile = join(tempDomainDir, `${domain}.ts`)
+        writeFileSync(domainFile, domainContent, 'utf8')
+        const mod = await import(pathToFileURL(domainFile).href)
+        Object.assign(merged, structuredClone(mod.default) as LocaleTree)
       }
       if (hasDomainTree) {
         bundles[localeName] = merged

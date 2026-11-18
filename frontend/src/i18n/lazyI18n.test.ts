@@ -80,13 +80,19 @@ test('embed i18n synchronizes shared utility i18n synchronously and merges full 
   )
 
   await loadLocaleMessages('ru-RU')
-  // Shared markdown/mermaid/tool/error utilities read from @/i18n on /embed/ too.
+  // Shared markdown/mermaid/tool/error utilities read from @/i18n on /embed/ too,
+  // and full native locale bundles upgrade English-fallback embed seeds (ko-KR / ru-RU).
   assert.notEqual(i18n.global.t('mermaid.diagram'), 'mermaid.diagram')
   assert.notEqual(i18n.global.t('tools.searchKnowledge'), 'tools.searchKnowledge')
   assert.equal(
     i18n.global.t('embedPublish.copyCode'),
-    embedMod.EMBED_MESSAGES['ru-RU'].embedPublish.copyCode,
+    (LOCALE_BUNDLES['ru-RU'].embedPublish as Record<string, string>).copyCode,
   )
+  assert.equal(i18n.global.t('embedPublish.copyCode'), 'Копировать код')
+
+  embedMod.applyEmbedLocale('ko-KR')
+  await loadLocaleMessages('ko-KR')
+  assert.equal(i18n.global.t('embedPublish.copyCode'), '코드 복사')
 
   await setI18nLanguage('zh-CN')
 })

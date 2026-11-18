@@ -362,7 +362,7 @@ import {
   type InviteLookup,
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
-import { setI18nLanguage } from '@/i18n'
+import { normalizeMainLocale, setI18nLanguage } from '@/i18n'
 import { useI18n } from 'vue-i18n'
 import { getApiBaseUrl } from '@/utils/api-base'
 
@@ -521,9 +521,12 @@ const toggleLanguageMenu = () => {
 // Select language
 const selectLanguage = async (lang: string) => {
   showLanguageMenu.value = false
+  const requested = normalizeMainLocale(lang)
   try {
-    await setI18nLanguage(lang)
-    MessagePlugin.success(t('language.languageSaved'))
+    const applied = await setI18nLanguage(requested)
+    if (applied === requested) {
+      MessagePlugin.success(t('language.languageSaved'))
+    }
   } catch (err) {
     console.error('[WeKnora] Failed to switch language:', err)
     MessagePlugin.error(t('common.failed'))

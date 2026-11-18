@@ -145,7 +145,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { setI18nLanguage } from '@/i18n'
+import { normalizeMainLocale, setI18nLanguage } from '@/i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
@@ -175,13 +175,14 @@ const {
 } = useFont()
 
 // 本地状态
-const localLanguage = ref('zh-CN')
+const localLanguage = ref(locale.value || 'zh-CN')
 const localTheme = ref<ThemeMode>(currentTheme.value)
 const localSansFont = ref<FontKey>(currentSans.value)
 const localMonoFont = ref<MonoFontKey>(currentMono.value)
 const localFontSize = ref<FontSizeKey>(currentSize.value)
 
 // Keep the form in sync if preferences change externally (e.g. on user switch).
+watch(locale, (val) => { if (val) localLanguage.value = val })
 watch(currentTheme, (val) => { localTheme.value = val })
 watch(currentSans, (val) => { localSansFont.value = val })
 watch(currentMono, (val) => { localMonoFont.value = val })
@@ -241,9 +242,13 @@ onMounted(async () => {
 
 // 处理语言变化
 const handleLanguageChange = async () => {
+  const requested = normalizeMainLocale(localLanguage.value)
   try {
-    localLanguage.value = await setI18nLanguage(localLanguage.value)
-    MessagePlugin.success(t('language.languageSaved'))
+    const applied = await setI18nLanguage(requested)
+    localLanguage.value = applied
+    if (applied === requested) {
+      MessagePlugin.success(t('language.languageSaved'))
+    }
   } catch (err) {
     localLanguage.value = locale.value
     console.error('[WeKnora] Failed to switch language:', err)
