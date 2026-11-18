@@ -265,11 +265,16 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
  *   - "invite_register" 仅持有效邀请链接可注册
  *   - "invite_only" 禁止注册，已有账号仍可接受邀请
  *
+ * `first_registration_open` 为 true 表示部署尚处于初始状态（零账号），
+ * 此时即使注册模式已关闭也放行首个账号注册（issue #1866）——与后端
+ * Register 门保持一致，用于决定是否展示注册 tab。
+ *
  * 失败时隐藏注册入口，避免误展示不允许的注册流程。
  */
 export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_register' | 'invite_only' | string
+  first_registration_open: boolean
   complex_password_enabled: boolean
 }
 
@@ -278,7 +283,12 @@ export async function getAuthConfig(): Promise<AuthConfigResponse> {
     const response = await get('/api/v1/auth/config')
     return response as unknown as AuthConfigResponse
   } catch {
-    return { success: false, registration_mode: '', complex_password_enabled: false }
+    return {
+      success: false,
+      registration_mode: '',
+      first_registration_open: false,
+      complex_password_enabled: false,
+    }
   }
 }
 
