@@ -119,8 +119,13 @@ type RetrievalResult struct {
 }
 
 // KnowledgeSearchOptions are the caller overrides accepted by the
-// knowledge-search API. Zero values keep the tenant RetrievalConfig.
+// knowledge-search API. Zero values keep the tenant RetrievalConfig, except
+// ChildrenDepth: a hit's direct parent is always added, and depth zero means
+// "parent only, no descendant expansion".
 type KnowledgeSearchOptions struct {
+	// ChildrenDepth and ChildrenLimit control parent / descendant expansion
+	// done before reranking. A hit's direct parent is always added; depth
+	// above zero also expands the parent's and the hit's own descendants.
 	ChildrenDepth int
 	ChildrenLimit int
 	// VectorThreshold and KeywordThreshold override the recall thresholds.

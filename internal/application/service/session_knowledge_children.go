@@ -11,14 +11,14 @@ import (
 
 // expandSearchKnowledgeCandidates runs after recall and before the shared reranker.
 func (s *sessionService) expandSearchKnowledgeCandidates(
-	ctx context.Context, cm *types.ChatManage, opts *types.KnowledgeSearchOptions,
+	ctx context.Context, cm *types.ChatManage,
 ) (*types.KnowledgeTreeDiagnostics, error) {
 	expander, ok := s.knowledgeBaseService.(interfaces.KnowledgeRerankExpansionService)
 	if !ok {
 		return nil, apperrors.NewServiceUnavailableError("knowledge tree retrieval unavailable")
 	}
 	treeOpts, err := types.ParseKnowledgeChildrenOptions(
-		fmt.Sprint(opts.ChildrenDepth), childrenLimitString(opts.ChildrenLimit),
+		fmt.Sprint(cm.ChildrenDepth), childrenLimitString(cm.ChildrenLimit),
 	)
 	if err != nil {
 		return nil, apperrors.NewBadRequestError(err.Error())

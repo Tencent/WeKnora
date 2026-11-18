@@ -15,14 +15,17 @@ import (
 
 var _ interfaces.KnowledgeRerankRepository = (*knowledgeRepository)(nil)
 
-// KnowledgeRerankPassages ascends one direct parent, then expands descendants.
-// Unlike detail reads, reaching a retrieval budget truncates rather than failing
-// the query. Only enabled, completed knowledge with ready passages is eligible.
+// KnowledgeRerankPassages supplies every hit's direct parent, then, when the
+// depth asks for it, expands the parent's and the hit's own descendants by
+// layer. The parent is supplied at depth 0 as well: a child passage is only
+// meaningful together with the knowledge it belongs to. Unlike detail reads,
+// reaching a retrieval budget truncates rather than failing the query. Only
+// enabled, completed knowledge with ready passages is eligible.
 func (r *knowledgeRepository) KnowledgeRerankPassages(
 	ctx context.Context, roots []types.KnowledgeTreeRoot, opts types.KnowledgeChildrenOptions,
 ) ([]types.KnowledgeTreePassage, *types.KnowledgeTreeDiagnostics, error) {
 	diag := &types.KnowledgeTreeDiagnostics{}
-	if opts.Depth == 0 || len(roots) == 0 {
+	if len(roots) == 0 {
 		return nil, diag, nil
 	}
 	if _, err := types.ParseKnowledgeChildrenOptions(fmt.Sprint(opts.Depth), fmt.Sprint(opts.Limit)); err != nil {
@@ -164,15 +167,20 @@ func collectRerankTree(
 		}
 	}
 	var result []types.KnowledgeTreePassage
-	frontier := map[string]string{}
 	seen := map[string]bool{}
 	add := func(k *types.Knowledge, anchor string, depth int) {
-		if !base[k.ID] {
-			result = append(result, types.KnowledgeTreePassage{
-				Knowledge: k, AnchorKnowledgeID: anchor, Depth: depth,
-			})
+		if k == nil || base[k.ID] {
+			return
 		}
+		result = append(result, types.KnowledgeTreePassage{
+			Knowledge: k, AnchorKnowledgeID: anchor, Depth: depth,
+		})
 	}
+	// Every hit contributes its direct parent whatever children_depth says, so
+	// a child never arrives without the knowledge it belongs to. Both the
+	// parent and the hit are expansion roots, which makes a positive depth
+	// supply the parent's other children and the hit's own descendants.
+	frontier := map[string]string{}
 	for _, id := range hits {
 		seed := seedByID[id]
 		if seed == nil || access.RejectMovingKnowledge(seed) != nil {
@@ -184,8 +192,12 @@ func collectRerankTree(
 		}
 		if !seen[anchor.ID] {
 			seen[anchor.ID] = true
-			frontier[anchor.ID] = anchor.ID
 			add(anchor, anchor.ID, 0)
+			frontier[anchor.ID] = anchor.ID
+		}
+		if !seen[seed.ID] {
+			seen[seed.ID] = true
+			frontier[seed.ID] = anchor.ID
 		}
 	}
 	maxDepth := opts.Depth

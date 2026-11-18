@@ -1012,9 +1012,9 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 	opts.ChildrenDepth = treeOptions.Depth
-	if treeOptions.Depth != 0 {
-		opts.ChildrenLimit = treeOptions.Limit
-	}
+	// The direct-parent expansion is bounded by children_limit too, so the
+	// limit applies even when children_depth is 0.
+	opts.ChildrenLimit = treeOptions.Limit
 
 	opts.QueryImage = queryImage
 	opts.QueryImageMediaType = queryImageType

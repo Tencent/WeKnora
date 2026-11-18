@@ -36,7 +36,7 @@ func TestNativeKnowledgeRerankParentSiblingsDepthAndLimit(t *testing.T) {
 	second := treePassage(t, r, s, 1)
 	roots := []types.KnowledgeTreeRoot{{TenantID: 1, KBID: "a", KnowledgeID: c.ID}}
 	for _, tc := range []struct{ depth, limit, wantKnowledge, wantPassages int }{
-		{0, 20, 0, 0}, {1, 20, 2, 3}, {2, 20, 3, 4}, {-1, 20, 3, 4}, {2, 1, 1, 1},
+		{0, 20, 1, 1}, {0, 1, 1, 1}, {1, 20, 2, 3}, {2, 20, 3, 4}, {-1, 20, 3, 4}, {2, 1, 1, 1},
 	} {
 		rows, diag, err := r.KnowledgeRerankPassages(context.Background(), roots,
 			types.KnowledgeChildrenOptions{Depth: tc.depth, Limit: tc.limit})
@@ -53,18 +53,20 @@ func TestNativeKnowledgeRerankParentSiblingsDepthAndLimit(t *testing.T) {
 			require.True(t, seen[second.ID], "later passages must also reach rerank")
 		}
 		if tc.limit == 1 {
-			require.True(t, diag.Truncated)
+			// Depth 0 has nothing left to cut; a deeper request loses the
+			// siblings and descendants it could not fit.
+			require.Equal(t, tc.depth != 0, diag.Truncated)
 			require.Equal(t, p.ID, rows[0].Knowledge.ID)
 		}
 	}
-	// Two hits under the same parent add its passages only once.
+	// Two hits under the same parent add its passages only once, and each hit
+	// still expands its own children.
 	roots = append(roots, types.KnowledgeTreeRoot{TenantID: 1, KBID: "a", KnowledgeID: s.ID})
 	rows, diag, err := r.KnowledgeRerankPassages(context.Background(), roots,
 		types.KnowledgeChildrenOptions{Depth: 1, Limit: 20})
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.Equal(t, p.ID, rows[0].Knowledge.ID)
-	require.Equal(t, 1, diag.AddedKnowledge)
+	require.ElementsMatch(t, []string{p.ID, g.ID}, rerankTreeKnowledgeIDs(rows))
+	require.Equal(t, 2, diag.AddedKnowledge)
 	// The old detail contract stays downward-only and strict on excess size.
 	_, err = r.KnowledgeChildren(context.Background(), roots[:1],
 		types.KnowledgeChildrenOptions{Depth: -1, Limit: 1})
@@ -159,4 +161,52 @@ func TestNativeKnowledgeRerankRoundsDoNotDependOnAbsoluteChunkIndex(t *testing.T
 	require.Equal(t, first.ID, rows[0].Chunk.ID)
 	require.Equal(t, sibling.ID, rows[1].Chunk.ID, "each knowledge gets its first passage before any second passage")
 	require.Equal(t, second.ID, rows[2].Chunk.ID)
+}
+
+func TestNativeKnowledgeRerankParentAlwaysAndHitDescendants(t *testing.T) {
+	r := nativeTreeRepo(t)
+	require.NoError(t, r.db.AutoMigrate(&types.Chunk{}))
+	p := nativeNode(t, r, "a", "", "parent")
+	c := nativeNode(t, r, "a", p.ID, "hit")
+	s := nativeNode(t, r, "a", p.ID, "sibling")
+	own := nativeNode(t, r, "a", c.ID, "own child")
+	ownGrandchild := nativeNode(t, r, "a", own.ID, "own grandchild")
+	for _, k := range []*types.Knowledge{p, c, s, own, ownGrandchild} {
+		treePassage(t, r, k, 0)
+	}
+	root := []types.KnowledgeTreeRoot{{TenantID: 1, KBID: "a", KnowledgeID: c.ID}}
+	// Depth 0 supplies the direct parent and nothing else, not even siblings.
+	rows, diag, err := r.KnowledgeRerankPassages(context.Background(), root,
+		types.KnowledgeChildrenOptions{Depth: 0, Limit: 20})
+	require.NoError(t, err)
+	require.Equal(t, []string{p.ID}, rerankTreeKnowledgeIDs(rows))
+	require.Zero(t, rows[0].Depth)
+	require.Equal(t, 1, diag.AddedKnowledge)
+	// Depth 1 reaches the parent's other children and the hit's own children.
+	rows, _, err = r.KnowledgeRerankPassages(context.Background(), root,
+		types.KnowledgeChildrenOptions{Depth: 1, Limit: 20})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{p.ID, s.ID, own.ID}, rerankTreeKnowledgeIDs(rows))
+	// Depth 2 additionally reaches the hit's grandchildren.
+	rows, _, err = r.KnowledgeRerankPassages(context.Background(), root,
+		types.KnowledgeChildrenOptions{Depth: 2, Limit: 20})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{p.ID, s.ID, own.ID, ownGrandchild.ID}, rerankTreeKnowledgeIDs(rows))
+	// Without a parent the hit stays the root; a flat knowledge base is unaffected.
+	flat := nativeNode(t, r, "a", "", "flat")
+	treePassage(t, r, flat, 0)
+	rows, diag, err = r.KnowledgeRerankPassages(context.Background(),
+		[]types.KnowledgeTreeRoot{{TenantID: 1, KBID: "a", KnowledgeID: flat.ID}},
+		types.KnowledgeChildrenOptions{Depth: 0, Limit: 20})
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	require.Zero(t, diag.AddedKnowledge)
+}
+
+func rerankTreeKnowledgeIDs(rows []types.KnowledgeTreePassage) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.Knowledge.ID)
+	}
+	return ids
 }

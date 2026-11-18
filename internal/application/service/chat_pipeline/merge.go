@@ -114,9 +114,11 @@ func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.
 	if k := chatManage.RerankTopK; k > 0 && len(result) > k {
 		// Graph hits have no retrieval score (0) and would always fall
 		// below the cut; entity search already bounds how many it adds.
+		// Parent / descendant evidence kept outside the rerank top-k carries
+		// the same "must not be cut" contract, so it rides along too.
 		kept := result[:k:k]
 		for _, r := range result[k:] {
-			if r.MatchType == types.MatchTypeGraph {
+			if r.MatchType == types.MatchTypeGraph || searchutil.IsKeptOutsideTopK(r) {
 				kept = append(kept, r)
 			}
 		}

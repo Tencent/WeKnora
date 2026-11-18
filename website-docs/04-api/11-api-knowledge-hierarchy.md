@@ -4,12 +4,12 @@
 
 ## 上传：增加一个顶层字段
 
-```http
+`````http
 POST /api/v1/knowledge-bases/{kb_id}/knowledge/manual
 Content-Type: application/json
 ```
 
-```json
+`````json
 {
   "title": "补充材料",
   "content": "完整内容\n\n![配图](https://images.example/supplement.jpg)",
@@ -54,7 +54,7 @@ GET /api/v1/knowledge/search?keyword=攻略&children_depth=2
 
 manual 子知识 content 来自原始 Markdown 快照，图片引用仍保留在 Markdown 中；file/URL 返回 content_available=false 和原有受权 preview 链接，不冒充解析全文。整次展开的文本预算为 512KiB UTF-8，超预算项标 content_truncated=true，须按 content_url 单独取回原文；不等于模型上下文预算。共享 Agent 的资源链接保留 agent_id/agent_source_tenant_id。
 
-## 召回：补直接父知识及其子孙，再统一 Rerank
+## 召回：命中子知识必补直接父，再按 children_depth 展开
 
 ```http
 POST /api/v1/knowledge-search
@@ -77,21 +77,25 @@ POST /api/v1/knowledge-bases/{kb_id}/hybrid-search
 
 | 参数 | 检索行为（详情/列表仍按上一节执行） |
 | --- | --- |
-| children_depth 缺省或 0 | 不查父子关系，保持原有检索行为 |
-| children_depth=1 | 命中有直接父时，补父及父的直接子知识；没有可用父时，从命中自身向下展开 |
-| children_depth=2 | 补直接父，并展开父的子知识和孙知识；不会继续上溯父的父 |
-| children_depth=-1 / all | 从同一起点向下，最多 32 层 |
+| children_depth 缺省或 0 | 命中是子知识时补它的直接父知识，不展开任何子孙；没有父知识的知识库结果不变 |
+| children_depth=1 | 补直接父，并额外展开父的其他直接子知识和命中知识自己的直接子知识 |
+| children_depth=2 | 在上一条基础上再向下展开一层，得到父的孙知识和命中的孙知识；不会继续上溯父的父 |
+| children_depth=-1 / all | 从父和命中两个起点向下，最多 32 层 |
 | children_limit | 整次请求最多补入的知识数（含新增父知识），默认 200，上限 1000；原命中不占此名额。达到上限截取候选，不因同组太大报错 |
 
-流程：初始向量/关键词召回 → 查直接父并展开其子孙 → 去重及限额 → 所有候选进入同一次 Rerank → TopK。相同父知识只展开一次，补入项按知识去重；原命中的 chunk 和检索分数保持原样。
+流程：初始向量/关键词召回 → 无论 children_depth 是多少都补直接父 → children_depth>0 时同时从父和命中向下逐层展开 → 去重及限额 → 所有候选进入同一次 Rerank → TopK。相同父知识只展开一次，补入项按知识去重；原命中的 chunk 和检索分数保持原样。没有父知识的知识库不会补入任何内容，响应结构与原先一致。
 
 补入内容取自已启用、索引 ready 的真实分块，支持 manual、文件和 URL 知识；不依赖原文重新解析或重新 Embedding。每个补入知识可以贡献多个分块，按分块序号轮流纳入，整次请求另有 1000 个补充分块的硬上限。大文档可能达到此上限，不能把本接口当成整组全文下载。
 
-最终 `data` 是统一排序后的结果，不再在 Rerank 后追加一份未评分的 `expanded`。补入项使用 `MatchTypeKnowledgeTree`，初始没有向量相似度；评分来自 Rerank 模型。其 metadata 中 `tree_anchor_knowledge_id`、`tree_parent_knowledge_id`、`tree_depth` 记录关系来源。Rerank 阈值与 TopK 可以淘汰父知识、原始命中或任意子知识，因此不保证整组都留在最终结果。
+最终 `data` 是统一排序后的结果，不再在 Rerank 后追加一份未评分的 `expanded`。补入项使用 `MatchTypeKnowledgeTree`，初始没有向量相似度；Rerank 正常执行时，评分来自模型，阈值与 TopK 可以淘汰父知识、原始命中或任意子知识。
 
-`meta.tree` 返回 `applied`、`added_knowledge`、`added_passages`、`truncated`，分别表示是否完成统一模型评分、补入知识数、分块数、是否达到保护上限。原有 `meta.rerank` 继续解释模型是否实际执行。若显式关闭 Rerank或未配置模型，不执行树扩展；若模型调用失败，丢弃未评分补入项，只按原命中降级，`applied=false`，不宣称完成了统一模型评分。两个接口在请求了树扩展但未执行评分时也返回 `meta.tree.applied=false`；`added_*` 是尝试补入的候选数，不是最终返回数，仅在 `applied=true` 时表示候选实际参与了模型评分。hybrid-search 需要显式传 `rerank` 对象才能启用模型重排。
+Rerank 没有执行时补入项仍然返回：hybrid-search 未启用 rerank、显式关闭 Rerank、未配置或无法加载模型、模型调用失败，都属于这种情况。此时父/子知识按原顺序附在结果中，metadata 带 `kept_by=knowledge_tree`，不参与排序，也不被 TopK 裁掉；`applied=false` 表示没有完成统一模型评分。Rerank 成功执行时补入项正常参与评分，不标记 `kept_by`，是否留在结果中由阈值和 TopK 决定。
 
-父/子知识必须属于同一授权租户和知识库、已完成处理、启用索引、未删除且不在移动/删除过程中；不可用的父回退到命中自身，不沿该父读取其他子知识。逐层补入不会扩大 API key、组织分享或 Agent 的知识库权限。关键词、标签及显式知识 ID 约束原始命中；主动开启关系扩展后，可补同一授权知识库内不匹配这些语义/标签条件的父子证据。
+补入项的 metadata 中 `tree_anchor_knowledge_id`、`tree_parent_knowledge_id`、`tree_depth` 记录关系来源；`tree_depth=0` 是补入的直接父知识，更大的值表示从父或命中向下展开的层数。
+
+`meta.tree` 返回 `applied`、`added_knowledge`、`added_passages`、`truncated`，分别表示是否完成统一模型评分、补入知识数、分块数、是否达到保护上限。原有 `meta.rerank` 继续解释模型是否实际执行。请求显式带 children_depth 或实际补入了父/子知识时返回 `meta.tree`；`added_*` 是补入的候选数，不是最终返回数，仅在 `applied=true` 时表示这些候选实际参与了模型评分。hybrid-search 需要显式传 `rerank` 对象才能启用模型重排，不传时仍会补直接父知识。
+
+父/子知识必须属于同一授权租户和知识库、已完成处理、启用索引、未删除且不在移动/删除过程中；不可用的父回退到命中自身，不沿该父读取其他子知识。逐层补入不会扩大 API key、组织分享或 Agent 的知识库权限。关键词、标签及显式知识 ID 约束原始命中；父/子证据补入后可来自同一授权知识库内不匹配这些语义/标签条件的知识。
 
 树读取或数据库错误会明确使本次请求失败，不把缺失结构上下文伪装为完整结果；此行为与上面的模型调用失败降级分开。
 

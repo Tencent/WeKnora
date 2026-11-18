@@ -368,7 +368,7 @@ type ImageAttrSchemaData struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"knowledge_base.search","risk":"probe","method":"post","max_items":30}
-// @x-agent-hint "Runs the raw vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. match_type 0 is a vector hit, 1 a keyword hit; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
+// @x-agent-hint "Runs the vector and keyword recall of one knowledge base, without rerank, and returns the chunks it finds in rank order, so you can see why something is or is not found. A hit that is a child knowledge also returns its direct parent; children_depth above 0 adds the parent's and the hit's own descendants. match_type 0 is a vector hit, 1 a keyword hit, 10 parent/child knowledge added by that expansion; score ranks the merged results and is not a similarity. Each threshold filters its own retriever before merging: leave them out to see every candidate, or set them to an agent's vector_threshold and keyword_threshold to see what passes. For answering a question, use search_knowledge instead."
 // @Router       /knowledge-bases/{id}/hybrid-search [post]
 // @Router       /knowledge-bases/{id}/hybrid-search [get]
 func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
@@ -401,9 +401,9 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 	req.ChildrenDepth = childrenOptions.Depth
-	if childrenOptions.Depth != 0 {
-		req.ChildrenLimit = childrenOptions.Limit
-	}
+	// children_limit bounds the always-added direct parents too, so it is
+	// applied even when children_depth is 0.
+	req.ChildrenLimit = childrenOptions.Limit
 	precomputedVectorOnly := len(req.QueryEmbedding) > 0 && req.DisableKeywordsMatch && !req.DisableVectorMatch
 	if strings.TrimSpace(req.QueryText) == "" && !precomputedVectorOnly {
 		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
@@ -430,17 +430,11 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 
-	// Execute hybrid search. Without a rerank object this is the raw recall
-	// primitive it has always been; with one, the response carries meta.
+	// Execute hybrid search. The expanding path always runs: a hit's direct
+	// parent is context even when no rerank model is configured.
 	// Note: For shared KBs, the service uses effectiveTenantID internally via context
 	var retrieval *types.RetrievalResult
-	if req.Rerank != nil || req.ChildrenDepth != 0 {
-		retrieval, err = h.service.HybridSearchWithRerank(c.Request.Context(), id, req)
-	} else {
-		var results []*types.SearchResult
-		results, err = h.service.HybridSearch(c.Request.Context(), id, req)
-		retrieval = &types.RetrievalResult{Results: results}
-	}
+	retrieval, err = h.service.HybridSearchWithRerank(c.Request.Context(), id, req)
 	if err != nil {
 		// Service-layer typed AppErrors (e.g. ErrVectorStoreBindingInvalid,
 		// ErrVectorStoreUnavailable, BadRequest from multi-store fan-out)

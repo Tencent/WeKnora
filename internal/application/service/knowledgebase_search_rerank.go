@@ -71,14 +71,22 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 			return nil, err
 		}
 		out := &types.RetrievalResult{Results: results}
-		if params.ChildrenDepth != 0 {
-			out.Meta.Tree = &types.KnowledgeTreeDiagnostics{}
+		// No reranker scores the pool here, so the parent / descendant
+		// knowledge fetched before the ranking stage must not compete on a
+		// retrieval score it never had: it rides outside the top-k cut.
+		expanded, treeDiag, treeErr := s.hybridRerankTree(ctx, id, params, results)
+		if treeErr != nil {
+			return nil, treeErr
 		}
-		if params.Rerank != nil || params.ChildrenDepth != 0 {
+		if len(expanded) > len(results) {
+			out.Results = mergeKnowledgeTreeFallback(results, expanded[len(results):])
+		}
+		out.Meta.Tree = knowledgeTreeVisible(treeDiag, params.ChildrenDepth != 0)
+		if out.Meta.Tree != nil || params.Rerank != nil {
 			out.Meta.Rerank = &types.RerankDiagnostics{
 				Outcome:        types.RerankOutcomeDisabled,
 				CandidateCount: len(results),
-				ResultCount:    len(results),
+				ResultCount:    len(out.Results),
 			}
 		}
 		return out, nil
@@ -118,9 +126,6 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 		EffectiveThreshold: threshold,
 	}
 	out := &types.RetrievalResult{Meta: types.RetrievalMeta{Rerank: diag}}
-	if params.ChildrenDepth != 0 {
-		out.Meta.Tree = &types.KnowledgeTreeDiagnostics{}
-	}
 
 	// Recall at least as deep as the rerank asks for: with match_count=5 and
 	// rerank.top_k=200 the pool used to stop at the 50-hit floor.
@@ -140,11 +145,8 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 	}
 	baseCount := len(candidates)
 	originalCandidates := candidates
-	canExpand := modelID != "" && params.ChildrenDepth != 0
-	if canExpand {
-		_, modelErr := s.modelService.GetRerankModel(modelCtx, modelID)
-		canExpand = modelErr == nil
-	}
+	// children_depth is recall-time enrichment; only the ranking needs a model.
+	canExpand := len(candidates) > 0
 	if canExpand {
 		candidates, out.Meta.Tree, err = s.hybridRerankTree(ctx, id, params, candidates)
 		if err != nil {
@@ -164,11 +166,18 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 
 	final := s.rerankCandidates(modelCtx, modelID, params.QueryText, candidates, threshold, topK,
 		reranking.ImageKeepScoreFor(params.VectorThreshold), diag)
+	var added []*types.SearchResult
+	if baseCount < len(candidates) {
+		added = candidates[baseCount:]
+	}
+	out.Meta.Tree = knowledgeTreeVisible(out.Meta.Tree, params.ChildrenDepth != 0)
 	if out.Meta.Tree != nil {
 		out.Meta.Tree.Applied = canExpand && diag.Applied
-		if !diag.Applied {
-			final = originalCandidates[:min(len(originalCandidates), topK)]
-		}
+	}
+	if !diag.Applied {
+		// The model did not score the pool; keep the parent / descendant
+		// knowledge fetched before reranking and leave the ranked order alone.
+		final = mergeKnowledgeTreeFallback(originalCandidates[:min(len(originalCandidates), topK)], added)
 	}
 	diag.ResultCount = len(final)
 	logger.Infof(ctx, "Hybrid search rerank: kb=%s model=%s(%s) outcome=%s candidates=%d results=%d",

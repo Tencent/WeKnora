@@ -907,7 +907,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 	applyKnowledgeSearchOverrides(chatManage, opts)
 
-	results, treeDiag, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets), opts)
+	results, treeDiag, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets))
 	if err != nil {
 		return nil, err
 	}
@@ -940,9 +940,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base search completed, found %d results, rerank outcome: %s",
 		len(results), diag.Outcome)
-	if opts.ChildrenDepth != 0 && treeDiag == nil {
-		treeDiag = &types.KnowledgeTreeDiagnostics{}
-	}
+	treeDiag = knowledgeTreeVisible(treeDiag, opts.ChildrenDepth != 0)
 	response := &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag, Tree: treeDiag}}
 	return response, nil
 }
@@ -957,6 +955,8 @@ func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.Kno
 		chatManage.KeywordThreshold = *opts.KeywordThreshold
 	}
 	chatManage.ParentSlotAggregation = opts.ParentSlotAggregation
+	chatManage.ChildrenDepth = opts.ChildrenDepth
+	chatManage.ChildrenLimit = opts.ChildrenLimit
 	// The final FILTER_TOP_K stage cuts to RerankTopK whether or not the
 	// rerank stage runs, so it is the result count. Recall must be at least
 	// as deep for the count to be reachable.
@@ -981,7 +981,6 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	targetCount int,
-	opts *types.KnowledgeSearchOptions,
 ) ([]*types.SearchResult, *types.KnowledgeTreeDiagnostics, error) {
 	if targetCount == 0 {
 		logger.Warn(ctx, "No search targets available, returning empty results")
@@ -1001,10 +1000,13 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 	var treeDiag *types.KnowledgeTreeDiagnostics
 	var originalHits []*types.SearchResult
 	for _, event := range searchEvents {
-		if event == types.CHUNK_RERANK && opts != nil && opts.ChildrenDepth != 0 && chatManage.RerankModelID != "" {
+		if event == types.CHUNK_RERANK {
+			// A hit's direct parent is part of its context, so expansion runs
+			// whatever children_depth asks for. A positive depth additionally
+			// expands the parent's and the hit's own descendants.
 			originalHits = chatManage.SearchResult
 			var err error
-			treeDiag, err = s.expandSearchKnowledgeCandidates(ctx, chatManage, opts)
+			treeDiag, err = s.expandSearchKnowledgeCandidates(ctx, chatManage)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1027,9 +1029,11 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 		if event == types.CHUNK_RERANK && treeDiag != nil && chatManage.RerankDiagnostics != nil {
 			treeDiag.Applied = chatManage.RerankDiagnostics.Applied
 			if !treeDiag.Applied {
-				// A provider error must not promote unscored structural additions
-				// into the normal retrieval fallback.
-				chatManage.SearchResult, chatManage.RerankResult = originalHits, nil
+				// Keep the parent / descendant knowledge expansion produced
+				// before reranking even when the provider failed or no model
+				// ran; only the rerank order is discarded.
+				chatManage.SearchResult = mergeKnowledgeTreeFallback(originalHits, chatManage.SearchResult)
+				chatManage.RerankResult = nil
 			}
 		}
 

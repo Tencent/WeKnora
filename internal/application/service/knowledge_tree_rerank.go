@@ -13,11 +13,12 @@ import (
 var _ interfaces.KnowledgeRerankExpansionService = (*knowledgeBaseService)(nil)
 
 // ExpandKnowledgeRerankCandidates preserves initial hits and appends bounded,
-// real passages from their direct parents and the parents' descendants.
+// real passages from their direct parents. A positive depth also appends the
+// parents' and the hits' own descendants, layer by layer.
 func (s *knowledgeBaseService) ExpandKnowledgeRerankCandidates(
 	ctx context.Context, targets types.SearchTargets, hits []*types.SearchResult, opts types.KnowledgeChildrenOptions,
 ) ([]*types.SearchResult, *types.KnowledgeTreeDiagnostics, error) {
-	if opts.Depth == 0 || len(hits) == 0 {
+	if len(hits) == 0 {
 		return hits, nil, nil
 	}
 	r, ok := s.kgRepo.(interfaces.KnowledgeRerankRepository)
@@ -70,10 +71,73 @@ func (s *knowledgeBaseService) ExpandKnowledgeRerankCandidates(
 	return results, diag, nil
 }
 
+// mergeKnowledgeTreeFallback keeps the recall order and appends the parent /
+// descendant passages that expansion added. It is used when the reranker did
+// not score the pool: children_depth is a recall-time enrichment, so losing a
+// model must not silently drop the knowledge it already fetched.
+func mergeKnowledgeTreeFallback(original, expanded []*types.SearchResult) []*types.SearchResult {
+	if len(expanded) == 0 {
+		return original
+	}
+	seen := make(map[string]bool, len(original)+len(expanded))
+	out := make([]*types.SearchResult, 0, len(original)+len(expanded))
+	for _, row := range original {
+		if row == nil {
+			continue
+		}
+		if row.ID != "" {
+			if seen[row.ID] {
+				continue
+			}
+			seen[row.ID] = true
+		}
+		out = append(out, row)
+	}
+	for _, row := range expanded {
+		if row == nil {
+			continue
+		}
+		if row.ID != "" {
+			if seen[row.ID] {
+				continue
+			}
+			seen[row.ID] = true
+		}
+		// Unscored structural evidence rides outside the ranked top-k, the
+		// same way kept image evidence does.
+		if row.Metadata == nil {
+			row.Metadata = map[string]string{}
+		}
+		row.Metadata[types.MetadataKeptBy] = types.KeptByKnowledgeTree
+		out = append(out, row)
+	}
+	return out
+}
+
+// knowledgeTreeVisible reports whether expansion diagnostics describe work the
+// caller would otherwise not see. A request that asked for expansion always
+// gets them; a plain request gets them once parent or descendant knowledge was
+// actually added, so a knowledge base without a hierarchy keeps its previous
+// response shape.
+func knowledgeTreeVisible(
+	diag *types.KnowledgeTreeDiagnostics, requested bool,
+) *types.KnowledgeTreeDiagnostics {
+	if diag == nil {
+		if !requested {
+			return nil
+		}
+		return &types.KnowledgeTreeDiagnostics{}
+	}
+	if requested || diag.AddedKnowledge > 0 || diag.AddedPassages > 0 || diag.Truncated {
+		return diag
+	}
+	return nil
+}
+
 func (s *knowledgeBaseService) hybridRerankTree(
 	ctx context.Context, id string, params types.SearchParams, hits []*types.SearchResult,
 ) ([]*types.SearchResult, *types.KnowledgeTreeDiagnostics, error) {
-	if params.ChildrenDepth == 0 {
+	if len(hits) == 0 {
 		return hits, nil, nil
 	}
 	opts, err := types.ParseKnowledgeChildrenOptions(

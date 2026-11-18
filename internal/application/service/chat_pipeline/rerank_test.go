@@ -225,6 +225,29 @@ func TestMergeFallbackKeepsRerankTopK(t *testing.T) {
 	}
 }
 
+// The fallback cut must not hide parent / descendant evidence the recall stage
+// added before rerank; it rides along exactly like kept image evidence.
+func TestMergeFallbackKeepsKnowledgeTreeEvidence(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 1},
+		PipelineState: types.PipelineState{SearchResult: []*types.SearchResult{
+			{ID: "high", Score: 0.9},
+			{ID: "low", Score: 0.1},
+			{
+				ID: "parent", MatchType: types.MatchTypeKnowledgeTree,
+				Metadata: map[string]string{types.MetadataKeptBy: types.KeptByKnowledgeTree},
+			},
+		}},
+	}
+	got := (&PluginMerge{}).selectInputResults(context.Background(), cm)
+	if len(got) != 2 || got[0].ID != "high" || got[1].ID != "parent" {
+		t.Fatalf("fallback input = %+v", got)
+	}
+	if cm.Truncation == nil || cm.Truncation.Stage != types.RetrievalStageMerge {
+		t.Fatalf("truncation = %+v, want merge cut", cm.Truncation)
+	}
+}
+
 // Rerank drops candidates before FILTER_TOP_K ever runs — threshold
 // rejection, the candidate cap and the MMR top-k all hide passages. The cut
 // has to be recorded here, or a turn with a rerank model reaches the prompt

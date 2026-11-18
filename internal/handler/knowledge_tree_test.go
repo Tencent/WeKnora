@@ -35,7 +35,7 @@ func TestNativeKnowledgeHybridExpansionKeepsScoredHits(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/knowledge-bases/kb/hybrid-search",
-		strings.NewReader(`{"query_text":"question","children_depth":2}`),
+		strings.NewReader(`{"query_text":"question","children_depth":2,"rerank":{"enabled":true}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -62,9 +62,12 @@ func TestNativeKnowledgeHybridQueryZeroOverridesBodyExpansion(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	// The expanding path runs even at depth 0, where only direct parents are
+	// added; the body's children_limit still bounds that expansion.
+	require.Equal(t, 1, svc.rerankCalls)
 	require.Equal(t, 1, svc.searchCalls)
-	require.Zero(t, svc.rerankCalls)
 	require.Zero(t, svc.searchParams.ChildrenDepth)
+	require.Equal(t, 20, svc.searchParams.ChildrenLimit)
 	require.NotContains(t, w.Body.String(), `"expanded"`)
 }
 

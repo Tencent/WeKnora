@@ -40,11 +40,19 @@ func (s *hybridSearchTestService) HybridSearch(
 }
 
 func (s *hybridSearchTestService) HybridSearchWithRerank(
-	_ context.Context,
-	_ string,
+	ctx context.Context,
+	id string,
 	params types.SearchParams,
 ) (*types.RetrievalResult, error) {
 	s.rerankCalls++
+	if params.Rerank == nil || !params.Rerank.IsEnabled() {
+		// Mirror the service's no-rerank branch: recall plus expansion.
+		results, err := s.HybridSearch(ctx, id, params)
+		if err != nil {
+			return nil, err
+		}
+		return &types.RetrievalResult{Results: results}, nil
+	}
 	s.searchParams = params
 	return &types.RetrievalResult{
 		Results: []*types.SearchResult{{ID: "c1", Score: 0.8}},
@@ -124,14 +132,17 @@ func TestHybridSearchRejectsInvalidRerank(t *testing.T) {
 	}
 }
 
-func TestHybridSearchWithoutRerankKeepsResponseShape(t *testing.T) {
+func TestHybridSearchWithoutRerankUsesExpandingPath(t *testing.T) {
 	svc := &hybridSearchTestService{}
 	response := performHybridSearchRequest(svc, `{"query_text":"q"}`)
-	if response.Code != http.StatusOK || svc.searchCalls != 1 || svc.rerankCalls != 0 {
+	if response.Code != http.StatusOK || svc.searchCalls != 1 || svc.rerankCalls != 1 {
 		t.Fatalf("code=%d search=%d rerank=%d", response.Code, svc.searchCalls, svc.rerankCalls)
 	}
+	if svc.searchParams.ChildrenDepth != 0 {
+		t.Fatalf("children_depth = %d, want the parent-only default", svc.searchParams.ChildrenDepth)
+	}
 	if strings.Contains(response.Body.String(), `"meta"`) {
-		t.Fatalf("plain hybrid search must not grow a meta field: %s", response.Body.String())
+		t.Fatalf("a knowledge base without parent knowledge keeps its response shape: %s", response.Body.String())
 	}
 }
 

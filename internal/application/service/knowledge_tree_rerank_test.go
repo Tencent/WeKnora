@@ -61,21 +61,55 @@ func TestSearchKnowledgeTreeCandidatesReachOneRerankBeforeTopK(t *testing.T) {
 	require.Empty(t, got.Expanded, "there is no second, unranked expansion after TopK")
 }
 
-func TestSearchKnowledgeTreeDefaultDoesNotLookup(t *testing.T) {
+func TestSearchKnowledgeTreeDefaultAddsParents(t *testing.T) {
 	models := newRerankModelService()
-	models.reranker = &scoredReranker{scores: []float64{0.9}}
-	svc := newSearchKnowledgeService(t, &types.RetrievalConfig{RerankModelID: "rr-1"},
-		models, &fakeRetrieval{results: []*types.SearchResult{{ID: "child", Content: "evidence", Score: 0.8}}})
+	models.reranker = &scoredReranker{scores: []float64{0.95, 0.9, 0.8}}
+	hit := &types.SearchResult{ID: "child", Content: "evidence", Score: 0.8}
+	svc := newSearchKnowledgeService(t, &types.RetrievalConfig{RerankModelID: "rr-1", RerankThreshold: 0},
+		models, &fakeRetrieval{results: []*types.SearchResult{hit}})
 	tree := &treeSearchKBService{}
 	svc.knowledgeBaseService = tree
 	got, err := svc.SearchKnowledge(searchKnowledgeCtx(), []string{"kb-1"}, nil, nil, "question", nil)
 	require.NoError(t, err)
-	require.False(t, tree.called)
-	require.Nil(t, got.Meta.Tree)
-	require.Len(t, got.Results, 1)
+	// A hit's direct parent is context even without children_depth.
+	require.True(t, tree.called)
+	require.Equal(t, types.KnowledgeChildrenOptions{Depth: 0, Limit: 200}, tree.options)
+	require.NotNil(t, got.Meta.Tree)
+	require.Equal(t, 2, got.Meta.Tree.AddedKnowledge)
+	require.True(t, got.Meta.Tree.Applied, "the reranker scored the added parent and sibling")
+	require.Len(t, got.Results, 3)
+	ids := []string{got.Results[0].ID, got.Results[1].ID, got.Results[2].ID}
+	require.ElementsMatch(t, []string{"child", "parent-chunk", "sibling-chunk"}, ids)
 }
 
-func TestSearchKnowledgeTreeRerankErrorKeepsOnlyOriginals(t *testing.T) {
+func TestSearchKnowledgeTreeKeptRowsSurviveTopKWithoutRerank(t *testing.T) {
+	models := newRerankModelService()
+	disabled := false
+	hit := &types.SearchResult{ID: "child-chunk", KnowledgeID: "child", Content: "child evidence", Score: 0.8}
+	svc := newSearchKnowledgeService(t, nil, models, &fakeRetrieval{results: []*types.SearchResult{hit}})
+	tree := &treeSearchKBService{}
+	svc.knowledgeBaseService = tree
+	got, err := svc.SearchKnowledge(searchKnowledgeCtx(), []string{"kb-1"}, nil, nil, "question",
+		&types.KnowledgeSearchOptions{
+			ChildrenDepth: 1, MatchCount: 1,
+			Rerank: &types.RerankOptions{Enabled: &disabled},
+		})
+	require.NoError(t, err)
+	require.NotNil(t, got.Meta.Tree)
+	require.False(t, got.Meta.Tree.Applied)
+	// match_count=1 would cut the two unscored additions; they ride outside
+	// the top-k cut instead.
+	require.Len(t, got.Results, 3)
+	kept := 0
+	for _, row := range got.Results {
+		if row.Metadata[types.MetadataKeptBy] == types.KeptByKnowledgeTree {
+			kept++
+		}
+	}
+	require.Equal(t, 2, kept)
+}
+
+func TestSearchKnowledgeTreeRerankErrorKeepsExpandedKnowledge(t *testing.T) {
 	models := newRerankModelService()
 	models.reranker = &scoredReranker{err: errors.New("provider unavailable")}
 	hit := &types.SearchResult{ID: "child", Content: "original evidence", Score: .8}
@@ -87,10 +121,17 @@ func TestSearchKnowledgeTreeRerankErrorKeepsOnlyOriginals(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.RerankOutcomeModelError, got.Meta.Rerank.Outcome)
 	require.False(t, got.Meta.Tree.Applied)
-	require.Equal(t, []*types.SearchResult{hit}, got.Results)
+	// The parent / sibling passages were fetched before reranking; a provider
+	// failure drops only the rerank order, not the expansion.
+	require.Len(t, got.Results, 3)
+	require.Equal(t, "child", got.Results[0].ID)
+	require.Equal(t, []string{"parent-chunk", "sibling-chunk"},
+		[]string{got.Results[1].ID, got.Results[2].ID})
+	// Unscored expansion must survive the top-k cut.
+	require.Equal(t, types.KeptByKnowledgeTree, got.Results[1].Metadata[types.MetadataKeptBy])
 }
 
-func TestSearchKnowledgeTreeDisabledDoesNotLookup(t *testing.T) {
+func TestSearchKnowledgeTreeExpandsWithRerankDisabled(t *testing.T) {
 	models := newRerankModelService()
 	hit := &types.SearchResult{ID: "child", Content: "original evidence", Score: .8}
 	svc := newSearchKnowledgeService(t, nil, models, &fakeRetrieval{results: []*types.SearchResult{hit}})
@@ -100,10 +141,12 @@ func TestSearchKnowledgeTreeDisabledDoesNotLookup(t *testing.T) {
 	got, err := svc.SearchKnowledge(searchKnowledgeCtx(), []string{"kb-1"}, nil, nil, "question",
 		&types.KnowledgeSearchOptions{ChildrenDepth: 1, Rerank: &types.RerankOptions{Enabled: &disabled}})
 	require.NoError(t, err)
-	require.False(t, tree.called)
+	// children_depth is recall-time enrichment and no longer depends on rerank.
+	require.True(t, tree.called)
 	require.NotNil(t, got.Meta.Tree)
 	require.False(t, got.Meta.Tree.Applied)
-	require.Equal(t, []*types.SearchResult{hit}, got.Results)
+	require.Len(t, got.Results, 3)
+	require.Equal(t, "child", got.Results[0].ID)
 }
 
 func TestSearchKnowledgeTreeUnavailableModelReportsSkippedExpansion(t *testing.T) {
@@ -124,12 +167,13 @@ func TestSearchKnowledgeTreeUnavailableModelReportsSkippedExpansion(t *testing.T
 		got, err := svc.SearchKnowledge(searchKnowledgeCtx(), []string{"kb-1"}, nil, nil, "question",
 			&types.KnowledgeSearchOptions{ChildrenDepth: 1})
 		require.NoError(t, err)
-		require.False(t, tree.called)
+		require.True(t, tree.called)
 		require.NotNil(t, got.Meta.Tree)
 		require.False(t, got.Meta.Tree.Applied)
-		require.Zero(t, got.Meta.Tree.AddedPassages)
+		require.Equal(t, 2, got.Meta.Tree.AddedPassages)
 		require.Equal(t, want, got.Meta.Rerank.Outcome)
-		require.Equal(t, []*types.SearchResult{hit}, got.Results)
+		require.Len(t, got.Results, 3)
+		require.Equal(t, "child", got.Results[0].ID)
 	}
 }
 
