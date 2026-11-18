@@ -49,7 +49,8 @@ const (
 	// block a write while holding c.mu, which in turn blocks Stop() and — since
 	// the IM service tears channels down while holding its own channel-map lock
 	// — every other channel operation in the process.
-	writeTimeout = 10 * time.Second
+	writeTimeout    = 10 * time.Second
+	replyAckTimeout = 5 * time.Second
 )
 
 // wsFrame is the JSON frame exchanged over the WeCom bot WebSocket.
@@ -126,6 +127,14 @@ type streamReplyBody struct {
 // MessageHandler is called when an IM message is received via long connection.
 type MessageHandler func(ctx context.Context, msg *im.IncomingMessage) error
 
+// replyAck belongs to one response on one connection. done releases another
+// sender using the same callback req_id, which WeCom also uses for its ACKs.
+type replyAck struct {
+	conn   *ws.Conn
+	result chan error
+	done   chan struct{}
+}
+
 // LongConnClient manages a WeCom intelligent bot WebSocket long connection.
 type LongConnClient struct {
 	botID            string
@@ -134,10 +143,12 @@ type LongConnClient struct {
 	extraAllowedHost string // hostname from custom endpoint for SSRF allowlist
 	handler          MessageHandler
 
-	conn   *ws.Conn
-	mu     sync.Mutex
-	closed atomic.Bool
-	reqSeq atomic.Int64
+	conn           *ws.Conn
+	mu             sync.Mutex
+	closed         atomic.Bool
+	reqSeq         atomic.Int64
+	pendingReplies map[string]*replyAck // guarded by mu
+	authenticated  bool                 // guarded by mu
 
 	// streamBufs tracks accumulated content per stream ID.
 	// WeCom stream protocol is replace-based: each frame's content replaces
@@ -251,7 +262,7 @@ func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMes
 		Body:    bodyBytes,
 	}
 
-	return c.writeJSON(frame)
+	return c.writeReply(ctx, frame)
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -293,12 +304,16 @@ func (c *LongConnClient) UpdateStreamContent(ctx context.Context, incoming *im.I
 	buf.WriteString(fullContent)
 	c.streamBufsMu.Unlock()
 
-	return c.sendStreamFrame(incoming, streamID, fullContent, false)
+	return c.sendStreamFrame(ctx, incoming, streamID, fullContent, false)
 }
 
-// FinalizeStream replaces the display with answer-only content before the stream ends.
+// FinalizeStream confirms the complete answer and terminal frame. The IM service
+// uses this result to decide whether the full answer needs a fallback reply.
 func (c *LongConnClient) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
-	return c.UpdateStreamContent(ctx, incoming, streamID, finalContent)
+	if err := c.UpdateStreamContent(ctx, incoming, streamID, finalContent); err != nil {
+		return err
+	}
+	return c.EndStream(ctx, incoming, streamID)
 }
 
 // SendStreamChunk is deprecated; kept as an alias for UpdateStreamContent.
@@ -311,14 +326,15 @@ func (c *LongConnClient) SendStreamChunk(ctx context.Context, incoming *im.Incom
 func (c *LongConnClient) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
 	c.streamBufsMu.Lock()
 	buf, ok := c.streamBufs[streamID]
-	var fullContent string
-	if ok {
-		fullContent = buf.String()
-		delete(c.streamBufs, streamID)
+	if !ok {
+		c.streamBufsMu.Unlock()
+		return nil // already finalized; do not replace the answer with an empty frame
 	}
+	fullContent := buf.String()
+	delete(c.streamBufs, streamID)
 	c.streamBufsMu.Unlock()
 
-	err := c.sendStreamFrame(incoming, streamID, fullContent, true)
+	err := c.sendStreamFrame(ctx, incoming, streamID, fullContent, true)
 	if err == nil {
 		return nil
 	}
@@ -330,14 +346,16 @@ func (c *LongConnClient) EndStream(ctx context.Context, incoming *im.IncomingMes
 			return ctx.Err()
 		case <-time.After(500 * time.Millisecond):
 		}
-		if retryErr := c.sendStreamFrame(incoming, streamID, fullContent, true); retryErr == nil {
+		if retryErr := c.sendStreamFrame(ctx, incoming, streamID, fullContent, true); retryErr == nil {
 			return nil
 		}
 	}
 	return err
 }
 
-func (c *LongConnClient) sendStreamFrame(incoming *im.IncomingMessage, streamID, content string, finish bool) error {
+func (c *LongConnClient) sendStreamFrame(
+	ctx context.Context, incoming *im.IncomingMessage, streamID, content string, finish bool,
+) error {
 	var reqID string
 	if incoming.Extra != nil {
 		reqID = incoming.Extra["req_id"]
@@ -362,7 +380,7 @@ func (c *LongConnClient) sendStreamFrame(incoming *im.IncomingMessage, streamID,
 		Body:    bodyBytes,
 	}
 
-	return c.writeJSON(frame)
+	return c.writeReply(ctx, frame)
 }
 
 func (c *LongConnClient) connectAndRun(ctx context.Context) error {
@@ -375,6 +393,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.conn = conn
+	c.authenticated = false
 	c.mu.Unlock()
 
 	defer func() {
@@ -397,6 +416,14 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	if err := c.authenticate(ctx); err != nil {
 		return fmt.Errorf("authenticate: %w", err)
 	}
+
+	c.mu.Lock()
+	if c.conn != conn {
+		c.mu.Unlock()
+		return fmt.Errorf("connection closed during authentication")
+	}
+	c.authenticated = true
+	c.mu.Unlock()
 
 	logger.Infof(ctx, "[IM] WeCom WebSocket connected successfully (bot_id=%s)", c.botID)
 
@@ -427,7 +454,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 			// Detach from connection ctx so in-flight messages survive reconnects.
 			go c.handleCallback(context.WithoutCancel(ctx), conn, frame)
 		default:
-			// pong or other control frames — ignore
+			c.receiveReplyAck(conn, frame)
 		}
 	}
 }
@@ -728,6 +755,7 @@ func (c *LongConnClient) closeConn() {
 	c.mu.Lock()
 	conn := c.conn
 	c.conn = nil
+	c.failReplyAcks(conn)
 	c.mu.Unlock()
 	if conn != nil {
 		_ = conn.Close()
@@ -747,6 +775,7 @@ func (c *LongConnClient) closeConnIf(conn *ws.Conn) {
 	active := c.conn == conn
 	if active {
 		c.conn = nil
+		c.failReplyAcks(conn)
 	}
 	c.mu.Unlock()
 	if active {
@@ -814,6 +843,95 @@ func (c *LongConnClient) stripAtMention(content string) string {
 
 	// Strategy 3: delegate to stateless helper (heuristic scan + first-@word fallback).
 	return stripAtMentionBasic(content)
+}
+
+// writeReply serializes replies sharing a callback req_id and waits for the
+// platform ACK. A successful socket write alone does not confirm delivery.
+func (c *LongConnClient) writeReply(ctx context.Context, frame wsFrame) error {
+	reqID := frame.Headers["req_id"]
+	var pending *replyAck
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		c.mu.Lock()
+		if c.conn == nil || !c.authenticated {
+			c.mu.Unlock()
+			return fmt.Errorf("connection is not ready for replies")
+		}
+		if previous := c.pendingReplies[reqID]; previous != nil {
+			c.mu.Unlock()
+			select {
+			case <-previous.done:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		pending = &replyAck{conn: c.conn, result: make(chan error, 1), done: make(chan struct{})}
+		if c.pendingReplies == nil {
+			c.pendingReplies = make(map[string]*replyAck)
+		}
+		c.pendingReplies[reqID] = pending
+		_ = pending.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		err := pending.conn.WriteJSON(frame)
+		c.mu.Unlock()
+		defer func() {
+			c.mu.Lock()
+			delete(c.pendingReplies, reqID)
+			close(pending.done)
+			c.mu.Unlock()
+		}()
+		if err != nil {
+			c.closeConnIf(pending.conn)
+			return err
+		}
+		break
+	}
+
+	timer := time.NewTimer(replyAckTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-pending.result:
+		return err
+	case <-ctx.Done():
+		// A late ACK has the same req_id as the next reply. Retire this
+		// connection before allowing a retry to prevent a false success.
+		c.closeConnIf(pending.conn)
+		return ctx.Err()
+	case <-timer.C:
+		c.closeConnIf(pending.conn)
+		return fmt.Errorf("WeCom reply acknowledgment timed out")
+	}
+}
+
+func (c *LongConnClient) receiveReplyAck(conn *ws.Conn, frame wsFrame) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending := c.pendingReplies[frame.Headers["req_id"]]
+	if pending == nil || pending.conn != conn {
+		return
+	}
+	var err error
+	if frame.ErrCode != 0 {
+		err = fmt.Errorf("WeCom reply rejected: code=%d msg=%s", frame.ErrCode, frame.ErrMsg)
+	}
+	select {
+	case pending.result <- err:
+	default:
+	}
+}
+
+// failReplyAcks is called with mu held, before the connection is closed.
+func (c *LongConnClient) failReplyAcks(conn *ws.Conn) {
+	for _, pending := range c.pendingReplies {
+		if pending.conn == conn {
+			select {
+			case pending.result <- fmt.Errorf("connection closed before reply acknowledgment"):
+			default:
+			}
+		}
+	}
 }
 
 func (c *LongConnClient) writeJSON(v interface{}) error {
