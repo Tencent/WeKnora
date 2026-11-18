@@ -57,7 +57,7 @@ func startQAExitHandler(
 			result <- qaExitResult{answer: final, err: err}
 			return
 		}
-		answer, err := service.runQA(ctx, session, "question", customAgent, nil, nil, nil, "user", nil)
+		answer, err := service.runQA(ctx, session, "question", customAgent, nil, nil, nil, "user", nil, nil)
 		if err != nil {
 			answer = imQAFailureReply(err)
 		}

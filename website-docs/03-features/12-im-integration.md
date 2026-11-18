@@ -28,6 +28,8 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 | QQ 机器人 `qqbot` | **websocket**（仅支持） | 否 | 否 | 否 | `app_id`、`client_secret`、`api_base_url`、`gateway_url` |
 | 云之家 `yunzhijia` | **webhook** / websocket（从 `send_msg_url` 推导 WS 地址） | 否 | 是 | 是（顶层 msgId / 回复 replyRootMsgId） | `send_msg_url`（必填）、`secret`、`app_id`、`app_secret`、`allowed_webhook_host_suffix`、`timeout_seconds` |
 
+个人微信在生成整段回复时会显示原生「正在输入」，并在发送正文前尝试清除提示。此功能随微信渠道启用。
+
 ## 内置命令系统
 
 命令框架在 `command.go` / `command_registry.go`：命令只声明意图（`CommandResult.Action`），副作用由 Service 执行；`LooksLikeCommand` 区分"命令尝试"（`/help`）与应透传给 QA 的路径文本（`/api/v2/users`）——前者未注册时回复"未知指令"，后者正常进入问答。

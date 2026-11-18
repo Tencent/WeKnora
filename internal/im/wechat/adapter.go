@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/im"
@@ -67,6 +68,7 @@ func newBaseInfo() baseInfo {
 type Adapter struct {
 	botToken   string
 	ilinkBotID string
+	typing     sync.Map // user ID -> *typingRun
 }
 
 // NewAdapter creates a new WeChat iLink adapter.
@@ -122,25 +124,8 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 		"base_info": newBaseInfo(),
 	}
 
-	return a.ilinkPost(ctx, "/ilink/bot/sendmessage", payload)
-}
-
-// SendTyping sends a typing indicator to the user.
-func (a *Adapter) SendTyping(ctx context.Context, incoming *im.IncomingMessage) error {
-	userID := incoming.UserID
-	contextToken := ""
-	if incoming.Extra != nil {
-		contextToken = incoming.Extra["context_token"]
-	}
-	_ = contextToken // typing may not need context_token
-
-	payload := map[string]interface{}{
-		"ilink_user_id": userID,
-		"status":        1, // TYPING
-		"base_info":     newBaseInfo(),
-	}
-
-	return a.ilinkPost(ctx, "/ilink/bot/sendtyping", payload)
+	_, err := a.ilinkPost(ctx, "/ilink/bot/sendmessage", payload)
+	return err
 }
 
 // DownloadFile downloads a media file from the iLink CDN.
@@ -278,35 +263,35 @@ func hexDecode(s string) ([]byte, error) {
 }
 
 // ilinkPost sends a POST request to the iLink API with authentication headers.
-func (a *Adapter) ilinkPost(ctx context.Context, path string, payload interface{}) error {
+func (a *Adapter) ilinkPost(ctx context.Context, path string, payload interface{}) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
+		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ilinkBaseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	a.setAuthHeaders(req, body)
 
 	resp, err := ilinkHTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("ilink request %s: %w", path, err)
+		return nil, fmt.Errorf("ilink request %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read ilink response: %w", err)
+		return nil, fmt.Errorf("read ilink response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ilink api %s returned status %d: %s", path, resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("ilink api %s returned status %d: %s", path, resp.StatusCode, string(respBody))
 	}
 
-	return nil
+	return respBody, nil
 }
 
 // setAuthHeaders sets the required iLink Bot authentication headers.

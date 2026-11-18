@@ -2018,7 +2018,20 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	// Non-streaming fallback: collect full answer then send.
-	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote)
+	var stopTyping func()
+	var cancelTyping context.CancelFunc
+	if indicator, ok := req.adapter.(interface {
+		BeginTyping(context.Context, *IncomingMessage) func()
+	}); ok {
+		typingCtx, cancel := context.WithCancel(ctx)
+		cancelTyping = cancel
+		defer cancelTyping()
+		stopTyping = indicator.BeginTyping(typingCtx, req.msg)
+		defer stopTyping()
+	}
+	answer, err := s.runQA(
+		ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote, cancelTyping,
+	)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = imQAFailureReply(err)
@@ -2029,6 +2042,9 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		Content: formatIMOutboundAnswerOrFallback(outCtx, answer,
 			s.newOutboundFileServiceResolver(req.tenant, req.agent, kbIDs)),
 		IsFinal: true,
+	}
+	if stopTyping != nil {
+		stopTyping()
 	}
 	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
 		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
@@ -2065,7 +2081,7 @@ func (s *Service) handleMessageFullOutput(
 	}
 
 	answer, qaErr := s.runQA(
-		ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote,
+		ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote, nil,
 	)
 	if qaErr != nil {
 		logger.Errorf(ctx, "[IM] Full-output QA failed: %v, sending fallback reply", qaErr)
@@ -2969,7 +2985,9 @@ loop:
 
 // fallbackNonStream is used when streaming initialization fails.
 func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
-	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
+	answer, err := s.runQA(
+		ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote, nil,
+	)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
 		answer = imQAFailureReply(err)
@@ -2984,7 +3002,18 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
-func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, userKey string, quote *QuotedMessage) (string, error) {
+func (s *Service) runQA(
+	ctx context.Context,
+	session *types.Session,
+	query string,
+	customAgent *types.CustomAgent,
+	kbIDs []string,
+	attachments types.MessageAttachments,
+	imageURLs []string,
+	userKey string,
+	quote *QuotedMessage,
+	onRemoteStop context.CancelFunc,
+) (string, error) {
 	// Cancellable context (no hard deadline): each agent round has its own
 	// LLMCallTimeout. The context can still be cancelled by /stop.
 	ctx, cancel := context.WithCancel(ctx)
@@ -3105,7 +3134,12 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	defer s.clearInflightMapping(ctx, userKey)
 
 	// Start StreamManager stop watcher.
-	go s.watchStreamManagerStop(ctx, session.ID, assistantMsg.ID, cancel)
+	go s.watchStreamManagerStop(ctx, session.ID, assistantMsg.ID, func() {
+		if onRemoteStop != nil {
+			onRemoteStop()
+		}
+		cancel()
+	})
 
 	// Run QA async
 	go func() {
