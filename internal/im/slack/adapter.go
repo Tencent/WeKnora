@@ -234,7 +234,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 		channelID = incoming.UserID
 	}
 
-	options := []slack.MsgOption{slack.MsgOptionText("正在思考...", false)}
+	options := []slack.MsgOption{slack.MsgOptionText(im.ThinkingPlaceholder(ctx), false)}
 	if incoming.MessageID != "" {
 		options = append(options, slack.MsgOptionTS(incoming.MessageID))
 	}
