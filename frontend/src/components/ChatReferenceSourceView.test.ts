@@ -18,13 +18,18 @@ const citedMarkdown = '| Model | Flagged as AI | Judged human |\n| --- | --- | -
 const refs = [{ id: 'chunk-1', knowledge_id: 'manual-doc', knowledge_title: 'Model card', knowledge_source: 'manual', chunk_type: 'text', content: citedMarkdown }]
 const target = resolveReferenceSource(refs, { chunkId: 'chunk-1', anchorText: '本次版本被标记的次数不到上一版本的一半。', openSource: true })!
 
-async function fixture(options: { details?: Record<string, unknown>; chunk?: Record<string, unknown>; target?: ReferenceSourceTarget } = {}) {
+async function fixture(options: {
+  details?: Record<string, unknown>
+  chunk?: Record<string, unknown>
+  target?: ReferenceSourceTarget
+  failFirstDetails?: boolean
+} = {}) {
   const props = reactive({ target: options.target || target, active: true })
   const requests: string[] = [], events: string[] = []
-  let preview: any, mounts = 0
+  let preview: any, mounts = 0, kbLookups = 0
   const exports: any = {}
   const Preview = defineComponent({
-    props: { knowledgeId: String, fileType: String, fileName: String, locate: Object, sourceMode: Boolean, active: Boolean, toolbarTarget: Object, fillHeight: Boolean },
+    props: { knowledgeId: String, confluenceBaseUrl: String, fileType: String, fileName: String, locate: Object, sourceMode: Boolean, active: Boolean, toolbarTarget: Object, fillHeight: Boolean },
     setup(p) { preview = p; mounts++; return () => h('preview') },
   })
   runInNewContext(compiled, { exports, console, require(name: string) {
@@ -34,11 +39,18 @@ async function fixture(options: { details?: Record<string, unknown>; chunk?: Rec
     // The KB-name lookup rides the shared keyed cache; in the sandbox it
     // resolves instantly so the provenance line renders deterministically.
     if (name === '@/stores/chatResources') return {
-      useChatResourcesStore: () => ({ fetchKnowledgeBaseById: async () => ({ name: '测试知识库' }) }),
+      useChatResourcesStore: () => ({
+        fetchKnowledgeBaseById: async () => {
+          kbLookups++
+          return { name: '测试知识库' }
+        },
+      }),
     }
     if (name === '@/api/knowledge-base/index') return {
       getKnowledgeDetails: async (id: string) => {
+        const firstRequest = requests.length === 0
         requests.push(`details:${id}`)
+        if (options.failFirstDetails && firstRequest) throw new Error('Temporary details failure')
         return { data: { type: 'manual', source: 'manual', file_type: 'manual', file_name: 'Model card.md', file_path: '', ...options.details } }
       },
       getChunkByIdOnly: async (id: string) => {
@@ -64,7 +76,7 @@ async function fixture(options: { details?: Record<string, unknown>; chunk?: Rec
   const root = node()
   app.mount(root)
   await flush()
-  return { props, requests, events, preview: () => preview, mounts: () => mounts, dispose: () => app.unmount(), root }
+  return { props, requests, events, preview: () => preview, mounts: () => mounts, kbLookups: () => kbLookups, dispose: () => app.unmount(), root }
 }
 
 test('manual citation opens Markdown with raw chunk evidence even without source locators', async t => {
@@ -124,6 +136,46 @@ test('FAQ still falls back to the source list even with manual source metadata',
 test('uploaded files keep their original preview format', async t => {
   const f = await fixture({ details: { type: 'file', source: 'upload', file_type: 'pdf', file_name: 'Report.pdf' }, target: { ...target, knowledgeSource: 'upload' } }); t.after(f.dispose)
   assert.equal(f.preview().fileType, 'pdf')
+})
+
+test('Confluence citation passes the document site to the Markdown preview', async t => {
+  const f = await fixture({
+    details: {
+      type: 'file',
+      file_type: 'md',
+      file_name: 'Confluence page.md',
+      confluence_base_url: 'https://team.atlassian.net/wiki',
+    },
+  })
+  t.after(f.dispose)
+  assert.equal(f.preview().confluenceBaseUrl, 'https://team.atlassian.net/wiki')
+  assert.equal(f.requests.filter(r => r.startsWith('details:')).length, 1)
+})
+
+test('another Confluence citation retries failed details without restarting the Markdown preview', async t => {
+  const confluenceTarget = {
+    ...target, knowledgeId: 'confluence-doc', knowledgeSource: 'upload', fileName: 'Confluence page.md',
+    knowledgeBaseId: 'kb-77',
+  }
+  const f = await fixture({
+    target: confluenceTarget,
+    details: { type: 'file', source: 'upload', file_type: 'md', confluence_base_url: 'https://team.atlassian.net/wiki' },
+    failFirstDetails: true,
+  })
+  t.after(f.dispose)
+  assert.equal(f.preview().confluenceBaseUrl, '')
+  assert.ok(nodeText(f.root).includes('测试知识库'))
+  const initialFileType = f.preview().fileType
+
+  f.props.target = { ...confluenceTarget, chunkId: 'chunk-2', anchorText: 'The second cited paragraph.' }
+  await flush()
+
+  assert.equal(f.preview().confluenceBaseUrl, 'https://team.atlassian.net/wiki')
+  assert.equal(f.preview().fileType, initialFileType)
+  assert.ok(nodeText(f.root).includes('测试知识库'))
+  assert.equal(f.kbLookups(), 1)
+  assert.equal(f.mounts(), 1)
+  assert.deepEqual(f.requests.filter(r => r.startsWith('details:')), ['details:confluence-doc', 'details:confluence-doc'])
 })
 
 function nodeText(root: any): string {

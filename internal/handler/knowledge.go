@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/confluence"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -40,6 +41,7 @@ type KnowledgeHandler struct {
 	userSvc           interfaces.UserService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	dataSourceRepo    interfaces.DataSourceRepository
 	backlog           backlogProbe
 }
 
@@ -96,6 +98,7 @@ func NewKnowledgeHandler(
 	userSvc interfaces.UserService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	dataSourceRepo interfaces.DataSourceRepository,
 	housekeeping *service.HousekeepingService,
 ) *KnowledgeHandler {
 	var backlog backlogProbe
@@ -114,6 +117,7 @@ func NewKnowledgeHandler(
 		userSvc:           userSvc,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
+		dataSourceRepo:    dataSourceRepo,
 	}
 }
 
@@ -626,6 +630,34 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	})
 }
 
+// KnowledgeDetail adds document-specific preview information to the stored knowledge.
+type KnowledgeDetail struct {
+	*types.Knowledge
+	ConfluenceBaseURL string `json:"confluence_base_url,omitempty"`
+}
+
+// confluenceAttachmentBaseURL is called after the document's read grant has
+// been checked. The data-source settings endpoint uses a separate owner grant.
+func (h *KnowledgeHandler) confluenceAttachmentBaseURL(ctx context.Context, knowledge *types.Knowledge) string {
+	if knowledge.Channel != types.ChannelConfluence || h.dataSourceRepo == nil {
+		return ""
+	}
+	id := knowledge.GetMetadata()["datasource_id"]
+	if id == "" {
+		return ""
+	}
+	source, err := h.dataSourceRepo.FindByID(ctx, id)
+	if err != nil || source == nil || source.Type != types.ConnectorTypeConfluence ||
+		source.TenantID != knowledge.TenantID || source.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+		return ""
+	}
+	cfg, err := source.ParseConfig()
+	if err != nil {
+		return ""
+	}
+	return confluence.AttachmentBaseURL(cfg)
+}
+
 // GetKnowledge godoc
 // @Summary      获取知识详情
 // @Description  根据ID获取知识条目详情
@@ -633,7 +665,7 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "知识ID"  extensions(x-agent=knowledge_id)
-// @Success      200  {object}  handler.DataResponse{data=types.Knowledge}  "知识详情"
+// @Success      200  {object}  handler.DataResponse{data=handler.KnowledgeDetail}  "知识详情"
 // @Failure      400  {object}  errors.AppError                             "请求参数错误"
 // @Failure      403  {object}  errors.AppError                             "无权访问所属知识库"
 // @Failure      404  {object}  errors.AppError                             "知识不存在"
@@ -671,7 +703,10 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 		secutils.SanitizeForLog(knowledge.ID), secutils.SanitizeForLog(knowledge.Title))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    knowledge,
+		"data": KnowledgeDetail{
+			Knowledge:         knowledge,
+			ConfluenceBaseURL: h.confluenceAttachmentBaseURL(effCtx, knowledge),
+		},
 	})
 }
 

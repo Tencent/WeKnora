@@ -1,7 +1,7 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
-import { ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
+import { computed, ref, shallowRef, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, defineAsyncComponent } from 'vue';
 import { getKnowledgeDetails, listKnowledgeFiles, previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { downloadArtifact } from '@/api/chat';
@@ -9,7 +9,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
+import { sanitizeHTML, sanitizeDocumentPreviewHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
@@ -56,6 +56,8 @@ const { t } = useI18n();
 const props = defineProps<{
   sourceBlob?: Blob;
   knowledgeId?: string;
+  /** Site address supplied by this document's detail response. */
+  confluenceBaseUrl?: string;
   sessionId?: string;
   attachmentId?: string;
   messageId?: string;
@@ -95,7 +97,20 @@ const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');
 const highlightedCode = ref('');
-const markdownHtml = ref('');
+// Keep the prepared Markdown so a late site address only changes rendering.
+const markdownSource = ref<string | null>(null);
+const markdownHtml = computed(() => {
+  if (markdownSource.value === null) return '';
+  if (!markdownSource.value) {
+    return '<p style="color: var(--td-text-color-disabled); text-align: center; padding: 20px;">文档内容为空</p>';
+  }
+  return renderDocumentPreviewMarkdown(
+    markdownSource.value,
+    (html) => sanitizeDocumentPreviewHTML(html, props.confluenceBaseUrl),
+    // 预览工具栏已显示文件名，移除正文开头的同名标题。
+    { titles: [props.fileName] },
+  );
+});
 const excelHtml = ref('');
 const mermaidSource = ref<string | null>(null);
 let loadedMermaidBlob: Blob | undefined;
@@ -351,25 +366,22 @@ function renderTextContent(text: string, fileType: string) {
 }
 
 async function renderMarkdown(blob: Blob) {
+  const generation = ++markdownImageGeneration;
   const text = await blob.text();
+  if (generation !== markdownImageGeneration) return;
 
   // 校验文本内容是否有效
   if (!text || typeof text !== 'string') {
-    markdownHtml.value = '<p style="color: var(--td-text-color-disabled); text-align: center; padding: 20px;">文档内容为空</p>';
+    markdownSource.value = '';
     return;
   }
 
-  const generation = ++markdownImageGeneration;
   revokeMarkdownImageUrls();
-  const previewOptions = {
-    // 预览工具栏已经显示文件名；正文第一行的同名 H1 属于重复标题。
-    titles: [props.fileName],
-  };
   // Relative images stay on a data URI unless a sibling file replaces them.
   // Painting the original href makes the browser request it from the page route.
   let source = props.knowledgeId ? neutralizeRelativePreviewImages(text) : text;
   if (props.knowledgeId) {
-    markdownHtml.value = renderDocumentPreviewMarkdown(source, undefined, previewOptions);
+    markdownSource.value = source;
     try {
       const rewritten = await rewriteKnowledgeMarkdownImages(text, props.knowledgeId, {
         getKnowledge: async (id) => {
@@ -410,7 +422,7 @@ async function renderMarkdown(blob: Blob) {
     }
   }
   if (generation !== markdownImageGeneration) return;
-  markdownHtml.value = renderDocumentPreviewMarkdown(source, undefined, previewOptions);
+  markdownSource.value = source;
 }
 
 function onImageLoad(e: Event) {
@@ -548,8 +560,7 @@ async function loadPreview() {
       }
       case 'markdown': {
         await renderMarkdown(blob);
-        // Markdown 里的 resource:// 等受保护图片需要带鉴权换 blob（无 override
-        // 时走应用默认鉴权面：登录态 /files 代理）。已换过的元素幂等跳过。
+        // Markdown 中的受保护图片通过应用鉴权换成 blob URL。
         await nextTick();
         await hydrateProtectedFileImages(previewContent.value);
         break;
@@ -589,7 +600,7 @@ function cleanup() {
   }
   textContent.value = '';
   highlightedCode.value = '';
-  markdownHtml.value = '';
+  markdownSource.value = null;
   excelHtml.value = '';
   mermaidSource.value = null;
   loadedMermaidBlob = undefined;
@@ -924,6 +935,11 @@ watch(
   },
   { immediate: true }
 );
+
+// A late site address replaces the rendered DOM without reloading the file.
+watch(() => props.confluenceBaseUrl, () => {
+  if (markdownHtml.value && props.active) void hydrateProtectedFileImages(previewContent.value);
+}, { flush: 'post' });
 
 onUnmounted(() => {
   cleanup();
