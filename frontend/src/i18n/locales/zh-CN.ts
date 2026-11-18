@@ -1397,6 +1397,10 @@ export default {
     schedule6h: '每 6 小时',
     schedule12h: '每 12 小时',
     schedule24h: '每天',
+    scheduleDailyTime: '启动时间',
+    scheduleCustom: '自定义间隔（小时）',
+    scheduleCustomHoursLabel: '自定义间隔（小时）',
+    scheduleHours: '每 {n} 小时',
     neverSynced: '未同步',
     justNow: '刚刚',
     minutesAgo: '{n} 分钟前',
@@ -1413,7 +1417,7 @@ export default {
       '1h': '每小时',
       '6h': '每 6 小时',
       '12h': '每 12 小时',
-      '24h': '每天'
+      '24h': '每天 {time}'
     },
     field: {
       appId: 'App ID',

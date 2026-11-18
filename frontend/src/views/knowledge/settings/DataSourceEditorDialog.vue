@@ -17,6 +17,7 @@ import {
   type Resource,
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { parseDailySyncTime } from '@/utils/cronHumanize'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
 
@@ -190,6 +191,10 @@ function enterReplaceCredentials() {
   testErrorMsg.value = ''
 }
 
+const DAILY_SCHEDULE = 'daily'
+const DEFAULT_DAILY_SYNC_TIME = '02:00'
+const dailySyncTime = ref(DEFAULT_DAILY_SYNC_TIME)
+
 // Form data
 const form = ref({
   name: '',
@@ -200,6 +205,7 @@ const form = ref({
     settings: {} as Record<string, any>,
   },
   sync_schedule: '0 0 */6 * * *',
+  customHours: 6,
   sync_mode: 'incremental' as 'incremental' | 'full',
   conflict_strategy: 'overwrite' as 'overwrite' | 'skip',
   sync_deletions: true,
@@ -572,8 +578,55 @@ const schedulePresets = computed(() => [
   { label: t('datasource.schedule1h'), value: '0 0 * * * *' },
   { label: t('datasource.schedule6h'), value: '0 0 */6 * * *' },
   { label: t('datasource.schedule12h'), value: '0 0 */12 * * *' },
-  { label: t('datasource.schedule24h'), value: '0 0 2 * * *' },
+  { label: t('datasource.schedule24h'), value: DAILY_SCHEDULE },
+  { label: t('datasource.scheduleCustom'), value: 'custom' },
 ])
+
+// Sentinel value used to represent the "custom hours" picker inside the form;
+// it is serialized to a cron expression on submit (see hoursToCron).
+const CUSTOM_SCHEDULE = 'custom'
+
+// Cron expressions of the predefined presets. Decoding a stored schedule runs
+// preset matching first, so e.g. "0 0 */6 * * *" never falls through to the
+// custom-hours branch.
+const PRESET_SCHEDULES = new Set([
+  '0 */30 * * * *',
+  '0 0 * * * *',
+  '0 0 */6 * * *',
+  '0 0 */12 * * *',
+  '',
+])
+
+// Preserve the custom picker for saved hourly intervals that do not match a preset.
+const CUSTOM_HOUR_RE = /^0 0 \*\/(\d{1,2}) \* \* \*$/
+
+// Serialize the custom-hours selection into the cron expression that the
+// backend scheduler actually runs.
+function hoursToCron(hours: number): string {
+  return `0 0 */${Math.min(Math.max(Math.floor(hours), 1), 24)} * * *`
+}
+
+// Convert the form-only options to cron before sending the schedule.
+function serializeSyncSchedule(): string {
+  if (form.value.sync_schedule === DAILY_SCHEDULE) {
+    const [hour, minute] = dailySyncTime.value.split(':').map(Number)
+    return `0 ${minute} ${hour} * * *`
+  }
+  return form.value.sync_schedule === CUSTOM_SCHEDULE
+    ? hoursToCron(form.value.customHours)
+    : form.value.sync_schedule
+}
+
+// Decode a stored cron schedule back into the editor state: a named preset,
+// the custom-hours picker, or the raw expression (kept as-is for anything
+// unrecognized, preserving the existing behavior).
+function decodeSyncSchedule(cron: string): { kind: 'preset' | 'custom' | 'raw'; hours?: number } {
+  if (PRESET_SCHEDULES.has(cron)) return { kind: 'preset' }
+  const m = CUSTOM_HOUR_RE.exec(cron || '')
+  const hours = m ? Number(m[1]) : 0
+  if (m && hours >= 1 && hours <= 24) return { kind: 'custom', hours }
+  return { kind: 'raw' }
+}
 
 // --- Connector definitions ---
 interface ConnectorDef {
@@ -833,6 +886,7 @@ watch(visible, async (v) => {
     return
   }
   step.value = isEdit.value ? 1 : 0
+  dailySyncTime.value = DEFAULT_DAILY_SYNC_TIME
   testResult.value = ''
   testErrorMsg.value = ''
   tempDsId.value = ''
@@ -859,6 +913,9 @@ watch(visible, async (v) => {
     refreshCredentialsStatus()
     testResult.value = credentialsConfigured.value ? 'success' : ''
     const editConfig = props.dataSource.config || {}
+    const savedDailyTime = parseDailySyncTime(props.dataSource.sync_schedule)
+    if (savedDailyTime) dailySyncTime.value = savedDailyTime
+    const decodedSchedule = decodeSyncSchedule(props.dataSource.sync_schedule)
     form.value = {
       name: props.dataSource.name,
       type: props.dataSource.type,
@@ -869,7 +926,10 @@ watch(visible, async (v) => {
           ? hydrateRssFeedUrlsFromConfig(editConfig)
           : { ...(editConfig.settings || {}) },
       },
-      sync_schedule: props.dataSource.sync_schedule,
+      sync_schedule: savedDailyTime
+        ? DAILY_SCHEDULE
+        : decodedSchedule.kind === 'custom' ? CUSTOM_SCHEDULE : props.dataSource.sync_schedule,
+      customHours: decodedSchedule.kind === 'custom' ? (decodedSchedule.hours as number) : 6,
       sync_mode: props.dataSource.sync_mode,
       conflict_strategy: props.dataSource.conflict_strategy,
       sync_deletions: props.dataSource.sync_deletions,
@@ -903,6 +963,7 @@ watch(visible, async (v) => {
       type: '',
       config: { credentials: {}, resource_ids: [], settings: {} },
       sync_schedule: '0 0 */6 * * *',
+      customHours: 6,
       sync_mode: 'incremental',
       conflict_strategy: 'overwrite',
       sync_deletions: true,
@@ -995,6 +1056,7 @@ async function testConnection() {
     if (isEdit.value && tempDsId.value && !needsConnectionTest()) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        sync_schedule: serializeSyncSchedule(),
         knowledge_base_id: props.kbId,
       } as any)
       await validateConnection(tempDsId.value)
@@ -1052,6 +1114,7 @@ async function ensureTempDataSource(persist = false): Promise<string> {
     if (persist || !isEdit.value) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        sync_schedule: serializeSyncSchedule(),
         knowledge_base_id: props.kbId,
       } as any)
     }
@@ -1079,6 +1142,7 @@ async function ensureTempDataSource(persist = false): Promise<string> {
     pending = (async () => {
       const res = await createDataSource({
         ...form.value,
+        sync_schedule: serializeSyncSchedule(),
         knowledge_base_id: props.kbId,
         status: 'paused',
       } as any)
@@ -1404,15 +1468,19 @@ async function handleSubmit() {
         submitting.value = false
         return
       }
+      const syncScheduleCron = serializeSyncSchedule()
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        sync_schedule: syncScheduleCron,
         config: buildConfigPayload(),
         knowledge_base_id: props.kbId,
         status: 'active',
       } as any)
     } else {
+      const syncScheduleCron = serializeSyncSchedule()
       const res = await createDataSource({
         ...form.value,
+        sync_schedule: syncScheduleCron,
         config: buildConfigPayload(),
         knowledge_base_id: props.kbId,
         status: 'active',
@@ -2102,6 +2170,34 @@ const drawerConfirmText = computed(() => {
         <t-select v-model="form.sync_schedule">
           <t-option v-for="p in schedulePresets" :key="p.value" :value="p.value" :label="p.label" />
         </t-select>
+
+        <div
+          v-if="form.sync_schedule === DAILY_SCHEDULE"
+          class="form-item form-item--flat"
+          style="margin-top: 12px"
+          role="group"
+          aria-labelledby="datasource-daily-sync-time-label"
+        >
+          <span id="datasource-daily-sync-time-label" class="form-label">{{ t('datasource.scheduleDailyTime') }}</span>
+          <t-time-picker
+            v-model="dailySyncTime"
+            format="HH:mm"
+            :steps="[1, 15, 1]"
+            :allow-input="false"
+            :clearable="false"
+          />
+        </div>
+        <div v-else-if="form.sync_schedule === CUSTOM_SCHEDULE" class="form-item form-item--flat" style="margin-top: 12px">
+          <label class="form-label">{{ t('datasource.scheduleCustomHoursLabel') }}</label>
+          <t-input-number
+            v-model="form.customHours"
+            :min="1"
+            :max="24"
+            :step="1"
+            :decimal-places="0"
+            theme="row"
+          />
+        </div>
       </section>
 
       <section class="setting-drawer__section">

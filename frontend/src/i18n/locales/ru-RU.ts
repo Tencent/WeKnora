@@ -1395,6 +1395,10 @@ export default {
     schedule6h: 'Каждые 6 часов',
     schedule12h: 'Каждые 12 часов',
     schedule24h: 'Ежедневно',
+    scheduleDailyTime: 'Время запуска',
+    scheduleCustom: 'По часам',
+    scheduleCustomHoursLabel: 'Интервал (часы)',
+    scheduleHours: 'Каждые {n} ч',
     neverSynced: 'Не синхронизировано',
     justNow: 'Только что',
     minutesAgo: '{n} мин назад',
@@ -1411,7 +1415,7 @@ export default {
       '1h': 'Каждый час',
       '6h': 'Каждые 6 часов',
       '12h': 'Каждые 12 часов',
-      '24h': 'Ежедневно'
+      '24h': 'Ежедневно в {time}'
     },
     field: {
       appId: 'App ID',

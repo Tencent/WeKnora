@@ -7,6 +7,7 @@ import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, h, nextTick, reactive, ref } from 'vue'
+import { parseDailySyncTime } from '../../../utils/cronHumanize'
 
 // The draft data source the resource picker lists through. A picker cannot call
 // the resource endpoint before a data source row exists, so the dialog creates a
@@ -131,6 +132,7 @@ async function fixture({
         }
       }
       if (name === '@/api/datasource') return api
+      if (name === '@/utils/cronHumanize') return { parseDailySyncTime }
       return { default: {} }
     },
     URL, console: vmConsole,
