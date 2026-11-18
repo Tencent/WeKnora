@@ -55,6 +55,7 @@ async function fixture() {
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === '@/stores/assistant') return { useAssistantStore: () => ({ visible: false }) }
       if (name === '@/composables/useAssistantPageContext') return { useAssistantPageContext() {} }
+      if (name === '@/composables/useProtectedImageLifecycle') return require('../../../composables/useProtectedImageLifecycle.ts')
       if (name === '@/utils/assistantDataChange') return { useAssistantDataChange() {} }
       if (name === '@/stores/settings') return { useSettingsStore: () => ({}) }
       if (name === '@/api/wiki') return api

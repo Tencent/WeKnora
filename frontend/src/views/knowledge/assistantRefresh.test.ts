@@ -4,6 +4,7 @@ import * as vue from 'vue'
 import * as marked from 'marked'
 import * as literalTilde from '../../utils/markedLiteralTilde.ts'
 import * as sorting from '../../utils/resourceSorting.ts'
+import * as protectedImageLifecycle from '../../composables/useProtectedImageLifecycle.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
 test('refreshes data source controls after assistant changes and stops on unmount', async t => {
@@ -86,6 +87,7 @@ test('refreshes Wiki pages, selected content and statistics for its own KB only'
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
     '@/stores/assistant': { useAssistantStore: () => ({ visible: false }) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
+    '@/composables/useProtectedImageLifecycle': protectedImageLifecycle,
     '@/stores/settings': { useSettingsStore: () => ({}) },
     '@/api/wiki': {
       getWikiPage, getWikiIndex, getWikiStats,

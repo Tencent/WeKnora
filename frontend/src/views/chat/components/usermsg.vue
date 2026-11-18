@@ -80,6 +80,7 @@
     </div>
 </template>
 <script setup>
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { computed, ref, watch, onMounted, nextTick } from "vue";
 import { hydrateProtectedFileImages } from '@/utils/security';
 import picturePreview from '@/components/picture-preview.vue';
@@ -185,6 +186,7 @@ const channelLabel = computed(() => {
 const channelClass = computed(() => props.channel ? `channel-${props.channel}` : '');
 
 const containerRef = ref(null);
+useProtectedImageLifecycle(() => containerRef.value)
 const hasImages = computed(() => props.images && props.images.length > 0);
 const hasAttachments = computed(() => props.attachments && props.attachments.length > 0);
 

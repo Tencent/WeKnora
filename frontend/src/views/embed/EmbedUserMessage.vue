@@ -18,6 +18,7 @@
 </template>
 
 <script setup lang="ts">
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
@@ -47,6 +48,7 @@ const props = withDefaults(
 )
 
 const containerRef = ref<HTMLElement | null>(null)
+useProtectedImageLifecycle(() => containerRef.value)
 const reviewImg = ref(false)
 const reviewUrl = ref('')
 
