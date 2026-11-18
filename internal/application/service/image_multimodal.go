@@ -1050,7 +1050,7 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 		}
 	}
 
-	data, err := downloadImageFromURL(payload.ImageURL)
+	data, err := downloadImageFromURL(ctx, payload.ImageURL)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", payload.ImageURL, err)
 	}
@@ -1058,9 +1058,10 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 	return data, nil
 }
 
-// downloadImageFromURL downloads image bytes from an HTTP(S) URL.
-func downloadImageFromURL(imageURL string) ([]byte, error) {
-	return secutils.DownloadBytes(imageURL)
+// downloadImageFromURL downloads image bytes from an HTTP(S) URL, aborting
+// when the caller's context is cancelled (#5240).
+func downloadImageFromURL(ctx context.Context, imageURL string) ([]byte, error) {
+	return secutils.DownloadBytesContext(ctx, imageURL)
 }
 
 // multimodalPendingKey is the Redis key holding how many image tasks a

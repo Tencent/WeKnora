@@ -1,11 +1,14 @@
 package utils
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type downloadTestTransport func(*http.Request) (*http.Response, error)
@@ -117,5 +120,60 @@ func TestDownloadBytesSizeLimit(t *testing.T) {
 				t.Error("response body was not closed")
 			}
 		})
+	}
+}
+
+// Issue: https://github.com/Tencent/WeKnora/issues/5240
+// A stalled remote image server must not hold a cancelled caller hostage:
+// DownloadBytesContext aborts the in-flight request when ctx is done.
+func TestDownloadBytesContextAbortsOnCancellation(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "download.example")
+	t.Setenv("SSRF_WHITELIST_EXTRA", "")
+	ResetSSRFWhitelistForTest()
+	t.Cleanup(ResetSSRFWhitelistForTest)
+	originalClient := defaultHTTPClient
+	t.Cleanup(func() { defaultHTTPClient = originalClient })
+
+	stalled := make(chan struct{})
+	release := make(chan struct{})
+	var sawAbort atomic.Bool
+	transport := downloadTestTransport(func(req *http.Request) (*http.Response, error) {
+		// Simulate a server that stalls before sending headers: the
+		// response arrives only when the handler releases it, and the
+		// transport reports the caller cancellation through req ctx.
+		select {
+		case <-release:
+			return nil, errors.New("released without response")
+		case <-req.Context().Done():
+			sawAbort.Store(true)
+			return nil, req.Context().Err()
+		case <-stalled:
+			return nil, errors.New("stalled")
+		}
+	})
+	defaultHTTPClient = &http.Client{Transport: transport}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() {
+		_, err := DownloadBytesContext(ctx, "https://download.example/stall.png")
+		errc <- err
+	}()
+
+	// Give the request a moment to reach the transport, then cancel the
+	// caller while the download is in flight.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("expected cancellation error, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("image download kept waiting after cancellation")
+	}
+	if !sawAbort.Load() {
+		t.Fatal("in-flight request was not aborted with the caller context")
 	}
 }
