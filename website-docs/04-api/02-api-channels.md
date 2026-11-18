@@ -26,9 +26,9 @@ API key：`manage_channels`/full。IM 渠道携带外部 bot 凭证：列表 Vie
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `platform` | string | 是 | `wecom/feishu/lark/slack/telegram/dingtalk/mattermost/wechat/qqbot/yunzhijia` |
+| `platform` | string | 是 | `wecom/feishu/lark/slack/telegram/dingtalk/mattermost/wechat/qqbot/yunzhijia/whatsapp` |
 | `name` | string | 否 | 显示名 |
-| `mode` | string | 否 | `websocket`（默认；mattermost/yunzhijia 默认 `webhook`）/`webhook`/`longpoll`（wechat 强制 longpoll） |
+| `mode` | string | 否 | `websocket`（默认；mattermost/yunzhijia/whatsapp 默认 `webhook`）/`webhook`/`longpoll`（wechat 强制 longpoll） |
 | `output_mode` | string | 否 | `stream`（默认）/`full`（wechat 强制 full） |
 | `locale` | string | 否 | 回复语言：`zh-CN`/`en-US`/`ja-JP`/`ko-KR`/`ru-RU`；空（默认）使用部署默认语言（`WEKNORA_LANGUAGE`，未设置为 `zh-CN`）；其他值 400 |
 | `session_mode` | string | 否 | `user`（默认）/`thread` |

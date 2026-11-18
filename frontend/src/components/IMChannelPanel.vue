@@ -154,7 +154,7 @@
             <div class="option-chips">
               <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.mode === 'websocket' }"
-                :disabled="formData.platform === 'mattermost'"
+                :disabled="formData.platform === 'mattermost' || formData.platform === 'whatsapp'"
                 @click="formData.mode = 'websocket'">
                 {{ formData.platform === 'dingtalk' ? 'Stream' : 'WebSocket' }}
               </button>
@@ -166,7 +166,8 @@
             <p class="form-desc">
               {{ formData.platform === 'mattermost' ? $t('agentEditor.im.mattermostModeHint') :
                 formData.platform === 'yunzhijia' ? $t('agentEditor.im.yunzhijiaModeHint') :
-                  $t('agentEditor.im.modeHint') }}
+                  formData.platform === 'whatsapp' ? $t('agentEditor.im.whatsappModeHint') :
+                    $t('agentEditor.im.modeHint') }}
             </p>
           </div>
 
@@ -175,6 +176,7 @@
             <div class="option-chips">
               <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.output_mode === 'stream' }"
+                :disabled="formData.platform === 'whatsapp'"
                 @click="formData.output_mode = 'stream'">
                 {{ $t('agentEditor.im.outputStream') }}
               </button>
@@ -486,6 +488,35 @@
               </div>
             </template>
 
+            <!-- WhatsApp credentials (Meta Cloud API) -->
+            <template v-if="formData.platform === 'whatsapp'">
+              <div class="platform-link-hint">
+                <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer"
+                  class="doc-link">
+                  {{ $t('agentEditor.im.whatsappConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label required">Phone Number ID</label>
+                <t-input v-model="formData.credentials.phone_number_id" placeholder="Phone Number ID" />
+              </div>
+              <div class="form-item">
+                <label class="form-label required">Access Token</label>
+                <t-input v-model="formData.credentials.access_token" type="password" placeholder="Access Token" />
+              </div>
+              <div class="form-item">
+                <label class="form-label required">App Secret</label>
+                <t-input v-model="formData.credentials.app_secret" type="password" placeholder="App Secret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label required">Verify Token</label>
+                <t-input v-model="formData.credentials.verify_token" type="password" placeholder="Verify Token" />
+                <p class="form-desc">{{ $t('agentEditor.im.whatsappVerifyTokenHint') }}</p>
+              </div>
+            </template>
+
             <!-- Yunzhijia credentials -->
             <template v-if="formData.platform === 'yunzhijia'">
               <div class="form-item">
@@ -612,6 +643,7 @@ import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
 import qqbotLogo from '@/assets/img/im/qqbot.png';
 import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
+import whatsappLogo from '@/assets/img/im/whatsapp.svg';
 
 type IMPlatform = IMChannel['platform'];
 type IMLocale = NonNullable<IMChannel['locale']>;
@@ -627,6 +659,7 @@ const PLATFORM_LOGO: Record<string, string> = {
   wechat: wechatLogo,
   qqbot: qqbotLogo,
   yunzhijia: yunzhijiaLogo,
+  whatsapp: whatsappLogo,
 };
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
@@ -679,6 +712,7 @@ const platformOptions = computed(() => ([
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
   { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
   { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
+  { value: 'whatsapp' as IMPlatform, label: t('agentEditor.im.whatsapp'), logo: whatsappLogo },
 ]));
 
 const localeOptions = computed(() => ([
@@ -813,6 +847,11 @@ watch(
         formData.value.credentials.post_to_main = false;
       }
     }
+    // WhatsApp is webhook-only and cannot edit a sent message, so no streaming.
+    if (p === 'whatsapp') {
+      formData.value.mode = 'webhook';
+      formData.value.output_mode = 'full';
+    }
     if (!platformSupportsThread(p)) {
       formData.value.session_mode = 'user';
     }
@@ -847,6 +886,9 @@ function onPlatformChange(val: string | number | boolean) {
         allowed_webhook_host_suffix: 'yunzhijia.com',
       };
     }
+  } else if (val === 'whatsapp') {
+    formData.value.mode = 'webhook';
+    formData.value.output_mode = 'full';
   } else {
     formData.value.mode = 'websocket';
     formData.value.output_mode = 'stream';

@@ -10,7 +10,7 @@ import (
 func TestValidIMPlatforms_CoversLark(t *testing.T) {
 	want := []string{
 		"wecom", "feishu", "lark", "slack", "telegram",
-		"dingtalk", "mattermost", "wechat", "qqbot",
+		"dingtalk", "mattermost", "wechat", "qqbot", "whatsapp",
 	}
 	for _, platform := range want {
 		if !validIMPlatforms[platform] {
