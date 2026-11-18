@@ -3273,6 +3273,10 @@ type installSessionService struct {
 	fx *installFixture
 }
 
+func (s *installSessionService) ScopedKnowledgeKBResolver() types.ScopedKnowledgeResolver {
+	return nil
+}
+
 func (s *installSessionService) CreateSession(_ context.Context, session *types.Session) (*types.Session, error) {
 	s.fx.record("create-session")
 	s.fx.sessionCalls = append(s.fx.sessionCalls, "CreateSession")
