@@ -2,11 +2,13 @@ package chatpipeline
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -259,10 +261,12 @@ func TestStreamReportsIncompleteAsError(t *testing.T) {
 
 	chatManage := &types.ChatManage{}
 	chatManage.SessionID = "sess-incomplete"
+	chatManage.ChatModelID = "primary"
 	chatManage.EventBus = bus
-	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	plugin := &PluginChatCompletionStream{modelService: &fallbackStreamModels{primary: model}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	require.Nil(t, plugin.OnEvent(
-		context.Background(), types.CHAT_COMPLETION_STREAM, chatManage,
+		ctx, types.CHAT_COMPLETION_STREAM, chatManage,
 		func() *PluginError { return nil },
 	))
 
@@ -349,4 +353,104 @@ func TestStreamCarriesUsageTrailerAfterFinishChunk(t *testing.T) {
 		{Content: "hel"},
 		{Content: "lo", Done: true, Usage: usage},
 	}, events)
+}
+
+type failedStreamChat struct {
+	openStreamChat
+	err error
+}
+
+func (m *failedStreamChat) ChatStream(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	return nil, m.err
+}
+
+type fallbackStreamModels struct {
+	interfaces.ModelService
+	primary, backup chat.Chat
+}
+
+func (m *fallbackStreamModels) GetChatModel(_ context.Context, id string) (chat.Chat, error) {
+	if id == "backup" {
+		return m.backup, nil
+	}
+	return m.primary, nil
+}
+
+func (m *fallbackStreamModels) GetModelByID(_ context.Context, id string) (*types.Model, error) {
+	model := &types.Model{ID: id, TenantID: 7, Type: types.ModelTypeKnowledgeQA}
+	if id == "primary" {
+		model.Parameters.FallbackChatModelID = "backup"
+	}
+	return model, nil
+}
+
+func TestStreamFallsBackBeforeOutput(t *testing.T) {
+	primaryFailure := &api.HTTPError{StatusCode: http.StatusTooManyRequests}
+	for name, primary := range map[string]chat.Chat{
+		"startup rate limit":  &failedStreamChat{err: primaryFailure},
+		"startup unavailable": &failedStreamChat{err: &api.HTTPError{StatusCode: http.StatusServiceUnavailable}},
+		"read timeout": &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+			{ResponseType: types.ResponseTypeError, Content: "timeout", Cause: context.DeadlineExceeded},
+		}},
+		"closed before output": &openStreamChat{closeStream: true},
+		"premature EOF": &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+			{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: types.FinishReasonIncomplete},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			bus := &syncEventBus{}
+			request := &types.ChatManage{}
+			request.ChatModelID = "primary"
+			request.EventBus = bus
+			models := &fallbackStreamModels{primary: primary, backup: &openStreamChat{
+				closeStream: true,
+				chunks: []types.StreamResponse{
+					{
+						ResponseType: types.ResponseTypeAnswer,
+						Content:      "backup answer",
+						Done:         true,
+						FinishReason: "stop",
+					},
+				},
+			}}
+			plugin := &PluginChatCompletionStream{modelService: models}
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+			result := plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, request, func() *PluginError { return nil })
+			require.Nil(t, result)
+			require.Eventually(t, func() bool {
+				for _, answer := range bus.finalAnswerEvents() {
+					if answer.Done {
+						return true
+					}
+				}
+				return false
+			}, time.Second, 5*time.Millisecond)
+			require.Contains(t, bus.finalAnswerContents(), "backup answer")
+		})
+	}
+}
+
+func TestStreamDoesNotFallbackOnAuthenticationFailure(t *testing.T) {
+	request := &types.ChatManage{}
+	request.ChatModelID = "primary"
+	request.EventBus = &syncEventBus{}
+	plugin := &PluginChatCompletionStream{modelService: &fallbackStreamModels{
+		primary: &failedStreamChat{err: &api.HTTPError{StatusCode: http.StatusUnauthorized}},
+	}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	require.NotNil(t, plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, request, func() *PluginError { return nil }))
+}
+
+func TestStreamDoesNotFallbackFromSharedModel(t *testing.T) {
+	request := &types.ChatManage{}
+	request.ChatModelID = "primary"
+	request.ChatModelTenantID = 8
+	request.EventBus = &syncEventBus{}
+	plugin := &PluginChatCompletionStream{modelService: &fallbackStreamModels{
+		primary: &failedStreamChat{err: &api.HTTPError{StatusCode: http.StatusServiceUnavailable}},
+	}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	require.NotNil(t, plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, request, func() *PluginError { return nil }))
 }

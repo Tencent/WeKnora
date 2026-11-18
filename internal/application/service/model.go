@@ -101,6 +101,10 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 func (s *modelService) CreateModel(ctx context.Context, model *types.Model) error {
 	logger.Infof(ctx, "Creating model: %s, type: %s, source: %s", model.Name, model.Type, model.Source)
 
+	if err := s.validateFallbackChatModel(ctx, model); err != nil {
+		return err
+	}
+
 	// Handle remote models (e.g., OpenAI, Azure)
 	if model.Source == types.ModelSourceRemote {
 		logger.Info(ctx, "Remote model detected, setting status to active")
@@ -362,6 +366,13 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		model.ManagedBy = ""
 	}
 
+	if existingModel == nil || model.Type != existingModel.Type ||
+		model.Parameters.FallbackChatModelID != existingModel.Parameters.FallbackChatModelID {
+		if err := s.validateFallbackChatModel(ctx, model); err != nil {
+			return err
+		}
+	}
+
 	// Update model in repository
 	err = s.repo.Update(ctx, model)
 	if err != nil {
@@ -373,6 +384,25 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	}
 
 	logger.Infof(ctx, "Model updated successfully: %s", model.ID)
+	return nil
+}
+
+func (s *modelService) validateFallbackChatModel(ctx context.Context, model *types.Model) error {
+	id := strings.TrimSpace(model.Parameters.FallbackChatModelID)
+	model.Parameters.FallbackChatModelID = id
+	if id == "" {
+		return nil
+	}
+	if model.IsBuiltin || model.Type != types.ModelTypeKnowledgeQA || id == model.ID {
+		return apperrors.NewBadRequestError("a workspace chat model requires a different chat model as fallback")
+	}
+	backup, err := s.repo.GetByID(ctx, types.MustTenantIDFromContext(ctx), id)
+	if err != nil {
+		return err
+	}
+	if backup == nil || backup.Type != types.ModelTypeKnowledgeQA || backup.Status != types.ModelStatusActive {
+		return apperrors.NewBadRequestError("fallback must be an available chat model")
+	}
 	return nil
 }
 

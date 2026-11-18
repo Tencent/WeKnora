@@ -134,8 +134,12 @@ type ModelParameters struct {
 	// 用途类似 Python OpenAI SDK 的 extra_headers 参数，
 	// 常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。
 	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
-	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
-	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	CustomHeaders map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
+	// FallbackChatModelID is an optional replacement for this workspace model's
+	// streaming answer when its provider fails before producing content.
+	FallbackChatModelID string `yaml:"fallback_chat_model_id,omitempty" json:"fallback_chat_model_id,omitempty"`
+	// SupportsVision indicates whether the model accepts image or multimodal input.
+	SupportsVision bool `yaml:"supports_vision" json:"supports_vision"`
 	// ContextWindow is the model's total context window in tokens and
 	// MaxOutputTokens the most it emits in one response. Both are provider
 	// facts the agent cannot discover but has to act on: the context window is

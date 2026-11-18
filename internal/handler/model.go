@@ -113,6 +113,10 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	}
 
 	if err := h.service.CreateModel(ctx, model); err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
