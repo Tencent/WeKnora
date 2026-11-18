@@ -468,6 +468,9 @@ type WikiPageRepository interface {
 	// CreateIssue inserts a new wiki page issue record.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) error
 
+	// UpdateIssue rewrites an existing issue row (duplicate-report reuse).
+	UpdateIssue(ctx context.Context, issue *types.WikiPageIssue) error
+
 	// ListIssues retrieves issues with optional filtering by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 

@@ -1608,6 +1608,23 @@ func (r *wikiPageRepository) CreateIssue(ctx context.Context, issue *types.WikiP
 	return r.db.WithContext(ctx).Create(issue).Error
 }
 
+// UpdateIssue rewrites an existing issue row for duplicate-report reuse. It
+// scopes by id and knowledge base so an issue id leaked from another KB can
+// never be rewritten.
+func (r *wikiPageRepository) UpdateIssue(ctx context.Context, issue *types.WikiPageIssue) error {
+	result := r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
+		Where("id = ? AND knowledge_base_id = ?", issue.ID, issue.KnowledgeBaseID).
+		Select("description", "suspected_knowledge_ids", "reported_by").
+		Updates(issue)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrWikiIssueNotFound
+	}
+	return nil
+}
+
 func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error) {
 	query := r.db.WithContext(ctx).Where("knowledge_base_id = ?", kbID)
 	if slug != "" {

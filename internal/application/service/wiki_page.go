@@ -1699,9 +1699,33 @@ func removeString(slice []string, s string) types.StringArray {
 }
 
 // CreateIssue logs a new issue for a wiki page
+// CreateIssue logs a new issue for a wiki page, reusing an existing pending
+// report for the same page and issue type instead of stacking duplicates:
+// independent QA sessions flagging the same stale fact produce one ticket,
+// while a different page, a different issue type, or a report raised after
+// the previous one was resolved/ignored still creates its own row (#5652).
 func (s *wikiPageService) CreateIssue(ctx context.Context, issue *types.WikiPageIssue) (*types.WikiPageIssue, error) {
 	if issue.ID == "" {
 		issue.ID = uuid.New().String()
+	}
+	if issue.Status == "" {
+		issue.Status = "pending"
+	}
+	existing, err := s.repo.ListIssues(ctx, issue.KnowledgeBaseID, issue.Slug, "pending")
+	if err != nil {
+		return nil, fmt.Errorf("list wiki page issues for duplicate check: %w", err)
+	}
+	for _, candidate := range existing {
+		if candidate.IssueType != issue.IssueType {
+			continue
+		}
+		candidate.Description = issue.Description
+		candidate.SuspectedKnowledgeIDs = issue.SuspectedKnowledgeIDs
+		candidate.ReportedBy = issue.ReportedBy
+		if err := s.repo.UpdateIssue(ctx, candidate); err != nil {
+			return nil, fmt.Errorf("update duplicate wiki page issue: %w", err)
+		}
+		return candidate, nil
 	}
 	if err := s.repo.CreateIssue(ctx, issue); err != nil {
 		return nil, fmt.Errorf("create wiki page issue: %w", err)
