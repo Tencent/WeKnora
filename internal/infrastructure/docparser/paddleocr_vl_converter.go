@@ -30,6 +30,9 @@ type PaddleOCRVLReader struct {
 	timeout  time.Duration
 	useSeal  bool
 	useChart bool
+	// headers are extra HTTP headers for deployments behind an authenticating
+	// gateway (see paddleocr_vl_headers).
+	headers map[string]string
 }
 
 // NewPaddleOCRVLReader creates a reader from ParserEngineOverrides.
@@ -39,6 +42,7 @@ func NewPaddleOCRVLReader(overrides map[string]string) *PaddleOCRVLReader {
 		endpoint: strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
 		useSeal:  parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
 		useChart: parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
+		headers:  paddleOCRVLHeadersFromOverrides(overrides),
 	}
 }
 
@@ -157,6 +161,7 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 		return "", nil, nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	applyPaddleOCRVLHeaders(httpReq, c.headers)
 
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 		Timeout:      c.timeout,
@@ -266,7 +271,10 @@ func (c *PaddleOCRVLReader) processImages(
 }
 
 // PingPaddleOCRVL checks whether a self-hosted PaddleOCR-VL service is reachable.
-func PingPaddleOCRVL(endpoint string) (bool, string) {
+// headers must match the ones used for parsing, otherwise a gateway in front of
+// the service would answer the probe with 401 while parsing works (or the
+// reverse).
+func PingPaddleOCRVL(endpoint string, headers map[string]string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
 		return false, "未配置 PaddleOCR-VL 端点"
@@ -280,11 +288,19 @@ func PingPaddleOCRVL(endpoint string) (bool, string) {
 	})
 	// The pipeline only exposes POST /layout-parsing; an empty GET should still
 	// produce a routed HTTP response (e.g. 404/405) when the service is up.
-	resp, err := client.Get(endpoint + "/layout-parsing")
+	req, err := http.NewRequest(http.MethodGet, endpoint+"/layout-parsing", nil)
+	if err != nil {
+		return false, fmt.Sprintf("PaddleOCR-VL 请求构造失败: %v", err)
+	}
+	applyPaddleOCRVLHeaders(req, headers)
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Sprintf("PaddleOCR-VL 服务不可达: %v", err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return false, fmt.Sprintf("PaddleOCR-VL 服务返回状态 %d（检查网关请求头）", resp.StatusCode)
+	}
 	if resp.StatusCode >= 500 {
 		return false, fmt.Sprintf("PaddleOCR-VL 服务返回状态 %d", resp.StatusCode)
 	}

@@ -39,6 +39,15 @@ func ParserEngineConfigForResponse(cfg *ParserEngineConfig, maskSecrets bool) *P
 	if out.PaddleOCRVLCloudToken != "" {
 		out.PaddleOCRVLCloudToken = RedactedSecretPlaceholder
 	}
+	// Header values may carry gateway credentials, so they are masked as a
+	// class the same way sandbox env vars and injected headers are.
+	if len(out.PaddleOCRVLHeaders) > 0 {
+		headers := make(map[string]string, len(out.PaddleOCRVLHeaders))
+		for name := range out.PaddleOCRVLHeaders {
+			headers[name] = RedactedSecretPlaceholder
+		}
+		out.PaddleOCRVLHeaders = headers
+	}
 	return &out
 }
 
@@ -172,6 +181,10 @@ func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *P
 	out.MinerUAPIKey = PreserveIfRedacted(out.MinerUAPIKey, prev.MinerUAPIKey)
 	out.MinerUServerAPIKey = PreserveIfRedacted(out.MinerUServerAPIKey, prev.MinerUServerAPIKey)
 	out.PaddleOCRVLCloudToken = PreserveIfRedacted(out.PaddleOCRVLCloudToken, prev.PaddleOCRVLCloudToken)
+	// Only keys present in incoming survive, so deleting a header row in the UI
+	// actually removes it; the redacted placeholder keeps the stored value.
+	out.PaddleOCRVLHeaders = mergeParserHeaderSecrets(out.PaddleOCRVLHeaders, prev.PaddleOCRVLHeaders)
+	out.PaddleOCRVLHeaders = NormalizePaddleOCRVLHeaders(out.PaddleOCRVLHeaders)
 	// Chat attachment parser rules are configured per agent; preserve any legacy
 	// tenant-level rules when the settings UI omits this field on engine updates.
 	if incoming.ChatParserEngineRules == nil && existing != nil {

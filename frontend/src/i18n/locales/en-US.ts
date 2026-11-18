@@ -2436,6 +2436,11 @@ export default {
       mineruLegacySectionHint: 'MinerU 4.0 removed these request parameters, so they are ignored by 4.0+ servers; configure the VLM server on the MinerU side instead.',
       paddleocrVlEndpointPlaceholder: 'e.g. http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'Base URL of the full PaddleOCR-VL pipeline service; no /layout-parsing suffix needed',
+      gatewayHeadersLabel: 'Gateway headers',
+      gatewayHeadersHint: 'Extra HTTP headers sent with every parse request, e.g. for a gateway in front of the self-hosted service. Values are shown masked and kept unless you replace them.',
+      gatewayHeadersAdd: 'Add header',
+      gatewayHeadersKeyPlaceholder: 'Header name, e.g. X-API-Key',
+      gatewayHeadersValuePlaceholder: 'Header value',
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token'
     },
     storageBackend: {

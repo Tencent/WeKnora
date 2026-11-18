@@ -347,6 +347,10 @@ type ParserEngineConfig struct {
 	PaddleOCRVLEndpoint            string `json:"paddleocr_vl_endpoint,omitempty"` // e.g. http://paddleocr-vl:8080
 	PaddleOCRVLUseSealRecognition  *bool  `json:"paddleocr_vl_use_seal_recognition,omitempty"`
 	PaddleOCRVLUseChartRecognition *bool  `json:"paddleocr_vl_use_chart_recognition,omitempty"`
+	// PaddleOCRVLHeaders are extra HTTP headers sent with every
+	// /layout-parsing request, for deployments behind an authenticating
+	// gateway. Values may carry credentials, so they are redacted in responses.
+	PaddleOCRVLHeaders map[string]string `json:"paddleocr_vl_headers,omitempty"`
 
 	// PaddleOCR-VL AI Studio cloud API.
 	PaddleOCRVLCloudToken               string `json:"paddleocr_vl_cloud_token,omitempty"`
@@ -476,6 +480,13 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.PaddleOCRVLUseChartRecognition != nil {
 		m["paddleocr_vl_use_chart_recognition"] = fmt.Sprintf("%v", *c.PaddleOCRVLUseChartRecognition)
+	}
+	// ParserEngineOverrides is map[string]string, so the header set travels as
+	// a JSON object under one key.
+	if headers := NormalizePaddleOCRVLHeaders(c.PaddleOCRVLHeaders); len(headers) > 0 {
+		if encoded, err := json.Marshal(headers); err == nil {
+			m["paddleocr_vl_headers"] = string(encoded)
+		}
 	}
 	if c.PaddleOCRVLCloudToken != "" {
 		m["paddleocr_vl_cloud_token"] = c.PaddleOCRVLCloudToken
