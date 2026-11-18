@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -16,15 +17,16 @@ import (
 // Transfer state lives with the document, so queue retries do not depend on
 // an expiring progress cache. It is server metadata, never custom metadata.
 type knowledgeTransferState struct {
-	TaskID       string                     `json:"task_id"`
-	Operation    access.KBTransferOperation `json:"operation"`
-	SourceKB     string                     `json:"source_kb"`
-	TargetKB     string                     `json:"target_kb"`
-	SourceID     string                     `json:"source_id"`
-	Mode         string                     `json:"mode,omitempty"`
-	WikiChunkIDs []string                   `json:"wiki_chunk_ids,omitempty"`
-	WikiSummary  string                     `json:"wiki_summary,omitempty"`
-	Phase        string                     `json:"phase"`
+	TaskID             string                     `json:"task_id"`
+	Operation          access.KBTransferOperation `json:"operation"`
+	SourceKB           string                     `json:"source_kb"`
+	TargetKB           string                     `json:"target_kb"`
+	SourceID           string                     `json:"source_id"`
+	Mode               string                     `json:"mode,omitempty"`
+	WikiChunkIDs       []string                   `json:"wiki_chunk_ids,omitempty"`
+	WikiSummary        string                     `json:"wiki_summary,omitempty"`
+	Phase              string                     `json:"phase"`
+	DocumentGeneration string                     `json:"document_generation,omitempty"`
 }
 
 func transferState(k *types.Knowledge) (*knowledgeTransferState, error) {
@@ -461,6 +463,12 @@ func (s *knowledgeService) markMoveItemFailed(
 	state, err := transferState(row)
 	if err != nil || !matchesTransfer(ctx, state, source, target, access.KBTransferMove, id, mode) {
 		return
+	}
+	if errors.Is(taskErr, types.ErrDocumentGenerationSuperseded) {
+		return
+	}
+	if state.DocumentGeneration != "" {
+		ctx = types.WithDocumentGeneration(ctx, row.TenantID, row.ID, state.DocumentGeneration)
 	}
 	sourceFailed := row.KnowledgeBaseID == source.ID && state.Phase == "moving" &&
 		row.ParseStatus == types.ParseStatusProcessing

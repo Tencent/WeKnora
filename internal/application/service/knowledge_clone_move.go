@@ -1299,6 +1299,22 @@ func (s *knowledgeService) moveOneKnowledge(
 		return err
 	}
 	if matchesTransfer(ctx, state, sourceKB, targetKB, access.KBTransferMove, knowledgeID, mode) {
+		if state.DocumentGeneration != "" {
+			ctx = types.WithDocumentGeneration(ctx, knowledge.TenantID, knowledge.ID, state.DocumentGeneration)
+		} else if mode == "reparse" && state.Phase == "moving" && !knowledge.IsManual() {
+			before := *knowledge
+			ctx, err = s.beginDocumentGeneration(ctx, knowledge, targetKB.ID)
+			if err != nil {
+				return err
+			}
+			state.DocumentGeneration, _ = types.DocumentGenerationFromContext(ctx, knowledge.TenantID, knowledge.ID)
+			if err := setTransferState(knowledge, *state); err != nil {
+				return err
+			}
+			if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, knowledge); err != nil {
+				return err
+			}
+		}
 		if state.Phase == "done" || state.Phase == "reparse_pending" {
 			if err := s.cleanupMovedSourceWiki(ctx, knowledge, sourceKB, targetKB); err != nil {
 				return err
@@ -1333,6 +1349,13 @@ func (s *knowledgeService) moveOneKnowledge(
 			state.WikiSummary = knowledge.Description
 		}
 		before := *knowledge
+		if mode == "reparse" {
+			ctx, err = s.beginDocumentGeneration(ctx, knowledge, targetKB.ID)
+			if err != nil {
+				return err
+			}
+			state.DocumentGeneration, _ = types.DocumentGenerationFromContext(ctx, knowledge.TenantID, knowledge.ID)
+		}
 		knowledge.ParseStatus = types.ParseStatusProcessing
 		if err := setTransferState(knowledge, *state); err != nil {
 			return err
@@ -1469,6 +1492,11 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, access.KBTransferMove); err != nil {
 		return err
 	}
+	var generationErr error
+	ctx, generationErr = s.beginDocumentGeneration(ctx, knowledge, targetKB.ID)
+	if generationErr != nil {
+		return generationErr
+	}
 	before := *knowledge
 	cleanup := *knowledge
 	cleanup.StorageSize = 0
@@ -1491,6 +1519,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 		return fmt.Errorf("move state unavailable")
 	}
 	state.Phase = "reparse_pending"
+	state.DocumentGeneration, _ = types.DocumentGenerationFromContext(ctx, knowledge.TenantID, knowledge.ID)
 	if err := setTransferState(knowledge, *state); err != nil {
 		return err
 	}
@@ -1510,6 +1539,31 @@ func (s *knowledgeService) enqueueMovedKnowledge(
 ) error {
 	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, access.KBTransferMove); err != nil {
 		return err
+	}
+	state, stateErr := transferState(knowledge)
+	if stateErr != nil {
+		return stateErr
+	}
+	if state != nil && state.DocumentGeneration != "" {
+		ctx = types.WithDocumentGeneration(ctx, knowledge.TenantID, knowledge.ID, state.DocumentGeneration)
+	} else if !knowledge.IsManual() {
+		// A transfer persisted by an older binary has no token. Advance once and
+		// persist it with the same transfer CAS before any reset or enqueue.
+		before := *knowledge
+		var err error
+		ctx, err = s.beginDocumentGeneration(ctx, knowledge, targetKB.ID)
+		if err != nil {
+			return err
+		}
+		if state != nil {
+			state.DocumentGeneration, _ = types.DocumentGenerationFromContext(ctx, knowledge.TenantID, knowledge.ID)
+			if err := setTransferState(knowledge, *state); err != nil {
+				return err
+			}
+			if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, knowledge); err != nil {
+				return err
+			}
+		}
 	}
 	if knowledge.ParseStatus == types.ParseStatusFailed {
 		before := *knowledge
@@ -1581,7 +1635,7 @@ func (s *knowledgeService) enqueueMovedKnowledge(
 				asynq.TaskID(taskID),
 				asynq.Retention(7*24*time.Hour),
 			)...)
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocument(ctx, task)
 		if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) && !errors.Is(err, asynq.ErrDuplicateTask) {
 			return fmt.Errorf("failed to enqueue document process task: %w", err)
 		}

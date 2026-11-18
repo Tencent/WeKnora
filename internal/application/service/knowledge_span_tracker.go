@@ -255,58 +255,50 @@ func (t *spanTracker) takeStart(spanID string) (time.Time, bool) {
 }
 
 func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTraceID string) (*Span, int, error) {
-	attempt, err := t.repo.NextAttempt(ctx, knowledgeID)
-	if err != nil {
-		return nil, 0, err
-	}
-	// A new attempt supersedes every earlier one: close whatever the previous
-	// attempt left open before opening the new root. A failure path that marks
-	// the row terminal without finalizing its attempt leaves a "running" root
-	// behind; housekeeping's stall sweep never revisits a terminal row, so
-	// without this the old run would appear to progress alongside the new one
-	// and would never be closed.
-	if attempt > 1 {
-		if n, err := t.repo.CancelOpenSpansBeforeAttempt(ctx, knowledgeID, attempt,
-			"ATTEMPT_SUPERSEDED", "superseded by a newer parse attempt"); err != nil {
-			logger.Warnf(ctx, "[SpanTracker] cancel superseded spans failed kid=%s attempt=%d: %v",
-				knowledgeID, attempt, err)
-		} else if n > 0 {
-			logger.Infof(ctx,
-				"[SpanTracker] cancelled %d superseded open span(s) for kid=%s before attempt %d",
-				n, knowledgeID, attempt)
-		}
-	}
 	now := time.Now()
 	rootID := newSpanID()
 	meta := types.JSONMap{}
 	if langfuseTraceID != "" {
-		// The frontend renders a "open in Langfuse" link from this.
 		meta["langfuse_trace_id"] = langfuseTraceID
 	}
 	row := &types.KnowledgeProcessingSpan{
-		KnowledgeID: knowledgeID,
-		Attempt:     attempt,
-		SpanID:      rootID,
-		Name:        "knowledge_processing",
-		Kind:        types.SpanKindRoot,
-		Status:      types.SpanStatusRunning,
-		Metadata:    meta,
-		StartedAt:   &now,
+		KnowledgeID: knowledgeID, SpanID: rootID, Name: "knowledge_processing",
+		Kind: types.SpanKindRoot, Status: types.SpanStatusRunning, Metadata: meta, StartedAt: &now,
 	}
-	if err := t.repo.Upsert(ctx, row); err != nil {
+	var attempt int
+	var err error
+	if _, _, scoped := types.DocumentGenerationOwnerFromContext(ctx, knowledgeID); scoped {
+		generationRepo, ok := t.repo.(repository.DocumentGenerationSpanRepository)
+		if !ok {
+			return nil, 0, fmt.Errorf("document generation span repository unavailable")
+		}
+		// Allocation, cancellation of older roots and insertion share the
+		// generation lock; a delayed producer cannot create a stray newer root.
+		attempt, err = generationRepo.OpenDocumentGenerationAttempt(ctx, row)
+	} else {
+		attempt, err = t.repo.NextAttempt(ctx, knowledgeID)
+		if err == nil {
+			if attempt > 1 {
+				if _, cancelErr := t.repo.CancelOpenSpansBeforeAttempt(ctx, knowledgeID, attempt,
+					"ATTEMPT_SUPERSEDED", "superseded by a newer parse attempt"); cancelErr != nil {
+					logger.Warnf(ctx, "[SpanTracker] cancel superseded spans failed kid=%s attempt=%d: %v",
+						knowledgeID, attempt, cancelErr)
+				}
+			}
+			row.Attempt = attempt
+			err = t.repo.Upsert(ctx, row)
+		}
+	}
+	if err != nil {
 		logger.Warnf(ctx, "[SpanTracker] OpenAttempt failed kid=%s: %v", knowledgeID, err)
 		return nil, attempt, err
 	}
 	t.recordStart(rootID, now)
 	t.touchKnowledgeHeartbeat(ctx, knowledgeID, types.SpanKindRoot)
 	return &Span{
-		KnowledgeID: knowledgeID,
-		Attempt:     attempt,
-		SpanID:      rootID,
-		Name:        "knowledge_processing",
-		Kind:        types.SpanKindRoot,
-		Status:      types.SpanStatusRunning,
-		StartedAt:   now,
+		KnowledgeID: knowledgeID, Attempt: attempt, SpanID: rootID,
+		Name: "knowledge_processing", Kind: types.SpanKindRoot,
+		Status: types.SpanStatusRunning, StartedAt: now,
 	}, attempt, nil
 }
 

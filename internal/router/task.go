@@ -267,7 +267,11 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	mux.HandleFunc(types.TypeDataTableSummary, params.DataTableSummary.Handle)
 
 	// Register document processing handler
-	mux.HandleFunc(types.TypeDocumentProcess, params.KnowledgeService.ProcessDocument)
+	legacyDocument, dispatchDocument := documentTaskHandlers(params.KnowledgeService)
+	mux.HandleFunc(types.TypeDocumentProcess, legacyDocument)
+	if dispatchDocument != nil {
+		mux.HandleFunc(types.TypeDocumentDispatch, dispatchDocument)
+	}
 	mux.HandleFunc(types.TypeTemporaryDocumentProcess, params.TemporaryDocument.Process)
 
 	// Register manual knowledge processing handler (cleanup + re-indexing)
@@ -395,6 +399,18 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 	return func(ctx context.Context, t *asynq.Task, taskErr error) {
 		if t == nil || taskErr == nil || errors.Is(taskErr, asynq.SkipRetry) {
 			return
+		}
+		if t.Type() == types.TypeDocumentProcess {
+			if handler, ok := ks.(legacyDocumentFailureHandler); ok {
+				handled, err := handler.FailLegacyDocument(ctx, t, taskErr)
+				if err != nil {
+					logger.Warnf(ctx, "generation-aware document admission failure could not be settled: %v", err)
+					return
+				}
+				if handled {
+					return
+				}
+			}
 		}
 		if t.Type() == types.TypeKnowledgeListDelete {
 			markKnowledgeListDeleteFailed(ctx, repo, t, taskErr)

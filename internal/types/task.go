@@ -62,7 +62,7 @@ type QueueDefinition struct {
 
 var queueDefinitions = []QueueDefinition{
 	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, SharedWeight: 3, TaskTypes: []string{
-		TypeDocumentProcess, TypeManualProcess,
+		TypeDocumentProcess, TypeDocumentDispatch, TypeManualProcess,
 	}},
 	// Interactive chat attachment parsing: higher core weight than the default
 	// queue so a large KB import cannot make chat uploads queue behind it.
@@ -233,6 +233,7 @@ type WorkerServerStat struct {
 
 const (
 	TypeChunkExtract             = "chunk:extract"
+	TypeDocumentDispatch         = "document:dispatch"
 	TypeDocumentProcess          = "document:process"           // 文档处理任务
 	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
 	TypeQuestionGeneration       = "question:generation"        // 问题生成任务

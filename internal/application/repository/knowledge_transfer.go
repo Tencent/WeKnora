@@ -23,6 +23,20 @@ func (r *knowledgeRepository) UpdateKnowledgeForTransfer(ctx context.Context, be
 	after.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 	var storedUpdatedAt time.Time
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if token, ok := types.DocumentGenerationFromContext(ctx, before.TenantID, before.ID); ok {
+			if err := tx.Exec(`UPDATE document_scheduler_state
+ SET last_tenant_id=last_tenant_id WHERE id=1`).Error; err != nil {
+				return err
+			}
+			generation, err := matchDocumentGeneration(tx, before.TenantID, before.ID, token)
+			if err != nil {
+				return err
+			}
+			if generation == nil || (after.KnowledgeBaseID != before.KnowledgeBaseID &&
+				after.KnowledgeBaseID != generation.ScopeID) {
+				return types.ErrDocumentGenerationSuperseded
+			}
+		}
 		result := tx.Model(&types.Knowledge{}).
 			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND parse_status = ? AND "+
 				"updated_at = ?",
