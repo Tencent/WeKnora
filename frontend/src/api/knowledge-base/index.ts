@@ -35,6 +35,7 @@ export async function listKnowledgeBaseActivity(
 export function listKnowledgeBases(params?: {
   agent_id?: string;
   agent_source_tenant_id?: string;
+  view?: 'list';
   /**
    * Optional creator filter. Server-side semantics:
    *   - "mine"   → only KBs whose creator_id matches the caller
@@ -49,6 +50,7 @@ export function listKnowledgeBases(params?: {
   if (params?.agent_id) query.set('agent_id', params.agent_id);
   if (params?.agent_source_tenant_id) query.set('agent_source_tenant_id', params.agent_source_tenant_id);
   if (params?.creator && params.creator !== 'all') query.set('creator', params.creator);
+  if (params?.view) query.set('view', params.view);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
 }

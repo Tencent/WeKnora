@@ -26,7 +26,7 @@
       <ResourceListToolbar v-if="!authStore.isLiteMode" v-model="spaceSelection" v-model:query="keyword" :count-all="allKnowledgeBases"
       :count-mine="kbs.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="kbFavoritesCount"
       :count-recents="kbRecentsCount" />
-      <div class="kb-list-main">
+      <div ref="kbListMain" class="kb-list-main">
         <EmptyState v-if="keyword.trim() && !(loading || spaceKbsLoading) && visibleResultCount === 0" icon="search"
           :title="$t('common.noResult')">
           <t-button variant="outline" @click="keyword = ''">{{ $t('common.clear') }}</t-button>
@@ -67,7 +67,7 @@
           class="kb-card-wrap">
           <!-- 置顶分组标题 -->
           <div
-            v-if="filteredKnowledgeBases[0] && filteredKnowledgeBases[0].isMine && filteredKnowledgeBases[0].is_pinned"
+            v-if="pagedKnowledgeBases[0] && pagedKnowledgeBases[0].isMine && pagedKnowledgeBases[0].is_pinned"
             class="kb-section-header kb-section-header-pinned" role="button" tabindex="0"
             :aria-expanded="!isKbSectionCollapsed('pinned')" @click="toggleKbSection('pinned')"
             @keydown.enter.prevent="toggleKbSection('pinned')"
@@ -82,13 +82,13 @@
                「已置顶」分组由顶部 header 接管。其余分段（我创建 / 本空间 ·
                仅查看 / 共享给我）各自打自己的标题；原本的「其他」过渡标题
                在 per-user 置顶模型下已无意义，删除以免和具体子段标题叠加。 -->
-          <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
+          <template v-for="(kb, index) in pagedKnowledgeBases" :key="kb.id">
             <!-- Lite 无需区分创建者；其他版本在第一张非置顶的我创建卡片前显示分组。 -->
             <div v-if="!authStore.isLiteMode && kb.isMine
               && isMyKb(kb as KB)
               && !kb.is_pinned
               && (index === 0
-                || (filteredKnowledgeBases[index - 1] as any).is_pinned)" class="kb-section-header" role="button"
+                || (pagedKnowledgeBases[index - 1] as any).is_pinned)" class="kb-section-header" role="button"
               tabindex="0" :aria-expanded="!isKbSectionCollapsed('mine')" @click="toggleKbSection('mine')"
               @keydown.enter.prevent="toggleKbSection('mine')"
               @keydown.space.prevent="toggleKbSection('mine')">
@@ -106,9 +106,9 @@
               && !isMyKb(kb as KB)
               && !kb.is_pinned
               && (index === 0
-                || !filteredKnowledgeBases[index - 1].isMine
-                || isMyKb(filteredKnowledgeBases[index - 1] as KB)
-                || (filteredKnowledgeBases[index - 1] as any).is_pinned)" class="kb-section-header" role="button"
+                || !pagedKnowledgeBases[index - 1].isMine
+                || isMyKb(pagedKnowledgeBases[index - 1] as KB)
+                || (pagedKnowledgeBases[index - 1] as any).is_pinned)" class="kb-section-header" role="button"
               tabindex="0" :aria-expanded="!isKbSectionCollapsed('tenantOthers')" @click="toggleKbSection('tenantOthers')"
               @keydown.enter.prevent="toggleKbSection('tenantOthers')"
               @keydown.space.prevent="toggleKbSection('tenantOthers')">
@@ -121,7 +121,7 @@
             <!-- 共享给我 · 可编辑：从「我的（含同事）」首次过渡到共享 + 可编辑 -->
             <div v-if="!kb.isMine
               && isSharedKbEditable((kb as any).permission)
-              && (index === 0 || filteredKnowledgeBases[index - 1].isMine)" class="kb-section-header" role="button"
+              && (index === 0 || pagedKnowledgeBases[index - 1].isMine)" class="kb-section-header" role="button"
               tabindex="0" :aria-expanded="!isKbSectionCollapsed('sharedEditable')" @click="toggleKbSection('sharedEditable')"
               @keydown.enter.prevent="toggleKbSection('sharedEditable')"
               @keydown.space.prevent="toggleKbSection('sharedEditable')">
@@ -136,8 +136,8 @@
             <div v-if="!kb.isMine
               && !isSharedKbEditable((kb as any).permission)
               && (index === 0
-                || filteredKnowledgeBases[index - 1].isMine
-                || isSharedKbEditable((filteredKnowledgeBases[index - 1] as any).permission))"
+                || pagedKnowledgeBases[index - 1].isMine
+                || isSharedKbEditable((pagedKnowledgeBases[index - 1] as any).permission))"
               class="kb-section-header" role="button" tabindex="0" :aria-expanded="!isKbSectionCollapsed('sharedReadonly')" @click="toggleKbSection('sharedReadonly')"
               @keydown.enter.prevent="toggleKbSection('sharedReadonly')"
               @keydown.space.prevent="toggleKbSection('sharedReadonly')">
@@ -342,7 +342,7 @@
 
         <div v-if="spaceSelection === 'mine' && sortedMineKbs.length > 0" class="kb-card-wrap">
           <!-- 置顶分组标题 -->
-          <div v-if="sortedMineKbs[0] && sortedMineKbs[0].is_pinned" class="kb-section-header kb-section-header-pinned"
+          <div v-if="pagedMineKbs[0] && pagedMineKbs[0].is_pinned" class="kb-section-header kb-section-header-pinned"
             role="button" tabindex="0" :aria-expanded="!isKbSectionCollapsed('pinned')" @click="toggleKbSection('pinned')"
             @keydown.enter.prevent="toggleKbSection('pinned')"
             @keydown.space.prevent="toggleKbSection('pinned')">
@@ -354,11 +354,11 @@
           </div>
           <!-- 我的知识库。「已置顶」由顶部 header 接管；其余各分段各打各的
                标题——见「全部」tab 同处注释。 -->
-          <template v-for="(kb, index) in sortedMineKbs" :key="kb.id">
+          <template v-for="(kb, index) in pagedMineKbs" :key="kb.id">
             <!-- Lite 无需区分创建者；其他版本与「全部」视图保持一致。 -->
             <div v-if="!authStore.isLiteMode && isMyKb(kb)
               && !kb.is_pinned
-              && (index === 0 || sortedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button"
+              && (index === 0 || pagedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button"
               tabindex="0" :aria-expanded="!isKbSectionCollapsed('mine')" @click="toggleKbSection('mine')"
               @keydown.enter.prevent="toggleKbSection('mine')"
               @keydown.space.prevent="toggleKbSection('mine')">
@@ -373,8 +373,8 @@
             <div v-if="!isMyKb(kb)
               && !kb.is_pinned
               && (index === 0
-                || isMyKb(sortedMineKbs[index - 1])
-                || sortedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button" tabindex="0"
+                || isMyKb(pagedMineKbs[index - 1])
+                || pagedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button" tabindex="0"
               :aria-expanded="!isKbSectionCollapsed('tenantOthers')" @click="toggleKbSection('tenantOthers')"
               @keydown.enter.prevent="toggleKbSection('tenantOthers')"
               @keydown.space.prevent="toggleKbSection('tenantOthers')">
@@ -502,7 +502,7 @@
           <t-loading size="medium" text="" />
         </div>
         <div v-else-if="spaceSelectionOrgId && sortedSpaceKbsList.length > 0" class="kb-card-wrap">
-          <template v-for="(shared, index) in sortedSpaceKbsList"
+          <template v-for="(shared, index) in pagedSpaceKbs"
             :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)">
             <!-- 我共享的：本空间下我自己创建并共享进来的条目，只在第一条 is_mine 上挂标题 -->
             <div v-if="shared.is_mine && index === 0" class="kb-section-header"
@@ -518,7 +518,7 @@
             <!-- 共享给我 · 可编辑：从「我的」首次进入「共享 + 可编辑」 -->
             <div v-if="!shared.is_mine
               && isSharedKbEditable(shared.permission)
-              && (index === 0 || sortedSpaceKbsList[index - 1].is_mine)" class="kb-section-header"
+              && (index === 0 || pagedSpaceKbs[index - 1].is_mine)" class="kb-section-header"
               role="button" tabindex="0" :aria-expanded="!isKbSectionCollapsed('sharedEditable')" @click="toggleKbSection('sharedEditable')"
               @keydown.enter.prevent="toggleKbSection('sharedEditable')"
               @keydown.space.prevent="toggleKbSection('sharedEditable')">
@@ -533,8 +533,8 @@
             <div v-if="!shared.is_mine
               && !isSharedKbEditable(shared.permission)
               && (index === 0
-                || sortedSpaceKbsList[index - 1].is_mine
-                || isSharedKbEditable(sortedSpaceKbsList[index - 1].permission))" class="kb-section-header"
+                || pagedSpaceKbs[index - 1].is_mine
+                || isSharedKbEditable(pagedSpaceKbs[index - 1].permission))" class="kb-section-header"
               role="button" tabindex="0" :aria-expanded="!isKbSectionCollapsed('sharedReadonly')" @click="toggleKbSection('sharedReadonly')"
               @keydown.enter.prevent="toggleKbSection('sharedReadonly')"
               @keydown.space.prevent="toggleKbSection('sharedReadonly')">
@@ -624,6 +624,11 @@
             {{ $t('knowledgeList.create') }}
           </t-button>
         </EmptyState>
+
+        <div v-if="visibleResultCount > KB_CARD_PAGE_SIZE" class="kb-list-pagination">
+          <t-pagination :current="cardPage" :total="visibleResultCount" :page-size="KB_CARD_PAGE_SIZE"
+            :show-page-size="false" :show-jumper="false" @change="onCardPageChange" />
+        </div>
 
         <!-- 空间下知识库空状态 -->
         <EmptyState v-if="!keyword.trim() && spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" :title="$t('knowledgeList.empty.sharedTitle')"
@@ -823,6 +828,8 @@ const sharedKnowledgeBaseSortAccessors: ResourceSortAccessors<OrganizationShared
 
 const kbs = ref<KB[]>([])
 const loading = ref(false)
+const kbListMain = ref<HTMLElement | null>(null)
+let listRequestVersion = 0
 const confirmDelete = useConfirmDelete()
 const openKbMenuId = ref<string | null>(null)
 const highlightedKbId = ref<string | null>(null)
@@ -1138,16 +1145,22 @@ const applyKbListData = (data: any[]) => {
 }
 
 const fetchList = (force = false) => {
+  const requestVersion = ++listRequestVersion
   loading.value = true
   // The creator filter only applies to the caller's own tenant KBs (the
   // first call). Shared KBs are inherently "not mine" so we don't filter
   // them server-side; the segmented control is also hidden whenever the
   // user is browsing the shared / per-space scopes.
   return Promise.all([
-    chatResources.fetchKnowledgeBasesForList({ creator: creatorFilter.value }, force).then(applyKbListData),
+    chatResources.fetchKnowledgeBasesForList({ creator: creatorFilter.value }, force).then(data => {
+      if (requestVersion === listRequestVersion) applyKbListData(data)
+    }),
     orgStore.fetchSharedKnowledgeBases({ force }),
     orgStore.fetchOrganizations({ force }),
-  ]).finally(() => { loading.value = false }).then(() => {
+  ]).finally(() => {
+    if (requestVersion === listRequestVersion) loading.value = false
+  }).then(() => {
+    if (requestVersion !== listRequestVersion) return
     // 各空间知识库数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.knowledge_bases?.by_organization
     if (counts) spaceCountByOrg.value = { ...counts }
@@ -1185,7 +1198,7 @@ watch(spaceSelection, (val) => {
 // than filtering in-memory so the server stays the single source of truth
 // (and we don't need to worry about stale share_count or pagination later).
 watch(creatorFilter, () => {
-  fetchList(true)
+  fetchList()
 })
 
 // Document and FAQ changes move the counts on the cards. Deletes and moves
@@ -1543,6 +1556,11 @@ const handleKBEditorSuccess = (kbId: string) => {
 
 // 触发高亮闪烁效果
 const triggerHighlightFlash = (kbId: string) => {
+  const index = activeCardList.value.findIndex(item =>
+    ('knowledge_base' in item ? item.knowledge_base?.id : item.id) === kbId,
+  )
+  if (index >= 0) cardPage.value = Math.floor(index / KB_CARD_PAGE_SIZE) + 1
+  highlightedCardRef.value = null
   highlightedKbId.value = kbId
   nextTick(() => {
     if (highlightedCardRef.value) {
@@ -1573,7 +1591,30 @@ const handleUploadFinishedEvent = (event: Event) => {
     uploadRefreshTimer = null
   }, 800)
 }
-const visibleResultCount = computed(() => spaceSelection.value === 'mine' ? sortedMineKbs.value.length : spaceSelectionOrgId.value ? sortedSpaceKbsList.value.length : filteredKnowledgeBases.value.length)
+const KB_CARD_PAGE_SIZE = 50
+const cardPage = ref(1)
+const activeCardList = computed(() => {
+  if (spaceSelection.value === 'mine') return sortedMineKbs.value
+  if (spaceSelectionOrgId.value) return sortedSpaceKbsList.value
+  return filteredKnowledgeBases.value
+})
+const visibleResultCount = computed(() => activeCardList.value.length)
+const lastCardPage = computed(() => Math.max(1, Math.ceil(visibleResultCount.value / KB_CARD_PAGE_SIZE)))
+const cardPageOffset = computed(() => (Math.min(cardPage.value, lastCardPage.value) - 1) * KB_CARD_PAGE_SIZE)
+function pageOfCards<T>(items: T[]): T[] {
+  return items.slice(cardPageOffset.value, cardPageOffset.value + KB_CARD_PAGE_SIZE)
+}
+const pagedKnowledgeBases = computed(() => pageOfCards(filteredKnowledgeBases.value))
+const pagedMineKbs = computed(() => pageOfCards(sortedMineKbs.value))
+const pagedSpaceKbs = computed(() => pageOfCards(sortedSpaceKbsList.value))
+
+watch([spaceSelection, creatorFilter, keyword, selectedResourceSort], () => { cardPage.value = 1 })
+watch(lastCardPage, page => { cardPage.value = Math.min(cardPage.value, page) })
+function onCardPageChange({ current }: { current: number }) {
+  cardPage.value = current
+  kbListMain.value?.scrollIntoView?.({ block: 'start' })
+}
+
 // A new search reveals matching rows even if their group was previously collapsed.
 watch(keyword, () => { collapsedKbSections.value = new Set() })
 </script>
@@ -1625,6 +1666,12 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
 }
 
 .kb-list-main { .resource-list-main(); }
+
+.kb-list-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
 
 .kb-list-main-loading {
   display: flex;

@@ -215,7 +215,8 @@ onMounted(() => {
     // /platform/knowledge-search?q=foo 重定向后携带 ?cmdk=foo
     maybeOpenCmdkFromRoute()
     // 后台预取对话输入栏资源，进入 creatChat / chat 时复用缓存
-    void useChatResourcesStore().prefetchChatInput()
+    // The KB dashboard fetches its own lightweight list on entry.
+    void useChatResourcesStore().prefetchChatInput(false, { includeKnowledgeBases: route.name !== 'knowledgeBaseList' })
 });
 
 // 监听路由变化，兼容 SPA 内部跳转时的 ?cmdk= 参数
