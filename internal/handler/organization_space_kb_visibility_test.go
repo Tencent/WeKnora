@@ -151,7 +151,8 @@ func (s spaceVisibilityKBSvc) GetKnowledgeBaseByIDOnly(ctx context.Context, kbID
 	return s.repo.GetKnowledgeBaseByID(ctx, kbID)
 }
 
-func (s spaceVisibilityKBSvc) ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
+func (s spaceVisibilityKBSvc) ListKnowledgeBasesByTenantID(
+	ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
 	return s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 }
 
@@ -220,11 +221,13 @@ func (e *spaceVisibilityEnv) seedSpace() {
 		spaceOrgID, "A shared space", "user-a", spaceTenantA,
 	).Error)
 	require.NoError(e.t, e.db.Exec(
-		`INSERT INTO organization_tenant_members (id, organization_id, tenant_id, role, representative_user_id) VALUES (?, ?, ?, 'admin', 'user-a')`,
+		`INSERT INTO organization_tenant_members (id, organization_id, tenant_id, role, representative_user_id) `+
+			`VALUES (?, ?, ?, 'admin', 'user-a')`,
 		"member-a", spaceOrgID, spaceTenantA,
 	).Error)
 	require.NoError(e.t, e.db.Exec(
-		`INSERT INTO organization_tenant_members (id, organization_id, tenant_id, role, representative_user_id) VALUES (?, ?, ?, 'editor', 'user-b')`,
+		`INSERT INTO organization_tenant_members (id, organization_id, tenant_id, role, representative_user_id) `+
+			`VALUES (?, ?, ?, 'editor', 'user-b')`,
 		"member-b", spaceOrgID, spaceTenantB,
 	).Error)
 	for _, kb := range []struct {
