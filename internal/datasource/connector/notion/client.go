@@ -779,8 +779,22 @@ func (c *notionClient) queryDataSourceWindow(
 			}
 		}
 
-		if !resp.HasMore || resp.NextCursor == "" {
+		if !resp.HasMore {
 			return rows, lastCreatedTime, incompleteReason, nil
+		}
+		// has_more promises another page but no continuation cursor was
+		// supplied, so the remaining rows are unreachable: the rows collected
+		// so far are a prefix, not the complete result. Returning them as a
+		// finished window would let an incremental sync read absence from the
+		// prefix as source-side deletions (#5604). Fail the pagination
+		// instead so the caller keeps its previous cursor and indexed items.
+		if resp.NextCursor == "" {
+			logger.Warnf(ctx, "[Notion] query %s returned has_more=true without a next_cursor after %d rows; "+
+				"treating the window as unreadable instead of a complete result",
+				path, len(rows))
+			return nil, time.Time{}, "", fmt.Errorf(
+				"paginate %s: has_more=true without a next_cursor (%d rows fetched)",
+				path, len(rows))
 		}
 		next, cursorErr := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
 		if cursorErr != nil {
